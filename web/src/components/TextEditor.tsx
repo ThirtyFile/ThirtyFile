@@ -46,6 +46,8 @@ export default function TextEditor(props: {
     let cancelled = false;
     setOriginal(null);
     setError(null);
+    // The editor stays mounted when moving to another file: forget the previous file's language
+    setLang(null);
     fetch(props.source.contentUrl(props.node))
       .then(async (r) => {
         if (!r.ok) {

@@ -232,10 +232,14 @@ export function useTabActions() {
   );
 
   const closeOthers = useCallback((id: string) => {
-    const t = state.tabs.find((x) => x.id === id);
-    if (!t || !state.tabs.every((x) => x.id === id || confirmClose(x))) return;
-    set({ tabs: [t], active: t.id });
-    if (id !== state.active) go(currentEntry(t));
+    const tab = state.tabs.find((x) => x.id === id);
+    if (!tab) return;
+    // Ask once for all of them, so cancelling can't leave some drafts already discarded
+    const unsaved = state.tabs.filter((x) => x.id !== id).map(viewedFile).filter((f): f is string => !!f && hasDraft(f));
+    if (unsaved.length && !window.confirm(t("{n} tab has unsaved changes. Close it anyway?|{n} tabs have unsaved changes. Close them anyway?", { n: unsaved.length }))) return;
+    unsaved.forEach((f) => setDraft(f, null));
+    set({ tabs: [tab], active: tab.id });
+    if (id !== state.active) go(currentEntry(tab));
   }, [go]);
 
   const step = useCallback(

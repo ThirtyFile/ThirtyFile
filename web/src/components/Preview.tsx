@@ -40,7 +40,7 @@ export function Preview(props: {
     const onKey = (e: KeyboardEvent) => {
       // Not while typing, editing, or seeking in a media player with the arrow keys
       const inEditor = (e.target as HTMLElement)?.closest?.(".cm-editor, video, audio, input, textarea, select, [contenteditable]");
-      if (e.key === "Escape") close();
+      if (e.key === "Escape" && !inEditor && !e.defaultPrevented) close();
       else if (!inEditor && e.key === "ArrowLeft") go(-1);
       else if (!inEditor && e.key === "ArrowRight") go(1);
     };
