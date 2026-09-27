@@ -24,7 +24,7 @@
           <li>Enter the public address under <strong>Control panel › General › Site URL</strong>.</li>
         </ol>
         <div class="note"><strong>The proxy setting must match your setup.</strong> Behind a proxy it has to be <code>true</code> (or the proxy's address when it runs on another computer), otherwise every visitor looks like the same person and one person's wrong passwords lock everybody out. Without a proxy it has to stay <code>false</code>.</div>
-        <p>When the proxy runs on the same computer, make ThirtyFile reachable only from there: publish the port as <code>-p 127.0.0.1:8080:8080</code> (in <code>compose.yaml</code>: <code>"127.0.0.1:8080:8080"</code>). Docker's published ports bypass the computer's firewall.</p>
+        <p>When the proxy runs on the same computer, make ThirtyFile reachable only from there: publish the port as <code>-p 127.0.0.1:8080:8080</code> (in <code>compose.yaml</code>: <code>"127.0.0.1:8080:8080"</code>). Docker's published ports bypass the computer's firewall (ufw and firewalld don't see them), so <code>-p 8080:8080</code> would leave ThirtyFile reachable without HTTPS from every network the computer is on. When the proxy runs in Docker too, publish no port at all (see <a href="#compose-caddy">below</a>).</p>
 
         <h2 id="caddy">Caddy</h2>
         <p>Caddy gets and renews the certificate by itself.</p>
@@ -36,12 +36,19 @@
 
         <h2 id="nginx">nginx</h2>
         <pre><code>server {
+    listen 80;
+    server_name files.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
     listen 443 ssl;
     server_name files.example.com;
     # ssl_certificate …; ssl_certificate_key …;
 
     location / {
         proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -51,6 +58,65 @@
         proxy_read_timeout 1h;
     }
 }</code></pre>
+        <ul>
+          <li><code>client_max_body_size 64m</code> is the smallest value that works: uploads are sent in parts of 32 MB, and the online editors save files of up to 20 MB in one request. With nginx's default of 1 MB, uploads and saves fail with "413 Request Entity Too Large". Larger files still upload, part by part.</li>
+          <li><code>proxy_http_version 1.1</code> keeps connections to ThirtyFile open between requests, and <code>proxy_buffering off</code> with <code>proxy_request_buffering off</code> let large downloads and uploads stream instead of being stored on the proxy's disk first.</li>
+          <li>The first <code>server</code> block sends visitors who type <code>http://</code> to the HTTPS address.</li>
+        </ul>
+
+        <h2 id="compose-caddy">Caddy in the same Docker Compose file</h2>
+        <p>When the proxy runs in Docker too, put both in one <code>compose.yaml</code>. ThirtyFile then publishes no port at all: only Caddy can reach it, over the network Compose creates for the file.</p>
+        <pre><code>services:
+  thirtyfile:
+    image: ghcr.io/thirtyfile/thirtyfile:latest
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+      - ./storage:/storage
+    environment:
+      THIRTYFILE_SECURE_COOKIE: "true"
+      THIRTYFILE_TRUST_PROXY: "true"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy-data:/data</code></pre>
+        <p>And the <code>Caddyfile</code> next to it, which reaches ThirtyFile by its service name:</p>
+        <pre><code>files.example.com {
+    reverse_proxy thirtyfile:8080 {
+        flush_interval -1
+    }
+}</code></pre>
+
+        <h2 id="traefik">Traefik</h2>
+        <p>With Traefik already running in Docker (with an entry point <code>websecure</code> on port 443 and a certificate resolver <code>letsencrypt</code>), add labels to ThirtyFile and put it on Traefik's network. No port is published.</p>
+        <pre><code>services:
+  thirtyfile:
+    image: ghcr.io/thirtyfile/thirtyfile:latest
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+      - ./storage:/storage
+    environment:
+      THIRTYFILE_SECURE_COOKIE: "true"
+      THIRTYFILE_TRUST_PROXY: "true"
+    networks: [traefik]
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.thirtyfile.rule: Host(`files.example.com`)
+      traefik.http.routers.thirtyfile.entrypoints: websecure
+      traefik.http.routers.thirtyfile.tls.certresolver: letsencrypt
+      traefik.http.services.thirtyfile.loadbalancer.server.port: "8080"
+
+networks:
+  traefik:
+    external: true</code></pre>
+        <p>Traefik streams uploads and downloads and has no body size limit by default, so nothing else is needed.</p>
 
         <h2 id="checklist">Before you open it to the world</h2>
         <ul>
