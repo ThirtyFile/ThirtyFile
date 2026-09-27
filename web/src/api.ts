@@ -765,7 +765,8 @@ export function shareSource(token: string): FileSource {
 /** Trigger a browser download (without leaving the page) */
 /**
  * Downloads: signed-in downloads show progress in the page (bottom right) and are saved when done;
- * public share links are handed to the browser to download directly (a pre-check would count an extra download).
+ * public share links are handed to the browser to download directly (handing a large file over to the browser after starting it in the page would count
+ * the download twice).
  * A function is called for the URL when the download starts (and again when it is retried)
  */
 export function triggerDownload(source: DownloadSource) {

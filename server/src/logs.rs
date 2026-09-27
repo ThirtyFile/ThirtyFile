@@ -846,8 +846,11 @@ pub async fn download_archive(State(st): State<AppState>, _: Admin, headers: Hea
     };
     let label = localize(slug, english(&headers));
     let name = format!("{label}-{}-{}.jsonl.gz", &format_time(from_at, 0)[..10], &format_time(to_at, 0)[..10]);
+    // The length up front lets the page show progress, and hand a large archive to the browser before downloading it
+    let len = f.metadata().await.map_err(AppError::internal)?.len();
     let mut res = Response::new(Body::from_stream(tokio_util::io::ReaderStream::new(f)));
     res.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("application/gzip"));
+    res.headers_mut().insert(header::CONTENT_LENGTH, len.into());
     res.headers_mut().insert(header::CONTENT_DISPOSITION, HeaderValue::from_str(&content_disposition("attachment", &name)).unwrap());
     Ok(res)
 }
@@ -1207,6 +1210,12 @@ mod tests {
         let lines: Vec<Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
         assert_eq!(lines.len(), 50);
         assert_eq!(lines[0]["node_name"], "old-file-0");
+
+        // Downloading it announces its length
+        let (id,): (i64,) = sqlx::query_as("SELECT id FROM log_archives WHERE kind = 'activity'").fetch_one(&env.st.db).await.unwrap();
+        let res = download_archive(State(env.st.clone()), Admin(env.admin().await), HeaderMap::new(), Path(id)).await.unwrap();
+        let len = std::fs::metadata(env.dir.join("archives").join(&file)).unwrap().len();
+        assert_eq!(res.headers()[header::CONTENT_LENGTH], len.to_string().as_str());
 
         // Archive files are removed after their retention period
         env.st.logs.write().unwrap().archive_keep_days = 30;

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { DownloadIcon, Loader2Icon } from "lucide-react";
-import { api, triggerDownload, type ActivityFilter } from "@/api";
+import { api, type ActivityFilter } from "@/api";
+import { nativeDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { ACTION_GROUPS, actionLabel } from "@/lib/drives";
 import { cn, formatWinDate } from "@/lib/utils";
@@ -46,7 +47,7 @@ export function ActivityLog({ driveId, className, compact }: { driveId?: string;
             className="h-8 text-xs"
             disabled={!rows.length}
             title={t("Export records that match the filters (up to 100,000)")}
-            onClick={() => triggerDownload(api.activityExportUrl(filter))}
+            onClick={() => nativeDownload(api.activityExportUrl(filter))}
           >
             <DownloadIcon /> {t("Export CSV")}
           </Button>

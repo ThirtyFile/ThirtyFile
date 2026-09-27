@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { DownloadIcon, Loader2Icon } from "lucide-react";
-import { api, triggerDownload, type LoginFilter } from "@/api";
+import { api, type LoginFilter } from "@/api";
+import { nativeDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn, formatWinDate } from "@/lib/utils";
@@ -67,7 +68,7 @@ export function LoginLog({ userId, admin, className }: { userId?: number; admin?
             className="h-8 text-xs"
             disabled={!rows.length}
             title={t("Export records that match the filters (up to 100,000)")}
-            onClick={() => triggerDownload(api.loginLogExportUrl(filter))}
+            onClick={() => nativeDownload(api.loginLogExportUrl(filter))}
           >
             <DownloadIcon /> {t("Export CSV")}
           </Button>
