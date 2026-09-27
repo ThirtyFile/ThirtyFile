@@ -61,9 +61,10 @@ struct Config {
     /// Enable when serving over HTTPS; cookies get the Secure attribute
     #[arg(long, env = "THIRTYFILE_SECURE_COOKIE", default_value_t = false)]
     secure_cookie: bool,
-    /// Enable when behind a reverse proxy (nginx, Caddy…): take the user's real IP from X-Forwarded-For (for sign-in rate limiting)
-    #[arg(long, env = "THIRTYFILE_TRUST_PROXY", default_value_t = false)]
-    trust_proxy: bool,
+    /// Enable when behind a reverse proxy (nginx, Caddy…): take the user's real IP from X-Forwarded-For (for sign-in rate
+    /// limiting). `true` trusts proxies on private and loopback addresses; or list the proxies' addresses or networks
+    #[arg(long, env = "THIRTYFILE_TRUST_PROXY", default_value = "false", value_parser = auth::TrustProxy::parse)]
+    trust_proxy: auth::TrustProxy,
     /// Days to keep items in the trash
     #[arg(long, env = "THIRTYFILE_TRASH_DAYS", default_value_t = 30)]
     trash_days: i64,
@@ -492,7 +493,7 @@ async fn same_origin(axum::extract::State(st): axum::extract::State<AppState>, r
         && let Some(origin) = req.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
             let origin_host = origin.split_once("://").map(|(_, h)| h).unwrap_or(origin);
             let h = req.headers();
-            let hosts = [h.get("x-forwarded-host").filter(|_| st.trust_proxy), h.get(header::HOST)];
+            let hosts = [h.get("x-forwarded-host").filter(|_| st.trust_proxy.enabled()), h.get(header::HOST)];
             let ok = hosts.iter().flatten().filter_map(|v| v.to_str().ok()).any(|host| host == origin_host);
             if !ok {
                 return (StatusCode::FORBIDDEN, "cross-origin request blocked").into_response();

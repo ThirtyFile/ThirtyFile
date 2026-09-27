@@ -312,7 +312,7 @@ pub async fn unlock(
     let Some(hash) = share.password_hash.clone() else {
         return Ok(Json(json!({ "ok": true })).into_response());
     };
-    let key = format!("share:{token}|{}", auth::client_ip(&st, addr, &headers));
+    let key = format!("share:{token}|{}", auth::limit_key_ip(&auth::client_ip(&st, addr, &headers)));
     // Counted before the hash runs, so parallel guesses can't exceed the limit
     if !auth::begin_attempt(&st, &key, UNLOCK_ATTEMPTS) {
         return Err(AppError::new(StatusCode::TOO_MANY_REQUESTS, "Too many attempts. Try again later."));

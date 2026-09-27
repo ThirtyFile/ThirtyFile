@@ -192,6 +192,26 @@ impl BatchReq {
     }
 }
 
+/// The selected ids without duplicates and without items inside other selected items: those are trashed, deleted or
+/// restored together with the folder around them, and handling them again on their own would fail.
+async fn outermost(conn: &mut SqliteConnection, ids: &[String]) -> AppResult<Vec<String>> {
+    let list = serde_json::to_string(ids).unwrap();
+    let nested: Vec<(String,)> = sqlx::query_as(
+        "WITH RECURSIVE up(start, id) AS (
+           SELECT s.value, n.parent_id FROM json_each(?1) s JOIN nodes n ON n.id = s.value
+           UNION ALL
+           SELECT up.start, n.parent_id FROM up JOIN nodes n ON n.id = up.id
+         )
+         SELECT DISTINCT start FROM up WHERE id IN (SELECT value FROM json_each(?1))",
+    )
+    .bind(list)
+    .fetch_all(&mut *conn)
+    .await?;
+    let nested: HashSet<String> = nested.into_iter().map(|(id,)| id).collect();
+    let mut seen = HashSet::new();
+    Ok(ids.iter().filter(|id| !nested.contains(*id) && seen.insert(id.as_str())).cloned().collect())
+}
+
 fn not_root(n: &Node) -> AppResult<()> {
     if n.parent_id.is_none() { Err(AppError::bad_request("This can't be done on the root folder of a space")) } else { Ok(()) }
 }
@@ -307,7 +327,7 @@ pub async fn trash(State(st): State<AppState>, user: User, Json(req): Json<Batch
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
     let ts = now();
-    for id in req.ids()? {
+    for id in &outermost(&mut tx, req.ids()?).await? {
         let node = tree::node_for(&mut tx, &user, id, Need::Delete).await?;
         not_root(&node)?;
         let trash_id = new_id();
@@ -479,7 +499,7 @@ pub async fn delete_forever(State(st): State<AppState>, user: User, Json(req): J
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
     let mut orphans = Vec::new();
-    for id in req.ids()? {
+    for id in &outermost(&mut tx, req.ids()?).await? {
         let (node, _) = trash_root(&mut tx, &user, id, Need::Delete).await?;
         tree::log(&mut tx, &user, Some(&node), "delete", "").await?;
         orphans.extend(tree::purge_subtree(&mut tx, &node.id).await?);
@@ -658,6 +678,42 @@ mod tests {
 
     fn ids(list: &[&str]) -> Json<BatchReq> {
         Json(BatchReq { ids: list.iter().map(|s| s.to_string()).collect(), dest_id: None })
+    }
+
+    #[tokio::test]
+    async fn a_selection_with_a_folder_and_something_inside_it_can_be_trashed_and_deleted() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let folder = env.folder(&amy, &amy.root_id, "Folder").await;
+        let inner = env.folder(&amy, &folder, "Inner").await;
+        let doc = env.file(&amy, &inner, "a.txt").await;
+        let other = env.file(&amy, &amy.root_id, "b.txt").await;
+
+        // Moving to the trash: the folder, a file deep inside it, and a duplicate id
+        let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&doc, &folder, &other, &folder])).await.unwrap();
+        let Json(listed) = list_trash(State(env.st.clone()), amy.clone()).await.unwrap();
+        let mut names: Vec<String> = listed.into_iter().map(|l| l.node.name).collect();
+        names.sort();
+        assert_eq!(names, vec!["Folder", "b.txt"]);
+
+        // Deleting for good: an item trashed on its own before its folder is listed separately; selecting both works
+        let _ = restore(State(env.st.clone()), amy.clone(), ids(&[&folder])).await.unwrap();
+        let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&doc])).await.unwrap();
+        let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&folder])).await.unwrap();
+        let Json(listed) = list_trash(State(env.st.clone()), amy.clone()).await.unwrap();
+        let all: Vec<String> = listed.into_iter().map(|l| l.node.id).collect();
+        assert!(all.contains(&doc) && all.contains(&folder));
+        let refs: Vec<&str> = all.iter().map(String::as_str).collect();
+        let _ = delete_forever(State(env.st.clone()), amy.clone(), ids(&refs)).await.unwrap();
+        let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE id IN (?, ?, ?, ?)")
+            .bind(&folder)
+            .bind(&inner)
+            .bind(&doc)
+            .bind(&other)
+            .fetch_one(&env.st.db)
+            .await
+            .unwrap();
+        assert_eq!(left, 0);
     }
 
     #[tokio::test]
