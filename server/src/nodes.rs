@@ -163,7 +163,9 @@ pub async fn rename(
         return Err(AppError::conflict(format!("\"{name}\" already exists")));
     }
     let mime = if node.is_folder() { String::new() } else { crate::util::guess_mime(&name) };
-    sqlx::query("UPDATE nodes SET name = ?, mime = ?, updated_at = ? WHERE id = ?")
+    // The time only moves forward: it is the version the editors send back to detect changes by someone else, and
+    // saving several times a second can put it slightly ahead of the clock
+    sqlx::query("UPDATE nodes SET name = ?, mime = ?, updated_at = MAX(?, updated_at + 1) WHERE id = ?")
         .bind(&name)
         .bind(mime)
         .bind(now())
@@ -699,6 +701,19 @@ mod tests {
         let _ = copy_nodes(State(env.st.clone()), amy.clone(), batch(&[&doc, &doc, &doc], &dest)).await.unwrap();
         let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE parent_id = ?").bind(&dest).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(n, 1);
+    }
+
+    #[tokio::test]
+    async fn a_file_version_never_goes_back() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let doc = env.file(&amy, &amy.root_id, "a.txt").await;
+        // Saved several times within a second: the version is ahead of the clock
+        let ahead = now() + 5;
+        sqlx::query("UPDATE nodes SET updated_at = ? WHERE id = ?").bind(ahead).bind(&doc).execute(&env.st.db).await.unwrap();
+        let _ = rename(State(env.st.clone()), amy.clone(), Path(doc.clone()), Json(RenameReq { name: "b.txt".into() })).await.unwrap();
+        let (after,): (i64,) = sqlx::query_as("SELECT updated_at FROM nodes WHERE id = ?").bind(&doc).fetch_one(&env.st.db).await.unwrap();
+        assert!(after > ahead, "renaming moved the version back from {ahead} to {after}");
     }
 
     #[tokio::test]
