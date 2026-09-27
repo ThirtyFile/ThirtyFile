@@ -93,6 +93,7 @@ export default {
   "A personal space can't be shared as a whole. Share a folder in it instead.": "個人空間不能整個共用，請改為共用其中的資料夾",
   "The \"Owner\" role can only be assigned on team spaces": "「擁有者」只能指派在團隊空間上",
   "You can't grant a role higher than your own": "不能授予比自己更高的角色",
+  "You can't change the access of someone whose role is higher than yours": "不能變更角色比自己高的人的權限",
   "User or group not found": "找不到授權對象",
   "Access entry not found": "找不到這筆授權",
   "The owner of a personal space can't be removed": "無法移除個人空間的擁有者",

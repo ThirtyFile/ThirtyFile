@@ -249,6 +249,24 @@ pub struct AccessInfo {
 }
 
 /// Whether the user can manage access to a node
+/// Refuses when no owner other than the given principal would remain (owners whose access has expired don't count)
+async fn require_other_owner(conn: &mut SqliteConnection, node_id: &str, principal_type: &str, principal_id: i64) -> AppResult<()> {
+    let (others,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM grants WHERE node_id = ? AND role = 'owner' AND NOT (principal_type = ? AND principal_id = ?)
+         AND (expires_at IS NULL OR expires_at > ?)",
+    )
+    .bind(node_id)
+    .bind(principal_type)
+    .bind(principal_id)
+    .bind(now())
+    .fetch_one(&mut *conn)
+    .await?;
+    if others == 0 {
+        return Err(AppError::bad_request("A space must have at least one owner"));
+    }
+    Ok(())
+}
+
 async fn can_manage_node(conn: &mut SqliteConnection, user: &User, node: &Node, drive: &Drive) -> AppResult<(bool, Option<Role>)> {
     let role = tree::role_on(conn, user, node).await?;
     let admin_override = user.is_admin() && drive.kind != "personal";
@@ -338,6 +356,23 @@ pub async fn grant(
     }
     let principal_id = if req.principal_type == "everyone" { 0 } else { req.principal_id };
     let name = principal_name(&mut tx, &req.principal_type, principal_id).await?.ok_or_else(|| AppError::bad_request("User or group not found"))?;
+    // The grant replaced by this one: only someone with at least that role may change it, and an owner may only be
+    // lowered or given an expiry while another owner remains
+    let existing: Option<(String,)> =
+        sqlx::query_as("SELECT role FROM grants WHERE node_id = ? AND principal_type = ? AND principal_id = ?")
+            .bind(&node.id)
+            .bind(&req.principal_type)
+            .bind(principal_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if let Some(old) = existing.and_then(|(r,)| Role::parse(&r)) {
+        if !user.is_admin() && my_role.is_some_and(|r| old > r) {
+            return Err(AppError::forbidden("You can't change the access of someone whose role is higher than yours"));
+        }
+        if old == Role::Owner && (role != Role::Owner || req.expires_at.is_some()) {
+            require_other_owner(&mut tx, &node.id, &req.principal_type, principal_id).await?;
+        }
+    }
     add_grant(&mut tx, &node.id, &req.principal_type, principal_id, role.as_str(), Some(user.id), req.expires_at).await?;
     tree::log(&mut tx, &user, Some(&node), "grant", &format!("{name} → {}", role_label(role))).await?;
     tx.commit().await?;
@@ -357,20 +392,20 @@ pub async fn revoke(State(st): State<AppState>, user: User, Path(grant_id): Path
     let drive = tree::get_drive(&mut tx, node.drive()).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
     // Users can leave items others shared with them
     let leaving = principal_type == "user" && principal_id == user.id && role != "owner";
-    if !leaving && !can_manage_node(&mut tx, &user, &node, &drive).await?.0 {
-        return Err(AppError::forbidden("You don't have permission to manage access"));
+    if !leaving {
+        let (can_manage, my_role) = can_manage_node(&mut tx, &user, &node, &drive).await?;
+        if !can_manage {
+            return Err(AppError::forbidden("You don't have permission to manage access"));
+        }
+        if !user.is_admin() && my_role.is_some_and(|mine| Role::parse(&role).is_some_and(|r| r > mine)) {
+            return Err(AppError::forbidden("You can't change the access of someone whose role is higher than yours"));
+        }
     }
     if drive.kind == "personal" && node.parent_id.is_none() {
         return Err(AppError::bad_request("The owner of a personal space can't be removed"));
     }
     if role == "owner" {
-        let (owners,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM grants WHERE node_id = ? AND role = 'owner'")
-            .bind(&node_id)
-            .fetch_one(&mut *tx)
-            .await?;
-        if owners <= 1 {
-            return Err(AppError::bad_request("A space must have at least one owner"));
-        }
+        require_other_owner(&mut tx, &node_id, &principal_type, principal_id).await?;
     }
     let name = principal_name(&mut tx, &principal_type, principal_id).await?.unwrap_or_default();
     sqlx::query("DELETE FROM grants WHERE id = ?").bind(grant_id).execute(&mut *tx).await?;
@@ -557,6 +592,63 @@ mod tests {
         // Amy, the owner, still sees everything
         let Json(info) = access(State(env.st.clone()), amy.clone(), Path(inner)).await.unwrap();
         assert!(info.inherited.iter().any(|g| g.node_id == private) && info.inherited.iter().any(|g| g.node_id == shared));
+    }
+
+    fn grant_req(to: &crate::auth::User, role: &str, expires_at: Option<i64>) -> Json<GrantReq> {
+        Json(GrantReq { principal_type: "user".into(), principal_id: to.id, role: role.into(), expires_at })
+    }
+
+    async fn grant_id(env: &testutil::TestEnv, node: &str, to: &crate::auth::User) -> i64 {
+        let (id,): (i64,) = sqlx::query_as("SELECT id FROM grants WHERE node_id = ? AND principal_type = 'user' AND principal_id = ?")
+            .bind(node)
+            .bind(to.id)
+            .fetch_one(&env.st.db)
+            .await
+            .unwrap();
+        id
+    }
+
+    #[tokio::test]
+    async fn managers_cannot_change_or_remove_the_access_of_owners() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let carol = env.user("carol", true).await;
+        let root = {
+            let mut conn = env.st.db.acquire().await.unwrap();
+            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0).await.unwrap();
+            crate::db::add_grant(&mut conn, &root, "user", amy.id, "owner", Some(amy.id), None).await.unwrap();
+            root
+        };
+        env.grant(&root, &ben, "manager").await;
+        env.grant(&root, &carol, "owner").await;
+        let st = || State(env.st.clone());
+
+        // Ben, a manager, can neither lower an owner nor give them an expiry, nor remove them
+        for req in [grant_req(&amy, "viewer", None), grant_req(&amy, "manager", None), grant_req(&amy, "viewer", Some(now() + 60))] {
+            let err = grant(st(), ben.clone(), Path(root.clone()), req).await.unwrap_err();
+            assert_eq!(err.status, axum::http::StatusCode::FORBIDDEN);
+        }
+        let err = revoke(st(), ben.clone(), Path(grant_id(&env, &root, &carol).await)).await.unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::FORBIDDEN);
+        // He still manages roles up to his own
+        let dan = env.user("dan", true).await;
+        let _ = grant(st(), ben.clone(), Path(root.clone()), grant_req(&dan, "manager", None)).await.unwrap();
+
+        // Owners can lower each other, but the last owner stays, also when their access would expire
+        let _ = grant(st(), amy.clone(), Path(root.clone()), grant_req(&carol, "manager", None)).await.unwrap();
+        let err = grant(st(), amy.clone(), Path(root.clone()), grant_req(&amy, "manager", None)).await.unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
+        let err = grant(st(), amy.clone(), Path(root.clone()), grant_req(&amy, "owner", Some(now() + 60))).await.unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
+        let err = revoke(st(), amy.clone(), Path(grant_id(&env, &root, &amy).await)).await.unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
+
+        // An owner whose access has expired doesn't count as the remaining owner
+        env.grant(&root, &carol, "owner").await;
+        sqlx::query("UPDATE grants SET expires_at = ? WHERE node_id = ? AND principal_id = ?").bind(now() - 1).bind(&root).bind(carol.id).execute(&env.st.db).await.unwrap();
+        let err = revoke(st(), amy.clone(), Path(grant_id(&env, &root, &amy).await)).await.unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
