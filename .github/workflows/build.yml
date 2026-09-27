@@ -101,6 +101,32 @@ jobs:
       - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v4
+        id: buildx
+
+      # The Dockerfile's cache mounts (compiled Rust dependencies, downloaded crates and pnpm packages) only
+      # live inside the builder, which is new on every run. Keep them in the Actions cache, so that a change
+      # to the backend recompiles ThirtyFile itself and not every dependency. The key changes with the
+      # lock files; in between, the saved dependencies stay valid and the cache is only restored.
+      - id: mounts
+        uses: actions/cache@v6
+        with:
+          path: cache-mount
+          key: buildkit-${{ github.event_name == 'pull_request' && 'amd64' || 'multi' }}-${{ hashFiles('server/Cargo.lock', 'web/pnpm-lock.yaml', 'Dockerfile') }}
+          restore-keys: |
+            buildkit-${{ github.event_name == 'pull_request' && 'amd64' || 'multi' }}-
+            buildkit-
+
+      - uses: reproducible-containers/buildkit-cache-dance@v3.4.0
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          cache-map: |
+            {
+              "cache-mount/pnpm-store": { "target": "/root/.local/share/pnpm/store", "id": "pnpm-store" },
+              "cache-mount/cargo-registry": { "target": "/usr/local/cargo/registry", "id": "cargo-registry" },
+              "cache-mount/target-amd64": { "target": "/src/server/target", "id": "thirtyfile-target-amd64" },
+              "cache-mount/target-arm64": { "target": "/src/server/target", "id": "thirtyfile-target-arm64" }
+            }
+          skip-extraction: ${{ steps.mounts.outputs.cache-hit }}
 
       - uses: docker/login-action@v4
         if: github.event_name != 'pull_request'
