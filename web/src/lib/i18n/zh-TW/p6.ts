@@ -65,6 +65,7 @@ export default {
   "This file isn't a valid Office document (it may be damaged, or wasn't created by Office), so it can't be opened online. Download it to check.": "這個檔案不是有效的 Office 文件（內容可能已損毀，或不是 Office 產生的檔案），無法線上開啟。可以下載後確認。",
   "The file is damaged or in an unrecognized format, so it can't be previewed. Download it and open it in Office to check.": "檔案內容已損毀或格式不正確，無法預覽。可以下載後用 Office 開啟確認。",
   "Couldn't load the previewer": "無法載入預覽程式",
+  "Couldn't show the preview. Reload the page.": "無法顯示預覽，請重新整理頁面。",
   "Couldn't open this document": "無法開啟這份文件",
   "Couldn't open this presentation": "無法開啟這份簡報",
   "Couldn't open this spreadsheet": "無法開啟這份試算表",

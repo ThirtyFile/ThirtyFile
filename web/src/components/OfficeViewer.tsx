@@ -13,6 +13,8 @@ export const OFFICE_PREVIEW_EXTS = ["docx", "xlsx", "pptx"];
 
 /** Time limit for Word / PowerPoint layout */
 const RENDER_TIMEOUT = 60_000;
+/** Time limit for the preview frame to start */
+const READY_TIMEOUT = 10_000;
 
 /** Error messages we produce ourselves (already translated) are shown as-is */
 class ViewerError extends Error {}
@@ -63,6 +65,13 @@ function FramePreview({ node, source, kind }: { node: Node; source: FileSource; 
     setLoading(true);
     setError(null);
     let timer = 0;
+    // The frame says "ready" once its script has started. If it never does (the script was blocked, e.g. a page left open
+    // across an upgrade whose policy no longer allows the new script, or it failed while starting), stop instead of spinning forever
+    const readyTimer = window.setTimeout(() => {
+      if (cancelled || ready) return;
+      setError(t("Couldn't show the preview. Reload the page."));
+      setLoading(false);
+    }, READY_TIMEOUT);
     const send = () => {
       if (cancelled || !ready || !buffer) return;
       // Transfer rather than copy, so large files don't take up an extra copy in memory
@@ -81,6 +90,7 @@ function FramePreview({ node, source, kind }: { node: Node; source: FileSource; 
       const msg = e.data as { type?: string; message?: string };
       if (msg.type === "ready") {
         ready = true;
+        window.clearTimeout(readyTimer);
         send();
       } else if (msg.type === "done") {
         window.clearTimeout(timer);
@@ -105,12 +115,14 @@ function FramePreview({ node, source, kind }: { node: Node; source: FileSource; 
       })
       .catch((e) => {
         if (cancelled) return;
+        window.clearTimeout(readyTimer);
         setError(viewError(e, kind === "docx" ? t("Couldn't open this document") : t("Couldn't open this presentation")));
         setLoading(false);
       });
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      window.clearTimeout(readyTimer);
       window.removeEventListener("message", onMessage);
     };
   }, [node.id, node.updated_at, source, kind, srcDoc]);
