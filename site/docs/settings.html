@@ -27,6 +27,7 @@
               <tr><td><code>THIRTYFILE_TRUST_PROXY</code></td><td><code>false</code></td><td>Set to <code>true</code> when the site is behind a reverse proxy</td></tr>
               <tr><td><code>THIRTYFILE_TRASH_DAYS</code></td><td><code>30</code></td><td>Days items stay in the trash. <code>0</code> keeps them forever</td></tr>
               <tr><td><code>THIRTYFILE_MAX_UPLOAD_MB</code></td><td><code>0</code></td><td>Largest file that can be uploaded. <code>0</code> means no limit</td></tr>
+              <tr><td><code>THIRTYFILE_RUN_AS</code></td><td><code>1000:1000</code></td><td>User and group the server runs as. The data and storage folders are given to them on start</td></tr>
               <tr><td><code>TZ</code></td><td><code>UTC</code></td><td>Time zone, for example <code>Asia/Taipei</code></td></tr>
             </tbody>
           </table>
@@ -34,7 +35,8 @@
 
         <h2 id="docker-run">With docker run</h2>
         <p>Add one <code>-e</code> for each setting:</p>
-        <pre><code>docker run -d --name thirtyfile -p 8080:8080 -v thirtyfile-data:/data \
+        <pre><code>docker run -d --name thirtyfile -p 8080:8080 \
+  -v /srv/thirtyfile/data:/data -v /srv/thirtyfile/storage:/storage \
   -e THIRTYFILE_ADMIN_PASSWORD='choose-a-password' \
   -e TZ=Asia/Taipei \
   -e THIRTYFILE_TRASH_DAYS=60 \
@@ -49,12 +51,18 @@
       THIRTYFILE_TRASH_DAYS: "60"</code></pre>
 
         <h2 id="data">Where the data is kept</h2>
-        <p>Everything is in <code>/data</code> inside the container. Both ways of installing keep it in a Docker volume named <code>thirtyfile-data</code>.</p>
-        <p>To keep it in a folder on your computer instead, make the folder writable for user 1000 and use its path:</p>
-        <pre><code>mkdir -p /srv/thirtyfile && sudo chown 1000:1000 /srv/thirtyfile
-docker run -d --name thirtyfile -p 8080:8080 \
-  -v /srv/thirtyfile:/data \
-  ghcr.io/thirtyfile/thirtyfile:latest</code></pre>
+        <p>The container uses two folders. Mount a folder of your computer on each:</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>In the container</th><th>Contents</th></tr></thead>
+            <tbody>
+              <tr><td><code>/data</code></td><td>Accounts, settings, logs, thumbnails and uploads in progress. Stays small</td></tr>
+              <tr><td><code>/storage</code></td><td>Your files, in the built-in storage location. Grows with your files</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>They don't have to be on the same disk: <code>/storage</code> can be a large disk or a NAS mount. Missing folders are created, and on start both are given to user 1000 (see <code>THIRTYFILE_RUN_AS</code>), so there is no need to change their owner yourself.</p>
+        <p>Other disks can be added as more storage locations: mount them into the container, for example <code>-v /mnt/nas:/nas</code>, then add <code>/nas</code> under <strong>Control panel › Storage locations</strong>. See <a href="storage.html">Storage locations</a>.</p>
       </main>
     </div>
     <script src="../assets/site.js"></script>

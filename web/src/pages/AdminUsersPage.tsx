@@ -275,7 +275,7 @@ function UserDialog({ user, self, onClose }: { user: UserRow | null; self: boole
               )}
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="u-pw">{user ? t("Reset password (leave blank to keep current)") : t("Password (at least 8 characters)")}</Label>
+              <Label htmlFor="u-pw">{user ? t("Reset password (leave blank to keep current)") : t("Password (at least 6 characters)")}</Label>
               <Input id="u-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
             </div>
             <div className="grid gap-1.5">

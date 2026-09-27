@@ -3,7 +3,7 @@
 # ThirtyFile
 #
 #   docker build -t thirtyfile .
-#   docker run -d -p 8080:8080 -v thirtyfile-data:/data thirtyfile
+#   docker run -d -p 8080:8080 -v /srv/thirtyfile/data:/data -v /srv/thirtyfile/storage:/storage thirtyfile
 #
 # Build arguments:
 #   VERSION  version written to the image labels (default: dev)
@@ -56,7 +56,7 @@ FROM --platform=$BUILDPLATFORM alpine:${ALPINE_VERSION} AS rootfs
 # ca-certificates: certificate validation for S3, single sign-on and FTPS (without it every https connection fails)
 # tzdata: allows setting the time zone with TZ (log exports, archive file names)
 RUN apk add --no-cache ca-certificates tzdata \
- && mkdir -p /rootfs/etc/ssl/certs /rootfs/usr/share /data \
+ && mkdir -p /rootfs/etc/ssl/certs /rootfs/usr/share /data /storage \
  && cp /etc/ssl/certs/ca-certificates.crt /rootfs/etc/ssl/certs/ \
  && cp -r /usr/share/zoneinfo /rootfs/usr/share/ \
  && cp /etc/passwd /etc/group /rootfs/etc/ \
@@ -75,15 +75,21 @@ LABEL org.opencontainers.image.title="ThirtyFile" \
 
 COPY --from=rootfs /rootfs/ /
 COPY --from=rootfs --chown=1000:1000 /data /data
+COPY --from=rootfs --chown=1000:1000 /storage /storage
 COPY --from=server /thirtyfile /usr/local/bin/thirtyfile
 # Apache-2.0 requires distributing a copy of the license with the software
 COPY LICENSE /usr/share/licenses/thirtyfile/LICENSE
 
+# /data: database, settings, thumbnails and uploads in progress
+# /storage: file contents of the built-in storage location
+# The container starts as root, gives both folders to user 1000 when needed (Docker creates missing
+# host folders as root), then runs as user 1000. With `--user`, it runs as that user and skips this.
 ENV THIRTYFILE_DATA=/data \
+    THIRTYFILE_STORAGE=/storage \
+    THIRTYFILE_RUN_AS=1000:1000 \
     THIRTYFILE_ADDR=0.0.0.0:8080
 
-USER drive
-VOLUME /data
+VOLUME ["/data", "/storage"]
 EXPOSE 8080
 
 # Requests /api/health on the address from THIRTYFILE_ADDR (no need to change this when the port changes)

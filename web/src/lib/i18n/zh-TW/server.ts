@@ -11,7 +11,7 @@ export default {
   "control characters": "控制字元",
   "API not found": "API 不存在",
   // Sign-in and user management (auth.rs, admin.rs)
-  "Password must be at least 8 characters": "密碼至少需要 8 個字元",
+  "Password must be at least 6 characters": "密碼至少需要 6 個字元",
   "Administrator permission required": "需要管理員權限",
   "Too many failed sign-in attempts. Try again in 15 minutes.": "登入失敗次數過多，請 15 分鐘後再試",
   "Incorrect username or password": "帳號或密碼錯誤",
@@ -331,7 +331,6 @@ export default {
   "Connection test failed: The content read back didn't match": "連線測試失敗：讀回的內容不一致",
   "Failed to move files: Verification of the copied content failed": "搬移檔案失敗：複製後的內容驗證失敗",
   // Added with the English backend (server-messages.json)
-  "THIRTYFILE_ADMIN_PASSWORD must be at least 8 characters": "THIRTYFILE_ADMIN_PASSWORD 至少需要 8 個字元",
   "administrator": "管理員",
   "standard user": "一般使用者",
   "{username}: {changes}": "{username}：{changes}",

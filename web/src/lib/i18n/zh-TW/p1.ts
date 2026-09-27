@@ -85,7 +85,6 @@ export default {
   "{kind} {from} – {to}, {n} entry. This can't be undone, so consider downloading it first.|{kind} {from} – {to}, {n} entries. This can't be undone, so consider downloading it first.": "{kind} {from} – {to}，共 {n} 筆。刪除後無法復原，建議先下載保存。",
   // Storage locations
   "FTP/FTPS": "FTP／FTPS",
-  "Data directory / blobs": "資料目錄 / blobs",
   "Connected to \"{name}\" successfully": "「{name}」連線正常",
   "Connection failed": "連線失敗",
   "New files will be stored in \"{name}\" by default": "新檔案預設存放在「{name}」",
@@ -114,7 +113,7 @@ export default {
   "Storage location added": "已新增儲存位置",
   "A connection test (writing, reading back, and deleting a small file) runs before saving.": "儲存前會先做連線測試（寫入、讀回、刪除一個小檔案）。",
   "For example: Company RustFS": "例如：公司 RustFS",
-  "The built-in location always uses the blobs folder in the server's data directory. Only its name can be changed.": "內建位置固定使用伺服器資料目錄中的 blobs 資料夾，只能修改名稱。",
+  "The built-in location's folder is set on the server with THIRTYFILE_STORAGE. Only its name can be changed.": "內建位置的資料夾由伺服器的 THIRTYFILE_STORAGE 設定，只能修改名稱。",
   "Folder path (absolute path on the server; can be a NAS mount point)": "資料夾路徑（伺服器上的絕對路徑，可以是 NAS 掛載點）",
   "/mnt/nas/thirtyfile or D:\\thirtyfile": "/mnt/nas/thirtyfile 或 D:\\thirtyfile",
   "Service": "服務",

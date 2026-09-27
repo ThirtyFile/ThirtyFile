@@ -141,7 +141,7 @@ export default {
   "The new passwords don't match": "兩次輸入的新密碼不一致",
   "After you change it, you'll be signed out on other devices.": "變更後，其他裝置上的登入會被登出。",
   "Current password": "目前密碼",
-  "New password (at least 8 characters)": "新密碼（至少 8 個字元）",
+  "New password (at least 6 characters)": "新密碼（至少 6 個字元）",
   "Confirm new password": "確認新密碼",
   "Link copied (people need to sign in and have access to open it)": "已複製連結（需要登入且有存取權才能開啟）",
   "Copy link": "複製連結",

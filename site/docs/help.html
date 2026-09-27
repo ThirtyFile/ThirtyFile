@@ -35,8 +35,11 @@
         <p>Error 413 comes from the reverse proxy. Raise its upload size limit to at least 64 MB, as in the <a href="internet.html#nginx">nginx example</a>.</p>
 
         <h2 id="permission">"Permission denied" when starting</h2>
-        <p>When the data is kept in a folder on your computer, make it writable for user 1000:</p>
-        <pre><code>sudo chown -R 1000:1000 /srv/thirtyfile</code></pre>
+        <p>On start, the container gives its folders to user 1000. This can't work in two cases:</p>
+        <ul>
+          <li>The container is started with <code>--user</code>. Make the folders writable for that user: <code>sudo chown -R 1000:1000 /srv/thirtyfile</code>, with the user's number instead of 1000.</li>
+          <li>A folder is on a network share that doesn't let the owner be changed. The log says <em>Can't give the folder … to user</em>. Set <code>THIRTYFILE_RUN_AS</code> to the user and group that own the files on the share, for example <code>1026:100</code>.</li>
+        </ul>
 
         <h2 id="logs">Looking at the log</h2>
         <pre><code>docker logs --tail 100 thirtyfile</code></pre>

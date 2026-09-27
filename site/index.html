@@ -141,13 +141,14 @@
             <div id="tab-run" role="tabpanel">
               <pre><code>docker run -d --name thirtyfile \
   -p 8080:8080 \
-  -v thirtyfile-data:/data \
+  -v /srv/thirtyfile/data:/data \
+  -v /srv/thirtyfile/storage:/storage \
   -e THIRTYFILE_ADMIN_PASSWORD='choose-a-password' \
   ghcr.io/thirtyfile/thirtyfile:latest</code></pre>
             </div>
             <div id="tab-compose" role="tabpanel">
               <pre><code>curl -O https://raw.githubusercontent.com/ThirtyFile/ThirtyFile/main/compose.yaml
-THIRTYFILE_ADMIN_PASSWORD='choose-a-password' docker compose up -d</code></pre>
+docker compose up -d</code></pre>
             </div>
             <p style="margin: 16px 0 0; color: var(--text-soft)">Next: <a href="docs/first-steps.html">set up users, storage and your logo</a>.</p>
           </div>

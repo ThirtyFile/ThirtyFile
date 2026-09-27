@@ -3527,6 +3527,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "image",
+ "libc",
  "mime_guess",
  "object_store",
  "percent-encoding",

@@ -11,6 +11,8 @@ mod ftp;
 mod sftp;
 mod sso;
 mod nodes;
+#[cfg(unix)]
+mod privileges;
 mod shares;
 mod state;
 mod storage;
@@ -50,6 +52,9 @@ struct Config {
     /// Data directory (database, files, thumbnails)
     #[arg(long, env = "THIRTYFILE_DATA", default_value = "./data")]
     data: PathBuf,
+    /// Folder for the file contents of the built-in storage location (default: blobs in the data directory)
+    #[arg(long, env = "THIRTYFILE_STORAGE")]
+    storage: Option<PathBuf>,
     /// Administrator password on first startup; if not set, a random one is generated and printed to the log
     #[arg(long, env = "THIRTYFILE_ADMIN_PASSWORD")]
     admin_password: Option<String>,
@@ -65,6 +70,10 @@ struct Config {
     /// Upload size limit per file (MB), 0 = unlimited
     #[arg(long, env = "THIRTYFILE_MAX_UPLOAD_MB", default_value_t = 0)]
     max_upload_mb: u64,
+    /// When started as root: give the data directory to this user (`uid` or `uid:gid`) and run as that user (set in the Docker image)
+    #[arg(long, env = "THIRTYFILE_RUN_AS")]
+    #[cfg_attr(not(unix), allow(dead_code))]
+    run_as: Option<String>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -77,21 +86,53 @@ enum Command {
     Health,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "thirtyfile=info,tower_http=warn".into()))
         .init();
     let cfg = Config::parse();
+    let runtime = || tokio::runtime::Builder::new_multi_thread().enable_all().build();
 
     // The health check only connects to the running service and doesn't touch the data directory
     if let Some(Command::Health) = &cfg.command {
-        std::process::exit(if health_probe(&cfg.addr).await { 0 } else { 1 });
+        std::process::exit(if runtime()?.block_on(health_probe(&cfg.addr)) { 0 } else { 1 });
     }
 
-    for dir in ["tmp", "thumbs", "blobs"] {
+    let storage = storage_dir(&cfg.data, cfg.storage.as_deref());
+
+    // Before the runtime starts its threads, so that all of them run as the new user
+    #[cfg(unix)]
+    if let Some(user) = &cfg.run_as {
+        privileges::drop_to(user, &[&cfg.data, &storage])?;
+    }
+
+    runtime()?.block_on(run(cfg, storage))
+}
+
+/// Where the built-in storage location keeps file contents. Version 0.1.0 always used blobs in the
+/// data directory; when files are still there, they stay in use so that nothing seems to disappear.
+fn storage_dir(data: &std::path::Path, configured: Option<&std::path::Path>) -> PathBuf {
+    let legacy = data.join("blobs");
+    let Some(dir) = configured.filter(|d| *d != legacy) else {
+        return legacy;
+    };
+    let legacy_in_use = std::fs::read_dir(&legacy).is_ok_and(|mut entries| entries.next().is_some());
+    if legacy_in_use {
+        tracing::warn!(
+            "Files are still kept in {}, so that folder is used instead of {}. To use {1}, stop ThirtyFile, move everything from {0} into {1} and start it again.",
+            legacy.display(),
+            dir.display()
+        );
+        return legacy;
+    }
+    dir.to_path_buf()
+}
+
+async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    for dir in ["tmp", "thumbs"] {
         std::fs::create_dir_all(cfg.data.join(dir))?;
     }
+    std::fs::create_dir_all(&storage)?;
     let db = db::connect(&cfg.data.join("drive.db")).await?;
 
     if let Some(Command::ResetPassword { username, password }) = &cfg.command {
@@ -116,7 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     db::bootstrap_admin(&db, cfg.admin_password.as_deref()).await.map_err(|e| e.message)?;
     let secret = db::load_secret(&db).await?;
     let system = db::load_system_settings(&db).await?;
-    let (storages, default_location) = locations::load_all(&db, &cfg.data).await?;
+    let (storages, default_location) = locations::load_all(&db, &storage).await?;
     let log_settings = logs::load_settings(&db).await;
     let branding = branding::load(&db).await;
     let sso_settings = sso::load(&db).await;
@@ -127,6 +168,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         default_location: std::sync::RwLock::new(default_location),
         migrations: Default::default(),
         data_dir: cfg.data.clone(),
+        storage_dir: storage,
         secret,
         secure_cookie: cfg.secure_cookie,
         trust_proxy: cfg.trust_proxy,
@@ -497,6 +539,20 @@ fn spawn_maintenance(st: AppState, trash_days: i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn storage_folder_is_separate_unless_files_are_still_in_the_data_folder() {
+        let data = std::env::temp_dir().join(format!("thirtyfile-test-{}", util::new_id()));
+        let storage = data.with_extension("storage");
+        assert_eq!(storage_dir(&data, None), data.join("blobs"));
+        assert_eq!(storage_dir(&data, Some(&storage)), storage);
+        // An empty blobs folder left from version 0.1.0 doesn't count
+        std::fs::create_dir_all(data.join("blobs")).unwrap();
+        assert_eq!(storage_dir(&data, Some(&storage)), storage);
+        std::fs::create_dir_all(data.join("blobs").join("ab")).unwrap();
+        assert_eq!(storage_dir(&data, Some(&storage)), data.join("blobs"));
+        std::fs::remove_dir_all(&data).unwrap();
+    }
 
     fn response(status: StatusCode, headers: &[(header::HeaderName, &str)]) -> axum::http::Response<String> {
         response_of(status, headers, 4096)
