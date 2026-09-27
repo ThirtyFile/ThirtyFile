@@ -6,6 +6,7 @@ import { api, type Located, type SortKey, type SortOrder } from "@/api";
 import { Explorer } from "@/components/Explorer";
 import { useSort } from "@/pages/FilesPage";
 import { t } from "@/lib/i18n";
+import { extOf, nameCollator } from "@/lib/utils";
 
 function Empty({ icon: Icon, text, hint }: { icon: typeof ClockIcon; text: string; hint?: string }) {
   return (
@@ -25,12 +26,13 @@ function useClientSort(items: Located[] | undefined, sort: { key: SortKey; order
     if (!items || !enabled) return items ?? [];
     const dir = sort.order === "asc" ? 1 : -1;
     const val = (n: Located) =>
-      sort.key === "size" ? n.size : sort.key === "updated" ? n.updated_at : sort.key === "type" ? (n.name.split(".").pop() ?? "") : n.name;
+      sort.key === "size" ? n.size : sort.key === "updated" ? n.updated_at : sort.key === "type" ? (n.kind === "folder" ? "" : extOf(n.name)) : n.name;
     return [...items].sort((a, b) => {
       if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
       const x = val(a);
       const y = val(b);
-      return (typeof x === "number" ? x - (y as number) : String(x).localeCompare(String(y), "zh-Hant")) * dir;
+      const c = typeof x === "number" ? x - (y as number) : nameCollator.compare(String(x), String(y));
+      return (c || nameCollator.compare(a.name, b.name)) * dir;
     });
   }, [items, sort.key, sort.order, enabled]);
 }

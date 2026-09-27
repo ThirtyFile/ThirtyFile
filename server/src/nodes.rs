@@ -99,15 +99,20 @@ pub struct ListQuery {
     folders_only: Option<bool>,
 }
 
+/// Sorting of folder listings, folders first. Names sort naturally ("File 2" before "File 10", the `natural_name`
+/// collation), and Type sorts by extension, as the column shows it (`extOf` in the browser: after the last dot, unless
+/// the name starts with it).
 pub fn order_clause(sort: Option<&str>, order: Option<&str>) -> String {
+    const EXT: &str = "CASE WHEN n.kind = 'file' AND length(rtrim(n.name, replace(n.name, '.', ''))) > 1
+        THEN lower(substr(n.name, length(rtrim(n.name, replace(n.name, '.', ''))) + 1)) ELSE '' END";
     let col = match sort {
         Some("size") => "n.size",
         Some("updated") => "n.updated_at",
-        Some("type") => "n.mime",
-        _ => "n.name COLLATE NOCASE",
+        Some("type") => EXT,
+        _ => "n.name COLLATE natural_name",
     };
     let dir = if order == Some("desc") { "DESC" } else { "ASC" };
-    format!("ORDER BY (n.kind = 'folder') DESC, {col} {dir}, n.name COLLATE NOCASE")
+    format!("ORDER BY (n.kind = 'folder') DESC, {col} {dir}, n.name COLLATE natural_name")
 }
 
 pub async fn children(
@@ -775,6 +780,47 @@ mod tests {
 
     fn ids(list: &[&str]) -> Json<BatchReq> {
         Json(BatchReq { ids: list.iter().map(|s| s.to_string()).collect(), dest_id: None })
+    }
+
+    #[tokio::test]
+    async fn names_differing_only_in_non_english_letter_case_are_the_same_name() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let folder = env.folder(&amy, &amy.root_id, "Été").await;
+        let mut c = env.st.db.acquire().await.unwrap();
+        assert!(tree::name_taken(&mut c, &amy.root_id, "été").await.unwrap());
+        assert_eq!(tree::unique_name(&mut c, &amy.root_id, "ÉTÉ", true).await.unwrap(), "ÉTÉ (1)");
+        // An uploaded folder "été/x" goes into the existing "Été"
+        let found = tree::ensure_folders(&mut c, amy.id, &amy.root_id, "été", "").await.unwrap();
+        assert_eq!(found, folder);
+        // The database refuses a second one too
+        let dup = sqlx::query(
+            "INSERT INTO nodes (id, owner_id, parent_id, kind, name, drive_id, created_at, updated_at)
+             SELECT 'x', owner_id, id, 'folder', 'été', drive_id, 0, 0 FROM nodes WHERE id = ?",
+        )
+        .bind(&amy.root_id)
+        .execute(&mut *c)
+        .await;
+        assert!(dup.is_err());
+    }
+
+    #[tokio::test]
+    async fn folders_list_names_in_natural_order_and_types_by_extension() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        for name in ["File 10.txt", "file 2.txt", "File 1.docx", "b.pdf", "README"] {
+            env.file(&amy, &amy.root_id, name).await;
+        }
+        let list = |sort: &'static str| {
+            let (st, amy) = (env.st.clone(), amy.clone());
+            async move {
+                let q = ListQuery { sort: Some(sort.into()), order: None, folders_only: None };
+                let Json(items) = children(State(st), amy.clone(), Path(amy.root_id.clone()), Query(q)).await.unwrap();
+                items.into_iter().map(|n| n.name).collect::<Vec<_>>()
+            }
+        };
+        assert_eq!(list("name").await, ["b.pdf", "File 1.docx", "file 2.txt", "File 10.txt", "README"]);
+        assert_eq!(list("type").await, ["README", "File 1.docx", "b.pdf", "file 2.txt", "File 10.txt"]);
     }
 
     #[tokio::test]

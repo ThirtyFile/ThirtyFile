@@ -471,7 +471,7 @@ pub async fn subtree(conn: &mut SqliteConnection, id: &str) -> AppResult<Vec<(No
 /// spaces (a folder on disk can hold both "A.txt" and "a.txt")
 pub async fn name_taken(conn: &mut SqliteConnection, parent_id: &str, name: &str) -> AppResult<bool> {
     let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM nodes WHERE parent_id = ?1 AND name_key = CASE WHEN fs_path IS NULL THEN lower(?2) ELSE ?2 END AND trashed_at IS NULL LIMIT 1",
+        "SELECT 1 FROM nodes WHERE parent_id = ?1 AND name_key = CASE WHEN fs_path IS NULL THEN unicode_lower(?2) ELSE ?2 END AND trashed_at IS NULL LIMIT 1",
     )
     .bind(parent_id)
     .bind(name)
@@ -491,7 +491,11 @@ pub async fn unique_name(conn: &mut SqliteConnection, parent_id: &str, name: &st
         let esc = |s: &str| s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
         format!("{} (%){}", esc(stem), esc(ext))
     };
-    let taken: Vec<(String,)> = sqlx::query_as("SELECT name FROM nodes WHERE parent_id = ? AND name LIKE ? ESCAPE '\\' AND trashed_at IS NULL")
+    // `LIKE` alone only ignores the case of A–Z; the name key is lower case in every language (exact in folder spaces,
+    // where this finds more names than needed, which only skips numbers)
+    let taken: Vec<(String,)> = sqlx::query_as(
+        "SELECT name FROM nodes WHERE parent_id = ? AND name_key LIKE unicode_lower(?) ESCAPE '\\' AND trashed_at IS NULL",
+    )
         .bind(parent_id)
         .bind(pattern)
         .fetch_all(conn)
@@ -916,7 +920,7 @@ pub async fn ensure_folders(conn: &mut SqliteConnection, owner_id: i64, parent_i
     for part in rel.split('/').filter(|p| !p.is_empty()) {
         let name = crate::util::validate_name(part)?;
         let existing: Option<(String, String)> = sqlx::query_as(
-            "SELECT id, kind FROM nodes WHERE parent_id = ?1 AND name_key = CASE WHEN fs_path IS NULL THEN lower(?2) ELSE ?2 END AND trashed_at IS NULL",
+            "SELECT id, kind FROM nodes WHERE parent_id = ?1 AND name_key = CASE WHEN fs_path IS NULL THEN unicode_lower(?2) ELSE ?2 END AND trashed_at IS NULL",
         )
         .bind(&current)
         .bind(&name)

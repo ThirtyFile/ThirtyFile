@@ -24,10 +24,60 @@ pub async fn connect(path: &Path) -> Result<SqlitePool, sqlx::Error> {
         // Temporary tables (sorting, recursive CTEs) in memory instead of on disk
         .pragma("temp_store", "MEMORY")
         // Memory-mapped reads (up to 256 MB): read queries skip the extra copy through the page cache
-        .pragma("mmap_size", "268435456");
-    let pool = SqlitePoolOptions::new().max_connections(8).connect_with(opts).await?;
+        .pragma("mmap_size", "268435456")
+        // Sorting names the way File Explorer does ("File 2" before "File 10", letter case ignored in every language)
+        .collation("natural_name", crate::util::natural_cmp);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(8)
+        .after_connect(|conn, _| Box::pin(async move { register_functions(conn).await }))
+        .connect_with(opts)
+        .await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
     Ok(pool)
+}
+
+/// Registers `unicode_lower(text)` on a connection: lower case in every language, where SQLite's `lower()` and
+/// `NOCASE` only fold A–Z. Names in the content store are unique by this key (the `name_key` column), so it must be
+/// the same rule as Rust's `to_lowercase()`, which the server uses to compare names in memory.
+///
+/// The column's index calls the function, so the database can only be changed by ThirtyFile itself (reading it with
+/// the `sqlite3` tool works, as long as `name_key` isn't selected).
+async fn register_functions(conn: &mut SqliteConnection) -> Result<(), sqlx::Error> {
+    use libsqlite3_sys as ffi;
+    use std::ffi::{c_int, c_void};
+
+    unsafe extern "C" fn unicode_lower(ctx: *mut ffi::sqlite3_context, argc: c_int, argv: *mut *mut ffi::sqlite3_value) {
+        // SAFETY: SQLite passes `argc` valid values, and the text pointer is valid for `sqlite3_value_bytes` bytes
+        // until the next call on this value. The result is copied by SQLite (SQLITE_TRANSIENT).
+        unsafe {
+            if argc != 1 {
+                ffi::sqlite3_result_null(ctx);
+                return;
+            }
+            let value = *argv;
+            if ffi::sqlite3_value_type(value) == ffi::SQLITE_NULL {
+                ffi::sqlite3_result_null(ctx);
+                return;
+            }
+            let text = ffi::sqlite3_value_text(value);
+            let len = ffi::sqlite3_value_bytes(value);
+            let bytes = if text.is_null() { &[][..] } else { std::slice::from_raw_parts(text, len.max(0) as usize) };
+            let lower = String::from_utf8_lossy(bytes).to_lowercase();
+            ffi::sqlite3_result_text(ctx, lower.as_ptr().cast(), lower.len() as c_int, ffi::SQLITE_TRANSIENT());
+        }
+    }
+
+    let mut handle = conn.lock_handle().await?;
+    let db = handle.as_raw_handle().as_ptr();
+    let flags = ffi::SQLITE_UTF8 | ffi::SQLITE_DETERMINISTIC | ffi::SQLITE_INNOCUOUS;
+    // SAFETY: `db` is the open connection, held locked for the call; the function has no user data or destructor.
+    let rc = unsafe {
+        ffi::sqlite3_create_function_v2(db, c"unicode_lower".as_ptr(), 1, flags, std::ptr::null_mut::<c_void>(), Some(unicode_lower), None, None, None)
+    };
+    if rc != ffi::SQLITE_OK {
+        return Err(sqlx::Error::Protocol(format!("Couldn't register unicode_lower() (SQLite error {rc})")));
+    }
+    Ok(())
 }
 
 /// Gets (or generates on first startup) the server secret used for signing.

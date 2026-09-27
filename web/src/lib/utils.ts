@@ -60,6 +60,9 @@ export function formatDate(ts: number): string {
   return new Intl.DateTimeFormat(locale, { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ts * 1000));
 }
 
+/** Sorts names the way File Explorer does: "File 2" before "File 10", letter case ignored (the server sorts the same way) */
+export const nameCollator = new Intl.Collator(locale, { numeric: true, sensitivity: "base" });
+
 export function extOf(name: string): string {
   const i = name.lastIndexOf(".");
   return i > 0 ? name.slice(i + 1).toLowerCase() : "";

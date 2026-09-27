@@ -3528,6 +3528,7 @@ dependencies = [
  "hyper-util",
  "image",
  "libc",
+ "libsqlite3-sys",
  "mime_guess",
  "object_store",
  "percent-encoding",

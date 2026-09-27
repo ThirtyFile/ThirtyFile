@@ -353,9 +353,10 @@ pub async fn login(
     let ip = client_ip(&st, addr, &headers);
     let username = req.username.trim();
     let limit_ip = limit_key_ip(&ip);
-    let key = format!("u:{}|{limit_ip}", username.to_lowercase());
+    // Usernames are unique regardless of the case of A–Z only (`COLLATE NOCASE`), so the keys fold the same letters
+    let key = format!("u:{}|{limit_ip}", username.to_ascii_lowercase());
     let ip_key = format!("ip:{limit_ip}");
-    let account_key = format!("a:{}", username.to_lowercase());
+    let account_key = format!("a:{}", username.to_ascii_lowercase());
     // Attempts during the lockout aren't logged individually (one "locked" entry was logged when the lockout began), so the log can't be flooded
     let too_many = AppError::new(axum::http::StatusCode::TOO_MANY_REQUESTS, "Too many failed sign-in attempts. Try again in 15 minutes.");
     if !begin_attempt(&st, &key, FAIL_LIMIT) {

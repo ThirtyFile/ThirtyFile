@@ -66,7 +66,6 @@ pub fn content_disposition(kind: &str, name: &str) -> String {
     format!("{kind}; filename=\"{fallback}\"; filename*=UTF-8''{}", utf8_percent_encode(name, RFC5987))
 }
 
-/// Generates a non-conflicting name: "report.pdf" → "report (1).pdf"
 /// A name's stem and extension (with the dot); folders have no extension
 pub fn split_name(name: &str, is_folder: bool) -> (&str, &str) {
     match name.rfind('.') {
@@ -75,6 +74,46 @@ pub fn split_name(name: &str, is_folder: bool) -> (&str, &str) {
     }
 }
 
+/// Compares names the way File Explorer sorts them: letter case is ignored in every language, and runs of digits
+/// compare by their value, so "File 2" comes before "File 10". Names that only differ in case or leading zeros still
+/// get a fixed order, so sorting is stable.
+pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let (la, lb) = (a.to_lowercase(), b.to_lowercase());
+    let (mut x, mut y) = (la.chars().peekable(), lb.chars().peekable());
+    loop {
+        match (x.peek().copied(), y.peek().copied()) {
+            (None, None) => break,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(c), Some(d)) if c.is_ascii_digit() && d.is_ascii_digit() => {
+                let take = |it: &mut std::iter::Peekable<std::str::Chars>| {
+                    let mut digits = String::new();
+                    while let Some(c) = it.next_if(char::is_ascii_digit) {
+                        digits.push(c);
+                    }
+                    digits
+                };
+                let (m, n) = (take(&mut x), take(&mut y));
+                let (m, n) = (m.trim_start_matches('0'), n.trim_start_matches('0'));
+                let ord = m.len().cmp(&n.len()).then_with(|| m.cmp(n));
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+            }
+            (Some(c), Some(d)) => {
+                if c != d {
+                    return c.cmp(&d);
+                }
+                x.next();
+                y.next();
+            }
+        }
+    }
+    la.cmp(&lb).then_with(|| a.cmp(b))
+}
+
+/// Generates a non-conflicting name: "report.pdf" → "report (1).pdf"
 pub fn numbered_name(name: &str, n: u32, is_folder: bool) -> String {
     let (stem, ext) = split_name(name, is_folder);
     format!("{stem} ({n}){ext}")
@@ -94,6 +133,14 @@ pub fn format_bytes(bytes: i64) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn natural_order_compares_numbers_by_value_and_ignores_case() {
+        let mut names = vec!["File 10.txt", "file 2.txt", "File 1.txt", "Été", "abc", "ÉTÉ 3", "File 02.txt", "B"];
+        names.sort_by(|a, b| super::natural_cmp(a, b));
+        assert_eq!(names, ["abc", "B", "File 1.txt", "File 02.txt", "file 2.txt", "File 10.txt", "Été", "ÉTÉ 3"]);
+        assert_eq!(super::natural_cmp("a", "A"), std::cmp::Ordering::Greater);
+    }
+
     #[test]
     fn names_windows_cannot_create_are_rejected() {
         use super::validate_name;
