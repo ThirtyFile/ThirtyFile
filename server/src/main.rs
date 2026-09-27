@@ -441,16 +441,48 @@ async fn probe_once(target: std::net::SocketAddr) -> bool {
 }
 
 /// Health check (for Docker HEALTHCHECK and load balancers): no sign-in required; checks that the database is readable
+/// Free space below this (on /data or /storage) makes the health check report "degraded": a full disk is the most likely
+/// outage of a file server, and SQLite fails when it can't write
+const LOW_DISK: u64 = 1024 * 1024 * 1024;
+
 async fn health(axum::extract::State(st): axum::extract::State<AppState>) -> axum::response::Response {
     use axum::response::IntoResponse;
     let version = VERSION;
-    match sqlx::query_scalar::<_, i64>("SELECT 1").fetch_one(&st.db).await {
-        Ok(_) => axum::Json(serde_json::json!({ "status": "ok", "version": version })).into_response(),
-        Err(e) => {
-            tracing::warn!("health check failed: {e}");
-            (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "status": "error", "version": version }))).into_response()
+    if let Err(e) = sqlx::query_scalar::<_, i64>("SELECT 1").fetch_one(&st.db).await {
+        tracing::warn!("health check failed: {e}");
+        return (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "status": "error", "version": version })))
+            .into_response();
+    }
+    let mut warnings = Vec::new();
+    let mut disks = serde_json::Map::new();
+    for (name, path) in [("data", &st.data_dir), ("storage", &st.storage_dir)] {
+        if let Some((free, total)) = util::disk_space(path) {
+            if free < LOW_DISK {
+                warnings.push(format!("{name}: {} free", util::format_bytes_u64(free)));
+            }
+            disks.insert(name.into(), serde_json::json!({ "free_bytes": free, "total_bytes": total }));
         }
     }
+    // Only whether each storage location is reachable: the reasons can name servers, and this endpoint is public
+    let locations: serde_json::Map<String, serde_json::Value> =
+        st.location_health.lock().unwrap().iter().map(|(id, h)| (id.clone(), serde_json::Value::from(if h.ok { "ok" } else { "offline" }))).collect();
+    for (id, s) in &locations {
+        if s != "ok" {
+            warnings.push(format!("storage location {id} is offline"));
+        }
+    }
+    let status = if warnings.is_empty() { "ok" } else { "degraded" };
+    if !warnings.is_empty() {
+        // Docker asks every 30 s: warn at most once an hour
+        static LAST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+        let t = util::now();
+        if t - LAST.load(std::sync::atomic::Ordering::Relaxed) >= 3600 {
+            LAST.store(t, std::sync::atomic::Ordering::Relaxed);
+            tracing::warn!("Health check degraded: {}", warnings.join("; "));
+        }
+    }
+    // Still 200: restarting the container doesn't free disk space or bring a storage service back
+    axum::Json(serde_json::json!({ "status": status, "version": version, "disks": disks, "locations": locations })).into_response()
 }
 
 fn api() -> Router<AppState> {
@@ -620,6 +652,20 @@ fn spawn_maintenance(st: AppState, trash_days: i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn health_reports_disks_and_offline_storage_locations() {
+        let env = crate::testutil::env().await;
+        let body = |res: Response| async { serde_json::from_slice::<serde_json::Value>(&axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap()).unwrap() };
+        let res = health(axum::extract::State(env.st.clone())).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let v = body(res).await;
+        assert!(v["disks"]["data"]["total_bytes"].as_u64().unwrap() > 0);
+        env.st.location_health.lock().unwrap().insert("nas".into(), state::LocationHealth { ok: false, error: Some("secret host".into()), checked_at: 0 });
+        let v = body(health(axum::extract::State(env.st.clone())).await).await;
+        assert_eq!((v["status"].as_str(), v["locations"]["nas"].as_str()), (Some("degraded"), Some("offline")));
+        assert!(!v.to_string().contains("secret host"), "reasons stay private");
+    }
 
     #[test]
     fn settings_accept_common_ways_of_writing_true_and_refuse_impossible_values() {

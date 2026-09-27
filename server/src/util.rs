@@ -119,6 +119,25 @@ pub fn numbered_name(name: &str, n: u32, is_folder: bool) -> String {
     format!("{stem} ({n}){ext}")
 }
 
+/// Free and total bytes of the file system holding `path` (what an unprivileged user may still write)
+#[cfg(unix)]
+pub fn disk_space(path: &std::path::Path) -> Option<(u64, u64)> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    // SAFETY: `c` is a valid NUL-terminated path and `st` a writable statvfs
+    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
+        return None;
+    }
+    let block = st.f_frsize as u64;
+    Some((st.f_bavail as u64 * block, st.f_blocks as u64 * block))
+}
+
+#[cfg(not(unix))]
+pub fn disk_space(_path: &std::path::Path) -> Option<(u64, u64)> {
+    None
+}
+
 /// Memory the server may use: the container's limit (cgroup v2 or v1) when there is one, else the computer's memory
 pub fn memory_limit() -> Option<u64> {
     let read = |p: &str| std::fs::read_to_string(p).ok();

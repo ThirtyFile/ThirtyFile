@@ -45,6 +45,9 @@
         <h2 id="logs">Looking at the log</h2>
         <pre><code>docker logs --tail 100 thirtyfile</code></pre>
 
+        <h2 id="health">Checking that it is running</h2>
+        <p><code>http://your-server:8080/api/health</code> answers with the version and state of the server: <code>"status": "ok"</code>, or <code>"degraded"</code> when <code>/data</code> or <code>/storage</code> has less than 1 GB free or a storage location can't be reached. It also lists the free and total space of both folders and whether each storage location is <code>ok</code> or <code>offline</code>, so a monitoring tool (Uptime Kuma, for example) can warn you before the disk is full. The log warns about it too, once an hour. Docker's own health check only fails when the server doesn't answer at all.</p>
+
         <h2 id="safety">How your files are protected</h2>
         <ul>
           <li>Passwords are stored in a form that cannot be read back.</li>
