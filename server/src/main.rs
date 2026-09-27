@@ -135,8 +135,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         logs.init();
     }
-    let cfg = Config::parse();
     let runtime = || tokio::runtime::Builder::new_multi_thread().enable_all().build();
+    let cfg = match Config::try_parse() {
+        Ok(cfg) => cfg,
+        // The health check only needs the address: a mistyped setting (which stops the server with a clear message)
+        // mustn't also make Docker report the check itself as broken
+        Err(e) if std::env::args().nth(1).as_deref() == Some("health") && e.kind() != clap::error::ErrorKind::DisplayHelp => {
+            let addr = std::env::var("THIRTYFILE_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into());
+            std::process::exit(if runtime()?.block_on(health_probe(&addr)) { 0 } else { 1 });
+        }
+        Err(e) => e.exit(),
+    };
 
     // The health check only connects to the running service and doesn't touch the data directory
     if let Some(Command::Health) = &cfg.command {
