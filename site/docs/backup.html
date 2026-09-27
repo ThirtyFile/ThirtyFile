@@ -22,7 +22,7 @@
         <h3>docker run</h3>
         <pre><code>docker pull ghcr.io/thirtyfile/thirtyfile:latest
 docker stop thirtyfile && docker rm thirtyfile
-docker run -d --name thirtyfile …   # the same options as when you installed it</code></pre>
+docker run -d --name thirtyfile --restart unless-stopped …   # the same options as when you installed it</code></pre>
         <h3>Docker Compose</h3>
         <pre><code>docker compose pull && docker compose up -d</code></pre>
         <h3 id="from-0-1">Upgrading from 0.1.0</h3>

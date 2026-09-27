@@ -18,8 +18,8 @@
         <h1>Troubleshooting</h1>
         <p class="lead">Answers to the problems people run into most.</p>
         <h2 id="password">I forgot the administrator password</h2>
-        <pre><code>docker exec thirtyfile thirtyfile reset-password admin 'a-new-password'</code></pre>
-        <p>This also switches the account back on if it was disabled.</p>
+        <pre><code>docker exec -it thirtyfile thirtyfile reset-password admin</code></pre>
+        <p>Type the new password when asked, so it doesn't stay in your shell history. This also switches the account back on if it was disabled.</p>
 
         <h2 id="links">Share links start with http://127.0.0.1:8080</h2>
         <p>Set the address people use under <strong>Control panel › General › Site URL</strong>.</p>
