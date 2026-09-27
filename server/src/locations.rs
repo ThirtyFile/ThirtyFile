@@ -572,6 +572,9 @@ async fn run_migration(st: &AppState, drive_id: &str, target: &str) -> AppResult
             break;
         }
         for (hash, size, from) in rows {
+            // Held from copying until the reference is switched: a deletion of this content still pending at the
+            // target (from an earlier move away from it) must not remove the copy this move keeps or writes there
+            let _staging = tree::stage_guard(st, &hash).await;
             let src = st.storage(&from)?;
             let tmp = st.tmp_dir().join(format!("migrate-{}", new_id()));
             let copied = async {

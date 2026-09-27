@@ -688,19 +688,24 @@ pub struct StagedBlob {
     guard: StageGuard,
 }
 
-pub async fn stage_blob(st: &AppState, drive_id: &str, hash: String, size: i64, tmp: std::path::PathBuf) -> AppResult<StagedBlob> {
-    // Register it as "staging"; if the same content is being deleted in the background, wait for that to finish before uploading, so the freshly uploaded file isn't deleted
+/// Marks content as "being staged" until the guard is dropped: background deletion leaves it alone meanwhile. If the
+/// same content is being deleted right now, waits for that to finish first, so content stored afterwards isn't deleted.
+pub async fn stage_guard(st: &AppState, hash: &str) -> StageGuard {
     loop {
         {
             let mut g = st.blob_guard.lock().unwrap();
-            if !g.deleting.contains_key(&hash) {
-                *g.staging.entry(hash.clone()).or_default() += 1;
+            if !g.deleting.contains_key(hash) {
+                *g.staging.entry(hash.to_string()).or_default() += 1;
                 break;
             }
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
-    let guard = StageGuard { st: st.clone(), hash: hash.clone() };
+    StageGuard { st: st.clone(), hash: hash.to_string() }
+}
+
+pub async fn stage_blob(st: &AppState, drive_id: &str, hash: String, size: i64, tmp: std::path::PathBuf) -> AppResult<StagedBlob> {
+    let guard = stage_guard(st, &hash).await;
     let result = async {
         let mut c = st.db.acquire().await?;
         let exists: Option<(String,)> = sqlx::query_as("SELECT location_id FROM blobs WHERE hash = ?").bind(&hash).fetch_optional(&mut *c).await?;
