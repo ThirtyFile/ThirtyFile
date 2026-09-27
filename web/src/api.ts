@@ -588,6 +588,13 @@ const toParams = (o: object) =>
     string
   >;
 const post = <T>(p: string, body?: unknown) => request<T>("POST", p, body ?? {});
+/**
+ * API path with every interpolated part encoded as one path segment (or query value): ids and share tokens can come from
+ * the address bar, and `/share/abc%3Fx=1` must not turn into `/public/shares/abc?x=1/unlock`. Query strings built with qs()
+ * are added after it, unencoded.
+ */
+export const enc = (strings: TemplateStringsArray, ...parts: (string | number)[]) =>
+  strings.reduce((out, s, i) => out + s + (i < parts.length ? encodeURIComponent(String(parts[i])) : ""), "");
 const qs = (params: Record<string, string | undefined>) => {
   const s = new URLSearchParams(Object.entries(params).filter((e): e is [string, string] => e[1] !== undefined));
   const str = s.toString();
@@ -600,11 +607,11 @@ export const api = {
   logout: () => post("/auth/logout"),
   changePassword: (current: string, next: string) => request("PUT", "/auth/password", { current, new: next }),
 
-  node: (id: string) => get<NodeInfo>(`/nodes/${id}`).then((n) => ({ ...n, drive: { ...n.drive, name: driveName(n.drive) } })),
+  node: (id: string) => get<NodeInfo>(enc`/nodes/${id}`).then((n) => ({ ...n, drive: { ...n.drive, name: driveName(n.drive) } })),
   children: (id: string, sort?: SortKey, order?: SortOrder, foldersOnly?: boolean) =>
-    get<Node[]>(`/nodes/${id}/children${qs({ sort, order, folders_only: foldersOnly ? "true" : undefined })}`),
+    get<Node[]>(enc`/nodes/${id}/children` + qs({ sort, order, folders_only: foldersOnly ? "true" : undefined })),
   createFolder: (parent_id: string, name: string) => post<Node>("/folders", { parent_id, name }),
-  rename: (id: string, name: string) => request<Node>("PATCH", `/nodes/${id}`, { name }),
+  rename: (id: string, name: string) => request<Node>("PATCH", enc`/nodes/${id}`, { name }),
   move: (ids: string[], dest_id: string) => post("/nodes/move", { ids, dest_id }),
   copy: (ids: string[], dest_id: string) => post("/nodes/copy", { ids, dest_id }),
   trash: (ids: string[]) => post("/nodes/trash", { ids }),
@@ -622,7 +629,7 @@ export const api = {
   saveContent: (id: string, content: BodyInit, baseVersion?: number) =>
     request<Node>(
       "PUT",
-      `/files/${id}/content`,
+      enc`/files/${id}/content`,
       undefined,
       content,
       baseVersion !== undefined ? { "X-Base-Version": String(baseVersion) } : undefined,
@@ -644,14 +651,14 @@ export const api = {
 
   shares: (nodeId?: string) => get<ShareInfo[]>(`/shares${qs({ node_id: nodeId })}`),
   createShare: (req: { node_id: string; password?: string; expires_at?: number; max_downloads?: number }) => post<ShareInfo>("/shares", req),
-  deleteShare: (id: string) => request("DELETE", `/shares/${id}`),
+  deleteShare: (id: string) => request("DELETE", enc`/shares/${id}`),
 
   users: () => get<UserRow[]>("/admin/users"),
   /** A page of accounts, by id */
   usersPage: (after: number, limit: number) => get<UserRow[]>(`/admin/users${qs({ after: String(after), limit: String(limit) })}`),
   createUser: (req: Partial<UserRow> & { password: string }) => post<UserRow>("/admin/users", req),
-  updateUser: (id: number, req: Partial<UserRow> & { password?: string }) => request<UserRow>("PATCH", `/admin/users/${id}`, req),
-  deleteUser: (id: number) => request("DELETE", `/admin/users/${id}`),
+  updateUser: (id: number, req: Partial<UserRow> & { password?: string }) => request<UserRow>("PATCH", enc`/admin/users/${id}`, req),
+  deleteUser: (id: number) => request("DELETE", enc`/admin/users/${id}`),
   systemSettings: () => get<SystemInfo>("/admin/settings"),
   updateSystemSettings: (req: SystemSettingsReq) => request<SystemInfo>("PATCH", "/admin/settings", req),
 
@@ -659,11 +666,11 @@ export const api = {
   createDrive: (name: string, quota_bytes?: number, source_path?: string, read_only?: boolean) =>
     post<Drive>("/drives", { name, quota_bytes, source_path, read_only }),
   /** Scans a folder space for changes made on the server's folder */
-  scanDrive: (id: string) => post<ScanReport>(`/admin/drives/${encodeURIComponent(id)}/scan`),
-  updateDrive: (id: string, req: { name?: string; quota_bytes?: number; read_only?: boolean }) => request<Drive>("PATCH", `/drives/${id}`, req),
-  deleteDrive: (id: string) => request("DELETE", `/drives/${id}`),
+  scanDrive: (id: string) => post<ScanReport>(enc`/admin/drives/${id}/scan`),
+  updateDrive: (id: string, req: { name?: string; quota_bytes?: number; read_only?: boolean }) => request<Drive>("PATCH", enc`/drives/${id}`, req),
+  deleteDrive: (id: string) => request("DELETE", enc`/drives/${id}`),
   adminDrives: () => get<Drive[]>("/admin/drives").then((l) => l.map(localizeDrive)),
-  access: (nodeId: string) => get<AccessInfo>(`/nodes/${nodeId}/access`),
+  access: (nodeId: string) => get<AccessInfo>(enc`/nodes/${nodeId}/access`),
   grant: (
     nodeId: string,
     req: {
@@ -672,8 +679,8 @@ export const api = {
       role: Role;
       expires_at?: number | null;
     },
-  ) => post(`/nodes/${nodeId}/access`, req),
-  revoke: (grantId: number) => request("DELETE", `/grants/${grantId}`),
+  ) => post(enc`/nodes/${nodeId}/access`, req),
+  revoke: (grantId: number) => request("DELETE", enc`/grants/${grantId}`),
   directory: (q: string) => get<Principal[]>(`/directory${qs({ q })}`),
   sharedWithMe: () => get<SharedItem[]>("/shared-with-me").then((l) => l.map(localizeLocated)),
   activity: (f: ActivityFilter & { before?: number; limit?: number }) => get<Page<Activity>>(`/activity${qs(toParams(f))}`),
@@ -684,49 +691,49 @@ export const api = {
   loginLogExportUrl: (f: LoginFilter) => `/api/login-log/export${qs(toParams({ ...f, tz: new Date().getTimezoneOffset() }))}`,
   branding: () => get<Branding>("/branding"),
   updateBranding: (b: BrandingReq) => request<Branding>("PUT", "/admin/branding", b),
-  uploadLogo: (variant: "light" | "dark", file: File) => request<Branding>("PUT", `/admin/branding/logo/${variant}`, undefined, file),
-  deleteLogo: (variant: "light" | "dark") => request<Branding>("DELETE", `/admin/branding/logo/${variant}`),
+  uploadLogo: (variant: "light" | "dark", file: File) => request<Branding>("PUT", enc`/admin/branding/logo/${variant}`, undefined, file),
+  deleteLogo: (variant: "light" | "dark") => request<Branding>("DELETE", enc`/admin/branding/logo/${variant}`),
   uploadLoginBackground: (file: File) => request<Branding>("PUT", "/admin/branding/background", undefined, file),
   deleteLoginBackground: () => request<Branding>("DELETE", "/admin/branding/background"),
   ssoProviders: () => get<SsoProvider[]>("/auth/sso/providers"),
   /** Start a third-party login (full-page redirect); link = link to the currently signed-in account */
-  ssoStartUrl: (provider: string, next: string) => `/api/auth/sso/${encodeURIComponent(provider)}/start${qs({ next })}`,
+  ssoStartUrl: (provider: string, next: string) => enc`/api/auth/sso/${provider}/start` + qs({ next }),
   /** Linking starts with a request from this page, which returns where to go next */
-  ssoLink: (provider: string, next: string) => post<{ url: string }>(`/auth/sso/${encodeURIComponent(provider)}/link`, { next }),
+  ssoLink: (provider: string, next: string) => post<{ url: string }>(enc`/auth/sso/${provider}/link`, { next }),
   myIdentities: () => get<{ linked: LinkedIdentity[]; available: string[] }>("/auth/identities"),
-  unlinkIdentity: (provider: string) => request("DELETE", `/auth/identities/${provider}`),
+  unlinkIdentity: (provider: string) => request("DELETE", enc`/auth/identities/${provider}`),
   ssoSettings: () => get<SsoSettings>("/admin/sso"),
   updateSsoSettings: (s: SsoSettingsReq) => request<SsoSettings>("PUT", "/admin/sso", s),
   logStatus: () => get<LogStatus>("/admin/logs"),
   updateLogSettings: (s: LogSettings) => request<LogStatus>("PUT", "/admin/logs", s),
   archiveLogsNow: () => post<LogStatus>("/admin/logs/archive"),
-  logArchiveUrl: (id: number) => `/api/admin/logs/archives/${id}`,
-  deleteLogArchive: (id: number) => request("DELETE", `/admin/logs/archives/${id}`),
+  logArchiveUrl: (id: number) => enc`/api/admin/logs/archives/${id}`,
+  deleteLogArchive: (id: number) => request("DELETE", enc`/admin/logs/archives/${id}`),
   storageLocations: () => get<StorageLocation[]>("/admin/storage").then((l) => l.map((x) => ({ ...x, name: locationName(x.id, x.name) }))),
   createStorage: (req: { name: string; kind: StorageKind; config: StorageConfig }) => post<{ id: string }>("/admin/storage", req),
-  updateStorage: (id: string, req: { name?: string; config?: StorageConfig }) => request("PATCH", `/admin/storage/${id}`, req),
-  deleteStorage: (id: string) => request("DELETE", `/admin/storage/${id}`),
+  updateStorage: (id: string, req: { name?: string; config?: StorageConfig }) => request("PATCH", enc`/admin/storage/${id}`, req),
+  deleteStorage: (id: string) => request("DELETE", enc`/admin/storage/${id}`),
   testStorage: (req: { id?: string; kind: StorageKind; config: StorageConfig }) =>
     post<{ ok: boolean; region?: string; host_key?: string }>("/admin/storage/test", req),
-  testExistingStorage: (id: string) => post(`/admin/storage/${id}/test`),
-  setDefaultStorage: (id: string) => post(`/admin/storage/${id}/default`),
+  testExistingStorage: (id: string) => post(enc`/admin/storage/${id}/test`),
+  setDefaultStorage: (id: string) => post(enc`/admin/storage/${id}/default`),
   setDriveLocation: (driveId: string, location_id: string | null, migrate: boolean) =>
-    request("PUT", `/admin/drives/${driveId}/location`, {
+    request("PUT", enc`/admin/drives/${driveId}/location`, {
       location_id,
       migrate,
     }),
-  migrateDrive: (driveId: string) => post(`/admin/drives/${driveId}/migrate`),
+  migrateDrive: (driveId: string) => post(enc`/admin/drives/${driveId}/migrate`),
   migrations: () => get<Migration[]>("/admin/migrations"),
   groups: () => get<Group[]>("/admin/groups"),
   createGroup: (req: { name: string; description?: string; members?: number[] }) => post<{ id: number }>("/admin/groups", req),
-  updateGroup: (id: number, req: { name?: string; description?: string; members?: number[] }) => request("PATCH", `/admin/groups/${id}`, req),
-  deleteGroup: (id: number) => request("DELETE", `/admin/groups/${id}`),
+  updateGroup: (id: number, req: { name?: string; description?: string; members?: number[] }) => request("PATCH", enc`/admin/groups/${id}`, req),
+  deleteGroup: (id: number) => request("DELETE", enc`/admin/groups/${id}`),
 
-  publicShare: (token: string) => get<PublicShare>(`/public/shares/${token}`),
-  unlockShare: (token: string, password: string) => post(`/public/shares/${token}/unlock`, { password }),
-  publicNode: (token: string, id: string) => get<{ node: Node; path: Crumb[] }>(`/public/shares/${token}/nodes/${id}`),
+  publicShare: (token: string) => get<PublicShare>(enc`/public/shares/${token}`),
+  unlockShare: (token: string, password: string) => post(enc`/public/shares/${token}/unlock`, { password }),
+  publicNode: (token: string, id: string) => get<{ node: Node; path: Crumb[] }>(enc`/public/shares/${token}/nodes/${id}`),
   publicChildren: (token: string, id: string, sort?: SortKey, order?: SortOrder) =>
-    get<Node[]>(`/public/shares/${token}/nodes/${id}/children${qs({ sort, order })}`),
+    get<Node[]>(enc`/public/shares/${token}/nodes/${id}/children` + qs({ sort, order })),
 };
 
 /** Source of file content URLs; signed-in files and public shares use the same components */
@@ -748,17 +755,17 @@ function downloadLink(base: string, ids: string[]): Promise<string> {
 }
 
 export const privateSource: FileSource = {
-  contentUrl: (n, download) => `/api/files/${n.id}/content${download ? "?download=1" : ""}`,
-  thumbUrl: (n) => `/api/files/${n.id}/thumbnail?v=${n.updated_at}`,
+  contentUrl: (n, download) => enc`/api/files/${n.id}/content` + (download ? "?download=1" : ""),
+  thumbUrl: (n) => enc`/api/files/${n.id}/thumbnail?v=${n.updated_at}`,
   downloadLink: (ids) => downloadLink("/download", ids),
 };
 
 export function shareSource(token: string): FileSource {
-  const base = `/api/public/shares/${token}`;
+  const base = enc`/api/public/shares/${token}`;
   return {
-    contentUrl: (n, download) => `${base}/nodes/${n.id}/content${download ? "?download=1" : ""}`,
-    thumbUrl: (n) => `${base}/nodes/${n.id}/thumbnail?v=${n.updated_at}`,
-    downloadLink: (ids) => downloadLink(`/public/shares/${token}/download`, ids),
+    contentUrl: (n, download) => base + enc`/nodes/${n.id}/content` + (download ? "?download=1" : ""),
+    thumbUrl: (n) => base + enc`/nodes/${n.id}/thumbnail?v=${n.updated_at}`,
+    downloadLink: (ids) => downloadLink(enc`/public/shares/${token}/download`, ids),
   };
 }
 

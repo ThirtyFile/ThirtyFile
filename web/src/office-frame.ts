@@ -23,6 +23,10 @@ type ScrollMessage = { type: "scroll"; x: number; y: number };
 type Message = RenderMessage | LoadXlsxMessage | DrawingsMessage | ScrollMessage;
 
 const root = document.getElementById("root")!;
+/**
+ * "*": this frame's origin is opaque, so it can't name the parent's origin either. The message only goes to window.parent,
+ * which ignores messages that don't come from this frame's window; nothing in them is secret
+ */
 const reply = (msg: object) => window.parent.postMessage(msg, "*");
 let dispose: (() => void) | null = null;
 

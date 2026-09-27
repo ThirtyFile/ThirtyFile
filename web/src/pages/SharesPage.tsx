@@ -53,7 +53,7 @@ export function SharesPage() {
         label={t("Open")}
         showLabel
         disabled={!current}
-        onClick={() => current && window.open(sharePath(current.id), "_blank")}
+        onClick={() => current && window.open(sharePath(current.id), "_blank", "noopener")}
       />
       <ToolButton icon={Link2OffIcon} label={t("Disable link")} showLabel disabled={!current} onClick={() => current && disable(current.id)} />
       <span className="mx-1 h-5 border-l" />
@@ -140,7 +140,7 @@ export function SharesPage() {
               <DropdownMenuItem onClick={() => copy(current.id)}>
                 <CopyIcon /> {t("Copy link")}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => window.open(sharePath(current.id), "_blank")}>
+              <DropdownMenuItem onClick={() => window.open(sharePath(current.id), "_blank", "noopener")}>
                 <ExternalLinkIcon /> {t("Open share page")}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => navigate(current.node_kind === "folder" ? `/files/${current.node_id}` : `/view/${current.node_id}`)}>

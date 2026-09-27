@@ -141,6 +141,8 @@ function useDrawingFrame(parts: ArrayBuffer | null): DrawingFrame {
       () => {},
     );
   }, [wanted]);
+  // "*": the sandboxed frame has an opaque origin, which no target origin can name. Only that frame receives it
+  // (its contentWindow), and it only accepts messages from this page (window.parent)
   const post = useCallback((msg: object, transfer?: Transferable[]) => {
     iframe.current?.contentWindow?.postMessage(msg, "*", transfer ?? []);
   }, []);

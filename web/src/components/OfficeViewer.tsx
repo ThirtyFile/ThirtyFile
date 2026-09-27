@@ -15,6 +15,8 @@ export const OFFICE_PREVIEW_EXTS = ["docx", "xlsx", "pptx"];
 const RENDER_TIMEOUT = 60_000;
 /** Time limit for the preview frame to start */
 const READY_TIMEOUT = 10_000;
+/** Links from a document open at most once per this interval (opening a tab normally uses up the click already) */
+const LINK_INTERVAL = 1000;
 
 /** Error messages we produce ourselves (already translated) are shown as-is */
 class ViewerError extends Error {}
@@ -72,10 +74,13 @@ function FramePreview({ node, source, kind }: { node: Node; source: FileSource; 
       setError(t("Couldn't show the preview. Reload the page."));
       setLoading(false);
     }, READY_TIMEOUT);
+    let lastOpen = -Infinity;
     const send = () => {
       if (cancelled || !ready || !buffer) return;
       // Transfer rather than copy, so large files don't take up an extra copy in memory
       const el = frame.current;
+      // "*": the sandboxed frame has an opaque origin, which no target origin can name. Only that frame receives it
+      // (its contentWindow), and it only accepts messages from this page (window.parent)
       el?.contentWindow?.postMessage({ type: "render", kind, buffer, width: el.clientWidth, height: el.clientHeight }, "*", [buffer]);
       buffer = null;
       // Stop when layout takes too long (e.g. a file with abnormal content): showing the error removes the iframe
@@ -97,9 +102,14 @@ function FramePreview({ node, source, kind }: { node: Node; source: FileSource; 
         setLoading(false);
       }
       else if (msg.type === "link") {
-        // Only open http(s) / mailto links, and cut the link to this page
+        // Only open http(s) / mailto links, and cut the link to this page. The frame only asks when a link is clicked, so the
+        // person must have just clicked (a click in the frame activates this page too), and each click opens at most one tab
         const href = String((msg as { href?: unknown }).href ?? "");
-        if (/^(https?:|mailto:)/i.test(href)) window.open(href, "_blank", "noopener,noreferrer");
+        if (!/^(https?:|mailto:)/i.test(href) || !navigator.userActivation?.isActive) return;
+        const now = performance.now();
+        if (now - lastOpen < LINK_INTERVAL) return;
+        lastOpen = now;
+        window.open(href, "_blank", "noopener,noreferrer");
       }
       else if (msg.type === "error") {
         window.clearTimeout(timer);
