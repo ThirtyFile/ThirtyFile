@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Loader2Icon, Redo2Icon, SaveIcon, Undo2Icon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { ApiError, type FileSource, type Node } from "@/api";
@@ -25,7 +25,7 @@ import {
 import { checkFormula } from "@/lib/sheet/formula";
 import { formatGeneral } from "@/lib/sheet/format";
 import { deriveStyle } from "@/lib/sheet/ops";
-import { HEADER_H, HEADER_W, cellRect, draw, fontOf, type View } from "./renderer";
+import { HEADER_H, HEADER_W, cellRect, cellText, draw, fontOf, type View } from "./renderer";
 import { SheetToolbar } from "./SheetToolbar";
 import { SheetMenu, type MenuTarget } from "./SheetMenu";
 import * as history from "./history";
@@ -481,6 +481,20 @@ function Workspace({
   const rowCount = wholeCols ? 1 : range.r2 - range.r1 + 1;
   const colCount = wholeRows ? 1 : range.c2 - range.c1 + 1;
 
+  // Screen readers can't read the canvas: the active cell and its value (or the selected range) are announced when they change.
+  // Nothing while editing: the cell's text box is read out itself
+  const descId = useId();
+  const activeText = cellText({ sheet, sheetIndex: sheetIdx, styles: book.styles, calc }, active[0], active[1]);
+  const announcement = editing
+    ? ""
+    : range.r1 !== range.r2 || range.c1 !== range.c2
+      ? tc("sheet", "{range} selected", { range: nameBox })
+      : activeCell?.f
+        ? tc("sheet", "{cell}, {value}, formula {formula}", { cell: nameBox, value: activeText, formula: barText })
+        : activeText
+          ? tc("sheet", "{cell}, {value}", { cell: nameBox, value: activeText })
+          : tc("sheet", "{cell}, empty", { cell: nameBox });
+
   return (
     <div className="flex size-full flex-col bg-background text-foreground">
       {/* Format toolbar */}
@@ -553,11 +567,13 @@ function Workspace({
       {/* Cell area */}
       <ContextMenu>
         <ContextMenuTrigger className="relative min-h-0 flex-1 overflow-hidden">
-          <div ref={wrapRef} className="absolute inset-0">
-            <canvas ref={canvasRef} className="absolute inset-0" style={{ width: size.w, height: size.h }} />
+          <div ref={wrapRef} role="group" aria-label={tc("sheet", "Sheet {name}", { name: sheet.name })} className="absolute inset-0">
+            <canvas ref={canvasRef} aria-hidden className="absolute inset-0" style={{ width: size.w, height: size.h }} />
+            {/* Not a Tab stop of its own: the keyboard moves through the cells from the cell's text box, which scrolls this along */}
             <div
               ref={scrollRef}
-              className="absolute inset-0 overflow-auto"
+              tabIndex={-1}
+              className="absolute inset-0 overflow-auto outline-none"
               style={{ cursor }}
               onScroll={(e) => {
                 scroll.current = { x: e.currentTarget.scrollLeft, y: e.currentTarget.scrollTop };
@@ -573,6 +589,7 @@ function Workspace({
             <textarea
               ref={inputRef}
               aria-label={t("Cell contents")}
+              aria-describedby={descId}
               spellCheck={false}
               className={cn(
                 "absolute z-10 resize-none overflow-hidden border-2 border-[#2563eb] bg-white px-[2px] leading-tight text-[#1f2328] outline-none",
@@ -608,6 +625,12 @@ function Workspace({
                   commitEdit(null);
               }}
             />
+            <p id={descId} className="sr-only">
+              {t("Arrow keys move between cells and Shift with the arrow keys selects. Type to replace the cell's contents, or press F2 to edit them; Enter confirms and Esc cancels.")}
+            </p>
+            <div role="status" className="sr-only">
+              {announcement}
+            </div>
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
@@ -649,6 +672,7 @@ function Workspace({
             <button
               key={s.id}
               type="button"
+              aria-current={i === sheetIdx ? "true" : undefined}
               className={cn(
                 "shrink-0 border-r px-3 py-1.5 whitespace-nowrap hover:bg-muted",
                 i === sheetIdx ? "border-b-2 border-b-[#2563eb] bg-background font-medium text-[#2563eb]" : "text-muted-foreground",

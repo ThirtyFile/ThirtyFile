@@ -1,17 +1,17 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import { Loader2Icon } from "lucide-react";
 import { readXlsx } from "@/lib/sheet/xlsx";
-import { Axis, MAX_COLS, MAX_ROWS, key, type Workbook } from "@/lib/sheet/model";
+import { Axis, MAX_COLS, MAX_ROWS, colName, key, type Workbook } from "@/lib/sheet/model";
 import { Calculator, type Value } from "@/lib/sheet/formula";
 import { OoxmlPackage } from "@/lib/office/ooxml";
 import { parseTheme, type Theme } from "@/lib/office/theme";
 import { readDrawings, type DrawingItem } from "@/lib/office/xlsx/anchors";
 import { frameDocument, loadFrameScript } from "@/components/officeFrame";
 import { computeConditional, readDxfs, type CellDecoration, type Dxf } from "@/lib/sheet/conditional";
-import { t } from "@/lib/i18n";
+import { t, tc } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { HEADER_H, HEADER_W, draw, type View } from "./renderer";
+import { HEADER_H, HEADER_W, cellText, draw, visibleCells, type View } from "./renderer";
 
 interface Loaded {
   book: Workbook;
@@ -95,6 +95,7 @@ export default function SheetPreview({ buffer, onError }: { buffer: ArrayBuffer;
             <button
               key={s.id}
               type="button"
+              aria-current={i === sheetIdx ? "true" : undefined}
               onClick={() => setSheetIdx(i)}
               className={cn(
                 "relative shrink-0 border-r px-3 py-1.5 whitespace-nowrap hover:bg-muted",
@@ -197,6 +198,9 @@ function useDrawingFrame(parts: ArrayBuffer | null): DrawingFrame {
     [srcDoc, wanted, post],
   );
 }
+
+/** Most rows and columns copied into the screen reader table (a full screen of a typical sheet fits) */
+const MIRROR = { rows: 100, cols: 40 };
 
 function Grid({ data, sheetIdx, drawingFrame }: { data: Loaded; sheetIdx: number; drawingFrame: DrawingFrame }) {
   const { book, pkg, theme, dxfs, palette } = data;
@@ -306,6 +310,21 @@ function Grid({ data, sheetIdx, drawingFrame }: { data: Loaded; sheetIdx: number
   useEffect(() => redraw());
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
 
+  // Screen readers can't read the canvas: the cells on screen are copied into an off-screen table, updated once scrolling stops
+  const descId = useId();
+  const [mirrorAt, setMirrorAt] = useState({ x: 0, y: 0 });
+  const mirrorTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(mirrorTimer.current), []);
+  const mirror = useMemo(() => {
+    if (!size.w) return null;
+    const shown = visibleCells({ width: size.w, height: size.h, scrollX: mirrorAt.x, scrollY: mirrorAt.y, rows, cols, frozen: sheet.frozen }, MIRROR);
+    const text = { sheet, sheetIndex: sheetIdx, styles: book.styles, calc: values };
+    // Empty rows, and empty columns after the last filled one, are left out; the headers keep the row numbers and column letters
+    const lines = shown.rows.map((r) => ({ r, cells: shown.cols.map((c) => cellText(text, r, c)) })).filter((l) => l.cells.some(Boolean));
+    const width = Math.max(0, ...lines.map((l) => l.cells.findLastIndex(Boolean) + 1));
+    return { cols: shown.cols.slice(0, width), lines: lines.map((l) => ({ r: l.r, cells: l.cells.slice(0, width) })) };
+  }, [size, mirrorAt, rows, cols, sheet, sheetIdx, book, values]);
+
   // Drawing objects are rendered by the sandboxed frame at these column/row positions
   useEffect(() => {
     const frozen = { rows: sheet.frozen?.rows ?? 0, cols: sheet.frozen?.cols ?? 0 };
@@ -315,16 +334,60 @@ function Grid({ data, sheetIdx, drawingFrame }: { data: Loaded; sheetIdx: number
 
   return (
     <div ref={wrapRef} className="relative min-h-0 flex-1 overflow-hidden">
-      <canvas ref={canvasRef} className="absolute inset-0" style={{ width: size.w, height: size.h }} />
+      <canvas ref={canvasRef} aria-hidden className="absolute inset-0" style={{ width: size.w, height: size.h }} />
       <div
-        className="absolute inset-0 overflow-auto"
+        role="region"
+        aria-label={tc("sheet", "Sheet {name}", { name: sheet.name })}
+        aria-describedby={descId}
+        tabIndex={0}
+        className="absolute inset-0 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset"
         onScroll={(e) => {
           scroll.current = { x: e.currentTarget.scrollLeft, y: e.currentTarget.scrollTop };
           redraw();
+          clearTimeout(mirrorTimer.current);
+          mirrorTimer.current = setTimeout(() => setMirrorAt({ ...scroll.current }), 200);
         }}
       >
         <div style={{ width: cols.total + HEADER_W + 40, height: rows.total + HEADER_H + 40 }} />
       </div>
+      <p id={descId} className="sr-only">
+        {t("The cells on screen are listed in the table that follows. Scroll with the arrow keys to show other cells.")}
+      </p>
+      {mirror && (
+        <table className="sr-only">
+          <caption>{tc("sheet", "Cells on screen in {name}", { name: sheet.name })}</caption>
+          {mirror.lines.length > 0 ? (
+            <>
+              <thead>
+                <tr>
+                  <td />
+                  {mirror.cols.map((c) => (
+                    <th key={c} scope="col">
+                      {colName(c)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {mirror.lines.map(({ r, cells }) => (
+                  <tr key={r}>
+                    <th scope="row">{r + 1}</th>
+                    {cells.map((text, i) => (
+                      <td key={mirror.cols[i]}>{text}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </>
+          ) : (
+            <tbody>
+              <tr>
+                <td>{t("The cells on screen are empty.")}</td>
+              </tr>
+            </tbody>
+          )}
+        </table>
+      )}
     </div>
   );
 }

@@ -87,6 +87,33 @@ export function displayText(value: Value, style?: CellStyle) {
   return formatCell(value, style?.numFmt);
 }
 
+/** A cell's text as shown on the canvas ("" when empty), for screen readers, which can't read the canvas */
+export function cellText(s: Pick<DrawState, "sheet" | "sheetIndex" | "styles" | "calc">, r: number, c: number) {
+  const cell = s.sheet.cells.get(key(r, c));
+  if (!cell) return "";
+  const value = s.calc.value(s.sheetIndex, r, c);
+  if (value === null || value === "") return "";
+  return displayText(value, cell.s !== undefined ? s.styles[cell.s] : undefined).text;
+}
+
+/** Rows and columns on screen, frozen ones included (at most `max` of each), for the screen reader copy of the visible cells */
+export function visibleCells(v: View, max: { rows: number; cols: number }) {
+  const fr = Math.min(v.frozen?.rows ?? 0, v.rows.count);
+  const fc = Math.min(v.frozen?.cols ?? 0, v.cols.count);
+  const pick = (axis: Axis, frozen: number, scroll: number, extent: number, limit: number) => {
+    const out: number[] = [];
+    // Hidden rows and columns (no height or width) are left out
+    for (let i = 0; i < frozen && out.length < limit; i++) if (axis.sizeOf(i) > 0) out.push(i);
+    const last = axis.indexAt(scroll + extent);
+    for (let i = Math.max(frozen, axis.indexAt(scroll + axis.offset(frozen))); i <= last && out.length < limit; i++) if (axis.sizeOf(i) > 0) out.push(i);
+    return out;
+  };
+  return {
+    rows: pick(v.rows, fr, v.scrollY, v.height - HEADER_H, max.rows),
+    cols: pick(v.cols, fc, v.scrollX, v.width - HEADER_W, max.cols),
+  };
+}
+
 function wrapLines(ctx: CanvasRenderingContext2D, text: string, width: number) {
   const lines: string[] = [];
   for (const para of text.split("\n")) {
