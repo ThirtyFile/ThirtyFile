@@ -1,4 +1,4 @@
-import { useState, type MouseEvent, type ReactNode } from "react";
+import { useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -46,6 +46,8 @@ type Selection = Item | null;
 
 /** Key used for selection (space and shared item ids may collide, so add a prefix) */
 const keyOf = (s: Item) => (s.t === "drive" ? `d:${s.drive.id}` : `s:${s.item.id}`);
+type SectionId = "personal" | "common" | "shared";
+const sectionOf = (s: Item): SectionId => (s.t === "shared" ? "shared" : s.drive.kind === "personal" ? "personal" : "common");
 type DialogState =
   | { t: "access"; nodeId: string }
   | { t: "create" }
@@ -101,13 +103,13 @@ function RoleBadge({ role }: { role: string | null }) {
   return <span className={cn("ml-1.5 rounded px-1.5 py-px text-[11px] whitespace-nowrap", cls)}>{ROLE_LABEL[role as keyof typeof ROLE_LABEL]}</span>;
 }
 
-function Section({ title, count, children }: { title: string; count: number; children: ReactNode }) {
-  const [open, setOpen] = useState(true);
+function Section({ title, count, open, onToggle, children }: { title: string; count: number; open: boolean; onToggle(): void; children: ReactNode }) {
   return (
     <section>
       <button
         type="button"
-        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        onClick={onToggle}
         className="mt-4 mb-2 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
       >
         <ChevronDownIcon className={cn("size-3.5 transition-transform", !open && "-rotate-90")} />
@@ -129,6 +131,8 @@ export function ThisPcPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
+  // Collapsed sections of the tiles view
+  const [collapsed, setCollapsed] = useState<Set<SectionId>>(new Set());
 
   const list = drives.data ?? [];
   const personal = list.filter((d) => d.kind === "personal");
@@ -218,10 +222,84 @@ export function ThisPcPage() {
     }
   };
 
+  /** Keyboard (like the file list): arrows move the selection (Shift extends it), Space selects (toggles with Ctrl), Home/End jump, Enter opens */
+  const keyNav = (e: KeyboardEvent<HTMLElement>, s: Item) => {
+    // Keys typed in the rename box belong to it
+    if (e.target !== e.currentTarget) return;
+    if (e.key === "Enter" && !e.altKey && !e.repeat) {
+      e.preventDefault();
+      openSel(s);
+      return;
+    }
+    if (e.key === " ") {
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) {
+        const next = new Set(selected);
+        if (next.has(keyOf(s))) next.delete(keyOf(s));
+        else next.add(keyOf(s));
+        setSelected(next);
+        setAnchor(keyOf(s));
+      } else selectOnly(s);
+      return;
+    }
+    // Work on the items as laid out (collapsed sections aren't there): each tiles section is its own grid
+    const el = e.currentTarget;
+    const all = Array.from(el.closest("[data-spaces]")?.querySelectorAll<HTMLElement>("[data-node-id]") ?? []);
+    const groups: HTMLElement[][] = [];
+    for (const x of all) {
+      if (groups.at(-1)?.[0].parentElement === x.parentElement) groups.at(-1)!.push(x);
+      else groups.push([x]);
+    }
+    const g = groups.findIndex((group) => group.includes(el));
+    const group = groups[g];
+    const i = group.indexOf(el);
+    const perRow = view === "tiles" ? Math.max(1, getComputedStyle(el.parentElement!).gridTemplateColumns.split(" ").filter(Boolean).length) : 1;
+    const col = i % perRow;
+    let target: HTMLElement | undefined;
+    if (e.key === "ArrowDown") {
+      if (i + perRow < group.length) target = group[i + perRow];
+      // Below is empty but there is a shorter last row: go to its last item
+      else if (Math.floor(i / perRow) < Math.floor((group.length - 1) / perRow)) target = group.at(-1);
+      else if (groups[g + 1]) target = groups[g + 1][Math.min(col, groups[g + 1].length - 1)];
+    } else if (e.key === "ArrowUp") {
+      if (i - perRow >= 0) target = group[i - perRow];
+      else if (groups[g - 1]) {
+        const prev = groups[g - 1];
+        target = prev[Math.min(Math.floor((prev.length - 1) / perRow) * perRow + col, prev.length - 1)];
+      }
+    } else if (e.key === "ArrowRight" && view === "tiles") target = all[all.indexOf(el) + 1];
+    else if (e.key === "ArrowLeft" && view === "tiles") target = all[all.indexOf(el) - 1];
+    else if (e.key === "Home") target = all[0];
+    else if (e.key === "End") target = all.at(-1);
+    else return;
+    e.preventDefault();
+    const next = target && ordered.find((x) => keyOf(x) === target.dataset.nodeId);
+    if (!target || !next) return;
+    const a = anchor === null ? -1 : ordered.findIndex((x) => keyOf(x) === anchor);
+    if (e.shiftKey && a >= 0) {
+      const b = ordered.indexOf(next);
+      const range = new Set<string>();
+      for (let j = Math.min(a, b); j <= Math.max(a, b); j++) range.add(keyOf(ordered[j]));
+      setSelected(range);
+    } else {
+      selectOnly(next);
+    }
+    target.focus();
+  };
+
+  // One item is reachable with Tab (the first selected one shown, else the first one shown); arrows move between the others
+  const shown = view === "list" ? ordered : ordered.filter((s) => !collapsed.has(sectionOf(s)));
+  const tabStop = (shown.find((s) => selected.has(keyOf(s))) ?? shown[0]) as Item | undefined;
+
   const itemProps = (s: Item) => ({
     "data-node-id": keyOf(s),
+    "aria-selected": selected.has(keyOf(s)),
+    tabIndex: tabStop && keyOf(tabStop) === keyOf(s) ? 0 : -1,
+    onKeyDown: (e: KeyboardEvent<HTMLElement>) => keyNav(e, s),
     onClick: (e: MouseEvent) => {
       e.stopPropagation();
+      // Rows start a marquee on mousedown, which keeps them from getting the focus: arrows continue from the clicked item
+      (e.currentTarget as HTMLElement).focus({ preventScroll: true });
       clickItem(e, s);
     },
     onDoubleClick: () => openSel(s),
@@ -262,8 +340,9 @@ export function ThisPcPage() {
         key={d.id}
         {...itemProps(s)}
         data-item
+        role="option"
         className={cn(
-          "flex cursor-default gap-3 rounded-md border border-transparent p-3 select-none hover:bg-muted/70",
+          "flex cursor-default gap-3 rounded-md border border-transparent p-3 outline-none select-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
           isSel(s) && "border-brand bg-selection hover:bg-selection",
         )}
       >
@@ -303,8 +382,9 @@ export function ThisPcPage() {
         key={item.id}
         {...itemProps(s)}
         data-item
+        role="option"
         className={cn(
-          "flex cursor-default gap-3 rounded-md border border-transparent p-3 select-none hover:bg-muted/70",
+          "flex cursor-default gap-3 rounded-md border border-transparent p-3 outline-none select-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
           isSel(s) && "border-brand bg-selection hover:bg-selection",
         )}
         title={item.name}
@@ -321,15 +401,37 @@ export function ThisPcPage() {
     );
   };
 
-  const grid = "grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-1.5";
+  const section = (id: SectionId, title: string, count: number) => ({
+    title,
+    count,
+    open: !collapsed.has(id),
+    onToggle: () => {
+      const next = new Set(collapsed);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      setCollapsed(next);
+    },
+  });
+  // Each section's tiles are a list of options (an empty section only shows its note)
+  const tiles = (label: string, count: number) => ({
+    className: "grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-1.5",
+    ...(count > 0 ? { role: "listbox", "aria-multiselectable": true, "aria-label": label } : {}),
+  });
 
   const listView = (
-    <table className="w-full table-fixed border-collapse text-xs whitespace-nowrap">
+    <table
+      role="grid"
+      aria-multiselectable
+      aria-label={t("All spaces")}
+      aria-rowcount={ordered.length + 1}
+      className="w-full table-fixed border-collapse text-xs whitespace-nowrap"
+    >
       <thead>
-        <tr className="border-b text-left text-muted-foreground">
+        <tr role="row" aria-rowindex={1} className="border-b text-left text-muted-foreground">
           {[t("Name"), t("Type"), t("Used"), t("Total size"), t("My role"), t("Owner")].map((h, i) => (
             <th
               key={h}
+              role="columnheader"
               className={cn(
                 "h-[30px] px-2 font-normal",
                 i === 0 ? "pl-3" : i === 1 ? "w-[120px] max-md:hidden" : i === 5 ? "w-[110px] max-md:hidden" : "w-[100px]",
@@ -341,7 +443,7 @@ export function ThisPcPage() {
         </tr>
       </thead>
       <tbody>
-        {list.map((d) => {
+        {list.map((d, i) => {
           const Icon = DRIVE_ICON[d.kind];
           const s = { t: "drive" as const, drive: d };
           return (
@@ -349,41 +451,51 @@ export function ThisPcPage() {
               key={d.id}
               {...itemProps(s)}
               data-item
-              className={cn("h-7 cursor-default hover:bg-muted/70", isSel(s) && "bg-selection shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection")}
+              role="row"
+              aria-rowindex={i + 2}
+              className={cn(
+                "h-7 cursor-default outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                isSel(s) && "bg-selection shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection",
+              )}
             >
-              <td className="truncate px-2 pl-3">
+              <td role="gridcell" className="truncate px-2 pl-3">
                 <span className="flex items-center gap-2">
                   <Icon className={cn("size-4 shrink-0", d.offline && "opacity-50")} /> {isRenaming(d) ? renameBox(d) : d.name}
                   <OfflineBadge d={d} />
                 </span>
               </td>
-              <td className="px-2 text-muted-foreground max-md:hidden">{DRIVE_KIND_LABEL[d.kind]}</td>
-              <td className="px-2 text-muted-foreground">{formatBytes(d.used_bytes)}</td>
-              <td className="px-2 text-muted-foreground">{d.quota_bytes ? formatBytes(d.quota_bytes) : tc("short", "Unlimited")}</td>
-              <td className="px-2 text-muted-foreground">{d.role ? ROLE_LABEL[d.role] : "—"}</td>
-              <td className="truncate px-2 text-muted-foreground max-md:hidden">{d.kind === "company" ? t("Company") : d.owner_name}</td>
+              <td role="gridcell" className="px-2 text-muted-foreground max-md:hidden">{DRIVE_KIND_LABEL[d.kind]}</td>
+              <td role="gridcell" className="px-2 text-muted-foreground">{formatBytes(d.used_bytes)}</td>
+              <td role="gridcell" className="px-2 text-muted-foreground">{d.quota_bytes ? formatBytes(d.quota_bytes) : tc("short", "Unlimited")}</td>
+              <td role="gridcell" className="px-2 text-muted-foreground">{d.role ? ROLE_LABEL[d.role] : "—"}</td>
+              <td role="gridcell" className="truncate px-2 text-muted-foreground max-md:hidden">{d.kind === "company" ? t("Company") : d.owner_name}</td>
             </tr>
           );
         })}
-        {sharedItems.map((item) => {
+        {sharedItems.map((item, i) => {
           const s = { t: "shared" as const, item };
           return (
             <tr
               key={item.id}
               {...itemProps(s)}
               data-item
-              className={cn("h-7 cursor-default hover:bg-muted/70", isSel(s) && "bg-selection shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection")}
+              role="row"
+              aria-rowindex={list.length + i + 2}
+              className={cn(
+                "h-7 cursor-default outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                isSel(s) && "bg-selection shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection",
+              )}
             >
-              <td className="truncate px-2 pl-3">
+              <td role="gridcell" className="truncate px-2 pl-3">
                 <span className="flex items-center gap-2">
                   <FileIcon node={item} className="size-4" /> {item.name}
                 </span>
               </td>
-              <td className="px-2 text-muted-foreground max-md:hidden">{t("Shared with me")}</td>
-              <td className="px-2 text-muted-foreground">{item.kind === "file" ? formatBytes(item.size) : ""}</td>
-              <td className="px-2 text-muted-foreground" />
-              <td className="px-2 text-muted-foreground">{ROLE_LABEL[item.role]}</td>
-              <td className="truncate px-2 text-muted-foreground max-md:hidden">{item.sharer}</td>
+              <td role="gridcell" className="px-2 text-muted-foreground max-md:hidden">{t("Shared with me")}</td>
+              <td role="gridcell" className="px-2 text-muted-foreground">{item.kind === "file" ? formatBytes(item.size) : ""}</td>
+              <td role="gridcell" className="px-2 text-muted-foreground" />
+              <td role="gridcell" className="px-2 text-muted-foreground">{ROLE_LABEL[item.role]}</td>
+              <td role="gridcell" className="truncate px-2 text-muted-foreground max-md:hidden">{item.sharer}</td>
             </tr>
           );
         })}
@@ -464,10 +576,14 @@ export function ThisPcPage() {
       <ContextMenu>
         <ContextMenuTrigger
           className="relative min-h-0 flex-1 overflow-auto px-4 pb-6"
+          data-spaces
           onClick={() => selectOnly(null)}
           onContextMenuCapture={(e) => !(e.target as HTMLElement).closest("[data-item]") && selectOnly(null)}
           {...marquee.containerProps}
         >
+          <div role="status" className="sr-only">
+            {selItems.length > 0 ? t("{n} item selected|{n} items selected", { n: selItems.length }) : ""}
+          </div>
           {marquee.box && (
             <div
               className="pointer-events-none absolute z-10 border border-brand bg-brand/15"
@@ -484,18 +600,18 @@ export function ThisPcPage() {
             <div className="pt-2">{listView}</div>
           ) : (
             <>
-              <Section title={t("Personal")} count={personal.length}>
-                <div className={grid}>{personal.map((d) => driveTile(d))}</div>
+              <Section {...section("personal", t("Personal"), personal.length)}>
+                <div {...tiles(t("Personal"), personal.length)}>{personal.map((d) => driveTile(d))}</div>
               </Section>
-              <Section title={t("Shared spaces")} count={common.length}>
-                <div className={grid}>
+              <Section {...section("common", t("Shared spaces"), common.length)}>
+                <div {...tiles(t("Shared spaces"), common.length)}>
                   {common.map((d) => driveTile(d))}
                   {common.length === 0 && <p className="px-3 text-xs text-muted-foreground">{t("You haven't joined any shared spaces yet.")}</p>}
                 </div>
               </Section>
               {sharedItems.length > 0 && (
-                <Section title={t("Shared with me")} count={sharedItems.length}>
-                  <div className={grid}>{sharedItems.map((item) => sharedTile(item))}</div>
+                <Section {...section("shared", t("Shared with me"), sharedItems.length)}>
+                  <div {...tiles(t("Shared with me"), sharedItems.length)}>{sharedItems.map((item) => sharedTile(item))}</div>
                 </Section>
               )}
             </>
