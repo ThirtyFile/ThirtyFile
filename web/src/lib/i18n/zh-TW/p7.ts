@@ -10,4 +10,5 @@ export default {
   "Skipping certificate verification": "略過憑證驗證",
   "{reason} requires a host address": "{reason}需要填寫主機位址",
   "Invalid tenant: enter a tenant ID (GUID) or domain, e.g. contoso.onmicrosoft.com": "租用戶格式不正確：請填寫租用戶 ID（GUID）或網域，例如 contoso.onmicrosoft.com",
+  "Show more": "顯示更多",
 } satisfies Record<string, string>;

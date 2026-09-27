@@ -14,3 +14,7 @@ CREATE INDEX login_log_user ON login_log (user_id);
 -- Never used by a query; they only slowed down writes
 DROP INDEX activity_user;
 DROP INDEX nodes_trash;
+
+-- The storage list sums the content of each location: a covering index answers it without reading the blobs table
+DROP INDEX blobs_location;
+CREATE INDEX blobs_location_size ON blobs (location_id, size);

@@ -1,5 +1,7 @@
 //! Spaces, members and folder sharing (grants), groups, activity log.
 
+use std::collections::HashMap;
+
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -51,56 +53,83 @@ pub struct DriveInfo {
 }
 
 async fn drive_info(st: &AppState, conn: &mut SqliteConnection, d: Drive, role: Option<Role>) -> AppResult<DriveInfo> {
+    Ok(drive_infos(st, conn, vec![(d, role)], false).await?.pop().expect("one space in, one out"))
+}
+
+/// What the space cards show, for many spaces in one query (the lists don't run a query per space). With
+/// `scan_details`, folder spaces also report their folder and last scan (administrators).
+async fn drive_infos(
+    st: &AppState,
+    conn: &mut SqliteConnection,
+    drives: Vec<(Drive, Option<Role>)>,
+    scan_details: bool,
+) -> AppResult<Vec<DriveInfo>> {
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        id: String,
+        location_id: Option<String>,
+        location_name: String,
+        quota_bytes: i64,
+        owner_name: String,
+        member_count: i64,
+        last_scan_at: Option<i64>,
+        scan_report: Option<String>,
+    }
     let default_location = st.default_location.read().unwrap().clone();
-    // Everything the card shows in one query (the space list runs this once per space)
-    let (explicit, location_name, quota_bytes, owner_name, member_count): (Option<String>, String, i64, String, i64) = sqlx::query_as(
-        "SELECT d.location_id,
-                COALESCE((SELECT name FROM storage_locations WHERE id = COALESCE(d.location_id, ?2)), ''),
-                CASE WHEN d.kind = 'personal' THEN COALESCE((SELECT quota_bytes FROM users WHERE id = d.owner_id), 0) ELSE d.quota_bytes END,
-                COALESCE((SELECT username FROM users WHERE id = d.owner_id), ''),
-                (SELECT COUNT(*) FROM grants WHERE node_id = d.root_id)
-         FROM drives d WHERE d.id = ?1",
+    let ids = serde_json::to_string(&drives.iter().map(|(d, _)| d.id.as_str()).collect::<Vec<_>>()).unwrap();
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT d.id, d.location_id, COALESCE(l.name, '') AS location_name,
+                CASE WHEN d.kind = 'personal' THEN COALESCE(u.quota_bytes, 0) ELSE d.quota_bytes END AS quota_bytes,
+                COALESCE(u.username, '') AS owner_name, COALESCE(g.n, 0) AS member_count, d.last_scan_at, d.scan_report
+         FROM drives d
+         LEFT JOIN storage_locations l ON l.id = COALESCE(d.location_id, ?2)
+         LEFT JOIN users u ON u.id = d.owner_id
+         LEFT JOIN (SELECT node_id, COUNT(*) AS n FROM grants GROUP BY node_id) g ON g.node_id = d.root_id
+         WHERE d.id IN (SELECT value FROM json_each(?1))",
     )
-    .bind(&d.id)
+    .bind(&ids)
     .bind(&default_location)
-    .fetch_one(&mut *conn)
+    .fetch_all(&mut *conn)
     .await?;
-    let used_bytes = d.used_bytes;
-    let location_is_default = explicit.is_none();
-    let location_id = explicit.unwrap_or(default_location);
-    // A folder space is on the server itself: nothing to be offline
-    let offline = if d.is_folder() { None } else { st.location_offline(&location_id) };
-    Ok(DriveInfo {
-        mode: d.mode.clone(),
-        read_only: d.read_only,
-        source_path: None,
-        last_scan_at: None,
-        scan_report: None,
-        id: d.id,
-        name: d.name,
-        kind: d.kind,
-        root_id: d.root_id,
-        role,
-        used_bytes,
-        quota_bytes,
-        owner_name,
-        member_count,
-        disabled: d.disabled,
-        location_id,
-        location_name,
-        location_is_default,
-        offline,
-    })
+    let mut rows: HashMap<String, Row> = rows.into_iter().map(|r| (r.id.clone(), r)).collect();
+    let mut out = Vec::with_capacity(drives.len());
+    for (d, role) in drives {
+        let r = rows.remove(&d.id).ok_or_else(|| AppError::not_found("Space not found"))?;
+        let location_is_default = r.location_id.is_none();
+        let location_id = r.location_id.unwrap_or_else(|| default_location.clone());
+        // A folder space is on the server itself: nothing to be offline
+        let offline = if d.is_folder() { None } else { st.location_offline(&location_id) };
+        let details = scan_details && d.is_folder();
+        out.push(DriveInfo {
+            mode: d.mode.clone(),
+            read_only: d.read_only,
+            source_path: d.source_path.clone().filter(|_| details),
+            last_scan_at: r.last_scan_at.filter(|_| details),
+            scan_report: r.scan_report.filter(|_| details).and_then(|r| serde_json::from_str(&r).ok()),
+            used_bytes: d.used_bytes,
+            id: d.id,
+            name: d.name,
+            kind: d.kind,
+            root_id: d.root_id,
+            role,
+            quota_bytes: r.quota_bytes,
+            owner_name: r.owner_name,
+            member_count: r.member_count,
+            disabled: d.disabled,
+            location_id,
+            location_name: r.location_name,
+            location_is_default,
+            offline,
+        });
+    }
+    Ok(out)
 }
 
 /// Spaces I can access
 pub async fn list(State(st): State<AppState>, user: User) -> AppResult<Json<Vec<DriveInfo>>> {
     let mut c = st.db.acquire().await?;
-    let mut out = Vec::new();
-    for (d, role) in tree::user_drives(&mut c, &user).await? {
-        out.push(drive_info(&st, &mut c, d, Some(role)).await?);
-    }
-    Ok(Json(out))
+    let drives = tree::user_drives(&mut c, &user).await?.into_iter().map(|(d, role)| (d, Some(role))).collect();
+    Ok(Json(drive_infos(&st, &mut c, drives, false).await?))
 }
 
 fn can_create_drive(st: &AppState, user: &User) -> bool {
@@ -272,23 +301,13 @@ pub async fn admin_list(State(st): State<AppState>, Admin(user): Admin) -> AppRe
     let mut c = st.db.acquire().await?;
     let sql = format!("SELECT {DRIVE_COLS} FROM drives d ORDER BY CASE d.kind WHEN 'company' THEN 0 WHEN 'team' THEN 1 ELSE 2 END, d.name");
     let drives: Vec<Drive> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).fetch_all(&mut *c).await?;
-    let mut out = Vec::new();
-    for d in drives {
-        let root = tree::get_node(&mut c, &d.root_id).await?.unwrap();
-        let role = tree::role_on(&mut c, &user, &root).await?;
-        let source_path = d.source_path.clone().filter(|_| d.is_folder());
-        let mut info = drive_info(&st, &mut c, d, role).await?;
-        if source_path.is_some() {
-            // Administrators see which folder a folder space shows and what its last scan found
-            let (at, report): (Option<i64>, Option<String>) =
-                sqlx::query_as("SELECT last_scan_at, scan_report FROM drives WHERE id = ?").bind(&info.id).fetch_one(&mut *c).await?;
-            info.last_scan_at = at;
-            info.scan_report = report.and_then(|r| serde_json::from_str(&r).ok());
-            info.source_path = source_path;
-        }
-        out.push(info);
-    }
-    Ok(Json(out))
+    // The administrator's own role (same as role_on for each root: grants, and managing the company space)
+    let roles: HashMap<String, Role> = tree::user_drives(&mut c, &user).await?.into_iter().map(|(d, r)| (d.id, r)).collect();
+    let drives = drives.into_iter().map(|d| {
+        let role = roles.get(&d.id).copied();
+        (d, role)
+    });
+    Ok(Json(drive_infos(&st, &mut c, drives.collect(), true).await?))
 }
 
 // ───────────── Access (space members / folder sharing) ─────────────
@@ -564,16 +583,20 @@ pub struct GroupMember {
 pub async fn list_groups(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<GroupInfo>>> {
     let groups: Vec<(i64, String, String, i64)> =
         sqlx::query_as("SELECT id, name, description, created_at FROM groups ORDER BY name").fetch_all(&st.db).await?;
-    let mut out = Vec::new();
-    for (id, name, description, created_at) in groups {
-        let members: Vec<GroupMember> = sqlx::query_as(
-            "SELECT u.id, u.username FROM group_members m JOIN users u ON u.id = m.user_id WHERE m.group_id = ? ORDER BY u.username",
-        )
-        .bind(id)
-        .fetch_all(&st.db)
-        .await?;
-        out.push(GroupInfo { id, name, description, created_at, members });
+    // Every group's members in one query
+    let members: Vec<(i64, i64, String)> = sqlx::query_as(
+        "SELECT m.group_id, u.id, u.username FROM group_members m JOIN users u ON u.id = m.user_id ORDER BY u.username",
+    )
+    .fetch_all(&st.db)
+    .await?;
+    let mut by_group: HashMap<i64, Vec<GroupMember>> = HashMap::new();
+    for (group_id, id, username) in members {
+        by_group.entry(group_id).or_default().push(GroupMember { id, username });
     }
+    let out = groups
+        .into_iter()
+        .map(|(id, name, description, created_at)| GroupInfo { id, name, description, created_at, members: by_group.remove(&id).unwrap_or_default() })
+        .collect();
     Ok(Json(out))
 }
 

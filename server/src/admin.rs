@@ -2,7 +2,7 @@
 
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -43,9 +43,18 @@ const USER_ROW_SQL: &str = "SELECT u.id, u.username, u.display_name, u.role, u.c
        (SELECT COALESCE(SUM(used_bytes), 0) FROM drives WHERE kind = 'personal' AND owner_id = u.id) AS used_bytes
      FROM users u";
 
-pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<UserRow>>> {
-    let sql = format!("{USER_ROW_SQL} ORDER BY u.id");
-    Ok(Json(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).fetch_all(&st.db).await?))
+#[derive(Deserialize)]
+pub struct ListQuery {
+    /// Paging: only accounts with an id above this one
+    after: Option<i64>,
+    /// Page size; without it every account is returned (the group editor picks members from all of them)
+    limit: Option<i64>,
+}
+
+pub async fn list(State(st): State<AppState>, _: Admin, Query(q): Query<ListQuery>) -> AppResult<Json<Vec<UserRow>>> {
+    let sql = format!("{USER_ROW_SQL} WHERE u.id > ? ORDER BY u.id LIMIT ?");
+    let limit = q.limit.map_or(-1, |l| l.clamp(1, 1000));
+    Ok(Json(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(q.after.unwrap_or(0)).bind(limit).fetch_all(&st.db).await?))
 }
 
 /// Trimmed, at most 80 characters, no control characters
@@ -448,6 +457,27 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
 mod tests {
     use super::*;
     use crate::{auth::Admin, testutil};
+
+    #[tokio::test]
+    async fn the_user_list_comes_in_pages() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        for name in ["amy", "ben", "cat"] {
+            env.user(name, false).await;
+        }
+        let page = |after, limit| {
+            let (st, admin) = (env.st.clone(), admin.clone());
+            async move {
+                let Json(rows) = list(State(st), Admin(admin), Query(ListQuery { after, limit })).await.unwrap();
+                rows.into_iter().map(|r| r.id).collect::<Vec<_>>()
+            }
+        };
+        let all = page(None, None).await;
+        assert_eq!(all.len(), 4);
+        let first = page(None, Some(2)).await;
+        assert_eq!(first, all[..2]);
+        assert_eq!(page(Some(first[1]), Some(2)).await, all[2..]);
+    }
 
     fn req(name: &str, quota: Option<i64>) -> Json<CreateReq> {
         Json(CreateReq {

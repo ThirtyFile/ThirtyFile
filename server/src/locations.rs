@@ -101,16 +101,20 @@ pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<Lo
         sqlx::query_as("SELECT id, name, kind, config, is_default FROM storage_locations ORDER BY (id = 'local') DESC, created_at")
             .fetch_all(&st.db)
             .await?;
+    // Totals of every location in three grouped queries (blobs by the covering index blobs_location_size)
+    let db = &st.db;
+    let totals = |sql: &'static str| async move {
+        let rows: Vec<(String, i64, i64)> = sqlx::query_as(sql).fetch_all(db).await?;
+        AppResult::Ok(rows.into_iter().map(|(id, a, b)| (id, (a, b))).collect::<std::collections::HashMap<_, _>>())
+    };
+    let blobs = totals("SELECT location_id, COALESCE(SUM(size), 0), COUNT(*) FROM blobs GROUP BY location_id").await?;
+    let drives = totals("SELECT location_id, COUNT(*), 0 FROM drives WHERE location_id IS NOT NULL GROUP BY location_id").await?;
+    let pending = totals("SELECT location_id, COUNT(*), 0 FROM pending_blob_deletes GROUP BY location_id").await?;
     let mut out = Vec::new();
     for r in rows {
-        let (used_bytes, blob_count, drive_count): (i64, i64, i64) = sqlx::query_as(
-            "SELECT (SELECT COALESCE(SUM(size), 0) FROM blobs WHERE location_id = ?1),
-                    (SELECT COUNT(*) FROM blobs WHERE location_id = ?1),
-                    (SELECT COUNT(*) FROM drives WHERE location_id = ?1)",
-        )
-        .bind(&r.id)
-        .fetch_one(&st.db)
-        .await?;
+        let (used_bytes, blob_count) = blobs.get(&r.id).copied().unwrap_or_default();
+        let drive_count = drives.get(&r.id).map_or(0, |d| d.0);
+        let pending_deletes = pending.get(&r.id).map_or(0, |d| d.0);
         let (mut config, has_secret) = public_config(&config_json(&r.config));
         if r.id == BUILTIN {
             // Shown in the list; the built-in location's folder is set with THIRTYFILE_STORAGE
@@ -118,8 +122,6 @@ pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<Lo
         }
         let health = st.location_health.lock().unwrap().get(&r.id).cloned();
         let connected = st.storages.read().unwrap().contains_key(&r.id) && health.as_ref().is_none_or(|h| h.ok);
-        let (pending_deletes,): (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM pending_blob_deletes WHERE location_id = ?").bind(&r.id).fetch_one(&st.db).await?;
         out.push(LocationInfo {
             builtin: r.id == BUILTIN,
             id: r.id,

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { HistoryIcon, Loader2Icon, PencilIcon, RefreshCwIcon, Trash2Icon, TriangleAlertIcon, UserCheckIcon, UserPlusIcon, UsersIcon, UserXIcon } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { DataTable, type Column } from "@/components/DataTable";
@@ -21,16 +21,23 @@ import { LoginLogDialog } from "@/components/logs/LoginLog";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
 
 const GB = 1024 ** 3;
+const USERS_PAGE = 200;
 
 export function AdminUsersPage() {
   const me = useMe();
-  const q = useQuery({ queryKey: ["admin-users"], queryFn: api.users });
+  // Loaded a page at a time: there is one account per person, so the list can be long
+  const q = useInfiniteQuery({
+    queryKey: ["admin-users", "pages"],
+    queryFn: ({ pageParam }) => api.usersPage(pageParam, USERS_PAGE),
+    initialPageParam: 0,
+    getNextPageParam: (last) => (last.length < USERS_PAGE ? undefined : last[last.length - 1].id),
+  });
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [editing, setEditing] = useState<UserRow | "new" | null>(null);
   const [deleting, setDeleting] = useState<UserRow | null>(null);
   const [loginsOf, setLoginsOf] = useState<UserRow | null>(null);
   const qc = useQueryClient();
-  const users = q.data ?? [];
+  const users = useMemo(() => q.data?.pages.flat() ?? [], [q.data]);
   const selected = users.find((u) => u.id === selectedId) ?? null;
 
   const toolbar = (
@@ -128,7 +135,16 @@ export function AdminUsersPage() {
       searchPlaceholder={t("Search settings")}
       onSearch={searchSettings}
       icon={UsersIcon}
-      footer={<span>{t("{n} user|{n} users", { n: users.length })}</span>}
+      footer={
+        <span className="flex items-center gap-2">
+          {t("{n} user|{n} users", { n: users.length })}
+          {q.hasNextPage && (
+            <Button variant="link" size="sm" className="h-auto p-0" disabled={q.isFetchingNextPage} onClick={() => q.fetchNextPage()}>
+              {t("Show more")}
+            </Button>
+          )}
+        </span>
+      }
     >
       <DataTable
         rows={users}

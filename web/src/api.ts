@@ -618,6 +618,8 @@ export const api = {
   deleteShare: (id: string) => request("DELETE", `/shares/${id}`),
 
   users: () => get<UserRow[]>("/admin/users"),
+  /** A page of accounts, by id */
+  usersPage: (after: number, limit: number) => get<UserRow[]>(`/admin/users${qs({ after: String(after), limit: String(limit) })}`),
   createUser: (req: Partial<UserRow> & { password: string }) => post<UserRow>("/admin/users", req),
   updateUser: (id: number, req: Partial<UserRow> & { password?: string }) => request<UserRow>("PATCH", `/admin/users/${id}`, req),
   deleteUser: (id: number) => request("DELETE", `/admin/users/${id}`),
