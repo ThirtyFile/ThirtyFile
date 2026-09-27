@@ -114,7 +114,6 @@ export default {
   "Disable account": "停用帳號",
   "Sign-in log for \"{name}\"": "「{name}」的登入紀錄",
   "Delete user \"{name}\"?": "刪除使用者「{name}」？",
-  "This permanently deletes all of this user's files ({size}) and share links. This can't be undone.": "這會永久刪除該使用者的所有檔案（{size}）與分享連結，無法復原。",
   "User deleted": "已刪除使用者",
   "User updated": "已更新使用者",
   "User created": "已建立使用者",

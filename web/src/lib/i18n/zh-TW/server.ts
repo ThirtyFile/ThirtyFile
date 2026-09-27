@@ -799,4 +799,13 @@ export default {
   "Accepts files": "可上傳檔案",
   "Preview only": "僅供預覽",
   "Accepts files, preview only": "可上傳檔案、僅供預覽",
+  // Deleting a user: moving their files (admin.rs)
+  "Choose either to move the user's files or to delete them": "請選擇移動或刪除該使用者的檔案，只能擇一",
+  "Choose where to move the user's files, or choose to delete them": "請選擇要把該使用者的檔案移到哪裡，或選擇刪除",
+  "Choose a space other than the user's own": "請選擇該使用者自己以外的空間",
+  "Files can't be moved into a space that shows a folder on the server": "檔案無法移到顯示伺服器資料夾的空間",
+  "That space is turned off": "該空間已停用",
+  "\"{name}\" doesn't have room for {size} more. Choose another space, or give it more space first.": "「{name}」沒有空間再放 {size}。請選擇其他空間，或先加大它的容量。",
+  "{username}: files moved to {place}": "{username}：檔案已移到 {place}",
+  "{username}: files deleted": "{username}：檔案已刪除",
 } satisfies Record<string, string>;

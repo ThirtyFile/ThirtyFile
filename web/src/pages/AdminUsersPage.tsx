@@ -4,7 +4,7 @@ import { HistoryIcon, Loader2Icon, MonitorSmartphoneIcon, ShieldCheckIcon, Shiel
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { DataTable, type Column } from "@/components/DataTable";
 import { toast } from "sonner";
-import { api, type UserRow } from "@/api";
+import { api, type Drive, type UserRow } from "@/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -249,24 +249,124 @@ export function AdminUsersPage() {
         />
       )}
       {deleting && (
-        <ConfirmDialog
-          title={t("Delete user \"{name}\"?", { name: deleting.username })}
-          description={t("This permanently deletes all of this user's files ({size}) and share links. This can't be undone.", { size: formatBytes(deleting.used_bytes) })}
-          confirmText={t("Delete user")}
-          destructive
+        <DeleteUserDialog
+          user={deleting}
           onClose={() => setDeleting(null)}
-          onConfirm={async () => {
-            await api.deleteUser(deleting.id);
-            toast.success(t("User deleted"));
+          onDeleted={() => {
             setDeleting(null);
             setSelectedId(null);
-            qc.invalidateQueries({ queryKey: ["admin-users"] });
           }}
         />
       )}
     </Frame>
   );
 }
+/** Deleting a user: their personal space is moved into a folder in another space (the default) or deleted */
+function DeleteUserDialog({ user, onClose, onDeleted }: { user: UserRow; onClose(): void; onDeleted(): void }) {
+  const qc = useQueryClient();
+  const me = useMe();
+  const drives = useQuery({ queryKey: ["admin-drives"], queryFn: api.adminDrives });
+  // Spaces that can take the files: not the user's own, not a folder on the server, not turned off
+  const targets = (drives.data ?? []).filter((d) => d.mode !== "folder" && !d.disabled && !(d.kind === "personal" && d.owner_name === user.username));
+  const mine = targets.find((d) => d.kind === "personal" && d.owner_name === me.username);
+  const [choice, setChoice] = useState<"move" | "delete">("move");
+  const [target, setTarget] = useState("");
+  const moveTo = target || mine?.id || targets[0]?.id || "";
+  const spaceLabel = (d: Drive) => (d.kind === "personal" ? t("My files of {name}", { name: d.owner_name }) : d.name);
+
+  const remove = useMutation({
+    mutationFn: () => api.deleteUser(user.id, choice === "move" ? { move_to: moveTo } : { delete_files: true }),
+    onSuccess: () => {
+      toast.success(t("User deleted"));
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      qc.invalidateQueries({ queryKey: ["admin-drives"] });
+      onDeleted();
+    },
+  });
+  const disable = useMutation({
+    mutationFn: () => api.updateUser(user.id, { disabled: true }),
+    onSuccess: () => {
+      toast.success(t("Account disabled"));
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      onClose();
+    },
+  });
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <form
+          className="grid gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            remove.mutate();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{t("Delete user \"{name}\"?", { name: user.username })}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-2 text-sm text-muted-foreground">
+            <p>
+              {t("Their personal space \"My files\" ({size}) is removed. Files they added to other spaces, and team spaces they own, are transferred to you. Their share links are deleted.", {
+                size: formatBytes(user.used_bytes),
+              })}
+            </p>
+            {!user.disabled && (
+              <p>
+                {t("To stop them signing in and keep everything as it is, disable the account instead.")}{" "}
+                <Button type="button" variant="link" className="h-auto p-0" disabled={disable.isPending} onClick={() => disable.mutate()}>
+                  {t("Disable account")}
+                </Button>
+              </p>
+            )}
+          </div>
+          <div className="grid gap-3" role="radiogroup" aria-label={t("Their files")}>
+            <Label className="flex items-start gap-2 font-normal">
+              <input type="radio" className="mt-1 accent-brand" checked={choice === "move"} onChange={() => setChoice("move")} />
+              <span className="grid flex-1 gap-1.5">
+                <span>{t("Move their files to:")}</span>
+                <select
+                  className="h-8 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                  aria-label={t("Move their files to:")}
+                  value={moveTo}
+                  disabled={choice !== "move"}
+                  onChange={(e) => setTarget(e.target.value)}
+                >
+                  {targets.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {spaceLabel(d)}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-muted-foreground">
+                  {t("They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash is emptied.", { name: user.username })}
+                </span>
+              </span>
+            </Label>
+            <Label className="flex items-start gap-2 font-normal">
+              <input type="radio" className="mt-1 accent-brand" checked={choice === "delete"} onChange={() => setChoice("delete")} />
+              <span>
+                {t("Delete their files permanently")}
+                <span className="block text-xs text-muted-foreground">{t("This can't be undone.")}</span>
+              </span>
+            </Label>
+          </div>
+          <ErrorText>{remove.error?.message ?? disable.error?.message}</ErrorText>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              {t("Cancel")}
+            </Button>
+            <Button type="submit" variant="destructive" disabled={remove.isPending || (choice === "move" && !moveTo)}>
+              {remove.isPending && <Loader2Icon className="animate-spin" />}
+              {t("Delete user")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function UserDialog({ user, self, onClose }: { user: UserRow | null; self: boolean; onClose(): void }) {
   const me = useMe();
   const qc = useQueryClient();

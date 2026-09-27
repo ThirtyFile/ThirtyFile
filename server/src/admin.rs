@@ -241,10 +241,24 @@ pub async fn update(
     Ok(Json(get_row(&st, id).await?))
 }
 
-/// Deletes a user: their personal space is permanently deleted too; files they uploaded to other spaces and team spaces they own are transferred to the administrator performing the deletion
-pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<i64>) -> AppResult<Json<Value>> {
+#[derive(Deserialize, Default)]
+pub struct DeleteQuery {
+    /// The space to move the user's files to: they go into a new folder "Files of <username>" at its top
+    move_to: Option<String>,
+    /// Delete the files instead; one of the two must be chosen when the personal space holds anything
+    #[serde(default)]
+    delete_files: bool,
+}
+
+/// Deletes a user. Their personal space is moved to another space (`move_to`) or permanently deleted
+/// (`delete_files`); files they uploaded to other spaces and team spaces they own are transferred to the administrator
+/// performing the deletion; their share links are deleted
+pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<i64>, Query(q): Query<DeleteQuery>) -> AppResult<Json<Value>> {
     if id == me.id {
         return Err(AppError::bad_request("You can't delete your own account"));
+    }
+    if q.move_to.is_some() && q.delete_files {
+        return Err(AppError::bad_request("Choose either to move the user's files or to delete them"));
     }
     let row = get_row(&st, id).await?;
     let _w = st.write_lock.lock().await;
@@ -253,10 +267,33 @@ pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
         .bind(id)
         .fetch_optional(&mut *tx)
         .await?;
-    let uploads: Vec<(String,)> = sqlx::query_as("SELECT id FROM uploads WHERE owner_id = ?").bind(id).fetch_all(&mut *tx).await?;
-    sqlx::query("DELETE FROM uploads WHERE owner_id = ?").bind(id).execute(&mut *tx).await?;
+    let mut detail = row.username.clone();
+    if let Some((drive_id, root_id)) = &personal {
+        let (has_files,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM nodes WHERE parent_id = ?)").bind(root_id).fetch_one(&mut *tx).await?;
+        if has_files {
+            match &q.move_to {
+                Some(target) => {
+                    let place = move_personal_files(&mut tx, &me, &row.username, drive_id, root_id, target).await?;
+                    detail = format!("{}: files moved to {place}", row.username);
+                }
+                None if q.delete_files => detail = format!("{}: files deleted", row.username),
+                None => return Err(AppError::bad_request("Choose where to move the user's files, or choose to delete them")),
+            }
+        }
+    }
+    let uploads: Vec<(String,)> = sqlx::query_as("SELECT id FROM uploads WHERE owner_id = ? OR drive_id = ?")
+        .bind(id)
+        .bind(personal.as_ref().map(|p| p.0.as_str()))
+        .fetch_all(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM uploads WHERE owner_id = ? OR drive_id = ?")
+        .bind(id)
+        .bind(personal.as_ref().map(|p| p.0.as_str()))
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("DELETE FROM shares WHERE owner_id = ?").bind(id).execute(&mut *tx).await?;
-    // The personal space disappears now; its files are deleted in the background, a batch at a time
+    // The personal space disappears now; what is still in it (everything when the files are deleted, the root folder
+    // and the trash after a move) is deleted in the background, a batch at a time
     if let Some((drive_id, _)) = &personal {
         sqlx::query("DELETE FROM drives WHERE id = ?").bind(drive_id).execute(&mut *tx).await?;
     }
@@ -274,7 +311,7 @@ pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     sqlx::query("UPDATE drives SET owner_id = ? WHERE owner_id = ?").bind(me.id).bind(id).execute(&mut *tx).await?;
     sqlx::query("UPDATE nodes SET owner_id = ? WHERE owner_id = ?").bind(me.id).bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM users WHERE id = ?").bind(id).execute(&mut *tx).await?;
-    tree::log(&mut tx, &me, None, "user_delete", &row.username).await?;
+    tree::log(&mut tx, &me, None, "user_delete", &detail).await?;
     tx.commit().await?;
     if personal.is_some() {
         tree::purge_detached_later(&st);
@@ -283,6 +320,63 @@ pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
         let _ = tokio::fs::remove_file(st.tmp_dir().join(format!("upload-{u}"))).await;
     }
     Ok(Json(json!({ "ok": true })))
+}
+
+/// Moves everything in a personal space into a new folder "Files of <username>" at the top of another space; returns
+/// where they went (for the log). Nothing is copied: the top items get the new folder as their parent, and one
+/// recursive update moves the whole tree to the other space, so even a large space takes one short transaction. The
+/// trash isn't moved: it stays behind in the personal space and is deleted with it
+async fn move_personal_files(
+    conn: &mut sqlx::SqliteConnection,
+    me: &crate::auth::User,
+    username: &str,
+    drive_id: &str,
+    root_id: &str,
+    target_id: &str,
+) -> AppResult<String> {
+    let target = tree::get_drive(conn, target_id).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
+    if target.id == drive_id {
+        return Err(AppError::bad_request("Choose a space other than the user's own"));
+    }
+    if target.is_folder() {
+        return Err(AppError::bad_request("Files can't be moved into a space that shows a folder on the server"));
+    }
+    if target.disabled {
+        return Err(AppError::bad_request("That space is turned off"));
+    }
+    // Everything not in the trash, below the root folder
+    const LIVE: &str = "WITH RECURSIVE sub(id) AS (
+           SELECT id FROM nodes WHERE parent_id = ?1 AND trashed_at IS NULL
+           UNION ALL SELECT c.id FROM nodes c JOIN sub ON c.parent_id = sub.id WHERE c.trashed_at IS NULL
+         )";
+    let sql = format!("{LIVE} SELECT COALESCE(SUM(size), 0) FROM nodes WHERE kind = 'file' AND id IN (SELECT id FROM sub)");
+    let (bytes,): (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(root_id).fetch_one(&mut *conn).await?;
+    if let Err(e) = tree::check_quota(conn, &target.id, bytes).await {
+        return Err(if e.code == Some("quota") {
+            AppError::new(
+                axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+                format!("\"{}\" doesn't have room for {} more. Choose another space, or give it more space first.", target.name, crate::util::format_bytes(bytes)),
+            )
+            .with_code("quota")
+        } else {
+            e
+        });
+    }
+    let name = tree::unique_name(conn, &target.root_id, &format!("Files of {username}"), true).await?;
+    let folder = tree::create_folder(conn, me.id, &target.root_id, &name).await?;
+    let sql = format!("{LIVE} UPDATE nodes SET drive_id = ?2 WHERE id IN (SELECT id FROM sub)");
+    sqlx::query(sqlx::AssertSqlSafe(sql.as_str())).bind(root_id).bind(&target.id).execute(&mut *conn).await?;
+    sqlx::query("UPDATE nodes SET parent_id = ? WHERE parent_id = ? AND trashed_at IS NULL").bind(&folder).bind(root_id).execute(&mut *conn).await?;
+    tree::adjust_usage(conn, drive_id, -bytes).await?;
+    tree::adjust_usage(conn, &target.id, bytes).await?;
+    let space = match target.kind.as_str() {
+        "personal" => {
+            let (owner,): (String,) = sqlx::query_as("SELECT COALESCE((SELECT username FROM users WHERE id = ?), '')").bind(target.owner_id).fetch_one(&mut *conn).await?;
+            format!("My files of {owner}")
+        }
+        _ => target.name.clone(),
+    };
+    Ok(format!("{space} › {name}"))
 }
 
 // ───────────── System settings ─────────────
@@ -568,7 +662,7 @@ mod tests {
         let admin = env.admin().await;
         let Json(first) = create(State(env.st.clone()), Admin(admin.clone()), req("first", None)).await.unwrap();
         // The newest account is deleted: its id would be handed out again without the counter
-        let _ = delete(State(env.st.clone()), Admin(admin.clone()), Path(first.id)).await.unwrap();
+        let _ = delete(State(env.st.clone()), Admin(admin.clone()), Path(first.id), Query(DeleteQuery::default())).await.unwrap();
         let Json(next) = create(State(env.st.clone()), Admin(admin.clone()), req("next", None)).await.unwrap();
         assert!(next.id > first.id, "the deleted account's id was given out again");
     }
@@ -655,5 +749,127 @@ mod tests {
         let amy = env.user("amy", true).await;
         let Json(me) = crate::auth::me(State(env.st.clone()), amy).await.unwrap();
         assert_eq!(me.public_url, "https://drive.example.com");
+    }
+
+    /// A file of `size` bytes (no content) in a folder; space usage is recomputed
+    async fn sized_file(env: &testutil::TestEnv, owner: &crate::auth::User, parent: &str, name: &str, size: i64) -> String {
+        let id = env.file(owner, parent, name).await;
+        sqlx::query("UPDATE nodes SET size = ? WHERE id = ?").bind(size).bind(&id).execute(&env.st.db).await.unwrap();
+        tree::recompute_usage(&env.st).await.unwrap();
+        id
+    }
+
+    async fn delete_user(env: &testutil::TestEnv, id: i64, q: serde_json::Value) -> AppResult<Json<Value>> {
+        let admin = env.admin().await;
+        delete(State(env.st.clone()), Admin(admin), Path(id), Query(serde_json::from_value(q).unwrap())).await
+    }
+
+    async fn drive_row(env: &testutil::TestEnv, node: &str) -> (String, String) {
+        sqlx::query_as("SELECT n.drive_id, n.parent_id FROM nodes n WHERE n.id = ?").bind(node).fetch_one(&env.st.db).await.unwrap()
+    }
+
+    async fn used(env: &testutil::TestEnv, drive: &str) -> i64 {
+        let (n,): (i64,) = sqlx::query_as("SELECT used_bytes FROM drives WHERE id = ?").bind(drive).fetch_one(&env.st.db).await.unwrap();
+        n
+    }
+
+    #[tokio::test]
+    async fn deleting_a_user_moves_their_files_into_a_folder_named_after_them() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let docs = env.folder(&amy, &amy.root_id, "Docs").await;
+        let deep = env.folder(&amy, &docs, "2026").await;
+        let report = sized_file(&env, &amy, &deep, "report.pdf", 300).await;
+        let top = sized_file(&env, &amy, &amy.root_id, "notes.txt", 100).await;
+        let binned = sized_file(&env, &amy, &amy.root_id, "old.txt", 50).await;
+        sqlx::query("UPDATE nodes SET trashed_at = 1, trash_id = 't1', trash_root = 1 WHERE id = ?").bind(&binned).execute(&env.st.db).await.unwrap();
+        let company = env.st.shared_root().unwrap();
+        let company_drive = env.drive_of(&company).await;
+        // The name is taken already: the folder gets a number
+        env.folder(&amy, &company, "Files of amy").await;
+
+        // Without a choice nothing happens
+        let err = delete_user(&env, amy.id, json!({})).await.unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
+        assert!(get_row(&env.st, amy.id).await.is_ok());
+
+        let _ = delete_user(&env, amy.id, json!({ "move_to": company_drive })).await.unwrap();
+        assert!(get_row(&env.st, amy.id).await.is_err());
+        let (folder,): (String,) = sqlx::query_as("SELECT id FROM nodes WHERE parent_id = ? AND name = 'Files of amy (1)'").bind(&company).fetch_one(&env.st.db).await.unwrap();
+        // The whole tree is in the company space now, as it was
+        assert_eq!(drive_row(&env, &docs).await, (company_drive.clone(), folder.clone()));
+        assert_eq!(drive_row(&env, &top).await, (company_drive.clone(), folder.clone()));
+        assert_eq!(drive_row(&env, &report).await, (company_drive.clone(), deep.clone()));
+        // The trash wasn't moved: it goes with the personal space, and with the root folder is deleted in the background
+        assert_eq!(used(&env, &company_drive).await, 400);
+        let gone = || async {
+            let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE id IN (?, ?)").bind(&binned).bind(&amy.root_id).fetch_one(&env.st.db).await.unwrap();
+            n == 0
+        };
+        for _ in 0..200 {
+            if gone().await {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(gone().await, "the trash and the root folder were left behind");
+        let (moved,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id = ?").bind(&company_drive).fetch_one(&env.st.db).await.unwrap();
+        assert!(moved >= 6, "the moved files were purged with the space: {moved}");
+        let (personal,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drives WHERE kind = 'personal' AND name = 'My files' AND root_id = ?").bind(&amy.root_id).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(personal, 0);
+        let (detail,): (String,) = sqlx::query_as("SELECT detail FROM activity WHERE action = 'user_delete'").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(detail, "amy: files moved to All files › Files of amy (1)");
+        tree::recompute_usage(&env.st).await.unwrap();
+        assert_eq!(used(&env, &company_drive).await, 400, "the counter matches the files");
+    }
+
+    #[tokio::test]
+    async fn moving_a_deleted_users_files_respects_the_target_space() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        sized_file(&env, &amy, &amy.root_id, "big.bin", 1000).await;
+        let bens = env.drive_of(&ben.root_id).await;
+        let amys = env.drive_of(&amy.root_id).await;
+
+        // Another person's personal space counts against their quota: refused with a clear message, nothing changes
+        sqlx::query("UPDATE users SET quota_bytes = 500 WHERE id = ?").bind(ben.id).execute(&env.st.db).await.unwrap();
+        let err = delete_user(&env, amy.id, json!({ "move_to": bens })).await.unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(err.message.contains("doesn't have room for"), "{}", err.message);
+        assert!(get_row(&env.st, amy.id).await.is_ok());
+        // Not into the user's own space, both choices at once, or a space that doesn't exist
+        assert!(delete_user(&env, amy.id, json!({ "move_to": amys })).await.is_err());
+        assert!(delete_user(&env, amy.id, json!({ "move_to": bens, "delete_files": true })).await.is_err());
+        assert!(delete_user(&env, amy.id, json!({ "move_to": "nope" })).await.is_err());
+
+        sqlx::query("UPDATE users SET quota_bytes = 0 WHERE id = ?").bind(ben.id).execute(&env.st.db).await.unwrap();
+        let _ = delete_user(&env, amy.id, json!({ "move_to": bens })).await.unwrap();
+        let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id = ? AND name = 'big.bin'").bind(&bens).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(used(&env, &bens).await, 1000);
+    }
+
+    #[tokio::test]
+    async fn a_folder_space_cant_take_a_deleted_users_files_and_deleting_them_stays_possible() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let file = sized_file(&env, &amy, &amy.root_id, "a.txt", 10).await;
+        let space = env.folder_space("Scans").await;
+        assert!(delete_user(&env, amy.id, json!({ "move_to": space.drive })).await.is_err());
+        let _ = delete_user(&env, amy.id, json!({ "delete_files": true })).await.unwrap();
+        // Deleted in the background
+        let mut n = 1;
+        for _ in 0..200 {
+            (n,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE id = ?").bind(&file).fetch_one(&env.st.db).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(n, 0);
+        // An empty personal space needs no choice
+        let ben = env.user("ben", true).await;
+        let _ = delete_user(&env, ben.id, json!({})).await.unwrap();
     }
 }

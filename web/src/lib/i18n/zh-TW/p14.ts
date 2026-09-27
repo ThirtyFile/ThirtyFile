@@ -1,4 +1,4 @@
-/** Traditional Chinese translations: managing share links (all share links, link policy, editing links), links that accept files or allow viewing only */
+/** Traditional Chinese translations: managing share links (all share links, link policy, editing links), links that accept files or allow viewing only, deleting a user */
 export default {
   // Share dialog and editing a link
   "An administrator has turned off public share links. Existing links don't work until they're allowed again.": "管理員已關閉公開分享連結。現有的連結在重新開放前都無法使用。",
@@ -65,4 +65,12 @@ export default {
   "This link is for viewing only, and this type of file can't be previewed.": "這個連結僅供檢視，而這種檔案類型無法預覽。",
   "You can add files here: drag them onto the list or click Upload.": "您可以在這裡加入檔案：拖曳到清單上或按「上傳」。",
   "Uploaded a file": "上傳了檔案",
+  // Deleting a user: moving their files
+  "Their personal space \"My files\" ({size}) is removed. Files they added to other spaces, and team spaces they own, are transferred to you. Their share links are deleted.": "他的個人空間「我的檔案」（{size}）會被移除。他加到其他空間的檔案，以及他擁有的團隊空間，會轉給您。他的分享連結會被刪除。",
+  "To stop them signing in and keep everything as it is, disable the account instead.": "若只想讓他無法登入、其他一切保持原樣，請改為停用帳號。",
+  "Their files": "他的檔案",
+  "Move their files to:": "把他的檔案移到：",
+  "They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash is emptied.": "檔案會放進該空間最上層一個名為「Files of {name}」的新資料夾，並計入該空間的容量。他的垃圾桶會被清空。",
+  "Delete their files permanently": "永久刪除他的檔案",
+  "This can't be undone.": "這個動作無法復原。",
 };

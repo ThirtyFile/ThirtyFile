@@ -836,7 +836,9 @@ export const api = {
   usersPage: (after: number, limit: number) => get<UserRow[]>(`/admin/users${qs({ after: String(after), limit: String(limit) })}`),
   createUser: (req: Partial<UserRow> & { password: string }) => post<UserRow>("/admin/users", req),
   updateUser: (id: number, req: Partial<UserRow> & { password?: string }) => request<UserRow>("PATCH", enc`/admin/users/${id}`, req),
-  deleteUser: (id: number) => request("DELETE", enc`/admin/users/${id}`),
+  /** Deletes a user: their personal space's files are moved to another space (move_to, a space id) or deleted (delete_files) */
+  deleteUser: (id: number, files: { move_to?: string; delete_files?: boolean } = {}) =>
+    request("DELETE", enc`/admin/users/${id}` + qs(toParams(files))),
   systemSettings: () => get<SystemInfo>("/admin/settings"),
   updateSystemSettings: (req: SystemSettingsReq) => request<SystemInfo>("PATCH", "/admin/settings", req),
 
