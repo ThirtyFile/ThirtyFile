@@ -85,8 +85,19 @@ function Unlock({ token }: { token: string }) {
   );
 }
 
+/** Starts a download and then refreshes the share, so a download limit shows the downloads left */
+function useShareDownload(token: string) {
+  const qc = useQueryClient();
+  return (url: string) => {
+    triggerDownload(url);
+    // The browser downloads in the background; the server counts it when the download starts
+    setTimeout(() => qc.invalidateQueries({ queryKey: ["public", token] }), 1500);
+  };
+}
+
 function SharedFile({ share, node }: { share: PublicShare; node: Node }) {
   const source = useMemo(() => shareSource(share.token), [share.token]);
+  const download = useShareDownload(share.token);
   const [previewing, setPreviewing] = useState(false);
   const exhausted = share.downloads_left === 0;
   return (
@@ -109,7 +120,7 @@ function SharedFile({ share, node }: { share: PublicShare; node: Node }) {
             <Button
               className="bg-brand text-brand-foreground hover:bg-brand/90"
               disabled={exhausted}
-              onClick={() => triggerDownload(source.contentUrl(node, true))}
+              onClick={() => download(source.contentUrl(node, true))}
             >
               <DownloadIcon /> {exhausted ? t("Download limit reached") : t("Download")}
             </Button>
@@ -121,7 +132,7 @@ function SharedFile({ share, node }: { share: PublicShare; node: Node }) {
               <EyeIcon /> {t("Preview")}
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem disabled={exhausted} onClick={() => triggerDownload(source.contentUrl(node, true))}>
+          <DropdownMenuItem disabled={exhausted} onClick={() => download(source.contentUrl(node, true))}>
             <DownloadIcon /> {t("Download")}
           </DropdownMenuItem>
         </ContextMenuContent>
@@ -141,6 +152,7 @@ function SharedFile({ share, node }: { share: PublicShare; node: Node }) {
 }
 
 function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
+  const download = useShareDownload(share.token);
   const { nodeId } = useParams();
   const current = nodeId ?? root.id;
   const navigate = useNavigate();
@@ -199,7 +211,7 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
           size="sm"
           className="bg-brand text-brand-foreground hover:bg-brand/90"
           disabled={exhausted}
-          onClick={() => triggerDownload(source.downloadUrl(downloadIds))}
+          onClick={() => download(source.downloadUrl(downloadIds))}
         >
           <DownloadIcon /> {selected.size ? t("Download {n} item|Download {n} items", { n: selected.size }) : t("Download all")}
         </Button>
@@ -248,7 +260,7 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
                 {selectedNodes[0].kind === "folder" ? <FolderOpenIcon /> : <EyeIcon />} {selectedNodes[0].kind === "folder" ? t("Open") : t("Preview")}
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem disabled={exhausted} onClick={() => triggerDownload(source.downloadUrl(downloadIds))}>
+            <DropdownMenuItem disabled={exhausted} onClick={() => download(source.downloadUrl(downloadIds))}>
               <DownloadIcon /> {selected.size ? t("Download {n} item|Download {n} items", { n: selected.size }) : t("Download all (ZIP)")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />

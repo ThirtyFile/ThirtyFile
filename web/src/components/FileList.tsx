@@ -231,7 +231,15 @@ export function FileList(p: FileListProps) {
             if (!raw) return;
             e.preventDefault();
             e.stopPropagation();
-            const ids = (JSON.parse(raw) as string[]).filter((id) => id !== item.id);
+            // Any page can set this type when dragging, so check what arrived
+            let dropped: unknown;
+            try {
+              dropped = JSON.parse(raw);
+            } catch {
+              return;
+            }
+            if (!Array.isArray(dropped) || !dropped.every((id) => typeof id === "string")) return;
+            const ids = (dropped as string[]).filter((id) => id !== item.id);
             if (ids.length) p.onMoveInto!(ids, item);
           },
         }

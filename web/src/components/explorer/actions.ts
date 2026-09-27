@@ -48,8 +48,11 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       // Default names follow the UI language (like English Windows: New folder, New Text Document.txt)
       const name = kind === "folder" ? uniqueName(t("New folder")) : uniqueName(t("New Text Document"), ".txt");
       const id = kind === "folder" ? (await api.createFolder(p.folderId, name)).id : await api.createEmptyFile(p.folderId, name);
-      // Only after the list reloads does the new item have a place to edit its name
+      // Only after the list reloads does the new item have a place to edit its name; if it didn't reload, don't start
+      // renaming a row that isn't there (that would leave the shortcuts turned off)
       await refresh();
+      const listed = qc.getQueriesData<Node[]>({ queryKey: ["children", p.folderId] }).some(([, d]) => d?.some((n) => n.id === id));
+      if (!listed) return;
       setSelected(new Set([id]));
       setAnchor(id);
       setDialog({ t: "rename", node: { id, name } });
