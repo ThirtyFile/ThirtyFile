@@ -836,7 +836,15 @@ pub async fn check_quota(conn: &mut SqliteConnection, drive_id: &str, extra: i64
         return Ok(());
     }
     // Files already there plus uploads still in progress (they were admitted against the quota when they started)
-    let (pending,): (i64,) = sqlx::query_as("SELECT COALESCE(SUM(size), 0) FROM uploads WHERE drive_id = ? AND node_id IS NULL").bind(drive_id).fetch_one(conn).await?;
+    // Only uploads that received data within the last day hold space: an abandoned one can't block a space for days
+    // (every request of an upload moves its expiry to UPLOAD_TTL from then)
+    let active_since = crate::util::now() + crate::upload::UPLOAD_TTL - 86400;
+    let (pending,): (i64,) =
+        sqlx::query_as("SELECT COALESCE(SUM(size), 0) FROM uploads WHERE drive_id = ? AND node_id IS NULL AND expires_at > ?")
+            .bind(drive_id)
+            .bind(active_since)
+            .fetch_one(conn)
+            .await?;
     let used = drive.used_bytes + pending;
     if used + extra > quota {
         return Err(AppError::new(axum::http::StatusCode::PAYLOAD_TOO_LARGE, format!("Not enough storage space in \"{}\"", drive.name)).with_code("quota"));
@@ -933,6 +941,29 @@ pub async fn touch(conn: &mut SqliteConnection, id: &str) -> AppResult<()> {
 mod tests {
     use super::*;
     use crate::testutil;
+
+    #[tokio::test]
+    async fn an_upload_without_progress_for_a_day_no_longer_holds_space() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let drive = env.drive_of(&amy.root_id).await;
+        // A personal space's quota is its owner's
+        sqlx::query("UPDATE users SET quota_bytes = 1000 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+        let ts = crate::util::now();
+        sqlx::query("INSERT INTO uploads (id, owner_id, parent_id, rel_path, name, size, offset, created_at, expires_at, drive_id) VALUES ('u1', ?, ?, '', 'big.bin', 900, 0, ?, ?, ?)")
+            .bind(amy.id)
+            .bind(&amy.root_id)
+            .bind(ts)
+            .bind(ts + crate::upload::UPLOAD_TTL)
+            .bind(&drive)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        let mut c = env.st.db.acquire().await.unwrap();
+        assert!(check_quota(&mut c, &drive, 200).await.is_err(), "a fresh upload reserves its size");
+        sqlx::query("UPDATE uploads SET expires_at = ? WHERE id = 'u1'").bind(ts + crate::upload::UPLOAD_TTL - 2 * 86400).execute(&mut *c).await.unwrap();
+        assert!(check_quota(&mut c, &drive, 200).await.is_ok(), "an upload idle for two days no longer does");
+    }
 
     #[tokio::test]
     async fn files_of_one_uploaded_folder_stay_together_when_a_file_has_its_name() {

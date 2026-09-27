@@ -147,12 +147,28 @@ pub struct LocationReq {
     config: Option<Value>,
 }
 
-/// Keeps the existing secrets when none are entered (no need to re-enter them when editing)
-async fn merged_config(st: &AppState, id: Option<&str>, config: Value) -> AppResult<Value> {
+/// Settings that decide where saved passwords and keys are sent
+const TARGET_FIELDS: [&str; 8] = ["host", "port", "endpoint", "bucket", "region", "username", "access_key_id", "tls"];
+
+/// Keeps the existing secrets when none are entered (no need to re-enter them when editing), but only for the same
+/// kind of storage and the same server, bucket and account: otherwise they would be sent to wherever the new settings
+/// point, and anyone able to edit the settings could collect them
+async fn merged_config(st: &AppState, id: Option<&str>, kind: &str, config: Value) -> AppResult<Value> {
     let mut config = config;
     let Some(id) = id else { return Ok(config) };
-    let old: Option<(String,)> = sqlx::query_as("SELECT config FROM storage_locations WHERE id = ?").bind(id).fetch_optional(&st.db).await?;
-    let Some(old) = old.map(|(c,)| config_json(&c)) else { return Ok(config) };
+    let old: Option<(String, String)> =
+        sqlx::query_as("SELECT kind, config FROM storage_locations WHERE id = ?").bind(id).fetch_optional(&st.db).await?;
+    let Some((old_kind, old)) = old.map(|(k, c)| (k, config_json(&c))) else { return Ok(config) };
+    let wanted = SECRET_FIELDS.iter().any(|f| {
+        config.get(*f).and_then(Value::as_str).is_none_or(str::is_empty) && old.get(*f).and_then(Value::as_str).is_some_and(|s| !s.is_empty())
+    });
+    if !wanted {
+        return Ok(config);
+    }
+    let normalized = storage::normalize(kind, config.clone()).await;
+    if old_kind != kind || TARGET_FIELDS.iter().any(|f| normalized.get(*f) != old.get(*f)) {
+        return Err(AppError::bad_request("Enter the password or key again: the server or account changed"));
+    }
     if let Some(obj) = config.as_object_mut() {
         for field in SECRET_FIELDS {
             let empty = obj.get(field).and_then(Value::as_str).is_none_or(str::is_empty);
@@ -299,7 +315,7 @@ pub struct TestReq {
 }
 
 pub async fn test(State(st): State<AppState>, _: Admin, Json(req): Json<TestReq>) -> AppResult<Json<Value>> {
-    let config = merged_config(&st, req.id.as_deref(), req.config).await?;
+    let config = merged_config(&st, req.id.as_deref(), &req.kind, req.config).await?;
     let (_, config) = connect(&st, &req.kind, config).await?;
     Ok(Json(json!({ "ok": true, "region": config.get("region"), "host_key": config.get("host_key") })))
 }
@@ -368,7 +384,7 @@ pub async fn update(
     // The built-in local location can only be renamed
     let new_backend = match (&req.config, id == BUILTIN) {
         (Some(cfg), false) => {
-            let merged = merged_config(&st, Some(&id), cfg.clone()).await?;
+            let merged = merged_config(&st, Some(&id), &row.kind, cfg.clone()).await?;
             Some(connect(&st, &row.kind, merged).await?)
         }
         _ => None,
@@ -630,4 +646,37 @@ async fn run_migration(st: &AppState, drive_id: &str, target: &str) -> AppResult
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil;
+
+    #[tokio::test]
+    async fn saved_passwords_are_only_reused_for_the_same_server_and_account() {
+        let env = testutil::env().await;
+        let saved = json!({ "host": "files.example.com", "port": 22, "username": "backup", "password": testutil::password(), "host_key": "k" });
+        sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES ('nas', 'NAS', 'sftp', ?, 0, 0)")
+            .bind(saved.to_string())
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        // Editing something else: the password is filled in
+        let same = json!({ "host": "files.example.com", "port": 22, "username": "backup", "password": "", "host_key": "k" });
+        let merged = merged_config(&env.st, Some("nas"), "sftp", same).await.unwrap();
+        assert_eq!(merged["password"], testutil::password());
+        // Another server, another account or another kind: it must be entered again
+        for (kind, cfg) in [
+            ("sftp", json!({ "host": "elsewhere.example.com", "port": 22, "username": "backup", "password": "" })),
+            ("sftp", json!({ "host": "files.example.com", "port": 22, "username": "someone", "password": "" })),
+            ("ftp", json!({ "host": "files.example.com", "port": 22, "username": "backup", "password": "" })),
+        ] {
+            let err = merged_config(&env.st, Some("nas"), kind, cfg).await.unwrap_err();
+            assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
+        }
+        // A password entered anew is used as it is
+        let fresh = json!({ "host": "elsewhere.example.com", "port": 22, "username": "backup", "password": testutil::wrong_password() });
+        assert!(merged_config(&env.st, Some("nas"), "sftp", fresh).await.is_ok());
+    }
 }
