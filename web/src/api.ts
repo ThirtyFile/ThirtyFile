@@ -322,7 +322,7 @@ export interface ShareAccess {
   owner_name: string | null;
   node_id: string | null;
   node_name: string;
-  /** view, unlock, password_fail, preview, download, zip */
+  /** view, unlock, password_fail, preview, download, zip, upload */
   event: string;
   ip: string;
   user_agent: string;
@@ -507,6 +507,12 @@ export interface ShareInfo {
   drive_kind: string;
   /** Owner of a personal space */
   drive_owner: string;
+  /** Folder links: visitors may upload files */
+  allow_upload: boolean;
+  /** Visitors can only upload, not see what is in the folder */
+  drop_only: boolean;
+  /** false: previews only, no download or ZIP */
+  allow_download: boolean;
 }
 
 export interface ShareFilter {
@@ -523,6 +529,16 @@ export interface ShareUpdate {
   password?: string;
   expires_at?: number | null;
   max_downloads?: number | null;
+  allow_upload?: boolean;
+  drop_only?: boolean;
+  allow_download?: boolean;
+}
+
+/** What visitors of a link may do besides viewing */
+export interface ShareAccessOptions {
+  allow_upload: boolean;
+  drop_only: boolean;
+  allow_download: boolean;
 }
 
 export interface UserRow {
@@ -608,6 +624,14 @@ export interface PublicShare {
   expires_at: number | null;
   downloads_left: number | null;
   needs_password: boolean;
+  /** Visitors may upload files into the folder */
+  allow_upload: boolean;
+  /** Visitors can only upload: the folder's contents aren't shown */
+  drop_only: boolean;
+  /** false: previews only */
+  allow_download: boolean;
+  /** Upload size limit per file in bytes; 0 = none */
+  max_upload: number;
   node?: Node;
 }
 
@@ -803,7 +827,8 @@ export const api = {
   /** With a node: every link on it the caller may manage; otherwise the caller's own links, or those matching the filter */
   shares: (nodeId?: string, filter: ShareFilter = {}) => get<ShareInfo[]>(`/shares${qs(toParams({ ...filter, node_id: nodeId }))}`),
   updateShare: (id: string, req: ShareUpdate) => request<ShareInfo>("PATCH", enc`/shares/${id}`, req),
-  createShare: (req: { node_id: string; password?: string; expires_at?: number; max_downloads?: number }) => post<ShareInfo>("/shares", req),
+  createShare: (req: { node_id: string; password?: string; expires_at?: number; max_downloads?: number } & Partial<ShareAccessOptions>) =>
+    post<ShareInfo>("/shares", req),
   deleteShare: (id: string) => request("DELETE", enc`/shares/${id}`),
 
   users: () => get<UserRow[]>("/admin/users"),
@@ -912,6 +937,9 @@ export const privateSource: FileSource = {
   thumbUrl: (n) => enc`/api/files/${n.id}/thumbnail?v=${n.updated_at}`,
   downloadLink: (ids) => downloadLink("/download", ids),
 };
+
+/** Where visitors of a share link that accepts files upload them */
+export const shareUploadEndpoint = (token: string) => enc`/api/public/shares/${token}/uploads`;
 
 export function shareSource(token: string): FileSource {
   const base = enc`/api/public/shares/${token}`;

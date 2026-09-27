@@ -443,6 +443,15 @@ fn untimed() -> Router<AppState> {
     Router::new()
         .merge(files)
         .route("/public/shares/{token}/nodes/{id}/thumbnail", get(shares::public_thumbnail))
+        // Visitors of a share link that accepts files
+        .route("/public/shares/{token}/uploads", post(shares::public_upload_create).options(upload::options))
+        .route(
+            "/public/shares/{token}/uploads/{id}",
+            head(shares::public_upload_head)
+                .patch(shares::public_upload_patch)
+                .delete(shares::public_upload_delete)
+                .layer(DefaultBodyLimit::disable()),
+        )
         .route("/admin/branding/logo/{variant}", put(branding::upload_logo).delete(branding::delete_logo))
         .route("/admin/branding/background", put(branding::upload_background).delete(branding::delete_background).layer(DefaultBodyLimit::max(branding::MAX_BACKGROUND + 1024)))
 }

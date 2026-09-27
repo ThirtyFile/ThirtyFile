@@ -1,4 +1,5 @@
-//! Public share links: optional password, expiration time and download limit.
+//! Public share links: optional password, expiration time and download limit; folder links can accept files from
+//! their visitors, and links can be limited to previews.
 
 use axum::{
     Json,
@@ -20,6 +21,7 @@ use crate::{
     nodes::{ListQuery as ChildrenQuery, Listing, list_children},
     state::AppState,
     tree::{self, Crumb, Node, Role},
+    upload,
     util::{now, random_token},
 };
 
@@ -47,6 +49,12 @@ pub struct ShareInfo {
     drive_kind: String,
     /// Owner of a personal space, to tell "My files" of different people apart
     drive_owner: String,
+    /// Folder links: visitors may upload files into the folder
+    allow_upload: bool,
+    /// Folder links: visitors can only upload, not see what is in the folder
+    drop_only: bool,
+    /// false: files are served for previews only (no download button, no ZIP)
+    allow_download: bool,
 }
 
 /// Share link token length: 10 alphanumeric characters (62^10, about 60 bits), infeasible to guess online while keeping the URL short
@@ -62,7 +70,8 @@ const SHARE_COLS: &str = "s.id, s.node_id, s.password_hash IS NOT NULL AS has_pa
      s.downloads, s.created_at, n.name AS node_name, n.kind AS node_kind,
      s.views, s.last_access, s.owner_id, u.username AS owner_name, n.drive_id,
      COALESCE(d.name, '') AS drive_name, COALESCE(d.kind, '') AS drive_kind,
-     COALESCE((SELECT username FROM users WHERE id = d.owner_id AND d.kind = 'personal'), '') AS drive_owner";
+     COALESCE((SELECT username FROM users WHERE id = d.owner_id AND d.kind = 'personal'), '') AS drive_owner,
+     s.allow_upload, s.drop_only, s.allow_download";
 
 const SHARE_FROM: &str = "shares s JOIN nodes n ON n.id = s.node_id JOIN users u ON u.id = s.owner_id LEFT JOIN drives d ON d.id = n.drive_id";
 
@@ -199,6 +208,46 @@ pub struct CreateReq {
     password: Option<String>,
     expires_at: Option<i64>,
     max_downloads: Option<i64>,
+    /// Folder links: visitors may upload files (the files belong to the link's creator)
+    #[serde(default)]
+    allow_upload: bool,
+    /// With uploads: visitors can't see or download what is in the folder
+    #[serde(default)]
+    drop_only: bool,
+    /// false: previews only
+    #[serde(default = "yes")]
+    allow_download: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// What visitors may do with a link: uploads need a folder and the permission to change it, and "drop only" needs uploads
+async fn check_access(conn: &mut SqliteConnection, user: &User, node: &Node, allow_upload: bool, drop_only: bool) -> AppResult<()> {
+    if drop_only && !allow_upload {
+        return Err(AppError::bad_request("A link that only accepts files must allow uploads"));
+    }
+    if allow_upload {
+        if !node.is_folder() {
+            return Err(AppError::bad_request("Only folder links can accept files"));
+        }
+        tree::node_for(conn, user, &node.id, tree::Need::Write).await?;
+    }
+    Ok(())
+}
+
+fn access_texts(allow_upload: bool, drop_only: bool, allow_download: bool) -> Vec<String> {
+    let mut out = Vec::new();
+    if drop_only {
+        out.push("only accepts files".to_string());
+    } else if allow_upload {
+        out.push("accepts files".to_string());
+    }
+    if !allow_download && !drop_only {
+        out.push("preview only".to_string());
+    }
+    out
 }
 
 /// A link's options for the activity log, e.g. "Password protected, expires 2026-05-01"
@@ -247,8 +296,10 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     if node.parent_id.is_none() {
         return Err(AppError::bad_request("The root folder can't be shared"));
     }
+    check_access(&mut tx, &user, &node, req.allow_upload, req.drop_only).await?;
     sqlx::query(
-        "INSERT INTO shares (id, node_id, owner_id, password_hash, expires_at, max_downloads, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO shares (id, node_id, owner_id, password_hash, expires_at, max_downloads, created_at, allow_upload, drop_only, allow_download)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&token)
     .bind(&node.id)
@@ -257,6 +308,9 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     .bind(req.expires_at)
     .bind(req.max_downloads)
     .bind(now())
+    .bind(req.allow_upload)
+    .bind(req.drop_only)
+    .bind(req.allow_download || req.drop_only)
     .execute(&mut *tx)
     .await?;
     let info = share_info(&mut tx, &token).await?;
@@ -270,6 +324,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     if req.max_downloads.is_some() {
         options.push(limit_text(req.max_downloads));
     }
+    options.extend(access_texts(req.allow_upload, req.drop_only, req.allow_download));
     tree::log(&mut tx, &user, Some(&node), "share_create", &describe(options)).await?;
     tx.commit().await?;
     Ok(Json(info))
@@ -288,6 +343,9 @@ pub struct UpdateReq {
     expires_at: Option<Option<i64>>,
     #[serde(default, deserialize_with = "present")]
     max_downloads: Option<Option<i64>>,
+    allow_upload: Option<bool>,
+    drop_only: Option<bool>,
+    allow_download: Option<bool>,
 }
 
 /// A share link (its password hash) and its item, for changing or deleting it: only people who may manage it find it
@@ -332,6 +390,15 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
     let (old_hash, node) = manageable_share(&mut tx, &user, &id).await?;
+    let (was_upload, was_drop, was_download): (bool, bool, bool) =
+        sqlx::query_as("SELECT allow_upload, drop_only, allow_download FROM shares WHERE id = ?").bind(&id).fetch_one(&mut *tx).await?;
+    let allow_upload = req.allow_upload.unwrap_or(was_upload);
+    let drop_only = req.drop_only.unwrap_or(was_drop) && allow_upload;
+    let allow_download = req.allow_download.unwrap_or(was_download) || drop_only;
+    // Turning uploads on needs the permission to change the folder; turning them off doesn't
+    if allow_upload && !was_upload || drop_only && !was_drop {
+        check_access(&mut tx, &user, &node, allow_upload, drop_only).await?;
+    }
     let mut changes = Vec::new();
     // A new password also locks out visitors who unlocked the link with the old one (the unlock cookie is tied to it)
     let hash = match (password, new_hash) {
@@ -353,15 +420,22 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
     if let Some(n) = req.max_downloads {
         changes.push(limit_text(n));
     }
+    if (allow_upload, drop_only, allow_download) != (was_upload, was_drop, was_download) {
+        let access = access_texts(allow_upload, drop_only, allow_download);
+        changes.push(if access.is_empty() { "view and download".to_string() } else { access.join(", ") });
+    }
     sqlx::query(
         "UPDATE shares SET password_hash = ?, expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
-           max_downloads = CASE WHEN ? THEN ? ELSE max_downloads END WHERE id = ?",
+           max_downloads = CASE WHEN ? THEN ? ELSE max_downloads END, allow_upload = ?, drop_only = ?, allow_download = ? WHERE id = ?",
     )
     .bind(&hash)
     .bind(req.expires_at.is_some())
     .bind(req.expires_at.flatten())
     .bind(req.max_downloads.is_some())
     .bind(req.max_downloads.flatten())
+    .bind(allow_upload)
+    .bind(drop_only)
+    .bind(allow_download)
     .bind(&id)
     .execute(&mut *tx)
     .await?;
@@ -395,6 +469,9 @@ struct Share {
     max_downloads: Option<i64>,
     downloads: i64,
     owner_name: String,
+    allow_upload: bool,
+    drop_only: bool,
+    allow_download: bool,
 }
 
 fn cookie_name(token: &str) -> String {
@@ -444,7 +521,8 @@ async fn find_share(st: &AppState, token: &str) -> AppResult<(Share, Node)> {
         return Err(gone());
     }
     let share: Share = sqlx::query_as(
-        "SELECT s.id, s.node_id, s.owner_id, s.password_hash, s.expires_at, s.max_downloads, s.downloads, u.username AS owner_name
+        "SELECT s.id, s.node_id, s.owner_id, s.password_hash, s.expires_at, s.max_downloads, s.downloads, u.username AS owner_name,
+                s.allow_upload, s.drop_only, s.allow_download
          FROM shares s JOIN users u ON u.id = s.owner_id WHERE s.id = ? AND u.disabled = 0",
     )
     .bind(token)
@@ -476,16 +554,36 @@ async fn open_share(st: &AppState, token: &str, headers: &HeaderMap) -> AppResul
     Ok((share, node))
 }
 
-/// A node within the share's scope
+/// A node within the share's scope; a link that only accepts files shows nothing but the shared folder itself
 async fn shared_node(st: &AppState, share: &Share, root: &Node, id: &str) -> AppResult<Node> {
     if id == "root" || id == root.id {
         return Ok(root.clone());
+    }
+    if share.drop_only {
+        return Err(AppError::not_found("Item not found"));
     }
     let mut c = st.db.acquire().await?;
     match tree::get_node(&mut c, id).await? {
         Some(n) if n.trashed_at.is_none() && tree::is_within(&mut c, &n.id, &share.node_id).await? => Ok(n),
         _ => Err(AppError::not_found("Item not found")),
     }
+}
+
+/// Visitors of a link that only accepts files can't see what is in the folder
+fn ensure_visible(share: &Share) -> AppResult<()> {
+    if share.drop_only {
+        return Err(AppError::forbidden("This link only accepts files").with_code("drop_only"));
+    }
+    Ok(())
+}
+
+/// Downloads (and ZIPs) of a link limited to previews
+fn ensure_download(share: &Share) -> AppResult<()> {
+    ensure_visible(share)?;
+    if !share.allow_download {
+        return Err(AppError::forbidden("Downloads are turned off for this link").with_code("no_download"));
+    }
+    Ok(())
 }
 
 fn downloads_left(share: &Share) -> Option<i64> {
@@ -542,6 +640,11 @@ pub async fn public_info(
         "expires_at": share.expires_at,
         "downloads_left": downloads_left(&share),
         "needs_password": !unlocked,
+        "allow_upload": share.allow_upload,
+        "drop_only": share.drop_only,
+        "allow_download": share.allow_download,
+        // Upload size limit per file in bytes (0 = none), so the page can refuse larger files before sending them
+        "max_upload": st.max_upload,
     });
     if unlocked {
         info["node"] = public_node_json(&node);
@@ -619,6 +722,7 @@ pub async fn public_children(
     headers: HeaderMap,
 ) -> AppResult<Json<Listing<serde_json::Value>>> {
     let (share, root) = open_share(&st, &token, &headers).await?;
+    ensure_visible(&share)?;
     let node = shared_node(&st, &share, &root, &id).await?;
     if !node.is_folder() {
         return Err(AppError::bad_request("This isn't a folder"));
@@ -640,8 +744,12 @@ pub async fn public_content(
     visitor: Visitor,
 ) -> AppResult<Response> {
     let (share, root) = open_share(&st, &token, &headers).await?;
-    let node = shared_node(&st, &share, &root, &id).await?;
+    ensure_visible(&share)?;
     let download = q.download == Some(1);
+    if download {
+        ensure_download(&share)?;
+    }
+    let node = shared_node(&st, &share, &root, &id).await?;
     // A request without Range, or starting at byte 0, starts a download and is counted (with a download limit, previews
     // fetch the whole file and count too, otherwise the preview URL would bypass the limit). A Range starting later is a
     // continuation (resuming, video seeking) only when it carries the cookie of a counted download; otherwise it's a new
@@ -681,6 +789,7 @@ pub async fn public_thumbnail(
     headers: HeaderMap,
 ) -> AppResult<Response> {
     let (share, root) = open_share(&st, &token, &headers).await?;
+    ensure_visible(&share)?;
     let node = shared_node(&st, &share, &root, &id).await?;
     files::thumbnail_response(&st, &headers, &node).await
 }
@@ -717,6 +826,7 @@ pub async fn create_public_download_link(
     Json(req): Json<files::DownloadReq>,
 ) -> AppResult<Json<Value>> {
     let (share, root) = open_share(&st, &token, &headers).await?;
+    ensure_download(&share)?;
     let ids = files::download_ids(&req.ids)?;
     ensure_quota_left(&share)?;
     shared_nodes(&st, &share, &root, &ids).await?;
@@ -747,6 +857,7 @@ async fn serve_public_download(
     headers: &HeaderMap,
     visitor: &Visitor,
 ) -> AppResult<Response> {
+    ensure_download(&share)?;
     // A single file: a Range request with the continuation cookie resumes a counted download, like /content
     let single = matches!(roots.as_slice(), [one] if !one.is_folder());
     let continuation = single
@@ -770,6 +881,64 @@ async fn serve_public_download(
         }
     }
     Ok(res)
+}
+
+// ───────────── Uploads through a link ─────────────
+
+/// A link that accepts files, opened (password, expiry, the creator's access), with the account the files will belong to
+async fn upload_share(st: &AppState, token: &str, headers: &HeaderMap, visitor: Visitor) -> AppResult<upload::Uploader> {
+    let (share, root) = open_share(st, token, headers).await?;
+    if !share.allow_upload || !root.is_folder() {
+        return Err(AppError::forbidden("This link doesn't accept files"));
+    }
+    // The creator's current permissions decide (open_share checked they can still share it; uploading checks they
+    // can still change the folder, and their space's quota)
+    let user = auth::user_by_id(st, &mut *st.db.acquire().await?, share.owner_id).await?.ok_or_else(gone)?;
+    Ok(upload::Uploader {
+        user,
+        share: Some(upload::ShareUpload { id: share.id, root: root.id, drop_only: share.drop_only, visitor }),
+    })
+}
+
+pub async fn public_upload_create(
+    State(st): State<AppState>,
+    Path(token): Path<String>,
+    headers: HeaderMap,
+    visitor: Visitor,
+) -> AppResult<Response> {
+    let up = upload_share(&st, &token, &headers, visitor).await?;
+    upload::create_as(&st, &up, &headers).await
+}
+
+pub async fn public_upload_head(
+    State(st): State<AppState>,
+    Path((token, id)): Path<(String, String)>,
+    headers: HeaderMap,
+    visitor: Visitor,
+) -> AppResult<Response> {
+    let up = upload_share(&st, &token, &headers, visitor).await?;
+    upload::head_as(&st, &up, &id).await
+}
+
+pub async fn public_upload_patch(
+    State(st): State<AppState>,
+    Path((token, id)): Path<(String, String)>,
+    headers: HeaderMap,
+    visitor: Visitor,
+    body: axum::body::Body,
+) -> AppResult<Response> {
+    let up = upload_share(&st, &token, &headers, visitor).await?;
+    upload::patch_as(&st, &up, &id, &headers, body).await
+}
+
+pub async fn public_upload_delete(
+    State(st): State<AppState>,
+    Path((token, id)): Path<(String, String)>,
+    headers: HeaderMap,
+    visitor: Visitor,
+) -> AppResult<Response> {
+    let up = upload_share(&st, &token, &headers, visitor).await?;
+    upload::delete_as(&st, &up, &id).await
 }
 
 #[cfg(test)]
@@ -800,13 +969,13 @@ mod tests {
         let addr: std::net::SocketAddr = "203.0.113.5:4000".parse().unwrap();
 
         // Behind a password: nothing about the owner before unlocking
-        let req = CreateReq { node_id: folder.clone(), password: Some(testutil::wrong_password()), expires_at: None, max_downloads: None };
+        let req = CreateReq { node_id: folder.clone(), password: Some(testutil::wrong_password()), expires_at: None, max_downloads: None, allow_upload: false, drop_only: false, allow_download: true };
         let Json(locked) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let Json(info) = public_info(State(env.st.clone()), Path(locked.id), ConnectInfo(addr), HeaderMap::new(), visitor()).await.unwrap();
         assert!(info["owner"].is_null() && info["node"].is_null(), "{info}");
 
         // Open: items without usernames, spaces or ids outside the share
-        let req = CreateReq { node_id: folder.clone(), password: None, expires_at: None, max_downloads: None };
+        let req = CreateReq { node_id: folder.clone(), password: None, expires_at: None, max_downloads: None, allow_upload: false, drop_only: false, allow_download: true };
         let Json(open) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let Json(info) = public_info(State(env.st.clone()), Path(open.id.clone()), ConnectInfo(addr), HeaderMap::new(), visitor()).await.unwrap();
         assert_eq!(info["owner"], "amy");
@@ -834,7 +1003,7 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let doc = stored_file(&env, &amy, &amy.root_id, "report.pdf", b"content").await;
-        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: Some(1) };
+        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: Some(1), allow_upload: false, drop_only: false, allow_download: true };
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
         let get = || public_content(State(env.st.clone()), Path((info.id.clone(), doc.clone())), Query(ContentQuery { download: Some(1) }), HeaderMap::new(), visitor());
@@ -855,7 +1024,7 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let doc = stored_file(&env, &amy, &amy.root_id, "a.txt", b"hello").await;
-        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: None };
+        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: None, allow_upload: false, drop_only: false, allow_download: true };
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
         for ip in ["203.0.113.1:1", "203.0.113.2:1"] {
@@ -906,7 +1075,7 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let doc = stored_file(&env, &amy, &amy.root_id, "movie.bin", &[7u8; 4096]).await;
-        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: Some(1) };
+        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: Some(1), allow_upload: false, drop_only: false, allow_download: true };
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
         let content = |range: Option<&'static str>, cookie: Option<String>| {
@@ -938,7 +1107,7 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let doc = stored_file(&env, &amy, &amy.root_id, "movie.bin", &[7u8; 4096]).await;
-        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: Some(1) };
+        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: Some(1), allow_upload: false, drop_only: false, allow_download: true };
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
         let download = |range: Option<&'static str>, cookie: Option<String>| {
@@ -971,7 +1140,7 @@ mod tests {
         let b = stored_file(&env, &amy, &folder, "b.txt", b"second").await;
         let outside = stored_file(&env, &amy, &amy.root_id, "c.txt", b"third").await;
         let share = |max: Option<i64>| {
-            let req = CreateReq { node_id: folder.clone(), password: None, expires_at: None, max_downloads: max };
+            let req = CreateReq { node_id: folder.clone(), password: None, expires_at: None, max_downloads: max, ..link(&folder) };
             create(State(env.st.clone()), amy.clone(), Json(req))
         };
         let Json(info) = share(Some(1)).await.unwrap();
@@ -1009,7 +1178,7 @@ mod tests {
         let doc = env.file(&amy, &folder, "report.txt").await;
         env.grant(&folder, &ben, "editor").await;
 
-        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: None };
+        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: None, allow_upload: false, drop_only: false, allow_download: true };
         let Json(info) = create(State(env.st.clone()), ben.clone(), Json(req)).await.unwrap();
         assert!(find_share(&env.st, &info.id).await.is_ok());
 
@@ -1031,13 +1200,13 @@ mod tests {
         assert!(find_share(&env.st, &info.id).await.is_err());
 
         // The file owner's own links are unaffected
-        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: None };
+        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: None, allow_upload: false, drop_only: false, allow_download: true };
         let Json(own) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         assert!(find_share(&env.st, &own.id).await.is_ok());
     }
 
     fn link(node: &str) -> CreateReq {
-        CreateReq { node_id: node.to_string(), password: None, expires_at: None, max_downloads: None }
+        CreateReq { node_id: node.to_string(), password: None, expires_at: None, max_downloads: None, allow_upload: false, drop_only: false, allow_download: true }
     }
 
     async fn links(env: &testutil::TestEnv, user: &User, q: ListQuery) -> Vec<String> {
@@ -1178,5 +1347,210 @@ mod tests {
         assert!(!crate::db::load_system_settings(&env.st.db).await.unwrap().public_links);
         set_policy(&env, json!({ "public_links": true })).await;
         assert!(find_share(&env.st, &ok.id).await.is_ok());
+    }
+
+    fn visitor() -> Visitor {
+        Visitor { ip: String::new(), user_agent: String::new() }
+    }
+
+    fn folder_link(node: &str, drop_only: bool) -> CreateReq {
+        CreateReq { allow_upload: true, drop_only, ..link(node) }
+    }
+
+    /// Starts an upload through a link; returns the upload's id (from its address)
+    async fn start_upload(env: &testutil::TestEnv, token: &str, parent: Option<&str>, name: &str, len: usize, cookie: Option<&str>) -> AppResult<String> {
+        use base64::Engine;
+        let b64 = |s: &str| base64::engine::general_purpose::STANDARD.encode(s);
+        let mut h = HeaderMap::new();
+        h.insert("upload-length", len.to_string().parse().unwrap());
+        let mut meta = format!("filename {}", b64(name));
+        if let Some(p) = parent {
+            meta.push_str(&format!(",parentId {}", b64(p)));
+        }
+        h.insert("upload-metadata", meta.parse().unwrap());
+        if let Some(c) = cookie {
+            h.insert(header::COOKIE, c.parse().unwrap());
+        }
+        let res = public_upload_create(State(env.st.clone()), Path(token.to_string()), h, visitor()).await?;
+        let location = res.headers()[header::LOCATION].to_str().unwrap().to_string();
+        assert!(location.starts_with(&format!("/api/public/shares/{token}/uploads/")), "{location}");
+        Ok(location.rsplit('/').next().unwrap().to_string())
+    }
+
+    async fn send_upload(env: &testutil::TestEnv, token: &str, id: &str, data: &'static [u8]) -> AppResult<Option<String>> {
+        let mut h = HeaderMap::new();
+        h.insert(header::CONTENT_TYPE, "application/offset+octet-stream".parse().unwrap());
+        h.insert("upload-offset", "0".parse().unwrap());
+        let res = public_upload_patch(State(env.st.clone()), Path((token.to_string(), id.to_string())), h, visitor(), axum::body::Body::from(data)).await?;
+        Ok(res.headers().get("x-node-id").map(|v| v.to_str().unwrap().to_string()))
+    }
+
+    async fn upload_through(env: &testutil::TestEnv, token: &str, parent: Option<&str>, name: &str, data: &'static [u8]) -> AppResult<String> {
+        let id = start_upload(env, token, parent, name, data.len(), None).await?;
+        Ok(send_upload(env, token, &id, data).await?.expect("the upload finished"))
+    }
+
+    async fn node(env: &testutil::TestEnv, id: &str) -> Node {
+        tree::get_node(&mut env.st.db.acquire().await.unwrap(), id).await.unwrap().unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_folder_link_accepts_files_that_belong_to_its_creator() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let inbox = env.folder(&amy, &amy.root_id, "Inbox").await;
+        let sub = env.folder(&amy, &inbox, "2026").await;
+        env.file(&amy, &inbox, "a.txt").await;
+        let Json(info) = create(State(env.st.clone()), amy.clone(), Json(folder_link(&inbox, false))).await.unwrap();
+        assert!(info.allow_upload && !info.drop_only && info.allow_download);
+
+        // A name that is taken gets a number; the file is Amy's, in the shared folder ("root" is the shared folder)
+        let id = upload_through(&env, &info.id, Some("root"), "a.txt", b"hello").await.unwrap();
+        let file = node(&env, &id).await;
+        assert_eq!((file.name.as_str(), file.parent_id.as_deref(), file.owner_id, file.size), ("a (1).txt", Some(inbox.as_str()), amy.id, 5));
+        let id = upload_through(&env, &info.id, Some(&sub), "b.txt", b"hi").await.unwrap();
+        assert_eq!(node(&env, &id).await.parent_id.as_deref(), Some(sub.as_str()));
+        // Recorded in the activity log and the link's access log
+        let (detail,): (String,) = sqlx::query_as("SELECT detail FROM activity WHERE action = 'upload' AND node_id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(detail, format!("Through share link /share/{}", info.id));
+        let mut logged = 0;
+        for _ in 0..100 {
+            (logged,) = sqlx::query_as("SELECT COUNT(*) FROM share_access WHERE share_id = ? AND event = 'upload'").bind(&info.id).fetch_one(&env.st.db).await.unwrap();
+            if logged == 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(logged, 2);
+
+        // Nothing outside the shared folder, not even Amy's own root folder
+        assert_eq!(start_upload(&env, &info.id, Some(&amy.root_id), "x.txt", 1, None).await.unwrap_err().status, StatusCode::NOT_FOUND);
+        // Bad names are refused as in any upload
+        assert!(start_upload(&env, &info.id, None, "a/b.txt", 1, None).await.is_err());
+        // A signed-in person can't continue a visitor's upload, nor a visitor someone else's
+        let pending = start_upload(&env, &info.id, None, "c.txt", 3, None).await.unwrap();
+        assert!(crate::upload::head(State(env.st.clone()), amy.clone(), Path(pending.clone())).await.is_err());
+        let Json(other) = create(State(env.st.clone()), amy.clone(), Json(folder_link(&sub, false))).await.unwrap();
+        assert!(send_upload(&env, &other.id, &pending, b"abc").await.is_err());
+
+        // The space's quota counts
+        sqlx::query("UPDATE users SET quota_bytes = 10 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+        assert_eq!(start_upload(&env, &info.id, None, "big.bin", 100, None).await.unwrap_err().status, StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn uploads_through_a_link_follow_the_link_and_its_creator() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let shared = env.folder(&amy, &amy.root_id, "Shared").await;
+        let sub = env.folder(&amy, &shared, "Sub").await;
+        env.grant(&shared, &ben, "editor").await;
+
+        // A link without uploads, a file link, "drop only" without uploads: refused
+        let Json(plain) = create(State(env.st.clone()), ben.clone(), Json(link(&shared))).await.unwrap();
+        assert_eq!(start_upload(&env, &plain.id, None, "a.txt", 1, None).await.unwrap_err().status, StatusCode::FORBIDDEN);
+        let doc = env.file(&amy, &shared, "doc.txt").await;
+        assert!(create(State(env.st.clone()), ben.clone(), Json(folder_link(&doc, false))).await.is_err());
+        assert!(create(State(env.st.clone()), ben.clone(), Json(CreateReq { drop_only: true, ..link(&shared) })).await.is_err());
+
+        // Uploads can be turned on later; the files belong to the link's creator
+        let changed = change(&env, &ben, &plain.id, json!({ "allow_upload": true })).await.unwrap();
+        assert!(changed.allow_upload);
+        let id = upload_through(&env, &plain.id, None, "a.txt", b"hello").await.unwrap();
+        assert_eq!(node(&env, &id).await.owner_id, ben.id);
+
+        // A folder moved out of the shared folder during an upload: the file doesn't follow it
+        let pending = start_upload(&env, &plain.id, Some(&sub), "late.txt", 4, None).await.unwrap();
+        sqlx::query("UPDATE nodes SET parent_id = ? WHERE id = ?").bind(&amy.root_id).bind(&sub).execute(&env.st.db).await.unwrap();
+        assert!(send_upload(&env, &plain.id, &pending, b"late").await.is_err());
+        let (placed,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE name LIKE 'late%'").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(placed, 0);
+
+        // The creator may only view now: no more uploads (nor the link at all, since they can't share it)
+        env.grant(&shared, &ben, "viewer").await;
+        assert!(start_upload(&env, &plain.id, None, "b.txt", 1, None).await.is_err());
+        env.grant(&shared, &ben, "editor").await;
+        sqlx::query("UPDATE users SET can_write = 0 WHERE id = ?").bind(ben.id).execute(&env.st.db).await.unwrap();
+        assert_eq!(start_upload(&env, &plain.id, None, "b.txt", 1, None).await.unwrap_err().status, StatusCode::FORBIDDEN);
+        sqlx::query("UPDATE users SET can_write = 1 WHERE id = ?").bind(ben.id).execute(&env.st.db).await.unwrap();
+
+        // A password protects uploads like everything else; the unlock cookie opens them
+        let pw = testutil::wrong_password();
+        change(&env, &ben, &plain.id, json!({ "password": pw })).await.unwrap();
+        assert_eq!(start_upload(&env, &plain.id, None, "c.txt", 1, None).await.unwrap_err().status, StatusCode::UNAUTHORIZED);
+        let addr: std::net::SocketAddr = "203.0.113.7:1".parse().unwrap();
+        let res = unlock(State(env.st.clone()), Path(plain.id.clone()), ConnectInfo(addr), HeaderMap::new(), visitor(), Json(UnlockReq { password: pw })).await.unwrap();
+        let cookie = res.headers()[header::SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_string();
+        assert!(start_upload(&env, &plain.id, None, "c.txt", 1, Some(&cookie)).await.is_ok());
+        // And an expired link takes none
+        sqlx::query("UPDATE shares SET expires_at = ? WHERE id = ?").bind(now() - 1).bind(&plain.id).execute(&env.st.db).await.unwrap();
+        assert_eq!(start_upload(&env, &plain.id, None, "d.txt", 1, Some(&cookie)).await.unwrap_err().status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn a_link_that_only_accepts_files_shows_nothing_of_the_folder() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let inbox = env.folder(&amy, &amy.root_id, "Inbox").await;
+        let sub = env.folder(&amy, &inbox, "Private").await;
+        let secret = stored_file(&env, &amy, &inbox, "secret.txt", b"secret").await;
+        let Json(info) = create(State(env.st.clone()), amy.clone(), Json(folder_link(&inbox, true))).await.unwrap();
+        let addr: std::net::SocketAddr = "203.0.113.8:1".parse().unwrap();
+        let Json(public) = public_info(State(env.st.clone()), Path(info.id.clone()), ConnectInfo(addr), HeaderMap::new(), visitor()).await.unwrap();
+        assert_eq!((public["drop_only"].as_bool(), public["allow_upload"].as_bool()), (Some(true), Some(true)));
+        assert_eq!(public["node"]["name"], "Inbox");
+
+        let q = || Query(ChildrenQuery::default());
+        let err = public_children(State(env.st.clone()), Path((info.id.clone(), inbox.clone())), q(), HeaderMap::new()).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::FORBIDDEN);
+        assert!(public_node(State(env.st.clone()), Path((info.id.clone(), sub.clone())), HeaderMap::new()).await.is_err());
+        for download in [None, Some(1)] {
+            let res = public_content(State(env.st.clone()), Path((info.id.clone(), secret.clone())), Query(ContentQuery { download }), HeaderMap::new(), visitor()).await;
+            assert_eq!(res.unwrap_err().status, StatusCode::FORBIDDEN);
+        }
+        assert!(public_thumbnail(State(env.st.clone()), Path((info.id.clone(), secret.clone())), HeaderMap::new()).await.is_err());
+        let zip = public_download(State(env.st.clone()), Path(info.id.clone()), Query(DownloadQuery { ids: "root".into(), tz: None }), HeaderMap::new(), visitor()).await;
+        assert_eq!(zip.unwrap_err().status, StatusCode::FORBIDDEN);
+
+        // Files go into the shared folder itself, never into a folder below it
+        let id = upload_through(&env, &info.id, None, "invoice.pdf", b"%PDF").await.unwrap();
+        assert_eq!(node(&env, &id).await.parent_id.as_deref(), Some(inbox.as_str()));
+        assert_eq!(start_upload(&env, &info.id, Some(&sub), "x.pdf", 1, None).await.unwrap_err().status, StatusCode::NOT_FOUND);
+
+        // A visitor can't keep any number of uploads open at once
+        for i in 0..upload::MAX_PENDING_PER_SHARE {
+            sqlx::query("INSERT INTO uploads (id, owner_id, parent_id, name, size, created_at, expires_at, share_id) VALUES (?, ?, ?, 'x', 1, ?, ?, ?)")
+                .bind(format!("pending-{i}"))
+                .bind(amy.id)
+                .bind(&inbox)
+                .bind(now())
+                .bind(now() + 3600)
+                .bind(&info.id)
+                .execute(&env.st.db)
+                .await
+                .unwrap();
+        }
+        assert_eq!(start_upload(&env, &info.id, None, "y.pdf", 1, None).await.unwrap_err().status, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn a_preview_only_link_serves_previews_but_no_downloads() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let folder = env.folder(&amy, &amy.root_id, "Photos").await;
+        let photo = stored_file(&env, &amy, &folder, "a.jpg", b"jpeg").await;
+        let Json(info) = create(State(env.st.clone()), amy.clone(), Json(CreateReq { allow_download: false, ..link(&folder) })).await.unwrap();
+        assert!(!info.allow_download);
+        let content = |download| public_content(State(env.st.clone()), Path((info.id.clone(), photo.clone())), Query(ContentQuery { download }), HeaderMap::new(), visitor());
+        assert_eq!(content(None).await.unwrap().status(), StatusCode::OK);
+        assert_eq!(content(Some(1)).await.unwrap_err().status, StatusCode::FORBIDDEN);
+        for ids in ["root", photo.as_str()] {
+            let res = public_download(State(env.st.clone()), Path(info.id.clone()), Query(DownloadQuery { ids: ids.into(), tz: None }), HeaderMap::new(), visitor()).await;
+            assert_eq!(res.unwrap_err().status, StatusCode::FORBIDDEN);
+        }
+        // Allowed again by editing the link
+        change(&env, &amy, &info.id, json!({ "allow_download": true })).await.unwrap();
+        assert_eq!(content(Some(1)).await.unwrap().status(), StatusCode::OK);
     }
 }

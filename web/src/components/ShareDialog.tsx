@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CopyIcon, KeyRoundIcon, Link2Icon, Loader2Icon, PencilIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
-import { api, type Node, type SharePolicy, type ShareInfo, type ShareUpdate } from "@/api";
+import { api, type Node, type ShareAccessOptions, type SharePolicy, type ShareInfo, type ShareUpdate } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -60,9 +60,57 @@ export function shareSummary(s: ShareInfo) {
   const parts = [];
   if (s.has_password) parts.push(t("Password required"));
   parts.push(s.expires_at ? tc("date", "Expires {date}", { date: formatDate(s.expires_at) }) : t("Never expires"));
+  if (s.drop_only) parts.push(t("Only accepts files"));
+  else {
+    if (s.allow_upload) parts.push(t("Accepts files"));
+    if (!s.allow_download) parts.push(t("Preview only"));
+  }
   if (s.max_downloads) parts.push(t("Downloaded {n}/{max} times", { n: s.downloads, max: s.max_downloads }));
   else parts.push(t("Downloaded {n} time|Downloaded {n} times", { n: s.downloads }));
   return parts.join(" · ");
+}
+
+/** What visitors may do: download, upload (folders), only upload (folders) */
+export function AccessOptions({ folder, value, onChange }: { folder: boolean; value: ShareAccessOptions; onChange(v: ShareAccessOptions): void }) {
+  const set = (patch: Partial<ShareAccessOptions>) => onChange({ ...value, ...patch });
+  return (
+    <div className="grid gap-2">
+      <Label>{t("Visitors can")}</Label>
+      {!value.drop_only && (
+        <Label className="flex items-start gap-2 font-normal">
+          <Checkbox className="mt-0.5" checked={value.allow_download} onCheckedChange={(v) => set({ allow_download: !!v })} />
+          <span>
+            {t("Download")}
+            {!value.allow_download && (
+              <span className="block text-xs text-muted-foreground">
+                {t("Visitors can only preview files. A preview still sends the whole file to their browser, so this hides the download buttons but can't stop someone from saving a file.")}
+              </span>
+            )}
+          </span>
+        </Label>
+      )}
+      {folder && (
+        <Label className="flex items-start gap-2 font-normal">
+          <Checkbox className="mt-0.5" checked={value.allow_upload} onCheckedChange={(v) => set({ allow_upload: !!v, drop_only: !!v && value.drop_only })} />
+          <span>
+            {t("Upload files")}
+            {value.allow_upload && (
+              <span className="block text-xs text-muted-foreground">{t("Uploaded files are yours and count toward the space's size. A file with a name that is taken gets a number.")}</span>
+            )}
+          </span>
+        </Label>
+      )}
+      {folder && value.allow_upload && (
+        <Label className="flex items-start gap-2 font-normal">
+          <Checkbox className="mt-0.5" checked={value.drop_only} onCheckedChange={(v) => set({ drop_only: !!v })} />
+          <span>
+            {t("Only upload")}
+            <span className="block text-xs text-muted-foreground">{t("Visitors don't see what is in the folder, and can't download anything: for collecting files.")}</span>
+          </span>
+        </Label>
+      )}
+    </div>
+  );
 }
 
 /** Where the linked item is: the space, and whose "My files" it is */
@@ -103,10 +151,12 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
   const [days, setDays] = useState(choices.some((c) => c.days === 7) ? 7 : choices[choices.length - 1].days);
   const [maxDownloads, setMaxDownloads] = useState("");
   const [editing, setEditing] = useState<ShareInfo | null>(null);
+  const [access, setAccess] = useState<ShareAccessOptions>({ allow_upload: false, drop_only: false, allow_download: true });
 
   const create = useMutation({
     mutationFn: () =>
       api.createShare({
+        ...access,
         node_id: node.id,
         password: password || undefined,
         expires_at: expiresIn(days) ?? undefined,
@@ -137,7 +187,9 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
         <DialogHeader>
           <DialogTitle className="truncate pr-8">{t("Share link for “{name}”", { name: node.name })}</DialogTitle>
           <DialogDescription>
-            {node.kind === "folder" ? t("Anyone with the link can browse and download the folder's contents.") : t("Anyone with the link can view and download this file.")}
+            {node.kind === "folder"
+              ? t("Anyone with the link can browse the folder's contents and, as you choose below, download them or upload files.")
+              : t("Anyone with the link can view and, as you choose below, download this file.")}
           </DialogDescription>
         </DialogHeader>
 
@@ -208,6 +260,7 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
                 ))}
               </div>
             </div>
+            <AccessOptions folder={node.kind === "folder"} value={access} onChange={setAccess} />
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
                 <Label htmlFor="share-pw">
@@ -262,6 +315,7 @@ export function EditShareDialog({ share, onClose }: { share: ShareInfo; onClose(
   // "keep": the current expiry stays; otherwise a number of days from now (0 = never)
   const [expiry, setExpiry] = useState<"keep" | number>("keep");
   const [maxDownloads, setMaxDownloads] = useState(share.max_downloads ? String(share.max_downloads) : "");
+  const [access, setAccess] = useState<ShareAccessOptions>({ allow_upload: share.allow_upload, drop_only: share.drop_only, allow_download: share.allow_download });
 
   const save = useMutation({
     mutationFn: () => {
@@ -271,6 +325,9 @@ export function EditShareDialog({ share, onClose }: { share: ShareInfo; onClose(
       if (expiry !== "keep") req.expires_at = expiresIn(expiry);
       const limit = maxDownloads ? Number(maxDownloads) : null;
       if (limit !== share.max_downloads) req.max_downloads = limit;
+      if (access.allow_upload !== share.allow_upload) req.allow_upload = access.allow_upload;
+      if (access.drop_only !== share.drop_only) req.drop_only = access.drop_only;
+      if (access.allow_download !== share.allow_download) req.allow_download = access.allow_download;
       return api.updateShare(share.id, req);
     },
     onSuccess: () => {
@@ -307,6 +364,7 @@ export function EditShareDialog({ share, onClose }: { share: ShareInfo; onClose(
               ))}
             </div>
           </div>
+          <AccessOptions folder={share.node_kind === "folder"} value={access} onChange={setAccess} />
           <div className="grid gap-1.5">
             <Label htmlFor="edit-share-pw">
               <KeyRoundIcon className="size-3.5" /> {share.has_password ? t("New password (leave blank to keep the current one)") : t("Password (optional)")}

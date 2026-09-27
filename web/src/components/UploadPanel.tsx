@@ -23,7 +23,8 @@ import { t } from "@/lib/i18n";
 /** Above this many uploads, only those in progress, paused or failed get a row; the rest are counted in a summary */
 const ROW_LIMIT = 100;
 
-export function UploadPanel() {
+/** Upload progress; `visitor`: on a share link's page, where the destination folder can't be opened */
+export function UploadPanel({ visitor = false }: { visitor?: boolean }) {
   const { tasks, totals } = useUploads();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
@@ -168,7 +169,7 @@ export function UploadPanel() {
                 <RotateCwIcon /> {t("Retry all failed")}
               </DropdownMenuItem>
             )}
-            {menuTask && (
+            {menuTask && !visitor && (
               <DropdownMenuItem onClick={() => navigate(`/files/${menuTask.parentId}`)}>
                 <FolderOpenIcon /> {t("Open destination folder")}
               </DropdownMenuItem>

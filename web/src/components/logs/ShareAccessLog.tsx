@@ -17,6 +17,7 @@ export const ACCESS_EVENTS: Record<string, { label: string; tone?: string }> = {
   preview: { label: t("Preview") },
   download: { label: t("Download"), tone: "text-brand" },
   zip: { label: t("ZIP download"), tone: "text-brand" },
+  upload: { label: t("Uploaded a file"), tone: "text-violet-600 dark:text-violet-400" },
 };
 
 const EVENT_GROUPS = [{ options: Object.entries(ACCESS_EVENTS).map(([value, e]) => ({ value, label: e.label })) }];

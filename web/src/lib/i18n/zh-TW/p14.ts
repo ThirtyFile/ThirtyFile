@@ -1,4 +1,4 @@
-/** Traditional Chinese translations: managing share links (all share links, link policy, editing links) */
+/** Traditional Chinese translations: managing share links (all share links, link policy, editing links), links that accept files or allow viewing only */
 export default {
   // Share dialog and editing a link
   "An administrator has turned off public share links. Existing links don't work until they're allowed again.": "管理員已關閉公開分享連結。現有的連結在重新開放前都無法使用。",
@@ -45,4 +45,24 @@ export default {
   "New and changed links must expire within this many days. Leave blank to allow links that never expire. Links created earlier keep their expiry.": "新建立與變更的連結必須在這個天數內到期。留白則允許永不到期的連結。之前建立的連結維持原本的到期日。",
   "Turn off public share links?": "要關閉公開分享連結嗎？",
   "All existing links stop working right away, and no one can create new ones. The links aren't deleted: allow public links again and they work as before.": "所有現有的連結會立即失效，也無法再建立新連結。連結不會被刪除：重新允許公開連結後即可照常使用。",
+  // Links that accept files, and links for viewing only
+  "Only accepts files": "只收檔案",
+  "Accepts files": "可上傳檔案",
+  "Preview only": "僅供預覽",
+  "Visitors can": "訪客可以",
+  "Visitors can only preview files. A preview still sends the whole file to their browser, so this hides the download buttons but can't stop someone from saving a file.": "訪客只能預覽檔案。預覽時整個檔案仍會傳到訪客的瀏覽器，因此這只會隱藏下載按鈕，無法阻止有心人存下檔案。",
+  "Uploaded files are yours and count toward the space's size. A file with a name that is taken gets a number.": "上傳的檔案屬於您，並計入空間的容量。檔名重複時會自動加上編號。",
+  "Only upload": "只能上傳",
+  "Visitors don't see what is in the folder, and can't download anything: for collecting files.": "訪客看不到資料夾裡有什麼，也無法下載任何檔案：適合用來收集檔案。",
+  "Anyone with the link can browse the folder's contents and, as you choose below, download them or upload files.": "任何人只要有連結，就能瀏覽資料夾內容，並依下方的設定下載或上傳檔案。",
+  "Anyone with the link can view and, as you choose below, download this file.": "任何人只要有連結，就能檢視這個檔案，並依下方的設定下載。",
+  "{name} is larger than the upload size limit ({size})": "{name} 超過上傳大小上限（{size}）",
+  "Send files to “{name}”": "傳送檔案到「{name}」",
+  "Drag files here or choose them. You won't see what others have sent, and nothing can be downloaded here.": "把檔案拖到這裡或選擇檔案。您看不到其他人傳送的檔案，這裡也無法下載任何東西。",
+  "Choose files": "選擇檔案",
+  "Up to {size} per file": "每個檔案最大 {size}",
+  "This link is for viewing only.": "這個連結僅供檢視。",
+  "This link is for viewing only, and this type of file can't be previewed.": "這個連結僅供檢視，而這種檔案類型無法預覽。",
+  "You can add files here: drag them onto the list or click Upload.": "您可以在這裡加入檔案：拖曳到清單上或按「上傳」。",
+  "Uploaded a file": "上傳了檔案",
 };

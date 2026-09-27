@@ -1,5 +1,6 @@
 //! tus 1.0 resumable uploads (core + creation + termination).
 //! The frontend uses tus-js-client; after an interruption (including a browser refresh) the upload resumes where it left off.
+//! Visitors of a share link that accepts files upload the same way (see `shares`): their files belong to the link's creator.
 
 use std::{io::SeekFrom, path::PathBuf};
 
@@ -43,6 +44,50 @@ struct Upload {
     /// The file this upload became, once finished
     node_id: Option<String>,
 }
+
+/// Who is uploading: a signed-in person, or a visitor of a share link. The file belongs to `user` either way (the
+/// link's creator for a link), and every permission is checked against that account.
+#[derive(Clone)]
+pub struct Uploader {
+    pub user: User,
+    pub share: Option<ShareUpload>,
+}
+
+/// An upload through a share link
+#[derive(Clone)]
+pub struct ShareUpload {
+    /// The link's token
+    pub id: String,
+    /// The shared folder: uploads stay inside it
+    pub root: String,
+    /// Visitors can't see the folder: files go into the shared folder itself
+    pub drop_only: bool,
+    pub visitor: crate::logs::Visitor,
+}
+
+impl Uploader {
+    fn signed_in(user: User) -> Uploader {
+        Uploader { user, share: None }
+    }
+    /// The activity log's detail for the uploaded file
+    fn log_detail(&self) -> String {
+        self.share.as_ref().map(|s| format!("Through share link /share/{}", s.id)).unwrap_or_default()
+    }
+    fn share_id(&self) -> Option<&str> {
+        self.share.as_ref().map(|s| s.id.as_str())
+    }
+    /// Where the client finds the upload: the link's own address for visitors
+    fn location(&self, id: &str) -> String {
+        match &self.share {
+            Some(s) => format!("/api/public/shares/{}/uploads/{id}", s.id),
+            None => format!("/api/uploads/{id}"),
+        }
+    }
+}
+
+/// Uploads through one share link that may be in progress at once: each one reserves its size in the space and a
+/// temporary file, so a visitor can't start any number of them
+pub const MAX_PENDING_PER_SHARE: i64 = 200;
 
 /// How long a finished upload is remembered, so a client that lost the last response learns the result
 const FINISHED_TTL: i64 = 24 * 3600;
@@ -89,7 +134,12 @@ pub async fn options(State(st): State<AppState>) -> Response {
 }
 
 pub async fn create(State(st): State<AppState>, user: User, headers: HeaderMap) -> AppResult<Response> {
-    let size = header_u64(&headers, "upload-length").ok_or_else(|| AppError::bad_request("Missing Upload-Length"))?;
+    create_as(&st, &Uploader::signed_in(user), &headers).await
+}
+
+pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> AppResult<Response> {
+    let user = &up.user;
+    let size = header_u64(headers, "upload-length").ok_or_else(|| AppError::bad_request("Missing Upload-Length"))?;
     // Sizes are stored as i64 and summed for quotas: refuse absurd values before they can overflow (1 PiB is far beyond any single file)
     if size > MAX_UPLOAD_LENGTH {
         return Err(AppError::new(StatusCode::PAYLOAD_TOO_LARGE, "Invalid Upload-Length"));
@@ -97,9 +147,13 @@ pub async fn create(State(st): State<AppState>, user: User, headers: HeaderMap) 
     if st.max_upload > 0 && size > st.max_upload {
         return Err(AppError::new(StatusCode::PAYLOAD_TOO_LARGE, "The file exceeds the upload size limit"));
     }
-    let meta = parse_metadata(&headers);
+    let meta = parse_metadata(headers);
     let name = validate_name(meta.get("filename").map(String::as_str).unwrap_or_default())?;
-    let parent_id = meta.get("parentId").cloned().unwrap_or_else(|| "root".into());
+    let parent_id = match &up.share {
+        // "root" is the shared folder here, never the creator's own files
+        Some(s) => meta.get("parentId").filter(|p| !p.is_empty() && *p != "root").cloned().unwrap_or_else(|| s.root.clone()),
+        None => meta.get("parentId").cloned().unwrap_or_else(|| "root".into()),
+    };
     let mut rel_parts = Vec::new();
     for part in meta.get("relativePath").map(String::as_str).unwrap_or_default().split('/').filter(|p| !p.is_empty()) {
         if rel_parts.len() >= MAX_REL_DEPTH {
@@ -118,12 +172,23 @@ pub async fn create(State(st): State<AppState>, user: User, headers: HeaderMap) 
     {
         let _w = st.write_lock.lock().await;
         let mut tx = st.db.begin().await?;
-        let parent = tree::folder_for(&mut tx, &user, &parent_id, tree::Need::Write).await?;
+        let parent = tree::folder_for(&mut tx, user, &parent_id, tree::Need::Write).await?;
+        if let Some(s) = &up.share {
+            check_in_share(&mut tx, s, &parent.id).await?;
+            let (pending,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM uploads WHERE share_id = ? AND node_id IS NULL AND expires_at > ?")
+                .bind(&s.id)
+                .bind(now())
+                .fetch_one(&mut *tx)
+                .await?;
+            if pending >= MAX_PENDING_PER_SHARE {
+                return Err(AppError::new(StatusCode::TOO_MANY_REQUESTS, "Too many uploads at once through this link. Try again later."));
+            }
+        }
         tree::check_quota(&mut tx, parent.drive(), size as i64).await?;
         let ts = now();
         sqlx::query(
-            "INSERT INTO uploads (id, owner_id, parent_id, rel_path, name, size, offset, created_at, expires_at, drive_id, batch)
-             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
+            "INSERT INTO uploads (id, owner_id, parent_id, rel_path, name, size, offset, created_at, expires_at, drive_id, batch, share_id)
+             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(user.id)
@@ -135,12 +200,13 @@ pub async fn create(State(st): State<AppState>, user: User, headers: HeaderMap) 
         .bind(ts + UPLOAD_TTL)
         .bind(&parent.drive_id)
         .bind(&batch)
+        .bind(up.share_id())
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
     }
     // Create the temp file only after the database record succeeds; if creation fails, undo the record, leaving neither uploads without a file nor unrecorded temp files
-    if let Err(e) = tokio::fs::File::create(upload_path(&st, &id)).await {
+    if let Err(e) = tokio::fs::File::create(upload_path(st, &id)).await {
         let _w = st.write_lock.lock().await;
         let _ = sqlx::query("DELETE FROM uploads WHERE id = ?").bind(&id).execute(&st.db).await;
         return Err(e.into());
@@ -148,27 +214,46 @@ pub async fn create(State(st): State<AppState>, user: User, headers: HeaderMap) 
 
     let mut res = StatusCode::CREATED.into_response();
     if size == 0 {
-        let upload = load(&st, &user, &id).await?;
-        let guard = ActiveGuard::claim(&st, &id).ok_or_else(|| AppError::new(StatusCode::LOCKED, "This file is already being uploaded"))?;
-        let node_id = finish(&st, &user, upload, guard).await?;
+        let upload = load(st, up, &id).await?;
+        let guard = ActiveGuard::claim(st, &id).ok_or_else(|| AppError::new(StatusCode::LOCKED, "This file is already being uploaded"))?;
+        let node_id = finish(st, up, upload, guard).await?;
         res.headers_mut().insert("x-node-id", HeaderValue::from_str(&node_id).unwrap());
     }
     tus(&mut res);
-    res.headers_mut().insert(header::LOCATION, HeaderValue::from_str(&format!("/api/uploads/{id}")).unwrap());
+    res.headers_mut().insert(header::LOCATION, HeaderValue::from_str(&up.location(&id)).unwrap());
     Ok(res)
 }
 
-async fn load(st: &AppState, user: &User, id: &str) -> AppResult<Upload> {
-    sqlx::query_as("SELECT id, owner_id, parent_id, rel_path, name, size, offset, drive_id, batch, node_id FROM uploads WHERE id = ? AND owner_id = ?")
+/// The folder is inside the shared folder (and, for a link that only accepts files, is the shared folder itself)
+async fn check_in_share(conn: &mut sqlx::SqliteConnection, share: &ShareUpload, folder: &str) -> AppResult<()> {
+    let inside = if share.drop_only { folder == share.root } else { tree::is_within(conn, folder, &share.root).await? };
+    if !inside {
+        return Err(AppError::not_found("Item not found"));
+    }
+    Ok(())
+}
+
+/// An upload of this person, or of this share link: a signed-in person can't continue a visitor's upload and the other way round
+async fn load(st: &AppState, up: &Uploader, id: &str) -> AppResult<Upload> {
+    sqlx::query_as(
+        "SELECT id, owner_id, parent_id, rel_path, name, size, offset, drive_id, batch, node_id FROM uploads
+         WHERE id = ?1 AND ((?3 IS NULL AND share_id IS NULL AND owner_id = ?2) OR share_id = ?3)",
+    )
         .bind(id)
-        .bind(user.id)
+        .bind(up.user.id)
+        .bind(up.share_id())
         .fetch_optional(&st.db)
         .await?
         .ok_or_else(|| AppError::not_found("The upload doesn't exist or has expired"))
 }
 
 pub async fn head(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Response> {
-    let upload = load(&st, &user, &id).await?;
+    head_as(&st, &Uploader::signed_in(user), &id).await
+}
+
+pub async fn head_as(st: &AppState, up: &Uploader, id: &str) -> AppResult<Response> {
+    let (st, id) = (st.clone(), id.to_string());
+    let upload = load(&st, up, &id).await?;
     let (size, offset, mut node_id) = (upload.size, upload.offset, upload.node_id.clone());
     if node_id.is_none() && offset == size {
         // Everything arrived but the file wasn't created: the server stopped before finishing. Finish now if the data
@@ -179,7 +264,7 @@ pub async fn head(State(st): State<AppState>, user: User, Path(id): Path<String>
             sqlx::query("DELETE FROM uploads WHERE id = ?").bind(&id).execute(&st.db).await?;
             return Err(AppError::not_found("The upload doesn't exist or has expired"));
         }
-        node_id = Some(finish(&st, &user, upload, guard).await?);
+        node_id = Some(finish(&st, up, upload, guard).await?);
     }
     let mut res = StatusCode::OK.into_response();
     tus(&mut res);
@@ -220,15 +305,20 @@ pub async fn patch(
     headers: HeaderMap,
     body: Body,
 ) -> AppResult<Response> {
+    patch_as(&st, &Uploader::signed_in(user), &id, &headers, body).await
+}
+
+pub async fn patch_as(st: &AppState, up: &Uploader, id: &str, headers: &HeaderMap, body: Body) -> AppResult<Response> {
+    let (st, id) = (st.clone(), id.to_string());
     if headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()) != Some("application/offset+octet-stream") {
         return Err(AppError::new(StatusCode::UNSUPPORTED_MEDIA_TYPE, "Content-Type must be application/offset+octet-stream"));
     }
     // Ownership first, so other users can't mark someone else's upload as active
-    load(&st, &user, &id).await?;
+    load(&st, up, &id).await?;
     let guard = ActiveGuard::claim(&st, &id).ok_or_else(|| AppError::new(StatusCode::LOCKED, "This file is already being uploaded"))?;
     // Read the offset only while holding the guard: a retried request must not work from the offset before the
     // previous request finished
-    let upload = load(&st, &user, &id).await?;
+    let upload = load(&st, up, &id).await?;
     if let Some(node_id) = &upload.node_id {
         let mut res = StatusCode::NO_CONTENT.into_response();
         tus(&mut res);
@@ -242,7 +332,7 @@ pub async fn patch(
         sqlx::query("UPDATE uploads SET expires_at = ? WHERE id = ?").bind(now() + UPLOAD_TTL).bind(&id).execute(&st.db).await?;
     }
 
-    let client_offset = header_u64(&headers, "upload-offset").ok_or_else(|| AppError::bad_request("Missing Upload-Offset"))?;
+    let client_offset = header_u64(headers, "upload-offset").ok_or_else(|| AppError::bad_request("Missing Upload-Offset"))?;
     if client_offset != upload.offset as u64 {
         return Err(AppError::conflict("Upload-Offset mismatch"));
     }
@@ -294,8 +384,8 @@ pub async fn patch(
 
     let mut res = StatusCode::NO_CONTENT.into_response();
     if offset == size {
-        let upload = load(&st, &user, &id).await?;
-        let node_id = finish(&st, &user, upload, guard).await?;
+        let upload = load(&st, up, &id).await?;
+        let node_id = finish(&st, up, upload, guard).await?;
         res.headers_mut().insert("x-node-id", HeaderValue::from_str(&node_id).unwrap());
     }
     tus(&mut res);
@@ -306,10 +396,18 @@ pub async fn patch(
 /// Finishes an upload in a task of its own: storing the content and creating the file must not stop halfway when the
 /// client or a proxy drops the request (which would leave content in storage without a file, or a file the client
 /// never hears about). The guard stays held until the task is done.
-async fn finish(st: &AppState, user: &User, upload: Upload, guard: ActiveGuard) -> AppResult<String> {
-    let (st, user) = (st.clone(), user.clone());
+async fn finish(st: &AppState, up: &Uploader, upload: Upload, guard: ActiveGuard) -> AppResult<String> {
+    let (st, up) = (st.clone(), up.clone());
     tokio::spawn(async move {
-        let result = finalize(&st, &user, upload).await;
+        let result = finalize(&st, &up, upload).await;
+        if let (Ok(id), Some(share)) = (&result, &up.share) {
+            // The share's access log shows the file each visitor sent (the file exists either way)
+            let node = match st.db.acquire().await {
+                Ok(mut c) => tree::get_node(&mut c, id).await.ok().flatten(),
+                Err(_) => None,
+            };
+            crate::logs::record_share_access(&st, &share.id, up.user.id, node.as_ref(), "upload", &share.visitor);
+        }
         drop(guard);
         result
     })
@@ -318,9 +416,9 @@ async fn finish(st: &AppState, user: &User, upload: Upload, guard: ActiveGuard) 
 }
 
 /// Upload finished: compute the hash, put it in storage, create the file node
-async fn finalize(st: &AppState, user: &User, upload: Upload) -> AppResult<String> {
+async fn finalize(st: &AppState, up: &Uploader, upload: Upload) -> AppResult<String> {
     let path = upload_path(st, &upload.id);
-    if let Some(id) = finalize_in_folder(st, user, &upload, &path).await? {
+    if let Some(id) = finalize_in_folder(st, up, &upload, &path).await? {
         return Ok(id);
     }
     let (hash, size) = hash_file(path.clone()).await?;
@@ -330,7 +428,7 @@ async fn finalize(st: &AppState, user: &User, upload: Upload) -> AppResult<Strin
     // First store it in the space's storage location (S3 may take a while, so don't hold the write lock)
     let staged = tree::stage_blob(st, upload.drive_id.as_deref().unwrap_or_default(), hash.clone(), size as i64, path.clone()).await?;
     let _w = st.write_lock.lock().await;
-    match commit_upload(st, user, &upload, &staged, &hash, size).await {
+    match commit_upload(st, up, &upload, &staged, &hash, size).await {
         Ok((id, extra)) => {
             tree::finish_staged(st, staged, extra).await;
             Ok(id)
@@ -348,7 +446,8 @@ async fn finalize(st: &AppState, user: &User, upload: Upload) -> AppResult<Strin
 /// Upload into a folder space: the file goes into the folder (under a name scans ignore, then renamed into place) and
 /// is indexed; its content isn't hashed. None when the target folder isn't in a folder space any more (the upload then
 /// goes where uploads go when their folder is gone).
-async fn finalize_in_folder(st: &AppState, user: &User, upload: &Upload, path: &std::path::Path) -> AppResult<Option<String>> {
+async fn finalize_in_folder(st: &AppState, up: &Uploader, upload: &Upload, path: &std::path::Path) -> AppResult<Option<String>> {
+    let user = &up.user;
     let parent = tree::get_node(&mut *st.db.acquire().await?, &upload.parent_id).await?;
     let Some(parent) = parent.filter(|p| p.in_folder_space() && p.is_folder() && p.trashed_at.is_none()) else { return Ok(None) };
     let size = tokio::fs::metadata(path).await?.len();
@@ -373,6 +472,9 @@ async fn finalize_in_folder(st: &AppState, user: &User, upload: &Upload, path: &
             return Err(AppError::forbidden("You no longer have permission to upload files"));
         }
         let target = tree::folder_for(&mut tx, user, &upload.parent_id, tree::Need::Write).await?;
+        if let Some(s) = &up.share {
+            check_in_share(&mut tx, s, &target.id).await?;
+        }
         if target.drive() != parent.drive() {
             return Err(AppError::conflict("Something changed at the same time. Try again."));
         }
@@ -390,7 +492,7 @@ async fn finalize_in_folder(st: &AppState, user: &User, upload: &Upload, path: &
         tree::touch(&mut tx, &folder.id).await?;
         if let Some(n) = tree::get_node(&mut tx, &id).await? {
             tree::adjust_usage(&mut tx, n.drive(), n.size).await?;
-            tree::log(&mut tx, user, Some(&n), "upload", "").await?;
+            tree::log(&mut tx, user, Some(&n), "upload", &up.log_detail()).await?;
         }
         tx.commit().await?;
         Ok(id)
@@ -410,16 +512,23 @@ async fn finalize_in_folder(st: &AppState, user: &User, upload: &Upload, path: &
 /// Creates the node and records the content reference while holding the write lock
 async fn commit_upload(
     st: &AppState,
-    user: &User,
+    up: &Uploader,
     upload: &Upload,
     staged: &tree::StagedBlob,
     hash: &str,
     size: u64,
 ) -> AppResult<(String, Option<tree::BlobRef>)> {
+    let user = &up.user;
     let mut tx = st.db.begin().await?;
     // The account's upload permission may have been removed while the upload was running
     if !user.can_write && !user.is_admin() {
         return Err(AppError::forbidden("You no longer have permission to upload files"));
+    }
+    // Through a share link, the file goes into the folder as it is now: still inside the shared folder, and still
+    // writable by the link's creator; it never falls back to the creator's own files
+    if let Some(s) = &up.share {
+        let target = tree::folder_for(&mut tx, user, &upload.parent_id, tree::Need::Write).await?;
+        check_in_share(&mut tx, s, &target.id).await?;
     }
     // The target folder may have been deleted during the upload; in that case put it in the root folder
     let parent_id = match tree::get_node(&mut tx, &upload.parent_id).await? {
@@ -471,19 +580,23 @@ async fn commit_upload(
     tree::touch(&mut tx, &folder).await?;
     if let Some(n) = tree::get_node(&mut tx, &id).await? {
         tree::adjust_usage(&mut tx, n.drive(), size as i64).await?;
-        tree::log(&mut tx, user, Some(&n), "upload", "").await?;
+        tree::log(&mut tx, user, Some(&n), "upload", &up.log_detail()).await?;
     }
     tx.commit().await?;
     Ok((id, extra))
 }
 
 pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Response> {
-    let upload = load(&st, &user, &id).await?;
+    delete_as(&st, &Uploader::signed_in(user), &id).await
+}
+
+pub async fn delete_as(st: &AppState, up: &Uploader, id: &str) -> AppResult<Response> {
+    let upload = load(st, up, id).await?;
     {
         let _w = st.write_lock.lock().await;
         sqlx::query("DELETE FROM uploads WHERE id = ?").bind(&upload.id).execute(&st.db).await?;
     }
-    let _ = tokio::fs::remove_file(upload_path(&st, &upload.id)).await;
+    let _ = tokio::fs::remove_file(upload_path(st, &upload.id)).await;
     let mut res = StatusCode::NO_CONTENT.into_response();
     tus(&mut res);
     Ok(res)
@@ -635,12 +748,13 @@ mod tests {
         let id = begin(&env, &amy, "big.txt", 5).await;
         tokio::fs::write(upload_path(&env.st, &id), b"hello").await.unwrap();
         sqlx::query("UPDATE uploads SET offset = 5 WHERE id = ?").bind(&id).execute(&env.st.db).await.unwrap();
-        let upload = load(&env.st, &amy, &id).await.unwrap();
+        let up = Uploader::signed_in(amy.clone());
+        let upload = load(&env.st, &up, &id).await.unwrap();
         let guard = ActiveGuard::claim(&env.st, &id).unwrap();
         // Hold the write lock, so finishing stops right before recording the file (the content is already stored),
         // and drop the request there, as a proxy closing the connection would
         let lock = env.st.write_lock.lock().await;
-        let request = finish(&env.st, &amy, upload, guard);
+        let request = finish(&env.st, &up, upload, guard);
         assert!(tokio::time::timeout(std::time::Duration::from_millis(300), request).await.is_err());
         drop(lock);
         // The file still appears, and the upload can't be finished a second time meanwhile

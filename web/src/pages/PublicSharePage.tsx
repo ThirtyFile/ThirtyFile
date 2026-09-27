@@ -1,11 +1,11 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronRightIcon, DownloadIcon, EyeIcon, FolderOpenIcon, Grid2X2Icon, InboxIcon, LinkIcon, ListIcon, Loader2Icon, LockIcon, UploadIcon } from "lucide-react";
 import { toast } from "sonner";
-import { ChevronRightIcon, DownloadIcon, EyeIcon, FolderOpenIcon, Grid2X2Icon, LinkIcon, ListIcon, Loader2Icon, LockIcon } from "lucide-react";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
-import { api, shareSource, triggerDownload, type Node, type PublicShare } from "@/api";
+import { api, shareSource, shareUploadEndpoint, triggerDownload, type Node, type PublicShare } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +16,8 @@ import { canPreview } from "@/components/FileViewer";
 import { Preview } from "@/components/Preview";
 import { Logo } from "@/pages/AppShell";
 import { LanguageSwitch } from "@/components/LanguageSwitch";
+import { UploadPanel } from "@/components/UploadPanel";
+import { enqueue, filesFromDrop, filesFromInput, onUploadsLanded, type PickedFile } from "@/uploads";
 import { cn, formatBytes, formatDate } from "@/lib/utils";
 import { t, tc } from "@/lib/i18n";
 import { useAllPages } from "@/lib/pages";
@@ -35,6 +37,7 @@ export function PublicSharePage() {
     );
   else if (info.data.needs_password) body = <Unlock token={token} />;
   else if (info.data.node!.kind === "file") body = <SharedFile share={info.data} node={info.data.node!} />;
+  else if (info.data.drop_only) body = <DropBox share={info.data} root={info.data.node!} />;
   else body = <SharedFolder share={info.data} root={info.data.node!} />;
 
   return (
@@ -55,6 +58,9 @@ export function PublicSharePage() {
         {!info.data?.needs_password && <h1 className="sr-only">{info.data?.node?.name ?? t("Share link")}</h1>}
         {body}
       </main>
+      <div className="fixed right-4 bottom-4 z-40 w-[min(380px,calc(100vw-2rem))]">
+        <UploadPanel visitor />
+      </div>
     </div>
   );
 }
@@ -102,6 +108,91 @@ function Unlock({ token }: { token: string }) {
   );
 }
 
+/** Uploads files into a folder of a link that accepts them; files over the size limit are refused before sending */
+function useShareUpload(share: PublicShare) {
+  return (files: PickedFile[], parentId: string) => {
+    const tooBig = share.max_upload ? files.filter((f) => f.file.size > share.max_upload) : [];
+    if (tooBig.length) toast.error(t("{name} is larger than the upload size limit ({size})", { name: tooBig[0].file.name, size: formatBytes(share.max_upload) }));
+    const ok = files.filter((f) => !tooBig.includes(f));
+    if (ok.length) enqueue(ok, parentId, shareUploadEndpoint(share.token));
+  };
+}
+
+/** Drag and drop of files from the computer: `onFiles` gets them, `dragging` is true while they're over the area */
+function useFileDrop(enabled: boolean, onFiles: (files: PickedFile[]) => void) {
+  const [dragging, setDragging] = useState(false);
+  if (!enabled) return { dragging: false, props: {} };
+  return {
+    dragging,
+    props: {
+      onDragOver: (e: DragEvent) => {
+        if (!e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        setDragging(true);
+      },
+      onDragLeave: (e: DragEvent) => {
+        if (!e.currentTarget.contains(e.relatedTarget as globalThis.Node | null)) setDragging(false);
+      },
+      onDrop: async (e: DragEvent) => {
+        if (!e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        setDragging(false);
+        const picked = await filesFromDrop(e.dataTransfer);
+        if (picked.length) onFiles(picked);
+      },
+    },
+  };
+}
+
+/** A hidden file picker and a function that opens it */
+function useFilePicker(onFiles: (files: PickedFile[]) => void) {
+  const ref = useRef<HTMLInputElement>(null);
+  const input = (
+    <input
+      ref={ref}
+      type="file"
+      multiple
+      hidden
+      onChange={(e) => {
+        if (e.target.files?.length) onFiles(filesFromInput(e.target.files));
+        e.target.value = "";
+      }}
+    />
+  );
+  return { input, pick: () => ref.current?.click() };
+}
+
+/** A link that only accepts files: an upload area, nothing of what is already in the folder */
+function DropBox({ share, root }: { share: PublicShare; root: Node }) {
+  const upload = useShareUpload(share);
+  const send = (files: PickedFile[]) => upload(files, root.id);
+  const drop = useFileDrop(true, send);
+  const picker = useFilePicker(send);
+  return (
+    <div
+      {...drop.props}
+      className={cn(
+        "mt-10 flex h-fit w-full max-w-md flex-col items-center gap-4 rounded-2xl border-2 border-dashed bg-card p-10 text-center shadow-sm",
+        drop.dragging && "border-brand bg-brand/5",
+      )}
+    >
+      <InboxIcon className="size-12 stroke-1 text-muted-foreground" />
+      <div>
+        <div className="font-medium break-all">{t("Send files to “{name}”", { name: root.name })}</div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {t("Drag files here or choose them. You won't see what others have sent, and nothing can be downloaded here.")}
+        </p>
+      </div>
+      <Button className="bg-brand text-brand-foreground hover:bg-brand/90" onClick={picker.pick}>
+        <UploadIcon /> {t("Choose files")}
+      </Button>
+      {share.max_upload > 0 && <p className="text-xs text-muted-foreground">{t("Up to {size} per file", { size: formatBytes(share.max_upload) })}</p>}
+      {picker.input}
+    </div>
+  );
+}
+
 /** Starts a download and then refreshes the share, so a download limit shows the downloads left */
 function useShareDownload(token: string) {
   const qc = useQueryClient();
@@ -123,6 +214,7 @@ function SharedFile({ share, node }: { share: PublicShare; node: Node }) {
   const download = useShareDownload(share.token);
   const [previewing, setPreviewing] = useState(false);
   const exhausted = share.downloads_left === 0;
+  const canDownload = share.allow_download && !exhausted;
   return (
     <>
       <ContextMenu>
@@ -140,14 +232,19 @@ function SharedFile({ share, node }: { share: PublicShare; node: Node }) {
                 <EyeIcon /> {t("Preview")}
               </Button>
             )}
-            <Button
-              className="bg-brand text-brand-foreground hover:bg-brand/90"
-              disabled={exhausted}
-              onClick={() => download(source.contentUrl(node, true))}
-            >
-              <DownloadIcon /> {exhausted ? t("Download limit reached") : t("Download")}
-            </Button>
+            {share.allow_download && (
+              <Button
+                className="bg-brand text-brand-foreground hover:bg-brand/90"
+                disabled={exhausted}
+                onClick={() => download(source.contentUrl(node, true))}
+              >
+                <DownloadIcon /> {exhausted ? t("Download limit reached") : t("Download")}
+              </Button>
+            )}
           </div>
+          {!share.allow_download && (
+            <p className="text-xs text-muted-foreground">{canPreview(node) ? t("This link is for viewing only.") : t("This link is for viewing only, and this type of file can't be previewed.")}</p>
+          )}
         </ContextMenuTrigger>
         <ContextMenuContent>
           {canPreview(node) && !exhausted && (
@@ -155,9 +252,11 @@ function SharedFile({ share, node }: { share: PublicShare; node: Node }) {
               <EyeIcon /> {t("Preview")}
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem disabled={exhausted} onClick={() => download(source.contentUrl(node, true))}>
-            <DownloadIcon /> {t("Download")}
-          </DropdownMenuItem>
+          {share.allow_download && (
+            <DropdownMenuItem disabled={exhausted} onClick={() => download(source.contentUrl(node, true))}>
+              <DownloadIcon /> {t("Download")}
+            </DropdownMenuItem>
+          )}
         </ContextMenuContent>
       </ContextMenu>
       {previewing && (
@@ -166,6 +265,7 @@ function SharedFile({ share, node }: { share: PublicShare; node: Node }) {
           index={0}
           source={source}
           editable={false}
+          allowDownload={canDownload}
           onIndexChange={() => {}}
           onClose={() => setPreviewing(false)}
         />
@@ -194,6 +294,13 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
 
   const downloadIds = selected.size ? [...selected] : [current];
   const selectedNodes = items.filter((n) => selected.has(n.id));
+  const qc = useQueryClient();
+  const upload = useShareUpload(share);
+  const send = (files: PickedFile[]) => upload(files, current);
+  const drop = useFileDrop(share.allow_upload, send);
+  const picker = useFilePicker(send);
+  // Files that finish uploading appear in the list
+  useEffect(() => onUploadsLanded(() => qc.invalidateQueries({ queryKey: ["public-children", share.token] }, { cancelRefetch: false })), [qc, share.token]);
 
   return (
     <div className="flex h-fit min-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl border bg-background shadow-sm">
@@ -228,15 +335,26 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
             </button>
           ))}
         </div>
-        <Button
-          size="sm"
-          className="bg-brand text-brand-foreground hover:bg-brand/90"
-          disabled={exhausted}
-          onClick={() => download(source.downloadLink(downloadIds))}
-        >
-          <DownloadIcon /> {selected.size ? t("Download {n} item|Download {n} items", { n: selected.size }) : t("Download all")}
-        </Button>
+        {share.allow_upload && (
+          <Button size="sm" variant="outline" onClick={picker.pick}>
+            <UploadIcon /> {t("Upload")}
+          </Button>
+        )}
+        {share.allow_download && (
+          <Button
+            size="sm"
+            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            disabled={exhausted}
+            onClick={() => download(source.downloadLink(downloadIds))}
+          >
+            <DownloadIcon /> {selected.size ? t("Download {n} item|Download {n} items", { n: selected.size }) : t("Download all")}
+          </Button>
+        )}
+        {picker.input}
       </div>
+      {share.allow_upload && (
+        <div className="border-b bg-muted/40 px-4 py-1.5 text-xs text-muted-foreground">{t("You can add files here: drag them onto the list or click Upload.")}</div>
+      )}
       {children.isLoading ? (
         <div className="grid gap-2 p-4">
           {[0, 1, 2, 3].map((i) => (
@@ -246,7 +364,8 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
       ) : (
         <ContextMenu>
           <ContextMenuTrigger
-            className="min-h-40 flex-1"
+            {...drop.props}
+            className={cn("min-h-40 flex-1", drop.dragging && "bg-brand/5 ring-2 ring-brand/40 ring-inset")}
             onContextMenuCapture={(e) => !(e.target as HTMLElement).closest("[data-node-id]") && setSelected(new Set())}
             onClick={(e) => !(e.target as HTMLElement).closest("[data-node-id]") && setSelected(new Set())}
           >
@@ -281,9 +400,16 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
                 {selectedNodes[0].kind === "folder" ? <FolderOpenIcon /> : <EyeIcon />} {selectedNodes[0].kind === "folder" ? t("Open") : t("Preview")}
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem disabled={exhausted} onClick={() => download(source.downloadLink(downloadIds))}>
-              <DownloadIcon /> {selected.size ? t("Download {n} item|Download {n} items", { n: selected.size }) : t("Download all (ZIP)")}
-            </DropdownMenuItem>
+            {share.allow_download && (
+              <DropdownMenuItem disabled={exhausted} onClick={() => download(source.downloadLink(downloadIds))}>
+                <DownloadIcon /> {selected.size ? t("Download {n} item|Download {n} items", { n: selected.size }) : t("Download all (ZIP)")}
+              </DropdownMenuItem>
+            )}
+            {share.allow_upload && (
+              <DropdownMenuItem onClick={picker.pick}>
+                <UploadIcon /> {t("Upload files")}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => setView(view === "list" ? "grid" : "list")}>
               {view === "list" ? <Grid2X2Icon /> : <ListIcon />} {view === "list" ? t("Icon view") : t("List view")}
@@ -297,7 +423,7 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
           index={previewIndex}
           source={source}
           editable={false}
-          allowDownload={!exhausted}
+          allowDownload={!exhausted && share.allow_download}
           onIndexChange={(i) => setPreviewId(files[i].id)}
           onClose={() => setPreviewId(null)}
         />

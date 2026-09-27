@@ -12,6 +12,8 @@ export interface UploadTask {
   parentId: string;
   /** Files added together, so the server puts one uploaded folder into one folder */
   batch: string;
+  /** Where the upload is created: signed-in uploads, or a share link that accepts files */
+  endpoint: string;
   size: number;
   sent: number;
   status: UploadStatus;
@@ -150,7 +152,7 @@ function errorMessage(err: Error): string {
 
 function start(task: UploadTask) {
   const upload = new tus.Upload(task.file, {
-    endpoint: "/api/uploads",
+    endpoint: task.endpoint,
     chunkSize: 32 * 1024 * 1024,
     retryDelays: [0, 1000, 3000, 5000, 10000, 20000],
     removeFingerprintOnSuccess: true,
@@ -163,7 +165,7 @@ function start(task: UploadTask) {
     },
     // Uploads of the same file to different locations must not resume each other
     fingerprint: async (file) =>
-      ["sd", task.parentId, task.relativePath, (file as File).name, (file as File).size, (file as File).lastModified].join("|"),
+      ["sd", task.endpoint, task.parentId, task.relativePath, (file as File).name, (file as File).size, (file as File).lastModified].join("|"),
     onProgress: (sent) => {
       if (task.upload !== upload || task.status !== "uploading") return;
       setSent(task, sent);
@@ -221,7 +223,8 @@ function requeue(task: UploadTask) {
   queue.push(task);
 }
 
-export function enqueue(files: PickedFile[], parentId: string) {
+/** Queues files for upload into a folder; `endpoint` is a share link's upload address for visitors of the link */
+export function enqueue(files: PickedFile[], parentId: string, endpoint = "/api/uploads") {
   // getRandomValues works on plain http too (randomUUID needs HTTPS)
   const batch = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join("");
   for (const { file, relativePath } of files) {
@@ -231,6 +234,7 @@ export function enqueue(files: PickedFile[], parentId: string) {
       relativePath,
       parentId,
       batch,
+      endpoint,
       size: file.size,
       sent: 0,
       status: "queued",

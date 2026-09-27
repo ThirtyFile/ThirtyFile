@@ -70,6 +70,7 @@ pub async fn load_settings(db: &SqlitePool) -> LogSettings {
 // ───────────── Visitors (for the share link visit log) ─────────────
 
 /// A visitor to a public share page: IP and browser (may not be recorded, depending on log settings)
+#[derive(Clone)]
 pub struct Visitor {
     pub ip: String,
     pub user_agent: String,
