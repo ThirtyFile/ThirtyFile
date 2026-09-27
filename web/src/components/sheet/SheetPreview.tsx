@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import { Loader2Icon } from "lucide-react";
+import { toast } from "sonner";
 import { readXlsx } from "@/lib/sheet/xlsx";
 import { Axis, MAX_COLS, MAX_ROWS, colName, key, type Workbook } from "@/lib/sheet/model";
 import { Calculator, type Value } from "@/lib/sheet/formula";
@@ -150,6 +151,13 @@ function useDrawingFrame(parts: ArrayBuffer | null): DrawingFrame {
     const st = state.current;
     st.ready = false;
     st.loaded = false;
+    // The frame says "ready" once its script has started. If it never does (the script was blocked, e.g. a page left
+    // open across an upgrade, or it failed while starting), say so instead of leaving charts and pictures silently out
+    const readyTimer = srcDoc
+      ? window.setTimeout(() => {
+          if (!st.ready) toast.warning(t("Charts and pictures in this workbook couldn't be shown. Reload the page."));
+        }, 10_000)
+      : 0;
     const onMessage = (e: MessageEvent) => {
       if (e.source !== iframe.current?.contentWindow) return;
       const msg = e.data as { type?: string };
@@ -169,7 +177,10 @@ function useDrawingFrame(parts: ArrayBuffer | null): DrawingFrame {
       }
     };
     window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
+    return () => {
+      window.clearTimeout(readyTimer);
+      window.removeEventListener("message", onMessage);
+    };
   }, [parts, srcDoc, post]);
   return useMemo(
     () => ({

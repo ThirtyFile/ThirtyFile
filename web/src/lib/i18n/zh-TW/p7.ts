@@ -17,4 +17,5 @@ export default {
   "Download progress": "下載進度",
   "Storage used": "已使用空間",
   "Share link": "分享連結",
+  "Charts and pictures in this workbook couldn't be shown. Reload the page.": "無法顯示此活頁簿中的圖表和圖片，請重新整理頁面。",
 } satisfies Record<string, string>;
