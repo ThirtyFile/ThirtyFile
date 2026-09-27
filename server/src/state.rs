@@ -85,6 +85,8 @@ pub struct SystemSettings {
     pub public_url: String,
     /// Interface language for people who haven't picked one: "auto" (follow the browser), "en" or "zh-TW"
     pub default_lang: String,
+    /// Folder spaces are scanned for changes made outside ThirtyFile this often (minutes, 0 = only by hand)
+    pub scan_minutes: i64,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]

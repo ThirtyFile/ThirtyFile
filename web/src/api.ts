@@ -40,6 +40,19 @@ export interface NodeInfo {
   via_share: boolean;
   /** Why the storage service holding the content is offline (e.g. S3 disconnected) */
   offline: string | null;
+  /** A folder space: browse, download and share only (for now) */
+  read_only: boolean;
+}
+
+/** What the last scan of a folder space found */
+export interface ScanReport {
+  at: number;
+  added: number;
+  changed: number;
+  moved: number;
+  removed: number;
+  skipped: string[];
+  error: string | null;
 }
 
 export interface Drive {
@@ -59,6 +72,12 @@ export interface Drive {
   location_is_default: boolean;
   /** Why the storage service is offline: can be browsed, but not opened, downloaded or uploaded to */
   offline: string | null;
+  /** "folder": the space shows a folder on the server */
+  mode: "store" | "folder";
+  /** Folder spaces, for administrators */
+  source_path?: string;
+  last_scan_at?: number | null;
+  scan_report?: ScanReport | null;
 }
 
 export type StorageKind = "local" | "s3" | "sftp" | "ftp";
@@ -413,6 +432,7 @@ export interface SystemSettingsReq {
   default_user_quota?: number;
   public_url?: string;
   default_lang?: DefaultLang;
+  scan_minutes?: number;
 }
 
 /** System default interface language: "auto" follows the browser */
@@ -427,6 +447,8 @@ export interface SystemInfo {
   /** Public site URL; blank = use the browser's current URL */
   public_url: string;
   default_lang: DefaultLang;
+  /** Folder spaces are checked for changes this often (minutes, 0 = only by hand) */
+  scan_minutes: number;
   stats: {
     users: number;
     groups: number;
@@ -586,7 +608,9 @@ export const api = {
   updateSystemSettings: (req: SystemSettingsReq) => request<SystemInfo>("PATCH", "/admin/settings", req),
 
   drives: () => get<Drive[]>("/drives").then((l) => l.map(localizeDrive)),
-  createDrive: (name: string, quota_bytes?: number) => post<Drive>("/drives", { name, quota_bytes }),
+  createDrive: (name: string, quota_bytes?: number, source_path?: string) => post<Drive>("/drives", { name, quota_bytes, source_path }),
+  /** Scans a folder space for changes made on the server's folder */
+  scanDrive: (id: string) => post<ScanReport>(`/admin/drives/${encodeURIComponent(id)}/scan`),
   updateDrive: (id: string, req: { name?: string; quota_bytes?: number }) => request<Drive>("PATCH", `/drives/${id}`, req),
   deleteDrive: (id: string) => request("DELETE", `/drives/${id}`),
   adminDrives: () => get<Drive[]>("/admin/drives").then((l) => l.map(localizeDrive)),

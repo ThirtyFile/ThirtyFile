@@ -49,6 +49,20 @@
         <h2 id="per-space">A location for each space</h2>
         <p>Under <strong>Control panel › Spaces</strong>, choose a storage location for a space. Files already in the space can be moved to the new location. The space stays in use while they move.</p>
 
+        <h2 id="folder-spaces">Folder spaces: a folder on the server as a space</h2>
+        <p>A folder space shows an existing folder on the server, such as a NAS share, as a space. Its files stay where they are, as ordinary files, and can also be changed there, for example over SMB or by a scanner.</p>
+        <ol>
+          <li>Mount the folder into the container, for example <code>-v /srv/shared:/mnt/shared</code>.</li>
+          <li>Under <strong>Control panel › Spaces</strong>, click <strong>New folder space</strong> and enter the path inside the container, <code>/mnt/shared</code>.</li>
+          <li>Add members as for any team space.</li>
+        </ol>
+        <p>ThirtyFile finds changes made in the folder when someone opens it, and checks every folder space every 15 minutes (change this under <strong>Control panel › General</strong>), or right away with <strong>Check for changes</strong>. Files and folders moved or renamed in the folder keep their share links and permissions.</p>
+        <ul>
+          <li>For now, files in a folder space are changed in the folder itself: from the web they can be opened, downloaded and shared.</li>
+          <li>Temporary files of office programs and systems (<code>~$…</code>, <code>Thumbs.db</code>, <code>.DS_Store</code>) aren't shown. Symbolic links, names that aren't valid text and other disks mounted inside the folder are skipped; <strong>Check for changes</strong> lists them.</li>
+          <li>A file that is still being copied into the folder appears once it has stopped changing for a few seconds.</li>
+        </ul>
+
         <h2 id="offline">When a location is offline</h2>
         <p>Browsing, searching and organising folders keep working. Opening, downloading and uploading are paused, and resume by themselves when the location is back. The space is marked as offline in the meantime.</p>
       </main>

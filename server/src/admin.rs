@@ -283,6 +283,7 @@ pub struct SystemInfo {
     default_user_quota: i64,
     public_url: String,
     default_lang: String,
+    scan_minutes: i64,
     stats: SystemStats,
 }
 
@@ -330,6 +331,7 @@ async fn system_info(st: &AppState) -> AppResult<SystemInfo> {
         default_user_quota: s.default_user_quota,
         public_url: s.public_url,
         default_lang: s.default_lang,
+        scan_minutes: s.scan_minutes,
         stats,
     })
 }
@@ -345,6 +347,7 @@ pub struct SettingsReq {
     default_user_quota: Option<i64>,
     public_url: Option<String>,
     default_lang: Option<String>,
+    scan_minutes: Option<i64>,
 }
 
 /// Values of the default interface language: follow the browser, English, Traditional Chinese
@@ -410,8 +413,18 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
             };
             tree::log(&mut tx, &user, None, "settings", &format!("Default language: {label}")).await?;
         }
+        if let Some(m) = req.scan_minutes {
+            if !(0..=1440).contains(&m) {
+                return Err(AppError::bad_request("Enter a number of minutes from 0 to 1440"));
+            }
+            set_setting(&mut tx, "scan_minutes", &m.to_string()).await?;
+            tree::log(&mut tx, &user, None, "settings", &format!("Folder spaces are checked for changes every {m} minutes")).await?;
+        }
         tx.commit().await?;
         let mut s = st.system.write().unwrap();
+        if let Some(m) = req.scan_minutes {
+            s.scan_minutes = m;
+        }
         if let Some(lang) = req.default_lang {
             s.default_lang = lang;
         }

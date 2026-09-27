@@ -478,6 +478,7 @@ pub async fn set_drive_location(
     Path(drive_id): Path<String>,
     Json(req): Json<DriveLocationReq>,
 ) -> AppResult<Json<Value>> {
+    refuse_folder_space(&st, &drive_id).await?;
     if let Some(loc) = &req.location_id {
         let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM storage_locations WHERE id = ?").bind(loc).fetch_optional(&st.db).await?;
         if exists.is_none() {
@@ -508,7 +509,21 @@ pub async fn set_drive_location(
     Ok(Json(json!({ "ok": true })))
 }
 
+/// A folder space's files are a folder on the server: they can't be moved to a storage location
+async fn refuse_folder_space(st: &AppState, drive_id: &str) -> AppResult<()> {
+    let (mode,): (String,) = sqlx::query_as("SELECT mode FROM drives WHERE id = ?")
+        .bind(drive_id)
+        .fetch_optional(&st.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Space not found"))?;
+    if mode == "folder" {
+        return Err(AppError::bad_request("This space shows a folder on the server; its files can't be moved to a storage location"));
+    }
+    Ok(())
+}
+
 pub async fn migrate(State(st): State<AppState>, _: Admin, Path(drive_id): Path<String>) -> AppResult<Json<Value>> {
+    refuse_folder_space(&st, &drive_id).await?;
     let target = tree::drive_location(&st, &mut *st.db.acquire().await?, &drive_id).await?;
     probe(&st, &target).await.map_err(|e| AppError::bad_request(format!("The target storage location can't be reached: {e}")))?;
     start_migration(&st, &drive_id).await?;

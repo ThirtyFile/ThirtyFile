@@ -37,6 +37,15 @@ pub struct DriveInfo {
     location_is_default: bool,
     /// Reason the storage location is offline (e.g. S3 disconnected); browsing works, but opening, downloading and uploading don't
     offline: Option<String>,
+    /// "store" or "folder" (a folder on the server, changed there rather than from the web for now)
+    mode: String,
+    /// Folder spaces, for administrators: the folder, when it was last scanned, and what the scan found
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_scan_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scan_report: Option<Value>,
 }
 
 async fn drive_info(st: &AppState, conn: &mut SqliteConnection, d: Drive, role: Option<Role>) -> AppResult<DriveInfo> {
@@ -57,8 +66,13 @@ async fn drive_info(st: &AppState, conn: &mut SqliteConnection, d: Drive, role: 
     let used_bytes = d.used_bytes;
     let location_is_default = explicit.is_none();
     let location_id = explicit.unwrap_or(default_location);
-    let offline = st.location_offline(&location_id);
+    // A folder space is on the server itself: nothing to be offline
+    let offline = if d.is_folder() { None } else { st.location_offline(&location_id) };
     Ok(DriveInfo {
+        mode: d.mode.clone(),
+        source_path: None,
+        last_scan_at: None,
+        scan_report: None,
         id: d.id,
         name: d.name,
         kind: d.kind,
@@ -95,6 +109,9 @@ pub struct CreateDriveReq {
     name: String,
     #[serde(default)]
     quota_bytes: i64,
+    /// Administrators: show this folder on the server as the space (a folder space) instead of storing files
+    #[serde(default)]
+    source_path: Option<String>,
 }
 
 /// Team spaces a standard user may create
@@ -105,6 +122,18 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
         return Err(AppError::forbidden("Only administrators can create spaces"));
     }
     let name = validate_name(&req.name)?;
+    let source = match req.source_path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        Some(_) if !user.is_admin() => return Err(AppError::forbidden("Only administrators can show a folder on the server as a space")),
+        Some(p) => {
+            let p = crate::folders::check_source(&st, p)?;
+            let (taken,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drives WHERE mode = 'folder' AND source_path = ?").bind(&p).fetch_one(&st.db).await?;
+            if taken > 0 {
+                return Err(AppError::conflict("Another space already shows this folder"));
+            }
+            Some(p)
+        }
+        None => None,
+    };
     // A space created by a standard user gets that user's own quota (0 = unlimited only when the user is unlimited)
     // rather than being unlimited; administrators adjust it later. Each space has its own quota: whether users may
     // create spaces at all is the administrator's setting
@@ -120,12 +149,25 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     }
     let (drive_id, root_id) = create_drive(&mut tx, &name, "team", user.id, quota).await?;
     add_grant(&mut tx, &root_id, "user", user.id, "owner", Some(user.id), None).await?;
+    if let Some(source) = &source {
+        crate::folders::set_up(&mut tx, &drive_id, &root_id, source).await?;
+    }
     let root = tree::get_node(&mut tx, &root_id).await?.unwrap();
-    tree::log(&mut tx, &user, Some(&root), "drive_create", "").await?;
+    tree::log(&mut tx, &user, Some(&root), "drive_create", source.as_deref().unwrap_or_default()).await?;
     let drive = tree::get_drive(&mut tx, &drive_id).await?.unwrap();
     let info = drive_info(&st, &mut tx, drive, Some(Role::Owner)).await?;
     tx.commit().await?;
+    drop(_w);
+    if source.is_some() {
+        // Index the folder right away (in the background: a large folder takes a while)
+        crate::folders::scan_later(&st, &drive_id);
+    }
     Ok(Json(info))
+}
+
+/// Scans a folder space now (Control panel › Spaces › Scan now)
+pub async fn scan(State(st): State<AppState>, Admin(_): Admin, Path(id): Path<String>) -> AppResult<Json<crate::folders::ScanReport>> {
+    Ok(Json(crate::folders::scan(&st, &id).await?))
 }
 
 /// Space management rights: manager or above; administrators can manage all non-personal spaces
@@ -216,7 +258,17 @@ pub async fn admin_list(State(st): State<AppState>, Admin(user): Admin) -> AppRe
     for d in drives {
         let root = tree::get_node(&mut c, &d.root_id).await?.unwrap();
         let role = tree::role_on(&mut c, &user, &root).await?;
-        out.push(drive_info(&st, &mut c, d, role).await?);
+        let source_path = d.source_path.clone().filter(|_| d.is_folder());
+        let mut info = drive_info(&st, &mut c, d, role).await?;
+        if source_path.is_some() {
+            // Administrators see which folder a folder space shows and what its last scan found
+            let (at, report): (Option<i64>, Option<String>) =
+                sqlx::query_as("SELECT last_scan_at, scan_report FROM drives WHERE id = ?").bind(&info.id).fetch_one(&mut *c).await?;
+            info.last_scan_at = at;
+            info.scan_report = report.and_then(|r| serde_json::from_str(&r).ok());
+            info.source_path = source_path;
+        }
+        out.push(info);
     }
     Ok(Json(out))
 }
@@ -620,9 +672,9 @@ mod tests {
         env.st.system.write().unwrap().allow_user_drives = true;
         let amy = env.user("amy", true).await;
         for i in 0..MAX_OWN_SPACES {
-            let _ = create(State(env.st.clone()), amy.clone(), Json(CreateDriveReq { name: format!("Team {i}"), quota_bytes: 0 })).await.unwrap();
+            let _ = create(State(env.st.clone()), amy.clone(), Json(CreateDriveReq { name: format!("Team {i}"), quota_bytes: 0, source_path: None })).await.unwrap();
         }
-        let res = create(State(env.st.clone()), amy.clone(), Json(CreateDriveReq { name: "One more".into(), quota_bytes: 0 })).await;
+        let res = create(State(env.st.clone()), amy.clone(), Json(CreateDriveReq { name: "One more".into(), quota_bytes: 0, source_path: None })).await;
         assert!(matches!(res, Err(e) if e.status == axum::http::StatusCode::BAD_REQUEST));
     }
 
@@ -711,11 +763,11 @@ mod tests {
         sqlx::query("UPDATE users SET quota_bytes = 5000 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
         let mut conn = env.st.db.acquire().await.unwrap();
         let amy = crate::auth::user_by_id(&env.st, &mut conn, amy.id).await.unwrap().unwrap();
-        let req = CreateDriveReq { name: "Team".into(), quota_bytes: 0 };
+        let req = CreateDriveReq { name: "Team".into(), quota_bytes: 0, source_path: None };
         let Json(info) = create(State(env.st.clone()), amy, Json(req)).await.unwrap();
         assert_eq!(info.quota_bytes, 5000, "not unlimited, whatever the request said");
         let admin = env.admin().await;
-        let Json(info) = create(State(env.st.clone()), admin, Json(CreateDriveReq { name: "Big".into(), quota_bytes: 0 })).await.unwrap();
+        let Json(info) = create(State(env.st.clone()), admin, Json(CreateDriveReq { name: "Big".into(), quota_bytes: 0, source_path: None })).await.unwrap();
         assert_eq!(info.quota_bytes, 0, "administrators may create unlimited spaces");
     }
 }

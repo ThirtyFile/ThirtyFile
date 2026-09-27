@@ -4,6 +4,7 @@ mod db;
 mod drives;
 mod error;
 mod files;
+mod folders;
 mod locations;
 mod logs;
 mod branding;
@@ -201,6 +202,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     }
     spawn_maintenance(state.clone(), cfg.trash_days);
     locations::spawn_health_monitor(state.clone());
+    folders::spawn_scanner(state.clone());
 
     // JSON requests that take longer than this are cut off (a stuck storage service, a slow provider). Requests that
     // carry a body to store, and thumbnails (which queue), are outside the limit (`untimed`); downloads stream after
@@ -445,6 +447,7 @@ fn api() -> Router<AppState> {
         .route("/admin/users/{id}", patch(admin::update).delete(admin::delete))
         .route("/admin/settings", get(admin::get_settings).patch(admin::update_settings))
         .route("/admin/drives", get(drives::admin_list))
+        .route("/admin/drives/{id}/scan", post(drives::scan))
         .route("/admin/drives/{id}/location", axum::routing::put(locations::set_drive_location))
         .route("/admin/drives/{id}/migrate", post(locations::migrate))
         .route("/admin/migrations", get(locations::migrations))

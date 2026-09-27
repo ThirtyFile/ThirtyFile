@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { UsersRoundIcon } from "lucide-react";
-import { OfflineBanner } from "@/components/OfflineNotice";
+import { FolderSpaceBanner, OfflineBanner } from "@/components/OfflineNotice";
 import { api, type NodeInfo, type SortKey, type SortOrder } from "@/api";
 import { Explorer } from "@/components/Explorer";
 import { crumbPath, expandPath, type Crumb } from "@/components/Frame";
@@ -60,7 +60,14 @@ export function FilesPage() {
 
   return (
     <Explorer
-      notice={info.data?.offline ? <OfflineBanner reason={info.data.offline} /> : undefined}
+      notice={
+        info.data?.offline ? (
+          <OfflineBanner reason={info.data.offline} />
+        ) : info.data?.read_only ? (
+          <FolderSpaceBanner />
+        ) : undefined
+      }
+      readOnly={info.data?.read_only}
       offline={info.data?.offline}
       items={children.data ?? []}
       loading={info.isLoading || children.isLoading}
