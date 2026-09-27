@@ -61,7 +61,7 @@ cd ../web && pnpm typecheck && node scripts/check-i18n.mjs && pnpm test</code></
           <li>When behaviour changes, update the guide that describes it, in <code>site/docs/</code>.</li>
           <li>Logic that changes people's files (formulas, saving workbooks, text encodings) gets unit tests in <code>web/tests/unit/</code>.</li>
         </ul>
-        <p>Every pull request runs the tests and builds the Docker image, without publishing it. A change that only touches the website or the guides skips both. Merging into <code>main</code> publishes nothing except the website.</p>
+        <p>Every pull request runs the tests and, at the same time, builds the Docker image and starts it, without publishing it. A change that only touches the website or the guides skips both. Merging into <code>main</code> publishes nothing except the website.</p>
 
         <h2 id="labels">Labels</h2>
         <div class="table-scroll">
@@ -82,7 +82,7 @@ cd ../web && pnpm typecheck && node scripts/check-i18n.mjs && pnpm test</code></
         <h2 id="releases">Releases</h2>
         <p>Merged changes collect on <code>main</code> until a maintainer decides to release them. A release is started by hand: on GitHub, open <strong>Actions › Release › Run workflow</strong>, keep <code>main</code> selected and enter the new version number, such as <code>1.2.3</code>. Or from the command line:</p>
         <pre><code>gh workflow run release.yml -f version=1.2.3</code></pre>
-        <p>The workflow tests what is on <code>main</code>, publishes the images <code>1.2.3</code>, <code>1.2</code> and <code>latest</code> for amd64 and arm64, and then creates the tag <code>v1.2.3</code> and the release on GitHub, with notes put together from the merged pull requests. If a test or the image build fails, nothing is tagged or released. The number must be newer than the last release.</p>
+        <p>The workflow tests what is on <code>main</code> while it builds the image for amd64 and arm64 and starts it. Once both have passed, that same image is tagged <code>1.2.3</code>, <code>1.2</code> and <code>latest</code>, without being built again, and then the workflow creates the tag <code>v1.2.3</code> and the release on GitHub, with notes put together from the merged pull requests. If a test or the image build fails, nothing is tagged or released. The number must be newer than the last release.</p>
         <div class="table-scroll">
           <table>
             <thead><tr><th>Number</th><th>Goes up when</th></tr></thead>

@@ -1,7 +1,8 @@
-# Checks every pull request: runs the tests and builds the Docker image (amd64 only, not published).
+# Checks every pull request: runs the tests and builds the Docker image side by side (amd64 only, not published).
 # Merging into main runs nothing here; images are only published by the Release workflow (release.yml), which
-# calls this workflow with a version number to build both platforms and push:
-#   ghcr.io/thirtyfile/thirtyfile:1.2.3, :1.2 and :latest
+# calls this workflow with a version number: the image is then built for both platforms and pushed by its digest,
+# without a tag. release.yml gives it its tags (1.2.3, 1.2, latest) only once the tests have passed as well, so the
+# published image is exactly the one that was built and started here.
 # Pull requests that only touch the website or the documentation skip the tests and the image. The required check is
 # "Checks passed" at the end: it passes when every job passed or was skipped, and fails when any failed or was cancelled.
 name: Build
@@ -14,6 +15,10 @@ on:
         description: Version to publish, such as 1.2.3
         type: string
         required: true
+    outputs:
+      digest:
+        description: Digest of the pushed image (sha256:…), for releases
+        value: ${{ jobs.image.outputs.digest }}
 
 concurrency:
   group: build-${{ github.ref }}-${{ inputs.release_version || 'check' }}
@@ -81,12 +86,14 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
+      # Only type-checked here: the Docker image job builds the frontend. The backend tests don't need it (without
+      # web/dist, the server is compiled without pages)
       - name: Frontend
         working-directory: web
         run: |
           pnpm install --frozen-lockfile
           node scripts/check-i18n.mjs
-          pnpm build
+          pnpm typecheck
 
       # Unit tests (Vitest), with the coverage in the job summary
       - name: Frontend tests
@@ -125,14 +132,18 @@ jobs:
         working-directory: web
         run: pnpm audit --prod
 
+  # Runs beside the tests rather than after them; releases wait for both (release.yml)
   image:
     name: Docker image
     timeout-minutes: 45
-    needs: check
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -142,6 +153,8 @@ jobs:
       # live inside the builder, which is new on every run. Keep them in the Actions cache, so that a change
       # to the backend recompiles ThirtyFile itself and not every dependency. The key changes with the
       # lock files; in between, the saved dependencies stay valid and the cache is only restored.
+      # This is the image's only cache: a layer cache (cache-to: type=gha) would store much the same again, and
+      # the two would push each other out of the 10 GB the repository gets.
       - id: mounts
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -170,23 +183,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Releases: 1.2.3, 1.2 and latest. Pull requests: pr-N (never pushed)
+      # Releases are pushed by digest only (release.yml adds the tags). Pull requests: pr-N, kept here, never pushed
       - id: tags
         env:
           PR: ${{ github.event.pull_request.number }}
         run: |
           if [ -n "$RELEASE" ]; then
-            {
-              echo "version=$RELEASE"
-              echo "list<<EOF"
-              echo "$IMAGE:$RELEASE"
-              echo "$IMAGE:${RELEASE%.*}"
-              echo "$IMAGE:latest"
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
+            echo "version=$RELEASE" >> "$GITHUB_OUTPUT"
+            echo "name=$IMAGE" >> "$GITHUB_OUTPUT"
           else
             echo "version=pr-$PR" >> "$GITHUB_OUTPUT"
-            echo "list=$IMAGE:pr-$PR" >> "$GITHUB_OUTPUT"
+            echo "name=$IMAGE:pr-$PR" >> "$GITHUB_OUTPUT"
           fi
 
       # Standard image labels (source, revision, creation time…) with the version set above
@@ -197,24 +204,25 @@ jobs:
           labels: org.opencontainers.image.version=${{ steps.tags.outputs.version }}
 
       # The backend is cross-compiled in the Dockerfile, so arm64 needs no emulation. Pull requests build amd64 only, to be quicker
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: ${{ inputs.release_version && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
-          push: ${{ !!inputs.release_version }}
           # Pull requests keep the image to start it below
           load: ${{ !inputs.release_version }}
-          tags: ${{ steps.tags.outputs.list }}
+          outputs: ${{ inputs.release_version && 'type=image,push-by-digest=true,name-canonical=true,push=true' || '' }}
+          tags: ${{ steps.tags.outputs.name }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VERSION=${{ steps.tags.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
-      # Starts the image locked down (read-only, minimal capabilities) and upgrades the latest release to it
+      # Starts the image locked down (read-only, minimal capabilities) and upgrades the latest release to it.
+      # Releases start the pushed image itself (its amd64 half)
       - name: Start the image
-        if: ${{ !inputs.release_version }}
-        run: bash .github/scripts/smoke-test.sh "$IMAGE:pr-${{ github.event.pull_request.number }}"
+        env:
+          REF: ${{ inputs.release_version && format('{0}@{1}', env.IMAGE, steps.build.outputs.digest) || steps.tags.outputs.name }}
+        run: bash .github/scripts/smoke-test.sh "$REF"
 
   # The one check the ruleset requires. Skipped jobs count as passed on GitHub, so when "Changes" itself fails, the
   # tests and the image are skipped and would let the pull request through; this job fails in that case.
