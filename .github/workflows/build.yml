@@ -2,8 +2,8 @@
 # Merging into main runs nothing here; images are only published by the Release workflow (release.yml), which
 # calls this workflow with a version number to build both platforms and push:
 #   ghcr.io/thirtyfile/thirtyfile:1.2.3, :1.2 and :latest
-# Pull requests that only touch the website or the documentation skip the tests and the image; the skipped jobs
-# still count as passed, so such pull requests can be merged.
+# Pull requests that only touch the website or the documentation skip the tests and the image. The required check is
+# "Checks passed" at the end: it passes when every job passed or was skipped, and fails when any failed or was cancelled.
 name: Build
 
 on:
@@ -175,3 +175,19 @@ jobs:
             VERSION=${{ steps.tags.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # The one check the ruleset requires. Skipped jobs count as passed on GitHub, so when "Changes" itself fails, the
+  # tests and the image are skipped and would let the pull request through; this job fails in that case.
+  result:
+    name: Checks passed
+    needs: [changes, check, image]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "changes, tests, image: $RESULTS"
+          case " $RESULTS " in
+            *" failure "* | *" cancelled "*) exit 1 ;;
+          esac
