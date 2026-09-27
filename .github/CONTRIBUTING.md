@@ -1,0 +1,24 @@
+# Contributing to ThirtyFile
+
+Thank you for helping. The full guide is on the website: **[Contributing](https://thirtyfile.github.io/ThirtyFile/docs/contributing.html)**.
+
+## Problems and ideas
+
+[Open an issue](https://github.com/ThirtyFile/ThirtyFile/issues/new/choose) and pick **Report a problem** or **Suggest an idea**. Look through the [existing issues](https://github.com/ThirtyFile/ThirtyFile/issues) first.
+
+Security problems are reported privately: see the [security policy](SECURITY.md).
+
+## Changing the code
+
+1. For anything larger than a small fix, agree on the idea in an issue first.
+2. Create a branch from `main`: `feat/…`, `fix/…`, `docs/…` or `chore/…`.
+3. Run the checks:
+   ```bash
+   cd server && cargo test && cargo clippy --all-targets
+   cd ../web && pnpm typecheck && node scripts/check-i18n.mjs
+   ```
+4. Open a pull request with a title that says what changes, one label (`enhancement`, `bug`, `documentation` or `dependencies`), and `Closes #123` in the description.
+
+Code, comments and guides are written in English. Text in the interface needs its Traditional Chinese translation in `web/src/lib/i18n/zh-TW/`. When behaviour changes, update the guide in `site/docs/` that describes it.
+
+By contributing, you agree that your contribution is licensed under the [Apache License 2.0](../LICENSE), and you agree to follow the [code of conduct](CODE_OF_CONDUCT.md).
