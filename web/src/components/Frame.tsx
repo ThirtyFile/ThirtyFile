@@ -52,6 +52,7 @@ import { LinkedAccountsDialog } from "@/components/LinkedAccountsDialog";
 import { NavMenu } from "@/components/NavMenu";
 import { Resizer } from "@/components/Resizer";
 import { DRIVE_ICON, useDrives } from "@/lib/drives";
+import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
 import { usePersisted, useMe } from "@/lib/session";
 import { useTheme, type ThemeMode } from "@/lib/theme";
 import { useBranding } from "@/lib/branding";
@@ -285,6 +286,10 @@ function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean; activ
   const [width, setWidth] = usePersisted("tf-nav-width", NAV_DEFAULT_WIDTH);
   const usedPct = me.quota_bytes > 0 ? Math.min(100, (me.used_bytes / me.quota_bytes) * 100) : 0;
   const usage = me.quota_bytes > 0 ? `${formatBytes(me.used_bytes)} / ${formatBytes(me.quota_bytes)}` : formatBytes(me.used_bytes);
+  // On phones the pane opens over the page (with a backdrop): keep focus in it until it closes
+  const ref = useRef<HTMLElement>(null);
+  const phone = useMediaQuery("(max-width: 47.99rem)");
+  useOverlayFocus(ref, open && phone, { onClose: onNavigate });
 
   const logout = async () => {
     await api.logout().catch(() => {});
@@ -293,6 +298,7 @@ function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean; activ
 
   return (
     <nav
+      ref={ref}
       aria-label={t("File locations")}
       onClick={(e) => (e.target as HTMLElement).closest("a") && onNavigate()}
       style={{ width, maxWidth: "85vw" }}
@@ -331,7 +337,15 @@ function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean; activ
       <div className="grid gap-2 border-t p-2">
         {me.quota_bytes > 0 && (
           <div className="grid gap-1 px-1">
-            <div className="h-1 overflow-hidden rounded-full bg-muted">
+            <div
+              role="progressbar"
+              aria-label={t("Storage used")}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(usedPct)}
+              aria-valuetext={usage}
+              className="h-1 overflow-hidden rounded-full bg-muted"
+            >
               <div className={cn("h-full rounded-full", usedPct > 90 ? "bg-destructive" : "bg-brand")} style={{ width: `${usedPct}%` }} />
             </div>
           </div>
@@ -615,6 +629,8 @@ export interface FrameProps {
   children: ReactNode;
 }
 
+export const MAIN_ID = "tf-main";
+
 export function Frame(p: FrameProps) {
   const me = useMe();
   const [navOpen, setNavOpen] = useState(false);
@@ -626,6 +642,7 @@ export function Frame(p: FrameProps) {
   }, [title, siteName]);
   return (
     <section className="flex h-full min-h-0 flex-col bg-background text-[13px]" aria-label={t("File Explorer")}>
+      <h1 className="sr-only">{title}</h1>
       <AddressBar
         crumbs={p.crumbs}
         icon={p.icon ?? FolderIcon}
@@ -641,7 +658,10 @@ export function Frame(p: FrameProps) {
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <LocationsNav open={navOpen} activeFolder={p.activeFolder} onNavigate={() => setNavOpen(false)} />
         {navOpen && <div className="absolute inset-0 z-[5] bg-black/20 md:hidden" onClick={() => setNavOpen(false)} />}
-        <div className="relative flex min-w-0 flex-1 flex-col">{p.children}</div>
+        {/* Target of the "Skip to main content" link (AppShell) */}
+        <div id={MAIN_ID} tabIndex={-1} className="relative flex min-w-0 flex-1 flex-col outline-none">
+          {p.children}
+        </div>
       </div>
       <footer className="flex h-7 shrink-0 items-center gap-3 px-3 text-xs text-muted-foreground">
         {p.footer}

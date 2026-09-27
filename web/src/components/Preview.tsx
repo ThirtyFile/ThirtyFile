@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { FileIcon } from "@/components/FileIcon";
 import { FileViewer } from "@/components/FileViewer";
 import { t } from "@/lib/i18n";
+import { useOverlayFocus } from "@/lib/focus";
 import { formatBytes } from "@/lib/utils";
 
 /** Floating full-screen preview (used by the public share page; signed-in files open in a tab instead) */
@@ -35,6 +36,9 @@ export function Preview(props: {
     [props.index, props.files.length, guard, props.onIndexChange],
   );
   const close = useCallback(() => guard() && props.onClose(), [guard, props.onClose]);
+  // Esc is handled below (it must not close while typing in an editor)
+  const root = useRef<HTMLDivElement>(null);
+  useOverlayFocus(root, !!node);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -61,7 +65,7 @@ export function Preview(props: {
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black/90 text-white backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={node.name}>
+    <div ref={root} className="fixed inset-0 z-50 flex flex-col bg-black/90 text-white backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={node.name}>
       <div className="flex h-14 shrink-0 items-center gap-3 px-4">
         <FileIcon node={node} className="size-5" />
         <div className="min-w-0 flex-1">
@@ -72,23 +76,35 @@ export function Preview(props: {
           </div>
         </div>
         {props.allowDownload !== false && (
-          <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 hover:text-white" title={t("Download")} onClick={() => triggerDownload(props.source.contentUrl(node, true))}>
+          <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 hover:text-white" aria-label={t("Download")} title={t("Download")} onClick={() => triggerDownload(props.source.contentUrl(node, true))}>
             <DownloadIcon />
           </Button>
         )}
-        <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 hover:text-white" title={t("Close (Esc)")} onClick={close}>
+        <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 hover:text-white" aria-label={t("Close (Esc)")} title={t("Close (Esc)")} onClick={close}>
           <XIcon />
         </Button>
       </div>
       <div className="relative flex min-h-0 flex-1 items-center justify-center px-4 pb-4 sm:px-16" onClick={(e) => e.target === e.currentTarget && close()}>
         {body}
         {props.index > 0 && (
-          <button type="button" onClick={() => go(-1)} className="absolute left-2 rounded-full bg-white/10 p-2 hover:bg-white/20 max-sm:hidden" title={t("Previous (←)")}>
+          <button
+            type="button"
+            onClick={() => go(-1)}
+            className="absolute left-2 rounded-full bg-white/10 p-2 hover:bg-white/20 max-sm:hidden"
+            aria-label={t("Previous (←)")}
+            title={t("Previous (←)")}
+          >
             <ChevronLeftIcon className="size-6" />
           </button>
         )}
         {props.index < props.files.length - 1 && (
-          <button type="button" onClick={() => go(1)} className="absolute right-2 rounded-full bg-white/10 p-2 hover:bg-white/20 max-sm:hidden" title={t("Next (→)")}>
+          <button
+            type="button"
+            onClick={() => go(1)}
+            className="absolute right-2 rounded-full bg-white/10 p-2 hover:bg-white/20 max-sm:hidden"
+            aria-label={t("Next (→)")}
+            title={t("Next (→)")}
+          >
             <ChevronRightIcon className="size-6" />
           </button>
         )}

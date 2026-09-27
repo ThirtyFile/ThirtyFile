@@ -103,10 +103,10 @@ export function Explorer(p: ExplorerProps) {
 
   const footerRight = (
     <span className="flex items-center gap-0.5">
-      <Button variant={view === "list" ? "secondary" : "ghost"} size="icon-xs" aria-label={t("Details")} title={t("Details")} onClick={() => setView("list")}>
+      <Button variant={view === "list" ? "secondary" : "ghost"} aria-pressed={view === "list"} size="icon-xs" aria-label={t("Details")} title={t("Details")} onClick={() => setView("list")}>
         <ListIcon />
       </Button>
-      <Button variant={view === "grid" ? "secondary" : "ghost"} size="icon-xs" aria-label={t("Large icons")} title={t("Large icons")} onClick={() => setView("grid")}>
+      <Button variant={view === "grid" ? "secondary" : "ghost"} aria-pressed={view === "grid"} size="icon-xs" aria-label={t("Large icons")} title={t("Large icons")} onClick={() => setView("grid")}>
         <Grid2X2Icon />
       </Button>
     </span>

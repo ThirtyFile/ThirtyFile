@@ -11,6 +11,7 @@ import { useMe } from "@/lib/session";
 import { cn } from "@/lib/utils";
 import { logoUrl, useBranding } from "@/lib/branding";
 import { SiteName } from "@/components/SiteName";
+import { MAIN_ID } from "@/components/Frame";
 import { loadTabs, syncLocation } from "@/tabs";
 import { onUploadDone } from "@/uploads";
 import { t, tServer } from "@/lib/i18n";
@@ -73,6 +74,19 @@ export function AppShell() {
 
   return (
     <div className="flex h-full flex-col">
+      {/* First stop for Tab: past the tab bar, address bar, command bar and navigation pane */}
+      <a
+        href={`#${MAIN_ID}`}
+        onClick={(e) => {
+          const main = document.getElementById(MAIN_ID);
+          if (!main) return;
+          e.preventDefault();
+          main.focus();
+        }}
+        className="sr-only rounded-md bg-background px-3 py-2 text-sm font-medium shadow-lg ring-2 ring-ring focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50"
+      >
+        {t("Skip to main content")}
+      </a>
       <ErrorBoundary>
         <TabBar />
       </ErrorBoundary>

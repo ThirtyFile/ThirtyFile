@@ -8,6 +8,7 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdow
 import { api, shareSource, triggerDownload, type Node, type PublicShare } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorText } from "@/components/dialogs";
 import { FileList, Thumb, type ViewMode } from "@/components/FileList";
@@ -48,7 +49,11 @@ export function PublicSharePage() {
           </span>
         )}
       </header>
-      <main className="flex min-h-0 flex-1 justify-center overflow-y-auto p-4">{body}</main>
+      <main className="flex min-h-0 flex-1 justify-center overflow-y-auto p-4">
+        {/* The password form has its own visible heading */}
+        {!info.data?.needs_password && <h1 className="sr-only">{info.data?.node?.name ?? t("Share link")}</h1>}
+        {body}
+      </main>
     </div>
   );
 }
@@ -73,10 +78,20 @@ function Unlock({ token }: { token: string }) {
   };
   return (
     <form onSubmit={submit} className="mt-16 grid h-fit w-full max-w-sm gap-4 rounded-2xl border bg-card p-6 shadow-sm">
-      <div className="flex items-center gap-2 font-medium">
+      <h1 className="flex items-center gap-2 font-medium">
         <LockIcon className="size-4" /> {t("This share requires a password")}
+      </h1>
+      <div className="grid gap-2">
+        <Label htmlFor="share-password">{t("Password")}</Label>
+        <Input
+          id="share-password"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder={t("Enter password")}
+          autoFocus
+        />
       </div>
-      <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t("Enter password")} autoFocus />
       <ErrorText>{error}</ErrorText>
       <Button type="submit" disabled={busy || !password}>
         {busy && <Loader2Icon className="animate-spin" />}

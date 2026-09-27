@@ -1,4 +1,4 @@
-/** Traditional Chinese translations: spreadsheet preview, restore notices, storage location and third-party sign-in validation messages */
+/** Traditional Chinese translations: spreadsheet preview, restore notices, storage location and third-party sign-in validation messages, screen reader names */
 export default {
   "Restored": "已復原",
   "The file's content is too large to preview. Download it and open it in Office.": "檔案內容過大，無法預覽。請下載後用 Office 開啟。",
@@ -11,4 +11,10 @@ export default {
   "{reason} requires a host address": "{reason}需要填寫主機位址",
   "Invalid tenant: enter a tenant ID (GUID) or domain, e.g. contoso.onmicrosoft.com": "租用戶格式不正確：請填寫租用戶 ID（GUID）或網域，例如 contoso.onmicrosoft.com",
   "Show more": "顯示更多",
+  // Screen reader names: skip link, progress bars, share page heading
+  "Skip to main content": "跳到主要內容",
+  "Upload progress": "上傳進度",
+  "Download progress": "下載進度",
+  "Storage used": "已使用空間",
+  "Share link": "分享連結",
 } satisfies Record<string, string>;

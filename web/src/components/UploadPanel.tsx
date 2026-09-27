@@ -40,20 +40,31 @@ export function UploadPanel() {
     <div className="overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-xl">
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <span className="flex-1 truncate text-sm font-medium">{title}</span>
-        <Button size="icon-xs" variant="ghost" onClick={() => setCollapsed(!collapsed)} title={collapsed ? t("Expand") : t("Collapse")}>
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label={collapsed ? t("Expand") : t("Collapse")}
+          title={collapsed ? t("Expand") : t("Collapse")}
+          onClick={() => setCollapsed(!collapsed)}
+        >
           {collapsed ? <ChevronUpIcon /> : <ChevronDownIcon />}
         </Button>
         <Button
           size="icon-xs"
           variant="ghost"
+          aria-label={t("Close")}
           title={t("Close")}
           onClick={() => (active.length ? window.confirm(t("Cancel all uploads in progress?")) && cancelAll() : clearFinished())}
         >
           <XIcon />
         </Button>
       </div>
+      {/* Read out by screen readers once everything has finished (not on every percent) */}
+      <div role="status" className="sr-only">
+        {active.length ? "" : title}
+      </div>
       {active.length > 0 && (
-        <div className="h-0.5 bg-muted">
+        <div role="progressbar" aria-label={t("Upload progress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} className="h-0.5 bg-muted">
           <div className="h-full bg-brand transition-[width]" style={{ width: `${pct}%` }} />
         </div>
       )}
@@ -81,7 +92,7 @@ export function UploadPanel() {
                               : `${formatBytes(task.sent)} / ${formatBytes(task.size)} · ${p}%`}
                     </div>
                     {(task.status === "uploading" || task.status === "paused") && (
-                      <div className="mt-1 h-1 overflow-hidden rounded bg-muted">
+                      <div role="progressbar" aria-label={task.name} aria-valuemin={0} aria-valuemax={100} aria-valuenow={p} className="mt-1 h-1 overflow-hidden rounded bg-muted">
                         <div className="h-full bg-brand transition-[width]" style={{ width: `${p}%` }} />
                       </div>
                     )}
@@ -89,22 +100,22 @@ export function UploadPanel() {
                   {task.status === "done" && <CheckCircle2Icon className="size-4 text-emerald-500" />}
                   {task.status === "error" && <AlertCircleIcon className="size-4 text-destructive" />}
                   {task.status === "uploading" && (
-                    <Button size="icon-xs" variant="ghost" title={t("Pause")} onClick={() => pause(task.id)}>
+                    <Button size="icon-xs" variant="ghost" aria-label={t("Pause")} title={t("Pause")} onClick={() => pause(task.id)}>
                       <PauseIcon />
                     </Button>
                   )}
                   {task.status === "paused" && (
-                    <Button size="icon-xs" variant="ghost" title={t("Resume")} onClick={() => resume(task.id)}>
+                    <Button size="icon-xs" variant="ghost" aria-label={t("Resume")} title={t("Resume")} onClick={() => resume(task.id)}>
                       <PlayIcon />
                     </Button>
                   )}
                   {task.status === "error" && (
-                    <Button size="icon-xs" variant="ghost" title={t("Retry")} onClick={() => resume(task.id)}>
+                    <Button size="icon-xs" variant="ghost" aria-label={t("Retry")} title={t("Retry")} onClick={() => resume(task.id)}>
                       <RotateCwIcon />
                     </Button>
                   )}
                   {task.status !== "done" && (
-                    <Button size="icon-xs" variant="ghost" title={t("Cancel")} onClick={() => cancel(task.id)}>
+                    <Button size="icon-xs" variant="ghost" aria-label={t("Cancel")} title={t("Cancel")} onClick={() => cancel(task.id)}>
                       <XIcon />
                     </Button>
                   )}

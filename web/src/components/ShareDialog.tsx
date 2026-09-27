@@ -119,6 +119,7 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
                 <Button
                   size="icon-sm"
                   variant="ghost"
+                  aria-label={t("Copy link")}
                   title={t("Copy link")}
                   onClick={async () => {
                     await copyText(shareLink(s.id));
@@ -127,7 +128,7 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
                 >
                   <CopyIcon />
                 </Button>
-                <Button size="icon-sm" variant="ghost" title={t("Disable link")} onClick={() => remove.mutate(s.id)} disabled={remove.isPending}>
+                <Button size="icon-sm" variant="ghost" aria-label={t("Disable link")} title={t("Disable link")} onClick={() => remove.mutate(s.id)} disabled={remove.isPending}>
                   <Trash2Icon />
                 </Button>
               </div>

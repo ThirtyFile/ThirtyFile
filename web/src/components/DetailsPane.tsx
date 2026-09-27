@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { XIcon } from "lucide-react";
 import { api, privateSource, type Node } from "@/api";
@@ -5,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { FileIcon, canThumbnail, typeLabel } from "@/components/FileIcon";
 import { Resizer } from "@/components/Resizer";
 import { ROLE_LABEL } from "@/lib/drives";
+import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
 import { locale, t } from "@/lib/i18n";
 import { usePersisted } from "@/lib/session";
 import { formatBytes, formatWinDate } from "@/lib/utils";
@@ -17,6 +19,11 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
   const node = selected.length === 1 ? selected[0] : selected.length === 0 ? folder : undefined;
   const info = useQuery({ queryKey: ["node", node?.id], queryFn: () => api.node(node!.id), enabled: !!node });
   const shares = useQuery({ queryKey: ["shares", node?.id], queryFn: () => api.shares(node!.id), enabled: !!node && !!node.parent_id });
+  // On narrow windows the pane covers the file list: focus moves into it, Esc closes it and focus goes back.
+  // The list stays usable beside it, so focus isn't kept inside
+  const ref = useRef<HTMLElement>(null);
+  const overlay = useMediaQuery("(max-width: 63.99rem)");
+  useOverlayFocus(ref, overlay, { onClose, modal: false });
 
   const header = (
     <div className="flex h-9 shrink-0 items-center justify-between border-b px-3 text-xs font-medium">
@@ -85,6 +92,7 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
 
   return (
     <aside
+      ref={ref}
       aria-label={t("Details")}
       style={{ width, maxWidth: "85vw" }}
       className="relative flex shrink-0 flex-col border-l bg-background max-lg:absolute max-lg:inset-y-0 max-lg:right-0 max-lg:z-10 max-lg:shadow-xl"

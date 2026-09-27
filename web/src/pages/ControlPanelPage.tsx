@@ -102,10 +102,10 @@ export function ControlPanelPage() {
         }}
       />
       <div className="flex-1" />
-      <Button variant={view === "tiles" ? "secondary" : "ghost"} size="icon-sm" aria-label={t("Large icons")} title={t("Large icons")} onClick={() => setView("tiles")}>
+      <Button variant={view === "tiles" ? "secondary" : "ghost"} aria-pressed={view === "tiles"} size="icon-sm" aria-label={t("Large icons")} title={t("Large icons")} onClick={() => setView("tiles")}>
         <Grid2X2Icon />
       </Button>
-      <Button variant={view === "list" ? "secondary" : "ghost"} size="icon-sm" aria-label={t("Details")} title={t("Details")} onClick={() => setView("list")}>
+      <Button variant={view === "list" ? "secondary" : "ghost"} aria-pressed={view === "list"} size="icon-sm" aria-label={t("Details")} title={t("Details")} onClick={() => setView("list")}>
         <ListIcon />
       </Button>
     </>
