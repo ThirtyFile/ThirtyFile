@@ -8,6 +8,7 @@ import { Explorer } from "@/components/Explorer";
 import { crumbPath, type Crumb } from "@/components/Frame";
 import { expandPath } from "@/components/FolderTree";
 import { DRIVE_ICON } from "@/lib/drives";
+import { useAllPages } from "@/lib/pages";
 import { usePersisted } from "@/lib/session";
 import { t } from "@/lib/i18n";
 
@@ -43,11 +44,12 @@ export function FilesPage() {
   });
   const node = info.data?.node;
   const folderId = node?.id;
-  const children = useQuery({
-    queryKey: ["children", folderId, sort.key, sort.order],
-    queryFn: () => api.children(folderId!, sort.key, sort.order),
-    enabled: !!folderId,
-  });
+  // Large folders come in pages: the first shows at once, the rest loads in the background
+  const children = useAllPages(
+    ["children", folderId, sort.key, sort.order],
+    (limit, after) => api.childrenPage(folderId!, sort.key, sort.order, limit, after),
+    !!folderId,
+  );
   const path = info.data?.path ?? [];
   const loc = locationOf(info.data);
 
@@ -70,8 +72,9 @@ export function FilesPage() {
       }
       readOnly={info.data?.read_only}
       offline={info.data?.offline}
-      items={children.data ?? []}
+      items={children.items}
       loading={info.isLoading || children.isLoading}
+      loadingMore={children.loadingMore}
       error={info.error ?? children.error}
       folderId={folderId}
       role={info.data?.role}

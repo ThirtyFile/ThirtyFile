@@ -1,9 +1,11 @@
 /** File explorer actions: open, download, favorite, cut / copy / paste, new folder / text file, keyboard shortcuts and drag-and-drop upload */
 import { useEffect, type DragEvent } from "react";
+import type { InfiniteData } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { api, privateSource, triggerDownload, type Node } from "@/api";
+import { api, privateSource, triggerDownload, type CursorPage, type Node } from "@/api";
 import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
+import { allItems } from "@/lib/pages";
 import { invalidateFiles } from "@/lib/queries";
 import { moveBack, originsOf, toastWithUndo } from "@/lib/undo";
 import { enqueue, filesFromDrop } from "@/uploads";
@@ -52,7 +54,10 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       // Only after the list reloads does the new item have a place to edit its name; if it didn't reload, don't start
       // renaming a row that isn't there (that would leave the shortcuts turned off)
       await refresh();
-      const listed = qc.getQueriesData<Node[]>({ queryKey: ["children", p.folderId] }).some(([, d]) => d?.some((n) => n.id === id));
+      // The folder's pages, and the folder tree's list of subfolders
+      const listed = qc
+        .getQueriesData<Node[] | InfiniteData<CursorPage<Node>>>({ queryKey: ["children", p.folderId] })
+        .some(([, d]) => (Array.isArray(d) ? d : allItems(d)).some((n) => n.id === id));
       if (!listed) return;
       setSelected(new Set([id]));
       setAnchor(id);

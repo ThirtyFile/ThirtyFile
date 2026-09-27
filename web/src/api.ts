@@ -294,6 +294,13 @@ export interface Page<T> {
   next: number | null;
 }
 
+/** A page of a folder or the trash (keyset paging) */
+export interface CursorPage<T> {
+  items: T[];
+  /** `after` parameter for the next page; null when there are no more */
+  next: string | null;
+}
+
 /** Share link access log */
 export interface ShareAccess {
   id: number;
@@ -610,12 +617,15 @@ export const api = {
   node: (id: string) => get<NodeInfo>(enc`/nodes/${id}`).then((n) => ({ ...n, drive: { ...n.drive, name: driveName(n.drive) } })),
   children: (id: string, sort?: SortKey, order?: SortOrder, foldersOnly?: boolean) =>
     get<Node[]>(enc`/nodes/${id}/children` + qs({ sort, order, folders_only: foldersOnly ? "true" : undefined })),
+  childrenPage: (id: string, sort: SortKey, order: SortOrder, limit: number, after?: string) =>
+    get<CursorPage<Node>>(enc`/nodes/${id}/children` + qs({ sort, order, limit: String(limit), after })),
   createFolder: (parent_id: string, name: string) => post<Node>("/folders", { parent_id, name }),
   rename: (id: string, name: string) => request<Node>("PATCH", enc`/nodes/${id}`, { name }),
   move: (ids: string[], dest_id: string) => post("/nodes/move", { ids, dest_id }),
   copy: (ids: string[], dest_id: string) => post("/nodes/copy", { ids, dest_id }),
   trash: (ids: string[]) => post("/nodes/trash", { ids }),
-  listTrash: () => get<Located[]>("/trash").then((l) => l.map(localizeLocated)),
+  trashPage: (limit: number, after?: string) =>
+    get<CursorPage<Located>>(`/trash${qs({ limit: String(limit), after })}`).then((p) => ({ ...p, items: p.items.map(localizeLocated) })),
   restore: (ids: string[]) => post("/trash/restore", { ids }),
   deleteForever: (ids: string[]) => post("/trash/delete", { ids }),
   emptyTrash: () => post("/trash/empty"),
@@ -732,8 +742,8 @@ export const api = {
   publicShare: (token: string) => get<PublicShare>(enc`/public/shares/${token}`),
   unlockShare: (token: string, password: string) => post(enc`/public/shares/${token}/unlock`, { password }),
   publicNode: (token: string, id: string) => get<{ node: Node; path: Crumb[] }>(enc`/public/shares/${token}/nodes/${id}`),
-  publicChildren: (token: string, id: string, sort?: SortKey, order?: SortOrder) =>
-    get<Node[]>(enc`/public/shares/${token}/nodes/${id}/children` + qs({ sort, order })),
+  publicChildrenPage: (token: string, id: string, limit: number, after?: string) =>
+    get<CursorPage<Node>>(enc`/public/shares/${token}/nodes/${id}/children` + qs({ limit: String(limit), after })),
 };
 
 /** Source of file content URLs; signed-in files and public shares use the same components */

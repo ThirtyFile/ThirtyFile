@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useMemo, useRef, type ReactNode } from "react";
 import { FolderOpenIcon, Grid2X2Icon, ListIcon, UploadCloudIcon, type LucideIcon } from "lucide-react";
 import { api, privateSource, type Node, type Role, type SortKey, type SortOrder } from "@/api";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { DetailsPane } from "@/components/DetailsPane";
 import { ErrorState } from "@/components/ErrorState";
 import { FileList } from "@/components/FileList";
-import { useMarquee } from "@/components/useMarquee";
+import { MarqueeBox, useMarquee, type MeasureHits } from "@/components/useMarquee";
 import { Frame, type Crumb } from "@/components/Frame";
 import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
@@ -28,6 +28,8 @@ export interface ExplorerProps {
   offline?: string | null;
   items: Item[];
   loading: boolean;
+  /** Further pages of a large folder are still loading in the background */
+  loadingMore?: boolean;
   error?: Error | null;
   /** Current folder; when set, uploading and creating are possible */
   folderId?: string;
@@ -81,11 +83,16 @@ export function Explorer(p: ExplorerProps) {
     setDialog,
   } = s;
   const { open, moveInto, dragProps, refresh } = a;
-  // Hold the left button and drag on empty space to marquee-select (disabled while renaming)
-  const marquee = useMarquee({ selected, onSelect: setSelected, enabled: !p.loading && dialog?.t !== "rename" });
+  // Hold the left button and drag on empty space to marquee-select (disabled while renaming); the list gives its row geometry
+  const measure = useRef<MeasureHits>(null);
+  const marquee = useMarquee({ selected, onSelect: setSelected, enabled: !p.loading && dialog?.t !== "rename", measure });
+  const dimmed = useMemo(() => (clip?.mode === "cut" ? new Set(clip.ids) : undefined), [clip]);
   const footer = (
     <>
-      <span>{t("{n} item|{n} items", { n: p.items.length })}</span>
+      <span>
+        {t("{n} item|{n} items", { n: p.items.length })}
+        {p.loadingMore && ` · ${t("Loading more items…")}`}
+      </span>
       {selectedNodes.length > 0 && (
         <span className="border-l pl-3">
           {t("{n} item selected|{n} items selected", { n: selectedNodes.length })}
@@ -139,12 +146,7 @@ export function Explorer(p: ExplorerProps) {
             {...dragProps}
             {...marquee.containerProps}
           >
-            {marquee.box && (
-              <div
-                className="pointer-events-none absolute z-10 border border-brand bg-brand/15"
-                style={{ left: marquee.box.x, top: marquee.box.y, width: marquee.box.w, height: marquee.box.h }}
-              />
-            )}
+            <MarqueeBox store={marquee.box} />
             {p.loading ? (
               <div className="grid gap-1.5 p-3">
                 {Array.from({ length: 8 }, (_, i) => (
@@ -171,7 +173,8 @@ export function Explorer(p: ExplorerProps) {
                 showLocation={p.showLocation}
                 showOwner={p.showOwner}
                 showCheckboxes={showCheckboxes}
-                dimmed={clip?.mode === "cut" ? new Set(clip.ids) : undefined}
+                dimmed={dimmed}
+                measureRef={measure}
                 onMoveInto={caps.write && p.folderId ? moveInto : undefined}
                 renamingId={dialog?.t === "rename" ? dialog.node.id : null}
                 onRename={async (n, name) => {

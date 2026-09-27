@@ -1,7 +1,24 @@
-import { useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+  type RefObject,
+  type FocusEvent,
+} from "react";
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDownIcon, ChevronUpIcon, StarIcon } from "lucide-react";
 import type { FileSource, Node, SortKey, SortOrder } from "@/api";
 import { FileIcon, canThumbnail, typeLabel, typeTitle } from "@/components/FileIcon";
+import type { Box, MeasureHits } from "@/components/useMarquee";
 import { cn, formatWinDate, formatWinSize } from "@/lib/utils";
 import { InlineRename } from "@/components/InlineRename";
 import { t, tc } from "@/lib/i18n";
@@ -41,9 +58,20 @@ export interface FileListProps {
   onRenameDone?(): void;
   /** Accessible name of the list (defaults to "Items") */
   label?: string;
+  /** Receives the list's geometry for marquee selection (useMarquee's `measure`): only the rows in view are rendered */
+  measureRef?: RefObject<MeasureHits | null>;
 }
 
 const coarse = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+
+/** Details view: height of a row (its cells are h-7) and of the column headers */
+const ROW = 28;
+const HEAD = 30;
+/** Icon view: tiles of one size (at least TILE_W wide), so rows are placed and hit-tested by their index */
+const TILE_W = 116;
+const TILE_H = 148;
+const GAP = 8;
+const PAD = 12;
 
 export function Thumb({ node, source, className, iconClass }: { node: Node; source: FileSource; className?: string; iconClass?: string }) {
   const [failed, setFailed] = useState(false);
@@ -104,29 +132,295 @@ function Head({
   );
 }
 
+/** What rows do when used; rows are memoised, so they reach the list's current state through a ref */
+interface Handlers {
+  click(e: MouseEvent, index: number): void;
+  toggle(index: number): void;
+  keyDown(e: KeyboardEvent<HTMLElement>, index: number): void;
+  focused(id: string): void;
+  contextMenu(index: number): void;
+  dragStart(e: DragEvent, index: number): void;
+  dragOver(e: DragEvent, id: string): void;
+  dragLeave(id: string): void;
+  drop(e: DragEvent, folder: Item): void;
+  open(n: Item): void;
+  openInNewTab?(n: Item): void;
+  dateOf(n: Item): number;
+  rename(item: Item, name: string): Promise<void>;
+  renameDone(): void;
+}
+type HandlersRef = RefObject<Handlers>;
+
+/** The state a row shows; a row re-renders only when one of these changes */
+interface RowProps {
+  item: Item;
+  index: number;
+  h: HandlersRef;
+  selected: boolean;
+  /** Reached with Tab (the first selected item, else the first item); arrows move between the others */
+  tabStop: boolean;
+  dimmed: boolean;
+  dropping: boolean;
+  renaming: boolean;
+  /** Drag to move (turned off while renaming) */
+  movable: boolean;
+  /** Folders take dropped items */
+  dropTarget: boolean;
+}
+
+function rowProps({ item, index, h, selected, tabStop, dropTarget }: RowProps) {
+  return {
+    "data-node-id": item.id,
+    "aria-selected": selected,
+    tabIndex: tabStop ? 0 : -1,
+    onKeyDown: (e: KeyboardEvent<HTMLElement>) => h.current.keyDown(e, index),
+    onFocus: (e: FocusEvent) => e.target === e.currentTarget && h.current.focused(item.id),
+    onClick: (e: MouseEvent) => h.current.click(e, index),
+    onDoubleClick: () => h.current.open(item),
+    onMouseDown: (e: MouseEvent) => {
+      if (e.button === 1 && h.current.openInNewTab) e.preventDefault();
+    },
+    onAuxClick: (e: MouseEvent) => {
+      if (e.button === 1 && h.current.openInNewTab) {
+        e.preventDefault();
+        h.current.openInNewTab(item);
+      }
+    },
+    onContextMenu: () => h.current.contextMenu(index),
+    ...(dropTarget
+      ? {
+          onDragOver: (e: DragEvent) => h.current.dragOver(e, item.id),
+          onDragLeave: () => h.current.dragLeave(item.id),
+          onDrop: (e: DragEvent) => h.current.drop(e, item),
+        }
+      : {}),
+  };
+}
+
+// Drag to move: icon view drags the whole item; list view drags only the name, dragging from other columns marquee-selects (like Windows)
+const dragHandle = ({ h, index, movable }: RowProps) => ({
+  draggable: movable,
+  onDragStart: (e: DragEvent) => h.current.dragStart(e, index),
+});
+
+function renameBox(r: RowProps, multiline?: boolean) {
+  return (
+    <InlineRename
+      initial={r.item.name}
+      multiline={multiline}
+      selectAll={r.item.kind === "folder"}
+      onSubmit={(name) => r.h.current.rename(r.item, name)}
+      onDone={() => r.h.current.renameDone()}
+      className={multiline ? "mt-1.5" : undefined}
+    />
+  );
+}
+
+const td = "h-7 px-2 truncate";
+
+const ListRow = memo(function ListRow(r: RowProps & { checkboxes: boolean; location: boolean; owner: boolean }) {
+  const { item } = r;
+  return (
+    <tr
+      {...rowProps(r)}
+      role="row"
+      aria-rowindex={r.index + 2}
+      className={cn(
+        "cursor-default outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset aria-selected:bg-selection aria-selected:text-accent-foreground aria-selected:shadow-[inset_3px_0_0_var(--color-brand)]",
+        r.dropping && "bg-brand/15",
+        r.dimmed && "opacity-50",
+      )}
+    >
+      {r.checkboxes && (
+        <td role="gridcell" className={cn(td, "px-[7px]")}>
+          <input
+            type="checkbox"
+            className="align-middle accent-brand"
+            aria-label={t("Select {name}", { name: item.name })}
+            checked={r.selected}
+            onClick={(e) => e.stopPropagation()}
+            onChange={() => r.h.current.toggle(r.index)}
+          />
+        </td>
+      )}
+      <td role="gridcell" className={cn(td, "pl-3")}>
+        <div data-drag-handle {...dragHandle(r)} className="flex w-fit max-w-full min-w-0 items-center gap-2" title={item.name}>
+          <FileIcon node={item} className="size-4 shrink-0" />
+          {r.renaming ? (
+            renameBox(r)
+          ) : (
+            <>
+              <span className="truncate">{item.name}</span>
+              {item.is_favorite && <StarIcon className="size-[11px] shrink-0 fill-amber-400 text-amber-400" aria-label={tc("state", "Favorite")} />}
+            </>
+          )}
+        </div>
+      </td>
+      {r.location && (
+        <td role="gridcell" className={cn(td, "text-muted-foreground max-lg:hidden")} title={item.location}>
+          {item.location}
+        </td>
+      )}
+      <td role="gridcell" className={cn(td, "text-muted-foreground max-md:hidden")}>{formatWinDate(r.h.current.dateOf(item))}</td>
+      <td role="gridcell" className={cn(td, "text-muted-foreground max-md:hidden")} title={typeTitle(item)}>
+        {typeLabel(item)}
+      </td>
+      <td role="gridcell" className={cn(td, "pr-3 text-right text-muted-foreground tabular-nums")}>{item.kind === "folder" ? "" : formatWinSize(item.size)}</td>
+      {r.owner && <td role="gridcell" className={cn(td, "text-muted-foreground max-md:hidden")}>{item.owner_name}</td>}
+    </tr>
+  );
+});
+
+const Tile = memo(function Tile(r: RowProps & { source: FileSource; count: number }) {
+  const { item } = r;
+  return (
+    <div
+      {...rowProps(r)}
+      {...dragHandle(r)}
+      role="option"
+      aria-posinset={r.index + 1}
+      aria-setsize={r.count}
+      title={item.name}
+      className={cn(
+        "relative min-w-0 rounded-md border border-transparent p-2 text-center outline-none select-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring aria-selected:border-brand aria-selected:bg-selection",
+        r.dropping && "border-brand bg-brand/10",
+        r.dimmed && "opacity-50",
+        r.renaming && "z-[1]",
+      )}
+      style={{ height: TILE_H }}
+    >
+      <div className="flex h-[88px] items-center justify-center">
+        <Thumb node={item} source={r.source} className="max-h-[88px] w-full rounded" iconClass="size-[42px]" />
+      </div>
+      {r.renaming ? renameBox(r, true) : <span className="line-clamp-2 pt-1.5 text-xs leading-[18px] break-all">{item.name}</span>}
+      {item.is_favorite && <StarIcon className="absolute top-1.5 right-1.5 size-3 fill-amber-400 text-amber-400" />}
+    </div>
+  );
+});
+
+/** The nearest scrolling ancestor, which the list is virtualised against */
+function scrollParent(el: HTMLElement): HTMLElement {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const o = getComputedStyle(p).overflowY;
+    if (o === "auto" || o === "scroll") return p;
+  }
+  return document.documentElement;
+}
+
+/** An element's position in a scroll container's content */
+function offsetIn(el: Element, container: HTMLElement) {
+  const r = el.getBoundingClientRect();
+  const c = container === document.documentElement ? { top: 0, left: 0 } : container.getBoundingClientRect();
+  return { top: r.top - c.top + container.scrollTop, left: r.left - c.left + container.scrollLeft, width: r.width };
+}
+
+/** First and last of `count` boxes (`size` long, `stride` apart from `start`) that touch the span lo–hi */
+function touching(start: number, size: number, stride: number, count: number, lo: number, hi: number): [number, number] {
+  return [Math.max(0, Math.ceil((lo - start - size) / stride)), Math.min(count - 1, Math.floor((hi - start) / stride))];
+}
+
 export function FileList(p: FileListProps) {
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  /** The item with the keyboard focus: always rendered, so the focus isn't lost when it scrolls out of view */
+  const [focusId, setFocusId] = useState<string | null>(null);
+  const [scroller, setScroller] = useState<HTMLElement | null>(null);
+  /** Where the first row starts in the scroll container's content, and the list's width */
+  const [geo, setGeo] = useState({ top: 0, width: 0 });
+  const root = useRef<HTMLElement | null>(null);
+  const head = useRef<HTMLTableSectionElement>(null);
+  const pendingFocus = useRef<string | null>(null);
+  const grid = p.view === "grid";
+  const n = p.items.length;
   const selecting = p.selected.size > 0;
 
-  const click = (e: MouseEvent, index: number) => {
-    const item = p.items[index];
-    // Marquee selection prevents the default mousedown, so the row wouldn't get the focus: arrows continue from the clicked row
-    (e.currentTarget as HTMLElement).focus({ preventScroll: true });
-    if (coarse && !selecting && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-      p.onOpen(item);
-      return;
+  const indexOf = useMemo(() => new Map(p.items.map((x, i) => [x.id, i])), [p.items]);
+  // The first selected item holds the Tab stop: found once per selection, not for every row
+  const firstSelected = useMemo(() => {
+    let first = -1;
+    for (const id of p.selected) {
+      const i = indexOf.get(id);
+      if (i !== undefined && (first < 0 || i < first)) first = i;
     }
-    const anchorIndex = p.anchor === null ? -1 : p.items.findIndex((x) => x.id === p.anchor);
-    if (e.shiftKey && anchorIndex >= 0) {
-      const [a, b] = [Math.min(anchorIndex, index), Math.max(anchorIndex, index)];
-      const next = new Set(e.ctrlKey || e.metaKey ? p.selected : []);
-      for (let i = a; i <= b; i++) next.add(p.items[i].id);
-      p.onSelect(next, p.anchor!);
-    } else if (e.ctrlKey || e.metaKey || (coarse && selecting)) {
-      toggle(index);
-    } else {
-      p.onSelect(new Set([item.id]), item.id);
+    return first;
+  }, [p.selected, indexOf]);
+  const allSelected = useMemo(() => n > 0 && p.selected.size >= n && p.items.every((x) => p.selected.has(x.id)), [p.items, p.selected, n]);
+
+  const cols = grid ? Math.max(1, Math.floor((geo.width - 2 * PAD + GAP) / (TILE_W + GAP))) : 1;
+  const stride = grid ? TILE_H + GAP : ROW;
+  const rowOf = (i: number) => Math.floor(i / cols);
+  const tabStop = firstSelected >= 0 ? firstSelected : 0;
+  // Rows rendered even out of view: the Tab stop, the focused item and the one being renamed
+  const pinned = [tabStop, focusId === null ? undefined : indexOf.get(focusId), p.renamingId ? indexOf.get(p.renamingId) : undefined]
+    .filter((i): i is number => i !== undefined && i < n)
+    .map(rowOf);
+
+  // Row sizes are cached per key: new keys when the view changes
+  const rowKey = useCallback((i: number) => (grid ? -1 - i : i), [grid]);
+  const v = useVirtualizer({
+    count: Math.ceil(n / cols),
+    getScrollElement: () => scroller,
+    estimateSize: () => stride,
+    getItemKey: rowKey,
+    overscan: grid ? 2 : 12,
+    scrollMargin: geo.top,
+    // Keep rows scrolled to by the keyboard clear of the sticky column headers
+    scrollPaddingStart: grid ? PAD : HEAD,
+    rangeExtractor: (range) => [...new Set([...defaultRangeExtractor(range), ...pinned])].sort((a, b) => a - b),
+    initialRect: { width: 0, height: typeof window === "undefined" ? 800 : window.innerHeight },
+  });
+
+  // Find the scroll container, and where the rows start in it (measured after every render and on resize)
+  const measureGeo = useCallback(() => {
+    const el = root.current;
+    if (!el) return;
+    const s = scrollParent(el);
+    setScroller((cur) => (cur === s ? cur : s));
+    const top = offsetIn(el, s).top + (head.current ? head.current.offsetHeight : PAD);
+    const width = el.clientWidth;
+    setGeo((g) => (g.top === top && g.width === width ? g : { top, width }));
+  }, []);
+  useLayoutEffect(measureGeo);
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const ro = new ResizeObserver(measureGeo);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [measureGeo, grid, n === 0]);
+
+  // Keyboard moves: focus the item once its row is rendered
+  useLayoutEffect(() => {
+    const id = pendingFocus.current;
+    const el = id && root.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
+    if (el) {
+      pendingFocus.current = null;
+      el.focus({ preventScroll: true });
     }
+  });
+
+  // A new item is renamed right after it's created, wherever it sorts: bring it into view
+  const renamingIndex = p.renamingId ? indexOf.get(p.renamingId) : undefined;
+  useEffect(() => {
+    if (renamingIndex !== undefined) v.scrollToIndex(Math.floor(renamingIndex / cols));
+    // Only when renaming starts, not while the list reloads
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.renamingId, renamingIndex === undefined]);
+
+  const focusItem = (index: number) => {
+    const id = p.items[index].id;
+    v.scrollToIndex(rowOf(index));
+    setFocusId(id);
+    const el = root.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
+    if (el) el.focus({ preventScroll: true });
+    else pendingFocus.current = id;
+  };
+
+  const rangeTo = (index: number, keep?: Set<string>) => {
+    const anchorIndex = p.anchor === null ? -1 : (indexOf.get(p.anchor) ?? -1);
+    if (anchorIndex < 0) return null;
+    const next = new Set(keep);
+    for (let i = Math.min(anchorIndex, index); i <= Math.max(anchorIndex, index); i++) next.add(p.items[i].id);
+    return next;
   };
 
   const toggle = (index: number) => {
@@ -137,46 +431,22 @@ export function FileList(p: FileListProps) {
     p.onSelect(next, id);
   };
 
-  const contextMenu = (index: number) => {
-    // Right-clicking an unselected item selects only that item
-    if (!p.selected.has(p.items[index].id)) p.onSelect(new Set([p.items[index].id]), p.items[index].id);
-  };
-
-  const dragStart = (e: DragEvent, index: number) => {
-    const id = p.items[index].id;
-    const ids = p.selected.has(id) ? [...p.selected] : [id];
-    if (!p.selected.has(id)) p.onSelect(new Set([id]), id);
-    e.dataTransfer.setData(DRAG_MIME, JSON.stringify(ids));
-    e.dataTransfer.effectAllowed = "move";
-  };
-
-  // Drag to move: icon view drags the whole item; list view drags only the name, dragging from other columns marquee-selects (like Windows)
-  const dragHandle = (item: Item, i: number) => ({
-    draggable: !!p.onMoveInto && item.id !== p.renamingId,
-    onDragStart: (e: DragEvent) => dragStart(e, i),
-  });
-
   /** Keyboard: arrows move the selection (Shift extends it), Space selects (toggles with Ctrl), Home/End jump, Enter opens */
   const keyNav = (e: KeyboardEvent<HTMLElement>, index: number) => {
     // Keys typed in a control inside the row (its checkbox, the rename box) belong to that control
-    if (e.target !== e.currentTarget) return;
-    const el = e.currentTarget;
-    const parent = el.parentElement;
-    if (!parent) return;
-    // Columns of the icon view, as laid out by the browser
-    const perRow = p.view === "grid" ? Math.max(1, getComputedStyle(parent).gridTemplateColumns.split(" ").filter(Boolean).length) : 1;
+    if (e.target !== e.currentTarget || p.items[index].id === p.renamingId) return;
     if (e.key === "Enter" && !e.altKey && !e.repeat) {
       e.preventDefault();
       p.onOpen(p.items[index]);
       return;
     }
     let next: number | null = null;
-    if (e.key === "ArrowDown") next = Math.min(p.items.length - 1, index + perRow);
-    else if (e.key === "ArrowUp") next = Math.max(0, index - perRow);
-    else if (e.key === "ArrowRight" && p.view === "grid") next = Math.min(p.items.length - 1, index + 1);
-    else if (e.key === "ArrowLeft" && p.view === "grid") next = Math.max(0, index - 1);
+    if (e.key === "ArrowDown") next = Math.min(n - 1, index + cols);
+    else if (e.key === "ArrowUp") next = Math.max(0, index - cols);
+    else if (e.key === "ArrowRight" && grid) next = Math.min(n - 1, index + 1);
+    else if (e.key === "ArrowLeft" && grid) next = Math.max(0, index - 1);
     else if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = p.items.length - 1;
+    else if (e.key === "End") next = n - 1;
     else if (e.key === " ") {
       e.preventDefault();
       if (e.ctrlKey || e.metaKey) toggle(index);
@@ -186,70 +456,99 @@ export function FileList(p: FileListProps) {
     if (next === null) return;
     e.preventDefault();
     const item = p.items[next];
-    const anchorIndex = p.anchor === null ? -1 : p.items.findIndex((x) => x.id === p.anchor);
-    if (e.shiftKey && anchorIndex >= 0) {
-      const [a, b] = [Math.min(anchorIndex, next), Math.max(anchorIndex, next)];
-      const range = new Set<string>();
-      for (let k = a; k <= b; k++) range.add(p.items[k].id);
-      p.onSelect(range, p.anchor!);
-    } else {
-      p.onSelect(new Set([item.id]), item.id);
-    }
-    parent.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(item.id)}"]`)?.focus();
+    const range = e.shiftKey ? rangeTo(next) : null;
+    if (range) p.onSelect(range, p.anchor!);
+    else p.onSelect(new Set([item.id]), item.id);
+    focusItem(next);
   };
 
-  const rowProps = (item: Item, i: number) => ({
-    "data-node-id": item.id,
-    "aria-selected": p.selected.has(item.id),
-    // One item is reachable with Tab (the first selected one, else the first item); arrows move between the others
-    tabIndex: p.selected.has(item.id) ? (p.items.findIndex((x) => p.selected.has(x.id)) === i ? 0 : -1) : p.selected.size === 0 && i === 0 ? 0 : -1,
-    onKeyDown: (e: KeyboardEvent<HTMLElement>) => {
-      if (item.id !== p.renamingId) keyNav(e, i);
-    },
-    onClick: (e: MouseEvent) => click(e, i),
-    onDoubleClick: () => p.onOpen(item),
-    onMouseDown: (e: MouseEvent) => {
-      if (e.button === 1 && p.onOpenInNewTab) e.preventDefault();
-    },
-    onAuxClick: (e: MouseEvent) => {
-      if (e.button === 1 && p.onOpenInNewTab) {
-        e.preventDefault();
-        p.onOpenInNewTab(item);
+  const h = useRef<Handlers>(null!);
+  h.current = {
+    click: (e, index) => {
+      const item = p.items[index];
+      // Marquee selection prevents the default mousedown, so the row wouldn't get the focus: arrows continue from the clicked row
+      (e.currentTarget as HTMLElement).focus({ preventScroll: true });
+      if (coarse && !selecting && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        p.onOpen(item);
+        return;
       }
+      const range = e.shiftKey ? rangeTo(index, e.ctrlKey || e.metaKey ? p.selected : undefined) : null;
+      if (range) p.onSelect(range, p.anchor!);
+      else if (e.ctrlKey || e.metaKey || (coarse && selecting)) toggle(index);
+      else p.onSelect(new Set([item.id]), item.id);
     },
-    onContextMenu: () => contextMenu(i),
-    ...(p.onMoveInto && item.kind === "folder"
-      ? {
-          onDragOver: (e: DragEvent) => {
-            if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
-            e.preventDefault();
-            e.stopPropagation();
-            e.dataTransfer.dropEffect = "move";
-            setDropTarget(item.id);
-          },
-          onDragLeave: () => setDropTarget((t) => (t === item.id ? null : t)),
-          onDrop: (e: DragEvent) => {
-            setDropTarget(null);
-            const raw = e.dataTransfer.getData(DRAG_MIME);
-            if (!raw) return;
-            e.preventDefault();
-            e.stopPropagation();
-            // Any page can set this type when dragging, so check what arrived
-            let dropped: unknown;
-            try {
-              dropped = JSON.parse(raw);
-            } catch {
-              return;
-            }
-            if (!Array.isArray(dropped) || !dropped.every((id) => typeof id === "string")) return;
-            const ids = (dropped as string[]).filter((id) => id !== item.id);
-            if (ids.length) p.onMoveInto!(ids, item);
-          },
-        }
-      : {}),
-  });
+    toggle,
+    keyDown: keyNav,
+    focused: setFocusId,
+    // Right-clicking an unselected item selects only that item
+    contextMenu: (index) => {
+      if (!p.selected.has(p.items[index].id)) p.onSelect(new Set([p.items[index].id]), p.items[index].id);
+    },
+    dragStart: (e, index) => {
+      const id = p.items[index].id;
+      const ids = p.selected.has(id) ? [...p.selected] : [id];
+      if (!p.selected.has(id)) p.onSelect(new Set([id]), id);
+      e.dataTransfer.setData(DRAG_MIME, JSON.stringify(ids));
+      e.dataTransfer.effectAllowed = "move";
+    },
+    dragOver: (e, id) => {
+      if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = "move";
+      setDropTarget(id);
+    },
+    dragLeave: (id) => setDropTarget((t) => (t === id ? null : t)),
+    drop: (e, folder) => {
+      setDropTarget(null);
+      const raw = e.dataTransfer.getData(DRAG_MIME);
+      if (!raw || !p.onMoveInto) return;
+      e.preventDefault();
+      e.stopPropagation();
+      // Any page can set this type when dragging, so check what arrived
+      let dropped: unknown;
+      try {
+        dropped = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      if (!Array.isArray(dropped) || !dropped.every((id) => typeof id === "string")) return;
+      const ids = (dropped as string[]).filter((id) => id !== folder.id);
+      if (ids.length) p.onMoveInto(ids, folder);
+    },
+    open: p.onOpen,
+    openInNewTab: p.onOpenInNewTab,
+    dateOf: p.dateOf ?? ((x) => x.updated_at),
+    rename: (item, name) => p.onRename!(item, name),
+    renameDone: () => p.onRenameDone?.(),
+  };
 
-  if (p.items.length === 0) return <>{p.empty}</>;
+  // Marquee selection finds the boxed items from the row geometry: most rows aren't in the DOM
+  const measure: MeasureHits = (container) => {
+    const el = root.current;
+    const items = p.items;
+    if (!el) return () => [];
+    const at = offsetIn(el, container);
+    const width = el.clientWidth;
+    if (!grid) {
+      const top = at.top + (head.current?.offsetHeight ?? HEAD);
+      return function* (b: Box) {
+        if (b.x > at.left + at.width || b.x + b.w < at.left) return;
+        const [first, last] = touching(top, ROW, ROW, items.length, b.y, b.y + b.h);
+        for (let i = first; i <= last; i++) yield items[i].id;
+      };
+    }
+    const perRow = Math.max(1, Math.floor((width - 2 * PAD + GAP) / (TILE_W + GAP)));
+    const tileW = (width - 2 * PAD - (perRow - 1) * GAP) / perRow;
+    return function* (b: Box) {
+      const [r0, r1] = touching(at.top + PAD, TILE_H, TILE_H + GAP, Math.ceil(items.length / perRow), b.y, b.y + b.h);
+      const [c0, c1] = touching(at.left + PAD, tileW, tileW + GAP, perRow, b.x, b.x + b.w);
+      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1 && r * perRow + c < items.length; c++) yield items[r * perRow + c].id;
+    };
+  };
+  if (p.measureRef) p.measureRef.current = measure;
+
+  if (n === 0) return <>{p.empty}</>;
 
   // Screen readers announce how many items are selected (the status bar isn't read out)
   const status = (
@@ -259,65 +558,72 @@ export function FileList(p: FileListProps) {
   );
   const label = p.label ?? t("Items");
 
-  const dateOf = p.dateOf ?? ((n: Item) => n.updated_at);
-  const renaming = (item: Item) => item.id === p.renamingId && !!p.onRename;
-  const renameBox = (item: Item, multiline?: boolean) => (
-    <InlineRename
-      initial={item.name}
-      multiline={multiline}
-      selectAll={item.kind === "folder"}
-      onSubmit={(name) => p.onRename!(item, name)}
-      onDone={() => p.onRenameDone?.()}
-      className={multiline ? "mt-1.5" : undefined}
-    />
-  );
-  const star = (item: Item) => item.is_favorite && <StarIcon className="size-[11px] shrink-0 fill-amber-400 text-amber-400" aria-label={tc("state", "Favorite")} />;
+  // The rows to render, each with the gap before it: rows kept for the focus can be far from the ones in view
+  let end = geo.top;
+  const rows = v.getVirtualItems().map((r) => {
+    const gap = r.start - end;
+    end = r.end;
+    return { row: r.index, gap };
+  });
+  const rest = v.getTotalSize() + geo.top - end;
 
-  if (p.view === "grid") {
+  const row = (index: number): RowProps => {
+    const item = p.items[index];
+    return {
+      item,
+      index,
+      h,
+      selected: p.selected.has(item.id),
+      tabStop: index === tabStop,
+      dimmed: !!p.dimmed?.has(item.id),
+      dropping: dropTarget === item.id,
+      renaming: item.id === p.renamingId && !!p.onRename,
+      movable: !!p.onMoveInto && item.id !== p.renamingId,
+      dropTarget: !!p.onMoveInto && item.kind === "folder",
+    };
+  };
+
+  if (grid) {
     return (
       <>
         {status}
-        <div role="listbox" aria-multiselectable aria-label={label} className="grid grid-cols-[repeat(auto-fill,minmax(116px,1fr))] gap-2 p-3">
-          {p.items.map((item, i) => (
-            <div
-              key={item.id}
-              {...rowProps(item, i)}
-              {...dragHandle(item, i)}
-              role="option"
-              title={item.name}
-              className={cn(
-                "relative min-w-0 rounded-md border border-transparent p-2 text-center outline-none select-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring aria-selected:border-brand aria-selected:bg-selection",
-                dropTarget === item.id && "border-brand bg-brand/10",
-                p.dimmed?.has(item.id) && "opacity-50",
-              )}
-            >
-              <div className="flex h-[88px] items-center justify-center">
-                <Thumb node={item} source={p.source} className="max-h-[88px] w-full rounded" iconClass="size-[42px]" />
+        <div ref={(el) => void (root.current = el)} role="listbox" aria-multiselectable aria-label={label} className="p-3">
+          {rows.map(({ row: r, gap }) => (
+            <Fragment key={r}>
+              {gap > 0 && <div aria-hidden style={{ height: gap }} />}
+              <div role="none" className="grid gap-2" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, marginBottom: GAP }}>
+                {p.items.slice(r * cols, (r + 1) * cols).map((item, k) => (
+                  <Tile key={item.id} {...row(r * cols + k)} source={p.source} count={n} />
+                ))}
               </div>
-              {renaming(item) ? renameBox(item, true) : <span className="line-clamp-2 pt-1.5 text-xs leading-[18px] break-all">{item.name}</span>}
-              {item.is_favorite && <StarIcon className="absolute top-1.5 right-1.5 size-3 fill-amber-400 text-amber-400" />}
-            </div>
+            </Fragment>
           ))}
+          {rest > 0 && <div aria-hidden style={{ height: rest }} />}
         </div>
       </>
     );
   }
 
-  const allSelected = p.items.length > 0 && p.items.every((n) => p.selected.has(n.id));
-  const td = "h-7 px-2 truncate";
+  const columns = 4 + (p.showCheckboxes ? 1 : 0) + (p.showLocation ? 1 : 0) + (p.showOwner ? 1 : 0);
+  const spacer = (height: number) => (
+    <tr aria-hidden>
+      <td colSpan={columns} style={{ height, padding: 0 }} />
+    </tr>
+  );
 
   // role="grid": screen readers only report the selected state of rows in a grid, not in a plain table
   return (
     <>
       {status}
       <table
+        ref={(el) => void (root.current = el)}
         role="grid"
         aria-multiselectable
         aria-label={label}
-        aria-rowcount={p.items.length + 1}
+        aria-rowcount={n + 1}
         className="w-full table-fixed border-collapse text-xs whitespace-nowrap select-none"
       >
-        <thead>
+        <thead ref={head}>
           <tr role="row" aria-rowindex={1}>
             {p.showCheckboxes && (
               <th role="columnheader" className={cn(th, "w-[30px] px-[7px]")}>
@@ -329,7 +635,7 @@ export function FileList(p: FileListProps) {
                   ref={(el) => {
                     if (el) el.indeterminate = selecting && !allSelected;
                   }}
-                  onChange={() => p.onSelect(allSelected ? new Set() : new Set(p.items.map((n) => n.id)))}
+                  onChange={() => p.onSelect(allSelected ? new Set() : new Set(p.items.map((x) => x.id)))}
                 />
               </th>
             )}
@@ -342,56 +648,13 @@ export function FileList(p: FileListProps) {
           </tr>
         </thead>
         <tbody>
-          {p.items.map((item, i) => (
-            <tr
-              key={item.id}
-              {...rowProps(item, i)}
-              role="row"
-              aria-rowindex={i + 2}
-              className={cn(
-                "cursor-default outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset aria-selected:bg-selection aria-selected:text-accent-foreground aria-selected:shadow-[inset_3px_0_0_var(--color-brand)]",
-                dropTarget === item.id && "bg-brand/15",
-                p.dimmed?.has(item.id) && "opacity-50",
-              )}
-            >
-              {p.showCheckboxes && (
-                <td role="gridcell" className={cn(td, "px-[7px]")}>
-                  <input
-                    type="checkbox"
-                    className="align-middle accent-brand"
-                    aria-label={t("Select {name}", { name: item.name })}
-                    checked={p.selected.has(item.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={() => toggle(i)}
-                  />
-                </td>
-              )}
-              <td role="gridcell" className={cn(td, "pl-3")}>
-                <div data-drag-handle {...dragHandle(item, i)} className="flex w-fit max-w-full min-w-0 items-center gap-2" title={item.name}>
-                  <FileIcon node={item} className="size-4 shrink-0" />
-                  {renaming(item) ? (
-                    renameBox(item)
-                  ) : (
-                    <>
-                      <span className="truncate">{item.name}</span>
-                      {star(item)}
-                    </>
-                  )}
-                </div>
-              </td>
-              {p.showLocation && (
-                <td role="gridcell" className={cn(td, "text-muted-foreground max-lg:hidden")} title={item.location}>
-                  {item.location}
-                </td>
-              )}
-              <td role="gridcell" className={cn(td, "text-muted-foreground max-md:hidden")}>{formatWinDate(dateOf(item))}</td>
-              <td role="gridcell" className={cn(td, "text-muted-foreground max-md:hidden")} title={typeTitle(item)}>
-                {typeLabel(item)}
-              </td>
-              <td role="gridcell" className={cn(td, "pr-3 text-right text-muted-foreground tabular-nums")}>{item.kind === "folder" ? "" : formatWinSize(item.size)}</td>
-              {p.showOwner && <td role="gridcell" className={cn(td, "text-muted-foreground max-md:hidden")}>{item.owner_name}</td>}
-            </tr>
+          {rows.map(({ row: i, gap }) => (
+            <Fragment key={p.items[i].id}>
+              {gap > 0 && spacer(gap)}
+              <ListRow {...row(i)} checkboxes={!!p.showCheckboxes} location={!!p.showLocation} owner={!!p.showOwner} />
+            </Fragment>
           ))}
+          {rest > 0 && spacer(rest)}
         </tbody>
       </table>
     </>

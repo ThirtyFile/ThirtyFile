@@ -13,6 +13,7 @@ import { FileList } from "@/components/FileList";
 import { Frame, ToolButton } from "@/components/Frame";
 import { useMe } from "@/lib/session";
 import { locale, t } from "@/lib/i18n";
+import { useAllPages } from "@/lib/pages";
 import { invalidateFiles } from "@/lib/queries";
 import { trashHint } from "@/lib/utils";
 
@@ -20,14 +21,14 @@ export function TrashPage() {
   const me = useMe();
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const q = useQuery({ queryKey: ["trash"], queryFn: api.listTrash });
+  const q = useAllPages(["trash", "pages"], api.trashPage);
   // Empty trash deletes only the spaces the person manages; the trash also lists items of spaces they can only view
   const emptyable = useQuery({ queryKey: ["trash", "empty"], queryFn: api.emptyTrashPreview, enabled: me.can_delete });
   const emptyCount = (emptyable.data ?? []).reduce((sum, s) => sum + s.items, 0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<"delete" | "empty" | null>(null);
-  const items = q.data ?? [];
+  const items = q.items;
   const ids = [...selected];
 
   const done = (msg: string) => {
@@ -62,6 +63,7 @@ export function TrashPage() {
       footer={
         <span>
           {t("{n} item|{n} items", { n: items.length })}
+          {q.loadingMore && ` · ${t("Loading more items…")}`}
           {selected.size > 0 && ` · ${t("{n} selected", { n: selected.size })}`} ·{" "}
           {me.trash_days > 0
             ? t("Items are permanently deleted after {n} day|Items are permanently deleted after {n} days", { n: me.trash_days })

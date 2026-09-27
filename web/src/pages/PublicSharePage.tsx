@@ -18,6 +18,7 @@ import { Logo } from "@/pages/AppShell";
 import { LanguageSwitch } from "@/components/LanguageSwitch";
 import { cn, formatBytes, formatDate } from "@/lib/utils";
 import { t, tc } from "@/lib/i18n";
+import { useAllPages } from "@/lib/pages";
 
 export function PublicSharePage() {
   const { token = "" } = useParams();
@@ -185,12 +186,9 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
   const [previewId, setPreviewId] = useState<string | null>(null);
 
   const info = useQuery({ queryKey: ["public-node", share.token, current], queryFn: () => api.publicNode(share.token, current) });
-  const children = useQuery({
-    queryKey: ["public-children", share.token, current],
-    queryFn: () => api.publicChildren(share.token, current),
-  });
-  const items = children.data ?? [];
-  const files = items.filter((n) => n.kind === "file");
+  const children = useAllPages(["public-children", share.token, current], (limit, after) => api.publicChildrenPage(share.token, current, limit, after));
+  const items = children.items;
+  const files = useMemo(() => items.filter((n) => n.kind === "file"), [items]);
   const previewIndex = previewId ? files.findIndex((f) => f.id === previewId) : -1;
   const exhausted = share.downloads_left === 0;
 

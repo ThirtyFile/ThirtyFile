@@ -29,7 +29,7 @@ import { AccessDialog } from "@/components/AccessDialog";
 import { ActivityLog } from "@/components/logs/ActivityLog";
 import { ConfirmDialog, ErrorText } from "@/components/dialogs";
 import { InlineRename } from "@/components/InlineRename";
-import { useMarquee } from "@/components/useMarquee";
+import { MarqueeBox, useMarquee } from "@/components/useMarquee";
 import { FileIcon } from "@/components/FileIcon";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { DRIVE_ICON, DRIVE_KIND_LABEL, ROLE_LABEL, atLeast, useDrives } from "@/lib/drives";
@@ -584,12 +584,7 @@ export function ThisPcPage() {
           <div role="status" className="sr-only">
             {selItems.length > 0 ? t("{n} item selected|{n} items selected", { n: selItems.length }) : ""}
           </div>
-          {marquee.box && (
-            <div
-              className="pointer-events-none absolute z-10 border border-brand bg-brand/15"
-              style={{ left: marquee.box.x, top: marquee.box.y, width: marquee.box.w, height: marquee.box.h }}
-            />
-          )}
+          <MarqueeBox store={marquee.box} />
           {drives.isLoading ? (
             <div className="grid gap-2 pt-4">
               {[0, 1, 2].map((i) => (
