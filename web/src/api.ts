@@ -40,7 +40,7 @@ export interface NodeInfo {
   via_share: boolean;
   /** Why the storage service holding the content is offline (e.g. S3 disconnected) */
   offline: string | null;
-  /** A folder space: browse, download and share only (for now) */
+  /** A read-only space: browse, download and share only */
   read_only: boolean;
 }
 
@@ -74,6 +74,8 @@ export interface Drive {
   offline: string | null;
   /** "folder": the space shows a folder on the server */
   mode: "store" | "folder";
+  /** Browse, download and share only (folder spaces) */
+  read_only: boolean;
   /** Folder spaces, for administrators */
   source_path?: string;
   last_scan_at?: number | null;
@@ -608,10 +610,11 @@ export const api = {
   updateSystemSettings: (req: SystemSettingsReq) => request<SystemInfo>("PATCH", "/admin/settings", req),
 
   drives: () => get<Drive[]>("/drives").then((l) => l.map(localizeDrive)),
-  createDrive: (name: string, quota_bytes?: number, source_path?: string) => post<Drive>("/drives", { name, quota_bytes, source_path }),
+  createDrive: (name: string, quota_bytes?: number, source_path?: string, read_only?: boolean) =>
+    post<Drive>("/drives", { name, quota_bytes, source_path, read_only }),
   /** Scans a folder space for changes made on the server's folder */
   scanDrive: (id: string) => post<ScanReport>(`/admin/drives/${encodeURIComponent(id)}/scan`),
-  updateDrive: (id: string, req: { name?: string; quota_bytes?: number }) => request<Drive>("PATCH", `/drives/${id}`, req),
+  updateDrive: (id: string, req: { name?: string; quota_bytes?: number; read_only?: boolean }) => request<Drive>("PATCH", `/drives/${id}`, req),
   deleteDrive: (id: string) => request("DELETE", `/drives/${id}`),
   adminDrives: () => get<Drive[]>("/admin/drives").then((l) => l.map(localizeDrive)),
   access: (nodeId: string) => get<AccessInfo>(`/nodes/${nodeId}/access`),

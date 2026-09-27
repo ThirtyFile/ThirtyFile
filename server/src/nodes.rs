@@ -14,6 +14,7 @@ use sqlx::SqliteConnection;
 use crate::{
     auth::User,
     error::{AppError, AppResult},
+    fsops,
     state::AppState,
     tree::{self, Crumb, NODE_COLS, Need, Node, Role},
     util::{new_id, now, validate_name},
@@ -45,7 +46,7 @@ pub struct NodeInfo {
     via_share: bool,
     /// Reason the storage location holding the content is offline (files: where the content is; folders: the space's location)
     offline: Option<String>,
-    /// A folder space: browse, download and share only (for now)
+    /// A read-only space: browse, download and share only
     read_only: bool,
 }
 
@@ -78,7 +79,7 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
         };
         st.location_offline(&location)
     };
-    let read_only = drive.is_folder();
+    let read_only = drive.read_only;
     Ok(Json(NodeInfo {
         node,
         path,
@@ -139,9 +140,11 @@ pub struct CreateFolderReq {
 
 pub async fn create_folder(State(st): State<AppState>, user: User, Json(req): Json<CreateFolderReq>) -> AppResult<Json<Node>> {
     let name = validate_name(&req.name)?;
+    let locks = fsops::lock(&st, &user, &[&req.parent_id]).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
     let parent = tree::folder_for(&mut tx, &user, &req.parent_id, Need::Write).await?;
+    locks.check(&parent)?;
     if tree::name_taken(&mut tx, &parent.id, &name).await? {
         return Err(AppError::conflict(format!("\"{name}\" already exists")));
     }
@@ -164,16 +167,23 @@ pub async fn rename(
     Json(req): Json<RenameReq>,
 ) -> AppResult<Json<Node>> {
     let name = validate_name(&req.name)?;
+    let locks = fsops::lock(&st, &user, &[&id]).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
     let node = tree::node_for(&mut tx, &user, &id, Need::Write).await?;
+    locks.check(&node)?;
     let parent = node.parent_id.clone().ok_or_else(|| AppError::bad_request("The root folder of a space can't be renamed"))?;
     if name == node.name {
         return Ok(Json(node));
     }
-    // Changing only the letter case isn't a conflict
-    if !name.eq_ignore_ascii_case(&node.name) && tree::name_taken(&mut tx, &parent, &name).await? {
+    // Changing only the letter case isn't a conflict (in a folder space, other letter case is another name)
+    let case_only = !node.in_folder_space() && name.eq_ignore_ascii_case(&node.name);
+    if !case_only && tree::name_taken(&mut tx, &parent, &name).await? {
         return Err(AppError::conflict(format!("\"{name}\" already exists")));
+    }
+    if node.in_folder_space() {
+        let folder = tree::get_node(&mut tx, &parent).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
+        fsops::rename(&mut tx, &node, &folder, &name).await?;
     }
     let mime = if node.is_folder() { String::new() } else { crate::util::guess_mime(&name) };
     // The time only moves forward: it is the version the editors send back to detect changes by someone else, and
@@ -236,11 +246,18 @@ fn not_root(n: &Node) -> AppResult<()> {
 }
 
 pub async fn move_nodes(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Value>> {
+    let ids = req.ids()?;
+    let locks = fsops::lock(&st, &user, &locked_ids(req.dest()?, &ids)).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
     let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Write).await?;
-    for id in &req.ids()? {
+    locks.check(&dest)?;
+    // Moves between spaces that involve a folder space copy content: done after this transaction, item by item
+    let mut across = Vec::new();
+    let mut across_items = 0usize;
+    for id in &ids {
         let node = tree::node_for(&mut tx, &user, id, Need::Write).await?;
+        locks.check(&node)?;
         not_root(&node)?;
         if node.parent_id.as_deref() == Some(dest.id.as_str()) {
             continue;
@@ -267,11 +284,22 @@ pub async fn move_nodes(State(st): State<AppState>, user: User, Json(req): Json<
             let subtree: Vec<Node> = tree::subtree(&mut tx, &node.id).await?.into_iter().map(|(n, _)| n).collect();
             let bytes: i64 = subtree.iter().filter(|n| !n.is_folder()).map(|n| n.size).sum();
             tree::check_quota(&mut tx, dest.drive(), bytes).await?;
+            if node.in_folder_space() || dest.in_folder_space() {
+                let nodes: Vec<Node> = subtree.into_iter().filter(|n| n.trashed_at.is_none()).collect();
+                across_items += nodes.len();
+                if across_items > MAX_COPY_ITEMS {
+                    return Err(AppError::bad_request("Move at most 20,000 items at once to or from a folder on the server"));
+                }
+                across.push(nodes);
+                continue;
+            }
             for n in &subtree {
                 sqlx::query("UPDATE nodes SET drive_id = ? WHERE id = ?").bind(&dest.drive_id).bind(&n.id).execute(&mut *tx).await?;
             }
             tree::adjust_usage(&mut tx, node.drive(), -bytes).await?;
             tree::adjust_usage(&mut tx, dest.drive(), bytes).await?;
+        } else if node.in_folder_space() {
+            fsops::rename(&mut tx, &node, &dest, &node.name).await?;
         }
         sqlx::query("UPDATE nodes SET parent_id = ? WHERE id = ?").bind(&dest.id).bind(&node.id).execute(&mut *tx).await?;
         tree::touch(&mut tx, node.parent_id.as_deref().unwrap()).await?;
@@ -279,22 +307,30 @@ pub async fn move_nodes(State(st): State<AppState>, user: User, Json(req): Json<
     }
     tree::touch(&mut tx, &dest.id).await?;
     tx.commit().await?;
+    drop(_w);
+    fsops::move_across(&st, &user, &dest, across).await?;
     Ok(Json(json!({ "ok": true })))
 }
 
+/// The items a move or copy touches, for locking their folder spaces
+fn locked_ids<'a>(dest: &'a str, ids: &'a [String]) -> Vec<&'a str> {
+    std::iter::once(dest).chain(ids.iter().map(String::as_str)).collect()
+}
+
 pub async fn copy_nodes(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Value>> {
+    let ids = req.ids()?;
+    let locks = fsops::lock(&st, &user, &locked_ids(req.dest()?, &ids)).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
     let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Write).await?;
+    locks.check(&dest)?;
     let mut plans = Vec::new();
     let mut total = 0i64;
     let mut items = 0usize;
-    for id in &req.ids()? {
+    for id in &ids {
         let node = tree::node_for(&mut tx, &user, id, Need::Read).await?;
+        locks.check(&node)?;
         not_root(&node)?;
-        if node.in_folder_space() {
-            return Err(AppError::bad_request("Items of a folder on the server can't be copied yet. Download them and upload them instead."));
-        }
         if tree::is_within(&mut tx, &dest.id, &node.id).await? {
             return Err(AppError::bad_request(format!("Can't copy \"{}\" into its own subfolder", node.name)));
         }
@@ -310,6 +346,9 @@ pub async fn copy_nodes(State(st): State<AppState>, user: User, Json(req): Json<
     }
     tree::check_quota(&mut tx, dest.drive(), total).await?;
 
+    // Copies to or from a folder space copy content: done after this transaction, item by item
+    let (across, plans): (Vec<Vec<Node>>, Vec<Vec<Node>>) = plans.into_iter().partition(|nodes| nodes[0].in_folder_space() || dest.in_folder_space());
+    let total: i64 = plans.iter().flatten().map(|n| n.size).sum();
     let ts = now();
     for nodes in plans {
         let mut ids: HashMap<String, String> = HashMap::new();
@@ -348,17 +387,26 @@ pub async fn copy_nodes(State(st): State<AppState>, user: User, Json(req): Json<
     tree::adjust_usage(&mut tx, dest.drive(), total).await?;
     tree::touch(&mut tx, &dest.id).await?;
     tx.commit().await?;
+    drop(_w);
+    fsops::copy_across(&st, &user, &dest, across).await?;
     Ok(Json(json!({ "ok": true })))
 }
 
 pub async fn trash(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Value>> {
+    let ids = req.ids()?;
+    let locks = fsops::lock(&st, &user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
     let ts = now();
-    for id in &outermost(&mut tx, &req.ids()?).await? {
+    for id in &outermost(&mut tx, &ids).await? {
         let node = tree::node_for(&mut tx, &user, id, Need::Delete).await?;
+        locks.check(&node)?;
         not_root(&node)?;
         let trash_id = new_id();
+        if node.in_folder_space() {
+            // Into the space's trash folder on disk, so it can be restored
+            fsops::trash(&mut tx, &node, &trash_id).await?;
+        }
         sqlx::query(
             "WITH RECURSIVE sub(id) AS (
                SELECT ?1 UNION ALL
@@ -478,6 +526,9 @@ async fn trash_root(conn: &mut SqliteConnection, user: &User, id: &str, need: Ne
     }
     let role = trash_role(conn, user, &node).await?.ok_or_else(not_found)?;
     tree::allows(user, role, need)?;
+    if node.space_read_only {
+        return Err(tree::read_only_space());
+    }
     let parent = match &node.parent_id {
         Some(p) => tree::get_node(conn, p).await?.filter(|p| p.trashed_at.is_none()),
         None => None,
@@ -497,12 +548,22 @@ async fn trash_root(conn: &mut SqliteConnection, user: &User, id: &str, need: Ne
 }
 
 pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Value>> {
+    let ids = req.ids()?;
+    let locks = fsops::lock(&st, &user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
-    for id in &req.ids()? {
+    for id in &ids {
         // Restored into the original folder, or the space's root folder if that was deleted too
         let (node, parent_id) = trash_root(&mut tx, &user, id, Need::Write).await?;
-        let name = tree::unique_name(&mut tx, &parent_id, &node.name, node.is_folder()).await?;
+        locks.check(&node)?;
+        let name = if node.in_folder_space() {
+            let dest = tree::get_node(&mut tx, &parent_id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
+            let name = fsops::free_name(&mut tx, &dest, &node.name, node.is_folder()).await?;
+            fsops::restore(&mut tx, &node, &dest, &name).await?;
+            name
+        } else {
+            tree::unique_name(&mut tx, &parent_id, &node.name, node.is_folder()).await?
+        };
         sqlx::query("UPDATE nodes SET parent_id = ?, name = ? WHERE id = ?")
             .bind(&parent_id)
             .bind(&name)
@@ -527,13 +588,16 @@ pub async fn delete_forever(State(st): State<AppState>, user: User, Json(req): J
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
     let mut orphans = Vec::new();
+    let mut on_disk = Vec::new();
     for id in &outermost(&mut tx, &req.ids()?).await? {
         let (node, _) = trash_root(&mut tx, &user, id, Need::Delete).await?;
         tree::log(&mut tx, &user, Some(&node), "delete", "").await?;
+        on_disk.extend(fsops::trash_folder(&node));
         orphans.extend(tree::purge_subtree(&mut tx, &node.id).await?);
     }
     tx.commit().await?;
     tree::schedule_blob_removal(&st, orphans);
+    fsops::remove_later(on_disk);
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -577,11 +641,16 @@ async fn purge_trash_in_batches(st: &AppState, select: &'static str, param: Stri
             return Ok(total);
         }
         let mut orphans = Vec::new();
+        let mut on_disk = Vec::new();
         for (id,) in &ids {
+            if let Some(node) = tree::get_node(&mut tx, id).await? {
+                on_disk.extend(fsops::trash_folder(&node));
+            }
             orphans.extend(tree::purge_subtree(&mut tx, id).await?);
         }
         tx.commit().await?;
         tree::schedule_blob_removal(st, orphans);
+        fsops::remove_later(on_disk);
         total += ids.len();
     }
 }

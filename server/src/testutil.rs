@@ -130,8 +130,52 @@ impl TestEnv {
             .unwrap();
     }
 
+    /// A folder space over a new temporary folder, created by the administrator (its owner) and scanned once
+    pub async fn folder_space(&self, name: &str) -> FolderSpace {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-folder-{}", new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let req = serde_json::from_value(serde_json::json!({ "name": name, "source_path": dir.to_string_lossy() })).unwrap();
+        let axum::Json(info) = crate::drives::create(axum::extract::State(self.st.clone()), self.admin().await, axum::Json(req)).await.unwrap();
+        let v = serde_json::to_value(&info).unwrap();
+        let drive = v["id"].as_str().unwrap().to_string();
+        // Creating the space starts indexing in the background: let it finish on the empty folder first
+        crate::folders::scan(&self.st, &drive).await.unwrap();
+        FolderSpace { dir, drive, root: v["root_id"].as_str().unwrap().to_string() }
+    }
+
+    /// The node indexed at `rel` in a folder space: (id, size)
+    pub async fn node_at(&self, drive: &str, rel: &str) -> Option<(String, i64)> {
+        sqlx::query_as("SELECT id, size FROM nodes WHERE drive_id = ? AND fs_path = ? AND trashed_at IS NULL")
+            .bind(drive)
+            .bind(rel)
+            .fetch_optional(&self.st.db)
+            .await
+            .unwrap()
+    }
+
     pub async fn drive_of(&self, node: &str) -> String {
         let (d,): (String,) = sqlx::query_as("SELECT drive_id FROM nodes WHERE id = ?").bind(node).fetch_one(&self.st.db).await.unwrap();
         d
     }
+}
+
+/// A folder space's temporary folder, removed when dropped
+pub struct FolderSpace {
+    pub dir: PathBuf,
+    pub drive: String,
+    pub root: String,
+}
+
+impl Drop for FolderSpace {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// Writes a file dated a minute ago, so scans don't treat it as still being written
+pub fn write_old(path: &std::path::Path, content: &[u8]) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, content).unwrap();
+    let f = std::fs::File::options().write(true).open(path).unwrap();
+    f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(60)).unwrap();
 }

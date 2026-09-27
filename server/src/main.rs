@@ -5,6 +5,7 @@ mod drives;
 mod error;
 mod files;
 mod folders;
+mod fsops;
 mod locations;
 mod logs;
 mod branding;

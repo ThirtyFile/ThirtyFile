@@ -85,18 +85,18 @@ fn ignored(name: &str) -> bool {
         || lower.starts_with(".smbdelete")
 }
 
-fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
+pub(crate) fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
     meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos() as i64).unwrap_or(0)
 }
 
 #[cfg(unix)]
-fn identity(meta: &std::fs::Metadata) -> (i64, i64) {
+pub(crate) fn identity(meta: &std::fs::Metadata) -> (i64, i64) {
     use std::os::unix::fs::MetadataExt;
     (meta.dev() as i64, meta.ino() as i64)
 }
 
 #[cfg(not(unix))]
-fn identity(_: &std::fs::Metadata) -> (i64, i64) {
+pub(crate) fn identity(_: &std::fs::Metadata) -> (i64, i64) {
     // Without inodes, a move is seen as removing and adding
     (0, 0)
 }
@@ -236,6 +236,7 @@ async fn scan_locked(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     .await?;
     let ops = plan(&drive, &indexed, &entries, true, &mut report);
     apply(st, &drive, ops).await?;
+    crate::fsops::clean_trash(st, &drive.id, &root).await?;
     finish(st, &drive, &report).await?;
     Ok(report)
 }
@@ -353,7 +354,7 @@ pub fn spawn_scanner(st: AppState) {
     });
 }
 
-fn drive_lock(drive_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+pub(crate) fn drive_lock(drive_id: &str) -> Arc<tokio::sync::Mutex<()>> {
     static LOCKS: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
     LOCKS.get_or_init(Default::default).lock().unwrap().entry(drive_id.to_string()).or_default().clone()
 }
@@ -574,10 +575,10 @@ async fn apply_one(conn: &mut SqliteConnection, drive: &Drive, owner: i64, op: O
     Ok(())
 }
 
-/// Space used is what the folder holds
+/// Space used is what the folder holds, its trash included (like `tree::recompute_usage`)
 async fn refresh_usage(st: &AppState, drive: &Drive) -> AppResult<()> {
     let _w = st.write_lock.lock().await;
-    sqlx::query("UPDATE drives SET used_bytes = (SELECT COALESCE(SUM(size), 0) FROM nodes WHERE drive_id = ?1 AND kind = 'file' AND trashed_at IS NULL) WHERE id = ?1")
+    sqlx::query("UPDATE drives SET used_bytes = (SELECT COALESCE(SUM(size), 0) FROM nodes WHERE drive_id = ?1 AND kind = 'file') WHERE id = ?1")
         .bind(&drive.id)
         .execute(&st.db)
         .await?;
@@ -649,44 +650,15 @@ pub async fn set_up(conn: &mut SqliteConnection, drive_id: &str, root_id: &str, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil;
-    use axum::{Json, extract::{Path as UrlPath, Query, State}};
-
-    /// A folder space over a new temporary folder, created as an administrator
-    async fn folder_space(env: &testutil::TestEnv) -> (crate::auth::User, PathBuf, String, String) {
-        let admin = env.admin().await;
-        let dir = std::env::temp_dir().join(format!("thirtyfile-folder-{}", new_id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let req = serde_json::from_value(serde_json::json!({ "name": "Shared", "source_path": dir.to_string_lossy() })).unwrap();
-        let Json(info) = crate::drives::create(State(env.st.clone()), admin.clone(), Json(req)).await.unwrap();
-        let v = serde_json::to_value(&info).unwrap();
-        let drive = v["id"].as_str().unwrap().to_string();
-        // Creating the space starts indexing in the background: let it finish on the empty folder first
-        scan(&env.st, &drive).await.unwrap();
-        (admin, dir, drive, v["root_id"].as_str().unwrap().to_string())
-    }
-
-    /// Writes a file dated a minute ago, so scans don't treat it as still being written
-    fn write_old(path: &Path, content: &[u8]) {
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, content).unwrap();
-        let f = std::fs::File::options().write(true).open(path).unwrap();
-        f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(60)).unwrap();
-    }
-
-    async fn node_at(env: &testutil::TestEnv, drive: &str, rel: &str) -> Option<(String, i64)> {
-        sqlx::query_as("SELECT id, size FROM nodes WHERE drive_id = ? AND fs_path = ? AND trashed_at IS NULL")
-            .bind(drive)
-            .bind(rel)
-            .fetch_optional(&env.st.db)
-            .await
-            .unwrap()
-    }
+    use crate::testutil::{self, write_old};
+    use axum::extract::{Path as UrlPath, Query, State};
 
     #[tokio::test]
     async fn a_folder_space_follows_changes_made_on_the_server() {
         let env = testutil::env().await;
-        let (admin, dir, drive, root) = folder_space(&env).await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        let (dir, drive, root) = (space.dir.clone(), space.drive.clone(), space.root.clone());
         write_old(&dir.join("a.txt"), b"one");
         write_old(&dir.join("Sub").join("b.txt"), b"two");
         write_old(&dir.join("~$a.docx"), b"office lock file");
@@ -694,33 +666,36 @@ mod tests {
 
         let r = scan(&env.st, &drive).await.unwrap();
         assert_eq!((r.added, r.removed), (3, 0), "{r:?}");
-        assert!(node_at(&env, &drive, "a.txt").await.is_some() && node_at(&env, &drive, "Sub/b.txt").await.is_some());
-        assert!(node_at(&env, &drive, "~$a.docx").await.is_none(), "temporary files are ignored");
-        assert!(node_at(&env, &drive, "fresh.txt").await.is_none(), "a file still being written waits");
+        assert!(env.node_at(&drive, "a.txt").await.is_some() && env.node_at(&drive, "Sub/b.txt").await.is_some());
+        assert!(env.node_at(&drive, "~$a.docx").await.is_none(), "temporary files are ignored");
+        assert!(env.node_at(&drive, "fresh.txt").await.is_none(), "a file still being written waits");
         let (used,): (i64,) = sqlx::query_as("SELECT used_bytes FROM drives WHERE id = ?").bind(&drive).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(used, 6);
 
         // Changed, moved and removed on the server
-        let (b_id, _) = node_at(&env, &drive, "Sub/b.txt").await.unwrap();
+        let (b_id, _) = env.node_at(&drive, "Sub/b.txt").await.unwrap();
         write_old(&dir.join("a.txt"), b"one, longer");
         std::fs::rename(dir.join("Sub"), dir.join("Moved")).unwrap();
         write_old(&dir.join("gone.txt"), b"x");
         scan(&env.st, &drive).await.unwrap();
         std::fs::remove_file(dir.join("gone.txt")).unwrap();
         let r = scan(&env.st, &drive).await.unwrap();
-        assert_eq!(node_at(&env, &drive, "a.txt").await.unwrap().1, 11);
-        let (moved_id, _) = node_at(&env, &drive, "Moved/b.txt").await.unwrap();
+        assert_eq!(env.node_at(&drive, "a.txt").await.unwrap().1, 11);
+        let (moved_id, _) = env.node_at(&drive, "Moved/b.txt").await.unwrap();
         if cfg!(unix) {
             // Recognised by its inode: the same node, so shares and permissions stay
             assert_eq!(moved_id, b_id);
         }
-        assert!(node_at(&env, &drive, "Sub/b.txt").await.is_none() && node_at(&env, &drive, "gone.txt").await.is_none(), "{r:?}");
+        assert!(env.node_at(&drive, "Sub/b.txt").await.is_none() && env.node_at(&drive, "gone.txt").await.is_none(), "{r:?}");
 
-        // Browsing works; changing from the web doesn't yet
-        let a = node_at(&env, &drive, "a.txt").await.unwrap().0;
+        // Browsing works; a read-only space can't be changed from the web
+        let a = env.node_at(&drive, "a.txt").await.unwrap().0;
         let res = crate::files::content(State(env.st.clone()), admin.clone(), UrlPath(a.clone()), Query(serde_json::from_value(serde_json::json!({})).unwrap()), axum::http::HeaderMap::new()).await.unwrap();
         let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
         assert_eq!(&body[..], b"one, longer");
+        assert!(tree::node_for(&mut env.st.db.acquire().await.unwrap(), &admin, &a, tree::Need::Write).await.is_ok());
+        let req = serde_json::from_value(serde_json::json!({ "read_only": true })).unwrap();
+        let _ = crate::drives::update(State(env.st.clone()), admin.clone(), UrlPath(drive.clone()), axum::Json(req)).await.unwrap();
         let err = tree::node_for(&mut env.st.db.acquire().await.unwrap(), &admin, &a, tree::Need::Write).await.unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::FORBIDDEN);
 
@@ -728,8 +703,7 @@ mod tests {
         write_old(&dir.join("new.txt"), b"new");
         let root_node = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &root).await.unwrap().unwrap();
         sync_folder(&env.st, &root_node).await;
-        assert!(node_at(&env, &drive, "new.txt").await.is_some());
-        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(env.node_at(&drive, "new.txt").await.is_some());
     }
 
     #[tokio::test]
