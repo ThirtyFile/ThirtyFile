@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import JSZip from "jszip";
 import { Loader2Icon } from "lucide-react";
 import { readXlsx } from "@/lib/sheet/xlsx";
 import { Axis, MAX_COLS, MAX_ROWS, key, type Workbook } from "@/lib/sheet/model";
@@ -19,6 +20,23 @@ interface Loaded {
   /** Differential formats for conditional formatting, and custom indexed colors */
   dxfs: Dxf[];
   palette?: string[];
+  /** What the drawing frame needs, as a small package; null when no sheet has pictures, charts or shapes */
+  drawingParts: ArrayBuffer | null;
+}
+
+/** Cell data, formulas, macros and the like: large, and not needed to draw pictures, charts and shapes */
+const CELL_DATA = /^xl\/(worksheets\/[^/]+\.xml|sharedStrings\.xml|calcChain\.xml|vbaProject\.bin|pivotCache\/|externalLinks\/)/;
+
+/**
+ * The workbook without its cell data, for the drawing frame. Entries are copied as they are, still compressed, so this
+ * neither unzips nor compresses them again; null when there is nothing to draw, so the frame isn't loaded at all.
+ */
+async function drawingParts(zip: JSZip): Promise<ArrayBuffer | null> {
+  const paths = Object.keys(zip.files);
+  if (!paths.some((p) => /^xl\/drawings\/[^/]+\.xml$/.test(p))) return null;
+  const parts = new JSZip();
+  for (const p of paths) if (!zip.files[p].dir && !CELL_DATA.test(p)) parts.files[p] = zip.files[p];
+  return parts.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
 }
 
 /**
@@ -28,7 +46,7 @@ interface Loaded {
 export default function SheetPreview({ buffer, onError }: { buffer: ArrayBuffer; onError(message: string): void }) {
   const [data, setData] = useState<Loaded | null>(null);
   const [sheetIdx, setSheetIdx] = useState(0);
-  const drawingFrame = useDrawingFrame(buffer);
+  const drawingFrame = useDrawingFrame(data?.drawingParts ?? null);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,9 +61,10 @@ export default function SheetPreview({ buffer, onError }: { buffer: ArrayBuffer;
       const styles = await pkg.xml("xl/styles.xml");
       const custom = Array.from(styles?.getElementsByTagNameNS("*", "rgbColor") ?? []).map((c) => (c.getAttribute("rgb") ?? "").slice(-6));
       const palette = custom.length ? custom : undefined;
+      const parts = await drawingParts(zip);
       if (cancelled) return pkg.dispose();
       setSheetIdx(book.active ?? 0);
-      setData({ book, pkg, theme, dxfs: readDxfs(styles, theme, palette), palette });
+      setData({ book, pkg, theme, dxfs: readDxfs(styles, theme, palette), palette, drawingParts: parts });
     })().catch((e) => !cancelled && onError(e instanceof Error ? e.message : t("Couldn't open this spreadsheet")));
     return () => {
       cancelled = true;
@@ -94,7 +113,7 @@ export default function SheetPreview({ buffer, onError }: { buffer: ArrayBuffer;
 
 /**
  * Pictures, charts and shapes are rendered by the same sandboxed frame as Word / PowerPoint previews (no same-origin rights,
- * no network), laid over the canvas. The host sends the workbook once, then the sheet and the column/row positions to draw at,
+ * no network), laid over the canvas, and only loaded for workbooks that have them. The host sends the drawing parts once, then the sheet and the column/row positions to draw at,
  * and the scroll offset as the user scrolls.
  */
 interface DrawingFrame {
@@ -104,7 +123,7 @@ interface DrawingFrame {
   scroll(x: number, y: number): void;
 }
 
-function useDrawingFrame(buffer: ArrayBuffer): DrawingFrame {
+function useDrawingFrame(parts: ArrayBuffer | null): DrawingFrame {
   const iframe = useRef<HTMLIFrameElement>(null);
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
   const state = useRef({
@@ -113,12 +132,14 @@ function useDrawingFrame(buffer: ArrayBuffer): DrawingFrame {
     pending: null as { sheet: string; cols: Float64Array; rows: Float64Array; frozen: { rows: number; cols: number } } | null,
     scroll: { x: 0, y: 0 },
   });
+  const wanted = parts !== null;
   useEffect(() => {
+    if (!wanted) return;
     loadFrameScript().then(
       (js) => setSrcDoc(frameDocument(js, true)),
       () => {},
     );
-  }, []);
+  }, [wanted]);
   const post = useCallback((msg: object, transfer?: Transferable[]) => {
     iframe.current?.contentWindow?.postMessage(msg, "*", transfer ?? []);
   }, []);
@@ -131,9 +152,8 @@ function useDrawingFrame(buffer: ArrayBuffer): DrawingFrame {
       const msg = e.data as { type?: string };
       if (msg.type === "ready") {
         st.ready = true;
-        // The frame gets its own copy of the workbook (transferred, so it doesn't stay in this page's memory)
-        const copy = buffer.slice(0);
-        post({ type: "load", kind: "xlsx", buffer: copy }, [copy]);
+        // Transferred, so it doesn't stay in this page's memory
+        if (parts?.byteLength) post({ type: "load", kind: "xlsx", buffer: parts }, [parts]);
       } else if (msg.type === "done" && !st.loaded) {
         st.loaded = true;
         if (st.pending) {
@@ -147,10 +167,10 @@ function useDrawingFrame(buffer: ArrayBuffer): DrawingFrame {
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [buffer, srcDoc, post]);
+  }, [parts, srcDoc, post]);
   return useMemo(
     () => ({
-      element: srcDoc ? (
+      element: srcDoc && wanted ? (
         <iframe
           ref={iframe}
           srcDoc={srcDoc}
@@ -174,7 +194,7 @@ function useDrawingFrame(buffer: ArrayBuffer): DrawingFrame {
         if (state.current.loaded) post({ type: "scroll", x, y });
       },
     }),
-    [srcDoc, post],
+    [srcDoc, wanted, post],
   );
 }
 
