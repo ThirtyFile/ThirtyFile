@@ -296,6 +296,43 @@ impl<R: AsyncRead + Unpin> AsyncRead for Held<R> {
 }
 
 impl Storage for SftpStorage {
+    fn size<'a>(&'a self, hash: &'a str) -> BoxFuture<'a, io::Result<Option<u64>>> {
+        Box::pin(async move {
+            let path = self.blob_path(hash)?;
+            let conn = self.conn().await?;
+            match conn.sftp.metadata(path.as_str()).await.map_err(sftp_err) {
+                Ok(m) => Ok(Some(m.len())),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(e),
+            }
+        })
+    }
+
+    fn list(&self) -> BoxFuture<'_, io::Result<Vec<String>>> {
+        Box::pin(async move {
+            let conn = self.conn().await?;
+            let names = |path: String| {
+                let conn = conn.clone();
+                async move {
+                    match conn.sftp.read_dir(path.as_str()).await.map_err(sftp_err) {
+                        Ok(dir) => Ok(dir.map(|e| e.file_name()).collect::<Vec<_>>()),
+                        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+                        Err(e) => Err(e),
+                    }
+                }
+            };
+            // blobs/ab/cd/<hash>
+            let base = format!("{}/blobs", self.root);
+            let mut out = Vec::new();
+            for a in names(base.clone()).await?.into_iter().filter(|n| n.len() == 2) {
+                for b in names(format!("{base}/{a}")).await?.into_iter().filter(|n| n.len() == 2) {
+                    out.extend(names(format!("{base}/{a}/{b}")).await?.into_iter().filter(|n| crate::storage::is_hash(n)));
+                }
+            }
+            Ok(out)
+        })
+    }
+
     fn put_file<'a>(&'a self, hash: &'a str, src: &'a Path) -> BoxFuture<'a, io::Result<()>> {
         Box::pin(async move {
             let res = self.put(hash, src).await;

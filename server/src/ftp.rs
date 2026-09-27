@@ -309,6 +309,43 @@ impl FtpStorage {
 }
 
 impl Storage for FtpStorage {
+    fn size<'a>(&'a self, hash: &'a str) -> BoxFuture<'a, io::Result<Option<u64>>> {
+        Box::pin(async move {
+            let path = self.blob_path(hash)?;
+            let (mut c, _permit) = self.checkout().await?;
+            let res = match timed(c.ftp.size(path.as_str())).await {
+                Ok(n) => Ok(Some(n as u64)),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+                Err(e) => return Err(e),
+            };
+            self.checkin(c);
+            res
+        })
+    }
+
+    fn list(&self) -> BoxFuture<'_, io::Result<Vec<String>>> {
+        Box::pin(async move {
+            let (mut c, _permit) = self.checkout().await?;
+            // Servers answer NLST with bare names or with paths: the last part is the name
+            async fn names(c: &mut Conn, dir: &str) -> io::Result<Vec<String>> {
+                match timed(c.ftp.nlst(Some(dir))).await {
+                    Ok(list) => Ok(list.into_iter().map(|n| n.rsplit('/').next().unwrap_or_default().to_string()).collect()),
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+                    Err(e) => Err(e),
+                }
+            }
+            let base = self.path("blobs");
+            let mut out = Vec::new();
+            for a in names(&mut c, &base).await?.into_iter().filter(|n| n.len() == 2) {
+                for b in names(&mut c, &format!("{base}/{a}")).await?.into_iter().filter(|n| n.len() == 2) {
+                    out.extend(names(&mut c, &format!("{base}/{a}/{b}")).await?.into_iter().filter(|n| crate::storage::is_hash(n)));
+                }
+            }
+            self.checkin(c);
+            Ok(out)
+        })
+    }
+
     fn put_file<'a>(&'a self, hash: &'a str, src: &'a Path) -> BoxFuture<'a, io::Result<()>> {
         Box::pin(async move {
             let (mut c, _permit) = self.checkout().await?;

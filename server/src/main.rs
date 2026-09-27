@@ -9,6 +9,7 @@ mod fsops;
 mod locations;
 mod logs;
 mod branding;
+mod check;
 mod ftp;
 mod sftp;
 mod sso;
@@ -122,6 +123,13 @@ enum Command {
     /// Encrypt the saved passwords and keys with a new key. Stop ThirtyFile first. With a key file, the file is
     /// replaced; with THIRTYFILE_SECRET_KEY, give the new key in THIRTYFILE_NEW_SECRET_KEY and set it afterwards
     RotateSecretKey,
+    /// Compare the stored file contents with the database: missing, changed or unknown files, for every storage
+    /// location. Unknown files are only listed, never deleted
+    Check {
+        /// Also read every file back and compare its hash (slow: reads everything)
+        #[arg(long)]
+        verify: bool,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -220,6 +228,13 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     let key = key_source.load()?;
     secrets::init(&key);
     let db = db::connect(&cfg.data.join("drive.db"), cfg.db_cache_mb).await?;
+
+    if let Some(Command::Check { verify }) = &cfg.command {
+        let (storages, _) = locations::load_all(&db, &storage).await?;
+        let reports = check::run(&db, &storages, *verify, |id, n| eprintln!("Checking storage location {id} ({n} file(s))…")).await?;
+        let problems = check::print(&reports);
+        std::process::exit(if problems == 0 { 0 } else { 1 });
+    }
 
     if let Some(Command::RotateSecretKey) = &cfg.command {
         return rotate_secret_key(&db, &key_source).await;
