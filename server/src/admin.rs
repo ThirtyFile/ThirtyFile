@@ -457,7 +457,7 @@ mod tests {
         // The newest account is deleted: its id would be handed out again without the counter
         let _ = delete(State(env.st.clone()), Admin(admin.clone()), Path(first.id)).await.unwrap();
         let Json(next) = create(State(env.st.clone()), Admin(admin.clone()), req("next", None)).await.unwrap();
-        assert!(next.id > first.id, "{} reused", next.id);
+        assert!(next.id > first.id, "the deleted account's id was given out again");
     }
 
     #[tokio::test]
