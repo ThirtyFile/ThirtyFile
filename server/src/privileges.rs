@@ -4,11 +4,7 @@
 //! (host folders in `compose.yaml` that didn't exist yet). It gives the folders to the user in
 //! `THIRTYFILE_RUN_AS`, then switches to that user before anything else runs.
 
-use std::{
-    io,
-    os::unix::fs::{MetadataExt, lchown},
-    path::Path,
-};
+use std::{io, os::unix::fs::MetadataExt, path::Path};
 
 /// Parses `uid` or `uid:gid`.
 pub fn parse_user(value: &str) -> Result<(u32, u32), String> {
@@ -90,22 +86,82 @@ fn extra_groups(gid: u32, current: &[u32], roots: &[u32]) -> Vec<u32> {
     out
 }
 
-/// Changes the owner of `path` and everything below it, without following symbolic links
-/// and without entering other file systems mounted inside it.
+/// Changes the owner of `path` and everything below it, without following symbolic links and without entering
+/// other file systems mounted inside it.
+///
+/// The walk works on open directories (`openat` with `O_NOFOLLOW`, `fchownat` without following links), not on
+/// paths: a directory swapped for a symbolic link while the walk runs can't send it outside the folder.
 fn chown_tree(path: &Path, dev: u64, uid: u32, gid: u32) -> io::Result<()> {
-    let meta = std::fs::symlink_metadata(path)?;
-    if meta.dev() != dev {
-        return Ok(());
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(io::Error::other)?;
+    // SAFETY: a valid NUL-terminated path; the descriptor is owned by `walk`, which closes it
+    let fd = unsafe { libc::open(c.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
     }
-    if (meta.uid(), meta.gid()) != (uid, gid) {
-        lchown(path, Some(uid), Some(gid))?;
+    walk(fd, dev, uid, gid)
+}
+
+/// Gives the open directory `fd` and its contents to `uid:gid`; takes ownership of `fd`
+fn walk(fd: libc::c_int, dev: u64, uid: u32, gid: u32) -> io::Result<()> {
+    // SAFETY: `fd` is an open directory; fdopendir takes it over and closedir closes both
+    let dir = unsafe { libc::fdopendir(fd) };
+    if dir.is_null() {
+        let e = io::Error::last_os_error();
+        unsafe { libc::close(fd) };
+        return Err(e);
     }
-    if meta.is_dir() {
-        for entry in std::fs::read_dir(path)? {
-            chown_tree(&entry?.path(), dev, uid, gid)?;
+    struct Dir(*mut libc::DIR);
+    impl Drop for Dir {
+        fn drop(&mut self) {
+            // SAFETY: opened by fdopendir above, closed once
+            unsafe { libc::closedir(self.0) };
         }
     }
-    Ok(())
+    let dir = Dir(dir);
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    // SAFETY: `fd` stays valid while `dir` is open
+    if unsafe { libc::fstat(fd, &mut st) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if st.st_dev as u64 != dev {
+        return Ok(());
+    }
+    if (st.st_uid, st.st_gid) != (uid, gid) && unsafe { libc::fchown(fd, uid, gid) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    loop {
+        // SAFETY: readdir on an open DIR; the entry is valid until the next call, and its name is copied first
+        let entry = unsafe { libc::readdir(dir.0) };
+        if entry.is_null() {
+            return Ok(());
+        }
+        let name = unsafe { std::ffi::CStr::from_ptr((*entry).d_name.as_ptr()) }.to_owned();
+        if matches!(name.as_bytes(), b"." | b"..") {
+            continue;
+        }
+        let mut st: libc::stat = unsafe { std::mem::zeroed() };
+        // SAFETY: `fd` is open and `name` a NUL-terminated entry name
+        if unsafe { libc::fstatat(fd, name.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if st.st_dev as u64 != dev {
+            continue;
+        }
+        if st.st_mode & libc::S_IFMT == libc::S_IFDIR {
+            // SAFETY: as above; O_NOFOLLOW refuses a link that replaced the directory since fstatat
+            let child = unsafe { libc::openat(fd, name.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
+            if child < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            walk(child, dev, uid, gid)?;
+        } else if (st.st_uid, st.st_gid) != (uid, gid)
+            // SAFETY: as above; the link itself is changed, never what it points to
+            && unsafe { libc::fchownat(fd, name.as_ptr(), uid, gid, libc::AT_SYMLINK_NOFOLLOW) } != 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+    }
 }
 
 #[cfg(test)]
@@ -118,6 +174,32 @@ mod tests {
         assert_eq!(parse_user("1000:100"), Ok((1000, 100)));
         assert!(parse_user("drive").is_err());
         assert!(parse_user("1000:").is_err());
+    }
+
+    #[test]
+    fn the_ownership_walk_stays_inside_the_folder() {
+        // Changing owners needs root (the Docker image starts as root); elsewhere there is nothing to check
+        if unsafe { libc::geteuid() } != 0 {
+            return;
+        }
+        let base = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));
+        let (inside, outside) = (base.join("data"), base.join("outside"));
+        std::fs::create_dir_all(inside.join("a/b")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(inside.join("a/b/file.txt"), "x").unwrap();
+        std::fs::write(outside.join("secret.txt"), "x").unwrap();
+        std::os::unix::fs::symlink(&outside, inside.join("link")).unwrap();
+        let dev = std::fs::metadata(&inside).unwrap().dev();
+        chown_tree(&inside, dev, 4321, 4321).unwrap();
+        let owner = |p: &Path| {
+            let m = std::fs::symlink_metadata(p).unwrap();
+            (m.uid(), m.gid())
+        };
+        assert_eq!(owner(&inside.join("a/b/file.txt")), (4321, 4321));
+        assert_eq!(owner(&inside.join("a")), (4321, 4321));
+        assert_eq!(owner(&inside.join("link")), (4321, 4321), "the link itself changes");
+        assert_eq!(owner(&outside.join("secret.txt")), (0, 0), "what it points to doesn't");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
