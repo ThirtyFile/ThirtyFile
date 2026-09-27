@@ -4,7 +4,7 @@ Thank you for helping. The full guide is on the website: **[Contributing](https:
 
 ## Problems and ideas
 
-[Open an issue](https://github.com/ThirtyFile/ThirtyFile/issues/new/choose) and pick **Report a problem** or **Suggest an idea**. Look through the [existing issues](https://github.com/ThirtyFile/ThirtyFile/issues) first.
+[Open an issue](https://github.com/ThirtyFile/ThirtyFile/issues/new/choose) and pick the form that fits: a problem, an idea, an accessibility barrier, the guides, or an improvement to the code. Look through the [existing issues](https://github.com/ThirtyFile/ThirtyFile/issues) first.
 
 Security problems are reported privately: see the [security policy](SECURITY.md).
 
@@ -17,7 +17,7 @@ Security problems are reported privately: see the [security policy](SECURITY.md)
    cd server && cargo test && cargo clippy --all-targets
    cd ../web && pnpm typecheck && node scripts/check-i18n.mjs
    ```
-4. Open a pull request with a title that says what changes, one label (`enhancement`, `bug`, `documentation` or `dependencies`), and `Closes #123` in the description.
+4. Open a pull request with a title that says what changes, one label (`enhancement`, `bug`, `performance`, `accessibility`, `documentation`, `dependencies` or `maintenance`), and `Closes #123` in the description.
 
 Code, comments and guides are written in English. Text in the interface needs its Traditional Chinese translation in `web/src/lib/i18n/zh-TW/`. When behaviour changes, update the guide in `site/docs/` that describes it.
 

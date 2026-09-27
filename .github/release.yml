@@ -7,9 +7,15 @@ changelog:
       labels: [enhancement]
     - title: Fixed
       labels: [bug]
+    - title: Faster
+      labels: [performance]
+    - title: Easier to use for everyone
+      labels: [accessibility]
     - title: Guides and website
       labels: [documentation]
     - title: Updated dependencies
       labels: [dependencies]
+    - title: Maintenance
+      labels: [maintenance]
     - title: Other changes
       labels: ["*"]

@@ -1,0 +1,23 @@
+name: Improve the guides
+description: A guide or the website is wrong, unclear or missing something
+labels: [documentation]
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Page
+      description: The address of the guide, or "new page"
+      placeholder: https://thirtyfile.github.io/ThirtyFile/docs/…
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong or missing?
+      description: Quote the part you mean, or describe what you looked for and didn't find.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: What should it say?

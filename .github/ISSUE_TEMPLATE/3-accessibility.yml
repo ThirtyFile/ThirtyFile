@@ -1,0 +1,35 @@
+name: Report an accessibility barrier
+description: Something is hard or impossible to use with a keyboard, screen reader, zoom or other aid
+labels: [accessibility]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What gets in the way?
+      description: What you tried to do, and where it stopped working.
+    validations:
+      required: true
+  - type: dropdown
+    id: aid
+    attributes:
+      label: How do you use ThirtyFile?
+      multiple: true
+      options:
+        - Keyboard only
+        - Screen reader
+        - Zoom or large text
+        - High contrast or forced colours
+        - Voice control
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: tools
+    attributes:
+      label: Browser and assistive technology
+      placeholder: Firefox 143 with NVDA 2026.1 on Windows 11
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The image tag you run, for example `1.0.0`, `latest` or `edge`
