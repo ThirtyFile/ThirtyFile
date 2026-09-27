@@ -1,0 +1,74 @@
+# Makes a release, started by hand: Actions › Release › Run workflow, with the new version number.
+# Tests what is on main right now, publishes the Docker images for both platforms
+#   ghcr.io/thirtyfile/thirtyfile:1.2.3, :1.2 and :latest
+# and then creates the tag v1.2.3 and the GitHub release, with notes put together from the merged pull
+# requests (see .github/release.yml). Nothing is tagged or released if the tests or the image build fail.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "New version, such as 1.2.3 (without the v)"
+        type: string
+        required: true
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Check version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: check
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          [ "$GITHUB_REF" = "refs/heads/main" ] || fail "Releases are made from main: choose main under \"Use workflow from\"."
+          VERSION="${VERSION#v}"
+          echo "$VERSION" | grep -qE '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+            || fail "\"$VERSION\" is not a version number such as 1.2.3."
+          git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null && fail "v$VERSION has already been released."
+          previous=$(git tag -l 'v*' --sort=-v:refname | head -n 1)
+          if [ -n "$previous" ]; then
+            newest=$(printf '%s\n%s\n' "${previous#v}" "$VERSION" | sort -V | tail -n 1)
+            [ "$newest" = "$VERSION" ] || fail "$VERSION must be newer than the last release, $previous."
+            [ -n "$(git log --oneline "$previous..HEAD")" ] || fail "Nothing has changed on main since $previous."
+            echo "Changes since $previous:"
+            git log --oneline "$previous..HEAD"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build
+    needs: prepare
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      release_version: ${{ needs.prepare.outputs.version }}
+
+  publish:
+    name: Tag and release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Tags exactly the commit that was tested and built, even if main has moved on since
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ needs.prepare.outputs.version }}
+        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
