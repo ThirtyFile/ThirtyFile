@@ -115,11 +115,14 @@ jobs:
           cargo test --locked
           cargo clippy --locked --all-targets -- -D warnings
 
-      # Sign in, upload, preview and download in a real browser, against the server built from this commit
-      # (the release build embeds web/dist, built above)
+      # Sign in, upload, preview and download in a real browser, against the server built from this commit. A debug
+      # build (it reuses what the tests compiled) that embeds the frontend, built here for it
       - name: End-to-end test
+        env:
+          THIRTYFILE_BIN: ${{ github.workspace }}/server/target/debug/thirtyfile
         run: |
-          (cd server && cargo build --release --locked)
+          (cd web && pnpm build)
+          (cd server && cargo build --locked)
           cd web
           pnpm exec playwright install --with-deps chromium
           pnpm test:e2e
