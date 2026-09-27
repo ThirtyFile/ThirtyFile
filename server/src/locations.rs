@@ -9,12 +9,12 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::SqlitePool;
-use tokio::io::AsyncWriteExt;
+use sha2::{Digest, Sha256};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{
     auth::Admin,
     error::{AppError, AppResult},
-    files::hash_file,
     state::{AppState, LocationHealth, MigrationStatus},
     storage::{self, Storage},
     tree,
@@ -581,11 +581,14 @@ fn update_job(st: &AppState, drive_id: &str, f: impl FnOnce(&mut MigrationStatus
 /// Moves file content used by the space that isn't in the target location yet. Verifies the sha256 after copying, then switches the reference;
 /// the copy in the old location is deleted only after a minute (letting in-flight downloads finish).
 async fn run_migration(st: &AppState, drive_id: &str, target: &str) -> AppResult<()> {
-    const PENDING: &str = "FROM blobs b WHERE b.location_id != ?1
-         AND b.hash IN (SELECT blob_hash FROM nodes WHERE drive_id = ?2 AND blob_hash IS NOT NULL)";
+    // Content of the space not yet at the target, walked in hash order: each page continues after the last hash
+    // (`?3`), so a page costs the same at the end of a large space as at the start
+    const PENDING: &str = "FROM blobs b WHERE b.location_id != ?1 AND b.hash > ?3
+         AND EXISTS (SELECT 1 FROM nodes n WHERE n.blob_hash = b.hash AND n.drive_id = ?2)";
     let (files, bytes): (i64, i64) = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT COUNT(*), COALESCE(SUM(b.size), 0) {PENDING}")))
         .bind(target)
         .bind(drive_id)
+        .bind("")
         .fetch_one(&st.db)
         .await?;
     update_job(st, drive_id, |j| {
@@ -594,20 +597,17 @@ async fn run_migration(st: &AppState, drive_id: &str, target: &str) -> AppResult
     });
     let dst = st.storage(target)?;
     let mut moved: Vec<(String, String)> = Vec::new();
-    let mut skipped: std::collections::HashSet<String> = Default::default();
+    let mut last = String::new();
     loop {
-        // Skipped hashes (moved elsewhere meanwhile) are excluded in the query, so a page full of them can't end the job early
-        let rows: Vec<(String, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT b.hash, b.size, b.location_id {PENDING} AND b.hash NOT IN (SELECT value FROM json_each(?3)) ORDER BY b.hash LIMIT 50"
-        )))
-        .bind(target)
-        .bind(drive_id)
-        .bind(serde_json::to_string(&skipped).unwrap())
-        .fetch_all(&st.db)
-        .await?;
-        if rows.is_empty() {
-            break;
-        }
+        let rows: Vec<(String, i64, String)> =
+            sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT b.hash, b.size, b.location_id {PENDING} ORDER BY b.hash LIMIT 50")))
+                .bind(target)
+                .bind(drive_id)
+                .bind(&last)
+                .fetch_all(&st.db)
+                .await?;
+        let Some((hash, ..)) = rows.last() else { break };
+        last = hash.clone();
         for (hash, size, from) in rows {
             // Held from copying until the reference is switched: a deletion of this content still pending at the
             // target (from an earlier move away from it) must not remove the copy this move keeps or writes there
@@ -615,20 +615,44 @@ async fn run_migration(st: &AppState, drive_id: &str, target: &str) -> AppResult
             let src = st.storage(&from)?;
             let tmp = st.tmp_dir().join(format!("migrate-{}", new_id()));
             let copied = async {
+                // Hashed while it is copied, so the content is read once before it is stored at the target
                 let mut reader = src.open(&hash, 0, size as u64).await?;
                 let mut file = tokio::fs::File::create(&tmp).await?;
-                tokio::io::copy(&mut reader, &mut file).await?;
+                let mut hasher = Sha256::new();
+                let mut len = 0u64;
+                let mut buf = vec![0u8; 256 * 1024];
+                loop {
+                    let n = reader.read(&mut buf).await?;
+                    if n == 0 {
+                        break;
+                    }
+                    hasher.update(&buf[..n]);
+                    file.write_all(&buf[..n]).await?;
+                    len += n as u64;
+                }
                 file.flush().await?;
                 drop(file);
-                let (actual, len) = hash_file(tmp.clone()).await.map_err(|e| std::io::Error::other(e.message))?;
-                if actual != hash || len != size as u64 {
+                if hex::encode(hasher.finalize()) != hash || len != size as u64 {
                     return Err(std::io::Error::other("Verification of the copied content failed"));
                 }
                 dst.put_file(&hash, &tmp).await
             }
             .await;
             let _ = tokio::fs::remove_file(&tmp).await;
-            copied.map_err(|e| AppError::new(axum::http::StatusCode::BAD_GATEWAY, format!("Failed to move files: {e}")))?;
+            if let Err(e) = copied {
+                // Deleted by someone during the move (or moved elsewhere meanwhile): nothing left to move for it
+                let current: Option<(String,)> =
+                    sqlx::query_as("SELECT location_id FROM blobs WHERE hash = ?").bind(&hash).fetch_optional(&st.db).await?;
+                if e.kind() == std::io::ErrorKind::NotFound && current.is_none_or(|(loc,)| loc != from) {
+                    tree::schedule_blob_removal(st, vec![(hash.clone(), target.to_string())]);
+                    update_job(st, drive_id, |j| {
+                        j.done_files += 1;
+                        j.done_bytes += size;
+                    });
+                    continue;
+                }
+                return Err(AppError::new(axum::http::StatusCode::BAD_GATEWAY, format!("Failed to move files: {e}")));
+            }
 
             let switched = {
                 let _w = st.write_lock.lock().await;
@@ -649,7 +673,6 @@ async fn run_migration(st: &AppState, drive_id: &str, target: &str) -> AppResult
                 // The blob was released or moved elsewhere while it was being copied: the copy just written to the
                 // target is unreferenced (remove_unreferenced checks again before deleting)
                 tree::schedule_blob_removal(st, vec![(hash.clone(), target.to_string())]);
-                skipped.insert(hash.clone());
             }
             update_job(st, drive_id, |j| {
                 j.done_files += 1;
@@ -673,6 +696,38 @@ async fn run_migration(st: &AppState, drive_id: &str, target: &str) -> AppResult
 mod tests {
     use super::*;
     use crate::testutil;
+
+    #[tokio::test]
+    async fn moving_a_space_moves_every_file_across_pages() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", false).await;
+        env.st.storages.write().unwrap().insert("second".into(), Arc::new(crate::storage::LocalStorage::new(env.dir.join("second")).unwrap()));
+        let local = env.st.storage("local").unwrap();
+        let mut hashes = Vec::new();
+        // More than one page of 50
+        for i in 0..60 {
+            let content = format!("file {i}");
+            let hash = hex::encode(Sha256::digest(content.as_bytes()));
+            let tmp = env.dir.join("tmp").join(&hash);
+            std::fs::write(&tmp, &content).unwrap();
+            local.put_file(&hash, &tmp).await.unwrap();
+            let id = env.file(&amy, &amy.root_id, &format!("f{i}.txt")).await;
+            let mut c = env.st.db.acquire().await.unwrap();
+            tree::add_blob_ref(&mut c, &hash, content.len() as i64, "local").await.unwrap();
+            sqlx::query("UPDATE nodes SET blob_hash = ?, size = ? WHERE id = ?").bind(&hash).bind(content.len() as i64).bind(&id).execute(&mut *c).await.unwrap();
+            hashes.push(hash);
+        }
+        let drive = env.drive_of(&amy.root_id).await;
+        run_migration(&env.st, &drive, "second").await.unwrap();
+        let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blobs WHERE location_id != 'second'").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(left, 0);
+        let second = env.st.storage("second").unwrap();
+        for hash in &hashes {
+            let mut content = String::new();
+            second.open(hash, 0, 64).await.unwrap().read_to_string(&mut content).await.unwrap();
+            assert!(content.starts_with("file "), "{hash} wasn't copied");
+        }
+    }
 
     #[tokio::test]
     async fn saved_passwords_are_only_reused_for_the_same_server_and_account() {
