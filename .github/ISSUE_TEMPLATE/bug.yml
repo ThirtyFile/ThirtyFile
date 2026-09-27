@@ -1,0 +1,67 @@
+name: Report a problem
+description: Something doesn't work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time. Please check [Troubleshooting](https://thirtyfile.github.io/ThirtyFile/docs/help.html) first.
+
+        **Found a security problem?** Don't write it here. Use [Report a vulnerability](https://github.com/ThirtyFile/ThirtyFile/security/advisories/new) so it stays private until it is fixed.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to see the problem
+      placeholder: |
+        1. Open …
+        2. Click …
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The image tag you run, for example `1.0.0`, `latest` or `edge`
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How is it installed?
+      options:
+        - docker run
+        - Docker Compose
+        - Built from the source code
+    validations:
+      required: true
+  - type: dropdown
+    id: storage
+    attributes:
+      label: Where are the files kept?
+      options:
+        - Local folder
+        - S3-compatible storage
+        - SFTP
+        - FTP / FTPS
+        - Not related to storage
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser
+      placeholder: Chrome 140 on Windows 11
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: The output of `docker logs --tail 100 thirtyfile`, if it shows anything. Remove passwords and addresses you don't want to share.
+      render: text

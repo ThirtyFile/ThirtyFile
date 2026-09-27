@@ -25,7 +25,18 @@ docker stop thirtyfile && docker rm thirtyfile
 docker run -d --name thirtyfile …   # the same options as when you installed it</code></pre>
         <h3>Docker Compose</h3>
         <pre><code>docker compose pull && docker compose up -d</code></pre>
-        <p><code>latest</code> follows the newest version. To stay on one release, use its number instead, for example <code>ghcr.io/thirtyfile/thirtyfile:1.0</code>.</p>
+        <h3>Which version you get</h3>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Tag</th><th>Contents</th></tr></thead>
+            <tbody>
+              <tr><td><code>latest</code></td><td>The newest release. The right choice for most people</td></tr>
+              <tr><td><code>1.2</code>, <code>1.2.3</code></td><td>One release line, or one exact release, if you want to decide yourself when to move on</td></tr>
+              <tr><td><code>edge</code></td><td>The newest code, not yet released. For trying out what is coming, not for files you care about</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>The changes in each release are listed on the <a href="https://github.com/ThirtyFile/ThirtyFile/releases">releases page</a>.</p>
 
         <h2 id="backup">Backing up</h2>
         <p>The data volume contains everything: files, accounts, settings and logs.</p>

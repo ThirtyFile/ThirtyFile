@@ -83,7 +83,7 @@ cd ../web && pnpm typecheck && node scripts/check-i18n.mjs
 | `web/` | Frontend (React). Traditional Chinese translations are in `web/src/lib/i18n/zh-TW/` |
 | `site/` | The website and guides, published to GitHub Pages |
 
-Every push to `main` is tested and published as `ghcr.io/thirtyfile/thirtyfile:latest`. A tag such as `v1.2.3` publishes `1.2.3` and `1.2` as well.
+Changes go through pull requests: see [Contributing](https://thirtyfile.github.io/ThirtyFile/docs/contributing.html). Releases are published as `ghcr.io/thirtyfile/thirtyfile:latest` and by version number; `edge` is the newest code on `main`.
 
 ## License
 
