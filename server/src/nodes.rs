@@ -92,6 +92,52 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
     }))
 }
 
+#[derive(Deserialize)]
+pub struct ContentsReq {
+    ids: Vec<String>,
+}
+
+/// What a set of folders holds, like Size and Contains in the Windows properties: everything inside them, at any depth
+#[derive(Serialize, Debug, PartialEq)]
+pub struct Contents {
+    /// Bytes of the files inside
+    size: i64,
+    files: i64,
+    folders: i64,
+}
+
+/// Size and number of items inside the given folders (the items themselves are not counted; a file holds nothing).
+/// Items in the trash are left out. For the Details pane, of one folder or of a selection of several.
+pub async fn contents(State(st): State<AppState>, user: User, Json(req): Json<ContentsReq>) -> AppResult<Json<Contents>> {
+    let ids = BatchReq { ids: req.ids, dest_id: None }.ids()?;
+    let mut c = st.db.acquire().await?;
+    let mut folders = Vec::with_capacity(ids.len());
+    for id in &ids {
+        let (node, _) = tree::node_with_role(&mut c, &user, id).await?;
+        if node.is_folder() {
+            folders.push(node.id);
+        }
+    }
+    // A folder selected together with a folder around it would be counted twice
+    let folders = outermost(&mut c, &folders).await?;
+    // Only the columns needed, and only folders are expanded, so even a large space is summed quickly
+    let (size, files, folders): (i64, i64, i64) = sqlx::query_as(
+        "WITH RECURSIVE sub(id, kind, size) AS (
+           SELECT n.id, n.kind, n.size FROM nodes n
+           WHERE n.parent_id IN (SELECT value FROM json_each(?1)) AND n.trashed_at IS NULL
+           UNION ALL
+           SELECT n.id, n.kind, n.size FROM nodes n JOIN sub ON n.parent_id = sub.id
+           WHERE sub.kind = 'folder' AND n.trashed_at IS NULL
+         )
+         SELECT COALESCE(SUM(CASE WHEN kind = 'file' THEN size ELSE 0 END), 0),
+                COALESCE(SUM(kind = 'file'), 0), COALESCE(SUM(kind = 'folder'), 0) FROM sub",
+    )
+    .bind(serde_json::to_string(&folders).unwrap())
+    .fetch_one(&mut *c)
+    .await?;
+    Ok(Json(Contents { size, files, folders }))
+}
+
 #[derive(Deserialize, Default)]
 pub struct ListQuery {
     sort: Option<String>,
@@ -1596,5 +1642,39 @@ mod tests {
         // The counters agree with the node table
         tree::recompute_usage(&env.st).await.unwrap();
         assert_eq!(used(personal).await, 1000);
+    }
+
+    #[tokio::test]
+    async fn folder_contents_count_everything_inside_except_the_trash() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let top = env.folder(&amy, &amy.root_id, "top").await;
+        let sub = env.folder(&amy, &top, "sub").await;
+        let deep = env.folder(&amy, &sub, "deep").await;
+        let gone = env.folder(&amy, &top, "gone").await;
+        let other = env.folder(&amy, &amy.root_id, "other").await;
+        for (parent, name, size) in [(&top, "a.txt", 100), (&sub, "b.txt", 20), (&deep, "c.txt", 3), (&gone, "d.txt", 4000), (&other, "e.txt", 5)] {
+            let id = env.file(&amy, parent, name).await;
+            sqlx::query("UPDATE nodes SET size = ? WHERE id = ?").bind(size).bind(&id).execute(&env.st.db).await.unwrap();
+        }
+        let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&gone])).await.unwrap();
+        let of = |list: &[&str]| Json(ContentsReq { ids: list.iter().map(|s| s.to_string()).collect() });
+
+        // The folder itself is not counted; the trashed folder and its file are left out
+        let Json(c) = contents(State(env.st.clone()), amy.clone(), of(&[&top])).await.unwrap();
+        assert_eq!(c, Contents { size: 123, files: 3, folders: 2 });
+        // Several folders add up, a folder inside another selected one is counted once, and a file holds nothing
+        let a = env.file(&amy, &amy.root_id, "loose.txt").await;
+        let Json(c) = contents(State(env.st.clone()), amy.clone(), of(&[&top, &sub, &other, &a])).await.unwrap();
+        assert_eq!(c, Contents { size: 128, files: 4, folders: 2 });
+        let Json(c) = contents(State(env.st.clone()), amy.clone(), of(&[&deep])).await.unwrap();
+        assert_eq!(c, Contents { size: 3, files: 1, folders: 0 });
+        // Only for people who can see the folder
+        let err = contents(State(env.st.clone()), ben.clone(), of(&[&top])).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+        env.grant(&sub, &ben, "viewer").await;
+        let Json(c) = contents(State(env.st.clone()), ben.clone(), of(&[&sub])).await.unwrap();
+        assert_eq!(c, Contents { size: 23, files: 2, folders: 1 });
     }
 }

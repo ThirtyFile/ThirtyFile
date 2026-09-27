@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { XIcon } from "lucide-react";
-import { api, privateSource, type Node } from "@/api";
+import { api, privateSource, type FolderContents, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
 import { FileIcon, canThumbnail, typeLabel } from "@/components/FileIcon";
@@ -15,10 +15,24 @@ import { formatBytes, formatWinDate } from "@/lib/utils";
 /** Right-hand "Details" pane (Windows 11 style) */
 const PANE_DEFAULT_WIDTH = 280;
 
+/** "3 files, 2 folders" */
+function containsText(c: Pick<FolderContents, "files" | "folders">) {
+  return t("{files}, {folders}", { files: t("{n} file|{n} files", { n: c.files }), folders: t("{n} folder|{n} folders", { n: c.folders }) });
+}
+
+const add = (a: FolderContents, b: FolderContents): FolderContents => ({ size: a.size + b.size, files: a.files + b.files, folders: a.folders + b.folders });
+
 export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; folder?: Node; onClose(): void }) {
   const [width, setWidth] = usePersisted("tf-details-width", PANE_DEFAULT_WIDTH);
   const node = selected.length === 1 ? selected[0] : selected.length === 0 ? folder : undefined;
   const info = useQuery({ queryKey: ["node", node?.id], queryFn: () => api.node(node!.id), enabled: !!node });
+  // What folders hold is summed on the server (every level, not the trash): one folder, or the folders of a selection
+  const folderIds = node ? (node.kind === "folder" ? [node.id] : []) : selected.filter((n) => n.kind === "folder").map((n) => n.id);
+  const contents = useQuery({
+    queryKey: node ? ["node", node.id, "contents"] : ["node", "contents", ...folderIds],
+    queryFn: () => api.contents(folderIds),
+    enabled: folderIds.length > 0,
+  });
   const shares = useQuery({ queryKey: ["shares", node?.id], queryFn: () => api.shares(node!.id), enabled: !!node && !!node.parent_id });
   // On narrow windows the pane covers the file list: focus moves into it, Esc closes it and focus goes back.
   // The list stays usable beside it, so focus isn't kept inside
@@ -37,8 +51,14 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
 
   let body;
   if (!node) {
-    const total = selected.reduce((s, n) => s + (n.kind === "file" ? n.size : 0), 0);
-    const files = selected.filter((n) => n.kind === "file").length;
+    const selectedFiles = selected.filter((n) => n.kind === "file");
+    const own = { size: selectedFiles.reduce((s, n) => s + n.size, 0), files: selectedFiles.length, folders: folderIds.length };
+    // The selected files and folders plus everything inside the folders
+    let summary: React.ReactNode = null;
+    if (folderIds.length === 0) summary = `${t("{n} file|{n} files", { n: own.files })} · ${formatBytes(own.size)}`;
+    else if (contents.data) summary = `${containsText(add(own, contents.data))} · ${formatBytes(own.size + contents.data.size)}`;
+    else if (contents.error) summary = "—";
+    else summary = t("Calculating size…");
     body = (
       <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
         <div className="relative size-20">
@@ -49,7 +69,7 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
           ))}
         </div>
         <div className="text-sm">{t("{n} item selected|{n} items selected", { n: selected.length })}</div>
-        {files > 0 && <div className="text-xs text-muted-foreground">{t("{n} file|{n} files", { n: files })} · {formatBytes(total)}</div>}
+        <div className="text-xs text-muted-foreground">{summary}</div>
       </div>
     );
   } else {
@@ -57,10 +77,13 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
     const isRoot = !node.parent_id;
     const location = info.data ? `/${root}` + info.data.path.slice(0, -1).map((c) => `/${c.name}`).join("") : info.error ? "—" : "…";
     // Values that couldn't be loaded show a dash, with the error and a way to try again below them
-    const error = info.error ?? shares.error;
+    const error = info.error ?? shares.error ?? contents.error;
+    const pending = (q: { error: unknown }) => (q.error ? "—" : "…");
+    const size = node.kind === "file" ? node.size : contents.data?.size;
     const rows: [string, React.ReactNode][] = [
       [t("Type"), typeLabel(node)],
-      ...(node.kind === "file" ? ([[t("Size"), t("{size} ({bytes} bytes)", { size: formatBytes(node.size), bytes: node.size })]] as [string, string][]) : []),
+      [t("Size"), size === undefined ? pending(contents) : t("{size} ({bytes} bytes)", { size: formatBytes(size), bytes: size })],
+      ...(node.kind === "folder" ? ([[t("Contains"), contents.data ? containsText(contents.data) : pending(contents)]] as [string, string][]) : []),
       ...(isRoot ? [] : ([[t("Location"), location]] as [string, string][])),
       ...(info.data ? ([[t("My role"), ROLE_LABEL[info.data.role]]] as [string, string][]) : []),
       [t("Date modified"), formatWinDate(node.updated_at)],
@@ -92,7 +115,7 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
             <ErrorState
               compact
               message={error.message}
-              onRetry={() => Promise.all([info.error && info.refetch(), shares.error && shares.refetch()])}
+              onRetry={() => Promise.all([info.error && info.refetch(), shares.error && shares.refetch(), contents.error && contents.refetch()])}
             />
           )}
         </div>

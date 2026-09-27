@@ -40,6 +40,13 @@ export interface Located extends Node {
   location_path: string[];
 }
 
+/** What folders hold, at any depth (not counting the folders themselves; items in the trash are left out) */
+export interface FolderContents {
+  size: number;
+  files: number;
+  folders: number;
+}
+
 export interface Crumb {
   id: string;
   name: string;
@@ -789,6 +796,8 @@ export const api = {
   move: (ids: string[], dest_id: string) => post("/nodes/move", { ids, dest_id }),
   copy: (ids: string[], dest_id: string) => post("/nodes/copy", { ids, dest_id }),
   trash: (ids: string[]) => post("/nodes/trash", { ids }),
+  /** Size and number of items inside these folders (files among the ids hold nothing) */
+  contents: (ids: string[]) => post<FolderContents>("/nodes/contents", { ids }),
   trashPage: (limit: number, after?: string) =>
     get<CursorPage<Located>>(`/trash${qs({ limit: String(limit), after })}`).then((p) => ({ ...p, items: p.items.map(localizeLocated) })),
   restore: (ids: string[]) => post("/trash/restore", { ids }),
