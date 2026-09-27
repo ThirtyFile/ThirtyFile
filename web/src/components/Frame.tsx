@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { leaveAfterSignOut } from "@/lib/signOut";
 import { Link, NavLink, useLocation, useNavigate, useSearchParams } from "react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -10,12 +10,9 @@ import {
   ChevronRightIcon,
   ChevronsUpDownIcon,
   ClockIcon,
-  CloudOffIcon,
   CopyIcon,
-  LayersIcon,
   UsersRoundIcon,
   FolderIcon,
-  FolderOpenIcon,
   HistoryIcon,
   KeyRoundIcon,
   LanguagesIcon,
@@ -51,12 +48,12 @@ import { LoginLogDialog } from "@/components/logs/LoginLog";
 import { LinkedAccountsDialog } from "@/components/LinkedAccountsDialog";
 import { NavMenu } from "@/components/NavMenu";
 import { Resizer } from "@/components/Resizer";
-import { DRIVE_ICON, useDrives } from "@/lib/drives";
+import { FolderTree } from "@/components/FolderTree";
 import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
 import { usePersisted, useMe } from "@/lib/session";
 import { useTheme, type ThemeMode } from "@/lib/theme";
 import { useBranding } from "@/lib/branding";
-import { LANGS, lang, setLang, t, tServer, type Lang } from "@/lib/i18n";
+import { LANGS, lang, setLang, t, type Lang } from "@/lib/i18n";
 import { cn, copyText, formatBytes } from "@/lib/utils";
 import { setActiveTitle, useTabActions, useTabsState } from "@/tabs";
 
@@ -85,170 +82,6 @@ export function ToolButton({
 
 export function ToolSeparator() {
   return <span className="mx-1 h-5 border-l" />;
-}
-
-// ───────────── Folder tree state (kept across page switches) ─────────────
-
-let expanded = new Set<string>();
-const treeListeners = new Set<() => void>();
-function setExpanded(id: string, open: boolean) {
-  if (expanded.has(id) === open) return;
-  expanded = new Set(expanded);
-  if (open) expanded.add(id);
-  else expanded.delete(id);
-  treeListeners.forEach((l) => l());
-}
-function useExpanded() {
-  return useSyncExternalStore(
-    (l) => {
-      treeListeners.add(l);
-      return () => {
-        treeListeners.delete(l);
-      };
-    },
-    () => expanded,
-  );
-}
-
-function TreeFolder({ id, name, depth, activeId }: { id: string; name: string; depth: number; activeId?: string }) {
-  const open = useExpanded().has(id);
-  const children = useQuery({
-    queryKey: ["children", id, "folders"],
-    queryFn: () => api.children(id, "name", "asc", true),
-    enabled: open,
-  });
-  const empty = children.data?.length === 0;
-  return (
-    <>
-      <NavMenu to={`/files/${id}`} nodeId={id}>
-        <div
-          className={cn(
-            "group flex h-[29px] items-center rounded text-muted-foreground hover:bg-muted",
-            activeId === id && "bg-selection text-accent-foreground shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection",
-          )}
-          style={{ paddingLeft: depth * 12 }}
-        >
-          <button
-            type="button"
-            aria-label={open ? t("Collapse") : t("Expand")}
-            className={cn("flex h-full w-5 shrink-0 items-center justify-center", empty && "invisible")}
-            onClick={() => setExpanded(id, !open)}
-          >
-            <ChevronRightIcon className={cn("size-3.5 transition-transform", open && "rotate-90")} />
-          </button>
-          <Link to={`/files/${id}`} className="flex h-full min-w-0 flex-1 items-center gap-[7px] pr-2" title={name}>
-            {open ? <FolderOpenIcon className="size-[15px] shrink-0" /> : <FolderIcon className="size-[15px] shrink-0" />}
-            <span className="truncate">{name}</span>
-          </Link>
-        </div>
-      </NavMenu>
-      {open && children.data?.map((c) => <TreeFolder key={c.id} id={c.id} name={c.name} depth={depth + 1} activeId={activeId} />)}
-    </>
-  );
-}
-
-/** Space root; can be expanded to show the first level of folders */
-function SpaceRoot({
-  rootId,
-  to,
-  icon: Icon,
-  label,
-  activeId,
-  depth = 0,
-  offline,
-}: {
-  rootId: string;
-  to: string;
-  icon: LucideIcon;
-  label: string;
-  activeId?: string;
-  depth?: number;
-  /** Why the storage service is offline */
-  offline?: string | null;
-}) {
-  const open = useExpanded().has(rootId);
-  const folders = useQuery({
-    queryKey: ["children", rootId, "folders"],
-    queryFn: () => api.children(rootId, "name", "asc", true),
-    enabled: open,
-  });
-  return (
-    <>
-      <NavMenu to={to} nodeId={rootId} isSpaceRoot>
-        <div
-          className={cn(
-            "flex h-[29px] items-center rounded text-muted-foreground hover:bg-muted",
-            activeId === rootId && "bg-selection text-accent-foreground shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection",
-          )}
-          style={{ paddingLeft: depth * 12 }}
-        >
-          <button
-            type="button"
-            aria-label={open ? t("Collapse") : t("Expand")}
-            className={cn("flex h-full w-5 shrink-0 items-center justify-center", folders.data?.length === 0 && "invisible")}
-            onClick={() => setExpanded(rootId, !open)}
-          >
-            <ChevronRightIcon className={cn("size-3.5 transition-transform", open && "rotate-90")} />
-          </button>
-          <Link
-            to={to}
-            className="flex h-full min-w-0 flex-1 items-center gap-[7px] pr-2"
-            title={offline ? t("{name}: storage service offline ({reason}). You can browse, but you can't open, download, or upload files.", { name: label, reason: tServer(offline) }) : undefined}
-          >
-            <Icon className={cn("size-[15px] shrink-0", offline && "opacity-40")} />
-            <span className="truncate">{label}</span>
-            {offline && <CloudOffIcon className="ml-auto size-3.5 shrink-0 text-destructive" aria-label={t("Offline")} />}
-          </Link>
-        </div>
-      </NavMenu>
-      {open && folders.data?.map((f) => <TreeFolder key={f.id} id={f.id} name={f.name} depth={depth + 1} activeId={activeId} />)}
-    </>
-  );
-}
-
-/** "All spaces": can be expanded to list every space I can access */
-function ThisPc({ activeId }: { activeId?: string }) {
-  const open = useExpanded().has("this-pc");
-  const drives = useDrives();
-  return (
-    <>
-      <NavMenu to="/drives">
-        <div className="flex h-[29px] items-center rounded text-muted-foreground hover:bg-muted">
-          <button
-            type="button"
-            aria-label={open ? t("Collapse") : t("Expand")}
-            className="flex h-full w-5 shrink-0 items-center justify-center"
-            onClick={() => setExpanded("this-pc", !open)}
-          >
-            <ChevronRightIcon className={cn("size-3.5 transition-transform", open && "rotate-90")} />
-          </button>
-          <NavLink
-            to="/drives"
-            end
-            className={({ isActive }) =>
-              cn("-ml-5 flex h-full min-w-0 flex-1 items-center gap-[7px] rounded pr-2 pl-5", isActive && "bg-selection text-accent-foreground shadow-[inset_3px_0_0_var(--color-brand)]")
-            }
-          >
-            <LayersIcon className="size-[15px] shrink-0" />
-            <span className="truncate">{t("All spaces")}</span>
-          </NavLink>
-        </div>
-      </NavMenu>
-      {open &&
-        drives.data?.map((d) => (
-          <SpaceRoot
-            key={d.id}
-            rootId={d.root_id}
-            to={`/files/${d.root_id}`}
-            icon={DRIVE_ICON[d.kind]}
-            label={d.name}
-            activeId={activeId}
-            depth={1}
-            offline={d.offline}
-          />
-        ))}
-    </>
-  );
 }
 
 // ───────────── Left-hand locations list ─────────────
@@ -320,7 +153,7 @@ function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean; activ
         <NavItem to="/recent" icon={ClockIcon} label={t("Recent")} />
         <NavItem to="/favorites" icon={StarIcon} label={t("Favorites")} />
         <div className="my-2 border-t" />
-        <ThisPc activeId={activeFolder} />
+        <FolderTree activeId={activeFolder} />
         <NavItem to="/shared-with-me" icon={UsersRoundIcon} label={t("Shared with me")} />
         <NavItem to="/shares" icon={Link2Icon} label={t("My share links")} />
         <div className="mt-3 grid gap-0 border-t pt-2">
@@ -673,9 +506,4 @@ export function Frame(p: FrameProps) {
       </footer>
     </section>
   );
-}
-
-/** When opening a folder, auto-expand its parent folders in the left-hand tree */
-export function expandPath(ids: string[]) {
-  ids.forEach((id) => setExpanded(id, true));
 }
