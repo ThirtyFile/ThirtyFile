@@ -1,7 +1,8 @@
 -- Two-factor sign-in: after a correct password, a code from an authenticator app (TOTP, RFC 6238) or a single-use
 -- recovery code. Single sign-on and app passwords don't ask for it.
 
--- The shared secret (base32); NULL = not set up. Unlike passwords it has to stay readable to check codes against it.
+-- The shared secret (base32), encrypted like the other saved secrets (secrets.rs); NULL = not set up. Unlike passwords
+-- it has to stay readable to check codes against it.
 ALTER TABLE users ADD COLUMN totp_secret TEXT;
 -- The 30-second step of the last accepted code: a code (or an older one) can't be used again
 ALTER TABLE users ADD COLUMN totp_last_step INTEGER NOT NULL DEFAULT 0;

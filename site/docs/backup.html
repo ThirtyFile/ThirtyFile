@@ -75,7 +75,7 @@ docker start thirtyfile</code></pre>
         <p>Test a restore now and then on another computer: a backup is only as good as the last time it was restored.</p>
 
         <h2 id="key">The key for saved passwords</h2>
-        <p>The passwords and keys of storage locations, the single sign-on client secrets and the secret that signs sessions and share links are saved in the database encrypted. The key is in <code>data/secret.key</code> (created on first start), or wherever <code>THIRTYFILE_SECRET_KEY</code> or <code>THIRTYFILE_SECRET_KEY_FILE</code> point. A copy of the database alone then gives none of them away.</p>
+        <p>The passwords and keys of storage locations, the single sign-on client secrets, the two-factor sign-in secrets and the secret that signs sessions and share links are saved in the database encrypted. The key is in <code>data/secret.key</code> (created on first start), or wherever <code>THIRTYFILE_SECRET_KEY</code> or <code>THIRTYFILE_SECRET_KEY_FILE</code> point. A copy of the database alone then gives none of them away.</p>
         <ul>
           <li><strong>Back up the key separately</strong>, for example in a password manager, and leave it out of the regular backup (as in the command above). Without it, restoring works, but the storage locations and single sign-on need their passwords entered again, and everyone has to sign in again.</li>
           <li>To keep the key out of the data folder entirely, create one (<code>openssl rand -hex 32</code>) and give it with <code>THIRTYFILE_SECRET_KEY_FILE</code> (a Docker secret) or <code>THIRTYFILE_SECRET_KEY</code>. An existing key file's content can be used the same way.</li>

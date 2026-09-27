@@ -166,7 +166,12 @@ async fn use_recovery_code(st: &AppState, user_id: i64, code: &str) -> AppResult
 /// Accepts a code from the authenticator app once; false when it's wrong, too old or already used
 async fn use_totp(st: &AppState, user_id: i64, code: &str) -> AppResult<bool> {
     let row: Option<(Option<String>, i64)> = sqlx::query_as("SELECT totp_secret, totp_last_step FROM users WHERE id = ?").bind(user_id).fetch_optional(&st.db).await?;
-    let Some((Some(secret), last)) = row else { return Ok(false) };
+    let Some((Some(stored), last)) = row else { return Ok(false) };
+    // Stored encrypted like the other secrets (secrets.rs); one saved with another key can't be checked
+    let Ok(secret) = crate::secrets::open(&stored) else {
+        tracing::error!("The two-factor secret of user {user_id} can't be read with the current key; reset their two-factor sign-in");
+        return Ok(false);
+    };
     let Some(step) = matching_step(&secret_bytes(&secret), &digits(code), now(), last) else { return Ok(false) };
     // Two requests with the same code at once: only one of them moves the step on
     let _w = st.write_lock.lock().await;
@@ -194,7 +199,12 @@ async fn turn_on(st: &AppState, user_id: i64, secret: &str, step: i64) -> AppRes
     let codes = new_recovery_codes();
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
-    sqlx::query("UPDATE users SET totp_secret = ?, totp_last_step = ? WHERE id = ?").bind(secret).bind(step).bind(user_id).execute(&mut *tx).await?;
+    sqlx::query("UPDATE users SET totp_secret = ?, totp_last_step = ? WHERE id = ?")
+        .bind(crate::secrets::seal(secret))
+        .bind(step)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
     store_recovery_codes(&mut tx, user_id, &codes).await?;
     tx.commit().await?;
     Ok(codes)
