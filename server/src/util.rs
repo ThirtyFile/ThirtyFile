@@ -119,6 +119,28 @@ pub fn numbered_name(name: &str, n: u32, is_folder: bool) -> String {
     format!("{stem} ({n}){ext}")
 }
 
+/// Memory the server may use: the container's limit (cgroup v2 or v1) when there is one, else the computer's memory
+pub fn memory_limit() -> Option<u64> {
+    let read = |p: &str| std::fs::read_to_string(p).ok();
+    let cgroup = read("/sys/fs/cgroup/memory.max")
+        .or_else(|| read("/sys/fs/cgroup/memory/memory.limit_in_bytes"))
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        // "max", or v1's "no limit" (a number near u64::MAX)
+        .filter(|&v| v < 1 << 60);
+    let total = read("/proc/meminfo").and_then(|m| {
+        let line = m.lines().find(|l| l.starts_with("MemTotal:"))?;
+        line.split_whitespace().nth(1)?.parse::<u64>().ok().map(|kb| kb * 1024)
+    });
+    match (cgroup, total) {
+        (Some(c), Some(t)) => Some(c.min(t)),
+        (c, t) => c.or(t),
+    }
+}
+
+pub fn format_bytes_u64(bytes: u64) -> String {
+    format_bytes(i64::try_from(bytes).unwrap_or(i64::MAX))
+}
+
 /// Converts bytes to a human-readable size, e.g. 10 GB, 512 MB (for the activity log)
 pub fn format_bytes(bytes: i64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];

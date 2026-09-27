@@ -12,18 +12,21 @@ use crate::{
     util::{new_id, now, random_token},
 };
 
-pub async fn connect(path: &Path) -> Result<SqlitePool, sqlx::Error> {
+/// Opens the database; `cache_mb` is the page cache of each connection (`THIRTYFILE_DB_CACHE_MB`)
+pub async fn connect(path: &Path, cache_mb: u32) -> Result<SqlitePool, sqlx::Error> {
     let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", path.display()))?
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
         .busy_timeout(Duration::from_secs(15))
         .foreign_keys(true)
-        // Page cache per connection (64 MB): the file tree, grants and blobs stay in memory on a small server
-        .pragma("cache_size", "-65536")
+        // Page cache per connection (16 MB by default, 8 connections): the file tree, grants and blobs of a small
+        // server stay in memory, and the operating system caches the rest of the file
+        .pragma("cache_size", format!("-{}", u64::from(cache_mb) * 1024))
         // Temporary tables (sorting, recursive CTEs) in memory instead of on disk
         .pragma("temp_store", "MEMORY")
-        // Memory-mapped reads (up to 256 MB): read queries skip the extra copy through the page cache
+        // Memory-mapped reads (up to 256 MB): read queries skip the extra copy through the page cache. The mapped
+        // pages are the operating system's file cache, which it can drop when memory is short
         .pragma("mmap_size", "268435456")
         // Sorting names the way File Explorer does ("File 2" before "File 10", letter case ignored in every language)
         .collation("natural_name", crate::util::natural_cmp);
@@ -311,7 +314,7 @@ mod tests {
     async fn admin_hash(password: Option<&str>) -> String {
         let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let db = connect(&dir.join("drive.db")).await.unwrap();
+        let db = connect(&dir.join("drive.db"), 16).await.unwrap();
         bootstrap_admin(&db, password).await.unwrap();
         let (hash,): (String,) = sqlx::query_as("SELECT password_hash FROM users WHERE username = 'admin'").fetch_one(&db).await.unwrap();
         db.close().await;

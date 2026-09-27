@@ -25,11 +25,12 @@ use crate::{
 };
 
 pub const MAX_EDIT_BYTES: usize = 20 * 1024 * 1024;
-/// Size limit for thumbnail source files: the source is read entirely into memory (at most two at a time)
+/// Size limit for thumbnail source files: the source is read entirely into memory (`THIRTYFILE_THUMBNAIL_JOBS` at a time)
 const MAX_THUMB_SOURCE: i64 = 20 * 1024 * 1024;
-/// Decoding limit: keeps malicious images that are tiny on disk but huge when decoded (e.g. a 30000×30000 PNG) from exhausting memory
+/// Decoding limit: keeps malicious images that are tiny on disk but huge when decoded (e.g. a 30000×30000 PNG) from
+/// exhausting memory. Lowered on servers with little memory (`thumb_decode_bytes`)
 const MAX_THUMB_PIXELS_SIDE: u32 = 12_000;
-const MAX_THUMB_DECODE_BYTES: u64 = 256 * 1024 * 1024;
+pub const MAX_THUMB_DECODE_BYTES: u64 = 256 * 1024 * 1024;
 const THUMB_SIZE: u32 = 320;
 
 /// Parses a single Range. Ok(None) = return the whole file; Err = 416.
@@ -376,12 +377,13 @@ pub async fn thumbnail_response(st: &AppState, headers: &HeaderMap, n: &Node) ->
         if !tokio::fs::try_exists(&path).await? {
             let mut data = Vec::with_capacity(size as usize);
             source.open(st, 0, size).await?.read_to_end(&mut data).await?;
+            let max_alloc = st.thumb_decode_bytes;
             let jpeg = tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
                 let mut reader = image::ImageReader::new(std::io::Cursor::new(data)).with_guessed_format().ok()?;
                 let mut limits = image::Limits::default();
                 limits.max_image_width = Some(MAX_THUMB_PIXELS_SIDE);
                 limits.max_image_height = Some(MAX_THUMB_PIXELS_SIDE);
-                limits.max_alloc = Some(MAX_THUMB_DECODE_BYTES);
+                limits.max_alloc = Some(max_alloc);
                 reader.limits(limits);
                 let img = reader.decode().ok()?;
                 let thumb = image::DynamicImage::ImageRgb8(img.thumbnail(THUMB_SIZE, THUMB_SIZE).to_rgb8());

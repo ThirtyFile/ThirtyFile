@@ -26,6 +26,8 @@ services:
       # THIRTYFILE_TRUST_PROXY: "true"
       # THIRTYFILE_MAX_UPLOAD_MB: "0"
       # THIRTYFILE_TRASH_DAYS: "30"
+    # Memory: about 100–300 MB in use; on a small NAS you can cap it (ThirtyFile adjusts to the limit on start)
+    # mem_limit: 512m
     # Raise the open file limit for very large folders
     ulimits:
       nofile: 65536

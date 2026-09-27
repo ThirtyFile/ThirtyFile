@@ -37,7 +37,7 @@ pub async fn env() -> TestEnv {
     for d in ["tmp", "thumbs", "blobs"] {
         std::fs::create_dir_all(dir.join(d)).unwrap();
     }
-    let db = db::connect(&dir.join("drive.db")).await.unwrap();
+    let db = db::connect(&dir.join("drive.db"), 16).await.unwrap();
     db::bootstrap_admin(&db, Some("admin-test-password")).await.unwrap();
     let system = db::load_system_settings(&db).await.unwrap();
     let mut storages: HashMap<String, Arc<dyn Storage>> = HashMap::new();
@@ -59,6 +59,7 @@ pub async fn env() -> TestEnv {
         active_uploads: Default::default(),
         login_failures: Default::default(),
         thumb_permits: tokio::sync::Semaphore::new(2),
+        thumb_decode_bytes: crate::files::MAX_THUMB_DECODE_BYTES,
         system: std::sync::RwLock::new(system),
         blob_guard: Default::default(),
         logs: std::sync::RwLock::new(Default::default()),

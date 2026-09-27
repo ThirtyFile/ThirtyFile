@@ -60,6 +60,8 @@ pub struct Inner {
     /// Selections waiting to be downloaded through a short-lived link: link token → selection (see `files::store_download_link`)
     pub download_links: Mutex<HashMap<String, crate::files::DownloadLink>>,
     pub thumb_permits: Semaphore,
+    /// Most memory one thumbnail may use to decode its image
+    pub thumb_decode_bytes: u64,
     /// System settings (cached in memory; changes are also written to the settings table)
     pub system: RwLock<SystemSettings>,
     pub blob_guard: Mutex<BlobGuard>,

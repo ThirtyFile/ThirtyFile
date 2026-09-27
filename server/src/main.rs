@@ -73,6 +73,12 @@ struct Config {
     /// Upload size limit per file (MB), 0 = unlimited
     #[arg(long, env = "THIRTYFILE_MAX_UPLOAD_MB", default_value_t = 0)]
     max_upload_mb: u64,
+    /// SQLite page cache per database connection (MB); up to 8 connections are open
+    #[arg(long, env = "THIRTYFILE_DB_CACHE_MB", default_value_t = 16, value_parser = clap::value_parser!(u32).range(1..=1024))]
+    db_cache_mb: u32,
+    /// Thumbnails made at the same time (default: 1 with less than 2 GB of memory, else 2)
+    #[arg(long, env = "THIRTYFILE_THUMBNAIL_JOBS", value_parser = clap::value_parser!(u32).range(1..=16))]
+    thumbnail_jobs: Option<u32>,
     /// When started as root: give the data directory to this user (`uid` or `uid:gid`) and run as that user (set in the Docker image)
     #[arg(long, env = "THIRTYFILE_RUN_AS")]
     #[cfg_attr(not(unix), allow(dead_code))]
@@ -136,7 +142,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         std::fs::create_dir_all(cfg.data.join(dir))?;
     }
     std::fs::create_dir_all(&storage)?;
-    let db = db::connect(&cfg.data.join("drive.db")).await?;
+    let db = db::connect(&cfg.data.join("drive.db"), cfg.db_cache_mb).await?;
 
     if let Some(Command::ResetPassword { username, password }) = &cfg.command {
         auth::validate_password(password).map_err(|e| e.message)?;
@@ -165,6 +171,16 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     let branding = branding::load(&db).await;
     let sso_settings = sso::load(&db).await;
     let (log_tx, log_rx) = logs::channel();
+    // Thumbnails read the image into memory and decode it: fewer at a time, and a lower decoding limit, on small servers
+    let memory = util::memory_limit();
+    let small = memory.is_some_and(|m| m < 2 * 1024 * 1024 * 1024);
+    let thumb_jobs = cfg.thumbnail_jobs.unwrap_or(if small { 1 } else { 2 });
+    let thumb_decode_bytes = memory.map_or(files::MAX_THUMB_DECODE_BYTES, |m| (m / 8).clamp(64 * 1024 * 1024, files::MAX_THUMB_DECODE_BYTES));
+    tracing::info!(
+        "Memory: {}, {thumb_jobs} thumbnail(s) at a time, {} MB database cache per connection",
+        memory.map_or("unknown".to_string(), util::format_bytes_u64),
+        cfg.db_cache_mb
+    );
     let state = AppState(Arc::new(Inner {
         db,
         storages: std::sync::RwLock::new(storages),
@@ -180,7 +196,8 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         write_lock: tokio::sync::Mutex::new(()),
         active_uploads: Default::default(),
         login_failures: Default::default(),
-        thumb_permits: tokio::sync::Semaphore::new(2),
+        thumb_permits: tokio::sync::Semaphore::new(thumb_jobs as usize),
+        thumb_decode_bytes,
         system: std::sync::RwLock::new(system),
         blob_guard: Default::default(),
         logs: std::sync::RwLock::new(log_settings),
