@@ -241,8 +241,9 @@ mod tests {
 
     #[tokio::test]
     async fn the_first_administrator_password_has_no_minimum_length() {
-        let hash = admin_hash(Some("admin")).await;
-        assert!(crate::auth::verify_password("admin".into(), hash).await.unwrap());
+        let short: String = crate::util::new_id().chars().take(5).collect();
+        let hash = admin_hash(Some(&short)).await;
+        assert!(crate::auth::verify_password(short, hash).await.unwrap());
     }
 
     #[tokio::test]
