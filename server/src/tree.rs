@@ -827,7 +827,11 @@ pub async fn check_quota(conn: &mut SqliteConnection, drive_id: &str, extra: i64
 }
 
 /// Finds or creates folders under parent following a relative path (a/b/c), returning the id of the deepest folder.
-pub async fn ensure_folders(conn: &mut SqliteConnection, owner_id: i64, parent_id: &str, rel: &str) -> AppResult<String> {
+///
+/// When a name on the way is taken by a file, a numbered folder is created instead ("Photos (1)"). Every file of an
+/// uploaded folder is its own upload, so with a `batch` the numbered folder is remembered and the other files of the
+/// same batch go into it too, instead of each creating another one.
+pub async fn ensure_folders(conn: &mut SqliteConnection, owner_id: i64, parent_id: &str, rel: &str, batch: &str) -> AppResult<String> {
     let mut current = parent_id.to_string();
     for part in rel.split('/').filter(|p| !p.is_empty()) {
         let name = crate::util::validate_name(part)?;
@@ -840,9 +844,44 @@ pub async fn ensure_folders(conn: &mut SqliteConnection, owner_id: i64, parent_i
         .await?;
         current = match existing {
             Some((id, kind)) if kind == "folder" => id,
-            _ => {
-                let name = unique_name(conn, &current, &name, true).await?;
-                create_folder(conn, owner_id, &current, &name).await?
+            None => create_folder(conn, owner_id, &current, &name).await?,
+            // Taken by a file
+            Some(_) => {
+                let key = name.to_lowercase();
+                let known: Option<(String,)> = if batch.is_empty() {
+                    None
+                } else {
+                    sqlx::query_as(
+                        "SELECT b.folder_id FROM upload_batch_folders b
+                         JOIN nodes n ON n.id = b.folder_id AND n.kind = 'folder' AND n.trashed_at IS NULL
+                         WHERE b.batch = ? AND b.parent_id = ? AND b.name = ?",
+                    )
+                    .bind(batch)
+                    .bind(&current)
+                    .bind(&key)
+                    .fetch_optional(&mut *conn)
+                    .await?
+                };
+                match known {
+                    Some((id,)) => id,
+                    None => {
+                        let numbered = unique_name(conn, &current, &name, true).await?;
+                        let id = create_folder(conn, owner_id, &current, &numbered).await?;
+                        if !batch.is_empty() {
+                            sqlx::query(
+                                "INSERT OR REPLACE INTO upload_batch_folders (batch, parent_id, name, folder_id, created_at) VALUES (?, ?, ?, ?, ?)",
+                            )
+                            .bind(batch)
+                            .bind(&current)
+                            .bind(&key)
+                            .bind(&id)
+                            .bind(crate::util::now())
+                            .execute(&mut *conn)
+                            .await?;
+                        }
+                        id
+                    }
+                }
             }
         };
     }
@@ -876,6 +915,28 @@ pub async fn touch(conn: &mut SqliteConnection, id: &str) -> AppResult<()> {
 mod tests {
     use super::*;
     use crate::testutil;
+
+    #[tokio::test]
+    async fn files_of_one_uploaded_folder_stay_together_when_a_file_has_its_name() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        env.file(&amy, &amy.root_id, "Photos").await;
+        let mut c = env.st.db.acquire().await.unwrap();
+        let mut ensure = async |rel: &str, batch: &str| ensure_folders(&mut c, amy.id, &amy.root_id, rel, batch).await.unwrap();
+
+        // Two files of one batch: "Photos (1)" is created once, and both land in it
+        let a = ensure("Photos", "b1").await;
+        let b = ensure("photos", "b1").await;
+        assert_eq!(a, b);
+        let sub = ensure("Photos/2026", "b1").await;
+        assert_eq!(get_node(&mut c, &sub).await.unwrap().unwrap().parent_id.as_deref(), Some(a.as_str()));
+        assert_eq!(get_node(&mut c, &a).await.unwrap().unwrap().name, "Photos (1)");
+
+        // Another batch, or a client that sends none, gets a folder of its own as before
+        let other = ensure_folders(&mut c, amy.id, &amy.root_id, "Photos", "b2").await.unwrap();
+        let none = ensure_folders(&mut c, amy.id, &amy.root_id, "Photos", "").await.unwrap();
+        assert!(other != a && none != a && none != other);
+    }
 
     #[tokio::test]
     async fn numbering_picks_the_lowest_free_number_in_one_query() {

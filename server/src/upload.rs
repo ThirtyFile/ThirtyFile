@@ -38,6 +38,8 @@ struct Upload {
     size: i64,
     offset: i64,
     drive_id: Option<String>,
+    /// Uploads started together (one folder dropped or picked at once); empty for older clients
+    batch: String,
 }
 
 fn tus(res: &mut Response) {
@@ -101,6 +103,11 @@ pub async fn create(State(st): State<AppState>, user: User, headers: HeaderMap) 
         rel_parts.push(validate_name(part)?);
     }
     let rel_path = rel_parts.join("/");
+    let batch = meta
+        .get("batchId")
+        .filter(|b| (1..=64).contains(&b.len()) && b.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        .cloned()
+        .unwrap_or_default();
 
     let id = new_id();
     {
@@ -110,8 +117,8 @@ pub async fn create(State(st): State<AppState>, user: User, headers: HeaderMap) 
         tree::check_quota(&mut tx, parent.drive(), size as i64).await?;
         let ts = now();
         sqlx::query(
-            "INSERT INTO uploads (id, owner_id, parent_id, rel_path, name, size, offset, created_at, expires_at, drive_id)
-             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+            "INSERT INTO uploads (id, owner_id, parent_id, rel_path, name, size, offset, created_at, expires_at, drive_id, batch)
+             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(user.id)
@@ -122,6 +129,7 @@ pub async fn create(State(st): State<AppState>, user: User, headers: HeaderMap) 
         .bind(ts)
         .bind(ts + UPLOAD_TTL)
         .bind(&parent.drive_id)
+        .bind(&batch)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -145,7 +153,7 @@ pub async fn create(State(st): State<AppState>, user: User, headers: HeaderMap) 
 }
 
 async fn load(st: &AppState, user: &User, id: &str) -> AppResult<Upload> {
-    sqlx::query_as("SELECT id, owner_id, parent_id, rel_path, name, size, offset, drive_id FROM uploads WHERE id = ? AND owner_id = ?")
+    sqlx::query_as("SELECT id, owner_id, parent_id, rel_path, name, size, offset, drive_id, batch FROM uploads WHERE id = ? AND owner_id = ?")
         .bind(id)
         .bind(user.id)
         .fetch_optional(&st.db)
@@ -316,7 +324,7 @@ async fn commit_upload(
             tree::check_quota(&mut tx, &personal, size as i64).await?;
         }
     }
-    let folder = tree::ensure_folders(&mut tx, upload.owner_id, &parent_id, &upload.rel_path).await?;
+    let folder = tree::ensure_folders(&mut tx, upload.owner_id, &parent_id, &upload.rel_path, &upload.batch).await?;
     let name = tree::unique_name(&mut tx, &folder, &upload.name, false).await?;
     let extra = tree::commit_blob(st, &mut tx, staged).await?;
     let id = new_id();
@@ -393,7 +401,10 @@ pub async fn clean_tmp(st: &AppState) -> AppResult<usize> {
 pub async fn purge_expired(st: &AppState) -> AppResult<usize> {
     let ids: Vec<(String,)> = {
         let _w = st.write_lock.lock().await;
-        sqlx::query_as("DELETE FROM uploads WHERE expires_at < ? RETURNING id").bind(now()).fetch_all(&st.db).await?
+        let ids = sqlx::query_as("DELETE FROM uploads WHERE expires_at < ? RETURNING id").bind(now()).fetch_all(&st.db).await?;
+        // Batches are no longer needed once their uploads can't be finished any more
+        sqlx::query("DELETE FROM upload_batch_folders WHERE created_at < ?").bind(now() - UPLOAD_TTL).execute(&st.db).await?;
+        ids
     };
     for (id,) in &ids {
         let _ = tokio::fs::remove_file(upload_path(st, id)).await;

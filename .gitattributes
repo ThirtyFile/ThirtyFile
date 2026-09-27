@@ -1,0 +1,2 @@
+# Migrations are checksummed by sqlx when applied: keep their bytes identical on every system
+/server/migrations/*.sql text eol=lf
