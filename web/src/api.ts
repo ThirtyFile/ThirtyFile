@@ -529,23 +529,55 @@ async function request<T>(method: string, path: string, body?: unknown, raw?: Bo
     },
     body: body !== undefined ? JSON.stringify(body) : raw,
   });
-  if (!res.ok) {
-    let message = t("Request failed ({status})", { status: res.status });
-    let code: string | undefined;
-    try {
-      const data = await res.json();
-      // Server messages are English: translate them to the UI language
-      message = data.error ? tServer(data.error) : message;
-      code = data.code;
-    } catch {
-      // Non-JSON error
-    }
-    if (res.status === 401 && code === undefined && !path.startsWith("/auth/login") && !path.startsWith("/public/")) {
-      window.dispatchEvent(new Event("tf:unauthorized"));
-    }
-    throw new ApiError(message, res.status, code);
-  }
+  if (!res.ok) throw await responseError(res, `/api${path}`, t("Request failed ({status})", { status: res.status }));
   return res.json() as Promise<T>;
+}
+
+/**
+ * The error for a failed response: the server's message translated to the UI language, or `fallback`.
+ * A 401 without a code means the session expired: the user is sent to sign in (except for sign-in attempts and public share links).
+ */
+export function errorFromBody(status: number, body: string, url: string, fallback: string): ApiError {
+  let message = fallback;
+  let code: string | undefined;
+  try {
+    const data = JSON.parse(body);
+    // Server messages are English: translate them to the UI language
+    if (data.error) message = tServer(data.error);
+    code = data.code;
+  } catch {
+    // Non-JSON error
+  }
+  if (status === 401 && code === undefined && !url.startsWith("/api/auth/login") && !url.startsWith("/api/public/")) {
+    window.dispatchEvent(new Event("tf:unauthorized"));
+  }
+  return new ApiError(message, status, code);
+}
+
+export async function responseError(res: Response, url: string, fallback: string): Promise<ApiError> {
+  return errorFromBody(res.status, await res.text().catch(() => ""), url, fallback);
+}
+
+/** `fetch` for file content and other requests made outside `api`, with the same error handling: throws an ApiError when the response isn't OK */
+export async function fetchOk(url: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(url, { credentials: "same-origin", ...init });
+  if (!res.ok) throw await responseError(res, url, t("Couldn't read the file ({status})", { status: res.status }));
+  return res;
+}
+
+/** An Office file's content (.docx / .xlsx / .pptx), checked to be an Office Open XML package */
+export async function fetchOffice(url: string): Promise<ArrayBuffer> {
+  return checkOoxml(await (await fetchOk(url)).arrayBuffer());
+}
+
+/** .docx / .xlsx / .pptx are really ZIP archives; check the header first so the preview and editor don't throw a cryptic error or show a blank page */
+function checkOoxml(buf: ArrayBuffer) {
+  const b = new Uint8Array(buf.slice(0, 4));
+  if (b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04) return buf;
+  if (b[0] === 0xd0 && b[1] === 0xcf && b[2] === 0x11 && b[3] === 0xe0)
+    throw new ApiError(t("This is a legacy Office file (.doc / .xls / .ppt) with a newer file extension, so it can't be opened online. Download it and open it in Office."), 0);
+  if (buf.byteLength === 0) throw new ApiError(t("This file is empty."), 0);
+  throw new ApiError(t("This file isn't a valid Office document (it may be damaged, or wasn't created by Office), so it can't be opened online. Download it to check."), 0);
 }
 
 const get = <T>(p: string) => request<T>("GET", p);
@@ -606,10 +638,7 @@ export const api = {
         "Upload-Metadata": `filename ${b64(name)},parentId ${b64(parentId)}`,
       },
     });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new ApiError(data.error ? tServer(data.error) : t("Couldn't create ({status})", { status: res.status }), res.status);
-    }
+    if (!res.ok) throw await responseError(res, "/api/uploads", t("Couldn't create ({status})", { status: res.status }));
     return res.headers.get("X-Node-Id")!;
   },
 

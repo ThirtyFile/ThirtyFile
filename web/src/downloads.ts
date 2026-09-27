@@ -4,7 +4,8 @@
 
 import { useSyncExternalStore } from "react";
 import { toast } from "sonner";
-import { t, tServer } from "@/lib/i18n";
+import { errorFromBody, responseError } from "@/api";
+import { t } from "@/lib/i18n";
 
 export type DownloadStatus = "downloading" | "done" | "error" | "canceled";
 
@@ -98,15 +99,6 @@ function filenameFrom(res: Response, fallback: string) {
   return /filename\s*=\s*"?([^";]+)"?/i.exec(cd)?.[1] ?? fallback;
 }
 
-async function errorOf(res: Response) {
-  try {
-    const error = ((await res.json()) as { error?: string }).error;
-    return error ? tServer(error) : t("Download failed ({status})", { status: res.status });
-  } catch {
-    return headError(res.status);
-  }
-}
-
 function save(blob: Blob, name: string) {
   const href = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -126,9 +118,9 @@ export async function download(url: string, opts: { zip?: boolean; name?: string
   try {
     const head = await fetch(url, { method: "HEAD", credentials: "same-origin" });
     if (!head.ok) {
-      // Direct fetch, so the session check in api.request doesn't apply: hand it over the same way
-      if (head.status === 401) window.dispatchEvent(new Event("tf:unauthorized"));
-      else toast.error(headError(head.status));
+      // A HEAD response has no body: only the status is checked (an expired session sends the user to sign in, like api.request)
+      const error = errorFromBody(head.status, "", url, headError(head.status));
+      if (head.status !== 401) toast.error(error.message);
       return;
     }
     size = Number(head.headers.get("content-length")) || null;
@@ -151,8 +143,8 @@ export async function download(url: string, opts: { zip?: boolean; name?: string
   emit();
   try {
     const res = await fetch(url, { credentials: "same-origin", signal: controller.signal });
-    if (res.status === 401) window.dispatchEvent(new Event("tf:unauthorized"));
-    if (!res.ok || !res.body) throw new Error(await errorOf(res));
+    if (!res.ok) throw await responseError(res, url, headError(res.status));
+    if (!res.body) throw new Error(headError(res.status));
     const name = filenameFrom(res, opts.name ?? "download");
     const total = Number(res.headers.get("content-length")) || size;
     // The server zips multiple items or folders

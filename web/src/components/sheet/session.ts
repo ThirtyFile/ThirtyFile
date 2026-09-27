@@ -3,9 +3,8 @@
  * Switching tabs and coming back reuses the same session, so unsaved changes aren't lost.
  */
 import JSZip from "jszip";
-import type { FileSource, Node } from "@/api";
+import { fetchOffice, type FileSource, type Node } from "@/api";
 import { hasDraft, onDraftRemoved } from "@/lib/drafts";
-import { t } from "@/lib/i18n";
 import { dateToSerial, parseNumber, serialToDate, Calculator } from "@/lib/sheet/formula";
 import { isDatePattern } from "@/lib/sheet/format";
 import type { Cell, CellStyle, Range, Scalar, Sheet, Workbook } from "@/lib/sheet/model";
@@ -180,9 +179,7 @@ export function reusableSession(node: Node): Session | undefined {
 }
 
 export async function openSession(node: Node, source: FileSource): Promise<Session> {
-  const r = await fetch(source.contentUrl(node));
-  if (!r.ok) throw new Error(t("Couldn't read the file ({status})", { status: r.status }));
-  const { zip, book, snapshot } = await readXlsx(await r.arrayBuffer());
+  const { zip, book, snapshot } = await readXlsx(await fetchOffice(source.contentUrl(node)));
   const s: Session = {
     zip,
     book,

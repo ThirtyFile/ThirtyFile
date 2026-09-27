@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2Icon } from "lucide-react";
-import type { FileSource, Node } from "@/api";
-import { t, tServer } from "@/lib/i18n";
+import { ApiError, fetchOffice, type FileSource, type Node } from "@/api";
+import { t } from "@/lib/i18n";
 import { frameDocument, loadFrameScript } from "@/components/officeFrame";
 import { extOf } from "@/lib/utils";
 import SheetPreview from "@/components/sheet/SheetPreview";
@@ -17,31 +17,12 @@ const RENDER_TIMEOUT = 60_000;
 /** Error messages we produce ourselves (already translated) are shown as-is */
 class ViewerError extends Error {}
 
-async function fetchBuffer(url: string) {
-  const r = await fetch(url);
-  if (!r.ok) {
-    const data = await r.json().catch(() => ({}));
-    throw new ViewerError(data.error ? tServer(data.error) : t("Couldn't read the file ({status})", { status: r.status }));
-  }
-  return checkOoxml(await r.arrayBuffer());
-}
-
-/** .docx / .xlsx / .pptx are really ZIP archives; check the header first so the preview components don't throw a cryptic error or show a blank page */
-function checkOoxml(buf: ArrayBuffer) {
-  const b = new Uint8Array(buf.slice(0, 4));
-  if (b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04) return buf;
-  if (b[0] === 0xd0 && b[1] === 0xcf && b[2] === 0x11 && b[3] === 0xe0)
-    throw new ViewerError(t("This is a legacy Office file (.doc / .xls / .ppt) with a newer file extension, so it can't be previewed online. Download it and open it in Office."));
-  if (buf.byteLength === 0) throw new ViewerError(t("This file is empty."));
-  throw new ViewerError(t("This file isn't a valid Office document (it may be damaged, or wasn't created by Office), so it can't be previewed. Download it to check."));
-}
-
 /** Turn English errors from the preview components (JSZip etc.) into understandable explanations */
 function viewError(e: unknown, fallback: string) {
   const msg = e instanceof Error ? e.message : "";
   if (!msg) return fallback;
-  // Show our own messages as-is; only convert the preview components' English errors
-  if (e instanceof ViewerError) return msg;
+  // Show our own messages (and translated server messages) as-is; only convert the preview components' English errors
+  if (e instanceof ViewerError || e instanceof ApiError) return msg;
   if (msg === TOO_LARGE) return t("The file's content is too large to preview. Download it and open it in Office.");
   if (/central directory|zip|corrupt|invalid|unexpected/i.test(msg) && !/[一-鿿]/.test(msg)) // i18n-ignore: regex that detects CJK text in a message
     return t("The file is damaged or in an unrecognized format, so it can't be previewed. Download it and open it in Office to check.");
@@ -117,7 +98,7 @@ function FramePreview({ node, source, kind }: { node: Node; source: FileSource; 
       }
     };
     window.addEventListener("message", onMessage);
-    fetchBuffer(source.contentUrl(node))
+    fetchOffice(source.contentUrl(node))
       .then((buf) => {
         buffer = buf;
         send();
@@ -160,7 +141,7 @@ function XlsxPreview({ node, source }: { node: Node; source: FileSource }) {
     let cancelled = false;
     setBuffer(null);
     setError(null);
-    fetchBuffer(source.contentUrl(node))
+    fetchOffice(source.contentUrl(node))
       .then((buf) => !cancelled && setBuffer(buf))
       .catch((e) => !cancelled && setError(viewError(e, t("Couldn't open this spreadsheet"))));
     return () => {

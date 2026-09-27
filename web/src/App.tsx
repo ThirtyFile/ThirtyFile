@@ -4,6 +4,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "re
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon } from "lucide-react";
 import { api, ApiError } from "@/api";
+import { Button } from "@/components/ui/button";
 import { MeContext } from "@/lib/session";
 import { t } from "@/lib/i18n";
 import { useApplyBranding } from "@/lib/branding";
@@ -75,7 +76,16 @@ function RequireAuth() {
     );
   if (me.error instanceof ApiError && me.error.status === 401)
     return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
-  if (!me.data) return <div className="p-10 text-center text-destructive">{me.error?.message ?? t("Can't connect to the server")}</div>;
+  if (!me.data)
+    return (
+      <div className="flex flex-col items-center gap-3 p-10 text-center">
+        <p className="text-destructive">{me.error instanceof ApiError ? me.error.message : t("Can't connect to the server")}</p>
+        <Button variant="outline" size="sm" disabled={me.isFetching} onClick={() => void me.refetch()}>
+          {me.isFetching && <Loader2Icon className="animate-spin" />}
+          {t("Retry")}
+        </Button>
+      </div>
+    );
 
   return (
     <MeContext.Provider value={me.data}>

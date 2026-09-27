@@ -5,10 +5,10 @@ import { languages } from "@codemirror/language-data";
 import { EditorView, keymap } from "@codemirror/view";
 import { Loader2Icon, SaveIcon } from "lucide-react";
 import { toast } from "sonner";
-import { ApiError, api, type FileSource, type Node } from "@/api";
+import { ApiError, api, fetchOk, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
 import { getDraft, setDraft } from "@/lib/drafts";
-import { t, tServer } from "@/lib/i18n";
+import { t } from "@/lib/i18n";
 import { decodeText, encodeText, lineEnding, normalizeLines, type TextEncodingName } from "@/lib/textEncoding";
 import { useTheme } from "@/lib/theme";
 
@@ -48,12 +48,8 @@ export default function TextEditor(props: {
     setError(null);
     // The editor stays mounted when moving to another file: forget the previous file's language
     setLang(null);
-    fetch(props.source.contentUrl(props.node))
-      .then(async (r) => {
-        if (!r.ok) {
-          const msg = await r.json().then((d) => d.error as string | undefined).catch(() => undefined);
-          throw new Error(msg ? tServer(msg) : t("Couldn't read the file ({status})", { status: r.status }));
-        }
+    fetchOk(props.source.contentUrl(props.node))
+      .then((r) => {
         // The version of the content just received (the node the parent holds may be older, e.g. after a conflict)
         const version = Number(r.headers.get("x-version")) || props.node.updated_at;
         return r.arrayBuffer().then((buf) => ({ buf, version }));

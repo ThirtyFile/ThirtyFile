@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import * as tus from "tus-js-client";
-import { t, tServer } from "@/lib/i18n";
+import { errorFromBody } from "@/api";
+import { t } from "@/lib/i18n";
 
 export type UploadStatus = "queued" | "uploading" | "paused" | "done" | "error";
 
@@ -61,14 +62,8 @@ export function onUploadDone(fn: (parentId: string) => void) {
 
 function errorMessage(err: Error): string {
   const res = (err as tus.DetailedError).originalResponse;
-  if (res) {
-    try {
-      const error: string | undefined = JSON.parse(res.getBody()).error;
-      return error ? tServer(error) : err.message;
-    } catch {
-      return t("Upload failed ({status})", { status: res.getStatus() });
-    }
-  }
+  // Handled like api.request: the server's message translated, and an expired session sends the user to sign in
+  if (res) return errorFromBody(res.getStatus(), res.getBody() ?? "", "/api/uploads", t("Upload failed ({status})", { status: res.getStatus() })).message;
   return t("Network connection lost");
 }
 
