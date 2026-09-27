@@ -585,7 +585,8 @@ pub fn schedule_blob_removal(st: &AppState, blobs: Vec<BlobRef>) {
 }
 
 /// Deletes one by one: skipped when (hash, location) is still some blob's current location or is being staged
-pub async fn remove_unreferenced(st: &AppState, blobs: Vec<BlobRef>) {
+pub async fn remove_unreferenced(st: &AppState, blobs: Vec<BlobRef>) -> Vec<String> {
+    let mut failures: Vec<String> = Vec::new();
     for (hash, location) in blobs {
         let still_used = {
             let _w = st.write_lock.lock().await;
@@ -619,17 +620,24 @@ pub async fn remove_unreferenced(st: &AppState, blobs: Vec<BlobRef>) {
         {
             let _w = st.write_lock.lock().await;
             let res = match &failed {
-                // Couldn't delete it (e.g. the storage service is disconnected): record it and retry once the location is reachable again, to avoid leaving orphaned objects taking up space
+                // Couldn't delete it (e.g. the storage service is disconnected): record it and retry once the location
+                // is reachable again, to avoid leaving orphaned objects taking up space. Each failure doubles the wait
+                // (created_at is the time of the next attempt), up to a day: a bucket that never allows deleting isn't
+                // asked every 30 seconds.
                 Some(err) => {
-                    tracing::warn!("Failed to delete physical file {hash} ({location}), will retry later: {err}");
+                    tracing::debug!("Failed to delete physical file {hash} ({location}), will retry later: {err}");
+                    failures.push(err.clone());
                     sqlx::query(
-                        "INSERT INTO pending_blob_deletes (hash, location_id, created_at, attempts, last_error) VALUES (?, ?, ?, 1, ?)
-                         ON CONFLICT (hash, location_id) DO UPDATE SET attempts = attempts + 1, last_error = excluded.last_error",
+                        "INSERT INTO pending_blob_deletes (hash, location_id, created_at, attempts, last_error) VALUES (?1, ?2, ?3 + ?5, 1, ?4)
+                         ON CONFLICT (hash, location_id) DO UPDATE SET attempts = attempts + 1, last_error = excluded.last_error,
+                           created_at = ?3 + MIN(?5 << MIN(attempts, 12), ?6)",
                     )
                     .bind(&hash)
                     .bind(&location)
                     .bind(crate::util::now())
                     .bind(err.chars().take(300).collect::<String>())
+                    .bind(RETRY_BASE)
+                    .bind(RETRY_MAX)
                     .execute(&st.db)
                     .await
                     .map(|_| ())
@@ -650,7 +658,15 @@ pub async fn remove_unreferenced(st: &AppState, blobs: Vec<BlobRef>) {
             let _ = tokio::fs::remove_file(st.thumb_path(&hash)).await;
         }
     }
+    if let Some(last) = failures.last() {
+        tracing::warn!("Failed to delete {} physical file(s), will retry later: {last}", failures.len());
+    }
+    failures
 }
+
+/// Wait before retrying a deletion that failed once; it doubles with every further failure, up to `RETRY_MAX`
+const RETRY_BASE: i64 = 60;
+const RETRY_MAX: i64 = 24 * 3600;
 
 struct DeletingGuard {
     st: AppState,
@@ -712,8 +728,9 @@ pub async fn defer_blob_removal(st: &AppState, blobs: &[BlobRef], delay: i64) {
     }
 }
 
-/// Retries physical files whose deletion failed earlier (called by the health monitor when a location is reachable again); returns the number retried
-pub async fn retry_pending_deletes(st: &AppState, location: &str) -> usize {
+/// Retries physical files whose deletion failed earlier and whose next attempt is due (called by the health monitor
+/// while a location is reachable); returns the number retried and the number that failed again
+pub async fn retry_pending_deletes(st: &AppState, location: &str) -> (usize, usize) {
     // created_at is in the future for deferred deletions that must still wait
     let rows: Vec<(String,)> = sqlx::query_as("SELECT hash FROM pending_blob_deletes WHERE location_id = ? AND created_at <= ? ORDER BY created_at LIMIT 1000")
         .bind(location)
@@ -722,10 +739,11 @@ pub async fn retry_pending_deletes(st: &AppState, location: &str) -> usize {
         .await
         .unwrap_or_default();
     let n = rows.len();
-    if n > 0 {
-        remove_unreferenced(st, rows.into_iter().map(|(h,)| (h, location.to_string())).collect()).await;
+    if n == 0 {
+        return (0, 0);
     }
-    n
+    let failed = remove_unreferenced(st, rows.into_iter().map(|(h,)| (h, location.to_string())).collect()).await.len();
+    (n, failed)
 }
 
 /// Which storage location a space's new files go to
@@ -1124,11 +1142,26 @@ mod tests {
         remove_unreferenced(&env.st, vec![(hash.clone(), "flaky".into())]).await;
         assert!(blob.exists());
         assert_eq!(pending().await, 1);
-        assert_eq!(retry_pending_deletes(&env.st, "flaky").await, 1, "still disconnected: retry fails and keeps waiting");
+        // Not retried before its next attempt is due
+        assert_eq!(retry_pending_deletes(&env.st, "flaky").await, (0, 0));
+        let due = || async {
+            sqlx::query("UPDATE pending_blob_deletes SET created_at = 0").execute(&env.st.db).await.unwrap();
+        };
+        due().await;
+        assert_eq!(retry_pending_deletes(&env.st, "flaky").await, (1, 1), "still disconnected: retry fails and keeps waiting");
         assert_eq!(pending().await, 1);
+        // Each failure waits twice as long
+        let (attempts, wait): (i64, i64) = sqlx::query_as("SELECT attempts, created_at - ? FROM pending_blob_deletes")
+            .bind(crate::util::now())
+            .fetch_one(&env.st.db)
+            .await
+            .unwrap();
+        assert_eq!(attempts, 2);
+        assert!((RETRY_BASE * 2 - 5..=RETRY_BASE * 2).contains(&wait), "{wait}");
 
         // Retry after recovery: actually deleted and the list is cleared
         flaky.down.store(false, std::sync::atomic::Ordering::SeqCst);
+        due().await;
         retry_pending_deletes(&env.st, "flaky").await;
         assert!(!blob.exists());
         assert_eq!(pending().await, 0);
@@ -1151,11 +1184,11 @@ mod tests {
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
-        assert_eq!(retry_pending_deletes(&env.st, "local").await, 0, "not due yet");
+        assert_eq!(retry_pending_deletes(&env.st, "local").await, (0, 0), "not due yet");
         assert!(blob.exists());
         // After the grace period, the health check's retry deletes it
         sqlx::query("UPDATE pending_blob_deletes SET created_at = created_at - ?").bind(REMOVAL_GRACE).execute(&env.st.db).await.unwrap();
-        assert_eq!(retry_pending_deletes(&env.st, "local").await, 1);
+        assert_eq!(retry_pending_deletes(&env.st, "local").await, (1, 0));
         assert!(!blob.exists());
     }
 

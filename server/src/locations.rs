@@ -275,9 +275,10 @@ pub fn spawn_health_monitor(st: AppState) {
             let results = futures_util::future::join_all(ids.iter().map(|id| probe(&st, id))).await;
             for (id, res) in ids.iter().zip(results) {
                 if res.is_ok() {
-                    let n = tree::retry_pending_deletes(&st, id).await;
+                    // One line per location: failures of single files are only logged at debug level
+                    let (n, failed) = tree::retry_pending_deletes(&st, id).await;
                     if n > 0 {
-                        tracing::info!("Retried deleting {n} physical files whose deletion failed earlier ({id})");
+                        tracing::info!("Retried deleting {n} physical files whose deletion failed earlier ({id}), {failed} failed again");
                     }
                 }
             }
@@ -457,9 +458,12 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
         )));
     }
     sqlx::query("DELETE FROM storage_locations WHERE id = ?").bind(&id).execute(&mut *tx).await?;
+    // Content that couldn't be deleted there stays in that storage: ThirtyFile no longer connects to it
+    sqlx::query("DELETE FROM pending_blob_deletes WHERE location_id = ?").bind(&id).execute(&mut *tx).await?;
     tree::log(&mut tx, &user, None, "storage_delete", &name).await?;
     tx.commit().await?;
     st.storages.write().unwrap().remove(&id);
+    st.location_health.lock().unwrap().remove(&id);
     Ok(Json(json!({ "ok": true })))
 }
 
