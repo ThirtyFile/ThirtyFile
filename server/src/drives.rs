@@ -37,8 +37,10 @@ pub struct DriveInfo {
     location_is_default: bool,
     /// Reason the storage location is offline (e.g. S3 disconnected); browsing works, but opening, downloading and uploading don't
     offline: Option<String>,
-    /// "store" or "folder" (a folder on the server, changed there rather than from the web for now)
+    /// "store" or "folder" (a folder on the server)
     mode: String,
+    /// Browse, download and share only
+    read_only: bool,
     /// Folder spaces, for administrators: the folder, when it was last scanned, and what the scan found
     #[serde(skip_serializing_if = "Option::is_none")]
     source_path: Option<String>,
@@ -70,6 +72,7 @@ async fn drive_info(st: &AppState, conn: &mut SqliteConnection, d: Drive, role: 
     let offline = if d.is_folder() { None } else { st.location_offline(&location_id) };
     Ok(DriveInfo {
         mode: d.mode.clone(),
+        read_only: d.read_only,
         source_path: None,
         last_scan_at: None,
         scan_report: None,
@@ -112,6 +115,9 @@ pub struct CreateDriveReq {
     /// Administrators: show this folder on the server as the space (a folder space) instead of storing files
     #[serde(default)]
     source_path: Option<String>,
+    /// Folder spaces: browse, download and share only
+    #[serde(default)]
+    read_only: bool,
 }
 
 /// Team spaces a standard user may create
@@ -151,6 +157,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     add_grant(&mut tx, &root_id, "user", user.id, "owner", Some(user.id), None).await?;
     if let Some(source) = &source {
         crate::folders::set_up(&mut tx, &drive_id, &root_id, source).await?;
+        sqlx::query("UPDATE drives SET read_only = ? WHERE id = ?").bind(req.read_only).bind(&drive_id).execute(&mut *tx).await?;
     }
     let root = tree::get_node(&mut tx, &root_id).await?.unwrap();
     tree::log(&mut tx, &user, Some(&root), "drive_create", source.as_deref().unwrap_or_default()).await?;
@@ -186,6 +193,8 @@ pub async fn manageable_drive(conn: &mut SqliteConnection, user: &User, id: &str
 pub struct UpdateDriveReq {
     name: Option<String>,
     quota_bytes: Option<i64>,
+    /// Folder spaces, administrators: browse, download and share only
+    read_only: Option<bool>,
 }
 
 pub async fn update(
@@ -221,6 +230,15 @@ pub async fn update(
         } else {
             sqlx::query("UPDATE drives SET quota_bytes = ? WHERE id = ?").bind(q.max(0)).bind(&drive.id).execute(&mut *tx).await?;
         }
+    }
+    if let Some(read_only) = req.read_only {
+        if !user.is_admin() {
+            return Err(AppError::forbidden("Only administrators can make a space read-only"));
+        }
+        if !drive.is_folder() {
+            return Err(AppError::bad_request("Only spaces that show a folder on the server can be read-only"));
+        }
+        sqlx::query("UPDATE drives SET read_only = ? WHERE id = ?").bind(read_only).bind(&drive.id).execute(&mut *tx).await?;
     }
     let root = tree::get_node(&mut tx, &drive.root_id).await?.unwrap();
     tree::log(&mut tx, &user, Some(&root), "drive_update", "").await?;
@@ -672,9 +690,9 @@ mod tests {
         env.st.system.write().unwrap().allow_user_drives = true;
         let amy = env.user("amy", true).await;
         for i in 0..MAX_OWN_SPACES {
-            let _ = create(State(env.st.clone()), amy.clone(), Json(CreateDriveReq { name: format!("Team {i}"), quota_bytes: 0, source_path: None })).await.unwrap();
+            let _ = create(State(env.st.clone()), amy.clone(), Json(CreateDriveReq { name: format!("Team {i}"), quota_bytes: 0, source_path: None, read_only: false })).await.unwrap();
         }
-        let res = create(State(env.st.clone()), amy.clone(), Json(CreateDriveReq { name: "One more".into(), quota_bytes: 0, source_path: None })).await;
+        let res = create(State(env.st.clone()), amy.clone(), Json(CreateDriveReq { name: "One more".into(), quota_bytes: 0, source_path: None, read_only: false })).await;
         assert!(matches!(res, Err(e) if e.status == axum::http::StatusCode::BAD_REQUEST));
     }
 
@@ -763,11 +781,11 @@ mod tests {
         sqlx::query("UPDATE users SET quota_bytes = 5000 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
         let mut conn = env.st.db.acquire().await.unwrap();
         let amy = crate::auth::user_by_id(&env.st, &mut conn, amy.id).await.unwrap().unwrap();
-        let req = CreateDriveReq { name: "Team".into(), quota_bytes: 0, source_path: None };
+        let req = CreateDriveReq { name: "Team".into(), quota_bytes: 0, source_path: None, read_only: false };
         let Json(info) = create(State(env.st.clone()), amy, Json(req)).await.unwrap();
         assert_eq!(info.quota_bytes, 5000, "not unlimited, whatever the request said");
         let admin = env.admin().await;
-        let Json(info) = create(State(env.st.clone()), admin, Json(CreateDriveReq { name: "Big".into(), quota_bytes: 0, source_path: None })).await.unwrap();
+        let Json(info) = create(State(env.st.clone()), admin, Json(CreateDriveReq { name: "Big".into(), quota_bytes: 0, source_path: None, read_only: false })).await.unwrap();
         assert_eq!(info.quota_bytes, 0, "administrators may create unlimited spaces");
     }
 }

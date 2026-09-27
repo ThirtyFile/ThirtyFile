@@ -262,11 +262,16 @@ pub async fn save_content(
         return Err(AppError::new(StatusCode::PAYLOAD_TOO_LARGE, "The file is too large to edit online"));
     }
     let base: Option<i64> = headers.get("x-base-version").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok());
-    let conflict = || AppError::new(StatusCode::CONFLICT, "Someone else changed this file while you were editing it. Reload the latest version and edit again.");
     // Check write permission before uploading anything to the storage location (a viewer must not be able to make the server write there)
     let node = tree::node_for(&mut *st.db.acquire().await?, &user, &id, tree::Need::Write).await?;
     if base.is_some_and(|b| b != node.updated_at) {
-        return Err(conflict());
+        return Err(edit_conflict());
+    }
+    if node.in_folder_space() {
+        // Written in a task of its own too, so a dropped request can't stop it halfway
+        return tokio::spawn(async move { crate::fsops::save(&st, &user, &id, &body, base, edit_conflict).await.map(Json) })
+            .await
+            .map_err(AppError::internal)?;
     }
     let hash = hex::encode(Sha256::digest(&body));
     if node.blob_hash.as_deref() == Some(hash.as_str()) {
@@ -277,8 +282,13 @@ pub async fn save_content(
     tokio::spawn(store_content(st, user, id, body, hash, base, drive)).await.map_err(AppError::internal)?
 }
 
+/// Someone else saved the file since it was opened in the editor
+fn edit_conflict() -> AppError {
+    AppError::new(StatusCode::CONFLICT, "Someone else changed this file while you were editing it. Reload the latest version and edit again.")
+}
+
 async fn store_content(st: AppState, user: User, id: String, body: Bytes, hash: String, base: Option<i64>, drive: String) -> AppResult<Json<Node>> {
-    let conflict = || AppError::new(StatusCode::CONFLICT, "Someone else changed this file while you were editing it. Reload the latest version and edit again.");
+    let conflict = edit_conflict;
     let tmp = st.tmp_dir().join(new_id());
     tokio::fs::write(&tmp, &body).await?;
     // First store it in the space's storage location (without holding the write lock)

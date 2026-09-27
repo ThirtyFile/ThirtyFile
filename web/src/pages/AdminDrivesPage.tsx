@@ -6,6 +6,8 @@ import {
   FolderOpenIcon,
   FolderSyncIcon,
   Loader2Icon,
+  LockIcon,
+  LockOpenIcon,
   GaugeIcon,
   HardDriveIcon,
   PanelTopIcon,
@@ -29,6 +31,7 @@ import { useSettingsSearch } from "@/lib/controlPanel";
 import { cn, formatBytes, formatDateTime } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { t, tServer, tc } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
 import { STORAGE_KIND_LABEL } from "@/components/StorageLocations";
@@ -44,6 +47,17 @@ export function AdminDrivesPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{ t: "quota" | "members" | "delete" | "create" | "location" | "folder"; drive?: Drive } | null>(null);
   const [scanning, setScanning] = useState(false);
+  /** Read-only folder spaces can be browsed, downloaded and shared, but not changed from the web */
+  const setReadOnly = async (d: Drive, readOnly: boolean) => {
+    try {
+      await api.updateDrive(d.id, { read_only: readOnly });
+      toast.success(readOnly ? t("\"{name}\" is read-only now", { name: d.name }) : t("\"{name}\" can be changed from the web now", { name: d.name }));
+      refresh();
+      invalidateFiles(qc);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("Couldn't save"));
+    }
+  };
   /** Checks a folder space for changes made on the server's folder now */
   const scanNow = async (d: Drive) => {
     setScanning(true);
@@ -238,9 +252,15 @@ export function AdminDrivesPage() {
                 <GaugeIcon /> {t("Change quota")}
               </DropdownMenuItem>
               {selected.mode === "folder" ? (
-                <DropdownMenuItem disabled={scanning} onClick={() => scanNow(selected)}>
-                  <RefreshCwIcon /> {t("Check for changes")}
-                </DropdownMenuItem>
+                <>
+                  <DropdownMenuItem disabled={scanning} onClick={() => scanNow(selected)}>
+                    <RefreshCwIcon /> {t("Check for changes")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setReadOnly(selected, !selected.read_only)}>
+                    {selected.read_only ? <LockOpenIcon /> : <LockIcon />}
+                    {selected.read_only ? t("Allow changes from the web") : t("Make read-only")}
+                  </DropdownMenuItem>
+                </>
               ) : (
                 <DropdownMenuItem onClick={() => setDialog({ t: "location", drive: selected })}>
                   <ArchiveIcon /> {t("Change storage location…")}
@@ -465,6 +485,7 @@ function FolderCell({ drive }: { drive: Drive }) {
     <span className="flex min-w-0 flex-col" title={title}>
       <span className="truncate font-mono text-[12px]">{drive.source_path}</span>
       <span className={cn("truncate text-[11px]", r?.error ? "text-destructive" : "text-muted-foreground")}>
+        {drive.read_only && !r?.error && `${t("Read-only")} · `}
         {r?.error
           ? t("Can't read the folder")
           : drive.last_scan_at
@@ -479,13 +500,14 @@ function FolderCell({ drive }: { drive: Drive }) {
 function FolderSpaceDialog({ onClose, onCreated }: { onClose(): void; onCreated(d: Drive): void }) {
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
+  const [readOnly, setReadOnly] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const submit = async () => {
     setBusy(true);
     setError("");
     try {
-      onCreated(await api.createDrive(name.trim(), 0, path.trim()));
+      onCreated(await api.createDrive(name.trim(), 0, path.trim(), readOnly));
     } catch (e) {
       setError(e instanceof Error ? e.message : t("Couldn't create"));
     } finally {
@@ -498,7 +520,7 @@ function FolderSpaceDialog({ onClose, onCreated }: { onClose(): void; onCreated(
         <DialogHeader>
           <DialogTitle>{t("New folder space")}</DialogTitle>
           <DialogDescription>
-            {t("Shows a folder on the server as a space. Its files stay where they are and can also be changed there (for example over SMB); changes appear here automatically. For now, files are changed in the folder, not from here.")}
+            {t("Shows a folder on the server as a space. Its files stay where they are: changes made here are made in the folder, and changes made there (for example over SMB) appear here automatically.")}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -517,6 +539,10 @@ function FolderSpaceDialog({ onClose, onCreated }: { onClose(): void; onCreated(
             <Input id="fs-path" className="font-mono" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/mnt/nas/shared" />
             <p className="text-xs text-muted-foreground">{t("The folder's path inside the container, for example a folder mounted with -v /srv/shared:/mnt/shared.")}</p>
           </div>
+          <Label className="flex items-center gap-2 font-normal">
+            <Checkbox checked={readOnly} onCheckedChange={(v) => setReadOnly(!!v)} />
+            {t("Read-only: browse, download and share only")}
+          </Label>
           {error && <ErrorText>{error}</ErrorText>}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>

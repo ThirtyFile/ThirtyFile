@@ -1,4 +1,4 @@
-import { CloudOffIcon, FolderSyncIcon, RefreshCwIcon } from "lucide-react";
+import { CloudOffIcon, LockIcon, RefreshCwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { t, tServer } from "@/lib/i18n";
 
@@ -16,14 +16,12 @@ export function OfflineBanner({ reason }: { reason: string }) {
   );
 }
 
-/** A folder space: its files are changed on the server's folder, not from here (for now) */
-export function FolderSpaceBanner() {
+/** A read-only space: browse, download and share only */
+export function ReadOnlyBanner() {
   return (
     <div className="flex shrink-0 items-start gap-2 border-b bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-      <FolderSyncIcon className="mt-px size-4 shrink-0" />
-      <div className="min-w-0">
-        {t("This space shows a folder on the server. You can open, download and share its files here; changes are made in the folder itself and appear here automatically.")}
-      </div>
+      <LockIcon className="mt-px size-4 shrink-0" />
+      <div className="min-w-0">{t("This space is read-only. You can open, download and share its files.")}</div>
     </div>
   );
 }

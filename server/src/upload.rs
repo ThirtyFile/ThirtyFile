@@ -320,6 +320,9 @@ async fn finish(st: &AppState, user: &User, upload: Upload, guard: ActiveGuard) 
 /// Upload finished: compute the hash, put it in storage, create the file node
 async fn finalize(st: &AppState, user: &User, upload: Upload) -> AppResult<String> {
     let path = upload_path(st, &upload.id);
+    if let Some(id) = finalize_in_folder(st, user, &upload, &path).await? {
+        return Ok(id);
+    }
     let (hash, size) = hash_file(path.clone()).await?;
     if size != upload.size as u64 {
         return Err(AppError::bad_request("File size mismatch"));
@@ -338,6 +341,68 @@ async fn finalize(st: &AppState, user: &User, upload: Upload) -> AppResult<Strin
             tree::abandon_staged(st, staged).await;
             let _ = sqlx::query("DELETE FROM uploads WHERE id = ?").bind(&upload.id).execute(&st.db).await;
             Err(AppError::new(e.status, format!("{} The upload was discarded; start it again.", e.message)).with_code("upload_discarded"))
+        }
+    }
+}
+
+/// Upload into a folder space: the file goes into the folder (under a name scans ignore, then renamed into place) and
+/// is indexed; its content isn't hashed. None when the target folder isn't in a folder space any more (the upload then
+/// goes where uploads go when their folder is gone).
+async fn finalize_in_folder(st: &AppState, user: &User, upload: &Upload, path: &std::path::Path) -> AppResult<Option<String>> {
+    let parent = tree::get_node(&mut *st.db.acquire().await?, &upload.parent_id).await?;
+    let Some(parent) = parent.filter(|p| p.in_folder_space() && p.is_folder() && p.trashed_at.is_none()) else { return Ok(None) };
+    let size = tokio::fs::metadata(path).await?.len();
+    if size != upload.size as u64 {
+        return Err(AppError::bad_request("File size mismatch"));
+    }
+    let discarded = |e: AppError| AppError::new(e.status, format!("{} The upload was discarded; start it again.", e.message)).with_code("upload_discarded");
+    let staged = match crate::fsops::stage_upload(&parent, path, size).await {
+        Ok(s) => s,
+        Err(e) => {
+            let _w = st.write_lock.lock().await;
+            let _ = sqlx::query("DELETE FROM uploads WHERE id = ?").bind(&upload.id).execute(&st.db).await;
+            return Err(discarded(e));
+        }
+    };
+    let _space = crate::fsops::lock_space(parent.drive()).await;
+    let _w = st.write_lock.lock().await;
+    let result = async {
+        let mut tx = st.db.begin().await?;
+        // The account's upload permission, or the folder, may have changed while the upload was running
+        if !user.can_write && !user.is_admin() {
+            return Err(AppError::forbidden("You no longer have permission to upload files"));
+        }
+        let target = tree::folder_for(&mut tx, user, &upload.parent_id, tree::Need::Write).await?;
+        if target.drive() != parent.drive() {
+            return Err(AppError::conflict("Something changed at the same time. Try again."));
+        }
+        let folder_id = tree::ensure_folders(&mut tx, upload.owner_id, &target.id, &upload.rel_path, &upload.batch).await?;
+        let folder = tree::get_node(&mut tx, &folder_id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
+        let name = crate::fsops::free_name(&mut tx, &folder, &upload.name, false).await?;
+        let id = crate::fsops::place_file(&mut tx, &staged, upload.owner_id, &folder, &name).await?;
+        let ts = now();
+        sqlx::query("UPDATE uploads SET node_id = ?, offset = size, expires_at = ? WHERE id = ?")
+            .bind(&id)
+            .bind(ts + FINISHED_TTL)
+            .bind(&upload.id)
+            .execute(&mut *tx)
+            .await?;
+        tree::touch(&mut tx, &folder.id).await?;
+        if let Some(n) = tree::get_node(&mut tx, &id).await? {
+            tree::adjust_usage(&mut tx, n.drive(), n.size).await?;
+            tree::log(&mut tx, user, Some(&n), "upload", "").await?;
+        }
+        tx.commit().await?;
+        Ok(id)
+    }
+    .await;
+    match result {
+        Ok(id) => Ok(Some(id)),
+        Err(e) => {
+            // Renamed into place already when only the index failed: the next scan shows it
+            let _ = tokio::fs::remove_file(&staged).await;
+            let _ = sqlx::query("DELETE FROM uploads WHERE id = ?").bind(&upload.id).execute(&st.db).await;
+            Err(discarded(e))
         }
     }
 }
@@ -373,6 +438,9 @@ async fn commit_upload(
         if upload.drive_id.as_deref() != Some(personal.as_str()) {
             tree::check_quota(&mut tx, &personal, size as i64).await?;
         }
+    }
+    if tree::get_node(&mut tx, &parent_id).await?.is_some_and(|p| p.in_folder_space()) {
+        return Err(AppError::conflict("Something changed at the same time. Try again."));
     }
     let folder = tree::ensure_folders(&mut tx, upload.owner_id, &parent_id, &upload.rel_path, &upload.batch).await?;
     let name = tree::unique_name(&mut tx, &folder, &upload.name, false).await?;
@@ -491,10 +559,14 @@ mod tests {
 
     /// Starts an upload of `data` into Amy's root folder and returns its id
     async fn begin(env: &testutil::TestEnv, user: &User, name: &str, len: usize) -> String {
+        begin_in(env, user, "root", name, len).await
+    }
+
+    async fn begin_in(env: &testutil::TestEnv, user: &User, parent: &str, name: &str, len: usize) -> String {
         let b64 = |s: &str| base64::engine::general_purpose::STANDARD.encode(s);
         let mut h = HeaderMap::new();
         h.insert("upload-length", len.to_string().parse().unwrap());
-        h.insert("upload-metadata", format!("filename {},parentId {}", b64(name), b64("root")).parse().unwrap());
+        h.insert("upload-metadata", format!("filename {},parentId {}", b64(name), b64(parent)).parse().unwrap());
         let res = create(State(env.st.clone()), user.clone(), h).await.unwrap();
         res.headers()[header::LOCATION].to_str().unwrap().rsplit('/').next().unwrap().to_string()
     }
@@ -581,5 +653,25 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
         panic!("the upload was received but never finished");
+    }
+
+    #[tokio::test]
+    async fn an_upload_into_a_folder_space_becomes_a_file_in_the_folder() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        for _ in 0..2 {
+            let id = begin_in(&env, &admin, &space.root, "report.txt", 5).await;
+            send(&env, &admin, &id, 0, b"hello").await.unwrap();
+        }
+        // The second one gets a free name; neither is kept in the content store
+        assert_eq!(std::fs::read(space.dir.join("report.txt")).unwrap(), b"hello");
+        assert_eq!(std::fs::read(space.dir.join("report (1).txt")).unwrap(), b"hello");
+        assert!(env.node_at(&space.drive, "report (1).txt").await.is_some());
+        let (blobs,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blobs").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(blobs, 0);
+        // Nothing left behind under a temporary name
+        let leftovers: Vec<_> = std::fs::read_dir(&space.dir).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(".thirtyfile-upload")).collect();
+        assert!(leftovers.is_empty());
     }
 }

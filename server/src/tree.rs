@@ -16,7 +16,8 @@ pub const NODE_COLS: &str =
     "n.id, n.owner_id, n.parent_id, n.kind, n.name, n.blob_hash, n.size, n.mime, n.created_at, n.updated_at, n.trashed_at, n.drive_id,
      COALESCE((SELECT username FROM users WHERE id = n.owner_id), '') AS owner_name,
      (SELECT location_id FROM blobs WHERE hash = n.blob_hash) AS blob_location,
-     n.fs_path, (SELECT source_path FROM drives WHERE id = n.drive_id AND mode = 'folder') AS fs_root";
+     n.fs_path, (SELECT source_path FROM drives WHERE id = n.drive_id AND mode = 'folder') AS fs_root,
+     (SELECT read_only FROM drives WHERE id = n.drive_id) AS space_read_only";
 
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 pub struct Node {
@@ -52,6 +53,10 @@ pub struct Node {
     #[serde(skip)]
     #[sqlx(default)]
     pub fs_root: Option<String>,
+    /// The space is read-only: browse, download and share only
+    #[serde(skip)]
+    #[sqlx(default)]
+    pub space_read_only: bool,
 }
 
 impl Node {
@@ -167,6 +172,8 @@ pub struct Drive {
     pub mode: String,
     /// Folder spaces: the folder
     pub source_path: Option<String>,
+    /// Browse, download and share only
+    pub read_only: bool,
 }
 
 impl Drive {
@@ -175,7 +182,7 @@ impl Drive {
     }
 }
 
-pub const DRIVE_COLS: &str = "d.id, d.name, d.kind, d.root_id, d.owner_id, d.quota_bytes, d.disabled, d.used_bytes, d.mode, d.source_path";
+pub const DRIVE_COLS: &str = "d.id, d.name, d.kind, d.root_id, d.owner_id, d.quota_bytes, d.disabled, d.used_bytes, d.mode, d.source_path, d.read_only";
 
 /// The grant's principal matches the current user (?2 = user id, ?3 = current time)
 const PRINCIPAL_MATCH: &str = "(g.expires_at IS NULL OR g.expires_at > ?3)
@@ -239,15 +246,15 @@ pub async fn node_with_role(conn: &mut SqliteConnection, user: &User, id: &str) 
 pub async fn node_for(conn: &mut SqliteConnection, user: &User, id: &str, need: Need) -> AppResult<Node> {
     let (n, role) = node_with_role(conn, user, id).await?;
     allows(user, role, need)?;
-    if matches!(need, Need::Write | Need::Delete) && n.in_folder_space() {
-        return Err(read_only_folder());
+    if matches!(need, Need::Write | Need::Delete) && n.space_read_only {
+        return Err(read_only_space());
     }
     Ok(n)
 }
 
-/// Folder spaces can be browsed, downloaded and shared; changing them from the web comes later
-pub fn read_only_folder() -> AppError {
-    AppError::forbidden("This space shows a folder on the server and can't be changed from here yet")
+/// A read-only space can be browsed, downloaded and shared
+pub fn read_only_space() -> AppError {
+    AppError::forbidden("This space is read-only")
 }
 
 pub async fn folder_for(conn: &mut SqliteConnection, user: &User, id: &str, need: Need) -> AppResult<Node> {
@@ -460,9 +467,11 @@ pub async fn subtree(conn: &mut SqliteConnection, id: &str) -> AppResult<Vec<(No
     Ok(rows.into_iter().map(|r| (r.node, r.depth)).collect())
 }
 
+/// Whether the folder has an item with this name: regardless of letter case in the content store, exactly in folder
+/// spaces (a folder on disk can hold both "A.txt" and "a.txt")
 pub async fn name_taken(conn: &mut SqliteConnection, parent_id: &str, name: &str) -> AppResult<bool> {
     let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM nodes WHERE parent_id = ? AND name = ? COLLATE NOCASE AND trashed_at IS NULL LIMIT 1",
+        "SELECT 1 FROM nodes WHERE parent_id = ?1 AND name_key = CASE WHEN fs_path IS NULL THEN lower(?2) ELSE ?2 END AND trashed_at IS NULL LIMIT 1",
     )
     .bind(parent_id)
     .bind(name)
@@ -907,7 +916,7 @@ pub async fn ensure_folders(conn: &mut SqliteConnection, owner_id: i64, parent_i
     for part in rel.split('/').filter(|p| !p.is_empty()) {
         let name = crate::util::validate_name(part)?;
         let existing: Option<(String, String)> = sqlx::query_as(
-            "SELECT id, kind FROM nodes WHERE parent_id = ? AND name = ? COLLATE NOCASE AND trashed_at IS NULL",
+            "SELECT id, kind FROM nodes WHERE parent_id = ?1 AND name_key = CASE WHEN fs_path IS NULL THEN lower(?2) ELSE ?2 END AND trashed_at IS NULL",
         )
         .bind(&current)
         .bind(&name)
@@ -959,9 +968,16 @@ pub async fn ensure_folders(conn: &mut SqliteConnection, owner_id: i64, parent_i
     Ok(current)
 }
 
+/// Creates a folder; in a folder space it is made on the disk first
 pub async fn create_folder(conn: &mut SqliteConnection, owner_id: i64, parent_id: &str, name: &str) -> AppResult<String> {
     let id = crate::util::new_id();
     let ts = now();
+    if let Some(parent) = get_node(conn, parent_id).await?.filter(|p| p.in_folder_space()) {
+        let (rel, stat) = crate::fsops::make_dir(&parent, name)?;
+        crate::fsops::insert(conn, &id, owner_id, &parent, name, &rel, &stat).await?;
+        touch(conn, parent_id).await?;
+        return Ok(id);
+    }
     sqlx::query(
         "INSERT INTO nodes (id, owner_id, parent_id, kind, name, drive_id, created_at, updated_at)
          SELECT ?1, ?2, ?3, 'folder', ?4, drive_id, ?5, ?5 FROM nodes WHERE id = ?3",
