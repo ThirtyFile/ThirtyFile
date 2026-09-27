@@ -159,7 +159,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         let password = match password {
             Some(p) => p.clone(),
             None => {
-                eprintln!("New password for {username}:");
+                eprintln!("Type the new password and press Enter:");
                 let mut line = String::new();
                 std::io::stdin().read_line(&mut line)?;
                 line.trim_end_matches(['\r', '\n']).to_string()
