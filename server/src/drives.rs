@@ -672,7 +672,7 @@ pub async fn delete_group(State(st): State<AppState>, Admin(user): Admin, Path(i
     let mut sso = st.sso.read().unwrap().clone();
     let changed = sso.forget_group(id);
     if changed {
-        crate::db::set_setting(&mut tx, "sso", &serde_json::to_string(&sso).unwrap()).await?;
+        crate::sso::store(&mut tx, &sso).await?;
     }
     tree::log(&mut tx, &user, None, "group_delete", &name).await?;
     tx.commit().await?;

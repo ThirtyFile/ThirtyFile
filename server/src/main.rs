@@ -15,6 +15,7 @@ mod sso;
 mod nodes;
 #[cfg(unix)]
 mod privileges;
+mod secrets;
 mod shares;
 mod state;
 mod storage;
@@ -69,6 +70,13 @@ struct Config {
     /// A file holding the administrator password for the first startup (for Docker secrets)
     #[arg(long, env = "THIRTYFILE_ADMIN_PASSWORD_FILE")]
     admin_password_file: Option<PathBuf>,
+    /// Key that encrypts the passwords and keys saved in the database (64 hex characters); default: secret.key in the
+    /// data folder, created on first start
+    #[arg(long, env = "THIRTYFILE_SECRET_KEY", hide_env_values = true)]
+    secret_key: Option<String>,
+    /// A file holding that key instead (for example a Docker secret)
+    #[arg(long, env = "THIRTYFILE_SECRET_KEY_FILE")]
+    secret_key_file: Option<PathBuf>,
     /// Enable when serving over HTTPS; cookies get the Secure attribute (true/false, also 1/0, yes/no, on/off)
     #[arg(long, env = "THIRTYFILE_SECURE_COOKIE", default_value = "false", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
     secure_cookie: bool,
@@ -106,6 +114,9 @@ enum Command {
     /// Write a consistent copy of the database to a new file, also while ThirtyFile is running
     /// (e.g. `docker exec thirtyfile thirtyfile backup /data/backups/drive.db`)
     Backup { file: PathBuf },
+    /// Encrypt the saved passwords and keys with a new key. Stop ThirtyFile first. With a key file, the file is
+    /// replaced; with THIRTYFILE_SECRET_KEY, give the new key in THIRTYFILE_NEW_SECRET_KEY and set it afterwards
+    RotateSecretKey,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -138,6 +149,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     runtime()?.block_on(run(cfg, storage))
 }
 
+/// `thirtyfile rotate-secret-key`: re-encrypts the saved secrets with a new key. The new key file is written first
+/// (as `<file>.new`) and moved into place once the database is updated, so a stop halfway leaves both keys on disk.
+async fn rotate_secret_key(db: &sqlx::SqlitePool, source: &secrets::KeySource) -> Result<(), Box<dyn std::error::Error>> {
+    let given = std::env::var("THIRTYFILE_NEW_SECRET_KEY").ok().filter(|k| !k.trim().is_empty());
+    let new_key = match (&given, source) {
+        (Some(k), _) => secrets::KeySource::Env(k.clone()).load()?,
+        (None, secrets::KeySource::Env(_)) => {
+            return Err("The key is set with THIRTYFILE_SECRET_KEY: put the new key (64 hex characters, e.g. from `openssl rand -hex 32`) in THIRTYFILE_NEW_SECRET_KEY, run this again, then set THIRTYFILE_SECRET_KEY to it".into());
+        }
+        (None, secrets::KeySource::File(_)) => rand::random(),
+    };
+    let staged = match source {
+        secrets::KeySource::File(path) => {
+            let staged = path.with_extension("key.new");
+            secrets::write_key_file(&staged, &new_key)?;
+            Some((staged, path.clone()))
+        }
+        secrets::KeySource::Env(_) => None,
+    };
+    let n = db::reseal_secrets(db, &new_key, true).await?;
+    if let Some((staged, path)) = staged {
+        std::fs::rename(&staged, &path)?;
+        println!("Encrypted {n} saved value(s) with a new key, saved in {}. Back it up again.", path.display());
+    } else {
+        println!("Encrypted {n} saved value(s) with the new key. Now set THIRTYFILE_SECRET_KEY to it before starting ThirtyFile.");
+    }
+    Ok(())
+}
+
 /// Where the built-in storage location keeps file contents. Version 0.1.0 always used blobs in the
 /// data directory; when files are still there, they stay in use so that nothing seems to disappear.
 fn storage_dir(data: &std::path::Path, configured: Option<&std::path::Path>) -> PathBuf {
@@ -162,7 +202,19 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         std::fs::create_dir_all(cfg.data.join(dir))?;
     }
     std::fs::create_dir_all(&storage)?;
+    let key_source = secrets::KeySource::from_settings(cfg.secret_key.clone(), cfg.secret_key_file.clone(), &cfg.data);
+    let key = key_source.load()?;
+    secrets::init(&key);
     let db = db::connect(&cfg.data.join("drive.db"), cfg.db_cache_mb).await?;
+
+    if let Some(Command::RotateSecretKey) = &cfg.command {
+        return rotate_secret_key(&db, &key_source).await;
+    }
+    // Secrets saved before encryption existed are encrypted now (nothing to do afterwards)
+    let sealed = db::reseal_secrets(&db, &key, false).await?;
+    if sealed > 0 {
+        tracing::info!("Encrypted {sealed} saved password(s) and key(s) in the database");
+    }
 
     if let Some(Command::Backup { file }) = &cfg.command {
         if let Some(dir) = file.parent().filter(|d| !d.as_os_str().is_empty()) {

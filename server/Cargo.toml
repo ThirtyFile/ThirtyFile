@@ -33,6 +33,8 @@ uuid = { version = "1", features = ["v4"] }
 rand = "0.10"
 sha2 = "0.11"
 hmac = "0.13"
+# Encryption of the secrets saved in the database (secrets.rs); already used by russh
+aes-gcm = "0.11"
 subtle = "2"
 hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["server", "server-auto", "server-graceful", "tokio"] }

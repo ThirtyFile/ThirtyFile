@@ -132,17 +132,86 @@ async fn register_functions(conn: &mut SqliteConnection) -> Result<(), sqlx::Err
     Ok(())
 }
 
-/// Gets (or generates on first startup) the server secret used for signing.
+/// Gets (or generates on first startup) the server secret used for signing, stored encrypted (secrets.rs)
 pub async fn load_secret(db: &SqlitePool) -> Result<Vec<u8>, sqlx::Error> {
     if let Some((v,)) = sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'secret'")
         .fetch_optional(db)
         .await?
     {
-        return Ok(v.into_bytes());
+        match crate::secrets::open(&v) {
+            Ok(secret) => return Ok(secret.into_bytes()),
+            // A database restored without its key: a new signing secret only signs everyone out and ends share links'
+            // unlocked sessions, which is better than not starting
+            Err(e) => tracing::error!("The signing secret can't be read ({e}); a new one is made, so everyone has to sign in again"),
+        }
     }
     let secret = random_token(64);
-    sqlx::query("INSERT INTO settings (key, value) VALUES ('secret', ?)").bind(&secret).execute(db).await?;
+    sqlx::query("INSERT INTO settings (key, value) VALUES ('secret', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+        .bind(crate::secrets::seal(&secret))
+        .execute(db)
+        .await?;
     Ok(secret.into_bytes())
+}
+
+/// Encrypts every stored secret with `new_key`: values saved before encryption existed (on every start, a no-op once
+/// they are encrypted), or all of them when the key is rotated. Returns how many values were written.
+pub async fn reseal_secrets(db: &SqlitePool, new_key: &[u8; 32], all: bool) -> Result<usize, sqlx::Error> {
+    use crate::secrets::{is_sealed, reseal};
+    let fix = |v: &str| -> Result<Option<String>, sqlx::Error> {
+        if v.is_empty() || (is_sealed(v) && !all) {
+            return Ok(None);
+        }
+        match reseal(v, new_key) {
+            Ok(sealed) => Ok(Some(sealed)),
+            // Saved with another key (a database restored without its key): left alone; reading it reports the problem
+            Err(_) if !all => Ok(None),
+            Err(e) => Err(sqlx::Error::Protocol(e)),
+        }
+    };
+    let mut tx = db.begin().await?;
+    let mut n = 0;
+    if let Some((v,)) = sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'secret'").fetch_optional(&mut *tx).await?
+        && let Some(sealed) = fix(&v)?
+    {
+        set_setting(&mut tx, "secret", &sealed).await?;
+        n += 1;
+    }
+    if let Some((v,)) = sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'sso'").fetch_optional(&mut *tx).await?
+        && let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&v)
+    {
+        let mut changed = false;
+        for p in crate::sso::PROVIDERS {
+            if let Some(secret) = json[p]["client_secret"].as_str().map(str::to_string)
+                && let Some(sealed) = fix(&secret)?
+            {
+                json[p]["client_secret"] = sealed.into();
+                changed = true;
+                n += 1;
+            }
+        }
+        if changed {
+            set_setting(&mut tx, "sso", &json.to_string()).await?;
+        }
+    }
+    let rows: Vec<(String, String)> = sqlx::query_as("SELECT id, config FROM storage_locations").fetch_all(&mut *tx).await?;
+    for (id, config) in rows {
+        let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&config) else { continue };
+        let mut changed = false;
+        for field in crate::locations::SECRET_FIELDS {
+            if let Some(secret) = json[field].as_str().map(str::to_string)
+                && let Some(sealed) = fix(&secret)?
+            {
+                json[field] = sealed.into();
+                changed = true;
+                n += 1;
+            }
+        }
+        if changed {
+            sqlx::query("UPDATE storage_locations SET config = ? WHERE id = ?").bind(json.to_string()).bind(&id).execute(&mut *tx).await?;
+        }
+    }
+    tx.commit().await?;
+    Ok(n)
 }
 
 pub async fn get_setting(db: &SqlitePool, key: &str) -> Result<Option<String>, sqlx::Error> {
@@ -401,6 +470,50 @@ mod tests {
         assert!(backup_to(&db, &dir.join("manual.db")).await.is_err());
         db.close().await;
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn saved_secrets_are_encrypted_on_start_and_when_the_key_is_rotated() {
+        let env = crate::testutil::env().await;
+        let db = &env.st.db;
+        let pw = crate::testutil::password();
+        // Saved before encryption existed: plain text
+        sqlx::query("INSERT INTO settings (key, value) VALUES ('secret', 'plain-signing-secret') ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+            .execute(db)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO settings (key, value) VALUES ('sso', ?)")
+            .bind(serde_json::json!({ "google": { "enabled": true, "client_id": "id", "client_secret": pw } }).to_string())
+            .execute(db)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES ('nas', 'NAS', 'sftp', ?, 0, 0)")
+            .bind(serde_json::json!({ "host": "h", "password": pw }).to_string())
+            .execute(db)
+            .await
+            .unwrap();
+        let dump = || async {
+            let s: Vec<(String,)> = sqlx::query_as("SELECT value FROM settings UNION ALL SELECT config FROM storage_locations").fetch_all(db).await.unwrap();
+            s.into_iter().map(|(v,)| v).collect::<Vec<_>>().join("\n")
+        };
+        let key = [42u8; 32];
+        assert_eq!(reseal_secrets(db, &key, false).await.unwrap(), 3);
+        let stored = dump().await;
+        assert!(!stored.contains(pw) && !stored.contains("plain-signing-secret"), "{stored}");
+        // Nothing left to do on the next start; values still read back
+        assert_eq!(reseal_secrets(db, &key, false).await.unwrap(), 0);
+        assert_eq!(load_secret(db).await.unwrap(), b"plain-signing-secret");
+        assert_eq!(crate::sso::load(db).await.google.client_secret, pw);
+        // Rotating re-encrypts all of them
+        assert_eq!(reseal_secrets(db, &[9; 32], true).await.unwrap(), 3);
+        assert_ne!(dump().await, stored);
+        // Now this process's key can't read them (as after restoring without the key): the server still starts, with
+        // a new signing secret, and without the client secret
+        assert_eq!(reseal_secrets(db, &key, false).await.unwrap(), 0);
+        let fresh = load_secret(db).await.unwrap();
+        assert_ne!(fresh, b"plain-signing-secret");
+        assert_eq!(load_secret(db).await.unwrap(), fresh);
+        assert_eq!(crate::sso::load(db).await.google.client_secret, "");
     }
 
     #[tokio::test]

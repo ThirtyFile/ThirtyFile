@@ -49,7 +49,7 @@ docker run -d --name thirtyfile --restart unless-stopped …   # the same option
             <pre><code>docker exec thirtyfile thirtyfile backup /data/backups/drive-$(date +%F).db</code></pre></li>
           <li>Copy <code>storage</code>, and <code>data</code> without <code>drive.db*</code>, <code>thumbs</code> and <code>tmp</code> (thumbnails are made again, and <code>tmp</code> holds only uploads in progress):
             <pre><code>sudo tar czf thirtyfile-$(date +%F).tar.gz -C /srv/thirtyfile \
-  --exclude='data/drive.db*' --exclude=data/thumbs --exclude=data/tmp data storage</code></pre></li>
+  --exclude='data/drive.db*' --exclude=data/secret.key --exclude=data/thumbs --exclude=data/tmp data storage</code></pre></li>
         </ol>
         <p>Files uploaded while the archive is being made may be in the archive without being in the saved database, or the other way round; either way the backup restores. To run it every night, put both commands in a script and add it to cron, for example <code>0 3 * * * /usr/local/bin/thirtyfile-backup.sh</code>, and delete archives older than a few weeks in the same script.</p>
         <h3>With ThirtyFile stopped</h3>
@@ -65,11 +65,19 @@ docker start thirtyfile</code></pre>
           <li>If the archive was made without stopping, put the saved database in place: copy <code>data/backups/drive-&lt;date&gt;.db</code> to <code>data/drive.db</code>, and delete <code>drive.db-wal</code> and <code>drive.db-shm</code>.</li>
           <li>Start the same version of ThirtyFile the backup came from (or a newer one), sign in, and open a few files, including one uploaded recently.</li>
         </ol>
-        <p>The database also holds the key that signs sessions and share links: after restoring, people stay signed in and share links keep working. Moving to a new server works the same way: install ThirtyFile there, restore the backup, and change the Site URL if the address changed.</p>
+        <p>The database also holds the secret that signs sessions and unlocked share links: restored together with <code>secret.key</code> (see <a href="#key">below</a>), people stay signed in; without the key, everyone signs in again, and storage locations and single sign-on need their passwords entered again. Share links themselves keep working either way. Moving to a new server works the same way: install ThirtyFile there, restore the backup, and change the Site URL if the address changed.</p>
         <p>Test a restore now and then on another computer: a backup is only as good as the last time it was restored.</p>
 
+        <h2 id="key">The key for saved passwords</h2>
+        <p>The passwords and keys of storage locations, the single sign-on client secrets and the secret that signs sessions and share links are saved in the database encrypted. The key is in <code>data/secret.key</code> (created on first start), or wherever <code>THIRTYFILE_SECRET_KEY</code> or <code>THIRTYFILE_SECRET_KEY_FILE</code> point. A copy of the database alone then gives none of them away.</p>
+        <ul>
+          <li><strong>Back up the key separately</strong>, for example in a password manager, and leave it out of the regular backup (as in the command above). Without it, restoring works, but the storage locations and single sign-on need their passwords entered again, and everyone has to sign in again.</li>
+          <li>To keep the key out of the data folder entirely, create one (<code>openssl rand -hex 32</code>) and give it with <code>THIRTYFILE_SECRET_KEY_FILE</code> (a Docker secret) or <code>THIRTYFILE_SECRET_KEY</code>. An existing key file's content can be used the same way.</li>
+          <li><strong>A new key</strong>, for example after a backup that included it went astray: stop ThirtyFile and run <code>docker compose run --rm thirtyfile rotate-secret-key</code> (or <code>docker run --rm -v …same volumes… ghcr.io/thirtyfile/thirtyfile rotate-secret-key</code>). It re-encrypts everything and replaces <code>secret.key</code>. With <code>THIRTYFILE_SECRET_KEY</code>, give the new key in <code>THIRTYFILE_NEW_SECRET_KEY</code> for that run, then switch the setting to it.</li>
+        </ul>
+
         <h2 id="safe">Keep backups safe</h2>
-        <p>A backup contains the keys and passwords of your storage locations and single sign-on, and the logs with visitors' IP addresses. Treat it like a password: store it where only administrators can reach it.</p>
+        <p>A backup contains your files, the accounts, and the logs with visitors' IP addresses; with <code>secret.key</code> in it, also everything needed to read the saved passwords. Treat it like a password: store it where only administrators can reach it.</p>
       </main>
     </div>
     <script src="../assets/site.js"></script>

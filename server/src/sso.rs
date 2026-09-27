@@ -194,8 +194,26 @@ pub async fn load(db: &sqlx::SqlitePool) -> SsoSettings {
     for p in PROVIDERS {
         let c = s.provider_mut(p).unwrap();
         c.provisioning.get_or_insert(legacy);
+        // Client secrets are stored encrypted (secrets.rs)
+        match crate::secrets::open(&c.client_secret) {
+            Ok(plain) => c.client_secret = plain,
+            Err(e) => {
+                tracing::error!("The {p} client secret can't be read ({e}); sign-in with {p} is off until it is entered again");
+                c.client_secret.clear();
+            }
+        }
     }
     s
+}
+
+/// Saves the settings, with the client secrets encrypted
+pub async fn store(conn: &mut sqlx::SqliteConnection, settings: &SsoSettings) -> Result<(), sqlx::Error> {
+    let mut sealed = settings.clone();
+    for p in PROVIDERS {
+        let c = sealed.provider_mut(p).unwrap();
+        c.client_secret = crate::secrets::seal(&c.client_secret);
+    }
+    set_setting(conn, "sso", &serde_json::to_string(&sealed).unwrap()).await
 }
 
 /// A sign-in in progress (between redirecting to the provider and coming back)
@@ -1063,7 +1081,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, hea
     {
         let _w = st.write_lock.lock().await;
         let mut tx = st.db.begin().await?;
-        set_setting(&mut tx, "sso", &serde_json::to_string(&req).unwrap()).await?;
+        store(&mut tx, &req).await?;
         tree::log(&mut tx, &user, None, "settings", &detail).await?;
         tx.commit().await?;
     }

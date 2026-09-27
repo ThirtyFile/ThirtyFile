@@ -32,8 +32,36 @@ struct LocationRow {
     is_default: bool,
 }
 
+/// A location's stored settings, with its passwords and keys decrypted (secrets.rs)
 fn config_json(raw: &str) -> Value {
-    serde_json::from_str(raw).unwrap_or_else(|_| json!({}))
+    let mut cfg: Value = serde_json::from_str(raw).unwrap_or_else(|_| json!({}));
+    if let Some(obj) = cfg.as_object_mut() {
+        for field in SECRET_FIELDS {
+            if let Some(Value::String(v)) = obj.get_mut(field) {
+                match crate::secrets::open(v) {
+                    Ok(plain) => *v = plain,
+                    Err(e) => {
+                        tracing::error!("A saved {field} of a storage location can't be read ({e}); enter it again");
+                        v.clear();
+                    }
+                }
+            }
+        }
+    }
+    cfg
+}
+
+/// Settings as stored: passwords and keys encrypted
+fn sealed_config(cfg: &Value) -> String {
+    let mut cfg = cfg.clone();
+    if let Some(obj) = cfg.as_object_mut() {
+        for field in SECRET_FIELDS {
+            if let Some(Value::String(v)) = obj.get_mut(field) {
+                *v = crate::secrets::seal(v);
+            }
+        }
+    }
+    cfg.to_string()
 }
 
 /// Loads all storage locations at startup; locations that can't be built are logged as warnings and skipped (reading their files reports "unavailable")
@@ -79,10 +107,11 @@ pub struct LocationInfo {
     drive_count: i64,
 }
 
-/// Settings with secrets removed
-/// Fields that aren't returned to the browser; leaving them blank when editing keeps the existing value
-const SECRET_FIELDS: [&str; 4] = ["secret_access_key", "password", "private_key", "key_passphrase"];
+/// Fields that aren't returned to the browser (leaving them blank when editing keeps the existing value), and are
+/// stored encrypted
+pub const SECRET_FIELDS: [&str; 4] = ["secret_access_key", "password", "private_key", "key_passphrase"];
 
+/// Settings with secrets removed
 fn public_config(cfg: &Value) -> (Value, bool) {
     let mut c = cfg.clone();
     let mut has_secret = false;
@@ -358,7 +387,7 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(req): J
             .bind(&id)
             .bind(&name)
             .bind(&kind)
-            .bind(config.to_string())
+            .bind(sealed_config(&config))
             .bind(now())
             .execute(&mut *tx)
             .await?;
@@ -397,7 +426,7 @@ pub async fn update(
         let mut tx = st.db.begin().await?;
         sqlx::query("UPDATE storage_locations SET name = ? WHERE id = ?").bind(&name).bind(&id).execute(&mut *tx).await?;
         if let Some((_, cfg)) = &new_backend {
-            sqlx::query("UPDATE storage_locations SET config = ? WHERE id = ?").bind(cfg.to_string()).bind(&id).execute(&mut *tx).await?;
+            sqlx::query("UPDATE storage_locations SET config = ? WHERE id = ?").bind(sealed_config(cfg)).bind(&id).execute(&mut *tx).await?;
         }
         tree::log(&mut tx, &user, None, "storage_update", &name).await?;
         tx.commit().await?;
