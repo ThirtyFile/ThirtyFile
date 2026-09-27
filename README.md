@@ -60,7 +60,7 @@ Open <http://localhost:8080> and sign in as `admin`. Without `THIRTYFILE_ADMIN_P
 
 ## Development
 
-You need Rust 1.89+, Node 22.12+ and pnpm 11.
+You need [rustup](https://rustup.rs/) (it installs the Rust version in `server/rust-toolchain.toml`), Node 22.12+ and pnpm 11.
 
 ```bash
 # Terminal 1: backend
