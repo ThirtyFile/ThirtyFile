@@ -543,7 +543,7 @@ pub async fn callback(
             if created {
                 record_login_via(&st, Some(user_id), &username, "sso_provisioned", &provider, &ip, &headers);
             }
-            let cookie = match open_session(&st, user_id).await {
+            let cookie = match open_session(&st, user_id, &provider, &ip, &headers).await {
                 Ok(c) => c,
                 Err(e) => return login_error(&e.message, None),
             };

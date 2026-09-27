@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { HistoryIcon, Loader2Icon, PencilIcon, RefreshCwIcon, Trash2Icon, TriangleAlertIcon, UserCheckIcon, UserPlusIcon, UsersIcon, UserXIcon } from "lucide-react";
+import { HistoryIcon, Loader2Icon, MonitorSmartphoneIcon, PencilIcon, RefreshCwIcon, Trash2Icon, TriangleAlertIcon, UserCheckIcon, UserPlusIcon, UsersIcon, UserXIcon } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { DataTable, type Column } from "@/components/DataTable";
 import { toast } from "sonner";
@@ -19,6 +19,7 @@ import { useSettingsSearch } from "@/lib/controlPanel";
 import { t, tc } from "@/lib/i18n";
 import { formatBytes, formatDate, formatDateTime } from "@/lib/utils";
 import { LoginLogDialog } from "@/components/logs/LoginLog";
+import { DevicesDialog } from "@/components/DevicesDialog";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
 
 const GB = 1024 ** 3;
@@ -37,6 +38,7 @@ export function AdminUsersPage() {
   const [editing, setEditing] = useState<UserRow | "new" | null>(null);
   const [deleting, setDeleting] = useState<UserRow | null>(null);
   const [loginsOf, setLoginsOf] = useState<UserRow | null>(null);
+  const [devicesOf, setDevicesOf] = useState<UserRow | null>(null);
   const qc = useQueryClient();
   const users = useMemo(() => q.data?.pages.flat() ?? [], [q.data]);
   const selected = users.find((u) => u.id === selectedId) ?? null;
@@ -55,6 +57,7 @@ export function AdminUsersPage() {
       />
       <ToolSeparator />
       <ToolButton icon={HistoryIcon} label={t("Sign-in log")} showLabel disabled={!selected} onClick={() => selected && setLoginsOf(selected)} />
+      <ToolButton icon={MonitorSmartphoneIcon} label={t("Devices")} showLabel disabled={!selected} onClick={() => selected && setDevicesOf(selected)} />
     </>
   );
 
@@ -165,6 +168,9 @@ export function AdminUsersPage() {
               <DropdownMenuItem onClick={() => setLoginsOf(selected)}>
                 <HistoryIcon /> {t("Sign-in log")}
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setDevicesOf(selected)}>
+                <MonitorSmartphoneIcon /> {t("Devices")}
+              </DropdownMenuItem>
               {selected.id !== me.id && (
                 <DropdownMenuItem
                   onClick={async () => {
@@ -215,6 +221,7 @@ export function AdminUsersPage() {
         <UserDialog user={editing === "new" ? null : editing} self={editing !== "new" && editing.id === me.id} onClose={() => setEditing(null)} />
       )}
       {loginsOf && <LoginLogDialog title={t("Sign-in log for \"{name}\"", { name: loginsOf.username })} userId={loginsOf.id} onClose={() => setLoginsOf(null)} />}
+      {devicesOf && <DevicesDialog user={devicesOf} onClose={() => setDevicesOf(null)} />}
       {deleting && (
         <ConfirmDialog
           title={t("Delete user \"{name}\"?", { name: deleting.username })}

@@ -332,7 +332,7 @@ export interface LoginRecord {
   /** null when the account doesn't exist */
   user_id: number | null;
   username: string;
-  /** login, bad_password, unknown_user, disabled, locked, logout, password_change, sso_denied, sso_provisioned, sso_link, sso_unlink */
+  /** login, bad_password, unknown_user, disabled, locked, logout, password_change, sso_denied, sso_provisioned, sso_link, sso_unlink, device_signout, signout_others, admin_signout */
   event: string;
   ip: string;
   user_agent: string;
@@ -403,6 +403,20 @@ export interface Me {
   public_url: string;
   /** Days before trashed items are deleted for good; 0 = kept until the trash is emptied */
   trash_days: number;
+}
+
+/** A signed-in device (sign-in session) */
+export interface Device {
+  id: string;
+  user_agent: string;
+  /** The address the device used most recently */
+  ip: string;
+  /** password, microsoft, google or github */
+  method: string;
+  created_at: number;
+  last_used_at: number | null;
+  /** The device this page is open on */
+  current: boolean;
 }
 
 export interface ShareInfo {
@@ -613,6 +627,12 @@ export const api = {
   login: (username: string, password: string) => post<Me>("/auth/login", { username, password }),
   logout: () => post("/auth/logout"),
   changePassword: (current: string, next: string) => request("PUT", "/auth/password", { current, new: next }),
+  devices: () => get<Device[]>("/auth/sessions"),
+  signOutDevice: (id: string) => request("DELETE", `/auth/sessions/${encodeURIComponent(id)}`),
+  signOutOtherDevices: () => post<{ removed: number }>("/auth/sessions/others"),
+  userDevices: (userId: number) => get<Device[]>(`/admin/users/${userId}/sessions`),
+  signOutUserDevice: (userId: number, id: string) => request("DELETE", `/admin/users/${userId}/sessions/${encodeURIComponent(id)}`),
+  signOutUserDevices: (userId: number) => request<{ removed: number }>("DELETE", `/admin/users/${userId}/sessions`),
 
   node: (id: string) => get<NodeInfo>(enc`/nodes/${id}`).then((n) => ({ ...n, drive: { ...n.drive, name: driveName(n.drive) } })),
   children: (id: string, sort?: SortKey, order?: SortOrder, foldersOnly?: boolean) =>

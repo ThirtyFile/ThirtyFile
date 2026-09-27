@@ -423,6 +423,9 @@ const ZH_TW: &[(&str, &str)] = &[
     ("SSO sign-in denied", "三方登入被拒"),
     ("External account linked", "連結外部帳號"),
     ("External account unlinked", "取消連結外部帳號"),
+    ("Device signed out", "登出裝置"),
+    ("Signed out on other devices", "登出其他裝置"),
+    ("Signed out by an administrator", "由管理員登出"),
     ("Password", "帳號密碼"),
 ];
 
@@ -613,7 +616,7 @@ pub fn record_login(st: &AppState, user_id: Option<i64>, username: &str, event: 
 
 /// Same as record_login, also recording the sign-in method (password, microsoft, google, github)
 pub fn record_login_via(st: &AppState, user_id: Option<i64>, username: &str, event: &'static str, method: &str, ip: &str, headers: &HeaderMap) {
-    let user_agent: String = headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or_default().chars().take(300).collect();
+    let user_agent = crate::auth::user_agent(headers);
     enqueue(
         st,
         LogEvent::Login {
@@ -746,6 +749,9 @@ fn login_event_label(e: &str) -> &str {
         "sso_provisioned" => "Account created by SSO",
         "sso_link" => "External account linked",
         "sso_unlink" => "External account unlinked",
+        "device_signout" => "Device signed out",
+        "signout_others" => "Signed out on other devices",
+        "admin_signout" => "Signed out by an administrator",
         other => other,
     }
 }

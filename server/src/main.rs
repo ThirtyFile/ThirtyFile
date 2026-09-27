@@ -16,6 +16,7 @@ mod nodes;
 #[cfg(unix)]
 mod privileges;
 mod secrets;
+mod sessions;
 mod shares;
 mod state;
 mod storage;
@@ -556,6 +557,9 @@ fn api() -> Router<AppState> {
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me))
         .route("/auth/password", axum::routing::put(auth::change_password))
+        .route("/auth/sessions", get(sessions::list))
+        .route("/auth/sessions/others", post(sessions::sign_out_others))
+        .route("/auth/sessions/{id}", delete(sessions::sign_out))
         // File tree
         .route("/nodes/{id}", get(nodes::get).patch(nodes::rename))
         .route("/nodes/{id}/children", get(nodes::children))
@@ -615,6 +619,8 @@ fn api() -> Router<AppState> {
         // Administration
         .route("/admin/users", get(admin::list).post(admin::create))
         .route("/admin/users/{id}", patch(admin::update).delete(admin::delete))
+        .route("/admin/users/{id}/sessions", get(sessions::admin_list).delete(sessions::admin_sign_out_all))
+        .route("/admin/users/{id}/sessions/{session}", delete(sessions::admin_sign_out))
         .route("/admin/settings", get(admin::get_settings).patch(admin::update_settings))
         .route("/admin/drives", get(drives::admin_list))
         .route("/admin/drives/{id}/scan", post(drives::scan))

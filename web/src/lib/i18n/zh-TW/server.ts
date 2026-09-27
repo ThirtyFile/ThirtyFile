@@ -40,6 +40,10 @@ export default {
   "{username}: space size {size}": "{username}：空間大小 {size}",
   "{username}: disabled account": "{username}：停用帳號",
   "{username}: enabled account": "{username}：啟用帳號",
+  "{username}: signed out one device": "{username}：登出一個裝置",
+  "{username}: signed out on all devices": "{username}：登出所有裝置",
+  // Signed-in devices (sessions.rs)
+  "This device is already signed out": "這個裝置已經登出",
   // System settings (admin.rs)
   "Invalid site URL. Example: https://drive.example.com or http://192.168.1.10:8080": "網站網址格式不正確，例如 https://drive.example.com 或 http://192.168.1.10:8080",
   "Enter only the domain or IP address (and port) for the site URL, without a path": "網站網址只填到網域或 IP（與連接埠），不要包含路徑",

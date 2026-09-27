@@ -26,12 +26,15 @@ export const LOGIN_EVENTS: Record<string, { label: string; tone?: string }> = {
   sso_provisioned: { label: t("Account created by third-party sign-in"), tone: "text-brand" },
   sso_link: { label: t("External account linked"), tone: "text-brand" },
   sso_unlink: { label: t("External account unlinked") },
+  device_signout: { label: t("Device signed out") },
+  signout_others: { label: t("Signed out on other devices") },
+  admin_signout: { label: t("Signed out by an administrator"), tone: "text-amber-600 dark:text-amber-400" },
 };
 
 const METHOD_LABEL: Record<string, string> = { password: tc("method", "Password"), microsoft: "Microsoft", google: "Google", github: "GitHub" };
 
 const EVENT_GROUPS = [
-  { label: t("Sign-ins"), options: ["login", "logout", "password_change"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
+  { label: t("Sign-ins"), options: ["login", "logout", "password_change", "device_signout", "signout_others", "admin_signout"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
   { label: t("Failed"), options: ["bad_password", "unknown_user", "disabled", "locked", "sso_denied"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
   { label: t("External accounts"), options: ["sso_provisioned", "sso_link", "sso_unlink"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
 ];

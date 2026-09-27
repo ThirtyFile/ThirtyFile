@@ -15,6 +15,7 @@
       ["files", "Working with files"],
       ["preview", "Preview and editing"],
       ["sharing", "Sharing"],
+      ["account", "Your account"],
     ]],
     ["Administration", [
       ["users", "Users and spaces"],

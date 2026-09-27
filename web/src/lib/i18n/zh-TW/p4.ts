@@ -23,7 +23,6 @@ export default {
   "Light": "淺色",
   "Dark": "深色",
   "Sign out": "登出",
-  "If you see an IP address or device you don't recognize, change your password immediately. You'll be signed out on other devices.": "如果看到不認得的 IP 或裝置，請立即變更密碼，其他裝置上的登入會被登出。",
   "Back": "返回",
   "Forward": "向前",
   "Up": "上一層",

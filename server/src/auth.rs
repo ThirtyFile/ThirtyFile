@@ -106,6 +106,10 @@ pub struct User {
     /// Root folder id of the shared space; None when the shared space is disabled
     #[sqlx(skip)]
     pub shared_root: Option<String>,
+    /// The sign-in session (device) the request came with; None for users loaded by id
+    #[sqlx(skip)]
+    #[serde(skip)]
+    pub session_id: Option<String>,
 }
 
 impl User {
@@ -114,24 +118,58 @@ impl User {
     }
 }
 
+/// A session's "last used" time and address are updated at most this often, so requests don't each write to the database
+const SESSION_TOUCH: i64 = 5 * 60;
+
+#[derive(sqlx::FromRow)]
+struct SessionRow {
+    #[sqlx(flatten)]
+    user: User,
+    session_id: String,
+    last_used_at: Option<i64>,
+}
+
 impl FromRequestParts<AppState> for User {
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, st: &AppState) -> Result<Self, Self::Rejection> {
         let token = get_cookie(&parts.headers, SESSION_COOKIE).ok_or_else(AppError::unauthorized)?;
         let sql = format!(
-            "SELECT {USER_COLS} FROM sessions s JOIN users u ON u.id = s.user_id
+            "SELECT {USER_COLS}, s.id AS session_id, s.last_used_at FROM sessions s JOIN users u ON u.id = s.user_id
              WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled = 0"
         );
-        let mut user = sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(sql.as_str()))
+        let ts = now();
+        let row = sqlx::query_as::<_, SessionRow>(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(sha256_hex(token.as_bytes()))
-            .bind(now())
+            .bind(ts)
             .fetch_optional(&st.db)
             .await?
             .ok_or_else(AppError::unauthorized)?;
+        if row.last_used_at.is_none_or(|t| ts - t >= SESSION_TOUCH) {
+            let ip = parts.extensions.get::<ConnectInfo<std::net::SocketAddr>>().map(|c| client_ip(st, c.0, &parts.headers));
+            touch_session(st.clone(), row.session_id.clone(), ip);
+        }
+        let mut user = row.user;
         user.shared_root = st.shared_root();
+        user.session_id = Some(row.session_id);
         Ok(user)
     }
+}
+
+/// Records that a session was used (in the background, so the request doesn't wait for the write)
+fn touch_session(st: AppState, id: String, ip: Option<String>) {
+    tokio::spawn(async move {
+        let _w = st.write_lock.lock().await;
+        let res = sqlx::query("UPDATE sessions SET last_used_at = ?, ip = COALESCE(?, ip) WHERE id = ?")
+            .bind(now())
+            .bind(ip)
+            .bind(&id)
+            .execute(&st.db)
+            .await;
+        if let Err(e) = res {
+            tracing::debug!("Couldn't record the use of a session: {e}");
+        }
+    });
 }
 
 /// Loads a (non-disabled) user by id, for permission checks that don't go through a sign-in session, e.g. public share links
@@ -411,7 +449,7 @@ pub async fn login(
     }
     attempt_succeeded(&st, &ip_key);
 
-    let cookie = open_session(&st, id).await?;
+    let cookie = open_session(&st, id, "password", &ip, &headers).await?;
     logs::record_login(&st, Some(id), username, "login", &ip, &headers);
     let sql = format!("SELECT {USER_COLS} FROM users u WHERE u.id = ?");
     let mut user: User = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(id).fetch_one(&st.db).await?;
@@ -419,19 +457,33 @@ pub async fn login(
     Ok(([(header::SET_COOKIE, cookie)], Json(me_of(&st, user).await?)))
 }
 
-/// Creates a sign-in session and updates "last sign-in", returning the cookie to set (shared by password and third-party sign-in)
-pub async fn open_session(st: &AppState, user_id: i64) -> AppResult<String> {
+/// The browser's User-Agent as stored with sessions and log entries (at most 300 characters)
+pub fn user_agent(headers: &HeaderMap) -> String {
+    headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or_default().chars().take(300).collect()
+}
+
+/// Creates a sign-in session and updates "last sign-in", returning the cookie to set (shared by password and third-party
+/// sign-in). `method` (password or the provider), the address and the browser are shown in the list of signed-in devices.
+pub async fn open_session(st: &AppState, user_id: i64, method: &str, ip: &str, headers: &HeaderMap) -> AppResult<String> {
     let token = random_token(43);
     let ts = now();
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
-    sqlx::query("INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)")
-        .bind(sha256_hex(token.as_bytes()))
-        .bind(user_id)
-        .bind(ts)
-        .bind(ts + SESSION_TTL)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "INSERT INTO sessions (token_hash, id, user_id, created_at, expires_at, user_agent, ip, method, last_used_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(sha256_hex(token.as_bytes()))
+    .bind(crate::util::new_id())
+    .bind(user_id)
+    .bind(ts)
+    .bind(ts + SESSION_TTL)
+    .bind(user_agent(headers))
+    .bind(ip)
+    .bind(method)
+    .bind(ts)
+    .execute(&mut *tx)
+    .await?;
     sqlx::query("UPDATE users SET last_login_at = ? WHERE id = ?").bind(ts).bind(user_id).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(cookie_header(st, SESSION_COOKIE, &token, "/", SESSION_TTL))

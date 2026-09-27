@@ -14,5 +14,6 @@ import p8 from "./p8";
 import p9 from "./p9";
 import p10 from "./p10";
 import p12 from "./p12";
+import p13 from "./p13";
 
-export const ZH: Record<string, string> = { ...server, ...p1, ...p2, ...p3, ...p4, ...p5, ...p6, ...login, ...p7, ...core, ...sso, ...p8, ...p9, ...p10, ...p12 };
+export const ZH: Record<string, string> = { ...server, ...p1, ...p2, ...p3, ...p4, ...p5, ...p6, ...login, ...p7, ...core, ...sso, ...p8, ...p9, ...p10, ...p12, ...p13 };

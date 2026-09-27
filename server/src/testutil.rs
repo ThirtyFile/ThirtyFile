@@ -97,6 +97,29 @@ impl TestEnv {
         auth::user_by_id(&self.st, &mut conn, id).await.unwrap().unwrap()
     }
 
+    /// Signs `user` in from a browser with this User-Agent (from 10.0.0.1): the user as the session sees them, and the
+    /// `name=value` cookie to send
+    pub async fn sign_in(&self, user: &User, agent: &str) -> (User, String) {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(axum::http::header::USER_AGENT, agent.parse().unwrap());
+        let set = auth::open_session(&self.st, user.id, "password", "10.0.0.1", &headers).await.unwrap();
+        let cookie = set.split(';').next().unwrap().to_string();
+        let session = self.session_user(&cookie).await.expect("a new session works");
+        (session, cookie)
+    }
+
+    /// The user a request with this cookie is signed in as, if any
+    pub async fn session_user(&self, cookie: &str) -> Option<User> {
+        self.request_user(axum::http::Request::builder().header(axum::http::header::COOKIE, cookie)).await
+    }
+
+    /// Runs the `User` extractor on a request
+    pub async fn request_user(&self, req: axum::http::request::Builder) -> Option<User> {
+        use axum::extract::FromRequestParts;
+        let (mut parts, _) = req.body(()).unwrap().into_parts();
+        User::from_request_parts(&mut parts, &self.st).await.ok()
+    }
+
     pub async fn folder(&self, owner: &User, parent: &str, name: &str) -> String {
         let mut conn = self.st.db.acquire().await.unwrap();
         crate::tree::create_folder(&mut conn, owner.id, parent, name).await.unwrap()
