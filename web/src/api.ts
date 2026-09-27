@@ -1,4 +1,4 @@
-import { download, nativeDownload } from "@/downloads";
+import { download, nativeDownload, type DownloadSource } from "@/downloads";
 import { t, tServer } from "@/lib/i18n";
 import type { Branding } from "@/lib/branding";
 export interface Node {
@@ -733,13 +733,24 @@ export const api = {
 export interface FileSource {
   contentUrl(n: Node, download?: boolean): string;
   thumbUrl(n: Node): string;
-  downloadUrl(ids: string[]): string;
+  /**
+   * Link to download the given items from: one item goes in the URL; several are sent to the server, which answers
+   * with a short-lived link (a URL holding hundreds of ids is too long for many reverse proxies)
+   */
+  downloadLink(ids: string[]): Promise<string>;
+}
+
+/** Download link for items at `base` (`/download` of the signed-in API or of a share) */
+function downloadLink(base: string, ids: string[]): Promise<string> {
+  const tz = new Date().getTimezoneOffset();
+  if (ids.length === 1) return Promise.resolve(`/api${base}?ids=${encodeURIComponent(ids[0])}&tz=${tz}`);
+  return post<{ url: string }>(base, { ids, tz }).then((r) => r.url);
 }
 
 export const privateSource: FileSource = {
   contentUrl: (n, download) => `/api/files/${n.id}/content${download ? "?download=1" : ""}`,
   thumbUrl: (n) => `/api/files/${n.id}/thumbnail?v=${n.updated_at}`,
-  downloadUrl: (ids) => `/api/download?ids=${ids.join(",")}&tz=${new Date().getTimezoneOffset()}`,
+  downloadLink: (ids) => downloadLink("/download", ids),
 };
 
 export function shareSource(token: string): FileSource {
@@ -747,16 +758,17 @@ export function shareSource(token: string): FileSource {
   return {
     contentUrl: (n, download) => `${base}/nodes/${n.id}/content${download ? "?download=1" : ""}`,
     thumbUrl: (n) => `${base}/nodes/${n.id}/thumbnail?v=${n.updated_at}`,
-    downloadUrl: (ids) => `${base}/download?ids=${ids.join(",")}&tz=${new Date().getTimezoneOffset()}`,
+    downloadLink: (ids) => downloadLink(`/public/shares/${token}/download`, ids),
   };
 }
 
 /** Trigger a browser download (without leaving the page) */
 /**
  * Downloads: signed-in downloads show progress in the page (bottom right) and are saved when done;
- * public share links are handed to the browser to download directly (a pre-check would count an extra download)
+ * public share links are handed to the browser to download directly (a pre-check would count an extra download).
+ * A function is called for the URL when the download starts (and again when it is retried)
  */
-export function triggerDownload(url: string) {
-  if (url.startsWith("/api/public/")) return nativeDownload(url);
-  return download(url);
+export function triggerDownload(source: DownloadSource) {
+  if (typeof source === "string" && source.startsWith("/api/public/")) return nativeDownload(source);
+  return download(source);
 }

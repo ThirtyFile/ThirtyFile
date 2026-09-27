@@ -68,6 +68,7 @@ pub async fn env() -> TestEnv {
         sso_pending: Default::default(),
         archive_lock: Default::default(),
         share_views: Default::default(),
+        download_links: Default::default(),
         log_tx,
     }));
     let _writer = crate::logs::spawn_writer(st.clone(), log_rx);

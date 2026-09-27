@@ -68,7 +68,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
   };
 
   // Multiple items or folders are zipped by the server while streaming; progress shows in the download panel at the bottom right
-  const download = (ids: string[]) => ids.length && void triggerDownload(privateSource.downloadUrl(ids));
+  const download = (ids: string[]) => ids.length && void triggerDownload(() => privateSource.downloadLink(ids));
 
   const toggleFavorite = async () => {
     try {

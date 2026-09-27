@@ -148,6 +148,9 @@ export default {
   "No thumbnail": "沒有縮圖",
   "The zip download was interrupted": "打包下載中斷",
   "Select items to download": "請選擇要下載的項目",
+  "At most {n} items can be downloaded at once. Download the folder they are in, or select fewer items.":
+    "一次最多只能下載 {n} 個項目，請改為下載它們所在的資料夾，或減少選取的項目",
+  "This download link has expired. Start the download again.": "下載連結已過期，請重新下載",
   "{path}: file size mismatch": "{path}: 檔案大小不符",
   // Uploads (upload.rs)
   "Missing Upload-Length": "缺少 Upload-Length",

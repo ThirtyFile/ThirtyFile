@@ -21,9 +21,13 @@ export interface DownloadTask {
   rate: number;
   status: DownloadStatus;
   error?: string;
-  url: string;
+  /** Where the download came from, to start it again */
+  source: DownloadSource;
   controller: AbortController;
 }
+
+/** A URL, or a function that makes one when the download starts (a short-lived link for several items) */
+export type DownloadSource = string | (() => Promise<string>);
 
 /**
  * Limit for downloading in the page; larger files are handed to the browser to download directly.
@@ -112,7 +116,15 @@ function save(blob: Blob, name: string) {
 }
 
 /** Download with progress; zip means a zipped download (multiple items or folders) */
-export async function download(url: string, opts: { zip?: boolean; name?: string } = {}) {
+export async function download(source: DownloadSource, opts: { zip?: boolean; name?: string } = {}) {
+  let url: string;
+  try {
+    url = typeof source === "string" ? source : await source();
+  } catch (e) {
+    // The server refused the selection (e.g. too many items); the message is already translated
+    toast.error(e instanceof Error ? e.message : t("Download failed"));
+    return;
+  }
   // First check that it can be downloaded and get the size: show the reason on failure; hand oversized files to the browser
   let size: number | null = null;
   try {
@@ -137,7 +149,7 @@ export async function download(url: string, opts: { zip?: boolean; name?: string
   const controller = new AbortController();
   const zip = !!opts.zip;
   tasks = [
-    { id, name: opts.name ?? (zip ? t("Download.zip") : t("Downloading…")), zip, total: size, received: 0, rate: 0, status: "downloading", url, controller },
+    { id, name: opts.name ?? (zip ? t("Download.zip") : t("Downloading…")), zip, total: size, received: 0, rate: 0, status: "downloading", source, controller },
     ...tasks,
   ];
   emit();
@@ -211,7 +223,7 @@ export function retryDownload(id: string) {
   if (!t) return;
   tasks = tasks.filter((x) => x.id !== id);
   emit();
-  void download(t.url, { zip: t.zip, name: t.name });
+  void download(t.source, { zip: t.zip, name: t.name });
 }
 
 export function clearDownloads() {

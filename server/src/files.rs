@@ -568,34 +568,188 @@ pub async fn zip_response(st: &AppState, roots: Vec<Node>, tz: i64) -> AppResult
         .into_response())
 }
 
-#[derive(Deserialize)]
-pub struct DownloadQuery {
-    ids: String,
-    /// The browser's time zone (JavaScript's getTimezoneOffset), for the times inside a ZIP
-    tz: Option<i64>,
+/// Most items one download can hold: a larger selection is refused rather than left out of the ZIP
+pub const MAX_DOWNLOAD_ITEMS: usize = 10_000;
+/// How long a download link made with `POST /download` works, in seconds: long enough to start the download (and for
+/// the page to hand it over to the browser), short enough that the link is of no use to anyone later
+pub const DOWNLOAD_LINK_SECS: i64 = 120;
+/// Download links kept per user or share link; making another one drops the oldest
+const DOWNLOAD_LINKS_PER_OWNER: usize = 16;
+
+/// A selection of items to download, kept on the server so the ids don't have to fit in a URL
+pub struct DownloadLink {
+    /// Who may use the link: `user:<id>` or `share:<token>`
+    owner: String,
+    ids: Vec<String>,
+    tz: i64,
+    expires: i64,
+    /// Order of creation, to drop the oldest
+    seq: u64,
 }
 
-/// Multi-select download: a single file is downloaded directly, anything else is packed into a ZIP
+/// The ids of a download, without blanks and repeats. Nothing is dropped: a selection above the limit is refused
+pub fn download_ids<S: AsRef<str>>(ids: impl IntoIterator<Item = S>) -> AppResult<Vec<String>> {
+    let mut seen = std::collections::HashSet::new();
+    let ids: Vec<String> =
+        ids.into_iter().map(|s| s.as_ref().trim().to_string()).filter(|s| !s.is_empty() && seen.insert(s.clone())).collect();
+    if ids.is_empty() {
+        return Err(AppError::bad_request("Select items to download"));
+    }
+    if ids.len() > MAX_DOWNLOAD_ITEMS {
+        return Err(AppError::bad_request(format!(
+            "At most {MAX_DOWNLOAD_ITEMS} items can be downloaded at once. Download the folder they are in, or select fewer items."
+        )));
+    }
+    Ok(ids)
+}
+
+/// Keeps a selection for a short while and returns the token of its download link
+pub fn store_download_link(st: &AppState, owner: String, ids: Vec<String>, tz: i64) -> String {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let token = crate::util::random_token(32);
+    let t = now();
+    let mut links = st.download_links.lock().unwrap();
+    links.retain(|_, l| l.expires > t);
+    let mut own: Vec<(u64, String)> = links.iter().filter(|(_, l)| l.owner == owner).map(|(k, l)| (l.seq, k.clone())).collect();
+    if own.len() >= DOWNLOAD_LINKS_PER_OWNER {
+        own.sort();
+        for (_, k) in &own[..=own.len() - DOWNLOAD_LINKS_PER_OWNER] {
+            links.remove(k);
+        }
+    }
+    links.insert(token.clone(), DownloadLink { owner, ids, tz, expires: t + DOWNLOAD_LINK_SECS, seq });
+    token
+}
+
+/// The selection behind a download link (its ids and time zone), when it belongs to `owner` and hasn't expired
+pub fn download_link(st: &AppState, owner: &str, token: &str) -> AppResult<(Vec<String>, i64)> {
+    let links = st.download_links.lock().unwrap();
+    match links.get(token) {
+        Some(l) if l.owner == owner && l.expires > now() => Ok((l.ids.clone(), l.tz)),
+        _ => Err(AppError::not_found("This download link has expired. Start the download again.")),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct DownloadQuery {
+    pub ids: String,
+    /// The browser's time zone (JavaScript's getTimezoneOffset), for the times inside a ZIP
+    pub tz: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct DownloadReq {
+    pub ids: Vec<String>,
+    /// The browser's time zone (JavaScript's getTimezoneOffset), for the times inside a ZIP
+    pub tz: Option<i64>,
+}
+
+/// The items to download, each of which the user must be able to open
+async fn owned_nodes(st: &AppState, user: &User, ids: &[String]) -> AppResult<Vec<Node>> {
+    let mut c = st.db.acquire().await?;
+    let mut roots = Vec::with_capacity(ids.len());
+    for id in ids {
+        roots.push(tree::owned_node(&mut c, user, id).await?);
+    }
+    Ok(roots)
+}
+
+/// A single file is downloaded directly, anything else is packed into a ZIP
+async fn serve_download(st: &AppState, headers: &HeaderMap, roots: Vec<Node>, tz: i64) -> AppResult<Response> {
+    if let [one] = roots.as_slice()
+        && !one.is_folder() {
+            return serve_blob(st, headers, node_blob(one)?, true).await;
+        }
+    zip_response(st, roots, tz).await
+}
+
+/// Multi-select download with the ids in the URL, for a few items (any number goes through `create_download_link`)
 pub async fn download(
     State(st): State<AppState>,
     user: User,
     Query(q): Query<DownloadQuery>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    let ids: Vec<&str> = q.ids.split(',').filter(|s| !s.is_empty()).take(1000).collect();
-    if ids.is_empty() {
-        return Err(AppError::bad_request("Select items to download"));
-    }
-    let mut roots = Vec::new();
-    {
-        let mut c = st.db.acquire().await?;
-        for id in ids {
-            roots.push(tree::owned_node(&mut c, &user, id).await?);
+    let ids = download_ids(q.ids.split(','))?;
+    let roots = owned_nodes(&st, &user, &ids).await?;
+    serve_download(&st, &headers, roots, q.tz.unwrap_or(0)).await
+}
+
+/// Multi-select download of any size: the ids come in the body, and the answer is a short-lived link for this user that
+/// the browser downloads from. The items are checked now, so a problem is reported here rather than as a failed download
+pub async fn create_download_link(State(st): State<AppState>, user: User, Json(req): Json<DownloadReq>) -> AppResult<Json<serde_json::Value>> {
+    let ids = download_ids(&req.ids)?;
+    owned_nodes(&st, &user, &ids).await?;
+    let token = store_download_link(&st, format!("user:{}", user.id), ids, req.tz.unwrap_or(0));
+    Ok(Json(serde_json::json!({ "url": format!("/api/download/{token}") })))
+}
+
+/// Downloads the selection behind a link from `create_download_link`
+pub async fn download_by_link(State(st): State<AppState>, user: User, Path(token): Path<String>, headers: HeaderMap) -> AppResult<Response> {
+    let (ids, tz) = download_link(&st, &format!("user:{}", user.id), &token)?;
+    let roots = owned_nodes(&st, &user, &ids).await?;
+    serve_download(&st, &headers, roots, tz).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil;
+
+    #[tokio::test]
+    async fn large_selections_download_through_a_link_for_the_same_user() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let folder = env.folder(&amy, &amy.root_id, "Docs").await;
+        let mut ids = Vec::new();
+        for i in 0..300 {
+            ids.push(env.folder(&amy, &folder, &format!("f{i}")).await);
         }
+        let req = |ids: Vec<String>| Json(DownloadReq { ids, tz: Some(-480) });
+
+        // 300 ids would make a URL of about 10 KB; in the body they are fine, and every item ends up in the ZIP
+        let Json(res) = create_download_link(State(env.st.clone()), amy.clone(), req(ids.clone())).await.unwrap();
+        let token = res["url"].as_str().unwrap().strip_prefix("/api/download/").unwrap().to_string();
+        let get = |user: User, token: String| download_by_link(State(env.st.clone()), user, Path(token), HeaderMap::new());
+        let zip = get(amy.clone(), token.clone()).await.unwrap();
+        assert_eq!(zip.headers()[header::CONTENT_TYPE], "application/zip");
+        let body = axum::body::to_bytes(zip.into_body(), usize::MAX).await.unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert!((0..300).all(|i| text.contains(&format!("f{i}/"))));
+
+        // The link is only for the user who made it, and only for a short while
+        assert_eq!(get(ben.clone(), token.clone()).await.unwrap_err().status, StatusCode::NOT_FOUND);
+        env.st.download_links.lock().unwrap().get_mut(&token).unwrap().expires = now();
+        assert_eq!(get(amy.clone(), token).await.unwrap_err().status, StatusCode::NOT_FOUND);
+
+        // Items the user can't open are refused when the link is made
+        assert!(create_download_link(State(env.st.clone()), ben.clone(), req(vec![folder.clone()])).await.is_err());
     }
-    if let [one] = roots.as_slice()
-        && !one.is_folder() {
-            return serve_blob(&st, &headers, node_blob(one)?, true).await;
-        }
-    zip_response(&st, roots, q.tz.unwrap_or(0)).await
+
+    #[test]
+    fn selections_above_the_limit_are_refused_not_cut_short() {
+        let ids: Vec<String> = (0..=MAX_DOWNLOAD_ITEMS).map(|i| format!("id{i}")).collect();
+        let err = download_ids(&ids).unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert!(err.message.starts_with("At most 10000 items"), "{}", err.message);
+        assert_eq!(download_ids(&ids[..MAX_DOWNLOAD_ITEMS]).unwrap().len(), MAX_DOWNLOAD_ITEMS);
+        // Blanks and repeats don't count
+        assert_eq!(download_ids(["a", "", "b", "a"]).unwrap(), ["a", "b"]);
+        assert!(download_ids([""]).is_err());
+    }
+
+    #[tokio::test]
+    async fn each_owner_keeps_only_a_few_download_links() {
+        let env = testutil::env().await;
+        let link = |owner: &str| store_download_link(&env.st, owner.into(), vec!["x".into()], 0);
+        let first = link("user:1");
+        let tokens: Vec<String> = (0..DOWNLOAD_LINKS_PER_OWNER).map(|_| link("user:1")).collect();
+        let other = link("user:2");
+        let links = env.st.download_links.lock().unwrap();
+        assert_eq!(links.values().filter(|l| l.owner == "user:1").count(), DOWNLOAD_LINKS_PER_OWNER);
+        assert!(!links.contains_key(&first));
+        assert!(tokens.iter().all(|t| links.contains_key(t)) && links.contains_key(&other));
+    }
 }

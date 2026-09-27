@@ -14,7 +14,7 @@ use sha2::Sha256;
 use crate::{
     auth::{self, User, cookie_header, hash_password, verify_password},
     error::{AppError, AppResult},
-    files::{self, node_blob, serve_blob},
+    files::{self, DownloadQuery, node_blob, serve_blob},
     logs::{self, Visitor, record_share_access},
     nodes::order_clause,
     state::AppState,
@@ -454,13 +454,16 @@ pub async fn public_thumbnail(
     files::thumbnail_response(&st, &headers, &node).await
 }
 
-#[derive(Deserialize)]
-pub struct DownloadQuery {
-    ids: String,
-    /// The browser's time zone (JavaScript's getTimezoneOffset), for the times inside a ZIP
-    tz: Option<i64>,
+/// The items to download, each of which must be within the share
+async fn shared_nodes(st: &AppState, share: &Share, root: &Node, ids: &[String]) -> AppResult<Vec<Node>> {
+    let mut roots = Vec::with_capacity(ids.len());
+    for id in ids {
+        roots.push(shared_node(st, share, root, id).await?);
+    }
+    Ok(roots)
 }
 
+/// Download with the ids in the URL, for a few items (any number goes through `create_public_download_link`)
 pub async fn public_download(
     State(st): State<AppState>,
     Path(token): Path<String>,
@@ -469,33 +472,70 @@ pub async fn public_download(
     visitor: Visitor,
 ) -> AppResult<Response> {
     let (share, root) = open_share(&st, &token, &headers).await?;
-    let mut roots = Vec::new();
-    for id in q.ids.split(',').filter(|s| !s.is_empty()).take(1000) {
-        roots.push(shared_node(&st, &share, &root, id).await?);
-    }
-    if roots.is_empty() {
-        return Err(AppError::bad_request("Select items to download"));
-    }
+    let ids = files::download_ids(q.ids.split(','))?;
+    let roots = shared_nodes(&st, &share, &root, &ids).await?;
+    serve_public_download(&st, &token, share, roots, q.tz.unwrap_or(0), &headers, &visitor).await
+}
+
+/// Download of any number of items from a share: the ids come in the body, and the answer is a short-lived link for
+/// this share that the browser downloads from. Nothing is counted until that download starts
+pub async fn create_public_download_link(
+    State(st): State<AppState>,
+    Path(token): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<files::DownloadReq>,
+) -> AppResult<Json<Value>> {
+    let (share, root) = open_share(&st, &token, &headers).await?;
+    let ids = files::download_ids(&req.ids)?;
+    ensure_quota_left(&share)?;
+    shared_nodes(&st, &share, &root, &ids).await?;
+    let link = files::store_download_link(&st, format!("share:{token}"), ids, req.tz.unwrap_or(0));
+    Ok(Json(json!({ "url": format!("/api/public/shares/{token}/download/{link}") })))
+}
+
+/// Downloads the selection behind a link from `create_public_download_link`
+pub async fn public_download_by_link(
+    State(st): State<AppState>,
+    Path((token, link)): Path<(String, String)>,
+    headers: HeaderMap,
+    visitor: Visitor,
+) -> AppResult<Response> {
+    let (ids, tz) = files::download_link(&st, &format!("share:{token}"), &link)?;
+    let (share, root) = open_share(&st, &token, &headers).await?;
+    let roots = shared_nodes(&st, &share, &root, &ids).await?;
+    serve_public_download(&st, &token, share, roots, tz, &headers, &visitor).await
+}
+
+/// Serves a download from a share and counts it (a single file resumed with the continuation cookie isn't counted again)
+async fn serve_public_download(
+    st: &AppState,
+    token: &str,
+    share: Share,
+    roots: Vec<Node>,
+    tz: i64,
+    headers: &HeaderMap,
+    visitor: &Visitor,
+) -> AppResult<Response> {
     // A single file: a Range request with the continuation cookie resumes a counted download, like /content
     let single = matches!(roots.as_slice(), [one] if !one.is_folder());
     let continuation = single
-        && files::range_start(&headers, roots[0].size as u64) > 0
-        && (share.max_downloads.is_none() || continues_download(&st, &headers, &token, &share));
+        && files::range_start(headers, roots[0].size as u64) > 0
+        && (share.max_downloads.is_none() || continues_download(st, headers, token, &share));
     if !continuation {
         ensure_quota_left(&share)?;
     }
     // Opened first (a ZIP opens its first file before answering): a download that fails because the storage can't be
     // reached doesn't use up the link
     let mut res = match roots.as_slice() {
-        [one] if !one.is_folder() => serve_blob(&st, &headers, node_blob(one)?, true).await?,
-        _ => files::zip_response(&st, roots.clone(), q.tz.unwrap_or(0)).await?,
+        [one] if !one.is_folder() => serve_blob(st, headers, node_blob(one)?, true).await?,
+        _ => files::zip_response(st, roots.clone(), tz).await?,
     };
     if !continuation {
-        count_download(&st, &share).await?;
-        record_share_access(&st, &share.id, share.owner_id, roots.first(), if single { "download" } else { "zip" }, &visitor);
-        note_access(&st, &share.id, false).await;
+        count_download(st, &share).await?;
+        record_share_access(st, &share.id, share.owner_id, roots.first(), if single { "download" } else { "zip" }, visitor);
+        note_access(st, &share.id, false).await;
         if single && share.max_downloads.is_some() {
-            res.headers_mut().append(header::SET_COOKIE, download_cookie(&st, &token, &share)?);
+            res.headers_mut().append(header::SET_COOKIE, download_cookie(st, token, &share)?);
         }
     }
     Ok(res)
@@ -689,6 +729,44 @@ mod tests {
         assert_eq!(download(Some("bytes=2048-"), Some(cookie)).await.unwrap().status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(download(Some("bytes=1-"), None).await.unwrap_err().status, StatusCode::GONE);
         assert_eq!(download(None, None).await.unwrap_err().status, StatusCode::GONE);
+    }
+
+    #[tokio::test]
+    async fn selections_download_through_a_link_for_the_same_share() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let folder = env.folder(&amy, &amy.root_id, "Docs").await;
+        let a = stored_file(&env, &amy, &folder, "a.txt", b"first").await;
+        let b = stored_file(&env, &amy, &folder, "b.txt", b"second").await;
+        let outside = stored_file(&env, &amy, &amy.root_id, "c.txt", b"third").await;
+        let share = |max: Option<i64>| {
+            let req = CreateReq { node_id: folder.clone(), password: None, expires_at: None, max_downloads: max };
+            create(State(env.st.clone()), amy.clone(), Json(req))
+        };
+        let Json(info) = share(Some(1)).await.unwrap();
+        let Json(other) = share(None).await.unwrap();
+        let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
+        let make = |token: String, ids: Vec<&String>| {
+            let req = files::DownloadReq { ids: ids.into_iter().cloned().collect(), tz: None };
+            create_public_download_link(State(env.st.clone()), Path(token), HeaderMap::new(), Json(req))
+        };
+        let get = |token: String, url: &str| {
+            let link = url.rsplit('/').next().unwrap().to_string();
+            public_download_by_link(State(env.st.clone()), Path((token, link)), HeaderMap::new(), visitor())
+        };
+
+        // Items outside the share are refused when the link is made, and nothing is counted yet
+        assert_eq!(make(info.id.clone(), vec![&a, &outside]).await.unwrap_err().status, StatusCode::NOT_FOUND);
+        let Json(res) = make(info.id.clone(), vec![&a, &b]).await.unwrap();
+        let url = res["url"].as_str().unwrap().to_string();
+        assert!(url.starts_with(&format!("/api/public/shares/{}/download/", info.id)), "{url}");
+        // The link works for its own share only
+        assert_eq!(get(other.id.clone(), &url).await.unwrap_err().status, StatusCode::NOT_FOUND);
+        // Downloading counts, and the limit is then reached
+        let zip = get(info.id.clone(), &url).await.unwrap();
+        assert_eq!(zip.headers()[header::CONTENT_TYPE], "application/zip");
+        assert_eq!(get(info.id.clone(), &url).await.unwrap_err().status, StatusCode::GONE);
+        assert_eq!(make(info.id.clone(), vec![&a]).await.unwrap_err().status, StatusCode::GONE);
     }
 
     #[tokio::test]

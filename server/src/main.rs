@@ -190,6 +190,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         sso_pending: Default::default(),
         archive_lock: Default::default(),
         share_views: Default::default(),
+        download_links: Default::default(),
         log_tx,
     }));
 
@@ -434,13 +435,15 @@ fn api() -> Router<AppState> {
         .route("/admin/logs/archives/{id}", get(logs::download_archive).delete(logs::delete_archive))
         // File content
         .route("/files/{id}/content", get(files::content))
-        .route("/download", get(files::download))
+        .route("/download", get(files::download).post(files::create_download_link))
+        .route("/download/{link}", get(files::download_by_link))
         // Sharing
         .route("/shares", get(shares::list).post(shares::create))
         .route("/shares/{id}", delete(shares::delete))
         .route("/public/shares/{token}", get(shares::public_info))
         .route("/public/shares/{token}/unlock", post(shares::unlock))
-        .route("/public/shares/{token}/download", get(shares::public_download))
+        .route("/public/shares/{token}/download", get(shares::public_download).post(shares::create_public_download_link))
+        .route("/public/shares/{token}/download/{link}", get(shares::public_download_by_link))
         .route("/public/shares/{token}/nodes/{id}", get(shares::public_node))
         .route("/public/shares/{token}/nodes/{id}/children", get(shares::public_children))
         .route("/public/shares/{token}/nodes/{id}/content", get(shares::public_content))

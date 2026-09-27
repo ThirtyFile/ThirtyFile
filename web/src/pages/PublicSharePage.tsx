@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { ChevronRightIcon, DownloadIcon, EyeIcon, FolderOpenIcon, Grid2X2Icon, LinkIcon, ListIcon, Loader2Icon, LockIcon } from "lucide-react";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -88,8 +89,14 @@ function Unlock({ token }: { token: string }) {
 /** Starts a download and then refreshes the share, so a download limit shows the downloads left */
 function useShareDownload(token: string) {
   const qc = useQueryClient();
-  return (url: string) => {
-    triggerDownload(url);
+  return async (link: string | Promise<string>) => {
+    try {
+      triggerDownload(await link);
+    } catch (e) {
+      // The server refused the selection (too many items, the limit reached…)
+      toast.error(e instanceof Error ? e.message : t("Download failed"));
+      return;
+    }
     // The browser downloads in the background; the server counts it when the download starts
     setTimeout(() => qc.invalidateQueries({ queryKey: ["public", token] }), 1500);
   };
@@ -211,7 +218,7 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
           size="sm"
           className="bg-brand text-brand-foreground hover:bg-brand/90"
           disabled={exhausted}
-          onClick={() => download(source.downloadUrl(downloadIds))}
+          onClick={() => download(source.downloadLink(downloadIds))}
         >
           <DownloadIcon /> {selected.size ? t("Download {n} item|Download {n} items", { n: selected.size }) : t("Download all")}
         </Button>
@@ -260,7 +267,7 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
                 {selectedNodes[0].kind === "folder" ? <FolderOpenIcon /> : <EyeIcon />} {selectedNodes[0].kind === "folder" ? t("Open") : t("Preview")}
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem disabled={exhausted} onClick={() => download(source.downloadUrl(downloadIds))}>
+            <DropdownMenuItem disabled={exhausted} onClick={() => download(source.downloadLink(downloadIds))}>
               <DownloadIcon /> {selected.size ? t("Download {n} item|Download {n} items", { n: selected.size }) : t("Download all (ZIP)")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />

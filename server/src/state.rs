@@ -57,6 +57,8 @@ pub struct Inner {
     pub archive_lock: tokio::sync::Mutex<()>,
     /// Last logged page view per "share|address": repeated views within a minute aren't logged again
     pub share_views: Mutex<HashMap<String, i64>>,
+    /// Selections waiting to be downloaded through a short-lived link: link token → selection (see `files::store_download_link`)
+    pub download_links: Mutex<HashMap<String, crate::files::DownloadLink>>,
     pub thumb_permits: Semaphore,
     /// System settings (cached in memory; changes are also written to the settings table)
     pub system: RwLock<SystemSettings>,
