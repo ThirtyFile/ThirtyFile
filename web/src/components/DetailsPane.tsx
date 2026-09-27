@@ -1,14 +1,14 @@
 import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { XIcon } from "lucide-react";
-import { api, privateSource, type FolderContents, type Node } from "@/api";
+import { api, privateSource, type FolderContents, type HistoryEntry, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
 import { FileIcon, canThumbnail, typeLabel } from "@/components/FileIcon";
 import { Resizer } from "@/components/Resizer";
-import { ROLE_LABEL } from "@/lib/drives";
+import { ROLE_LABEL, actionLabel } from "@/lib/drives";
 import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
-import { t } from "@/lib/i18n";
+import { t, tServer } from "@/lib/i18n";
 import { usePersisted } from "@/lib/session";
 import { formatBytes, formatWinDate } from "@/lib/utils";
 
@@ -22,6 +22,43 @@ function containsText(c: Pick<FolderContents, "files" | "folders">) {
 
 const add = (a: FolderContents, b: FolderContents): FolderContents => ({ size: a.size + b.size, files: a.files + b.files, folders: a.folders + b.folders });
 
+/** The server sends at most this many entries */
+const HISTORY_LIMIT = 50;
+
+/** Recent activity on the item: who uploaded, edited, renamed, moved or deleted it, or something inside the folder */
+function History({ node, query }: { node: Node; query: { data?: HistoryEntry[]; error: Error | null; refetch(): unknown } }) {
+  let body;
+  if (query.error) body = <ErrorState compact message={query.error.message} onRetry={() => query.refetch()} />;
+  else if (!query.data) body = <p className="text-xs text-muted-foreground">…</p>;
+  else if (!query.data.length) body = <p className="text-xs text-muted-foreground">{t("No activity yet")}</p>;
+  else
+    body = (
+      <ol className="grid gap-2 text-xs">
+        {query.data.map((a) => {
+          const detail = tServer(a.detail);
+          return (
+            <li key={a.id} className="grid gap-0.5">
+              <div className="[overflow-wrap:anywhere]">
+                <span className="font-medium">{a.username}</span> · {actionLabel(a.action)}
+                {/* Entries about something inside the folder name it */}
+                {a.node_id !== node.id && a.node_name && <> · {a.node_name}</>}
+                {detail && <span className="text-muted-foreground"> {detail}</span>}
+              </div>
+              <div className="text-muted-foreground">{formatWinDate(a.at)}</div>
+            </li>
+          );
+        })}
+        {query.data.length >= HISTORY_LIMIT && <li className="text-muted-foreground">{t("Only the {n} most recent entries are shown", { n: HISTORY_LIMIT })}</li>}
+      </ol>
+    );
+  return (
+    <section aria-label={t("Activity")} className="grid gap-2 border-t pt-3">
+      <h3 className="text-xs font-medium">{t("Activity")}</h3>
+      {body}
+    </section>
+  );
+}
+
 export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; folder?: Node; onClose(): void }) {
   const [width, setWidth] = usePersisted("tf-details-width", PANE_DEFAULT_WIDTH);
   const node = selected.length === 1 ? selected[0] : selected.length === 0 ? folder : undefined;
@@ -33,6 +70,7 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
     queryFn: () => api.contents(folderIds),
     enabled: folderIds.length > 0,
   });
+  const history = useQuery({ queryKey: ["node", node?.id, "history"], queryFn: () => api.history(node!.id), enabled: !!node });
   const shares = useQuery({ queryKey: ["shares", node?.id], queryFn: () => api.shares(node!.id), enabled: !!node && !!node.parent_id });
   // On narrow windows the pane covers the file list: focus moves into it, Esc closes it and focus goes back.
   // The list stays usable beside it, so focus isn't kept inside
@@ -111,6 +149,7 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
               </div>
             ))}
           </dl>
+          <History node={node} query={history} />
           {error && (
             <ErrorState
               compact

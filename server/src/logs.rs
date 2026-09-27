@@ -25,7 +25,7 @@ use crate::{
     db::{get_setting, set_setting},
     error::{AppError, AppResult},
     state::AppState,
-    tree::{self, Node},
+    tree::{self, Node, Role},
     util::{content_disposition, format_bytes, now},
 };
 
@@ -355,6 +355,57 @@ pub async fn activity(State(st): State<AppState>, user: User, Query(q): Query<Ac
     let items = query_activity(&st, &q, limit).await?;
     let next = (items.len() as i64 == limit).then(|| items.last().map(|r| r.id)).flatten();
     Ok(Json(json!({ "items": items, "next": next })))
+}
+
+// ───────────── An item's history (Details pane) ─────────────
+
+/// Entries shown in an item's history
+const HISTORY_LIMIT: i64 = 50;
+
+/// What happened to the item and its contents. People who can only view or edit it don't see sharing and permission
+/// changes (who was given access, share links); those stay with managers, as in the space's activity log.
+const CONTENT_ACTIONS: [&str; 9] = ["upload", "create_folder", "edit", "rename", "move", "copy", "trash", "restore", "delete"];
+
+#[derive(Serialize, sqlx::FromRow, Debug)]
+pub struct HistoryRow {
+    id: i64,
+    at: i64,
+    username: String,
+    node_id: Option<String>,
+    node_name: String,
+    action: String,
+    detail: String,
+}
+
+/// The most recent entries about an item, for anyone who can open it (the activity log itself is for space managers and
+/// administrators). A folder's history also has the entries of everything now inside it, including items in its trash;
+/// a space's root folder, those of the whole space. No IP addresses: the activity log doesn't record them.
+pub async fn node_history(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Json<Vec<HistoryRow>>> {
+    let mut c = st.db.acquire().await?;
+    let (node, role) = tree::node_with_role(&mut c, &user, &id).await?;
+    let mut qb = QueryBuilder::<Sqlite>::new("SELECT a.id, a.at, a.username, a.node_id, a.node_name, a.action, a.detail FROM activity a WHERE ");
+    if node.parent_id.is_none() {
+        qb.push("a.drive_id = ").push_bind(node.drive().to_string()).push(" AND a.node_id IS NOT NULL");
+    } else if node.is_folder() {
+        qb.push(
+            "a.node_id IN (WITH RECURSIVE sub(id) AS (
+               SELECT ",
+        )
+        .push_bind(node.id.clone())
+        .push(" UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id) SELECT id FROM sub)");
+    } else {
+        qb.push("a.node_id = ").push_bind(node.id.clone());
+    }
+    if role < Role::Manager {
+        qb.push(" AND a.action IN (");
+        let mut sep = qb.separated(", ");
+        for a in CONTENT_ACTIONS {
+            sep.push_bind(a);
+        }
+        qb.push(")");
+    }
+    qb.push(" ORDER BY a.id DESC LIMIT ").push_bind(HISTORY_LIMIT);
+    Ok(Json(qb.build_query_as().fetch_all(&mut *c).await?))
 }
 
 /// Whether exports should be in English: the interface language set by the frontend (`tf_lang` cookie) is English.
@@ -1382,5 +1433,57 @@ mod tests {
         assert_eq!(csv_field("=HYPERLINK(\"x\")"), "\"'=HYPERLINK(\"\"x\"\")\"");
         assert_eq!(csv_field("a,b"), "\"a,b\"");
         assert_eq!(csv_field("plain text"), "plain text");
+    }
+
+    #[tokio::test]
+    async fn an_items_history_covers_what_is_inside_it_for_anyone_who_can_open_it() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let top = env.folder(&amy, &amy.root_id, "top").await;
+        let sub = env.folder(&amy, &top, "sub").await;
+        let a = env.file(&amy, &top, "a.txt").await;
+        let b = env.file(&amy, &sub, "b.txt").await;
+        let other = env.file(&amy, &amy.root_id, "other.txt").await;
+        let log = |id: String, action: &'static str| {
+            let (st, amy) = (env.st.clone(), amy.clone());
+            async move {
+                let mut c = st.db.acquire().await.unwrap();
+                let node = tree::get_node(&mut c, &id).await.unwrap().unwrap();
+                tree::log(&mut c, &amy, Some(&node), action, "").await.unwrap();
+            }
+        };
+        log(a.clone(), "upload").await;
+        log(b.clone(), "edit").await;
+        log(top.clone(), "rename").await;
+        log(top.clone(), "grant").await;
+        log(other.clone(), "upload").await;
+        let history = |who: User, id: &str| {
+            let (st, id) = (env.st.clone(), id.to_string());
+            async move { node_history(State(st), who, Path(id)).await.map(|Json(rows)| rows.into_iter().map(|r| format!("{} {}", r.action, r.node_name)).collect::<Vec<_>>()) }
+        };
+
+        // The folder's own entries and those of everything inside it, newest first; the owner sees permission changes too
+        assert_eq!(history(amy.clone(), &top).await.unwrap(), ["grant top", "rename top", "edit b.txt", "upload a.txt"]);
+        assert_eq!(history(amy.clone(), &a).await.unwrap(), ["upload a.txt"]);
+        // The space's root folder: the whole space
+        assert_eq!(history(amy.clone(), &amy.root_id).await.unwrap().len(), 5);
+        // A trashed item's entries stay in its folder's history
+        let _ = crate::nodes::trash(State(env.st.clone()), amy.clone(), Json(serde_json::from_value(json!({ "ids": [b] })).unwrap())).await.unwrap();
+        assert_eq!(history(amy.clone(), &sub).await.unwrap(), ["trash b.txt", "edit b.txt"]);
+
+        // Someone who can view the folder sees its history, without sharing and permission changes
+        assert_eq!(history(ben.clone(), &top).await.unwrap_err().status, axum::http::StatusCode::NOT_FOUND);
+        env.grant(&top, &ben, "viewer").await;
+        assert_eq!(history(ben.clone(), &top).await.unwrap(), ["trash b.txt", "rename top", "edit b.txt", "upload a.txt"]);
+        assert_eq!(history(ben.clone(), &other).await.unwrap_err().status, axum::http::StatusCode::NOT_FOUND);
+
+        // Only the most recent entries
+        for _ in 0..60 {
+            log(a.clone(), "edit").await;
+        }
+        let rows = history(amy.clone(), &a).await.unwrap();
+        assert_eq!(rows.len(), HISTORY_LIMIT as usize);
+        assert!(rows.iter().all(|r| r == "edit a.txt"));
     }
 }

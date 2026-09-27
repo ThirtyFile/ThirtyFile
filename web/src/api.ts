@@ -222,6 +222,9 @@ export interface Activity {
   detail: string;
 }
 
+/** An entry of an item's history (Details pane): the item itself, or something inside the folder */
+export type HistoryEntry = Omit<Activity, "drive_id" | "drive_name">;
+
 /** Activity log filters (times are Unix seconds, start inclusive, end exclusive) */
 export interface ActivityFilter {
   drive_id?: string;
@@ -798,6 +801,8 @@ export const api = {
   move: (ids: string[], dest_id: string) => post("/nodes/move", { ids, dest_id }),
   copy: (ids: string[], dest_id: string) => post("/nodes/copy", { ids, dest_id }),
   trash: (ids: string[]) => post("/nodes/trash", { ids }),
+  /** The most recent entries about an item (and, for a folder, what's inside it) */
+  history: (id: string) => get<HistoryEntry[]>(enc`/nodes/${id}/activity`),
   /** Size and number of items inside these folders (files among the ids hold nothing) */
   contents: (ids: string[]) => post<FolderContents>("/nodes/contents", { ids }),
   /** With mine, only the items the person deleted */

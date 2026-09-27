@@ -670,6 +670,7 @@ fn api() -> Router<AppState> {
         .route("/directory", get(drives::directory))
         .route("/activity", get(logs::activity))
         .route("/activity/export", get(logs::export_activity))
+        .route("/nodes/{id}/activity", get(logs::node_history))
         .route("/share-access", get(logs::share_access))
         .route("/auth/sso/providers", get(sso::providers))
         .route("/auth/sso/{provider}/start", get(sso::start))

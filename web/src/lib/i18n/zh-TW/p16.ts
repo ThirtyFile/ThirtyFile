@@ -10,4 +10,7 @@ export default {
   "Deleted by me": "我刪除的項目",
   "Deleted by everyone": "所有人刪除的項目",
   "You haven't deleted anything that's in the trash": "垃圾桶裡沒有你刪除的項目",
+  // An item's history in the Details pane
+  "Activity": "活動",
+  "Only the {n} most recent entries are shown": "只顯示最近 {n} 筆紀錄",
 };
