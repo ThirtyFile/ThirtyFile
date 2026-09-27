@@ -8,7 +8,8 @@ import { toast } from "sonner";
 import { api, type ShareInfo } from "@/api";
 import { FileIcon } from "@/components/FileIcon";
 import { Frame, ToolButton } from "@/components/Frame";
-import { LocalLinkWarning, sharePath, useShareLink } from "@/components/ShareDialog";
+import { LocalLinkWarning, disableLinkQuestion, sharePath, useShareLink } from "@/components/ShareDialog";
+import { confirm } from "@/components/confirm";
 import { copyText, formatDate, formatDateTime } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ShareAccessLog } from "@/components/logs/ShareAccessLog";
@@ -35,6 +36,10 @@ export function SharesPage() {
     onError: (e) => toast.error(e.message),
   });
 
+  const disable = async (id: string) => {
+    if (await confirm(disableLinkQuestion())) remove.mutate(id);
+  };
+
   const copy = async (id: string) => {
     await copyText(shareLink(id));
     toast.success(t("Link copied"));
@@ -50,7 +55,7 @@ export function SharesPage() {
         disabled={!current}
         onClick={() => current && window.open(sharePath(current.id), "_blank")}
       />
-      <ToolButton icon={Link2OffIcon} label={t("Disable link")} showLabel disabled={!current} onClick={() => current && remove.mutate(current.id)} />
+      <ToolButton icon={Link2OffIcon} label={t("Disable link")} showLabel disabled={!current} onClick={() => current && disable(current.id)} />
       <span className="mx-1 h-5 border-l" />
       <ToolButton
         icon={HistoryIcon}
@@ -145,7 +150,7 @@ export function SharesPage() {
                 <HistoryIcon /> {t("Access log")}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onClick={() => remove.mutate(current.id)}>
+              <DropdownMenuItem variant="destructive" onClick={() => disable(current.id)}>
                 <Link2OffIcon /> {t("Disable link")}
               </DropdownMenuItem>
             </>

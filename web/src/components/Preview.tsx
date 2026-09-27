@@ -4,6 +4,7 @@ import { triggerDownload, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
 import { FileIcon } from "@/components/FileIcon";
 import { FileViewer } from "@/components/FileViewer";
+import { confirm } from "@/components/confirm";
 import { t } from "@/lib/i18n";
 import { useOverlayFocus } from "@/lib/focus";
 import { formatBytes } from "@/lib/utils";
@@ -25,23 +26,35 @@ export function Preview(props: {
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
 
-  const guard = useCallback(() => !dirtyRef.current || window.confirm(t("This file has unsaved changes. Leave anyway?")), []);
+  const guard = useCallback(
+    async () =>
+      !dirtyRef.current ||
+      confirm({
+        title: t("Discard unsaved changes?"),
+        description: t("This file has unsaved changes. If you leave it, your changes will be lost."),
+        confirmText: t("Leave without saving"),
+        destructive: true,
+      }),
+    [],
+  );
   const go = useCallback(
-    (delta: number) => {
+    async (delta: number) => {
       const next = props.index + delta;
-      if (next < 0 || next >= props.files.length || !guard()) return;
+      if (next < 0 || next >= props.files.length || !(await guard())) return;
       setDirty(false);
       props.onIndexChange(next);
     },
     [props.index, props.files.length, guard, props.onIndexChange],
   );
-  const close = useCallback(() => guard() && props.onClose(), [guard, props.onClose]);
+  const close = useCallback(async () => (await guard()) && props.onClose(), [guard, props.onClose]);
   // Esc is handled below (it must not close while typing in an editor)
   const root = useRef<HTMLDivElement>(null);
   useOverlayFocus(root, !!node);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Keys pressed in a dialog above the preview (e.g. Escape to answer "no") are the dialog's
+      if ((e.target as HTMLElement)?.closest?.('[data-slot="dialog-content"]')) return;
       // Not while typing, editing, or seeking in a media player with the arrow keys
       const inEditor = (e.target as HTMLElement)?.closest?.(".cm-editor, video, audio, input, textarea, select, [contenteditable]");
       if (e.key === "Escape" && !inEditor && !e.defaultPrevented) close();

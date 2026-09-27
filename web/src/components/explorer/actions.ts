@@ -5,6 +5,7 @@ import { api, privateSource, triggerDownload, type Node } from "@/api";
 import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
+import { moveBack, originsOf, toastWithUndo } from "@/lib/undo";
 import { enqueue, filesFromDrop } from "@/uploads";
 import { type Item, isTyping } from "./types";
 import type { ExplorerProps } from "../Explorer";
@@ -82,8 +83,11 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
 
   const moveInto = async (ids: string[], folder: Node) => {
     try {
+      const origins = originsOf(p.items, ids, folder.id);
       await api.move(ids, folder.id);
-      toast.success(t("Moved {n} item to \"{name}\"|Moved {n} items to \"{name}\"", { n: ids.length, name: folder.name }));
+      const moved = t("Moved {n} item to \"{name}\"|Moved {n} items to \"{name}\"", { n: ids.length, name: folder.name });
+      if (origins.size) toastWithUndo(moved, { undo: () => moveBack(origins), undoneText: t("Moved back"), after: refresh });
+      else toast.success(moved);
       setSelected(new Set());
       refresh();
     } catch (e) {
@@ -93,7 +97,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
 
   const cut = () => {
     if (!selectedIds.length || !caps.write) return;
-    setClipboard({ mode: "cut", ids: selectedIds });
+    setClipboard({ mode: "cut", ids: selectedIds, origins: originsOf(selectedNodes, selectedIds, "") });
     toast(t("{n} item cut. Go to the destination folder and select Paste to move it.|{n} items cut. Go to the destination folder and select Paste to move them.", { n: selectedIds.length }));
   };
   const copy = () => {
@@ -106,9 +110,13 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     if (!clip || !p.folderId) return;
     try {
       if (clip.mode === "cut") {
-        await api.move(clip.ids, p.folderId);
+        const dest = p.folderId;
+        const origins = new Map([...(clip.origins ?? [])].filter(([, parent]) => parent !== dest));
+        await api.move(clip.ids, dest);
         setClipboard(null);
-        toast.success(t("Moved {n} item|Moved {n} items", { n: clip.ids.length }));
+        const moved = t("Moved {n} item|Moved {n} items", { n: clip.ids.length });
+        if (origins.size) toastWithUndo(moved, { undo: () => moveBack(origins), undoneText: t("Moved back"), after: refresh });
+        else toast.success(moved);
       } else {
         await api.copy(clip.ids, p.folderId);
         toast.success(t("Pasted {n} item|Pasted {n} items", { n: clip.ids.length }));

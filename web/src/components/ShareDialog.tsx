@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { ErrorText } from "@/components/dialogs";
 import { ErrorState } from "@/components/ErrorState";
+import { useConfirm, type ConfirmOptions } from "@/components/confirm";
 import { copyText, formatDate } from "@/lib/utils";
 import { useMe } from "@/lib/session";
 import { t, tc } from "@/lib/i18n";
@@ -62,6 +63,14 @@ const EXPIRY = [
   { label: t("{n} day|{n} days", { n: 90 }), days: 90 },
 ];
 
+/** Asked before a share link is disabled (here and on the Shared links page) */
+export const disableLinkQuestion = (): ConfirmOptions => ({
+  title: t("Disable this share link?"),
+  description: t("People who have the link can no longer open it. A new link would have a different address."),
+  confirmText: t("Disable link"),
+  destructive: true,
+});
+
 export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) {
   const qc = useQueryClient();
   const { link: shareLink, local, admin } = useShareLink();
@@ -89,6 +98,7 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
     },
   });
 
+  const [ask, question] = useConfirm();
   const remove = useMutation({
     mutationFn: (id: string) => api.deleteShare(id),
     onSuccess: () => {
@@ -100,6 +110,7 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
+        {question}
         <DialogHeader>
           <DialogTitle className="truncate pr-8">{t("Share link for “{name}”", { name: node.name })}</DialogTitle>
           <DialogDescription>
@@ -132,7 +143,14 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
                 >
                   <CopyIcon />
                 </Button>
-                <Button size="icon-sm" variant="ghost" aria-label={t("Disable link")} title={t("Disable link")} onClick={() => remove.mutate(s.id)} disabled={remove.isPending}>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={t("Disable link")}
+                  title={t("Disable link")}
+                  onClick={async () => (await ask(disableLinkQuestion())) && remove.mutate(s.id)}
+                  disabled={remove.isPending}
+                >
                   <Trash2Icon />
                 </Button>
               </div>

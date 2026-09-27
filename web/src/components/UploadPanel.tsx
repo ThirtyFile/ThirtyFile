@@ -15,6 +15,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/component
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { FileIcon } from "@/components/FileIcon";
+import { confirm } from "@/components/confirm";
 import { cn, formatBytes } from "@/lib/utils";
 import { cancel, cancelAll, clearFinished, pause, resume, retryFailed, useUploads } from "@/uploads";
 import { t } from "@/lib/i18n";
@@ -69,7 +70,10 @@ export function UploadPanel() {
           variant="ghost"
           aria-label={t("Close")}
           title={t("Close")}
-          onClick={() => (active ? window.confirm(t("Cancel all uploads in progress?")) && cancelAll() : clearFinished())}
+          onClick={async () => {
+            if (!active) return clearFinished();
+            if (await confirm({ title: t("Cancel all uploads in progress?"), confirmText: t("Cancel uploads"), destructive: true })) cancelAll();
+          }}
         >
           <XIcon />
         </Button>

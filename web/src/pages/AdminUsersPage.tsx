@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog, ErrorText } from "@/components/dialogs";
+import { confirm } from "@/components/confirm";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { useMe } from "@/lib/session";
 import { useSettingsSearch } from "@/lib/controlPanel";
@@ -167,6 +168,16 @@ export function AdminUsersPage() {
               {selected.id !== me.id && (
                 <DropdownMenuItem
                   onClick={async () => {
+                    if (
+                      !selected.disabled &&
+                      !(await confirm({
+                        title: t("Disable account \"{name}\"?", { name: selected.username }),
+                        description: t("They can no longer sign in, and their share links stop working until the account is enabled again."),
+                        confirmText: t("Disable account"),
+                        destructive: true,
+                      }))
+                    )
+                      return;
                     try {
                       await api.updateUser(selected.id, { disabled: !selected.disabled });
                       toast.success(selected.disabled ? t("Account enabled") : t("Account disabled"));

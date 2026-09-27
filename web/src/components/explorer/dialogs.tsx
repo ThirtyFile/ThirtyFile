@@ -1,6 +1,7 @@
 /** File explorer dialogs: move / copy, delete, share and access (creating and renaming are edited inline in the list) */
 import { toast } from "sonner";
 import { api } from "@/api";
+import { moveBack, originsOf, toastWithUndo } from "@/lib/undo";
 import { AccessDialog } from "@/components/AccessDialog";
 import { ConfirmDialog, FolderPickerDialog } from "@/components/dialogs";
 import { ShareDialog } from "@/components/ShareDialog";
@@ -25,9 +26,15 @@ export function ExplorerDialogs({ p, s, a }: { p: ExplorerProps; s: ExplorerStat
           excludeIds={new Set(dialog.ids)}
           onClose={() => setDialog(null)}
           onPick={async (dest) => {
-            if (dialog.t === "move") await api.move(dialog.ids, dest);
-            else await api.copy(dialog.ids, dest);
-            toast.success(dialog.t === "move" ? t("Moved") : t("Copied"));
+            if (dialog.t === "move") {
+              const origins = originsOf(p.items, dialog.ids, dest);
+              await api.move(dialog.ids, dest);
+              if (origins.size) toastWithUndo(t("Moved"), { undo: () => moveBack(origins), undoneText: t("Moved back"), after: refresh });
+              else toast.success(t("Moved"));
+            } else {
+              await api.copy(dialog.ids, dest);
+              toast.success(t("Copied"));
+            }
             setDialog(null);
             setSelected(new Set());
             refresh();
@@ -43,20 +50,8 @@ export function ExplorerDialogs({ p, s, a }: { p: ExplorerProps; s: ExplorerStat
           onClose={() => setDialog(null)}
           onConfirm={async () => {
             await api.trash(dialog.ids);
-            toast.success(t("Moved to trash"), {
-              action: {
-                label: t("Undo"),
-                onClick: () =>
-                  api
-                    .restore(dialog.ids)
-                    .then(() => {
-                      toast.success(t("Restored"));
-                      refresh();
-                    })
-                    // E.g. the original folder was deleted, a name conflict, or the space is full
-                    .catch((e: Error) => toast.error(e.message)),
-              },
-            });
+            // Restoring can fail, e.g. the original folder was deleted, a name conflict, or the space is full
+            toastWithUndo(t("Moved to trash"), { undo: () => api.restore(dialog.ids), undoneText: t("Restored"), after: refresh });
             setDialog(null);
             setSelected(new Set());
             refresh();

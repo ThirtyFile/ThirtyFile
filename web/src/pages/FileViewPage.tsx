@@ -29,6 +29,7 @@ import { extOf, formatBytes, formatWinDate } from "@/lib/utils";
 import { hasDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
+import { toastWithUndo } from "@/lib/undo";
 import { categoryOf, isTextLike, typeLabel } from "@/components/FileIcon";
 import { capsOf } from "@/lib/drives";
 import { locationOf } from "@/pages/FilesPage";
@@ -223,9 +224,12 @@ export function FileViewPage() {
           confirmText={t("Rename")}
           onClose={() => setDialog(null)}
           onSubmit={async (name) => {
+            const before = node.name;
             await api.rename(node.id, name);
             setDialog(null);
             invalidateFiles(qc);
+            if (name !== before)
+              toastWithUndo(t("Renamed to \"{name}\"", { name }), { undo: () => api.rename(node.id, before), undoneText: t("Renamed back"), after: () => invalidateFiles(qc) });
           }}
         />
       )}

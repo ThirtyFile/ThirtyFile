@@ -305,6 +305,12 @@ export function cancelAll() {
   flushLanded();
 }
 
+// While files wait or are being sent, warn before closing or reloading the page: the files would have to be picked
+// again to continue
+window.addEventListener("beforeunload", (e) => {
+  if (hasActiveUploads()) e.preventDefault();
+});
+
 /** Get files from a drop event (including every file inside folders) */
 export async function filesFromDrop(dt: DataTransfer): Promise<PickedFile[]> {
   const entries = Array.from(dt.items)

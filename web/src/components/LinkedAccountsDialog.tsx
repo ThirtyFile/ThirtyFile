@@ -5,6 +5,7 @@ import { api } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
+import { useConfirm } from "@/components/confirm";
 import { formatDateTime } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 
@@ -20,12 +21,23 @@ export function LinkedAccountsDialog({ onClose }: { onClose(): void }) {
     },
     onError: (e) => toast.error(e.message),
   });
+  const [ask, question] = useConfirm();
+  const confirmUnlink = async (p: SsoProviderId) => {
+    const ok = await ask({
+      title: t("Unlink your {provider} account?", { provider: SSO_LABEL[p] ?? p }),
+      description: t("After unlinking, you can no longer sign in with this account"),
+      confirmText: t("Unlink"),
+      destructive: true,
+    });
+    if (ok) unlink.mutate(p);
+  };
   const here = window.location.pathname + window.location.search;
   const providers = [...new Set([...(q.data?.available ?? []), ...(q.data?.linked.map((l) => l.provider) ?? [])])] as SsoProviderId[];
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
+        {question}
         <DialogHeader>
           <DialogTitle>{t("Sign-in methods")}</DialogTitle>
           <DialogDescription>{t("Link a work or personal external account to sign in with it directly from the sign-in page.")}</DialogDescription>
@@ -51,7 +63,7 @@ export function LinkedAccountsDialog({ onClose }: { onClose(): void }) {
                     </div>
                   </div>
                   {linked ? (
-                    <Button variant="ghost" size="sm" disabled={unlink.isPending} onClick={() => unlink.mutate(p)} title={t("After unlinking, you can no longer sign in with this account")}>
+                    <Button variant="ghost" size="sm" disabled={unlink.isPending} onClick={() => confirmUnlink(p)} title={t("After unlinking, you can no longer sign in with this account")}>
                       <UnlinkIcon /> {t("Unlink")}
                     </Button>
                   ) : available ? (

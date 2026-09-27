@@ -11,6 +11,7 @@ import { useMarquee } from "@/components/useMarquee";
 import { Frame, type Crumb } from "@/components/Frame";
 import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
+import { toastWithUndo } from "@/lib/undo";
 import { formatBytes } from "@/lib/utils";
 import { enqueue, filesFromInput } from "@/uploads";
 import { useExplorerState } from "./explorer/state";
@@ -176,6 +177,8 @@ export function Explorer(p: ExplorerProps) {
                 onRename={async (n, name) => {
                   await api.rename(n.id, name);
                   refresh();
+                  if (name !== n.name)
+                    toastWithUndo(t("Renamed to \"{name}\"", { name }), { undo: () => api.rename(n.id, n.name), undoneText: t("Renamed back"), after: refresh });
                 }}
                 onRenameDone={() => setDialog(null)}
                 empty={

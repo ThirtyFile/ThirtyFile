@@ -23,8 +23,7 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdow
 import { cn } from "@/lib/utils";
 import { CONTROL_PANEL_ITEMS } from "@/lib/controlPanel";
 import { FileIcon as TypeIcon } from "@/components/FileIcon";
-import { hasDraft, setDraft, useDraftsVersion } from "@/lib/drafts";
-import { ConfirmDialog } from "@/components/dialogs";
+import { hasDraft, useDraftsVersion } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 import { currentEntry, useTabActions, useTabsState, viewedFile, type Tab } from "@/tabs";
 
@@ -61,26 +60,11 @@ function TabItem({ tab, active, onlyOne }: { tab: Tab; active: boolean; onlyOne:
   const file = viewedFile(tab);
   useDraftsVersion();
   const unsaved = !!file && hasDraft(file);
-  const [confirmClose, setConfirmClose] = useState(false);
-  // Confirm first when there are unsaved changes; only discard the draft once closing is confirmed (otherwise discarded changes would reappear on reopen)
-  const requestClose = () => (unsaved ? setConfirmClose(true) : close(tab.id));
+  // Asks first when there are unsaved changes
+  const requestClose = () => close(tab.id);
 
   return (
     <>
-      {confirmClose && file && (
-        <ConfirmDialog
-          title={t("Discard unsaved changes?")}
-          description={t("\"{name}\" has unsaved changes. If you close the tab, your changes will be lost.", { name: title })}
-          confirmText={t("Discard and close")}
-          destructive
-          onClose={() => setConfirmClose(false)}
-          onConfirm={async () => {
-            setDraft(file, null);
-            setConfirmClose(false);
-            close(tab.id);
-          }}
-        />
-      )}
       <ContextMenu>
         <ContextMenuTrigger
           render={<div />}

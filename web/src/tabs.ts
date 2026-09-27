@@ -3,6 +3,7 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 import { useNavigate } from "react-router";
+import { confirm } from "@/components/confirm";
 import { hasDraft, setDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 
@@ -67,13 +68,18 @@ export function viewedFile(t: Tab): string | null {
   return m ? m[1] : null;
 }
 
-/** Confirm before closing: ask when there are unsaved edits */
-function confirmClose(tab: Tab): boolean {
+/** Confirm before closing: ask when there are unsaved edits, and only discard them once closing is confirmed */
+async function confirmClose(tab: Tab): Promise<boolean> {
   const file = viewedFile(tab);
   if (!file || !hasDraft(file)) return true;
-  if (!window.confirm(t("\"{name}\" has unsaved changes. Close it anyway?", { name: tab.title || t("File") }))) return false;
-  setDraft(file, null);
-  return true;
+  const ok = await confirm({
+    title: t("Discard unsaved changes?"),
+    description: t("\"{name}\" has unsaved changes. If you close the tab, your changes will be lost.", { name: tab.title || t("File") }),
+    confirmText: t("Discard and close"),
+    destructive: true,
+  });
+  if (ok) setDraft(file, null);
+  return ok;
 }
 
 /** Load the user's tabs after signing in */
@@ -209,9 +215,12 @@ export function useTabActions() {
   );
 
   const close = useCallback(
-    (id: string) => {
+    async (id: string) => {
+      const tab = state.tabs.find((x) => x.id === id);
+      if (!tab || !(await confirmClose(tab))) return;
+      // Tabs may have changed while the question was open
       const i = state.tabs.findIndex((x) => x.id === id);
-      if (i < 0 || !confirmClose(state.tabs[i])) return;
+      if (i < 0) return;
       if (state.tabs.length === 1) {
         // Last tab: go back to the home page instead of closing
         const t = newTab(HOME);
@@ -231,12 +240,23 @@ export function useTabActions() {
     [go],
   );
 
-  const closeOthers = useCallback((id: string) => {
-    const tab = state.tabs.find((x) => x.id === id);
-    if (!tab) return;
+  const closeOthers = useCallback(async (id: string) => {
+    if (!state.tabs.some((x) => x.id === id)) return;
     // Ask once for all of them, so cancelling can't leave some drafts already discarded
     const unsaved = state.tabs.filter((x) => x.id !== id).map(viewedFile).filter((f): f is string => !!f && hasDraft(f));
-    if (unsaved.length && !window.confirm(t("{n} tab has unsaved changes. Close it anyway?|{n} tabs have unsaved changes. Close them anyway?", { n: unsaved.length }))) return;
+    if (
+      unsaved.length &&
+      !(await confirm({
+        title: t("Discard unsaved changes?"),
+        description: t("{n} tab has unsaved changes. If you close it, the changes will be lost.|{n} tabs have unsaved changes. If you close them, the changes will be lost.", { n: unsaved.length }),
+        confirmText: t("Discard and close"),
+        destructive: true,
+      }))
+    )
+      return;
+    // Tabs may have changed while the question was open
+    const tab = state.tabs.find((x) => x.id === id);
+    if (!tab) return;
     unsaved.forEach((f) => setDraft(f, null));
     set({ tabs: [tab], active: tab.id });
     if (id !== state.active) go(currentEntry(tab));

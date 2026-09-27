@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ErrorText } from "@/components/dialogs";
+import { useConfirm } from "@/components/confirm";
 import { ROLE_HINT, ROLE_LABEL } from "@/lib/drives";
 import { useMe } from "@/lib/session";
 import { cn, formatDate } from "@/lib/utils";
@@ -162,6 +163,27 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
     onSuccess: () => refresh(),
     onError: (e) => toast.error(e.message),
   });
+  const [ask, question] = useConfirm();
+  const confirmRemove = async (g: Grant, self: boolean) => {
+    const name = info?.is_drive_root ? info.drive.name : (info?.node.name ?? "");
+    const ok = await ask(
+      self
+        ? {
+            title: t("Leave “{name}”?", { name }),
+            description: t("You'll lose your access to it right away. Only someone who manages it can give it back."),
+            confirmText: t("Leave"),
+            destructive: true,
+          }
+        : {
+            title: t("Remove access for {name}?", { name: principalName(g) }),
+            description: t("They'll lose their access to it right away. You can give it back later."),
+            confirmText: t("Remove"),
+            destructive: true,
+          },
+    );
+    // Once you have left, there is nothing more here for you to see
+    if (ok) remove.mutate(g.id, { onSuccess: () => self && onClose() });
+  };
 
   const info = q.data;
   const personalRoot = info?.drive.kind === "personal" && info.is_drive_root;
@@ -175,6 +197,7 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
+        {question}
         <DialogHeader>
           <DialogTitle className="truncate pr-8">{title}</DialogTitle>
           <DialogDescription>
@@ -248,7 +271,7 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
                       onRole={(r) =>
                         add.mutate({ principal_type: g.principal_type, principal_id: g.principal_id, role: r, expires_at: g.expires_at })
                       }
-                      onRemove={info.can_manage || canLeave ? () => remove.mutate(g.id) : undefined}
+                      onRemove={info.can_manage || canLeave ? () => confirmRemove(g, self) : undefined}
                       removeLabel={canLeave && !info.can_manage ? t("Leave") : t("Remove")}
                     />
                   );

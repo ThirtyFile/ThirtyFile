@@ -4,6 +4,8 @@ import { useSyncExternalStore } from "react";
 export interface FileClipboard {
   mode: "cut" | "copy";
   ids: string[];
+  /** Cut: the folder each item was in, so the move can be taken back after pasting */
+  origins?: Map<string, string>;
 }
 
 let clip: FileClipboard | null = null;

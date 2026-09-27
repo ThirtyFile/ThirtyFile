@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { backgroundUrl, brandForeground, DEFAULT_BRANDING, logoUrl, useBranding, type Branding } from "@/lib/branding";
 import { SiteName } from "@/components/SiteName";
 import { formatClock, formatDate, LoginAvatar, LoginWallpaper } from "@/pages/LoginPage";
+import { confirm } from "@/components/confirm";
 import type { ThemeMode } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { t, tServer, tc } from "@/lib/i18n";
@@ -363,7 +364,20 @@ function LogoSlot({ variant, saved }: { variant: "light" | "dark"; saved: Brandi
           {has ? t("Replace") : t("Upload")}
         </Button>
         {has && (
-          <Button variant="ghost" size="sm" disabled={remove.isPending} onClick={() => remove.mutate()}>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={remove.isPending}
+            onClick={async () => {
+              const ok = await confirm({
+                title: dark ? t("Remove the dark mode logo?") : t("Remove the logo?"),
+                description: t("The image is deleted. To use it again, you'll need to upload it again."),
+                confirmText: t("Remove"),
+                destructive: true,
+              });
+              if (ok) remove.mutate();
+            }}
+          >
             <Trash2Icon /> {t("Remove")}
           </Button>
         )}
@@ -470,7 +484,20 @@ function BackgroundSlot({ saved }: { saved: Branding }) {
               {has ? t("Replace") : t("Upload")}
             </Button>
             {has && (
-              <Button variant="ghost" size="sm" disabled={remove.isPending} onClick={() => remove.mutate()}>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={remove.isPending}
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: t("Remove the background image?"),
+                    description: t("The image is deleted. To use it again, you'll need to upload it again."),
+                    confirmText: t("Remove"),
+                    destructive: true,
+                  });
+                  if (ok) remove.mutate();
+                }}
+              >
                 <Trash2Icon /> {t("Remove")}
               </Button>
             )}

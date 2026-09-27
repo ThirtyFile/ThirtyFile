@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AlertCircleIcon, CheckCircle2Icon, ChevronDownIcon, ChevronUpIcon, FileArchiveIcon, FileDownIcon, RotateCwIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { confirm } from "@/components/confirm";
 import { cn, formatBytes } from "@/lib/utils";
 import { cancelDownload, clearDownloads, removeDownload, retryDownload, useDownloads, type DownloadTask } from "@/downloads";
 import { t } from "@/lib/i18n";
@@ -59,7 +60,10 @@ export function DownloadPanel() {
           variant="ghost"
           aria-label={t("Close")}
           title={t("Close")}
-          onClick={() => (active.length ? window.confirm(t("Cancel all downloads in progress?")) && clearDownloads() : clearDownloads())}
+          onClick={async () => {
+            if (active.length && !(await confirm({ title: t("Cancel all downloads in progress?"), confirmText: t("Cancel downloads"), destructive: true }))) return;
+            clearDownloads();
+          }}
         >
           <XIcon />
         </Button>
