@@ -78,8 +78,6 @@ export default {
   "{n} team space|{n} team spaces": "{n} 個團隊空間",
   "{n} location · Default: {name}|{n} locations · Default: {name}": "{n} 個位置 · 預設：{name}",
   "{size} used on disk": "實際佔用 {size}",
-  "\"All files\" enabled": "「全部檔案」已啟用",
-  "\"All files\" disabled": "「全部檔案」已停用",
   "Open": "開啟",
   "Open in new tab": "在新分頁開啟",
   "Refresh": "重新整理",

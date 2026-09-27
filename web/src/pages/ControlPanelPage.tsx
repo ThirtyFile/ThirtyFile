@@ -34,6 +34,9 @@ export function ControlPanelPage() {
   const [collapsed, setCollapsed] = useState<string[]>([]);
   const system = useQuery({ queryKey: ["system"], queryFn: api.systemSettings });
   const locations = useQuery({ queryKey: ["storage-locations"], queryFn: api.storageLocations });
+  const drives = useQuery({ queryKey: ["admin-drives"], queryFn: api.adminDrives });
+  // The company space can be renamed, so the summary uses its current name
+  const company = drives.data?.find((d) => d.kind === "company")?.name ?? t("All files");
 
   const s = system.data?.stats;
   const defaultLocation = locations.data?.find((l) => l.is_default);
@@ -46,7 +49,7 @@ export function ControlPanelPage() {
           ? t("{n} location · Default: {name}|{n} locations · Default: {name}", { n: locations.data.length, name: defaultLocation?.name ?? "—" })
           : undefined,
         usage: t("{size} used on disk", { size: formatBytes(s.stored_bytes) }),
-        general: system.data?.shared_enabled ? t("\"All files\" enabled") : t("\"All files\" disabled"),
+        general: system.data?.shared_enabled ? t("\"{name}\" enabled", { name: company }) : t("\"{name}\" disabled", { name: company }),
       }
     : {};
 

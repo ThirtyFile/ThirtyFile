@@ -93,7 +93,7 @@ export function FileViewPage() {
       />
       <ToolButton
         icon={Share2Icon}
-        label={t("Share")}
+        label={t("Create share link")}
         className="size-9 px-0 [&_svg]:size-[18px]"
         disabled={!node || !caps.share}
         onClick={() => setDialog("share")}
@@ -129,7 +129,7 @@ export function FileViewPage() {
         onClick={() => setDetailsOpen(!detailsOpen)}
       >
         <PanelRightIcon />
-        <span className="max-lg:hidden">{t("Details")}</span>
+        <span className="max-lg:hidden">{t("Details pane")}</span>
       </Button>
     </>
   );

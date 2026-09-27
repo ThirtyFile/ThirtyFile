@@ -224,7 +224,7 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
                   </select>
                   <Button type="submit" size="sm" className="h-8" disabled={!principal || add.isPending}>
                     {add.isPending && <Loader2Icon className="animate-spin" />}
-                    {t("New")}
+                    {t("Add")}
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">

@@ -70,7 +70,7 @@ export function FavoritesPage() {
       sort={sort}
       onSort={onSort}
       onSortChange={setSort}
-      crumbs={crumbs(t("Favorite"))}
+      crumbs={crumbs(t("Favorites"))}
       icon={StarIcon}
       empty={<Empty icon={StarIcon} text={t("No favorites yet")} hint={t("Right-click a file, or choose Add to favorites from the ⋯ menu.")} />}
     />

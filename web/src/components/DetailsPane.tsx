@@ -93,7 +93,7 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
   return (
     <aside
       ref={ref}
-      aria-label={t("Details")}
+      aria-label={t("Details pane")}
       style={{ width, maxWidth: "85vw" }}
       className="relative flex shrink-0 flex-col border-l bg-background max-lg:absolute max-lg:inset-y-0 max-lg:right-0 max-lg:z-10 max-lg:shadow-xl"
     >

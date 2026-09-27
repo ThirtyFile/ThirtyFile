@@ -180,7 +180,7 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
         onClick={() => setDetailsOpen(!detailsOpen)}
       >
         <PanelRightIcon />
-        <span className="max-lg:hidden">{t("Details")}</span>
+        <span className="max-lg:hidden">{t("Details pane")}</span>
       </Button>
     </>
   );

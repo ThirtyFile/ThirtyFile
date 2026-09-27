@@ -318,7 +318,7 @@ function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean; activ
       />
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-2.5">
         <NavItem to="/recent" icon={ClockIcon} label={t("Recent")} />
-        <NavItem to="/favorites" icon={StarIcon} label={t("Favorite")} />
+        <NavItem to="/favorites" icon={StarIcon} label={t("Favorites")} />
         <div className="my-2 border-t" />
         <ThisPc activeId={activeFolder} />
         <NavItem to="/shared-with-me" icon={UsersRoundIcon} label={t("Shared with me")} />

@@ -120,7 +120,6 @@ export default {
   // components/TabBar.tsx, tabs.ts
   "Folder": "資料夾",
   "Search": "搜尋",
-  "My shares": "我的分享",
   "Discard unsaved changes?": "捨棄未儲存的修改？",
   "\"{name}\" has unsaved changes. If you close the tab, your changes will be lost.": "「{name}」有尚未儲存的修改，關閉分頁後修改會遺失。",
   "Discard and close": "捨棄並關閉",

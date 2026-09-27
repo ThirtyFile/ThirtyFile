@@ -113,7 +113,7 @@ export function SharesPage() {
   ];
 
   return (
-    <Frame toolbar={toolbar} crumbs={[{ label: t("Files") }, { label: t("My shares") }]} icon={Link2Icon} footer={<span>{t("{n} share link|{n} share links", { n: items.length })}</span>}>
+    <Frame toolbar={toolbar} crumbs={[{ label: t("Files") }, { label: t("My share links") }]} icon={Link2Icon} footer={<span>{t("{n} share link|{n} share links", { n: items.length })}</span>}>
       {local && (
         <div className="shrink-0 border-b p-2">
           <LocalLinkWarning admin={admin} />
@@ -128,7 +128,7 @@ export function SharesPage() {
         selectedKey={selected}
         onSelect={setSelected}
         onOpen={(s) => copy(s.id)}
-        empty={<EmptyState icon={Link2OffIcon} title={t("You haven't shared any files yet")} hint={t("Select a file and click Share on the toolbar to create a public link.")} />}
+        empty={<EmptyState icon={Link2OffIcon} title={t("You haven't shared any files yet")} hint={t("Select a file and click Create share link on the toolbar to create a public link.")} />}
         menu={() =>
           current ? (
             <>

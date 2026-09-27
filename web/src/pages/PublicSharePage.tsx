@@ -225,7 +225,7 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
               onClick={() => setView(v)}
               className={cn("rounded-md px-2 py-0.5 text-xs", view === v ? "bg-secondary" : "text-muted-foreground")}
             >
-              {v === "list" ? t("List") : t("Icons")}
+              {v === "list" ? t("Details") : t("Large icons")}
             </button>
           ))}
         </div>

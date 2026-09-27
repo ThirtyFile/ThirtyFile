@@ -39,9 +39,9 @@ function describe(path: string): { icon: LucideIcon; title: string } {
   if (p === "/shared-with-me") return { icon: UsersRoundIcon, title: t("Shared with me") };
   if (p.startsWith("/files/")) return { icon: FolderIcon, title: t("Folder") };
   if (p === "/recent") return { icon: ClockIcon, title: t("Recent") };
-  if (p === "/favorites") return { icon: StarIcon, title: t("Favorite") };
+  if (p === "/favorites") return { icon: StarIcon, title: t("Favorites") };
   if (p === "/search") return { icon: SearchIcon, title: t("Search") };
-  if (p === "/shares") return { icon: Link2Icon, title: t("My shares") };
+  if (p === "/shares") return { icon: Link2Icon, title: t("My share links") };
   if (p === "/trash") return { icon: Trash2Icon, title: t("Trash") };
   if (p === "/admin") return { icon: SettingsIcon, title: t("Control panel") };
   const cp = CONTROL_PANEL_ITEMS.find((i) => i.to === p);
