@@ -1,0 +1,22 @@
+/** Traditional Chinese translations (English source text → Traditional Chinese): search filters */
+export default {
+  "Search filters": "搜尋篩選條件",
+  "Look in": "搜尋範圍",
+  "{name} and its subfolders": "{name}及其子資料夾",
+  "Everywhere I have access": "所有我能存取的位置",
+  "Any": "不限",
+  "Documents": "文件",
+  "Spreadsheets": "試算表",
+  "Presentations": "簡報",
+  "Pictures": "圖片",
+  "Videos": "影片",
+  "Music and sound": "音樂和音訊",
+  "Compressed archives": "壓縮檔",
+  "Last 7 days": "過去 7 天",
+  "Last 30 days": "過去 30 天",
+  "Last year": "過去一年",
+  "Smaller than 1 MB": "小於 1 MB",
+  "1 to 100 MB": "1 到 100 MB",
+  "Larger than 100 MB": "大於 100 MB",
+  "Showing the first {n} results. Add words or filters to find the rest.": "只顯示前 {n} 筆結果。請加入更多字詞或篩選條件來找到其餘項目。",
+} satisfies Record<string, string>;

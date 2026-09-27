@@ -18,6 +18,19 @@ export interface Node {
   is_favorite: boolean;
 }
 
+export interface SearchFilter {
+  /** Folder id: that folder and below */
+  in?: string;
+  kind?: "file" | "folder";
+  /** Extensions, comma separated */
+  ext?: string;
+  /** Modified from / before (Unix seconds) */
+  from?: number;
+  to?: number;
+  min_size?: number;
+  max_size?: number;
+}
+
 export interface Located extends Node {
   /** Where the item is, e.g. "All files/Projects/2026", in the interface's language (built by `localizeLocated`) */
   location: string;
@@ -713,7 +726,9 @@ export const api = {
   emptyTrash: () => post("/trash/empty"),
   /** What Empty trash would delete: items per space */
   emptyTrashPreview: () => get<{ kind: string; name: string; items: number }[]>("/trash/empty"),
-  search: (q: string) => get<Located[]>(`/search${qs({ q })}`).then((l) => l.map(localizeLocated)),
+  /** Names containing `q`; at most 300 (`truncated` when there were more) */
+  search: (q: string, f: SearchFilter = {}) =>
+    get<{ items: Located[]; truncated: boolean }>(`/search${qs(toParams({ q, ...f }))}`).then((r) => ({ ...r, items: r.items.map(localizeLocated) })),
   recent: () => get<Located[]>("/recent").then((l) => l.map(localizeLocated)),
   favorites: (sort?: SortKey, order?: SortOrder) => get<Located[]>(`/favorites${qs({ sort, order })}`).then((l) => l.map(localizeLocated)),
   setFavorite: (ids: string[], favorite: boolean) => post("/nodes/favorite", { ids, favorite }),

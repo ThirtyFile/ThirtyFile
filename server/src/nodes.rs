@@ -914,24 +914,97 @@ async fn purge_trash_in_batches(st: &AppState, select: &'static str, param: Stri
 #[derive(Deserialize)]
 pub struct SearchQuery {
     q: String,
+    /// Only this folder and what's below it (a folder id); without it, everything the user can open
+    #[serde(rename = "in")]
+    within: Option<String>,
+    /// "folder" or "file"
+    kind: Option<String>,
+    /// Extensions without the dot, comma separated (files only)
+    ext: Option<String>,
+    /// Modified at or after / before (Unix seconds)
+    from: Option<i64>,
+    to: Option<i64>,
+    /// Size in bytes (files only)
+    min_size: Option<i64>,
+    max_size: Option<i64>,
+    /// Uploaded by (username, exact)
+    owner: Option<String>,
 }
 
-/// Searches all spaces and shared folders I can access
-pub async fn search(State(st): State<AppState>, user: User, Query(q): Query<SearchQuery>) -> AppResult<Json<Vec<Located>>> {
+/// Results returned at most
+const SEARCH_LIMIT: i64 = 300;
+
+#[derive(Serialize)]
+pub struct SearchResult {
+    items: Vec<Located>,
+    /// More matches than returned
+    truncated: bool,
+}
+
+/// Searches names in all spaces and shared folders I can access, or in one folder and below
+pub async fn search(State(st): State<AppState>, user: User, Query(q): Query<SearchQuery>) -> AppResult<Json<SearchResult>> {
     let term = q.q.trim();
     if term.is_empty() {
-        return Ok(Json(Vec::new()));
+        return Ok(Json(SearchResult { items: Vec::new(), truncated: false }));
     }
-    let (drives, folders) = tree::scope(&mut *st.db.acquire().await?, &user).await?;
-    let escaped = term.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
-    let sql = format!(
-        "SELECT {NODE_COLS} FROM nodes n
-         WHERE {} AND n.trashed_at IS NULL AND n.parent_id IS NOT NULL AND n.name LIKE ?3 ESCAPE '\\'
-         ORDER BY (n.kind = 'folder') DESC, n.updated_at DESC LIMIT 300",
-        tree::scope_sql(1, 2)
-    );
-    let nodes: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(drives).bind(folders).bind(format!("%{escaped}%")).fetch_all(&st.db).await?;
-    Ok(Json(locate(&st, &user, nodes).await?))
+    let mut c = st.db.acquire().await?;
+    let (drives, folders) = tree::scope(&mut c, &user).await?;
+    let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(format!("SELECT {NODE_COLS} FROM nodes n WHERE "));
+    qb.push("(n.drive_id IN (SELECT value FROM json_each(").push_bind(drives).push("))");
+    qb.push(" OR n.id IN (WITH RECURSIVE s(id) AS (SELECT value FROM json_each(").push_bind(folders);
+    qb.push(") UNION ALL SELECT c.id FROM nodes c JOIN s ON c.parent_id = s.id) SELECT id FROM s))");
+    qb.push(" AND n.trashed_at IS NULL AND n.parent_id IS NOT NULL");
+    if let Some(within) = q.within.as_deref().filter(|w| !w.is_empty()) {
+        let folder = tree::folder_for(&mut c, &user, within, Need::Read).await?;
+        qb.push(" AND n.id IN (WITH RECURSIVE d(id) AS (SELECT id FROM nodes WHERE parent_id = ").push_bind(folder.id);
+        qb.push(" AND trashed_at IS NULL UNION ALL SELECT c.id FROM nodes c JOIN d ON c.parent_id = d.id WHERE c.trashed_at IS NULL) SELECT id FROM d)");
+    }
+    if term.chars().count() >= 3 {
+        // The trigram index: the term as one phrase (quotes inside it doubled)
+        qb.push(" AND n.rowid IN (SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ").push_bind(format!("\"{}\"", term.replace('"', "\"\""))).push(")");
+    } else {
+        let escaped = term.to_lowercase().replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        qb.push(" AND unicode_lower(n.name) LIKE ").push_bind(format!("%{escaped}%")).push(" ESCAPE '\\'");
+    }
+    match q.kind.as_deref() {
+        Some("folder") => {
+            qb.push(" AND n.kind = 'folder'");
+        }
+        Some("file") => {
+            qb.push(" AND n.kind = 'file'");
+        }
+        _ => {}
+    }
+    let exts: Vec<String> = q.ext.as_deref().unwrap_or_default().split(',').map(|e| e.trim().trim_start_matches('.').to_lowercase()).filter(|e| !e.is_empty()).collect();
+    if !exts.is_empty() {
+        qb.push(" AND n.kind = 'file' AND (");
+        let mut sep = qb.separated(" OR ");
+        for e in exts {
+            sep.push("unicode_lower(n.name) LIKE ").push_bind_unseparated(format!("%.{}", e.replace(['%', '\\'], "").replace('_', "\\_"))).push_unseparated(" ESCAPE '\\'");
+        }
+        qb.push(")");
+    }
+    if let Some(f) = q.from {
+        qb.push(" AND n.updated_at >= ").push_bind(f);
+    }
+    if let Some(t) = q.to {
+        qb.push(" AND n.updated_at < ").push_bind(t);
+    }
+    if let Some(m) = q.min_size {
+        qb.push(" AND n.kind = 'file' AND n.size >= ").push_bind(m);
+    }
+    if let Some(m) = q.max_size {
+        qb.push(" AND n.kind = 'file' AND n.size <= ").push_bind(m);
+    }
+    if let Some(o) = q.owner.as_deref().filter(|o| !o.trim().is_empty()) {
+        qb.push(" AND n.owner_id = (SELECT id FROM users WHERE username = ").push_bind(o.trim().to_string()).push(")");
+    }
+    qb.push(" ORDER BY (n.kind = 'folder') DESC, n.updated_at DESC LIMIT ").push_bind(SEARCH_LIMIT + 1);
+    let mut nodes: Vec<Node> = qb.build_query_as().fetch_all(&mut *c).await?;
+    drop(c);
+    let truncated = nodes.len() as i64 > SEARCH_LIMIT;
+    nodes.truncate(SEARCH_LIMIT as usize);
+    Ok(Json(SearchResult { items: locate(&st, &user, nodes).await?, truncated }))
 }
 
 #[derive(Deserialize)]
@@ -1269,6 +1342,49 @@ mod tests {
         let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id = ?").bind(&team).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(left, 0);
         assert_eq!(refs().await, Some(2), "the copies still use the content");
+    }
+
+    #[tokio::test]
+    async fn search_finds_names_in_any_letter_case_and_filters() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let reports = env.folder(&amy, &amy.root_id, "Reports").await;
+        env.file(&amy, &reports, "Été 2026.xlsx").await;
+        env.file(&amy, &reports, "budget.docx").await;
+        env.file(&amy, &amy.root_id, "ete-notes.txt").await;
+        env.file(&amy, &amy.root_id, "AB.txt").await;
+        let search = |q: &str, within: Option<&str>, ext: Option<&str>| {
+            let (st, amy) = (env.st.clone(), amy.clone());
+            let q = SearchQuery {
+                q: q.into(),
+                within: within.map(str::to_string),
+                kind: None,
+                ext: ext.map(str::to_string),
+                from: None,
+                to: None,
+                min_size: None,
+                max_size: None,
+                owner: None,
+            };
+            async move {
+                let Json(r) = search(State(st), amy, Query(q)).await.unwrap();
+                let mut names: Vec<String> = r.items.into_iter().map(|l| l.node.name).collect();
+                names.sort();
+                names
+            }
+        };
+        // Letter case and accents in any language, through the trigram index
+        assert_eq!(search("ÉTÉ", None, None).await, ["ete-notes.txt", "Été 2026.xlsx"]);
+        // Short terms scan, also ignoring case
+        assert_eq!(search("ab", None, None).await, ["AB.txt"]);
+        // Only below a folder, and by type
+        assert_eq!(search("ete", Some(&reports), None).await, ["Été 2026.xlsx"]);
+        assert_eq!(search("e", None, Some("docx")).await, ["budget.docx"]);
+        // Renames are indexed
+        let id = env.file(&amy, &amy.root_id, "old name.txt").await;
+        let _ = rename(State(env.st.clone()), amy.clone(), Path(id), Json(RenameReq { name: "Quarterly.txt".into() })).await.unwrap();
+        assert_eq!(search("quarter", None, None).await, ["Quarterly.txt"]);
+        assert!(search("old name", None, None).await.is_empty());
     }
 
     #[tokio::test]

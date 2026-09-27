@@ -284,11 +284,13 @@ export interface Crumb {
   virtual?: boolean;
 }
 
-function SearchInput({ placeholder, onSearch }: { placeholder: string; onSearch?: (q: string) => void }) {
+function SearchInput({ placeholder, onSearch, within }: { placeholder: string; onSearch?: (q: string) => void; within?: string }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [params] = useSearchParams();
   const onSearchPage = location.pathname === "/search";
+  // Searching from a folder looks in that folder and below (the search page keeps the scope it was opened with)
+  const scope = onSearchPage ? (params.get("in") ?? undefined) : within;
   // When the page filters itself (control panel), the search string lives in the URL's ?q=, so typing can continue after jumping over from a settings page
   const initial = onSearchPage || onSearch ? (params.get("q") ?? "") : "";
   const [q, setQ] = useState(initial);
@@ -307,7 +309,7 @@ function SearchInput({ placeholder, onSearch }: { placeholder: string; onSearch?
     clearTimeout(timer.current);
     timer.current = setTimeout(() => {
       if (v.trim())
-        navigate(`/search?q=${encodeURIComponent(v.trim())}`, {
+        navigate(`/search?q=${encodeURIComponent(v.trim())}${scope ? `&in=${encodeURIComponent(scope)}` : ""}`, {
           replace: onSearchPage,
         });
     }, 350);
@@ -343,6 +345,7 @@ function AddressBar({
   upTo,
   searchPlaceholder,
   onSearch,
+  searchIn,
   icon: Icon,
 }: {
   crumbs: Crumb[];
@@ -350,6 +353,8 @@ function AddressBar({
   upTo?: string | null;
   searchPlaceholder: string;
   onSearch?: (q: string) => void;
+  /** Folder the search box searches in (and below); none = everything */
+  searchIn?: string;
   icon: LucideIcon;
 }) {
   const navigate = useNavigate();
@@ -457,7 +462,7 @@ function AddressBar({
           {copied ? <CheckIcon /> : <CopyIcon />}
         </Button>
       </div>
-      <SearchInput placeholder={searchPlaceholder} onSearch={onSearch} />
+      <SearchInput placeholder={searchPlaceholder} onSearch={onSearch} within={searchIn} />
     </div>
   );
 }
@@ -502,8 +507,9 @@ export function Frame(p: FrameProps) {
         icon={p.icon ?? FolderIcon}
         path={p.path ?? crumbPath(p.crumbs)}
         upTo={p.upTo}
-        searchPlaceholder={p.searchPlaceholder ?? t("Search {name}", { name: title })}
+        searchPlaceholder={p.searchPlaceholder ?? (p.activeFolder ? t("Search {name}", { name: title }) : t("Search all spaces"))}
         onSearch={p.onSearch}
+        searchIn={p.activeFolder}
       />
       <div className="flex min-h-12 shrink-0 flex-wrap items-center gap-1 border-y px-3 py-1.5 max-lg:px-2">
         <ToolButton icon={PanelLeftIcon} label={t("Location")} showLabel className="md:hidden" aria-expanded={navOpen} onClick={() => setNavOpen(!navOpen)} />
