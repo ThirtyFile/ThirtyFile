@@ -666,7 +666,7 @@ export interface FileSource {
 export const privateSource: FileSource = {
   contentUrl: (n, download) => `/api/files/${n.id}/content${download ? "?download=1" : ""}`,
   thumbUrl: (n) => `/api/files/${n.id}/thumbnail?v=${n.updated_at}`,
-  downloadUrl: (ids) => `/api/download?ids=${ids.join(",")}`,
+  downloadUrl: (ids) => `/api/download?ids=${ids.join(",")}&tz=${new Date().getTimezoneOffset()}`,
 };
 
 export function shareSource(token: string): FileSource {
@@ -674,7 +674,7 @@ export function shareSource(token: string): FileSource {
   return {
     contentUrl: (n, download) => `${base}/nodes/${n.id}/content${download ? "?download=1" : ""}`,
     thumbUrl: (n) => `${base}/nodes/${n.id}/thumbnail?v=${n.updated_at}`,
-    downloadUrl: (ids) => `${base}/download?ids=${ids.join(",")}`,
+    downloadUrl: (ids) => `${base}/download?ids=${ids.join(",")}&tz=${new Date().getTimezoneOffset()}`,
   };
 }
 

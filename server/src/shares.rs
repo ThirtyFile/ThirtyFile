@@ -44,8 +44,21 @@ const SHARE_TOKEN_LEN: usize = 10;
 
 const SHARE_COLS: &str = "s.id, s.node_id, s.password_hash IS NOT NULL AS has_password, s.expires_at, s.max_downloads,
      s.downloads, s.created_at, n.name AS node_name, n.kind AS node_kind,
-     (SELECT COUNT(*) FROM share_access a WHERE a.share_id = s.id AND a.event = 'view') AS views,
-     (SELECT MAX(at) FROM share_access a WHERE a.share_id = s.id) AS last_access";
+     s.views, s.last_access";
+
+/// Counts a visit on the share itself: the access log is archived and trimmed, the counters stay
+async fn note_access(st: &AppState, share_id: &str, view: bool) {
+    let _w = st.write_lock.lock().await;
+    let res = sqlx::query("UPDATE shares SET views = views + ?, last_access = ? WHERE id = ?")
+        .bind(view as i64)
+        .bind(now())
+        .bind(share_id)
+        .execute(&st.db)
+        .await;
+    if let Err(e) = res {
+        tracing::warn!("Couldn't count a visit of share {share_id}: {e}");
+    }
+}
 
 #[derive(Deserialize)]
 pub struct ListQuery {
@@ -277,6 +290,7 @@ pub async fn public_info(
     // The address is only kept in memory for this; whether it is written to the log depends on the log settings
     if logs::first_view_in_a_while(&st, &share.id, &auth::client_ip(&st, addr, &headers)) {
         record_share_access(&st, &share.id, share.owner_id, Some(&node), "view", &visitor);
+        note_access(&st, &share.id, true).await;
     }
     let unlocked =
         share.password_hash.is_none() || auth::cookie_matches(&headers, &cookie_name(&token), &unlock_value(&st, &share));
@@ -406,12 +420,17 @@ pub async fn public_content(
         files::range_start(&headers, node.size as u64) > 0 && (!limited || continues_download(&st, &headers, &token, &share));
     let counted = !continuation && (download || limited);
     if counted {
+        ensure_quota_left(&share)?;
+    }
+    // Opened first: a download that fails because the storage can't be reached doesn't use up the link
+    let mut res = serve_blob(&st, &headers, node_blob(&node)?, download).await?;
+    if counted {
         count_download(&st, &share).await?;
     }
     if !continuation {
         record_share_access(&st, &share.id, share.owner_id, Some(&node), if download { "download" } else { "preview" }, &visitor);
+        note_access(&st, &share.id, false).await;
     }
-    let mut res = serve_blob(&st, &headers, node_blob(&node)?, download).await?;
     if counted && limited {
         res.headers_mut().append(header::SET_COOKIE, download_cookie(&st, &token, &share)?);
     }
@@ -438,6 +457,8 @@ pub async fn public_thumbnail(
 #[derive(Deserialize)]
 pub struct DownloadQuery {
     ids: String,
+    /// The browser's time zone (JavaScript's getTimezoneOffset), for the times inside a ZIP
+    tz: Option<i64>,
 }
 
 pub async fn public_download(
@@ -461,21 +482,23 @@ pub async fn public_download(
         && files::range_start(&headers, roots[0].size as u64) > 0
         && (share.max_downloads.is_none() || continues_download(&st, &headers, &token, &share));
     if !continuation {
-        // A zip of several items: the limit is checked before the first entry is streamed
         ensure_quota_left(&share)?;
+    }
+    // Opened first (a ZIP opens its first file before answering): a download that fails because the storage can't be
+    // reached doesn't use up the link
+    let mut res = match roots.as_slice() {
+        [one] if !one.is_folder() => serve_blob(&st, &headers, node_blob(one)?, true).await?,
+        _ => files::zip_response(&st, roots.clone(), q.tz.unwrap_or(0)).await?,
+    };
+    if !continuation {
         count_download(&st, &share).await?;
         record_share_access(&st, &share.id, share.owner_id, roots.first(), if single { "download" } else { "zip" }, &visitor);
-    }
-    if let [one] = roots.as_slice()
-        && !one.is_folder()
-    {
-        let mut res = serve_blob(&st, &headers, node_blob(one)?, true).await?;
-        if !continuation && share.max_downloads.is_some() {
+        note_access(&st, &share.id, false).await;
+        if single && share.max_downloads.is_some() {
             res.headers_mut().append(header::SET_COOKIE, download_cookie(&st, &token, &share)?);
         }
-        return Ok(res);
     }
-    files::zip_response(&st, roots).await
+    Ok(res)
 }
 
 #[cfg(test)]
@@ -536,6 +559,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_download_that_fails_to_open_doesnt_use_up_the_link() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let doc = stored_file(&env, &amy, &amy.root_id, "report.pdf", b"content").await;
+        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: Some(1) };
+        let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
+        let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
+        let get = || public_content(State(env.st.clone()), Path((info.id.clone(), doc.clone())), Query(ContentQuery { download: Some(1) }), HeaderMap::new(), visitor());
+        // The stored content can't be read (a storage service that is down behaves the same)
+        let hash = crate::util::sha256_hex(b"content");
+        let blob = env.dir.join("blobs").join(&hash[0..2]).join(&hash[2..4]).join(&hash);
+        let moved = blob.with_extension("away");
+        std::fs::rename(&blob, &moved).unwrap();
+        assert!(get().await.is_err());
+        // Back again: the one allowed download still works
+        std::fs::rename(&moved, &blob).unwrap();
+        assert_eq!(get().await.unwrap().status(), StatusCode::OK);
+        assert_eq!(get().await.unwrap_err().status, StatusCode::GONE);
+    }
+
+    #[tokio::test]
+    async fn visits_are_counted_on_the_share_and_survive_trimming_the_log() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let doc = stored_file(&env, &amy, &amy.root_id, "a.txt", b"hello").await;
+        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: None };
+        let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
+        let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
+        for ip in ["203.0.113.1:1", "203.0.113.2:1"] {
+            let addr: std::net::SocketAddr = ip.parse().unwrap();
+            let _ = public_info(State(env.st.clone()), Path(info.id.clone()), ConnectInfo(addr), HeaderMap::new(), visitor()).await.unwrap();
+        }
+        // The access log is trimmed after its retention period; the count stays
+        sqlx::query("DELETE FROM share_access").execute(&env.st.db).await.unwrap();
+        let Json(list) = super::list(State(env.st.clone()), amy.clone(), Query(ListQuery { node_id: None })).await.unwrap();
+        assert_eq!(list[0].views, 2);
+        assert!(list[0].last_access.is_some());
+    }
+
+    #[tokio::test]
+    async fn zips_give_items_with_the_same_name_a_number_and_include_each_item_once() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let one = env.folder(&amy, &amy.root_id, "One").await;
+        let two = env.folder(&amy, &amy.root_id, "Two").await;
+        let a1 = stored_file(&env, &amy, &one, "a.txt", b"first").await;
+        let a2 = stored_file(&env, &amy, &two, "a.txt", b"second").await;
+        let zip = |ids: Vec<&String>| {
+            let st = env.st.clone();
+            let ids: Vec<String> = ids.into_iter().cloned().collect();
+            async move {
+                let mut roots = Vec::new();
+                let mut c = st.db.acquire().await.unwrap();
+                for id in &ids {
+                    roots.push(tree::get_node(&mut c, id).await.unwrap().unwrap());
+                }
+                drop(c);
+                let res = files::zip_response(&st, roots, -480).await.unwrap();
+                let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+                String::from_utf8_lossy(&body).into_owned()
+            }
+        };
+        // Two files named a.txt from different folders: the second is numbered (each name appears in the local header
+        // and in the central directory)
+        let text = zip(vec![&a1, &a2]).await;
+        assert_eq!((text.matches("a (1).txt").count(), text.matches("a.txt").count()), (2, 2));
+        // A file selected on its own and inside a selected folder, and selected twice: packed once, inside the folder
+        let text = zip(vec![&a1, &one, &a1]).await;
+        assert_eq!((text.matches("One/a.txt").count(), text.matches("a.txt").count()), (2, 2));
+    }
+
+    #[tokio::test]
     async fn download_limit_cannot_be_skipped_with_a_range_request() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
@@ -583,7 +678,7 @@ mod tests {
             if let Some(c) = cookie {
                 h.insert(header::COOKIE, c.parse().unwrap());
             }
-            public_download(State(env.st.clone()), Path(info.id.clone()), Query(DownloadQuery { ids: "root".into() }), h, visitor())
+            public_download(State(env.st.clone()), Path(info.id.clone()), Query(DownloadQuery { ids: "root".into(), tz: None }), h, visitor())
         };
         let first = download(None, None).await.unwrap();
         assert_eq!(first.status(), StatusCode::OK);
