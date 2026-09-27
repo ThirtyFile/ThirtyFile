@@ -61,6 +61,11 @@ form_urlencoded = "1"
 # Switching to an unprivileged user in the Docker image (privileges.rs)
 libc = "0.2"
 
+# The Docker image is a static musl build and keeps musl's own memory allocator. Measured against mimalloc
+# (same build, 4 cores, 160 concurrent 4 MB saves, 24 thumbnails of 1600×1200 pictures, 8 concurrent ZIPs of
+# 320 MB; see #54): mimalloc saved about 30% of the time on concurrent saves and changed thumbnails and ZIPs
+# little, but more than doubled peak memory (about 225 MB instead of 105 MB). With MIMALLOC_PURGE_DELAY=0 and
+# MIMALLOC_ARENA_EAGER_COMMIT=0 it still used 30% more memory and the gain was gone. Small servers (#50) matter more.
 [profile.release]
 opt-level = 3
 lto = "thin"
