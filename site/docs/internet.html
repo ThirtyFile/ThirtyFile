@@ -23,7 +23,8 @@
           <li>Set up the reverse proxy with one of the examples below.</li>
           <li>Enter the public address under <strong>Control panel › General › Site URL</strong>.</li>
         </ol>
-        <div class="note"><strong>The proxy setting must match your setup.</strong> Behind a proxy it has to be <code>true</code>, otherwise every visitor looks like the same person and one person's wrong passwords lock everybody out. Without a proxy it has to stay <code>false</code>.</div>
+        <div class="note"><strong>The proxy setting must match your setup.</strong> Behind a proxy it has to be <code>true</code> (or the proxy's address when it runs on another computer), otherwise every visitor looks like the same person and one person's wrong passwords lock everybody out. Without a proxy it has to stay <code>false</code>.</div>
+        <p>When the proxy runs on the same computer, make ThirtyFile reachable only from there: publish the port as <code>-p 127.0.0.1:8080:8080</code> (in <code>compose.yaml</code>: <code>"127.0.0.1:8080:8080"</code>). Docker's published ports bypass the computer's firewall.</p>
 
         <h2 id="caddy">Caddy</h2>
         <p>Caddy gets and renews the certificate by itself.</p>

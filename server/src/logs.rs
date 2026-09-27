@@ -1283,7 +1283,7 @@ mod tests {
             crate::auth::login(State(env.st.clone()), ConnectInfo(addr), headers.clone(), Json(req))
         };
 
-        assert!(login("amy", "password-1234").await.is_ok());
+        assert!(login("amy", crate::testutil::password()).await.is_ok());
         assert!(login("nobody", "whatever").await.is_err());
         // 5 consecutive failures: the 5th records a "locked" entry, and blocked attempts after that aren't recorded
         for _ in 0..5 {
