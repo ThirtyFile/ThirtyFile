@@ -7,6 +7,16 @@ import { applyStructOp, inverseOp } from "@/lib/sheet/ops";
 import { restoreStates, type Change, type Entry, type Layout, type Session } from "./session";
 
 const MAX_UNDO = 200;
+/** Row/column inserts and deletes keep full copies of the sheets they touch, so far fewer of them are kept */
+const MAX_STRUCT_UNDO = 20;
+
+/** Drop the oldest steps beyond the limits (always from the start: undo must replay the remaining steps in order) */
+function trimUndo(session: Session) {
+  let structs = session.undo.reduce((n, e) => n + (e.struct ? 1 : 0), 0);
+  while (session.undo.length > MAX_UNDO || structs > MAX_STRUCT_UNDO) {
+    if (session.undo.shift()?.struct) structs--;
+  }
+}
 
 export function applyChanges(book: Workbook, changes: Change[], dir: "after" | "before") {
   for (const ch of changes) {
@@ -32,7 +42,7 @@ export function applyLayout(book: Workbook, sheet: number, l: Layout) {
 /** Record a change that has already been applied */
 export function pushEntry(session: Session, e: Entry) {
   session.undo.push(e);
-  if (session.undo.length > MAX_UNDO) session.undo.shift();
+  trimUndo(session);
   session.redo = [];
   session.version++;
   session.calc.invalidate();
@@ -89,6 +99,7 @@ export function redo(session: Session): Entry | undefined {
   applyChanges(session.book, e.changes, "after");
   if (e.layout) applyLayout(session.book, e.layout.sheet, e.layout.after);
   session.undo.push(e);
+  trimUndo(session);
   session.version++;
   session.calc.invalidate();
   return e;

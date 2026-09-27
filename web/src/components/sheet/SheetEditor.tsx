@@ -38,6 +38,7 @@ import { saveSession } from "./save";
 import {
   dropSession,
   editText,
+  keepSession,
   openSession,
   parseInput,
   releaseIfClean,
@@ -67,7 +68,12 @@ export default function SheetEditor(props: { node: Node; source: FileSource; onS
     setSession(null);
     setError(null);
     openSession(node, props.source)
-      .then((s) => !cancelled && setSession(s))
+      .then((s) => {
+        // Closed (or moved to another file) while loading: don't keep the workbook in memory
+        if (cancelled) return;
+        keepSession(node.id, s);
+        setSession(s);
+      })
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : t("Couldn't open this spreadsheet")));
     return () => {
       cancelled = true;

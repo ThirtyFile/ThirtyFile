@@ -178,9 +178,10 @@ export function reusableSession(node: Node): Session | undefined {
   return undefined;
 }
 
+/** Load a workbook into a new session. It isn't kept for reuse until `keepSession` (the editor may be closed while loading) */
 export async function openSession(node: Node, source: FileSource): Promise<Session> {
   const { zip, book, snapshot } = await readXlsx(await fetchOffice(source.contentUrl(node)));
-  const s: Session = {
+  return {
     zip,
     book,
     snapshot,
@@ -194,8 +195,10 @@ export async function openSession(node: Node, source: FileSource): Promise<Sessi
     sheet: 0,
     sel: { anchor: [0, 0], focus: [0, 0] },
   };
-  sessions.set(node.id, s);
-  return s;
+}
+
+export function keepSession(nodeId: string, s: Session) {
+  sessions.set(nodeId, s);
 }
 
 /** Release memory when there are no unsaved changes (the workbook and original zip can be large) */
