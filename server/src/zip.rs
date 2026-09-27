@@ -22,7 +22,7 @@ pub struct ZipWriter<W> {
     entries: Vec<Entry>,
 }
 
-/// Unix seconds → DOS date/time (UTC)
+/// Unix seconds → DOS date/time (the caller shifts the seconds to the local time the ZIP should show)
 fn dos_datetime(ts: i64) -> (u16, u16) {
     let days = ts.div_euclid(86400);
     let secs = ts.rem_euclid(86400);

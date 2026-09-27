@@ -518,12 +518,17 @@ pub async fn purge_subtree(conn: &mut SqliteConnection, id: &str) -> AppResult<V
 
 /// Deletes physical files and thumbnails that are no longer referenced in the background (doesn't block the caller or hold the global write lock while calling the storage service).
 /// Each file is re-checked under the write lock before deletion: it's kept if it has been referenced again or someone is uploading the same content.
+/// Content no longer used is deleted after this long, so downloads and ZIPs already reading it can finish
+pub const REMOVAL_GRACE: i64 = 60;
+
+/// Queues content that is no longer used for deletion after `REMOVAL_GRACE`. The queue is in the database, so it
+/// survives a restart; the storage health check works through it (only content still unused is deleted).
 pub fn schedule_blob_removal(st: &AppState, blobs: Vec<BlobRef>) {
     if blobs.is_empty() {
         return;
     }
     let st = st.clone();
-    tokio::spawn(async move { remove_unreferenced(&st, blobs).await });
+    tokio::spawn(async move { defer_blob_removal(&st, &blobs, REMOVAL_GRACE).await });
 }
 
 /// Deletes one by one: skipped when (hash, location) is still some blob's current location or is being staged
@@ -1067,6 +1072,31 @@ mod tests {
         retry_pending_deletes(&env.st, "flaky").await;
         assert!(!blob.exists());
         assert_eq!(pending().await, 0);
+    }
+
+    #[tokio::test]
+    async fn content_no_longer_used_waits_before_it_is_deleted() {
+        let env = testutil::env().await;
+        let hash = "ef".repeat(32);
+        let blob = env.dir.join("blobs").join("ef").join("ef").join(&hash);
+        let tmp = env.dir.join("tmp").join("grace");
+        std::fs::write(&tmp, b"read by a download").unwrap();
+        crate::storage::Storage::put_file(env.st.storage("local").unwrap().as_ref(), &hash, &tmp).await.unwrap();
+        schedule_blob_removal(&env.st, vec![(hash.clone(), "local".into())]);
+        // Queued, not deleted: downloads already reading it can finish
+        for _ in 0..50 {
+            let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM pending_blob_deletes WHERE hash = ?").bind(&hash).fetch_one(&env.st.db).await.unwrap();
+            if n == 1 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(retry_pending_deletes(&env.st, "local").await, 0, "not due yet");
+        assert!(blob.exists());
+        // After the grace period, the health check's retry deletes it
+        sqlx::query("UPDATE pending_blob_deletes SET created_at = created_at - ?").bind(REMOVAL_GRACE).execute(&env.st.db).await.unwrap();
+        assert_eq!(retry_pending_deletes(&env.st, "local").await, 1);
+        assert!(!blob.exists());
     }
 
     #[tokio::test]

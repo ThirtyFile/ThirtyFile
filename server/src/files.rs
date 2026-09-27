@@ -336,10 +336,20 @@ struct ZipItem {
     mtime: i64,
 }
 
-/// Packs multiple nodes (including folder contents) into a streamed ZIP
-pub async fn zip_response(st: &AppState, roots: Vec<Node>) -> AppResult<Response> {
+/// Packs multiple nodes (including folder contents) into a streamed ZIP. `tz` is the browser's time zone as JavaScript
+/// reports it (minutes behind UTC): ZIP times are local times, and Windows shows them as such.
+pub async fn zip_response(st: &AppState, roots: Vec<Node>, tz: i64) -> AppResult<Response> {
+    let offset = -tz.clamp(-14 * 60, 14 * 60) * 60;
+    // Items inside other selected items come with them; selected twice counts once
+    let roots = {
+        let ids: Vec<String> = roots.iter().map(|n| n.id.clone()).collect();
+        let keep: std::collections::HashSet<String> =
+            crate::nodes::outermost(&mut *st.db.acquire().await?, &ids).await?.into_iter().collect();
+        let mut seen = std::collections::HashSet::new();
+        roots.into_iter().filter(|n| keep.contains(&n.id) && seen.insert(n.id.clone())).collect::<Vec<_>>()
+    };
     let mut items = Vec::new();
-    let mut root_names = Vec::new();
+    let mut root_names: Vec<String> = Vec::new();
     // Multi-select download: the ZIP is named after the containing folder (the space name for a space's root folder)
     let mut parent_name = None;
     {
@@ -357,11 +367,18 @@ pub async fn zip_response(st: &AppState, roots: Vec<Node>) -> AppResult<Response
         }
         for root in &roots {
             // A space's root folder has no name: use the space name, otherwise paths in the ZIP would become "/filename"
-            let root_name = if root.name.is_empty() {
+            let mut root_name = if root.name.is_empty() {
                 tree::get_drive(&mut c, root.drive()).await?.map(|d| d.name).unwrap_or_else(|| "download".into())
             } else {
                 root.name.clone()
             };
+            // Items with the same name from different folders (search results, favourites) get a number
+            let base = root_name.clone();
+            let mut n = 1;
+            while root_names.iter().any(|r| r.eq_ignore_ascii_case(&root_name)) {
+                root_name = crate::util::numbered_name(&base, n, root.is_folder());
+                n += 1;
+            }
             root_names.push(root_name.clone());
             let mut paths: HashMap<String, String> = HashMap::new();
             for (n, depth) in tree::subtree(&mut c, &root.id).await? {
@@ -378,7 +395,7 @@ pub async fn zip_response(st: &AppState, roots: Vec<Node>) -> AppResult<Response
                 };
                 paths.insert(n.id.clone(), path.clone());
                 let blob = n.blob().ok().map(|(h, l)| (h.to_string(), l.to_string()));
-                items.push(ZipItem { path, blob, size: n.size as u64, mtime: n.updated_at });
+                items.push(ZipItem { path, blob, size: n.size as u64, mtime: n.updated_at + offset });
             }
         }
     }
@@ -466,6 +483,8 @@ pub async fn zip_response(st: &AppState, roots: Vec<Node>) -> AppResult<Response
 #[derive(Deserialize)]
 pub struct DownloadQuery {
     ids: String,
+    /// The browser's time zone (JavaScript's getTimezoneOffset), for the times inside a ZIP
+    tz: Option<i64>,
 }
 
 /// Multi-select download: a single file is downloaded directly, anything else is packed into a ZIP
@@ -490,5 +509,5 @@ pub async fn download(
         && !one.is_folder() {
             return serve_blob(&st, &headers, node_blob(one)?, true).await;
         }
-    zip_response(&st, roots).await
+    zip_response(&st, roots, q.tz.unwrap_or(0)).await
 }

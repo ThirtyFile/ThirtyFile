@@ -269,8 +269,16 @@ impl FtpStorage {
         let tmp = format!("{path}.part-{}", uuid::Uuid::new_v4().simple());
         let mut input = tokio::fs::File::open(src).await?;
         let mut out = timed(c.ftp.put_with_stream(tmp.as_str())).await?;
-        tokio::io::copy(&mut input, &mut out).await.map_err(unavailable)?;
-        end_upload(out).await?;
+        let sent = async {
+            tokio::io::copy(&mut input, &mut out).await.map_err(unavailable)?;
+            end_upload(out).await
+        }
+        .await;
+        if let Err(e) = sent {
+            // Don't leave the half-written file on the server (best effort: the connection may be gone)
+            let _ = timed(c.ftp.rm(tmp.as_str())).await;
+            return Err(e);
+        }
         if let Err(e) = timed(c.ftp.rename(tmp.as_str(), path.as_str())).await {
             // Some servers don't allow rename to overwrite: if the same content already exists, keep the original
             let exists = timed(c.ftp.size(path.as_str())).await.is_ok();

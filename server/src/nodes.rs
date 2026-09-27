@@ -198,7 +198,7 @@ impl BatchReq {
 
 /// The selected ids without duplicates and without items inside other selected items: those are trashed, deleted or
 /// restored together with the folder around them, and handling them again on their own would fail.
-async fn outermost(conn: &mut SqliteConnection, ids: &[String]) -> AppResult<Vec<String>> {
+pub async fn outermost(conn: &mut SqliteConnection, ids: &[String]) -> AppResult<Vec<String>> {
     let list = serde_json::to_string(ids).unwrap();
     let nested: Vec<(String,)> = sqlx::query_as(
         "WITH RECURSIVE up(start, id) AS (

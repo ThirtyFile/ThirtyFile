@@ -74,10 +74,18 @@ impl Storage for LocalStorage {
             }
             tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
             if tokio::fs::rename(src, &dest).await.is_err() {
-                // Copy instead when the temp directory and storage are on different volumes
-                let tmp = dest.with_extension("partial");
-                tokio::fs::copy(src, &tmp).await?;
-                tokio::fs::rename(&tmp, &dest).await?;
+                // Copy instead when the temp directory and storage are on different volumes. The copy gets a name of
+                // its own, so two uploads of the same content can't write into one file, and is removed if it fails
+                let tmp = dest.with_extension(format!("partial-{}", uuid::Uuid::new_v4().simple()));
+                let copied = async {
+                    tokio::fs::copy(src, &tmp).await?;
+                    tokio::fs::rename(&tmp, &dest).await
+                }
+                .await;
+                if let Err(e) = copied {
+                    let _ = tokio::fs::remove_file(&tmp).await;
+                    return Err(e);
+                }
                 let _ = tokio::fs::remove_file(src).await;
             }
             Ok(())
