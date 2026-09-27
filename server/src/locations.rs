@@ -285,6 +285,31 @@ pub async fn probe(st: &AppState, id: &str) -> Result<(), String> {
     res
 }
 
+/// Retries a location's failed deletions in a task of its own, so a long batch (a slow or refusing storage service)
+/// doesn't hold up the health checks of the other locations. At most one batch per location runs at a time.
+fn retry_in_background(st: &AppState, id: &str) {
+    static RUNNING: std::sync::Mutex<std::collections::BTreeSet<String>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
+    if !RUNNING.lock().unwrap().insert(id.to_string()) {
+        return;
+    }
+    // Released when the task ends, also if it panics
+    struct Running(String);
+    impl Drop for Running {
+        fn drop(&mut self) {
+            RUNNING.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.0);
+        }
+    }
+    let (st, running) = (st.clone(), Running(id.to_string()));
+    tokio::spawn(async move {
+        let id = &running.0;
+        // One line per location: failures of single files are only logged at debug level
+        let (n, failed) = tree::retry_pending_deletes(&st, id).await;
+        if n > 0 {
+            tracing::info!("Retried deleting {n} physical files whose deletion failed earlier ({id}), {failed} failed again");
+        }
+    });
+}
+
 /// Checks all storage locations every 30 seconds (every 20 seconds while any is offline), and immediately when an operation fails.
 /// Reachable locations also retry files whose deletion failed earlier
 pub fn spawn_health_monitor(st: AppState) {
@@ -304,11 +329,7 @@ pub fn spawn_health_monitor(st: AppState) {
             let results = futures_util::future::join_all(ids.iter().map(|id| probe(&st, id))).await;
             for (id, res) in ids.iter().zip(results) {
                 if res.is_ok() {
-                    // One line per location: failures of single files are only logged at debug level
-                    let (n, failed) = tree::retry_pending_deletes(&st, id).await;
-                    if n > 0 {
-                        tracing::info!("Retried deleting {n} physical files whose deletion failed earlier ({id}), {failed} failed again");
-                    }
+                    retry_in_background(&st, id);
                 }
             }
         }
@@ -364,10 +385,7 @@ pub async fn test_existing(State(st): State<AppState>, _: Admin, Path(id): Path<
         Ok((b, _)) => {
             st.storages.write().unwrap().insert(id.clone(), b);
             // In the background: up to 1000 deletions on a slow storage service shouldn't hold the request
-            let (st, id) = (st.clone(), id.clone());
-            tokio::spawn(async move {
-                tree::retry_pending_deletes(&st, &id).await;
-            });
+            retry_in_background(&st, &id);
             Ok(Json(json!({ "ok": true })))
         }
         Err(e) => Err(e),
