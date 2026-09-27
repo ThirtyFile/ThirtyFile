@@ -445,7 +445,8 @@ export interface SystemInfo {
 
 export interface PublicShare {
   token: string;
-  owner: string;
+  /** Only once the share is unlocked */
+  owner: string | null;
   expires_at: number | null;
   downloads_left: number | null;
   needs_password: boolean;
@@ -616,8 +617,9 @@ export const api = {
   deleteLoginBackground: () => request<Branding>("DELETE", "/admin/branding/background"),
   ssoProviders: () => get<SsoProvider[]>("/auth/sso/providers"),
   /** Start a third-party login (full-page redirect); link = link to the currently signed-in account */
-  ssoStartUrl: (provider: string, next: string, link = false) =>
-    `/api/auth/sso/${provider}/start${qs({ next, ...(link ? { link: "true" } : {}) })}`,
+  ssoStartUrl: (provider: string, next: string) => `/api/auth/sso/${encodeURIComponent(provider)}/start${qs({ next })}`,
+  /** Linking starts with a request from this page, which returns where to go next */
+  ssoLink: (provider: string, next: string) => post<{ url: string }>(`/auth/sso/${encodeURIComponent(provider)}/link`, { next }),
   myIdentities: () => get<{ linked: LinkedIdentity[]; available: string[] }>("/auth/identities"),
   unlinkIdentity: (provider: string) => request("DELETE", `/auth/identities/${provider}`),
   ssoSettings: () => get<SsoSettings>("/admin/sso"),

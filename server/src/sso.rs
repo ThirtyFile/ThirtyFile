@@ -322,9 +322,39 @@ pub async fn providers(State(st): State<AppState>) -> Json<Value> {
 #[derive(Deserialize)]
 pub struct StartQuery {
     next: Option<String>,
-    /// Link to the currently signed-in account ("My account › Sign-in methods")
-    #[serde(default)]
-    link: bool,
+    /// Link to the currently signed-in account ("My account › Sign-in methods"): a ticket from `link`
+    link: Option<String>,
+}
+
+/// One-time tickets for linking a sign-in method: ticket → (user, created)
+fn link_tickets() -> &'static std::sync::Mutex<std::collections::HashMap<String, (i64, Instant)>> {
+    static T: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, (i64, Instant)>>> = std::sync::OnceLock::new();
+    T.get_or_init(Default::default)
+}
+const LINK_TICKET_TTL: Duration = Duration::from_secs(60);
+
+#[derive(Deserialize)]
+pub struct LinkReq {
+    next: Option<String>,
+}
+
+/// Starts linking a sign-in method to the signed-in account. A POST, which other websites can't send on the user's
+/// behalf (origin check), hands out a short-lived ticket for the page to navigate to `start` with; `start` accepts
+/// linking only with such a ticket, so another website can't make a user link an account signed in in their browser.
+pub async fn start_link(State(st): State<AppState>, user: User, Path(provider): Path<String>, Json(req): Json<LinkReq>) -> AppResult<Json<Value>> {
+    if st.sso.read().unwrap().provider(&provider).filter(|c| c.ready()).is_none() {
+        return Err(AppError::bad_request("This sign-in method isn't enabled"));
+    }
+    let ticket = random_token(32);
+    {
+        let mut tickets = link_tickets().lock().unwrap();
+        tickets.retain(|_, (_, created)| created.elapsed() < LINK_TICKET_TTL);
+        tickets.insert(ticket.clone(), (user.id, Instant::now()));
+    }
+    let next = safe_next(req.next.as_deref());
+    // The provider name was just found among the configured ones, so it is a plain word
+    let url = format!("/api/auth/sso/{provider}/start?{}", encode(&[("next", next.as_str()), ("link", ticket.as_str())]));
+    Ok(Json(json!({ "url": url })))
 }
 
 fn login_error(message: &str, next: Option<&str>) -> Response {
@@ -349,13 +379,16 @@ pub async fn start(
     let Some(cfg) = cfg.filter(ProviderConfig::ready) else {
         return login_error("This sign-in method isn't enabled", None);
     };
-    let link_user = if q.link {
-        match user {
-            Ok(u) => Some(u.id),
-            Err(_) => return login_error("Sign in before linking an external account", None),
+    let link_user = match q.link.as_deref() {
+        Some(ticket) => {
+            let Ok(u) = user else { return login_error("Sign in before linking an external account", None) };
+            let issued = link_tickets().lock().unwrap().remove(ticket);
+            match issued {
+                Some((id, created)) if id == u.id && created.elapsed() < LINK_TICKET_TTL => Some(u.id),
+                _ => return login_error("The link request has expired. Try again.", Some(&next)),
+            }
         }
-    } else {
-        None
+        None => None,
     };
     let (state, verifier, nonce) = (random_token(32), random_token(64), random_token(24));
     let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
@@ -1116,14 +1149,24 @@ mod tests {
         form_urlencoded::parse(q.as_bytes()).find(|(k, _)| k == key).map(|(_, v)| v.into_owned()).unwrap_or_default()
     }
 
+    /// A linking ticket, as the account menu gets it before navigating to `start`
+    async fn ticket(env: &testutil::TestEnv, user: &User, provider: &str) -> String {
+        let Json(v) = start_link(State(env.st.clone()), user.clone(), Path(provider.into()), Json(LinkReq { next: None })).await.unwrap();
+        query_param(v["url"].as_str().unwrap(), "link")
+    }
+
     /// Runs the whole flow: start sign-in → (provider) → callback; claims are generated from the nonce
     async fn login(env: &testutil::TestEnv, m: &Arc<Mutex<Mock>>, provider: &str, user: Option<User>, make: impl FnOnce(&str) -> Value) -> Response {
         let mut headers = HeaderMap::new();
         headers.insert(header::HOST, "drive.test".parse().unwrap());
+        let link = match &user {
+            Some(u) => Some(ticket(env, u, provider).await),
+            None => None,
+        };
         let r = start(
             State(env.st.clone()),
             Path(provider.into()),
-            Query(StartQuery { next: Some("/files/abc".into()), link: user.is_some() }),
+            Query(StartQuery { next: Some("/files/abc".into()), link }),
             ConnectInfo("127.0.0.1:1".parse().unwrap()),
             headers.clone(),
             user.clone().ok_or_else(AppError::unauthorized),
@@ -1159,7 +1202,7 @@ mod tests {
         // An attacker starts a sign-in and hands the callback URL to another browser (without the state cookie)
         let mut headers = HeaderMap::new();
         headers.insert(header::HOST, "drive.test".parse().unwrap());
-        let r = start(State(env.st.clone()), Path("google".into()), Query(StartQuery { next: None, link: false }), ConnectInfo("127.0.0.1:1".parse().unwrap()), headers.clone(), Err(AppError::unauthorized())).await;
+        let r = start(State(env.st.clone()), Path("google".into()), Query(StartQuery { next: None, link: None }), ConnectInfo("127.0.0.1:1".parse().unwrap()), headers.clone(), Err(AppError::unauthorized())).await;
         let url = location(&r);
         let (state, nonce) = (query_param(&url, "state"), query_param(&url, "nonce"));
         m.lock().unwrap().claims = google(&nonce, "g-1", "amy@example.com", true);
@@ -1167,6 +1210,31 @@ mod tests {
         let r = callback(State(env.st.clone()), Path("google".into()), Query(q), ConnectInfo("127.0.0.1:1".parse().unwrap()), headers, Err(AppError::unauthorized())).await;
         assert!(location(&r).starts_with("/login?sso_error="), "{}", location(&r));
         assert!(r.headers().get(header::SET_COOKIE).is_none(), "no sign-in session was created");
+    }
+
+    #[tokio::test]
+    async fn linking_needs_a_ticket_from_the_same_user() {
+        let _g = SERIAL.lock().await;
+        let env = testutil::env().await;
+        let (_m, base) = mock_server().await;
+        *MOCK_BASE.lock().unwrap() = Some(base);
+        enable(&env, |_| {});
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, "drive.test".parse().unwrap());
+        let go = |user: &User, link: Option<String>| {
+            start(State(env.st.clone()), Path("google".into()), Query(StartQuery { next: Some("/files".into()), link }), ConnectInfo("127.0.0.1:1".parse().unwrap()), headers.clone(), Ok(user.clone()))
+        };
+        // A link started from another website carries no ticket, or one that doesn't exist
+        assert!(location(&go(&amy, Some("made-up".into())).await).contains("sso_error="));
+        // Someone else's ticket doesn't work
+        let bens = ticket(&env, &ben, "google").await;
+        assert!(location(&go(&amy, Some(bens)).await).contains("sso_error="));
+        // Her own works once
+        let amys = ticket(&env, &amy, "google").await;
+        assert!(location(&go(&amy, Some(amys.clone())).await).contains("code_challenge_method=S256"));
+        assert!(location(&go(&amy, Some(amys)).await).contains("sso_error="));
     }
 
     #[tokio::test]
@@ -1180,7 +1248,8 @@ mod tests {
         let victim = env.user("victim", true).await;
         let mut headers = HeaderMap::new();
         headers.insert(header::HOST, "drive.test".parse().unwrap());
-        let r = start(State(env.st.clone()), Path("google".into()), Query(StartQuery { next: None, link: true }), ConnectInfo("127.0.0.1:1".parse().unwrap()), headers.clone(), Ok(attacker)).await;
+        let link = Some(ticket(&env, &attacker, "google").await);
+        let r = start(State(env.st.clone()), Path("google".into()), Query(StartQuery { next: None, link }), ConnectInfo("127.0.0.1:1".parse().unwrap()), headers.clone(), Ok(attacker)).await;
         let url = location(&r);
         let set = r.headers()[header::SET_COOKIE].to_str().unwrap().to_string();
         headers.insert(header::COOKIE, set.split(';').next().unwrap().parse().unwrap());

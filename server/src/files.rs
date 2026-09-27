@@ -75,7 +75,20 @@ pub struct Blob<'a> {
     pub location: &'a str,
 }
 
+/// Types a browser would run or apply when a page loads the file as a script, style sheet or module. Stored files are
+/// served with them as plain text, so an uploaded file can't become code on this site whatever the page includes.
+fn runs_as_code(mime: &str) -> bool {
+    let m = mime.split(';').next().unwrap_or_default().trim().to_ascii_lowercase();
+    m.contains("javascript") || m.contains("ecmascript") || m == "text/css" || m == "application/wasm" || m == "text/jscript"
+}
+
 pub async fn serve_blob(st: &AppState, headers: &HeaderMap, b: Blob<'_>, download: bool) -> AppResult<Response> {
+    // A page loading a stored file as a script, style sheet or worker (never how this app uses them)
+    if let Some(dest) = headers.get("sec-fetch-dest").and_then(|v| v.to_str().ok())
+        && matches!(dest, "script" | "style" | "worker" | "sharedworker" | "serviceworker" | "audioworklet" | "paintworklet")
+    {
+        return Err(AppError::forbidden("Files can't be loaded as scripts or styles"));
+    }
     let etag = format!("\"{}\"", b.hash);
     if headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
         return Ok((StatusCode::NOT_MODIFIED, [(header::ETAG, etag)]).into_response());
@@ -95,7 +108,13 @@ pub async fn serve_blob(st: &AppState, headers: &HeaderMap, b: Blob<'_>, downloa
     let len = if b.size == 0 { 0 } else { end - start + 1 };
     let reader = st.storage(b.location)?.open(b.hash, start, len).await?;
 
-    let mime = if b.mime.is_empty() { "application/octet-stream" } else { b.mime };
+    let mime = if b.mime.is_empty() {
+        "application/octet-stream"
+    } else if runs_as_code(b.mime) {
+        "text/plain; charset=utf-8"
+    } else {
+        b.mime
+    };
     let mut res = Response::new(Body::from_stream(ReaderStream::with_capacity(reader, 256 * 1024)));
     *res.status_mut() = status;
     let h = res.headers_mut();

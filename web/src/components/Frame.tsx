@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { leaveAfterSignOut } from "@/lib/signOut";
 import { Link, NavLink, useLocation, useNavigate, useSearchParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -277,8 +278,6 @@ function NavItem({ to, icon: Icon, label, end }: { to: string; icon: LucideIcon;
 
 function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean; activeFolder?: string; onNavigate(): void }) {
   const me = useMe();
-  const qc = useQueryClient();
-  const navigate = useNavigate();
   const { dark, mode, canToggle, setMode } = useTheme();
   const [changingPassword, setChangingPassword] = useState(false);
   const [showLogins, setShowLogins] = useState(false);
@@ -289,8 +288,7 @@ function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean; activ
 
   const logout = async () => {
     await api.logout().catch(() => {});
-    qc.clear();
-    navigate("/login");
+    leaveAfterSignOut(me.id);
   };
 
   return (

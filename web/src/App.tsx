@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect } from "react";
+import { noteSignedIn } from "@/lib/signOut";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon } from "lucide-react";
@@ -50,6 +51,11 @@ function RequireAuth() {
   const location = useLocation();
   const navigate = useNavigate();
   const qc = useQueryClient();
+
+  // Someone else signing in in this tab after a session expired gets a fresh page
+  useEffect(() => {
+    if (me.data) noteSignedIn(me.data.id);
+  }, [me.data]);
 
   // Any API returning 401 (session expired) sends the user back to the login page
   useEffect(() => {
