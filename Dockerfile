@@ -3,7 +3,7 @@
 # ThirtyFile
 #
 #   docker build -t thirtyfile .
-#   docker run -d -p 8080:8080 -v /srv/thirtyfile/data:/data -v /srv/thirtyfile/storage:/storage thirtyfile
+#   docker run -d --restart unless-stopped -p 8080:8080 -v /srv/thirtyfile/data:/data -v /srv/thirtyfile/storage:/storage thirtyfile
 #
 # Build arguments:
 #   VERSION  version written to the image labels (default: dev)
@@ -42,6 +42,9 @@ RUN xx-apk add --no-cache musl-dev gcc
 WORKDIR /src/server
 COPY server/ ./
 COPY --from=web /src/web/dist /src/web/dist
+# The version `thirtyfile --version` and /api/health report
+ARG VERSION=dev
+ENV THIRTYFILE_VERSION=$VERSION
 # Dependencies and build output are cached, so rebuilds after code changes only recompile what changed
 RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=thirtyfile-target-${TARGETARCH},target=/src/server/target \

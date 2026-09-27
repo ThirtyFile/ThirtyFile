@@ -27,7 +27,7 @@ You need [Docker](https://docs.docker.com/get-docker/).
 **docker run**
 
 ```bash
-docker run -d --name thirtyfile \
+docker run -d --name thirtyfile --restart unless-stopped \
   -p 8080:8080 \
   -v /srv/thirtyfile/data:/data \
   -v /srv/thirtyfile/storage:/storage \

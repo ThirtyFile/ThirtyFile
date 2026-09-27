@@ -21,7 +21,7 @@
         <p>Install <a href="https://docs.docker.com/get-docker/">Docker</a> on the computer or server that will hold the files. Nothing else is needed.</p>
 
         <h2 id="docker-run">Option 1: docker run</h2>
-        <pre><code>docker run -d --name thirtyfile \
+        <pre><code>docker run -d --name thirtyfile --restart unless-stopped \
   -p 8080:8080 \
   -v /srv/thirtyfile/data:/data \
   -v /srv/thirtyfile/storage:/storage \

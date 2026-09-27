@@ -45,8 +45,14 @@ use crate::{
     state::{AppState, Inner},
 };
 
+/// The version: the release number the image was built for (THIRTYFILE_VERSION at build time), else Cargo.toml's
+pub const VERSION: &str = match option_env!("THIRTYFILE_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 #[derive(Parser)]
-#[command(name = "thirtyfile", version, about = "ThirtyFile — lightweight cloud file management system")]
+#[command(name = "thirtyfile", version = VERSION, about = "ThirtyFile — lightweight cloud file management system")]
 struct Config {
     /// Listen address
     #[arg(long, env = "THIRTYFILE_ADDR", default_value = "0.0.0.0:8080")]
@@ -58,17 +64,20 @@ struct Config {
     #[arg(long, env = "THIRTYFILE_STORAGE")]
     storage: Option<PathBuf>,
     /// Administrator password on first startup; if not set, a random one is generated and printed to the log
-    #[arg(long, env = "THIRTYFILE_ADMIN_PASSWORD")]
+    #[arg(long, env = "THIRTYFILE_ADMIN_PASSWORD", hide_env_values = true)]
     admin_password: Option<String>,
-    /// Enable when serving over HTTPS; cookies get the Secure attribute
-    #[arg(long, env = "THIRTYFILE_SECURE_COOKIE", default_value_t = false)]
+    /// A file holding the administrator password for the first startup (for Docker secrets)
+    #[arg(long, env = "THIRTYFILE_ADMIN_PASSWORD_FILE")]
+    admin_password_file: Option<PathBuf>,
+    /// Enable when serving over HTTPS; cookies get the Secure attribute (true/false, also 1/0, yes/no, on/off)
+    #[arg(long, env = "THIRTYFILE_SECURE_COOKIE", default_value = "false", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
     secure_cookie: bool,
     /// Enable when behind a reverse proxy (nginx, Caddy…): take the user's real IP from X-Forwarded-For (for sign-in rate
     /// limiting). `true` trusts proxies on private and loopback addresses; or list the proxies' addresses or networks
     #[arg(long, env = "THIRTYFILE_TRUST_PROXY", default_value = "false", value_parser = auth::TrustProxy::parse)]
     trust_proxy: auth::TrustProxy,
-    /// Days to keep items in the trash
-    #[arg(long, env = "THIRTYFILE_TRASH_DAYS", default_value_t = 30)]
+    /// Days to keep items in the trash, 0 = until emptied
+    #[arg(long, env = "THIRTYFILE_TRASH_DAYS", default_value_t = 30, value_parser = clap::value_parser!(i64).range(0..=36500))]
     trash_days: i64,
     /// Upload size limit per file (MB), 0 = unlimited
     #[arg(long, env = "THIRTYFILE_MAX_UPLOAD_MB", default_value_t = 0)]
@@ -83,16 +92,24 @@ struct Config {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Reset a user's password (for when the administrator password is forgotten)
-    ResetPassword { username: String, password: String },
+    /// Reset a user's password (for when the administrator password is forgotten). Without the password, it is read
+    /// from the input, so it doesn't end up in the shell history or the process list
+    ResetPassword { username: String, password: Option<String> },
     /// Check whether the running service is healthy (for Docker HEALTHCHECK): exit code 0 when healthy
     Health,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt()
+    use std::io::IsTerminal;
+    // Colours only on a terminal (not in `docker logs` or a log collector); THIRTYFILE_LOG_FORMAT=json for JSON lines
+    let logs = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "thirtyfile=info,tower_http=warn".into()))
-        .init();
+        .with_ansi(std::io::stdout().is_terminal());
+    if std::env::var("THIRTYFILE_LOG_FORMAT").is_ok_and(|f| f.eq_ignore_ascii_case("json")) {
+        logs.json().init();
+    } else {
+        logs.init();
+    }
     let cfg = Config::parse();
     let runtime = || tokio::runtime::Builder::new_multi_thread().enable_all().build();
 
@@ -139,6 +156,16 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     let db = db::connect(&cfg.data.join("drive.db")).await?;
 
     if let Some(Command::ResetPassword { username, password }) = &cfg.command {
+        let password = match password {
+            Some(p) => p.clone(),
+            None => {
+                eprintln!("Type the new password and press Enter:");
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line)?;
+                line.trim_end_matches(['\r', '\n']).to_string()
+            }
+        };
+        let password = &password;
         auth::validate_password(password).map_err(|e| e.message)?;
         let hash = auth::hash_password(password.clone()).await.map_err(|e| e.message)?;
         let res = sqlx::query("UPDATE users SET password_hash = ?, disabled = 0 WHERE username = ?")
@@ -157,9 +184,26 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         return Ok(());
     }
 
-    db::bootstrap_admin(&db, cfg.admin_password.as_deref()).await.map_err(|e| e.message)?;
+    let admin_password = match (&cfg.admin_password, &cfg.admin_password_file) {
+        (Some(p), _) => Some(p.clone()),
+        (None, Some(file)) => Some(
+            std::fs::read_to_string(file)
+                .map_err(|e| format!("Can't read THIRTYFILE_ADMIN_PASSWORD_FILE {}: {e}", file.display()))?
+                .trim_end_matches(['\r', '\n'])
+                .to_string(),
+        ),
+        (None, None) => None,
+    };
+    db::bootstrap_admin(&db, admin_password.as_deref()).await.map_err(|e| e.message)?;
     let secret = db::load_secret(&db).await?;
     let system = db::load_system_settings(&db).await?;
+    // Settings that are probably wrong together: said once at startup
+    if !cfg.secure_cookie && cfg.trust_proxy.enabled() {
+        tracing::warn!("THIRTYFILE_TRUST_PROXY is on but THIRTYFILE_SECURE_COOKIE is off: if the proxy serves HTTPS, set THIRTYFILE_SECURE_COOKIE=true");
+    }
+    if !cfg.secure_cookie && system.public_url.starts_with("https://") {
+        tracing::warn!("The site URL uses https but THIRTYFILE_SECURE_COOKIE is off: set THIRTYFILE_SECURE_COOKIE=true");
+    }
     let (storages, default_location) = locations::load_all(&db, &storage).await?;
     let log_settings = logs::load_settings(&db).await;
     let branding = branding::load(&db).await;
@@ -208,6 +252,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     // JSON requests that take longer than this are cut off (a stuck storage service, a slow provider). Requests that
     // carry a body to store, and thumbnails (which queue), are outside the limit (`untimed`); downloads stream after
     // the handler returned, so the limit doesn't apply to them either
+    let db_pool = state.db.clone();
     let app = Router::new()
         .nest("/api", api().layer(TimeoutLayer::with_status_code(StatusCode::GATEWAY_TIMEOUT, Duration::from_secs(120))).merge(untimed()))
         .fallback(web::serve)
@@ -216,6 +261,8 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         // Level 4: brotli's default (11) spends far more CPU per response than it saves on JSON and HTML; gzip 4 is likewise the sweet spot
         .layer(CompressionLayer::new().gzip(true).br(true).quality(CompressionLevel::Precise(4)).compress_when(Compressible))
         .layer(TraceLayer::new_for_http())
+        // A bug hit by one request answers that request with an error instead of stopping the server for everyone
+        .layer(tower_http::catch_panic::CatchPanicLayer::new())
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&cfg.addr).await?;
@@ -223,6 +270,9 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     serve(listener, app).await?;
     // Sign-in and share access events still queued are written before exiting
     log_writer.finish().await;
+    // Let SQLite update its statistics and fold the write-ahead log into the database file
+    let _ = sqlx::query("PRAGMA optimize").execute(&db_pool).await;
+    db_pool.close().await;
     tracing::info!("Stopped");
     Ok(())
 }
@@ -313,9 +363,10 @@ async fn serve(listener: tokio::net::TcpListener, app: Router) -> Result<(), Box
     }
     // Stop listening, so new connections are refused instead of waiting in the backlog
     drop(listener);
-    // Running requests get a moment to finish; large transfers may be cut off (Docker's own stop timeout applies too)
-    if tokio::time::timeout(Duration::from_secs(30), graceful.shutdown()).await.is_err() {
-        tracing::warn!("Some connections were still open after 30 seconds and were closed");
+    // Running requests get a moment to finish; large transfers may be cut off. 20 s leaves time within Docker's stop
+    // timeout (30 s in compose.yaml) to write the last log entries and close the database
+    if tokio::time::timeout(Duration::from_secs(20), graceful.shutdown()).await.is_err() {
+        tracing::warn!("Some connections were still open after 20 seconds and were closed");
     }
     Ok(())
 }
@@ -372,7 +423,7 @@ async fn probe_once(target: std::net::SocketAddr) -> bool {
 /// Health check (for Docker HEALTHCHECK and load balancers): no sign-in required; checks that the database is readable
 async fn health(axum::extract::State(st): axum::extract::State<AppState>) -> axum::response::Response {
     use axum::response::IntoResponse;
-    let version = env!("CARGO_PKG_VERSION");
+    let version = VERSION;
     match sqlx::query_scalar::<_, i64>("SELECT 1").fetch_one(&st.db).await {
         Ok(_) => axum::Json(serde_json::json!({ "status": "ok", "version": version })).into_response(),
         Err(e) => {
@@ -545,6 +596,27 @@ fn spawn_maintenance(st: AppState, trash_days: i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_accept_common_ways_of_writing_true_and_refuse_impossible_values() {
+        let parse = |args: &[&str]| Config::try_parse_from(std::iter::once("thirtyfile").chain(args.iter().copied()));
+        for yes in ["true", "TRUE", "1", "yes", "on"] {
+            assert!(parse(&["--secure-cookie", yes]).unwrap().secure_cookie, "{yes}");
+        }
+        for no in ["false", "0", "no", "off"] {
+            assert!(!parse(&["--secure-cookie", no]).unwrap().secure_cookie, "{no}");
+        }
+        assert!(parse(&["--trash-days=-5"]).is_err(), "a negative number of days would turn off emptying the trash");
+        assert_eq!(parse(&["--trash-days", "0"]).unwrap().trash_days, 0);
+    }
+
+    #[test]
+    fn help_doesnt_show_the_administrator_password() {
+        use clap::CommandFactory;
+        let cmd = Config::command();
+        let arg = cmd.get_arguments().find(|a| a.get_id() == "admin_password").unwrap();
+        assert!(arg.is_hide_env_values_set());
+    }
 
     #[test]
     fn storage_folder_is_separate_unless_files_are_still_in_the_data_folder() {

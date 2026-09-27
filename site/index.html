@@ -139,7 +139,7 @@
               <button type="button" role="tab" data-tab="tab-compose">Docker Compose</button>
             </div>
             <div id="tab-run" role="tabpanel">
-              <pre><code>docker run -d --name thirtyfile \
+              <pre><code>docker run -d --name thirtyfile --restart unless-stopped \
   -p 8080:8080 \
   -v /srv/thirtyfile/data:/data \
   -v /srv/thirtyfile/storage:/storage \
