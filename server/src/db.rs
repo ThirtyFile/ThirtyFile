@@ -192,13 +192,10 @@ pub async fn bootstrap_admin(db: &SqlitePool, password: Option<&str>) -> AppResu
     if count > 0 {
         return Ok(());
     }
-    let (password, generated) = match password {
-        Some(p) => {
-            if p.chars().count() < 8 {
-                return Err(crate::error::AppError::bad_request("THIRTYFILE_ADMIN_PASSWORD must be at least 8 characters"));
-            }
-            (p.to_string(), false)
-        }
+    // Any password is accepted here: the administrator is asked to change it after signing in.
+    // An empty one counts as not set, so `THIRTYFILE_ADMIN_PASSWORD=` in a compose file gets a random password.
+    let (password, generated) = match password.filter(|p| !p.is_empty()) {
+        Some(p) => (p.to_string(), false),
         None => (random_token(16), true),
     };
     let password_hash = hash_password(password.clone()).await?;
@@ -225,4 +222,33 @@ pub async fn bootstrap_admin(db: &SqlitePool, password: Option<&str>) -> AppResu
         tracing::info!("Created default administrator account admin (password from THIRTYFILE_ADMIN_PASSWORD)");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn admin_hash(password: Option<&str>) -> String {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = connect(&dir.join("drive.db")).await.unwrap();
+        bootstrap_admin(&db, password).await.unwrap();
+        let (hash,): (String,) = sqlx::query_as("SELECT password_hash FROM users WHERE username = 'admin'").fetch_one(&db).await.unwrap();
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+        hash
+    }
+
+    #[tokio::test]
+    async fn the_first_administrator_password_has_no_minimum_length() {
+        let short: String = crate::util::new_id().chars().take(5).collect();
+        let hash = admin_hash(Some(&short)).await;
+        assert!(crate::auth::verify_password(short, hash).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn an_empty_first_administrator_password_counts_as_not_set() {
+        let hash = admin_hash(Some("")).await;
+        assert!(!crate::auth::verify_password(String::new(), hash).await.unwrap());
+    }
 }

@@ -25,6 +25,8 @@ docker stop thirtyfile && docker rm thirtyfile
 docker run -d --name thirtyfile …   # the same options as when you installed it</code></pre>
         <h3>Docker Compose</h3>
         <pre><code>docker compose pull && docker compose up -d</code></pre>
+        <h3 id="from-0-1">Upgrading from 0.1.0</h3>
+        <p>Version 0.1.0 kept your files in the <code>blobs</code> folder inside <code>/data</code>. They stay there and keep working; the log says so when ThirtyFile starts. To move them to <code>/storage</code>, stop ThirtyFile, move everything inside <code>blobs</code> into the storage folder, and start it again.</p>
         <h3>Which version you get</h3>
         <div class="table-scroll">
           <table>
@@ -39,18 +41,23 @@ docker run -d --name thirtyfile …   # the same options as when you installed i
         <p>The changes in each release are listed on the <a href="https://github.com/ThirtyFile/ThirtyFile/releases">releases page</a>.</p>
 
         <h2 id="backup">Backing up</h2>
-        <p>The data volume contains everything: files, accounts, settings and logs.</p>
+        <p>The <code>data</code> and <code>storage</code> folders together contain everything: files, accounts, settings and logs. Stop ThirtyFile while copying them, so that the copy is consistent.</p>
+        <h3>docker run</h3>
         <pre><code>docker stop thirtyfile
-docker run --rm -v thirtyfile-data:/data -v "$PWD":/backup alpine \
-  tar czf /backup/thirtyfile-backup.tar.gz -C /data .
+sudo tar czf thirtyfile-backup.tar.gz -C /srv/thirtyfile data storage
 docker start thirtyfile</code></pre>
+        <h3>Docker Compose</h3>
+        <p>In the folder of <code>compose.yaml</code>:</p>
+        <pre><code>docker compose stop
+sudo tar czf thirtyfile-backup.tar.gz data storage
+docker compose start</code></pre>
         <p>This writes <code>thirtyfile-backup.tar.gz</code> into the current folder. Copy it to another computer or disk.</p>
         <div class="note"><strong>Files on S3, SFTP or FTP are not in the backup.</strong> Back up that storage with its own tools. The backup still contains the list of files and who may see them.</div>
 
         <h2 id="restore">Restoring</h2>
-        <p>Restore into an empty volume, then start the container as usual:</p>
-        <pre><code>docker run --rm -v thirtyfile-data:/data -v "$PWD":/backup alpine sh -c \
-  "tar xzf /backup/thirtyfile-backup.tar.gz -C /data && chown -R 1000:1000 /data"</code></pre>
+        <p>Unpack the backup where the folders belong, then start the container as usual:</p>
+        <pre><code>sudo tar xzf thirtyfile-backup.tar.gz -C /srv/thirtyfile</code></pre>
+        <p>With Docker Compose, unpack it in the folder of <code>compose.yaml</code> instead.</p>
 
         <h2 id="safe">Keep backups safe</h2>
         <p>A backup contains the keys and passwords of your storage locations and single sign-on, and the logs with visitors' IP addresses. Treat it like a password: store it where only administrators can reach it.</p>

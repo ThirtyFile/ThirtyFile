@@ -38,6 +38,8 @@ pub struct Inner {
     /// Space move jobs: space id → progress
     pub migrations: Mutex<HashMap<String, MigrationStatus>>,
     pub data_dir: PathBuf,
+    /// Folder of the built-in `local` storage location
+    pub storage_dir: PathBuf,
     pub secret: Vec<u8>,
     pub secure_cookie: bool,
     /// Trust X-Forwarded-For sent by a reverse proxy

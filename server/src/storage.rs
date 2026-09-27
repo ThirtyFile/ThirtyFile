@@ -478,7 +478,7 @@ fn normalize_host(mut config: serde_json::Value) -> serde_json::Value {
     config
 }
 
-/// Builds a backend from storage location settings; the built-in `local` location always uses blobs in the data directory
+/// Builds a backend from storage location settings; the built-in `local` location always uses `default_root`
 pub fn build(kind: &str, config: &serde_json::Value, default_root: &Path) -> io::Result<Arc<dyn Storage>> {
     match kind {
         "local" => {

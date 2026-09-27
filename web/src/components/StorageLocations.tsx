@@ -49,7 +49,7 @@ const DEFAULTS: Record<StorageKind, StorageConfig> = {
 };
 
 function describe(l: StorageLocation) {
-  if (l.kind === "local") return l.builtin ? t("Data directory / blobs") : l.config.path || "—";
+  if (l.kind === "local") return l.config.path || "—";
   if (l.kind === "sftp" || l.kind === "ftp") {
     const c = l.config;
     const scheme = l.kind === "sftp" ? "sftp" : c.tls ? "ftps" : "ftp";
@@ -358,7 +358,7 @@ function StorageDialog({ location, onClose, onSaved }: { location: StorageLocati
             </div>
             {builtin ? (
               <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
-                {t("The built-in location always uses the blobs folder in the server's data directory. Only its name can be changed.")}
+                {t("The built-in location's folder is set on the server with THIRTYFILE_STORAGE. Only its name can be changed.")}
               </p>
             ) : (
               <>

@@ -55,8 +55,8 @@ pub async fn verify_password(password: String, hash: String) -> AppResult<bool> 
 }
 
 pub fn validate_password(p: &str) -> AppResult<()> {
-    if p.chars().count() < 8 {
-        return Err(AppError::bad_request("Password must be at least 8 characters"));
+    if p.chars().count() < 6 {
+        return Err(AppError::bad_request("Password must be at least 6 characters"));
     }
     Ok(())
 }

@@ -29,8 +29,9 @@ You need [Docker](https://docs.docker.com/get-docker/).
 ```bash
 docker run -d --name thirtyfile \
   -p 8080:8080 \
-  -v thirtyfile-data:/data \
-  -e THIRTYFILE_ADMIN_PASSWORD='<a password of at least 8 characters>' \
+  -v /srv/thirtyfile/data:/data \
+  -v /srv/thirtyfile/storage:/storage \
+  -e THIRTYFILE_ADMIN_PASSWORD='choose-a-password' \
   ghcr.io/thirtyfile/thirtyfile:latest
 ```
 
@@ -38,10 +39,12 @@ docker run -d --name thirtyfile \
 
 ```bash
 curl -O https://raw.githubusercontent.com/ThirtyFile/ThirtyFile/main/compose.yaml
-THIRTYFILE_ADMIN_PASSWORD='<a password of at least 8 characters>' docker compose up -d
+docker compose up -d
 ```
 
-Open <http://localhost:8080> and sign in as `admin` with that password.
+Open <http://localhost:8080> and sign in as `admin`. Without `THIRTYFILE_ADMIN_PASSWORD`, the password is created at random: `docker logs thirtyfile 2>&1 | grep password`.
+
+`/data` holds accounts and settings, `/storage` holds your files.
 
 ## Guides
 

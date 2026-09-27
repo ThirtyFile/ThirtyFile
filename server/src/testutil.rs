@@ -38,6 +38,7 @@ pub async fn env() -> TestEnv {
         default_location: std::sync::RwLock::new("local".into()),
         migrations: Default::default(),
         data_dir: dir.clone(),
+        storage_dir: dir.join("blobs"),
         secret: vec![7; 32],
         secure_cookie: false,
         trust_proxy: false,

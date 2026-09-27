@@ -1,7 +1,8 @@
 # ThirtyFile
-#   THIRTYFILE_ADMIN_PASSWORD=<a password of at least 8 characters> docker compose up -d
-# (or put the variable in a .env file in this folder). After the first start, sign in as admin with this
-# password and change it right away.
+#   docker compose up -d
+# Then open http://localhost:8080 and sign in as admin. Without THIRTYFILE_ADMIN_PASSWORD, the password
+# is created at random on the first start; read it with: docker compose logs thirtyfile | grep password
+# Change it right after signing in.
 services:
   thirtyfile:
     image: ghcr.io/thirtyfile/thirtyfile:latest
@@ -12,24 +13,20 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - thirtyfile-data:/data
-      # Or use a host folder (it must be writable for uid 1000 inside the container):
-      # - ./data:/data
+      # Database, settings, thumbnails and uploads in progress
+      - ./data:/data
+      # Your files (the built-in storage location). Can be a folder on another disk or a NAS mount
+      - ./storage:/storage
     environment:
-      # Only used on the first start, when the database does not exist yet
-      THIRTYFILE_ADMIN_PASSWORD: ${THIRTYFILE_ADMIN_PASSWORD:?Set THIRTYFILE_ADMIN_PASSWORD (the initial administrator password)}
+      # Password of the admin account, used on the first start only (or put it in a .env file in this folder)
+      THIRTYFILE_ADMIN_PASSWORD: ${THIRTYFILE_ADMIN_PASSWORD:-}
       TZ: Asia/Taipei
       # Enable when served over HTTPS behind a reverse proxy:
       # THIRTYFILE_SECURE_COOKIE: "true"
       # THIRTYFILE_TRUST_PROXY: "true"
       # THIRTYFILE_MAX_UPLOAD_MB: "0"
       # THIRTYFILE_TRASH_DAYS: "30"
-    # Uploads in progress are kept in /data/tmp; raise the open file limit for very large folders
+    # Raise the open file limit for very large folders
     ulimits:
       nofile: 65536
     stop_grace_period: 30s
-
-volumes:
-  # A fixed name, the same as in the `docker run` example, so backup commands are the same for both
-  thirtyfile-data:
-    name: thirtyfile-data

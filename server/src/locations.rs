@@ -37,7 +37,7 @@ fn config_json(raw: &str) -> Value {
 }
 
 /// Loads all storage locations at startup; locations that can't be built are logged as warnings and skipped (reading their files reports "unavailable")
-pub async fn load_all(db: &SqlitePool, data_dir: &FsPath) -> Result<(HashMap<String, Arc<dyn Storage>>, String), sqlx::Error> {
+pub async fn load_all(db: &SqlitePool, storage_dir: &FsPath) -> Result<(HashMap<String, Arc<dyn Storage>>, String), sqlx::Error> {
     let rows: Vec<LocationRow> = sqlx::query_as("SELECT id, name, kind, config, is_default FROM storage_locations").fetch_all(db).await?;
     let mut map = HashMap::new();
     let mut default = BUILTIN.to_string();
@@ -45,7 +45,7 @@ pub async fn load_all(db: &SqlitePool, data_dir: &FsPath) -> Result<(HashMap<Str
         if r.is_default {
             default = r.id.clone();
         }
-        match storage::build(&r.kind, &config_json(&r.config), &data_dir.join("blobs")) {
+        match storage::build(&r.kind, &config_json(&r.config), storage_dir) {
             Ok(s) => {
                 map.insert(r.id, s);
             }
@@ -111,7 +111,11 @@ pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<Lo
         .bind(&r.id)
         .fetch_one(&st.db)
         .await?;
-        let (config, has_secret) = public_config(&config_json(&r.config));
+        let (mut config, has_secret) = public_config(&config_json(&r.config));
+        if r.id == BUILTIN {
+            // Shown in the list; the built-in location's folder is set with THIRTYFILE_STORAGE
+            config["path"] = st.storage_dir.display().to_string().into();
+        }
         let health = st.location_health.lock().unwrap().get(&r.id).cloned();
         let connected = st.storages.read().unwrap().contains_key(&r.id) && health.as_ref().is_none_or(|h| h.ok);
         let (pending_deletes,): (i64,) =
@@ -267,7 +271,7 @@ pub fn spawn_health_monitor(st: AppState) {
 async fn connect(st: &AppState, kind: &str, config: Value) -> AppResult<(Arc<dyn Storage>, Value)> {
     let config = storage::normalize(kind, config).await;
     storage::check_insecure_target(kind, &config).await.map_err(AppError::bad_request)?;
-    let backend = storage::build(kind, &config, &st.data_dir.join("blobs")).map_err(|e| AppError::bad_request(format!("Invalid settings: {e}")))?;
+    let backend = storage::build(kind, &config, &st.storage_dir).map_err(|e| AppError::bad_request(format!("Invalid settings: {e}")))?;
     tokio::time::timeout(Duration::from_secs(20), backend.check())
         .await
         .map_err(|_| AppError::bad_request("Connection timed out. Check the endpoint and network."))?

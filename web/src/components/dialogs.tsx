@@ -255,7 +255,7 @@ export function ChangePasswordDialog({ onClose }: { onClose(): void }) {
           <div className="grid gap-2">
             <Label htmlFor="pw-cur">{t("Current password")}</Label>
             <Input id="pw-cur" type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
-            <Label htmlFor="pw-new">{t("New password (at least 8 characters)")}</Label>
+            <Label htmlFor="pw-new">{t("New password (at least 6 characters)")}</Label>
             <Input id="pw-new" type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
             <Label htmlFor="pw-cfm">{t("Confirm new password")}</Label>
             <Input id="pw-cfm" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
