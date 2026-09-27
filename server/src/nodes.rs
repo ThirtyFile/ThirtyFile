@@ -644,7 +644,7 @@ pub async fn trash(State(st): State<AppState>, user: User, Json(req): Json<Batch
         .bind(&trash_id)
         .execute(&mut *tx)
         .await?;
-        sqlx::query("UPDATE nodes SET trash_root = 1 WHERE id = ?").bind(&node.id).execute(&mut *tx).await?;
+        sqlx::query("UPDATE nodes SET trash_root = 1, trashed_by = ? WHERE id = ?").bind(user.id).bind(&node.id).execute(&mut *tx).await?;
         tree::touch(&mut tx, node.parent_id.as_deref().unwrap()).await?;
         tree::log(&mut tx, &user, Some(&node), "trash", "").await?;
     }
@@ -662,6 +662,9 @@ pub struct Located {
     location_space: Option<SpaceRef>,
     /// Folders from the space root (or the shared folder) down to the item's parent
     location_path: Vec<String>,
+    /// Trash: who moved the item there; None when unknown (deleted before this was recorded, or by a removed account)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deleted_by: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -705,7 +708,7 @@ async fn locate(st: &AppState, user: &User, mut nodes: Vec<Node>) -> AppResult<V
         let location_path: Vec<String> = path[start..].iter().map(|p| p.name.clone()).collect();
         let first = space.as_ref().map_or(SHARED_WITH_ME, |s| s.name.as_str());
         let location = std::iter::once(first).chain(location_path.iter().map(String::as_str)).collect::<Vec<_>>().join("/");
-        out.push(Located { node, location, location_space: space, location_path });
+        out.push(Located { node, location, location_space: space, location_path, deleted_by: None });
     }
     Ok(out)
 }
@@ -726,11 +729,13 @@ async fn trash_drives(conn: &mut SqliteConnection, user: &User, min_role: Role) 
 }
 
 #[derive(Deserialize, Default)]
-pub struct PageQuery {
+pub struct TrashQuery {
     /// Items per page (at most MAX_PAGE); without it, the whole list comes at once
     limit: Option<i64>,
     /// The `next` of the previous page
     after: Option<String>,
+    /// Only items the user deleted (Deleted by me); otherwise everyone's
+    mine: Option<bool>,
 }
 
 /// Where a trash page ends (newest deleted first)
@@ -740,29 +745,50 @@ struct TrashCursor {
     id: String,
 }
 
-pub async fn list_trash(State(st): State<AppState>, user: User, Query(q): Query<PageQuery>) -> AppResult<Json<Listing<Located>>> {
+pub async fn list_trash(State(st): State<AppState>, user: User, Query(q): Query<TrashQuery>) -> AppResult<Json<Listing<Located>>> {
     let (limit, after) = page_of::<TrashCursor>(q.limit, q.after.as_deref())?;
     let drive_ids = trash_drives(&mut *st.db.acquire().await?, &user, Role::Viewer).await?;
     let keyset = if after.is_some() { "AND (n.trashed_at < ?2 OR (n.trashed_at = ?2 AND n.id < ?3))" } else { "" };
+    // The filter is one more condition on the same order, so paging works the same with it
+    let mine = if q.mine == Some(true) { "AND n.trashed_by = ?5" } else { "" };
     let sql = format!(
-        "SELECT {NODE_COLS} FROM nodes n
-         WHERE n.trash_root = 1 AND n.drive_id IN (SELECT value FROM json_each(?1)) {keyset}
+        "SELECT {NODE_COLS}, (SELECT username FROM users WHERE id = n.trashed_by) AS deleted_by FROM nodes n
+         WHERE n.trash_root = 1 AND n.drive_id IN (SELECT value FROM json_each(?1)) {keyset} {mine}
          ORDER BY n.trashed_at DESC, n.id DESC LIMIT ?4"
     );
-    let nodes: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        #[sqlx(flatten)]
+        node: Node,
+        deleted_by: Option<String>,
+    }
+    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(serde_json::to_string(&drive_ids).unwrap())
         .bind(after.as_ref().map(|c| c.at))
         .bind(after.as_ref().map(|c| c.id.clone()))
         .bind(limit.unwrap_or(-1))
+        .bind(user.id)
         .fetch_all(&st.db)
         .await?;
-    let next = match (limit, nodes.last()) {
-        (Some(l), Some(last)) if nodes.len() as i64 == l => {
-            Some(encode_cursor(&TrashCursor { at: last.trashed_at.unwrap_or_default(), id: last.id.clone() }))
+    let next = match (limit, rows.last()) {
+        (Some(l), Some(last)) if rows.len() as i64 == l => {
+            Some(encode_cursor(&TrashCursor { at: last.node.trashed_at.unwrap_or_default(), id: last.node.id.clone() }))
         }
         _ => None,
     };
-    Ok(Json(Listing::new(locate(&st, &user, nodes).await?, limit, next)))
+    let mut deleted_by: HashMap<String, String> = HashMap::new();
+    let mut nodes = Vec::with_capacity(rows.len());
+    for r in rows {
+        if let Some(name) = r.deleted_by {
+            deleted_by.insert(r.node.id.clone(), name);
+        }
+        nodes.push(r.node);
+    }
+    let mut located = locate(&st, &user, nodes).await?;
+    for l in &mut located {
+        l.deleted_by = deleted_by.remove(&l.node.id);
+    }
+    Ok(Json(Listing::new(located, limit, next)))
 }
 
 /// The user's role for trash operations: their role on the item, and administrators manage the trash of every space
@@ -836,7 +862,7 @@ pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<Bat
             .execute(&mut *tx)
             .await?;
         sqlx::query(
-            "UPDATE nodes SET trashed_at = NULL, trash_root = 0, trash_id = NULL
+            "UPDATE nodes SET trashed_at = NULL, trash_root = 0, trash_id = NULL, trashed_by = NULL
              WHERE trash_id = (SELECT trash_id FROM nodes WHERE id = ?)",
         )
         .bind(&node.id)
@@ -1304,13 +1330,13 @@ mod tests {
             sqlx::query("UPDATE nodes SET trashed_at = ? WHERE id = ?").bind(100 + (i as i64).min(5)).bind(id).execute(&env.st.db).await.unwrap();
         }
         let whole: Vec<String> =
-            list_trash(State(env.st.clone()), amy.clone(), Query(PageQuery::default())).await.unwrap().0.into_items().into_iter().map(|l| l.node.name).collect();
+            list_trash(State(env.st.clone()), amy.clone(), Query(TrashQuery::default())).await.unwrap().0.into_items().into_iter().map(|l| l.node.name).collect();
         assert_eq!(whole.len(), 7);
         assert_eq!(&whole[2..], ["4.txt", "3.txt", "2.txt", "1.txt", "0.txt"]);
         for limit in [1, 2, 3, 7] {
             let (mut names, mut after) = (Vec::new(), None);
             loop {
-                let q = PageQuery { limit: Some(limit), after };
+                let q = TrashQuery { limit: Some(limit), after, mine: None };
                 let Json(Listing::Page { items, next }) = list_trash(State(env.st.clone()), amy.clone(), Query(q)).await.unwrap() else {
                     panic!("a limit gives a page")
                 };
@@ -1343,7 +1369,7 @@ mod tests {
 
         let Json(done) = empty_trash(State(env.st.clone()), amy.clone()).await.unwrap();
         assert_eq!(done["deleted"], 2);
-        let left = list_trash(State(env.st.clone()), bob.clone(), Query(PageQuery::default())).await.unwrap().0.into_items();
+        let left = list_trash(State(env.st.clone()), bob.clone(), Query(TrashQuery::default())).await.unwrap().0.into_items();
         assert_eq!(left.len(), 1);
     }
 
@@ -1468,7 +1494,7 @@ mod tests {
 
         // Moving to the trash: the folder, a file deep inside it, and a duplicate id
         let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&doc, &folder, &other, &folder])).await.unwrap();
-        let listed = list_trash(State(env.st.clone()), amy.clone(), Query(PageQuery::default())).await.unwrap().0.into_items();
+        let listed = list_trash(State(env.st.clone()), amy.clone(), Query(TrashQuery::default())).await.unwrap().0.into_items();
         let mut names: Vec<String> = listed.into_iter().map(|l| l.node.name).collect();
         names.sort();
         assert_eq!(names, vec!["Folder", "b.txt"]);
@@ -1477,7 +1503,7 @@ mod tests {
         let _ = restore(State(env.st.clone()), amy.clone(), ids(&[&folder])).await.unwrap();
         let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&doc])).await.unwrap();
         let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&folder])).await.unwrap();
-        let listed = list_trash(State(env.st.clone()), amy.clone(), Query(PageQuery::default())).await.unwrap().0.into_items();
+        let listed = list_trash(State(env.st.clone()), amy.clone(), Query(TrashQuery::default())).await.unwrap().0.into_items();
         let all: Vec<String> = listed.into_iter().map(|l| l.node.id).collect();
         assert!(all.contains(&doc) && all.contains(&folder));
         let refs: Vec<&str> = all.iter().map(String::as_str).collect();
@@ -1559,7 +1585,7 @@ mod tests {
         let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&doc, &other, &private])).await.unwrap();
 
         // Listed with the space's name, and each item can be restored or deleted, not only emptied as a whole
-        let listed = list_trash(State(env.st.clone()), admin.clone(), Query(PageQuery::default())).await.unwrap().0.into_items();
+        let listed = list_trash(State(env.st.clone()), admin.clone(), Query(TrashQuery::default())).await.unwrap().0.into_items();
         let plan = listed.iter().find(|l| l.node.name == "plan.txt").unwrap();
         let space = plan.location_space.as_ref().unwrap();
         assert_eq!((space.kind.as_str(), space.name.as_str(), plan.location_path.len()), ("team", "Team", 0));
@@ -1676,5 +1702,67 @@ mod tests {
         env.grant(&sub, &ben, "viewer").await;
         let Json(c) = contents(State(env.st.clone()), ben.clone(), of(&[&sub])).await.unwrap();
         assert_eq!(c, Contents { size: 23, files: 2, folders: 1 });
+    }
+
+    #[tokio::test]
+    async fn the_trash_shows_who_deleted_each_item_and_filters_by_me() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        // A team space both are members of
+        let shared = {
+            let mut conn = env.st.db.acquire().await.unwrap();
+            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0).await.unwrap();
+            crate::db::add_grant(&mut conn, &root, "user", amy.id, "owner", Some(amy.id), None).await.unwrap();
+            crate::db::add_grant(&mut conn, &root, "user", ben.id, "editor", Some(amy.id), None).await.unwrap();
+            root
+        };
+        let (mut by_amy, mut by_ben) = (Vec::new(), Vec::new());
+        for i in 0..5 {
+            by_amy.push(env.file(&amy, &shared, &format!("amy-{i}.txt")).await);
+            by_ben.push(env.file(&amy, &shared, &format!("ben-{i}.txt")).await);
+        }
+        let old = env.file(&amy, &shared, "old.txt").await;
+        for (who, list) in [(&amy, &by_amy), (&ben, &by_ben)] {
+            let refs: Vec<&str> = list.iter().map(String::as_str).collect();
+            let _ = trash(State(env.st.clone()), who.clone(), ids(&refs)).await.unwrap();
+        }
+        // Deleted before who deleted it was recorded
+        let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&old])).await.unwrap();
+        sqlx::query("UPDATE nodes SET trashed_by = NULL WHERE id = ?").bind(&old).execute(&env.st.db).await.unwrap();
+
+        let all = list_trash(State(env.st.clone()), amy.clone(), Query(TrashQuery::default())).await.unwrap().0.into_items();
+        assert_eq!(all.len(), 11);
+        for l in &all {
+            let expected = if l.node.name == "old.txt" { None } else { Some(&l.node.name[..3]) };
+            assert_eq!(l.deleted_by.as_deref(), expected, "{}", l.node.name);
+        }
+        let unknown = all.iter().find(|l| l.node.name == "old.txt").unwrap();
+        assert!(serde_json::to_value(unknown).unwrap().get("deleted_by").is_none());
+
+        // Deleted by me, page by page
+        for (who, prefix) in [(&amy, "amy-"), (&ben, "ben-")] {
+            let (mut names, mut after) = (Vec::new(), None);
+            loop {
+                let q = TrashQuery { limit: Some(2), after, mine: Some(true) };
+                let Json(Listing::Page { items, next }) = list_trash(State(env.st.clone()), who.clone(), Query(q)).await.unwrap() else {
+                    panic!("a limit gives a page")
+                };
+                names.extend(items.into_iter().map(|l| l.node.name));
+                let Some(n) = next else { break };
+                after = Some(n);
+            }
+            names.sort();
+            assert_eq!(names, (0..5).map(|i| format!("{prefix}{i}.txt")).collect::<Vec<_>>());
+        }
+
+        // Restoring forgets it; deleting again records the new person
+        let _ = restore(State(env.st.clone()), amy.clone(), ids(&[&by_ben[0]])).await.unwrap();
+        let (by,): (Option<i64>,) = sqlx::query_as("SELECT trashed_by FROM nodes WHERE id = ?").bind(&by_ben[0]).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(by, None);
+        let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&by_ben[0]])).await.unwrap();
+        let mine = list_trash(State(env.st.clone()), amy.clone(), Query(TrashQuery { mine: Some(true), ..Default::default() })).await.unwrap().0.into_items();
+        assert!(mine.iter().any(|l| l.node.id == by_ben[0]));
+        assert_eq!(mine.len(), 6);
     }
 }

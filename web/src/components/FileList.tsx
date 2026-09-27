@@ -59,6 +59,8 @@ export interface FileListProps {
   dimmed?: Set<string>;
   dateLabel?: string;
   dateOf?(n: Item): number;
+  /** One more text column after the size (list view), e.g. who deleted each item in the trash */
+  extraColumn?: { label: string; value(n: Item): string };
   /** Allow dragging items into folders to move them (or copy them, with Ctrl) */
   onDropInto?(ids: string[], folder: Node, copy: boolean): void;
   /** Allow dropping files from the computer on folders to upload them there */
@@ -167,6 +169,7 @@ interface Handlers {
   doubleClick(n: Item): void;
   openInNewTab?(n: Item): void;
   dateOf(n: Item): number;
+  extra?(n: Item): string;
   rename(item: Item, name: string): Promise<void>;
   renameDone(): void;
 }
@@ -244,7 +247,7 @@ function renameBox(r: RowProps, multiline?: boolean) {
 
 const td = "h-7 px-2 truncate";
 
-const ListRow = memo(function ListRow(r: RowProps & { checkboxes: boolean; location: boolean; owner: boolean }) {
+const ListRow = memo(function ListRow(r: RowProps & { checkboxes: boolean; location: boolean; owner: boolean; extra: boolean }) {
   const { item } = r;
   return (
     <tr
@@ -293,6 +296,7 @@ const ListRow = memo(function ListRow(r: RowProps & { checkboxes: boolean; locat
       </td>
       <td role="gridcell" className={cn(td, "pr-3 text-right text-muted-foreground tabular-nums")}>{item.kind === "folder" ? "" : formatWinSize(item.size)}</td>
       {r.owner && <td role="gridcell" className={cn(td, "text-muted-foreground max-md:hidden")}>{item.owner_name}</td>}
+      {r.extra && <td role="gridcell" className={cn(td, "text-muted-foreground max-md:hidden")}>{r.h.current.extra?.(item)}</td>}
     </tr>
   );
 });
@@ -635,6 +639,7 @@ export function FileList(p: FileListProps) {
     doubleClick: (item) => !coarse && p.onOpen(item),
     openInNewTab: p.onOpenInNewTab,
     dateOf: p.dateOf ?? ((x) => x.updated_at),
+    extra: p.extraColumn?.value,
     rename: (item, name) => p.onRename!(item, name),
     renameDone: () => p.onRenameDone?.(),
   };
@@ -721,7 +726,7 @@ export function FileList(p: FileListProps) {
     );
   }
 
-  const columns = 4 + (p.showCheckboxes ? 1 : 0) + (p.showLocation ? 1 : 0) + (p.showOwner ? 1 : 0);
+  const columns = 4 + (p.showCheckboxes ? 1 : 0) + (p.showLocation ? 1 : 0) + (p.showOwner ? 1 : 0) + (p.extraColumn ? 1 : 0);
   const spacer = (height: number) => (
     <tr aria-hidden>
       <td colSpan={columns} style={{ height, padding: 0 }} />
@@ -762,13 +767,14 @@ export function FileList(p: FileListProps) {
             <Head sort={p.sort} onSort={p.onSort} k="type" label={t("Type")} className="w-[120px] max-md:hidden" />
             <Head sort={p.sort} onSort={p.onSort} k="size" label={t("Size")} className="w-[100px]" />
             {p.showOwner && <Head sort={p.sort} onSort={p.onSort} label={t("Uploaded by")} className="w-[110px] max-md:hidden" />}
+            {p.extraColumn && <Head sort={p.sort} onSort={p.onSort} label={p.extraColumn.label} className="w-[110px] max-md:hidden" />}
           </tr>
         </thead>
         <tbody>
           {rows.map(({ row: i, gap }) => (
             <Fragment key={p.items[i].id}>
               {gap > 0 && spacer(gap)}
-              <ListRow {...row(i)} checkboxes={!!p.showCheckboxes} location={!!p.showLocation} owner={!!p.showOwner} />
+              <ListRow {...row(i)} checkboxes={!!p.showCheckboxes} location={!!p.showLocation} owner={!!p.showOwner} extra={!!p.extraColumn} />
             </Fragment>
           ))}
           {rest > 0 && spacer(rest)}

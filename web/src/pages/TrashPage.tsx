@@ -1,12 +1,20 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArchiveRestoreIcon, FolderOpenIcon, RefreshCwIcon, SquareCheckIcon, Trash2Icon, TrashIcon } from "lucide-react";
+import { ArchiveRestoreIcon, FilterIcon, FolderOpenIcon, RefreshCwIcon, SquareCheckIcon, Trash2Icon, TrashIcon } from "lucide-react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import { api, driveName, privateSource } from "@/api";
+import { api, driveName, privateSource, type Located } from "@/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/dialogs";
 import { ErrorState } from "@/components/ErrorState";
 import { FileList } from "@/components/FileList";
@@ -21,7 +29,10 @@ export function TrashPage() {
   const me = useMe();
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const q = useAllPages(["trash", "pages"], api.trashPage);
+  // Deleted by me, or by everyone (the items of every space whose trash the person sees)
+  const [deletedBy, setDeletedBy] = useState<"everyone" | "me">("everyone");
+  const mine = deletedBy === "me";
+  const q = useAllPages(["trash", "pages", deletedBy], (limit, after) => api.trashPage(limit, after, mine));
   // Empty trash deletes only the spaces the person manages; the trash also lists items of spaces they can only view
   const emptyable = useQuery({ queryKey: ["trash", "empty"], queryFn: api.emptyTrashPreview, enabled: me.can_delete });
   const emptyCount = (emptyable.data ?? []).reduce((sum, s) => sum + s.items, 0);
@@ -50,6 +61,23 @@ export function TrashPage() {
     <>
       <ToolButton icon={ArchiveRestoreIcon} label={t("Restore")} showLabel disabled={!ids.length} onClick={restore} />
       <ToolButton icon={Trash2Icon} label={t("Delete permanently")} showLabel disabled={!ids.length || !me.can_delete} onClick={() => setConfirm("delete")} />
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={<ToolButton icon={FilterIcon} label={mine ? t("Deleted by me") : t("Deleted by everyone")} showLabel className={mine ? "text-brand" : undefined} />}
+        />
+        <DropdownMenuContent className="w-48">
+          <DropdownMenuRadioGroup
+            value={deletedBy}
+            onValueChange={(v) => {
+              setDeletedBy(v as "everyone" | "me");
+              setSelected(new Set());
+            }}
+          >
+            <DropdownMenuRadioItem value="everyone">{t("Deleted by everyone")}</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="me">{t("Deleted by me")}</DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <span className="flex-1" />
       <ToolButton icon={TrashIcon} label={t("Empty trash")} showLabel disabled={!emptyCount || !me.can_delete} onClick={() => setConfirm("empty")} />
     </>
@@ -100,10 +128,11 @@ export function TrashPage() {
               showLocation
               dateLabel={t("Date deleted")}
               dateOf={(n) => n.trashed_at ?? n.updated_at}
+              extraColumn={{ label: t("Deleted by"), value: (n) => (n as Located).deleted_by ?? "—" }}
               empty={
                 <div className="flex min-h-52 flex-col items-center justify-center gap-2 py-10 text-muted-foreground">
                   <Trash2Icon className="size-9 stroke-[1.4]" />
-                  <p>{t("Trash is empty")}</p>
+                  <p>{mine ? t("You haven't deleted anything that's in the trash") : t("Trash is empty")}</p>
                   <p className="text-xs">{trashHint(me.trash_days)}</p>
                 </div>
               }

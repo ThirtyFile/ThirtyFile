@@ -310,6 +310,8 @@ pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     sqlx::query("DELETE FROM grants WHERE principal_type = 'user' AND principal_id = ?").bind(id).execute(&mut *tx).await?;
     sqlx::query("UPDATE drives SET owner_id = ? WHERE owner_id = ?").bind(me.id).bind(id).execute(&mut *tx).await?;
     sqlx::query("UPDATE nodes SET owner_id = ? WHERE owner_id = ?").bind(me.id).bind(id).execute(&mut *tx).await?;
+    // The trash shows "—" for items deleted by a removed account (a later account could get the same id)
+    sqlx::query("UPDATE nodes SET trashed_by = NULL WHERE trashed_by = ?").bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM users WHERE id = ?").bind(id).execute(&mut *tx).await?;
     tree::log(&mut tx, &me, None, "user_delete", &detail).await?;
     tx.commit().await?;

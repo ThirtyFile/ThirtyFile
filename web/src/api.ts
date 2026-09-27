@@ -38,6 +38,8 @@ export interface Located extends Node {
   location_space: { kind: string; name: string } | null;
   /** Folders from the space root (or the shared folder) down to the item's parent */
   location_path: string[];
+  /** Trash: who moved the item there; missing when unknown (deleted before this was recorded, or by a removed account) */
+  deleted_by?: string;
 }
 
 /** What folders hold, at any depth (not counting the folders themselves; items in the trash are left out) */
@@ -798,8 +800,9 @@ export const api = {
   trash: (ids: string[]) => post("/nodes/trash", { ids }),
   /** Size and number of items inside these folders (files among the ids hold nothing) */
   contents: (ids: string[]) => post<FolderContents>("/nodes/contents", { ids }),
-  trashPage: (limit: number, after?: string) =>
-    get<CursorPage<Located>>(`/trash${qs({ limit: String(limit), after })}`).then((p) => ({ ...p, items: p.items.map(localizeLocated) })),
+  /** With mine, only the items the person deleted */
+  trashPage: (limit: number, after?: string, mine?: boolean) =>
+    get<CursorPage<Located>>(`/trash${qs({ limit: String(limit), after, mine: mine ? "true" : undefined })}`).then((p) => ({ ...p, items: p.items.map(localizeLocated) })),
   restore: (ids: string[]) => post("/trash/restore", { ids }),
   deleteForever: (ids: string[]) => post("/trash/delete", { ids }),
   emptyTrash: () => post("/trash/empty"),
