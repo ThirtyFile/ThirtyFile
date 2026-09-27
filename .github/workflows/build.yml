@@ -1,7 +1,7 @@
 # Checks every pull request: runs the tests and builds the Docker image side by side (amd64 only, not published).
 # Merging into main runs nothing here; images are only published by the Release workflow (release.yml), which
 # calls this workflow with a version number: the image is then built for both platforms and pushed by its digest,
-# without a tag. release.yml gives it its tags (1.2.3, 1.2, latest) only once the tests have passed as well, so the
+# without a tag. release.yml gives it its tags (1.2.3, 1.2, 1, latest) only once the tests have passed as well, so the
 # published image is exactly the one that was built and started here.
 # Pull requests that only touch the website or the documentation skip the tests and the image. The required check is
 # "Checks passed" at the end: it passes when every job passed or was skipped, and fails when any failed or was cancelled.

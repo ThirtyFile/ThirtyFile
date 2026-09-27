@@ -32,12 +32,14 @@ docker run -d --name thirtyfile --restart unless-stopped …   # the same option
           <table>
             <thead><tr><th>Tag</th><th>Contents</th></tr></thead>
             <tbody>
-              <tr><td><code>latest</code></td><td>The newest release. The right choice for most people</td></tr>
+              <tr><td><code>1</code></td><td>The newest release of one major version (from 1.0.0 on). Picks up new features and repairs but never a version that changes something you rely on (2.0.0), so it is the safe tag for updating automatically</td></tr>
+              <tr><td><code>latest</code></td><td>The newest release, including a new major version: read its notes before you upgrade</td></tr>
               <tr><td><code>1.2</code>, <code>1.2.3</code></td><td>One release line, or one exact release, if you want to decide yourself when to move on</td></tr>
+              <tr><td><code>1.2.3-rc.1</code></td><td>A pre-release, for trying out what is coming. Only available under its own number: the other tags never point to a pre-release</td></tr>
             </tbody>
           </table>
         </div>
-        <p>The changes in each release are listed on the <a href="https://github.com/ThirtyFile/ThirtyFile/releases">releases page</a>.</p>
+        <p>Before 1.0.0 there is no major-version tag: <code>0.3</code> is the closest, since any 0.x release may change things. The changes in each release are listed on the <a href="https://github.com/ThirtyFile/ThirtyFile/releases">releases page</a>, which also has <code>compose.yaml</code> and the server as a single program for Linux on amd64 and arm64, with their SHA-256 checksums in <code>SHA256SUMS</code>.</p>
         <h3 id="downgrade">Going back to an older version</h3>
         <p>An older version doesn't start on a database a newer one has changed. To go back, stop ThirtyFile, replace <code>data/drive.db</code> with the copy made before the upgrade (<code>data/backups/drive-before-&lt;new version&gt;.db</code>), delete <code>drive.db-wal</code> and <code>drive.db-shm</code> if they are there, and start the older image. Changes made since the upgrade (new accounts, files uploaded and their names) are lost; files uploaded since then stay in the storage folder but aren't listed.</p>
 
