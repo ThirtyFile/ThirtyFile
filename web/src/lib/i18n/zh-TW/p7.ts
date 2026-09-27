@@ -18,4 +18,8 @@ export default {
   "Storage used": "已使用空間",
   "Share link": "分享連結",
   "Charts and pictures in this workbook couldn't be shown. Reload the page.": "無法顯示此活頁簿中的圖表和圖片，請重新整理頁面。",
+  "light mode": "淺色模式",
+  "dark mode": "深色模式",
+  "In {mode}, the accent color stands out too little from the page ({ratio}:1, at least 3:1 is needed): focus rings and selected items are hard to see.": "{mode}下，強調色與頁面的對比太低（{ratio}:1，至少需要 3:1）：焦點框和選取的項目不易看清。",
+  "In {mode}, button text on the accent color is hard to read ({ratio}:1, at least 4.5:1 is needed).": "{mode}下，強調色上的按鈕文字不易閱讀（{ratio}:1，至少需要 4.5:1）。",
 } satisfies Record<string, string>;

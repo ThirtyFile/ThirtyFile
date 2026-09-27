@@ -6,7 +6,7 @@ export default {
   "Manager": "管理者",
   "Owner": "擁有者",
   "Can browse, preview, and download": "可瀏覽、預覽、下載",
-  "Can upload, edit, delete, and create share links": "可上傳、編輯、刪除、建立分享連結",
+  "Can upload, edit, delete, and create share links, as far as their account allows": "可上傳、編輯、刪除、建立分享連結（視帳號權限而定）",
   "Editor permissions, plus manage members and sharing": "編輯者權限，並可管理成員與共用",
   "Manager permissions, plus delete the space": "管理者權限，並可刪除空間",
   "Personal space": "個人空間",

@@ -14,7 +14,7 @@ export const ROLE_LABEL: Record<Role, string> = {
 
 export const ROLE_HINT: Record<Role, string> = {
   viewer: t("Can browse, preview, and download"),
-  editor: t("Can upload, edit, delete, and create share links"),
+  editor: t("Can upload, edit, delete, and create share links, as far as their account allows"),
   manager: t("Editor permissions, plus manage members and sharing"),
   owner: t("Manager permissions, plus delete the space"),
 };

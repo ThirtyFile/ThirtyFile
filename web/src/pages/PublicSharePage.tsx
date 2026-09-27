@@ -222,6 +222,7 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
             <button
               key={v}
               type="button"
+              aria-pressed={view === v}
               onClick={() => setView(v)}
               className={cn("rounded-md px-2 py-0.5 text-xs", view === v ? "bg-secondary" : "text-muted-foreground")}
             >
