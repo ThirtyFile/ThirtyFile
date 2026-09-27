@@ -77,7 +77,13 @@ Checks before committing:
 
 ```bash
 cd server && cargo test && cargo clippy --all-targets
-cd ../web && pnpm typecheck && node scripts/check-i18n.mjs
+cd ../web && pnpm typecheck && node scripts/check-i18n.mjs && pnpm test
+```
+
+The end-to-end test signs in, uploads and previews files in a real browser, against a server built from the repository (the first time, get the browser with `pnpm exec playwright install chromium`):
+
+```bash
+cd web && pnpm build && (cd ../server && cargo build --release) && pnpm test:e2e
 ```
 
 | Folder | Contents |

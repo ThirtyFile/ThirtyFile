@@ -66,7 +66,7 @@ jobs:
 
   check:
     name: Tests
-    timeout-minutes: 30
+    timeout-minutes: 45
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -88,6 +88,13 @@ jobs:
           node scripts/check-i18n.mjs
           pnpm build
 
+      # Unit tests (Vitest), with the coverage in the job summary
+      - name: Frontend tests
+        working-directory: web
+        run: |
+          pnpm test --coverage
+          node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY"
+
       # rustup installs the version and clippy named in server/rust-toolchain.toml on first use
       - run: rustup toolchain install
         working-directory: server
@@ -100,6 +107,15 @@ jobs:
         run: |
           cargo test --locked
           cargo clippy --locked --all-targets -- -D warnings
+
+      # Sign in, upload, preview and download in a real browser, against the server built from this commit
+      # (the release build embeds web/dist, built above)
+      - name: End-to-end test
+        run: |
+          (cd server && cargo build --release --locked)
+          cd web
+          pnpm exec playwright install --with-deps chromium
+          pnpm test:e2e
 
       # Known security problems in dependencies, their licences and where they come from (server/deny.toml)
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1

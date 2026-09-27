@@ -2,6 +2,9 @@
 /server/target/
 /web/node_modules/
 /web/dist/
+/web/coverage/
+/web/test-results/
+/web/playwright-report/
 *.tsbuildinfo
 
 # Data and local settings (`cargo run` creates server/data/ during development)

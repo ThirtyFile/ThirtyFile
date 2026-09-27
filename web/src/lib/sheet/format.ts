@@ -201,7 +201,9 @@ function formatDate(serial: number, body: string, roc = false, en = false) {
         out += pad(s);
         break;
       case "am/pm":
-        out += pm ? "下午" : "上午"; // i18n-ignore: AM/PM markers produced by Excel number formats
+        // English locale ([$-409]): AM / PM like the month names; otherwise the Taiwanese markers
+        if (en) out += pm ? "PM" : "AM";
+        else out += pm ? "下午" : "上午"; // i18n-ignore: AM/PM markers produced by Excel number formats
         break;
       case "a/p":
         out += pm ? "P" : "A";

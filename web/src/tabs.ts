@@ -24,12 +24,12 @@ const HOME = "/files";
 const MAX_TABS = 20;
 const MAX_ENTRIES = 50;
 
+let seq = 0;
 let storageKey = "tf-tabs";
 let state: TabsState = fresh(HOME);
 /** The next navigation, triggered by a tab operation, that shouldn't be written to the history */
 let pending: string | null = null;
 const listeners = new Set<() => void>();
-let seq = 0;
 
 function newTab(path: string): Tab {
   return { id: `t${Date.now().toString(36)}${seq++}`, entries: [path], index: 0, title: "" };
@@ -98,7 +98,7 @@ export function loadTabs(userId: number) {
 }
 
 /** The saved state, if it has the expected shape (an older format or an edited value would otherwise crash the tab bar on every load) */
-function validTabs(raw: unknown): TabsState | null {
+export function validTabs(raw: unknown): TabsState | null {
   if (!raw || typeof raw !== "object") return null;
   const { tabs, active } = raw as { tabs?: unknown; active?: unknown };
   if (!Array.isArray(tabs) || tabs.length === 0 || tabs.length > MAX_TABS || typeof active !== "string") return null;

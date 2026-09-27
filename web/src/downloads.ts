@@ -91,7 +91,7 @@ export function nativeDownload(url: string) {
   a.remove();
 }
 
-function filenameFrom(res: Response, fallback: string) {
+export function filenameFrom(res: Response, fallback: string) {
   const cd = res.headers.get("content-disposition") ?? "";
   const star = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(cd);
   if (star) {
