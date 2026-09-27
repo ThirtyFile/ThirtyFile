@@ -162,12 +162,41 @@ pub struct NewUser<'a> {
     pub provisioned_by: Option<&'a str>,
 }
 
+/// Tables whose ids are never given out twice
+pub enum Counted {
+    Users,
+    Groups,
+}
+
+/// The next id for a user or group: one higher than any id given out before, even when that row was deleted since, so
+/// a new account or group can't pick up log entries or sign-in settings still pointing at a deleted one
+pub async fn next_id(conn: &mut SqliteConnection, table: Counted) -> Result<i64, sqlx::Error> {
+    let (name, sql) = match table {
+        Counted::Users => (
+            "users",
+            "INSERT INTO id_counters (name, last) VALUES (?1, (SELECT COALESCE(MAX(id), 0) FROM users) + 1)
+             ON CONFLICT (name) DO UPDATE SET last = MAX(id_counters.last, (SELECT COALESCE(MAX(id), 0) FROM users)) + 1
+             RETURNING last",
+        ),
+        Counted::Groups => (
+            "groups",
+            "INSERT INTO id_counters (name, last) VALUES (?1, (SELECT COALESCE(MAX(id), 0) FROM groups) + 1)
+             ON CONFLICT (name) DO UPDATE SET last = MAX(id_counters.last, (SELECT COALESCE(MAX(id), 0) FROM groups)) + 1
+             RETURNING last",
+        ),
+    };
+    let (id,): (i64,) = sqlx::query_as(sql).bind(name).fetch_one(&mut *conn).await?;
+    Ok(id)
+}
+
 /// Creates a user and their personal space, returning the user id. The caller must hold the write lock.
 pub async fn create_user(conn: &mut SqliteConnection, u: NewUser<'_>) -> AppResult<i64> {
-    let (id,): (i64,) = sqlx::query_as(
-        "INSERT INTO users (username, password_hash, role, can_write, can_delete, can_share, quota_bytes, created_at, source, provisioned_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+    let id = next_id(conn, Counted::Users).await?;
+    sqlx::query(
+        "INSERT INTO users (id, username, password_hash, role, can_write, can_delete, can_share, quota_bytes, created_at, source, provisioned_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
+    .bind(id)
     .bind(u.username)
     .bind(u.password_hash)
     .bind(u.role)
@@ -178,7 +207,7 @@ pub async fn create_user(conn: &mut SqliteConnection, u: NewUser<'_>) -> AppResu
     .bind(now())
     .bind(u.source)
     .bind(u.provisioned_by)
-    .fetch_one(&mut *conn)
+    .execute(&mut *conn)
     .await?;
     let (_, root_id) = create_drive(conn, "My files", "personal", id, 0).await?;
     add_grant(conn, &root_id, "user", id, "owner", Some(id), None).await?;

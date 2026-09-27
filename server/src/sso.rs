@@ -158,6 +158,19 @@ impl SsoSettings {
             _ => None,
         }
     }
+    /// Removes a deleted group from the groups new accounts join; returns whether anything changed
+    pub fn forget_group(&mut self, id: i64) -> bool {
+        let lists = [&mut self.microsoft.groups, &mut self.google.groups, &mut self.github.groups]
+            .into_iter()
+            .chain(self.domain_rules.iter_mut().map(|r| &mut r.groups));
+        let mut changed = false;
+        for list in lists {
+            let before = list.len();
+            list.retain(|g| *g != id);
+            changed |= list.len() != before;
+        }
+        changed
+    }
     fn provider_mut(&mut self, p: &str) -> Option<&mut ProviderConfig> {
         match p {
             "microsoft" => Some(&mut self.microsoft),

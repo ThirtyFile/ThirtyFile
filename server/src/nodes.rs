@@ -20,6 +20,8 @@ use crate::{
 };
 
 const MAX_BATCH: usize = 1000;
+/// Files and folders one copy may create (counted after expanding folders)
+const MAX_COPY_ITEMS: usize = 20_000;
 /// First segment of the location shown for items accessed through a folder share (translated by the frontend)
 const SHARED_WITH_ME: &str = "Shared with me";
 
@@ -181,11 +183,13 @@ pub struct BatchReq {
 }
 
 impl BatchReq {
-    fn ids(&self) -> AppResult<&[String]> {
+    /// The selected ids, each once
+    fn ids(&self) -> AppResult<Vec<String>> {
         if self.ids.is_empty() || self.ids.len() > MAX_BATCH {
             return Err(AppError::bad_request("Select 1 to 1000 items"));
         }
-        Ok(&self.ids)
+        let mut seen = HashSet::new();
+        Ok(self.ids.iter().filter(|id| seen.insert(id.as_str())).cloned().collect())
     }
     fn dest(&self) -> AppResult<&str> {
         self.dest_id.as_deref().ok_or_else(|| AppError::bad_request("Select a destination folder"))
@@ -220,7 +224,7 @@ pub async fn move_nodes(State(st): State<AppState>, user: User, Json(req): Json<
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
     let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Write).await?;
-    for id in req.ids()? {
+    for id in &req.ids()? {
         let node = tree::node_for(&mut tx, &user, id, Need::Write).await?;
         not_root(&node)?;
         if node.parent_id.as_deref() == Some(dest.id.as_str()) {
@@ -269,7 +273,8 @@ pub async fn copy_nodes(State(st): State<AppState>, user: User, Json(req): Json<
     let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Write).await?;
     let mut plans = Vec::new();
     let mut total = 0i64;
-    for id in req.ids()? {
+    let mut items = 0usize;
+    for id in &req.ids()? {
         let node = tree::node_for(&mut tx, &user, id, Need::Read).await?;
         not_root(&node)?;
         if tree::is_within(&mut tx, &dest.id, &node.id).await? {
@@ -278,6 +283,11 @@ pub async fn copy_nodes(State(st): State<AppState>, user: User, Json(req): Json<
         let nodes: Vec<Node> =
             tree::subtree(&mut tx, &node.id).await?.into_iter().map(|(n, _)| n).filter(|n| n.trashed_at.is_none()).collect();
         total += nodes.iter().map(|n| n.size).sum::<i64>();
+        items += nodes.len();
+        // Copies run in one transaction while every other change waits: keep each one to a bounded size
+        if items > MAX_COPY_ITEMS {
+            return Err(AppError::bad_request("Copy at most 20,000 items at once"));
+        }
         plans.push(nodes);
     }
     tree::check_quota(&mut tx, dest.drive(), total).await?;
@@ -327,7 +337,7 @@ pub async fn trash(State(st): State<AppState>, user: User, Json(req): Json<Batch
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
     let ts = now();
-    for id in &outermost(&mut tx, req.ids()?).await? {
+    for id in &outermost(&mut tx, &req.ids()?).await? {
         let node = tree::node_for(&mut tx, &user, id, Need::Delete).await?;
         not_root(&node)?;
         let trash_id = new_id();
@@ -471,7 +481,7 @@ async fn trash_root(conn: &mut SqliteConnection, user: &User, id: &str, need: Ne
 pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
-    for id in req.ids()? {
+    for id in &req.ids()? {
         // Restored into the original folder, or the space's root folder if that was deleted too
         let (node, parent_id) = trash_root(&mut tx, &user, id, Need::Write).await?;
         let name = tree::unique_name(&mut tx, &parent_id, &node.name, node.is_folder()).await?;
@@ -499,7 +509,7 @@ pub async fn delete_forever(State(st): State<AppState>, user: User, Json(req): J
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
     let mut orphans = Vec::new();
-    for id in &outermost(&mut tx, req.ids()?).await? {
+    for id in &outermost(&mut tx, &req.ids()?).await? {
         let (node, _) = trash_root(&mut tx, &user, id, Need::Delete).await?;
         tree::log(&mut tx, &user, Some(&node), "delete", "").await?;
         orphans.extend(tree::purge_subtree(&mut tx, &node.id).await?);
@@ -678,6 +688,17 @@ mod tests {
 
     fn ids(list: &[&str]) -> Json<BatchReq> {
         Json(BatchReq { ids: list.iter().map(|s| s.to_string()).collect(), dest_id: None })
+    }
+
+    #[tokio::test]
+    async fn the_same_item_selected_twice_is_copied_once() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let doc = env.file(&amy, &amy.root_id, "a.txt").await;
+        let dest = env.folder(&amy, &amy.root_id, "Copies").await;
+        let _ = copy_nodes(State(env.st.clone()), amy.clone(), batch(&[&doc, &doc, &doc], &dest)).await.unwrap();
+        let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE parent_id = ?").bind(&dest).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(n, 1);
     }
 
     #[tokio::test]

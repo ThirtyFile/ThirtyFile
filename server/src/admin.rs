@@ -450,6 +450,17 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_new_account_never_gets_the_id_of_a_deleted_one() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let Json(first) = create(State(env.st.clone()), Admin(admin.clone()), req("first", None)).await.unwrap();
+        // The newest account is deleted: its id would be handed out again without the counter
+        let _ = delete(State(env.st.clone()), Admin(admin.clone()), Path(first.id)).await.unwrap();
+        let Json(next) = create(State(env.st.clone()), Admin(admin.clone()), req("next", None)).await.unwrap();
+        assert!(next.id > first.id, "the deleted account's id was given out again");
+    }
+
+    #[tokio::test]
     async fn new_users_get_the_default_quota() {
         let env = testutil::env().await;
         let admin = env.admin().await;

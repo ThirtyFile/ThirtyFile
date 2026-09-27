@@ -97,6 +97,9 @@ pub struct CreateDriveReq {
     quota_bytes: i64,
 }
 
+/// Team spaces a standard user may create
+const MAX_OWN_SPACES: i64 = 20;
+
 pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<CreateDriveReq>) -> AppResult<Json<DriveInfo>> {
     if !can_create_drive(&st, &user) {
         return Err(AppError::forbidden("Only administrators can create spaces"));
@@ -108,6 +111,13 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     let quota = if user.is_admin() { req.quota_bytes.max(0) } else { user.quota_bytes.max(0) };
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
+    if !user.is_admin() {
+        // Each space brings its own quota, so the number a user can create is limited
+        let (own,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drives WHERE kind = 'team' AND owner_id = ?").bind(user.id).fetch_one(&mut *tx).await?;
+        if own >= MAX_OWN_SPACES {
+            return Err(AppError::bad_request("You can create at most 20 spaces. Ask an administrator for more."));
+        }
+    }
     let (drive_id, root_id) = create_drive(&mut tx, &name, "team", user.id, quota).await?;
     add_grant(&mut tx, &root_id, "user", user.id, "owner", Some(user.id), None).await?;
     let root = tree::get_node(&mut tx, &root_id).await?.unwrap();
@@ -520,11 +530,13 @@ pub async fn create_group(State(st): State<AppState>, Admin(user): Admin, Json(r
     let name = validate_name(req.name.as_deref().unwrap_or_default())?;
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
-    let (id,): (i64,) = sqlx::query_as("INSERT INTO groups (name, description, created_at) VALUES (?, ?, ?) RETURNING id")
+    let id = crate::db::next_id(&mut tx, crate::db::Counted::Groups).await?;
+    sqlx::query("INSERT INTO groups (id, name, description, created_at) VALUES (?, ?, ?, ?)")
+        .bind(id)
         .bind(&name)
         .bind(req.description.unwrap_or_default())
         .bind(now())
-        .fetch_one(&mut *tx)
+        .execute(&mut *tx)
         .await
         .map_err(|e| if matches!(&e, sqlx::Error::Database(d) if d.is_unique_violation()) { AppError::conflict("A group with this name already exists") } else { e.into() })?;
     set_members(&mut tx, id, req.members.as_deref().unwrap_or_default()).await?;
@@ -563,8 +575,17 @@ pub async fn delete_group(State(st): State<AppState>, Admin(user): Admin, Path(i
     let name = principal_name(&mut tx, "group", id).await?.unwrap_or_default();
     sqlx::query("DELETE FROM grants WHERE principal_type = 'group' AND principal_id = ?").bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM groups WHERE id = ?").bind(id).execute(&mut *tx).await?;
+    // Accounts created by single sign-on must no longer be added to it
+    let mut sso = st.sso.read().unwrap().clone();
+    let changed = sso.forget_group(id);
+    if changed {
+        crate::db::set_setting(&mut tx, "sso", &serde_json::to_string(&sso).unwrap()).await?;
+    }
     tree::log(&mut tx, &user, None, "group_delete", &name).await?;
     tx.commit().await?;
+    if changed {
+        *st.sso.write().unwrap() = sso;
+    }
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -573,6 +594,37 @@ pub async fn delete_group(State(st): State<AppState>, Admin(user): Admin, Path(i
 mod tests {
     use super::*;
     use crate::testutil;
+
+    #[tokio::test]
+    async fn a_deleted_group_leaves_the_sign_in_settings_and_its_id_isnt_reused() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let group = |name: &str| Json(GroupReq { name: Some(name.into()), description: None, members: None });
+        let Json(g) = create_group(State(env.st.clone()), Admin(admin.clone()), group("Sales")).await.unwrap();
+        let id = g["id"].as_i64().unwrap();
+        {
+            let mut sso = env.st.sso.write().unwrap();
+            sso.google.groups = vec![id];
+            sso.domain_rules = vec![crate::sso::DomainRule { domain: "example.com".into(), groups: vec![id, 99], ..Default::default() }];
+        }
+        let _ = delete_group(State(env.st.clone()), Admin(admin.clone()), Path(id)).await.unwrap();
+        let sso = env.st.sso.read().unwrap().clone();
+        assert!(sso.google.groups.is_empty() && sso.domain_rules[0].groups == vec![99]);
+        let Json(again) = create_group(State(env.st.clone()), Admin(admin), group("Support")).await.unwrap();
+        assert!(again["id"].as_i64().unwrap() > id);
+    }
+
+    #[tokio::test]
+    async fn standard_users_can_create_a_limited_number_of_spaces() {
+        let env = testutil::env().await;
+        env.st.system.write().unwrap().allow_user_drives = true;
+        let amy = env.user("amy", true).await;
+        for i in 0..MAX_OWN_SPACES {
+            let _ = create(State(env.st.clone()), amy.clone(), Json(CreateDriveReq { name: format!("Team {i}"), quota_bytes: 0 })).await.unwrap();
+        }
+        let res = create(State(env.st.clone()), amy.clone(), Json(CreateDriveReq { name: "One more".into(), quota_bytes: 0 })).await;
+        assert!(matches!(res, Err(e) if e.status == axum::http::StatusCode::BAD_REQUEST));
+    }
 
     #[tokio::test]
     async fn shared_access_only_shows_grants_from_the_shared_folder_down() {
