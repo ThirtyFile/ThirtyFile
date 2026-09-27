@@ -3,6 +3,7 @@
 //! Source text is English: `t("{n} item selected|{n} items selected", { n })`. English uses the source text as is;
 //! Traditional Chinese looks it up in the zh-TW dictionary and falls back to the English source when missing.
 //! - Parameters are written as `{name}`; English plurals are `single|plural`, picked by `n` (or `count`)
+//! - Number parameters are formatted for the locale (1,234); write whole sentences, not pieces joined in code
 //! - `tc(context, "English")` is for English text that needs different Chinese in different places (key `context::English`)
 //! - Messages returned by the server (errors, activity log details…) are English; `tServer()` translates them:
 //!   exact match first, then templates with parameters
@@ -63,8 +64,21 @@ export async function loadDictionary() {
   const preloaded = typeof window !== "undefined" ? window.__TF_ZH__?.ZH : undefined;
   ZH = preloaded ?? (await import("@/lib/i18n/zh-TW")).ZH;
 }
-/** Locale used by Intl */
-export const locale = lang === "en" ? "en-US" : "zh-TW";
+/**
+ * Locale used by Intl. English follows the browser's region when it is an English one (en-GB: day/month/year and
+ * 24-hour times), else en-US
+ */
+function englishLocale() {
+  const nav = typeof navigator !== "undefined" ? navigator.languages?.[0] ?? navigator.language ?? "" : "";
+  if (!nav.toLowerCase().startsWith("en")) return "en-US";
+  try {
+    return Intl.DateTimeFormat.supportedLocalesOf([nav])[0] ?? "en-US";
+  } catch {
+    return "en-US"; // malformed language tag
+  }
+}
+
+export const locale = lang === "en" ? englishLocale() : "zh-TW";
 
 if (typeof document !== "undefined") {
   document.documentElement.lang = lang === "en" ? "en" : "zh-Hant";
@@ -87,9 +101,14 @@ export function setLang(next: Lang) {
 
 type Vars = Record<string, string | number | null | undefined>;
 
+/** Insert parameters; numbers get the locale's digit grouping (1,234 items) */
 function fill(text: string, vars?: Vars) {
   if (!vars) return text;
-  return text.replace(/\{(\w+)\}/g, (m, k: string) => (vars[k] === undefined || vars[k] === null ? m : String(vars[k])));
+  return text.replace(/\{(\w+)\}/g, (m, k: string) => {
+    const v = vars[k];
+    if (v === undefined || v === null) return m;
+    return typeof v === "number" ? v.toLocaleString(locale) : v;
+  });
 }
 
 /** English plurals: `single|plural`, picked by n (plural when there is no n) */

@@ -10,5 +10,6 @@ import login from "./login";
 import p7 from "./p7";
 import core from "./core";
 import sso from "./sso";
+import p8 from "./p8";
 
-export const ZH: Record<string, string> = { ...server, ...p1, ...p2, ...p3, ...p4, ...p5, ...p6, ...login, ...p7, ...core, ...sso };
+export const ZH: Record<string, string> = { ...server, ...p1, ...p2, ...p3, ...p4, ...p5, ...p6, ...login, ...p7, ...core, ...sso, ...p8 };

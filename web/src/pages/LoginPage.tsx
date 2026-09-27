@@ -31,9 +31,9 @@ function saveLastUser(username: string) {
   }
 }
 
-/** Lock screen time: no AM/PM shown (same as an OS lock screen) */
+/** Lock screen time: no AM/PM shown (same as an OS lock screen); English follows the region's clock */
 export function formatClock(d: Date) {
-  return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", hourCycle: lang === "en" ? "h12" : "h23" })
+  return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", hourCycle: lang === "en" ? undefined : "h23" })
     .formatToParts(d)
     .filter((p) => p.type !== "dayPeriod")
     .map((p) => p.value)

@@ -7,7 +7,7 @@ import { FileIcon, canThumbnail, typeLabel } from "@/components/FileIcon";
 import { Resizer } from "@/components/Resizer";
 import { ROLE_LABEL } from "@/lib/drives";
 import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
-import { locale, t } from "@/lib/i18n";
+import { t } from "@/lib/i18n";
 import { usePersisted } from "@/lib/session";
 import { formatBytes, formatWinDate } from "@/lib/utils";
 
@@ -57,7 +57,7 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
     const location = info.data ? `/${root}` + info.data.path.slice(0, -1).map((c) => `/${c.name}`).join("") : "…";
     const rows: [string, React.ReactNode][] = [
       [t("Type"), typeLabel(node)],
-      ...(node.kind === "file" ? ([[t("Size"), t("{size} ({bytes} bytes)", { size: formatBytes(node.size), bytes: node.size.toLocaleString(locale) })]] as [string, string][]) : []),
+      ...(node.kind === "file" ? ([[t("Size"), t("{size} ({bytes} bytes)", { size: formatBytes(node.size), bytes: node.size })]] as [string, string][]) : []),
       ...(isRoot ? [] : ([[t("Location"), location]] as [string, string][])),
       ...(info.data ? ([[t("My role"), ROLE_LABEL[info.data.role]]] as [string, string][]) : []),
       [t("Date modified"), formatWinDate(node.updated_at)],

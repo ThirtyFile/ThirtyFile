@@ -28,10 +28,14 @@ const winDateFmt = new Intl.DateTimeFormat(locale, {
   day: "numeric",
   hour: "numeric",
   minute: "2-digit",
-  hour12: true,
+  // English follows the region's clock (en-GB: 24-hour)
+  hour12: locale === "zh-TW" ? true : undefined,
 });
 
-/** Windows File Explorer format: 9/3/2026 10:15 PM (zh-TW: 2026/9/3 with the Chinese PM marker before 10:15) */
+/**
+ * Windows File Explorer format: 9/3/2026 10:15 PM, 03/09/2026 22:15 in en-GB
+ * (zh-TW: 2026/9/3 with the Chinese PM marker before 10:15)
+ */
 export function formatWinDate(ts: number): string {
   const s = winDateFmt.format(new Date(ts * 1000));
   return locale === "zh-TW" ? s.replace(/\s*(上午|下午)\s*/, " $1 ") : s.replace(",", ""); // i18n-ignore: tidies the Chinese AM/PM markers in formatted dates

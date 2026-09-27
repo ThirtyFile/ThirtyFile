@@ -204,8 +204,7 @@ export function ControlPanelPage() {
                     className="mt-4 mb-2 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
                   >
                     <ChevronDownIcon className={cn("size-3.5 transition-transform", !isOpen && "-rotate-90")} />
-                    {label}
-                    {t(" ({n})", { n: inCat.length })}
+                    {t("{label} ({n})", { label, n: inCat.length })}
                   </button>
                   {isOpen && <div className={grid}>{inCat.map(tile)}</div>}
                 </section>

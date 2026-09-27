@@ -137,8 +137,6 @@ export default {
   "Cancel": "取消",
   "OK": "確定",
   "Shared with me: {name}": "與我共用：{name}",
-  " (team space)": "（團隊空間）",
-  " (company-wide)": "（公司共用）",
   "No subfolders": "沒有子資料夾",
   "The new passwords don't match": "兩次輸入的新密碼不一致",
   "After you change it, you'll be signed out on other devices.": "變更後，其他裝置上的登入會被登出。",

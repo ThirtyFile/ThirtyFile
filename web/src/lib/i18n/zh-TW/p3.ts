@@ -94,7 +94,6 @@ export default {
   "\"{name}\" selected": "已選取「{name}」",
   "{n} item|{n} items": "{n} 個項目",
   "No settings match \"{query}\".": "找不到符合「{query}」的設定。",
-  " ({n})": "（{n}）",
   // pages/AdminUsersPage.tsx
   "Delete": "刪除",
   "Sign-in log": "登入紀錄",

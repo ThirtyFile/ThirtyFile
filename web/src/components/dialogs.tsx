@@ -175,8 +175,7 @@ export function FolderPickerDialog(props: {
             {!drives.data?.some((d) => d.root_id === base.id) && <option value="">{t("Shared with me: {name}", { name: base.name })}</option>}
             {drives.data?.map((d) => (
               <option key={d.id} value={d.root_id}>
-                {d.name}
-                {d.kind === "team" ? t(" (team space)") : d.kind === "company" ? t(" (company-wide)") : ""}
+                {d.kind === "team" ? t("{name} (team space)", { name: d.name }) : d.kind === "company" ? t("{name} (company-wide)", { name: d.name }) : d.name}
               </option>
             ))}
           </select>

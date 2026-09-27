@@ -17,7 +17,7 @@ import { Frame, ToolButton } from "@/components/Frame";
 import { controlPanelItem, type ControlPanelKey, useSettingsSearch } from "@/lib/controlPanel";
 import { cn, formatBytes, formatDate } from "@/lib/utils";
 import { usePersisted } from "@/lib/session";
-import { LANGS, t, tServer } from "@/lib/i18n";
+import { LANGS, locale, t, tServer } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
 
 export function Toggle({ checked, disabled, onChange, label }: { checked: boolean; disabled?: boolean; onChange(v: boolean): void; label: string }) {
@@ -546,17 +546,17 @@ export function LogSettingsPage() {
               {[
                 [
                   t("Activity log"),
-                  t("{n} entry|{n} entries", { n: d.activity.rows.toLocaleString() }),
+                  t("{n} entry|{n} entries", { n: d.activity.rows }),
                   d.activity.oldest ? t("Oldest: {date}", { date: formatDate(d.activity.oldest) }) : "—",
                 ],
                 [
                   t("Share link access"),
-                  t("{n} entry|{n} entries", { n: d.share_access.rows.toLocaleString() }),
+                  t("{n} entry|{n} entries", { n: d.share_access.rows }),
                   d.share_access.oldest ? t("Oldest: {date}", { date: formatDate(d.share_access.oldest) }) : "—",
                 ],
                 [
                   t("Sign-in log"),
-                  t("{n} entry|{n} entries", { n: d.login_log.rows.toLocaleString() }),
+                  t("{n} entry|{n} entries", { n: d.login_log.rows }),
                   d.login_log.oldest ? t("Oldest: {date}", { date: formatDate(d.login_log.oldest) }) : "—",
                 ],
                 [t("Archives"), t("{n}", { n: d.archives.length }), formatBytes(d.archive_bytes)],
@@ -692,7 +692,7 @@ export function LogSettingsPage() {
                       <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
                         {formatDate(a.from_at)} – {formatDate(a.to_at)}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums">{a.rows.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{a.rows.toLocaleString(locale)}</td>
                       <td className="px-3 py-2 text-right text-muted-foreground tabular-nums max-sm:hidden">{formatBytes(a.bytes)}</td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">
                         <Button
@@ -723,7 +723,7 @@ export function LogSettingsPage() {
             kind: KIND_LABEL[deleting.kind],
             from: formatDate(deleting.from_at),
             to: formatDate(deleting.to_at),
-            n: deleting.rows.toLocaleString(),
+            n: deleting.rows,
           })}
           confirmText={t("Delete permanently")}
           destructive
