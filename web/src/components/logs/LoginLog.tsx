@@ -32,6 +32,12 @@ export const LOGIN_EVENTS: Record<string, { label: string; tone?: string }> = {
   app_password_failed: { label: t("Wrong app password"), tone: "text-destructive" },
   app_password_created: { label: t("App password created"), tone: "text-brand" },
   app_password_revoked: { label: t("App password removed") },
+  "2fa_failed": { label: t("Wrong two-factor code"), tone: "text-destructive" },
+  "2fa_enabled": { label: t("Two-factor sign-in turned on"), tone: "text-brand" },
+  "2fa_disabled": { label: t("Two-factor sign-in turned off"), tone: "text-amber-600 dark:text-amber-400" },
+  "2fa_reset": { label: t("Two-factor sign-in reset by an administrator"), tone: "text-amber-600 dark:text-amber-400" },
+  recovery_code_used: { label: t("Recovery code used"), tone: "text-amber-600 dark:text-amber-400" },
+  recovery_codes_new: { label: t("New recovery codes") },
 };
 
 const METHOD_LABEL: Record<string, string> = {
@@ -44,8 +50,12 @@ const METHOD_LABEL: Record<string, string> = {
 
 const EVENT_GROUPS = [
   { label: t("Sign-ins"), options: ["login", "logout", "password_change", "device_signout", "signout_others", "admin_signout"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
-  { label: t("Failed"), options: ["bad_password", "unknown_user", "disabled", "locked", "sso_denied", "app_password_failed"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
+  { label: t("Failed"), options: ["bad_password", "unknown_user", "disabled", "locked", "sso_denied", "app_password_failed", "2fa_failed"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
   { label: t("External accounts"), options: ["sso_provisioned", "sso_link", "sso_unlink"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
+  {
+    label: t("Two-factor sign-in"),
+    options: ["2fa_enabled", "2fa_disabled", "2fa_reset", "recovery_code_used", "recovery_codes_new"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })),
+  },
   { label: t("App passwords"), options: ["app_password_created", "app_password_revoked"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
 ];
 

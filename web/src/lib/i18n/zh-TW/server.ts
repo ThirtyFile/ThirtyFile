@@ -11,7 +11,7 @@ export default {
   "control characters": "控制字元",
   "API not found": "API 不存在",
   // Sign-in and user management (auth.rs, admin.rs)
-  "Password must be at least 6 characters": "密碼至少需要 6 個字元",
+  "Password must be at least {n} characters": "密碼至少需要 {n} 個字元",
   "Administrator permission required": "需要管理員權限",
   "Too many failed sign-in attempts. Try again in 15 minutes.": "登入失敗次數過多，請 15 分鐘後再試",
   "Too many failed sign-in attempts for this account. Try again in {n} seconds.": "此帳號登入失敗次數過多，請 {n} 秒後再試",
@@ -44,6 +44,23 @@ export default {
   "{username}: signed out on all devices": "{username}：登出所有裝置",
   // Signed-in devices (sessions.rs)
   "This device is already signed out": "這個裝置已經登出",
+  // Two-factor sign-in (twofactor.rs)
+  "Wrong code": "驗證碼錯誤",
+  "Too many wrong codes. Try again in 15 minutes.": "驗證碼錯誤次數過多，請 15 分鐘後再試",
+  "Too many wrong codes. Enter your password again.": "驗證碼錯誤次數過多，請重新輸入密碼",
+  "The sign-in has expired. Enter your password again.": "登入已逾時，請重新輸入密碼",
+  "Two-factor sign-in is already set up for this account": "這個帳號已經設定兩步驟驗證",
+  "Set up two-factor sign-in first": "請先設定兩步驟驗證",
+  "This account has no password: it signs in with Microsoft, Google or GitHub, whose own two-step verification applies.": "這個帳號沒有密碼，是用 Microsoft、Google 或 GitHub 登入，請使用該服務的兩步驟驗證。",
+  "The setup has expired. Start again.": "設定已逾時，請重新開始",
+  "Wrong code. Check that the time on your phone is right, and try again.": "驗證碼錯誤。請確認手機的時間正確後再試一次",
+  "Your administrator requires two-factor sign-in, so it can't be turned off.": "管理員要求使用兩步驟驗證，因此無法關閉",
+  "Two-factor sign-in isn't turned on": "尚未開啟兩步驟驗證",
+  "{username}: reset two-factor sign-in": "{username}：重設兩步驟驗證",
+  "Two-factor sign-in required for password accounts": "密碼登入必須使用兩步驟驗證",
+  "Two-factor sign-in optional": "兩步驟驗證改為選用",
+  "The minimum password length must be from 6 to 64 characters": "密碼最短長度必須是 6 到 64 個字元",
+  "Minimum password length: {n} characters": "密碼最短長度：{n} 個字元",
   // App passwords (tokens.rs)
   "Wrong or expired app password": "應用程式密碼錯誤或已過期",
   "This app password can only read files": "這組應用程式密碼只能讀取檔案",

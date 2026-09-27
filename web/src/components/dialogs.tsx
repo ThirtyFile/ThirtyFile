@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useDrives } from "@/lib/drives";
+import { useMe } from "@/lib/session";
 import { t } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
 import { cn } from "@/lib/utils";
@@ -261,6 +262,7 @@ export function FolderPickerDialog(props: {
 }
 
 export function ChangePasswordDialog({ onClose }: { onClose(): void }) {
+  const me = useMe();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -280,7 +282,7 @@ export function ChangePasswordDialog({ onClose }: { onClose(): void }) {
           <div className="grid gap-2">
             <Label htmlFor="pw-cur">{t("Current password")}</Label>
             <Input id="pw-cur" type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
-            <Label htmlFor="pw-new">{t("New password (at least 6 characters)")}</Label>
+            <Label htmlFor="pw-new">{t("New password (at least {n} characters)", { n: me.min_password_length })}</Label>
             <Input id="pw-new" type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
             <Label htmlFor="pw-cfm">{t("Confirm new password")}</Label>
             <Input id="pw-cfm" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />

@@ -3,7 +3,7 @@ use axum::{
     Json,
     extract::{ConnectInfo, FromRequestParts, State},
     http::{HeaderMap, header, request::Parts},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 
@@ -66,9 +66,18 @@ pub async fn verify_password(password: String, hash: String) -> AppResult<bool> 
     .await?)
 }
 
-pub fn validate_password(p: &str) -> AppResult<()> {
-    if p.chars().count() < 6 {
-        return Err(AppError::bad_request("Password must be at least 6 characters"));
+/// The shortest password allowed, and the highest the minimum can be set to (Control panel › General)
+pub const MIN_PASSWORD: usize = 6;
+pub const MAX_MIN_PASSWORD: usize = 64;
+
+/// The minimum password length currently set
+pub fn min_password(st: &AppState) -> usize {
+    st.system.read().unwrap().min_password_length
+}
+
+pub fn validate_password(p: &str, min: usize) -> AppResult<()> {
+    if p.chars().count() < min {
+        return Err(AppError::bad_request(format!("Password must be at least {min} characters")));
     }
     Ok(())
 }
@@ -214,21 +223,23 @@ pub struct Me {
     pub public_url: String,
     /// Days before trashed items are deleted for good (0 = kept until the trash is emptied)
     pub trash_days: i64,
+    /// Shortest password allowed
+    pub min_password_length: usize,
 }
 
 async fn me_of(st: &AppState, user: User) -> AppResult<Me> {
     let used_bytes = tree::used_bytes(&st.db, user.id).await?;
-    let (can_create_drive, public_url) = {
+    let (can_create_drive, public_url, min_password_length) = {
         let s = st.system.read().unwrap();
-        (user.is_admin() || s.allow_user_drives, s.public_url.clone())
+        (user.is_admin() || s.allow_user_drives, s.public_url.clone(), s.min_password_length)
     };
-    Ok(Me { user, used_bytes, can_create_drive, public_url, trash_days: st.trash_days })
+    Ok(Me { user, used_bytes, can_create_drive, public_url, trash_days: st.trash_days, min_password_length })
 }
 
 #[derive(Deserialize)]
 pub struct LoginReq {
-    username: String,
-    password: String,
+    pub username: String,
+    pub password: String,
 }
 
 /// Counts an attempt against `key` *before* the password is checked, so parallel requests can't all slip past the
@@ -402,7 +413,7 @@ pub async fn login(
     ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
     headers: HeaderMap,
     Json(req): Json<LoginReq>,
-) -> AppResult<impl IntoResponse> {
+) -> AppResult<Response> {
     let ip = client_ip(&st, addr, &headers);
     let username = req.username.trim();
     let limit_ip = limit_key_ip(&ip);
@@ -462,12 +473,26 @@ pub async fn login(
     }
     attempt_succeeded(&st, &ip_key);
 
-    let cookie = open_session(&st, id, "password", &ip, &headers).await?;
-    logs::record_login(&st, Some(id), username, "login", &ip, &headers);
+    // With two-factor sign-in, the password only gets a short-lived ticket for the second step
+    if let Some(pending) = crate::twofactor::after_password(&st, id).await? {
+        return Ok(Json(pending).into_response());
+    }
+    finish_login(&st, id, username, &ip, &headers, None).await
+}
+
+/// Signs a user in after every step of password sign-in passed: opens the session and answers with the user (and the
+/// recovery codes when two-factor sign-in was just set up)
+pub async fn finish_login(st: &AppState, id: i64, username: &str, ip: &str, headers: &HeaderMap, recovery_codes: Option<Vec<String>>) -> AppResult<Response> {
+    let cookie = open_session(st, id, "password", ip, headers).await?;
+    logs::record_login(st, Some(id), username, "login", ip, headers);
     let sql = format!("SELECT {USER_COLS} FROM users u WHERE u.id = ?");
     let mut user: User = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(id).fetch_one(&st.db).await?;
     user.shared_root = st.shared_root();
-    Ok(([(header::SET_COOKIE, cookie)], Json(me_of(&st, user).await?)))
+    let mut body = serde_json::to_value(me_of(st, user).await?).map_err(AppError::internal)?;
+    if let Some(codes) = recovery_codes {
+        body["recovery_codes"] = serde_json::json!(codes);
+    }
+    Ok(([(header::SET_COOKIE, cookie)], Json(body)).into_response())
 }
 
 /// The browser's User-Agent as stored with sessions and log entries (at most 300 characters)
@@ -543,18 +568,8 @@ pub async fn change_password(
     user: User,
     Json(req): Json<ChangePasswordReq>,
 ) -> AppResult<Json<serde_json::Value>> {
-    validate_password(&req.new)?;
-    // Limited like signing in, so a session in the wrong hands can't be used to guess the password itself
-    let key = format!("pw:{}", user.id);
-    if !begin_attempt(&st, &key, FAIL_LIMIT) {
-        return Err(AppError::new(axum::http::StatusCode::TOO_MANY_REQUESTS, "Too many failed attempts. Try again in 15 minutes."));
-    }
-    let (hash,): (String,) =
-        sqlx::query_as("SELECT password_hash FROM users WHERE id = ?").bind(user.id).fetch_one(&st.db).await?;
-    if !verify_password(req.current, hash).await? {
-        return Err(AppError::bad_request("Current password is incorrect"));
-    }
-    st.login_failures.lock().unwrap().remove(&key);
+    validate_password(&req.new, min_password(&st))?;
+    confirm_password(&st, user.id, req.current).await?;
     let new_hash = hash_password(req.new).await?;
     let current_token = get_cookie(&headers, SESSION_COOKIE).map(|t| sha256_hex(t.as_bytes())).unwrap_or_default();
     let _w = st.write_lock.lock().await;
@@ -569,6 +584,21 @@ pub async fn change_password(
     tx.commit().await?;
     logs::record_login(&st, Some(user.id), &user.username, "password_change", &client_ip(&st, addr, &headers), &headers);
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Checks the signed-in user's current password before a sensitive change (changing it, two-factor settings).
+/// Limited like signing in, so a session in the wrong hands can't be used to guess the password itself.
+pub async fn confirm_password(st: &AppState, user_id: i64, password: String) -> AppResult<()> {
+    let key = format!("pw:{user_id}");
+    if !begin_attempt(st, &key, FAIL_LIMIT) {
+        return Err(AppError::new(axum::http::StatusCode::TOO_MANY_REQUESTS, "Too many failed attempts. Try again in 15 minutes."));
+    }
+    let (hash,): (String,) = sqlx::query_as("SELECT password_hash FROM users WHERE id = ?").bind(user_id).fetch_one(&st.db).await?;
+    if !verify_password(password, hash).await? {
+        return Err(AppError::bad_request("Current password is incorrect"));
+    }
+    st.login_failures.lock().unwrap().remove(&key);
+    Ok(())
 }
 
 #[cfg(test)]

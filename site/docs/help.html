@@ -24,6 +24,10 @@
         <h2 id="shell">docker exec thirtyfile sh doesn't work</h2>
         <p>The image contains only ThirtyFile itself: no shell and no other programs, which leaves less to keep up to date. Commands of ThirtyFile work as shown in these guides, such as <code>docker exec thirtyfile thirtyfile reset-password …</code>. To look at the files, use the <code>data</code> and <code>storage</code> folders on the host, or <code>docker cp</code>.</p>
 
+        <h2 id="two-factor">An administrator lost their phone and recovery codes</h2>
+        <p>Another administrator can reset it under <strong>Control panel › Users</strong>. If there is none, turn it off on the server:</p>
+        <pre><code>docker exec thirtyfile thirtyfile reset-two-factor admin</code></pre>
+
         <h2 id="links">Share links start with http://127.0.0.1:8080</h2>
         <p>Set the address people use under <strong>Control panel › General › Site URL</strong>.</p>
 
@@ -53,7 +57,8 @@
 
         <h2 id="safety">How your files are protected</h2>
         <ul>
-          <li>Passwords, app passwords and sign-in sessions are stored in a form that cannot be read back.</li>
+          <li>Passwords, app passwords, recovery codes and sign-in sessions are stored in a form that cannot be read back.</li>
+          <li>Two-factor sign-in can be required for everyone who signs in with a password.</li>
           <li>App passwords only reach files, never the account or the Control panel. See <a href="account.html#app-passwords">Your account</a>.</li>
           <li>Uploaded files cannot run scripts on the site.</li>
           <li>A share link stops working when the person who made it loses access to the item.</li>

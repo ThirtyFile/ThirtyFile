@@ -95,6 +95,10 @@ pub struct SystemSettings {
     pub default_lang: String,
     /// Folder spaces are scanned for changes made outside ThirtyFile this often (minutes, 0 = only by hand)
     pub scan_minutes: i64,
+    /// Password sign-in needs a second factor: accounts without one set it up right after signing in
+    pub require_two_factor: bool,
+    /// Shortest password people may choose (at least `auth::MIN_PASSWORD`)
+    pub min_password_length: usize,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]

@@ -333,7 +333,8 @@ export interface LoginRecord {
   user_id: number | null;
   username: string;
   /** login, bad_password, unknown_user, disabled, locked, logout, password_change, sso_denied, sso_provisioned, sso_link, sso_unlink, device_signout, signout_others, admin_signout,
-   * app_password_failed, app_password_created, app_password_revoked */
+   * app_password_failed, app_password_created, app_password_revoked, 2fa_failed, 2fa_enabled, 2fa_disabled, 2fa_reset,
+   * recovery_code_used, recovery_codes_new */
   event: string;
   ip: string;
   user_agent: string;
@@ -404,6 +405,34 @@ export interface Me {
   public_url: string;
   /** Days before trashed items are deleted for good; 0 = kept until the trash is emptied */
   trash_days: number;
+  /** Shortest password allowed */
+  min_password_length: number;
+}
+
+/** A correct password of an account with two-factor sign-in: the ticket for the second step */
+export interface TwoFactorPending {
+  /** code: ask for a code; setup: the administrator requires it and it isn't set up yet */
+  two_factor: "code" | "setup";
+  ticket: string;
+}
+
+/** What an authenticator app needs to be set up */
+export interface TwoFactorSetup {
+  /** The secret in base32, for typing it in */
+  secret: string;
+  /** otpauth:// link */
+  uri: string;
+  /** QR code of the link (SVG) */
+  qr_svg: string;
+}
+
+export interface TwoFactorStatus {
+  enabled: boolean;
+  recovery_codes_left: number;
+  /** The administrator requires it for password accounts */
+  required: boolean;
+  /** Accounts that only sign in with Microsoft, Google or GitHub have no password to protect */
+  has_password: boolean;
 }
 
 /** A signed-in device (sign-in session) */
@@ -461,6 +490,8 @@ export interface UserRow {
   last_login_at: number | null;
   /** Linked third-party logins (comma-separated) */
   sso: string;
+  /** Two-factor sign-in is set up */
+  two_factor: boolean;
   /** "password" (created by an administrator) or the provider that created the account automatically */
   source: string;
   /** Email of the most recently used linked sign-in */
@@ -476,6 +507,8 @@ export interface SystemSettingsReq {
   public_url?: string;
   default_lang?: DefaultLang;
   scan_minutes?: number;
+  require_two_factor?: boolean;
+  min_password_length?: number;
 }
 
 /** System default interface language: "auto" follows the browser */
@@ -492,6 +525,9 @@ export interface SystemInfo {
   default_lang: DefaultLang;
   /** Folder spaces are checked for changes this often (minutes, 0 = only by hand) */
   scan_minutes: number;
+  /** Password sign-in needs a second factor */
+  require_two_factor: boolean;
+  min_password_length: number;
   stats: {
     users: number;
     groups: number;
@@ -637,7 +673,16 @@ const qs = (params: Record<string, string | undefined>) => {
 
 export const api = {
   me: () => get<Me>("/auth/me"),
-  login: (username: string, password: string) => post<Me>("/auth/login", { username, password }),
+  login: (username: string, password: string) => post<Me | TwoFactorPending>("/auth/login", { username, password }),
+  /** The second step of signing in; after setting it up, the answer carries the recovery codes */
+  loginCode: (ticket: string, code: string) => post<Me & { recovery_codes?: string[] }>("/auth/login/2fa", { ticket, code }),
+  loginSetup: (ticket: string) => post<TwoFactorSetup>("/auth/login/2fa/setup", { ticket }),
+  twoFactor: () => get<TwoFactorStatus>("/auth/2fa"),
+  startTwoFactor: (password: string) => post<TwoFactorSetup>("/auth/2fa/setup", { password }),
+  enableTwoFactor: (code: string) => post<{ recovery_codes: string[] }>("/auth/2fa/enable", { code }),
+  disableTwoFactor: (password: string) => post("/auth/2fa/disable", { password }),
+  newRecoveryCodes: (password: string) => post<{ recovery_codes: string[] }>("/auth/2fa/recovery-codes", { password }),
+  resetTwoFactor: (userId: number) => request("DELETE", `/admin/users/${userId}/2fa`),
   logout: () => post("/auth/logout"),
   changePassword: (current: string, next: string) => request("PUT", "/auth/password", { current, new: next }),
   devices: () => get<Device[]>("/auth/sessions"),

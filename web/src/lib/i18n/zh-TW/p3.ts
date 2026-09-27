@@ -121,7 +121,7 @@ export default {
   "User created": "已建立使用者",
   "Edit \"{name}\"": "編輯「{name}」",
   "Reset password (leave blank to keep current)": "重設密碼（留空則不變更）",
-  "Password (at least 6 characters)": "密碼（至少 6 個字元）",
+  "Password (at least {n} characters)": "密碼（至少 {n} 個字元）",
   "Role": "角色",
   "Standard user": "一般使用者",
   "Upload and edit": "上傳與編輯",

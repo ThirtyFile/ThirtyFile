@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::{
-    auth::{Admin, hash_password, validate_password},
+    auth::{Admin, hash_password, min_password, validate_password},
     db::{NewUser, add_grant, create_user, set_setting},
     error::{AppError, AppResult},
     state::AppState,
@@ -30,6 +30,8 @@ pub struct UserRow {
     last_login_at: Option<i64>,
     /// Linked third-party sign-ins (comma-separated)
     sso: String,
+    /// Two-factor sign-in is set up
+    two_factor: bool,
     /// 'password' (created by an administrator) or the provider that created the account automatically
     source: String,
     /// Email of the most recently used linked sign-in (to spot accounts whose username no longer matches)
@@ -39,6 +41,7 @@ pub struct UserRow {
 
 const USER_ROW_SQL: &str = "SELECT u.id, u.username, u.display_name, u.role, u.can_write, u.can_delete, u.can_share, u.quota_bytes, u.disabled, u.created_at, u.last_login_at, u.source,
        (SELECT COALESCE(GROUP_CONCAT(provider), '') FROM user_identities WHERE user_id = u.id) AS sso,
+       u.totp_secret IS NOT NULL AS two_factor,
        (SELECT COALESCE(email, '') FROM user_identities WHERE user_id = u.id ORDER BY last_login_at DESC LIMIT 1) AS sso_email,
        (SELECT COALESCE(SUM(used_bytes), 0) FROM drives WHERE kind = 'personal' AND owner_id = u.id) AS used_bytes
      FROM users u";
@@ -113,7 +116,7 @@ async fn get_row(st: &AppState, id: i64) -> AppResult<UserRow> {
 pub async fn create(State(st): State<AppState>, Admin(me): Admin, Json(req): Json<CreateReq>) -> AppResult<Json<UserRow>> {
     let username = req.username.trim();
     validate_username(username)?;
-    validate_password(&req.password)?;
+    validate_password(&req.password, min_password(&st))?;
     validate_role(&req.role)?;
     let display_name = validate_display_name(&req.display_name)?.to_string();
     let password_hash = hash_password(req.password.clone()).await?;
@@ -172,7 +175,7 @@ pub async fn update(
     }
     let password_hash = match &req.password {
         Some(p) => {
-            validate_password(p)?;
+            validate_password(p, min_password(&st))?;
             Some(hash_password(p.clone()).await?)
         }
         None => None,
@@ -294,6 +297,8 @@ pub struct SystemInfo {
     public_url: String,
     default_lang: String,
     scan_minutes: i64,
+    require_two_factor: bool,
+    min_password_length: usize,
     stats: SystemStats,
 }
 
@@ -342,6 +347,8 @@ async fn system_info(st: &AppState) -> AppResult<SystemInfo> {
         public_url: s.public_url,
         default_lang: s.default_lang,
         scan_minutes: s.scan_minutes,
+        require_two_factor: s.require_two_factor,
+        min_password_length: s.min_password_length,
         stats,
     })
 }
@@ -358,6 +365,8 @@ pub struct SettingsReq {
     public_url: Option<String>,
     default_lang: Option<String>,
     scan_minutes: Option<i64>,
+    require_two_factor: Option<bool>,
+    min_password_length: Option<usize>,
 }
 
 /// Values of the default interface language: follow the browser, English, Traditional Chinese
@@ -430,8 +439,26 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
             set_setting(&mut tx, "scan_minutes", &m.to_string()).await?;
             tree::log(&mut tx, &user, None, "settings", &format!("Folder spaces are checked for changes every {m} minutes")).await?;
         }
+        if let Some(require) = req.require_two_factor {
+            set_setting(&mut tx, "require_two_factor", if require { "1" } else { "0" }).await?;
+            let detail = if require { "Two-factor sign-in required for password accounts" } else { "Two-factor sign-in optional" };
+            tree::log(&mut tx, &user, None, "settings", detail).await?;
+        }
+        if let Some(n) = req.min_password_length {
+            if !(crate::auth::MIN_PASSWORD..=crate::auth::MAX_MIN_PASSWORD).contains(&n) {
+                return Err(AppError::bad_request("The minimum password length must be from 6 to 64 characters"));
+            }
+            set_setting(&mut tx, "min_password_length", &n.to_string()).await?;
+            tree::log(&mut tx, &user, None, "settings", &format!("Minimum password length: {n} characters")).await?;
+        }
         tx.commit().await?;
         let mut s = st.system.write().unwrap();
+        if let Some(require) = req.require_two_factor {
+            s.require_two_factor = require;
+        }
+        if let Some(n) = req.min_password_length {
+            s.min_password_length = n;
+        }
         if let Some(m) = req.scan_minutes {
             s.scan_minutes = m;
         }
@@ -538,6 +565,31 @@ mod tests {
         let bad = SettingsReq { default_lang: Some("fr".into()), ..Default::default() };
         assert!(update_settings(State(env.st.clone()), Admin(admin), Json(bad)).await.is_err());
         assert_eq!(env.st.system.read().unwrap().default_lang, "zh-TW");
+    }
+
+    #[tokio::test]
+    async fn minimum_password_length_applies_to_new_passwords() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        for bad in [5, 65] {
+            let settings = SettingsReq { min_password_length: Some(bad), ..Default::default() };
+            assert!(update_settings(State(env.st.clone()), Admin(admin.clone()), Json(settings)).await.is_err());
+        }
+        let settings = SettingsReq { min_password_length: Some(12), require_two_factor: Some(true), ..Default::default() };
+        let Json(info) = update_settings(State(env.st.clone()), Admin(admin.clone()), Json(settings)).await.unwrap();
+        assert!(info.min_password_length == 12 && info.require_two_factor);
+        let saved = crate::db::load_system_settings(&env.st.db).await.unwrap();
+        assert!(saved.min_password_length == 12 && saved.require_two_factor);
+
+        let mut short = req("carol", None);
+        short.password = "elevenchars".into();
+        let err = create(State(env.st.clone()), Admin(admin.clone()), short).await.map(|_| ()).unwrap_err();
+        assert_eq!(err.message, "Password must be at least 12 characters");
+        let amy = env.user("amy", true).await;
+        let update = UpdateReq { password: Some("elevenchars".into()), display_name: None, role: None, can_write: None, can_delete: None, can_share: None, quota_bytes: None, disabled: None };
+        assert!(super::update(State(env.st.clone()), Admin(admin), Path(amy.id), Json(update)).await.is_err());
+        let Json(me) = crate::auth::me(State(env.st.clone()), amy).await.unwrap();
+        assert_eq!(me.min_password_length, 12);
     }
 
     #[test]

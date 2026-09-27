@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { HistoryIcon, Loader2Icon, MonitorSmartphoneIcon, PencilIcon, RefreshCwIcon, Trash2Icon, TriangleAlertIcon, UserCheckIcon, UserPlusIcon, UsersIcon, UserXIcon } from "lucide-react";
+import { HistoryIcon, Loader2Icon, MonitorSmartphoneIcon, ShieldCheckIcon, ShieldOffIcon, PencilIcon, RefreshCwIcon, Trash2Icon, TriangleAlertIcon, UserCheckIcon, UserPlusIcon, UsersIcon, UserXIcon } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { DataTable, type Column } from "@/components/DataTable";
 import { toast } from "sonner";
@@ -39,6 +39,7 @@ export function AdminUsersPage() {
   const [deleting, setDeleting] = useState<UserRow | null>(null);
   const [loginsOf, setLoginsOf] = useState<UserRow | null>(null);
   const [devicesOf, setDevicesOf] = useState<UserRow | null>(null);
+  const [resetting, setResetting] = useState<UserRow | null>(null);
   const qc = useQueryClient();
   const users = useMemo(() => q.data?.pages.flat() ?? [], [q.data]);
   const selected = users.find((u) => u.id === selectedId) ?? null;
@@ -87,6 +88,11 @@ export function AdminUsersPage() {
             <Badge variant="outline" className="h-4 px-1.5 text-[10px]" title={t("Created automatically by {provider} sign-in", { provider: SSO_LABEL[u.source as SsoProviderId] ?? u.source })}>
               {t("Auto-created")}
             </Badge>
+          )}
+          {u.two_factor && (
+            <span className="text-emerald-600 dark:text-emerald-400" title={t("Two-factor sign-in is on")}>
+              <ShieldCheckIcon className="size-3.5" />
+            </span>
           )}
           {u.role === "admin" && <Badge className="h-4 px-1.5 text-[10px]">{t("Administrator")}</Badge>}
           {u.disabled && (
@@ -171,6 +177,11 @@ export function AdminUsersPage() {
               <DropdownMenuItem onClick={() => setDevicesOf(selected)}>
                 <MonitorSmartphoneIcon /> {t("Devices")}
               </DropdownMenuItem>
+              {selected.two_factor && (
+                <DropdownMenuItem onClick={() => setResetting(selected)}>
+                  <ShieldOffIcon /> {t("Reset two-factor sign-in")}
+                </DropdownMenuItem>
+              )}
               {selected.id !== me.id && (
                 <DropdownMenuItem
                   onClick={async () => {
@@ -222,6 +233,21 @@ export function AdminUsersPage() {
       )}
       {loginsOf && <LoginLogDialog title={t("Sign-in log for \"{name}\"", { name: loginsOf.username })} userId={loginsOf.id} onClose={() => setLoginsOf(null)} />}
       {devicesOf && <DevicesDialog user={devicesOf} onClose={() => setDevicesOf(null)} />}
+      {resetting && (
+        <ConfirmDialog
+          title={t("Reset two-factor sign-in for \"{name}\"?", { name: resetting.username })}
+          description={t("For someone who lost their phone and recovery codes. Their authenticator app and recovery codes stop working, and they sign in with just their password until they set it up again (right away, if two-factor sign-in is required).")}
+          confirmText={t("Reset")}
+          destructive
+          onClose={() => setResetting(null)}
+          onConfirm={async () => {
+            await api.resetTwoFactor(resetting.id);
+            toast.success(t("Two-factor sign-in reset"));
+            setResetting(null);
+            qc.invalidateQueries({ queryKey: ["admin-users"] });
+          }}
+        />
+      )}
       {deleting && (
         <ConfirmDialog
           title={t("Delete user \"{name}\"?", { name: deleting.username })}
@@ -242,6 +268,7 @@ export function AdminUsersPage() {
   );
 }
 function UserDialog({ user, self, onClose }: { user: UserRow | null; self: boolean; onClose(): void }) {
+  const me = useMe();
   const qc = useQueryClient();
   const [username, setUsername] = useState(user?.username ?? "");
   const [displayName, setDisplayName] = useState(user?.display_name ?? "");
@@ -309,7 +336,7 @@ function UserDialog({ user, self, onClose }: { user: UserRow | null; self: boole
               )}
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="u-pw">{user ? t("Reset password (leave blank to keep current)") : t("Password (at least 6 characters)")}</Label>
+              <Label htmlFor="u-pw">{user ? t("Reset password (leave blank to keep current)") : t("Password (at least {n} characters)", { n: me.min_password_length })}</Label>
               <Input id="u-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
             </div>
             <div className="grid gap-1.5">

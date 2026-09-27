@@ -430,6 +430,12 @@ const ZH_TW: &[(&str, &str)] = &[
     ("App password created", "建立應用程式密碼"),
     ("App password removed", "移除應用程式密碼"),
     ("App password", "應用程式密碼"),
+    ("Wrong two-factor code", "兩步驟驗證碼錯誤"),
+    ("Two-factor sign-in turned on", "開啟兩步驟驗證"),
+    ("Two-factor sign-in turned off", "關閉兩步驟驗證"),
+    ("Two-factor sign-in reset by an administrator", "管理員重設兩步驟驗證"),
+    ("Recovery code used", "使用復原碼"),
+    ("New recovery codes", "產生新的復原碼"),
     ("Password", "帳號密碼"),
 ];
 
@@ -760,6 +766,12 @@ fn login_event_label(e: &str) -> &str {
         "app_password_failed" => "Wrong app password",
         "app_password_created" => "App password created",
         "app_password_revoked" => "App password removed",
+        "2fa_failed" => "Wrong two-factor code",
+        "2fa_enabled" => "Two-factor sign-in turned on",
+        "2fa_disabled" => "Two-factor sign-in turned off",
+        "2fa_reset" => "Two-factor sign-in reset by an administrator",
+        "recovery_code_used" => "Recovery code used",
+        "recovery_codes_new" => "New recovery codes",
         other => other,
     }
 }

@@ -69,7 +69,7 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
         <DialogHeader>
           <DialogTitle>{t("App passwords")}</DialogTitle>
           <DialogDescription>
-            {t("For scripts, backup tools and file clients, including accounts that sign in with Microsoft, Google or GitHub. They work for files only, not for your account settings, sharing or administration.")}
+            {t("For scripts, backup tools and file clients, including accounts that sign in with Microsoft, Google or GitHub. They work for files only, not for your account settings, sharing or administration, and don't ask for a two-factor code.")}
           </DialogDescription>
         </DialogHeader>
 

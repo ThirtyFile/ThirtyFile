@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Your account · ThirtyFile</title>
-    <meta name="description" content="Your password, the devices you're signed in on, app passwords for scripts, and your sign-in history." />
+    <meta name="description" content="Your password, two-factor sign-in, the devices you're signed in on, app passwords for scripts, and your sign-in history." />
     <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -16,11 +16,27 @@
       <nav class="docs-nav" aria-label="Guides"><noscript><a href="index.html">Install</a></noscript></nav>
       <main class="article">
         <h1>Your account</h1>
-        <p class="lead">Your password, the devices you're signed in on, app passwords for scripts, and your sign-in history.</p>
+        <p class="lead">Your password, two-factor sign-in, the devices you're signed in on, app passwords for scripts, and your sign-in history.</p>
         <p>Everything on this page is in the <strong>account menu</strong>: click your name at the bottom of the list on the left.</p>
 
         <h2 id="password">Password</h2>
-        <p><strong>Change password</strong> asks for the current password and a new one. Your other devices are signed out afterwards.</p>
+        <p><strong>Change password</strong> asks for the current password and a new one. Your other devices are signed out afterwards. A new password needs at least 6 characters, or more if your administrator set a longer minimum.</p>
+
+        <h2 id="two-factor">Two-factor sign-in</h2>
+        <p>With two-factor sign-in, your password alone isn't enough: after it, sign-in asks for a six-digit code from an authenticator app on your phone, such as Microsoft Authenticator, Google Authenticator or 1Password. The code changes every 30 seconds and works only once.</p>
+        <ol>
+          <li>Open <strong>Two-factor sign-in</strong> and choose <strong>Set up</strong>. Enter your password.</li>
+          <li>Scan the QR code with the app. If you can't scan it, type the key shown under it into the app.</li>
+          <li>Enter the code the app shows to confirm, and two-factor sign-in is on.</li>
+          <li>Save the ten <strong>recovery codes</strong> shown next, for example in a password manager or on paper. Each one signs you in once instead of a code, if you lose your phone. They are shown only this once.</li>
+        </ol>
+        <p>From the same dialog you can create new recovery codes (the old ones stop working), move to another phone or app with <strong>Change app</strong>, or turn two-factor sign-in off. Each asks for your password.</p>
+        <ul>
+          <li>After five wrong codes you have to enter your password again. After ten wrong codes for one account, further codes are refused for up to 15 minutes.</li>
+          <li>Sign-in with Microsoft, Google or GitHub doesn't ask for a code: those providers have their own two-step verification. <a href="#app-passwords">App passwords</a> don't ask for one either.</li>
+          <li>If an administrator requires two-factor sign-in, you're asked to set it up right after your password the next time you sign in, and you can't turn it off.</li>
+        </ul>
+        <div class="note">Lost your phone and your recovery codes? Ask an administrator to reset your two-factor sign-in. You can then sign in with your password and set it up again.</div>
 
         <h2 id="devices">Signed-in devices</h2>
         <p><strong>Devices</strong> lists every browser signed in to your account: the browser and system, the address it last used, when it signed in and when it was last used. The one you're using is marked <strong>This device</strong>.</p>

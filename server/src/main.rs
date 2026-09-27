@@ -24,6 +24,7 @@ mod storage;
 mod testutil;
 mod tokens;
 mod tree;
+mod twofactor;
 mod upload;
 mod util;
 mod web;
@@ -111,6 +112,8 @@ enum Command {
     /// Reset a user's password (for when the administrator password is forgotten). Without the password, it is read
     /// from the input, so it doesn't end up in the shell history or the process list
     ResetPassword { username: String, password: Option<String> },
+    /// Turn a user's two-factor sign-in off (for when the phone and the recovery codes are lost)
+    ResetTwoFactor { username: String },
     /// Check whether the running service is healthy (for Docker HEALTHCHECK): exit code 0 when healthy
     Health,
     /// Write a consistent copy of the database to a new file, also while ThirtyFile is running
@@ -227,6 +230,15 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         return Ok(());
     }
 
+    if let Some(Command::ResetTwoFactor { username }) = &cfg.command {
+        let res = sqlx::query("UPDATE users SET totp_secret = NULL, totp_last_step = 0 WHERE username = ?").bind(username).execute(&db).await?;
+        if res.rows_affected() == 0 {
+            return Err(format!("User not found: {username}").into());
+        }
+        sqlx::query("DELETE FROM recovery_codes WHERE user_id = (SELECT id FROM users WHERE username = ?)").bind(username).execute(&db).await?;
+        println!("Two-factor sign-in turned off for {username}");
+        return Ok(());
+    }
     if let Some(Command::ResetPassword { username, password }) = &cfg.command {
         let password = match password {
             Some(p) => p.clone(),
@@ -238,7 +250,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
             }
         };
         let password = &password;
-        auth::validate_password(password).map_err(|e| e.message)?;
+        auth::validate_password(password, auth::MIN_PASSWORD).map_err(|e| e.message)?;
         let hash = auth::hash_password(password.clone()).await.map_err(|e| e.message)?;
         let res = sqlx::query("UPDATE users SET password_hash = ?, disabled = 0 WHERE username = ?")
             .bind(hash)
@@ -590,6 +602,8 @@ fn api() -> Router<AppState> {
     Router::new()
         .route("/health", get(health))
         .route("/auth/login", post(auth::login))
+        .route("/auth/login/2fa", post(twofactor::login_code))
+        .route("/auth/login/2fa/setup", post(twofactor::login_setup))
         .route("/auth/logout", post(auth::logout))
         .merge(file_api())
         .route("/auth/password", axum::routing::put(auth::change_password))
@@ -598,6 +612,11 @@ fn api() -> Router<AppState> {
         .route("/auth/sessions/{id}", delete(sessions::sign_out))
         .route("/auth/app-passwords", get(tokens::list).post(tokens::create))
         .route("/auth/app-passwords/{id}", delete(tokens::delete))
+        .route("/auth/2fa", get(twofactor::status))
+        .route("/auth/2fa/setup", post(twofactor::start_setup))
+        .route("/auth/2fa/enable", post(twofactor::enable))
+        .route("/auth/2fa/disable", post(twofactor::disable))
+        .route("/auth/2fa/recovery-codes", post(twofactor::new_recovery_codes_for_me))
         // Spaces and access (listing the spaces works with an app password too)
         .route("/drives", get(drives::list).layer(middleware::from_fn(tokens::allow)).post(drives::create))
         .route("/drives/{id}", patch(drives::update).delete(drives::delete))
@@ -639,6 +658,7 @@ fn api() -> Router<AppState> {
         .route("/admin/users/{id}", patch(admin::update).delete(admin::delete))
         .route("/admin/users/{id}/sessions", get(sessions::admin_list).delete(sessions::admin_sign_out_all))
         .route("/admin/users/{id}/sessions/{session}", delete(sessions::admin_sign_out))
+        .route("/admin/users/{id}/2fa", delete(twofactor::admin_reset))
         .route("/admin/settings", get(admin::get_settings).patch(admin::update_settings))
         .route("/admin/drives", get(drives::admin_list))
         .route("/admin/drives/{id}/scan", post(drives::scan))

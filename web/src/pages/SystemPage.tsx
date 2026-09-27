@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Switch } from "@base-ui/react/switch";
-import { ActivityIcon, DatabaseIcon, DownloadIcon, FilesIcon, FolderSyncIcon, GlobeIcon, HardDriveIcon, LanguagesIcon, Link2Icon, Loader2Icon, LogInIcon, RefreshCwIcon, SettingsIcon, Trash2Icon, type LucideIcon } from "lucide-react";
+import { ActivityIcon, DatabaseIcon, KeyRoundIcon, ShieldCheckIcon, DownloadIcon, FilesIcon, FolderSyncIcon, GlobeIcon, HardDriveIcon, LanguagesIcon, Link2Icon, Loader2Icon, LogInIcon, RefreshCwIcon, SettingsIcon, Trash2Icon, type LucideIcon } from "lucide-react";
 import { Link } from "react-router";
 import { ActivityLog } from "@/components/logs/ActivityLog";
 import { ShareAccessLog } from "@/components/logs/ShareAccessLog";
@@ -107,6 +107,32 @@ function QuotaInput({ value, saving, onSave }: { value: number; saving: boolean;
         <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-muted-foreground">GB</span>
       </div>
       <Button type="submit" size="sm" disabled={saving || invalid || bytes === value}>
+        {t("Save")}
+      </Button>
+    </form>
+  );
+}
+
+/** Minimum password length (6 to 64 characters) */
+function MinPasswordInput({ value, saving, onSave }: { value: number; saving: boolean; onSave(n: number): void }) {
+  const [text, setText] = useState(String(value));
+  const n = Number(text);
+  const invalid = !/^\d+$/.test(text.trim()) || n < 6 || n > 64;
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!invalid && n !== value) onSave(n);
+  };
+  return (
+    <form className="flex shrink-0 items-center gap-2" onSubmit={submit}>
+      <Input
+        aria-label={t("Minimum password length")}
+        inputMode="numeric"
+        className="h-8 w-20 text-right tabular-nums"
+        value={text}
+        aria-invalid={invalid}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <Button type="submit" size="sm" disabled={saving || invalid || n === value}>
         {t("Save")}
       </Button>
     </form>
@@ -316,6 +342,40 @@ export function GeneralSettingsPage() {
               value={q.data.default_user_quota}
               saving={save.isPending}
               onSave={(bytes) => save.mutate({ default_user_quota: bytes })}
+            />
+          </div>
+          <div className="flex flex-wrap items-start gap-4 border-t p-4">
+            <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">
+              <ShieldCheckIcon className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">{t("Require two-factor sign-in for password accounts")}</div>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {t("Signing in with a password also asks for a code from an authenticator app. People who haven't set it up are asked to right after their password, before they get in, and can't turn it off. Sign-in with Microsoft, Google or GitHub relies on that provider, and app passwords keep working. Devices already signed in stay signed in.")}
+              </p>
+            </div>
+            <Toggle
+              label={t("Require two-factor sign-in for password accounts")}
+              checked={q.data.require_two_factor}
+              disabled={save.isPending}
+              onChange={(v) => save.mutate({ require_two_factor: v })}
+            />
+          </div>
+          <div className="flex flex-wrap items-start gap-4 border-t p-4">
+            <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-300">
+              <KeyRoundIcon className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">{t("Minimum password length")}</div>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {t("The shortest password people can choose, from 6 to 64 characters. It applies to new and changed passwords; existing passwords keep working.")}
+              </p>
+            </div>
+            <MinPasswordInput
+              key={q.data.min_password_length}
+              value={q.data.min_password_length}
+              saving={save.isPending}
+              onSave={(n) => save.mutate({ min_password_length: n })}
             />
           </div>
         </Section>

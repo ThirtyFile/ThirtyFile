@@ -25,9 +25,18 @@
           <li><strong>Permissions</strong>: whether the person may edit, delete and share. Without them the account can only view.</li>
           <li><strong>Space size</strong>: how much the person may store. <code>0</code> means no limit.</li>
           <li><strong>Disable</strong> an account to stop it signing in without deleting its files. Its <a href="account.html#app-passwords">app passwords</a> stop working too.</li>
+          <li><strong>Reset two-factor sign-in</strong> is for someone who lost their phone and their recovery codes. A shield next to the name shows who has it on.</li>
           <li><strong>Devices</strong> lists the browsers where the person is signed in. Sign out one of them, or all of them with <strong>Sign out everywhere</strong>. It is recorded in the activity log and in the person's sign-in history.</li>
         </ul>
         <p>The <strong>Used</strong> column includes items in the trash.</p>
+
+        <h2 id="security">Sign-in security</h2>
+        <p>Under <strong>Control panel › General › Users</strong>:</p>
+        <ul>
+          <li><strong>Require two-factor sign-in for password accounts</strong>: signing in with a password also asks for a code from an authenticator app. People who haven't set it up are asked to right after their password, before they get in, and can't turn it off. Devices that are already signed in stay signed in; sign them out under <strong>Devices</strong> if needed. Accounts that sign in with Microsoft, Google or GitHub rely on that provider, and <a href="account.html#app-passwords">app passwords</a> keep working without a code.</li>
+          <li><strong>Minimum password length</strong>: 6 characters unless you choose more, up to 64. It applies to passwords set or changed from then on.</li>
+        </ul>
+        <p>How people set up two-factor sign-in is described in <a href="account.html#two-factor">Your account</a>.</p>
 
         <h2 id="groups">Groups</h2>
         <p>A group is a list of people, for example one department. Give a group access to a space or folder instead of adding people one by one. When someone joins or leaves the group, their access follows.</p>

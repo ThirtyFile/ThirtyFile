@@ -316,7 +316,23 @@ pub async fn load_system_settings(db: &SqlitePool) -> Result<SystemSettings, sql
         .filter(|v| crate::admin::LANGS.contains(&v.as_str()))
         .unwrap_or_else(|| "auto".into());
     let scan_minutes = get_setting(db, "scan_minutes").await?.and_then(|v| v.parse().ok()).unwrap_or(15).clamp(0, 1440);
-    Ok(SystemSettings { shared_enabled: !disabled, shared_root_id, allow_user_drives, default_user_quota, public_url, default_lang, scan_minutes })
+    let require_two_factor = get_setting(db, "require_two_factor").await?.as_deref() == Some("1");
+    let min_password_length = get_setting(db, "min_password_length")
+        .await?
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(crate::auth::MIN_PASSWORD)
+        .clamp(crate::auth::MIN_PASSWORD, crate::auth::MAX_MIN_PASSWORD);
+    Ok(SystemSettings {
+        shared_enabled: !disabled,
+        shared_root_id,
+        allow_user_drives,
+        default_user_quota,
+        public_url,
+        default_lang,
+        scan_minutes,
+        require_two_factor,
+        min_password_length,
+    })
 }
 
 pub struct NewUser<'a> {
