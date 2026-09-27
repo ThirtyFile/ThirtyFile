@@ -189,10 +189,17 @@ pub async fn save_content(
     if node.blob_hash.as_deref() == Some(hash.as_str()) {
         return Ok(Json(node));
     }
+    // Store and record in a task of its own, so a dropped request can't stop it between the two
+    let drive = node.drive().to_string();
+    tokio::spawn(store_content(st, user, id, body, hash, base, drive)).await.map_err(AppError::internal)?
+}
+
+async fn store_content(st: AppState, user: User, id: String, body: Bytes, hash: String, base: Option<i64>, drive: String) -> AppResult<Json<Node>> {
+    let conflict = || AppError::new(StatusCode::CONFLICT, "Someone else changed this file while you were editing it. Reload the latest version and edit again.");
     let tmp = st.tmp_dir().join(new_id());
     tokio::fs::write(&tmp, &body).await?;
     // First store it in the space's storage location (without holding the write lock)
-    let staged = match tree::stage_blob(&st, node.drive(), hash.clone(), body.len() as i64, tmp.clone()).await {
+    let staged = match tree::stage_blob(&st, &drive, hash.clone(), body.len() as i64, tmp.clone()).await {
         Ok(s) => s,
         Err(e) => {
             let _ = tokio::fs::remove_file(&tmp).await;

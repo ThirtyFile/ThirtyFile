@@ -40,7 +40,12 @@ struct Upload {
     drive_id: Option<String>,
     /// Uploads started together (one folder dropped or picked at once); empty for older clients
     batch: String,
+    /// The file this upload became, once finished
+    node_id: Option<String>,
 }
+
+/// How long a finished upload is remembered, so a client that lost the last response learns the result
+const FINISHED_TTL: i64 = 24 * 3600;
 
 fn tus(res: &mut Response) {
     res.headers_mut().insert(HeaderName::from_static("tus-resumable"), HeaderValue::from_static(TUS_VERSION));
@@ -144,7 +149,8 @@ pub async fn create(State(st): State<AppState>, user: User, headers: HeaderMap) 
     let mut res = StatusCode::CREATED.into_response();
     if size == 0 {
         let upload = load(&st, &user, &id).await?;
-        let node_id = finalize(&st, &user, upload).await?;
+        let guard = ActiveGuard::claim(&st, &id).ok_or_else(|| AppError::new(StatusCode::LOCKED, "This file is already being uploaded"))?;
+        let node_id = finish(&st, &user, upload, guard).await?;
         res.headers_mut().insert("x-node-id", HeaderValue::from_str(&node_id).unwrap());
     }
     tus(&mut res);
@@ -153,7 +159,7 @@ pub async fn create(State(st): State<AppState>, user: User, headers: HeaderMap) 
 }
 
 async fn load(st: &AppState, user: &User, id: &str) -> AppResult<Upload> {
-    sqlx::query_as("SELECT id, owner_id, parent_id, rel_path, name, size, offset, drive_id, batch FROM uploads WHERE id = ? AND owner_id = ?")
+    sqlx::query_as("SELECT id, owner_id, parent_id, rel_path, name, size, offset, drive_id, batch, node_id FROM uploads WHERE id = ? AND owner_id = ?")
         .bind(id)
         .bind(user.id)
         .fetch_optional(&st.db)
@@ -163,22 +169,45 @@ async fn load(st: &AppState, user: &User, id: &str) -> AppResult<Upload> {
 
 pub async fn head(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Response> {
     let upload = load(&st, &user, &id).await?;
+    let (size, offset, mut node_id) = (upload.size, upload.offset, upload.node_id.clone());
+    if node_id.is_none() && offset == size {
+        // Everything arrived but the file wasn't created: the server stopped before finishing. Finish now if the data
+        // is still there; otherwise the client must start over, rather than being told the upload succeeded.
+        let guard = ActiveGuard::claim(&st, &id).ok_or_else(|| AppError::new(StatusCode::LOCKED, "This file is already being uploaded"))?;
+        if !tokio::fs::try_exists(upload_path(&st, &id)).await.unwrap_or(false) {
+            let _w = st.write_lock.lock().await;
+            sqlx::query("DELETE FROM uploads WHERE id = ?").bind(&id).execute(&st.db).await?;
+            return Err(AppError::not_found("The upload doesn't exist or has expired"));
+        }
+        node_id = Some(finish(&st, &user, upload, guard).await?);
+    }
     let mut res = StatusCode::OK.into_response();
     tus(&mut res);
     let h = res.headers_mut();
-    h.insert("upload-offset", upload.offset.into());
-    h.insert("upload-length", upload.size.into());
+    // A finished upload reports everything as received, whatever the row said before finishing
+    h.insert("upload-offset", if node_id.is_some() { size } else { offset }.into());
+    h.insert("upload-length", size.into());
+    if let Some(n) = &node_id {
+        h.insert("x-node-id", HeaderValue::from_str(n).unwrap());
+    }
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok(res)
 }
 
-/// Makes sure the same upload isn't written concurrently
-struct ActiveGuard<'a> {
-    st: &'a AppState,
+/// Makes sure the same upload isn't written or finished twice at the same time. It owns the state, so it can move
+/// into the task that finishes the upload and stay held until that is done, even if the request is dropped.
+struct ActiveGuard {
+    st: AppState,
     id: String,
 }
 
-impl Drop for ActiveGuard<'_> {
+impl ActiveGuard {
+    fn claim(st: &AppState, id: &str) -> Option<ActiveGuard> {
+        st.active_uploads.lock().unwrap().insert(id.to_string()).then(|| ActiveGuard { st: st.clone(), id: id.to_string() })
+    }
+}
+
+impl Drop for ActiveGuard {
     fn drop(&mut self) {
         self.st.active_uploads.lock().unwrap().remove(&self.id);
     }
@@ -195,11 +224,18 @@ pub async fn patch(
         return Err(AppError::new(StatusCode::UNSUPPORTED_MEDIA_TYPE, "Content-Type must be application/offset+octet-stream"));
     }
     // Ownership first, so other users can't mark someone else's upload as active
+    load(&st, &user, &id).await?;
+    let guard = ActiveGuard::claim(&st, &id).ok_or_else(|| AppError::new(StatusCode::LOCKED, "This file is already being uploaded"))?;
+    // Read the offset only while holding the guard: a retried request must not work from the offset before the
+    // previous request finished
     let upload = load(&st, &user, &id).await?;
-    if !st.active_uploads.lock().unwrap().insert(id.clone()) {
-        return Err(AppError::new(StatusCode::LOCKED, "This file is already being uploaded"));
+    if let Some(node_id) = &upload.node_id {
+        let mut res = StatusCode::NO_CONTENT.into_response();
+        tus(&mut res);
+        res.headers_mut().insert("upload-offset", upload.size.into());
+        res.headers_mut().insert("x-node-id", HeaderValue::from_str(node_id).unwrap());
+        return Ok(res);
     }
-    let _guard = ActiveGuard { st: &st, id: id.clone() };
     // The deadline moves when data starts arriving, so the hourly cleanup can't remove an upload that is being received
     {
         let _w = st.write_lock.lock().await;
@@ -259,12 +295,26 @@ pub async fn patch(
     let mut res = StatusCode::NO_CONTENT.into_response();
     if offset == size {
         let upload = load(&st, &user, &id).await?;
-        let node_id = finalize(&st, &user, upload).await?;
+        let node_id = finish(&st, &user, upload, guard).await?;
         res.headers_mut().insert("x-node-id", HeaderValue::from_str(&node_id).unwrap());
     }
     tus(&mut res);
     res.headers_mut().insert("upload-offset", offset.into());
     Ok(res)
+}
+
+/// Finishes an upload in a task of its own: storing the content and creating the file must not stop halfway when the
+/// client or a proxy drops the request (which would leave content in storage without a file, or a file the client
+/// never hears about). The guard stays held until the task is done.
+async fn finish(st: &AppState, user: &User, upload: Upload, guard: ActiveGuard) -> AppResult<String> {
+    let (st, user) = (st.clone(), user.clone());
+    tokio::spawn(async move {
+        let result = finalize(&st, &user, upload).await;
+        drop(guard);
+        result
+    })
+    .await
+    .map_err(AppError::internal)?
 }
 
 /// Upload finished: compute the hash, put it in storage, create the file node
@@ -343,7 +393,13 @@ async fn commit_upload(
     .bind(ts)
     .execute(&mut *tx)
     .await?;
-    sqlx::query("DELETE FROM uploads WHERE id = ?").bind(&upload.id).execute(&mut *tx).await?;
+    // Kept for a day with the new file, for clients that lost the response
+    sqlx::query("UPDATE uploads SET node_id = ?, offset = size, expires_at = ? WHERE id = ?")
+        .bind(&id)
+        .bind(ts + FINISHED_TTL)
+        .bind(&upload.id)
+        .execute(&mut *tx)
+        .await?;
     tree::touch(&mut tx, &folder).await?;
     if let Some(n) = tree::get_node(&mut tx, &id).await? {
         tree::adjust_usage(&mut tx, n.drive(), size as i64).await?;
@@ -431,5 +487,99 @@ mod tests {
         };
         assert_eq!(start(MAX_REL_DEPTH).await.unwrap().status(), axum::http::StatusCode::CREATED);
         assert_eq!(start(MAX_REL_DEPTH + 1).await.unwrap_err().status, axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    /// Starts an upload of `data` into Amy's root folder and returns its id
+    async fn begin(env: &testutil::TestEnv, user: &User, name: &str, len: usize) -> String {
+        let b64 = |s: &str| base64::engine::general_purpose::STANDARD.encode(s);
+        let mut h = HeaderMap::new();
+        h.insert("upload-length", len.to_string().parse().unwrap());
+        h.insert("upload-metadata", format!("filename {},parentId {}", b64(name), b64("root")).parse().unwrap());
+        let res = create(State(env.st.clone()), user.clone(), h).await.unwrap();
+        res.headers()[header::LOCATION].to_str().unwrap().rsplit('/').next().unwrap().to_string()
+    }
+
+    async fn send(env: &testutil::TestEnv, user: &User, id: &str, offset: usize, data: &'static [u8]) -> AppResult<Response> {
+        let mut h = HeaderMap::new();
+        h.insert(header::CONTENT_TYPE, "application/offset+octet-stream".parse().unwrap());
+        h.insert("upload-offset", offset.to_string().parse().unwrap());
+        patch(State(env.st.clone()), user.clone(), Path(id.to_string()), h, Body::from(data)).await
+    }
+
+    async fn files_named(env: &testutil::TestEnv, name: &str) -> i64 {
+        let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE name LIKE ?").bind(format!("{name}%")).fetch_one(&env.st.db).await.unwrap();
+        n
+    }
+
+    #[tokio::test]
+    async fn a_client_that_lost_the_last_response_learns_the_upload_finished() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let id = begin(&env, &amy, "report.txt", 5).await;
+        let done = send(&env, &amy, &id, 0, b"hello").await.unwrap();
+        let node = done.headers()["x-node-id"].to_str().unwrap().to_string();
+
+        // The response got lost: asking again reports the finished upload and the file it became
+        let res = head(State(env.st.clone()), amy.clone(), Path(id.clone())).await.unwrap();
+        assert_eq!(res.headers()["upload-offset"], "5");
+        assert_eq!(res.headers()["x-node-id"].to_str().unwrap(), node);
+        // Sending the last part again changes nothing
+        let res = send(&env, &amy, &id, 0, b"hello").await.unwrap();
+        assert_eq!(res.headers()["x-node-id"].to_str().unwrap(), node);
+        assert_eq!(files_named(&env, "report").await, 1);
+        // A finished upload no longer reserves space in the quota
+        let (reserved,): (i64,) = sqlx::query_as("SELECT COALESCE(SUM(size), 0) FROM uploads WHERE node_id IS NULL").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(reserved, 0);
+        // Nothing is left on the deletion list for the stored content
+        let (pending,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM pending_blob_deletes").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(pending, 0);
+    }
+
+    #[tokio::test]
+    async fn an_upload_the_server_stopped_finishing_is_finished_or_started_over() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        // Everything arrived, but the file wasn't created (as if the server stopped right then)
+        let id = begin(&env, &amy, "kept.txt", 5).await;
+        tokio::fs::write(upload_path(&env.st, &id), b"hello").await.unwrap();
+        sqlx::query("UPDATE uploads SET offset = 5 WHERE id = ?").bind(&id).execute(&env.st.db).await.unwrap();
+        let res = head(State(env.st.clone()), amy.clone(), Path(id.clone())).await.unwrap();
+        assert!(res.headers().contains_key("x-node-id"));
+        assert_eq!(files_named(&env, "kept").await, 1);
+
+        // The received data is gone too: the client is told to start over, not that the upload succeeded
+        let id = begin(&env, &amy, "lost.txt", 5).await;
+        tokio::fs::remove_file(upload_path(&env.st, &id)).await.unwrap();
+        sqlx::query("UPDATE uploads SET offset = 5 WHERE id = ?").bind(&id).execute(&env.st.db).await.unwrap();
+        let err = head(State(env.st.clone()), amy.clone(), Path(id.clone())).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+        assert_eq!(files_named(&env, "lost").await, 0);
+    }
+
+    #[tokio::test]
+    async fn finishing_continues_when_the_request_is_dropped() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let id = begin(&env, &amy, "big.txt", 5).await;
+        tokio::fs::write(upload_path(&env.st, &id), b"hello").await.unwrap();
+        sqlx::query("UPDATE uploads SET offset = 5 WHERE id = ?").bind(&id).execute(&env.st.db).await.unwrap();
+        let upload = load(&env.st, &amy, &id).await.unwrap();
+        let guard = ActiveGuard::claim(&env.st, &id).unwrap();
+        // Hold the write lock, so finishing stops right before recording the file (the content is already stored),
+        // and drop the request there, as a proxy closing the connection would
+        let lock = env.st.write_lock.lock().await;
+        let request = finish(&env.st, &amy, upload, guard);
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(300), request).await.is_err());
+        drop(lock);
+        // The file still appears, and the upload can't be finished a second time meanwhile
+        for _ in 0..100 {
+            if files_named(&env, "big").await == 1 {
+                let (node,): (Option<String>,) = sqlx::query_as("SELECT node_id FROM uploads WHERE id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
+                assert!(node.is_some());
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("the upload was received but never finished");
     }
 }
