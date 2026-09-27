@@ -23,4 +23,7 @@ export default {
   "Undo the last move, rename or delete": "復原上一次的移動、重新命名或刪除",
   "Show details": "顯示詳細資料",
   "Show these shortcuts": "顯示這些快速鍵",
+  // Selecting on phones
+  "Selected items": "已選取的項目",
+  "More": "更多",
 };

@@ -675,6 +675,7 @@ fn api() -> Router<AppState> {
         .route("/branding.css", get(branding::css))
         .route("/branding/logo", get(branding::logo))
         .route("/branding/background", get(branding::background))
+        .route("/branding/manifest.webmanifest", get(branding::manifest))
         .route("/admin/branding", put(branding::update))
         .route("/login-log", get(logs::login_log))
         .route("/login-log/export", get(logs::export_login_log))

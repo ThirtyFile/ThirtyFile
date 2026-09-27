@@ -132,6 +132,31 @@ pub async fn css(State(st): State<AppState>) -> Response {
     ([(header::CONTENT_TYPE, "text/css; charset=utf-8"), (header::CACHE_CONTROL, "public, max-age=31536000, immutable")], body).into_response()
 }
 
+/// Web app manifest, so the site can be added to a phone's home screen and opens there without the browser's bars.
+/// It's fetched from this origin, which the page's Content-Security-Policy allows (`default-src 'self'`).
+pub async fn manifest(State(st): State<AppState>) -> Response {
+    let body = manifest_json(&st.branding.read().unwrap()).to_string();
+    ([(header::CONTENT_TYPE, "application/manifest+json"), (header::CACHE_CONTROL, "no-cache")], body).into_response()
+}
+
+/// Named after the site; the icon is the uploaded logo, else the default one (both scale, so one icon fits every size)
+fn manifest_json(b: &Branding) -> Value {
+    let icon = match &b.logo {
+        Some(logo) => json!({ "src": format!("/api/branding/logo?v={}", b.version), "sizes": "any", "type": logo.mime }),
+        None => json!({ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }),
+    };
+    json!({
+        "name": b.site_name,
+        "short_name": b.site_name,
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "background_color": "#ffffff",
+        "theme_color": b.light_brand,
+        "icons": [icon],
+    })
+}
+
 /// Generates CSS variables from the accent color; button text, focus ring and selection background are all derived from it, computed separately for light and dark.
 /// The focus ring is the accent color itself: a tint of it would fall below 3:1 against the page
 pub fn palette_css(b: &Branding) -> String {
@@ -454,6 +479,20 @@ mod tests {
         assert!(html.contains(r#"<script>window.__TF_DEFAULT_LANG__="en";window.__TF_BRANDING__="#));
         assert!(html.contains("tf-brand-css"));
         assert!(!html.contains("</script><b>"), "settings content must not escape the script tag");
+    }
+
+    #[test]
+    fn manifest_takes_the_site_name_and_logo() {
+        let mut b = Branding { site_name: "Stellar Cloud".into(), ..Branding::default() };
+        let m = manifest_json(&b);
+        assert_eq!(m["name"], "Stellar Cloud");
+        assert_eq!(m["display"], "standalone");
+        assert_eq!(m["icons"][0]["src"], "/favicon.svg", "the default icon without a logo");
+        b.logo = Some(LogoFile { file: "logo.png".into(), mime: "image/png".into() });
+        b.version = 7;
+        let m = manifest_json(&b);
+        assert_eq!(m["icons"][0]["src"], "/api/branding/logo?v=7");
+        assert_eq!(m["icons"][0]["type"], "image/png");
     }
 
     #[tokio::test]

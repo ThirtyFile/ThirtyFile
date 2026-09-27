@@ -99,8 +99,8 @@ export function AppShell() {
           <Outlet />
         </ErrorBoundary>
       </div>
-      {/* Transfer progress at the bottom right: downloads above, uploads below */}
-      <div className="fixed right-4 bottom-4 z-40 flex w-[min(380px,calc(100vw-2rem))] flex-col gap-2">
+      {/* Transfer progress at the bottom right: downloads above, uploads below (above the phone selection bar while it shows) */}
+      <div className="fixed right-4 bottom-[calc(var(--tf-bottom-inset,0px)+1rem)] z-40 flex w-[min(380px,calc(100vw-2rem))] flex-col gap-2">
         <DownloadPanel />
         <UploadPanel />
       </div>

@@ -13,6 +13,7 @@ import {
   type ReactNode,
   type RefObject,
   type FocusEvent,
+  type TouchEvent,
 } from "react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDownIcon, ChevronUpIcon, StarIcon } from "lucide-react";
@@ -50,8 +51,10 @@ export interface FileListProps {
   onSort?(key: SortKey): void;
   showLocation?: boolean;
   showOwner?: boolean;
-  /** Show item checkboxes */
+  /** Show item checkboxes (in both views) */
   showCheckboxes?: boolean;
+  /** A long press on an item also opens the context menu (on phones the selection bar takes its place) */
+  touchMenu?: boolean;
   /** Cut items (not yet pasted) are shown semi-transparent */
   dimmed?: Set<string>;
   dateLabel?: string;
@@ -74,6 +77,9 @@ export interface FileListProps {
 }
 
 const coarse = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+/** How long a finger rests on an item to select it, and how far it may move meanwhile */
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_SLOP = 10;
 
 /** Details view: height of a row (its cells are h-7) and of the column headers */
 const ROW = 28;
@@ -149,12 +155,16 @@ interface Handlers {
   toggle(index: number): void;
   keyDown(e: KeyboardEvent<HTMLElement>, index: number): void;
   focused(id: string): void;
-  contextMenu(index: number): void;
+  contextMenu(e: MouseEvent, index: number): void;
+  touchStart(e: TouchEvent, index: number): void;
+  touchMove(e: TouchEvent): void;
+  touchEnd(index: number): void;
   dragStart(e: DragEvent, index: number): void;
   dragOver(e: DragEvent, id: string): void;
   dragLeave(id: string): void;
   drop(e: DragEvent, folder: Item): void;
   open(n: Item): void;
+  doubleClick(n: Item): void;
   openInNewTab?(n: Item): void;
   dateOf(n: Item): number;
   rename(item: Item, name: string): Promise<void>;
@@ -187,7 +197,7 @@ function rowProps({ item, index, h, selected, tabStop, dropTarget }: RowProps) {
     onKeyDown: (e: KeyboardEvent<HTMLElement>) => h.current.keyDown(e, index),
     onFocus: (e: FocusEvent) => e.target === e.currentTarget && h.current.focused(item.id),
     onClick: (e: MouseEvent) => h.current.click(e, index),
-    onDoubleClick: () => h.current.open(item),
+    onDoubleClick: () => h.current.doubleClick(item),
     onMouseDown: (e: MouseEvent) => {
       if (e.button === 1 && h.current.openInNewTab) e.preventDefault();
     },
@@ -197,7 +207,11 @@ function rowProps({ item, index, h, selected, tabStop, dropTarget }: RowProps) {
         h.current.openInNewTab(item);
       }
     },
-    onContextMenu: () => h.current.contextMenu(index),
+    onContextMenu: (e: MouseEvent) => h.current.contextMenu(e, index),
+    onTouchStart: (e: TouchEvent) => h.current.touchStart(e, index),
+    onTouchMove: (e: TouchEvent) => h.current.touchMove(e),
+    onTouchEnd: () => h.current.touchEnd(index),
+    onTouchCancel: () => h.current.touchEnd(index),
     ...(dropTarget
       ? {
           "data-drop-folder": true,
@@ -283,7 +297,7 @@ const ListRow = memo(function ListRow(r: RowProps & { checkboxes: boolean; locat
   );
 });
 
-const Tile = memo(function Tile(r: RowProps & { source: FileSource; count: number }) {
+const Tile = memo(function Tile(r: RowProps & { source: FileSource; count: number; checkboxes: boolean }) {
   const { item } = r;
   return (
     <div
@@ -306,6 +320,19 @@ const Tile = memo(function Tile(r: RowProps & { source: FileSource; count: numbe
       </div>
       {r.renaming ? renameBox(r, true) : <span className="line-clamp-2 pt-1.5 text-xs leading-[18px] break-all">{item.name}</span>}
       {item.is_favorite && <StarIcon className="absolute top-1.5 right-1.5 size-3 fill-amber-400 text-amber-400" />}
+      {/* Space selects with the keyboard, so the check box isn't a Tab stop of its own */}
+      {r.checkboxes && (
+        <input
+          type="checkbox"
+          tabIndex={-1}
+          className="absolute top-1.5 left-1.5 size-4 accent-brand"
+          aria-label={t("Select {name}", { name: item.name })}
+          checked={r.selected}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onChange={() => r.h.current.toggle(r.index)}
+        />
+      )}
     </div>
   );
 });
@@ -497,12 +524,27 @@ export function FileList(p: FileListProps) {
   };
   if (p.navRef) p.navRef.current = { typeAhead };
 
+  /** A finger resting on an item: selected once it has stayed long enough */
+  const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number; done: boolean } | null>(null);
+  /** The click that may follow a long press doesn't toggle the item again */
+  const ignoreClick = useRef({ index: -1, until: 0 });
+  const cancelPress = () => {
+    if (press.current) clearTimeout(press.current.timer);
+  };
+  /** Long press (on every platform, iOS included): select the item, adding it when items are already selected */
+  const longPress = (index: number) => {
+    const id = p.items[index].id;
+    if (!p.selected.has(id)) p.onSelect(selecting ? new Set(p.selected).add(id) : new Set([id]), id);
+    navigator.vibrate?.(15);
+  };
+
   const h = useRef<Handlers>(null!);
   h.current = {
     click: (e, index) => {
       const item = p.items[index];
       // Marquee selection prevents the default mousedown, so the row wouldn't get the focus: arrows continue from the clicked row
       (e.currentTarget as HTMLElement).focus({ preventScroll: true });
+      if (ignoreClick.current.index === index && Date.now() < ignoreClick.current.until) return;
       if (coarse && !selecting && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
         p.onOpen(item);
         return;
@@ -516,8 +558,46 @@ export function FileList(p: FileListProps) {
     keyDown: keyNav,
     focused: setFocusId,
     // Right-clicking an unselected item selects only that item
-    contextMenu: (index) => {
+    contextMenu: (e, index) => {
+      if (press.current) {
+        // Android reports a long press as a right-click too: the long press handles it
+        if (!p.touchMenu) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        return;
+      }
       if (!p.selected.has(p.items[index].id)) p.onSelect(new Set([p.items[index].id]), p.items[index].id);
+    },
+    touchStart: (e, index) => {
+      cancelPress();
+      press.current = null;
+      if (e.touches.length !== 1) return;
+      // Without the menu, the context menu area mustn't start its own long press
+      if (!p.touchMenu) e.stopPropagation();
+      const { clientX: x, clientY: y } = e.touches[0];
+      const timer = setTimeout(() => {
+        if (press.current) press.current.done = true;
+        longPress(index);
+      }, LONG_PRESS_MS);
+      press.current = { timer, x, y, done: false };
+    },
+    touchMove: (e) => {
+      const at = press.current;
+      const touch = e.touches[0];
+      if (at && !at.done && touch && Math.hypot(touch.clientX - at.x, touch.clientY - at.y) > LONG_PRESS_SLOP) {
+        cancelPress();
+        press.current = null;
+      }
+    },
+    touchEnd: (index) => {
+      cancelPress();
+      const ended = press.current;
+      if (ended?.done) ignoreClick.current = { index, until: Date.now() + 800 };
+      // Kept a moment for the right-click Android sends at the end of a long press
+      setTimeout(() => {
+        if (press.current === ended) press.current = null;
+      }, 600);
     },
     dragStart: (e, index) => {
       const id = p.items[index].id;
@@ -551,6 +631,8 @@ export function FileList(p: FileListProps) {
       }
     },
     open: p.onOpen,
+    // On touch screens a tap opens (or, while selecting, toggles): two quick taps mustn't open the item as well
+    doubleClick: (item) => !coarse && p.onOpen(item),
     openInNewTab: p.onOpenInNewTab,
     dateOf: p.dateOf ?? ((x) => x.updated_at),
     rename: (item, name) => p.onRename!(item, name),
@@ -612,7 +694,8 @@ export function FileList(p: FileListProps) {
       dimmed: !!p.dimmed?.has(item.id),
       dropping: dropTarget === item.id,
       renaming: item.id === p.renamingId && !!p.onRename,
-      movable: !!p.onDropInto && item.id !== p.renamingId,
+      // Not on touch screens: holding a finger on an item selects it rather than picking it up
+      movable: !coarse && !!p.onDropInto && item.id !== p.renamingId,
       dropTarget: !!(p.onDropInto || p.onUploadInto) && item.kind === "folder",
     };
   };
@@ -627,7 +710,7 @@ export function FileList(p: FileListProps) {
               {gap > 0 && <div aria-hidden style={{ height: gap }} />}
               <div role="none" className="grid gap-2" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, marginBottom: GAP }}>
                 {p.items.slice(r * cols, (r + 1) * cols).map((item, k) => (
-                  <Tile key={item.id} {...row(r * cols + k)} source={p.source} count={n} />
+                  <Tile key={item.id} {...row(r * cols + k)} source={p.source} count={n} checkboxes={!!p.showCheckboxes} />
                 ))}
               </div>
             </Fragment>

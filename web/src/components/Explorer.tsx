@@ -19,6 +19,8 @@ import { useExplorerActions } from "./explorer/actions";
 import { explorerMenus } from "./explorer/menus";
 import { explorerToolbar } from "./explorer/toolbar";
 import { ExplorerDialogs } from "./explorer/dialogs";
+import { SelectionBar } from "./explorer/selectionBar";
+import { useMediaQuery } from "@/lib/focus";
 import type { Item } from "./explorer/types";
 
 export interface ExplorerProps {
@@ -86,6 +88,8 @@ export function Explorer(p: ExplorerProps) {
   // Hold the left button and drag on empty space to marquee-select (disabled while renaming); the list gives its row geometry
   const measure = useRef<MeasureHits>(null);
   const marquee = useMarquee({ selected, onSelect: setSelected, enabled: !p.loading && dialog?.t !== "rename", measure });
+  // Phones: a bar with the selected items' actions takes the place of the context menu on a long press
+  const phone = useMediaQuery("(max-width: 47.99rem)");
   const dimmed = useMemo(() => (clip?.mode === "cut" ? new Set(clip.ids) : undefined), [clip]);
   const footer = (
     <>
@@ -174,6 +178,7 @@ export function Explorer(p: ExplorerProps) {
                 showLocation={p.showLocation}
                 showOwner={p.showOwner}
                 showCheckboxes={showCheckboxes}
+                touchMenu={!phone}
                 dimmed={dimmed}
                 measureRef={measure}
                 navRef={s.listNav}
@@ -213,6 +218,7 @@ export function Explorer(p: ExplorerProps) {
         </ContextMenu>
         {detailsOpen && <DetailsPane selected={selectedNodes} folder={p.folder} onClose={() => setDetailsOpen(false)} />}
       </div>
+      {phone && selectedNodes.length > 0 && <SelectionBar p={p} s={s} a={a} menuItems={menuItems} />}
 
       <input
         ref={fileInput}
