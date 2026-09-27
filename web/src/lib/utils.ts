@@ -81,3 +81,10 @@ export async function copyText(text: string) {
     ta.remove();
   }
 }
+
+/** How long removed items stay in the trash, for the texts that explain it */
+export function trashHint(days: number) {
+  return days > 0
+    ? t("Removed items stay in the trash for {n} day and can be restored until then.|Removed items stay in the trash for {n} days and can be restored until then.", { n: days })
+    : t("Removed items stay in the trash and can be restored until it's emptied.");
+}

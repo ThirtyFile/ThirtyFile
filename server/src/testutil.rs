@@ -52,6 +52,7 @@ pub async fn env() -> TestEnv {
         storage_dir: dir.join("blobs"),
         secret: vec![7; 32],
         secure_cookie: false,
+        trash_days: 30,
         trust_proxy: Default::default(),
         max_upload: 0,
         write_lock: tokio::sync::Mutex::new(()),

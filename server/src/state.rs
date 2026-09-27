@@ -42,6 +42,8 @@ pub struct Inner {
     pub storage_dir: PathBuf,
     pub secret: Vec<u8>,
     pub secure_cookie: bool,
+    /// Days before trashed items are deleted for good (0 = kept until the trash is emptied)
+    pub trash_days: i64,
     /// Trust X-Forwarded-For sent by a reverse proxy
     pub trust_proxy: crate::auth::TrustProxy,
     pub max_upload: u64,

@@ -168,6 +168,8 @@ pub struct Me {
     pub can_create_drive: bool,
     /// The site's public URL (for building share links); blank = use the browser's current URL
     pub public_url: String,
+    /// Days before trashed items are deleted for good (0 = kept until the trash is emptied)
+    pub trash_days: i64,
 }
 
 async fn me_of(st: &AppState, user: User) -> AppResult<Me> {
@@ -176,7 +178,7 @@ async fn me_of(st: &AppState, user: User) -> AppResult<Me> {
         let s = st.system.read().unwrap();
         (user.is_admin() || s.allow_user_drives, s.public_url.clone())
     };
-    Ok(Me { user, used_bytes, can_create_drive, public_url })
+    Ok(Me { user, used_bytes, can_create_drive, public_url, trash_days: st.trash_days })
 }
 
 #[derive(Deserialize)]

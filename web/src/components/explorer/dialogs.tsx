@@ -5,6 +5,8 @@ import { AccessDialog } from "@/components/AccessDialog";
 import { ConfirmDialog, FolderPickerDialog } from "@/components/dialogs";
 import { ShareDialog } from "@/components/ShareDialog";
 import { t } from "@/lib/i18n";
+import { useMe } from "@/lib/session";
+import { trashHint } from "@/lib/utils";
 import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
 import type { ExplorerActions } from "./actions";
@@ -12,6 +14,7 @@ import type { ExplorerActions } from "./actions";
 export function ExplorerDialogs({ p, s, a }: { p: ExplorerProps; s: ExplorerState; a: ExplorerActions }) {
   const { setSelected, dialog, setDialog } = s;
   const { refresh } = a;
+  const me = useMe();
   return (
     <>
       {(dialog?.t === "move" || dialog?.t === "copy") && (
@@ -34,7 +37,7 @@ export function ExplorerDialogs({ p, s, a }: { p: ExplorerProps; s: ExplorerStat
       {dialog?.t === "trash" && (
         <ConfirmDialog
           title={t("Move {n} item to trash?|Move {n} items to trash?", { n: dialog.ids.length })}
-          description={t("Removed files stay in the trash and can be restored at any time.")}
+          description={trashHint(me.trash_days)}
           confirmText={t("Move to trash")}
           destructive
           onClose={() => setDialog(null)}

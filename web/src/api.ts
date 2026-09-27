@@ -389,6 +389,8 @@ export interface Me {
   can_create_drive: boolean;
   /** Public site URL (used to build share links); blank = use the browser's current URL */
   public_url: string;
+  /** Days before trashed items are deleted for good; 0 = kept until the trash is emptied */
+  trash_days: number;
 }
 
 export interface ShareInfo {
@@ -567,6 +569,8 @@ export const api = {
   restore: (ids: string[]) => post("/trash/restore", { ids }),
   deleteForever: (ids: string[]) => post("/trash/delete", { ids }),
   emptyTrash: () => post("/trash/empty"),
+  /** What Empty trash would delete: items per space */
+  emptyTrashPreview: () => get<{ kind: string; name: string; items: number }[]>("/trash/empty"),
   search: (q: string) => get<Located[]>(`/search${qs({ q })}`),
   recent: () => get<Located[]>("/recent"),
   favorites: (sort?: SortKey, order?: SortOrder) => get<Located[]>(`/favorites${qs({ sort, order })}`),

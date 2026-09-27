@@ -606,9 +606,46 @@ pub async fn delete_forever(State(st): State<AppState>, user: User, Json(req): J
     Ok(Json(json!({ "ok": true })))
 }
 
+/// The spaces whose trash Empty trash deletes: those the user manages (or owns), except read-only spaces. The trash
+/// also lists items of spaces the user can only view, which stay.
+async fn empty_trash_drives(conn: &mut SqliteConnection, user: &User) -> AppResult<Vec<String>> {
+    if !(user.can_delete || user.is_admin()) {
+        return Ok(Vec::new());
+    }
+    let ids = trash_drives(conn, user, Role::Manager).await?;
+    let writable: Vec<(String,)> =
+        sqlx::query_as("SELECT id FROM drives WHERE id IN (SELECT value FROM json_each(?)) AND read_only = 0")
+            .bind(serde_json::to_string(&ids).unwrap())
+            .fetch_all(conn)
+            .await?;
+    Ok(writable.into_iter().map(|(id,)| id).collect())
+}
+
+#[derive(Serialize)]
+pub struct EmptyTrashSpace {
+    kind: String,
+    name: String,
+    items: i64,
+}
+
+/// What Empty trash would delete: the number of items per space, so the page can ask about exactly that
+pub async fn empty_trash_preview(State(st): State<AppState>, user: User) -> AppResult<Json<Vec<EmptyTrashSpace>>> {
+    let mut c = st.db.acquire().await?;
+    let drive_ids = empty_trash_drives(&mut c, &user).await?;
+    let rows: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT d.kind, d.name, COUNT(*) FROM nodes n JOIN drives d ON d.id = n.drive_id
+         WHERE n.trash_root = 1 AND n.drive_id IN (SELECT value FROM json_each(?))
+         GROUP BY d.id ORDER BY CASE d.kind WHEN 'personal' THEN 0 WHEN 'company' THEN 1 ELSE 2 END, d.name",
+    )
+    .bind(serde_json::to_string(&drive_ids).unwrap())
+    .fetch_all(&mut *c)
+    .await?;
+    Ok(Json(rows.into_iter().map(|(kind, name, items)| EmptyTrashSpace { kind, name, items }).collect()))
+}
+
 /// Empty trash: spaces where I'm a manager (or owner)
 pub async fn empty_trash(State(st): State<AppState>, user: User) -> AppResult<Json<Value>> {
-    let drive_ids = if user.can_delete || user.is_admin() { trash_drives(&mut *st.db.acquire().await?, &user, Role::Manager).await? } else { Vec::new() };
+    let drive_ids = empty_trash_drives(&mut *st.db.acquire().await?, &user).await?;
     let total = purge_trash_in_batches(
         &st,
         "SELECT id FROM nodes WHERE trash_root = 1 AND drive_id IN (SELECT value FROM json_each(?1)) LIMIT ?2",
@@ -621,7 +658,7 @@ pub async fn empty_trash(State(st): State<AppState>, user: User) -> AppResult<Js
         tree::log(&mut tx, &user, None, "empty_trash", &format!("{total} {}", if total == 1 { "item" } else { "items" })).await?;
         tx.commit().await?;
     }
-    Ok(Json(json!({ "ok": true })))
+    Ok(Json(json!({ "ok": true, "deleted": total })))
 }
 
 /// Automatically purges trash items older than the retention period
@@ -821,6 +858,31 @@ mod tests {
         };
         assert_eq!(list("name").await, ["b.pdf", "File 1.docx", "file 2.txt", "File 10.txt", "README"]);
         assert_eq!(list("type").await, ["README", "File 1.docx", "b.pdf", "file 2.txt", "File 10.txt"]);
+    }
+
+    #[tokio::test]
+    async fn empty_trash_counts_and_deletes_only_what_the_user_manages() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let a = env.file(&amy, &amy.root_id, "a.txt").await;
+        let b = env.file(&amy, &amy.root_id, "b.txt").await;
+        let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&a, &b])).await.unwrap();
+        let Json(preview) = empty_trash_preview(State(env.st.clone()), amy.clone()).await.unwrap();
+        assert_eq!(preview.len(), 1);
+        assert_eq!((preview[0].kind.as_str(), preview[0].items), ("personal", 2));
+
+        // Without permission to delete, nothing is emptied and nothing is counted
+        let mut bob = env.user("bob", false).await;
+        let c = env.file(&bob, &bob.root_id, "c.txt").await;
+        let _ = trash(State(env.st.clone()), bob.clone(), ids(&[&c])).await.unwrap();
+        bob.can_delete = false;
+        let Json(preview) = empty_trash_preview(State(env.st.clone()), bob.clone()).await.unwrap();
+        assert!(preview.is_empty());
+
+        let Json(done) = empty_trash(State(env.st.clone()), amy.clone()).await.unwrap();
+        assert_eq!(done["deleted"], 2);
+        let Json(left) = list_trash(State(env.st.clone()), bob.clone()).await.unwrap();
+        assert_eq!(left.len(), 1);
     }
 
     #[tokio::test]

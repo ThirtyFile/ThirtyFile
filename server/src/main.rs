@@ -174,6 +174,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         storage_dir: storage,
         secret,
         secure_cookie: cfg.secure_cookie,
+        trash_days: cfg.trash_days,
         trust_proxy: cfg.trust_proxy,
         max_upload: cfg.max_upload_mb.checked_mul(1024 * 1024).ok_or("THIRTYFILE_MAX_UPLOAD_MB is too large")?,
         write_lock: tokio::sync::Mutex::new(()),
@@ -399,7 +400,7 @@ fn api() -> Router<AppState> {
         .route("/trash", get(nodes::list_trash))
         .route("/trash/restore", post(nodes::restore))
         .route("/trash/delete", post(nodes::delete_forever))
-        .route("/trash/empty", post(nodes::empty_trash))
+        .route("/trash/empty", get(nodes::empty_trash_preview).post(nodes::empty_trash))
         .route("/search", get(nodes::search))
         .route("/recent", get(nodes::recent))
         .route("/favorites", get(nodes::favorites))
