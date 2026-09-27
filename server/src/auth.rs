@@ -557,7 +557,7 @@ mod attempt_tests {
             async move {
                 // A different address every time, so only the per-account limit applies
                 let addr: std::net::SocketAddr = format!("203.0.{}.{}:5000", i / 250, i % 250 + 1).parse().unwrap();
-                let req = LoginReq { username: "Amy".into(), password: format!("wrong-{i}") };
+                let req = LoginReq { username: "Amy".into(), password: testutil::wrong_password() };
                 login(State(st), ConnectInfo(addr), HeaderMap::new(), Json(req)).await.map(|_| ()).unwrap_err().status
             }
         };
@@ -576,7 +576,7 @@ mod attempt_tests {
         // After the wait, the right password works and the count starts over
         env.st.login_failures.lock().unwrap().get_mut("a:amy").unwrap().iter_mut().for_each(|t| *t -= ACCOUNT_MAX_DELAY);
         let addr: std::net::SocketAddr = "198.51.100.1:5000".parse().unwrap();
-        let req = LoginReq { username: "amy".into(), password: "password-1234".into() };
+        let req = LoginReq { username: "amy".into(), password: testutil::password().into() };
         assert!(login(State(env.st.clone()), ConnectInfo(addr), HeaderMap::new(), Json(req)).await.is_ok());
         assert!(!env.st.login_failures.lock().unwrap().contains_key("a:amy"));
     }
@@ -587,13 +587,13 @@ mod attempt_tests {
         let amy = env.user("amy", true).await;
         let addr: std::net::SocketAddr = "10.0.0.1:5000".parse().unwrap();
         let change = |current: &str| {
-            let req = ChangePasswordReq { current: current.into(), new: "new-password-1".into() };
+            let req = ChangePasswordReq { current: current.into(), new: testutil::wrong_password() };
             change_password(State(env.st.clone()), ConnectInfo(addr), HeaderMap::new(), amy.clone(), Json(req))
         };
         for _ in 0..FAIL_LIMIT {
-            assert_eq!(change("wrong").await.unwrap_err().status, axum::http::StatusCode::BAD_REQUEST);
+            assert_eq!(change(&testutil::wrong_password()).await.unwrap_err().status, axum::http::StatusCode::BAD_REQUEST);
         }
-        assert_eq!(change("password-1234").await.unwrap_err().status, axum::http::StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(change(testutil::password()).await.unwrap_err().status, axum::http::StatusCode::TOO_MANY_REQUESTS);
     }
 
     #[tokio::test]
@@ -602,10 +602,10 @@ mod attempt_tests {
         env.user("amy", true).await;
         let addr: std::net::SocketAddr = "10.0.0.1:5000".parse().unwrap();
         // Ten guesses at once: only FAIL_LIMIT of them get to run the hash, the rest are refused right away
-        let results = futures_util::future::join_all((0..10).map(|i| {
+        let results = futures_util::future::join_all((0..10).map(|_| {
             let st = env.st.clone();
             async move {
-                let req = LoginReq { username: "amy".into(), password: format!("wrong-{i}") };
+                let req = LoginReq { username: "amy".into(), password: testutil::wrong_password() };
                 login(State(st), ConnectInfo(addr), HeaderMap::new(), Json(req)).await.map(|_| ()).unwrap_err().status
             }
         }))
@@ -616,7 +616,7 @@ mod attempt_tests {
 
         // A correct password from another address isn't counted as a failure
         let other: std::net::SocketAddr = "10.0.0.2:5000".parse().unwrap();
-        let req = LoginReq { username: "amy".into(), password: "password-1234".into() };
+        let req = LoginReq { username: "amy".into(), password: testutil::password().into() };
         assert!(login(State(env.st.clone()), ConnectInfo(other), HeaderMap::new(), Json(req)).await.is_ok());
         let map = env.st.login_failures.lock().unwrap();
         assert!(map.get("u:amy|10.0.0.2").is_none() && map.get("ip:10.0.0.2").is_none(), "{:?}", map.keys().collect::<Vec<_>>());

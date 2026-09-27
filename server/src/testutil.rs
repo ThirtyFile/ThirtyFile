@@ -10,6 +10,17 @@ use crate::{
     util::{new_id, now},
 };
 
+/// The password of every test user. Generated once per test run, so the code holds no hard-coded credentials.
+pub fn password() -> &'static str {
+    static PASSWORD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PASSWORD.get_or_init(|| format!("pw-{}", new_id()))
+}
+
+/// A password that is certainly wrong
+pub fn wrong_password() -> String {
+    format!("wrong-{}", new_id())
+}
+
 pub struct TestEnv {
     pub st: AppState,
     pub dir: PathBuf,
@@ -66,7 +77,7 @@ impl TestEnv {
     /// Creates a standard user (with a personal space)
     pub async fn user(&self, name: &str, can_share: bool) -> User {
         let mut conn = self.st.db.acquire().await.unwrap();
-        let password_hash = auth::hash_password("password-1234".into()).await.unwrap();
+        let password_hash = auth::hash_password(password().into()).await.unwrap();
         let id = db::create_user(
             &mut conn,
             NewUser { username: name, password_hash: &password_hash, role: "user", can_write: true, can_delete: true, can_share, quota_bytes: 0, source: "password", provisioned_by: None },

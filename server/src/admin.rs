@@ -439,7 +439,7 @@ mod tests {
     fn req(name: &str, quota: Option<i64>) -> Json<CreateReq> {
         Json(CreateReq {
             username: name.into(),
-            password: "password-1234".into(),
+            password: testutil::password().into(),
             display_name: String::new(),
             role: "user".into(),
             can_write: true,
