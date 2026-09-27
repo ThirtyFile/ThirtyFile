@@ -62,7 +62,7 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
     let (mut node, role) = tree::node_with_role(&mut c, &user, &id).await?;
     let drive = tree::get_drive(&mut c, node.drive()).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
     let (path, via_share) = visible_path(&mut c, &user, &node).await?;
-    tree::mark_favorites(&st.db, user.id, [&mut node]).await?;
+    tree::mark_favorites(&mut c, user.id, [&mut node]).await?;
     let is_root = node.parent_id.is_none();
     let location = match node.blob() {
         Ok((_, loc)) => loc.to_string(),
@@ -112,7 +112,7 @@ pub async fn children(
         order_clause(q.sort.as_deref(), q.order.as_deref())
     );
     let mut nodes: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&folder.id).fetch_all(&mut *c).await?;
-    tree::mark_favorites(&st.db, user.id, &mut nodes).await?;
+    tree::mark_favorites(&mut c, user.id, &mut nodes).await?;
     Ok(Json(nodes))
 }
 
@@ -341,8 +341,8 @@ pub struct Located {
 
 /// Attaches each node's location (space name + path) and marks favorites
 async fn locate(st: &AppState, user: &User, mut nodes: Vec<Node>) -> AppResult<Vec<Located>> {
-    tree::mark_favorites(&st.db, user.id, &mut nodes).await?;
     let mut c = st.db.acquire().await?;
+    tree::mark_favorites(&mut c, user.id, &mut nodes).await?;
     let mut drives: HashMap<String, String> = tree::user_drives(&mut c, user).await?.into_iter().map(|(d, _)| (d.id, d.name)).collect();
     if user.is_admin() && nodes.iter().any(|n| !drives.contains_key(n.drive())) {
         // Spaces an administrator manages without being a member (their trash is listed too)
@@ -658,6 +658,30 @@ mod tests {
 
     fn ids(list: &[&str]) -> Json<BatchReq> {
         Json(BatchReq { ids: list.iter().map(|s| s.to_string()).collect(), dest_id: None })
+    }
+
+    #[tokio::test]
+    async fn many_listings_at_once_share_the_connection_pool() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let folder = env.folder(&amy, &amy.root_id, "docs").await;
+        let doc = env.file(&amy, &folder, "a.txt").await;
+        // Each listing used to hold one connection while waiting for a second one, so more listings than
+        // connections at the same moment waited for each other until the pool timed out
+        let listings = (0..32).map(|i| {
+            let (st, amy, folder, doc) = (env.st.clone(), amy.clone(), folder.clone(), doc.clone());
+            async move {
+                if i % 2 == 0 {
+                    let q = Query(ListQuery { sort: None, order: None, folders_only: None });
+                    children(State(st), amy, Path(folder), q).await.map(|_| ())
+                } else {
+                    get(State(st), amy, Path(doc)).await.map(|_| ())
+                }
+            }
+        });
+        let all = futures_util::future::join_all(listings.map(tokio::spawn));
+        let results = tokio::time::timeout(std::time::Duration::from_secs(10), all).await.expect("listings stalled");
+        assert!(results.into_iter().all(|r| r.unwrap().is_ok()));
     }
 
     #[tokio::test]
