@@ -23,6 +23,7 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdow
 import { cn } from "@/lib/utils";
 import { CONTROL_PANEL_ITEMS } from "@/lib/controlPanel";
 import { FileIcon as TypeIcon } from "@/components/FileIcon";
+import { folderOfPath, useFolderDrop } from "@/lib/dnd";
 import { hasDraft, useDraftsVersion } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 import { currentEntry, useTabActions, useTabsState, viewedFile, type Tab } from "@/tabs";
@@ -60,6 +61,9 @@ function TabItem({ tab, active, onlyOne }: { tab: Tab; active: boolean; onlyOne:
   const file = viewedFile(tab);
   useDraftsVersion();
   const unsaved = !!file && hasDraft(file);
+  // A tab showing a folder takes items dragged onto it, like that folder in the tree
+  const folder = folderOfPath(path);
+  const { dropping: droppingItems, dropProps } = useFolderDrop(folder ? { id: folder, name: title } : null);
   // Asks first when there are unsaved changes
   const requestClose = () => close(tab.id);
 
@@ -78,15 +82,19 @@ function TabItem({ tab, active, onlyOne }: { tab: Tab; active: boolean; onlyOne:
             e.dataTransfer.effectAllowed = "move";
           }}
           onDragOver={(e) => {
-            if (!e.dataTransfer.types.includes(TAB_MIME)) return;
+            if (!e.dataTransfer.types.includes(TAB_MIME)) return dropProps.onDragOver?.(e);
             e.preventDefault();
             setDropping(true);
           }}
-          onDragLeave={() => setDropping(false)}
+          onDragLeave={(e) => {
+            setDropping(false);
+            dropProps.onDragLeave?.(e);
+          }}
           onDrop={(e) => {
             setDropping(false);
             const from = e.dataTransfer.getData(TAB_MIME);
             if (from) move(from, tab.id);
+            else dropProps.onDrop?.(e);
           }}
           onMouseDown={(e) => {
             if (e.button === 0) activate(tab.id);
@@ -104,6 +112,7 @@ function TabItem({ tab, active, onlyOne }: { tab: Tab; active: boolean; onlyOne:
               ? "bg-background text-foreground shadow-[0_-1px_0_var(--border),1px_0_0_var(--border),-1px_0_0_var(--border)]"
               : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
             dropping && "ring-2 ring-brand ring-inset",
+            droppingItems && "bg-brand/15 text-foreground ring-2 ring-brand ring-inset",
           )}
         >
           {file ? (

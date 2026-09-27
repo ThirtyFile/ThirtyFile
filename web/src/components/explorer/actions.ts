@@ -8,6 +8,7 @@ import { t } from "@/lib/i18n";
 import { allItems } from "@/lib/pages";
 import { invalidateFiles } from "@/lib/queries";
 import { moveBack, originsOf, toastWithUndo } from "@/lib/undo";
+import { carriesFiles, dropFiles, dropItems } from "@/lib/dnd";
 import { enqueue, filesFromDrop } from "@/uploads";
 import { type Item, isTyping } from "./types";
 import type { ExplorerProps } from "../Explorer";
@@ -86,19 +87,12 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     }
   };
 
-  const moveInto = async (ids: string[], folder: Node) => {
-    try {
-      const origins = originsOf(p.items, ids, folder.id);
-      await api.move(ids, folder.id);
-      const moved = t("Moved {n} item to \"{name}\"|Moved {n} items to \"{name}\"", { n: ids.length, name: folder.name });
-      if (origins.size) toastWithUndo(moved, { undo: () => moveBack(origins), undoneText: t("Moved back"), after: refresh });
-      else toast.success(moved);
-      setSelected(new Set());
-      refresh();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Couldn't move"));
-    }
+  // Items dragged onto a folder in the list move there (or are copied, with Ctrl); files from the computer are uploaded there
+  const dropInto = async (ids: string[], folder: Node, copy: boolean) => {
+    await dropItems(qc, ids, folder, copy);
+    setSelected(new Set());
   };
+  const uploadInto = (dt: DataTransfer, folder: Node) => void dropFiles(dt, folder);
 
   const cut = () => {
     if (!selectedIds.length || !caps.write) return;
@@ -171,20 +165,23 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  // Upload files dragged in from the desktop; when the storage service is offline, intercept and explain (otherwise the browser would open the dropped file)
+  // Upload files dragged in from the desktop (into the folder shown, or the folder row they're dropped on); when the storage service is offline, intercept and explain (otherwise the browser would open the dropped file)
   const dragProps = canUpload
     ? {
         onDragOver: (e: DragEvent) => {
-          if (!e.dataTransfer.types.includes("Files")) return;
+          if (!carriesFiles(e.dataTransfer)) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = "copy";
-          setDragging(true);
+          // Over a folder row, the files go into that folder: don't say they go into this one
+          setDragging(!(e.target as HTMLElement).closest("[data-drop-folder]"));
         },
         onDragLeave: (e: DragEvent) => {
           if (!e.currentTarget.contains(e.relatedTarget as globalThis.Node | null)) setDragging(false);
         },
+        // A folder row that takes the drop stops it there
+        onDropCapture: () => setDragging(false),
         onDrop: async (e: DragEvent) => {
-          if (!e.dataTransfer.types.includes("Files")) return;
+          if (!carriesFiles(e.dataTransfer)) return;
           e.preventDefault();
           setDragging(false);
           const picked = await filesFromDrop(e.dataTransfer);
@@ -206,7 +203,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         }
       : {};
 
-  return { refresh, open, download, toggleFavorite, moveInto, cut, copy, canPaste, paste, dragProps, createNew };
+  return { refresh, open, download, toggleFavorite, dropInto, uploadInto, cut, copy, canPaste, paste, dragProps, createNew };
 }
 
 export type ExplorerActions = ReturnType<typeof useExplorerActions>;

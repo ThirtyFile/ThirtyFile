@@ -82,7 +82,7 @@ export function Explorer(p: ExplorerProps) {
     dialog,
     setDialog,
   } = s;
-  const { open, moveInto, dragProps, refresh } = a;
+  const { open, dropInto, uploadInto, dragProps, refresh } = a;
   // Hold the left button and drag on empty space to marquee-select (disabled while renaming); the list gives its row geometry
   const measure = useRef<MeasureHits>(null);
   const marquee = useMarquee({ selected, onSelect: setSelected, enabled: !p.loading && dialog?.t !== "rename", measure });
@@ -175,7 +175,8 @@ export function Explorer(p: ExplorerProps) {
                 showCheckboxes={showCheckboxes}
                 dimmed={dimmed}
                 measureRef={measure}
-                onMoveInto={caps.write && p.folderId ? moveInto : undefined}
+                onDropInto={caps.write && p.folderId ? dropInto : undefined}
+                onUploadInto={s.canUpload ? uploadInto : undefined}
                 renamingId={dialog?.t === "rename" ? dialog.node.id : null}
                 onRename={async (n, name) => {
                   await api.rename(n.id, name);

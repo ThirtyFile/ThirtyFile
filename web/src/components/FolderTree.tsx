@@ -3,6 +3,7 @@ import { Link, NavLink } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRightIcon, CloudOffIcon, FolderIcon, FolderOpenIcon, LayersIcon, type LucideIcon } from "lucide-react";
 import { api } from "@/api";
+import { useFolderDrop } from "@/lib/dnd";
 import { NavMenu } from "@/components/NavMenu";
 import { DRIVE_ICON, useDrives } from "@/lib/drives";
 import { t, tServer } from "@/lib/i18n";
@@ -62,6 +63,17 @@ function useTreeItem(key: string, level: number, pos: number, size: number) {
 const row = "flex h-[29px] items-center rounded text-muted-foreground hover:bg-muted has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring";
 const expander = "flex h-full w-5 shrink-0 items-center justify-center";
 
+/** Items dragged over a collapsed folder for a moment open it, so they can be dropped deeper (like File Explorer) */
+function useExpandOnHover(id: string, dropping: boolean, open: boolean) {
+  useEffect(() => {
+    if (!dropping || open) return;
+    const timer = setTimeout(() => setExpanded(id, true), 800);
+    return () => clearTimeout(timer);
+  }, [id, dropping, open]);
+}
+
+const droppingRow = "bg-brand/15 text-foreground ring-1 ring-brand ring-inset";
+
 /** Arrow on the left of a row: mouse only (the keyboard uses ← and →), so it's hidden from screen readers and isn't a Tab stop */
 function Expander({ id, open, hidden }: { id: string; open: boolean; hidden?: boolean }) {
   return (
@@ -80,10 +92,16 @@ function TreeFolder({ id, name, depth, pos, size, activeId }: { id: string; name
   });
   const empty = children.data?.length === 0;
   const item = useTreeItem(id, depth + 1, pos, size);
+  const { dropping, dropProps } = useFolderDrop({ id, name });
+  useExpandOnHover(id, dropping, open);
   return (
     <>
       <NavMenu to={`/files/${id}`} nodeId={id}>
-        <div className={cn("group", row, activeId === id && "bg-selection text-accent-foreground shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection")} style={{ paddingLeft: depth * 12 }}>
+        <div
+          {...dropProps}
+          className={cn("group", row, activeId === id && "bg-selection text-accent-foreground shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection", dropping && droppingRow)}
+          style={{ paddingLeft: depth * 12 }}
+        >
           <Expander id={id} open={open} hidden={empty} />
           <Link
             to={`/files/${id}`}
@@ -137,10 +155,16 @@ function SpaceRoot({
   });
   const empty = folders.data?.length === 0;
   const item = useTreeItem(rootId, depth + 1, pos, size);
+  const { dropping, dropProps } = useFolderDrop({ id: rootId, name: label });
+  useExpandOnHover(rootId, dropping, open);
   return (
     <>
       <NavMenu to={to} nodeId={rootId} isSpaceRoot>
-        <div className={cn(row, activeId === rootId && "bg-selection text-accent-foreground shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection")} style={{ paddingLeft: depth * 12 }}>
+        <div
+          {...dropProps}
+          className={cn(row, activeId === rootId && "bg-selection text-accent-foreground shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection", dropping && droppingRow)}
+          style={{ paddingLeft: depth * 12 }}
+        >
           <Expander id={rootId} open={open} hidden={empty} />
           <Link
             to={to}

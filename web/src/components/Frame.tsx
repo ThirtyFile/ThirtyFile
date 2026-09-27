@@ -55,6 +55,7 @@ import { TwoFactorDialog } from "@/components/TwoFactor";
 import { NavMenu } from "@/components/NavMenu";
 import { Resizer } from "@/components/Resizer";
 import { FolderTree } from "@/components/FolderTree";
+import { folderOfPath, useFolderDrop } from "@/lib/dnd";
 import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
 import { usePersisted, useMe } from "@/lib/session";
 import { useTheme, type ThemeMode } from "@/lib/theme";
@@ -338,6 +339,29 @@ export function crumbPath(crumbs: Crumb[]) {
   return "/" + crumbs.filter((c) => !c.virtual).map((c) => c.label).join("/");
 }
 
+/** A part of the address bar path: a link to that folder, which also takes dropped items and files */
+function CrumbItem({ crumb: c, last, path }: { crumb: Crumb; last: boolean; path: string }) {
+  const folder = folderOfPath(c.to);
+  const { dropping, dropProps } = useFolderDrop(folder ? { id: folder, name: c.label } : null);
+  const drop = cn(dropping && "bg-brand/15 ring-1 ring-brand ring-inset");
+  return (
+    <span className="flex items-center">
+      <ChevronRightIcon className="mx-0.5 size-3.5 shrink-0 text-muted-foreground" />
+      {c.to && !last ? (
+        <NavMenu to={c.to} path={path}>
+          <Link to={c.to} {...dropProps} className={cn("rounded px-1.5 py-1 hover:bg-accent", drop)}>
+            {c.label}
+          </Link>
+        </NavMenu>
+      ) : (
+        <span {...dropProps} className={cn("rounded px-1.5 py-1", drop)}>
+          {c.label}
+        </span>
+      )}
+    </span>
+  );
+}
+
 /** Windows 11 style address bar: click empty space to show the full path, which can be copied directly */
 function AddressBar({
   crumbs,
@@ -427,21 +451,7 @@ function AddressBar({
             <Icon className="size-4 shrink-0 text-muted-foreground" />
             <nav aria-label={t("File path")} className="flex min-w-0 flex-1 items-center overflow-x-auto text-[13px] whitespace-nowrap">
               {crumbs.map((c, i) => (
-                <span key={i} className="flex items-center">
-                  <ChevronRightIcon className="mx-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                  {c.to && i < crumbs.length - 1 ? (
-                    <NavMenu
-                      to={c.to}
-                      path={crumbPath(crumbs.slice(0, i + 1))}
-                    >
-                      <Link to={c.to} className="rounded px-1.5 py-1 hover:bg-accent">
-                        {c.label}
-                      </Link>
-                    </NavMenu>
-                  ) : (
-                    <span className="px-1.5 py-1">{c.label}</span>
-                  )}
-                </span>
+                <CrumbItem key={i} crumb={c} last={i === crumbs.length - 1} path={crumbPath(crumbs.slice(0, i + 1))} />
               ))}
             </nav>
           </>

@@ -21,10 +21,11 @@ import { FileIcon, canThumbnail, typeLabel, typeTitle } from "@/components/FileI
 import type { Box, MeasureHits } from "@/components/useMarquee";
 import { cn, formatWinDate, formatWinSize } from "@/lib/utils";
 import { InlineRename } from "@/components/InlineRename";
+import { carriesFiles, carriesItems, dropEffect, droppedIds, startDrag } from "@/lib/dnd";
 import { t, tc } from "@/lib/i18n";
+import { wantsCopy } from "@/lib/keys";
 
 export type ViewMode = "list" | "grid";
-export const DRAG_MIME = "application/x-thirtyfile-nodes";
 
 type Item = Node & { location?: string };
 
@@ -49,8 +50,10 @@ export interface FileListProps {
   dimmed?: Set<string>;
   dateLabel?: string;
   dateOf?(n: Item): number;
-  /** Allow dragging items into folders to move them */
-  onMoveInto?(ids: string[], folder: Node): void;
+  /** Allow dragging items into folders to move them (or copy them, with Ctrl) */
+  onDropInto?(ids: string[], folder: Node, copy: boolean): void;
+  /** Allow dropping files from the computer on folders to upload them there */
+  onUploadInto?(dt: DataTransfer, folder: Node): void;
   empty?: ReactNode;
   /** Item being renamed inline */
   renamingId?: string | null;
@@ -162,9 +165,9 @@ interface RowProps {
   dimmed: boolean;
   dropping: boolean;
   renaming: boolean;
-  /** Drag to move (turned off while renaming) */
+  /** Drag to move or copy (turned off while renaming) */
   movable: boolean;
-  /** Folders take dropped items */
+  /** Folders take dropped items and files */
   dropTarget: boolean;
 }
 
@@ -189,6 +192,7 @@ function rowProps({ item, index, h, selected, tabStop, dropTarget }: RowProps) {
     onContextMenu: () => h.current.contextMenu(index),
     ...(dropTarget
       ? {
+          "data-drop-folder": true,
           onDragOver: (e: DragEvent) => h.current.dragOver(e, item.id),
           onDragLeave: () => h.current.dragLeave(item.id),
           onDrop: (e: DragEvent) => h.current.drop(e, item),
@@ -197,7 +201,7 @@ function rowProps({ item, index, h, selected, tabStop, dropTarget }: RowProps) {
   };
 }
 
-// Drag to move: icon view drags the whole item; list view drags only the name, dragging from other columns marquee-selects (like Windows)
+// Drag to move or copy: icon view drags the whole item; list view drags only the name, dragging from other columns marquee-selects (like Windows)
 const dragHandle = ({ h, index, movable }: RowProps) => ({
   draggable: movable,
   onDragStart: (e: DragEvent) => h.current.dragStart(e, index),
@@ -488,33 +492,32 @@ export function FileList(p: FileListProps) {
       const id = p.items[index].id;
       const ids = p.selected.has(id) ? [...p.selected] : [id];
       if (!p.selected.has(id)) p.onSelect(new Set([id]), id);
-      e.dataTransfer.setData(DRAG_MIME, JSON.stringify(ids));
-      e.dataTransfer.effectAllowed = "move";
+      startDrag(e, ids, p.items);
     },
     dragOver: (e, id) => {
-      if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
+      const items = carriesItems(e.dataTransfer) && !!p.onDropInto;
+      if (!items && !(carriesFiles(e.dataTransfer) && p.onUploadInto)) return;
       e.preventDefault();
-      e.stopPropagation();
-      e.dataTransfer.dropEffect = "move";
+      // Files from the computer bubble on, so the list can tell they're held over a folder rather than the list itself
+      if (items) e.stopPropagation();
+      e.dataTransfer.dropEffect = dropEffect(e);
       setDropTarget(id);
     },
     dragLeave: (id) => setDropTarget((t) => (t === id ? null : t)),
     drop: (e, folder) => {
       setDropTarget(null);
-      const raw = e.dataTransfer.getData(DRAG_MIME);
-      if (!raw || !p.onMoveInto) return;
-      e.preventDefault();
-      e.stopPropagation();
-      // Any page can set this type when dragging, so check what arrived
-      let dropped: unknown;
-      try {
-        dropped = JSON.parse(raw);
-      } catch {
-        return;
+      const ids = p.onDropInto && droppedIds(e.dataTransfer);
+      if (ids) {
+        e.preventDefault();
+        e.stopPropagation();
+        const rest = ids.filter((id) => id !== folder.id);
+        if (rest.length) p.onDropInto!(rest, folder, wantsCopy(e));
+      } else if (!carriesItems(e.dataTransfer) && carriesFiles(e.dataTransfer) && p.onUploadInto) {
+        // Uploaded into this folder, not the one the list shows
+        e.preventDefault();
+        e.stopPropagation();
+        p.onUploadInto(e.dataTransfer, folder);
       }
-      if (!Array.isArray(dropped) || !dropped.every((id) => typeof id === "string")) return;
-      const ids = (dropped as string[]).filter((id) => id !== folder.id);
-      if (ids.length) p.onMoveInto(ids, folder);
     },
     open: p.onOpen,
     openInNewTab: p.onOpenInNewTab,
@@ -578,8 +581,8 @@ export function FileList(p: FileListProps) {
       dimmed: !!p.dimmed?.has(item.id),
       dropping: dropTarget === item.id,
       renaming: item.id === p.renamingId && !!p.onRename,
-      movable: !!p.onMoveInto && item.id !== p.renamingId,
-      dropTarget: !!p.onMoveInto && item.kind === "folder",
+      movable: !!p.onDropInto && item.id !== p.renamingId,
+      dropTarget: !!(p.onDropInto || p.onUploadInto) && item.kind === "folder",
     };
   };
 
