@@ -39,7 +39,10 @@ start new "$IMAGE" smoke-data smoke-storage
 wait_healthy "The new image"
 curl -fsS "$BASE/" | grep -q '<div id="root"' || fail "the web pages aren't served"
 sign_in /tmp/new.cookies
-docker exec new sh -c 'grep "^Uid:" /proc/1/status' | grep -qE '^Uid:\s+1000\s' || fail "the server doesn't run as user 1000"
+# The image has no shell or ps: the host lists the container's processes
+uids=$(docker top new -o pid,uid | awk 'NR > 1 { print $2 }' | sort -u)
+[ "$uids" = "1000" ] || fail "the server doesn't run as user 1000 (but as: $uids)"
+docker exec new thirtyfile health >/dev/null || fail "the health check command fails"
 docker rm -f new >/dev/null
 
 echo "== Upgrading the latest release"

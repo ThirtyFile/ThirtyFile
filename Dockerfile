@@ -53,22 +53,25 @@ RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry,sharin
  && xx-verify --static /thirtyfile
 
 # ───────────── 3) Runtime files ─────────────
-# Architecture-independent files, prepared on the build machine's platform so that the runtime stage
-# needs no RUN step (and therefore no emulation when building for another architecture)
+# Everything the runtime image contains besides the server, prepared on the build machine's platform: the runtime
+# stage is empty (scratch) and runs no commands, so building it for another architecture needs no emulation
 FROM --platform=$BUILDPLATFORM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS rootfs
 # ca-certificates: certificate validation for S3, single sign-on and FTPS (without it every https connection fails)
 # tzdata: allows setting the time zone with TZ (log exports, archive file names)
+# passwd/group: names for user 1000 and root (the server switches user by number and doesn't read them itself)
+# tmp: the usual temporary folder, for anything that expects one (ThirtyFile's own temporary files are in /data/tmp)
 RUN apk add --no-cache ca-certificates tzdata \
- && mkdir -p /rootfs/etc/ssl/certs /rootfs/usr/share /data /storage \
+ && mkdir -p /rootfs/etc/ssl/certs /rootfs/usr/share /rootfs/tmp /data /storage \
+ && chmod 1777 /rootfs/tmp \
  && cp /etc/ssl/certs/ca-certificates.crt /rootfs/etc/ssl/certs/ \
  && cp -r /usr/share/zoneinfo /rootfs/usr/share/ \
- && cp /etc/passwd /etc/group /rootfs/etc/ \
- && echo "drive:x:1000:1000::/data:/sbin/nologin" >> /rootfs/etc/passwd \
- && echo "drive:x:1000:" >> /rootfs/etc/group
+ && printf '%s\n' "root:x:0:0:root:/root:/sbin/nologin" "drive:x:1000:1000::/data:/sbin/nologin" > /rootfs/etc/passwd \
+ && printf '%s\n' "root:x:0:" "drive:x:1000:" > /rootfs/etc/group
 
 # ───────────── 4) Runtime ─────────────
-# The runtime image: the backend is a statically linked musl binary, independent of the build image
-FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+# The runtime image starts empty: the backend is a statically linked musl binary and needs nothing else (no shell, no
+# package manager), which leaves less to scan and to update
+FROM scratch
 ARG VERSION=dev
 LABEL org.opencontainers.image.title="ThirtyFile" \
       org.opencontainers.image.description="A lightweight self-hosted file manager" \
@@ -88,7 +91,8 @@ COPY LICENSE /usr/share/licenses/thirtyfile/LICENSE
 # /storage: file contents of the built-in storage location
 # The container starts as root, gives both folders to user 1000 when needed (Docker creates missing
 # host folders as root), then runs as user 1000. With `--user`, it runs as that user and skips this.
-ENV THIRTYFILE_DATA=/data \
+ENV PATH=/usr/local/bin \
+    THIRTYFILE_DATA=/data \
     THIRTYFILE_STORAGE=/storage \
     THIRTYFILE_RUN_AS=1000:1000 \
     THIRTYFILE_ADDR=0.0.0.0:8080
