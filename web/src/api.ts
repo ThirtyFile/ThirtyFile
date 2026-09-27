@@ -19,7 +19,12 @@ export interface Node {
 }
 
 export interface Located extends Node {
+  /** Where the item is, e.g. "All files/Projects/2026", in the interface's language (built by `localizeLocated`) */
   location: string;
+  /** The space the item is in; null when it is only reached through something shared with the person */
+  location_space: { kind: string; name: string } | null;
+  /** Folders from the space root (or the shared folder) down to the item's parent */
+  location_path: string[];
 }
 
 export interface Crumb {
@@ -496,6 +501,12 @@ export function locationName(id: string, name: string) {
   return id === "local" && name === "Local disk" ? t("Local disk") : name;
 }
 
+/** The server sends the location in English; it is rebuilt from its parts with translated space names */
+const localizeLocated = <T extends Located>(n: T): T => ({
+  ...n,
+  location: [n.location_space ? driveName(n.location_space) : t("Shared with me"), ...(n.location_path ?? [])].join("/"),
+});
+
 const localizeDrive = (d: Drive): Drive => ({ ...d, name: driveName(d), location_name: locationName(d.location_id, d.location_name) });
 
 export class ApiError extends Error {
@@ -565,15 +576,15 @@ export const api = {
   move: (ids: string[], dest_id: string) => post("/nodes/move", { ids, dest_id }),
   copy: (ids: string[], dest_id: string) => post("/nodes/copy", { ids, dest_id }),
   trash: (ids: string[]) => post("/nodes/trash", { ids }),
-  listTrash: () => get<Located[]>("/trash"),
+  listTrash: () => get<Located[]>("/trash").then((l) => l.map(localizeLocated)),
   restore: (ids: string[]) => post("/trash/restore", { ids }),
   deleteForever: (ids: string[]) => post("/trash/delete", { ids }),
   emptyTrash: () => post("/trash/empty"),
   /** What Empty trash would delete: items per space */
   emptyTrashPreview: () => get<{ kind: string; name: string; items: number }[]>("/trash/empty"),
-  search: (q: string) => get<Located[]>(`/search${qs({ q })}`),
-  recent: () => get<Located[]>("/recent"),
-  favorites: (sort?: SortKey, order?: SortOrder) => get<Located[]>(`/favorites${qs({ sort, order })}`),
+  search: (q: string) => get<Located[]>(`/search${qs({ q })}`).then((l) => l.map(localizeLocated)),
+  recent: () => get<Located[]>("/recent").then((l) => l.map(localizeLocated)),
+  favorites: (sort?: SortKey, order?: SortOrder) => get<Located[]>(`/favorites${qs({ sort, order })}`).then((l) => l.map(localizeLocated)),
   setFavorite: (ids: string[], favorite: boolean) => post("/nodes/favorite", { ids, favorite }),
   /** Save from the online editor; with baseVersion (updated_at when the file was opened), returns 409 if someone else changed the file */
   saveContent: (id: string, content: BodyInit, baseVersion?: number) =>
@@ -633,7 +644,7 @@ export const api = {
   ) => post(`/nodes/${nodeId}/access`, req),
   revoke: (grantId: number) => request("DELETE", `/grants/${grantId}`),
   directory: (q: string) => get<Principal[]>(`/directory${qs({ q })}`),
-  sharedWithMe: () => get<SharedItem[]>("/shared-with-me"),
+  sharedWithMe: () => get<SharedItem[]>("/shared-with-me").then((l) => l.map(localizeLocated)),
   activity: (f: ActivityFilter & { before?: number; limit?: number }) => get<Page<Activity>>(`/activity${qs(toParams(f))}`),
   /** CSV export URL (tz: browser time zone; exported times are shown in local time) */
   activityExportUrl: (f: ActivityFilter) => `/api/activity/export${qs(toParams({ ...f, tz: new Date().getTimezoneOffset() }))}`,

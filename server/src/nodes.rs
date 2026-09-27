@@ -23,7 +23,7 @@ use crate::{
 const MAX_BATCH: usize = 1000;
 /// Files and folders one copy may create (counted after expanding folders)
 const MAX_COPY_ITEMS: usize = 20_000;
-/// First segment of the location shown for items accessed through a folder share (translated by the frontend)
+/// First segment of the location text for items accessed through a folder share (the browser uses its own text)
 const SHARED_WITH_ME: &str = "Shared with me";
 
 #[derive(Serialize)]
@@ -436,20 +436,32 @@ pub async fn trash(State(st): State<AppState>, user: User, Json(req): Json<Batch
 pub struct Located {
     #[serde(flatten)]
     node: Node,
-    /// Location, e.g. "All files/Projects/2026"
+    /// Location, e.g. "All files/Projects/2026" (English; the browser builds its own text from the parts below)
     location: String,
+    /// The space the item is in, or None when it is only reached through something shared with the user
+    location_space: Option<SpaceRef>,
+    /// Folders from the space root (or the shared folder) down to the item's parent
+    location_path: Vec<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct SpaceRef {
+    kind: String,
+    name: String,
 }
 
 /// Attaches each node's location (space name + path) and marks favorites
 async fn locate(st: &AppState, user: &User, mut nodes: Vec<Node>) -> AppResult<Vec<Located>> {
     let mut c = st.db.acquire().await?;
     tree::mark_favorites(&mut c, user.id, &mut nodes).await?;
-    let mut drives: HashMap<String, String> = tree::user_drives(&mut c, user).await?.into_iter().map(|(d, _)| (d.id, d.name)).collect();
+    let mut drives: HashMap<String, SpaceRef> =
+        tree::user_drives(&mut c, user).await?.into_iter().map(|(d, _)| (d.id, SpaceRef { kind: d.kind, name: d.name })).collect();
     if user.is_admin() && nodes.iter().any(|n| !drives.contains_key(n.drive())) {
         // Spaces an administrator manages without being a member (their trash is listed too)
-        let all: Vec<(String, String)> = sqlx::query_as("SELECT id, name FROM drives WHERE kind != 'personal' AND disabled = 0").fetch_all(&mut *c).await?;
-        for (id, name) in all {
-            drives.entry(id).or_insert(name);
+        let all: Vec<(String, String, String)> =
+            sqlx::query_as("SELECT id, kind, name FROM drives WHERE kind != 'personal' AND disabled = 0").fetch_all(&mut *c).await?;
+        for (id, kind, name) in all {
+            drives.entry(id).or_insert(SpaceRef { kind, name });
         }
     }
     let shared: HashSet<String> = if nodes.iter().any(|n| !drives.contains_key(n.drive())) {
@@ -467,15 +479,13 @@ async fn locate(st: &AppState, user: &User, mut nodes: Vec<Node>) -> AppResult<V
             Some(p) => paths.get(p).cloned().unwrap_or_default(),
             None => Vec::new(),
         };
-        let location = match drives.get(node.drive()) {
-            Some(name) => std::iter::once(name.as_str()).chain(path.iter().map(|p| p.name.as_str())).collect::<Vec<_>>().join("/"),
-            None => {
-                // Accessed through a folder share: only show from the shared folder down
-                let start = path.iter().position(|c| shared.contains(&c.id)).unwrap_or(path.len());
-                std::iter::once(SHARED_WITH_ME).chain(path[start..].iter().map(|p| p.name.as_str())).collect::<Vec<_>>().join("/")
-            }
-        };
-        out.push(Located { node, location });
+        let space = drives.get(node.drive()).cloned();
+        // Accessed through a folder share: only shown from the shared folder down
+        let start = if space.is_some() { 0 } else { path.iter().position(|c| shared.contains(&c.id)).unwrap_or(path.len()) };
+        let location_path: Vec<String> = path[start..].iter().map(|p| p.name.clone()).collect();
+        let first = space.as_ref().map_or(SHARED_WITH_ME, |s| s.name.as_str());
+        let location = std::iter::once(first).chain(location_path.iter().map(String::as_str)).collect::<Vec<_>>().join("/");
+        out.push(Located { node, location, location_space: space, location_path });
     }
     Ok(out)
 }
@@ -778,8 +788,7 @@ pub async fn recent(State(st): State<AppState>, user: User) -> AppResult<Json<Ve
 #[derive(Serialize)]
 pub struct SharedItem {
     #[serde(flatten)]
-    node: Node,
-    location: String,
+    located: Located,
     role: Role,
     sharer: String,
 }
@@ -799,7 +808,7 @@ pub async fn shared_with_me(State(st): State<AppState>, user: User) -> AppResult
             .into_iter()
             .map(|l| {
                 let (role, sharer) = roles.remove(&l.node.id).unwrap_or((Role::Viewer, String::new()));
-                SharedItem { location: l.location, node: l.node, role, sharer }
+                SharedItem { located: l, role, sharer }
             })
             .collect(),
     ))
@@ -1012,6 +1021,9 @@ mod tests {
 
         // Listed with the space's name, and each item can be restored or deleted, not only emptied as a whole
         let Json(listed) = list_trash(State(env.st.clone()), admin.clone()).await.unwrap();
+        let plan = listed.iter().find(|l| l.node.name == "plan.txt").unwrap();
+        let space = plan.location_space.as_ref().unwrap();
+        assert_eq!((space.kind.as_str(), space.name.as_str(), plan.location_path.len()), ("team", "Team", 0));
         let listed: Vec<(String, String)> = listed.into_iter().map(|l| (l.node.name.clone(), l.location.clone())).collect();
         assert!(listed.contains(&("plan.txt".to_string(), "Team".to_string())), "{listed:?}");
         assert!(!listed.iter().any(|(n, _)| n == "diary.txt"), "personal spaces stay private: {listed:?}");
