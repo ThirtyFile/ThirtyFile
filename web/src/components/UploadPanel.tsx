@@ -16,25 +16,40 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdow
 import { Button } from "@/components/ui/button";
 import { FileIcon } from "@/components/FileIcon";
 import { cn, formatBytes } from "@/lib/utils";
-import { cancel, cancelAll, clearFinished, pause, resume, useUploads } from "@/uploads";
+import { cancel, cancelAll, clearFinished, pause, resume, retryFailed, useUploads } from "@/uploads";
 import { t } from "@/lib/i18n";
 
+/** Above this many uploads, only those in progress, paused or failed get a row; the rest are counted in a summary */
+const ROW_LIMIT = 100;
+
 export function UploadPanel() {
-  const tasks = useUploads();
+  const { tasks, totals } = useUploads();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
+  // One context menu for every row: remembers which row it was opened on
+  const [menuId, setMenuId] = useState<string | null>(null);
   if (tasks.length === 0) return null;
 
-  const active = tasks.filter((x) => x.status === "uploading" || x.status === "queued");
-  const failed = tasks.filter((x) => x.status === "error").length;
-  const total = tasks.reduce((s, x) => s + x.size, 0);
-  const sent = tasks.reduce((s, x) => s + x.sent, 0);
-  const pct = total ? Math.round((sent / total) * 100) : 100;
-  const title = active.length
-    ? t("Uploading {n} file · {pct}%|Uploading {n} files · {pct}%", { n: active.length, pct })
+  const active = totals.uploading + totals.queued;
+  const failed = totals.error;
+  const pct = totals.size ? Math.round((totals.sent / totals.size) * 100) : 100;
+  const title = active
+    ? t("Uploading {n} file · {pct}%|Uploading {n} files · {pct}%", { n: active, pct })
     : failed
       ? t("{n} file failed to upload|{n} files failed to upload", { n: failed })
       : t("{n} upload complete|{n} uploads complete", { n: tasks.length });
+
+  const condensed = tasks.length > ROW_LIMIT;
+  const shown = condensed ? tasks.filter((x) => x.status === "uploading" || x.status === "paused" || x.status === "error") : tasks;
+  const rows = shown.slice(0, ROW_LIMIT);
+  const summary = condensed
+    ? [
+        totals.queued > 0 && t("{n} waiting", { n: totals.queued }),
+        totals.done > 0 && t("{n} complete", { n: totals.done }),
+        shown.length > rows.length && t("{n} more not shown", { n: shown.length - rows.length }),
+      ].filter(Boolean)
+    : [];
+  const menuTask = menuId ? tasks.find((x) => x.id === menuId) : undefined;
 
   return (
     <div className="overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-xl">
@@ -54,27 +69,31 @@ export function UploadPanel() {
           variant="ghost"
           aria-label={t("Close")}
           title={t("Close")}
-          onClick={() => (active.length ? window.confirm(t("Cancel all uploads in progress?")) && cancelAll() : clearFinished())}
+          onClick={() => (active ? window.confirm(t("Cancel all uploads in progress?")) && cancelAll() : clearFinished())}
         >
           <XIcon />
         </Button>
       </div>
       {/* Read out by screen readers once everything has finished (not on every percent) */}
       <div role="status" className="sr-only">
-        {active.length ? "" : title}
+        {active ? "" : title}
       </div>
-      {active.length > 0 && (
+      {active > 0 && (
         <div role="progressbar" aria-label={t("Upload progress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} className="h-0.5 bg-muted">
           <div className="h-full bg-brand transition-[width]" style={{ width: `${pct}%` }} />
         </div>
       )}
       {!collapsed && (
-        <div className="max-h-72 overflow-y-auto">
-          {tasks.map((task) => {
-            const p = task.size ? Math.round((task.sent / task.size) * 100) : 100;
-            return (
-              <ContextMenu key={task.id}>
-                <ContextMenuTrigger className="flex items-center gap-2.5 border-b border-border/50 px-3 py-2 last:border-0">
+        <ContextMenu>
+          <ContextMenuTrigger className="block max-h-72 overflow-y-auto" onContextMenuCapture={() => setMenuId(null)}>
+            {rows.map((task) => {
+              const p = task.size ? Math.round((task.sent / task.size) * 100) : 100;
+              return (
+                <div
+                  key={task.id}
+                  className="flex items-center gap-2.5 border-b border-border/50 px-3 py-2 last:border-0"
+                  onContextMenu={() => setMenuId(task.id)}
+                >
                   <FileIcon node={{ kind: "file", name: task.name, mime: task.file.type }} className="size-5" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm" title={task.relativePath ? `${task.relativePath}/${task.name}` : task.name}>
@@ -119,40 +138,48 @@ export function UploadPanel() {
                       <XIcon />
                     </Button>
                   )}
-                </ContextMenuTrigger>
-                <ContextMenuContent>
-                  {task.status === "uploading" && (
-                    <DropdownMenuItem onClick={() => pause(task.id)}>
-                      <PauseIcon /> {t("Pause")}
-                    </DropdownMenuItem>
-                  )}
-                  {task.status === "paused" && (
-                    <DropdownMenuItem onClick={() => resume(task.id)}>
-                      <PlayIcon /> {t("Resume")}
-                    </DropdownMenuItem>
-                  )}
-                  {task.status === "error" && (
-                    <DropdownMenuItem onClick={() => resume(task.id)}>
-                      <RotateCwIcon /> {t("Retry")}
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem onClick={() => navigate(`/files/${task.parentId}`)}>
-                    <FolderOpenIcon /> {t("Open destination folder")}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  {task.status !== "done" && (
-                    <DropdownMenuItem variant="destructive" onClick={() => cancel(task.id)}>
-                      <XIcon /> {t("Cancel upload")}
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem onClick={clearFinished}>
-                    <CheckCircle2Icon /> {t("Clear completed")}
-                  </DropdownMenuItem>
-                </ContextMenuContent>
-              </ContextMenu>
-            );
-          })}
-        </div>
+                </div>
+              );
+            })}
+            {summary.length > 0 && <div className="px-3 py-2 text-xs text-muted-foreground">{summary.join(" · ")}</div>}
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            {menuTask?.status === "uploading" && (
+              <DropdownMenuItem onClick={() => pause(menuTask.id)}>
+                <PauseIcon /> {t("Pause")}
+              </DropdownMenuItem>
+            )}
+            {menuTask?.status === "paused" && (
+              <DropdownMenuItem onClick={() => resume(menuTask.id)}>
+                <PlayIcon /> {t("Resume")}
+              </DropdownMenuItem>
+            )}
+            {menuTask?.status === "error" && (
+              <DropdownMenuItem onClick={() => resume(menuTask.id)}>
+                <RotateCwIcon /> {t("Retry")}
+              </DropdownMenuItem>
+            )}
+            {failed > 1 && (
+              <DropdownMenuItem onClick={retryFailed}>
+                <RotateCwIcon /> {t("Retry all failed")}
+              </DropdownMenuItem>
+            )}
+            {menuTask && (
+              <DropdownMenuItem onClick={() => navigate(`/files/${menuTask.parentId}`)}>
+                <FolderOpenIcon /> {t("Open destination folder")}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+            {menuTask && menuTask.status !== "done" && (
+              <DropdownMenuItem variant="destructive" onClick={() => cancel(menuTask.id)}>
+                <XIcon /> {t("Cancel upload")}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onClick={clearFinished}>
+              <CheckCircle2Icon /> {t("Clear completed")}
+            </DropdownMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
       )}
     </div>
   );

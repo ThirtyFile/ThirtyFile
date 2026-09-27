@@ -26,20 +26,75 @@ export interface PickedFile {
   relativePath: string;
 }
 
+/** Running totals, kept up to date as tasks change, so nothing has to add up every task */
+export interface UploadTotals {
+  size: number;
+  sent: number;
+  queued: number;
+  uploading: number;
+  paused: number;
+  done: number;
+  error: number;
+}
+
+export interface UploadsSnapshot {
+  tasks: readonly UploadTask[];
+  totals: UploadTotals;
+}
+
 const CONCURRENCY = 3;
+/** Progress is shown at most this often, so thousands of small files don't re-render the page on every event */
+const EMIT_MS = 250;
+/** While files keep landing, lists are refreshed at most this often, and once more when the uploads end */
+const LANDED_MS = 1500;
+
+// Tasks are changed in place; the snapshot handed to React is rebuilt at most every EMIT_MS
 let tasks: UploadTask[] = [];
+const byId = new Map<string, UploadTask>();
+const emptyTotals = (): UploadTotals => ({ size: 0, sent: 0, queued: 0, uploading: 0, paused: 0, done: 0, error: 0 });
+let totals = emptyTotals();
+let snapshot: UploadsSnapshot = { tasks, totals: { ...totals } };
+/** Tasks waiting to start, in order; entries no longer queued (cancelled, already started) are skipped */
+let queue: UploadTask[] = [];
+let queueHead = 0;
 const listeners = new Set<() => void>();
-const doneListeners = new Set<(parentId: string) => void>();
+const landedListeners = new Set<(parentIds: string[], final: boolean) => void>();
+const landedParents = new Set<string>();
+/** Files landed since the last final refresh */
+let landedAny = false;
+let landedTimer: ReturnType<typeof setTimeout> | undefined;
+let emitTimer: ReturnType<typeof setTimeout> | undefined;
 let seq = 0;
 
-function emit() {
-  tasks = [...tasks];
+function flush() {
+  clearTimeout(emitTimer);
+  emitTimer = undefined;
+  snapshot = { tasks: [...tasks], totals: { ...totals } };
   listeners.forEach((l) => l());
 }
 
-function update(id: string, patch: Partial<UploadTask>) {
-  tasks = tasks.map((t) => (t.id === id ? { ...t, ...patch } : t));
-  listeners.forEach((l) => l());
+/** Show changes: right away after something the user did, otherwise at most every EMIT_MS */
+function emit(now = false) {
+  if (now) flush();
+  else emitTimer ??= setTimeout(flush, EMIT_MS);
+}
+
+function setStatus(task: UploadTask, status: UploadStatus) {
+  totals[task.status]--;
+  totals[status]++;
+  task.status = status;
+}
+
+function setSent(task: UploadTask, sent: number) {
+  totals.sent += sent - task.sent;
+  task.sent = sent;
+}
+
+function forget(task: UploadTask) {
+  totals[task.status]--;
+  totals.size -= task.size;
+  totals.sent -= task.sent;
+  byId.delete(task.id);
 }
 
 export function useUploads() {
@@ -48,16 +103,42 @@ export function useUploads() {
       listeners.add(l);
       return () => listeners.delete(l);
     },
-    () => tasks,
+    () => snapshot,
   );
 }
 
-/** Notify when a file finishes uploading (used to refresh the list) */
-export function onUploadDone(fn: (parentId: string) => void) {
-  doneListeners.add(fn);
+/** True while files are waiting or being sent (leaving the page would stop them) */
+export function hasActiveUploads() {
+  return totals.queued + totals.uploading > 0;
+}
+
+/**
+ * Notify when uploaded files have landed, to refresh the lists: with the folders they were uploaded to, at most every
+ * LANDED_MS while uploads run, and once with final = true when nothing is left to send
+ */
+export function onUploadsLanded(fn: (parentIds: string[], final: boolean) => void) {
+  landedListeners.add(fn);
   return () => {
-    doneListeners.delete(fn);
+    landedListeners.delete(fn);
   };
+}
+
+function flushLanded() {
+  clearTimeout(landedTimer);
+  landedTimer = undefined;
+  const final = !hasActiveUploads();
+  if (landedParents.size === 0 && !(final && landedAny)) return;
+  const ids = [...landedParents];
+  landedParents.clear();
+  if (final) landedAny = false;
+  landedListeners.forEach((l) => l(ids, final));
+}
+
+function landed(parentId: string) {
+  landedParents.add(parentId);
+  landedAny = true;
+  if (!hasActiveUploads()) flushLanded();
+  else landedTimer ??= setTimeout(flushLanded, LANDED_MS);
 }
 
 function errorMessage(err: Error): string {
@@ -83,15 +164,27 @@ function start(task: UploadTask) {
     // Uploads of the same file to different locations must not resume each other
     fingerprint: async (file) =>
       ["sd", task.parentId, task.relativePath, (file as File).name, (file as File).size, (file as File).lastModified].join("|"),
-    onProgress: (sent) => update(task.id, { sent }),
+    onProgress: (sent) => {
+      if (task.upload !== upload || task.status !== "uploading") return;
+      setSent(task, sent);
+      emit();
+    },
     onSuccess: () => {
-      update(task.id, { status: "done", sent: task.size, upload: undefined });
-      doneListeners.forEach((l) => l(task.parentId));
+      if (task.upload !== upload || task.status !== "uploading") return;
+      setSent(task, task.size);
+      setStatus(task, "done");
+      task.upload = undefined;
       pump();
+      emit();
+      landed(task.parentId);
     },
     onError: (err) => {
-      update(task.id, { status: "error", error: errorMessage(err) });
+      if (task.upload !== upload || task.status !== "uploading") return;
+      setStatus(task, "error");
+      task.error = errorMessage(err);
       pump();
+      emit();
+      if (!hasActiveUploads()) flushLanded();
     },
     onShouldRetry: (err) => {
       const status = (err as tus.DetailedError).originalResponse?.getStatus() ?? 0;
@@ -99,27 +192,40 @@ function start(task: UploadTask) {
       return status === 0 || status === 409 || status === 423 || status >= 500;
     },
   });
-  update(task.id, { status: "uploading", upload, error: undefined });
+  setStatus(task, "uploading");
+  task.upload = upload;
+  task.error = undefined;
   upload.findPreviousUploads().then((previous) => {
     // The user may have paused or cancelled during the lookup: abort() has no effect yet, so check here before starting
-    const current = tasks.find((x) => x.id === task.id);
-    if (!current || current.status !== "uploading" || current.upload !== upload) return;
+    if (byId.get(task.id) !== task || task.status !== "uploading" || task.upload !== upload) return;
     if (previous.length > 0) upload.resumeFromPreviousUpload(previous[0]);
     upload.start();
   });
 }
 
 function pump() {
-  const running = tasks.filter((t) => t.status === "uploading").length;
-  const queued = tasks.filter((t) => t.status === "queued");
-  for (const t of queued.slice(0, Math.max(0, CONCURRENCY - running))) start(t);
+  while (totals.uploading < CONCURRENCY && queueHead < queue.length) {
+    const next = queue[queueHead++];
+    if (next.status === "queued" && byId.get(next.id) === next) start(next);
+  }
+  // Now and then drop the part of the queue already taken
+  if (queueHead > 1024 && queueHead * 2 > queue.length) {
+    queue = queue.slice(queueHead);
+    queueHead = 0;
+  }
+}
+
+function requeue(task: UploadTask) {
+  setStatus(task, "queued");
+  task.error = undefined;
+  queue.push(task);
 }
 
 export function enqueue(files: PickedFile[], parentId: string) {
   // getRandomValues works on plain http too (randomUUID needs HTTPS)
   const batch = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join("");
   for (const { file, relativePath } of files) {
-    tasks.push({
+    const task: UploadTask = {
       id: `u${++seq}`,
       name: file.name,
       relativePath,
@@ -129,48 +235,74 @@ export function enqueue(files: PickedFile[], parentId: string) {
       sent: 0,
       status: "queued",
       file,
-    });
+    };
+    tasks.push(task);
+    byId.set(task.id, task);
+    totals.queued++;
+    totals.size += task.size;
+    queue.push(task);
   }
-  emit();
   pump();
+  emit(true);
 }
 
 export function pause(id: string) {
-  const t = tasks.find((x) => x.id === id);
+  const t = byId.get(id);
   if (t?.status === "uploading") {
     t.upload?.abort();
-    update(id, { status: "paused" });
+    setStatus(t, "paused");
     pump();
+    emit(true);
   }
 }
 
 export function resume(id: string) {
-  const t = tasks.find((x) => x.id === id);
+  const t = byId.get(id);
   if (t && (t.status === "paused" || t.status === "error")) {
-    update(id, { status: "queued", error: undefined });
+    requeue(t);
     pump();
+    emit(true);
   }
 }
 
+/** Try every failed upload again */
+export function retryFailed() {
+  for (const t of tasks) if (t.status === "error") requeue(t);
+  pump();
+  emit(true);
+}
+
 export function cancel(id: string) {
-  const t = tasks.find((x) => x.id === id);
+  const t = byId.get(id);
   if (!t) return;
   // abort(true) also tells the server to delete the temporary data
   if (t.upload && t.status !== "done") t.upload.abort(true).catch(() => {});
-  tasks = tasks.filter((x) => x.id !== id);
-  emit();
+  t.upload = undefined;
+  forget(t);
+  tasks = tasks.filter((x) => x !== t);
   pump();
+  emit(true);
+  if (!hasActiveUploads()) flushLanded();
 }
 
 export function clearFinished() {
-  tasks = tasks.filter((t) => t.status !== "done");
-  emit();
+  tasks = tasks.filter((t) => {
+    if (t.status !== "done") return true;
+    forget(t);
+    return false;
+  });
+  emit(true);
 }
 
 export function cancelAll() {
   for (const t of tasks) if (t.upload && t.status !== "done") t.upload.abort(true).catch(() => {});
   tasks = [];
-  emit();
+  byId.clear();
+  totals = emptyTotals();
+  queue = [];
+  queueHead = 0;
+  emit(true);
+  flushLanded();
 }
 
 /** Get files from a drop event (including every file inside folders) */

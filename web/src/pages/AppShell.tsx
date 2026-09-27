@@ -13,7 +13,7 @@ import { logoUrl, useBranding } from "@/lib/branding";
 import { SiteName } from "@/components/SiteName";
 import { MAIN_ID } from "@/components/Frame";
 import { loadTabs, syncLocation } from "@/tabs";
-import { onUploadDone } from "@/uploads";
+import { onUploadsLanded } from "@/uploads";
 import { t, tServer } from "@/lib/i18n";
 
 /** Site logo and name (from branding settings; switches automatically when there's a dark-mode logo) */
@@ -63,11 +63,14 @@ export function AppShell() {
     syncLocation(location.pathname + location.search);
   }, [location.pathname, location.search]);
 
-  // After uploads complete, refresh the list and used space
+  // As uploaded files land, refresh the folders they went to (not every open folder), at most every 1.5 s; when the
+  // uploads end, once more every list (uploaded folders add subfolders) and the used space. A refresh already under
+  // way is left to finish instead of being restarted.
   useEffect(
     () =>
-      onUploadDone(() => {
-        for (const key of ["children", "recent", "me"]) qc.invalidateQueries({ queryKey: [key] });
+      onUploadsLanded((parentIds, final) => {
+        const keys = final ? [["children"], ["recent"], ["me"]] : parentIds.map((id) => ["children", id]);
+        for (const queryKey of keys) qc.invalidateQueries({ queryKey }, { cancelRefetch: false });
       }),
     [qc],
   );
