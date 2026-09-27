@@ -545,8 +545,14 @@ pub async fn callback(
 
 // ───────────── Exchanging the code for an identity ─────────────
 
+/// One HTTP client for every sign-in: it keeps its connections and TLS set-up instead of building them each time
 fn http() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder().timeout(HTTP_TIMEOUT).user_agent("ThirtyFile").build().map_err(|e| e.to_string())
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    if let Some(c) = CLIENT.get() {
+        return Ok(c.clone());
+    }
+    let c = reqwest::Client::builder().timeout(HTTP_TIMEOUT).user_agent("ThirtyFile").build().map_err(|e| e.to_string())?;
+    Ok(CLIENT.get_or_init(|| c).clone())
 }
 
 async fn fetch_identity(provider: &str, cfg: &ProviderConfig, code: &str, p: &Pending) -> Result<Identity, String> {

@@ -273,7 +273,11 @@ pub async fn save_content(
             .await
             .map_err(AppError::internal)?;
     }
-    let hash = hex::encode(Sha256::digest(&body));
+    // Up to 20 MB: hashed on a blocking thread, not on the async worker every other request shares
+    let hash = {
+        let body = body.clone();
+        tokio::task::spawn_blocking(move || hex::encode(Sha256::digest(&body))).await.map_err(AppError::internal)?
+    };
     if node.blob_hash.as_deref() == Some(hash.as_str()) {
         return Ok(Json(node));
     }

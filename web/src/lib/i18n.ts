@@ -220,5 +220,15 @@ export function tServer(msg: string | null | undefined): string {
   if (!msg) return msg ?? "";
   if (lang === "en") return msg;
   if (!exact) build();
-  return translate(msg, 0);
+  // A message without an exact match is tried against every pattern: remember the result (log pages repeat the
+  // same details on every render)
+  let out = serverCache.get(msg);
+  if (out === undefined) {
+    if (serverCache.size >= 2000) serverCache.clear();
+    out = translate(msg, 0);
+    serverCache.set(msg, out);
+  }
+  return out;
 }
+
+const serverCache = new Map<string, string>();
