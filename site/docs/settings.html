@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en" data-root=".." data-page="settings">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Settings · ThirtyFile</title>
+    <meta name="description" content="Most settings are in the Control panel. A few are given when the container starts." />
+    <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <link rel="stylesheet" href="../assets/site.css" />
+  </head>
+  <body>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="Guides"><noscript><a href="index.html">Install</a></noscript></nav>
+      <main class="article">
+        <h1>Settings</h1>
+        <p class="lead">Most settings are in the Control panel. A few are given when the container starts.</p>
+        <h2 id="list">The settings</h2>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Setting</th><th>Default</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><code>THIRTYFILE_ADMIN_PASSWORD</code></td><td>random</td><td>Password of the <code>admin</code> account. Used on the first start only</td></tr>
+              <tr><td><code>THIRTYFILE_SECURE_COOKIE</code></td><td><code>false</code></td><td>Set to <code>true</code> when the site uses HTTPS</td></tr>
+              <tr><td><code>THIRTYFILE_TRUST_PROXY</code></td><td><code>false</code></td><td>Set to <code>true</code> when the site is behind a reverse proxy</td></tr>
+              <tr><td><code>THIRTYFILE_TRASH_DAYS</code></td><td><code>30</code></td><td>Days items stay in the trash. <code>0</code> keeps them forever</td></tr>
+              <tr><td><code>THIRTYFILE_MAX_UPLOAD_MB</code></td><td><code>0</code></td><td>Largest file that can be uploaded. <code>0</code> means no limit</td></tr>
+              <tr><td><code>TZ</code></td><td><code>UTC</code></td><td>Time zone, for example <code>Asia/Taipei</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="docker-run">With docker run</h2>
+        <p>Add one <code>-e</code> for each setting:</p>
+        <pre><code>docker run -d --name thirtyfile -p 8080:8080 -v thirtyfile-data:/data \
+  -e THIRTYFILE_ADMIN_PASSWORD='choose-a-password' \
+  -e TZ=Asia/Taipei \
+  -e THIRTYFILE_TRASH_DAYS=60 \
+  ghcr.io/thirtyfile/thirtyfile:latest</code></pre>
+        <p>To change a setting later, stop and remove the container, then run the command again with the new value. Your files are kept.</p>
+        <pre><code>docker stop thirtyfile && docker rm thirtyfile</code></pre>
+
+        <h2 id="compose">With Docker Compose</h2>
+        <p>Add them under <code>environment:</code> in <code>compose.yaml</code>, then run <code>docker compose up -d</code> again:</p>
+        <pre><code>    environment:
+      TZ: Asia/Taipei
+      THIRTYFILE_TRASH_DAYS: "60"</code></pre>
+
+        <h2 id="data">Where the data is kept</h2>
+        <p>Everything is in <code>/data</code> inside the container. Both ways of installing keep it in a Docker volume named <code>thirtyfile-data</code>.</p>
+        <p>To keep it in a folder on your computer instead, make the folder writable for user 1000 and use its path:</p>
+        <pre><code>mkdir -p /srv/thirtyfile && sudo chown 1000:1000 /srv/thirtyfile
+docker run -d --name thirtyfile -p 8080:8080 \
+  -v /srv/thirtyfile:/data \
+  ghcr.io/thirtyfile/thirtyfile:latest</code></pre>
+      </main>
+    </div>
+    <script src="../assets/site.js"></script>
+  </body>
+</html>

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>ThirtyFile</title>
+    <script>
+      // Apply the theme before CSS loads to avoid a flash; __TF_BRANDING__ is injected by the server (default appearance and whether users may switch it)
+      try {
+        const b = window.__TF_BRANDING__ || {};
+        const t = b.allow_toggle === false ? null : localStorage.getItem("tf-theme");
+        const mode = t || b.default_mode || "system";
+        const dark = mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+        if (dark) document.documentElement.classList.add("dark");
+      } catch {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

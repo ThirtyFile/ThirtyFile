@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en" data-root=".." data-page="internet">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Putting it on the internet · ThirtyFile</title>
+    <meta name="description" content="To reach ThirtyFile from outside your network, put a reverse proxy with HTTPS in front of it." />
+    <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <link rel="stylesheet" href="../assets/site.css" />
+  </head>
+  <body>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="Guides"><noscript><a href="index.html">Install</a></noscript></nav>
+      <main class="article">
+        <h1>Putting it on the internet</h1>
+        <p class="lead">To reach ThirtyFile from outside your network, put a reverse proxy with HTTPS in front of it.</p>
+        <h2 id="steps">Three things to do</h2>
+        <ol>
+          <li>Start ThirtyFile with <code>THIRTYFILE_SECURE_COOKIE=true</code> and <code>THIRTYFILE_TRUST_PROXY=true</code>. See <a href="settings.html">Settings</a>.</li>
+          <li>Set up the reverse proxy with one of the examples below.</li>
+          <li>Enter the public address under <strong>Control panel › General › Site URL</strong>.</li>
+        </ol>
+        <div class="note"><strong>The proxy setting must match your setup.</strong> Behind a proxy it has to be <code>true</code>, otherwise every visitor looks like the same person and one person's wrong passwords lock everybody out. Without a proxy it has to stay <code>false</code>.</div>
+
+        <h2 id="caddy">Caddy</h2>
+        <p>Caddy gets and renews the certificate by itself.</p>
+        <pre><code>files.example.com {
+    reverse_proxy 127.0.0.1:8080 {
+        flush_interval -1
+    }
+}</code></pre>
+
+        <h2 id="nginx">nginx</h2>
+        <pre><code>server {
+    listen 443 ssl;
+    server_name files.example.com;
+    # ssl_certificate …; ssl_certificate_key …;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        client_max_body_size 64m;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+    }
+}</code></pre>
+
+        <h2 id="checklist">Before you open it to the world</h2>
+        <ul>
+          <li>Change the <code>admin</code> password to a long one.</li>
+          <li>Set up a <a href="backup.html">backup</a>.</li>
+          <li>Decide who may sign in. See <a href="sign-in.html#who">Single sign-on</a>.</li>
+        </ul>
+      </main>
+    </div>
+    <script src="../assets/site.js"></script>
+  </body>
+</html>

@@ -1,0 +1,35 @@
+# ThirtyFile
+#   THIRTYFILE_ADMIN_PASSWORD=<a password of at least 8 characters> docker compose up -d
+# (or put the variable in a .env file in this folder). After the first start, sign in as admin with this
+# password and change it right away.
+services:
+  thirtyfile:
+    image: ghcr.io/thirtyfile/thirtyfile:latest
+    # To build the image from the source code instead, remove the line above and use:
+    # build: .
+    container_name: thirtyfile
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - thirtyfile-data:/data
+      # Or use a host folder (it must be writable for uid 1000 inside the container):
+      # - ./data:/data
+    environment:
+      # Only used on the first start, when the database does not exist yet
+      THIRTYFILE_ADMIN_PASSWORD: ${THIRTYFILE_ADMIN_PASSWORD:?Set THIRTYFILE_ADMIN_PASSWORD (the initial administrator password)}
+      TZ: Asia/Taipei
+      # Enable when served over HTTPS behind a reverse proxy:
+      # THIRTYFILE_SECURE_COOKIE: "true"
+      # THIRTYFILE_TRUST_PROXY: "true"
+      # THIRTYFILE_MAX_UPLOAD_MB: "0"
+      # THIRTYFILE_TRASH_DAYS: "30"
+    # Uploads in progress are kept in /data/tmp; raise the open file limit for very large folders
+    ulimits:
+      nofile: 65536
+    stop_grace_period: 30s
+
+volumes:
+  # A fixed name, the same as in the `docker run` example, so backup commands are the same for both
+  thirtyfile-data:
+    name: thirtyfile-data

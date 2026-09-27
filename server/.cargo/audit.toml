@@ -1,0 +1,7 @@
+# cargo-audit settings (`cargo install cargo-audit && cargo audit`)
+[advisories]
+# RUSTSEC-2023-0071 (rsa: Marvin timing side channel, no fixed release yet). Pulled in by russh / ssh-key for
+# SFTP private-key sign-in only. The affected operation is the client signing the SSH challenge with the
+# administrator's key towards a storage server the administrator configured; the timing oracle would have to
+# be measured by that server. Re-check when russh moves to a fixed rsa release.
+ignore = ["RUSTSEC-2023-0071"]

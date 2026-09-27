@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en" data-root=".." data-page="install">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Install · ThirtyFile</title>
+    <meta name="description" content="ThirtyFile runs in Docker. Pick one of the two ways below; both take about a minute." />
+    <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <link rel="stylesheet" href="../assets/site.css" />
+  </head>
+  <body>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="Guides"><noscript><a href="index.html">Install</a></noscript></nav>
+      <main class="article">
+        <h1>Install</h1>
+        <p class="lead">ThirtyFile runs in Docker. Pick one of the two ways below; both take about a minute.</p>
+        <h2 id="before">Before you start</h2>
+        <p>Install <a href="https://docs.docker.com/get-docker/">Docker</a> on the computer or server that will hold the files. Nothing else is needed.</p>
+
+        <h2 id="docker-run">Option 1: docker run</h2>
+        <pre><code>docker run -d --name thirtyfile \
+  -p 8080:8080 \
+  -v thirtyfile-data:/data \
+  -e THIRTYFILE_ADMIN_PASSWORD='choose-a-password' \
+  ghcr.io/thirtyfile/thirtyfile:latest</code></pre>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Part</th><th>What it does</th></tr></thead>
+            <tbody>
+              <tr><td><code>-p 8080:8080</code></td><td>The port the site is reached on. For port 80, write <code>-p 80:8080</code></td></tr>
+              <tr><td><code>-v thirtyfile-data:/data</code></td><td>Where files and settings are kept, so they survive updates</td></tr>
+              <tr><td><code>THIRTYFILE_ADMIN_PASSWORD</code></td><td>The password of the first account, at least 8 characters</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="compose">Option 2: Docker Compose</h2>
+        <p>Download the ready-made <code>compose.yaml</code> into an empty folder and start it from there:</p>
+        <pre><code>curl -O https://raw.githubusercontent.com/ThirtyFile/ThirtyFile/main/compose.yaml
+THIRTYFILE_ADMIN_PASSWORD='choose-a-password' docker compose up -d</code></pre>
+        <p>The password can also go in a file named <code>.env</code> in the same folder:</p>
+        <pre><code>THIRTYFILE_ADMIN_PASSWORD=choose-a-password</code></pre>
+
+        <h2 id="sign-in">Sign in</h2>
+        <ol>
+          <li>Open <code>http://localhost:8080</code>. From another computer, use the server's address instead of <code>localhost</code>.</li>
+          <li>Click anywhere on the lock screen, then sign in as <strong>admin</strong> with the password you chose.</li>
+          <li>Open the account menu at the bottom left and choose <strong>Change password</strong>.</li>
+        </ol>
+        <div class="note"><strong>No password set?</strong> A random one is created and written to the log. Read it with <code>docker logs thirtyfile</code>.</div>
+
+        <h2 id="stop">Stop and start</h2>
+        <pre><code>docker stop thirtyfile
+docker start thirtyfile</code></pre>
+        <p>With Docker Compose, use <code>docker compose stop</code> and <code>docker compose start</code> in the folder of <code>compose.yaml</code>.</p>
+      </main>
+    </div>
+    <script src="../assets/site.js"></script>
+  </body>
+</html>

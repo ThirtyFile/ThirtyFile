@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en" data-root=".." data-page="backup">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Upgrade and backup · ThirtyFile</title>
+    <meta name="description" content="Keep ThirtyFile up to date, and keep a copy of your data somewhere safe." />
+    <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <link rel="stylesheet" href="../assets/site.css" />
+  </head>
+  <body>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="Guides"><noscript><a href="index.html">Install</a></noscript></nav>
+      <main class="article">
+        <h1>Upgrade and backup</h1>
+        <p class="lead">Keep ThirtyFile up to date, and keep a copy of your data somewhere safe.</p>
+        <h2 id="upgrade">Upgrading</h2>
+        <p><a href="#backup">Back up</a> first. Your files and settings are kept, and the database is updated when the new version starts.</p>
+        <h3>docker run</h3>
+        <pre><code>docker pull ghcr.io/thirtyfile/thirtyfile:latest
+docker stop thirtyfile && docker rm thirtyfile
+docker run -d --name thirtyfile …   # the same options as when you installed it</code></pre>
+        <h3>Docker Compose</h3>
+        <pre><code>docker compose pull && docker compose up -d</code></pre>
+        <p><code>latest</code> follows the newest version. To stay on one release, use its number instead, for example <code>ghcr.io/thirtyfile/thirtyfile:1.0</code>.</p>
+
+        <h2 id="backup">Backing up</h2>
+        <p>The data volume contains everything: files, accounts, settings and logs.</p>
+        <pre><code>docker stop thirtyfile
+docker run --rm -v thirtyfile-data:/data -v "$PWD":/backup alpine \
+  tar czf /backup/thirtyfile-backup.tar.gz -C /data .
+docker start thirtyfile</code></pre>
+        <p>This writes <code>thirtyfile-backup.tar.gz</code> into the current folder. Copy it to another computer or disk.</p>
+        <div class="note"><strong>Files on S3, SFTP or FTP are not in the backup.</strong> Back up that storage with its own tools. The backup still contains the list of files and who may see them.</div>
+
+        <h2 id="restore">Restoring</h2>
+        <p>Restore into an empty volume, then start the container as usual:</p>
+        <pre><code>docker run --rm -v thirtyfile-data:/data -v "$PWD":/backup alpine sh -c \
+  "tar xzf /backup/thirtyfile-backup.tar.gz -C /data && chown -R 1000:1000 /data"</code></pre>
+
+        <h2 id="safe">Keep backups safe</h2>
+        <p>A backup contains the keys and passwords of your storage locations and single sign-on, and the logs with visitors' IP addresses. Treat it like a password: store it where only administrators can reach it.</p>
+      </main>
+    </div>
+    <script src="../assets/site.js"></script>
+  </body>
+</html>

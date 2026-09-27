@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en" data-root=".">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ThirtyFile: your own file manager, in the browser</title>
+    <meta name="description" content="ThirtyFile is a self-hosted file manager that works like Windows File Explorer in the browser. Keep files on your own storage, preview and edit Office documents, and share with a link." />
+    <meta property="og:title" content="ThirtyFile" />
+    <meta property="og:description" content="A self-hosted file manager that works like File Explorer, in your browser." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://thirtyfile.github.io/ThirtyFile/assets/files-light.webp" />
+    <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <link rel="stylesheet" href="assets/site.css" />
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <div class="wrap">
+          <div class="hero-text">
+            <span class="eyebrow">Self-hosted file manager</span>
+            <h1>Your files, on <em>your</em> servers, as easy as File Explorer.</h1>
+            <p class="lead">ThirtyFile is a file manager for your team that runs in the browser. It looks and works like the File Explorer everyone already knows, and your files stay on storage you control.</p>
+            <div class="actions">
+              <a class="button primary" href="#install">Install in one minute</a>
+              <a class="button ghost" href="docs/index.html">Read the guides</a>
+            </div>
+          </div>
+          <div class="hero-shot">
+            <div class="window-bar" aria-hidden="true"><span></span><span></span><span></span></div>
+            <img class="only-light" src="assets/files-light.webp" width="1920" height="1080" alt="The ThirtyFile file list: a folder tree on the left, folders and documents on the right, with tabs and an address bar above" />
+            <img class="only-dark" src="assets/files-dark.webp" width="1920" height="1080" alt="The ThirtyFile file list in dark mode" />
+          </div>
+        </div>
+      </section>
+
+      <section id="features">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>Everything a shared drive needs</h2>
+            <p>No training required. If you can use File Explorer, you can use ThirtyFile.</p>
+          </div>
+          <div class="grid">
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg></span>
+              <h3>Familiar from the first click</h3>
+              <p>Tabs, an address bar, a folder tree, drag and drop, right-click menus and the keyboard shortcuts you already use.</p>
+            </div>
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" /><path d="M14 3v5h5M9 13h6M9 17h4" /></svg></span>
+              <h3>Office files open in the browser</h3>
+              <p>Preview Word, PowerPoint and Excel without installing anything. Edit Excel workbooks and text files online.</p>
+            </div>
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1" /><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" /></svg></span>
+              <h3>Share with a link</h3>
+              <p>Send a link with a password, an expiry date and a download limit. Or share a folder with a colleague.</p>
+            </div>
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3" /><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" /></svg></span>
+              <h3>Storage you choose</h3>
+              <p>A local disk or NAS, S3-compatible storage, SFTP or FTP. Each team space can use its own.</p>
+            </div>
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8" /></svg></span>
+              <h3>Spaces for every team</h3>
+              <p>Personal, company-wide and team spaces, with roles for viewers, editors and managers, and a size limit for each.</p>
+            </div>
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.2 7.8 8 9 4.8-1.2 8-4.5 8-9V6Z" /><path d="m9 12 2 2 4-4" /></svg></span>
+              <h3>Sign in your way</h3>
+              <p>Usernames and passwords, or Microsoft, Google and GitHub accounts. Every sign-in and file action is logged.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="soft">
+        <div class="wrap">
+          <div class="feature">
+            <div class="feature-text">
+              <h3>Edit spreadsheets without leaving the browser</h3>
+              <p>Open an Excel workbook, change what you need and save. The file stays a normal Excel file that opens anywhere.</p>
+              <ul class="ticks">
+                <li>Formulas, number formats, colours and borders</li>
+                <li>Copy and paste to and from Excel</li>
+                <li>Charts, pictures and everything else in the file are left untouched</li>
+              </ul>
+            </div>
+            <div class="shot"><img src="assets/excel-edit.webp" width="1920" height="1080" loading="lazy" alt="An Excel budget open for editing in ThirtyFile, with a formatting toolbar and a formula bar" /></div>
+          </div>
+
+          <div class="feature flip">
+            <div class="feature-text">
+              <h3>Share exactly as much as you mean to</h3>
+              <p>A link can ask for a password, stop working after a week, or allow a set number of downloads.</p>
+              <ul class="ticks">
+                <li>Links stop working when the person who made them loses access</li>
+                <li>See who opened a link, and when</li>
+                <li>Recipients need no account</li>
+              </ul>
+            </div>
+            <div class="shot narrow"><img src="assets/share-dialog.webp" width="1024" height="496" loading="lazy" alt="The share link dialog with an expiry of seven days, a password and a download limit" /></div>
+          </div>
+
+          <div class="feature">
+            <div class="feature-text">
+              <h3>Comfortable day and night, desk or phone</h3>
+              <p>Light and dark mode, a layout for phones, and English or Traditional Chinese for each person.</p>
+              <ul class="ticks">
+                <li>Thumbnails for photos and a viewer for video, audio and PDF</li>
+                <li>Uploads continue where they stopped after a lost connection</li>
+                <li>Your own name, logo and colours on every page</li>
+              </ul>
+            </div>
+            <div class="shot"><img src="assets/photos-dark.webp" width="1920" height="1080" loading="lazy" alt="A folder of photos shown as thumbnails in dark mode" /></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="install">
+        <div class="wrap install">
+          <div>
+            <div class="section-head">
+              <h2>Running in one minute</h2>
+              <p>One small program. No database or web server to set up.</p>
+            </div>
+            <ol class="steps">
+              <li><strong>Install Docker</strong>on the computer or server that will hold the files.</li>
+              <li><strong>Run the command</strong>with a password of your choice.</li>
+              <li><strong>Open the page</strong>at <code>http://localhost:8080</code> and sign in as <code>admin</code>.</li>
+            </ol>
+          </div>
+          <div>
+            <div class="tabs" role="tablist" aria-label="Ways to install">
+              <button type="button" role="tab" data-tab="tab-run">docker run</button>
+              <button type="button" role="tab" data-tab="tab-compose">Docker Compose</button>
+            </div>
+            <div id="tab-run" role="tabpanel">
+              <pre><code>docker run -d --name thirtyfile \
+  -p 8080:8080 \
+  -v thirtyfile-data:/data \
+  -e THIRTYFILE_ADMIN_PASSWORD='choose-a-password' \
+  ghcr.io/thirtyfile/thirtyfile:latest</code></pre>
+            </div>
+            <div id="tab-compose" role="tabpanel">
+              <pre><code>curl -O https://raw.githubusercontent.com/ThirtyFile/ThirtyFile/main/compose.yaml
+THIRTYFILE_ADMIN_PASSWORD='choose-a-password' docker compose up -d</code></pre>
+            </div>
+            <p style="margin: 16px 0 0; color: var(--text-soft)">Next: <a href="docs/first-steps.html">set up users, storage and your logo</a>.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="cta">
+        <div class="wrap">
+          <img src="assets/logo.svg" alt="" width="72" height="72" />
+          <h2>Give your team a drive of their own</h2>
+          <p>Install it in a minute and see for yourself. The source code is on GitHub.</p>
+          <div class="actions">
+            <a class="button primary" href="docs/index.html">Get started</a>
+            <a class="button ghost" href="https://github.com/ThirtyFile/ThirtyFile">View on GitHub</a>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script src="assets/site.js"></script>
+  </body>
+</html>

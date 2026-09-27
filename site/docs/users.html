@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en" data-root=".." data-page="users">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Users and spaces · ThirtyFile</title>
+    <meta name="description" content="Accounts, groups and spaces are managed by administrators in the Control panel." />
+    <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <link rel="stylesheet" href="../assets/site.css" />
+  </head>
+  <body>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="Guides"><noscript><a href="index.html">Install</a></noscript></nav>
+      <main class="article">
+        <h1>Users and spaces</h1>
+        <p class="lead">Accounts, groups and spaces are managed by administrators in the Control panel.</p>
+        <h2 id="users">Users</h2>
+        <p>Open <strong>Control panel › Users</strong>.</p>
+        <ul>
+          <li><strong>Create</strong> an account with a username and a first password. Ask the person to change it after signing in.</li>
+          <li><strong>Role</strong>: administrators can open the Control panel. Users cannot.</li>
+          <li><strong>Permissions</strong>: whether the person may edit, delete and share. Without them the account can only view.</li>
+          <li><strong>Space size</strong>: how much the person may store. <code>0</code> means no limit.</li>
+          <li><strong>Disable</strong> an account to stop it signing in without deleting its files.</li>
+        </ul>
+        <p>The <strong>Used</strong> column includes items in the trash.</p>
+
+        <h2 id="groups">Groups</h2>
+        <p>A group is a list of people, for example one department. Give a group access to a space or folder instead of adding people one by one. When someone joins or leaves the group, their access follows.</p>
+
+        <h2 id="spaces">Spaces</h2>
+        <p>Open <strong>Control panel › Spaces</strong> to create team spaces, set their size limit and choose where their files are stored.</p>
+        <ul>
+          <li>Add members from the space's <strong>Members</strong> dialog and give each a <a href="sharing.html#people">role</a>.</li>
+          <li>To let everyone create team spaces themselves, switch it on under <strong>Control panel › General</strong>. A space created this way gets the same size limit as its creator.</li>
+        </ul>
+
+        <h2 id="privacy">What administrators can see</h2>
+        <p>Administrators manage every team space and the company space, including their trash. They cannot open personal spaces.</p>
+
+        <h2 id="password">Forgotten passwords</h2>
+        <p>An administrator sets a new password under <strong>Control panel › Users</strong>. If the administrator's own password is lost, see <a href="help.html#password">Troubleshooting</a>.</p>
+      </main>
+    </div>
+    <script src="../assets/site.js"></script>
+  </body>
+</html>

@@ -1,0 +1,37 @@
+# Build output and dependencies
+/server/target/
+/web/node_modules/
+/web/dist/
+*.tsbuildinfo
+
+# Data and local settings (`cargo run` creates server/data/ during development)
+/data/
+/server/data/
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.*
+
+# Local test leftovers (curl cookie jars etc. may contain session tokens)
+*.cookies
+cookies.txt
+/server/fb
+/server/fj
+
+# Local tool settings and notes
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+.cursor/
+.aider*
+/.ai/
+/notes/
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

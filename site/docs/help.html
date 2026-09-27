@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en" data-root=".." data-page="help">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Troubleshooting · ThirtyFile</title>
+    <meta name="description" content="Answers to the problems people run into most." />
+    <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <link rel="stylesheet" href="../assets/site.css" />
+  </head>
+  <body>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="Guides"><noscript><a href="index.html">Install</a></noscript></nav>
+      <main class="article">
+        <h1>Troubleshooting</h1>
+        <p class="lead">Answers to the problems people run into most.</p>
+        <h2 id="password">I forgot the administrator password</h2>
+        <pre><code>docker exec thirtyfile thirtyfile reset-password admin 'a-new-password'</code></pre>
+        <p>This also switches the account back on if it was disabled.</p>
+
+        <h2 id="links">Share links start with http://127.0.0.1:8080</h2>
+        <p>Set the address people use under <strong>Control panel › General › Site URL</strong>.</p>
+
+        <h2 id="signed-out">I am signed out right after signing in</h2>
+        <p><code>THIRTYFILE_SECURE_COOKIE</code> is <code>true</code>, but the site is opened with <code>http://</code>. Open it with <code>https://</code>, or set it to <code>false</code> if you don't use HTTPS.</p>
+
+        <h2 id="locked">Everyone gets "too many failed attempts"</h2>
+        <p>Behind a reverse proxy, <code>THIRTYFILE_TRUST_PROXY</code> must be <code>true</code>, and the proxy must pass on the visitor's address as in the <a href="internet.html">examples</a>. Otherwise everyone counts as one visitor.</p>
+        <p>The block lifts by itself after 15 minutes.</p>
+
+        <h2 id="upload">Large uploads fail</h2>
+        <p>Error 413 comes from the reverse proxy. Raise its upload size limit to at least 64 MB, as in the <a href="internet.html#nginx">nginx example</a>.</p>
+
+        <h2 id="permission">"Permission denied" when starting</h2>
+        <p>When the data is kept in a folder on your computer, make it writable for user 1000:</p>
+        <pre><code>sudo chown -R 1000:1000 /srv/thirtyfile</code></pre>
+
+        <h2 id="logs">Looking at the log</h2>
+        <pre><code>docker logs --tail 100 thirtyfile</code></pre>
+
+        <h2 id="safety">How your files are protected</h2>
+        <ul>
+          <li>Passwords are stored in a form that cannot be read back.</li>
+          <li>Uploaded files cannot run scripts on the site.</li>
+          <li>A share link stops working when the person who made it loses access to the item.</li>
+          <li>Repeated wrong passwords are blocked for 15 minutes.</li>
+        </ul>
+
+        <h2 id="more">Still stuck?</h2>
+        <p><a href="https://github.com/ThirtyFile/ThirtyFile/issues">Report the problem on GitHub</a>, with what you did, what you expected and what happened instead.</p>
+      </main>
+    </div>
+    <script src="../assets/site.js"></script>
+  </body>
+</html>

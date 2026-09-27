@@ -1,0 +1,53 @@
+import React from "react";
+import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ApiError } from "@/api";
+import { Toaster } from "@/components/ui/sonner";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import "./style.css";
+import { loadDictionary } from "@/lib/i18n";
+import { reloadForNewVersion } from "@/lib/reload";
+
+// After a site update (redeploy), the code chunks an old page wants to load no longer exist: reload to get the new version
+window.addEventListener("vite:preloadError", (e) => {
+  if (reloadForNewVersion()) e.preventDefault();
+});
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      staleTime: 5_000,
+      // 4xx errors don't need a retry
+      retry: (count, err) => !(err instanceof ApiError && err.status < 500) && count < 2,
+    },
+  },
+});
+
+// Load the translations first (a separate chunk, only for Traditional Chinese), then the app: its modules may call t() while being evaluated
+loadDictionary()
+  .then(() => import("@/App"))
+  .then((mod) => {
+    // A chunk that failed to load (deployment in progress, offline) can resolve to nothing instead of throwing
+    if (!mod?.App) throw new Error("The app failed to load");
+    const { App } = mod;
+    createRoot(document.getElementById("root")!).render(
+      <React.StrictMode>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter>
+            <ErrorBoundary>
+              <App />
+            </ErrorBoundary>
+          </BrowserRouter>
+          <Toaster position="bottom-center" />
+        </QueryClientProvider>
+      </React.StrictMode>,
+    );
+  })
+  .catch((e: unknown) => {
+    // Chunks missing after a redeploy are handled by vite:preloadError above; anything else (offline, blocked script) ends here
+    console.error(e);
+    const el = document.getElementById("root");
+    if (el) el.textContent = "The app couldn't be loaded. Reload the page to try again.";
+  });

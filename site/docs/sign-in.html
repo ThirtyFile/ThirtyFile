@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en" data-root=".." data-page="sign-in">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Single sign-on · ThirtyFile</title>
+    <meta name="description" content="Let people sign in with the Microsoft, Google or GitHub account they already have." />
+    <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <link rel="stylesheet" href="../assets/site.css" />
+  </head>
+  <body>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="Guides"><noscript><a href="index.html">Install</a></noscript></nav>
+      <main class="article">
+        <h1>Single sign-on</h1>
+        <p class="lead">Let people sign in with the Microsoft, Google or GitHub account they already have.</p>
+        <h2 id="setup">Setting up a provider</h2>
+        <ol>
+          <li>Set the <strong>Site URL</strong> under <strong>Control panel › General</strong> first.</li>
+          <li>Open <strong>Control panel › Single sign-on</strong> and choose the provider. The page shows a <strong>redirect address</strong> to copy.</li>
+          <li>Register ThirtyFile with the provider (see below) and paste that address there.</li>
+          <li>Copy the ID and secret the provider gives you into ThirtyFile, switch the provider on and save.</li>
+        </ol>
+
+        <h3>Microsoft Entra ID</h3>
+        <p>Microsoft Entra admin center › App registrations › New registration. Select the "Web" platform and enter the redirect address, then add a client secret under "Certificates &amp; secrets". The application ID and tenant ID are on the "Overview" page.</p>
+
+        <h3>Google</h3>
+        <p>Google Cloud Console › APIs &amp; Services › Credentials › Create credentials › OAuth client ID. Choose "Web application" and add the redirect address under "Authorized redirect URIs".</p>
+
+        <h3>GitHub</h3>
+        <p>GitHub › Settings › Developer settings › OAuth Apps › New OAuth App. Enter the redirect address as the callback URL, then generate a client secret.</p>
+
+        <h2 id="who">Who may sign in</h2>
+        <p>Each provider has its own rule for people who sign in for the first time:</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Rule</th><th>What happens</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Linked accounts only</strong></td><td>Only people who linked the account themselves, from their account menu</td></tr>
+              <tr><td><strong>Match existing users by email</strong></td><td>People whose email is the username of an existing account</td></tr>
+              <tr><td><strong>Create accounts automatically</strong></td><td>Anyone from an allowed email domain gets a new account</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>With automatic accounts, list the <strong>allowed email domains</strong>, for example <code>example.com</code>, so that only your own people get in.</p>
+
+        <h2 id="rules">Different settings for different domains</h2>
+        <p>Rules by email domain give new accounts their own permissions, space size and groups. For example, partners from <code>partner.example</code> can get a smaller space and no permission to share.</p>
+
+        <h2 id="link">Linking an account yourself</h2>
+        <p>Anyone can link or unlink a Microsoft, Google or GitHub account under <strong>Account menu › Sign-in methods</strong>.</p>
+        <div class="note">An account created by single sign-on has no password. Its last linked account can only be removed after an administrator gave it a password.</div>
+
+        <h2 id="guests">Microsoft tenants with guests</h2>
+        <p>If your Microsoft tenant has guests from other organisations, leave the tenant ID empty. People then link their Microsoft account themselves after signing in with a password, instead of being matched by email.</p>
+      </main>
+    </div>
+    <script src="../assets/site.js"></script>
+  </body>
+</html>

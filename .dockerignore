@@ -1,0 +1,35 @@
+# Build output and dependencies (rebuilt inside the container)
+**/target
+**/node_modules
+web/dist
+**/*.tsbuildinfo
+
+# Data and local settings (may contain accounts, secrets and session tokens)
+data
+server/data
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/.env
+**/.env.*
+**/*.cookies
+**/cookies.txt
+
+# Local tool settings and notes
+**/.claude
+**/CLAUDE.md
+**/CLAUDE.local.md
+**/AGENTS.md
+**/.cursor
+.ai
+notes
+
+# Other
+.git
+.github
+site
+**/.vscode
+**/.idea
+Dockerfile
+compose.yaml
+**/*.log

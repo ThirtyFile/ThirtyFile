@@ -1,0 +1,97 @@
+import { useQuery } from "@tanstack/react-query";
+import { XIcon } from "lucide-react";
+import { api, privateSource, type Node } from "@/api";
+import { Button } from "@/components/ui/button";
+import { FileIcon, canThumbnail, typeLabel } from "@/components/FileIcon";
+import { Resizer } from "@/components/Resizer";
+import { ROLE_LABEL } from "@/lib/drives";
+import { locale, t } from "@/lib/i18n";
+import { usePersisted } from "@/lib/session";
+import { formatBytes, formatWinDate } from "@/lib/utils";
+
+/** Right-hand "Details" pane (Windows 11 style) */
+const PANE_DEFAULT_WIDTH = 280;
+
+export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; folder?: Node; onClose(): void }) {
+  const [width, setWidth] = usePersisted("tf-details-width", PANE_DEFAULT_WIDTH);
+  const node = selected.length === 1 ? selected[0] : selected.length === 0 ? folder : undefined;
+  const info = useQuery({ queryKey: ["node", node?.id], queryFn: () => api.node(node!.id), enabled: !!node });
+  const shares = useQuery({ queryKey: ["shares", node?.id], queryFn: () => api.shares(node!.id), enabled: !!node && !!node.parent_id });
+
+  const header = (
+    <div className="flex h-9 shrink-0 items-center justify-between border-b px-3 text-xs font-medium">
+      {t("Details")}
+      <Button variant="ghost" size="icon-xs" aria-label={t("Close details pane")} onClick={onClose}>
+        <XIcon />
+      </Button>
+    </div>
+  );
+
+  let body;
+  if (!node) {
+    const total = selected.reduce((s, n) => s + (n.kind === "file" ? n.size : 0), 0);
+    const files = selected.filter((n) => n.kind === "file").length;
+    body = (
+      <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+        <div className="relative size-20">
+          {selected.slice(0, 3).map((n, i) => (
+            <span key={n.id} className="absolute rounded-md bg-background" style={{ left: i * 12, top: i * 8 }}>
+              <FileIcon node={n} className="size-12" />
+            </span>
+          ))}
+        </div>
+        <div className="text-sm">{t("{n} item selected|{n} items selected", { n: selected.length })}</div>
+        {files > 0 && <div className="text-xs text-muted-foreground">{t("{n} file|{n} files", { n: files })} · {formatBytes(total)}</div>}
+      </div>
+    );
+  } else {
+    const root = info.data ? (info.data.via_share ? t("Shared with me") : info.data.drive.name) : "…";
+    const isRoot = !node.parent_id;
+    const location = info.data ? `/${root}` + info.data.path.slice(0, -1).map((c) => `/${c.name}`).join("") : "…";
+    const rows: [string, React.ReactNode][] = [
+      [t("Type"), typeLabel(node)],
+      ...(node.kind === "file" ? ([[t("Size"), t("{size} ({bytes} bytes)", { size: formatBytes(node.size), bytes: node.size.toLocaleString(locale) })]] as [string, string][]) : []),
+      ...(isRoot ? [] : ([[t("Location"), location]] as [string, string][])),
+      ...(info.data ? ([[t("My role"), ROLE_LABEL[info.data.role]]] as [string, string][]) : []),
+      [t("Date modified"), formatWinDate(node.updated_at)],
+      [t("Date created"), formatWinDate(node.created_at)],
+      ...(isRoot ? [] : ([[t("Created by"), node.owner_name]] as [string, string][])),
+      ...(isRoot ? [] : ([[t("Favorite"), node.is_favorite ? t("Yes") : t("No")]] as [string, string][])),
+      ...(isRoot ? [] : ([[t("Share links"), shares.data ? (shares.data.length ? t("{n}", { n: shares.data.length }) : t("None")) : "…"]] as [string, string][])),
+    ];
+    body = (
+      <>
+        <div className="flex h-44 shrink-0 items-center justify-center border-b bg-muted/30 p-4">
+          {node.kind === "file" && canThumbnail(node) ? (
+            <img src={privateSource.thumbUrl(node)} alt="" className="max-h-full max-w-full rounded object-contain shadow" />
+          ) : (
+            <FileIcon node={node} className="size-16" />
+          )}
+        </div>
+        <div className="grid gap-4 p-4">
+          <div className="text-sm font-medium [overflow-wrap:anywhere]">{isRoot ? (info.data?.drive.name ?? "") : node.name}</div>
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
+            {rows.map(([k, v]) => (
+              <div key={k} className="contents">
+                <dt className="text-muted-foreground">{k}</dt>
+                <dd className="[overflow-wrap:anywhere] select-text">{v}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <aside
+      aria-label={t("Details")}
+      style={{ width, maxWidth: "85vw" }}
+      className="relative flex shrink-0 flex-col border-l bg-background max-lg:absolute max-lg:inset-y-0 max-lg:right-0 max-lg:z-10 max-lg:shadow-xl"
+    >
+      <Resizer width={width} onChange={setWidth} min={220} max={640} defaultWidth={PANE_DEFAULT_WIDTH} edge="left" label={t("Resize details pane")} />
+      {header}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">{body}</div>
+    </aside>
+  );
+}

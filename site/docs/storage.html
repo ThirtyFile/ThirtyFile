@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en" data-root=".." data-page="storage">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Storage locations · ThirtyFile</title>
+    <meta name="description" content="Choose where file contents are kept. Different spaces can use different locations." />
+    <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <link rel="stylesheet" href="../assets/site.css" />
+  </head>
+  <body>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="Guides"><noscript><a href="index.html">Install</a></noscript></nav>
+      <main class="article">
+        <h1>Storage locations</h1>
+        <p class="lead">Choose where file contents are kept. Different spaces can use different locations.</p>
+        <h2 id="types">Types</h2>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Type</th><th>Use it for</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Local folder</strong></td><td>The data folder, or any path such as a mounted NAS</td></tr>
+              <tr><td><strong>S3-compatible</strong></td><td>AWS S3, Cloudflare R2, Backblaze B2, Wasabi, RustFS and others</td></tr>
+              <tr><td><strong>SFTP</strong></td><td>A server you reach with a password or a private key</td></tr>
+              <tr><td><strong>FTP / FTPS</strong></td><td>Older file servers</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="add">Adding a location</h2>
+        <ol>
+          <li>Open <strong>Control panel › Storage locations</strong> and click <strong>Add storage location</strong>.</li>
+          <li>Choose the type and fill in the address and the login details.</li>
+          <li>Click <strong>Test connection</strong>. The location can be saved once the test succeeds.</li>
+          <li>Make it the <strong>default</strong> if new spaces should use it.</li>
+        </ol>
+
+        <h3>Provider notes</h3>
+        <ul>
+          <li><strong>AWS S3</strong>: leave the endpoint empty.</li>
+          <li><strong>Cloudflare R2</strong>: endpoint <code>https://&lt;account ID&gt;.r2.cloudflarestorage.com</code>, region <code>auto</code>.</li>
+          <li><strong>Self-hosted</strong>: <a href="https://github.com/rustfs/rustfs">RustFS</a> works well. Choose "Self-hosted" and tick "Path-style URLs".</li>
+        </ul>
+        <div class="note">Connections without encryption (plain FTP, or S3 over http) are only accepted for addresses inside your own network.</div>
+
+        <h2 id="per-space">A location for each space</h2>
+        <p>Under <strong>Control panel › Spaces</strong>, choose a storage location for a space. Files already in the space can be moved to the new location. The space stays in use while they move.</p>
+
+        <h2 id="offline">When a location is offline</h2>
+        <p>Browsing, searching and organising folders keep working. Opening, downloading and uploading are paused, and resume by themselves when the location is back. The space is marked as offline in the meantime.</p>
+      </main>
+    </div>
+    <script src="../assets/site.js"></script>
+  </body>
+</html>

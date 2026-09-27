@@ -1,0 +1,274 @@
+import { useMemo, useState, type FormEvent } from "react";
+import { Link, useNavigate, useParams } from "react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronRightIcon, DownloadIcon, EyeIcon, FolderOpenIcon, Grid2X2Icon, LinkIcon, ListIcon, Loader2Icon, LockIcon } from "lucide-react";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { api, shareSource, triggerDownload, type Node, type PublicShare } from "@/api";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorText } from "@/components/dialogs";
+import { FileList, Thumb, type ViewMode } from "@/components/FileList";
+import { canPreview } from "@/components/FileViewer";
+import { Preview } from "@/components/Preview";
+import { Logo } from "@/pages/AppShell";
+import { LanguageSwitch } from "@/components/LanguageSwitch";
+import { cn, formatBytes, formatDate } from "@/lib/utils";
+import { t, tc } from "@/lib/i18n";
+
+export function PublicSharePage() {
+  const { token = "" } = useParams();
+  const info = useQuery({ queryKey: ["public", token], queryFn: () => api.publicShare(token), retry: false });
+
+  let body;
+  if (info.isLoading) body = <Skeleton className="h-64 w-full max-w-3xl" />;
+  else if (info.error || !info.data)
+    body = (
+      <div className="flex flex-col items-center gap-3 py-20 text-center text-muted-foreground">
+        <LinkIcon className="size-12 stroke-1" />
+        <div>{info.error?.message ?? t("This share link doesn't exist or has expired")}</div>
+      </div>
+    );
+  else if (info.data.needs_password) body = <Unlock token={token} />;
+  else if (info.data.node!.kind === "file") body = <SharedFile share={info.data} node={info.data.node!} />;
+  else body = <SharedFolder share={info.data} root={info.data.node!} />;
+
+  return (
+    <div className="flex h-full flex-col bg-sidebar">
+      <header className="flex h-14 shrink-0 items-center border-b bg-background px-4">
+        <Logo className="text-sm" />
+        <LanguageSwitch className="order-last ml-3 shrink-0" />
+        {info.data && !info.data.needs_password && (
+          <span className="ml-auto truncate pl-4 text-xs text-muted-foreground">
+            {t("Shared by {name}", { name: info.data.owner })}
+            {info.data.expires_at && ` · ${tc("date", "Expires {date}", { date: formatDate(info.data.expires_at) })}`}
+            {info.data.downloads_left !== null && ` · ${t("{n} download left|{n} downloads left", { n: info.data.downloads_left })}`}
+          </span>
+        )}
+      </header>
+      <main className="flex min-h-0 flex-1 justify-center overflow-y-auto p-4">{body}</main>
+    </div>
+  );
+}
+
+function Unlock({ token }: { token: string }) {
+  const qc = useQueryClient();
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api.unlockShare(token, password);
+      await qc.invalidateQueries({ queryKey: ["public", token] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("Couldn't unlock"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form onSubmit={submit} className="mt-16 grid h-fit w-full max-w-sm gap-4 rounded-2xl border bg-card p-6 shadow-sm">
+      <div className="flex items-center gap-2 font-medium">
+        <LockIcon className="size-4" /> {t("This share requires a password")}
+      </div>
+      <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t("Enter password")} autoFocus />
+      <ErrorText>{error}</ErrorText>
+      <Button type="submit" disabled={busy || !password}>
+        {busy && <Loader2Icon className="animate-spin" />}
+        {t("Open")}
+      </Button>
+    </form>
+  );
+}
+
+function SharedFile({ share, node }: { share: PublicShare; node: Node }) {
+  const source = useMemo(() => shareSource(share.token), [share.token]);
+  const [previewing, setPreviewing] = useState(false);
+  const exhausted = share.downloads_left === 0;
+  return (
+    <>
+      <ContextMenu>
+        <ContextMenuTrigger className="mt-10 flex h-fit w-full max-w-md flex-col items-center gap-5 rounded-2xl border bg-card p-8 text-center shadow-sm">
+          <div className="flex size-40 items-center justify-center overflow-hidden rounded-xl bg-muted">
+            <Thumb node={node} source={source} className="size-full" iconClass="size-16" />
+          </div>
+          <div>
+            <div className="font-medium break-all">{node.name}</div>
+            <div className="text-sm text-muted-foreground">{formatBytes(node.size)}</div>
+          </div>
+          <div className="flex gap-2">
+            {canPreview(node) && !exhausted && (
+              <Button variant="outline" onClick={() => setPreviewing(true)}>
+                <EyeIcon /> {t("Preview")}
+              </Button>
+            )}
+            <Button
+              className="bg-brand text-brand-foreground hover:bg-brand/90"
+              disabled={exhausted}
+              onClick={() => triggerDownload(source.contentUrl(node, true))}
+            >
+              <DownloadIcon /> {exhausted ? t("Download limit reached") : t("Download")}
+            </Button>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          {canPreview(node) && !exhausted && (
+            <DropdownMenuItem onClick={() => setPreviewing(true)}>
+              <EyeIcon /> {t("Preview")}
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuItem disabled={exhausted} onClick={() => triggerDownload(source.contentUrl(node, true))}>
+            <DownloadIcon /> {t("Download")}
+          </DropdownMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+      {previewing && (
+        <Preview
+          files={[node]}
+          index={0}
+          source={source}
+          editable={false}
+          onIndexChange={() => {}}
+          onClose={() => setPreviewing(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
+  const { nodeId } = useParams();
+  const current = nodeId ?? root.id;
+  const navigate = useNavigate();
+  const source = useMemo(() => shareSource(share.token), [share.token]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [anchor, setAnchor] = useState<string | null>(null);
+  const [view, setView] = useState<ViewMode>("list");
+  const [previewId, setPreviewId] = useState<string | null>(null);
+
+  const info = useQuery({ queryKey: ["public-node", share.token, current], queryFn: () => api.publicNode(share.token, current) });
+  const children = useQuery({
+    queryKey: ["public-children", share.token, current],
+    queryFn: () => api.publicChildren(share.token, current),
+  });
+  const items = children.data ?? [];
+  const files = items.filter((n) => n.kind === "file");
+  const previewIndex = previewId ? files.findIndex((f) => f.id === previewId) : -1;
+  const exhausted = share.downloads_left === 0;
+
+  const downloadIds = selected.size ? [...selected] : [current];
+  const selectedNodes = items.filter((n) => selected.has(n.id));
+
+  return (
+    <div className="flex h-fit min-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl border bg-background shadow-sm">
+      <div className="flex min-h-14 flex-wrap items-center gap-2 border-b px-4 py-2">
+        <nav className="flex min-w-0 flex-1 items-center gap-0.5">
+          {(info.data?.path ?? [{ id: root.id, name: root.name }]).map((c, i, arr) => (
+            <span key={c.id} className="flex min-w-0 items-center gap-0.5">
+              {i > 0 && <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />}
+              {i === arr.length - 1 ? (
+                <span className="truncate px-1.5 font-semibold">{c.name}</span>
+              ) : (
+                <Link
+                  to={`/share/${share.token}/${c.id}`}
+                  className="truncate rounded-md px-1.5 py-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  {c.name}
+                </Link>
+              )}
+            </span>
+          ))}
+        </nav>
+        <div className="flex rounded-lg border p-0.5">
+          {(["list", "grid"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              className={cn("rounded-md px-2 py-0.5 text-xs", view === v ? "bg-secondary" : "text-muted-foreground")}
+            >
+              {v === "list" ? t("List") : t("Icons")}
+            </button>
+          ))}
+        </div>
+        <Button
+          size="sm"
+          className="bg-brand text-brand-foreground hover:bg-brand/90"
+          disabled={exhausted}
+          onClick={() => triggerDownload(source.downloadUrl(downloadIds))}
+        >
+          <DownloadIcon /> {selected.size ? t("Download {n} item|Download {n} items", { n: selected.size }) : t("Download all")}
+        </Button>
+      </div>
+      {children.isLoading ? (
+        <div className="grid gap-2 p-4">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-9" />
+          ))}
+        </div>
+      ) : (
+        <ContextMenu>
+          <ContextMenuTrigger
+            className="min-h-40 flex-1"
+            onContextMenuCapture={(e) => !(e.target as HTMLElement).closest("[data-node-id]") && setSelected(new Set())}
+            onClick={(e) => !(e.target as HTMLElement).closest("[data-node-id]") && setSelected(new Set())}
+          >
+            <FileList
+              items={items}
+              view={view}
+              source={source}
+              selected={selected}
+              anchor={anchor}
+              onSelect={(s, a) => {
+                setSelected(s);
+                if (a !== undefined) setAnchor(a);
+              }}
+              onOpen={(n) => {
+                setSelected(new Set());
+                if (n.kind === "folder") navigate(`/share/${share.token}/${n.id}`);
+                else setPreviewId(n.id);
+              }}
+              empty={<div className="py-16 text-center text-sm text-muted-foreground">{t("This folder is empty")}</div>}
+            />
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            {selectedNodes.length === 1 && (
+              <DropdownMenuItem
+                onClick={() => {
+                  const n = selectedNodes[0];
+                  setSelected(new Set());
+                  if (n.kind === "folder") navigate(`/share/${share.token}/${n.id}`);
+                  else setPreviewId(n.id);
+                }}
+              >
+                {selectedNodes[0].kind === "folder" ? <FolderOpenIcon /> : <EyeIcon />} {selectedNodes[0].kind === "folder" ? t("Open") : t("Preview")}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem disabled={exhausted} onClick={() => triggerDownload(source.downloadUrl(downloadIds))}>
+              <DownloadIcon /> {selected.size ? t("Download {n} item|Download {n} items", { n: selected.size }) : t("Download all (ZIP)")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setView(view === "list" ? "grid" : "list")}>
+              {view === "list" ? <Grid2X2Icon /> : <ListIcon />} {view === "list" ? t("Icon view") : t("List view")}
+            </DropdownMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+      )}
+      {previewIndex >= 0 && (
+        <Preview
+          files={files}
+          index={previewIndex}
+          source={source}
+          editable={false}
+          allowDownload={!exhausted}
+          onIndexChange={(i) => setPreviewId(files[i].id)}
+          onClose={() => setPreviewId(null)}
+        />
+      )}
+    </div>
+  );
+}
