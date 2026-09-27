@@ -16,7 +16,7 @@ ARG ALPINE_VERSION=3
 
 # ───────────── 1) Frontend ─────────────
 # The output is platform-independent, so multi-platform builds only build it once on the build machine's platform
-FROM --platform=$BUILDPLATFORM node:24-alpine AS web
+FROM --platform=$BUILDPLATFORM node:26-alpine AS web
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 WORKDIR /src/web
