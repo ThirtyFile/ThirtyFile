@@ -18,7 +18,7 @@
         <h1>Upgrade and backup</h1>
         <p class="lead">Keep ThirtyFile up to date, and keep a copy of your data somewhere safe.</p>
         <h2 id="upgrade">Upgrading</h2>
-        <p><a href="#backup">Back up</a> first. Your files and settings are kept, and the database is updated when the new version starts.</p>
+        <p><a href="#backup">Back up</a> first. Your files and settings are kept, and the database is updated when the new version starts. Before it changes the database, ThirtyFile saves a copy of it in <code>data/backups/drive-before-&lt;version&gt;.db</code> (the last three are kept).</p>
         <h3>docker run</h3>
         <pre><code>docker pull ghcr.io/thirtyfile/thirtyfile:latest
 docker stop thirtyfile && docker rm thirtyfile
@@ -38,25 +38,35 @@ docker run -d --name thirtyfile --restart unless-stopped …   # the same option
           </table>
         </div>
         <p>The changes in each release are listed on the <a href="https://github.com/ThirtyFile/ThirtyFile/releases">releases page</a>.</p>
+        <h3 id="downgrade">Going back to an older version</h3>
+        <p>An older version doesn't start on a database a newer one has changed. To go back, stop ThirtyFile, replace <code>data/drive.db</code> with the copy made before the upgrade (<code>data/backups/drive-before-&lt;new version&gt;.db</code>), delete <code>drive.db-wal</code> and <code>drive.db-shm</code> if they are there, and start the older image. Changes made since the upgrade (new accounts, files uploaded and their names) are lost; files uploaded since then stay in the storage folder but aren't listed.</p>
 
         <h2 id="backup">Backing up</h2>
-        <p>The <code>data</code> and <code>storage</code> folders together contain everything: files, accounts, settings and logs. Stop ThirtyFile while copying them, so that the copy is consistent.</p>
-        <h3>docker run</h3>
+        <p>The <code>data</code> and <code>storage</code> folders together contain everything: files, accounts, settings and logs. The database in <code>data</code> is being written all the time, so don't copy <code>drive.db</code> while ThirtyFile runs; save a copy with the backup command instead, or stop ThirtyFile while copying.</p>
+        <h3 id="running">Without stopping it</h3>
+        <ol>
+          <li>Save a consistent copy of the database (it can't be overwritten, so use a new name each time):
+            <pre><code>docker exec thirtyfile thirtyfile backup /data/backups/drive-$(date +%F).db</code></pre></li>
+          <li>Copy <code>storage</code>, and <code>data</code> without <code>drive.db*</code>, <code>thumbs</code> and <code>tmp</code> (thumbnails are made again, and <code>tmp</code> holds only uploads in progress):
+            <pre><code>sudo tar czf thirtyfile-$(date +%F).tar.gz -C /srv/thirtyfile \
+  --exclude='data/drive.db*' --exclude=data/thumbs --exclude=data/tmp data storage</code></pre></li>
+        </ol>
+        <p>Files uploaded while the archive is being made may be in the archive without being in the saved database, or the other way round; either way the backup restores. To run it every night, put both commands in a script and add it to cron, for example <code>0 3 * * * /usr/local/bin/thirtyfile-backup.sh</code>, and delete archives older than a few weeks in the same script.</p>
+        <h3>With ThirtyFile stopped</h3>
         <pre><code>docker stop thirtyfile
 sudo tar czf thirtyfile-backup.tar.gz -C /srv/thirtyfile data storage
 docker start thirtyfile</code></pre>
-        <h3>Docker Compose</h3>
-        <p>In the folder of <code>compose.yaml</code>:</p>
-        <pre><code>docker compose stop
-sudo tar czf thirtyfile-backup.tar.gz data storage
-docker compose start</code></pre>
-        <p>This writes <code>thirtyfile-backup.tar.gz</code> into the current folder. Copy it to another computer or disk.</p>
-        <div class="note"><strong>Files on S3, SFTP or FTP are not in the backup.</strong> Back up that storage with its own tools. The backup still contains the list of files and who may see them.</div>
+        <p>With Docker Compose, use <code>docker compose stop</code> and <code>docker compose start</code> in the folder of <code>compose.yaml</code>, and <code>data storage</code> relative to it.</p>
+        <div class="note"><strong>Also back up:</strong> storage locations mounted besides <code>/storage</code> (a NAS folder added as a <em>Local folder</em> location, folder spaces), and files on S3, SFTP or FTP with the storage's own tools. The backup contains the list of those files and who may see them, not their content.</div>
 
         <h2 id="restore">Restoring</h2>
-        <p>Unpack the backup where the folders belong, then start the container as usual:</p>
-        <pre><code>sudo tar xzf thirtyfile-backup.tar.gz -C /srv/thirtyfile</code></pre>
-        <p>With Docker Compose, unpack it in the folder of <code>compose.yaml</code> instead.</p>
+        <ol>
+          <li>Stop ThirtyFile and unpack the archive where the folders belong: <code>sudo tar xzf thirtyfile-backup.tar.gz -C /srv/thirtyfile</code> (with Docker Compose, in the folder of <code>compose.yaml</code>).</li>
+          <li>If the archive was made without stopping, put the saved database in place: copy <code>data/backups/drive-&lt;date&gt;.db</code> to <code>data/drive.db</code>, and delete <code>drive.db-wal</code> and <code>drive.db-shm</code>.</li>
+          <li>Start the same version of ThirtyFile the backup came from (or a newer one), sign in, and open a few files, including one uploaded recently.</li>
+        </ol>
+        <p>The database also holds the key that signs sessions and share links: after restoring, people stay signed in and share links keep working. Moving to a new server works the same way: install ThirtyFile there, restore the backup, and change the Site URL if the address changed.</p>
+        <p>Test a restore now and then on another computer: a backup is only as good as the last time it was restored.</p>
 
         <h2 id="safe">Keep backups safe</h2>
         <p>A backup contains the keys and passwords of your storage locations and single sign-on, and the logs with visitors' IP addresses. Treat it like a password: store it where only administrators can reach it.</p>

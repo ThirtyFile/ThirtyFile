@@ -103,6 +103,9 @@ enum Command {
     ResetPassword { username: String, password: Option<String> },
     /// Check whether the running service is healthy (for Docker HEALTHCHECK): exit code 0 when healthy
     Health,
+    /// Write a consistent copy of the database to a new file, also while ThirtyFile is running
+    /// (e.g. `docker exec thirtyfile thirtyfile backup /data/backups/drive.db`)
+    Backup { file: PathBuf },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -160,6 +163,15 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     }
     std::fs::create_dir_all(&storage)?;
     let db = db::connect(&cfg.data.join("drive.db"), cfg.db_cache_mb).await?;
+
+    if let Some(Command::Backup { file }) = &cfg.command {
+        if let Some(dir) = file.parent().filter(|d| !d.as_os_str().is_empty()) {
+            std::fs::create_dir_all(dir)?;
+        }
+        db::backup_to(&db, file).await?;
+        println!("Database saved to {}", file.display());
+        return Ok(());
+    }
 
     if let Some(Command::ResetPassword { username, password }) = &cfg.command {
         let password = match password {

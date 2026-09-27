@@ -35,8 +35,57 @@ pub async fn connect(path: &Path, cache_mb: u32) -> Result<SqlitePool, sqlx::Err
         .after_connect(|conn, _| Box::pin(async move { register_functions(conn).await }))
         .connect_with(opts)
         .await?;
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    let migrator = sqlx::migrate!("./migrations");
+    backup_before_migrations(&pool, &migrator, path).await?;
+    migrator.run(&pool).await?;
     Ok(pool)
+}
+
+/// Automatic backups kept before upgrades (the oldest are removed)
+const UPGRADE_BACKUPS: usize = 3;
+
+/// When this version brings migrations the database doesn't have yet, copies the database to
+/// `backups/drive-before-<version>.db` next to it first: going back to the older version means restoring it, since
+/// an older version refuses to start on a database changed by a newer one.
+async fn backup_before_migrations(pool: &SqlitePool, migrator: &sqlx::migrate::Migrator, path: &Path) -> Result<(), sqlx::Error> {
+    // A new database has no migrations table yet: nothing to keep
+    let Ok(applied) = sqlx::query_as::<_, (i64,)>("SELECT version FROM _sqlx_migrations WHERE success = 1").fetch_all(pool).await else {
+        return Ok(());
+    };
+    let applied: std::collections::HashSet<i64> = applied.into_iter().map(|(v,)| v).collect();
+    if applied.is_empty() || migrator.iter().all(|m| applied.contains(&m.version)) {
+        return Ok(());
+    }
+    let dir = path.parent().unwrap_or(Path::new(".")).join("backups");
+    std::fs::create_dir_all(&dir)?;
+    let file = dir.join(format!("drive-before-{}.db", crate::VERSION));
+    if file.exists() {
+        // An earlier start of this version failed after the copy: keep that one, it has the old schema
+        return Ok(());
+    }
+    tracing::info!("Upgrading the database: saving a copy of it first in {}", file.display());
+    backup_to(pool, &file).await?;
+    // Keep the newest few
+    let mut old: Vec<(std::time::SystemTime, std::path::PathBuf)> = std::fs::read_dir(&dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with("drive-before-"))
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    old.sort();
+    for (_, p) in old.iter().rev().skip(UPGRADE_BACKUPS) {
+        let _ = std::fs::remove_file(p);
+    }
+    Ok(())
+}
+
+/// A consistent copy of the running database in one file (`VACUUM INTO`, safe while the server writes, unlike copying
+/// drive.db with its WAL file). Refuses to overwrite an existing file.
+pub async fn backup_to(pool: &SqlitePool, file: &Path) -> Result<(), sqlx::Error> {
+    if file.exists() {
+        return Err(sqlx::Error::Protocol(format!("{} already exists", file.display())));
+    }
+    sqlx::query("VACUUM INTO ?").bind(file.to_string_lossy().into_owned()).execute(pool).await?;
+    Ok(())
 }
 
 /// Registers `unicode_lower(text)` on a connection: lower case in every language, where SQLite's `lower()` and
@@ -320,6 +369,38 @@ mod tests {
         db.close().await;
         let _ = std::fs::remove_dir_all(&dir);
         hash
+    }
+
+    #[tokio::test]
+    async fn the_database_is_copied_before_new_migrations_and_on_request() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("drive.db");
+        let db = connect(&path, 16).await.unwrap();
+        // Up to date: no copy
+        let current = sqlx::migrate!("./migrations");
+        backup_before_migrations(&db, &current, &path).await.unwrap();
+        assert!(!dir.join("backups").exists());
+        // A newer version with one more migration: copied first
+        let newer_dir = dir.join("migrations");
+        std::fs::create_dir_all(&newer_dir).unwrap();
+        for e in std::fs::read_dir("migrations").unwrap() {
+            let e = e.unwrap();
+            std::fs::copy(e.path(), newer_dir.join(e.file_name())).unwrap();
+        }
+        std::fs::write(newer_dir.join("9999_next.sql"), "CREATE TABLE next (id INTEGER);").unwrap();
+        let newer = sqlx::migrate::Migrator::new(newer_dir.as_path()).await.unwrap();
+        backup_before_migrations(&db, &newer, &path).await.unwrap();
+        let copy = dir.join("backups").join(format!("drive-before-{}.db", crate::VERSION));
+        let copied = connect(&copy, 16).await.unwrap();
+        let (users,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users").fetch_one(&copied).await.unwrap();
+        assert_eq!(users, 0);
+        copied.close().await;
+        // On request, never over an existing file
+        backup_to(&db, &dir.join("manual.db")).await.unwrap();
+        assert!(backup_to(&db, &dir.join("manual.db")).await.is_err());
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
