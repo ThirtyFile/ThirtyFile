@@ -97,6 +97,7 @@ cd ../web && pnpm typecheck && node scripts/check-i18n.mjs && pnpm test</code></
 
         <h2 id="licence">Licence</h2>
         <p>ThirtyFile is licensed under the <a href="https://github.com/ThirtyFile/ThirtyFile/blob/main/LICENSE">Apache License 2.0</a>. What you contribute is licensed under the same terms.</p>
+        <p>Dependencies must have a permissive licence: the Rust ones are checked against the list in <code>server/deny.toml</code>, which <code>server/about.toml</code> repeats. The image build collects the licence notices of every crate and npm package into <code>THIRD-PARTY-NOTICES</code>, and fails when a crate's licence isn't on that list.</p>
       </main>
     </div>
     <script src="../assets/site.js"></script>

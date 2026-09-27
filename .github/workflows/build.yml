@@ -216,6 +216,9 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VERSION=${{ steps.tags.outputs.version }}
+          # Releases store an SBOM and the full build provenance with the image; release.yml also signs the provenance
+          sbom: ${{ !!inputs.release_version }}
+          provenance: ${{ inputs.release_version && 'mode=max' || 'false' }}
 
       # Starts the image locked down (read-only, minimal capabilities) and upgrades the latest release to it.
       # Releases start the pushed image itself (its amd64 half)

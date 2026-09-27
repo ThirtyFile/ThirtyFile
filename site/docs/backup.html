@@ -40,6 +40,10 @@ docker run -d --name thirtyfile --restart unless-stopped …   # the same option
           </table>
         </div>
         <p>Before 1.0.0 there is no major-version tag: <code>0.3</code> is the closest, since any 0.x release may change things. The changes in each release are listed on the <a href="https://github.com/ThirtyFile/ThirtyFile/releases">releases page</a>, which also has <code>compose.yaml</code> and the server as a single program for Linux on amd64 and arm64, with their SHA-256 checksums in <code>SHA256SUMS</code>.</p>
+        <p>Every released image comes with a list of what it contains (an SBOM) and a signed record of how it was built. To check that an image or a program was built by ThirtyFile's own release workflow, use the <a href="https://cli.github.com/">GitHub CLI</a>:</p>
+        <pre><code>gh attestation verify oci://ghcr.io/thirtyfile/thirtyfile:1.2.3 --repo ThirtyFile/ThirtyFile
+gh attestation verify thirtyfile-1.2.3-linux-amd64 --repo ThirtyFile/ThirtyFile</code></pre>
+        <p>The licences of the libraries inside ThirtyFile are in <code>/usr/share/licenses/thirtyfile/THIRD-PARTY-NOTICES</code> in the image, and in <code>THIRD-PARTY-NOTICES</code> on the releases page.</p>
         <h3 id="downgrade">Going back to an older version</h3>
         <p>An older version doesn't start on a database a newer one has changed. To go back, stop ThirtyFile, replace <code>data/drive.db</code> with the copy made before the upgrade (<code>data/backups/drive-before-&lt;new version&gt;.db</code>), delete <code>drive.db-wal</code> and <code>drive.db-shm</code> if they are there, and start the older image. Changes made since the upgrade (new accounts, files uploaded and their names) are lost; files uploaded since then stay in the storage folder but aren't listed.</p>
 

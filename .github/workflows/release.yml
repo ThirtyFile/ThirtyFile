@@ -4,7 +4,9 @@
 #   ghcr.io/thirtyfile/thirtyfile:1.2.3, :1.2, :1 (from 1.0.0 on; none for 0.x) and :latest
 # and then creates the tag v1.2.3 and the GitHub release, with notes put together from the merged pull requests
 # (see .github/release.yml), the server programs for amd64 and arm64 taken from the image, their SHA-256 checksums,
-# and compose.yaml. Nothing is tagged or released if the tests or the image build fail.
+# LICENSE, THIRD-PARTY-NOTICES and compose.yaml. The image carries an SBOM and build provenance; the provenance of the
+# image and of the programs is signed (GitHub attestations). Nothing is tagged or released if the tests or the image
+# build fail.
 #
 # Pre-releases (1.2.3-rc.1, anything with a "-") only get their own image tag and are marked as pre-releases on
 # GitHub, so `latest` and the release lines never move to them. A release of the same commit as the last pre-release
@@ -126,6 +128,9 @@ jobs:
     timeout-minutes: 10
     permissions:
       packages: write
+      # Signed provenance: a Sigstore certificate for this workflow (id-token), stored as an attestation
+      id-token: write
+      attestations: write
     outputs:
       digest: ${{ steps.tag.outputs.digest }}
     steps:
@@ -136,7 +141,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: tag
         env:
-          TAGS: ${{ needs.prepare.outputs.tags }}
           REUSE: ${{ needs.prepare.outputs.reuse }}
           BUILT: ${{ needs.build.outputs.digest }}
         run: |
@@ -146,11 +150,26 @@ jobs:
             digest="$BUILT"
           fi
           case "$digest" in sha256:*) ;; *) echo "::error::No image digest (got \"$digest\")."; exit 1 ;; esac
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      # Signed build provenance for a newly built image (a reused pre-release image already has it), pushed next to
+      # the image. Check it with: gh attestation verify oci://ghcr.io/thirtyfile/thirtyfile:1.2.3 -R ThirtyFile/ThirtyFile
+      - if: needs.prepare.outputs.reuse == ''
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.tag.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - env:
+          TAGS: ${{ needs.prepare.outputs.tags }}
+          DIGEST: ${{ steps.tag.outputs.digest }}
+        run: |
           args=()
           for tag in $TAGS; do args+=(-t "$IMAGE:$tag"); done
-          docker buildx imagetools create "${args[@]}" "$IMAGE@$digest"
-          docker buildx imagetools inspect "$IMAGE@$digest"
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          docker buildx imagetools create "${args[@]}" "$IMAGE@$DIGEST"
+          docker buildx imagetools inspect "$IMAGE@$DIGEST"
 
   publish:
     name: GitHub release
@@ -161,6 +180,8 @@ jobs:
     permissions:
       contents: write
       packages: read
+      id-token: write
+      attestations: write
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
       DIGEST: ${{ needs.images.outputs.digest }}
@@ -174,19 +195,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The server is one static program: the same file as in the image, for running without Docker
+      # The server is one static program: the same file as in the image, for running without Docker, with the
+      # licence notices of what it contains
       - name: Files for the release
         run: |
           mkdir dist
           for arch in amd64 arm64; do
             id=$(docker create --platform "linux/$arch" "$IMAGE@$DIGEST")
             docker cp "$id:/usr/local/bin/thirtyfile" "dist/thirtyfile-$VERSION-linux-$arch"
+            docker cp "$id:/usr/share/licenses/thirtyfile/THIRD-PARTY-NOTICES" dist/THIRD-PARTY-NOTICES
             docker rm "$id" >/dev/null
           done
-          cp compose.yaml dist/
+          cp compose.yaml LICENSE dist/
           cd dist
           sha256sum -- * > SHA256SUMS
           cat SHA256SUMS
+
+      # Signed build provenance for the programs: gh attestation verify thirtyfile-1.2.3-linux-amd64 -R ThirtyFile/ThirtyFile
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/thirtyfile-*
 
       # Tags exactly the commit that was tested and built, even if main has moved on since
       - env:

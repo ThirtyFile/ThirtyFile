@@ -96,4 +96,4 @@ Changes go through pull requests: see [Contributing](https://thirtyfile.github.i
 
 ## License
 
-ThirtyFile is licensed under the [Apache License 2.0](LICENSE). Unless you state otherwise, any contribution you submit for inclusion is licensed under the same terms.
+ThirtyFile is licensed under the [Apache License 2.0](LICENSE). The licence notices of the libraries it includes are in `THIRD-PARTY-NOTICES`, next to `LICENSE` in the image (`/usr/share/licenses/thirtyfile/`) and on each release. Unless you state otherwise, any contribution you submit for inclusion is licensed under the same terms.
