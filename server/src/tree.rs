@@ -309,9 +309,10 @@ pub async fn scope(conn: &mut SqliteConnection, user: &User) -> AppResult<(Strin
     Ok((serde_json::to_string(&drives).unwrap(), serde_json::to_string(&folders).unwrap()))
 }
 
-/// Fills in the current user's favorite status
-pub async fn mark_favorites<'a>(db: &SqlitePool, user_id: i64, nodes: impl IntoIterator<Item = &'a mut Node>) -> AppResult<()> {
-    let favs: Vec<(String,)> = sqlx::query_as("SELECT node_id FROM favorites WHERE user_id = ?").bind(user_id).fetch_all(db).await?;
+/// Fills in the current user's favorite status.
+/// Takes the caller's connection: taking a second one from the pool while holding one can use up the pool under load.
+pub async fn mark_favorites<'a>(conn: &mut SqliteConnection, user_id: i64, nodes: impl IntoIterator<Item = &'a mut Node>) -> AppResult<()> {
+    let favs: Vec<(String,)> = sqlx::query_as("SELECT node_id FROM favorites WHERE user_id = ?").bind(user_id).fetch_all(&mut *conn).await?;
     let favs: std::collections::HashSet<String> = favs.into_iter().map(|(id,)| id).collect();
     for n in nodes {
         n.is_favorite = favs.contains(&n.id);
