@@ -45,7 +45,7 @@ export function DevicesDialog({ user, onClose }: { user?: { id: number; username
           <DialogTitle>{user ? t("Devices of \"{name}\"", { name: user.username }) : t("Devices")}</DialogTitle>
           <DialogDescription>
             {user
-              ? t("Browsers where this user is signed in. Signing a device out ends its session right away.")
+              ? t("Browsers where this user is signed in. Signing a device out ends its session right away; app passwords keep working.")
               : t("Browsers where you're signed in. If you don't recognize one, sign it out here. If you sign in with a password, change it too.")}
           </DialogDescription>
         </DialogHeader>

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Your account · ThirtyFile</title>
-    <meta name="description" content="Your password, the devices you're signed in on, and your sign-in history." />
+    <meta name="description" content="Your password, the devices you're signed in on, app passwords for scripts, and your sign-in history." />
     <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -16,7 +16,7 @@
       <nav class="docs-nav" aria-label="Guides"><noscript><a href="index.html">Install</a></noscript></nav>
       <main class="article">
         <h1>Your account</h1>
-        <p class="lead">Your password, the devices you're signed in on, and your sign-in history.</p>
+        <p class="lead">Your password, the devices you're signed in on, app passwords for scripts, and your sign-in history.</p>
         <p>Everything on this page is in the <strong>account menu</strong>: click your name at the bottom of the list on the left.</p>
 
         <h2 id="password">Password</h2>
@@ -30,8 +30,21 @@
         </ul>
         <div class="note">If you see a device you don't recognise, sign it out here. If you sign in with a password, change it too. If you sign in with Microsoft, Google or GitHub, you have no password here: signing the device out is what ends its access, and it is worth checking that account's own security page as well.</div>
 
+        <h2 id="app-passwords">App passwords</h2>
+        <p>Scripts, backup tools and file clients can't sign in through the sign-in page. Give each one its own app password under <strong>App passwords</strong>. This is also the way for accounts that sign in with Microsoft, Google or GitHub, which have no password of their own.</p>
+        <ul>
+          <li>Give it a <strong>name</strong> that says where it's used, choose whether it may only <strong>read files</strong> or also <strong>change</strong> them, and when it <strong>expires</strong>.</li>
+          <li>The app password is shown once, right after you create it. Copy it then: only a fingerprint of it is kept, so nobody can show it again.</li>
+          <li>The list shows when and from which address each one was last used. <strong>Remove</strong> one and whatever uses it stops working right away.</li>
+        </ul>
+        <p>Send it in the <code>Authorization</code> header, or as the password of HTTP Basic sign-in together with your username:</p>
+        <pre><code>curl -H "Authorization: Bearer tfa_…" https://drive.example.com/api/auth/me
+curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;file id&gt;/content?download=1"</code></pre>
+        <p>App passwords work for files only: browsing, searching, downloading, uploading, and organising files and folders. They can't change your password, create app passwords, link sign-in methods, share links or use the Control panel, and they never get a cookie. One that may only read files is refused for anything that changes something.</p>
+        <div class="note">Signing out devices and changing your password don't affect app passwords. Remove the ones you no longer trust. An app password stops working when its account is disabled or deleted. Wrong app passwords count towards the same limit as wrong passwords: after 30 from one address, that address has to wait 15 minutes.</div>
+
         <h2 id="history">Sign-in history</h2>
-        <p><strong>My sign-in history</strong> shows your sign-ins, failed attempts, sign-outs and password changes, with the address and browser of each.</p>
+        <p><strong>My sign-in history</strong> shows your sign-ins, failed attempts, sign-outs, password changes, and app passwords created, removed or used with a wrong secret, with the address and browser of each.</p>
       </main>
     </div>
     <script src="../assets/site.js"></script>

@@ -29,14 +29,24 @@ export const LOGIN_EVENTS: Record<string, { label: string; tone?: string }> = {
   device_signout: { label: t("Device signed out") },
   signout_others: { label: t("Signed out on other devices") },
   admin_signout: { label: t("Signed out by an administrator"), tone: "text-amber-600 dark:text-amber-400" },
+  app_password_failed: { label: t("Wrong app password"), tone: "text-destructive" },
+  app_password_created: { label: t("App password created"), tone: "text-brand" },
+  app_password_revoked: { label: t("App password removed") },
 };
 
-const METHOD_LABEL: Record<string, string> = { password: tc("method", "Password"), microsoft: "Microsoft", google: "Google", github: "GitHub" };
+const METHOD_LABEL: Record<string, string> = {
+  password: tc("method", "Password"),
+  microsoft: "Microsoft",
+  google: "Google",
+  github: "GitHub",
+  app_password: t("App password"),
+};
 
 const EVENT_GROUPS = [
   { label: t("Sign-ins"), options: ["login", "logout", "password_change", "device_signout", "signout_others", "admin_signout"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
-  { label: t("Failed"), options: ["bad_password", "unknown_user", "disabled", "locked", "sso_denied"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
+  { label: t("Failed"), options: ["bad_password", "unknown_user", "disabled", "locked", "sso_denied", "app_password_failed"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
   { label: t("External accounts"), options: ["sso_provisioned", "sso_link", "sso_unlink"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
+  { label: t("App passwords"), options: ["app_password_created", "app_password_revoked"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
 ];
 
 /**
@@ -124,7 +134,7 @@ export function LoginLog({ userId, admin, className }: { userId?: number; admin?
                     <td className={cn("px-2.5 py-1.5 whitespace-nowrap", ev?.tone)}>{ev?.label ?? r.event}</td>
                     <td className="px-2.5 py-1.5 whitespace-nowrap">
                       <span className="inline-flex items-center gap-1.5">
-                        {r.method !== "password" && <ProviderIcon provider={r.method} className="size-3.5" />}
+                        {r.method !== "password" && r.method !== "app_password" && <ProviderIcon provider={r.method} className="size-3.5" />}
                         {METHOD_LABEL[r.method] ?? r.method}
                       </span>
                     </td>

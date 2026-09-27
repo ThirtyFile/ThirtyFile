@@ -332,7 +332,8 @@ export interface LoginRecord {
   /** null when the account doesn't exist */
   user_id: number | null;
   username: string;
-  /** login, bad_password, unknown_user, disabled, locked, logout, password_change, sso_denied, sso_provisioned, sso_link, sso_unlink, device_signout, signout_others, admin_signout */
+  /** login, bad_password, unknown_user, disabled, locked, logout, password_change, sso_denied, sso_provisioned, sso_link, sso_unlink, device_signout, signout_others, admin_signout,
+   * app_password_failed, app_password_created, app_password_revoked */
   event: string;
   ip: string;
   user_agent: string;
@@ -417,6 +418,18 @@ export interface Device {
   last_used_at: number | null;
   /** The device this page is open on */
   current: boolean;
+}
+
+/** An app password (the token itself is only returned once, when it is created) */
+export interface AppPassword {
+  id: string;
+  name: string;
+  /** read: downloads and listings only; write: can change files too */
+  scope: "read" | "write";
+  created_at: number;
+  expires_at: number | null;
+  last_used_at: number | null;
+  last_ip: string;
 }
 
 export interface ShareInfo {
@@ -633,6 +646,10 @@ export const api = {
   userDevices: (userId: number) => get<Device[]>(`/admin/users/${userId}/sessions`),
   signOutUserDevice: (userId: number, id: string) => request("DELETE", `/admin/users/${userId}/sessions/${encodeURIComponent(id)}`),
   signOutUserDevices: (userId: number) => request<{ removed: number }>("DELETE", `/admin/users/${userId}/sessions`),
+  appPasswords: () => get<AppPassword[]>("/auth/app-passwords"),
+  createAppPassword: (req: { name: string; scope: "read" | "write"; expires_days?: number }) =>
+    post<{ token: string; app_password: AppPassword }>("/auth/app-passwords", req),
+  deleteAppPassword: (id: string) => request("DELETE", `/auth/app-passwords/${encodeURIComponent(id)}`),
 
   node: (id: string) => get<NodeInfo>(enc`/nodes/${id}`).then((n) => ({ ...n, drive: { ...n.drive, name: driveName(n.drive) } })),
   children: (id: string, sort?: SortKey, order?: SortOrder, foldersOnly?: boolean) =>

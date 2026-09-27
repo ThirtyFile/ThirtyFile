@@ -15,6 +15,7 @@ import {
   FolderIcon,
   HistoryIcon,
   KeyRoundIcon,
+  KeySquareIcon,
   LanguagesIcon,
   Link2Icon,
   LogOutIcon,
@@ -48,6 +49,7 @@ import { ChangePasswordDialog } from "@/components/dialogs";
 import { LoginLogDialog } from "@/components/logs/LoginLog";
 import { LinkedAccountsDialog } from "@/components/LinkedAccountsDialog";
 import { DevicesDialog } from "@/components/DevicesDialog";
+import { AppPasswordsDialog } from "@/components/AppPasswordsDialog";
 import { NavMenu } from "@/components/NavMenu";
 import { Resizer } from "@/components/Resizer";
 import { FolderTree } from "@/components/FolderTree";
@@ -119,6 +121,7 @@ function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean; activ
   const [showLogins, setShowLogins] = useState(false);
   const [showAccounts, setShowAccounts] = useState(false);
   const [showDevices, setShowDevices] = useState(false);
+  const [showAppPasswords, setShowAppPasswords] = useState(false);
   const [width, setWidth] = usePersisted("tf-nav-width", NAV_DEFAULT_WIDTH);
   const usedPct = me.quota_bytes > 0 ? Math.min(100, (me.used_bytes / me.quota_bytes) * 100) : 0;
   const usage = me.quota_bytes > 0 ? `${formatBytes(me.used_bytes)} / ${formatBytes(me.quota_bytes)}` : formatBytes(me.used_bytes);
@@ -210,6 +213,9 @@ function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean; activ
             <DropdownMenuItem onClick={() => setShowDevices(true)}>
               <MonitorSmartphoneIcon /> {t("Devices")}
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setShowAppPasswords(true)}>
+              <KeySquareIcon /> {t("App passwords")}
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setShowLogins(true)}>
               <HistoryIcon /> {t("My sign-in history")}
             </DropdownMenuItem>
@@ -250,6 +256,7 @@ function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean; activ
       {changingPassword && <ChangePasswordDialog onClose={() => setChangingPassword(false)} />}
       {showAccounts && <LinkedAccountsDialog onClose={() => setShowAccounts(false)} />}
       {showDevices && <DevicesDialog onClose={() => setShowDevices(false)} />}
+      {showAppPasswords && <AppPasswordsDialog onClose={() => setShowAppPasswords(false)} />}
       {showLogins && (
         <LoginLogDialog
           title={t("My sign-in history")}

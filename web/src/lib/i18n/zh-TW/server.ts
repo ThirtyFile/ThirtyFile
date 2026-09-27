@@ -44,6 +44,14 @@ export default {
   "{username}: signed out on all devices": "{username}：登出所有裝置",
   // Signed-in devices (sessions.rs)
   "This device is already signed out": "這個裝置已經登出",
+  // App passwords (tokens.rs)
+  "Wrong or expired app password": "應用程式密碼錯誤或已過期",
+  "This app password can only read files": "這組應用程式密碼只能讀取檔案",
+  "Give the app password a name of at most 60 characters": "請為應用程式密碼取一個最多 60 個字元的名稱",
+  "Choose whether the app password may only read files or also change them": "請選擇應用程式密碼只能讀取檔案，或也能變更檔案",
+  "An app password can be valid for 1 to 3650 days": "應用程式密碼的有效期限為 1 到 3650 天",
+  "You can have at most 50 app passwords. Remove one you no longer use first.": "最多只能有 50 組應用程式密碼，請先移除不再使用的",
+  "App password not found": "找不到這組應用程式密碼",
   // System settings (admin.rs)
   "Invalid site URL. Example: https://drive.example.com or http://192.168.1.10:8080": "網站網址格式不正確，例如 https://drive.example.com 或 http://192.168.1.10:8080",
   "Enter only the domain or IP address (and port) for the site URL, without a path": "網站網址只填到網域或 IP（與連接埠），不要包含路徑",

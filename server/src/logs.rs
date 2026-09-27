@@ -426,6 +426,10 @@ const ZH_TW: &[(&str, &str)] = &[
     ("Device signed out", "登出裝置"),
     ("Signed out on other devices", "登出其他裝置"),
     ("Signed out by an administrator", "由管理員登出"),
+    ("Wrong app password", "應用程式密碼錯誤"),
+    ("App password created", "建立應用程式密碼"),
+    ("App password removed", "移除應用程式密碼"),
+    ("App password", "應用程式密碼"),
     ("Password", "帳號密碼"),
 ];
 
@@ -732,6 +736,7 @@ fn login_method_label(m: &str) -> &str {
         "microsoft" => "Microsoft",
         "google" => "Google",
         "github" => "GitHub",
+        "app_password" => "App password",
         other => other,
     }
 }
@@ -752,6 +757,9 @@ fn login_event_label(e: &str) -> &str {
         "device_signout" => "Device signed out",
         "signout_others" => "Signed out on other devices",
         "admin_signout" => "Signed out by an administrator",
+        "app_password_failed" => "Wrong app password",
+        "app_password_created" => "App password created",
+        "app_password_revoked" => "App password removed",
         other => other,
     }
 }

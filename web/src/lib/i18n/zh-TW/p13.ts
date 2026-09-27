@@ -1,10 +1,10 @@
-/** Traditional Chinese translations: account security (signed-in devices) */
+/** Traditional Chinese translations: account security (signed-in devices, app passwords) */
 export default {
   // Signed-in devices
   "Devices": "裝置",
   "Devices of \"{name}\"": "「{name}」的裝置",
   "Browsers where you're signed in. If you don't recognize one, sign it out here. If you sign in with a password, change it too.": "目前登入你帳號的瀏覽器。如果有不認得的裝置，請在這裡將它登出；如果你用密碼登入，也請變更密碼。",
-  "Browsers where this user is signed in. Signing a device out ends its session right away.": "這位使用者目前登入的瀏覽器。登出裝置會立即結束它的登入。",
+  "Browsers where this user is signed in. Signing a device out ends its session right away; app passwords keep working.": "這位使用者目前登入的瀏覽器。登出裝置會立即結束它的登入；應用程式密碼不受影響。",
   "Not signed in on any device.": "目前沒有登入任何裝置。",
   "This device": "這個裝置",
   "Signed in {time}": "{time} 登入",
@@ -19,4 +19,30 @@ export default {
   "Device signed out": "登出裝置",
   "Signed out on other devices": "登出其他裝置",
   "Signed out by an administrator": "由管理員登出",
+  // App passwords
+  "App passwords": "應用程式密碼",
+  "App password": "應用程式密碼",
+  "For scripts, backup tools and file clients, including accounts that sign in with Microsoft, Google or GitHub. They work for files only, not for your account settings, sharing or administration.": "給指令碼、備份工具與檔案用戶端使用，用 Microsoft、Google 或 GitHub 登入的帳號也可以建立。只能存取檔案，不能變更帳號設定、分享或管理。",
+  "App password \"{name}\" created": "已建立應用程式密碼「{name}」",
+  "Copy it now. It won't be shown again.": "請現在複製，之後不會再顯示。",
+  "Send it as the header \"Authorization: Bearer <app password>\", or sign in with the username {username} and the app password as the password.": "以標頭「Authorization: Bearer <應用程式密碼>」傳送，或用帳號 {username} 搭配這組應用程式密碼當作密碼登入。",
+  "For example: Nightly backup": "例如：每晚備份",
+  "Access": "權限",
+  "Read files only": "只能讀取檔案",
+  "Read and change files": "讀取並變更檔案",
+  "Read only": "唯讀",
+  "Read and write": "讀寫",
+  "Expires": "到期",
+  "In {n} day|In {n} days": "{n} 天後",
+  "You have no app passwords.": "你還沒有應用程式密碼。",
+  "Created {date}": "{date} 建立",
+  "Expired {date}": "已於 {date} 到期",
+  "Last used {time} from {ip}": "最後使用 {time}（{ip}）",
+  "Never used": "尚未使用",
+  "Never": "永不",
+  "Done": "完成",
+  "Scripts using it stop working right away": "使用它的指令碼會立即失效",
+  "Wrong app password": "應用程式密碼錯誤",
+  "App password created": "建立應用程式密碼",
+  "App password removed": "移除應用程式密碼",
 } satisfies Record<string, string>;

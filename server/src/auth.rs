@@ -19,9 +19,9 @@ pub const SESSION_COOKIE: &str = "tf_session";
 const SESSION_TTL: i64 = 30 * 24 * 3600;
 const FAIL_WINDOW: i64 = 15 * 60;
 /// Limit on consecutive failures for one username from one IP (counted per username + IP, so an attacker can't use it to lock the real user out from elsewhere)
-const FAIL_LIMIT: usize = 5;
+pub const FAIL_LIMIT: usize = 5;
 /// Limit on total failures from one IP within the time window (blocks attempts against many usernames)
-const IP_FAIL_LIMIT: usize = 30;
+pub const IP_FAIL_LIMIT: usize = 30;
 /// Failures against one account (from any address) before each further attempt has to wait
 const ACCOUNT_FREE_FAILURES: usize = 10;
 /// The longest wait between attempts against one account; the account itself is never locked
@@ -119,7 +119,7 @@ impl User {
 }
 
 /// A session's "last used" time and address are updated at most this often, so requests don't each write to the database
-const SESSION_TOUCH: i64 = 5 * 60;
+pub const SESSION_TOUCH: i64 = 5 * 60;
 
 #[derive(sqlx::FromRow)]
 struct SessionRow {
@@ -133,6 +133,12 @@ impl FromRequestParts<AppState> for User {
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, st: &AppState) -> Result<Self, Self::Rejection> {
+        // App passwords only count on the routes that allow them (file operations); elsewhere the header is ignored
+        if parts.extensions.get::<crate::tokens::AllowAppPasswords>().is_some()
+            && let Some(credential) = crate::tokens::credential(&parts.headers)
+        {
+            return crate::tokens::authenticate(parts, st, credential).await;
+        }
         let token = get_cookie(&parts.headers, SESSION_COOKIE).ok_or_else(AppError::unauthorized)?;
         let sql = format!(
             "SELECT {USER_COLS}, s.id AS session_id, s.last_used_at FROM sessions s JOIN users u ON u.id = s.user_id
@@ -258,6 +264,13 @@ pub fn begin_account_attempt(st: &AppState, key: &str) -> Result<(), i64> {
     }
     list.push(ts);
     Ok(())
+}
+
+/// Whether `key` already reached `limit` failures within the window. For checks that are fast (a hash of a random token
+/// rather than a password hash): the attempt is checked first and only a failure is counted, with `begin_attempt`.
+pub fn attempts_exhausted(st: &AppState, key: &str, limit: usize) -> bool {
+    let cutoff = now() - FAIL_WINDOW;
+    st.login_failures.lock().unwrap().get(key).is_some_and(|list| list.iter().filter(|t| **t > cutoff).count() >= limit)
 }
 
 /// Removes the attempt recorded by `begin_attempt` (the password was right)

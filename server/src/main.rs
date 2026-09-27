@@ -22,6 +22,7 @@ mod state;
 mod storage;
 #[cfg(test)]
 mod testutil;
+mod tokens;
 mod tree;
 mod upload;
 mod util;
@@ -338,17 +339,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     // carry a body to store, and thumbnails (which queue), are outside the limit (`untimed`); downloads stream after
     // the handler returned, so the limit doesn't apply to them either
     let db_pool = state.db.clone();
-    let app = Router::new()
-        .nest("/api", api().layer(TimeoutLayer::with_status_code(StatusCode::GATEWAY_TIMEOUT, Duration::from_secs(120))).merge(untimed()))
-        .fallback(web::serve)
-        .layer(middleware::from_fn_with_state(state.clone(), same_origin))
-        // gzip / brotli for JSON, HTML, JS, CSS and SVG (see `Compressible`); file contents and other downloads are never compressed
-        // Level 4: brotli's default (11) spends far more CPU per response than it saves on JSON and HTML; gzip 4 is likewise the sweet spot
-        .layer(CompressionLayer::new().gzip(true).br(true).quality(CompressionLevel::Precise(4)).compress_when(Compressible))
-        .layer(TraceLayer::new_for_http())
-        // A bug hit by one request answers that request with an error instead of stopping the server for everyone
-        .layer(tower_http::catch_panic::CatchPanicLayer::new())
-        .with_state(state);
+    let app = router(state);
 
     let listener = tokio::net::TcpListener::bind(&cfg.addr).await?;
     tracing::info!("ThirtyFile started: http://{}", cfg.addr);
@@ -360,6 +351,21 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     db_pool.close().await;
     tracing::info!("Stopped");
     Ok(())
+}
+
+/// All routes: the API (with or without the request timeout) and the web interface
+fn router(state: AppState) -> Router {
+    Router::new()
+        .nest("/api", api().layer(TimeoutLayer::with_status_code(StatusCode::GATEWAY_TIMEOUT, Duration::from_secs(120))).merge(untimed()))
+        .fallback(web::serve)
+        .layer(middleware::from_fn_with_state(state.clone(), same_origin))
+        // gzip / brotli for JSON, HTML, JS, CSS and SVG (see `Compressible`); file contents and other downloads are never compressed
+        // Level 4: brotli's default (11) spends far more CPU per response than it saves on JSON and HTML; gzip 4 is likewise the sweet spot
+        .layer(CompressionLayer::new().gzip(true).br(true).quality(CompressionLevel::Precise(4)).compress_when(Compressible))
+        .layer(TraceLayer::new_for_http())
+        // A bug hit by one request answers that request with an error instead of stopping the server for everyone
+        .layer(tower_http::catch_panic::CatchPanicLayer::new())
+        .with_state(state)
 }
 
 /// Ctrl+C or SIGTERM (sent by `docker stop` or when systemd stops the service): stop accepting new connections and wait for in-flight requests to finish
@@ -388,17 +394,47 @@ async fn shutdown_signal() {
 /// Routes outside the API's request timeout (see `main`): they receive content and write it to the storage
 /// location, or wait in the thumbnail queue, and legitimately take as long as that takes
 fn untimed() -> Router<AppState> {
-    Router::new()
+    // File operations: app passwords work here too
+    let files = Router::new()
         .route("/files/{id}/content", put(files::save_content).layer(DefaultBodyLimit::max(files::MAX_EDIT_BYTES)))
         .route("/files/{id}/thumbnail", get(files::thumbnail))
-        .route("/public/shares/{token}/nodes/{id}/thumbnail", get(shares::public_thumbnail))
-        .route("/admin/branding/logo/{variant}", put(branding::upload_logo).delete(branding::delete_logo))
-        .route("/admin/branding/background", put(branding::upload_background).delete(branding::delete_background).layer(DefaultBodyLimit::max(branding::MAX_BACKGROUND + 1024)))
         .route("/uploads", post(upload::create).options(upload::options))
         .route(
             "/uploads/{id}",
             head(upload::head).patch(upload::patch).delete(upload::delete).layer(DefaultBodyLimit::disable()),
         )
+        .route_layer(middleware::from_fn(tokens::allow));
+    Router::new()
+        .merge(files)
+        .route("/public/shares/{token}/nodes/{id}/thumbnail", get(shares::public_thumbnail))
+        .route("/admin/branding/logo/{variant}", put(branding::upload_logo).delete(branding::delete_logo))
+        .route("/admin/branding/background", put(branding::upload_background).delete(branding::delete_background).layer(DefaultBodyLimit::max(branding::MAX_BACKGROUND + 1024)))
+}
+
+/// Routes that also accept app passwords (`Authorization: Bearer` or HTTP Basic, see tokens.rs): file operations only.
+/// Everything else (the account itself, sign-in methods, sharing, logs and administration) needs a browser session.
+fn file_api() -> Router<AppState> {
+    Router::new()
+        .route("/auth/me", get(auth::me))
+        .route("/nodes/{id}", get(nodes::get).patch(nodes::rename))
+        .route("/nodes/{id}/children", get(nodes::children))
+        .route("/nodes/move", post(nodes::move_nodes))
+        .route("/nodes/copy", post(nodes::copy_nodes))
+        .route("/nodes/trash", post(nodes::trash))
+        .route("/folders", post(nodes::create_folder))
+        .route("/trash", get(nodes::list_trash))
+        .route("/trash/restore", post(nodes::restore))
+        .route("/trash/delete", post(nodes::delete_forever))
+        .route("/trash/empty", get(nodes::empty_trash_preview).post(nodes::empty_trash))
+        .route("/search", get(nodes::search))
+        .route("/recent", get(nodes::recent))
+        .route("/favorites", get(nodes::favorites))
+        .route("/nodes/favorite", post(nodes::set_favorite))
+        .route("/shared-with-me", get(nodes::shared_with_me))
+        .route("/files/{id}/content", get(files::content))
+        .route("/download", get(files::download).post(files::create_download_link))
+        .route("/download/{link}", get(files::download_by_link))
+        .route_layer(middleware::from_fn(tokens::allow))
 }
 
 /// Accept loop with the limits `axum::serve` doesn't set: a connection that sends nothing, or doesn't finish sending
@@ -555,29 +591,15 @@ fn api() -> Router<AppState> {
         .route("/health", get(health))
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
-        .route("/auth/me", get(auth::me))
+        .merge(file_api())
         .route("/auth/password", axum::routing::put(auth::change_password))
         .route("/auth/sessions", get(sessions::list))
         .route("/auth/sessions/others", post(sessions::sign_out_others))
         .route("/auth/sessions/{id}", delete(sessions::sign_out))
-        // File tree
-        .route("/nodes/{id}", get(nodes::get).patch(nodes::rename))
-        .route("/nodes/{id}/children", get(nodes::children))
-        .route("/nodes/move", post(nodes::move_nodes))
-        .route("/nodes/copy", post(nodes::copy_nodes))
-        .route("/nodes/trash", post(nodes::trash))
-        .route("/folders", post(nodes::create_folder))
-        .route("/trash", get(nodes::list_trash))
-        .route("/trash/restore", post(nodes::restore))
-        .route("/trash/delete", post(nodes::delete_forever))
-        .route("/trash/empty", get(nodes::empty_trash_preview).post(nodes::empty_trash))
-        .route("/search", get(nodes::search))
-        .route("/recent", get(nodes::recent))
-        .route("/favorites", get(nodes::favorites))
-        .route("/nodes/favorite", post(nodes::set_favorite))
-        .route("/shared-with-me", get(nodes::shared_with_me))
-        // Spaces and access
-        .route("/drives", get(drives::list).post(drives::create))
+        .route("/auth/app-passwords", get(tokens::list).post(tokens::create))
+        .route("/auth/app-passwords/{id}", delete(tokens::delete))
+        // Spaces and access (listing the spaces works with an app password too)
+        .route("/drives", get(drives::list).layer(middleware::from_fn(tokens::allow)).post(drives::create))
         .route("/drives/{id}", patch(drives::update).delete(drives::delete))
         .route("/nodes/{id}/access", get(drives::access).post(drives::grant))
         .route("/grants/{id}", delete(drives::revoke))
@@ -602,10 +624,6 @@ fn api() -> Router<AppState> {
         .route("/admin/logs", get(logs::get_status).put(logs::update_settings))
         .route("/admin/logs/archive", post(logs::archive_now))
         .route("/admin/logs/archives/{id}", get(logs::download_archive).delete(logs::delete_archive))
-        // File content
-        .route("/files/{id}/content", get(files::content))
-        .route("/download", get(files::download).post(files::create_download_link))
-        .route("/download/{link}", get(files::download_by_link))
         // Sharing
         .route("/shares", get(shares::list).post(shares::create))
         .route("/shares/{id}", delete(shares::delete))
@@ -668,8 +686,12 @@ impl Predicate for Compressible {
 
 /// Basic CSRF protection: requests that modify data must have an Origin matching Host, if they carry one
 /// (behind a reverse proxy with THIRTYFILE_TRUST_PROXY set, X-Forwarded-Host is accepted too).
+/// A request signed in with an app password and without a session cookie carries no credential a browser adds by
+/// itself, so another website can't send it on someone's behalf: it isn't checked.
 async fn same_origin(axum::extract::State(st): axum::extract::State<AppState>, req: Request, next: Next) -> Response {
+    let app_password_only = tokens::credential(req.headers()).is_some() && auth::get_cookie(req.headers(), auth::SESSION_COOKIE).is_none();
     if !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS)
+        && !app_password_only
         && let Some(origin) = req.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
             let origin_host = origin.split_once("://").map(|(_, h)| h).unwrap_or(origin);
             let h = req.headers();
@@ -722,6 +744,7 @@ fn spawn_maintenance(st: AppState, trash_days: i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil;
 
     #[tokio::test]
     async fn health_reports_disks_and_offline_storage_locations() {
@@ -783,6 +806,87 @@ mod tests {
             r.headers_mut().insert(k.clone(), v.parse().unwrap());
         }
         r
+    }
+
+    async fn call(app: &Router, method: Method, uri: &str, headers: &[(header::HeaderName, String)], body: Option<serde_json::Value>) -> Response {
+        let mut req = axum::http::Request::builder().method(method).uri(uri).extension(axum::extract::ConnectInfo(std::net::SocketAddr::from(([10, 0, 0, 1], 5000))));
+        for (k, v) in headers {
+            req = req.header(k, v);
+        }
+        let req = match body {
+            Some(b) => req.header(header::CONTENT_TYPE, "application/json").body(axum::body::Body::from(b.to_string())),
+            None => req.body(axum::body::Body::empty()),
+        };
+        app.clone().oneshot(req.unwrap()).await.unwrap()
+    }
+
+    async fn app_password(env: &testutil::TestEnv, user: &auth::User, scope: &str) -> String {
+        let (_, cookie) = env.sign_in(user, "Test").await;
+        let res = call(&router(env.st.clone()), Method::POST, "/api/auth/app-passwords", &[(header::COOKIE, cookie)], Some(serde_json::json!({ "name": "Script", "scope": scope }))).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap()["token"].as_str().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn app_passwords_work_for_file_operations_only() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let app = router(env.st.clone());
+        let token = app_password(&env, &admin, "write").await;
+        let bearer = || vec![(header::AUTHORIZATION, format!("Bearer {token}"))];
+
+        let res = call(&app, Method::GET, "/api/auth/me", &bearer(), None).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(!res.headers().contains_key(header::SET_COOKIE));
+        assert_eq!(call(&app, Method::GET, "/api/drives", &bearer(), None).await.status(), StatusCode::OK);
+        assert_eq!(call(&app, Method::GET, &format!("/api/nodes/{}/children", admin.root_id), &bearer(), None).await.status(), StatusCode::OK);
+        // Scripts send no Origin; a token request that does isn't a cross-site forgery either
+        let mut with_origin = bearer();
+        with_origin.push((header::ORIGIN, "https://elsewhere.example".into()));
+        let folder = serde_json::json!({ "parent_id": admin.root_id, "name": "From a script" });
+        assert_eq!(call(&app, Method::POST, "/api/folders", &with_origin, Some(folder)).await.status(), StatusCode::OK);
+
+        // The account, sign-in methods, sharing and administration need a browser session
+        for (method, uri, body) in [
+            (Method::GET, "/api/auth/sessions", None),
+            (Method::GET, "/api/auth/app-passwords", None),
+            (Method::POST, "/api/auth/app-passwords", Some(serde_json::json!({ "name": "x", "scope": "write" }))),
+            (Method::PUT, "/api/auth/password", Some(serde_json::json!({ "current": "a", "new": "abcdefgh" }))),
+            (Method::GET, "/api/auth/identities", None),
+            (Method::POST, "/api/auth/sso/google/link", Some(serde_json::json!({}))),
+            (Method::GET, "/api/shares", None),
+            (Method::GET, "/api/admin/users", None),
+            (Method::PATCH, "/api/admin/settings", Some(serde_json::json!({ "allow_user_drives": true }))),
+            (Method::POST, "/api/drives", Some(serde_json::json!({ "name": "Team" }))),
+        ] {
+            assert_eq!(call(&app, method, uri, &bearer(), body).await.status(), StatusCode::UNAUTHORIZED, "{uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn read_only_app_passwords_cant_change_files() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let app = router(env.st.clone());
+        let token = app_password(&env, &amy, "read").await;
+        let auth = vec![(header::AUTHORIZATION, format!("Basic {}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, format!("amy:{token}"))))];
+        assert_eq!(call(&app, Method::GET, &format!("/api/nodes/{}/children", amy.root_id), &auth, None).await.status(), StatusCode::OK);
+        let folder = serde_json::json!({ "parent_id": amy.root_id, "name": "Nope" });
+        assert_eq!(call(&app, Method::POST, "/api/folders", &auth, Some(folder)).await.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn sessions_still_need_the_same_origin() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let app = router(env.st.clone());
+        let token = app_password(&env, &amy, "write").await;
+        let (_, cookie) = env.sign_in(&amy, "Test").await;
+        // A cookie together with some token: the browser would add the cookie by itself, so the origin is checked
+        let headers = vec![(header::COOKIE, cookie), (header::AUTHORIZATION, format!("Bearer {token}")), (header::ORIGIN, "https://elsewhere.example".into())];
+        let folder = serde_json::json!({ "parent_id": amy.root_id, "name": "Forged" });
+        assert_eq!(call(&app, Method::POST, "/api/folders", &headers, Some(folder)).await.status(), StatusCode::FORBIDDEN);
     }
 
     #[test]
