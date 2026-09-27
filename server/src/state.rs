@@ -43,7 +43,7 @@ pub struct Inner {
     pub secret: Vec<u8>,
     pub secure_cookie: bool,
     /// Trust X-Forwarded-For sent by a reverse proxy
-    pub trust_proxy: bool,
+    pub trust_proxy: crate::auth::TrustProxy,
     pub max_upload: u64,
     /// SQLite allows only one writer; every write transaction takes this lock first, to avoid SQLITE_BUSY when a deferred transaction is upgraded.
     pub write_lock: tokio::sync::Mutex<()>,

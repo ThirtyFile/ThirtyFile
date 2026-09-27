@@ -279,7 +279,7 @@ pub fn base_url(st: &AppState, headers: &HeaderMap) -> String {
     let forwarded = headers
         .get("x-forwarded-proto")
         .and_then(|v| v.to_str().ok())
-        .filter(|_| st.trust_proxy)
+        .filter(|_| st.trust_proxy.enabled())
         .and_then(|v| v.rsplit(',').next())
         .map(str::trim)
         .filter(|v| matches!(*v, "http" | "https"));

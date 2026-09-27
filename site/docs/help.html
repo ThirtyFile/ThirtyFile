@@ -28,8 +28,9 @@
         <p><code>THIRTYFILE_SECURE_COOKIE</code> is <code>true</code>, but the site is opened with <code>http://</code>. Open it with <code>https://</code>, or set it to <code>false</code> if you don't use HTTPS.</p>
 
         <h2 id="locked">Everyone gets "too many failed attempts"</h2>
-        <p>Behind a reverse proxy, <code>THIRTYFILE_TRUST_PROXY</code> must be <code>true</code>, and the proxy must pass on the visitor's address as in the <a href="internet.html">examples</a>. Otherwise everyone counts as one visitor.</p>
+        <p>Behind a reverse proxy, <code>THIRTYFILE_TRUST_PROXY</code> must be <code>true</code> (or list the proxy's address when it runs on another computer), and the proxy must pass on the visitor's address as in the <a href="internet.html">examples</a>. Otherwise everyone counts as one visitor.</p>
         <p>The block lifts by itself after 15 minutes.</p>
+        <p>After many wrong passwords for one account, from any address, each further attempt for that account has to wait a little longer, up to a minute. The account itself is never locked.</p>
 
         <h2 id="upload">Large uploads fail</h2>
         <p>Error 413 comes from the reverse proxy. Raise its upload size limit to at least 64 MB, as in the <a href="internet.html#nginx">nginx example</a>.</p>

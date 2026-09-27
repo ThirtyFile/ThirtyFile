@@ -14,6 +14,8 @@ export default {
   "Password must be at least 6 characters": "密碼至少需要 6 個字元",
   "Administrator permission required": "需要管理員權限",
   "Too many failed sign-in attempts. Try again in 15 minutes.": "登入失敗次數過多，請 15 分鐘後再試",
+  "Too many failed sign-in attempts for this account. Try again in {n} seconds.": "此帳號登入失敗次數過多，請 {n} 秒後再試",
+  "Too many failed attempts. Try again in 15 minutes.": "失敗次數過多，請 15 分鐘後再試",
   "Incorrect username or password": "帳號或密碼錯誤",
   "Current password is incorrect": "目前的密碼不正確",
   "Invalid role": "角色無效",

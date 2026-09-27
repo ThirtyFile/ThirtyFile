@@ -22,6 +22,10 @@ const FAIL_WINDOW: i64 = 15 * 60;
 const FAIL_LIMIT: usize = 5;
 /// Limit on total failures from one IP within the time window (blocks attempts against many usernames)
 const IP_FAIL_LIMIT: usize = 30;
+/// Failures against one account (from any address) before each further attempt has to wait
+const ACCOUNT_FREE_FAILURES: usize = 10;
+/// The longest wait between attempts against one account; the account itself is never locked
+const ACCOUNT_MAX_DELAY: i64 = 60;
 
 pub async fn hash_password(password: String) -> AppResult<String> {
     tokio::task::spawn_blocking(move || {
@@ -188,6 +192,26 @@ pub fn begin_attempt(st: &AppState, key: &str, limit: usize) -> bool {
     true
 }
 
+/// Counts an attempt against one account from any address. After `ACCOUNT_FREE_FAILURES` failures within the window,
+/// each attempt must wait twice as long after the previous one as the one before (up to `ACCOUNT_MAX_DELAY`), which
+/// slows down guessing from many addresses without letting anyone lock the real user out. Returns the seconds to wait.
+pub fn begin_account_attempt(st: &AppState, key: &str) -> Result<(), i64> {
+    let mut map = st.login_failures.lock().unwrap();
+    let ts = now();
+    let list = map.entry(key.to_string()).or_default();
+    list.retain(|t| *t > ts - FAIL_WINDOW);
+    if list.len() >= ACCOUNT_FREE_FAILURES {
+        let extra = (list.len() - ACCOUNT_FREE_FAILURES).min(6) as u32;
+        let delay = (1i64 << extra).min(ACCOUNT_MAX_DELAY);
+        let since = ts - list.last().copied().unwrap_or(0);
+        if since < delay {
+            return Err(delay - since);
+        }
+    }
+    list.push(ts);
+    Ok(())
+}
+
 /// Removes the attempt recorded by `begin_attempt` (the password was right)
 pub fn attempt_succeeded(st: &AppState, key: &str) {
     let mut map = st.login_failures.lock().unwrap();
@@ -208,17 +232,96 @@ pub fn prune_login_failures(st: &AppState) {
     });
 }
 
-/// The user's IP: the TCP connection address by default; behind a reverse proxy, the **last** address in X-Forwarded-For.
+/// Which reverse proxies may tell us the visitor's address (`THIRTYFILE_TRUST_PROXY`)
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum TrustProxy {
+    /// X-Forwarded-For is ignored
+    #[default]
+    Off,
+    /// `true`: proxies connecting from a private or loopback address (the same host or Docker network)
+    Private,
+    /// A list of addresses or networks (`203.0.113.7, 10.1.0.0/16`)
+    Listed(Vec<(std::net::IpAddr, u8)>),
+}
+
+impl TrustProxy {
+    pub fn parse(value: &str) -> Result<TrustProxy, String> {
+        let v = value.trim().to_ascii_lowercase();
+        match v.as_str() {
+            "" | "false" | "0" | "no" | "off" => return Ok(TrustProxy::Off),
+            "true" | "1" | "yes" | "on" => return Ok(TrustProxy::Private),
+            _ => {}
+        }
+        let invalid = |part: &str| format!("not true, false, or a list of addresses and networks: {part:?}");
+        let mut list = Vec::new();
+        for part in v.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+            let (ip, bits) = part.split_once('/').unwrap_or((part, ""));
+            let ip: std::net::IpAddr = ip.parse().map_err(|_| invalid(part))?;
+            let max = if ip.is_ipv4() { 32 } else { 128 };
+            let bits = if bits.is_empty() { max } else { bits.parse::<u8>().ok().filter(|b| *b <= max).ok_or_else(|| invalid(part))? };
+            list.push((ip.to_canonical(), bits));
+        }
+        Ok(TrustProxy::Listed(list))
+    }
+
+    pub fn enabled(&self) -> bool {
+        *self != TrustProxy::Off
+    }
+
+    /// Whether a connection from `peer` may set the visitor's address
+    pub fn trusts(&self, peer: std::net::IpAddr) -> bool {
+        let peer = peer.to_canonical();
+        match self {
+            TrustProxy::Off => false,
+            TrustProxy::Private => match peer {
+                std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+                std::net::IpAddr::V6(v6) => v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local(),
+            },
+            TrustProxy::Listed(list) => list.iter().any(|(net, bits)| in_network(peer, *net, *bits)),
+        }
+    }
+}
+
+fn in_network(ip: std::net::IpAddr, net: std::net::IpAddr, bits: u8) -> bool {
+    let mask = |len: u32, bits: u8| if bits == 0 { 0u128 } else { u128::MAX << (len - bits as u32) };
+    match (ip, net) {
+        (std::net::IpAddr::V4(a), std::net::IpAddr::V4(b)) => {
+            let m = mask(32, bits) as u32;
+            u32::from(a) & m == u32::from(b) & m
+        }
+        (std::net::IpAddr::V6(a), std::net::IpAddr::V6(b)) => {
+            let m = mask(128, bits);
+            u128::from(a) & m == u128::from(b) & m
+        }
+        _ => false,
+    }
+}
+
+/// The user's IP: the TCP connection address by default; when the connection comes from a trusted reverse proxy, the
+/// **last** address in X-Forwarded-For.
 ///
 /// The last one is the connection address the reverse proxy itself saw; earlier addresses may be client-supplied (nginx's
 /// `$proxy_add_x_forwarded_for` appends to the value the client sent), so they can't be used for sign-in rate limiting.
+/// Connections from anywhere else can't set it, so publishing the port directly doesn't let visitors choose their address.
 pub fn client_ip(st: &AppState, addr: std::net::SocketAddr, headers: &HeaderMap) -> String {
-    if st.trust_proxy
+    if st.trust_proxy.trusts(addr.ip())
         && let Some(ip) = forwarded_ip(headers)
     {
         return ip;
     }
-    addr.ip().to_string()
+    addr.ip().to_canonical().to_string()
+}
+
+/// The part of an address used for rate limits: IPv6 addresses count per /64, the block a single connection usually gets
+pub fn limit_key_ip(ip: &str) -> String {
+    match ip.parse::<std::net::IpAddr>().map(|a| a.to_canonical()) {
+        Ok(std::net::IpAddr::V6(v6)) => {
+            let prefix = std::net::Ipv6Addr::from(u128::from(v6) & (u128::MAX << 64));
+            format!("{prefix}/64")
+        }
+        Ok(v4) => v4.to_string(),
+        Err(_) => ip.to_string(),
+    }
 }
 
 fn forwarded_ip(headers: &HeaderMap) -> Option<String> {
@@ -241,8 +344,10 @@ pub async fn login(
 ) -> AppResult<impl IntoResponse> {
     let ip = client_ip(&st, addr, &headers);
     let username = req.username.trim();
-    let key = format!("u:{}|{ip}", username.to_lowercase());
-    let ip_key = format!("ip:{ip}");
+    let limit_ip = limit_key_ip(&ip);
+    let key = format!("u:{}|{limit_ip}", username.to_lowercase());
+    let ip_key = format!("ip:{limit_ip}");
+    let account_key = format!("a:{}", username.to_lowercase());
     // Attempts during the lockout aren't logged individually (one "locked" entry was logged when the lockout began), so the log can't be flooded
     let too_many = AppError::new(axum::http::StatusCode::TOO_MANY_REQUESTS, "Too many failed sign-in attempts. Try again in 15 minutes.");
     if !begin_attempt(&st, &key, FAIL_LIMIT) {
@@ -251,6 +356,14 @@ pub async fn login(
     if !begin_attempt(&st, &ip_key, IP_FAIL_LIMIT) {
         attempt_succeeded(&st, &key);
         return Err(too_many);
+    }
+    if let Err(wait) = begin_account_attempt(&st, &account_key) {
+        attempt_succeeded(&st, &key);
+        attempt_succeeded(&st, &ip_key);
+        return Err(AppError::new(
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            format!("Too many failed sign-in attempts for this account. Try again in {wait} seconds."),
+        ));
     }
     let row: Option<(i64, String, bool)> = sqlx::query_as("SELECT id, password_hash, disabled FROM users WHERE username = ?")
         .bind(username)
@@ -281,7 +394,11 @@ pub async fn login(
         // The response doesn't distinguish the reason, to avoid revealing whether the username exists
         return Err(AppError::new(axum::http::StatusCode::UNAUTHORIZED, "Incorrect username or password"));
     }
-    st.login_failures.lock().unwrap().remove(&key);
+    {
+        let mut map = st.login_failures.lock().unwrap();
+        map.remove(&key);
+        map.remove(&account_key);
+    }
     attempt_succeeded(&st, &ip_key);
 
     let cookie = open_session(&st, id).await?;
@@ -352,11 +469,17 @@ pub async fn change_password(
     Json(req): Json<ChangePasswordReq>,
 ) -> AppResult<Json<serde_json::Value>> {
     validate_password(&req.new)?;
+    // Limited like signing in, so a session in the wrong hands can't be used to guess the password itself
+    let key = format!("pw:{}", user.id);
+    if !begin_attempt(&st, &key, FAIL_LIMIT) {
+        return Err(AppError::new(axum::http::StatusCode::TOO_MANY_REQUESTS, "Too many failed attempts. Try again in 15 minutes."));
+    }
     let (hash,): (String,) =
         sqlx::query_as("SELECT password_hash FROM users WHERE id = ?").bind(user.id).fetch_one(&st.db).await?;
     if !verify_password(req.current, hash).await? {
         return Err(AppError::bad_request("Current password is incorrect"));
     }
+    st.login_failures.lock().unwrap().remove(&key);
     let new_hash = hash_password(req.new).await?;
     let current_token = get_cookie(&headers, SESSION_COOKIE).map(|t| sha256_hex(t.as_bytes())).unwrap_or_default();
     let _w = st.write_lock.lock().await;
@@ -387,12 +510,91 @@ mod tests {
         h.insert("x-forwarded-for", "198.51.100.7".parse().unwrap());
         assert_eq!(forwarded_ip(&h).as_deref(), Some("198.51.100.7"));
     }
+
+    #[test]
+    fn only_trusted_proxies_may_set_the_visitor_address() {
+        let ip = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
+        for off in ["false", "", "0", "No"] {
+            assert_eq!(TrustProxy::parse(off), Ok(TrustProxy::Off));
+        }
+        let private = TrustProxy::parse("TRUE").unwrap();
+        assert_eq!(private, TrustProxy::Private);
+        // The same host, a Docker network or a LAN proxy; not a visitor connecting straight to the published port
+        for peer in ["127.0.0.1", "172.17.0.1", "10.0.0.5", "192.168.1.2", "::1", "fd00::1", "::ffff:172.18.0.3"] {
+            assert!(private.trusts(ip(peer)), "{peer}");
+        }
+        for peer in ["203.0.113.9", "8.8.8.8", "2001:db8::1", "::ffff:203.0.113.9"] {
+            assert!(!private.trusts(ip(peer)), "{peer}");
+        }
+        let listed = TrustProxy::parse("203.0.113.7, 198.51.100.0/24, 2001:db8::/32").unwrap();
+        assert!(listed.trusts(ip("203.0.113.7")) && listed.trusts(ip("198.51.100.200")) && listed.trusts(ip("2001:db8:1::5")));
+        assert!(!listed.trusts(ip("203.0.113.8")) && !listed.trusts(ip("10.0.0.1")));
+        assert!(TrustProxy::parse("proxy.example.com").is_err());
+        assert!(TrustProxy::parse("10.0.0.0/33").is_err());
+        assert!(!TrustProxy::Off.trusts(ip("127.0.0.1")));
+    }
+
+    #[test]
+    fn ipv6_addresses_share_one_limit_per_64_block() {
+        assert_eq!(limit_key_ip("2001:db8:1:2:aaaa::1"), limit_key_ip("2001:db8:1:2:bbbb::9"));
+        assert_ne!(limit_key_ip("2001:db8:1:2::1"), limit_key_ip("2001:db8:1:3::1"));
+        assert_eq!(limit_key_ip("203.0.113.9"), "203.0.113.9");
+        assert_eq!(limit_key_ip("::ffff:203.0.113.9"), "203.0.113.9");
+    }
 }
 
 #[cfg(test)]
 mod attempt_tests {
     use super::*;
     use crate::testutil;
+
+    #[tokio::test]
+    async fn guessing_one_account_from_many_addresses_slows_down() {
+        let env = testutil::env().await;
+        env.user("amy", true).await;
+        let wrong = |i: u32| {
+            let st = env.st.clone();
+            async move {
+                // A different address every time, so only the per-account limit applies
+                let addr: std::net::SocketAddr = format!("203.0.{}.{}:5000", i / 250, i % 250 + 1).parse().unwrap();
+                let req = LoginReq { username: "Amy".into(), password: format!("wrong-{i}") };
+                login(State(st), ConnectInfo(addr), HeaderMap::new(), Json(req)).await.map(|_| ()).unwrap_err().status
+            }
+        };
+        for i in 0..ACCOUNT_FREE_FAILURES as u32 {
+            assert_eq!(wrong(i).await, axum::http::StatusCode::UNAUTHORIZED);
+        }
+        // Every address counted against the one account; the next attempt right away has to wait (hashing may be slow
+        // on a busy test machine, so the last failure is dated now rather than relying on timing)
+        {
+            let mut map = env.st.login_failures.lock().unwrap();
+            let list = map.get_mut("a:amy").unwrap();
+            assert_eq!(list.len(), ACCOUNT_FREE_FAILURES);
+            *list.last_mut().unwrap() = now();
+        }
+        assert_eq!(wrong(100).await, axum::http::StatusCode::TOO_MANY_REQUESTS);
+        // After the wait, the right password works and the count starts over
+        env.st.login_failures.lock().unwrap().get_mut("a:amy").unwrap().iter_mut().for_each(|t| *t -= ACCOUNT_MAX_DELAY);
+        let addr: std::net::SocketAddr = "198.51.100.1:5000".parse().unwrap();
+        let req = LoginReq { username: "amy".into(), password: "password-1234".into() };
+        assert!(login(State(env.st.clone()), ConnectInfo(addr), HeaderMap::new(), Json(req)).await.is_ok());
+        assert!(!env.st.login_failures.lock().unwrap().contains_key("a:amy"));
+    }
+
+    #[tokio::test]
+    async fn changing_the_password_is_limited_like_signing_in() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let addr: std::net::SocketAddr = "10.0.0.1:5000".parse().unwrap();
+        let change = |current: &str| {
+            let req = ChangePasswordReq { current: current.into(), new: "new-password-1".into() };
+            change_password(State(env.st.clone()), ConnectInfo(addr), HeaderMap::new(), amy.clone(), Json(req))
+        };
+        for _ in 0..FAIL_LIMIT {
+            assert_eq!(change("wrong").await.unwrap_err().status, axum::http::StatusCode::BAD_REQUEST);
+        }
+        assert_eq!(change("password-1234").await.unwrap_err().status, axum::http::StatusCode::TOO_MANY_REQUESTS);
+    }
 
     #[tokio::test]
     async fn parallel_wrong_passwords_are_counted_before_hashing() {
