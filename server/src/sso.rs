@@ -1153,7 +1153,7 @@ mod tests {
             let c = s.provider_mut(p).unwrap();
             c.enabled = true;
             c.client_id = format!("{p}-client");
-            c.client_secret = "secret".into();
+            c.client_secret = crate::testutil::password().into();
         }
         f(&mut s);
         *env.st.sso.write().unwrap() = s;

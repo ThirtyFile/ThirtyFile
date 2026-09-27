@@ -159,7 +159,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
             .bind(username)
             .execute(&db)
             .await?;
-        println!("Password reset for {username}");
+        println!("Password reset");
         return Ok(());
     }
 

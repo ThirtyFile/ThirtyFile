@@ -38,7 +38,7 @@ pub async fn env() -> TestEnv {
         std::fs::create_dir_all(dir.join(d)).unwrap();
     }
     let db = db::connect(&dir.join("drive.db"), 16).await.unwrap();
-    db::bootstrap_admin(&db, Some("admin-test-password")).await.unwrap();
+    db::bootstrap_admin(&db, Some(password())).await.unwrap();
     let system = db::load_system_settings(&db).await.unwrap();
     let mut storages: HashMap<String, Arc<dyn Storage>> = HashMap::new();
     storages.insert("local".into(), Arc::new(LocalStorage::new(dir.join("blobs")).unwrap()));

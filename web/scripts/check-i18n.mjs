@@ -28,11 +28,21 @@ function walk(dir, ext, out = []) {
 }
 
 const STR = String.raw`"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'`;
-/** A string literal's value: "…", '…' or a template literal without ${} */
+const ESCAPES = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", v: "\v", 0: "\0" };
+/**
+ * A string literal's value: "…", '…' or a template literal without ${}. JavaScript escapes are decoded directly
+ * (JSON doesn't accept \x41, \0, \' or line continuations).
+ */
 function literal(raw) {
   if (raw.startsWith("`")) return raw.slice(1, -1);
-  if (raw.startsWith("'")) return JSON.parse(`"${raw.slice(1, -1).replace(/\\'/g, "'").replace(/"/g, '\\"')}"`);
-  return JSON.parse(raw);
+  return raw
+    .slice(1, -1)
+    .replace(/\\(?:x([0-9a-fA-F]{2})|u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|(\r\n|[\s\S]))/g, (_, x, cp, u, c) => {
+      if (x || u) return String.fromCharCode(parseInt(x ?? u, 16));
+      if (cp) return String.fromCodePoint(parseInt(cp, 16));
+      if (c === "\n" || c === "\r\n" || c === "\u2028" || c === "\u2029") return "";
+      return ESCAPES[c] ?? c;
+    });
 }
 
 // Dictionaries: each file is `export default { "English": "<Traditional Chinese>", ... }`
