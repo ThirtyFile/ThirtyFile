@@ -131,6 +131,7 @@ export function Explorer(p: ExplorerProps) {
       activeFolder={p.folderId}
       footer={footer}
       footerRight={footerRight}
+      keys
     >
       {p.notice}
       <div className="relative flex min-h-0 flex-1">
@@ -175,6 +176,7 @@ export function Explorer(p: ExplorerProps) {
                 showCheckboxes={showCheckboxes}
                 dimmed={dimmed}
                 measureRef={measure}
+                navRef={s.listNav}
                 onDropInto={caps.write && p.folderId ? dropInto : undefined}
                 onUploadInto={s.canUpload ? uploadInto : undefined}
                 renamingId={dialog?.t === "rename" ? dialog.node.id : null}

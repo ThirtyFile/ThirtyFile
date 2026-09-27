@@ -1,4 +1,4 @@
-/** File explorer actions: open, download, favorite, cut / copy / paste, new folder / text file, keyboard shortcuts and drag-and-drop upload */
+/** File explorer actions: open, download, favorite, cut / copy / paste, new folder / text file, delete for good, keyboard shortcuts and drag-and-drop upload */
 import { useEffect, type DragEvent } from "react";
 import type { InfiniteData } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -7,7 +7,8 @@ import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
 import { allItems } from "@/lib/pages";
 import { invalidateFiles } from "@/lib/queries";
-import { moveBack, originsOf, toastWithUndo } from "@/lib/undo";
+import { moveBack, originsOf, toastWithUndo, undoLast } from "@/lib/undo";
+import { confirm } from "@/components/confirm";
 import { carriesFiles, dropFiles, dropItems } from "@/lib/dnd";
 import { enqueue, filesFromDrop } from "@/uploads";
 import { type Item, isTyping } from "./types";
@@ -126,7 +127,28 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     }
   };
 
-  // Keyboard shortcuts
+  /** Shift+Delete: delete for good without going through the trash, after asking */
+  const deleteForever = async (ids: string[]) => {
+    const ok = await confirm({
+      title: t("Permanently delete {n} item?|Permanently delete {n} items?", { n: ids.length }),
+      description: t("Permanently deleted items can't be recovered."),
+      confirmText: t("Delete permanently"),
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      // Only items in the trash can be deleted for good: put them there first
+      await api.trash(ids);
+      await api.deleteForever(ids);
+      toast.success(t("Permanently deleted"));
+      setSelected(new Set());
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("Operation failed"));
+    }
+    refresh();
+  };
+
+  // Keyboard shortcuts (moving around, search and refresh are the address bar's: see Frame)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (dialog || isTyping(e.target) || document.querySelector("[role=dialog]")) return;
@@ -144,6 +166,13 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         setSelected(new Set(p.items.map((n) => n.id)));
       } else if (e.altKey && e.key === "Enter") {
         setDetailsOpen(true);
+      } else if (mod && !e.shiftKey && key === "z") {
+        // Ctrl+Z: take back the last move, rename or delete
+        e.preventDefault();
+        undoLast();
+      } else if (e.key === "Delete" && e.shiftKey && selectedNodes.length && caps.del) {
+        e.preventDefault();
+        void deleteForever(selectedIds);
       } else if (e.key === "Delete" && selectedNodes.length && caps.del) {
         setDialog({ t: "trash", ids: selectedIds });
       } else if (mod && e.shiftKey && key === "n" && canCreate) {
@@ -157,8 +186,10 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         open(single);
       } else if (e.key === "Escape") {
         setSelected(new Set());
-      } else if (e.key === "Backspace" && p.upTo) {
-        navigate(p.upTo);
+      } else if (e.key.length === 1 && e.key !== " " && e.key !== "?" && !mod && !e.altKey) {
+        // Typing letters goes to the next item whose name starts with them
+        e.preventDefault();
+        s.listNav.current?.typeAhead(e.key);
       }
     };
     window.addEventListener("keydown", onKey);

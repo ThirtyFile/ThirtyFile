@@ -7,6 +7,7 @@ import {
   EllipsisIcon,
   FolderInputIcon,
   Grid2X2Icon,
+  KeyboardIcon,
   LayoutListIcon,
   ListIcon,
   PanelRightIcon,
@@ -25,6 +26,8 @@ import type { SortKey } from "@/api";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ToolButton, ToolSeparator } from "@/components/Frame";
+import { openShortcuts } from "@/components/ShortcutsDialog";
+import { shortcut } from "@/lib/keys";
 import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
 import type { ExplorerActions } from "./actions";
@@ -69,9 +72,9 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
         <DropdownMenuContent className="w-56">{newItems}</DropdownMenuContent>
       </DropdownMenu>
       <ToolSeparator />
-      <ToolButton icon={ScissorsIcon} label={t("Cut")} title={`${t("Cut")} (Ctrl+X)`} className={icon} disabled={none || !caps.write} onClick={cut} />
-      <ToolButton icon={CopyIcon} label={t("Copy")} title={`${t("Copy")} (Ctrl+C)`} className={icon} disabled={none} onClick={copy} />
-      <ToolButton icon={ClipboardPasteIcon} label={t("Paste")} title={`${t("Paste")} (Ctrl+V)`} className={icon} disabled={!canPaste} onClick={paste} />
+      <ToolButton icon={ScissorsIcon} label={t("Cut")} title={`${t("Cut")} (${shortcut("Ctrl+X")})`} className={icon} disabled={none || !caps.write} onClick={cut} />
+      <ToolButton icon={CopyIcon} label={t("Copy")} title={`${t("Copy")} (${shortcut("Ctrl+C")})`} className={icon} disabled={none} onClick={copy} />
+      <ToolButton icon={ClipboardPasteIcon} label={t("Paste")} title={`${t("Paste")} (${shortcut("Ctrl+V")})`} className={icon} disabled={!canPaste} onClick={paste} />
       <ToolButton
         icon={PencilIcon}
         label={t("Rename")}
@@ -169,6 +172,10 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
           </DropdownMenuItem>
           <DropdownMenuItem disabled={none} onClick={() => setSelected(new Set(p.items.filter((n) => !selected.has(n.id)).map((n) => n.id)))}>
             <SquareCheckIcon /> {t("Invert selection")}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={openShortcuts}>
+            <KeyboardIcon /> {t("Keyboard shortcuts")} <Kbd>?</Kbd>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

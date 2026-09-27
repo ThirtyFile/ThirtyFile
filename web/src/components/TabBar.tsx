@@ -170,7 +170,7 @@ export function TabBar() {
   const { open, activate } = useTabActions();
   // Keyboard: Tab reaches the active tab, Left/Right (Home/End) switch to the others
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    if ((e.target as HTMLElement).getAttribute("role") !== "tab") return;
+    if ((e.target as HTMLElement).getAttribute("role") !== "tab" || e.altKey) return;
     const i = tabs.findIndex((t) => t.id === active);
     let next: number | null = null;
     if (e.key === "ArrowRight") next = (i + 1) % tabs.length;

@@ -55,8 +55,11 @@ import { TwoFactorDialog } from "@/components/TwoFactor";
 import { NavMenu } from "@/components/NavMenu";
 import { Resizer } from "@/components/Resizer";
 import { FolderTree } from "@/components/FolderTree";
+import { ShortcutsHost, openShortcuts } from "@/components/ShortcutsDialog";
+import { isTyping } from "@/components/explorer/types";
 import { folderOfPath, useFolderDrop } from "@/lib/dnd";
 import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
+import { shortcut } from "@/lib/keys";
 import { usePersisted, useMe } from "@/lib/session";
 import { useTheme, type ThemeMode } from "@/lib/theme";
 import { useBranding } from "@/lib/branding";
@@ -285,7 +288,17 @@ export interface Crumb {
   virtual?: boolean;
 }
 
-function SearchInput({ placeholder, onSearch, within }: { placeholder: string; onSearch?: (q: string) => void; within?: string }) {
+function SearchInput({
+  placeholder,
+  onSearch,
+  within,
+  inputRef,
+}: {
+  placeholder: string;
+  onSearch?: (q: string) => void;
+  within?: string;
+  inputRef?: React.Ref<HTMLInputElement>;
+}) {
   const navigate = useNavigate();
   const location = useLocation();
   const [params] = useSearchParams();
@@ -320,6 +333,7 @@ function SearchInput({ placeholder, onSearch, within }: { placeholder: string; o
     <div className="relative max-sm:w-full">
       <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-[13px] -translate-y-1/2 text-muted-foreground" />
       <Input
+        ref={inputRef}
         value={q}
         onChange={(e) => change(e.target.value)}
         onKeyDown={(e) => {
@@ -371,6 +385,7 @@ function AddressBar({
   onSearch,
   searchIn,
   icon: Icon,
+  keys,
 }: {
   crumbs: Crumb[];
   path: string;
@@ -380,6 +395,7 @@ function AddressBar({
   /** Folder the search box searches in (and below); none = everything */
   searchIn?: string;
   icon: LucideIcon;
+  keys?: boolean;
 }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -391,15 +407,52 @@ function AddressBar({
   const [refreshing, setRefreshing] = useState(false);
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    await qc.invalidateQueries();
+    setRefreshing(false);
+  };
+
+  // Moving around with the keyboard, like File Explorer (see the shortcuts dialog)
+  useEffect(() => {
+    if (!keys) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const mod = e.ctrlKey || e.metaKey;
+      // F5 refreshes the list rather than reloading the page, also while typing in a box
+      if (e.key === "F5" && !mod && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        void refresh();
+        return;
+      }
+      if (isTyping(e.target) || document.querySelector("[role=dialog]") || (e.target as HTMLElement | null)?.closest?.("[role=menu], [role=menuitem]")) return;
+      const alt = e.altKey && !mod;
+      if (alt && e.key === "ArrowUp") {
+        if (upTo) navigate(upTo);
+      } else if ((alt && e.key === "ArrowLeft") || (e.key === "Backspace" && !mod && !e.altKey)) back();
+      else if (alt && e.key === "ArrowRight") forward();
+      else if ((mod && !e.altKey && e.key.toLowerCase() === "f") || (e.key === "F3" && !mod && !e.altKey)) {
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      } else if ((mod && !e.altKey && e.key.toLowerCase() === "l") || (alt && e.code === "KeyD")) setEditing(true);
+      else if (e.key === "?" && !mod && !e.altKey) openShortcuts();
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   const nav = "size-8 rounded-md [&_svg]:size-[18px]";
 
   return (
     <div className="flex shrink-0 items-center gap-1 px-2 py-1.5 max-sm:flex-wrap">
-      <Button variant="ghost" size="icon" className={nav} aria-label={t("Back")} title={t("Back")} disabled={!canBack} onClick={back}>
+      <Button variant="ghost" size="icon" className={nav} aria-label={t("Back")} title={`${t("Back")} (${shortcut("Alt+←")})`} disabled={!canBack} onClick={back}>
         <ArrowLeftIcon />
       </Button>
-      <Button variant="ghost" size="icon" className={nav} aria-label={t("Forward")} title={t("Forward")} disabled={!canForward} onClick={forward}>
+      <Button variant="ghost" size="icon" className={nav} aria-label={t("Forward")} title={`${t("Forward")} (${shortcut("Alt+→")})`} disabled={!canForward} onClick={forward}>
         <ArrowRightIcon />
       </Button>
       <Button
@@ -407,7 +460,7 @@ function AddressBar({
         size="icon"
         className={nav}
         aria-label={t("Up")}
-        title={t("Up to parent folder")}
+        title={`${t("Up to parent folder")} (${shortcut("Alt+↑")})`}
         disabled={!upTo}
         onClick={() => upTo && navigate(upTo)}
       >
@@ -418,12 +471,8 @@ function AddressBar({
         size="icon"
         className={cn(nav, "mr-1")}
         aria-label={t("Refresh")}
-        title={t("Refresh")}
-        onClick={async () => {
-          setRefreshing(true);
-          await qc.invalidateQueries();
-          setRefreshing(false);
-        }}
+        title={`${t("Refresh")} (F5)`}
+        onClick={refresh}
       >
         <RefreshCwIcon className={cn(refreshing && "animate-spin")} />
       </Button>
@@ -472,7 +521,7 @@ function AddressBar({
           {copied ? <CheckIcon /> : <CopyIcon />}
         </Button>
       </div>
-      <SearchInput placeholder={searchPlaceholder} onSearch={onSearch} within={searchIn} />
+      <SearchInput placeholder={searchPlaceholder} onSearch={onSearch} within={searchIn} inputRef={searchRef} />
     </div>
   );
 }
@@ -495,6 +544,8 @@ export interface FrameProps {
   footer?: ReactNode;
   /** Right side of the status bar (e.g. view switcher) */
   footerRight?: ReactNode;
+  /** File explorer keys: Alt+arrows and Backspace to move around, Ctrl+F, Ctrl+L, F5, "?" for the list of shortcuts */
+  keys?: boolean;
   children: ReactNode;
 }
 
@@ -520,6 +571,7 @@ export function Frame(p: FrameProps) {
         searchPlaceholder={p.searchPlaceholder ?? (p.activeFolder ? t("Search {name}", { name: title }) : t("Search all spaces"))}
         onSearch={p.onSearch}
         searchIn={p.activeFolder}
+        keys={p.keys}
       />
       <div className="flex min-h-12 shrink-0 flex-wrap items-center gap-1 border-y px-3 py-1.5 max-lg:px-2">
         <ToolButton icon={PanelLeftIcon} label={t("Location")} showLabel className="md:hidden" aria-expanded={navOpen} onClick={() => setNavOpen(!navOpen)} />
@@ -541,6 +593,7 @@ export function Frame(p: FrameProps) {
         </span>
         {p.footerRight}
       </footer>
+      {p.keys && <ShortcutsHost />}
     </section>
   );
 }

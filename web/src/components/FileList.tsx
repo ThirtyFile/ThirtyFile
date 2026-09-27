@@ -23,9 +23,15 @@ import { cn, formatWinDate, formatWinSize } from "@/lib/utils";
 import { InlineRename } from "@/components/InlineRename";
 import { carriesFiles, carriesItems, dropEffect, droppedIds, startDrag } from "@/lib/dnd";
 import { t, tc } from "@/lib/i18n";
-import { wantsCopy } from "@/lib/keys";
+import { findByPrefix, wantsCopy } from "@/lib/keys";
 
 export type ViewMode = "list" | "grid";
+
+/** What the explorer's keyboard handling asks of the list */
+export interface ListNav {
+  /** A letter typed: go to the next item whose name starts with the letters typed in the last second */
+  typeAhead(key: string): void;
+}
 
 type Item = Node & { location?: string };
 
@@ -63,6 +69,8 @@ export interface FileListProps {
   label?: string;
   /** Receives the list's geometry for marquee selection (useMarquee's `measure`): only the rows in view are rendered */
   measureRef?: RefObject<MeasureHits | null>;
+  /** Receives the list's keyboard helpers */
+  navRef?: RefObject<ListNav | null>;
 }
 
 const coarse = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
@@ -444,6 +452,8 @@ export function FileList(p: FileListProps) {
       p.onOpen(p.items[index]);
       return;
     }
+    // Alt+arrows move around folders (handled by the address bar)
+    if (e.altKey) return;
     let next: number | null = null;
     if (e.key === "ArrowDown") next = Math.min(n - 1, index + cols);
     else if (e.key === "ArrowUp") next = Math.max(0, index - cols);
@@ -465,6 +475,27 @@ export function FileList(p: FileListProps) {
     else p.onSelect(new Set([item.id]), item.id);
     focusItem(next);
   };
+
+  /** Letters typed to find an item, and when the last one was typed */
+  const typed = useRef({ text: "", at: 0 });
+  const typeAhead = (key: string) => {
+    const now = Date.now();
+    const text = (now - typed.current.at < 1000 ? typed.current.text : "") + key.toLocaleLowerCase();
+    typed.current = { text, at: now };
+    const current = focusId ?? p.anchor;
+    const at = current === null ? -1 : (indexOf.get(current) ?? -1);
+    // The same letter again moves on to the next item starting with it; more letters narrow down from the current item
+    const same = [...text].every((c) => c === text[0]);
+    const next = findByPrefix(
+      p.items.map((x) => x.name),
+      same ? text[0] : text,
+      same ? at : Math.max(at, 0) - 1,
+    );
+    if (next < 0) return;
+    p.onSelect(new Set([p.items[next].id]), p.items[next].id);
+    focusItem(next);
+  };
+  if (p.navRef) p.navRef.current = { typeAhead };
 
   const h = useRef<Handlers>(null!);
   h.current = {

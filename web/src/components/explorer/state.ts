@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
-import type { ViewMode } from "@/components/FileList";
+import type { ListNav, ViewMode } from "@/components/FileList";
 import { useClipboard } from "@/lib/clipboard";
 import { capsOf } from "@/lib/drives";
 import { usePersisted, useMe } from "@/lib/session";
@@ -27,6 +27,7 @@ export function useExplorerState(p: ExplorerProps) {
   const clip = useClipboard();
   const fileInput = useRef<HTMLInputElement>(null);
   const dirInput = useRef<HTMLInputElement>(null);
+  const listNav = useRef<ListNav>(null);
 
   // New folder and paste only touch the database; uploading and creating files need to write to the storage service, so they're disabled while offline
   const canCreate = !!p.folderId && caps.write;
@@ -51,6 +52,7 @@ export function useExplorerState(p: ExplorerProps) {
     clip,
     fileInput,
     dirInput,
+    listNav,
     canCreate,
     canUpload,
     selectedNodes,
