@@ -1,0 +1,40 @@
+# cargo deny check: known security problems, licences, and where crates come from. Runs in the Tests check.
+
+[advisories]
+# RustSec advisories, including crates marked unmaintained or unsound; yanked versions fail too
+yanked = "deny"
+ignore = [
+  # rsa (through russh, the SFTP client): not constant-time, no fixed version exists yet. ThirtyFile only uses it to
+  # sign in to an SFTP server with an RSA key the administrator configured; Ed25519 keys don't use it at all, and the
+  # storage guide recommends them. Remove this once rsa is fixed.
+  { id = "RUSTSEC-2023-0071", reason = "No fix available; only used for SFTP sign-in with an RSA key" },
+]
+
+[licenses]
+# Permissive licences only: ThirtyFile is Apache-2.0 and ships as one binary with its dependencies
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-1-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "MIT-0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

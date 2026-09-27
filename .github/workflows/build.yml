@@ -101,6 +101,14 @@ jobs:
           cargo test --locked
           cargo clippy --locked --all-targets -- -D warnings
 
+      # Known security problems in dependencies, their licences and where they come from (server/deny.toml)
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: server/Cargo.toml
+      - name: Frontend dependencies
+        working-directory: web
+        run: pnpm audit --prod
+
   image:
     name: Docker image
     timeout-minutes: 45
@@ -178,12 +186,19 @@ jobs:
           context: .
           platforms: ${{ inputs.release_version && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: ${{ !!inputs.release_version }}
+          # Pull requests keep the image to start it below
+          load: ${{ !inputs.release_version }}
           tags: ${{ steps.tags.outputs.list }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VERSION=${{ steps.tags.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Starts the image locked down (read-only, minimal capabilities) and upgrades the latest release to it
+      - name: Start the image
+        if: ${{ !inputs.release_version }}
+        run: bash .github/scripts/smoke-test.sh "$IMAGE:pr-${{ github.event.pull_request.number }}"
 
   # The one check the ruleset requires. Skipped jobs count as passed on GitHub, so when "Changes" itself fails, the
   # tests and the image are skipped and would let the pull request through; this job fails in that case.
