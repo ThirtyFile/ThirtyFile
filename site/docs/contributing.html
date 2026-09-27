@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en" data-root=".." data-page="contributing">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Contributing · ThirtyFile</title>
+    <meta name="description" content="How to report a problem, suggest an idea, or change the code of ThirtyFile." />
+    <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <link rel="stylesheet" href="../assets/site.css" />
+  </head>
+  <body>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="Guides"><noscript><a href="index.html">Install</a></noscript></nav>
+      <main class="article">
+        <h1>Contributing</h1>
+        <p class="lead">How to report a problem, suggest an idea, or change the code of ThirtyFile.</p>
+
+        <h2 id="issues">Problems and ideas</h2>
+        <ul>
+          <li><a href="https://github.com/ThirtyFile/ThirtyFile/issues/new/choose">Open an issue</a> and pick <strong>Report a problem</strong> or <strong>Suggest an idea</strong>. The form asks for what is needed to help you.</li>
+          <li>Look through the <a href="https://github.com/ThirtyFile/ThirtyFile/issues">existing issues</a> first. If yours is there, add to it instead of opening a new one.</li>
+        </ul>
+        <div class="note"><strong>Security problems are reported privately.</strong> Use <a href="https://github.com/ThirtyFile/ThirtyFile/security/advisories/new">Report a vulnerability</a>, not an issue, so the problem can be fixed before it is public.</div>
+
+        <h2 id="flow">Changing the code</h2>
+        <p>Nothing is pushed to <code>main</code> directly. Every change is a pull request from its own branch.</p>
+        <ol>
+          <li><strong>Start from an issue.</strong> For anything larger than a small fix, agree on the idea there first.</li>
+          <li><strong>Create a branch</strong> from <code>main</code>, named after what it does:
+            <div class="table-scroll">
+              <table>
+                <thead><tr><th>Branch</th><th>For</th></tr></thead>
+                <tbody>
+                  <tr><td><code>feat/share-link-editing</code></td><td>Something new</td></tr>
+                  <tr><td><code>fix/upload-resume</code></td><td>A repair</td></tr>
+                  <tr><td><code>docs/backup-guide</code></td><td>The website and guides</td></tr>
+                  <tr><td><code>chore/update-actions</code></td><td>Tools, builds and dependencies</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </li>
+          <li><strong>Make the change</strong>, and run the checks below.</li>
+          <li><strong>Open a pull request.</strong> Give it a title that says what changes in plain words, and one label. Write <code>Closes #123</code> in the description to close the issue when it is merged.</li>
+          <li><strong>Wait for the checks.</strong> The tests and the image build must pass before it can be merged.</li>
+          <li><strong>Merge.</strong> The pull request becomes one commit on <code>main</code>, and its branch is deleted.</li>
+        </ol>
+
+        <h2 id="checks">Checks</h2>
+        <p>Run these before opening a pull request. The same checks run on GitHub.</p>
+        <pre><code>cd server && cargo test && cargo clippy --all-targets
+cd ../web && pnpm typecheck && node scripts/check-i18n.mjs</code></pre>
+        <ul>
+          <li>Code, comments and guides are written in English.</li>
+          <li>Text in the interface is written in English in the code, with its Traditional Chinese translation in <code>web/src/lib/i18n/zh-TW/</code>.</li>
+          <li>When behaviour changes, update the guide that describes it, in <code>site/docs/</code>.</li>
+        </ul>
+        <p>A change that only touches the website or the guides skips the tests and the image build.</p>
+
+        <h2 id="labels">Labels</h2>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Label</th><th>In the release notes under</th></tr></thead>
+            <tbody>
+              <tr><td><code>enhancement</code></td><td>New</td></tr>
+              <tr><td><code>bug</code></td><td>Fixed</td></tr>
+              <tr><td><code>documentation</code></td><td>Guides and website</td></tr>
+              <tr><td><code>dependencies</code></td><td>Updated dependencies</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="releases">Releases</h2>
+        <p>What is on <code>main</code> is published as the <code>edge</code> image after every merge. A release is made by tagging a version:</p>
+        <pre><code>git switch main && git pull
+git tag v1.2.3
+git push origin v1.2.3</code></pre>
+        <p>The tag builds the images <code>1.2.3</code>, <code>1.2</code> and <code>latest</code>, and creates the release on GitHub with notes put together from the merged pull requests.</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Number</th><th>Goes up when</th></tr></thead>
+            <tbody>
+              <tr><td>First (<code>2</code>.0.0)</td><td>Something people rely on changes or is removed</td></tr>
+              <tr><td>Second (1.<code>3</code>.0)</td><td>Something new is added</td></tr>
+              <tr><td>Third (1.2.<code>4</code>)</td><td>Only repairs</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="licence">Licence</h2>
+        <p>ThirtyFile is licensed under the <a href="https://github.com/ThirtyFile/ThirtyFile/blob/main/LICENSE">Apache License 2.0</a>. What you contribute is licensed under the same terms.</p>
+      </main>
+    </div>
+    <script src="../assets/site.js"></script>
+  </body>
+</html>

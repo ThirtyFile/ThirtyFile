@@ -28,6 +28,9 @@
       ["backup", "Upgrade and backup"],
       ["help", "Troubleshooting"],
     ]],
+    ["The project", [
+      ["contributing", "Contributing"],
+    ]],
   ];
 
   const el = (html) => {
