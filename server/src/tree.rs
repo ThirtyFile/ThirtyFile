@@ -709,6 +709,9 @@ pub async fn stage_blob(st: &AppState, drive_id: &str, hash: String, size: i64, 
         }
         let location = drive_location(st, &mut c, drive_id).await?;
         drop(c);
+        // If the server stops between storing and recording it, the content would stay in storage unreferenced: list
+        // it for deletion a day from now; recording it removes the entry, and deletion skips content still in use
+        defer_blob_removal(st, &[(hash.clone(), location.clone())], STAGED_GRACE).await;
         st.storage(&location)?.put_file(&hash, &tmp).await?;
         Ok::<_, crate::error::AppError>((Some(location), None))
     }
@@ -717,8 +720,18 @@ pub async fn stage_blob(st: &AppState, drive_id: &str, hash: String, size: i64, 
     Ok(StagedBlob { hash, size, tmp, uploaded_to, existing_at, guard })
 }
 
+/// How long content stored for an upload may stay unrecorded before background deletion removes it
+const STAGED_GRACE: i64 = 24 * 3600;
+
 /// Records the reference within the transaction (holding the write lock); returns redundant copies to delete after commit
 pub async fn commit_blob(st: &AppState, conn: &mut SqliteConnection, staged: &StagedBlob) -> AppResult<Option<BlobRef>> {
+    if let Some(loc) = &staged.uploaded_to {
+        sqlx::query("DELETE FROM pending_blob_deletes WHERE hash = ? AND location_id = ? AND last_error = 'deferred'")
+            .bind(&staged.hash)
+            .bind(loc)
+            .execute(&mut *conn)
+            .await?;
+    }
     let current: Option<(String,)> = sqlx::query_as("SELECT location_id FROM blobs WHERE hash = ?").bind(&staged.hash).fetch_optional(&mut *conn).await?;
     match (&current, &staged.uploaded_to) {
         // The content already exists: keep its original location; if a copy was also uploaded elsewhere, that one is redundant
@@ -818,7 +831,7 @@ pub async fn check_quota(conn: &mut SqliteConnection, drive_id: &str, extra: i64
         return Ok(());
     }
     // Files already there plus uploads still in progress (they were admitted against the quota when they started)
-    let (pending,): (i64,) = sqlx::query_as("SELECT COALESCE(SUM(size), 0) FROM uploads WHERE drive_id = ?").bind(drive_id).fetch_one(conn).await?;
+    let (pending,): (i64,) = sqlx::query_as("SELECT COALESCE(SUM(size), 0) FROM uploads WHERE drive_id = ? AND node_id IS NULL").bind(drive_id).fetch_one(conn).await?;
     let used = drive.used_bytes + pending;
     if used + extra > quota {
         return Err(AppError::new(axum::http::StatusCode::PAYLOAD_TOO_LARGE, format!("Not enough storage space in \"{}\"", drive.name)).with_code("quota"));
