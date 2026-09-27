@@ -1,22 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Switch } from "@base-ui/react/switch";
-import {
-  ActivityIcon,
-  DatabaseIcon,
-  DownloadIcon,
-  FilesIcon,
-  GlobeIcon,
-  HardDriveIcon,
-  LanguagesIcon,
-  LogInIcon,
-  Link2Icon,
-  Loader2Icon,
-  RefreshCwIcon,
-  SettingsIcon,
-  Trash2Icon,
-  type LucideIcon,
-} from "lucide-react";
+import { ActivityIcon, DatabaseIcon, DownloadIcon, FilesIcon, FolderSyncIcon, GlobeIcon, HardDriveIcon, LanguagesIcon, Link2Icon, Loader2Icon, LogInIcon, RefreshCwIcon, SettingsIcon, Trash2Icon, type LucideIcon } from "lucide-react";
 import { Link } from "react-router";
 import { ActivityLog } from "@/components/logs/ActivityLog";
 import { ShareAccessLog } from "@/components/logs/ShareAccessLog";
@@ -122,6 +107,35 @@ function QuotaInput({ value, saving, onSave }: { value: number; saving: boolean;
         <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-muted-foreground">GB</span>
       </div>
       <Button type="submit" size="sm" disabled={saving || invalid || bytes === value}>
+        {t("Save")}
+      </Button>
+    </form>
+  );
+}
+
+/** How often folder spaces are checked for changes (minutes, 0 = only by hand) */
+function ScanIntervalInput({ value, saving, onSave }: { value: number; saving: boolean; onSave(minutes: number): void }) {
+  const [text, setText] = useState(String(value));
+  const minutes = Number(text);
+  const invalid = !/^\d+$/.test(text.trim()) || minutes > 1440;
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!invalid && minutes !== value) onSave(minutes);
+  };
+  return (
+    <form className="flex shrink-0 items-center gap-2" onSubmit={submit}>
+      <div className="relative">
+        <Input
+          aria-label={t("Check folder spaces every (minutes)")}
+          inputMode="numeric"
+          className="h-8 w-28 pr-12 text-right tabular-nums"
+          value={text}
+          aria-invalid={invalid}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-muted-foreground">{t("min")}</span>
+      </div>
+      <Button type="submit" size="sm" disabled={saving || invalid || minutes === value}>
         {t("Save")}
       </Button>
     </form>
@@ -302,6 +316,27 @@ export function GeneralSettingsPage() {
               value={q.data.default_user_quota}
               saving={save.isPending}
               onSave={(bytes) => save.mutate({ default_user_quota: bytes })}
+            />
+          </div>
+        </Section>
+      )}
+      {q.data && (
+        <Section title={t("Folder spaces")}>
+          <div className="flex flex-wrap items-start gap-4 p-4">
+            <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">
+              <FolderSyncIcon className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">{t("Check for changes made on the server")}</div>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {t("Folder spaces show folders on the server. Changes made there (for example over SMB) appear when someone opens the folder, and all folders are checked this often. 0 = only when someone opens a folder or clicks \"Check for changes\".")}
+              </p>
+            </div>
+            <ScanIntervalInput
+              key={q.data.scan_minutes}
+              value={q.data.scan_minutes}
+              saving={save.isPending}
+              onSave={(minutes) => save.mutate({ scan_minutes: minutes })}
             />
           </div>
         </Section>

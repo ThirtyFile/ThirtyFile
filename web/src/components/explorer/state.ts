@@ -13,7 +13,7 @@ import type { ExplorerProps } from "../Explorer";
 export function useExplorerState(p: ExplorerProps) {
   const me = useMe();
   // In a folder, available actions depend on the role; list pages (search, recent, etc.) mix several locations, so the server decides
-  const caps = p.role ? capsOf(p.role, me) : { write: me.can_write, del: me.can_delete, share: me.can_share, manage: false };
+  const caps = p.role ? capsOf(p.role, me, p.readOnly) : { write: me.can_write, del: me.can_delete, share: me.can_share, manage: false };
   const qc = useQueryClient();
   const navigate = useNavigate();
   const tabs = useTabActions();

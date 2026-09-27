@@ -4,6 +4,7 @@ import {
   ArchiveIcon,
   CirclePlusIcon,
   FolderOpenIcon,
+  FolderSyncIcon,
   Loader2Icon,
   GaugeIcon,
   HardDriveIcon,
@@ -17,7 +18,7 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdow
 import { DataTable, type Column } from "@/components/DataTable";
 import { useTabActions } from "@/tabs";
 import { toast } from "sonner";
-import { api, type Drive, type Migration } from "@/api";
+import { api, type Drive, type Migration, type ScanReport } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AccessDialog } from "@/components/AccessDialog";
@@ -25,7 +26,9 @@ import { ConfirmDialog, ErrorText, NameDialog } from "@/components/dialogs";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { DRIVE_ICON, DRIVE_KIND_LABEL, ROLE_LABEL, driveLabel } from "@/lib/drives";
 import { useSettingsSearch } from "@/lib/controlPanel";
-import { cn, formatBytes } from "@/lib/utils";
+import { cn, formatBytes, formatDateTime } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { t, tServer, tc } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
 import { STORAGE_KIND_LABEL } from "@/components/StorageLocations";
@@ -39,7 +42,22 @@ export function AdminDrivesPage() {
   const tabs = useTabActions();
   const q = useQuery({ queryKey: ["admin-drives"], queryFn: api.adminDrives });
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<{ t: "quota" | "members" | "delete" | "create" | "location"; drive?: Drive } | null>(null);
+  const [dialog, setDialog] = useState<{ t: "quota" | "members" | "delete" | "create" | "location" | "folder"; drive?: Drive } | null>(null);
+  const [scanning, setScanning] = useState(false);
+  /** Checks a folder space for changes made on the server's folder now */
+  const scanNow = async (d: Drive) => {
+    setScanning(true);
+    try {
+      const r = await api.scanDrive(d.id);
+      if (r.error) toast.error(tServer(r.error));
+      else toast.success(scanSummary(r));
+      refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("Couldn't check the folder"));
+    } finally {
+      setScanning(false);
+    }
+  };
   // Refresh every 1.5 seconds while a migration job is running
   const migrations = useQuery({
     queryKey: ["migrations"],
@@ -63,15 +81,33 @@ export function AdminDrivesPage() {
         className="h-9 px-2.5 text-[13px]"
         onClick={() => setDialog({ t: "create" })}
       />
-      <ToolSeparator />
       <ToolButton
-        icon={ArchiveIcon}
-        label={t("Storage location")}
+        icon={FolderSyncIcon}
+        label={t("New folder space")}
         showLabel
         className="h-9 px-2.5 text-[13px]"
-        disabled={!selected}
-        onClick={() => selected && setDialog({ t: "location", drive: selected })}
+        onClick={() => setDialog({ t: "folder" })}
       />
+      <ToolSeparator />
+      {selected?.mode === "folder" ? (
+        <ToolButton
+          icon={RefreshCwIcon}
+          label={t("Check for changes")}
+          showLabel
+          className="h-9 px-2.5 text-[13px]"
+          disabled={scanning}
+          onClick={() => scanNow(selected)}
+        />
+      ) : (
+        <ToolButton
+          icon={ArchiveIcon}
+          label={t("Storage location")}
+          showLabel
+          className="h-9 px-2.5 text-[13px]"
+          disabled={!selected}
+          onClick={() => selected && setDialog({ t: "location", drive: selected })}
+        />
+      )}
       <ToolButton
         icon={GaugeIcon}
         label={t("Change quota")}
@@ -154,7 +190,11 @@ export function AdminDrivesPage() {
       cellClassName: "text-muted-foreground",
       cell: (d) => (d.role ? ROLE_LABEL[d.role] : "—"),
     },
-    { header: t("Storage location"), className: "w-[150px]", cell: (d) => <LocationCell drive={d} job={jobOf(d.id)} /> },
+    {
+      header: t("Storage location"),
+      className: "w-[150px]",
+      cell: (d) => (d.mode === "folder" ? <FolderCell drive={d} /> : <LocationCell drive={d} job={jobOf(d.id)} />),
+    },
   ];
 
   return (
@@ -197,9 +237,15 @@ export function AdminDrivesPage() {
               <DropdownMenuItem onClick={() => setDialog({ t: "quota", drive: selected })}>
                 <GaugeIcon /> {t("Change quota")}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setDialog({ t: "location", drive: selected })}>
-                <ArchiveIcon /> {t("Change storage location…")}
-              </DropdownMenuItem>
+              {selected.mode === "folder" ? (
+                <DropdownMenuItem disabled={scanning} onClick={() => scanNow(selected)}>
+                  <RefreshCwIcon /> {t("Check for changes")}
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onClick={() => setDialog({ t: "location", drive: selected })}>
+                  <ArchiveIcon /> {t("Change storage location…")}
+                </DropdownMenuItem>
+              )}
               {selected.kind !== "personal" && (
                 <DropdownMenuItem onClick={() => setDialog({ t: "members", drive: selected })}>
                   <UsersRoundIcon /> {t("Manage members")}
@@ -239,6 +285,17 @@ export function AdminDrivesPage() {
             refresh();
             setSelectedId(d.id);
             toast.success(t("Space created"));
+          }}
+        />
+      )}
+      {dialog?.t === "folder" && (
+        <FolderSpaceDialog
+          onClose={() => setDialog(null)}
+          onCreated={(d) => {
+            setDialog(null);
+            refresh();
+            setSelectedId(d.id);
+            toast.success(t("Space created. Its folder is being indexed."));
           }}
         />
       )}
@@ -382,6 +439,91 @@ function LocationDialog({ drive, onClose, onDone }: { drive: Drive; onClose(): v
             <Button type="submit" disabled={busy}>
               {busy && <Loader2Icon className="animate-spin" />}
               {t("Apply")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function scanSummary(r: ScanReport) {
+  const main = t("Checked: {added} added, {changed} changed, {moved} moved, {removed} removed", {
+    added: r.added,
+    changed: r.changed,
+    moved: r.moved,
+    removed: r.removed,
+  });
+  return r.skipped.length ? `${main} · ${t("{n} item skipped|{n} items skipped", { n: r.skipped.length })}` : main;
+}
+
+/** A folder space's folder and its last check */
+function FolderCell({ drive }: { drive: Drive }) {
+  const r = drive.scan_report;
+  const title = [drive.source_path, r?.error ? tServer(r.error) : r ? scanSummary(r) : "", ...(r?.skipped ?? [])].filter(Boolean).join("\n");
+  return (
+    <span className="flex min-w-0 flex-col" title={title}>
+      <span className="truncate font-mono text-[12px]">{drive.source_path}</span>
+      <span className={cn("truncate text-[11px]", r?.error ? "text-destructive" : "text-muted-foreground")}>
+        {r?.error
+          ? t("Can't read the folder")
+          : drive.last_scan_at
+            ? t("Checked {time}", { time: formatDateTime(drive.last_scan_at) })
+            : t("Being indexed…")}
+      </span>
+    </span>
+  );
+}
+
+/** A new space that shows a folder on the server */
+function FolderSpaceDialog({ onClose, onCreated }: { onClose(): void; onCreated(d: Drive): void }) {
+  const [name, setName] = useState("");
+  const [path, setPath] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      onCreated(await api.createDrive(name.trim(), 0, path.trim()));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("Couldn't create"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t("New folder space")}</DialogTitle>
+          <DialogDescription>
+            {t("Shows a folder on the server as a space. Its files stay where they are and can also be changed there (for example over SMB); changes appear here automatically. For now, files are changed in the folder, not from here.")}
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="grid gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+        >
+          <div className="grid gap-1.5">
+            <Label htmlFor="fs-name">{t("Name")}</Label>
+            <Input id="fs-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="fs-path">{t("Folder on the server")}</Label>
+            <Input id="fs-path" className="font-mono" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/mnt/nas/shared" />
+            <p className="text-xs text-muted-foreground">{t("The folder's path inside the container, for example a folder mounted with -v /srv/shared:/mnt/shared.")}</p>
+          </div>
+          {error && <ErrorText>{error}</ErrorText>}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              {t("Cancel")}
+            </Button>
+            <Button type="submit" disabled={busy || !name.trim() || !path.trim()}>
+              {t("Create")}
             </Button>
           </DialogFooter>
         </form>

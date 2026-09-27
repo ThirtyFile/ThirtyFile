@@ -15,7 +15,8 @@ use crate::{
 pub const NODE_COLS: &str =
     "n.id, n.owner_id, n.parent_id, n.kind, n.name, n.blob_hash, n.size, n.mime, n.created_at, n.updated_at, n.trashed_at, n.drive_id,
      COALESCE((SELECT username FROM users WHERE id = n.owner_id), '') AS owner_name,
-     (SELECT location_id FROM blobs WHERE hash = n.blob_hash) AS blob_location";
+     (SELECT location_id FROM blobs WHERE hash = n.blob_hash) AS blob_location,
+     n.fs_path, (SELECT source_path FROM drives WHERE id = n.drive_id AND mode = 'folder') AS fs_root";
 
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 pub struct Node {
@@ -43,6 +44,14 @@ pub struct Node {
     /// Whether the current user has favorited it; filled in by mark_favorites
     #[sqlx(default)]
     pub is_favorite: bool,
+    /// Folder spaces: the path below the space's folder
+    #[serde(skip)]
+    #[sqlx(default)]
+    pub fs_path: Option<String>,
+    /// Folder spaces: the space's folder on the server
+    #[serde(skip)]
+    #[sqlx(default)]
+    pub fs_root: Option<String>,
 }
 
 impl Node {
@@ -58,6 +67,19 @@ impl Node {
     }
     pub fn drive(&self) -> &str {
         self.drive_id.as_deref().unwrap_or_default()
+    }
+    /// The file on the server, for items of a folder space
+    pub fn fs_file(&self) -> Option<std::path::PathBuf> {
+        let (root, rel) = (self.fs_root.as_deref()?, self.fs_path.as_deref()?);
+        // Paths come from scanning the folder; never step outside it whatever they say
+        if rel.split('/').any(|part| part == ".." || part == "." ) || rel.starts_with('/') {
+            return None;
+        }
+        Some(if rel.is_empty() { std::path::PathBuf::from(root) } else { std::path::Path::new(root).join(rel) })
+    }
+    /// Whether it belongs to a folder space (changed on the server's folder, not through the content store)
+    pub fn in_folder_space(&self) -> bool {
+        self.fs_root.is_some()
     }
 }
 
@@ -141,9 +163,19 @@ pub struct Drive {
     pub disabled: bool,
     /// Bytes of all file nodes in the space, including the trash (kept up to date by `adjust_usage`)
     pub used_bytes: i64,
+    /// "store" (content store) or "folder" (a folder on the server)
+    pub mode: String,
+    /// Folder spaces: the folder
+    pub source_path: Option<String>,
 }
 
-pub const DRIVE_COLS: &str = "d.id, d.name, d.kind, d.root_id, d.owner_id, d.quota_bytes, d.disabled, d.used_bytes";
+impl Drive {
+    pub fn is_folder(&self) -> bool {
+        self.mode == "folder"
+    }
+}
+
+pub const DRIVE_COLS: &str = "d.id, d.name, d.kind, d.root_id, d.owner_id, d.quota_bytes, d.disabled, d.used_bytes, d.mode, d.source_path";
 
 /// The grant's principal matches the current user (?2 = user id, ?3 = current time)
 const PRINCIPAL_MATCH: &str = "(g.expires_at IS NULL OR g.expires_at > ?3)
@@ -207,7 +239,15 @@ pub async fn node_with_role(conn: &mut SqliteConnection, user: &User, id: &str) 
 pub async fn node_for(conn: &mut SqliteConnection, user: &User, id: &str, need: Need) -> AppResult<Node> {
     let (n, role) = node_with_role(conn, user, id).await?;
     allows(user, role, need)?;
+    if matches!(need, Need::Write | Need::Delete) && n.in_folder_space() {
+        return Err(read_only_folder());
+    }
     Ok(n)
+}
+
+/// Folder spaces can be browsed, downloaded and shared; changing them from the web comes later
+pub fn read_only_folder() -> AppError {
+    AppError::forbidden("This space shows a folder on the server and can't be changed from here yet")
 }
 
 pub async fn folder_for(conn: &mut SqliteConnection, user: &User, id: &str, need: Need) -> AppResult<Node> {

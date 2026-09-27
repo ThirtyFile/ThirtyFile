@@ -45,6 +45,8 @@ pub struct NodeInfo {
     via_share: bool,
     /// Reason the storage location holding the content is offline (files: where the content is; folders: the space's location)
     offline: Option<String>,
+    /// A folder space: browse, download and share only (for now)
+    read_only: bool,
 }
 
 /// The path visible to the user: space members see the full path; people with shared access only see from the shared folder down
@@ -66,11 +68,17 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
     let (path, via_share) = visible_path(&mut c, &user, &node).await?;
     tree::mark_favorites(&mut c, user.id, [&mut node]).await?;
     let is_root = node.parent_id.is_none();
-    let location = match node.blob() {
-        Ok((_, loc)) => loc.to_string(),
-        Err(_) => tree::drive_location(&st, &mut c, node.drive()).await?,
+    // Folder spaces are on the server itself: nothing to be offline
+    let offline = if drive.is_folder() {
+        None
+    } else {
+        let location = match node.blob() {
+            Ok((_, loc)) => loc.to_string(),
+            Err(_) => tree::drive_location(&st, &mut c, node.drive()).await?,
+        };
+        st.location_offline(&location)
     };
-    let offline = st.location_offline(&location);
+    let read_only = drive.is_folder();
     Ok(Json(NodeInfo {
         node,
         path,
@@ -79,6 +87,7 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
         role,
         via_share,
         offline,
+        read_only,
     }))
 }
 
@@ -108,6 +117,10 @@ pub async fn children(
 ) -> AppResult<Json<Vec<Node>>> {
     let mut c = st.db.acquire().await?;
     let folder = tree::folder_for(&mut c, &user, &id, Need::Read).await?;
+    if folder.in_folder_space() {
+        // Changes made on the server's folder show up when the folder is opened
+        crate::folders::sync_folder(&st, &folder).await;
+    }
     let kind_filter = if q.folders_only == Some(true) { "AND n.kind = 'folder'" } else { "" };
     let sql = format!(
         "SELECT {NODE_COLS} FROM nodes n WHERE n.parent_id = ? AND n.trashed_at IS NULL {kind_filter} {}",
@@ -279,6 +292,9 @@ pub async fn copy_nodes(State(st): State<AppState>, user: User, Json(req): Json<
     for id in &req.ids()? {
         let node = tree::node_for(&mut tx, &user, id, Need::Read).await?;
         not_root(&node)?;
+        if node.in_folder_space() {
+            return Err(AppError::bad_request("Items of a folder on the server can't be copied yet. Download them and upload them instead."));
+        }
         if tree::is_within(&mut tx, &dest.id, &node.id).await? {
             return Err(AppError::bad_request(format!("Can't copy \"{}\" into its own subfolder", node.name)));
         }

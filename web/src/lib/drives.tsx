@@ -23,12 +23,13 @@ export function atLeast(role: Role | null | undefined, min: Role) {
   return !!role && ROLE_RANK[role] >= ROLE_RANK[min];
 }
 
-/** Effective capabilities = role ∩ account permissions (matches the backend's tree::allows) */
-export function capsOf(role: Role | null | undefined, me: Me) {
+/** Effective capabilities = role ∩ account permissions (matches the backend's tree::allows). A folder space
+ * (`readOnly`) can be browsed, downloaded and shared, but not changed from the web yet */
+export function capsOf(role: Role | null | undefined, me: Me, readOnly = false) {
   const admin = me.role === "admin";
   return {
-    write: atLeast(role, "editor") && (me.can_write || admin),
-    del: atLeast(role, "editor") && (me.can_delete || admin),
+    write: !readOnly && atLeast(role, "editor") && (me.can_write || admin),
+    del: !readOnly && atLeast(role, "editor") && (me.can_delete || admin),
     share: atLeast(role, "editor") && (me.can_share || admin),
     manage: atLeast(role, "manager"),
   };
@@ -70,6 +71,7 @@ const ACTION_LABEL: Record<string, string> = {
   grant: t("Grant access"),
   revoke: t("Remove access"),
   drive_create: t("Create space"),
+  scan: t("Checked the folder"),
   drive_update: t("Update space"),
   drive_delete: t("Delete space"),
   group_create: t("Create group"),

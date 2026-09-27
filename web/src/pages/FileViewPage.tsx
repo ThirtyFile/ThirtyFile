@@ -66,7 +66,7 @@ export function FileViewPage() {
 
   const path = info.data?.path ?? [];
   const loc = locationOf(info.data);
-  const caps = capsOf(info.data?.role, me);
+  const caps = capsOf(info.data?.role, me, info.data?.read_only);
   const canEditSheet = !!node && extOf(node.name) === "xlsx" && caps.write && node.size <= MAX_EDIT_BYTES;
   const sheetEditing = !!node && editingId === node.id && canEditSheet;
   const rootUrl = loc.rootUrl;

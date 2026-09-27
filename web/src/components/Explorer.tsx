@@ -29,6 +29,8 @@ export interface ExplorerProps {
   error?: Error | null;
   /** Current folder; when set, uploading and creating are possible */
   folderId?: string;
+  /** A folder space: nothing can be changed from the web yet */
+  readOnly?: boolean;
   crumbs: Crumb[];
   path?: string;
   upTo?: string | null;

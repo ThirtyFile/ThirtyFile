@@ -66,13 +66,74 @@ pub fn range_start(headers: &HeaderMap, size: u64) -> u64 {
     }
 }
 
+/// Where a file's content is
+#[derive(Clone, Debug)]
+pub enum Source {
+    /// In a storage location, named by its hash
+    Stored { hash: String, location: String },
+    /// A file in a folder space
+    File(PathBuf),
+}
+
+impl Source {
+    pub fn of(n: &Node) -> AppResult<Source> {
+        if n.in_folder_space() {
+            return n.fs_file().map(Source::File).ok_or_else(|| AppError::not_found("File not found"));
+        }
+        let (hash, location) = n.blob()?;
+        Ok(Source::Stored { hash: hash.to_string(), location: location.to_string() })
+    }
+
+    /// The size and a version tag of the content as it is now. A stored content never changes; a file in a folder
+    /// space may have changed since it was indexed, so it is looked at again
+    pub async fn describe(&self, indexed_size: u64) -> AppResult<(u64, String)> {
+        match self {
+            Source::Stored { hash, .. } => Ok((indexed_size, hash.clone())),
+            Source::File(path) => {
+                let meta = tokio::fs::metadata(path).await.map_err(|_| AppError::not_found("File not found"))?;
+                if !meta.is_file() {
+                    return Err(AppError::not_found("File not found"));
+                }
+                Ok((meta.len(), file_tag(&meta)))
+            }
+        }
+    }
+
+    /// Reads the content in [start, start + len)
+    pub async fn open(&self, st: &AppState, start: u64, len: u64) -> std::io::Result<crate::storage::BoxReader> {
+        match self {
+            Source::Stored { hash, location } => match st.storage(location) {
+                Ok(s) => s.open(hash, start, len).await,
+                Err(e) => Err(std::io::Error::other(e.message)),
+            },
+            Source::File(path) => {
+                use tokio::io::AsyncSeekExt;
+                let mut f = tokio::fs::File::open(path).await?;
+                if start > 0 {
+                    f.seek(std::io::SeekFrom::Start(start)).await?;
+                }
+                Ok(Box::pin(f.take(len)))
+            }
+        }
+    }
+}
+
+/// A tag that changes whenever the file does: its identity, size and modification time
+fn file_tag(meta: &std::fs::Metadata) -> String {
+    let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
+    #[cfg(unix)]
+    let ino = std::os::unix::fs::MetadataExt::ino(meta);
+    #[cfg(not(unix))]
+    let ino = 0u64;
+    format!("f{ino:x}-{:x}-{mtime:x}", meta.len())
+}
+
 pub struct Blob<'a> {
-    pub hash: &'a str,
+    pub source: Source,
+    /// The size known from the index (a folder space's file is looked at again)
     pub size: u64,
     pub name: &'a str,
     pub mime: &'a str,
-    /// The storage location it's in
-    pub location: &'a str,
 }
 
 /// Types a browser would run or apply when a page loads the file as a script, style sheet or module. Stored files are
@@ -89,24 +150,25 @@ pub async fn serve_blob(st: &AppState, headers: &HeaderMap, b: Blob<'_>, downloa
     {
         return Err(AppError::forbidden("Files can't be loaded as scripts or styles"));
     }
-    let etag = format!("\"{}\"", b.hash);
+    let (size, tag) = b.source.describe(b.size).await?;
+    let etag = format!("\"{tag}\"");
     if headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
         return Ok((StatusCode::NOT_MODIFIED, [(header::ETAG, etag)]).into_response());
     }
     let if_range_ok = headers.get(header::IF_RANGE).map(|v| v.to_str().ok() == Some(etag.as_str())).unwrap_or(true);
     let range = match headers.get(header::RANGE).and_then(|v| v.to_str().ok()) {
-        Some(r) if if_range_ok => parse_range(r, b.size),
+        Some(r) if if_range_ok => parse_range(r, size),
         _ => Ok(None),
     };
     let (status, start, end) = match range {
         Ok(Some((s, e))) => (StatusCode::PARTIAL_CONTENT, s, e),
-        Ok(None) => (StatusCode::OK, 0, b.size.saturating_sub(1)),
+        Ok(None) => (StatusCode::OK, 0, size.saturating_sub(1)),
         Err(()) => {
-            return Ok((StatusCode::RANGE_NOT_SATISFIABLE, [(header::CONTENT_RANGE, format!("bytes */{}", b.size))]).into_response());
+            return Ok((StatusCode::RANGE_NOT_SATISFIABLE, [(header::CONTENT_RANGE, format!("bytes */{size}"))]).into_response());
         }
     };
-    let len = if b.size == 0 { 0 } else { end - start + 1 };
-    let reader = st.storage(b.location)?.open(b.hash, start, len).await?;
+    let len = if size == 0 { 0 } else { end - start + 1 };
+    let reader = b.source.open(st, start, len).await?;
 
     let mime = if b.mime.is_empty() {
         "application/octet-stream"
@@ -136,14 +198,16 @@ pub async fn serve_blob(st: &AppState, headers: &HeaderMap, b: Blob<'_>, downloa
         );
     }
     if status == StatusCode::PARTIAL_CONTENT {
-        h.insert(header::CONTENT_RANGE, HeaderValue::from_str(&format!("bytes {start}-{end}/{}", b.size)).unwrap());
+        h.insert(header::CONTENT_RANGE, HeaderValue::from_str(&format!("bytes {start}-{end}/{size}")).unwrap());
     }
     Ok(res)
 }
 
 pub fn node_blob(n: &Node) -> AppResult<Blob<'_>> {
-    let (hash, location) = n.blob()?;
-    Ok(Blob { hash, size: n.size as u64, name: &n.name, mime: &n.mime, location })
+    if n.is_folder() {
+        return Err(AppError::bad_request("This isn't a file"));
+    }
+    Ok(Blob { source: Source::of(n)?, size: n.size as u64, name: &n.name, mime: &n.mime })
 }
 
 #[derive(Deserialize)]
@@ -268,15 +332,26 @@ async fn store_content(st: AppState, user: User, id: String, body: Bytes, hash: 
 fn thumbnailable(n: &Node) -> bool {
     matches!(n.mime.as_str(), "image/jpeg" | "image/png" | "image/gif" | "image/webp" | "image/bmp")
         && n.size <= MAX_THUMB_SOURCE
-        && n.blob_hash.is_some()
+        && (n.blob_hash.is_some() || n.in_folder_space())
 }
 
 pub async fn thumbnail_response(st: &AppState, headers: &HeaderMap, n: &Node) -> AppResult<Response> {
     if !thumbnailable(n) {
         return Err(AppError::not_found("No thumbnail"));
     }
-    let (hash, location) = n.blob()?;
-    // The thumbnail is derived from the content hash: a matching ETag means the browser's copy is current (no disk read, no body)
+    let source = Source::of(n)?;
+    let (size, tag) = source.describe(n.size as u64).await?;
+    if size > MAX_THUMB_SOURCE as u64 {
+        return Err(AppError::not_found("No thumbnail"));
+    }
+    // Stored content: its hash. A folder space's file: a key from its identity, size and time, so a changed file gets
+    // a new thumbnail
+    let hash = match &source {
+        Source::Stored { hash, .. } => hash.clone(),
+        Source::File(_) => crate::util::sha256_hex(tag.as_bytes()),
+    };
+    let hash = hash.as_str();
+    // The thumbnail is derived from the content: a matching ETag means the browser's copy is current (no disk read, no body)
     let etag = format!("\"t{hash}\"");
     if headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
         return Ok((StatusCode::NOT_MODIFIED, [(header::ETAG, etag), (header::CACHE_CONTROL, "private, max-age=604800".to_string())]).into_response());
@@ -285,8 +360,8 @@ pub async fn thumbnail_response(st: &AppState, headers: &HeaderMap, n: &Node) ->
     if !tokio::fs::try_exists(&path).await? {
         let _permit = st.thumb_permits.acquire().await.map_err(AppError::internal)?;
         if !tokio::fs::try_exists(&path).await? {
-            let mut data = Vec::with_capacity(n.size as usize);
-            st.storage(location)?.open(hash, 0, n.size as u64).await?.read_to_end(&mut data).await?;
+            let mut data = Vec::with_capacity(size as usize);
+            source.open(st, 0, size).await?.read_to_end(&mut data).await?;
             let jpeg = tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
                 let mut reader = image::ImageReader::new(std::io::Cursor::new(data)).with_guessed_format().ok()?;
                 let mut limits = image::Limits::default();
@@ -330,8 +405,8 @@ pub async fn thumbnail(State(st): State<AppState>, user: User, Path(id): Path<St
 
 struct ZipItem {
     path: String,
-    /// (hash, storage location); None for folders
-    blob: Option<(String, String)>,
+    /// None for folders
+    blob: Option<Source>,
     size: u64,
     mtime: i64,
 }
@@ -394,8 +469,16 @@ pub async fn zip_response(st: &AppState, roots: Vec<Node>, tz: i64) -> AppResult
                     }
                 };
                 paths.insert(n.id.clone(), path.clone());
-                let blob = n.blob().ok().map(|(h, l)| (h.to_string(), l.to_string()));
-                items.push(ZipItem { path, blob, size: n.size as u64, mtime: n.updated_at + offset });
+                let blob = if n.is_folder() { None } else { Source::of(&n).ok() };
+                // The length of the ZIP is announced up front: a folder space's file is measured as it is now
+                let size = match &blob {
+                    Some(s @ Source::File(_)) => s.describe(n.size as u64).await.map(|(size, _)| size).unwrap_or(0),
+                    _ => n.size as u64,
+                };
+                if !n.is_folder() && blob.is_none() {
+                    continue;
+                }
+                items.push(ZipItem { path, blob, size, mtime: n.updated_at + offset });
             }
         }
     }
@@ -409,16 +492,11 @@ pub async fn zip_response(st: &AppState, roots: Vec<Node>, tz: i64) -> AppResult
         _ => "download.zip".to_string(),
     };
     // Open the first file before starting the response: if the storage service (e.g. S3) can't be reached, report the error directly instead of sending an empty ZIP
-    let open = |st: AppState, hash: String, location: String, size: u64| async move {
-        match st.storage(&location) {
-            Ok(s) => s.open(&hash, 0, size).await,
-            Err(e) => Err(std::io::Error::other(e.message)),
-        }
-    };
+    let open = |st: AppState, source: Source, size: u64| async move { source.open(&st, 0, size).await };
     let mut first = None;
     if let Some((i, item)) = items.iter().enumerate().find(|(_, it)| it.blob.is_some()) {
-        let (hash, location) = item.blob.clone().unwrap();
-        first = Some((i, open(st.clone(), hash, location, item.size).await?));
+        let source = item.blob.clone().unwrap();
+        first = Some((i, open(st.clone(), source, item.size).await?));
     }
     let (writer, reader) = tokio::io::duplex(512 * 1024);
     // If packing fails midway, notify the response stream so the connection ends with an error (the browser shows a failed download) rather than saving a truncated ZIP
@@ -429,12 +507,12 @@ pub async fn zip_response(st: &AppState, roots: Vec<Node>, tz: i64) -> AppResult
         for (i, item) in items.into_iter().enumerate() {
             let res = match item.blob {
                 None => zip.add_dir(&item.path, item.mtime).await,
-                Some((hash, location)) => {
+                Some(source) => {
                     let opened = match first.take() {
                         Some((j, r)) if j == i => Ok(r),
                         other => {
                             first = other;
-                            open(st.clone(), hash, location, item.size).await
+                            open(st.clone(), source, item.size).await
                         }
                     };
                     match opened {

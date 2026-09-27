@@ -144,7 +144,8 @@ pub async fn load_system_settings(db: &SqlitePool) -> Result<SystemSettings, sql
         .await?
         .filter(|v| crate::admin::LANGS.contains(&v.as_str()))
         .unwrap_or_else(|| "auto".into());
-    Ok(SystemSettings { shared_enabled: !disabled, shared_root_id, allow_user_drives, default_user_quota, public_url, default_lang })
+    let scan_minutes = get_setting(db, "scan_minutes").await?.and_then(|v| v.parse().ok()).unwrap_or(15).clamp(0, 1440);
+    Ok(SystemSettings { shared_enabled: !disabled, shared_root_id, allow_user_drives, default_user_quota, public_url, default_lang, scan_minutes })
 }
 
 pub struct NewUser<'a> {
