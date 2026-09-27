@@ -938,7 +938,7 @@ pub async fn create_folder(conn: &mut SqliteConnection, owner_id: i64, parent_id
 }
 
 pub async fn touch(conn: &mut SqliteConnection, id: &str) -> AppResult<()> {
-    sqlx::query("UPDATE nodes SET updated_at = ? WHERE id = ?").bind(now()).bind(id).execute(conn).await?;
+    sqlx::query("UPDATE nodes SET updated_at = MAX(?, updated_at + 1) WHERE id = ?").bind(now()).bind(id).execute(conn).await?;
     Ok(())
 }
 

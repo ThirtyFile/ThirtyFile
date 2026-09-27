@@ -37,6 +37,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Maximum time to wait for a response to each command
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_CONNECTIONS: usize = 4;
+/// How long a download may wait for the reader to take more data before its connection is given back
+const STALLED_READER: Duration = Duration::from_secs(120);
 /// Connections idle longer than this are checked to be alive before reuse
 const IDLE_CHECK: Duration = Duration::from_secs(30);
 
@@ -343,8 +345,9 @@ impl Storage for FtpStorage {
                         }
                         Ok(Ok(n)) => n,
                     };
-                    if tx.write_all(&buf[..n]).await.is_err() {
-                        // The caller canceled the download
+                    // The caller canceled the download, or stopped reading (a paused download or video): give the
+                    // connection back instead of holding one of the few there are
+                    if !matches!(tokio::time::timeout(STALLED_READER, tx.write_all(&buf[..n])).await, Ok(Ok(()))) {
                         ok = false;
                         break;
                     }
@@ -425,6 +428,10 @@ impl Storage for FtpStorage {
 
     fn ping(&self) -> BoxFuture<'_, io::Result<()>> {
         Box::pin(async move {
+            // Every connection is in use, so they work: don't wait behind long downloads and report the server as down
+            if self.permits.available_permits() == 0 {
+                return Ok(());
+            }
             let (mut c, _permit) = self.checkout().await?;
             timed(c.ftp.noop()).await?;
             self.checkin(c);
