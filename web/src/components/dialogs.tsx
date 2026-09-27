@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { ChevronRightIcon, FolderIcon, HardDriveIcon, HomeIcon, Loader2Icon } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronRightIcon, FolderIcon, FolderPlusIcon, HardDriveIcon, HomeIcon, Loader2Icon } from "lucide-react";
 import { api, type Crumb } from "@/api";
+import { ErrorState } from "@/components/ErrorState";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useDrives } from "@/lib/drives";
 import { t } from "@/lib/i18n";
+import { invalidateFiles } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
 function useSubmit(fn: () => Promise<void>) {
@@ -151,6 +153,22 @@ export function FolderPickerDialog(props: {
     queryFn: () => api.children(current, "name", "asc", true),
   });
   const { busy, error, run } = useSubmit(() => props.onPick(current));
+  const qc = useQueryClient();
+  const [naming, setNaming] = useState(false);
+  // Like Windows' Move to dialog: a new folder is made inside the folder being browsed, then opened so it's the destination
+  const newFolderName = () => {
+    const taken = new Set(folders.data?.map((f) => f.name.toLowerCase()));
+    for (let i = 1; ; i++) {
+      const name = i === 1 ? t("New folder") : `${t("New folder")} (${i})`;
+      if (!taken.has(name.toLowerCase())) return name;
+    }
+  };
+  const createFolder = async (name: string) => {
+    const f = await api.createFolder(current, name);
+    void invalidateFiles(qc);
+    setTrail([...trail, { id: f.id, name: f.name }]);
+    setNaming(false);
+  };
 
   return (
     <Dialog open onOpenChange={(o) => !o && props.onClose()}>
@@ -198,6 +216,8 @@ export function FolderPickerDialog(props: {
             <div className="flex h-full items-center justify-center text-muted-foreground">
               <Loader2Icon className="size-5 animate-spin" />
             </div>
+          ) : folders.error ? (
+            <ErrorState message={folders.error.message} onRetry={() => folders.refetch()} className="h-full min-h-0" />
           ) : folders.data?.length ? (
             folders.data.map((f) => {
               const disabled = props.excludeIds.has(f.id);
@@ -221,6 +241,9 @@ export function FolderPickerDialog(props: {
         </div>
         <ErrorText>{error}</ErrorText>
         <DialogFooter>
+          <Button variant="outline" className="sm:mr-auto" disabled={!folders.data || props.excludeIds.has(current)} onClick={() => setNaming(true)}>
+            <FolderPlusIcon /> {t("New folder")}
+          </Button>
           <Button variant="outline" onClick={props.onClose}>
             {t("Cancel")}
           </Button>
@@ -229,6 +252,9 @@ export function FolderPickerDialog(props: {
             {props.confirmText}
           </Button>
         </DialogFooter>
+        {naming && (
+          <NameDialog title={t("New folder")} label={t("Name")} initial={newFolderName()} confirmText={t("Create")} onSubmit={createFolder} onClose={() => setNaming(false)} />
+        )}
       </DialogContent>
     </Dialog>
   );

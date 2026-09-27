@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { XIcon } from "lucide-react";
 import { api, privateSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
+import { ErrorState } from "@/components/ErrorState";
 import { FileIcon, canThumbnail, typeLabel } from "@/components/FileIcon";
 import { Resizer } from "@/components/Resizer";
 import { ROLE_LABEL } from "@/lib/drives";
@@ -54,7 +55,9 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
   } else {
     const root = info.data ? (info.data.via_share ? t("Shared with me") : info.data.drive.name) : "…";
     const isRoot = !node.parent_id;
-    const location = info.data ? `/${root}` + info.data.path.slice(0, -1).map((c) => `/${c.name}`).join("") : "…";
+    const location = info.data ? `/${root}` + info.data.path.slice(0, -1).map((c) => `/${c.name}`).join("") : info.error ? "—" : "…";
+    // Values that couldn't be loaded show a dash, with the error and a way to try again below them
+    const error = info.error ?? shares.error;
     const rows: [string, React.ReactNode][] = [
       [t("Type"), typeLabel(node)],
       ...(node.kind === "file" ? ([[t("Size"), t("{size} ({bytes} bytes)", { size: formatBytes(node.size), bytes: node.size })]] as [string, string][]) : []),
@@ -64,7 +67,7 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
       [t("Date created"), formatWinDate(node.created_at)],
       ...(isRoot ? [] : ([[t("Created by"), node.owner_name]] as [string, string][])),
       ...(isRoot ? [] : ([[t("Favorite"), node.is_favorite ? t("Yes") : t("No")]] as [string, string][])),
-      ...(isRoot ? [] : ([[t("Share links"), shares.data ? (shares.data.length ? t("{n}", { n: shares.data.length }) : t("None")) : "…"]] as [string, string][])),
+      ...(isRoot ? [] : ([[t("Share links"), shares.data ? (shares.data.length ? t("{n}", { n: shares.data.length }) : t("None")) : shares.error ? "—" : "…"]] as [string, string][])),
     ];
     body = (
       <>
@@ -85,6 +88,13 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
               </div>
             ))}
           </dl>
+          {error && (
+            <ErrorState
+              compact
+              message={error.message}
+              onRetry={() => Promise.all([info.error && info.refetch(), shares.error && shares.refetch()])}
+            />
+          )}
         </div>
       </>
     );

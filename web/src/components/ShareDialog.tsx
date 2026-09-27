@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { ErrorText } from "@/components/dialogs";
+import { ErrorState } from "@/components/ErrorState";
 import { copyText, formatDate } from "@/lib/utils";
 import { useMe } from "@/lib/session";
 import { t, tc } from "@/lib/i18n";
@@ -108,6 +109,8 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
 
         {local && <LocalLinkWarning admin={admin} />}
 
+        {shares.error && <ErrorState compact message={shares.error.message} onRetry={() => shares.refetch()} />}
+
         {shares.data && shares.data.length > 0 && (
           <div className="grid gap-2">
             {shares.data.map((s) => (
@@ -134,6 +137,7 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
                 </Button>
               </div>
             ))}
+            <ErrorText>{remove.error?.message}</ErrorText>
             <Separator className="my-1" />
           </div>
         )}

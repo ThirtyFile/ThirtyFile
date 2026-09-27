@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/dialogs";
+import { ErrorState } from "@/components/ErrorState";
 import { FileList } from "@/components/FileList";
 import { Frame, ToolButton } from "@/components/Frame";
 import { useMe } from "@/lib/session";
@@ -80,6 +81,8 @@ export function TrashPage() {
                 <Skeleton key={i} className="h-6" />
               ))}
             </div>
+          ) : q.error ? (
+            <ErrorState message={q.error.message} onRetry={() => q.refetch()} />
           ) : (
             <FileList
               items={items}

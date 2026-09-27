@@ -11,4 +11,6 @@ export default {
   "Select a file and click Create share link on the toolbar to create a public link.": "選取檔案後按工具列的「建立分享連結」即可建立公開連結。",
   "\"{name}\" enabled": "「{name}」已啟用",
   "\"{name}\" disabled": "「{name}」已停用",
+  // components/ErrorState.tsx
+  "Try again": "再試一次",
 } satisfies Record<string, string>;
