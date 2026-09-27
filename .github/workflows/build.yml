@@ -1,27 +1,31 @@
-# Checks every pull request and every push to main, and publishes the Docker image to the GitHub Container Registry:
-#   push to main      ghcr.io/thirtyfile/thirtyfile:edge      (the newest code, not yet released)
-#   tag v1.2.3        ghcr.io/thirtyfile/thirtyfile:1.2.3, :1.2 and :latest, plus a GitHub release
-# Pull requests are built (amd64 only) but not published.
-# Changes that only touch the website or the documentation skip the tests and the image; the skipped jobs still
-# count as passed, so such pull requests can be merged.
+# Checks every pull request: runs the tests and builds the Docker image (amd64 only, not published).
+# Merging into main runs nothing here; images are only published by the Release workflow (release.yml), which
+# calls this workflow with a version number to build both platforms and push:
+#   ghcr.io/thirtyfile/thirtyfile:1.2.3, :1.2 and :latest
+# Pull requests that only touch the website or the documentation skip the tests and the image; the skipped jobs
+# still count as passed, so such pull requests can be merged.
 name: Build
 
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
   pull_request:
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release_version:
+        description: Version to publish, such as 1.2.3
+        type: string
+        required: true
 
 concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
+  group: build-${{ github.ref }}-${{ inputs.release_version || 'check' }}
+  cancel-in-progress: ${{ !inputs.release_version }}
 
 permissions:
   contents: read
 
 env:
   IMAGE: ghcr.io/thirtyfile/thirtyfile
+  # Empty for pull requests
+  RELEASE: ${{ inputs.release_version }}
 
 jobs:
   changes:
@@ -35,12 +39,10 @@ jobs:
           fetch-depth: 0
       - id: diff
         env:
-          EVENT: ${{ github.event_name }}
-          REF: ${{ github.ref }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          # Releases and manual runs always build; so does anything whose starting point is unknown
-          if [ "$EVENT" = "workflow_dispatch" ] || [ "${REF#refs/tags/}" != "$REF" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+          # Releases always build; so does anything whose starting point is unknown
+          if [ -n "$RELEASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             echo "code=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -111,9 +113,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: cache-mount
-          key: buildkit-${{ github.event_name == 'pull_request' && 'amd64' || 'multi' }}-${{ hashFiles('server/Cargo.lock', 'web/pnpm-lock.yaml', 'Dockerfile') }}
+          key: buildkit-${{ inputs.release_version && 'multi' || 'amd64' }}-${{ hashFiles('server/Cargo.lock', 'web/pnpm-lock.yaml', 'Dockerfile') }}
           restore-keys: |
-            buildkit-${{ github.event_name == 'pull_request' && 'amd64' || 'multi' }}-
+            buildkit-${{ inputs.release_version && 'multi' || 'amd64' }}-
             buildkit-
 
       - uses: reproducible-containers/buildkit-cache-dance@v3.4.0
@@ -129,47 +131,47 @@ jobs:
           skip-extraction: ${{ steps.mounts.outputs.cache-hit }}
 
       - uses: docker/login-action@v4
-        if: github.event_name != 'pull_request'
+        if: inputs.release_version
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # `latest` is added by itself for version tags
+      # Releases: 1.2.3, 1.2 and latest. Pull requests: pr-N (never pushed)
+      - id: tags
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -n "$RELEASE" ]; then
+            {
+              echo "version=$RELEASE"
+              echo "list<<EOF"
+              echo "$IMAGE:$RELEASE"
+              echo "$IMAGE:${RELEASE%.*}"
+              echo "$IMAGE:latest"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "version=pr-$PR" >> "$GITHUB_OUTPUT"
+            echo "list=$IMAGE:pr-$PR" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Standard image labels (source, revision, creation time…) with the version set above
       - id: meta
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
-          tags: |
-            type=edge
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=ref,event=pr
+          labels: org.opencontainers.image.version=${{ steps.tags.outputs.version }}
 
       # The backend is cross-compiled in the Dockerfile, so arm64 needs no emulation. Pull requests build amd64 only, to be quicker
       - uses: docker/build-push-action@v7
         with:
           context: .
-          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ inputs.release_version && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          push: ${{ !!inputs.release_version }}
+          tags: ${{ steps.tags.outputs.list }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ steps.meta.outputs.version }}
+            VERSION=${{ steps.tags.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  release:
-    name: Release
-    needs: image
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-      # Release notes are put together from the merged pull requests (see .github/release.yml)
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag
