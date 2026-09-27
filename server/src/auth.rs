@@ -225,6 +225,8 @@ pub struct Me {
     pub trash_days: i64,
     /// Shortest password allowed
     pub min_password_length: usize,
+    /// The rules for public share links, so the share dialog offers only what is allowed
+    pub share_policy: crate::shares::SharePolicy,
 }
 
 async fn me_of(st: &AppState, user: User) -> AppResult<Me> {
@@ -233,7 +235,8 @@ async fn me_of(st: &AppState, user: User) -> AppResult<Me> {
         let s = st.system.read().unwrap();
         (user.is_admin() || s.allow_user_drives, s.public_url.clone(), s.min_password_length)
     };
-    Ok(Me { user, used_bytes, can_create_drive, public_url, trash_days: st.trash_days, min_password_length })
+    let share_policy = crate::shares::policy(st);
+    Ok(Me { user, used_bytes, can_create_drive, public_url, trash_days: st.trash_days, min_password_length, share_policy })
 }
 
 #[derive(Deserialize)]

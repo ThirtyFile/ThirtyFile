@@ -299,6 +299,12 @@ pub struct SystemInfo {
     scan_minutes: i64,
     require_two_factor: bool,
     min_password_length: usize,
+    /// Public share links: must have a password
+    share_password_required: bool,
+    /// Public share links: must expire within this many days (0 = no limit)
+    share_max_days: i64,
+    /// Public share links can be created and opened
+    public_links: bool,
     stats: SystemStats,
 }
 
@@ -349,6 +355,9 @@ async fn system_info(st: &AppState) -> AppResult<SystemInfo> {
         scan_minutes: s.scan_minutes,
         require_two_factor: s.require_two_factor,
         min_password_length: s.min_password_length,
+        share_password_required: s.share_password_required,
+        share_max_days: s.share_max_days,
+        public_links: s.public_links,
         stats,
     })
 }
@@ -367,6 +376,9 @@ pub struct SettingsReq {
     scan_minutes: Option<i64>,
     require_two_factor: Option<bool>,
     min_password_length: Option<usize>,
+    share_password_required: Option<bool>,
+    share_max_days: Option<i64>,
+    public_links: Option<bool>,
 }
 
 /// Values of the default interface language: follow the browser, English, Traditional Chinese
@@ -451,6 +463,27 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
             set_setting(&mut tx, "min_password_length", &n.to_string()).await?;
             tree::log(&mut tx, &user, None, "settings", &format!("Minimum password length: {n} characters")).await?;
         }
+        if let Some(required) = req.share_password_required {
+            set_setting(&mut tx, "share_password_required", if required { "1" } else { "0" }).await?;
+            let detail = if required { "Share links must have a password" } else { "Share links don't need a password" };
+            tree::log(&mut tx, &user, None, "settings", detail).await?;
+        }
+        if let Some(days) = req.share_max_days {
+            if !(0..=crate::shares::MAX_EXPIRY_DAYS).contains(&days) {
+                return Err(AppError::bad_request(format!("Enter a number of days from 0 to {}", crate::shares::MAX_EXPIRY_DAYS)));
+            }
+            set_setting(&mut tx, "share_max_days", &days.to_string()).await?;
+            let detail = match days {
+                0 => "Share links may be kept without an expiry".to_string(),
+                1 => "Share links must expire within 1 day".to_string(),
+                n => format!("Share links must expire within {n} days"),
+            };
+            tree::log(&mut tx, &user, None, "settings", &detail).await?;
+        }
+        if let Some(on) = req.public_links {
+            set_setting(&mut tx, "public_links", if on { "1" } else { "0" }).await?;
+            tree::log(&mut tx, &user, None, "settings", if on { "Allowed public share links" } else { "Turned off public share links" }).await?;
+        }
         tx.commit().await?;
         let mut s = st.system.write().unwrap();
         if let Some(require) = req.require_two_factor {
@@ -461,6 +494,15 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
         }
         if let Some(m) = req.scan_minutes {
             s.scan_minutes = m;
+        }
+        if let Some(required) = req.share_password_required {
+            s.share_password_required = required;
+        }
+        if let Some(days) = req.share_max_days {
+            s.share_max_days = days;
+        }
+        if let Some(on) = req.public_links {
+            s.public_links = on;
         }
         if let Some(lang) = req.default_lang {
             s.default_lang = lang;

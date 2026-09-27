@@ -669,7 +669,7 @@ fn api() -> Router<AppState> {
         .route("/admin/logs/archives/{id}", get(logs::download_archive).delete(logs::delete_archive))
         // Sharing
         .route("/shares", get(shares::list).post(shares::create))
-        .route("/shares/{id}", delete(shares::delete))
+        .route("/shares/{id}", patch(shares::update).delete(shares::delete))
         .route("/public/shares/{token}", get(shares::public_info))
         .route("/public/shares/{token}/unlock", post(shares::unlock))
         .route("/public/shares/{token}/download", get(shares::public_download).post(shares::create_public_download_link))

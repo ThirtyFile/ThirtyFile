@@ -26,6 +26,7 @@ const page = <M, K extends keyof M>(load: () => Promise<M>, name: K) =>
 const ControlPanelPage = page(() => import("@/pages/ControlPanelPage"), "ControlPanelPage");
 const AdminUsersPage = page(() => import("@/pages/AdminUsersPage"), "AdminUsersPage");
 const GroupsPage = page(() => import("@/pages/GroupsPage"), "GroupsPage");
+const AdminSharesPage = page(() => import("@/pages/AdminSharesPage"), "AdminSharesPage");
 const AdminDrivesPage = page(() => import("@/pages/AdminDrivesPage"), "AdminDrivesPage");
 const GeneralSettingsPage = page(() => import("@/pages/SystemPage"), "GeneralSettingsPage");
 const StorageSettingsPage = page(() => import("@/pages/SystemPage"), "StorageSettingsPage");
@@ -141,6 +142,14 @@ export function App() {
             element={
               <AdminOnly>
                 <AdminUsersPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/admin/shares"
+            element={
+              <AdminOnly>
+                <AdminSharesPage />
               </AdminOnly>
             }
           />

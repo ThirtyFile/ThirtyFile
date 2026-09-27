@@ -1,10 +1,8 @@
 /** Traditional Chinese translations: share links, access, activity/access logs, public share page, upload and download progress */
 export default {
   // Share links (My shares, share dialog)
-  "Share link disabled": "已停用分享連結",
   "Link copied": "已複製連結",
   "Copy link": "複製連結",
-  "Disable link": "停用連結",
   "Access log": "存取紀錄",
   "All access logs": "所有存取紀錄",
   "Link": "連結",

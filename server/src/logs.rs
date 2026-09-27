@@ -609,8 +609,13 @@ async fn query_access(st: &AppState, q: &AccessQuery, owner_id: Option<i64>, lim
 
 /// Share link access records: standard users only see links they created; administrators can query everything
 pub async fn share_access(State(st): State<AppState>, user: User, Query(q): Query<AccessQuery>) -> AppResult<Json<Value>> {
-    // Standard users can only query links they created (including records left by deleted links)
-    let owner = if user.is_admin() { None } else { Some(user.id) };
+    // Standard users can only query links they created (including records left by deleted links), and a link someone
+    // else created that they may manage (a manager of its space, the owner of its item)
+    let others = match &q.share_id {
+        Some(id) if !user.is_admin() => crate::shares::may_manage(&st, &user, id).await?,
+        _ => false,
+    };
+    let owner = if user.is_admin() || others { None } else { Some(user.id) };
     let limit = q.limit.unwrap_or(100).clamp(1, 1000);
     let items = query_access(&st, &q, owner, limit).await?;
     let next = (items.len() as i64 == limit).then(|| items.last().map(|r| r.id)).flatten();

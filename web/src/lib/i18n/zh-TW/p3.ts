@@ -35,7 +35,6 @@ export default {
   "Modify user": "修改使用者",
   "Delete user": "刪除使用者",
   "Create share link": "建立分享連結",
-  "Disable share link": "停用分享連結",
   "Change storage location": "變更儲存位置",
   "Add storage location": "新增儲存位置",
   "Modify storage location": "修改儲存位置",

@@ -14,7 +14,7 @@ export default {
   "Unlink your {provider} account?": "要取消連結你的 {provider} 帳戶嗎？",
   "This file has unsaved changes. If you leave it, your changes will be lost.": "檔案有未儲存的變更，離開後變更將會遺失。",
   "Leave without saving": "不儲存並離開",
-  "Disable this share link?": "要停用這個分享連結嗎？",
+  "Delete this share link?": "要刪除這個分享連結嗎？",
   "People who have the link can no longer open it. A new link would have a different address.": "持有連結的人將無法再開啟。新建立的連結會是不同的網址。",
   "Disable account \"{name}\"?": "要停用帳戶「{name}」嗎？",
   "They can no longer sign in, and their share links stop working until the account is enabled again.": "在重新啟用帳戶之前，對方無法登入，其分享連結也會失效。",

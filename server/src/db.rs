@@ -329,6 +329,9 @@ pub async fn load_system_settings(db: &SqlitePool) -> Result<SystemSettings, sql
         .and_then(|v| v.parse().ok())
         .unwrap_or(crate::auth::MIN_PASSWORD)
         .clamp(crate::auth::MIN_PASSWORD, crate::auth::MAX_MIN_PASSWORD);
+    let share_password_required = get_setting(db, "share_password_required").await?.as_deref() == Some("1");
+    let share_max_days = get_setting(db, "share_max_days").await?.and_then(|v| v.parse().ok()).unwrap_or(0).clamp(0, crate::shares::MAX_EXPIRY_DAYS);
+    let public_links = get_setting(db, "public_links").await?.as_deref() != Some("0");
     Ok(SystemSettings {
         shared_enabled: !disabled,
         shared_root_id,
@@ -339,6 +342,9 @@ pub async fn load_system_settings(db: &SqlitePool) -> Result<SystemSettings, sql
         scan_minutes,
         require_two_factor,
         min_password_length,
+        share_password_required,
+        share_max_days,
+        public_links,
     })
 }
 

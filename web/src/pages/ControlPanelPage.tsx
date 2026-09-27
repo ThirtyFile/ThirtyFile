@@ -44,6 +44,7 @@ export function ControlPanelPage() {
     ? {
         users: t("{n} user|{n} users", { n: s.users }),
         groups: t("{n} group|{n} groups", { n: s.groups }),
+        shares: system.data?.public_links ? t("{n} share link|{n} share links", { n: s.share_links }) : t("Public links turned off"),
         drives: t("{n} team space|{n} team spaces", { n: s.team_drives }),
         storage: locations.data
           ? t("{n} location · Default: {name}|{n} locations · Default: {name}", { n: locations.data.length, name: defaultLocation?.name ?? "—" })

@@ -42,11 +42,22 @@
           <li><strong>Password</strong>: visitors must enter it before they see anything. Send the password separately from the link.</li>
           <li><strong>Download limit</strong>: the link stops working after this many downloads.</li>
         </ul>
-        <p>To change a link, delete it and create a new one.</p>
+        <p>To change a link's password, expiry or download limit, click <strong>Edit link</strong> next to it. The address stays the same. After a new password, people who opened the link before must enter the new one.</p>
 
         <h2 id="manage">Your links</h2>
-        <p><strong>My share links</strong> in the menu lists every link you created, with its expiry date and how often it was used. Delete a link there to stop it working right away.</p>
-        <div class="note">A link also stops working when you lose access to the item yourself, for example when you leave a team space.</div>
+        <p><strong>My share links</strong> in the menu lists every link you created, with its expiry date and how often it was used. Select a link to copy, edit or delete it; <strong>Delete link</strong> stops it working right away.</p>
+        <p>Switch the list to <strong>All links I can manage</strong> to also see links other people made in spaces you manage, and on files you own. You can edit and delete those links too, and see who opened them. The share dialog and the details pane of an item show the same links.</p>
+        <div class="note">A link also stops working when its creator loses access to the item or the permission to share, for example when they leave a team space, and when their account is disabled. Deleting an account deletes the links it created.</div>
+
+        <h2 id="admin">For administrators</h2>
+        <p><strong>Control panel › All share links</strong> lists every public link, in every space, with who created it. Filter by space, by creator, and by whether the link still works, then edit or delete links, or open their access log.</p>
+        <p>Under <strong>Control panel › General › Share links</strong>, set the rules for links:</p>
+        <ul>
+          <li><strong>Allow public share links</strong>: when off, no one can create links, and every existing link stops working until you turn it back on. The links aren't deleted.</li>
+          <li><strong>Require a password</strong>: new links must have a password, and passwords can't be removed.</li>
+          <li><strong>Longest expiry</strong>: new and changed links must expire within this many days.</li>
+        </ul>
+        <p>The last two rules apply to links created or changed afterwards. Links created earlier keep working as they are; find them in <strong>All share links</strong> and edit or delete them.</p>
 
         <h2 id="spaces">Spaces</h2>
         <p>A space is a drive with its own members and size limit.</p>

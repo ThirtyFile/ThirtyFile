@@ -10,6 +10,7 @@ use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::Sha256;
+use sqlx::SqliteConnection;
 
 use crate::{
     auth::{self, User, cookie_header, hash_password, verify_password},
@@ -18,11 +19,11 @@ use crate::{
     logs::{self, Visitor, record_share_access},
     nodes::{ListQuery as ChildrenQuery, Listing, list_children},
     state::AppState,
-    tree::{self, Crumb, Node},
+    tree::{self, Crumb, Node, Role},
     util::{now, random_token},
 };
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct ShareInfo {
     id: String,
     node_id: String,
@@ -37,14 +38,84 @@ pub struct ShareInfo {
     views: i64,
     /// Time of the most recent access
     last_access: Option<i64>,
+    /// Who created the link (links others made are listed for the people who may manage them)
+    owner_id: i64,
+    owner_name: String,
+    /// The space the item is in
+    drive_id: Option<String>,
+    drive_name: String,
+    drive_kind: String,
+    /// Owner of a personal space, to tell "My files" of different people apart
+    drive_owner: String,
 }
 
 /// Share link token length: 10 alphanumeric characters (62^10, about 60 bits), infeasible to guess online while keeping the URL short
 const SHARE_TOKEN_LEN: usize = 10;
 
+/// Longest expiry a link policy can ask for, in days (about 10 years)
+pub const MAX_EXPIRY_DAYS: i64 = 3650;
+
+/// A link's expiry may be this much past the policy's limit: the browser picks the time, and its clock may be a little ahead
+const EXPIRY_SLACK: i64 = 3600;
+
 const SHARE_COLS: &str = "s.id, s.node_id, s.password_hash IS NOT NULL AS has_password, s.expires_at, s.max_downloads,
      s.downloads, s.created_at, n.name AS node_name, n.kind AS node_kind,
-     s.views, s.last_access";
+     s.views, s.last_access, s.owner_id, u.username AS owner_name, n.drive_id,
+     COALESCE(d.name, '') AS drive_name, COALESCE(d.kind, '') AS drive_kind,
+     COALESCE((SELECT username FROM users WHERE id = d.owner_id AND d.kind = 'personal'), '') AS drive_owner";
+
+const SHARE_FROM: &str = "shares s JOIN nodes n ON n.id = s.node_id JOIN users u ON u.id = s.owner_id LEFT JOIN drives d ON d.id = n.drive_id";
+
+/// The administrators' rules for public links (Control panel › General)
+#[derive(Serialize, Clone, Debug)]
+pub struct SharePolicy {
+    pub password_required: bool,
+    /// 0 = links may be kept without an expiry
+    pub max_days: i64,
+    /// Off: no new links, and existing ones stop working
+    pub public_links: bool,
+}
+
+pub fn policy(st: &AppState) -> SharePolicy {
+    let s = st.system.read().unwrap();
+    SharePolicy { password_required: s.share_password_required, max_days: s.share_max_days, public_links: s.public_links }
+}
+
+fn links_off() -> AppError {
+    AppError::forbidden("Public share links are turned off")
+}
+
+/// Checks an expiry against the policy; `None` means the link never expires
+fn check_expiry(policy: &SharePolicy, expires_at: Option<i64>) -> AppResult<()> {
+    if matches!(expires_at, Some(t) if t <= now()) {
+        return Err(AppError::bad_request("The expiration time must be in the future"));
+    }
+    if policy.max_days > 0 && expires_at.is_none_or(|t| t > now() + policy.max_days * 86400 + EXPIRY_SLACK) {
+        return Err(AppError::bad_request(format!(
+            "Share links must expire within {} {}",
+            policy.max_days,
+            if policy.max_days == 1 { "day" } else { "days" }
+        )));
+    }
+    Ok(())
+}
+
+fn check_max_downloads(n: Option<i64>) -> AppResult<()> {
+    if matches!(n, Some(n) if n <= 0) {
+        return Err(AppError::bad_request("The download limit must be greater than 0"));
+    }
+    Ok(())
+}
+
+/// Whether the user may change or delete a link: the person who created it, a manager of the item's space or folder,
+/// the item's owner while they still have access to it, or an administrator
+async fn can_manage(conn: &mut SqliteConnection, user: &User, creator: i64, node: &Node) -> AppResult<bool> {
+    if creator == user.id || user.is_admin() {
+        return Ok(true);
+    }
+    let role = tree::role_on(conn, user, node).await?;
+    Ok(role.is_some_and(|r| r >= Role::Manager) || (role.is_some() && node.owner_id == user.id))
+}
 
 /// Counts a visit on the share itself: the access log is archived and trimmed, the counters stay
 async fn note_access(st: &AppState, share_id: &str, view: bool) {
@@ -60,18 +131,66 @@ async fn note_access(st: &AppState, share_id: &str, view: bool) {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub struct ListQuery {
+    /// The links on one item: every one the caller may manage (the share dialog and the details pane)
     node_id: Option<String>,
+    /// "mine" (default): links the caller created; "managed": every link the caller may manage (administrators: all)
+    scope: Option<String>,
+    drive_id: Option<String>,
+    /// Only links created by this account
+    owner_id: Option<i64>,
+    /// true: only links that stopped working because they expired or used up their downloads; false: only the others
+    expired: Option<bool>,
 }
 
 pub async fn list(State(st): State<AppState>, user: User, Query(q): Query<ListQuery>) -> AppResult<Json<Vec<ShareInfo>>> {
+    let mut c = st.db.acquire().await?;
+    // Which links besides the caller's own are listed: all of them, or those in spaces the caller manages and on
+    // items the caller owns in spaces they can open
+    let (all, managed, accessible) = match (&q.node_id, q.scope.as_deref()) {
+        (Some(id), _) => {
+            let node = tree::get_node(&mut c, id).await?.ok_or_else(|| AppError::not_found("Item not found"))?;
+            // Other people's links on the item, when the caller could manage them (-1: nobody is the creator)
+            (can_manage(&mut c, &user, -1, &node).await?, Vec::new(), Vec::new())
+        }
+        (None, Some("managed")) if user.is_admin() => (true, Vec::new(), Vec::new()),
+        (None, Some("managed")) => {
+            let drives = tree::user_drives(&mut c, &user).await?;
+            let managed: Vec<String> = drives.iter().filter(|(_, r)| *r >= Role::Manager).map(|(d, _)| d.id.clone()).collect();
+            (false, managed, drives.into_iter().map(|(d, _)| d.id).collect())
+        }
+        (None, None | Some("mine")) => (false, Vec::new(), Vec::new()),
+        _ => return Err(AppError::bad_request("Invalid scope")),
+    };
     let sql = format!(
-        "SELECT {SHARE_COLS} FROM shares s JOIN nodes n ON n.id = s.node_id
-         WHERE s.owner_id = ? AND n.trashed_at IS NULL AND (?2 IS NULL OR s.node_id = ?2)
+        "SELECT {SHARE_COLS} FROM {SHARE_FROM}
+         WHERE n.trashed_at IS NULL
+           AND (?1 = 1 OR s.owner_id = ?2 OR n.drive_id IN (SELECT value FROM json_each(?3))
+                OR (n.owner_id = ?2 AND n.drive_id IN (SELECT value FROM json_each(?4))))
+           AND (?5 IS NULL OR s.node_id = ?5) AND (?6 IS NULL OR n.drive_id = ?6) AND (?7 IS NULL OR s.owner_id = ?7)
+           AND (?8 IS NULL OR ?8 = ((s.expires_at IS NOT NULL AND s.expires_at <= ?9)
+                                    OR (s.max_downloads IS NOT NULL AND s.downloads >= s.max_downloads)))
          ORDER BY s.created_at DESC"
     );
-    Ok(Json(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(user.id).bind(q.node_id).fetch_all(&st.db).await?))
+    let rows = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
+        .bind(all)
+        .bind(user.id)
+        .bind(serde_json::to_string(&managed).unwrap())
+        .bind(serde_json::to_string(&accessible).unwrap())
+        .bind(&q.node_id)
+        .bind(&q.drive_id)
+        .bind(q.owner_id)
+        .bind(q.expired)
+        .bind(now())
+        .fetch_all(&mut *c)
+        .await?;
+    Ok(Json(rows))
+}
+
+async fn share_info(conn: &mut SqliteConnection, id: &str) -> AppResult<ShareInfo> {
+    let sql = format!("SELECT {SHARE_COLS} FROM {SHARE_FROM} WHERE s.id = ?");
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(id).fetch_one(conn).await?)
 }
 
 #[derive(Deserialize)]
@@ -82,17 +201,45 @@ pub struct CreateReq {
     max_downloads: Option<i64>,
 }
 
+/// A link's options for the activity log, e.g. "Password protected, expires 2026-05-01"
+fn describe(options: Vec<String>) -> String {
+    // Capitalize the first option so the detail reads as a sentence
+    let mut detail = options.join(", ");
+    if let Some(first) = detail.get(..1).map(str::to_uppercase) {
+        detail.replace_range(..1, &first);
+    }
+    detail
+}
+
+fn expiry_text(t: Option<i64>) -> String {
+    match t {
+        Some(t) => format!("expires {}", &crate::logs::format_time(t, 0)[..10]),
+        None => "never expires".to_string(),
+    }
+}
+
+fn limit_text(n: Option<i64>) -> String {
+    match n {
+        Some(n) => format!("limited to {n} {}", if n == 1 { "download" } else { "downloads" }),
+        None => "no download limit".to_string(),
+    }
+}
+
 pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<CreateReq>) -> AppResult<Json<ShareInfo>> {
-    let password_hash = match req.password.as_deref().map(str::trim) {
-        Some(p) if !p.is_empty() => Some(hash_password(p.to_string()).await?),
-        _ => None,
+    let policy = policy(&st);
+    if !policy.public_links {
+        return Err(links_off());
+    }
+    let password = req.password.as_deref().map(str::trim).filter(|p| !p.is_empty());
+    if password.is_none() && policy.password_required {
+        return Err(AppError::bad_request("Share links must have a password"));
+    }
+    check_expiry(&policy, req.expires_at)?;
+    check_max_downloads(req.max_downloads)?;
+    let password_hash = match password {
+        Some(p) => Some(hash_password(p.to_string()).await?),
+        None => None,
     };
-    if matches!(req.expires_at, Some(t) if t <= now()) {
-        return Err(AppError::bad_request("The expiration time must be in the future"));
-    }
-    if matches!(req.max_downloads, Some(n) if n <= 0) {
-        return Err(AppError::bad_request("The download limit must be greater than 0"));
-    }
     let token = random_token(SHARE_TOKEN_LEN);
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
@@ -112,24 +259,116 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     .bind(now())
     .execute(&mut *tx)
     .await?;
-    let sql = format!("SELECT {SHARE_COLS} FROM shares s JOIN nodes n ON n.id = s.node_id WHERE s.id = ?");
-    let info = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&token).fetch_one(&mut *tx).await?;
+    let info = share_info(&mut tx, &token).await?;
     let mut options = Vec::new();
-    if req.password.as_deref().is_some_and(|p| !p.trim().is_empty()) {
+    if password.is_some() {
         options.push("password protected".to_string());
     }
+    if req.expires_at.is_some() {
+        options.push(expiry_text(req.expires_at));
+    }
+    if req.max_downloads.is_some() {
+        options.push(limit_text(req.max_downloads));
+    }
+    tree::log(&mut tx, &user, Some(&node), "share_create", &describe(options)).await?;
+    tx.commit().await?;
+    Ok(Json(info))
+}
+
+/// A field that can be left out (unchanged), null (cleared) or given
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<Option<T>>, D::Error> {
+    Option::<T>::deserialize(d).map(Some)
+}
+
+#[derive(Deserialize, Default)]
+pub struct UpdateReq {
+    /// A new password; "" removes the password
+    password: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    expires_at: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "present")]
+    max_downloads: Option<Option<i64>>,
+}
+
+/// A share link (its password hash) and its item, for changing or deleting it: only people who may manage it find it
+async fn manageable_share(conn: &mut SqliteConnection, user: &User, id: &str) -> AppResult<(Option<String>, Node)> {
+    let row: Option<(i64, Option<String>, String)> =
+        sqlx::query_as("SELECT owner_id, password_hash, node_id FROM shares WHERE id = ?").bind(id).fetch_optional(&mut *conn).await?;
+    let not_found = || AppError::not_found("Share link not found");
+    let (creator, hash, node_id) = row.ok_or_else(not_found)?;
+    let node = tree::get_node(conn, &node_id).await?.ok_or_else(not_found)?;
+    if !can_manage(conn, user, creator, &node).await? {
+        return Err(not_found());
+    }
+    Ok((hash, node))
+}
+
+/// Whether the user may manage the link (see `can_manage`); false when it doesn't exist
+pub async fn may_manage(st: &AppState, user: &User, id: &str) -> AppResult<bool> {
+    match manageable_share(&mut *st.db.acquire().await?, user, id).await {
+        Ok(_) => Ok(true),
+        Err(e) if e.status == StatusCode::NOT_FOUND => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// Changes a link's password, expiry or download limit; the link keeps its address and its creator
+pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<String>, Json(req): Json<UpdateReq>) -> AppResult<Json<ShareInfo>> {
+    let policy = policy(&st);
+    let password = req.password.as_deref().map(str::trim);
+    if password == Some("") && policy.password_required {
+        return Err(AppError::bad_request("Share links must have a password"));
+    }
     if let Some(t) = req.expires_at {
-        options.push(format!("expires {}", &crate::logs::format_time(t, 0)[..10]));
+        check_expiry(&policy, t)?;
     }
     if let Some(n) = req.max_downloads {
-        options.push(format!("limited to {n} {}", if n == 1 { "download" } else { "downloads" }));
+        check_max_downloads(n)?;
     }
-    // Capitalize the first option so the detail reads as a sentence
-    let mut detail = options.join(", ");
-    if let Some(first) = detail.get(..1).map(str::to_uppercase) {
-        detail.replace_range(..1, &first);
+    let new_hash = match password {
+        Some(p) if !p.is_empty() => Some(hash_password(p.to_string()).await?),
+        _ => None,
+    };
+    let _w = st.write_lock.lock().await;
+    let mut tx = st.db.begin().await?;
+    let (old_hash, node) = manageable_share(&mut tx, &user, &id).await?;
+    let mut changes = Vec::new();
+    // A new password also locks out visitors who unlocked the link with the old one (the unlock cookie is tied to it)
+    let hash = match (password, new_hash) {
+        (None, _) => old_hash,
+        (Some(_), Some(new)) => {
+            changes.push(if old_hash.is_some() { "changed the password" } else { "added a password" }.to_string());
+            Some(new)
+        }
+        (Some(_), None) => {
+            if old_hash.is_some() {
+                changes.push("removed the password".to_string());
+            }
+            None
+        }
+    };
+    if let Some(t) = req.expires_at {
+        changes.push(expiry_text(t));
     }
-    tree::log(&mut tx, &user, Some(&node), "share_create", &detail).await?;
+    if let Some(n) = req.max_downloads {
+        changes.push(limit_text(n));
+    }
+    sqlx::query(
+        "UPDATE shares SET password_hash = ?, expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
+           max_downloads = CASE WHEN ? THEN ? ELSE max_downloads END WHERE id = ?",
+    )
+    .bind(&hash)
+    .bind(req.expires_at.is_some())
+    .bind(req.expires_at.flatten())
+    .bind(req.max_downloads.is_some())
+    .bind(req.max_downloads.flatten())
+    .bind(&id)
+    .execute(&mut *tx)
+    .await?;
+    if !changes.is_empty() {
+        tree::log(&mut tx, &user, Some(&node), "share_update", &format!("/share/{id}: {}", changes.join(", "))).await?;
+    }
+    let info = share_info(&mut tx, &id).await?;
     tx.commit().await?;
     Ok(Json(info))
 }
@@ -137,11 +376,9 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
 pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
-    let node_id: Option<(String,)> = sqlx::query_as("SELECT node_id FROM shares WHERE id = ? AND owner_id = ?").bind(&id).bind(user.id).fetch_optional(&mut *tx).await?;
-    let Some((node_id,)) = node_id else { return Err(AppError::not_found("Share link not found")) };
+    let (_, node) = manageable_share(&mut tx, &user, &id).await?;
     sqlx::query("DELETE FROM shares WHERE id = ?").bind(&id).execute(&mut *tx).await?;
-    let node = tree::get_node(&mut tx, &node_id).await?;
-    tree::log(&mut tx, &user, node.as_ref(), "share_delete", &format!("/share/{id}")).await?;
+    tree::log(&mut tx, &user, Some(&node), "share_delete", &format!("/share/{id}")).await?;
     tx.commit().await?;
     Ok(Json(json!({ "ok": true })))
 }
@@ -202,6 +439,10 @@ fn gone() -> AppError {
 }
 
 async fn find_share(st: &AppState, token: &str) -> AppResult<(Share, Node)> {
+    // Turned off by an administrator: every link stops working until links are allowed again
+    if !policy(st).public_links {
+        return Err(gone());
+    }
     let share: Share = sqlx::query_as(
         "SELECT s.id, s.node_id, s.owner_id, s.password_hash, s.expires_at, s.max_downloads, s.downloads, u.username AS owner_name
          FROM shares s JOIN users u ON u.id = s.owner_id WHERE s.id = ? AND u.disabled = 0",
@@ -623,7 +864,7 @@ mod tests {
         }
         // The access log is trimmed after its retention period; the count stays
         sqlx::query("DELETE FROM share_access").execute(&env.st.db).await.unwrap();
-        let Json(list) = super::list(State(env.st.clone()), amy.clone(), Query(ListQuery { node_id: None })).await.unwrap();
+        let Json(list) = super::list(State(env.st.clone()), amy.clone(), Query(ListQuery::default())).await.unwrap();
         assert_eq!(list[0].views, 2);
         assert!(list[0].last_access.is_some());
     }
@@ -793,5 +1034,149 @@ mod tests {
         let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: None };
         let Json(own) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         assert!(find_share(&env.st, &own.id).await.is_ok());
+    }
+
+    fn link(node: &str) -> CreateReq {
+        CreateReq { node_id: node.to_string(), password: None, expires_at: None, max_downloads: None }
+    }
+
+    async fn links(env: &testutil::TestEnv, user: &User, q: ListQuery) -> Vec<String> {
+        let Json(list) = super::list(State(env.st.clone()), user.clone(), Query(q)).await.unwrap();
+        list.into_iter().map(|s| s.id).collect()
+    }
+
+    fn managed() -> ListQuery {
+        ListQuery { scope: Some("managed".into()), ..Default::default() }
+    }
+
+    async fn change(env: &testutil::TestEnv, user: &User, id: &str, req: serde_json::Value) -> AppResult<ShareInfo> {
+        let req: UpdateReq = serde_json::from_value(req).unwrap();
+        update(State(env.st.clone()), user.clone(), Path(id.to_string()), Json(req)).await.map(|Json(i)| i)
+    }
+
+    async fn remove(env: &testutil::TestEnv, user: &User, id: &str) -> AppResult<Json<Value>> {
+        delete(State(env.st.clone()), user.clone(), Path(id.to_string())).await
+    }
+
+    async fn set_policy(env: &testutil::TestEnv, req: serde_json::Value) {
+        let admin = env.admin().await;
+        let req: crate::admin::SettingsReq = serde_json::from_value(req).unwrap();
+        let _ = crate::admin::update_settings(State(env.st.clone()), crate::auth::Admin(admin), Json(req)).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn managers_administrators_and_owners_see_and_manage_links_others_made() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let ben = env.user("ben", true).await;
+        let carl = env.user("carl", true).await;
+        let company = env.st.shared_root().unwrap();
+        let doc = env.file(&ben, &company, "plan.txt").await;
+        let Json(info) = create(State(env.st.clone()), ben.clone(), Json(link(&doc))).await.unwrap();
+        assert_eq!((info.owner_name.as_str(), info.drive_kind.as_str()), ("ben", "company"));
+
+        // Another member of the space: doesn't see the link and can't change or delete it
+        assert!(links(&env, &carl, managed()).await.is_empty());
+        assert!(links(&env, &carl, ListQuery { node_id: Some(doc.clone()), ..Default::default() }).await.is_empty());
+        assert_eq!(change(&env, &carl, &info.id, json!({ "max_downloads": 1 })).await.unwrap_err().status, StatusCode::NOT_FOUND);
+        assert_eq!(remove(&env, &carl, &info.id).await.unwrap_err().status, StatusCode::NOT_FOUND);
+        assert!(!may_manage(&env.st, &carl, &info.id).await.unwrap(), "nor read its access log");
+
+        // A manager of the space sees it among the links they manage and on the item, and can change it
+        env.grant(&company, &carl, "manager").await;
+        assert!(may_manage(&env.st, &carl, &info.id).await.unwrap());
+        assert_eq!(links(&env, &carl, managed()).await, vec![info.id.clone()]);
+        assert_eq!(links(&env, &carl, ListQuery { node_id: Some(doc.clone()), ..Default::default() }).await, vec![info.id.clone()]);
+        assert!(links(&env, &carl, ListQuery::default()).await.is_empty(), "their own links stay separate");
+        let changed = change(&env, &carl, &info.id, json!({ "max_downloads": 3 })).await.unwrap();
+        assert_eq!((changed.max_downloads, changed.owner_id), (Some(3), ben.id), "the link keeps its creator");
+
+        // An administrator sees every link, filtered by space, creator and state, and can delete it
+        assert_eq!(links(&env, &admin, managed()).await, vec![info.id.clone()]);
+        let drive = env.drive_of(&company).await;
+        assert_eq!(links(&env, &admin, ListQuery { drive_id: Some(drive), owner_id: Some(ben.id), ..managed() }).await.len(), 1);
+        assert!(links(&env, &admin, ListQuery { owner_id: Some(carl.id), ..managed() }).await.is_empty());
+        assert!(links(&env, &admin, ListQuery { expired: Some(true), ..managed() }).await.is_empty());
+        sqlx::query("UPDATE shares SET downloads = 3").execute(&env.st.db).await.unwrap();
+        assert_eq!(links(&env, &admin, ListQuery { expired: Some(true), ..managed() }).await.len(), 1, "used up counts as expired");
+        let _ = remove(&env, &admin, &info.id).await.unwrap();
+        assert!(find_share(&env.st, &info.id).await.is_err());
+
+        // The owner of a file sees and deletes a link a colleague made on it
+        let amy = env.user("amy", true).await;
+        let folder = env.folder(&amy, &amy.root_id, "Shared").await;
+        let report = env.file(&amy, &folder, "report.txt").await;
+        env.grant(&folder, &ben, "editor").await;
+        let Json(theirs) = create(State(env.st.clone()), ben.clone(), Json(link(&report))).await.unwrap();
+        assert_eq!(links(&env, &amy, ListQuery { node_id: Some(report.clone()), ..Default::default() }).await, vec![theirs.id.clone()]);
+        assert_eq!(links(&env, &amy, managed()).await, vec![theirs.id.clone()]);
+        let _ = remove(&env, &amy, &theirs.id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn changing_a_link_keeps_its_address_and_a_new_password_locks_out_earlier_visitors() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let doc = stored_file(&env, &amy, &amy.root_id, "a.txt", b"hello").await;
+        let first = testutil::wrong_password();
+        let req = CreateReq { password: Some(first.clone()), expires_at: Some(now() + 86400), ..link(&doc) };
+        let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
+        let addr: std::net::SocketAddr = "203.0.113.9:1".parse().unwrap();
+        let visitor = Visitor { ip: String::new(), user_agent: String::new() };
+        let res = unlock(State(env.st.clone()), Path(info.id.clone()), ConnectInfo(addr), HeaderMap::new(), visitor, Json(UnlockReq { password: first })).await.unwrap();
+        let cookie = res.headers()[header::SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_string();
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, cookie.parse().unwrap());
+        assert!(open_share(&env.st, &info.id, &headers).await.is_ok());
+
+        // Leaving a field out keeps it; null clears it
+        let changed = change(&env, &amy, &info.id, json!({ "expires_at": null, "max_downloads": 5 })).await.unwrap();
+        assert_eq!((changed.id.as_str(), changed.expires_at, changed.max_downloads, changed.has_password), (info.id.as_str(), None, Some(5), true));
+        assert!(open_share(&env.st, &info.id, &headers).await.is_ok());
+        assert!(change(&env, &amy, &info.id, json!({ "expires_at": now() - 10 })).await.is_err());
+        assert!(change(&env, &amy, &info.id, json!({ "max_downloads": 0 })).await.is_err());
+
+        // A new password: visitors who unlocked the link before must enter it
+        change(&env, &amy, &info.id, json!({ "password": testutil::wrong_password() })).await.unwrap();
+        assert_eq!(open_share(&env.st, &info.id, &headers).await.err().map(|e| e.status), Some(StatusCode::UNAUTHORIZED));
+        let open = change(&env, &amy, &info.id, json!({ "password": "" })).await.unwrap();
+        assert!(!open.has_password);
+        assert!(open_share(&env.st, &info.id, &HeaderMap::new()).await.is_ok());
+        let (logged,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM activity WHERE action = 'share_update'").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(logged, 3);
+    }
+
+    #[tokio::test]
+    async fn the_link_policy_applies_to_new_and_changed_links() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let doc = env.file(&amy, &amy.root_id, "a.txt").await;
+        let Json(old) = create(State(env.st.clone()), amy.clone(), Json(link(&doc))).await.unwrap();
+        set_policy(&env, json!({ "share_password_required": true, "share_max_days": 7 })).await;
+        let make = |req: CreateReq| create(State(env.st.clone()), amy.clone(), Json(req));
+
+        let err = make(CreateReq { expires_at: Some(now() + 86400), ..link(&doc) }).await.unwrap_err();
+        assert_eq!(err.message, "Share links must have a password");
+        let pw = || Some(testutil::wrong_password());
+        let err = make(CreateReq { password: pw(), ..link(&doc) }).await.unwrap_err();
+        assert_eq!(err.message, "Share links must expire within 7 days");
+        assert!(make(CreateReq { password: pw(), expires_at: Some(now() + 30 * 86400), ..link(&doc) }).await.is_err());
+        let Json(ok) = make(CreateReq { password: pw(), expires_at: Some(now() + 7 * 86400), ..link(&doc) }).await.unwrap();
+        assert!(change(&env, &amy, &ok.id, json!({ "password": "" })).await.is_err());
+        assert!(change(&env, &amy, &ok.id, json!({ "expires_at": null })).await.is_err());
+        assert!(change(&env, &amy, &ok.id, json!({ "expires_at": now() + 3 * 86400 })).await.is_ok());
+        // A link made before the rule keeps working as it is
+        assert!(find_share(&env.st, &old.id).await.is_ok());
+        assert!(crate::db::load_system_settings(&env.st.db).await.unwrap().share_password_required);
+
+        // Public links turned off: none can be made, and existing ones stop working until they're allowed again,
+        // while their creators and administrators still find them to delete them
+        set_policy(&env, json!({ "public_links": false })).await;
+        assert_eq!(make(CreateReq { password: pw(), expires_at: Some(now() + 86400), ..link(&doc) }).await.unwrap_err().status, StatusCode::FORBIDDEN);
+        assert_eq!(find_share(&env.st, &ok.id).await.err().map(|e| e.status), Some(StatusCode::NOT_FOUND));
+        assert_eq!(links(&env, &amy, ListQuery::default()).await.len(), 2);
+        assert!(!crate::db::load_system_settings(&env.st.db).await.unwrap().public_links);
+        set_policy(&env, json!({ "public_links": true })).await;
+        assert!(find_share(&env.st, &ok.id).await.is_ok());
     }
 }

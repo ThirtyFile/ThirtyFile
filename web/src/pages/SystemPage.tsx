@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Switch } from "@base-ui/react/switch";
-import { ActivityIcon, DatabaseIcon, KeyRoundIcon, ShieldCheckIcon, DownloadIcon, FilesIcon, FolderSyncIcon, GlobeIcon, HardDriveIcon, LanguagesIcon, Link2Icon, Loader2Icon, LogInIcon, RefreshCwIcon, SettingsIcon, Trash2Icon, type LucideIcon } from "lucide-react";
+import { ActivityIcon, CalendarClockIcon, DatabaseIcon, KeyRoundIcon, ShieldCheckIcon, DownloadIcon, FilesIcon, FolderSyncIcon, GlobeIcon, HardDriveIcon, LanguagesIcon, Link2Icon, Loader2Icon, LogInIcon, RefreshCwIcon, SettingsIcon, Trash2Icon, type LucideIcon } from "lucide-react";
 import { Link } from "react-router";
 import { ActivityLog } from "@/components/logs/ActivityLog";
 import { ShareAccessLog } from "@/components/logs/ShareAccessLog";
@@ -168,6 +168,36 @@ function ScanIntervalInput({ value, saving, onSave }: { value: number; saving: b
   );
 }
 
+/** Longest expiry allowed for share links (days, 0 = no limit) */
+function MaxDaysInput({ value, saving, onSave }: { value: number; saving: boolean; onSave(days: number): void }) {
+  const [text, setText] = useState(value ? String(value) : "");
+  const days = text.trim() ? Number(text) : 0;
+  const invalid = text.trim() !== "" && (!/^\d+$/.test(text.trim()) || days > 3650);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!invalid && days !== value) onSave(days);
+  };
+  return (
+    <form className="flex shrink-0 items-center gap-2" onSubmit={submit}>
+      <div className="relative">
+        <Input
+          aria-label={t("Share links must expire within (days)")}
+          inputMode="numeric"
+          className="h-8 w-28 pr-12 text-right tabular-nums"
+          placeholder={t("No limit")}
+          value={text}
+          aria-invalid={invalid}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-muted-foreground">{t("days")}</span>
+      </div>
+      <Button type="submit" size="sm" disabled={saving || invalid || days === value}>
+        {t("Save")}
+      </Button>
+    </form>
+  );
+}
+
 /** Site URL input (module level, so it doesn't lose focus on re-render) */
 function PublicUrlInput({ value, saving, onSave }: { value: string; saving: boolean; onSave(url: string): void }) {
   const [text, setText] = useState(value);
@@ -212,6 +242,7 @@ export function GeneralSettingsPage() {
   const qc = useQueryClient();
   const q = useSystem();
   const [confirmDisable, setConfirmDisable] = useState(false);
+  const [confirmLinksOff, setConfirmLinksOff] = useState(false);
 
   const save = useMutation({
     mutationFn: (req: SystemSettingsReq) => api.updateSystemSettings(req),
@@ -400,6 +431,77 @@ export function GeneralSettingsPage() {
             />
           </div>
         </Section>
+      )}
+      {q.data && (
+        <Section title={t("Share links")}>
+          <div className="flex items-start gap-4 p-4">
+            <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-teal-500/10 text-teal-700 dark:text-teal-300">
+              <Link2Icon className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">{t("Allow public share links")}</div>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {t("Anyone with a link can open the linked file or folder without an account. When off, no one can create links, and existing links stop working until they're allowed again; they aren't deleted. Find and revoke single links in \"All share links\".")}
+              </p>
+              <Link to="/admin/shares" className="mt-2 inline-block text-xs text-brand hover:underline">
+                {t("All share links")}
+              </Link>
+            </div>
+            <Toggle
+              label={t("Allow public share links")}
+              checked={q.data.public_links}
+              disabled={save.isPending}
+              onChange={(v) => (v ? save.mutate({ public_links: true }) : setConfirmLinksOff(true))}
+            />
+          </div>
+          <div className="flex items-start gap-4 border-t p-4">
+            <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-300">
+              <KeyRoundIcon className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">{t("Require a password")}</div>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {t("New links must have a password, and a password can't be removed from a link. Links created earlier keep working as they are.")}
+              </p>
+            </div>
+            <Toggle
+              label={t("Require a password")}
+              checked={q.data.share_password_required}
+              disabled={save.isPending}
+              onChange={(v) => save.mutate({ share_password_required: v })}
+            />
+          </div>
+          <div className="flex flex-wrap items-start gap-4 border-t p-4">
+            <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-300">
+              <CalendarClockIcon className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">{t("Longest expiry")}</div>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {t("New and changed links must expire within this many days. Leave blank to allow links that never expire. Links created earlier keep their expiry.")}
+              </p>
+            </div>
+            <MaxDaysInput
+              key={q.data.share_max_days}
+              value={q.data.share_max_days}
+              saving={save.isPending}
+              onSave={(days) => save.mutate({ share_max_days: days })}
+            />
+          </div>
+        </Section>
+      )}
+      {confirmLinksOff && (
+        <ConfirmDialog
+          title={t("Turn off public share links?")}
+          description={t("All existing links stop working right away, and no one can create new ones. The links aren't deleted: allow public links again and they work as before.")}
+          confirmText={t("Turn off")}
+          destructive
+          onClose={() => setConfirmLinksOff(false)}
+          onConfirm={async () => {
+            await save.mutateAsync({ public_links: false });
+            setConfirmLinksOff(false);
+          }}
+        />
       )}
       {confirmDisable && (
         <ConfirmDialog

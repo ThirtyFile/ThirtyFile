@@ -420,6 +420,16 @@ export interface Me {
   trash_days: number;
   /** Shortest password allowed */
   min_password_length: number;
+  /** The administrators' rules for public share links */
+  share_policy: SharePolicy;
+}
+
+export interface SharePolicy {
+  password_required: boolean;
+  /** Links must expire within this many days; 0 = no limit */
+  max_days: number;
+  /** Off: no new links, and existing ones don't work */
+  public_links: boolean;
 }
 
 /** A correct password of an account with two-factor sign-in: the ticket for the second step */
@@ -488,6 +498,31 @@ export interface ShareInfo {
   views: number;
   /** Time of the last access */
   last_access: number | null;
+  /** Who created the link */
+  owner_id: number;
+  owner_name: string;
+  /** The space the item is in */
+  drive_id: string | null;
+  drive_name: string;
+  drive_kind: string;
+  /** Owner of a personal space */
+  drive_owner: string;
+}
+
+export interface ShareFilter {
+  /** "managed": every link the caller may manage (administrators: all); default: the caller's own */
+  scope?: "mine" | "managed";
+  drive_id?: string;
+  owner_id?: number;
+  /** true: only links that expired or used up their downloads; false: only working ones */
+  expired?: boolean;
+}
+
+/** Changes to a link: a field left out stays as it is; null clears it; password "" removes the password */
+export interface ShareUpdate {
+  password?: string;
+  expires_at?: number | null;
+  max_downloads?: number | null;
 }
 
 export interface UserRow {
@@ -522,6 +557,9 @@ export interface SystemSettingsReq {
   scan_minutes?: number;
   require_two_factor?: boolean;
   min_password_length?: number;
+  share_password_required?: boolean;
+  share_max_days?: number;
+  public_links?: boolean;
 }
 
 /** System default interface language: "auto" follows the browser */
@@ -541,6 +579,12 @@ export interface SystemInfo {
   /** Password sign-in needs a second factor */
   require_two_factor: boolean;
   min_password_length: number;
+  /** Public share links must have a password */
+  share_password_required: boolean;
+  /** Public share links must expire within this many days (0 = no limit) */
+  share_max_days: number;
+  /** Public share links can be created and opened */
+  public_links: boolean;
   stats: {
     users: number;
     groups: number;
@@ -756,7 +800,9 @@ export const api = {
     return res.headers.get("X-Node-Id")!;
   },
 
-  shares: (nodeId?: string) => get<ShareInfo[]>(`/shares${qs({ node_id: nodeId })}`),
+  /** With a node: every link on it the caller may manage; otherwise the caller's own links, or those matching the filter */
+  shares: (nodeId?: string, filter: ShareFilter = {}) => get<ShareInfo[]>(`/shares${qs(toParams({ ...filter, node_id: nodeId }))}`),
+  updateShare: (id: string, req: ShareUpdate) => request<ShareInfo>("PATCH", enc`/shares/${id}`, req),
   createShare: (req: { node_id: string; password?: string; expires_at?: number; max_downloads?: number }) => post<ShareInfo>("/shares", req),
   deleteShare: (id: string) => request("DELETE", enc`/shares/${id}`),
 

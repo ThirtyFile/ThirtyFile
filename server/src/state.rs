@@ -99,6 +99,12 @@ pub struct SystemSettings {
     pub require_two_factor: bool,
     /// Shortest password people may choose (at least `auth::MIN_PASSWORD`)
     pub min_password_length: usize,
+    /// Public share links: new and changed links must have a password
+    pub share_password_required: bool,
+    /// Public share links: new and changed links must expire within this many days (0 = no limit)
+    pub share_max_days: i64,
+    /// Public share links can be created and opened; while off, existing links stop working (they aren't deleted)
+    pub public_links: bool,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]

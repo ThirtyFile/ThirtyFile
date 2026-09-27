@@ -5,6 +5,7 @@ import {
   DatabaseIcon,
   HardDriveIcon,
   KeyRoundIcon,
+  Link2Icon,
   PaletteIcon,
   PieChartIcon,
   SlidersHorizontalIcon,
@@ -14,7 +15,7 @@ import {
 } from "lucide-react";
 import { t, tc } from "@/lib/i18n";
 
-export type ControlPanelKey = "users" | "groups" | "drives" | "storage" | "usage" | "general" | "branding" | "sso" | "activity" | "logs";
+export type ControlPanelKey = "users" | "groups" | "shares" | "drives" | "storage" | "usage" | "general" | "branding" | "sso" | "activity" | "logs";
 
 export interface ControlPanelItem {
   key: ControlPanelKey;
@@ -60,6 +61,16 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     tone: "bg-violet-500/12 text-violet-600 dark:text-violet-300",
     category: "users",
     keywords: "成員 授權 group member access", // i18n-ignore: bilingual search keywords
+  },
+  {
+    key: "shares",
+    to: "/admin/shares",
+    title: t("All share links"),
+    desc: t("Find and revoke public links to any file, filtered by space, creator and whether they still work"),
+    icon: Link2Icon,
+    tone: "bg-teal-500/12 text-teal-700 dark:text-teal-300",
+    category: "users",
+    keywords: "分享連結 公開 連結 撤銷 刪除 到期 密碼 share link public revoke delete expired password", // i18n-ignore: bilingual search keywords
   },
   {
     key: "drives",
