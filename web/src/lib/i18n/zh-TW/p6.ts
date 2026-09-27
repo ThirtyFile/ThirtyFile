@@ -51,6 +51,7 @@ export default {
   "Reload (discard changes)": "重新載入（捨棄修改）",
   "Couldn't save": "儲存失敗",
   "Will be converted to UTF-8 when saved": "儲存時會轉為 UTF-8",
+  "Unknown encoding: opened read-only so the file isn't damaged": "無法辨識的編碼：以唯讀開啟，避免損壞檔案",
   "Read-only": "唯讀",
   "Unsaved changes": "尚未儲存",
   "Save": "儲存",
