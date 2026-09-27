@@ -92,27 +92,200 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
     }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub struct ListQuery {
     sort: Option<String>,
     order: Option<String>,
     folders_only: Option<bool>,
+    /// Items per page (at most MAX_PAGE); without it, the whole list comes at once
+    limit: Option<i64>,
+    /// The `next` of the previous page
+    after: Option<String>,
+}
+
+/// Largest page of a folder or trash listing
+const MAX_PAGE: i64 = 5000;
+
+/// A whole listing, or one page of it when the request gave a `limit`
+#[derive(Serialize, Debug)]
+#[serde(untagged)]
+pub enum Listing<T> {
+    All(Vec<T>),
+    Page {
+        items: Vec<T>,
+        /// `after` for the next page; None on the last page
+        next: Option<String>,
+    },
+}
+
+impl<T> Listing<T> {
+    fn new(items: Vec<T>, limit: Option<i64>, next: Option<String>) -> Self {
+        if limit.is_some() { Listing::Page { items, next } } else { Listing::All(items) }
+    }
+
+    /// Changes the items, keeping the page
+    pub fn map<U>(self, f: impl FnOnce(Vec<T>) -> Vec<U>) -> Listing<U> {
+        match self {
+            Listing::All(items) => Listing::All(f(items)),
+            Listing::Page { items, next } => Listing::Page { items: f(items), next },
+        }
+    }
+
+    pub fn items_mut(&mut self) -> &mut Vec<T> {
+        match self {
+            Listing::All(items) | Listing::Page { items, .. } => items,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn into_items(self) -> Vec<T> {
+        match self {
+            Listing::All(items) | Listing::Page { items, .. } => items,
+        }
+    }
+}
+
+/// Where a folder page ends: the sort values of its last item, so the next page starts right after it even when items
+/// were added or removed in between (keyset paging). The browser gets it as opaque text.
+#[derive(Serialize, Deserialize)]
+struct Cursor {
+    folder: bool,
+    key: SortValue,
+    name: String,
+    id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum SortValue {
+    Int(i64),
+    Text(String),
+}
+
+fn encode_cursor<T: Serialize>(c: &T) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(c).unwrap())
+}
+
+fn decode_cursor<T: serde::de::DeserializeOwned>(s: &str) -> AppResult<T> {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(s)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .ok_or_else(|| AppError::bad_request("This list has changed. Reload it."))
+}
+
+/// The page size asked for, and where the page starts (only with a size)
+fn page_of<T: serde::de::DeserializeOwned>(limit: Option<i64>, after: Option<&str>) -> AppResult<(Option<i64>, Option<T>)> {
+    let limit = limit.map(|l| l.clamp(1, MAX_PAGE));
+    let after = match (after, limit) {
+        (Some(a), Some(_)) => Some(decode_cursor(a)?),
+        _ => None,
+    };
+    Ok((limit, after))
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum SortCol {
+    Name,
+    Size,
+    Updated,
+    Type,
+}
+
+impl SortCol {
+    fn parse(sort: Option<&str>) -> Self {
+        match sort {
+            Some("size") => Self::Size,
+            Some("updated") => Self::Updated,
+            Some("type") => Self::Type,
+            _ => Self::Name,
+        }
+    }
+
+    fn expr(self) -> &'static str {
+        const EXT: &str = "CASE WHEN n.kind = 'file' AND length(rtrim(n.name, replace(n.name, '.', ''))) > 1
+            THEN lower(substr(n.name, length(rtrim(n.name, replace(n.name, '.', ''))) + 1)) ELSE '' END";
+        match self {
+            Self::Size => "n.size",
+            Self::Updated => "n.updated_at",
+            Self::Type => EXT,
+            Self::Name => "n.name COLLATE natural_name",
+        }
+    }
 }
 
 /// Sorting of folder listings, folders first. Names sort naturally ("File 2" before "File 10", the `natural_name`
 /// collation), and Type sorts by extension, as the column shows it (`extOf` in the browser: after the last dot, unless
-/// the name starts with it).
+/// the name starts with it). The id comes last so every item has a fixed place, which paging relies on.
 pub fn order_clause(sort: Option<&str>, order: Option<&str>) -> String {
-    const EXT: &str = "CASE WHEN n.kind = 'file' AND length(rtrim(n.name, replace(n.name, '.', ''))) > 1
-        THEN lower(substr(n.name, length(rtrim(n.name, replace(n.name, '.', ''))) + 1)) ELSE '' END";
-    let col = match sort {
-        Some("size") => "n.size",
-        Some("updated") => "n.updated_at",
-        Some("type") => EXT,
-        _ => "n.name COLLATE natural_name",
-    };
+    let col = SortCol::parse(sort).expr();
     let dir = if order == Some("desc") { "DESC" } else { "ASC" };
-    format!("ORDER BY (n.kind = 'folder') DESC, {col} {dir}, n.name COLLATE natural_name")
+    format!("ORDER BY (n.kind = 'folder') DESC, {col} {dir}, n.name COLLATE natural_name, n.id")
+}
+
+/// The children of a folder (not in the trash) in the order of `order_clause`; with a limit, one page of them.
+/// SQLite runs NODE_COLS' subqueries after sorting, only for the rows it returns: measured on a folder of 50,000
+/// items, that is faster than joining the same tables for every row, with or without a limit.
+pub async fn list_children(conn: &mut SqliteConnection, parent_id: &str, q: &ListQuery) -> AppResult<Listing<Node>> {
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        #[sqlx(flatten)]
+        node: Node,
+        /// The extension when sorting by type (the other sort values are columns of the node)
+        ext: Option<String>,
+    }
+    let sort = SortCol::parse(q.sort.as_deref());
+    let desc = q.order.as_deref() == Some("desc");
+    let (limit, after) = page_of::<Cursor>(q.limit, q.after.as_deref())?;
+    let kind_filter = if q.folders_only == Some(true) { "AND n.kind = 'folder'" } else { "" };
+    // Everything after the cursor in that order: folders before files, then the sort column, the name and the id
+    let col = sort.expr();
+    let keyset = if after.is_some() {
+        let op = if desc { "<" } else { ">" };
+        format!(
+            "AND ((n.kind = 'folder') < ?2 OR ((n.kind = 'folder') = ?2 AND ({col} {op} ?3 OR ({col} = ?3
+                 AND (n.name COLLATE natural_name > ?4 OR (n.name COLLATE natural_name = ?4 AND n.id > ?5))))))"
+        )
+    } else {
+        String::new()
+    };
+    let ext = if sort == SortCol::Type { col } else { "NULL" };
+    let sql = format!(
+        "SELECT {NODE_COLS}, {ext} AS ext FROM nodes n
+         WHERE n.parent_id = ?1 AND n.trashed_at IS NULL {kind_filter} {keyset} {} LIMIT ?6",
+        order_clause(q.sort.as_deref(), q.order.as_deref())
+    );
+    let query = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str())).bind(parent_id);
+    let query = match &after {
+        Some(c) => {
+            let query = query.bind(c.folder);
+            let query = match &c.key {
+                SortValue::Int(v) => query.bind(*v),
+                SortValue::Text(v) => query.bind(v.clone()),
+            };
+            query.bind(c.name.clone()).bind(c.id.clone())
+        }
+        None => query.bind(None::<bool>).bind(None::<i64>).bind(None::<String>).bind(None::<String>),
+    };
+    // SQLite reads a negative limit as no limit
+    let rows = query.bind(limit.unwrap_or(-1)).fetch_all(&mut *conn).await?;
+    let next = match (limit, rows.last()) {
+        (Some(l), Some(last)) if rows.len() as i64 == l => Some(encode_cursor(&Cursor {
+            folder: last.node.is_folder(),
+            key: match sort {
+                SortCol::Size => SortValue::Int(last.node.size),
+                SortCol::Updated => SortValue::Int(last.node.updated_at),
+                SortCol::Type => SortValue::Text(last.ext.clone().unwrap_or_default()),
+                SortCol::Name => SortValue::Text(last.node.name.clone()),
+            },
+            name: last.node.name.clone(),
+            id: last.node.id.clone(),
+        })),
+        _ => None,
+    };
+    Ok(Listing::new(rows.into_iter().map(|r| r.node).collect(), limit, next))
 }
 
 pub async fn children(
@@ -120,21 +293,16 @@ pub async fn children(
     user: User,
     Path(id): Path<String>,
     Query(q): Query<ListQuery>,
-) -> AppResult<Json<Vec<Node>>> {
+) -> AppResult<Json<Listing<Node>>> {
     let mut c = st.db.acquire().await?;
     let folder = tree::folder_for(&mut c, &user, &id, Need::Read).await?;
-    if folder.in_folder_space() {
-        // Changes made on the server's folder show up when the folder is opened
+    if folder.in_folder_space() && q.after.is_none() {
+        // Changes made on the server's folder show up when the folder is opened (not again for each further page)
         crate::folders::sync_folder(&st, &folder).await;
     }
-    let kind_filter = if q.folders_only == Some(true) { "AND n.kind = 'folder'" } else { "" };
-    let sql = format!(
-        "SELECT {NODE_COLS} FROM nodes n WHERE n.parent_id = ? AND n.trashed_at IS NULL {kind_filter} {}",
-        order_clause(q.sort.as_deref(), q.order.as_deref())
-    );
-    let mut nodes: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&folder.id).fetch_all(&mut *c).await?;
-    tree::mark_favorites(&mut c, user.id, &mut nodes).await?;
-    Ok(Json(nodes))
+    let mut list = list_children(&mut c, &folder.id, &q).await?;
+    tree::mark_favorites(&mut c, user.id, list.items_mut()).await?;
+    Ok(Json(list))
 }
 
 #[derive(Deserialize)]
@@ -511,14 +679,44 @@ async fn trash_drives(conn: &mut SqliteConnection, user: &User, min_role: Role) 
     Ok(ids)
 }
 
-pub async fn list_trash(State(st): State<AppState>, user: User) -> AppResult<Json<Vec<Located>>> {
+#[derive(Deserialize, Default)]
+pub struct PageQuery {
+    /// Items per page (at most MAX_PAGE); without it, the whole list comes at once
+    limit: Option<i64>,
+    /// The `next` of the previous page
+    after: Option<String>,
+}
+
+/// Where a trash page ends (newest deleted first)
+#[derive(Serialize, Deserialize)]
+struct TrashCursor {
+    at: i64,
+    id: String,
+}
+
+pub async fn list_trash(State(st): State<AppState>, user: User, Query(q): Query<PageQuery>) -> AppResult<Json<Listing<Located>>> {
+    let (limit, after) = page_of::<TrashCursor>(q.limit, q.after.as_deref())?;
     let drive_ids = trash_drives(&mut *st.db.acquire().await?, &user, Role::Viewer).await?;
+    let keyset = if after.is_some() { "AND (n.trashed_at < ?2 OR (n.trashed_at = ?2 AND n.id < ?3))" } else { "" };
     let sql = format!(
         "SELECT {NODE_COLS} FROM nodes n
-         WHERE n.trash_root = 1 AND n.drive_id IN (SELECT value FROM json_each(?)) ORDER BY n.trashed_at DESC"
+         WHERE n.trash_root = 1 AND n.drive_id IN (SELECT value FROM json_each(?1)) {keyset}
+         ORDER BY n.trashed_at DESC, n.id DESC LIMIT ?4"
     );
-    let nodes: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(serde_json::to_string(&drive_ids).unwrap()).fetch_all(&st.db).await?;
-    Ok(Json(locate(&st, &user, nodes).await?))
+    let nodes: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
+        .bind(serde_json::to_string(&drive_ids).unwrap())
+        .bind(after.as_ref().map(|c| c.at))
+        .bind(after.as_ref().map(|c| c.id.clone()))
+        .bind(limit.unwrap_or(-1))
+        .fetch_all(&st.db)
+        .await?;
+    let next = match (limit, nodes.last()) {
+        (Some(l), Some(last)) if nodes.len() as i64 == l => {
+            Some(encode_cursor(&TrashCursor { at: last.trashed_at.unwrap_or_default(), id: last.id.clone() }))
+        }
+        _ => None,
+    };
+    Ok(Json(Listing::new(locate(&st, &user, nodes).await?, limit, next)))
 }
 
 /// The user's role for trash operations: their role on the item, and administrators manage the trash of every space
@@ -866,13 +1064,143 @@ mod tests {
         let list = |sort: &'static str| {
             let (st, amy) = (env.st.clone(), amy.clone());
             async move {
-                let q = ListQuery { sort: Some(sort.into()), order: None, folders_only: None };
-                let Json(items) = children(State(st), amy.clone(), Path(amy.root_id.clone()), Query(q)).await.unwrap();
+                let q = ListQuery { sort: Some(sort.into()), ..Default::default() };
+                let items = children(State(st), amy.clone(), Path(amy.root_id.clone()), Query(q)).await.unwrap().0.into_items();
                 items.into_iter().map(|n| n.name).collect::<Vec<_>>()
             }
         };
         assert_eq!(list("name").await, ["b.pdf", "File 1.docx", "file 2.txt", "File 10.txt", "README"]);
         assert_eq!(list("type").await, ["README", "File 1.docx", "b.pdf", "file 2.txt", "File 10.txt"]);
+    }
+
+    /// Lists a folder page by page (`limit` items each) until the end
+    async fn all_pages(env: &testutil::TestEnv, user: &User, folder: &str, sort: &str, order: &str, limit: i64) -> Vec<String> {
+        let (mut names, mut after) = (Vec::new(), None);
+        loop {
+            let q = ListQuery { sort: Some(sort.into()), order: Some(order.into()), limit: Some(limit), after, ..Default::default() };
+            let Json(page) = children(State(env.st.clone()), user.clone(), Path(folder.to_string()), Query(q)).await.unwrap();
+            let Listing::Page { items, next } = page else { panic!("a limit gives a page") };
+            assert!(items.len() as i64 <= limit);
+            names.extend(items.into_iter().map(|n| n.name));
+            match next {
+                Some(n) => after = Some(n),
+                None => return names,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn folders_list_page_by_page_in_every_sort_order() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        for name in ["Zeta", "alpha", "Folder 10", "Folder 9"] {
+            env.folder(&amy, &amy.root_id, name).await;
+        }
+        // Equal sizes, times and extensions, so the ties are ordered by name and id across page boundaries
+        for (i, name) in ["File 10.txt", "file 2.txt", "File 1.docx", "b.pdf", "README", "c.TXT", "d.pdf", "e", "a.docx", "f.txt", "g.png"].iter().enumerate() {
+            let id = env.file(&amy, &amy.root_id, name).await;
+            sqlx::query("UPDATE nodes SET size = ?, updated_at = ? WHERE id = ?")
+                .bind((i % 3) as i64 * 100)
+                .bind(1_000 + (i % 4) as i64)
+                .bind(&id)
+                .execute(&env.st.db)
+                .await
+                .unwrap();
+        }
+        for sort in ["name", "size", "updated", "type"] {
+            for order in ["asc", "desc"] {
+                let q = ListQuery { sort: Some(sort.into()), order: Some(order.into()), ..Default::default() };
+                let Json(whole) = children(State(env.st.clone()), amy.clone(), Path(amy.root_id.clone()), Query(q)).await.unwrap();
+                let Listing::All(whole) = whole else { panic!("no limit gives the whole list") };
+                let whole: Vec<String> = whole.into_iter().map(|n| n.name).collect();
+                assert_eq!(whole.len(), 15);
+                assert!(whole[..4].iter().all(|n| !n.contains('.') && n != "README" && n != "e"), "folders first: {whole:?}");
+                for limit in [1, 2, 4, 15, 100] {
+                    assert_eq!(all_pages(&env, &amy, &amy.root_id, sort, order, limit).await, whole, "{sort} {order}, {limit} per page");
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn the_next_page_starts_after_the_last_item_even_when_the_folder_changed() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        for i in 1..=6 {
+            env.file(&amy, &amy.root_id, &format!("{i}.txt")).await;
+        }
+        let page = |after: Option<String>| {
+            let (st, amy) = (env.st.clone(), amy.clone());
+            async move {
+                let q = ListQuery { limit: Some(3), after, ..Default::default() };
+                match children(State(st), amy.clone(), Path(amy.root_id.clone()), Query(q)).await.unwrap().0 {
+                    Listing::Page { items, next } => (items.into_iter().map(|n| n.name).collect::<Vec<_>>(), next),
+                    Listing::All(_) => panic!("a limit gives a page"),
+                }
+            }
+        };
+        let (first, next) = page(None).await;
+        assert_eq!(first, ["1.txt", "2.txt", "3.txt"]);
+        // The last item of the page is renamed away and one is added before it: nothing is repeated or skipped
+        let (three,): (String,) = sqlx::query_as("SELECT id FROM nodes WHERE name = '3.txt'").fetch_one(&env.st.db).await.unwrap();
+        let _ = rename(State(env.st.clone()), amy.clone(), Path(three), Json(RenameReq { name: "9.txt".into() })).await.unwrap();
+        env.file(&amy, &amy.root_id, "0.txt").await;
+        let (second, next) = page(next).await;
+        assert_eq!(second, ["4.txt", "5.txt", "6.txt"]);
+        let (third, next) = page(next).await;
+        assert_eq!((third, next), (vec!["9.txt".to_string()], None));
+
+        // A cursor that wasn't made by the server
+        let q = ListQuery { limit: Some(3), after: Some("not a cursor".into()), ..Default::default() };
+        let err = children(State(env.st.clone()), amy.clone(), Path(amy.root_id.clone()), Query(q)).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn a_listing_without_a_limit_is_a_plain_array() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        env.file(&amy, &amy.root_id, "a.txt").await;
+        let Json(whole) = children(State(env.st.clone()), amy.clone(), Path(amy.root_id.clone()), Query(ListQuery::default())).await.unwrap();
+        let v = serde_json::to_value(&whole).unwrap();
+        assert_eq!((v.as_array().map(Vec::len), v[0]["name"].as_str(), v[0]["owner_name"].as_str()), (Some(1), Some("a.txt"), Some("amy")));
+        let q = ListQuery { limit: Some(10), ..Default::default() };
+        let Json(page) = children(State(env.st.clone()), amy.clone(), Path(amy.root_id.clone()), Query(q)).await.unwrap();
+        let v = serde_json::to_value(&page).unwrap();
+        assert_eq!((v["items"][0]["name"].as_str(), v["next"].is_null()), (Some("a.txt"), true));
+    }
+
+    #[tokio::test]
+    async fn the_trash_lists_page_by_page_newest_first() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let mut files = Vec::new();
+        for i in 0..7 {
+            files.push(env.file(&amy, &amy.root_id, &format!("{i}.txt")).await);
+        }
+        let refs: Vec<&str> = files.iter().map(String::as_str).collect();
+        let _ = trash(State(env.st.clone()), amy.clone(), ids(&refs)).await.unwrap();
+        // Deleted at different times, two of them at the same second
+        for (i, id) in files.iter().enumerate() {
+            sqlx::query("UPDATE nodes SET trashed_at = ? WHERE id = ?").bind(100 + (i as i64).min(5)).bind(id).execute(&env.st.db).await.unwrap();
+        }
+        let whole: Vec<String> =
+            list_trash(State(env.st.clone()), amy.clone(), Query(PageQuery::default())).await.unwrap().0.into_items().into_iter().map(|l| l.node.name).collect();
+        assert_eq!(whole.len(), 7);
+        assert_eq!(&whole[2..], ["4.txt", "3.txt", "2.txt", "1.txt", "0.txt"]);
+        for limit in [1, 2, 3, 7] {
+            let (mut names, mut after) = (Vec::new(), None);
+            loop {
+                let q = PageQuery { limit: Some(limit), after };
+                let Json(Listing::Page { items, next }) = list_trash(State(env.st.clone()), amy.clone(), Query(q)).await.unwrap() else {
+                    panic!("a limit gives a page")
+                };
+                names.extend(items.into_iter().map(|l| l.node.name));
+                let Some(n) = next else { break };
+                after = Some(n);
+            }
+            assert_eq!(names, whole, "{limit} per page");
+        }
     }
 
     #[tokio::test]
@@ -896,7 +1224,7 @@ mod tests {
 
         let Json(done) = empty_trash(State(env.st.clone()), amy.clone()).await.unwrap();
         assert_eq!(done["deleted"], 2);
-        let Json(left) = list_trash(State(env.st.clone()), bob.clone()).await.unwrap();
+        let left = list_trash(State(env.st.clone()), bob.clone(), Query(PageQuery::default())).await.unwrap().0.into_items();
         assert_eq!(left.len(), 1);
     }
 
@@ -978,7 +1306,7 @@ mod tests {
 
         // Moving to the trash: the folder, a file deep inside it, and a duplicate id
         let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&doc, &folder, &other, &folder])).await.unwrap();
-        let Json(listed) = list_trash(State(env.st.clone()), amy.clone()).await.unwrap();
+        let listed = list_trash(State(env.st.clone()), amy.clone(), Query(PageQuery::default())).await.unwrap().0.into_items();
         let mut names: Vec<String> = listed.into_iter().map(|l| l.node.name).collect();
         names.sort();
         assert_eq!(names, vec!["Folder", "b.txt"]);
@@ -987,7 +1315,7 @@ mod tests {
         let _ = restore(State(env.st.clone()), amy.clone(), ids(&[&folder])).await.unwrap();
         let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&doc])).await.unwrap();
         let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&folder])).await.unwrap();
-        let Json(listed) = list_trash(State(env.st.clone()), amy.clone()).await.unwrap();
+        let listed = list_trash(State(env.st.clone()), amy.clone(), Query(PageQuery::default())).await.unwrap().0.into_items();
         let all: Vec<String> = listed.into_iter().map(|l| l.node.id).collect();
         assert!(all.contains(&doc) && all.contains(&folder));
         let refs: Vec<&str> = all.iter().map(String::as_str).collect();
@@ -1015,7 +1343,7 @@ mod tests {
             let (st, amy, folder, doc) = (env.st.clone(), amy.clone(), folder.clone(), doc.clone());
             async move {
                 if i % 2 == 0 {
-                    let q = Query(ListQuery { sort: None, order: None, folders_only: None });
+                    let q = Query(ListQuery::default());
                     children(State(st), amy, Path(folder), q).await.map(|_| ())
                 } else {
                     get(State(st), amy, Path(doc)).await.map(|_| ())
@@ -1069,7 +1397,7 @@ mod tests {
         let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&doc, &other, &private])).await.unwrap();
 
         // Listed with the space's name, and each item can be restored or deleted, not only emptied as a whole
-        let Json(listed) = list_trash(State(env.st.clone()), admin.clone()).await.unwrap();
+        let listed = list_trash(State(env.st.clone()), admin.clone(), Query(PageQuery::default())).await.unwrap().0.into_items();
         let plan = listed.iter().find(|l| l.node.name == "plan.txt").unwrap();
         let space = plan.location_space.as_ref().unwrap();
         assert_eq!((space.kind.as_str(), space.name.as_str(), plan.location_path.len()), ("team", "Team", 0));

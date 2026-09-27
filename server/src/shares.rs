@@ -16,9 +16,9 @@ use crate::{
     error::{AppError, AppResult},
     files::{self, DownloadQuery, node_blob, serve_blob},
     logs::{self, Visitor, record_share_access},
-    nodes::order_clause,
+    nodes::{ListQuery as ChildrenQuery, Listing, list_children},
     state::AppState,
-    tree::{self, Crumb, NODE_COLS, Node},
+    tree::{self, Crumb, Node},
     util::{now, random_token},
 };
 
@@ -371,29 +371,19 @@ pub async fn public_node(
     Ok(Json(SharedNodeInfo { node: public_node_json(&node), path: full.into_iter().skip(start).collect() }))
 }
 
-#[derive(Deserialize)]
-pub struct ChildrenQuery {
-    sort: Option<String>,
-    order: Option<String>,
-}
-
 pub async fn public_children(
     State(st): State<AppState>,
     Path((token, id)): Path<(String, String)>,
     Query(q): Query<ChildrenQuery>,
     headers: HeaderMap,
-) -> AppResult<Json<Vec<serde_json::Value>>> {
+) -> AppResult<Json<Listing<serde_json::Value>>> {
     let (share, root) = open_share(&st, &token, &headers).await?;
     let node = shared_node(&st, &share, &root, &id).await?;
     if !node.is_folder() {
         return Err(AppError::bad_request("This isn't a folder"));
     }
-    let sql = format!(
-        "SELECT {NODE_COLS} FROM nodes n WHERE n.parent_id = ? AND n.trashed_at IS NULL {}",
-        order_clause(q.sort.as_deref(), q.order.as_deref())
-    );
-    let children: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).fetch_all(&st.db).await?;
-    Ok(Json(children.iter().map(public_node_json).collect()))
+    let children = list_children(&mut *st.db.acquire().await?, &node.id, &q).await?;
+    Ok(Json(children.map(|nodes| nodes.iter().map(public_node_json).collect())))
 }
 
 #[derive(Deserialize)]
@@ -579,8 +569,8 @@ mod tests {
         let Json(open) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let Json(info) = public_info(State(env.st.clone()), Path(open.id.clone()), ConnectInfo(addr), HeaderMap::new(), visitor()).await.unwrap();
         assert_eq!(info["owner"], "amy");
-        let q = Query(ChildrenQuery { sort: None, order: None });
-        let Json(items) = public_children(State(env.st.clone()), Path((open.id.clone(), folder.clone())), q, HeaderMap::new()).await.unwrap();
+        let q = Query(ChildrenQuery::default());
+        let items = public_children(State(env.st.clone()), Path((open.id.clone(), folder.clone())), q, HeaderMap::new()).await.unwrap().0.into_items();
         for key in ["owner_name", "drive_id", "parent_id"] {
             assert!(items[0].get(key).is_none() && info["node"].get(key).is_none(), "{key} in {items:?}");
         }
