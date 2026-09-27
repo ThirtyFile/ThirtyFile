@@ -9,6 +9,8 @@ export interface UploadTask {
   name: string;
   relativePath: string;
   parentId: string;
+  /** Files added together, so the server puts one uploaded folder into one folder */
+  batch: string;
   size: number;
   sent: number;
   status: UploadStatus;
@@ -80,6 +82,8 @@ function start(task: UploadTask) {
       filename: task.file.name,
       parentId: task.parentId,
       relativePath: task.relativePath,
+      // Files of one uploaded folder land in the same folder, even when its name is taken by a file
+      batchId: task.batch,
     },
     // Uploads of the same file to different locations must not resume each other
     fingerprint: async (file) =>
@@ -117,12 +121,15 @@ function pump() {
 }
 
 export function enqueue(files: PickedFile[], parentId: string) {
+  // getRandomValues works on plain http too (randomUUID needs HTTPS)
+  const batch = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join("");
   for (const { file, relativePath } of files) {
     tasks.push({
       id: `u${++seq}`,
       name: file.name,
       relativePath,
       parentId,
+      batch,
       size: file.size,
       sent: 0,
       status: "queued",
