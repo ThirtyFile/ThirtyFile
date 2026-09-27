@@ -1,5 +1,8 @@
 # Weekly pull requests for newer versions. Minor and patch updates of one kind arrive together in one pull request;
-# major updates arrive one by one, because they may need changes to the code.
+# major updates arrive one by one, because they may need changes to the code. New versions are only proposed after a
+# few days, so a broken or compromised release is usually withdrawn before it reaches us.
+# Actions and base images are pinned to a commit or digest; Dependabot updates the pin and its version comment.
+# The Rust version (server/rust-toolchain.toml and the rust image) is raised by hand, in a pull request of its own.
 version: 2
 updates:
   - package-ecosystem: cargo
@@ -8,6 +11,8 @@ updates:
       interval: weekly
       day: monday
     labels: [dependencies]
+    cooldown:
+      default-days: 3
     open-pull-requests-limit: 5
     groups:
       rust:
@@ -19,6 +24,8 @@ updates:
       interval: weekly
       day: monday
     labels: [dependencies]
+    cooldown:
+      default-days: 3
     open-pull-requests-limit: 5
     groups:
       frontend:
@@ -30,6 +37,8 @@ updates:
       interval: weekly
       day: monday
     labels: [dependencies]
+    cooldown:
+      default-days: 3
     groups:
       actions:
         patterns: ["*"]
@@ -40,3 +49,11 @@ updates:
       interval: weekly
       day: monday
     labels: [dependencies]
+    cooldown:
+      default-days: 3
+    groups:
+      images:
+        patterns: ["*"]
+    ignore:
+      # Raised together with server/rust-toolchain.toml
+      - dependency-name: rust

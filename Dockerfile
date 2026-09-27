@@ -11,12 +11,12 @@
 # Multi-platform (amd64 + arm64; the backend is cross-compiled, so no emulation is needed):
 #   docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/thirtyfile:<version> --push .
 
-# Alpine version of the runtime image (the backend is a statically linked musl binary, independent of the build image)
-ARG ALPINE_VERSION=3
+# Base images are pinned to a version and digest, so two builds of one commit use the same images. Dependabot proposes
+# updates every week. The Rust version matches server/rust-toolchain.toml.
 
 # ───────────── 1) Frontend ─────────────
 # The output is platform-independent, so multi-platform builds only build it once on the build machine's platform
-FROM --platform=$BUILDPLATFORM node:26-alpine AS web
+FROM --platform=$BUILDPLATFORM node:26.10.0-alpine3.24@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80 AS web
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 # Node no longer includes corepack (since version 25), which installs the pnpm version named in package.json
 RUN npm install --global corepack && corepack enable
@@ -30,8 +30,8 @@ RUN pnpm build
 # ───────────── 2) Backend (with the frontend embedded) ─────────────
 # Runs on the build machine's platform and cross-compiles for the target platform with xx,
 # so arm64 images are built at native speed on amd64 machines (and vice versa) without emulation
-FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.9.0 AS xx
-FROM --platform=$BUILDPLATFORM rust:1-alpine AS server
+FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.9.0@sha256:c64defb9ed5a91eacb37f96ccc3d4cd72521c4bd18d5442905b95e2226b0e707 AS xx
+FROM --platform=$BUILDPLATFORM rust:1.98.1-alpine3.24@sha256:7cc1c22d77d9432f7fe012a70e6d3e555af54c2a6832700ed7d553f1769ae89f AS server
 COPY --from=xx / /
 # clang/lld cross-compile the C code of aws-lc (TLS crypto) and SQLite; cmake/perl are used by aws-lc's build script
 RUN apk add --no-cache clang lld cmake make perl
@@ -52,7 +52,7 @@ RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry,sharin
 # ───────────── 3) Runtime files ─────────────
 # Architecture-independent files, prepared on the build machine's platform so that the runtime stage
 # needs no RUN step (and therefore no emulation when building for another architecture)
-FROM --platform=$BUILDPLATFORM alpine:${ALPINE_VERSION} AS rootfs
+FROM --platform=$BUILDPLATFORM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS rootfs
 # ca-certificates: certificate validation for S3, single sign-on and FTPS (without it every https connection fails)
 # tzdata: allows setting the time zone with TZ (log exports, archive file names)
 RUN apk add --no-cache ca-certificates tzdata \
@@ -64,7 +64,8 @@ RUN apk add --no-cache ca-certificates tzdata \
  && echo "drive:x:1000:" >> /rootfs/etc/group
 
 # ───────────── 4) Runtime ─────────────
-FROM alpine:${ALPINE_VERSION}
+# The runtime image: the backend is a statically linked musl binary, independent of the build image
+FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 ARG VERSION=dev
 LABEL org.opencontainers.image.title="ThirtyFile" \
       org.opencontainers.image.description="A lightweight self-hosted file manager" \
