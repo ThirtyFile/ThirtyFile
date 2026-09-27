@@ -117,8 +117,8 @@ export function ControlPanelPage() {
       key={item.key}
       {...itemProps(item)}
       className={cn(
-        "flex cursor-default gap-3 rounded-md border border-transparent p-3 outline-none select-none hover:bg-muted/70 focus-visible:border-ring",
-        sel === item.key && "border-ring bg-accent hover:bg-accent",
+        "flex cursor-default gap-3 rounded-md border border-transparent p-3 outline-none select-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
+        sel === item.key && "border-brand bg-selection hover:bg-selection",
       )}
     >
       <span className={cn("flex size-11 shrink-0 items-center justify-center rounded-lg", item.tone)}>
@@ -147,7 +147,7 @@ export function ControlPanelPage() {
           <tr
             key={item.key}
             {...itemProps(item)}
-            className={cn("h-8 cursor-default outline-none hover:bg-muted/70", sel === item.key && "bg-accent hover:bg-accent")}
+            className={cn("h-8 cursor-default outline-none hover:bg-muted/70", sel === item.key && "bg-selection shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection")}
           >
             <td className="truncate px-2 pl-3">
               <span className="flex items-center gap-2">

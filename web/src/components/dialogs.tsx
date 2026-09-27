@@ -161,7 +161,7 @@ export function FolderPickerDialog(props: {
         <label className="flex items-center gap-2 text-sm">
           <HardDriveIcon className="size-4 text-muted-foreground" />
           <select
-            className="h-8 flex-1 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="h-8 flex-1 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={t("Spaces")}
             value={drives.data?.some((d) => d.root_id === base.id) ? base.id : ""}
             onChange={(e) => {

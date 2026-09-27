@@ -59,14 +59,14 @@ export function useBranding(): Branding {
 export const logoUrl = (b: Branding, dark = false) => `/api/branding/logo?v=${b.version}${dark ? "&dark=1" : ""}`;
 export const backgroundUrl = (b: Branding) => `/api/branding/background?v=${b.version}`;
 
-/** Text color on the accent color: above a luminance of 0.3 black text has more contrast (same formula as the server) */
+/** Text color on the accent color: above a luminance of 0.19 black text has more contrast than white (same formula as the server) */
 export function brandForeground(hex: string) {
   const ch = (i: number) => {
     const v = parseInt(hex.slice(i, i + 2), 16) / 255;
     return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
   };
   const l = 0.2126 * ch(1) + 0.7152 * ch(3) + 0.0722 * ch(5);
-  return l > 0.3 ? "#111111" : "#ffffff";
+  return l > 0.19 ? "#111111" : "#ffffff";
 }
 
 /** Apply to the current page after settings change: color stylesheet, favicon, appearance mode */

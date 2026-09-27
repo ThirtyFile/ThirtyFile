@@ -431,7 +431,7 @@ function LocationDialog({ drive, onClose, onDone }: { drive: Drive; onClose(): v
           </DialogHeader>
           <div className="grid gap-2">
             <select
-              className="h-9 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className="h-9 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
               value={value}
               onChange={(e) => setValue(e.target.value)}
               aria-label={t("Storage location")}

@@ -123,7 +123,7 @@ function TreeFolder({ id, name, depth, activeId }: { id: string; name: string; d
         <div
           className={cn(
             "group flex h-[29px] items-center rounded text-muted-foreground hover:bg-muted",
-            activeId === id && "bg-accent text-accent-foreground hover:bg-accent",
+            activeId === id && "bg-selection text-accent-foreground shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection",
           )}
           style={{ paddingLeft: depth * 12 }}
         >
@@ -177,7 +177,7 @@ function SpaceRoot({
         <div
           className={cn(
             "flex h-[29px] items-center rounded text-muted-foreground hover:bg-muted",
-            activeId === rootId && "bg-accent text-accent-foreground hover:bg-accent",
+            activeId === rootId && "bg-selection text-accent-foreground shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection",
           )}
           style={{ paddingLeft: depth * 12 }}
         >
@@ -225,7 +225,7 @@ function ThisPc({ activeId }: { activeId?: string }) {
             to="/drives"
             end
             className={({ isActive }) =>
-              cn("-ml-5 flex h-full min-w-0 flex-1 items-center gap-[7px] rounded pr-2 pl-5", isActive && "bg-accent text-accent-foreground")
+              cn("-ml-5 flex h-full min-w-0 flex-1 items-center gap-[7px] rounded pr-2 pl-5", isActive && "bg-selection text-accent-foreground shadow-[inset_3px_0_0_var(--color-brand)]")
             }
           >
             <LayersIcon className="size-[15px] shrink-0" />
@@ -265,7 +265,7 @@ function NavItem({ to, icon: Icon, label, end }: { to: string; icon: LucideIcon;
         className={({ isActive }) =>
           cn(
             "flex h-[29px] items-center gap-[7px] rounded px-2 whitespace-nowrap text-muted-foreground hover:bg-muted",
-            isActive && "bg-accent text-accent-foreground hover:bg-accent",
+            isActive && "bg-selection text-accent-foreground shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection",
           )
         }
       >

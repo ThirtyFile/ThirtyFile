@@ -26,7 +26,7 @@ const EXPIRY = [
 const roleDetail = (detail: string) => (detail === "Administrator" ? t("Admin") : tServer(detail));
 const principalName = (g: Grant) => (g.principal_type === "everyone" || g.principal_name === "(deleted)" ? tServer(g.principal_name) : g.principal_name);
 
-const selectCls = "h-8 rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
+const selectCls = "h-8 rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 function PrincipalPicker(props: { value: Principal | null; onChange(p: Principal | null): void; allowEveryone: boolean }) {
   const [q, setQ] = useState("");

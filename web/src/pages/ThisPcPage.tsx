@@ -264,7 +264,7 @@ export function ThisPcPage() {
         data-item
         className={cn(
           "flex cursor-default gap-3 rounded-md border border-transparent p-3 select-none hover:bg-muted/70",
-          isSel(s) && "border-ring bg-accent hover:bg-accent",
+          isSel(s) && "border-brand bg-selection hover:bg-selection",
         )}
       >
         <Icon
@@ -305,7 +305,7 @@ export function ThisPcPage() {
         data-item
         className={cn(
           "flex cursor-default gap-3 rounded-md border border-transparent p-3 select-none hover:bg-muted/70",
-          isSel(s) && "border-ring bg-accent hover:bg-accent",
+          isSel(s) && "border-brand bg-selection hover:bg-selection",
         )}
         title={item.name}
       >
@@ -349,7 +349,7 @@ export function ThisPcPage() {
               key={d.id}
               {...itemProps(s)}
               data-item
-              className={cn("h-7 cursor-default hover:bg-muted/70", isSel(s) && "bg-accent hover:bg-accent")}
+              className={cn("h-7 cursor-default hover:bg-muted/70", isSel(s) && "bg-selection shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection")}
             >
               <td className="truncate px-2 pl-3">
                 <span className="flex items-center gap-2">
@@ -372,7 +372,7 @@ export function ThisPcPage() {
               key={item.id}
               {...itemProps(s)}
               data-item
-              className={cn("h-7 cursor-default hover:bg-muted/70", isSel(s) && "bg-accent hover:bg-accent")}
+              className={cn("h-7 cursor-default hover:bg-muted/70", isSel(s) && "bg-selection shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection")}
             >
               <td className="truncate px-2 pl-3">
                 <span className="flex items-center gap-2">

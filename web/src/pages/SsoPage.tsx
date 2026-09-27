@@ -308,7 +308,7 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
                   id={`sso-${id}-provisioning`}
                   value={draft[id].provisioning}
                   onChange={(e) => setProvider(id, { provisioning: e.target.value as SsoProvisioning })}
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring"
                 >
                   {PROVISIONING.map((o) => (
                     <option key={o.value} value={o.value}>

@@ -490,7 +490,7 @@ function Workspace({
       <div className="flex h-10 shrink-0 items-center gap-2 border-b px-2">
         <input
           aria-label={t("Name box")}
-          className="h-7 w-24 shrink-0 rounded border bg-background px-2 text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="h-7 w-24 shrink-0 rounded border bg-background px-2 text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring"
           defaultValue={nameBox}
           key={nameBox}
           onKeyDown={(e) => {
@@ -510,7 +510,7 @@ function Workspace({
         <input
           ref={barRef}
           aria-label={t("Formula bar")}
-          className="h-7 min-w-0 flex-1 rounded border bg-background px-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="h-7 min-w-0 flex-1 rounded border bg-background px-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
           value={barText}
           onFocus={() => {
             if (!editing) startEdit(barText, "edit", "bar");

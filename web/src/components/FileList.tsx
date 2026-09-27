@@ -273,7 +273,7 @@ export function FileList(p: FileListProps) {
             role="option"
             title={item.name}
             className={cn(
-              "relative min-w-0 rounded-md border border-transparent p-2 text-center outline-none select-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/60 aria-selected:border-ring aria-selected:bg-accent",
+              "relative min-w-0 rounded-md border border-transparent p-2 text-center outline-none select-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring aria-selected:border-brand aria-selected:bg-selection",
               dropTarget === item.id && "border-brand bg-brand/10",
               p.dimmed?.has(item.id) && "opacity-50",
             )}
@@ -324,7 +324,7 @@ export function FileList(p: FileListProps) {
             key={item.id}
             {...rowProps(item, i)}
             className={cn(
-              "cursor-default outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset aria-selected:bg-accent aria-selected:text-accent-foreground",
+              "cursor-default outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset aria-selected:bg-selection aria-selected:text-accent-foreground aria-selected:shadow-[inset_3px_0_0_var(--color-brand)]",
               dropTarget === item.id && "bg-brand/15",
               p.dimmed?.has(item.id) && "opacity-50",
             )}

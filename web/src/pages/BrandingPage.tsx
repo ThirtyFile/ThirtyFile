@@ -382,7 +382,7 @@ function ThemePreview({ b, mode }: { b: Branding; mode: "light" | "dark" }) {
   const selection = `color-mix(in srgb, ${brand} ${mode === "dark" ? 24 : 13}%, ${s.bg})`;
   const logo = (b.has_logo_dark && mode === "dark") || b.has_logo ? logoUrl(b, mode === "dark") : "/favicon.svg";
   const row = (label: string, selected = false) => (
-    <div className="flex items-center gap-1.5 rounded px-1.5 py-1" style={selected ? { background: selection } : undefined}>
+    <div className="flex items-center gap-1.5 rounded px-1.5 py-1" style={selected ? { background: selection, boxShadow: `inset 3px 0 0 ${brand}` } : undefined}>
       <FolderIcon className="size-3" style={{ color: selected ? brand : s.muted }} />
       <span style={{ color: selected ? brand : s.fg }}>{label}</span>
     </div>

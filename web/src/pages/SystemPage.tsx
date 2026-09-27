@@ -28,7 +28,7 @@ export function Toggle({ checked, disabled, onChange, label }: { checked: boolea
       onCheckedChange={onChange}
       aria-label={label}
       className={cn(
-        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border border-transparent transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50",
+        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border border-transparent transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring disabled:opacity-50",
         checked ? "bg-brand" : "bg-input",
       )}
     >
