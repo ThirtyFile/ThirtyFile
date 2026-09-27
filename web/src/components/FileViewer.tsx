@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useState } from "react";
 import { DownloadIcon, Loader2Icon } from "lucide-react";
 import { triggerDownload, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
@@ -15,9 +15,19 @@ export function isOfficePreviewable(n: Node) {
   return ["docx", "xlsx", "pptx"].includes(extOf(n.name)) && n.size <= MAX_OFFICE_PREVIEW_BYTES;
 }
 
+/** Pictures and videos most browsers can't show (HEIC, TIFF, AVI, MKV…): offered for download instead of a broken preview */
+const NOT_IN_BROWSER_EXT = /^(heic|heif|tiff?|avi|mkv|wmv|flv)$/;
+const NOT_IN_BROWSER_MIME = /^(image\/(heic|heif|tiff)|video\/(x-msvideo|x-matroska|x-ms-wmv|x-flv))$/;
+
+/** A picture or video the browser can show */
+function isBrowserMedia(n: Node) {
+  const c = categoryOf(n);
+  return (c === "image" || c === "video") && !NOT_IN_BROWSER_EXT.test(extOf(n.name)) && !NOT_IN_BROWSER_MIME.test(n.mime.toLowerCase());
+}
+
 export function canPreview(n: Node) {
   const c = categoryOf(n);
-  return c === "image" || c === "video" || c === "audio" || c === "pdf" || isTextLike(n) || isOfficePreviewable(n);
+  return isBrowserMedia(n) || c === "audio" || c === "pdf" || isTextLike(n) || isOfficePreviewable(n);
 }
 
 /** Show content by file type: image, video, audio, PDF, text editor, or a can't-preview notice */
@@ -35,8 +45,8 @@ export function FileViewer(props: {
   const cat = categoryOf(node);
   const url = props.source.contentUrl(node);
 
-  if (cat === "image") return <img key={node.id} src={url} alt={node.name} className="max-h-full max-w-full object-contain select-none" />;
-  if (cat === "video") return <video key={node.id} src={url} controls autoPlay className="max-h-full max-w-full rounded-lg bg-black" />;
+  // key: a new element (and a fresh error state) for each file
+  if (isBrowserMedia(node)) return <Media key={node.id} node={node} url={url} source={props.source} allowDownload={props.allowDownload} />;
   if (cat === "pdf")
     return <iframe key={node.id} src={url} title={node.name} className={cn("size-full bg-white", !embedded && "max-w-5xl rounded-lg")} />;
   if (cat === "audio")
@@ -68,15 +78,28 @@ export function FileViewer(props: {
         />
       </Suspense>
     );
+  return <NoPreview node={node} source={props.source} allowDownload={props.allowDownload} reason={t("Preview isn't available for this file type")} />;
+}
+
+/** Picture or video; if the browser can't show it after all (format or codec), offer the download instead of a broken image or an empty player */
+function Media({ node, url, source, allowDownload }: { node: Node; url: string; source: FileSource; allowDownload?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <NoPreview node={node} source={source} allowDownload={allowDownload} reason={t("Your browser can't show this file")} />;
+  if (categoryOf(node) === "image")
+    return <img src={url} alt={node.name} onError={() => setFailed(true)} className="max-h-full max-w-full object-contain select-none" />;
+  return <video src={url} controls autoPlay onError={() => setFailed(true)} className="max-h-full max-w-full rounded-lg bg-black" />;
+}
+
+function NoPreview({ node, source, allowDownload, reason }: { node: Node; source: FileSource; allowDownload?: boolean; reason: string }) {
   return (
     <div className="flex flex-col items-center gap-4 rounded-2xl border bg-background px-10 py-8 text-center text-foreground">
       <FileIcon node={node} className="size-16" />
       <div>
         <div className="font-medium break-all">{node.name}</div>
-        <div className="text-sm text-muted-foreground">{formatBytes(node.size)} · {t("Preview isn't available for this file type")}</div>
+        <div className="text-sm text-muted-foreground">{formatBytes(node.size)} · {reason}</div>
       </div>
-      {props.allowDownload !== false && (
-        <Button onClick={() => triggerDownload(props.source.contentUrl(node, true))}>
+      {allowDownload !== false && (
+        <Button onClick={() => triggerDownload(source.contentUrl(node, true))}>
           <DownloadIcon /> {t("Download")}
         </Button>
       )}

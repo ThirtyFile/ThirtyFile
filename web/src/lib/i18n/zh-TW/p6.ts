@@ -60,6 +60,7 @@ export default {
   "Previous (←)": "上一個 (←)",
   "Next (→)": "下一個 (→)",
   "Preview isn't available for this file type": "無法預覽這種檔案",
+  "Your browser can't show this file": "瀏覽器無法顯示這個檔案",
   "This is a legacy Office file (.doc / .xls / .ppt) with a newer file extension, so it can't be opened online. Download it and open it in Office.": "這是舊版 Office 格式（.doc / .xls / .ppt），只是副檔名被改成新版，無法線上開啟，請下載後用 Office 開啟。",
   "This file is empty.": "這個檔案是空的。",
   "This file isn't a valid Office document (it may be damaged, or wasn't created by Office), so it can't be opened online. Download it to check.": "這個檔案不是有效的 Office 文件（內容可能已損毀，或不是 Office 產生的檔案），無法線上開啟。可以下載後確認。",
