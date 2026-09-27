@@ -9,16 +9,8 @@ import { ApiError, api, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
 import { getDraft, setDraft } from "@/lib/drafts";
 import { t, tServer } from "@/lib/i18n";
+import { decodeText, encodeText, lineEnding, normalizeLines, type TextEncodingName } from "@/lib/textEncoding";
 import { useTheme } from "@/lib/theme";
-
-function decode(buf: ArrayBuffer): { text: string; encoding: string } {
-  try {
-    return { text: new TextDecoder("utf-8", { fatal: true }).decode(buf), encoding: "UTF-8" };
-  } catch {
-    // Legacy file encodings common in Taiwan
-    return { text: new TextDecoder("big5").decode(buf), encoding: "Big5" };
-  }
-}
 
 export default function TextEditor(props: {
   node: Node;
@@ -31,11 +23,15 @@ export default function TextEditor(props: {
 }) {
   const { dark } = useTheme();
   const [original, setOriginal] = useState<string | null>(null);
-  const [encoding, setEncoding] = useState("UTF-8");
+  /** null: the encoding wasn't recognised, so the file is read-only to avoid damaging it */
+  const [encoding, setEncoding] = useState<TextEncodingName | null>("UTF-8");
+  /** Line ending of the file, restored when saving */
+  const eol = useRef<"\r\n" | "\n">("\n");
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [lang, setLang] = useState<LanguageSupport | null>(null);
   const [saving, setSaving] = useState(false);
+  const editable = props.editable && encoding !== null;
   const dirty = original !== null && text !== original;
   const saveRef = useRef<() => void>(() => {});
   /** Version when the file was opened; sent on save, so if someone else changed the file meanwhile the save is rejected instead of overwriting each other */
@@ -64,9 +60,11 @@ export default function TextEditor(props: {
         if (cancelled) return;
         base.current = version;
         loaded.current = { id: props.node.id, reload };
-        const d = decode(buf);
+        const decoded = decodeText(buf);
+        eol.current = lineEnding(decoded.text);
+        const d = { ...decoded, text: normalizeLines(decoded.text) };
         // Restore unsaved content when switching back to the tab
-        const draft = props.editable ? getDraft(props.node.id) : undefined;
+        const draft = props.editable && d.encoding !== null ? getDraft(props.node.id) : undefined;
         if (draft && draft.base !== d.text) {
           // Someone else changed the file while these edits were unsaved: keep the edits and the version they were
           // based on, so saving is refused (409, with a reload option) instead of overwriting the other person's work
@@ -92,18 +90,19 @@ export default function TextEditor(props: {
 
   const change = (value: string) => {
     setText(value);
-    if (original !== null && props.editable) setDraft(props.node.id, value === original ? null : { text: value, base: original, version: base.current });
+    if (original !== null && editable) setDraft(props.node.id, value === original ? null : { text: value, base: original, version: base.current });
   };
 
   saveRef.current = async () => {
-    if (!props.editable || !dirty || saving) return;
+    if (!editable || !dirty || saving || encoding === null) return;
     setSaving(true);
     try {
-      const n = await api.saveContent(props.node.id, text, base.current);
+      const out = encodeText(eol.current === "\n" ? text : text.replace(/\n/g, eol.current), encoding);
+      const n = await api.saveContent(props.node.id, out.body, base.current);
       base.current = n.updated_at;
       setDraft(props.node.id, null);
       setOriginal(text);
-      setEncoding("UTF-8");
+      setEncoding(out.encoding);
       toast.success(t("Saved"));
       props.onSaved?.(n);
     } catch (e) {
@@ -151,11 +150,15 @@ export default function TextEditor(props: {
       }
     >
       <div className="flex h-10 items-center gap-2 border-b px-3 text-xs text-muted-foreground">
-        <span>{encoding}</span>
-        {encoding !== "UTF-8" && props.editable && <span>· {t("Will be converted to UTF-8 when saved")}</span>}
+        {encoding === null ? (
+          <span>{t("Unknown encoding: opened read-only so the file isn't damaged")}</span>
+        ) : (
+          <span>{encoding}</span>
+        )}
+        {encoding === "Big5" && editable && <span>· {t("Will be converted to UTF-8 when saved")}</span>}
         {!props.editable && <span>· {t("Read-only")}</span>}
         <span className="ml-auto">{dirty ? t("Unsaved changes") : ""}</span>
-        {props.editable && (
+        {editable && (
           <Button size="sm" disabled={!dirty || saving} onClick={() => saveRef.current()}>
             {saving ? <Loader2Icon className="animate-spin" /> : <SaveIcon />}
             {t("Save")}
@@ -167,8 +170,8 @@ export default function TextEditor(props: {
         <CodeMirror
           value={text}
           onChange={change}
-          editable={props.editable}
-          readOnly={!props.editable}
+          editable={editable}
+          readOnly={!editable}
           theme={dark ? "dark" : "light"}
           extensions={extensions}
           height="100%"
