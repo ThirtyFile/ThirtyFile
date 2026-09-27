@@ -16,9 +16,10 @@ ARG ALPINE_VERSION=3
 
 # ───────────── 1) Frontend ─────────────
 # The output is platform-independent, so multi-platform builds only build it once on the build machine's platform
-FROM --platform=$BUILDPLATFORM node:24-alpine AS web
+FROM --platform=$BUILDPLATFORM node:26-alpine AS web
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-RUN corepack enable
+# Node no longer includes corepack (since version 25), which installs the pnpm version named in package.json
+RUN npm install --global corepack && corepack enable
 WORKDIR /src/web
 COPY web/package.json web/pnpm-lock.yaml ./
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
