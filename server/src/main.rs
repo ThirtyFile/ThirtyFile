@@ -476,6 +476,7 @@ fn file_api() -> Router<AppState> {
         .route("/nodes/{id}/children", get(nodes::children))
         .route("/nodes/move", post(nodes::move_nodes))
         .route("/nodes/copy", post(nodes::copy_nodes))
+        .route("/nodes/conflicts", post(nodes::conflicts))
         .route("/nodes/trash", post(nodes::trash))
         .route("/nodes/contents", post(nodes::contents))
         .route("/folders", post(nodes::create_folder))

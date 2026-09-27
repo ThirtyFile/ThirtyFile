@@ -1,6 +1,7 @@
 import { download, nativeDownload, type DownloadSource } from "@/downloads";
 import { t, tServer } from "@/lib/i18n";
 import type { Branding } from "@/lib/branding";
+import type { Resolution } from "@/lib/conflicts";
 export interface Node {
   id: string;
   parent_id: string | null;
@@ -650,6 +651,18 @@ export interface PublicShare {
 }
 
 export type SortKey = "name" | "updated" | "size" | "type";
+
+/** An item whose name the destination already has (see `api.conflicts`) */
+export interface NameConflict {
+  /** The item being moved, copied or restored; null for a name about to be uploaded */
+  id: string | null;
+  name: string;
+  kind: "file" | "folder" | null;
+  size: number | null;
+  updated_at: number | null;
+  /** The item with the same name already there */
+  existing: Node;
+}
 export type SortOrder = "asc" | "desc";
 
 /**
@@ -798,8 +811,11 @@ export const api = {
     get<CursorPage<Node>>(enc`/nodes/${id}/children` + qs({ sort, order, limit: String(limit), after })),
   createFolder: (parent_id: string, name: string) => post<Node>("/folders", { parent_id, name }),
   rename: (id: string, name: string) => request<Node>("PATCH", enc`/nodes/${id}`, { name }),
-  move: (ids: string[], dest_id: string) => post("/nodes/move", { ids, dest_id }),
-  copy: (ids: string[], dest_id: string) => post("/nodes/copy", { ids, dest_id }),
+  /** `resolutions`: what to do with each item (by id) whose name the destination already has */
+  move: (ids: string[], dest_id: string, resolutions?: Record<string, Resolution>) => post("/nodes/move", { ids, dest_id, resolutions }),
+  copy: (ids: string[], dest_id: string, resolutions?: Record<string, Resolution>) => post("/nodes/copy", { ids, dest_id, resolutions }),
+  /** Which names would clash: of `names` about to be uploaded to `dest_id`, of `ids` moved or copied there, or of `ids` restored from the trash (no `dest_id`) */
+  conflicts: (req: { dest_id?: string; names?: string[]; ids?: string[] }) => post<NameConflict[]>("/nodes/conflicts", req),
   trash: (ids: string[]) => post("/nodes/trash", { ids }),
   /** The most recent entries about an item (and, for a folder, what's inside it) */
   history: (id: string) => get<HistoryEntry[]>(enc`/nodes/${id}/activity`),
@@ -808,7 +824,7 @@ export const api = {
   /** With mine, only the items the person deleted */
   trashPage: (limit: number, after?: string, mine?: boolean) =>
     get<CursorPage<Located>>(`/trash${qs({ limit: String(limit), after, mine: mine ? "true" : undefined })}`).then((p) => ({ ...p, items: p.items.map(localizeLocated) })),
-  restore: (ids: string[]) => post("/trash/restore", { ids }),
+  restore: (ids: string[], resolutions?: Record<string, Resolution>) => post("/trash/restore", { ids, resolutions }),
   deleteForever: (ids: string[]) => post("/trash/delete", { ids }),
   emptyTrash: () => post("/trash/empty"),
   /** What Empty trash would delete: items per space */

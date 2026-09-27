@@ -11,7 +11,8 @@ import { t } from "@/lib/i18n";
 import { wantsCopy } from "@/lib/keys";
 import { invalidateFiles } from "@/lib/queries";
 import { moveBack, originsOf, toastWithUndo } from "@/lib/undo";
-import { enqueue, filesFromDrop } from "@/uploads";
+import { askBeforeTransfer } from "@/components/ConflictDialog";
+import { filesFromDrop, uploadFiles } from "@/uploads";
 
 export const DRAG_MIME = "application/x-thirtyfile-nodes";
 
@@ -56,18 +57,22 @@ export function droppedIds(dt: DataTransfer): string[] | null {
   }
 }
 
-/** Move or copy items into a folder; a move can be undone */
+/** Move or copy items into a folder, asking first what to do with names it already has; a move can be undone */
 export async function dropItems(qc: QueryClient, ids: string[], folder: DropFolder, copy: boolean) {
   ids = ids.filter((id) => id !== folder.id);
   if (!ids.length) return;
   const refresh = () => invalidateFiles(qc);
   try {
+    const resolutions = await askBeforeTransfer(copy ? "copy" : "move", ids, folder.id);
+    if (!resolutions) return;
+    ids = ids.filter((id) => resolutions[id] !== "skip");
+    if (!ids.length) return;
     if (copy) {
-      await api.copy(ids, folder.id);
+      await api.copy(ids, folder.id, resolutions);
       toast.success(t("Copied {n} item to \"{name}\"|Copied {n} items to \"{name}\"", { n: ids.length, name: folder.name }));
     } else {
       const origins = dragged ? originsOf(dragged.items, ids, folder.id) : new Map<string, string>();
-      await api.move(ids, folder.id);
+      await api.move(ids, folder.id, resolutions);
       const moved = t("Moved {n} item to \"{name}\"|Moved {n} items to \"{name}\"", { n: ids.length, name: folder.name });
       if (origins.size) toastWithUndo(moved, { undo: () => moveBack(origins), undoneText: t("Moved back"), after: refresh });
       else toast.success(moved);
@@ -81,7 +86,7 @@ export async function dropItems(qc: QueryClient, ids: string[], folder: DropFold
 /** Upload files and folders dropped from the computer into a folder */
 export async function dropFiles(dt: DataTransfer, folder: DropFolder) {
   const picked = await filesFromDrop(dt);
-  if (picked.length) enqueue(picked, folder.id);
+  if (picked.length) await uploadFiles(picked, folder.id);
 }
 
 /** What the pointer would do over a folder: copy with Ctrl (Option), otherwise move; files from the computer are copied */

@@ -109,7 +109,7 @@ pub struct Contents {
 /// Size and number of items inside the given folders (the items themselves are not counted; a file holds nothing).
 /// Items in the trash are left out. For the Details pane, of one folder or of a selection of several.
 pub async fn contents(State(st): State<AppState>, user: User, Json(req): Json<ContentsReq>) -> AppResult<Json<Contents>> {
-    let ids = BatchReq { ids: req.ids, dest_id: None }.ids()?;
+    let ids = BatchReq { ids: req.ids, dest_id: None, resolutions: Default::default() }.ids()?;
     let mut c = st.db.acquire().await?;
     let mut folders = Vec::with_capacity(ids.len());
     for id in &ids {
@@ -420,13 +420,31 @@ pub async fn rename(
     Ok(Json(node))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub struct BatchReq {
     ids: Vec<String>,
     dest_id: Option<String>,
+    /// What to do with each item (by id) whose name the destination already has; the browser asks first (`conflicts`)
+    #[serde(default)]
+    resolutions: HashMap<String, Resolution>,
+}
+
+/// The answer to "the destination already has an item with this name"
+#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Resolution {
+    /// The item already there goes to the trash, and this one takes its place
+    Replace,
+    /// This item is left where it is
+    Skip,
+    /// Both stay: this one gets a number ("Report (1).docx")
+    Keep,
 }
 
 impl BatchReq {
+    fn resolution(&self, id: &str) -> Option<Resolution> {
+        self.resolutions.get(id).copied()
+    }
     /// The selected ids, each once
     fn ids(&self) -> AppResult<Vec<String>> {
         if self.ids.is_empty() || self.ids.len() > MAX_BATCH {
@@ -475,7 +493,7 @@ pub async fn move_nodes(State(st): State<AppState>, user: User, Json(req): Json<
     let mut across = Vec::new();
     let mut across_items = 0usize;
     for id in &ids {
-        let node = tree::node_for(&mut tx, &user, id, Need::Write).await?;
+        let mut node = tree::node_for(&mut tx, &user, id, Need::Write).await?;
         locks.check(&node)?;
         not_root(&node)?;
         if node.parent_id.as_deref() == Some(dest.id.as_str()) {
@@ -484,8 +502,16 @@ pub async fn move_nodes(State(st): State<AppState>, user: User, Json(req): Json<
         if tree::is_within(&mut tx, &dest.id, &node.id).await? {
             return Err(AppError::bad_request(format!("Can't move \"{}\" into its own subfolder", node.name)));
         }
-        if tree::name_taken(&mut tx, &dest.id, &node.name).await? {
-            return Err(AppError::conflict(format!("The destination folder already contains \"{}\"", node.name)));
+        // The name the item has in the destination
+        let mut name = node.name.clone();
+        if let Some(existing) = tree::find_child(&mut tx, &dest.id, &node.name).await? {
+            match req.resolution(&node.id) {
+                None => return Err(AppError::conflict(format!("The destination folder already contains \"{}\"", node.name))),
+                Some(Resolution::Skip) => continue,
+                Some(Resolution::Keep) if dest.in_folder_space() => name = fsops::free_name(&mut tx, &dest, &node.name, node.is_folder()).await?,
+                Some(Resolution::Keep) => name = tree::unique_name(&mut tx, &dest.id, &node.name, node.is_folder()).await?,
+                Some(Resolution::Replace) => replace_existing(&mut tx, &user, &locks, &existing, &node).await?,
+            }
         }
         if node.drive_id != dest.drive_id {
             // Moving out of the original space is like deleting from it: the user must be a member of that space (with delete permission on its root);
@@ -504,7 +530,9 @@ pub async fn move_nodes(State(st): State<AppState>, user: User, Json(req): Json<
             let bytes: i64 = subtree.iter().filter(|n| !n.is_folder()).map(|n| n.size).sum();
             tree::check_quota(&mut tx, dest.drive(), bytes).await?;
             if node.in_folder_space() || dest.in_folder_space() {
-                let nodes: Vec<Node> = subtree.into_iter().filter(|n| n.trashed_at.is_none()).collect();
+                let mut nodes: Vec<Node> = subtree.into_iter().filter(|n| n.trashed_at.is_none()).collect();
+                // The first one is the item itself: it goes in under its name in the destination
+                nodes[0].name = name;
                 across_items += nodes.len();
                 if across_items > MAX_COPY_ITEMS {
                     return Err(AppError::bad_request("Move at most 20,000 items at once to or from a folder on the server"));
@@ -523,9 +551,10 @@ pub async fn move_nodes(State(st): State<AppState>, user: User, Json(req): Json<
             tree::adjust_usage(&mut tx, node.drive(), -bytes).await?;
             tree::adjust_usage(&mut tx, dest.drive(), bytes).await?;
         } else if node.in_folder_space() {
-            fsops::rename(&mut tx, &node, &dest, &node.name).await?;
+            fsops::rename(&mut tx, &node, &dest, &name).await?;
         }
-        sqlx::query("UPDATE nodes SET parent_id = ? WHERE id = ?").bind(&dest.id).bind(&node.id).execute(&mut *tx).await?;
+        sqlx::query("UPDATE nodes SET parent_id = ?, name = ? WHERE id = ?").bind(&dest.id).bind(&name).bind(&node.id).execute(&mut *tx).await?;
+        node.name = name;
         tree::touch(&mut tx, node.parent_id.as_deref().unwrap()).await?;
         tree::log(&mut tx, &user, Some(&node), "move", &format!("→ {}", if dest.parent_id.is_none() { "Root folder" } else { &dest.name })).await?;
     }
@@ -557,6 +586,16 @@ pub async fn copy_nodes(State(st): State<AppState>, user: User, Json(req): Json<
         not_root(&node)?;
         if tree::is_within(&mut tx, &dest.id, &node.id).await? {
             return Err(AppError::bad_request(format!("Can't copy \"{}\" into its own subfolder", node.name)));
+        }
+        // Without an answer the copy gets a number, as it always did; a copy into its own folder always does
+        if node.parent_id.as_deref() != Some(dest.id.as_str())
+            && let Some(existing) = tree::find_child(&mut tx, &dest.id, &node.name).await?
+        {
+            match req.resolution(&node.id) {
+                Some(Resolution::Skip) => continue,
+                Some(Resolution::Replace) => replace_existing(&mut tx, &user, &locks, &existing, &node).await?,
+                Some(Resolution::Keep) | None => {}
+            }
         }
         let nodes: Vec<Node> =
             tree::subtree(&mut tx, &node.id).await?.into_iter().map(|(n, _)| n).filter(|n| n.trashed_at.is_none()).collect();
@@ -622,34 +661,112 @@ pub async fn trash(State(st): State<AppState>, user: User, Json(req): Json<Batch
     let locks = fsops::lock(&st, &user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
-    let ts = now();
     for id in &outermost(&mut tx, &ids).await? {
         let node = tree::node_for(&mut tx, &user, id, Need::Delete).await?;
         locks.check(&node)?;
-        not_root(&node)?;
-        let trash_id = new_id();
-        if node.in_folder_space() {
-            // Into the space's trash folder on disk, so it can be restored
-            fsops::trash(&mut tx, &node, &trash_id).await?;
-        }
-        sqlx::query(
-            "WITH RECURSIVE sub(id) AS (
-               SELECT ?1 UNION ALL
-               SELECT c.id FROM nodes c JOIN sub ON c.parent_id = sub.id WHERE c.trashed_at IS NULL
-             )
-             UPDATE nodes SET trashed_at = ?2, trash_id = ?3 WHERE id IN (SELECT id FROM sub)",
-        )
-        .bind(&node.id)
-        .bind(ts)
-        .bind(&trash_id)
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query("UPDATE nodes SET trash_root = 1, trashed_by = ? WHERE id = ?").bind(user.id).bind(&node.id).execute(&mut *tx).await?;
-        tree::touch(&mut tx, node.parent_id.as_deref().unwrap()).await?;
-        tree::log(&mut tx, &user, Some(&node), "trash", "").await?;
+        trash_one(&mut tx, &user, &node, "").await?;
     }
     tx.commit().await?;
     Ok(Json(json!({ "ok": true })))
+}
+
+/// Moves an item (the user may delete it) and everything in it to the trash; `detail` goes into the activity log
+async fn trash_one(conn: &mut SqliteConnection, user: &User, node: &Node, detail: &str) -> AppResult<()> {
+    not_root(node)?;
+    let trash_id = new_id();
+    if node.in_folder_space() {
+        // Into the space's trash folder on disk, so it can be restored
+        fsops::trash(conn, node, &trash_id).await?;
+    }
+    sqlx::query(
+        "WITH RECURSIVE sub(id) AS (
+           SELECT ?1 UNION ALL
+           SELECT c.id FROM nodes c JOIN sub ON c.parent_id = sub.id WHERE c.trashed_at IS NULL
+         )
+         UPDATE nodes SET trashed_at = ?2, trash_id = ?3 WHERE id IN (SELECT id FROM sub)",
+    )
+    .bind(&node.id)
+    .bind(now())
+    .bind(&trash_id)
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query("UPDATE nodes SET trash_root = 1, trashed_by = ? WHERE id = ?").bind(user.id).bind(&node.id).execute(&mut *conn).await?;
+    tree::touch(conn, node.parent_id.as_deref().unwrap()).await?;
+    tree::log(conn, user, Some(node), "trash", detail).await?;
+    Ok(())
+}
+
+/// "Replace": the item already in the destination goes to the trash so `incoming` can take its name. The user needs
+/// delete permission on it, and it can't be a folder holding `incoming` itself.
+async fn replace_existing(conn: &mut SqliteConnection, user: &User, locks: &fsops::SpaceLocks, existing: &Node, incoming: &Node) -> AppResult<()> {
+    if existing.id == incoming.id || tree::is_within(conn, &incoming.id, &existing.id).await? {
+        return Err(AppError::conflict(format!("\"{}\" can't be replaced: it holds the item that would replace it", existing.name)));
+    }
+    let existing = tree::node_for(conn, user, &existing.id, Need::Delete).await?;
+    locks.check(&existing)?;
+    trash_one(conn, user, &existing, "Replaced").await
+}
+
+#[derive(Deserialize)]
+pub struct ConflictsReq {
+    /// The destination folder; without it, the items are in the trash and go back where they came from
+    dest_id: Option<String>,
+    /// Names of items about to be uploaded
+    #[serde(default)]
+    names: Vec<String>,
+    /// Items about to be moved, copied (with a destination) or restored (without one)
+    #[serde(default)]
+    ids: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct Conflict {
+    /// The item being moved, copied or restored (none for uploads)
+    id: Option<String>,
+    /// Its name (for uploads, the name asked about)
+    name: String,
+    kind: Option<String>,
+    size: Option<i64>,
+    updated_at: Option<i64>,
+    /// The item with the same name already there
+    existing: Node,
+}
+
+/// Uploaded names checked at once (the top-level items of a drop)
+const MAX_CONFLICT_NAMES: usize = 10_000;
+
+/// Which of these would land on a name the destination already has, so the browser can ask whether to replace, skip
+/// or keep both before it starts
+pub async fn conflicts(State(st): State<AppState>, user: User, Json(req): Json<ConflictsReq>) -> AppResult<Json<Vec<Conflict>>> {
+    if req.names.len() > MAX_CONFLICT_NAMES || req.ids.len() > MAX_BATCH {
+        return Err(AppError::bad_request("Too many items at once"));
+    }
+    let mut c = st.db.acquire().await?;
+    let mut out = Vec::new();
+    if let Some(dest) = &req.dest_id {
+        let dest = tree::folder_for(&mut c, &user, dest, Need::Read).await?;
+        for (name, existing) in tree::find_children(&mut c, &dest.id, &req.names).await? {
+            out.push(Conflict { id: None, name, kind: None, size: None, updated_at: None, existing });
+        }
+        for id in &req.ids {
+            let node = tree::node_for(&mut c, &user, id, Need::Read).await?;
+            // Already there: a move changes nothing, and a copy into its own folder gets a number, as in Windows
+            if node.parent_id.as_deref() == Some(dest.id.as_str()) {
+                continue;
+            }
+            if let Some(existing) = tree::find_child(&mut c, &dest.id, &node.name).await?.filter(|e| e.id != node.id) {
+                out.push(Conflict { id: Some(node.id.clone()), name: node.name.clone(), kind: Some(node.kind.clone()), size: Some(node.size), updated_at: Some(node.updated_at), existing });
+            }
+        }
+    } else {
+        for id in &req.ids {
+            let (node, parent) = trash_root(&mut c, &user, id, Need::Read).await?;
+            if let Some(existing) = tree::find_child(&mut c, &parent, &node.name).await? {
+                out.push(Conflict { id: Some(node.id.clone()), name: node.name.clone(), kind: Some(node.kind.clone()), size: Some(node.size), updated_at: Some(node.updated_at), existing });
+            }
+        }
+    }
+    Ok(Json(out))
 }
 
 #[derive(Serialize)]
@@ -847,6 +964,14 @@ pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<Bat
         // Restored into the original folder, or the space's root folder if that was deleted too
         let (node, parent_id) = trash_root(&mut tx, &user, id, Need::Write).await?;
         locks.check(&node)?;
+        // Without an answer the item gets a number when its name is taken, as it always did
+        if let Some(existing) = tree::find_child(&mut tx, &parent_id, &node.name).await? {
+            match req.resolution(&node.id) {
+                Some(Resolution::Skip) => continue,
+                Some(Resolution::Replace) => replace_existing(&mut tx, &user, &locks, &existing, &node).await?,
+                Some(Resolution::Keep) | None => {}
+            }
+        }
         let name = if node.in_folder_space() {
             let dest = tree::get_node(&mut tx, &parent_id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
             let name = fsops::free_name(&mut tx, &dest, &node.name, node.is_folder()).await?;
@@ -1227,11 +1352,11 @@ mod tests {
     use axum::http::StatusCode;
 
     fn batch(ids: &[&str], dest: &str) -> Json<BatchReq> {
-        Json(BatchReq { ids: ids.iter().map(|s| s.to_string()).collect(), dest_id: Some(dest.to_string()) })
+        Json(BatchReq { ids: ids.iter().map(|s| s.to_string()).collect(), dest_id: Some(dest.to_string()), ..Default::default() })
     }
 
     fn ids(list: &[&str]) -> Json<BatchReq> {
-        Json(BatchReq { ids: list.iter().map(|s| s.to_string()).collect(), dest_id: None })
+        Json(BatchReq { ids: list.iter().map(|s| s.to_string()).collect(), dest_id: None, ..Default::default() })
     }
 
     #[tokio::test]
@@ -1893,5 +2018,111 @@ mod tests {
         let _ = delete_forever(State(env.st.clone()), ben.clone(), ids(&[&mine])).await.unwrap();
         let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM recent_files WHERE node_id = ?").bind(&mine).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(left, 0);
+    }
+
+    fn resolved(ids: &[&str], dest: Option<&str>, answer: Resolution) -> Json<BatchReq> {
+        Json(BatchReq {
+            ids: ids.iter().map(|s| s.to_string()).collect(),
+            dest_id: dest.map(str::to_string),
+            resolutions: ids.iter().map(|s| (s.to_string(), answer)).collect(),
+        })
+    }
+
+    async fn name_of(env: &testutil::TestEnv, id: &str) -> (String, Option<String>, bool) {
+        let n = tree::get_node(&mut env.st.db.acquire().await.unwrap(), id).await.unwrap().unwrap();
+        (n.name, n.parent_id, n.trashed_at.is_some())
+    }
+
+    #[tokio::test]
+    async fn moving_onto_a_taken_name_asks_and_then_replaces_skips_or_keeps_both() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let st = || State(env.st.clone());
+        let dest = env.folder(&amy, &amy.root_id, "Dest").await;
+        let there = env.file(&amy, &dest, "Report.docx").await;
+        let src = env.folder(&amy, &amy.root_id, "Src").await;
+        let a = env.file(&amy, &src, "report.docx").await;
+
+        // The browser learns about the clash first
+        let Json(found) = conflicts(st(), amy.clone(), Json(ConflictsReq { dest_id: Some(dest.clone()), names: vec!["REPORT.docx".into(), "new.txt".into()], ids: vec![a.clone()] }))
+            .await
+            .unwrap();
+        assert_eq!(found.len(), 2);
+        assert!(found.iter().all(|c| c.existing.id == there));
+        assert_eq!((found[0].id.as_deref(), found[1].id.as_deref()), (None, Some(a.as_str())));
+
+        // Without an answer the move fails as before; skipped, nothing moves
+        assert_eq!(move_nodes(st(), amy.clone(), batch(&[&a], &dest)).await.unwrap_err().status, StatusCode::CONFLICT);
+        let _ = move_nodes(st(), amy.clone(), resolved(&[&a], Some(&dest), Resolution::Skip)).await.unwrap();
+        assert_eq!(name_of(&env, &a).await.1.as_deref(), Some(src.as_str()));
+        // Both kept: the moved one gets a number
+        let _ = move_nodes(st(), amy.clone(), resolved(&[&a], Some(&dest), Resolution::Keep)).await.unwrap();
+        assert_eq!(name_of(&env, &a).await, ("report (1).docx".into(), Some(dest.clone()), false));
+
+        // Replaced: the item there goes to the trash, the moved one takes its place under its own name
+        let b = env.file(&amy, &src, "Report.docx").await;
+        let _ = move_nodes(st(), amy.clone(), resolved(&[&b], Some(&dest), Resolution::Replace)).await.unwrap();
+        assert_eq!(name_of(&env, &b).await, ("Report.docx".into(), Some(dest.clone()), false));
+        assert!(name_of(&env, &there).await.2, "the replaced file is in the trash");
+
+        // A folder can't be replaced by something inside it
+        let outer = env.folder(&amy, &amy.root_id, "Box").await;
+        let inner = env.folder(&amy, &outer, "Box").await;
+        let err = move_nodes(st(), amy.clone(), resolved(&[&inner], Some(&amy.root_id), Resolution::Replace)).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert!(!name_of(&env, &outer).await.2);
+    }
+
+    #[tokio::test]
+    async fn copying_and_restoring_onto_a_taken_name_follow_the_answer() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let st = || State(env.st.clone());
+        let dest = env.folder(&amy, &amy.root_id, "Dest").await;
+        let there = env.file(&amy, &dest, "a.txt").await;
+        let a = env.file(&amy, &amy.root_id, "a.txt").await;
+        let count = |parent: String| {
+            let db = env.st.db.clone();
+            async move {
+                let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE parent_id = ? AND trashed_at IS NULL").bind(parent).fetch_one(&db).await.unwrap();
+                n
+            }
+        };
+        let _ = copy_nodes(st(), amy.clone(), resolved(&[&a], Some(&dest), Resolution::Skip)).await.unwrap();
+        assert_eq!(count(dest.clone()).await, 1);
+        // Without an answer a copy gets a number, as it always did
+        let _ = copy_nodes(st(), amy.clone(), batch(&[&a], &dest)).await.unwrap();
+        assert_eq!(count(dest.clone()).await, 2);
+        let _ = copy_nodes(st(), amy.clone(), resolved(&[&a], Some(&dest), Resolution::Replace)).await.unwrap();
+        assert_eq!(count(dest.clone()).await, 2);
+        assert!(name_of(&env, &there).await.2);
+
+        // Restoring: another "a.txt" took the name meanwhile
+        let _ = trash(st(), amy.clone(), ids(&[&a])).await.unwrap();
+        let newer = env.file(&amy, &amy.root_id, "a.txt").await;
+        let Json(found) = conflicts(st(), amy.clone(), Json(ConflictsReq { dest_id: None, names: vec![], ids: vec![a.clone()] })).await.unwrap();
+        assert_eq!(found.iter().map(|c| c.existing.id.as_str()).collect::<Vec<_>>(), [newer.as_str()]);
+        let _ = restore(st(), amy.clone(), resolved(&[&a], None, Resolution::Skip)).await.unwrap();
+        assert!(name_of(&env, &a).await.2, "skipped: still in the trash");
+        let _ = restore(st(), amy.clone(), resolved(&[&a], None, Resolution::Replace)).await.unwrap();
+        assert_eq!(name_of(&env, &a).await, ("a.txt".into(), Some(amy.root_id.clone()), false));
+        assert!(name_of(&env, &newer).await.2);
+    }
+
+    #[tokio::test]
+    async fn replacing_in_a_folder_space_moves_the_item_there_to_its_trash() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        testutil::write_old(&space.dir.join("a.txt"), b"old");
+        testutil::write_old(&space.dir.join("Sub/a.txt"), b"new");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (old, _) = env.node_at(&space.drive, "a.txt").await.unwrap();
+        let (new, _) = env.node_at(&space.drive, "Sub/a.txt").await.unwrap();
+        let _ = move_nodes(State(env.st.clone()), admin.clone(), resolved(&[&new], Some(&space.root), Resolution::Replace)).await.unwrap();
+        assert_eq!(std::fs::read(space.dir.join("a.txt")).unwrap(), b"new");
+        assert_eq!(env.node_at(&space.drive, "a.txt").await.unwrap().0, new);
+        assert!(name_of(&env, &old).await.2);
+        assert!(!space.dir.join("Sub/a.txt").exists());
     }
 }

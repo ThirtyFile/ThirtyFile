@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/dialogs";
+import { askBeforeTransfer } from "@/components/ConflictDialog";
 import { ErrorState } from "@/components/ErrorState";
 import { FileList } from "@/components/FileList";
 import { Frame, ToolButton } from "@/components/Frame";
@@ -50,8 +51,12 @@ export function TrashPage() {
 
   const restore = async () => {
     try {
-      await api.restore(ids);
-      done(t("Restored {n} item|Restored {n} items", { n: ids.length }));
+      // Asks first when an item's name was taken in its folder meanwhile
+      const resolutions = await askBeforeTransfer("restore", ids);
+      if (!resolutions) return;
+      const sent = ids.filter((id) => resolutions[id] !== "skip");
+      if (sent.length) await api.restore(sent, resolutions);
+      done(t("Restored {n} item|Restored {n} items", { n: sent.length }));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Couldn't restore"));
     }

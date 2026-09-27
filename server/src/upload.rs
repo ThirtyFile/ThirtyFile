@@ -43,6 +43,8 @@ struct Upload {
     batch: String,
     /// The file this upload became, once finished
     node_id: Option<String>,
+    /// "replace": a file with the same name gets the new content; otherwise both are kept (see migration 0014)
+    on_conflict: String,
 }
 
 /// Who is uploading: a signed-in person, or a visitor of a share link. The file belongs to `user` either way (the
@@ -167,6 +169,11 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
         .filter(|b| (1..=64).contains(&b.len()) && b.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
         .cloned()
         .unwrap_or_default();
+    // Visitors of a share link never replace files: they may not even see what's there
+    let on_conflict = match meta.get("onConflict").map(String::as_str) {
+        Some("replace") if up.share.is_none() => "replace",
+        _ => "keep",
+    };
 
     let id = new_id();
     {
@@ -187,8 +194,8 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
         tree::check_quota(&mut tx, parent.drive(), size as i64).await?;
         let ts = now();
         sqlx::query(
-            "INSERT INTO uploads (id, owner_id, parent_id, rel_path, name, size, offset, created_at, expires_at, drive_id, batch, share_id)
-             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
+            "INSERT INTO uploads (id, owner_id, parent_id, rel_path, name, size, offset, created_at, expires_at, drive_id, batch, share_id, on_conflict)
+             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(user.id)
@@ -201,6 +208,7 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
         .bind(&parent.drive_id)
         .bind(&batch)
         .bind(up.share_id())
+        .bind(on_conflict)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -217,7 +225,7 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
         let upload = load(st, up, &id).await?;
         let guard = ActiveGuard::claim(st, &id).ok_or_else(|| AppError::new(StatusCode::LOCKED, "This file is already being uploaded"))?;
         let node_id = finish(st, up, upload, guard).await?;
-        res.headers_mut().insert("x-node-id", HeaderValue::from_str(&node_id).unwrap());
+        finished_headers(st, res.headers_mut(), &node_id).await?;
     }
     tus(&mut res);
     res.headers_mut().insert(header::LOCATION, HeaderValue::from_str(&up.location(&id)).unwrap());
@@ -236,7 +244,7 @@ async fn check_in_share(conn: &mut sqlx::SqliteConnection, share: &ShareUpload, 
 /// An upload of this person, or of this share link: a signed-in person can't continue a visitor's upload and the other way round
 async fn load(st: &AppState, up: &Uploader, id: &str) -> AppResult<Upload> {
     sqlx::query_as(
-        "SELECT id, owner_id, parent_id, rel_path, name, size, offset, drive_id, batch, node_id FROM uploads
+        "SELECT id, owner_id, parent_id, rel_path, name, size, offset, drive_id, batch, node_id, on_conflict FROM uploads
          WHERE id = ?1 AND ((?3 IS NULL AND share_id IS NULL AND owner_id = ?2) OR share_id = ?3)",
     )
         .bind(id)
@@ -268,15 +276,27 @@ pub async fn head_as(st: &AppState, up: &Uploader, id: &str) -> AppResult<Respon
     }
     let mut res = StatusCode::OK.into_response();
     tus(&mut res);
+    if let Some(n) = &node_id {
+        finished_headers(&st, res.headers_mut(), n).await?;
+    }
     let h = res.headers_mut();
     // A finished upload reports everything as received, whatever the row said before finishing
     h.insert("upload-offset", if node_id.is_some() { size } else { offset }.into());
     h.insert("upload-length", size.into());
-    if let Some(n) = &node_id {
-        h.insert("x-node-id", HeaderValue::from_str(n).unwrap());
-    }
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok(res)
+}
+
+/// Tells the client which file the upload became: its id, and its name (percent-encoded), which differs from the
+/// uploaded one when both files were kept ("Report (1).docx")
+async fn finished_headers(st: &AppState, h: &mut HeaderMap, node_id: &str) -> AppResult<()> {
+    let name: Option<(String,)> = sqlx::query_as("SELECT name FROM nodes WHERE id = ?").bind(node_id).fetch_optional(&st.db).await?;
+    h.insert("x-node-id", HeaderValue::from_str(node_id).map_err(AppError::internal)?);
+    if let Some((name,)) = name {
+        let encoded = percent_encoding::utf8_percent_encode(&name, percent_encoding::NON_ALPHANUMERIC).to_string();
+        h.insert("x-node-name", HeaderValue::from_str(&encoded).map_err(AppError::internal)?);
+    }
+    Ok(())
 }
 
 /// Makes sure the same upload isn't written or finished twice at the same time. It owns the state, so it can move
@@ -323,7 +343,7 @@ pub async fn patch_as(st: &AppState, up: &Uploader, id: &str, headers: &HeaderMa
         let mut res = StatusCode::NO_CONTENT.into_response();
         tus(&mut res);
         res.headers_mut().insert("upload-offset", upload.size.into());
-        res.headers_mut().insert("x-node-id", HeaderValue::from_str(node_id).unwrap());
+        finished_headers(&st, res.headers_mut(), node_id).await?;
         return Ok(res);
     }
     // The deadline moves when data starts arriving, so the hourly cleanup can't remove an upload that is being received
@@ -386,7 +406,7 @@ pub async fn patch_as(st: &AppState, up: &Uploader, id: &str, headers: &HeaderMa
     if offset == size {
         let upload = load(&st, up, &id).await?;
         let node_id = finish(&st, up, upload, guard).await?;
-        res.headers_mut().insert("x-node-id", HeaderValue::from_str(&node_id).unwrap());
+        finished_headers(&st, res.headers_mut(), &node_id).await?;
     }
     tus(&mut res);
     res.headers_mut().insert("upload-offset", offset.into());
@@ -415,11 +435,28 @@ async fn finish(st: &AppState, up: &Uploader, upload: Upload, guard: ActiveGuard
     .map_err(AppError::internal)?
 }
 
-/// Upload finished: compute the hash, put it in storage, create the file node
+/// The upload's folder was deleted or put in the trash while it was running. It used to land in the personal space
+/// instead, where nobody looked for it: now it fails and says why.
+fn folder_gone() -> AppError {
+    AppError::not_found("The folder you were uploading to was deleted or moved to the trash")
+}
+
+fn discarded(e: AppError) -> AppError {
+    AppError::new(e.status, format!("{}. The upload was discarded; start it again.", e.message.trim_end_matches('.'))).with_code("upload_discarded")
+}
+
+/// Upload finished: compute the hash, put it in storage, create the file node (or give an existing one the new content)
 async fn finalize(st: &AppState, up: &Uploader, upload: Upload) -> AppResult<String> {
     let path = upload_path(st, &upload.id);
-    if let Some(id) = finalize_in_folder(st, up, &upload, &path).await? {
-        return Ok(id);
+    let parent = tree::get_node(&mut *st.db.acquire().await?, &upload.parent_id).await?;
+    let Some(parent) = parent.filter(|p| p.is_folder() && p.trashed_at.is_none()) else {
+        let _w = st.write_lock.lock().await;
+        let _ = sqlx::query("DELETE FROM uploads WHERE id = ?").bind(&upload.id).execute(&st.db).await;
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err(discarded(folder_gone()));
+    };
+    if parent.in_folder_space() {
+        return finalize_in_folder(st, up, &upload, &path, parent).await;
     }
     let (hash, size) = hash_file(path.clone()).await?;
     if size != upload.size as u64 {
@@ -429,8 +466,9 @@ async fn finalize(st: &AppState, up: &Uploader, upload: Upload) -> AppResult<Str
     let staged = tree::stage_blob(st, upload.drive_id.as_deref().unwrap_or_default(), hash.clone(), size as i64, path.clone()).await?;
     let _w = st.write_lock.lock().await;
     match commit_upload(st, up, &upload, &staged, &hash, size).await {
-        Ok((id, extra)) => {
+        Ok((id, extra, orphans)) => {
             tree::finish_staged(st, staged, extra).await;
+            tree::schedule_blob_removal(st, orphans);
             Ok(id)
         }
         Err(e) => {
@@ -438,23 +476,31 @@ async fn finalize(st: &AppState, up: &Uploader, upload: Upload) -> AppResult<Str
             // The temporary file is gone by now, so the upload can't be resumed: drop its row (it would otherwise count against the quota for 7 days)
             tree::abandon_staged(st, staged).await;
             let _ = sqlx::query("DELETE FROM uploads WHERE id = ?").bind(&upload.id).execute(&st.db).await;
-            Err(AppError::new(e.status, format!("{} The upload was discarded; start it again.", e.message)).with_code("upload_discarded"))
+            Err(discarded(e))
         }
     }
 }
 
+/// The file whose content an upload replaces: one with the same name in `folder` when the upload was told to replace
+/// (a folder with that name can't take a file's content, so both are kept then)
+async fn replaced_file(conn: &mut sqlx::SqliteConnection, user: &User, upload: &Upload, folder: &str) -> AppResult<Option<tree::Node>> {
+    if upload.on_conflict != "replace" {
+        return Ok(None);
+    }
+    match tree::find_child(conn, folder, &upload.name).await?.filter(|n| !n.is_folder()) {
+        Some(existing) => Ok(Some(tree::node_for(conn, user, &existing.id, tree::Need::Write).await?)),
+        None => Ok(None),
+    }
+}
+
 /// Upload into a folder space: the file goes into the folder (under a name scans ignore, then renamed into place) and
-/// is indexed; its content isn't hashed. None when the target folder isn't in a folder space any more (the upload then
-/// goes where uploads go when their folder is gone).
-async fn finalize_in_folder(st: &AppState, up: &Uploader, upload: &Upload, path: &std::path::Path) -> AppResult<Option<String>> {
+/// is indexed; its content isn't hashed
+async fn finalize_in_folder(st: &AppState, up: &Uploader, upload: &Upload, path: &std::path::Path, parent: tree::Node) -> AppResult<String> {
     let user = &up.user;
-    let parent = tree::get_node(&mut *st.db.acquire().await?, &upload.parent_id).await?;
-    let Some(parent) = parent.filter(|p| p.in_folder_space() && p.is_folder() && p.trashed_at.is_none()) else { return Ok(None) };
     let size = tokio::fs::metadata(path).await?.len();
     if size != upload.size as u64 {
         return Err(AppError::bad_request("File size mismatch"));
     }
-    let discarded = |e: AppError| AppError::new(e.status, format!("{} The upload was discarded; start it again.", e.message)).with_code("upload_discarded");
     let staged = match crate::fsops::stage_upload(&parent, path, size).await {
         Ok(s) => s,
         Err(e) => {
@@ -480,8 +526,16 @@ async fn finalize_in_folder(st: &AppState, up: &Uploader, upload: &Upload, path:
         }
         let folder_id = tree::ensure_folders(&mut tx, upload.owner_id, &target.id, &upload.rel_path, &upload.batch).await?;
         let folder = tree::get_node(&mut tx, &folder_id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
-        let name = crate::fsops::free_name(&mut tx, &folder, &upload.name, false).await?;
-        let id = crate::fsops::place_file(&mut tx, &staged, upload.owner_id, &folder, &name).await?;
+        let (id, replaced) = match replaced_file(&mut tx, user, upload, &folder.id).await? {
+            Some(existing) => {
+                crate::fsops::replace_file(&mut tx, &staged, &existing).await?;
+                (existing.id.clone(), Some(existing))
+            }
+            None => {
+                let name = crate::fsops::free_name(&mut tx, &folder, &upload.name, false).await?;
+                (crate::fsops::place_file(&mut tx, &staged, upload.owner_id, &folder, &name).await?, None)
+            }
+        };
         let ts = now();
         sqlx::query("UPDATE uploads SET node_id = ?, offset = size, expires_at = ? WHERE id = ?")
             .bind(&id)
@@ -491,15 +545,16 @@ async fn finalize_in_folder(st: &AppState, up: &Uploader, upload: &Upload, path:
             .await?;
         tree::touch(&mut tx, &folder.id).await?;
         if let Some(n) = tree::get_node(&mut tx, &id).await? {
-            tree::adjust_usage(&mut tx, n.drive(), n.size).await?;
-            tree::log(&mut tx, user, Some(&n), "upload", &up.log_detail()).await?;
+            let before = replaced.as_ref().map_or(0, |r| r.size);
+            tree::adjust_usage(&mut tx, n.drive(), n.size - before).await?;
+            tree::log(&mut tx, user, Some(&n), "upload", &if replaced.is_some() { "Replaced the existing file".to_string() } else { up.log_detail() }).await?;
         }
         tx.commit().await?;
         Ok(id)
     }
     .await;
     match result {
-        Ok(id) => Ok(Some(id)),
+        Ok(id) => Ok(id),
         Err(e) => {
             // Renamed into place already when only the index failed: the next scan shows it
             let _ = tokio::fs::remove_file(&staged).await;
@@ -509,7 +564,8 @@ async fn finalize_in_folder(st: &AppState, up: &Uploader, upload: &Upload, path:
     }
 }
 
-/// Creates the node and records the content reference while holding the write lock
+/// Creates the node (or gives the file it replaces the new content) and records the content reference while holding
+/// the write lock; returns the file's id, a redundant copy of the content and content no longer used
 async fn commit_upload(
     st: &AppState,
     up: &Uploader,
@@ -517,7 +573,7 @@ async fn commit_upload(
     staged: &tree::StagedBlob,
     hash: &str,
     size: u64,
-) -> AppResult<(String, Option<tree::BlobRef>)> {
+) -> AppResult<(String, Option<tree::BlobRef>, Vec<tree::BlobRef>)> {
     let user = &up.user;
     let mut tx = st.db.begin().await?;
     // The account's upload permission may have been removed while the upload was running
@@ -530,47 +586,51 @@ async fn commit_upload(
         let target = tree::folder_for(&mut tx, user, &upload.parent_id, tree::Need::Write).await?;
         check_in_share(&mut tx, s, &target.id).await?;
     }
-    // The target folder may have been deleted during the upload; in that case put it in the root folder
-    let parent_id = match tree::get_node(&mut tx, &upload.parent_id).await? {
-        Some(p) if p.trashed_at.is_none() && p.is_folder() => {
-            let role = tree::role_on(&mut tx, user, &p).await?;
-            match role {
-                Some(r) if tree::allows(user, r, tree::Need::Write).is_ok() => p.id,
-                _ => user.root_id.clone(),
-            }
-        }
-        _ => user.root_id.clone(),
-    };
-    if parent_id == user.root_id {
-        // Fell back to the personal space: the quota was checked against the original space, so check the personal one now
-        let personal = tree::get_node(&mut tx, &user.root_id).await?.and_then(|n| n.drive_id).unwrap_or_default();
-        if upload.drive_id.as_deref() != Some(personal.as_str()) {
-            tree::check_quota(&mut tx, &personal, size as i64).await?;
-        }
+    // The target folder may have been deleted, or the permission to it removed, during the upload
+    let parent = tree::get_node(&mut tx, &upload.parent_id).await?.filter(|p| p.trashed_at.is_none() && p.is_folder()).ok_or_else(folder_gone)?;
+    let role = tree::role_on(&mut tx, user, &parent).await?;
+    if role.is_none_or(|r| tree::allows(user, r, tree::Need::Write).is_err()) {
+        return Err(AppError::forbidden("You no longer have permission to upload to this folder"));
     }
-    if tree::get_node(&mut tx, &parent_id).await?.is_some_and(|p| p.in_folder_space()) {
+    if parent.in_folder_space() || parent.space_read_only {
         return Err(AppError::conflict("Something changed at the same time. Try again."));
     }
-    let folder = tree::ensure_folders(&mut tx, upload.owner_id, &parent_id, &upload.rel_path, &upload.batch).await?;
-    let name = tree::unique_name(&mut tx, &folder, &upload.name, false).await?;
-    let extra = tree::commit_blob(st, &mut tx, staged).await?;
-    let id = new_id();
+    let folder = tree::ensure_folders(&mut tx, upload.owner_id, &parent.id, &upload.rel_path, &upload.batch).await?;
     let ts = now();
-    sqlx::query(
-        "INSERT INTO nodes (id, owner_id, parent_id, kind, name, blob_hash, size, mime, drive_id, created_at, updated_at)
-         SELECT ?1, ?2, ?3, 'file', ?4, ?5, ?6, ?7, drive_id, ?8, ?8 FROM nodes WHERE id = ?3",
-    )
-    .bind(&id)
-    .bind(upload.owner_id)
-    .bind(&folder)
-    .bind(&name)
-    .bind(hash)
-    .bind(size as i64)
-    .bind(guess_mime(&name))
-    .bind(ts)
-    .execute(&mut *tx)
-    .await?;
-    // Kept for a day with the new file, for clients that lost the response
+    let (id, extra, orphans) = match replaced_file(&mut tx, user, upload, &folder).await? {
+        Some(existing) => {
+            // Admitted against the quota for its full size when it started; only the difference counts now
+            let extra = tree::commit_blob(st, &mut tx, staged).await?;
+            let orphans = tree::set_content(&mut tx, &existing, hash, size as i64).await?;
+            tree::log(&mut tx, user, Some(&existing), "upload", "Replaced the existing file").await?;
+            (existing.id.clone(), extra, orphans)
+        }
+        None => {
+            let name = tree::unique_name(&mut tx, &folder, &upload.name, false).await?;
+            let extra = tree::commit_blob(st, &mut tx, staged).await?;
+            let id = new_id();
+            sqlx::query(
+                "INSERT INTO nodes (id, owner_id, parent_id, kind, name, blob_hash, size, mime, drive_id, created_at, updated_at)
+                 SELECT ?1, ?2, ?3, 'file', ?4, ?5, ?6, ?7, drive_id, ?8, ?8 FROM nodes WHERE id = ?3",
+            )
+            .bind(&id)
+            .bind(upload.owner_id)
+            .bind(&folder)
+            .bind(&name)
+            .bind(hash)
+            .bind(size as i64)
+            .bind(guess_mime(&name))
+            .bind(ts)
+            .execute(&mut *tx)
+            .await?;
+            if let Some(n) = tree::get_node(&mut tx, &id).await? {
+                tree::adjust_usage(&mut tx, n.drive(), size as i64).await?;
+                tree::log(&mut tx, user, Some(&n), "upload", &up.log_detail()).await?;
+            }
+            (id, extra, Vec::new())
+        }
+    };
+    // Kept for a day with the file, for clients that lost the response
     sqlx::query("UPDATE uploads SET node_id = ?, offset = size, expires_at = ? WHERE id = ?")
         .bind(&id)
         .bind(ts + FINISHED_TTL)
@@ -578,13 +638,10 @@ async fn commit_upload(
         .execute(&mut *tx)
         .await?;
     tree::touch(&mut tx, &folder).await?;
-    if let Some(n) = tree::get_node(&mut tx, &id).await? {
-        tree::adjust_usage(&mut tx, n.drive(), size as i64).await?;
-        tree::log(&mut tx, user, Some(&n), "upload", &up.log_detail()).await?;
-    }
     tx.commit().await?;
-    Ok((id, extra))
+    Ok((id, extra, orphans))
 }
+
 
 pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Response> {
     delete_as(&st, &Uploader::signed_in(user), &id).await
@@ -676,10 +733,15 @@ mod tests {
     }
 
     async fn begin_in(env: &testutil::TestEnv, user: &User, parent: &str, name: &str, len: usize) -> String {
+        begin_with(env, user, parent, name, len, "keep").await
+    }
+
+    /// Starts an upload that does `on_conflict` ("replace" or "keep") when the name is taken
+    async fn begin_with(env: &testutil::TestEnv, user: &User, parent: &str, name: &str, len: usize, on_conflict: &str) -> String {
         let b64 = |s: &str| base64::engine::general_purpose::STANDARD.encode(s);
         let mut h = HeaderMap::new();
         h.insert("upload-length", len.to_string().parse().unwrap());
-        h.insert("upload-metadata", format!("filename {},parentId {}", b64(name), b64(parent)).parse().unwrap());
+        h.insert("upload-metadata", format!("filename {},parentId {},onConflict {}", b64(name), b64(parent), b64(on_conflict)).parse().unwrap());
         let res = create(State(env.st.clone()), user.clone(), h).await.unwrap();
         res.headers()[header::LOCATION].to_str().unwrap().rsplit('/').next().unwrap().to_string()
     }
@@ -787,5 +849,84 @@ mod tests {
         // Nothing left behind under a temporary name
         let leftovers: Vec<_> = std::fs::read_dir(&space.dir).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(".thirtyfile-upload")).collect();
         assert!(leftovers.is_empty());
+    }
+
+    /// Reads a file's content as the browser would
+    async fn read(env: &testutil::TestEnv, user: &User, id: &str) -> Vec<u8> {
+        let q = axum::extract::Query(serde_json::from_value(serde_json::json!({})).unwrap());
+        let res = crate::files::content(State(env.st.clone()), user.clone(), Path(id.to_string()), q, HeaderMap::new()).await.unwrap();
+        axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap().to_vec()
+    }
+
+    #[tokio::test]
+    async fn an_upload_replaces_a_file_with_the_same_name_or_keeps_both_and_says_so() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let id = begin(&env, &amy, "report.txt", 5).await;
+        let first = send(&env, &amy, &id, 0, b"hello").await.unwrap();
+        let original = first.headers()["x-node-id"].to_str().unwrap().to_string();
+        assert_eq!(first.headers()["x-node-name"], "report%2Etxt");
+
+        // Kept both: the new one gets a number, and the client hears which
+        let id = begin_with(&env, &amy, "root", "Report.txt", 3, "keep").await;
+        let kept = send(&env, &amy, &id, 0, b"two").await.unwrap();
+        assert_eq!(kept.headers()["x-node-name"], "Report%20%281%29%2Etxt");
+        assert_ne!(kept.headers()["x-node-id"], original.as_str());
+
+        // Replaced: the same file (so its shares and permissions stay) with the new content
+        let id = begin_with(&env, &amy, "root", "REPORT.txt", 6, "replace").await;
+        let replaced = send(&env, &amy, &id, 0, b"world!").await.unwrap();
+        assert_eq!(replaced.headers()["x-node-id"], original.as_str());
+        assert_eq!(replaced.headers()["x-node-name"], "report%2Etxt");
+        assert_eq!(read(&env, &amy, &original).await, b"world!");
+        assert_eq!(files_named(&env, "report").await, 2);
+        let (used,): (i64,) = sqlx::query_as("SELECT used_bytes FROM drives WHERE root_id = ?").bind(&amy.root_id).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(used, 6 + 3);
+        // The old content is no longer referenced
+        let (blobs,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blobs").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(blobs, 2);
+    }
+
+    #[tokio::test]
+    async fn an_upload_whose_folder_was_deleted_fails_instead_of_landing_elsewhere() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let folder = env.folder(&amy, &amy.root_id, "Projects").await;
+        let id = begin_in(&env, &amy, &folder, "plan.txt", 5).await;
+        let _ = crate::nodes::trash(State(env.st.clone()), amy.clone(), axum::Json(serde_json::from_value(serde_json::json!({ "ids": [folder] })).unwrap()))
+            .await
+            .unwrap();
+        let err = send(&env, &amy, &id, 0, b"hello").await.unwrap_err();
+        assert_eq!((err.status, err.code), (StatusCode::NOT_FOUND, Some("upload_discarded")));
+        assert!(err.message.contains("deleted or moved to the trash"), "{}", err.message);
+        assert_eq!(files_named(&env, "plan").await, 0);
+        assert!(load(&env.st, &Uploader::signed_in(amy.clone()), &id).await.is_err(), "the upload is gone, not waiting to be resumed");
+
+        // Or the permission to write there was taken away
+        let ben = env.user("ben", true).await;
+        let shared = env.folder(&amy, &amy.root_id, "Shared").await;
+        env.grant(&shared, &ben, "editor").await;
+        let id = begin_in(&env, &ben, &shared, "notes.txt", 5).await;
+        env.revoke(&shared, &ben).await;
+        let err = send(&env, &ben, &id, 0, b"hello").await.unwrap_err();
+        assert_eq!(err.status, StatusCode::FORBIDDEN);
+        assert_eq!(files_named(&env, "notes").await, 0);
+    }
+
+    #[tokio::test]
+    async fn an_upload_replaces_a_file_in_a_folder_space_in_place() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        let id = begin_in(&env, &admin, &space.root, "report.txt", 5).await;
+        let first = send(&env, &admin, &id, 0, b"hello").await.unwrap();
+        let original = first.headers()["x-node-id"].to_str().unwrap().to_string();
+        let id = begin_with(&env, &admin, &space.root, "report.txt", 6, "replace").await;
+        let replaced = send(&env, &admin, &id, 0, b"world!").await.unwrap();
+        assert_eq!(replaced.headers()["x-node-id"], original.as_str());
+        assert_eq!(std::fs::read(space.dir.join("report.txt")).unwrap(), b"world!");
+        assert_eq!(env.node_at(&space.drive, "report.txt").await, Some((original, 6)));
+        let r = crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        assert_eq!((r.added, r.changed, r.removed), (0, 0, 0), "the index already knows: {r:?}");
     }
 }

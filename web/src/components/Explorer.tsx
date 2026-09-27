@@ -13,7 +13,7 @@ import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
 import { toastWithUndo } from "@/lib/undo";
 import { formatBytes } from "@/lib/utils";
-import { enqueue, filesFromInput } from "@/uploads";
+import { filesFromInput, uploadFiles } from "@/uploads";
 import { useExplorerState } from "./explorer/state";
 import { useExplorerActions } from "./explorer/actions";
 import { explorerMenus } from "./explorer/menus";
@@ -226,7 +226,7 @@ export function Explorer(p: ExplorerProps) {
         multiple
         hidden
         onChange={(e) => {
-          if (e.target.files?.length) enqueue(filesFromInput(e.target.files), p.folderId!);
+          if (e.target.files?.length) void uploadFiles(filesFromInput(e.target.files), p.folderId!);
           e.target.value = "";
         }}
       />
@@ -237,7 +237,7 @@ export function Explorer(p: ExplorerProps) {
         // @ts-expect-error webkitdirectory isn't in the standard types
         webkitdirectory=""
         onChange={(e) => {
-          if (e.target.files?.length) enqueue(filesFromInput(e.target.files), p.folderId!);
+          if (e.target.files?.length) void uploadFiles(filesFromInput(e.target.files), p.folderId!);
           e.target.value = "";
         }}
       />

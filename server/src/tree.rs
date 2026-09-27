@@ -480,6 +480,37 @@ pub async fn name_taken(conn: &mut SqliteConnection, parent_id: &str, name: &str
     Ok(row.is_some())
 }
 
+/// The items of a folder (not in the trash) that have one of these names, matched the way `name_taken` matches:
+/// (the name asked about, the item already there)
+pub async fn find_children(conn: &mut SqliteConnection, parent_id: &str, names: &[String]) -> AppResult<Vec<(String, Node)>> {
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        asked: String,
+        #[sqlx(flatten)]
+        node: Node,
+    }
+    if names.is_empty() {
+        return Ok(Vec::new());
+    }
+    let sql = format!(
+        "SELECT j.value AS asked, {NODE_COLS} FROM json_each(?2) j
+         JOIN nodes n ON n.parent_id = ?1 AND n.trashed_at IS NULL
+                     AND n.name_key = CASE WHEN n.fs_path IS NULL THEN unicode_lower(j.value) ELSE j.value END
+         ORDER BY j.key"
+    );
+    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
+        .bind(parent_id)
+        .bind(serde_json::to_string(names).unwrap())
+        .fetch_all(conn)
+        .await?;
+    Ok(rows.into_iter().map(|r| (r.asked, r.node)).collect())
+}
+
+/// The item of a folder (not in the trash) that has this name
+pub async fn find_child(conn: &mut SqliteConnection, parent_id: &str, name: &str) -> AppResult<Option<Node>> {
+    Ok(find_children(conn, parent_id, &[name.to_string()]).await?.into_iter().next().map(|(_, n)| n))
+}
+
 /// Automatically adds a number on name conflicts
 pub async fn unique_name(conn: &mut SqliteConnection, parent_id: &str, name: &str, is_folder: bool) -> AppResult<String> {
     if !name_taken(conn, parent_id, name).await? {
@@ -546,6 +577,20 @@ pub async fn release_blobs(conn: &mut SqliteConnection, hashes: &[String]) -> Ap
     .fetch_all(&mut *conn)
     .await?;
     Ok(orphans)
+}
+
+/// Gives a file of the content store new content, keeping its id (and with it its shares, permissions and favourites).
+/// The caller has recorded the reference to the new content (`commit_blob`); returns content no longer used.
+pub async fn set_content(conn: &mut SqliteConnection, node: &Node, hash: &str, size: i64) -> AppResult<Vec<BlobRef>> {
+    sqlx::query("UPDATE nodes SET blob_hash = ?, size = ?, updated_at = ? WHERE id = ?")
+        .bind(hash)
+        .bind(size)
+        .bind(now().max(node.updated_at + 1))
+        .bind(&node.id)
+        .execute(&mut *conn)
+        .await?;
+    adjust_usage(conn, node.drive(), size - node.size).await?;
+    release_blobs(conn, &node.blob_hash.iter().cloned().collect::<Vec<_>>()).await
 }
 
 /// Adds a reference for each file of a copy, one statement for the whole list: (hash, size, location when new)

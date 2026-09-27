@@ -1,6 +1,9 @@
 import { useSyncExternalStore } from "react";
 import * as tus from "tus-js-client";
-import { errorFromBody } from "@/api";
+import { toast } from "sonner";
+import { api, errorFromBody } from "@/api";
+import { resolveConflicts } from "@/components/ConflictDialog";
+import { applyToUpload, topLevel } from "@/lib/conflicts";
 import { t } from "@/lib/i18n";
 
 export type UploadStatus = "queued" | "uploading" | "paused" | "done" | "error";
@@ -20,12 +23,18 @@ export interface UploadTask {
   error?: string;
   upload?: tus.Upload;
   file: File;
+  /** When the name is taken: give that file the new content, or keep both (the new one gets a number) */
+  onConflict: "replace" | "keep";
+  /** The name the server gave the file, when it isn't the uploaded one ("Report (1).docx") */
+  savedAs?: string;
 }
 
 export interface PickedFile {
   file: File;
   /** Relative folder path, e.g. "Photos/2024"; empty string for plain files */
   relativePath: string;
+  /** What the server does when the name is taken (keep both unless the user chose to replace) */
+  onConflict?: "replace" | "keep";
 }
 
 /** Running totals, kept up to date as tasks change, so nothing has to add up every task */
@@ -150,6 +159,17 @@ function errorMessage(err: Error): string {
   return t("Network connection lost");
 }
 
+/** The name the server reports (percent-encoded), when it differs from the one uploaded */
+export function savedName(header: string | undefined, uploaded: string): string | undefined {
+  if (!header) return undefined;
+  try {
+    const name = decodeURIComponent(header);
+    return name === uploaded ? undefined : name;
+  } catch {
+    return undefined;
+  }
+}
+
 function start(task: UploadTask) {
   const upload = new tus.Upload(task.file, {
     endpoint: task.endpoint,
@@ -162,17 +182,19 @@ function start(task: UploadTask) {
       relativePath: task.relativePath,
       // Files of one uploaded folder land in the same folder, even when its name is taken by a file
       batchId: task.batch,
+      onConflict: task.onConflict,
     },
-    // Uploads of the same file to different locations must not resume each other
+    // Uploads of the same file to different locations, or with a different answer to a name clash, must not resume each other
     fingerprint: async (file) =>
-      ["sd", task.endpoint, task.parentId, task.relativePath, (file as File).name, (file as File).size, (file as File).lastModified].join("|"),
+      ["sd", task.endpoint, task.parentId, task.relativePath, task.onConflict, (file as File).name, (file as File).size, (file as File).lastModified].join("|"),
     onProgress: (sent) => {
       if (task.upload !== upload || task.status !== "uploading") return;
       setSent(task, sent);
       emit();
     },
-    onSuccess: () => {
+    onSuccess: ({ lastResponse }) => {
       if (task.upload !== upload || task.status !== "uploading") return;
+      task.savedAs = savedName(lastResponse.getHeader("x-node-name"), task.name);
       setSent(task, task.size);
       setStatus(task, "done");
       task.upload = undefined;
@@ -227,7 +249,7 @@ function requeue(task: UploadTask) {
 export function enqueue(files: PickedFile[], parentId: string, endpoint = "/api/uploads") {
   // getRandomValues works on plain http too (randomUUID needs HTTPS)
   const batch = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join("");
-  for (const { file, relativePath } of files) {
+  for (const { file, relativePath, onConflict } of files) {
     const task: UploadTask = {
       id: `u${++seq}`,
       name: file.name,
@@ -239,6 +261,7 @@ export function enqueue(files: PickedFile[], parentId: string, endpoint = "/api/
       sent: 0,
       status: "queued",
       file,
+      onConflict: onConflict ?? "keep",
     };
     tasks.push(task);
     byId.set(task.id, task);
@@ -248,6 +271,39 @@ export function enqueue(files: PickedFile[], parentId: string, endpoint = "/api/
   }
   pump();
   emit(true);
+}
+
+/**
+ * Upload picked or dropped files into a folder, asking first about names the folder already has (replace, skip or
+ * keep both, as in Windows). Nothing is uploaded when the question is cancelled.
+ */
+export async function uploadFiles(files: PickedFile[], parentId: string) {
+  if (!files.length) return;
+  const tops = topLevel(files);
+  let found;
+  try {
+    found = await api.conflicts({ dest_id: parentId, names: tops.map((x) => x.name) });
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : t("Couldn't upload"));
+    return;
+  }
+  const byName = new Map(tops.map((x) => [x.name, x]));
+  const answers = await resolveConflicts(
+    found.map((c) => {
+      const top = byName.get(c.name);
+      return {
+        key: c.name,
+        name: c.name,
+        kind: top?.kind ?? "file",
+        size: top?.size,
+        modified: top?.modified,
+        existing: { kind: c.existing.kind, size: c.existing.size, updated_at: c.existing.updated_at },
+      };
+    }),
+    "upload",
+  );
+  if (!answers) return;
+  enqueue(applyToUpload(files, answers), parentId);
 }
 
 export function pause(id: string) {

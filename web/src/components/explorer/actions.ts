@@ -7,10 +7,11 @@ import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
 import { allItems } from "@/lib/pages";
 import { invalidateFiles } from "@/lib/queries";
-import { moveBack, originsOf, toastWithUndo, undoLast } from "@/lib/undo";
+import { type Origins, moveBack, originsOf, toastWithUndo, undoLast } from "@/lib/undo";
 import { confirm } from "@/components/confirm";
+import { askBeforeTransfer } from "@/components/ConflictDialog";
 import { carriesFiles, dropFiles, dropItems } from "@/lib/dnd";
-import { enqueue, filesFromDrop } from "@/uploads";
+import { filesFromDrop, uploadFiles } from "@/uploads";
 import { type Item, isTyping } from "./types";
 import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
@@ -93,6 +94,36 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     await dropItems(qc, ids, folder, copy);
     setSelected(new Set());
   };
+
+  /**
+   * Moves or copies items to a folder, asking first what to do with names the folder already has (replace, skip or
+   * keep both). `done` words the message for the number of items that went; a move can be undone from it. False when
+   * it was cancelled or failed (the reason is shown).
+   */
+  const transfer = async (mode: "move" | "copy", ids: string[], dest: string, done: (n: number) => string, fallback: string, known?: Origins) => {
+    try {
+      const resolutions = await askBeforeTransfer(mode, ids, dest);
+      if (!resolutions) return false;
+      const sent = ids.filter((id) => resolutions[id] !== "skip");
+      if (sent.length) {
+        if (mode === "move") {
+          const origins = new Map([...(known ?? originsOf(p.items, sent, dest))].filter(([id, parent]) => sent.includes(id) && parent !== dest));
+          await api.move(sent, dest, resolutions);
+          if (origins.size) toastWithUndo(done(sent.length), { undo: () => moveBack(origins), undoneText: t("Moved back"), after: refresh });
+          else toast.success(done(sent.length));
+        } else {
+          await api.copy(sent, dest, resolutions);
+          toast.success(done(sent.length));
+        }
+      }
+      setSelected(new Set());
+      refresh();
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : fallback);
+      return false;
+    }
+  };
   const uploadInto = (dt: DataTransfer, folder: Node) => void dropFiles(dt, folder);
 
   const cut = () => {
@@ -108,22 +139,11 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
   const canPaste = !!clip && canCreate;
   const paste = async () => {
     if (!clip || !p.folderId) return;
-    try {
-      if (clip.mode === "cut") {
-        const dest = p.folderId;
-        const origins = new Map([...(clip.origins ?? [])].filter(([, parent]) => parent !== dest));
-        await api.move(clip.ids, dest);
-        setClipboard(null);
-        const moved = t("Moved {n} item|Moved {n} items", { n: clip.ids.length });
-        if (origins.size) toastWithUndo(moved, { undo: () => moveBack(origins), undoneText: t("Moved back"), after: refresh });
-        else toast.success(moved);
-      } else {
-        await api.copy(clip.ids, p.folderId);
-        toast.success(t("Pasted {n} item|Pasted {n} items", { n: clip.ids.length }));
-      }
-      refresh();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Couldn't paste"));
+    if (clip.mode === "cut") {
+      const moved = await transfer("move", clip.ids, p.folderId, (n) => t("Moved {n} item|Moved {n} items", { n }), t("Couldn't paste"), clip.origins ?? new Map());
+      if (moved) setClipboard(null);
+    } else {
+      await transfer("copy", clip.ids, p.folderId, (n) => t("Pasted {n} item|Pasted {n} items", { n }), t("Couldn't paste"));
     }
   };
 
@@ -216,7 +236,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
           e.preventDefault();
           setDragging(false);
           const picked = await filesFromDrop(e.dataTransfer);
-          if (picked.length) enqueue(picked, p.folderId!);
+          if (picked.length) void uploadFiles(picked, p.folderId!);
         },
       }
     : canCreate && p.offline
@@ -234,7 +254,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         }
       : {};
 
-  return { refresh, open, download, toggleFavorite, dropInto, uploadInto, cut, copy, canPaste, paste, dragProps, createNew };
+  return { refresh, open, download, toggleFavorite, dropInto, uploadInto, transfer, cut, copy, canPaste, paste, dragProps, createNew };
 }
 
 export type ExplorerActions = ReturnType<typeof useExplorerActions>;

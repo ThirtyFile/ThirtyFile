@@ -19,6 +19,7 @@ import { PublicSharePage } from "@/pages/PublicSharePage";
 import { SharesPage } from "@/pages/SharesPage";
 import { TrashPage } from "@/pages/TrashPage";
 import { ConfirmHost } from "@/components/confirm";
+import { ConflictHost } from "@/components/ConflictDialog";
 
 // Administration pages: loaded only when an administrator opens them
 const page = <M, K extends keyof M>(load: () => Promise<M>, name: K) =>
@@ -112,6 +113,8 @@ export function App() {
     <>
       {/* Questions asked with confirm() from outside components */}
       <ConfirmHost />
+      {/* "Replace or skip" questions before uploading, moving, copying or restoring */}
+      <ConflictHost />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/share/:token/:nodeId?" element={<PublicSharePage />} />

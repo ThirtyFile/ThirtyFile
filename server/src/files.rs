@@ -324,18 +324,10 @@ async fn store_content(st: AppState, user: User, id: String, body: Bytes, hash: 
         if base.is_some_and(|b| b != node.updated_at) {
             return Err(conflict());
         }
-        let old_hash = node.hash()?.to_string();
+        node.hash()?;
         tree::check_quota(&mut tx, node.drive(), body.len() as i64 - node.size).await?;
         let extra = tree::commit_blob(&st, &mut tx, &staged).await?;
-        sqlx::query("UPDATE nodes SET blob_hash = ?, size = ?, updated_at = ? WHERE id = ?")
-            .bind(&hash)
-            .bind(body.len() as i64)
-            .bind(now().max(node.updated_at + 1))
-            .bind(&node.id)
-            .execute(&mut *tx)
-            .await?;
-        let orphans = tree::release_blobs(&mut tx, &[old_hash]).await?;
-        tree::adjust_usage(&mut tx, node.drive(), body.len() as i64 - node.size).await?;
+        let orphans = tree::set_content(&mut tx, &node, &hash, body.len() as i64).await?;
         tree::log(&mut tx, &user, Some(&node), "edit", "").await?;
         let node = tree::get_node(&mut tx, &node.id).await?.unwrap();
         tx.commit().await?;

@@ -1,7 +1,6 @@
 /** File explorer dialogs: move / copy, delete, share and access (creating and renaming are edited inline in the list) */
-import { toast } from "sonner";
 import { api } from "@/api";
-import { moveBack, originsOf, toastWithUndo } from "@/lib/undo";
+import { toastWithUndo } from "@/lib/undo";
 import { AccessDialog } from "@/components/AccessDialog";
 import { ConfirmDialog, FolderPickerDialog } from "@/components/dialogs";
 import { ShareDialog } from "@/components/ShareDialog";
@@ -14,7 +13,7 @@ import type { ExplorerActions } from "./actions";
 
 export function ExplorerDialogs({ p, s, a }: { p: ExplorerProps; s: ExplorerState; a: ExplorerActions }) {
   const { setSelected, dialog, setDialog } = s;
-  const { refresh } = a;
+  const { refresh, transfer } = a;
   const me = useMe();
   return (
     <>
@@ -26,18 +25,10 @@ export function ExplorerDialogs({ p, s, a }: { p: ExplorerProps; s: ExplorerStat
           excludeIds={new Set(dialog.ids)}
           onClose={() => setDialog(null)}
           onPick={async (dest) => {
-            if (dialog.t === "move") {
-              const origins = originsOf(p.items, dialog.ids, dest);
-              await api.move(dialog.ids, dest);
-              if (origins.size) toastWithUndo(t("Moved"), { undo: () => moveBack(origins), undoneText: t("Moved back"), after: refresh });
-              else toast.success(t("Moved"));
-            } else {
-              await api.copy(dialog.ids, dest);
-              toast.success(t("Copied"));
-            }
+            // Closed first: a question about names the destination already has may follow
             setDialog(null);
-            setSelected(new Set());
-            refresh();
+            if (dialog.t === "move") await transfer("move", dialog.ids, dest, () => t("Moved"), t("Couldn't move"));
+            else await transfer("copy", dialog.ids, dest, () => t("Copied"), t("Couldn't copy"));
           }}
         />
       )}

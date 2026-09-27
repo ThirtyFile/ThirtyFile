@@ -108,7 +108,10 @@ export function UploadPanel({ visitor = false }: { visitor?: boolean }) {
                       {task.status === "error"
                         ? task.error
                         : task.status === "done"
-                          ? formatBytes(task.size)
+                          ? // Both files were kept: say which name the new one got
+                            task.savedAs
+                            ? t("Saved as \"{name}\"", { name: task.savedAs })
+                            : formatBytes(task.size)
                           : task.status === "queued"
                             ? t("Waiting")
                             : task.status === "paused"
