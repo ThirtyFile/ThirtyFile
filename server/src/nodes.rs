@@ -298,9 +298,14 @@ pub async fn move_nodes(State(st): State<AppState>, user: User, Json(req): Json<
                 across.push(nodes);
                 continue;
             }
-            for n in &subtree {
-                sqlx::query("UPDATE nodes SET drive_id = ? WHERE id = ?").bind(&dest.drive_id).bind(&n.id).execute(&mut *tx).await?;
-            }
+            sqlx::query(
+                "WITH RECURSIVE sub(id) AS (SELECT ?1 UNION ALL SELECT c.id FROM nodes c JOIN sub ON c.parent_id = sub.id)
+                 UPDATE nodes SET drive_id = ?2 WHERE id IN (SELECT id FROM sub)",
+            )
+            .bind(&node.id)
+            .bind(&dest.drive_id)
+            .execute(&mut *tx)
+            .await?;
             tree::adjust_usage(&mut tx, node.drive(), -bytes).await?;
             tree::adjust_usage(&mut tx, dest.drive(), bytes).await?;
         } else if node.in_folder_space() {
@@ -357,6 +362,8 @@ pub async fn copy_nodes(State(st): State<AppState>, user: User, Json(req): Json<
     let ts = now();
     for nodes in plans {
         let mut ids: HashMap<String, String> = HashMap::new();
+        let mut rows = Vec::with_capacity(nodes.len());
+        let mut blobs = Vec::new();
         for (i, n) in nodes.iter().enumerate() {
             let new_id = new_id();
             let (parent, name) = if i == 0 {
@@ -365,28 +372,27 @@ pub async fn copy_nodes(State(st): State<AppState>, user: User, Json(req): Json<
                 // The subtree is sorted by depth, so parents have always been copied already
                 (ids[n.parent_id.as_ref().unwrap()].clone(), n.name.clone())
             };
-            sqlx::query(
-                "INSERT INTO nodes (id, owner_id, parent_id, kind, name, blob_hash, size, mime, drive_id, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            )
-            .bind(&new_id)
-            .bind(user.id)
-            .bind(&parent)
-            .bind(&n.kind)
-            .bind(&name)
-            .bind(&n.blob_hash)
-            .bind(n.size)
-            .bind(&n.mime)
-            .bind(&dest.drive_id)
-            .bind(ts)
-            .bind(ts)
-            .execute(&mut *tx)
-            .await?;
+            rows.push(json!([new_id, parent, n.kind, name, n.blob_hash, n.size, n.mime]));
             if let Some(hash) = &n.blob_hash {
-                tree::add_blob_ref(&mut tx, hash, n.size, n.blob_location.as_deref().unwrap_or("local")).await?;
+                blobs.push((hash.clone(), n.size, n.blob_location.clone().unwrap_or_else(|| "local".into())));
             }
             ids.insert(n.id.clone(), new_id);
         }
+        // One statement for the whole subtree, in depth order (parents are inserted before their children)
+        sqlx::query(
+            "INSERT INTO nodes (id, owner_id, parent_id, kind, name, blob_hash, size, mime, drive_id, created_at, updated_at)
+             SELECT json_extract(value, '$[0]'), ?2, json_extract(value, '$[1]'), json_extract(value, '$[2]'),
+                    json_extract(value, '$[3]'), json_extract(value, '$[4]'), json_extract(value, '$[5]'),
+                    json_extract(value, '$[6]'), ?3, ?4, ?4
+             FROM json_each(?1) ORDER BY key",
+        )
+        .bind(serde_json::to_string(&rows).unwrap())
+        .bind(user.id)
+        .bind(&dest.drive_id)
+        .bind(ts)
+        .execute(&mut *tx)
+        .await?;
+        tree::add_blob_refs(&mut tx, &blobs).await?;
         tree::log(&mut tx, &user, Some(&nodes[0]), "copy", &format!("→ {}", if dest.parent_id.is_none() { "Root folder" } else { &dest.name })).await?;
     }
     tree::adjust_usage(&mut tx, dest.drive(), total).await?;
@@ -892,6 +898,49 @@ mod tests {
         assert_eq!(done["deleted"], 2);
         let Json(left) = list_trash(State(env.st.clone()), bob.clone()).await.unwrap();
         assert_eq!(left.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn copies_and_deleted_spaces_keep_content_references_right() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let team_root = {
+            let mut conn = env.st.db.acquire().await.unwrap();
+            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0).await.unwrap();
+            crate::db::add_grant(&mut conn, &root, "user", amy.id, "owner", Some(amy.id), None).await.unwrap();
+            root
+        };
+        // Two files with the same content, one level down
+        let folder = env.folder(&amy, &team_root, "Docs").await;
+        let (a, b) = (env.file(&amy, &folder, "a.txt").await, env.file(&amy, &folder, "b.txt").await);
+        let hash = "ab".repeat(32);
+        {
+            let mut c = env.st.db.acquire().await.unwrap();
+            for id in [&a, &b] {
+                tree::add_blob_ref(&mut c, &hash, 5, "local").await.unwrap();
+                sqlx::query("UPDATE nodes SET blob_hash = ?, size = 5 WHERE id = ?").bind(&hash).bind(id).execute(&mut *c).await.unwrap();
+            }
+        }
+        let refs = || async {
+            sqlx::query_as::<_, (i64,)>("SELECT refcount FROM blobs WHERE hash = ?").bind(&hash).fetch_optional(&env.st.db).await.unwrap().map(|r| r.0)
+        };
+        // Copying the folder adds a reference per file, in one statement
+        let _ = copy_nodes(State(env.st.clone()), amy.clone(), batch(&[&folder], &amy.root_id)).await.unwrap();
+        assert_eq!(refs().await, Some(4));
+
+        // Deleting the space removes it at once and its content in the background
+        let team = env.drive_of(&team_root).await;
+        let _ = crate::drives::delete(State(env.st.clone()), amy.clone(), Path(team.clone())).await.unwrap();
+        for _ in 0..100 {
+            let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id = ?").bind(&team).fetch_one(&env.st.db).await.unwrap();
+            if left == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id = ?").bind(&team).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(left, 0);
+        assert_eq!(refs().await, Some(2), "the copies still use the content");
     }
 
     #[tokio::test]

@@ -59,6 +59,8 @@ pub struct Inner {
     pub share_views: Mutex<HashMap<String, i64>>,
     /// Selections waiting to be downloaded through a short-lived link: link token → selection (see `files::store_download_link`)
     pub download_links: Mutex<HashMap<String, crate::files::DownloadLink>>,
+    /// Purge of deleted spaces' content: (running, asked to run again)
+    pub detached_purge: (std::sync::atomic::AtomicBool, std::sync::atomic::AtomicBool),
     pub thumb_permits: Semaphore,
     /// Most memory one thumbnail may use to decode its image
     pub thumb_decode_bytes: u64,

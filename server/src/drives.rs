@@ -288,11 +288,11 @@ pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<Strin
     if !(user.is_admin() || role == Some(Role::Owner)) {
         return Err(AppError::forbidden("Only the space owner or an administrator can delete a space"));
     }
+    // The space disappears now; its files are deleted in the background, a batch at a time
     sqlx::query("DELETE FROM drives WHERE id = ?").bind(&drive.id).execute(&mut *tx).await?;
-    let orphans = tree::purge_subtree(&mut tx, &drive.root_id).await?;
     tree::log(&mut tx, &user, None, "drive_delete", &drive.name).await?;
     tx.commit().await?;
-    tree::schedule_blob_removal(&st, orphans);
+    tree::purge_detached_later(&st);
     Ok(Json(json!({ "ok": true })))
 }
 

@@ -253,10 +253,9 @@ pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     let uploads: Vec<(String,)> = sqlx::query_as("SELECT id FROM uploads WHERE owner_id = ?").bind(id).fetch_all(&mut *tx).await?;
     sqlx::query("DELETE FROM uploads WHERE owner_id = ?").bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM shares WHERE owner_id = ?").bind(id).execute(&mut *tx).await?;
-    let mut orphans = Vec::new();
-    if let Some((drive_id, root_id)) = personal {
-        sqlx::query("DELETE FROM drives WHERE id = ?").bind(&drive_id).execute(&mut *tx).await?;
-        orphans = tree::purge_subtree(&mut tx, &root_id).await?;
+    // The personal space disappears now; its files are deleted in the background, a batch at a time
+    if let Some((drive_id, _)) = &personal {
+        sqlx::query("DELETE FROM drives WHERE id = ?").bind(drive_id).execute(&mut *tx).await?;
     }
     // Transfer team space ownership to the administrator
     let owned: Vec<(String,)> = sqlx::query_as(
@@ -274,7 +273,9 @@ pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     sqlx::query("DELETE FROM users WHERE id = ?").bind(id).execute(&mut *tx).await?;
     tree::log(&mut tx, &me, None, "user_delete", &row.username).await?;
     tx.commit().await?;
-    tree::schedule_blob_removal(&st, orphans);
+    if personal.is_some() {
+        tree::purge_detached_later(&st);
+    }
     for (u,) in uploads {
         let _ = tokio::fs::remove_file(st.tmp_dir().join(format!("upload-{u}"))).await;
     }

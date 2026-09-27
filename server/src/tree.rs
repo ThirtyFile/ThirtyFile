@@ -527,32 +527,64 @@ pub async fn add_blob_ref(conn: &mut SqliteConnection, hash: &str, size: i64, lo
 
 /// Removes a reference; returns blobs that are no longer referenced and whose physical files must be deleted.
 pub async fn release_blobs(conn: &mut SqliteConnection, hashes: &[String]) -> AppResult<Vec<BlobRef>> {
-    let mut orphans = Vec::new();
-    for hash in hashes {
-        let row: Option<(i64, String)> =
-            sqlx::query_as("UPDATE blobs SET refcount = refcount - 1 WHERE hash = ? RETURNING refcount, location_id")
-                .bind(hash)
-                .fetch_optional(&mut *conn)
-                .await?;
-        if let Some((c, location)) = row
-            && c <= 0 {
-                sqlx::query("DELETE FROM blobs WHERE hash = ?").bind(hash).execute(&mut *conn).await?;
-                orphans.push((hash.clone(), location));
-            }
+    if hashes.is_empty() {
+        return Ok(Vec::new());
     }
+    // One statement per step for the whole list (a hash listed n times loses n references)
+    let list = serde_json::to_string(hashes).unwrap();
+    sqlx::query(
+        "UPDATE blobs SET refcount = refcount - d.n
+         FROM (SELECT value AS hash, COUNT(*) AS n FROM json_each(?) GROUP BY value) d WHERE blobs.hash = d.hash",
+    )
+    .bind(&list)
+    .execute(&mut *conn)
+    .await?;
+    let orphans: Vec<BlobRef> = sqlx::query_as(
+        "DELETE FROM blobs WHERE hash IN (SELECT value FROM json_each(?)) AND refcount <= 0 RETURNING hash, location_id",
+    )
+    .bind(&list)
+    .fetch_all(&mut *conn)
+    .await?;
     Ok(orphans)
+}
+
+/// Adds a reference for each file of a copy, one statement for the whole list: (hash, size, location when new)
+pub async fn add_blob_refs(conn: &mut SqliteConnection, blobs: &[(String, i64, String)]) -> AppResult<()> {
+    if blobs.is_empty() {
+        return Ok(());
+    }
+    sqlx::query(
+        "INSERT INTO blobs (hash, size, refcount, created_at, location_id)
+         SELECT json_extract(value, '$[0]'), MAX(json_extract(value, '$[1]')), COUNT(*), ?2, MIN(json_extract(value, '$[2]'))
+         FROM json_each(?1) WHERE true GROUP BY json_extract(value, '$[0]')
+         ON CONFLICT (hash) DO UPDATE SET refcount = refcount + excluded.refcount",
+    )
+    .bind(serde_json::to_string(blobs).unwrap())
+    .bind(now())
+    .execute(conn)
+    .await?;
+    Ok(())
 }
 
 /// Permanently deletes a subtree (including share links), returning the physical files to delete.
 pub async fn purge_subtree(conn: &mut SqliteConnection, id: &str) -> AppResult<Vec<BlobRef>> {
-    let nodes = subtree(conn, id).await?;
-    let hashes: Vec<String> = nodes.iter().filter_map(|(n, _)| n.blob_hash.clone()).collect();
-    // Space usage: subtract the files being deleted, per space (a subtree normally lives in one space)
+    // Only the columns needed: which content the files use, and how much space they free per space
+    let rows: Vec<(Option<String>, String, i64, Option<String>)> = sqlx::query_as(
+        "WITH RECURSIVE sub(id) AS (
+           SELECT ?1 UNION ALL SELECT c.id FROM nodes c JOIN sub ON c.parent_id = sub.id
+         )
+         SELECT n.drive_id, n.kind, n.size, n.blob_hash FROM sub JOIN nodes n ON n.id = sub.id",
+    )
+    .bind(id)
+    .fetch_all(&mut *conn)
+    .await?;
     let mut freed: HashMap<String, i64> = HashMap::new();
-    for (n, _) in &nodes {
-        if !n.is_folder() {
-            *freed.entry(n.drive().to_string()).or_default() += n.size;
+    let mut hashes = Vec::new();
+    for (drive, kind, size, hash) in rows {
+        if kind != "folder" {
+            *freed.entry(drive.unwrap_or_default()).or_default() += size;
         }
+        hashes.extend(hash);
     }
     for (drive, bytes) in freed {
         adjust_usage(conn, &drive, -bytes).await?;
@@ -567,6 +599,67 @@ pub async fn purge_subtree(conn: &mut SqliteConnection, id: &str) -> AppResult<V
     .execute(&mut *conn)
     .await?;
     release_blobs(conn, &hashes).await
+}
+
+/// Nodes deleted per transaction when purging the content of deleted spaces
+const DETACHED_BATCH: i64 = 2000;
+
+/// Deletes, in the background, the content of spaces whose space row is gone: deleting a space or a user only
+/// removes the space (the content can no longer be reached) and leaves the files to this, a batch per transaction,
+/// so a space with hundreds of thousands of files doesn't hold the write lock for minutes. Also run at startup, for
+/// content left when the server stopped halfway.
+pub fn purge_detached_later(st: &AppState) {
+    use std::sync::atomic::Ordering::SeqCst;
+    // One purge at a time; a request while it runs makes it look again when it's done
+    let (running, again) = &st.detached_purge;
+    again.store(true, SeqCst);
+    if running.swap(true, SeqCst) {
+        return;
+    }
+    let st = st.clone();
+    tokio::spawn(async move {
+        let (running, again) = &st.detached_purge;
+        while again.swap(false, SeqCst) {
+            if let Err(e) = purge_detached(&st).await {
+                tracing::warn!("Failed to delete the content of deleted spaces, will retry at the next start: {e:?}");
+            }
+        }
+        running.store(false, SeqCst);
+    });
+}
+
+async fn purge_detached(st: &AppState) -> AppResult<()> {
+    let drives: Vec<(String,)> =
+        sqlx::query_as("SELECT DISTINCT drive_id FROM nodes WHERE drive_id IS NOT NULL AND drive_id NOT IN (SELECT id FROM drives)")
+            .fetch_all(&st.db)
+            .await?;
+    for (drive,) in drives {
+        let mut total = 0;
+        loop {
+            let _w = st.write_lock.lock().await;
+            let mut tx = st.db.begin().await?;
+            // Leaves first (files, then folders once they're empty): a node's children must go before it
+            let deleted: Vec<(Option<String>,)> = sqlx::query_as(
+                "DELETE FROM nodes WHERE id IN (
+                   SELECT n.id FROM nodes n WHERE n.drive_id = ?1 AND NOT EXISTS (SELECT 1 FROM nodes c WHERE c.parent_id = n.id) LIMIT ?2
+                 ) RETURNING blob_hash",
+            )
+            .bind(&drive)
+            .bind(DETACHED_BATCH)
+            .fetch_all(&mut *tx)
+            .await?;
+            if deleted.is_empty() {
+                break;
+            }
+            total += deleted.len();
+            let hashes: Vec<String> = deleted.into_iter().filter_map(|(h,)| h).collect();
+            let orphans = release_blobs(&mut tx, &hashes).await?;
+            tx.commit().await?;
+            schedule_blob_removal(st, orphans);
+        }
+        tracing::info!("Deleted {total} files and folders of a deleted space");
+    }
+    Ok(())
 }
 
 /// Deletes physical files and thumbnails that are no longer referenced in the background (doesn't block the caller or hold the global write lock while calling the storage service).

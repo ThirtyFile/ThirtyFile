@@ -196,6 +196,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         write_lock: tokio::sync::Mutex::new(()),
         active_uploads: Default::default(),
         login_failures: Default::default(),
+        detached_purge: Default::default(),
         thumb_permits: tokio::sync::Semaphore::new(thumb_jobs as usize),
         thumb_decode_bytes,
         system: std::sync::RwLock::new(system),
@@ -529,6 +530,8 @@ async fn same_origin(axum::extract::State(st): axum::extract::State<AppState>, r
 }
 
 fn spawn_maintenance(st: AppState, trash_days: i64) {
+    // Content of spaces deleted while the server stopped before it was all removed
+    tree::purge_detached_later(&st);
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(3600));
         let mut hours: u32 = 0;

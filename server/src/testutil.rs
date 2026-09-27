@@ -58,6 +58,7 @@ pub async fn env() -> TestEnv {
         write_lock: tokio::sync::Mutex::new(()),
         active_uploads: Default::default(),
         login_failures: Default::default(),
+        detached_purge: Default::default(),
         thumb_permits: tokio::sync::Semaphore::new(2),
         thumb_decode_bytes: crate::files::MAX_THUMB_DECODE_BYTES,
         system: std::sync::RwLock::new(system),
