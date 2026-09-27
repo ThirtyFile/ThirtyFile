@@ -55,7 +55,16 @@ export function LinkedAccountsDialog({ onClose }: { onClose(): void }) {
                       <UnlinkIcon /> {t("Unlink")}
                     </Button>
                   ) : available ? (
-                    <Button variant="outline" size="sm" nativeButton={false} render={<a href={api.ssoStartUrl(p, here, true)} />}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        api
+                          .ssoLink(p, here)
+                          .then(({ url }) => window.location.assign(url))
+                          .catch((e) => toast.error(e instanceof Error ? e.message : t("Couldn't start linking")))
+                      }
+                    >
                       <Link2Icon /> {t("Link")}
                     </Button>
                   ) : null}

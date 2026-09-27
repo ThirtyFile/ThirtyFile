@@ -282,13 +282,14 @@ pub async fn public_info(
         share.password_hash.is_none() || auth::cookie_matches(&headers, &cookie_name(&token), &unlock_value(&st, &share));
     let mut info = json!({
         "token": share.id,
-        "owner": share.owner_name,
+        // Only once unlocked: the link alone shouldn't tell who in the organisation has which account
+        "owner": unlocked.then_some(share.owner_name.as_str()),
         "expires_at": share.expires_at,
         "downloads_left": downloads_left(&share),
         "needs_password": !unlocked,
     });
     if unlocked {
-        info["node"] = serde_json::to_value(&node).unwrap();
+        info["node"] = public_node_json(&node);
     }
     Ok(Json(info))
 }
@@ -327,9 +328,20 @@ pub async fn unlock(
     Ok(([(header::SET_COOKIE, cookie)], Json(json!({ "ok": true }))).into_response())
 }
 
+/// What visitors of a share link see of an item: no usernames, spaces or ids outside the shared folder
+fn public_node_json(node: &Node) -> serde_json::Value {
+    let mut v = serde_json::to_value(node).unwrap();
+    if let Some(o) = v.as_object_mut() {
+        for key in ["parent_id", "drive_id", "owner_name", "trashed_at", "is_favorite"] {
+            o.remove(key);
+        }
+    }
+    v
+}
+
 #[derive(Serialize)]
 pub struct SharedNodeInfo {
-    node: Node,
+    node: serde_json::Value,
     path: Vec<Crumb>,
 }
 
@@ -342,7 +354,7 @@ pub async fn public_node(
     let node = shared_node(&st, &share, &root, &id).await?;
     let full = tree::path_of(&mut *st.db.acquire().await?, &node.id).await?;
     let start = full.iter().position(|c| c.id == share.node_id).unwrap_or(full.len());
-    Ok(Json(SharedNodeInfo { node, path: full.into_iter().skip(start).collect() }))
+    Ok(Json(SharedNodeInfo { node: public_node_json(&node), path: full.into_iter().skip(start).collect() }))
 }
 
 #[derive(Deserialize)]
@@ -356,7 +368,7 @@ pub async fn public_children(
     Path((token, id)): Path<(String, String)>,
     Query(q): Query<ChildrenQuery>,
     headers: HeaderMap,
-) -> AppResult<Json<Vec<Node>>> {
+) -> AppResult<Json<Vec<serde_json::Value>>> {
     let (share, root) = open_share(&st, &token, &headers).await?;
     let node = shared_node(&st, &share, &root, &id).await?;
     if !node.is_folder() {
@@ -366,7 +378,8 @@ pub async fn public_children(
         "SELECT {NODE_COLS} FROM nodes n WHERE n.parent_id = ? AND n.trashed_at IS NULL {}",
         order_clause(q.sort.as_deref(), q.order.as_deref())
     );
-    Ok(Json(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).fetch_all(&st.db).await?))
+    let children: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).fetch_all(&st.db).await?;
+    Ok(Json(children.iter().map(public_node_json).collect()))
 }
 
 #[derive(Deserialize)]
@@ -481,6 +494,45 @@ mod tests {
         tree::add_blob_ref(&mut c, &hash, content.len() as i64, "local").await.unwrap();
         sqlx::query("UPDATE nodes SET blob_hash = ?, size = ? WHERE id = ?").bind(&hash).bind(content.len() as i64).bind(&id).execute(&mut *c).await.unwrap();
         id
+    }
+
+    #[tokio::test]
+    async fn share_links_show_visitors_only_what_they_need() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let folder = env.folder(&amy, &amy.root_id, "Docs").await;
+        let script = stored_file(&env, &amy, &folder, "app.js", b"alert(1)").await;
+        let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
+        let addr: std::net::SocketAddr = "203.0.113.5:4000".parse().unwrap();
+
+        // Behind a password: nothing about the owner before unlocking
+        let req = CreateReq { node_id: folder.clone(), password: Some(testutil::wrong_password()), expires_at: None, max_downloads: None };
+        let Json(locked) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
+        let Json(info) = public_info(State(env.st.clone()), Path(locked.id), ConnectInfo(addr), HeaderMap::new(), visitor()).await.unwrap();
+        assert!(info["owner"].is_null() && info["node"].is_null(), "{info}");
+
+        // Open: items without usernames, spaces or ids outside the share
+        let req = CreateReq { node_id: folder.clone(), password: None, expires_at: None, max_downloads: None };
+        let Json(open) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
+        let Json(info) = public_info(State(env.st.clone()), Path(open.id.clone()), ConnectInfo(addr), HeaderMap::new(), visitor()).await.unwrap();
+        assert_eq!(info["owner"], "amy");
+        let q = Query(ChildrenQuery { sort: None, order: None });
+        let Json(items) = public_children(State(env.st.clone()), Path((open.id.clone(), folder.clone())), q, HeaderMap::new()).await.unwrap();
+        for key in ["owner_name", "drive_id", "parent_id"] {
+            assert!(items[0].get(key).is_none() && info["node"].get(key).is_none(), "{key} in {items:?}");
+        }
+
+        // An uploaded script is served as plain text, and can't be loaded as a script at all
+        let content = |dest: Option<&'static str>| {
+            let mut h = HeaderMap::new();
+            if let Some(d) = dest {
+                h.insert("sec-fetch-dest", d.parse().unwrap());
+            }
+            public_content(State(env.st.clone()), Path((open.id.clone(), script.clone())), Query(ContentQuery { download: None }), h, visitor())
+        };
+        let res = content(Some("document")).await.unwrap();
+        assert!(res.headers()[header::CONTENT_TYPE].to_str().unwrap().starts_with("text/plain"));
+        assert_eq!(content(Some("script")).await.unwrap_err().status, StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

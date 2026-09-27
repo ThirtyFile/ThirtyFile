@@ -48,12 +48,20 @@ fn hash_permits() -> &'static tokio::sync::Semaphore {
     S.get_or_init(|| tokio::sync::Semaphore::new(std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).clamp(2, 8)))
 }
 
+/// A valid hash no password matches, checked instead of a missing or unusable one, so the time a check takes doesn't
+/// reveal whether an account exists or signs in only through single sign-on
+const DUMMY_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$dGhpc2lzbm90YXJlYWxoYXNodGhpc2lzbm90";
+
 pub async fn verify_password(password: String, hash: String) -> AppResult<bool> {
     let _permit = hash_permits().acquire().await.map_err(AppError::internal)?;
     Ok(tokio::task::spawn_blocking(move || {
-        PasswordHash::new(&hash)
-            .map(|parsed| Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok())
-            .unwrap_or(false)
+        let (usable, parsed) = match PasswordHash::new(&hash) {
+            Ok(p) => (true, p),
+            Err(_) => (false, PasswordHash::new(DUMMY_HASH).expect("valid dummy hash")),
+        };
+        // Always run the check: `usable && …` would skip it and answer at once
+        let matches = Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok();
+        usable && matches
     })
     .await?)
 }
@@ -370,8 +378,7 @@ pub async fn login(
         .fetch_optional(&st.db)
         .await?;
     // Hash once even when the username doesn't exist, so response timing doesn't reveal whether it exists
-    let (id, hash, disabled) =
-        row.unwrap_or((0, "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$dGhpc2lzbm90YXJlYWxoYXNodGhpc2lzbm90".into(), false));
+    let (id, hash, disabled) = row.unwrap_or((0, DUMMY_HASH.into(), false));
     let password_ok = verify_password(req.password, hash).await?;
     if !password_ok || id == 0 || disabled {
         // The attempt was already counted; the lockout begins when this failure was the last one allowed
@@ -532,6 +539,21 @@ mod tests {
         assert!(TrustProxy::parse("proxy.example.com").is_err());
         assert!(TrustProxy::parse("10.0.0.0/33").is_err());
         assert!(!TrustProxy::Off.trusts(ip("127.0.0.1")));
+    }
+
+    #[tokio::test]
+    async fn accounts_without_a_password_take_as_long_to_check() {
+        let time = |hash: &'static str| async move {
+            let start = std::time::Instant::now();
+            let ok = verify_password(crate::testutil::wrong_password(), hash.into()).await.unwrap();
+            (ok, start.elapsed())
+        };
+        let (ok, real) = time(DUMMY_HASH).await;
+        assert!(!ok);
+        // Accounts that only sign in through single sign-on store "!" as their hash
+        let (ok, none) = time("!").await;
+        assert!(!ok);
+        assert!(none * 3 > real, "an account without a password answers much faster: {none:?} vs {real:?}");
     }
 
     #[test]

@@ -413,6 +413,7 @@ fn api() -> Router<AppState> {
         .route("/share-access", get(logs::share_access))
         .route("/auth/sso/providers", get(sso::providers))
         .route("/auth/sso/{provider}/start", get(sso::start))
+        .route("/auth/sso/{provider}/link", post(sso::start_link))
         .route("/auth/sso/{provider}/callback", get(sso::callback))
         .route("/auth/identities", get(sso::my_identities))
         .route("/auth/identities/{provider}", delete(sso::unlink))
