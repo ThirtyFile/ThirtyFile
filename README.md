@@ -38,7 +38,7 @@ docker run -d --name thirtyfile --restart unless-stopped \
 **Docker Compose**
 
 ```bash
-curl -O https://raw.githubusercontent.com/ThirtyFile/ThirtyFile/main/compose.yaml
+curl -fLO https://github.com/ThirtyFile/ThirtyFile/releases/latest/download/compose.yaml
 docker compose up -d
 ```
 

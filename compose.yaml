@@ -20,7 +20,8 @@ services:
     environment:
       # Password of the admin account, used on the first start only (or put it in a .env file in this folder)
       THIRTYFILE_ADMIN_PASSWORD: ${THIRTYFILE_ADMIN_PASSWORD:-}
-      TZ: Asia/Taipei
+      # Time zone, for example Asia/Taipei (or set TZ in a .env file in this folder)
+      TZ: ${TZ:-UTC}
       # Enable when served over HTTPS behind a reverse proxy:
       # THIRTYFILE_SECURE_COOKIE: "true"
       # THIRTYFILE_TRUST_PROXY: "true"

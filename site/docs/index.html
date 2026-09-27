@@ -41,7 +41,7 @@
 
         <h2 id="compose">Option 2: Docker Compose</h2>
         <p>Download the ready-made <code>compose.yaml</code> into an empty folder and start it from there:</p>
-        <pre><code>curl -O https://raw.githubusercontent.com/ThirtyFile/ThirtyFile/main/compose.yaml
+        <pre><code>curl -fLO https://github.com/ThirtyFile/ThirtyFile/releases/latest/download/compose.yaml
 docker compose up -d</code></pre>
         <p>Accounts and settings are kept in the <code>data</code> folder and your files in the <code>storage</code> folder, both next to <code>compose.yaml</code>. To keep your files on another disk or a NAS, change <code>./storage</code> in <code>compose.yaml</code> to that path.</p>
         <p>To choose the admin password yourself, put it in a file named <code>.env</code> in the same folder before the first start:</p>

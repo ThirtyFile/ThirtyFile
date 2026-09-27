@@ -34,11 +34,16 @@
               <tr><td><code>THIRTYFILE_LOG_FORMAT</code></td><td>text</td><td><code>json</code> writes one JSON object per log line, for log collectors</td></tr>
               <tr><td><code>RUST_LOG</code></td><td><code>thirtyfile=info</code></td><td>How much is logged, for example <code>thirtyfile=debug</code> while looking into a problem</td></tr>
               <tr><td><code>TZ</code></td><td><code>UTC</code></td><td>Time zone, for example <code>Asia/Taipei</code></td></tr>
+              <tr><td><code>THIRTYFILE_ADDR</code></td><td><code>0.0.0.0:8080</code></td><td>Address and port the server listens on inside the container. To use another port on your computer, change the published port (<code>-p 9000:8080</code>) instead</td></tr>
+              <tr><td><code>THIRTYFILE_DATA</code></td><td><code>/data</code></td><td>Folder for the database, thumbnails and uploads in progress. Set by the image; mount a folder there rather than changing it</td></tr>
+              <tr><td><code>THIRTYFILE_STORAGE</code></td><td><code>/storage</code></td><td>Folder of the built-in storage location. Set by the image, like <code>THIRTYFILE_DATA</code></td></tr>
             </tbody>
           </table>
         </div>
 
         <p>On and off settings accept <code>true</code>/<code>false</code>, <code>1</code>/<code>0</code>, <code>yes</code>/<code>no</code> and <code>on</code>/<code>off</code>.</p>
+
+        <p>Settings that are on or off take <code>true</code> or <code>false</code> (also <code>1</code>/<code>0</code>, <code>yes</code>/<code>no</code> and <code>on</code>/<code>off</code>, in any letter case). In <code>compose.yaml</code>, put them in quotes (<code>"true"</code>), otherwise YAML turns them into something else.</p>
 
         <h2 id="docker-run">With docker run</h2>
         <p>Add one <code>-e</code> for each setting:</p>
