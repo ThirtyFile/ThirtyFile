@@ -843,7 +843,6 @@ export default {
   "Select items to compress": "請選擇要壓縮的項目",
   "At most {n} items can be compressed at once. Compress the folder they are in, or select fewer items.": "一次最多只能壓縮 {n} 個項目。請壓縮它們所在的資料夾，或選擇較少的項目。",
   "Only ZIP files can be extracted": "只能解壓縮 ZIP 檔案",
-  "ZIP files can't be extracted in a space that shows a folder on the server yet. Download the file and extract it on your computer.": "目前還無法在顯示伺服器資料夾的空間中解壓縮 ZIP 檔案。請下載檔案，在電腦上解壓縮。",
   "\"{path}\" in the ZIP file points outside the folder it would be extracted to": "ZIP 檔案中的「{path}」指向解壓縮資料夾以外的位置",
   "\"{path}\" in the ZIP file can't be extracted: {reason}": "ZIP 檔案中的「{path}」無法解壓縮：{reason}",
   "\"{path}\" in the ZIP file is protected with a password, which isn't supported": "ZIP 檔案中的「{path}」有密碼保護，目前不支援",
