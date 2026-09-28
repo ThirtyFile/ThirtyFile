@@ -174,7 +174,10 @@ pub async fn lock(st: &AppState, user: &User, ids: &[&str]) -> AppResult<SpaceLo
 }
 
 pub async fn lock_space(drive_id: &str) -> OwnedMutexGuard<()> {
-    crate::folders::drive_lock(drive_id).lock_owned().await
+    let guard = crate::folders::drive_lock(drive_id).lock_owned().await;
+    // A scan reading the folder meanwhile reads it again
+    crate::folders::changing(drive_id);
+    guard
 }
 
 // ───────────── Disk ─────────────
@@ -404,9 +407,10 @@ async fn record(conn: &mut SqliteConnection, id: &str, drive_id: &str, rel: &str
 
 /// An item and everything in it moved on disk from `old` to `new` (paths below the space's folder)
 async fn repath(conn: &mut SqliteConnection, drive_id: &str, old: &str, new: &str) -> AppResult<()> {
+    // A range rather than `substr`, so the index on (drive_id, fs_path) finds the items ('0' comes right after '/')
     sqlx::query(
         "UPDATE nodes SET fs_path = ?3 || substr(fs_path, length(?2) + 1)
-         WHERE drive_id = ?1 AND (fs_path = ?2 OR substr(fs_path, 1, length(?2) + 1) = ?2 || '/')",
+         WHERE drive_id = ?1 AND fs_path IS NOT NULL AND (fs_path = ?2 OR (fs_path >= ?2 || '/' AND fs_path < ?2 || '0'))",
     )
     .bind(drive_id)
     .bind(old)
@@ -479,13 +483,16 @@ pub const TRASH_GRACE: std::time::Duration = std::time::Duration::from_secs(24 *
 /// Removes trash folders the index doesn't know (deleted for good while removing them from disk failed, say). Recent
 /// ones stay: something that went wrong halfway may still need them.
 pub async fn clean_trash(st: &AppState, drive_id: &str, root: &Path) -> AppResult<()> {
-    let Ok(dir) = Pinned::root(root).and_then(|r| r.join(TRASH_DIR)).and_then(|t| t.dir()) else { return Ok(()) };
-    let Ok(read) = std::fs::read_dir(dir.as_path()) else { return Ok(()) };
-    let names: Vec<String> = read
-        .flatten()
-        .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|n| dir.join(n).is_ok_and(|p| older_than(&p, TRASH_GRACE)))
-        .collect();
+    let top = root.to_path_buf();
+    let names = tokio::task::spawn_blocking(move || -> Vec<String> {
+        let Ok(dir) = Pinned::root(&top).and_then(|r| r.join(TRASH_DIR)).and_then(|t| t.dir()) else { return Vec::new() };
+        let Ok(read) = std::fs::read_dir(dir.as_path()) else { return Vec::new() };
+        read.flatten()
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|n| dir.join(n).is_ok_and(|p| older_than(&p, TRASH_GRACE)))
+            .collect()
+    })
+    .await?;
     if names.is_empty() {
         return Ok(());
     }
@@ -542,6 +549,17 @@ pub fn clean_leftovers(paths: Vec<Pinned>, age: std::time::Duration) {
 }
 
 // ───────────── Uploads and saving ─────────────
+
+/// Removes a file staged for a change when the change stops before using it (once renamed into place, the name is gone)
+struct Discard(Option<Pinned>);
+
+impl Drop for Discard {
+    fn drop(&mut self) {
+        if let Some(p) = self.0.take() {
+            let _ = std::fs::remove_file(p.as_path());
+        }
+    }
+}
 
 const UPLOAD_PREFIX: &str = ".thirtyfile-upload-";
 const SAVE_PREFIX: &str = ".thirtyfile-save-";
@@ -606,7 +624,16 @@ pub async fn replace_file(conn: &mut SqliteConnection, policy: versions::Policy,
 /// there) isn't overwritten: the new content is saved next to it as "name (conflict copy)" and the save reports a
 /// conflict.
 pub async fn save(st: &AppState, user: &User, id: &str, body: &[u8], base: Option<i64>, conflict: fn() -> AppError) -> AppResult<Node> {
-    let drive = tree::get_node(&mut *st.db.acquire().await?, id).await?.map(|n| n.drive().to_string()).unwrap_or_default();
+    let before = tree::node_for(&mut *st.db.acquire().await?, user, id, Need::Write).await?;
+    let drive = before.drive().to_string();
+    // The new content is written next to the file before taking the locks, so a large save doesn't hold up every
+    // other change meanwhile; it is removed again unless it is put in place
+    let tmp = abs(&before)?.parent().ok_or_else(|| AppError::not_found("Item not found"))?.join(&format!("{SAVE_PREFIX}{}", new_id())).map_err(disk_error)?;
+    {
+        let (tmp, body) = (tmp.clone(), body.to_vec());
+        tokio::task::spawn_blocking(move || crate::beneath::write_new(&tmp, &body)).await?.map_err(disk_error)?;
+    }
+    let _discard = Discard(Some(tmp.clone()));
     let _space = lock_space(&drive).await;
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
@@ -618,20 +645,13 @@ pub async fn save(st: &AppState, user: &User, id: &str, body: &[u8], base: Optio
         return Err(conflict());
     }
     let path = abs(&node)?;
-    let dir = path.parent().ok_or_else(|| AppError::not_found("Item not found"))?;
     let (fs_size, fs_mtime, fs_ino): (Option<i64>, Option<i64>, Option<i64>) =
         sqlx::query_as("SELECT fs_size, fs_mtime_ns, fs_ino FROM nodes WHERE id = ?").bind(&node.id).fetch_one(&mut *tx).await?;
     let unchanged = stat(path.as_path()).is_ok_and(|s| Some(s.size) == fs_size && Some(s.mtime_ns) == fs_mtime && Some(s.ino) == fs_ino);
-
-    let tmp = dir.join(&format!("{SAVE_PREFIX}{}", new_id())).map_err(disk_error)?;
     // The new content keeps the file's permissions
-    let written = crate::beneath::write_new(&tmp, body).and_then(|()| match crate::beneath::copy_permissions(&path, &tmp) {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-        r => r,
-    });
-    if let Err(e) = written {
-        let _ = std::fs::remove_file(tmp.as_path());
-        return Err(disk_error(e));
+    match crate::beneath::copy_permissions(&path, &tmp) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(disk_error(e)),
+        _ => {}
     }
 
     if !unchanged {

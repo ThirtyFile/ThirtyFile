@@ -118,13 +118,19 @@ pub async fn keep_file(conn: &mut SqliteConnection, policy: Policy, node: &Node,
     }
     let id = new_id();
     let rel = format!("{VERSIONS_DIR}/{}/{id}", node.id);
-    let to = version_file(Path::new(root), &node.id, &id).and_then(|to| {
-        // A hard link never follows a symbolic link (on Linux)
-        match std::fs::hard_link(path.as_path(), to.as_path()) {
-            Ok(()) => Ok(to),
-            Err(_) => crate::beneath::copy_file(path, to.as_path()).map(|_| to),
-        }
-    });
+    let (root, node_id, version, path) = (PathBuf::from(root), node.id.clone(), id.clone(), path.clone());
+    // On a blocking thread: where the disk has no hard links, the whole file is copied
+    let to = tokio::task::spawn_blocking(move || {
+        version_file(&root, &node_id, &version).and_then(|to| {
+            // A hard link never follows a symbolic link (on Linux)
+            match std::fs::hard_link(path.as_path(), to.as_path()) {
+                Ok(()) => Ok(to),
+                Err(_) => crate::beneath::copy_file(&path, to.as_path()).map(|_| to),
+            }
+        })
+    })
+    .await
+    .map_err(AppError::internal)?;
     let to = to.map_err(fsops::disk_error)?;
     let (author_id, author_name) = content_author(conn, node).await?;
     let inserted = sqlx::query(
@@ -256,20 +262,26 @@ pub async fn prune(st: &AppState) -> AppResult<usize> {
 /// Removes files in a folder space's versions folder that no version refers to any more (the file was deleted for
 /// good, or removing it failed earlier). Run with each scan of the space.
 pub async fn clean_folder(st: &AppState, drive_id: &str, root: &Path) -> AppResult<()> {
-    let Ok(dir) = Pinned::root(root).and_then(|r| r.join(VERSIONS_DIR)).and_then(|d| d.dir()) else { return Ok(()) };
-    let Ok(read) = std::fs::read_dir(dir.as_path()) else { return Ok(()) };
-    let mut found = Vec::new();
-    for node_dir in read.flatten() {
-        let Ok(node) = node_dir.file_name().into_string() else { continue };
-        let Ok(node_dir) = dir.join(&node) else { continue };
-        let Ok(inside) = node_dir.dir() else { continue };
-        let Ok(files) = std::fs::read_dir(inside.as_path()) else { continue };
-        let names: Vec<String> = files.flatten().filter_map(|f| f.file_name().into_string().ok()).collect();
-        if names.is_empty() {
-            let _ = std::fs::remove_dir(node_dir.as_path());
+    let top = root.to_path_buf();
+    let found = tokio::task::spawn_blocking(move || -> Vec<String> {
+        let Ok(dir) = Pinned::root(&top).and_then(|r| r.join(VERSIONS_DIR)).and_then(|d| d.dir()) else { return Vec::new() };
+        let Ok(read) = std::fs::read_dir(dir.as_path()) else { return Vec::new() };
+        let mut found = Vec::new();
+        for node_dir in read.flatten() {
+            let Ok(node) = node_dir.file_name().into_string() else { continue };
+            let Ok(node_dir) = dir.join(&node) else { continue };
+            let Ok(inside) = node_dir.dir() else { continue };
+            let Ok(files) = std::fs::read_dir(inside.as_path()) else { continue };
+            let names: Vec<String> = files.flatten().filter_map(|f| f.file_name().into_string().ok()).collect();
+            if names.is_empty() {
+                let _ = std::fs::remove_dir(node_dir.as_path());
+            }
+            found.extend(names.into_iter().map(|n| format!("{VERSIONS_DIR}/{node}/{n}")));
         }
-        found.extend(names.into_iter().map(|n| format!("{VERSIONS_DIR}/{node}/{n}")));
-    }
+        found
+    })
+    .await
+    .map_err(AppError::internal)?;
     if found.is_empty() {
         return Ok(());
     }

@@ -868,6 +868,9 @@ fn spawn_maintenance(st: AppState, trash_days: i64) {
         loop {
             tick.tick().await;
             hours += 1;
+            if hours.is_multiple_of(24) {
+                db::optimize(&st.db).await;
+            }
             // Once a day: put the usage counters back in step with the node table, should one ever drift
             if hours.is_multiple_of(24)
                 && let Err(e) = tree::recompute_usage(&st).await

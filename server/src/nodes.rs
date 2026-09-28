@@ -346,12 +346,14 @@ pub async fn children(
     Path(id): Path<String>,
     Query(q): Query<ListQuery>,
 ) -> AppResult<Json<Listing<Node>>> {
-    let mut c = st.db.acquire().await?;
-    let folder = tree::folder_for(&mut c, &user, &id, Need::Read).await?;
+    let folder = tree::folder_for(&mut *st.db.acquire().await?, &user, &id, Need::Read).await?;
     if folder.in_folder_space() && q.after.is_none() {
-        // Changes made on the server's folder show up when the folder is opened (not again for each further page)
+        // Changes made on the server's folder show up when the folder is opened (not again for each further page).
+        // No connection is held meanwhile: syncing takes its own, and many folders opened at once would otherwise
+        // use up the pool while each waits for a second one
         crate::folders::sync_folder(&st, &folder).await;
     }
+    let mut c = st.db.acquire().await?;
     let mut list = list_children(&mut c, &folder.id, &q).await?;
     tree::mark_favorites(&mut c, user.id, list.items_mut()).await?;
     Ok(Json(list))
@@ -1276,6 +1278,8 @@ pub async fn record_open(st: &AppState, user_id: i64, node_id: &str) -> AppResul
     if last.is_some_and(|(t,)| t > at - RECENT_OPEN_INTERVAL) {
         return Ok(());
     }
+    // Like every other write: a transaction that reads before writing would otherwise fail when this commits in between
+    let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
     sqlx::query("INSERT INTO recent_files (user_id, node_id, at) VALUES (?1, ?2, ?3) ON CONFLICT (user_id, node_id) DO UPDATE SET at = ?3")
         .bind(user_id)
