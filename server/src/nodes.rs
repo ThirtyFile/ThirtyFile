@@ -80,7 +80,7 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
     } else {
         let location = match node.blob() {
             Ok((_, loc)) => loc.to_string(),
-            Err(_) => tree::drive_location(&st, &mut c, node.drive()).await?,
+            Err(_) => tree::drive_location(&mut c, node.drive()).await?,
         };
         st.location_offline(&location)
     };
@@ -1581,7 +1581,7 @@ mod tests {
         let amy = env.user("amy", true).await;
         let team_root = {
             let mut conn = env.st.db.acquire().await.unwrap();
-            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0).await.unwrap();
+            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0, "local").await.unwrap();
             crate::db::add_grant(&mut conn, &root, "user", amy.id, "owner", Some(amy.id), None).await.unwrap();
             root
         };
@@ -1776,7 +1776,7 @@ mod tests {
         let admin = env.admin().await;
         let (team_root, doc, other, private) = {
             let mut conn = env.st.db.acquire().await.unwrap();
-            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0).await.unwrap();
+            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0, "local").await.unwrap();
             crate::db::add_grant(&mut conn, &root, "user", amy.id, "owner", Some(amy.id), None).await.unwrap();
             drop(conn);
             let doc = env.file(&amy, &root, "plan.txt").await;
@@ -1914,7 +1914,7 @@ mod tests {
         // A team space both are members of
         let shared = {
             let mut conn = env.st.db.acquire().await.unwrap();
-            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0).await.unwrap();
+            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0, "local").await.unwrap();
             crate::db::add_grant(&mut conn, &root, "user", amy.id, "owner", Some(amy.id), None).await.unwrap();
             crate::db::add_grant(&mut conn, &root, "user", ben.id, "editor", Some(amy.id), None).await.unwrap();
             root
@@ -1975,7 +1975,7 @@ mod tests {
         let ben = env.user("ben", true).await;
         let team = {
             let mut conn = env.st.db.acquire().await.unwrap();
-            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0).await.unwrap();
+            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0, "local").await.unwrap();
             crate::db::add_grant(&mut conn, &root, "user", amy.id, "owner", Some(amy.id), None).await.unwrap();
             crate::db::add_grant(&mut conn, &root, "user", ben.id, "editor", Some(amy.id), None).await.unwrap();
             root

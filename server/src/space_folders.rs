@@ -116,21 +116,20 @@ async fn location_folder(conn: &mut SqliteConnection, builtin: &Path, location: 
     Ok(Some(if location == crate::locations::BUILTIN || path.is_empty() { builtin.to_path_buf() } else { PathBuf::from(path) }))
 }
 
-/// Makes a space that was just created (and is still empty) a folder space when its files go to a folder of this
-/// server: creates its folder and points the space at it. `builtin`: the built-in location's folder
+/// Makes a space that was just created (and is still empty) a folder space when the location it was created on
+/// (`drives.location_id`) is a folder of this server: creates its folder and points the space at it. `builtin`: the built-in location's folder
 /// (`AppState::space_folders`); None keeps every new space in the content store. Returns the folder; the caller calls
 /// `folders::spaces_changed` once its transaction is committed.
 pub async fn make_folder_space(conn: &mut SqliteConnection, builtin: Option<&Path>, drive_id: &str) -> AppResult<Option<PathBuf>> {
     let Some(builtin) = builtin else { return Ok(None) };
-    let (name, kind, root_id, location, owner): (String, String, String, String, String) = sqlx::query_as(
-        "SELECT d.name, d.kind, d.root_id,
-                COALESCE(d.location_id, (SELECT id FROM storage_locations WHERE is_default = 1), 'local'),
-                COALESCE((SELECT username FROM users WHERE id = d.owner_id), '')
+    let (name, kind, root_id, location, owner): (String, String, String, Option<String>, String) = sqlx::query_as(
+        "SELECT d.name, d.kind, d.root_id, d.location_id, COALESCE((SELECT username FROM users WHERE id = d.owner_id), '')
          FROM drives d WHERE d.id = ?",
     )
     .bind(drive_id)
     .fetch_one(&mut *conn)
     .await?;
+    let Some(location) = location else { return Ok(None) };
     let Some(root) = location_folder(conn, builtin, &location).await? else { return Ok(None) };
     let root = std::path::absolute(&root).unwrap_or(root);
     // The location's folder itself must be there: a NAS that isn't mounted must not get the folder on the disk
@@ -164,7 +163,7 @@ pub async fn make_folder_space(conn: &mut SqliteConnection, builtin: Option<&Pat
             format!("Couldn't create the folder {} for the space: {e}", folder.display()),
         )
     })?;
-    crate::folders::set_up(conn, drive_id, &root_id, &folder.to_string_lossy()).await?;
+    crate::folders::set_up(conn, drive_id, &root_id, &folder.to_string_lossy(), Some(&location)).await?;
     Ok(Some(folder))
 }
 

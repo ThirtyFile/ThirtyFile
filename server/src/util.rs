@@ -151,7 +151,24 @@ pub fn disk_space(path: &std::path::Path) -> Option<(u64, u64)> {
     Some((st.f_bavail as u64 * block, st.f_blocks as u64 * block))
 }
 
-#[cfg(not(unix))]
+/// Free and total bytes of the disk holding `path` (what this user may still write), for development builds on Windows
+#[cfg(windows)]
+pub fn disk_space(path: &std::path::Path) -> Option<(u64, u64)> {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetDiskFreeSpaceExW(dir: *const u16, free_to_caller: *mut u64, total: *mut u64, total_free: *mut u64) -> i32;
+    }
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let (mut free, mut total, mut all_free) = (0u64, 0u64, 0u64);
+    // SAFETY: `wide` is a valid NUL-terminated UTF-16 path and the three outputs are writable u64s
+    if unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut free, &mut total, &mut all_free) } == 0 {
+        return None;
+    }
+    Some((free, total))
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn disk_space(_path: &std::path::Path) -> Option<(u64, u64)> {
     None
 }

@@ -1168,7 +1168,7 @@ async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
             for (n, name) in nodes.iter().zip(&names) {
                 sqlx::query("UPDATE nodes SET name = ? WHERE id = ?").bind(name).bind(&n.id).execute(&mut *tx).await?;
                 if let Some(s) = staged.get(&n.id) {
-                    extras.extend(tree::commit_blob(st, &mut tx, s).await?);
+                    extras.extend(tree::commit_blob(&mut tx, s).await?);
                     sqlx::query("UPDATE nodes SET blob_hash = ?, size = ? WHERE id = ?").bind(&s.hash).bind(s.size).bind(&n.id).execute(&mut *tx).await?;
                 }
                 if let Some(rel) = n.fs_path.clone().filter(|r| !r.is_empty()) {
@@ -1251,7 +1251,7 @@ async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
                 }
                 let s = staged.get(&n.id);
                 if let Some(s) = s {
-                    extras.extend(tree::commit_blob(st, &mut tx, s).await?);
+                    extras.extend(tree::commit_blob(&mut tx, s).await?);
                     bytes += s.size;
                 }
                 let id = new_id();

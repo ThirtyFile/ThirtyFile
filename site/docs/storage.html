@@ -48,8 +48,17 @@
           <li>Open <strong>Control panel › Storage locations</strong> and click <strong>Add storage location</strong>.</li>
           <li>Choose the type and fill in the address and the login details.</li>
           <li>Click <strong>Test connection</strong>. The location can be saved once the test succeeds.</li>
-          <li>Make it the <strong>default</strong> if new spaces should use it.</li>
+          <li>Make it the <strong>default</strong> if new spaces should be created on it.</li>
         </ol>
+        <p>The default only decides where new spaces go: users' "My files", team spaces and, on a new server, "All files". Each space stays on the location it was created on, so changing the default doesn't move any existing space, and their new files keep going where their older ones are. Only <a href="#per-space">moving a space</a> changes its location.</p>
+
+        <h3 id="list">What the list shows</h3>
+        <ul>
+          <li><strong>Used space</strong>: the files of the spaces on the location. For folder spaces, the size of the files in their folders, as of the latest check; for the content store, the contents kept there. Contents that are the same in several files are counted once.</li>
+          <li><strong>Free space</strong>: for the storage folder and <em>Local folder</em> locations, how much is free on the disk that holds the folder, and how big it is.</li>
+          <li><strong>Files and spaces</strong>: how many contents the content store keeps there, and how many spaces are on the location. Click the number of spaces to list them, with their kind, owner and size. What is in them isn't shown.</li>
+        </ul>
+        <p>A location can't be deleted while a space is on it, or while its content store still keeps files. A folder space an administrator made from a folder of their choice (<a href="#folder-spaces">below</a>) isn't on any location.</p>
 
         <h3>Provider notes</h3>
         <ul>
@@ -60,7 +69,7 @@
         <div class="note">Connections without encryption (plain FTP, or S3 over http) are only accepted for addresses inside your own network.</div>
 
         <h2 id="per-space">A location for each space</h2>
-        <p>Under <strong>Control panel › Spaces</strong>, choose a storage location for a space in the content store (on S3, SFTP or FTP). Files already in the space can be moved to the new location. The space stays in use while they move. A folder space stays in its folder: to put its files elsewhere, move them to another space.</p>
+        <p>Under <strong>Control panel › Spaces</strong>, choose a storage location for a space in the content store (on S3, SFTP or FTP). New files go to the chosen location from then on, and files already in the space can be moved to it. The space stays in use while they move. A folder space stays in its folder: to put its files elsewhere, move them to another space.</p>
 
         <h2 id="folder-spaces">Folder spaces: a folder on the server as a space</h2>
         <p>Every space on the storage folder or a <em>Local folder</em> location is a folder space (see <a href="#layout">Where the files are</a>). You can also show an existing folder on the server, such as a NAS share, as a space. Its files stay where they are, as ordinary files, and can also be changed there, for example over SMB or by a scanner.</p>

@@ -10,7 +10,7 @@ use sqlx::SqliteConnection;
 
 use super::{Node, adjust_usage};
 use crate::{
-    error::AppResult,
+    error::{AppError, AppResult},
     state::AppState,
     util::now,
 };
@@ -375,10 +375,15 @@ pub async fn retry_pending_deletes(st: &AppState, location: &str) -> (usize, usi
     (n, failed)
 }
 
-/// Which storage location a space's new files go to
-pub async fn drive_location(st: &AppState, conn: &mut SqliteConnection, drive_id: &str) -> AppResult<String> {
+/// Which storage location a content-store space's new files go to: the one it records (`drives.location_id`), set
+/// when it was created and changed only by a move. A folder space an administrator chose is on no location.
+pub async fn drive_location(conn: &mut SqliteConnection, drive_id: &str) -> AppResult<String> {
     let row: Option<(Option<String>,)> = sqlx::query_as("SELECT location_id FROM drives WHERE id = ?").bind(drive_id).fetch_optional(conn).await?;
-    Ok(row.and_then(|r| r.0).unwrap_or_else(|| st.default_location.read().unwrap().clone()))
+    match row {
+        Some((Some(location),)) => Ok(location),
+        Some((None,)) => Err(AppError::bad_request("This space shows a folder on the server; it isn't on a storage location")),
+        None => Err(AppError::not_found("Space not found")),
+    }
 }
 
 /// A temp file about to be stored: uploaded to the storage location *before* taking the write lock (S3 may take a while)
@@ -417,7 +422,7 @@ pub async fn stage_blob(st: &AppState, drive_id: &str, hash: String, size: i64, 
         if let Some((loc,)) = exists {
             return Ok((None, Some(loc)));
         }
-        let location = drive_location(st, &mut c, drive_id).await?;
+        let location = drive_location(&mut c, drive_id).await?;
         drop(c);
         // If the server stops between storing and recording it, the content would stay in storage unreferenced: list
         // it for deletion a day from now; recording it removes the entry, and deletion skips content still in use
@@ -434,7 +439,7 @@ pub async fn stage_blob(st: &AppState, drive_id: &str, hash: String, size: i64, 
 const STAGED_GRACE: i64 = 24 * 3600;
 
 /// Records the reference within the transaction (holding the write lock); returns redundant copies to delete after commit
-pub async fn commit_blob(st: &AppState, conn: &mut SqliteConnection, staged: &StagedBlob) -> AppResult<Option<BlobRef>> {
+pub async fn commit_blob(conn: &mut SqliteConnection, staged: &StagedBlob) -> AppResult<Option<BlobRef>> {
     if let Some(loc) = &staged.uploaded_to {
         sqlx::query("DELETE FROM pending_blob_deletes WHERE hash = ? AND location_id = ? AND last_error = 'deferred'")
             .bind(&staged.hash)
@@ -456,8 +461,8 @@ pub async fn commit_blob(st: &AppState, conn: &mut SqliteConnection, staged: &St
         // The content's last reference was released while we were staging: the file itself is still there, because
         // background deletion skips hashes that are being staged, so just register it again (no storage I/O under the lock)
         (None, None) => {
-            let loc = staged.existing_at.clone().unwrap_or_else(|| st.default_location.read().unwrap().clone());
-            add_blob_ref(conn, &staged.hash, staged.size, &loc).await?;
+            let loc = staged.existing_at.as_deref().ok_or_else(|| AppError::internal("staged content was neither uploaded nor stored"))?;
+            add_blob_ref(conn, &staged.hash, staged.size, loc).await?;
             Ok(None)
         }
     }
@@ -601,7 +606,7 @@ mod tests {
         {
             let _w = env.st.write_lock.lock().await;
             let mut c = env.st.db.acquire().await.unwrap();
-            let extra = commit_blob(&env.st, &mut c, &staged).await.unwrap();
+            let extra = commit_blob(&mut c, &staged).await.unwrap();
             drop(c);
             finish_staged(&env.st, staged, extra).await;
         }

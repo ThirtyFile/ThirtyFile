@@ -447,7 +447,7 @@ async fn restore_stored(st: &AppState, user: &User, node: &Node, tmp: PathBuf) -
             return Err(AppError::conflict("Something changed at the same time. Try again."));
         }
         tree::check_quota(&mut tx, current.drive(), staged.size - current.size).await?;
-        let extra = tree::commit_blob(st, &mut tx, &staged).await?;
+        let extra = tree::commit_blob(&mut tx, &staged).await?;
         let removed = tree::set_content(&mut tx, Policy::of(st), &current, &staged.hash, staged.size, user.id).await?;
         logs::record_activity(&mut tx, user, Some(&current), "edit", RESTORED).await?;
         let node = tree::get_node(&mut tx, &current.id).await?.ok_or_else(|| AppError::not_found("File not found"))?;

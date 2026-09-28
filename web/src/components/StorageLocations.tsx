@@ -5,6 +5,7 @@ import {
   CloudIcon,
   EllipsisIcon,
   HardDriveIcon,
+  LayersIcon,
   Loader2Icon,
   PencilIcon,
   PlugZapIcon,
@@ -17,6 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type StorageConfig, type StorageKind, type StorageLocation } from "@/api";
+import { DRIVE_ICON, DRIVE_KIND_LABEL } from "@/lib/drives";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -68,6 +70,7 @@ export function StorageLocations() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editing, setEditing] = useState<StorageLocation | "new" | null>(null);
   const [deleting, setDeleting] = useState<StorageLocation | null>(null);
+  const [showing, setShowing] = useState<StorageLocation | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
   const list = q.data ?? [];
   const selected = list.find((l) => l.id === selectedId) ?? null;
@@ -106,6 +109,9 @@ export function StorageLocations() {
       <DropdownMenuItem onClick={() => test(l)}>
         <PlugZapIcon /> {t("Test connection")}
       </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => setShowing(l)}>
+        <LayersIcon /> {t("Spaces on this location")}
+      </DropdownMenuItem>
       <DropdownMenuItem disabled={l.is_default} onClick={() => makeDefault(l)}>
         <StarIcon /> {t("Set as default location")}
       </DropdownMenuItem>
@@ -125,7 +131,7 @@ export function StorageLocations() {
       <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
         <p className="text-xs leading-relaxed text-muted-foreground">
           {(() => {
-            const [before, after] = t("Where file contents are actually stored. Each space can be assigned a location in \"Space management\"; spaces without one use the {default}.").split("{default}");
+            const [before, after] = t("Where spaces keep their files. New spaces are created on the {default}; changing it doesn't move existing spaces. A space's files can be moved in \"Space management\".").split("{default}");
             return (
               <>
                 {before}
@@ -196,10 +202,25 @@ export function StorageLocations() {
                       </div>
                     )}
                   </div>
-                  <div className="hidden w-40 shrink-0 text-right text-xs text-muted-foreground sm:block">
-                    <div className="tabular-nums">{formatBytes(l.used_bytes)}</div>
+                  <div className="hidden w-48 shrink-0 text-right text-xs text-muted-foreground sm:block">
+                    <div className="tabular-nums" title={l.folder_bytes > 0 ? t("{size} in folder spaces", { size: formatBytes(l.folder_bytes) }) : undefined}>
+                      {t("{size} used", { size: formatBytes(l.used_bytes) })}
+                    </div>
+                    {l.disk_total_bytes != null && l.disk_free_bytes != null && (
+                      <div className="tabular-nums">{t("{free} free of {total}", { free: formatBytes(l.disk_free_bytes), total: formatBytes(l.disk_total_bytes) })}</div>
+                    )}
                     <div>
-                      {t("{n} file|{n} files", { n: l.blob_count })} · {t("{n} space|{n} spaces", { n: l.drive_count })}
+                      {t("{n} file|{n} files", { n: l.blob_count })} ·{" "}
+                      <button
+                        type="button"
+                        className="underline-offset-2 hover:text-foreground hover:underline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowing(l);
+                        }}
+                      >
+                        {t("{n} space|{n} spaces", { n: l.drive_count })}
+                      </button>
                     </div>
                   </div>
                   <span
@@ -242,6 +263,7 @@ export function StorageLocations() {
           }}
         />
       )}
+      {showing && <SpacesDialog location={showing} onClose={() => setShowing(null)} />}
       {deleting && (
         <ConfirmDialog
           title={t("Delete storage location \"{name}\"?", { name: deleting.name })}
@@ -259,6 +281,55 @@ export function StorageLocations() {
         />
       )}
     </div>
+  );
+}
+
+/** The spaces on a location: name, kind, owner and size (nothing of what is in them) */
+function SpacesDialog({ location, onClose }: { location: StorageLocation; onClose(): void }) {
+  const q = useQuery({ queryKey: ["storage-location-spaces", location.id], queryFn: () => api.storageLocationSpaces(location.id) });
+  const spaces = q.data ?? [];
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t("Spaces on \"{name}\"", { name: location.name })}</DialogTitle>
+          <DialogDescription>{t("Spaces stay on the location they were created on until they're moved.")}</DialogDescription>
+        </DialogHeader>
+        {q.isLoading ? (
+          <div className="flex h-20 items-center justify-center text-muted-foreground">
+            <Loader2Icon className="size-5 animate-spin" />
+          </div>
+        ) : q.error ? (
+          <ErrorText>{q.error instanceof Error ? q.error.message : t("Operation failed")}</ErrorText>
+        ) : spaces.length === 0 ? (
+          <p className="py-4 text-center text-sm text-muted-foreground">{t("No spaces are on this location.")}</p>
+        ) : (
+          <ul className="max-h-80 divide-y overflow-y-auto rounded-md border text-sm">
+            {spaces.map((s) => {
+              const Icon = DRIVE_ICON[s.kind];
+              return (
+                <li key={s.id} className="flex items-center gap-2.5 px-3 py-2">
+                  <Icon className="size-4 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate">{s.kind === "personal" && s.owner_name ? `${s.name} · ${s.owner_name}` : s.name}</div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {DRIVE_KIND_LABEL[s.kind]}
+                      {s.mode === "folder" && ` · ${t("Folder on the server")}`}
+                    </div>
+                  </div>
+                  <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{formatBytes(s.used_bytes)}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            {t("Close")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -775,6 +775,7 @@ export default {
   "Choose a folder outside ThirtyFile's data folder": "請選擇 ThirtyFile 資料資料夾以外的資料夾",
   "This space doesn't show a folder": "這個空間不是資料夾空間",
   "This space shows a folder on the server; its files can't be moved to a storage location": "這個空間顯示的是伺服器上的資料夾，檔案不能搬到儲存位置",
+  "This space shows a folder on the server; it isn't on a storage location": "這個空間顯示的是伺服器上的資料夾，不在任何儲存位置上",
   "Enter a number of minutes from 0 to 1440": "請輸入 0 到 1440 的分鐘數",
   "Can't read {path}: {error}": "無法讀取 {path}：{error}",
   "{path} is empty, but the space still has items: if it is on a disk or network share that isn't mounted, mount it and check again. To empty the space, delete its items in ThirtyFile.": "{path} 是空的，但空間裡仍有項目：如果它位於尚未掛載的磁碟或網路共用資料夾，請掛載後再檢查一次。若要清空空間，請在 ThirtyFile 中刪除項目。",

@@ -692,14 +692,14 @@ async fn commit_upload(
     let (id, extra, removed) = match replaced_file(&mut tx, user, upload, &folder).await? {
         Some(existing) => {
             // Admitted against the quota for its full size when it started; only the difference counts now
-            let extra = tree::commit_blob(st, &mut tx, staged).await?;
+            let extra = tree::commit_blob(&mut tx, staged).await?;
             let removed = tree::set_content(&mut tx, crate::versions::Policy::of(st), &existing, hash, size as i64, user.id).await?;
             logs::record_activity(&mut tx, user, Some(&existing), "upload", "Replaced the existing file").await?;
             (existing.id.clone(), extra, removed)
         }
         None => {
             let name = tree::unique_name(&mut tx, &folder, &upload.name, false).await?;
-            let extra = tree::commit_blob(st, &mut tx, staged).await?;
+            let extra = tree::commit_blob(&mut tx, staged).await?;
             let id = new_id();
             sqlx::query(
                 "INSERT INTO nodes (id, owner_id, parent_id, kind, name, blob_hash, size, mime, drive_id, created_at, updated_at)

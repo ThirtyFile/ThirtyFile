@@ -785,7 +785,7 @@ async fn store_content(st: &AppState, user: &User, parent: &Node, name: &str, tm
                     return Ok((false, None, crate::versions::Removed::default()));
                 }
                 tree::check_quota(&mut tx, n.drive(), size - n.size).await?;
-                let extra = tree::commit_blob(st, &mut tx, &staged).await?;
+                let extra = tree::commit_blob(&mut tx, &staged).await?;
                 // The content it had is kept as an earlier version
                 let removed = tree::set_content(&mut tx, crate::versions::Policy::of(st), &n, &hash, size, user.id).await?;
                 tree::touch(&mut tx, &folder.id).await?;
@@ -794,7 +794,7 @@ async fn store_content(st: &AppState, user: &User, parent: &Node, name: &str, tm
             }
             None => {
                 tree::check_quota(&mut tx, folder.drive(), size).await?;
-                let extra = tree::commit_blob(st, &mut tx, &staged).await?;
+                let extra = tree::commit_blob(&mut tx, &staged).await?;
                 let id = new_id();
                 sqlx::query(
                     "INSERT INTO nodes (id, owner_id, parent_id, kind, name, blob_hash, size, mime, drive_id, created_at, updated_at)
