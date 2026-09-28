@@ -236,7 +236,8 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     for dir in ["tmp", "thumbs"] {
         std::fs::create_dir_all(cfg.data.join(dir))?;
     }
-    std::fs::create_dir_all(&storage)?;
+    // Created with its marker on a fresh install; a storage folder with items but no marker stops the start
+    crate::storage::prepare_builtin(&storage)?;
     let key_source = secrets::KeySource::from_settings(cfg.secret_key.clone(), cfg.secret_key_file.clone(), &cfg.data);
     let key = key_source.load()?;
     secrets::init(&key);

@@ -97,11 +97,9 @@ async fn drive_infos(
     let mut out = Vec::with_capacity(drives.len());
     for (d, role) in drives {
         let r = rows.remove(&d.id).ok_or_else(|| AppError::not_found("Space not found"))?;
-        // A folder space is on the server itself: nothing to be offline
-        let offline = match &r.location_id {
-            Some(location) if !d.is_folder() => st.location_offline(location),
-            _ => None,
-        };
+        // A folder space on a location (the built-in one, or a Local folder location) is offline with it: its
+        // disk may not be mounted. A folder an administrator chose is on no location.
+        let offline = r.location_id.as_deref().and_then(|location| st.location_offline(location));
         let details = scan_details && d.is_folder();
         out.push(DriveInfo {
             mode: d.mode.clone(),

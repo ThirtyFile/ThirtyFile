@@ -67,7 +67,8 @@ fn rel_of(n: &Node) -> &str {
 
 /// The item on disk, reached without following a symbolic link on the way (`beneath`)
 fn abs(n: &Node) -> AppResult<Pinned> {
-    n.fs_pinned().map_err(gone_or_disk_error)
+    let rel = n.fs_path.as_deref().ok_or_else(|| gone_or_disk_error(io::ErrorKind::NotFound.into()))?;
+    space_root(n)?.join(rel).map_err(gone_or_disk_error)
 }
 
 /// A path that no longer leads to the item: a folder on the way is missing, or was replaced by a link
@@ -82,9 +83,21 @@ fn gone_or_disk_error(e: io::Error) -> AppError {
     }
 }
 
-/// A space's folder
+/// A space's folder, to change something in it. When it isn't there (its disk or share isn't mounted, say), nothing is
+/// changed: it is never made again, which would put the space's files on the disk below the mount point. It must also
+/// hold this space's marker (`folders::MARKER`): another disk mounted at the same place, with a folder of the same
+/// name, isn't written to.
 fn space_root(n: &Node) -> AppResult<Pinned> {
-    Pinned::root(Path::new(n.fs_root.as_deref().unwrap_or_default())).map_err(gone_or_disk_error)
+    let root = n.fs_root.as_deref().ok_or_else(|| gone_or_disk_error(io::ErrorKind::NotFound.into()))?;
+    let not_mounted = || AppError::new(StatusCode::SERVICE_UNAVAILABLE, crate::storage::NOT_MOUNTED);
+    let pinned = Pinned::root(Path::new(root)).map_err(|e| match e.kind() {
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory => not_mounted(),
+        _ => gone_or_disk_error(e),
+    })?;
+    match crate::folders::space_marker(&pinned).map_err(disk_error)? {
+        Some(id) if id == n.drive() => Ok(pinned),
+        _ => Err(not_mounted()),
+    }
 }
 
 /// A disk error as people see it
@@ -1318,6 +1331,50 @@ mod tests {
         let q = Query(serde_json::from_value(json!({})).unwrap());
         let res = crate::files::content(State(env.st.clone()), user.clone(), UrlPath(id.to_string()), q, HeaderMap::new()).await.unwrap();
         axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap().to_vec()
+    }
+
+    #[tokio::test]
+    async fn nothing_is_written_into_a_folder_that_isnt_the_spaces_own() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let space = env.folder_space("Scans").await;
+        let (dir, drive) = (&space.dir, &space.drive);
+        let marker = dir.join(crate::folders::MARKER);
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), *drive);
+        let away = dir.with_extension("away");
+        std::fs::rename(dir, &away).unwrap();
+        let refused = |what: &'static str| {
+            let (env, admin, root) = (&env, admin.clone(), space.root.clone());
+            async move {
+                let err = env.try_upload(&admin, &root, "a.txt", b"a").await.unwrap_err();
+                assert!(err.message.starts_with(crate::storage::NOT_MOUNTED), "{what}: {}", err.message);
+                let req = req(json!({ "parent_id": root, "name": "Docs" }));
+                let err = crate::nodes::create_folder(State(env.st.clone()), admin, req).await.unwrap_err();
+                assert_eq!((err.status, err.message.as_str()), (StatusCode::SERVICE_UNAVAILABLE, crate::storage::NOT_MOUNTED), "{what}");
+            }
+        };
+        // Missing: not made again
+        refused("missing").await;
+        assert!(!dir.exists());
+        // Another disk mounted there, with a folder of the same name: without the marker, or with another space's
+        for other in [None, Some("another space")] {
+            std::fs::create_dir(dir).unwrap();
+            if let Some(id) = other {
+                std::fs::write(&marker, id).unwrap();
+            }
+            refused("another disk").await;
+            let report = crate::folders::scan(&env.st, drive).await.unwrap();
+            let names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+            if other.is_some() {
+                assert!(report.error.is_some(), "a scan leaves another space's folder alone");
+                assert_eq!(names, [crate::folders::MARKER]);
+            }
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+        // Its own folder back: changes are made again
+        std::fs::rename(&away, dir).unwrap();
+        env.upload(&admin, &space.root, "a.txt", b"a").await;
+        assert!(dir.join("a.txt").is_file());
     }
 
     #[tokio::test]

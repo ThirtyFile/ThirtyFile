@@ -285,7 +285,8 @@ mod tests {
     /// A Local folder location in a new folder (not the default)
     async fn local_location(env: &testutil::TestEnv, id: &str) -> std::path::PathBuf {
         let dir = env.dir.join(id);
-        std::fs::create_dir_all(&dir).unwrap();
+        // Added as an administrator adds it: the folder holds the location's marker
+        crate::storage::claim_folder(&dir, id).unwrap();
         sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES (?, ?, 'local', ?, 0, 0)")
             .bind(id)
             .bind(id.to_uppercase())
@@ -430,7 +431,9 @@ mod tests {
     async fn a_personal_space_waits_for_a_missing_folder_and_is_created_later() {
         let env = testutil::folders_env().await;
         let nas = local_location(&env, "nas").await;
-        std::fs::remove_dir_all(&nas).unwrap();
+        // Not mounted: the folder (with its marker) is elsewhere for now
+        let away = env.dir.join("nas-away");
+        std::fs::rename(&nas, &away).unwrap();
         // Creating the user still works
         let row = new_user(&env, "amy", json!({ "personal_location": "nas" })).await.unwrap();
         assert!(!row.personal_space);
@@ -444,8 +447,13 @@ mod tests {
         drop(c);
         let Json(me) = crate::auth::me(State(env.st.clone()), amy.clone()).await.unwrap();
         assert!(me.personal_pending);
+        // An empty mount point isn't the location's folder either
+        std::fs::create_dir(&nas).unwrap();
+        assert_eq!(retry_pending(&env.st, None).await, 0);
+        assert_eq!(std::fs::read_dir(&nas).unwrap().count(), 0, "nothing created in the empty mount point");
+        std::fs::remove_dir(&nas).unwrap();
         // Back: signing in creates it
-        std::fs::create_dir_all(&nas).unwrap();
+        std::fs::rename(&away, &nas).unwrap();
         let (session, _) = env.sign_in(&amy, "test").await;
         assert!(session.root_id.is_some());
         assert_eq!(personal(&env, row.id).await.1.as_deref(), Some("nas"));
@@ -462,7 +470,7 @@ mod tests {
         assert_eq!((location.as_deref(), pending), (Some(crate::locations::BUILTIN), None));
 
         // An administrator can cancel the wait
-        std::fs::remove_dir_all(&nas).unwrap();
+        std::fs::rename(&nas, &away).unwrap();
         let cat = new_user(&env, "cat", json!({ "personal_location": "nas" })).await.unwrap();
         assert_eq!(cat.personal_pending.as_deref(), Some("nas"));
         let q = Query(serde_json::from_value(json!({})).unwrap());

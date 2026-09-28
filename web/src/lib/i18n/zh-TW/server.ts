@@ -253,6 +253,8 @@ export default {
   "The content read back didn't match": "讀回的內容不一致",
   "Invalid endpoint URL. It should be https://hostname": "端點網址格式不正確，應為 https://主機名稱",
   "Enter an absolute path": "請輸入絕對路徑",
+  "The folder isn't there, or a different disk is mounted there": "資料夾不在，或那裡掛載的是另一顆磁碟",
+  "Another storage location uses this folder (it holds that location's .thirtyfile-location file)": "另一個儲存位置正在使用這個資料夾（資料夾中有該位置的 .thirtyfile-location 檔案）",
   "Enter a bucket name": "請輸入 bucket 名稱",
   "Unsupported storage type": "不支援的儲存類型",
   // Storage locations: connection tests and health checks (locations.rs, state.rs)
@@ -810,6 +812,7 @@ export default {
   "This space shows a folder on the server; it isn't on a storage location": "這個空間顯示的是伺服器上的資料夾，不在任何儲存位置上",
   "Enter a number of minutes from 0 to 1440": "請輸入 0 到 1440 的分鐘數",
   "Can't read {path}: {error}": "無法讀取 {path}：{error}",
+  "{path} holds another space's .thirtyfile-space file: if a different disk is mounted there, mount the right one and check again.": "{path} 中有另一個空間的 .thirtyfile-space 檔案：如果那裡掛載的是另一顆磁碟，請掛載正確的磁碟後再檢查一次。",
   "{path} is empty, but the space still has items: if it is on a disk or network share that isn't mounted, mount it and check again. To empty the space, delete its items in ThirtyFile.": "{path} 是空的，但空間裡仍有項目：如果它位於尚未掛載的磁碟或網路共用資料夾，請掛載後再檢查一次。若要清空空間，請在 ThirtyFile 中刪除項目。",
   "Folder spaces are checked for changes every {n} minutes": "每 {n} 分鐘檢查一次資料夾空間的變更",
   // Earlier versions of files (versions.rs, admin.rs)

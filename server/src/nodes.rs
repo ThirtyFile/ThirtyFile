@@ -74,9 +74,11 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
     let location = paths::location_of(&mut c, &user, &node).await?;
     tree::mark_favorites(&mut c, user.id, [&mut node]).await?;
     let is_root = node.parent_id.is_none();
-    // Folder spaces are on the server itself: nothing to be offline
+    // A folder space is offline with its location (a disk that may not be mounted); a folder an administrator chose
+    // is on no location
     let offline = if drive.is_folder() {
-        None
+        let (location,): (Option<String>,) = sqlx::query_as("SELECT location_id FROM drives WHERE id = ?").bind(&drive.id).fetch_one(&mut *c).await?;
+        location.and_then(|l| st.location_offline(&l))
     } else {
         let location = match node.blob() {
             Ok((_, loc)) => loc.to_string(),

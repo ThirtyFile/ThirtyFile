@@ -49,13 +49,14 @@ async fn make_env(space_folders: bool) -> TestEnv {
     for d in ["tmp", "thumbs", "blobs"] {
         std::fs::create_dir_all(dir.join(d)).unwrap();
     }
+    crate::storage::prepare_builtin(&dir.join("blobs")).unwrap();
     let space_folders = space_folders.then(|| dir.join("blobs"));
     let db = db::connect(&dir.join("drive.db"), 16).await.unwrap();
     db::bootstrap_admin(&db, Some(password()), space_folders.as_deref()).await.unwrap();
     db::create_company_space(&db, space_folders.as_deref()).await.unwrap();
     let system = db::load_system_settings(&db).await.unwrap();
     let mut storages: HashMap<String, Arc<dyn Storage>> = HashMap::new();
-    storages.insert("local".into(), Arc::new(LocalStorage::new(dir.join("blobs")).unwrap()));
+    storages.insert("local".into(), Arc::new(LocalStorage::new(dir.join("blobs"), "local")));
     let (log_tx, log_rx) = crate::logs::channel();
     let st = AppState(Arc::new(Inner {
         db,
@@ -196,6 +197,11 @@ impl TestEnv {
     /// Uploads a file as the web does (tus): into the content store or a folder space, whichever `parent` is in.
     /// Returns its id.
     pub async fn upload(&self, user: &User, parent: &str, name: &str, content: &'static [u8]) -> String {
+        self.try_upload(user, parent, name, content).await.unwrap()
+    }
+
+    /// `upload`, returning the error when it fails
+    pub async fn try_upload(&self, user: &User, parent: &str, name: &str, content: &'static [u8]) -> crate::error::AppResult<String> {
         use axum::{
             extract::{Path, State},
             http::{HeaderMap, header},
@@ -205,13 +211,13 @@ impl TestEnv {
         let mut h = HeaderMap::new();
         h.insert("upload-length", content.len().to_string().parse().unwrap());
         h.insert("upload-metadata", format!("filename {},parentId {}", b64(name), b64(parent)).parse().unwrap());
-        let res = crate::upload::create(State(self.st.clone()), user.clone(), h).await.unwrap();
+        let res = crate::upload::create(State(self.st.clone()), user.clone(), h).await?;
         let upload = res.headers()[header::LOCATION].to_str().unwrap().rsplit('/').next().unwrap().to_string();
         let mut h = HeaderMap::new();
         h.insert(header::CONTENT_TYPE, "application/offset+octet-stream".parse().unwrap());
         h.insert("upload-offset", "0".parse().unwrap());
-        let res = crate::upload::patch(State(self.st.clone()), user.clone(), Path(upload), h, axum::body::Body::from(content)).await.unwrap();
-        res.headers()["x-node-id"].to_str().unwrap().to_string()
+        let res = crate::upload::patch(State(self.st.clone()), user.clone(), Path(upload), h, axum::body::Body::from(content)).await?;
+        Ok(res.headers()["x-node-id"].to_str().unwrap().to_string())
     }
 
     pub async fn grant(&self, node: &str, to: &User, role: &str) {
