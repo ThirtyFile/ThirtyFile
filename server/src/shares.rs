@@ -1570,6 +1570,13 @@ mod tests {
         assert!(changed.allow_upload);
         let id = upload_through(&env, &plain.id, None, "a.txt", b"hello").await.unwrap();
         assert_eq!(node(&env, &id).await.owner_id, ben.id);
+        // Ben is told, once for files that keep coming through the same link
+        upload_through(&env, &plain.id, None, "a2.txt", b"again").await.unwrap();
+        let told: Vec<(String, String)> =
+            sqlx::query_as("SELECT kind, data FROM notifications WHERE user_id = ? AND kind = 'link_upload'").bind(ben.id).fetch_all(&env.st.db).await.unwrap();
+        assert_eq!(told.len(), 1);
+        let data: serde_json::Value = serde_json::from_str(&told[0].1).unwrap();
+        assert_eq!((data["count"].as_i64(), data["file"].as_str(), data["name"].as_str()), (Some(2), Some("a2.txt"), Some("Shared")));
 
         // A folder moved out of the shared folder during an upload: the file doesn't follow it
         let pending = start_upload(&env, &plain.id, Some(&sub), "late.txt", 4, None).await.unwrap();

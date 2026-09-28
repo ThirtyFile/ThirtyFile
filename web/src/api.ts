@@ -270,7 +270,7 @@ export interface SsoProvider {
   label: string;
 }
 
-export type NotificationKind = "shared" | "space_full" | "access_expiring" | "app_password";
+export type NotificationKind = "shared" | "space_full" | "access_expiring" | "app_password" | "link_upload";
 
 /** What a notification shows; names are copied when it was made */
 export interface NotificationData {
@@ -288,6 +288,9 @@ export interface NotificationData {
   used?: number;
   quota?: number;
   percent?: number;
+  /** Files received through a link: the last file's name, and how many arrived */
+  file?: string;
+  count?: number;
   /** App passwords: what it may do, and the address it was made from */
   scope?: "read" | "write";
   ip?: string;
