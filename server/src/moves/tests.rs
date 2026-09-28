@@ -1001,3 +1001,84 @@ async fn a_folder_an_administrator_chose_moves_onto_a_location() {
         assert!(!space.dir.exists(), "{name}: the folder was moved");
     }
 }
+
+// ───────────── Several spaces, whole locations ─────────────
+
+#[tokio::test]
+async fn several_spaces_move_one_after_the_other_and_a_location_can_then_be_deleted() {
+    let env = testutil::folders_env().await;
+    let admin = env.admin().await;
+    add_bucket(&env, "bucket").await;
+    let nas = add_nas(&env, "nas").await;
+    // Everything on the built-in storage: "All files", the administrator's and two users' "My files", a team space
+    let amy = env.user("amy", true).await;
+    let ben = env.user("ben", true).await;
+    let req = serde_json::from_value(json!({ "name": "Sales" })).unwrap();
+    let Json(sales) = crate::drives::create(State(env.st.clone()), admin.clone(), Json(req)).await.unwrap();
+    let sales = serde_json::to_value(&sales).unwrap();
+    let company = env.st.shared_root().unwrap();
+    let a = env.upload(&amy, amy.root(), "a.txt", b"amy's").await;
+    let b = env.upload(&ben, ben.root(), "b.txt", b"ben's").await;
+    let c = env.upload(&admin, &company, "c.txt", b"company").await;
+    let s = env.upload(&admin, sales["root_id"].as_str().unwrap(), "s.txt", b"sales").await;
+    let Json(on_local) = crate::locations::spaces(State(env.st.clone()), Admin(admin.clone()), Path(crate::locations::BUILTIN.into())).await.unwrap();
+    let ids: Vec<String> = serde_json::to_value(&on_local).unwrap().as_array().unwrap().iter().map(|s| s["id"].as_str().unwrap().to_string()).collect();
+    assert_eq!(ids.len(), 5);
+
+    // Everything to the NAS, a move each, in order; a space listed twice is moved once
+    let mut asked: Vec<&str> = ids.iter().map(String::as_str).collect();
+    asked.push(&ids[0]);
+    let req = CreateReq { drive_ids: asked.iter().map(|s| s.to_string()).collect(), location_id: "nas".into() };
+    let Json(v) = create(State(env.st.clone()), Admin(admin.clone()), Json(req)).await.unwrap();
+    let moves: Vec<String> = v["ids"].as_array().unwrap().iter().map(|i| i.as_str().unwrap().to_string()).collect();
+    assert_eq!(moves.len(), 5);
+    // One at a time: the runner takes the oldest first
+    start_due(&env.st).await.unwrap();
+    for _ in 0..500 {
+        let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM space_moves WHERE state IN ('queued', 'running')").fetch_one(&env.st.db).await.unwrap();
+        if left == 0 {
+            break;
+        }
+        assert!(env.st.moves.running.lock().unwrap().len() <= 1);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        start_due(&env.st).await.unwrap();
+    }
+    for id in &moves {
+        assert_eq!(state(&env, id).await, "done");
+    }
+    let order: Vec<(String,)> = sqlx::query_as("SELECT drive_id FROM space_moves ORDER BY started_at, rowid").fetch_all(&env.st.db).await.unwrap();
+    assert_eq!(order.into_iter().map(|(d,)| d).collect::<Vec<_>>(), ids, "in the order asked for");
+    for (user, id, content) in [(&amy, &a, &b"amy's"[..]), (&ben, &b, b"ben's"), (&admin, &c, b"company"), (&admin, &s, b"sales")] {
+        assert_eq!(read(&env, user, id).await, content);
+    }
+    assert!(nas.join("users/amy/a.txt").is_file() && nas.join("teams/Sales/s.txt").is_file() && nas.join("company/c.txt").is_file());
+    let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drives WHERE location_id = 'local'").fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(left, 0);
+
+    // The same to a bucket: then the NAS holds nothing, and once it isn't the default it can go
+    sqlx::query("UPDATE storage_locations SET is_default = (id = 'nas')").execute(&env.st.db).await.unwrap();
+    let req = CreateReq { drive_ids: ids.clone(), location_id: "bucket".into() };
+    let Json(v) = create(State(env.st.clone()), Admin(admin.clone()), Json(req)).await.unwrap();
+    for id in v["ids"].as_array().unwrap() {
+        assert_eq!(run_move(&env, id.as_str().unwrap()).await, "done");
+    }
+    let err = crate::locations::delete(State(env.st.clone()), Admin(admin.clone()), Path("nas".into())).await.unwrap_err();
+    assert_eq!(err.message, "Set another location as the default first");
+    let _ = crate::locations::set_default(State(env.st.clone()), Admin(admin.clone()), Path("bucket".into())).await.unwrap();
+    let _ = crate::locations::delete(State(env.st.clone()), Admin(admin.clone()), Path("nas".into())).await.unwrap();
+    assert_eq!(read(&env, &amy, &a).await, b"amy's");
+}
+
+#[tokio::test]
+async fn a_batch_is_refused_whole_when_one_space_cant_go() {
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    let ben = env.user("ben", true).await;
+    add_bucket(&env, "bucket").await;
+    let (a, b) = (env.drive_of(amy.root()).await, env.drive_of(ben.root()).await);
+    move_to(&env, &[&a], "bucket").await.unwrap();
+    // Amy's is being moved already: neither is queued
+    assert_eq!(move_to(&env, &[&b, &a], "bucket").await.unwrap_err().message, "\"My files · amy\" is already being moved");
+    let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM space_moves WHERE drive_id = ?").bind(&b).fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(n, 0);
+}

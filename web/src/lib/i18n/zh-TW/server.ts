@@ -304,7 +304,7 @@ export default {
   "This storage location can't be reached right now, so it can't be set as the default": "這個儲存位置目前無法連線，不能設為預設",
   "The built-in local disk can't be deleted": "內建的本機磁碟無法刪除",
   "Set another location as the default first": "請先把其他位置設為預設",
-  "{n} space still uses this location. Change it first.|{n} spaces still use this location. Change them first.": "還有 {n} 個空間指定使用這個位置，請先變更",
+  "{n} space still uses this location. Move it to another location first.|{n} spaces still use this location. Move them to another location first.": "還有 {n} 個空間在這個位置上，請先把它們搬到其他位置",
   "This location still stores {n} file. Move the spaces that use it to another location first.|This location still stores {n} files. Move the spaces that use it to another location first.": "這個位置還存放著 {n} 個檔案，請先把使用它的空間搬移到其他位置",
   "This storage location can't be reached right now": "這個儲存位置目前無法連線",
   "A space is being moved to or from this location. Wait until the move finishes, or cancel it.": "有空間正在搬進或搬出這個位置，請等搬移完成或取消搬移",
