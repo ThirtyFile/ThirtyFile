@@ -22,6 +22,7 @@ use crate::{
     auth::User,
     error::{AppError, AppResult},
     files::hash_file,
+    logs,
     state::AppState,
     tree,
     util::{guess_mime, new_id, now, validate_name},
@@ -624,7 +625,7 @@ async fn finalize_in_folder(st: &AppState, up: &Uploader, upload: &Upload, path:
         if let Some(n) = tree::get_node(&mut tx, &id).await? {
             let before = replaced.as_ref().map_or(0, |(r, _)| r.size);
             tree::adjust_usage(&mut tx, n.drive(), n.size - before).await?;
-            tree::log(&mut tx, user, Some(&n), "upload", &if replaced.is_some() { "Replaced the existing file".to_string() } else { up.log_detail() }).await?;
+            logs::record_activity(&mut tx, user, Some(&n), "upload", &if replaced.is_some() { "Replaced the existing file".to_string() } else { up.log_detail() }).await?;
         }
         tx.commit().await?;
         if let Some((_, removed)) = replaced {
@@ -688,7 +689,7 @@ async fn commit_upload(
             // Admitted against the quota for its full size when it started; only the difference counts now
             let extra = tree::commit_blob(st, &mut tx, staged).await?;
             let removed = tree::set_content(&mut tx, crate::versions::Policy::of(st), &existing, hash, size as i64, user.id).await?;
-            tree::log(&mut tx, user, Some(&existing), "upload", "Replaced the existing file").await?;
+            logs::record_activity(&mut tx, user, Some(&existing), "upload", "Replaced the existing file").await?;
             (existing.id.clone(), extra, removed)
         }
         None => {
@@ -711,7 +712,7 @@ async fn commit_upload(
             .await?;
             if let Some(n) = tree::get_node(&mut tx, &id).await? {
                 tree::adjust_usage(&mut tx, n.drive(), size as i64).await?;
-                tree::log(&mut tx, user, Some(&n), "upload", &up.log_detail()).await?;
+                logs::record_activity(&mut tx, user, Some(&n), "upload", &up.log_detail()).await?;
             }
             (id, extra, crate::versions::Removed::default())
         }

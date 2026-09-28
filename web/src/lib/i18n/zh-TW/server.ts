@@ -148,7 +148,7 @@ export default {
   "{name} → Manager": "{name} → 管理者",
   "Owner": "擁有者",
   "{name} → Owner": "{name} → 擁有者",
-  // Files and folders (nodes.rs, tree.rs, files.rs)
+  // Files and folders (nodes.rs, tree/, files.rs)
   "\"{name}\" already exists": "「{name}」已存在",
   "The root folder of a space can't be renamed": "無法重新命名空間根目錄",
   "Select 1 to 1000 items": "請選擇 1 到 1000 個項目",

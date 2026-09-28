@@ -18,7 +18,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sqlx::{QueryBuilder, Sqlite, SqlitePool};
+use sqlx::{QueryBuilder, Sqlite, SqliteConnection, SqlitePool};
 
 use crate::{
     auth::{Admin, User},
@@ -256,6 +256,24 @@ pub fn record_share_access(st: &AppState, share_id: &str, owner_id: i64, node: O
             user_agent: v.user_agent.clone(),
         },
     );
+}
+
+/// Records an activity (within the caller's transaction, unlike sign-in and share link events)
+pub async fn record_activity(conn: &mut SqliteConnection, user: &User, node: Option<&Node>, action: &str, detail: &str) -> AppResult<()> {
+    sqlx::query(
+        "INSERT INTO activity (at, user_id, username, drive_id, node_id, node_name, action, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(now())
+    .bind(user.id)
+    .bind(&user.username)
+    .bind(node.and_then(|n| n.drive_id.clone()))
+    .bind(node.map(|n| n.id.clone()))
+    .bind(node.map(|n| n.name.clone()).unwrap_or_default())
+    .bind(action)
+    .bind(detail)
+    .execute(conn)
+    .await?;
+    Ok(())
 }
 
 // ───────────── Activity log queries ─────────────
@@ -892,7 +910,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
             if s.archive_keep_days == 0 { "kept forever".to_string() } else { format!("kept {}", plural(s.archive_keep_days, "day", "days")) },
             if s.record_visitor { "" } else { ", visitor IPs not recorded" }
         );
-        tree::log(&mut tx, &user, None, "settings", &detail).await?;
+        record_activity(&mut tx, &user, None, "settings", &detail).await?;
         tx.commit().await?;
     }
     *st.logs.write().unwrap() = s;
@@ -905,7 +923,7 @@ pub async fn archive_now(State(st): State<AppState>, Admin(user): Admin) -> AppR
     {
         let _w = st.write_lock.lock().await;
         let mut tx = st.db.begin().await?;
-        tree::log(&mut tx, &user, None, "log_archive", &summary.describe()).await?;
+        record_activity(&mut tx, &user, None, "log_archive", &summary.describe()).await?;
         tx.commit().await?;
     }
     let mut v = status(&st).await?;
@@ -940,7 +958,7 @@ pub async fn delete_archive(State(st): State<AppState>, Admin(user): Admin, Path
     let (file, rows): (String, i64) =
         sqlx::query_as("SELECT file, rows FROM log_archives WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?.ok_or_else(|| AppError::not_found("Archive not found"))?;
     sqlx::query("DELETE FROM log_archives WHERE id = ?").bind(id).execute(&mut *tx).await?;
-    tree::log(&mut tx, &user, None, "log_archive_delete", &format!("{file} ({})", plural(rows, "record", "records"))).await?;
+    record_activity(&mut tx, &user, None, "log_archive_delete", &format!("{file} ({})", plural(rows, "record", "records"))).await?;
     tx.commit().await?;
     let _ = tokio::fs::remove_file(archive_dir(&st).join(&file)).await;
     Ok(Json(json!({ "ok": true })))
@@ -1446,7 +1464,7 @@ mod tests {
             async move {
                 let mut c = st.db.acquire().await.unwrap();
                 let node = tree::get_node(&mut c, &id).await.unwrap().unwrap();
-                tree::log(&mut c, &amy, Some(&node), action, "").await.unwrap();
+                record_activity(&mut c, &amy, Some(&node), action, "").await.unwrap();
             }
         };
         log(a.clone(), "upload").await;

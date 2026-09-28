@@ -23,6 +23,7 @@ use crate::{
     error::{AppError, AppResult},
     files::{Blob, Source, serve_blob},
     fsops,
+    logs,
     state::AppState,
     tree::{self, BlobRef, Need, Node},
     util::{new_id, now},
@@ -417,7 +418,7 @@ async fn restore_stored(st: &AppState, user: &User, node: &Node, tmp: PathBuf) -
         tree::check_quota(&mut tx, current.drive(), staged.size - current.size).await?;
         let extra = tree::commit_blob(st, &mut tx, &staged).await?;
         let removed = tree::set_content(&mut tx, Policy::of(st), &current, &staged.hash, staged.size, user.id).await?;
-        tree::log(&mut tx, user, Some(&current), "edit", RESTORED).await?;
+        logs::record_activity(&mut tx, user, Some(&current), "edit", RESTORED).await?;
         let node = tree::get_node(&mut tx, &current.id).await?.ok_or_else(|| AppError::not_found("File not found"))?;
         tx.commit().await?;
         Ok((node, extra, removed))
@@ -454,7 +455,7 @@ async fn restore_in_folder(st: &AppState, user: &User, node: &Node, tmp: &Path, 
         let removed = fsops::replace_file(&mut tx, Policy::of(st), &staged, &current, user.id).await?;
         let now_size = tree::get_node(&mut tx, &current.id).await?.map_or(0, |n| n.size);
         tree::adjust_usage(&mut tx, current.drive(), now_size - current.size).await?;
-        tree::log(&mut tx, user, Some(&current), "edit", RESTORED).await?;
+        logs::record_activity(&mut tx, user, Some(&current), "edit", RESTORED).await?;
         let node = tree::get_node(&mut tx, &current.id).await?.ok_or_else(|| AppError::not_found("File not found"))?;
         tx.commit().await?;
         Ok((node, removed))

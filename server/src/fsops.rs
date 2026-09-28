@@ -20,6 +20,7 @@ use crate::{
     auth::User,
     error::{AppError, AppResult},
     files::Source,
+    logs,
     state::AppState,
     tree::{self, BlobRef, Need, Node, StagedBlob},
     util::{guess_mime, new_id, now, numbered_name, split_name},
@@ -458,7 +459,7 @@ pub async fn save(st: &AppState, user: &User, id: &str, body: &[u8], base: Optio
         };
         if let Some(copy) = tree::get_node(&mut tx, &copy_id).await? {
             tree::adjust_usage(&mut tx, copy.drive(), copy.size).await?;
-            tree::log(&mut tx, user, Some(&copy), "upload", "").await?;
+            logs::record_activity(&mut tx, user, Some(&copy), "upload", "").await?;
         }
         tx.commit().await?;
         return Err(AppError::new(
@@ -489,7 +490,7 @@ pub async fn save(st: &AppState, user: &User, id: &str, body: &[u8], base: Optio
         .execute(&mut *tx)
         .await?;
     tree::adjust_usage(&mut tx, node.drive(), s.size - node.size).await?;
-    tree::log(&mut tx, user, Some(&node), "edit", "").await?;
+    logs::record_activity(&mut tx, user, Some(&node), "edit", "").await?;
     let node = tree::get_node(&mut tx, &node.id).await?.ok_or_else(|| AppError::not_found("Item not found"))?;
     tx.commit().await?;
     removed.finish(st);
@@ -812,7 +813,7 @@ async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
         tree::touch(&mut tx, p).await?;
     }
     tree::touch(&mut tx, &dest.id).await?;
-    tree::log(&mut tx, user, Some(top), "move", &format!("→ {}", if dest.parent_id.is_none() { "Root folder" } else { &dest.name })).await?;
+    logs::record_activity(&mut tx, user, Some(top), "move", &format!("→ {}", if dest.parent_id.is_none() { "Root folder" } else { &dest.name })).await?;
     tx.commit().await?;
     Ok((extras, remove))
 }
@@ -905,7 +906,7 @@ async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
     }
     tree::adjust_usage(&mut tx, dest.drive(), bytes).await?;
     tree::touch(&mut tx, &dest.id).await?;
-    tree::log(&mut tx, user, Some(top), "copy", &format!("→ {}", if dest.parent_id.is_none() { "Root folder" } else { &dest.name })).await?;
+    logs::record_activity(&mut tx, user, Some(top), "copy", &format!("→ {}", if dest.parent_id.is_none() { "Root folder" } else { &dest.name })).await?;
     tx.commit().await?;
     Ok(extras)
 }

@@ -30,6 +30,7 @@ use crate::{
     auth::User,
     error::{AppError, AppResult},
     files::Source,
+    logs,
     state::AppState,
     tree::{self, Need, Node},
     util::{format_bytes_u64, guess_mime, new_id, now, split_name, validate_name},
@@ -250,7 +251,7 @@ async fn store_new_file(st: &AppState, user: &User, folder_id: &str, name: &str,
             tree::touch(&mut tx, &folder.id).await?;
             if let Some(n) = tree::get_node(&mut tx, &id).await? {
                 tree::adjust_usage(&mut tx, n.drive(), n.size).await?;
-                tree::log(&mut tx, user, Some(&n), action, "").await?;
+                logs::record_activity(&mut tx, user, Some(&n), action, "").await?;
             }
             tx.commit().await?;
             Ok((id, name))
@@ -278,7 +279,7 @@ async fn store_new_file(st: &AppState, user: &User, folder_id: &str, name: &str,
         tree::touch(&mut tx, &folder.id).await?;
         tree::adjust_usage(&mut tx, folder.drive(), size as i64).await?;
         let node = tree::get_node(&mut tx, &id).await?;
-        tree::log(&mut tx, user, node.as_ref(), action, "").await?;
+        logs::record_activity(&mut tx, user, node.as_ref(), action, "").await?;
         tx.commit().await?;
         Ok((id, name, extra))
     }
@@ -551,7 +552,7 @@ async fn extract_into(st: &AppState, user: &User, job: &str, zip: &Node, parent_
         }
         tree::adjust_usage(&mut tx, parent.drive(), actual).await?;
         let node = tree::get_node(&mut tx, &root).await?;
-        tree::log(&mut tx, user, node.as_ref(), "extract", &zip.name).await?;
+        logs::record_activity(&mut tx, user, node.as_ref(), "extract", &zip.name).await?;
         tx.commit().await?;
         Ok((root, name, extras))
     }

@@ -21,8 +21,8 @@ use crate::{
     auth::Admin,
     db::{get_setting, set_setting},
     error::{AppError, AppResult},
+    logs,
     state::AppState,
-    tree,
 };
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -184,7 +184,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
     let mut tx = st.db.begin().await?;
     store(&mut tx, &s).await?;
     let detail = if s.enabled { format!("Email notifications are sent through {}:{}", s.host, s.port) } else { "Email notifications are off".to_string() };
-    tree::log(&mut tx, &user, None, "settings", &detail).await?;
+    logs::record_activity(&mut tx, &user, None, "settings", &detail).await?;
     tx.commit().await?;
     Ok(Json(admin_view(&s)))
 }

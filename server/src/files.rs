@@ -18,6 +18,7 @@ use tokio_util::io::ReaderStream;
 use crate::{
     auth::User,
     error::{AppError, AppResult},
+    logs,
     state::AppState,
     tree::{self, Node},
     util::{content_disposition, new_id, now},
@@ -328,7 +329,7 @@ async fn store_content(st: AppState, user: User, id: String, body: Bytes, hash: 
         tree::check_quota(&mut tx, node.drive(), body.len() as i64 - node.size).await?;
         let extra = tree::commit_blob(&st, &mut tx, &staged).await?;
         let removed = tree::set_content(&mut tx, crate::versions::Policy::of(&st), &node, &hash, body.len() as i64, user.id).await?;
-        tree::log(&mut tx, &user, Some(&node), "edit", "").await?;
+        logs::record_activity(&mut tx, &user, Some(&node), "edit", "").await?;
         let node = tree::get_node(&mut tx, &node.id).await?.unwrap();
         tx.commit().await?;
         Ok((node, extra, removed))

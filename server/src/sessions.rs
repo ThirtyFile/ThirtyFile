@@ -16,7 +16,6 @@ use crate::{
     error::{AppError, AppResult},
     logs,
     state::AppState,
-    tree,
     util::now,
 };
 
@@ -118,7 +117,7 @@ async fn log_admin_sign_out(st: &AppState, me: &User, user_id: i64, username: &s
     {
         let _w = st.write_lock.lock().await;
         let mut conn = st.db.acquire().await?;
-        tree::log(&mut conn, me, None, "user_update", &format!("{username}: {detail}")).await?;
+        logs::record_activity(&mut conn, me, None, "user_update", &format!("{username}: {detail}")).await?;
     }
     logs::record_login(st, Some(user_id), username, "admin_signout", &client_ip(st, addr, headers), headers);
     Ok(())

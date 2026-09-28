@@ -29,9 +29,8 @@ use crate::{
     auth::{Admin, User, client_ip, open_session},
     db::{NewUser, create_user, get_setting, set_setting},
     error::{AppError, AppResult},
-    logs::record_login_via,
+    logs::{self, record_login_via},
     state::AppState,
-    tree,
     util::{now, random_token},
 };
 
@@ -881,7 +880,7 @@ async fn create_sso_user(st: &AppState, provider: &str, cfg: &ProviderConfig, id
             rule.as_ref().map(|r| format!(", domain rule {}", r.domain)).unwrap_or_default(),
             if joined.is_empty() { String::new() } else { format!(", groups: {}", joined.join(", ")) }
         );
-        tree::log(&mut tx, &user, None, "user_create", &detail).await?;
+        logs::record_activity(&mut tx, &user, None, "user_create", &detail).await?;
     }
     tx.commit().await?;
     tracing::info!("Automatically created account {username} via {} sign-in", label(provider));
@@ -1086,7 +1085,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, hea
         let _w = st.write_lock.lock().await;
         let mut tx = st.db.begin().await?;
         store(&mut tx, &req).await?;
-        tree::log(&mut tx, &user, None, "settings", &detail).await?;
+        logs::record_activity(&mut tx, &user, None, "settings", &detail).await?;
         tx.commit().await?;
     }
     *st.sso.write().unwrap() = req;

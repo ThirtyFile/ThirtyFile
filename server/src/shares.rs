@@ -325,7 +325,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
         options.push(limit_text(req.max_downloads));
     }
     options.extend(access_texts(req.allow_upload, req.drop_only, req.allow_download));
-    tree::log(&mut tx, &user, Some(&node), "share_create", &describe(options)).await?;
+    logs::record_activity(&mut tx, &user, Some(&node), "share_create", &describe(options)).await?;
     tx.commit().await?;
     Ok(Json(info))
 }
@@ -440,7 +440,7 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
     .execute(&mut *tx)
     .await?;
     if !changes.is_empty() {
-        tree::log(&mut tx, &user, Some(&node), "share_update", &format!("/share/{id}: {}", changes.join(", "))).await?;
+        logs::record_activity(&mut tx, &user, Some(&node), "share_update", &format!("/share/{id}: {}", changes.join(", "))).await?;
     }
     let info = share_info(&mut tx, &id).await?;
     tx.commit().await?;
@@ -452,7 +452,7 @@ pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<Strin
     let mut tx = st.db.begin().await?;
     let (_, node) = manageable_share(&mut tx, &user, &id).await?;
     sqlx::query("DELETE FROM shares WHERE id = ?").bind(&id).execute(&mut *tx).await?;
-    tree::log(&mut tx, &user, Some(&node), "share_delete", &format!("/share/{id}")).await?;
+    logs::record_activity(&mut tx, &user, Some(&node), "share_delete", &format!("/share/{id}")).await?;
     tx.commit().await?;
     Ok(Json(json!({ "ok": true })))
 }

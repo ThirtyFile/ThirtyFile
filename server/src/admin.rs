@@ -11,6 +11,7 @@ use crate::{
     auth::{Admin, hash_password, min_password, validate_password},
     db::{NewUser, add_grant, create_user, set_setting},
     error::{AppError, AppResult},
+    logs,
     state::AppState,
     tree,
 };
@@ -142,7 +143,7 @@ pub async fn create(State(st): State<AppState>, Admin(me): Admin, Json(req): Jso
         if !display_name.is_empty() {
             sqlx::query("UPDATE users SET display_name = ? WHERE id = ?").bind(&display_name).bind(id).execute(&mut *tx).await?;
         }
-        tree::log(&mut tx, &me, None, "user_create", &format!("{username} ({})", if req.role == "admin" { "administrator" } else { "standard user" })).await?;
+        logs::record_activity(&mut tx, &me, None, "user_create", &format!("{username} ({})", if req.role == "admin" { "administrator" } else { "standard user" })).await?;
         tx.commit().await?;
         id
     };
@@ -207,7 +208,7 @@ pub async fn update(
         let _w = st.write_lock.lock().await;
         let mut tx = st.db.begin().await?;
         if !changes.is_empty() {
-            tree::log(&mut tx, &me, None, "user_update", &format!("{}: {}", target.username, changes.join(", "))).await?;
+            logs::record_activity(&mut tx, &me, None, "user_update", &format!("{}: {}", target.username, changes.join(", "))).await?;
         }
         sqlx::query(
             "UPDATE users SET
@@ -313,7 +314,7 @@ pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     // The trash shows "—" for items deleted by a removed account (a later account could get the same id)
     sqlx::query("UPDATE nodes SET trashed_by = NULL WHERE trashed_by = ?").bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM users WHERE id = ?").bind(id).execute(&mut *tx).await?;
-    tree::log(&mut tx, &me, None, "user_delete", &detail).await?;
+    logs::record_activity(&mut tx, &me, None, "user_delete", &detail).await?;
     tx.commit().await?;
     if personal.is_some() {
         tree::purge_detached_later(&st);
@@ -519,11 +520,11 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
         let mut tx = st.db.begin().await?;
         if let Some(enabled) = req.shared_enabled {
             sqlx::query("UPDATE drives SET disabled = ? WHERE kind = 'company'").bind(!enabled).execute(&mut *tx).await?;
-            tree::log(&mut tx, &user, None, "settings", if enabled { "Enabled All files" } else { "Disabled All files" }).await?;
+            logs::record_activity(&mut tx, &user, None, "settings", if enabled { "Enabled All files" } else { "Disabled All files" }).await?;
         }
         if let Some(allow) = req.allow_user_drives {
             set_setting(&mut tx, "allow_user_drives", if allow { "1" } else { "0" }).await?;
-            tree::log(&mut tx, &user, None, "settings", if allow { "Allowed users to create spaces" } else { "Only administrators can create spaces" }).await?;
+            logs::record_activity(&mut tx, &user, None, "settings", if allow { "Allowed users to create spaces" } else { "Only administrators can create spaces" }).await?;
         }
         if let Some(q) = req.default_user_quota {
             if q < 0 {
@@ -531,12 +532,12 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
             }
             set_setting(&mut tx, "default_user_quota", &q.to_string()).await?;
             let label = if q == 0 { "Unlimited".to_string() } else { crate::util::format_bytes(q) };
-            tree::log(&mut tx, &user, None, "settings", &format!("Default space size for new users: {label}")).await?;
+            logs::record_activity(&mut tx, &user, None, "settings", &format!("Default space size for new users: {label}")).await?;
         }
         let public_url = req.public_url.as_deref().map(normalize_public_url).transpose()?;
         if let Some(url) = &public_url {
             set_setting(&mut tx, "public_url", url).await?;
-            tree::log(&mut tx, &user, None, "settings", &format!("Site URL: {}", if url.is_empty() { "Use the browser's current URL" } else { url })).await?;
+            logs::record_activity(&mut tx, &user, None, "settings", &format!("Site URL: {}", if url.is_empty() { "Use the browser's current URL" } else { url })).await?;
         }
         if let Some(lang) = &req.default_lang {
             if !LANGS.contains(&lang.as_str()) {
@@ -548,31 +549,31 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
                 "zh-TW" => "Traditional Chinese",
                 _ => "Follow the browser language",
             };
-            tree::log(&mut tx, &user, None, "settings", &format!("Default language: {label}")).await?;
+            logs::record_activity(&mut tx, &user, None, "settings", &format!("Default language: {label}")).await?;
         }
         if let Some(m) = req.scan_minutes {
             if !(0..=1440).contains(&m) {
                 return Err(AppError::bad_request("Enter a number of minutes from 0 to 1440"));
             }
             set_setting(&mut tx, "scan_minutes", &m.to_string()).await?;
-            tree::log(&mut tx, &user, None, "settings", &format!("Folder spaces are checked for changes every {m} minutes")).await?;
+            logs::record_activity(&mut tx, &user, None, "settings", &format!("Folder spaces are checked for changes every {m} minutes")).await?;
         }
         if let Some(require) = req.require_two_factor {
             set_setting(&mut tx, "require_two_factor", if require { "1" } else { "0" }).await?;
             let detail = if require { "Two-factor sign-in required for password accounts" } else { "Two-factor sign-in optional" };
-            tree::log(&mut tx, &user, None, "settings", detail).await?;
+            logs::record_activity(&mut tx, &user, None, "settings", detail).await?;
         }
         if let Some(n) = req.min_password_length {
             if !(crate::auth::MIN_PASSWORD..=crate::auth::MAX_MIN_PASSWORD).contains(&n) {
                 return Err(AppError::bad_request("The minimum password length must be from 6 to 64 characters"));
             }
             set_setting(&mut tx, "min_password_length", &n.to_string()).await?;
-            tree::log(&mut tx, &user, None, "settings", &format!("Minimum password length: {n} characters")).await?;
+            logs::record_activity(&mut tx, &user, None, "settings", &format!("Minimum password length: {n} characters")).await?;
         }
         if let Some(required) = req.share_password_required {
             set_setting(&mut tx, "share_password_required", if required { "1" } else { "0" }).await?;
             let detail = if required { "Share links must have a password" } else { "Share links don't need a password" };
-            tree::log(&mut tx, &user, None, "settings", detail).await?;
+            logs::record_activity(&mut tx, &user, None, "settings", detail).await?;
         }
         if let Some(days) = req.share_max_days {
             if !(0..=crate::shares::MAX_EXPIRY_DAYS).contains(&days) {
@@ -584,11 +585,11 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
                 1 => "Share links must expire within 1 day".to_string(),
                 n => format!("Share links must expire within {n} days"),
             };
-            tree::log(&mut tx, &user, None, "settings", &detail).await?;
+            logs::record_activity(&mut tx, &user, None, "settings", &detail).await?;
         }
         if let Some(on) = req.public_links {
             set_setting(&mut tx, "public_links", if on { "1" } else { "0" }).await?;
-            tree::log(&mut tx, &user, None, "settings", if on { "Allowed public share links" } else { "Turned off public share links" }).await?;
+            logs::record_activity(&mut tx, &user, None, "settings", if on { "Allowed public share links" } else { "Turned off public share links" }).await?;
         }
         if let Some(n) = req.version_keep {
             if !(0..=crate::versions::MAX_KEEP).contains(&n) {
@@ -596,7 +597,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
             }
             set_setting(&mut tx, "version_keep", &n.to_string()).await?;
             let detail = if n == 0 { "Earlier versions of files aren't kept".to_string() } else { format!("Earlier versions kept per file: {n}") };
-            tree::log(&mut tx, &user, None, "settings", &detail).await?;
+            logs::record_activity(&mut tx, &user, None, "settings", &detail).await?;
         }
         if let Some(d) = req.version_days {
             if !(0..=crate::versions::MAX_DAYS).contains(&d) {
@@ -604,7 +605,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
             }
             set_setting(&mut tx, "version_days", &d.to_string()).await?;
             let detail = if d == 0 { "Earlier versions of files are kept without a time limit".to_string() } else { format!("Earlier versions of files are kept for {d} days") };
-            tree::log(&mut tx, &user, None, "settings", &detail).await?;
+            logs::record_activity(&mut tx, &user, None, "settings", &detail).await?;
         }
         tx.commit().await?;
         let mut s = st.system.write().unwrap();

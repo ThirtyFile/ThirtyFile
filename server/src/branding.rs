@@ -17,8 +17,8 @@ use crate::{
     auth::Admin,
     db::{get_setting, set_setting},
     error::{AppError, AppResult},
+    logs,
     state::AppState,
-    tree,
     util::now,
 };
 
@@ -94,7 +94,7 @@ async fn save(st: &AppState, b: &Branding, detail: &str, user: &crate::auth::Use
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
     set_setting(&mut tx, "branding", &serde_json::to_string(b).unwrap()).await?;
-    tree::log(&mut tx, user, None, "settings", detail).await?;
+    logs::record_activity(&mut tx, user, None, "settings", detail).await?;
     tx.commit().await?;
     *st.branding.write().unwrap() = b.clone();
     Ok(())

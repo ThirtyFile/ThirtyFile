@@ -33,7 +33,6 @@ use crate::{
     error::{AppError, AppResult},
     logs,
     state::AppState,
-    tree,
     util::{now, random_token, sha256_hex},
 };
 
@@ -529,7 +528,7 @@ pub async fn admin_reset(
         {
             let _w = st.write_lock.lock().await;
             let mut conn = st.db.acquire().await?;
-            tree::log(&mut conn, &me, None, "user_update", &format!("{username}: reset two-factor sign-in")).await?;
+            logs::record_activity(&mut conn, &me, None, "user_update", &format!("{username}: reset two-factor sign-in")).await?;
         }
         logs::record_login(&st, Some(user_id), &username, "2fa_reset", &client_ip(&st, addr, &headers), &headers);
     }

@@ -15,6 +15,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::{
     auth::Admin,
     error::{AppError, AppResult},
+    logs,
     state::{AppState, LocationHealth, MigrationStatus},
     storage::{self, Storage},
     tree,
@@ -409,7 +410,7 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(req): J
             .bind(now())
             .execute(&mut *tx)
             .await?;
-        tree::log(&mut tx, &user, None, "storage_create", &name).await?;
+        logs::record_activity(&mut tx, &user, None, "storage_create", &name).await?;
         tx.commit().await?;
     }
     st.storages.write().unwrap().insert(id.clone(), backend);
@@ -446,7 +447,7 @@ pub async fn update(
         if let Some((_, cfg)) = &new_backend {
             sqlx::query("UPDATE storage_locations SET config = ? WHERE id = ?").bind(sealed_config(cfg)).bind(&id).execute(&mut *tx).await?;
         }
-        tree::log(&mut tx, &user, None, "storage_update", &name).await?;
+        logs::record_activity(&mut tx, &user, None, "storage_update", &name).await?;
         tx.commit().await?;
     }
     if let Some((backend, _)) = new_backend {
@@ -468,7 +469,7 @@ pub async fn set_default(State(st): State<AppState>, Admin(user): Admin, Path(id
         .await?
         .ok_or_else(|| AppError::not_found("Storage location not found"))?;
     sqlx::query("UPDATE storage_locations SET is_default = (id = ?)").bind(&id).execute(&mut *tx).await?;
-    tree::log(&mut tx, &user, None, "storage_default", &name).await?;
+    logs::record_activity(&mut tx, &user, None, "storage_default", &name).await?;
     tx.commit().await?;
     *st.default_location.write().unwrap() = id;
     Ok(Json(json!({ "ok": true })))
@@ -507,7 +508,7 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
     sqlx::query("DELETE FROM storage_locations WHERE id = ?").bind(&id).execute(&mut *tx).await?;
     // Content that couldn't be deleted there stays in that storage: ThirtyFile no longer connects to it
     sqlx::query("DELETE FROM pending_blob_deletes WHERE location_id = ?").bind(&id).execute(&mut *tx).await?;
-    tree::log(&mut tx, &user, None, "storage_delete", &name).await?;
+    logs::record_activity(&mut tx, &user, None, "storage_delete", &name).await?;
     tx.commit().await?;
     st.storages.write().unwrap().remove(&id);
     st.location_health.lock().unwrap().remove(&id);
@@ -553,7 +554,7 @@ pub async fn set_drive_location(
         let drive = tree::get_drive(&mut tx, &drive_id).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
         sqlx::query("UPDATE drives SET location_id = ? WHERE id = ?").bind(&req.location_id).bind(&drive_id).execute(&mut *tx).await?;
         let root = tree::get_node(&mut tx, &drive.root_id).await?;
-        tree::log(&mut tx, &user, root.as_ref(), "drive_location", req.location_id.as_deref().unwrap_or("Default")).await?;
+        logs::record_activity(&mut tx, &user, root.as_ref(), "drive_location", req.location_id.as_deref().unwrap_or("Default")).await?;
         tx.commit().await?;
     }
     if req.migrate {

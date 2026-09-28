@@ -14,6 +14,7 @@ use crate::{
     auth::{Admin, User},
     db::{add_grant, create_drive},
     error::{AppError, AppResult},
+    logs,
     state::AppState,
     tree::{self, DRIVE_COLS, Drive, Node, Role},
     util::{now, validate_name},
@@ -193,7 +194,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
         sqlx::query("UPDATE drives SET read_only = ? WHERE id = ?").bind(req.read_only).bind(&drive_id).execute(&mut *tx).await?;
     }
     let root = tree::get_node(&mut tx, &root_id).await?.unwrap();
-    tree::log(&mut tx, &user, Some(&root), "drive_create", source.as_deref().unwrap_or_default()).await?;
+    logs::record_activity(&mut tx, &user, Some(&root), "drive_create", source.as_deref().unwrap_or_default()).await?;
     let drive = tree::get_drive(&mut tx, &drive_id).await?.unwrap();
     let info = drive_info(&st, &mut tx, drive, Some(Role::Owner)).await?;
     tx.commit().await?;
@@ -275,7 +276,7 @@ pub async fn update(
         sqlx::query("UPDATE drives SET read_only = ? WHERE id = ?").bind(read_only).bind(&drive.id).execute(&mut *tx).await?;
     }
     let root = tree::get_node(&mut tx, &drive.root_id).await?.unwrap();
-    tree::log(&mut tx, &user, Some(&root), "drive_update", "").await?;
+    logs::record_activity(&mut tx, &user, Some(&root), "drive_update", "").await?;
     let drive = tree::get_drive(&mut tx, &drive.id).await?.unwrap();
     let info = drive_info(&st, &mut tx, drive, role).await?;
     tx.commit().await?;
@@ -296,7 +297,7 @@ pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<Strin
     }
     // The space disappears now; its files are deleted in the background, a batch at a time
     sqlx::query("DELETE FROM drives WHERE id = ?").bind(&drive.id).execute(&mut *tx).await?;
-    tree::log(&mut tx, &user, None, "drive_delete", &drive.name).await?;
+    logs::record_activity(&mut tx, &user, None, "drive_delete", &drive.name).await?;
     tx.commit().await?;
     crate::folders::spaces_changed();
     tree::purge_detached_later(&st);
@@ -492,7 +493,7 @@ pub async fn grant(
     } else {
         Vec::new()
     };
-    tree::log(&mut tx, &user, Some(&node), "grant", &format!("{name} → {}", role_label(role))).await?;
+    logs::record_activity(&mut tx, &user, Some(&node), "grant", &format!("{name} → {}", role_label(role))).await?;
     tx.commit().await?;
     crate::notify::send_later(&st, emails);
     Ok(Json(json!({ "ok": true })))
@@ -528,7 +529,7 @@ pub async fn revoke(State(st): State<AppState>, user: User, Path(grant_id): Path
     }
     let name = principal_name(&mut tx, &principal_type, principal_id).await?.unwrap_or_default();
     sqlx::query("DELETE FROM grants WHERE id = ?").bind(grant_id).execute(&mut *tx).await?;
-    tree::log(&mut tx, &user, Some(&node), "revoke", &name).await?;
+    logs::record_activity(&mut tx, &user, Some(&node), "revoke", &name).await?;
     tx.commit().await?;
     Ok(Json(json!({ "ok": true })))
 }
@@ -653,7 +654,7 @@ pub async fn create_group(State(st): State<AppState>, Admin(user): Admin, Json(r
         .await
         .map_err(|e| if matches!(&e, sqlx::Error::Database(d) if d.is_unique_violation()) { AppError::conflict("A group with this name already exists") } else { e.into() })?;
     set_members(&mut tx, id, req.members.as_deref().unwrap_or_default()).await?;
-    tree::log(&mut tx, &user, None, "group_create", &name).await?;
+    logs::record_activity(&mut tx, &user, None, "group_create", &name).await?;
     tx.commit().await?;
     Ok(Json(json!({ "id": id })))
 }
@@ -682,7 +683,7 @@ pub async fn update_group(
         set_members(&mut tx, id, m).await?;
     }
     let name = principal_name(&mut tx, "group", id).await?.unwrap_or_default();
-    tree::log(&mut tx, &user, None, "group_update", &name).await?;
+    logs::record_activity(&mut tx, &user, None, "group_update", &name).await?;
     tx.commit().await?;
     Ok(Json(json!({ "ok": true })))
 }
@@ -699,7 +700,7 @@ pub async fn delete_group(State(st): State<AppState>, Admin(user): Admin, Path(i
     if changed {
         crate::sso::store(&mut tx, &sso).await?;
     }
-    tree::log(&mut tx, &user, None, "group_delete", &name).await?;
+    logs::record_activity(&mut tx, &user, None, "group_delete", &name).await?;
     tx.commit().await?;
     if changed {
         *st.sso.write().unwrap() = sso;

@@ -15,6 +15,7 @@ use crate::{
     auth::User,
     error::{AppError, AppResult},
     fsops, paths,
+    logs,
     state::AppState,
     tree::{self, Crumb, NODE_COLS, Need, Node, Role},
     util::{new_id, now, validate_name},
@@ -374,7 +375,7 @@ pub async fn create_folder(State(st): State<AppState>, user: User, Json(req): Js
     }
     let id = tree::create_folder(&mut tx, user.id, &parent.id, &name).await?;
     let node = tree::get_node(&mut tx, &id).await?.unwrap();
-    tree::log(&mut tx, &user, Some(&node), "create_folder", "").await?;
+    logs::record_activity(&mut tx, &user, Some(&node), "create_folder", "").await?;
     tx.commit().await?;
     Ok(Json(node))
 }
@@ -419,7 +420,7 @@ pub async fn rename(
         .bind(&node.id)
         .execute(&mut *tx)
         .await?;
-    tree::log(&mut tx, &user, Some(&node), "rename", &format!("→ {name}")).await?;
+    logs::record_activity(&mut tx, &user, Some(&node), "rename", &format!("→ {name}")).await?;
     let node = tree::get_node(&mut tx, &node.id).await?.unwrap();
     tx.commit().await?;
     Ok(Json(node))
@@ -561,7 +562,7 @@ pub async fn move_nodes(State(st): State<AppState>, user: User, Json(req): Json<
         sqlx::query("UPDATE nodes SET parent_id = ?, name = ? WHERE id = ?").bind(&dest.id).bind(&name).bind(&node.id).execute(&mut *tx).await?;
         node.name = name;
         tree::touch(&mut tx, node.parent_id.as_deref().unwrap()).await?;
-        tree::log(&mut tx, &user, Some(&node), "move", &format!("→ {}", if dest.parent_id.is_none() { "Root folder" } else { &dest.name })).await?;
+        logs::record_activity(&mut tx, &user, Some(&node), "move", &format!("→ {}", if dest.parent_id.is_none() { "Root folder" } else { &dest.name })).await?;
     }
     tree::touch(&mut tx, &dest.id).await?;
     tx.commit().await?;
@@ -651,7 +652,7 @@ pub async fn copy_nodes(State(st): State<AppState>, user: User, Json(req): Json<
         .execute(&mut *tx)
         .await?;
         tree::add_blob_refs(&mut tx, &blobs).await?;
-        tree::log(&mut tx, &user, Some(&nodes[0]), "copy", &format!("→ {}", if dest.parent_id.is_none() { "Root folder" } else { &dest.name })).await?;
+        logs::record_activity(&mut tx, &user, Some(&nodes[0]), "copy", &format!("→ {}", if dest.parent_id.is_none() { "Root folder" } else { &dest.name })).await?;
     }
     tree::adjust_usage(&mut tx, dest.drive(), total).await?;
     tree::touch(&mut tx, &dest.id).await?;
@@ -697,7 +698,7 @@ async fn trash_one(conn: &mut SqliteConnection, user: &User, node: &Node, detail
     .await?;
     sqlx::query("UPDATE nodes SET trash_root = 1, trashed_by = ? WHERE id = ?").bind(user.id).bind(&node.id).execute(&mut *conn).await?;
     tree::touch(conn, node.parent_id.as_deref().unwrap()).await?;
-    tree::log(conn, user, Some(node), "trash", detail).await?;
+    logs::record_activity(conn, user, Some(node), "trash", detail).await?;
     Ok(())
 }
 
@@ -999,7 +1000,7 @@ pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<Bat
         .execute(&mut *tx)
         .await?;
         tree::touch(&mut tx, &parent_id).await?;
-        tree::log(&mut tx, &user, Some(&node), "restore", "").await?;
+        logs::record_activity(&mut tx, &user, Some(&node), "restore", "").await?;
     }
     tx.commit().await?;
     Ok(Json(json!({ "ok": true })))
@@ -1012,7 +1013,7 @@ pub async fn delete_forever(State(st): State<AppState>, user: User, Json(req): J
     let mut on_disk = Vec::new();
     for id in &outermost(&mut tx, &req.ids()?).await? {
         let (node, _) = trash_root(&mut tx, &user, id, Need::Delete).await?;
-        tree::log(&mut tx, &user, Some(&node), "delete", "").await?;
+        logs::record_activity(&mut tx, &user, Some(&node), "delete", "").await?;
         on_disk.extend(fsops::trash_folder(&node));
         orphans.extend(tree::purge_subtree(&mut tx, &node.id).await?);
     }
@@ -1071,7 +1072,7 @@ pub async fn empty_trash(State(st): State<AppState>, user: User) -> AppResult<Js
     if total > 0 {
         let _w = st.write_lock.lock().await;
         let mut tx = st.db.begin().await?;
-        tree::log(&mut tx, &user, None, "empty_trash", &format!("{total} {}", if total == 1 { "item" } else { "items" })).await?;
+        logs::record_activity(&mut tx, &user, None, "empty_trash", &format!("{total} {}", if total == 1 { "item" } else { "items" })).await?;
         tx.commit().await?;
     }
     Ok(Json(json!({ "ok": true, "deleted": total })))
@@ -1977,7 +1978,7 @@ mod tests {
         {
             let mut c = env.st.db.acquire().await.unwrap();
             let node = tree::get_node(&mut c, &edited).await.unwrap().unwrap();
-            tree::log(&mut c, &ben, Some(&node), "edit", "").await.unwrap();
+            logs::record_activity(&mut c, &ben, Some(&node), "edit", "").await.unwrap();
         }
         sqlx::query("UPDATE activity SET at = ?").bind(t - 200).execute(&env.st.db).await.unwrap();
         let names = |who: User| {

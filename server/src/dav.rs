@@ -38,6 +38,7 @@ use crate::{
     auth::User,
     error::{AppError, AppResult},
     files, fsops, nodes,
+    logs,
     paths::{Found, SHARED, Target, child_named, resolve, tops},
     state::AppState,
     tokens,
@@ -777,7 +778,7 @@ async fn store_content(st: &AppState, user: &User, parent: &Node, name: &str, tm
                 // The content it had is kept as an earlier version
                 let removed = tree::set_content(&mut tx, crate::versions::Policy::of(st), &n, &hash, size, user.id).await?;
                 tree::touch(&mut tx, &folder.id).await?;
-                tree::log(&mut tx, user, Some(&n), "edit", "").await?;
+                logs::record_activity(&mut tx, user, Some(&n), "edit", "").await?;
                 (false, extra, removed)
             }
             None => {
@@ -801,7 +802,7 @@ async fn store_content(st: &AppState, user: &User, parent: &Node, name: &str, tm
                 tree::touch(&mut tx, &folder.id).await?;
                 tree::adjust_usage(&mut tx, folder.drive(), size).await?;
                 let node = tree::get_node(&mut tx, &id).await?;
-                tree::log(&mut tx, user, node.as_ref(), "upload", "").await?;
+                logs::record_activity(&mut tx, user, node.as_ref(), "upload", "").await?;
                 (true, extra, crate::versions::Removed::default())
             }
         };
@@ -842,7 +843,7 @@ async fn store_in_folder(st: &AppState, user: &User, parent: &Node, name: &str, 
                 removed = fsops::replace_file(&mut tx, crate::versions::Policy::of(st), &staged, &n, user.id).await?;
                 let new_size = tree::get_node(&mut tx, &n.id).await?.map_or(n.size, |x| x.size);
                 tree::adjust_usage(&mut tx, n.drive(), new_size - n.size).await?;
-                tree::log(&mut tx, user, Some(&n), "edit", "").await?;
+                logs::record_activity(&mut tx, user, Some(&n), "edit", "").await?;
                 false
             }
             None => {
@@ -851,7 +852,7 @@ async fn store_in_folder(st: &AppState, user: &User, parent: &Node, name: &str, 
                 tree::touch(&mut tx, &folder.id).await?;
                 if let Some(n) = tree::get_node(&mut tx, &id).await? {
                     tree::adjust_usage(&mut tx, n.drive(), n.size).await?;
-                    tree::log(&mut tx, user, Some(&n), "upload", "").await?;
+                    logs::record_activity(&mut tx, user, Some(&n), "upload", "").await?;
                 }
                 true
             }
