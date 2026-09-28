@@ -83,6 +83,7 @@ async fn make_env(space_folders: bool) -> TestEnv {
         location_health: Default::default(),
         sso: Default::default(),
         sso_pending: Default::default(),
+        twofactor_setups: Default::default(),
         archive_lock: Default::default(),
         share_views: Default::default(),
         download_links: Default::default(),

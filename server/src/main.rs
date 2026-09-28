@@ -417,6 +417,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         location_health: Default::default(),
         sso: std::sync::RwLock::new(sso_settings),
         sso_pending: Default::default(),
+        twofactor_setups: Default::default(),
         archive_lock: Default::default(),
         share_views: Default::default(),
         download_links: Default::default(),
@@ -913,7 +914,8 @@ mod tests {
         let res = health(axum::extract::State(env.st.clone())).await;
         assert_eq!(res.status(), StatusCode::OK);
         let v = body(res).await;
-        assert!(v["disks"]["data"]["total_bytes"].as_u64().unwrap() > 0);
+        // Disk space is only read on Unix
+        assert!(!cfg!(unix) || v["disks"]["data"]["total_bytes"].as_u64().unwrap() > 0);
         env.st.location_health.lock().unwrap().insert("nas".into(), state::LocationHealth { ok: false, error: Some("secret host".into()), checked_at: 0 });
         let v = body(health(axum::extract::State(env.st.clone())).await).await;
         assert_eq!((v["status"].as_str(), v["locations"]["nas"].as_str()), (Some("degraded"), Some("offline")));

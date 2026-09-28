@@ -82,6 +82,8 @@ pub struct Inner {
     /// Third-party sign-in settings and sign-ins in progress
     pub sso: RwLock<crate::sso::SsoSettings>,
     pub sso_pending: crate::sso::PendingMap,
+    /// Two-factor sign-in being set up from the account menu
+    pub twofactor_setups: crate::twofactor::SetupMap,
     /// Sign-in and share-access events, written to the database in batches by one background task (see `logs::spawn_writer`)
     pub log_tx: tokio::sync::mpsc::Sender<crate::logs::LogEvent>,
 }

@@ -391,10 +391,7 @@ pub async fn login_code(
 // ───────────── My two-factor sign-in ─────────────
 
 /// Secrets shown for setting up from the account menu, waiting for their first code: user → (secret, shown at)
-fn setups() -> &'static Mutex<HashMap<i64, (String, Instant)>> {
-    static S: OnceLock<Mutex<HashMap<i64, (String, Instant)>>> = OnceLock::new();
-    S.get_or_init(Default::default)
-}
+pub type SetupMap = Mutex<HashMap<i64, (String, Instant)>>;
 
 #[derive(Serialize)]
 pub struct Status {
@@ -434,7 +431,7 @@ pub async fn start_setup(State(st): State<AppState>, user: User, Json(req): Json
     auth::confirm_password(&st, user.id, req.password).await?;
     let secret = new_secret();
     {
-        let mut map = setups().lock().unwrap();
+        let mut map = st.twofactor_setups.lock().unwrap();
         map.retain(|_, (_, at)| at.elapsed() < SETUP_TTL);
         map.insert(user.id, (secret.clone(), Instant::now()));
     }
@@ -454,7 +451,7 @@ pub async fn enable(
     headers: HeaderMap,
     Json(req): Json<EnableReq>,
 ) -> AppResult<Json<Value>> {
-    let secret = setups().lock().unwrap().get(&user.id).filter(|(_, at)| at.elapsed() < SETUP_TTL).map(|(s, _)| s.clone());
+    let secret = st.twofactor_setups.lock().unwrap().get(&user.id).filter(|(_, at)| at.elapsed() < SETUP_TTL).map(|(s, _)| s.clone());
     let Some(secret) = secret else { return Err(AppError::bad_request("The setup has expired. Start again.")) };
     let key = format!("2fa:{}", user.id);
     if !auth::begin_attempt(&st, &key, ACCOUNT_LIMIT) {
@@ -464,7 +461,7 @@ pub async fn enable(
         return Err(AppError::bad_request("Wrong code. Check that the time on your phone is right, and try again."));
     };
     auth::attempt_succeeded(&st, &key);
-    setups().lock().unwrap().remove(&user.id);
+    st.twofactor_setups.lock().unwrap().remove(&user.id);
     let codes = turn_on(&st, user.id, &secret, step).await?;
     logs::record_login(&st, Some(user.id), &user.username, "2fa_enabled", &client_ip(&st, addr, &headers), &headers);
     Ok(Json(json!({ "recovery_codes": codes })))

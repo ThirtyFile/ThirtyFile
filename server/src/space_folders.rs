@@ -189,7 +189,7 @@ mod tests {
     }
 
     fn folder(storage: &Path, rel: &str) -> Option<String> {
-        Some(storage.join(rel).to_string_lossy().into_owned())
+        Some(rel.split('/').fold(storage.to_path_buf(), |p, part| p.join(part)).to_string_lossy().into_owned())
     }
 
     #[tokio::test]
@@ -229,7 +229,7 @@ mod tests {
         let _ = crate::drives::delete(State(env.st.clone()), admin.clone(), UrlPath(path(&sales))).await.unwrap();
         assert_eq!(std::fs::read(storage.join("teams/Sales/plan.txt")).unwrap(), b"keep me");
         let (detail,): (String,) = sqlx::query_as("SELECT detail FROM activity WHERE action = 'drive_delete'").fetch_one(&env.st.db).await.unwrap();
-        assert_eq!(detail, format!("Sales and marketing (its folder on the server is kept: {})", storage.join("teams/Sales").display()));
+        assert_eq!(detail, format!("Sales and marketing (its folder on the server is kept: {})", storage.join("teams").join("Sales").display()));
         let third = new_team(&env, "Sales").await;
         let (source,): (String,) = sqlx::query_as("SELECT source_path FROM drives WHERE id = ?").bind(path(&third)).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(Some(source), folder(&storage, "teams/Sales (3)"));
