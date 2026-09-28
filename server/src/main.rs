@@ -16,7 +16,6 @@ mod mail;
 mod notify;
 mod branding;
 mod check;
-mod convert;
 mod ftp;
 mod sftp;
 mod sso;
@@ -144,14 +143,6 @@ enum Command {
         #[arg(long)]
         verify: bool,
     },
-    /// Turn the spaces kept in the content store on this server's disks (from 0.1 and 0.2) into ordinary folders in
-    /// the storage folder: company, teams/<name> and users/<name>. Stop ThirtyFile first. It can be stopped and run
-    /// again; what is done is skipped. Spaces on S3, SFTP or FTP stay as they are
-    Convert {
-        /// Only list what would be done
-        #[arg(long)]
-        dry_run: bool,
-    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -182,15 +173,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(if runtime()?.block_on(health_probe(&cfg.addr)) { 0 } else { 1 });
     }
 
-    let storage = storage_dir(&cfg.data, cfg.storage.as_deref());
+    // The built-in storage location's folder
+    let storage = cfg.storage.clone().unwrap_or_else(|| cfg.data.join("blobs"));
 
-    // Before the runtime starts its threads, so that all of them run as the new user. The storage folder set is
-    // given too when 0.1's /data/blobs is still in use: new spaces get their folders there
+    // Before the runtime starts its threads, so that all of them run as the new user
     #[cfg(unix)]
     if let Some(user) = &cfg.run_as {
-        let mut folders = vec![cfg.data.as_path(), storage.as_path()];
-        folders.extend(cfg.storage.as_deref().filter(|s| *s != storage));
-        privileges::drop_to(user, &folders)?;
+        privileges::drop_to(user, &[cfg.data.as_path(), storage.as_path()])?;
     }
 
     runtime()?.block_on(run(cfg, storage))
@@ -215,7 +204,7 @@ async fn rotate_secret_key(db: &sqlx::SqlitePool, source: &secrets::KeySource) -
         }
         secrets::KeySource::Env(_) => None,
     };
-    db::reseal_secrets(db, &new_key, true).await?;
+    db::reseal_secrets(db, &new_key).await?;
     if let Some((staged, path)) = staged {
         std::fs::rename(&staged, &path)?;
         println!("The saved passwords and keys are encrypted with a new key, saved in {}. Back it up again.", path.display());
@@ -225,39 +214,20 @@ async fn rotate_secret_key(db: &sqlx::SqlitePool, source: &secrets::KeySource) -
     Ok(())
 }
 
-/// Holds `thirtyfile.lock` in the data folder while the server or `thirtyfile convert` runs, so they never run at the
-/// same time. Where the file system can't lock files, nothing is held.
+/// Holds `thirtyfile.lock` in the data folder while the server runs, so two never run on the same data at the same
+/// time. Where the file system can't lock files, nothing is held.
 fn lock_data(data: &std::path::Path) -> Result<Option<std::fs::File>, Box<dyn std::error::Error>> {
     let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(data.join("thirtyfile.lock"))?;
     match file.try_lock() {
         Ok(()) => Ok(Some(file)),
         Err(std::fs::TryLockError::WouldBlock) => {
-            Err("ThirtyFile, or `thirtyfile convert`, is already running with this data folder. Stop it first.".into())
+            Err("ThirtyFile is already running with this data folder. Stop it first.".into())
         }
         Err(std::fs::TryLockError::Error(e)) => {
             tracing::warn!("Couldn't lock the data folder ({e}); make sure only one ThirtyFile uses it");
             Ok(None)
         }
     }
-}
-
-/// Where the built-in storage location keeps file contents. Version 0.1.0 always used blobs in the
-/// data directory; when files are still there, they stay in use so that nothing seems to disappear.
-fn storage_dir(data: &std::path::Path, configured: Option<&std::path::Path>) -> PathBuf {
-    let legacy = data.join("blobs");
-    let Some(dir) = configured.filter(|d| *d != legacy) else {
-        return legacy;
-    };
-    let legacy_in_use = std::fs::read_dir(&legacy).is_ok_and(|mut entries| entries.next().is_some());
-    if legacy_in_use {
-        tracing::warn!(
-            "Files are still kept in {}, so that folder is used instead of {}. To use {1}, stop ThirtyFile, move everything from {0} into {1} and start it again.",
-            legacy.display(),
-            dir.display()
-        );
-        return legacy;
-    }
-    dir.to_path_buf()
 }
 
 async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
@@ -277,26 +247,8 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         std::process::exit(if problems == 0 { 0 } else { 1 });
     }
 
-    if let Some(Command::Convert { dry_run }) = &cfg.command {
-        let _lock = lock_data(&cfg.data)?;
-        let (storages, _) = locations::load_all(&db, &storage).await?;
-        // The built-in location's spaces go to the storage folder set now: for 0.1, whose files are still in /data/blobs,
-        // that is /storage rather than the folder in use
-        let target = std::path::absolute(cfg.storage.as_ref().unwrap_or(&storage))?;
-        let report = convert::run(&db, &storages, &target, &cfg.data, *dry_run, |name| eprintln!("Converting the space \"{name}\"…"))
-            .await
-            .map_err(|e| e.to_string())?;
-        let problems = convert::print(&report, *dry_run);
-        std::process::exit(if problems == 0 { 0 } else { 1 });
-    }
-
     if let Some(Command::RotateSecretKey) = &cfg.command {
         return rotate_secret_key(&db, &key_source).await;
-    }
-    // Secrets saved before encryption existed are encrypted now (nothing to do afterwards)
-    let sealed = db::reseal_secrets(&db, &key, false).await?;
-    if sealed > 0 {
-        tracing::info!("Encrypted {sealed} saved password(s) and key(s) in the database");
     }
 
     if let Some(Command::Backup { file }) = &cfg.command {
@@ -360,10 +312,8 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         ),
         (None, None) => None,
     };
-    // New spaces of the built-in location get their folders in the storage folder set now: for 0.1, whose content is
-    // still in /data/blobs, that is /storage (as for `thirtyfile convert`)
-    let space_folders = std::path::absolute(cfg.storage.as_ref().unwrap_or(&storage))?;
-    std::fs::create_dir_all(&space_folders)?;
+    // New spaces of the built-in location get their folders in the storage folder
+    let space_folders = std::path::absolute(&storage)?;
     db::bootstrap_admin(&db, admin_password.as_deref(), Some(&space_folders)).await.map_err(|e| e.message)?;
     db::create_company_space(&db, Some(&space_folders)).await.map_err(|e| e.message)?;
     let secret = db::load_secret(&db).await?;
@@ -373,12 +323,6 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         tracing::warn!("THIRTYFILE_TRUST_PROXY is on but THIRTYFILE_SECURE_COOKIE is off: if the proxy serves HTTPS, set THIRTYFILE_SECURE_COOKIE=true");
     }
     let (storages, default_location) = locations::load_all(&db, &storage).await?;
-    match convert::pending(&db).await {
-        Ok(n) if n > 0 => tracing::info!(
-            "{n} space(s) keep their files in the content store on this server's disk. `thirtyfile convert` turns them into ordinary folders (see the guide Upgrade and backup)"
-        ),
-        _ => {}
-    }
     let log_settings = logs::load_settings(&db).await;
     let branding = branding::load(&db).await;
     let sso_settings = sso::load(&db).await;
@@ -968,20 +912,6 @@ mod tests {
         let cmd = Config::command();
         let arg = cmd.get_arguments().find(|a| a.get_id() == "admin_password").unwrap();
         assert!(arg.is_hide_env_values_set());
-    }
-
-    #[test]
-    fn storage_folder_is_separate_unless_files_are_still_in_the_data_folder() {
-        let data = std::env::temp_dir().join(format!("thirtyfile-test-{}", util::new_id()));
-        let storage = data.with_extension("storage");
-        assert_eq!(storage_dir(&data, None), data.join("blobs"));
-        assert_eq!(storage_dir(&data, Some(&storage)), storage);
-        // An empty blobs folder left from version 0.1.0 doesn't count
-        std::fs::create_dir_all(data.join("blobs")).unwrap();
-        assert_eq!(storage_dir(&data, Some(&storage)), storage);
-        std::fs::create_dir_all(data.join("blobs").join("ab")).unwrap();
-        assert_eq!(storage_dir(&data, Some(&storage)), data.join("blobs"));
-        std::fs::remove_dir_all(&data).unwrap();
     }
 
     fn response(status: StatusCode, headers: &[(header::HeaderName, &str)]) -> axum::http::Response<String> {

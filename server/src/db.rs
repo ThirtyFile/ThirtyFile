@@ -162,20 +162,13 @@ pub async fn load_secret(db: &SqlitePool) -> Result<Vec<u8>, sqlx::Error> {
     Ok(secret.into_bytes())
 }
 
-/// Encrypts every stored secret with `new_key`: values saved before encryption existed (on every start, a no-op once
-/// they are encrypted), or all of them when the key is rotated. Returns how many values were written.
-pub async fn reseal_secrets(db: &SqlitePool, new_key: &[u8; 32], all: bool) -> Result<usize, sqlx::Error> {
-    use crate::secrets::{is_sealed, reseal};
+/// Encrypts every stored secret again with `new_key`, when the key is rotated. Returns how many values were written.
+pub async fn reseal_secrets(db: &SqlitePool, new_key: &[u8; 32]) -> Result<usize, sqlx::Error> {
     let fix = |context: &str, v: &str| -> Result<Option<String>, sqlx::Error> {
-        if v.is_empty() || (is_sealed(v) && !all) {
+        if v.is_empty() {
             return Ok(None);
         }
-        match reseal(context, v, new_key) {
-            Ok(sealed) => Ok(Some(sealed)),
-            // Saved with another key (a database restored without its key): left alone; reading it reports the problem
-            Err(_) if !all => Ok(None),
-            Err(e) => Err(sqlx::Error::Protocol(e)),
-        }
+        crate::secrets::reseal(context, v, new_key).map(Some).map_err(sqlx::Error::Protocol)
     };
     let mut tx = db.begin().await?;
     let mut n = 0;
@@ -543,45 +536,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn saved_secrets_are_encrypted_on_start_and_when_the_key_is_rotated() {
+    async fn saved_secrets_are_encrypted_again_when_the_key_is_rotated() {
         let env = crate::testutil::env().await;
         let db = &env.st.db;
         let pw = crate::testutil::password();
-        // Saved before encryption existed: plain text
-        sqlx::query("INSERT INTO settings (key, value) VALUES ('secret', 'plain-signing-secret') ON CONFLICT (key) DO UPDATE SET value = excluded.value")
-            .execute(db)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO settings (key, value) VALUES ('sso', ?)")
-            .bind(serde_json::json!({ "google": { "enabled": true, "client_id": "id", "client_secret": pw } }).to_string())
-            .execute(db)
-            .await
-            .unwrap();
+        let secret = load_secret(db).await.unwrap();
+        let mut c = db.acquire().await.unwrap();
+        let mut sso = crate::sso::SsoSettings::default();
+        sso.google = crate::sso::ProviderConfig { enabled: true, client_id: "id".into(), client_secret: pw.to_string(), ..Default::default() };
+        crate::sso::store(&mut c, &sso).await.unwrap();
+        drop(c);
         sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES ('nas', 'NAS', 'sftp', ?, 0, 0)")
-            .bind(serde_json::json!({ "host": "h", "password": pw }).to_string())
+            .bind(serde_json::json!({ "host": "h", "password": crate::secrets::seal("location:nas:password", pw) }).to_string())
             .execute(db)
             .await
             .unwrap();
         let dump = || async {
             let s: Vec<(String,)> = sqlx::query_as("SELECT value FROM settings UNION ALL SELECT config FROM storage_locations").fetch_all(db).await.unwrap();
-            s.into_iter().map(|(v,)| v).collect::<Vec<_>>().join("\n")
+            s.into_iter().map(|(v,)| v).collect::<Vec<_>>().join("
+")
         };
-        let key = *crate::secrets::test_key();
-        assert_eq!(reseal_secrets(db, &key, false).await.unwrap(), 3);
         let stored = dump().await;
-        assert!(!stored.contains(pw) && !stored.contains("plain-signing-secret"), "{stored}");
-        // Nothing left to do on the next start; values still read back
-        assert_eq!(reseal_secrets(db, &key, false).await.unwrap(), 0);
-        assert_eq!(load_secret(db).await.unwrap(), b"plain-signing-secret");
+        assert!(!stored.contains(pw), "{stored}");
         assert_eq!(crate::sso::load(db).await.google.client_secret, pw);
         // Rotating re-encrypts all of them
-        assert_eq!(reseal_secrets(db, &rand::random(), true).await.unwrap(), 3);
+        assert_eq!(reseal_secrets(db, &rand::random()).await.unwrap(), 3);
         assert_ne!(dump().await, stored);
         // Now this process's key can't read them (as after restoring without the key): the server still starts, with
         // a new signing secret, and without the client secret
-        assert_eq!(reseal_secrets(db, &key, false).await.unwrap(), 0);
         let fresh = load_secret(db).await.unwrap();
-        assert_ne!(fresh, b"plain-signing-secret");
+        assert_ne!(fresh, secret);
         assert_eq!(load_secret(db).await.unwrap(), fresh);
         assert_eq!(crate::sso::load(db).await.google.client_secret, "");
     }

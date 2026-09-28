@@ -25,28 +25,7 @@ docker stop thirtyfile && docker rm thirtyfile
 docker run -d --name thirtyfile --restart unless-stopped …   # the same options as when you installed it</code></pre>
         <h3>Docker Compose</h3>
         <pre><code>docker compose pull && docker compose up -d</code></pre>
-        <h3 id="from-0-1">Upgrading from 0.1.0</h3>
-        <p>Version 0.1.0 kept your files in the <code>blobs</code> folder inside <code>/data</code>. They stay there and keep working; the log says so when ThirtyFile starts. To move them to <code>/storage</code>, <a href="#convert">convert the spaces to plain folders</a>: that writes them to <code>/storage</code> and empties <code>blobs</code>. Or stop ThirtyFile, move everything inside <code>blobs</code> into the storage folder, and start it again.</p>
-        <h3 id="convert">Converting spaces to plain folders</h3>
-        <p>Versions 0.1 and 0.2 keep the files of every space in a content store: <code>/storage/ab/cd/…</code>, named after their content, with the names and folders only in the database. Opening <code>/storage</code> shows nothing you can use, and other programs can't change the files. The conversion turns these spaces into <a href="storage.html#folder-spaces">folder spaces</a>, whose files are ordinary files in ordinary folders:</p>
-        <pre><code>/storage/company/…            the company space
-/storage/teams/&lt;space name&gt;/…  team spaces
-/storage/users/&lt;user name&gt;/…   personal spaces</code></pre>
-        <p>Spaces and users added after upgrading get these folders right away; only the spaces made before need converting. It doesn't happen by itself when you upgrade: run it when it suits you (the log mentions it at every start while spaces are left to convert). <a href="#backup">Back up</a> first, then stop ThirtyFile and run:</p>
-        <pre><code>docker compose stop
-docker compose run --rm thirtyfile convert --dry-run   # only lists what would happen
-docker compose run --rm thirtyfile convert
-docker compose start</code></pre>
-        <p>(With <code>docker run</code>: <code>docker stop thirtyfile</code>, then <code>docker run --rm -v …same volumes… ghcr.io/thirtyfile/thirtyfile convert</code>.) ThirtyFile and the conversion never run at the same time: whichever starts second stops with a message.</p>
-        <ul>
-          <li><strong>Little extra disk space.</strong> Each file becomes a hard link to its stored content, so it isn't copied. Content several files or versions share (a file several people uploaded, stored once) is copied for each of them instead, so that changing one of the files later doesn't change the others. When the stored files are on another disk or Docker volume than the folders (<code>/data/blobs</code> from 0.1, say), they are copied instead and checked against their fingerprint, one space at a time.</li>
-          <li><strong>Nothing changes for people.</strong> Every file and folder keeps its identity, so share links, permissions, favourites, Recent and earlier versions keep working. The trash of each space moves to its <code>.thirtyfile-trash</code> folder, earlier versions to <code>.thirtyfile-versions</code>.</li>
-          <li><strong>A space changes only once it is complete.</strong> Its files are written and checked first; then the space becomes a folder space, and only then is its content removed from the store (content another space still uses stays until that space is converted too). The conversion can be stopped at any time and run again: files already written are skipped. Until a space is converted, don't change its new folder by hand: the conversion removes what doesn't belong there.</li>
-          <li><strong>Some names change.</strong> Names a folder can't hold as they are get another one, and the report lists each: two names that differ only in letter case (<em>notes (1).txt</em>), names ThirtyFile doesn't show in folders (<em>Thumbs.db</em>, <em>~$…</em> and other temporary files get an underscore, <em>_Thumbs.db</em>), and names too long for the disk.</li>
-          <li><strong>What stays as it is.</strong> Spaces on S3, SFTP or FTP stay in their content store, as does a space with a file whose stored content is missing or turns out damaged (the report names it; <a href="help.html#check"><code>thirtyfile check</code></a> tells you more). Files you put in <code>/storage</code> yourself are listed in the report and never touched.</li>
-          <li><strong>Hard links.</strong> Files that were stored once for several uploads stay linked after the conversion. ThirtyFile always writes new content to a new file, so saving one of them on the web never changes the others; a program that changes files in place (over SMB, say) changes all the links at once.</li>
-        </ul>
-        <p>Spaces on a <em>Local folder</em> storage location are converted the same way, into <code>company</code>, <code>teams</code> and <code>users</code> in that location's folder.</p>
+        <p>Versions up to 0.3 can't be upgraded to newer ones, as the database was started over: install the new version with empty <code>data</code> and <code>storage</code> folders, then copy your files into it.</p>
         <h3>Which version you get</h3>
         <div class="table-scroll">
           <table>

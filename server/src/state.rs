@@ -40,9 +40,8 @@ pub struct Inner {
     pub data_dir: PathBuf,
     /// Folder of the built-in `local` storage location
     pub storage_dir: PathBuf,
-    /// Where new spaces of the built-in location get their folders (space_folders.rs): the storage folder set now,
-    /// which differs from `storage_dir` only while 0.1's content is still in /data/blobs. None keeps new spaces in the
-    /// content store (tests about it)
+    /// Where new spaces of the built-in location get their folders (space_folders.rs): the storage folder, as an
+    /// absolute path. None keeps new spaces in the content store (tests about it)
     pub space_folders: Option<PathBuf>,
     pub secret: Vec<u8>,
     pub secure_cookie: bool,

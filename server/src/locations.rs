@@ -931,7 +931,7 @@ mod tests {
         let env = testutil::env().await;
         let saved = json!({ "host": "files.example.com", "port": 22, "username": "backup", "password": testutil::password(), "host_key": "k" });
         sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES ('nas', 'NAS', 'sftp', ?, 0, 0)")
-            .bind(saved.to_string())
+            .bind(sealed_config("nas", &saved))
             .execute(&env.st.db)
             .await
             .unwrap();

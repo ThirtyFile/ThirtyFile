@@ -41,7 +41,6 @@
           <li><strong>Renaming.</strong> Renaming a space doesn't rename its folder, so programs, SMB shares and backups that use the path keep working. <strong>Control panel › Spaces</strong> shows each space's folder.</li>
           <li><strong>Deleting.</strong> Deleting a space, or a user with their files, removes them from ThirtyFile only: the folder and the files in it stay on the disk, for you to delete or keep. A new space or user with the same name gets a new folder, never the old files. Moving a deleted user's files to another space moves them on the disk.</li>
           <li><strong>S3, SFTP and FTP</strong> keep files in a content store instead: names made of the file's content (<code>ab/cd/…</code>), with the names and folders only in ThirtyFile's database. Renaming a folder there would copy every file in it. Spaces created while one of these is the default location use the content store, and can be <a href="#per-space">moved to another location</a> later.</li>
-          <li><strong>After upgrading from 0.1 or 0.2</strong>, the spaces made before keep their files in the content store in <code>/storage</code> until you <a href="backup.html#convert">convert them to plain folders</a>; spaces and users added since get folders right away.</li>
         </ul>
 
         <h2 id="add">Adding a location</h2>
@@ -61,7 +60,7 @@
         <div class="note">Connections without encryption (plain FTP, or S3 over http) are only accepted for addresses inside your own network.</div>
 
         <h2 id="per-space">A location for each space</h2>
-        <p>Under <strong>Control panel › Spaces</strong>, choose a storage location for a space in the content store (on S3, SFTP or FTP, or not converted yet). Files already in the space can be moved to the new location. The space stays in use while they move. A folder space stays in its folder: to put its files elsewhere, move them to another space.</p>
+        <p>Under <strong>Control panel › Spaces</strong>, choose a storage location for a space in the content store (on S3, SFTP or FTP). Files already in the space can be moved to the new location. The space stays in use while they move. A folder space stays in its folder: to put its files elsewhere, move them to another space.</p>
 
         <h2 id="folder-spaces">Folder spaces: a folder on the server as a space</h2>
         <p>Every space on the storage folder or a <em>Local folder</em> location is a folder space (see <a href="#layout">Where the files are</a>). You can also show an existing folder on the server, such as a NAS share, as a space. Its files stay where they are, as ordinary files, and can also be changed there, for example over SMB or by a scanner.</p>
@@ -88,7 +87,6 @@
           <li><strong>Disks and shares that aren't mounted.</strong> Once a space's folder has been checked, it holds a small hidden file, <code>.thirtyfile-space</code>. A folder without it that is suddenly empty is taken to be a disk or share that isn't mounted: the space keeps its items, shares and history, and <strong>Check for changes</strong> says so. Mount it again and check. A folder inside the space that can't be read keeps its items the same way. To empty a space, delete its items in ThirtyFile.</li>
           <li>When something goes wrong while several items are deleted, moved or restored at once, the ones already changed in the folder are put back, so nothing is half done. If ThirtyFile stops in the middle of moving an item into a space, the item is put back in that folder, under its own name, at the next check a day later.</li>
         </ul>
-        <p>Spaces made with 0.1 and 0.2 keep their files in the storage folder under names made of their content (<code>ab/cd/…</code>). To turn them into folder spaces with ordinary folders, like the spaces created since, see <a href="backup.html#convert">Converting spaces to plain folders</a>.</p>
 
         <h2 id="offline">When a location is offline</h2>
         <p>Browsing, searching and organising folders keep working. Opening, downloading and uploading are paused, and resume by themselves when the location is back. The space is marked as offline in the meantime.</p>

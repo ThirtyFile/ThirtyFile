@@ -795,7 +795,7 @@ pub struct Located {
     location_space: Option<SpaceRef>,
     /// Folders from the space root (or the shared folder) down to the item's parent
     location_path: Vec<String>,
-    /// Trash: who moved the item there; None when unknown (deleted before this was recorded, or by a removed account)
+    /// Trash: who moved the item there; None when unknown (deleted by a removed account)
     #[serde(skip_serializing_if = "Option::is_none")]
     deleted_by: Option<String>,
 }

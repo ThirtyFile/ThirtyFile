@@ -65,6 +65,8 @@ jobs:
         run: |
           # Databases have already applied every migration that was part of a release: those files must never change
           last=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null) || exit 0
+          # Releases up to 0.3 had the migration history that was replaced by one schema file (#170): nothing to compare
+          git cat-file -e "$last:server/migrations/0024_password_resets.sql" 2>/dev/null && exit 0
           for f in $(git ls-tree --name-only "$last" server/migrations/); do
             git diff --quiet "$last" HEAD -- "$f" || { echo "::error file=$f::$f was released in $last and must not change. Add a new migration instead."; exit 1; }
           done
