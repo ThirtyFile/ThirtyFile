@@ -325,7 +325,7 @@ mod tests {
     async fn an_administrator_chooses_the_location_of_a_new_space() {
         let env = testutil::folders_env().await;
         let nas = env.dir.join("nas");
-        std::fs::create_dir_all(&nas).unwrap();
+        crate::storage::claim_folder(&nas, "nas").unwrap();
         sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES ('nas', 'NAS', 'local', ?, 0, 0)")
             .bind(json!({ "path": nas.to_string_lossy() }).to_string())
             .execute(&env.st.db)

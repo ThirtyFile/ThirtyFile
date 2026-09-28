@@ -1369,6 +1369,8 @@ mod tests {
         let team = new_team(&env, "Plans").await;
         make_default(&env, BUILTIN).await;
         let drive = env.drive_of(&team).await;
+        // The space's folder is marked as its own when it is created, before anything is written there
+        assert_eq!(std::fs::read_to_string(nas.join("teams/Plans").join(crate::folders::MARKER)).unwrap(), drive);
         env.upload(&admin, &team, "a.txt", b"one").await;
         assert!(nas.join("teams/Plans/a.txt").is_file());
 
@@ -1406,6 +1408,14 @@ mod tests {
         let report = crate::folders::scan(&env.st, &drive).await.unwrap();
         assert_eq!(report.error.as_deref(), Some(storage::NOT_MOUNTED));
         assert!(env.node_at(&drive, "a.txt").await.is_some() && env.node_at(&drive, "other.txt").await.is_none());
+        // ...and nothing is written into it, even with its own location's marker there: the folder isn't the space's
+        std::fs::write(nas.join(storage::LOCATION_MARKER), "nas").unwrap();
+        let err = env.try_upload(&admin, &team, "b.txt", b"two").await.unwrap_err();
+        assert!(err.message.starts_with(storage::NOT_MOUNTED), "{}", err.message);
+        let req = serde_json::from_value(json!({ "parent_id": team, "name": "Docs" })).unwrap();
+        assert_eq!(crate::nodes::create_folder(State(env.st.clone()), admin.clone(), Json(req)).await.unwrap_err().message, storage::NOT_MOUNTED);
+        let names = |dir: std::path::PathBuf| std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect::<Vec<_>>();
+        assert_eq!(names(nas.join("teams/Plans")), ["other.txt"]);
         std::fs::remove_dir_all(&nas).unwrap();
 
         std::fs::rename(&away, &nas).unwrap();

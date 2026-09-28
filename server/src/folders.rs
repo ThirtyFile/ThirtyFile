@@ -32,9 +32,31 @@ const SETTLE_SECONDS: i64 = 10;
 const BATCH: usize = 500;
 /// Skipped items listed in a scan report
 const MAX_REPORTED: usize = 200;
-/// A file in the folder of every folder space once it has been scanned: a folder without it that is suddenly empty is
-/// a disk or share that isn't mounted, not one whose items were all deleted
-const MARKER: &str = ".thirtyfile-space";
+/// A file in the folder of every folder space, holding the space's id: written when the space is created (and by a scan
+/// when it is missing). A folder without it that is suddenly empty is a disk or share that isn't mounted, not one whose
+/// items were all deleted; and nothing is written into a space's folder unless it holds this space's (fsops.rs), so
+/// another disk mounted at the same place, with a folder of the same name, is left alone.
+pub const MARKER: &str = ".thirtyfile-space";
+
+/// The space id in the marker of the space folder `root`; None when there is none
+pub fn space_marker(root: &crate::beneath::Pinned) -> std::io::Result<Option<String>> {
+    match std::fs::read(root.join(MARKER)?.as_path()) {
+        Ok(b) => Ok(Some(String::from_utf8_lossy(&b).trim().to_string())),
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Gives the folder `source` of a new space `drive_id` the space's marker, replacing one left by a deleted space (a
+/// folder another space uses can't be chosen: `check_new_source`)
+fn mark_space(source: &Path, drive_id: &str) -> std::io::Result<()> {
+    let marker = crate::beneath::Pinned::root(source)?.join(MARKER)?;
+    match std::fs::remove_file(marker.as_path()) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+        _ => {}
+    }
+    crate::beneath::write_new(&marker, drive_id.as_bytes())
+}
 
 /// One item found in the folder
 #[derive(Debug, Clone)]
@@ -349,7 +371,17 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     // An empty folder where the index has items is what a disk or share that isn't mounted looks like (its mount
     // point is an empty folder): only a folder that has the marker is really empty
     let marker = crate::beneath::Pinned::root(&root).and_then(|r| r.join(MARKER));
-    let marked = marker.as_ref().is_ok_and(|m| std::fs::symlink_metadata(m.as_path()).is_ok_and(|x| x.is_file()));
+    let found = crate::beneath::Pinned::root(&root).and_then(|r| space_marker(&r)).ok().flatten();
+    if found.as_ref().is_some_and(|id| *id != drive.id) {
+        // Another space's folder: a different disk mounted at the same place, say
+        report.error = Some(format!(
+            "{} holds another space's .thirtyfile-space file: if a different disk is mounted there, mount the right one and check again.",
+            root.display()
+        ));
+        save_report(st, &drive, &report).await?;
+        return Ok(report);
+    }
+    let marked = found.is_some();
     let has_items = indexed.iter().any(|n| n.fs_path.as_deref().is_some_and(|p| !p.is_empty()));
     if entries.is_empty() && has_items && !marked {
         report.error = Some(format!(
@@ -954,6 +986,10 @@ pub async fn set_up(conn: &mut SqliteConnection, drive_id: &str, root_id: &str, 
         .execute(&mut *conn)
         .await?;
     sqlx::query("UPDATE nodes SET fs_path = '' WHERE id = ?").bind(root_id).execute(&mut *conn).await?;
+    // Before anything is written there (a folder that can't take it, read-only say, gets it from a scan if ever)
+    if let Err(e) = mark_space(Path::new(source), drive_id) {
+        tracing::debug!("Couldn't write the marker file in {source}: {e}");
+    }
     Ok(())
 }
 

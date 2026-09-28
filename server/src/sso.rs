@@ -1819,8 +1819,8 @@ mod tests {
         let r = login(&env, &m, "google", None, |n| google(n, "g-31", "ned@nas.example", true)).await;
         assert_eq!(location(&r), "/files/abc");
         assert_eq!(space("ned@nas.example").await, (None, None, Some("nas".into())));
-        // Once the folder is back, the next sign-in creates it there
-        std::fs::create_dir_all(&nas).unwrap();
+        // Once the folder is back (with the location's marker), the next sign-in creates it there
+        crate::storage::claim_folder(&nas, "nas").unwrap();
         let r = login(&env, &m, "google", None, |n| google(n, "g-31", "ned@nas.example", true)).await;
         assert_eq!(location(&r), "/files/abc");
         let (root, at, pending) = space("ned@nas.example").await;
