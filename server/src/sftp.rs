@@ -434,6 +434,7 @@ mod tests {
     use russh_sftp::protocol::{Attrs, Data, File, FileAttributes, Handle, Name, OpenFlags, Status, Version};
 
     use super::*;
+    use crate::testutil;
 
     /// The files of an SFTP session, in a folder: only the requests the storage makes. Like SFTP v3 servers, a rename
     /// doesn't replace an existing file.
@@ -677,8 +678,8 @@ mod tests {
 
     #[tokio::test]
     async fn content_is_stored_read_listed_and_deleted_over_sftp() {
-        let s = server("secret").await;
-        let st = storage(&s, "secret", "");
+        let s = server(testutil::password()).await;
+        let st = storage(&s, testutil::password(), "");
         st.check().await.unwrap();
         // The host key seen is recorded, to be checked on later connections
         assert_eq!(st.host_key(), Some(s.fingerprint.clone()));
@@ -718,19 +719,19 @@ mod tests {
 
     #[tokio::test]
     async fn a_wrong_password_or_another_host_key_is_refused() {
-        let s = server("secret").await;
-        let err = storage(&s, "wrong", "").check().await.unwrap_err();
+        let s = server(testutil::password()).await;
+        let err = storage(&s, &testutil::wrong_password(), "").check().await.unwrap_err();
         assert!(message(&err).starts_with("Incorrect username, password"), "{}", message(&err));
 
         // The key recorded earlier is accepted; another one means another server (or someone in between)
-        storage(&s, "secret", &s.fingerprint).ping().await.unwrap();
-        let other = server("secret").await;
-        let err = storage(&s, "secret", &other.fingerprint).ping().await.unwrap_err();
+        storage(&s, testutil::password(), &s.fingerprint).ping().await.unwrap();
+        let other = server(testutil::password()).await;
+        let err = storage(&s, testutil::password(), &other.fingerprint).ping().await.unwrap_err();
         assert!(message(&err).starts_with("The host key doesn't match"), "{}", message(&err));
 
         let port = s.port;
         drop(s);
-        let cfg = SftpConfig { host: "127.0.0.1".into(), port, username: "backup".into(), password: "secret".into(), ..Default::default() };
+        let cfg = SftpConfig { host: "127.0.0.1".into(), port, username: "backup".into(), password: testutil::wrong_password(), ..Default::default() };
         let err = SftpStorage::new(&cfg).unwrap().ping().await.unwrap_err();
         assert_eq!(message(&err), UNAVAILABLE);
     }

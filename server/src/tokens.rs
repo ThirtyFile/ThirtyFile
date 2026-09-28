@@ -53,7 +53,7 @@ pub async fn allow(mut req: Request, next: Next) -> Response {
 pub enum Credential {
     Bearer(String),
     /// HTTP Basic sign-in: the username and an app password (never the account's own password)
-    Basic { username: String, password: String },
+    Basic { username: String, token: String },
 }
 
 /// The app password a request carries in its Authorization header, if any
@@ -66,8 +66,9 @@ pub fn credential(headers: &HeaderMap) -> Option<Credential> {
     }
     if scheme.eq_ignore_ascii_case("basic") {
         let decoded = String::from_utf8(STANDARD.decode(rest).ok()?).ok()?;
-        let (username, password) = decoded.split_once(':')?;
-        return Some(Credential::Basic { username: username.to_string(), password: password.to_string() });
+        // The password part is an app password: a token, never the account's own password
+        let (username, token) = decoded.split_once(':')?;
+        return Some(Credential::Basic { username: username.to_string(), token: token.to_string() });
     }
     None
 }
@@ -123,7 +124,7 @@ pub async fn authenticate(parts: &Parts, st: &AppState, credential: Credential) 
     }
     let (username, token) = match credential {
         Credential::Bearer(token) => (None, token),
-        Credential::Basic { username, password } => (Some(username), password),
+        Credential::Basic { username, token } => (Some(username), token),
     };
     let found = find(st, &token).await?;
     // Basic sign-in names the account too: it must be the one the token belongs to

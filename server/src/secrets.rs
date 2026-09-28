@@ -87,9 +87,16 @@ pub fn init(key: &[u8; 32]) {
     let _ = CIPHER.set(Aes256Gcm::new(key.into()));
 }
 
+/// The key tests run with: generated once per run, so the code holds no key
+#[cfg(test)]
+pub fn test_key() -> &'static [u8; 32] {
+    static KEY: OnceLock<[u8; 32]> = OnceLock::new();
+    KEY.get_or_init(rand::random)
+}
+
 fn cipher() -> &'static Aes256Gcm {
     #[cfg(test)]
-    init(&[42; 32]);
+    init(test_key());
     CIPHER.get().expect("secrets::init runs at startup")
 }
 
@@ -154,9 +161,10 @@ mod tests {
         assert_eq!(open("plain").unwrap(), "plain");
         assert_eq!(seal(""), "");
         // Another key can't read it
-        let other = Aes256Gcm::new(&[7u8; 32].into());
+        let other_key: [u8; 32] = rand::random();
+        let other = Aes256Gcm::new(&other_key.into());
         assert!(open_with(&other, &sealed).is_err());
-        let moved = reseal(&sealed, &[7; 32]).unwrap();
+        let moved = reseal(&sealed, &other_key).unwrap();
         assert_eq!(open_with(&other, &moved).unwrap(), "hunter-2-but-generated");
     }
 

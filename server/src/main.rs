@@ -213,12 +213,12 @@ async fn rotate_secret_key(db: &sqlx::SqlitePool, source: &secrets::KeySource) -
         }
         secrets::KeySource::Env(_) => None,
     };
-    let n = db::reseal_secrets(db, &new_key, true).await?;
+    db::reseal_secrets(db, &new_key, true).await?;
     if let Some((staged, path)) = staged {
         std::fs::rename(&staged, &path)?;
-        println!("Encrypted {n} saved value(s) with a new key, saved in {}. Back it up again.", path.display());
+        println!("The saved passwords and keys are encrypted with a new key, saved in {}. Back it up again.", path.display());
     } else {
-        println!("Encrypted {n} saved value(s) with the new key. Now set THIRTYFILE_SECRET_KEY to it before starting ThirtyFile.");
+        println!("The saved passwords and keys are encrypted with the new key. Now set THIRTYFILE_SECRET_KEY to it before starting ThirtyFile.");
     }
     Ok(())
 }
@@ -312,7 +312,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
             return Err(format!("User not found: {username}").into());
         }
         sqlx::query("DELETE FROM recovery_codes WHERE user_id = (SELECT id FROM users WHERE username = ?)").bind(username).execute(&db).await?;
-        println!("Two-factor sign-in turned off for {username}");
+        println!("Two-factor sign-in is turned off for this account");
         return Ok(());
     }
     if let Some(Command::ResetPassword { username, password }) = &cfg.command {

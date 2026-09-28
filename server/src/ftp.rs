@@ -499,6 +499,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::testutil;
 
     /// A small FTP server over a temporary folder: passive mode, plain connections, and only the commands the storage
     /// uses. It counts the connections it was given.
@@ -623,8 +624,8 @@ mod tests {
 
     #[tokio::test]
     async fn content_is_stored_read_listed_and_deleted_over_ftp() {
-        let s = server("secret").await;
-        let st = storage(&s, "secret");
+        let s = server(testutil::password()).await;
+        let st = storage(&s, testutil::password());
         st.check().await.unwrap();
 
         let hash = put(&st, &s, b"hello over ftp").await;
@@ -670,8 +671,8 @@ mod tests {
 
     #[tokio::test]
     async fn requests_at_once_share_a_few_connections() {
-        let s = server("secret").await;
-        let st = Arc::new(storage(&s, "secret"));
+        let s = server(testutil::password()).await;
+        let st = Arc::new(storage(&s, testutil::password()));
         let hash = put(&st, &s, &[7u8; 100_000]).await;
         let reads: Vec<_> = (0..12u64)
             .map(|i| {
@@ -688,14 +689,14 @@ mod tests {
 
     #[tokio::test]
     async fn a_wrong_password_or_a_server_that_is_gone_is_reported_as_such() {
-        let s = server("secret").await;
-        let err = storage(&s, "wrong").check().await.unwrap_err();
+        let s = server(testutil::password()).await;
+        let err = storage(&s, &testutil::wrong_password()).check().await.unwrap_err();
         let inner = err.get_ref().and_then(|e| e.downcast_ref::<StorageError>()).unwrap();
         assert!(inner.message.starts_with("Incorrect username or password"), "{}", inner.message);
 
         let port = s.port;
         drop(s);
-        let cfg = FtpConfig { host: "127.0.0.1".into(), port, username: "backup".into(), password: "secret".into(), ..Default::default() };
+        let cfg = FtpConfig { host: "127.0.0.1".into(), port, username: "backup".into(), password: testutil::wrong_password(), ..Default::default() };
         let err = FtpStorage::new(&cfg).unwrap().ping().await.unwrap_err();
         let inner = err.get_ref().and_then(|e| e.downcast_ref::<StorageError>()).unwrap();
         assert_eq!(inner.message, UNAVAILABLE);

@@ -557,7 +557,7 @@ mod tests {
             let s: Vec<(String,)> = sqlx::query_as("SELECT value FROM settings UNION ALL SELECT config FROM storage_locations").fetch_all(db).await.unwrap();
             s.into_iter().map(|(v,)| v).collect::<Vec<_>>().join("\n")
         };
-        let key = [42u8; 32];
+        let key = *crate::secrets::test_key();
         assert_eq!(reseal_secrets(db, &key, false).await.unwrap(), 3);
         let stored = dump().await;
         assert!(!stored.contains(pw) && !stored.contains("plain-signing-secret"), "{stored}");
@@ -566,7 +566,7 @@ mod tests {
         assert_eq!(load_secret(db).await.unwrap(), b"plain-signing-secret");
         assert_eq!(crate::sso::load(db).await.google.client_secret, pw);
         // Rotating re-encrypts all of them
-        assert_eq!(reseal_secrets(db, &[9; 32], true).await.unwrap(), 3);
+        assert_eq!(reseal_secrets(db, &rand::random(), true).await.unwrap(), 3);
         assert_ne!(dump().await, stored);
         // Now this process's key can't read them (as after restoring without the key): the server still starts, with
         // a new signing secret, and without the client secret
