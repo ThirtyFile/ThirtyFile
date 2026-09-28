@@ -60,6 +60,26 @@ pub fn valid_hash(hash: &str) -> io::Result<()> {
     Ok(())
 }
 
+/// The folders to create, top down, for a remote folder path: "/a/b" → "/a", "/a/b"; "a/./b" → "a", "a/./b"
+pub fn dir_levels(dir: &str) -> Vec<String> {
+    let mut levels = Vec::new();
+    let mut path = String::new();
+    for part in dir.split('/') {
+        if part.is_empty() {
+            path.push('/');
+            continue;
+        }
+        if !path.is_empty() && !path.ends_with('/') {
+            path.push('/');
+        }
+        path.push_str(part);
+        if part != "." {
+            levels.push(path.clone());
+        }
+    }
+    levels
+}
+
 // ───────────── Local folder ─────────────
 
 pub struct LocalStorage {
@@ -597,6 +617,13 @@ pub fn build(kind: &str, config: &serde_json::Value, default_root: &Path) -> io:
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn remote_folders_are_created_level_by_level() {
+        assert_eq!(super::dir_levels("/srv/blobs/ab"), ["/srv", "/srv/blobs", "/srv/blobs/ab"]);
+        assert_eq!(super::dir_levels("./blobs/ab"), ["./blobs", "./blobs/ab"]);
+        assert!(super::dir_levels("").is_empty());
+    }
+
     use super::*;
 
     #[tokio::test]

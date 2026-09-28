@@ -252,16 +252,7 @@ impl FtpStorage {
         if dir.is_empty() || self.dirs.lock().unwrap().contains(dir) {
             return Ok(());
         }
-        let mut path = String::new();
-        for part in dir.split('/') {
-            if part.is_empty() {
-                path.push('/');
-                continue;
-            }
-            if !path.is_empty() && !path.ends_with('/') {
-                path.push('/');
-            }
-            path.push_str(part);
+        for path in crate::storage::dir_levels(dir) {
             if self.dirs.lock().unwrap().contains(&path) {
                 continue;
             }
@@ -275,7 +266,7 @@ impl FtpStorage {
                 }
                 Err(e) => return Err(e),
             }
-            self.dirs.lock().unwrap().insert(path.clone());
+            self.dirs.lock().unwrap().insert(path);
         }
         Ok(())
     }

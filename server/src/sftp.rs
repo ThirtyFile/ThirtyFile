@@ -226,17 +226,8 @@ impl SftpStorage {
         if self.dirs.lock().unwrap().contains(dir) {
             return Ok(());
         }
-        let mut path = String::new();
-        for part in dir.split('/') {
-            if part.is_empty() {
-                path.push('/');
-                continue;
-            }
-            if !path.is_empty() && !path.ends_with('/') {
-                path.push('/');
-            }
-            path.push_str(part);
-            if part == "." || self.dirs.lock().unwrap().contains(&path) {
+        for path in crate::storage::dir_levels(dir) {
+            if self.dirs.lock().unwrap().contains(&path) {
                 continue;
             }
             if !conn.sftp.try_exists(path.as_str()).await.map_err(sftp_err)? {
@@ -247,7 +238,7 @@ impl SftpStorage {
                     return Err(sftp_err(e));
                 }
             }
-            self.dirs.lock().unwrap().insert(path.clone());
+            self.dirs.lock().unwrap().insert(path);
         }
         Ok(())
     }
