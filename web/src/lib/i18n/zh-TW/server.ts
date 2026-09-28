@@ -882,4 +882,6 @@ export default {
   "Sign out and sign in again, then create the app password within 10 minutes": "請登出後重新登入，並在 10 分鐘內建立應用程式密碼",
   // Share-link passwords (shares.rs)
   "Too many wrong passwords for this link. Try again in {n} seconds.": "此連結的密碼錯誤次數過多，請 {n} 秒後再試",
+  // Email settings (mail.rs)
+  "Enter the password again: the email server or account changed": "郵件伺服器或帳號已變更，請重新輸入密碼",
 } satisfies Record<string, string>;

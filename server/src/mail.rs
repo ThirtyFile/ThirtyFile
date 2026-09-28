@@ -137,7 +137,9 @@ pub struct SettingsReq {
     insecure: bool,
 }
 
-/// The settings asked for, checked; a blank password keeps the saved one (and there is none without a username)
+/// The settings asked for, checked; a blank password keeps the saved one (and there is none without a username), but
+/// only for the same server and account: otherwise it would be sent to wherever the new settings point, and anyone
+/// able to change them could collect it (as for storage locations, locations.rs)
 fn settings_from(req: SettingsReq, saved: &SmtpSettings) -> AppResult<SmtpSettings> {
     let host = req.host.trim().to_string();
     let from = req.from.trim().to_string();
@@ -160,21 +162,20 @@ fn settings_from(req: SettingsReq, saved: &SmtpSettings) -> AppResult<SmtpSettin
         Security::Tls => 465,
         Security::None => 25,
     };
+    let port = req.port.filter(|p| *p > 0).unwrap_or(default_port);
+    let same_target = host.eq_ignore_ascii_case(&saved.host)
+        && port == saved.port
+        && req.security == saved.security
+        && req.insecure == saved.insecure
+        && username == saved.username;
     let password = match (username.is_empty(), req.password.is_empty()) {
         (true, _) => String::new(),
-        (false, true) => saved.password.clone(),
+        (false, true) if saved.password.is_empty() => String::new(),
+        (false, true) if same_target => saved.password.clone(),
+        (false, true) => return Err(AppError::bad_request("Enter the password again: the email server or account changed")),
         (false, false) => req.password,
     };
-    Ok(SmtpSettings {
-        enabled: req.enabled,
-        host,
-        port: req.port.filter(|p| *p > 0).unwrap_or(default_port),
-        security: req.security,
-        username,
-        password,
-        from,
-        insecure: req.insecure,
-    })
+    Ok(SmtpSettings { enabled: req.enabled, host, port, security: req.security, username, password, from, insecure: req.insecure })
 }
 
 pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Json(req): Json<SettingsReq>) -> AppResult<Json<Value>> {
@@ -538,8 +539,29 @@ pub mod tests {
     fn settings_are_checked_and_keep_the_password() {
         let saved = settings(25);
         let req = |v: Value| serde_json::from_value::<SettingsReq>(v).unwrap();
-        let s = settings_from(req(json!({ "enabled": true, "host": " smtp.example.com ", "security": "tls", "username": "mailer", "from": "drive@example.com" })), &saved).unwrap();
-        assert_eq!((s.host.as_str(), s.port, s.password.as_str()), ("smtp.example.com", 465, "secret"));
+        // The saved password is kept for the same server and account…
+        let s = settings_from(req(json!({ "enabled": true, "host": " 127.0.0.1 ", "port": 25, "security": "none", "username": "mailer", "from": "drive@example.com" })), &saved).unwrap();
+        assert_eq!((s.host.as_str(), s.port, s.password.as_str()), ("127.0.0.1", 25, "secret"));
+        // …and never sent anywhere else: another server, port, account, encryption or certificate check asks for it again
+        for changed in [
+            json!({ "host": "smtp.example.com", "port": 25, "username": "mailer" }),
+            json!({ "host": "127.0.0.1", "port": 2525, "username": "mailer" }),
+            json!({ "host": "127.0.0.1", "port": 25, "username": "someone" }),
+            json!({ "host": "127.0.0.1", "port": 25, "username": "mailer", "security": "tls" }),
+            json!({ "host": "127.0.0.1", "port": 25, "username": "mailer", "insecure": true }),
+        ] {
+            let mut v = changed.clone();
+            if v.get("security").is_none() {
+                v["security"] = json!("none");
+            }
+            v["enabled"] = json!(true);
+            v["from"] = json!("drive@example.com");
+            assert!(settings_from(req(v.clone()), &saved).is_err(), "{changed}");
+            v["password"] = json!("typed again");
+            assert_eq!(settings_from(req(v), &saved).unwrap().password, "typed again");
+        }
+        let s = settings_from(req(json!({ "enabled": true, "host": " smtp.example.com ", "security": "tls", "username": "mailer", "password": "new", "from": "drive@example.com" })), &saved).unwrap();
+        assert_eq!((s.host.as_str(), s.port, s.password.as_str()), ("smtp.example.com", 465, "new"));
         let s = settings_from(req(json!({ "enabled": false, "host": "smtp.example.com", "from": "drive@example.com" })), &saved).unwrap();
         assert!(s.password.is_empty(), "no username, no password");
         assert!(settings_from(req(json!({ "enabled": true, "host": "", "from": "drive@example.com" })), &saved).is_err());
