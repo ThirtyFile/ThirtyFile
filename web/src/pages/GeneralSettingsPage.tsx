@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CalendarClockIcon, DatabaseIcon, KeyRoundIcon, ShieldCheckIcon, FilesIcon, FolderSyncIcon, GlobeIcon, HardDriveIcon, HistoryIcon, LanguagesIcon, Link2Icon } from "lucide-react";
+import { ArchiveIcon, CalendarClockIcon, DatabaseIcon, KeyRoundIcon, ShieldCheckIcon, FilesIcon, FolderOpenIcon, FolderSyncIcon, GlobeIcon, HardDriveIcon, HistoryIcon, LanguagesIcon, Link2Icon } from "lucide-react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { api, type DefaultLang, type SystemSettingsReq } from "@/api";
@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/dialogs";
+import { LocationSelect } from "@/components/LocationSelect";
 import { cn, formatBytes } from "@/lib/utils";
 import { LANGS, t } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
@@ -279,7 +280,7 @@ export function GeneralSettingsPage() {
               <div className="min-w-0 flex-1">
                 <div className="font-medium">{t("\"All files\" company space")}</div>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  {t("A folder shared by all users. Each user uploads and organizes files in it according to their own permissions (edit, delete); files in the shared folder don't count toward personal space quotas. Every user also has their own private \"My files\" folder that no one else can see.")}
+                  {t("A folder shared by all users. Each user uploads and organizes files in it according to their own permissions (edit, delete); files in the shared folder don't count toward personal space quotas. Each user can also have their own private \"My files\" folder that no one else can see.")}
                 </p>
                 {!q.data.shared_enabled && (
                   <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
@@ -316,7 +317,45 @@ export function GeneralSettingsPage() {
       )}
       {q.data && (
         <Section title={t("Users")}>
-          <div className="flex flex-wrap items-start gap-4 p-4">
+          <div className="flex items-start gap-4 p-4">
+            <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
+              <FolderOpenIcon className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">{t("Give new users a personal space (\"My files\")")}</div>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {t("When off, new users only see the spaces they're given access to, such as \"All files\" and team spaces. You can still give someone \"My files\" when adding them, or later under \"Users\". Existing users keep theirs.")}
+              </p>
+            </div>
+            <Toggle
+              label={t("Give new users a personal space (\"My files\")")}
+              checked={q.data.personal_spaces}
+              disabled={save.isPending}
+              onChange={(v) => save.mutate({ personal_spaces: v })}
+            />
+          </div>
+          <div className="flex flex-wrap items-start gap-4 border-t p-4">
+            <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-300">
+              <ArchiveIcon className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1 basis-60">
+              <label htmlFor="personal-location" className="font-medium">
+                {t("Location of new users' \"My files\"")}
+              </label>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {t("The storage location where new personal spaces are created. \"Default location\" follows the default under \"Storage\" at the time each user is added. If the location isn't available (a disk that isn't mounted), the user is still created, and their \"My files\" is created once it's available again.")}
+              </p>
+            </div>
+            <LocationSelect
+              id="personal-location"
+              className="max-w-full shrink-0"
+              value={q.data.personal_location}
+              blank="default"
+              disabled={save.isPending || !q.data.personal_spaces}
+              onChange={(v) => save.mutate({ personal_location: v })}
+            />
+          </div>
+          <div className="flex flex-wrap items-start gap-4 border-t p-4">
             <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-300">
               <HardDriveIcon className="size-4" />
             </span>

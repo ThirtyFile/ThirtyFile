@@ -24,14 +24,28 @@
           <li><strong>Role</strong>: administrators can open the Control panel. Users cannot.</li>
           <li><strong>Permissions</strong>: whether the person may edit, delete and share. Sharing covers share links, <strong>Share with…</strong> and managing the members of a space, including in their own personal space. Without them the account can only view.</li>
           <li><strong>Space size</strong>: how much the person may store. <code>0</code> means no limit.</li>
+          <li><strong>Create "My files"</strong>: whether the person gets a <a href="#personal">personal space</a>, and on which storage location. Both start from the settings under <strong>Control panel › General</strong>.</li>
           <li><strong>Disable</strong> an account to stop it signing in without deleting its files. Its <a href="account.html#app-passwords">app passwords</a> stop working too.</li>
           <li><strong>Reset two-factor sign-in</strong> is for someone who lost their phone and their recovery codes. It also signs them out everywhere and removes their <a href="account.html#app-passwords">app passwords</a>, as resetting their password does. A shield next to the name shows who has it on.</li>
           <li><strong>Devices</strong> lists the browsers where the person is signed in. Sign out one of them, or all of them with <strong>Sign out everywhere</strong>. It is recorded in the activity log and in the person's sign-in history.</li>
         </ul>
-        <p>The <strong>Used</strong> column includes items in the trash.</p>
+        <p>The <strong>Used</strong> column shows the person's personal space, including items in its trash, or <strong>No "My files"</strong> when they have none.</p>
+
+        <h3 id="personal">Personal spaces</h3>
+        <p>A personal space, <strong>My files</strong>, is a space only its owner can open. Under <strong>Control panel › General › Users</strong>:</p>
+        <ul>
+          <li><strong>Give new users a personal space</strong> is on unless you turn it off. When it's off, new people start in the first space they can use, usually <strong>All files</strong>, and "My files" doesn't appear anywhere for them. People who already have one keep it.</li>
+          <li><strong>Location of new users' "My files"</strong> is the <a href="storage.html">storage location</a> new personal spaces are created on. <strong>Default location</strong> follows whatever location is the default when each person is added.</li>
+        </ul>
+        <p>The dialog for a new user starts from these settings, and <a href="sign-in.html#rules">rules by email domain</a> can choose otherwise for accounts made by single sign-on. To change it later, right-click a user (or open <strong>Edit</strong>):</p>
+        <ul>
+          <li><strong>Create "My files"…</strong> gives the person a personal space now, on the location you choose.</li>
+          <li><strong>Remove "My files"…</strong> removes it. As when <a href="#delete">deleting an account</a>, you choose whether its files move into a folder in another space or are deleted; the person keeps their account and their access to other spaces.</li>
+        </ul>
+        <p>When the location's folder isn't available, for example a disk or network share that isn't mounted, adding the user and their first single sign-on still work. The list then shows <strong>My files pending (location unavailable)</strong>, and the space is created on that location when the person next signs in, or within a minute of the folder being back. The server log says why it waited.</p>
 
         <h3 id="delete">Deleting an account</h3>
-        <p>Select the user and click <strong>Delete</strong>. Their personal space <strong>My files</strong> is removed, so choose what happens to what is in it:</p>
+        <p>Select the user and click <strong>Delete</strong>. Their personal space <strong>My files</strong>, if they have one, is removed, so choose what happens to what is in it:</p>
         <ul>
           <li><strong>Move their files to</strong> another person's personal space, a team space or the company space. This is the default. The files keep their folders and go into a new folder named after the person, for example <em>Files of amy</em> (numbered if that name is taken). They count toward that space's size: when it doesn't have room, nothing is deleted and you're asked to choose another space or make it bigger. Nothing is copied, so this is quick even for large spaces. The person's trash is emptied, not moved. Folders they shared with colleagues stay shared.</li>
           <li><strong>Delete their files permanently</strong>. This can't be undone.</li>
@@ -53,8 +67,9 @@
         <h2 id="spaces">Spaces</h2>
         <p>Open <strong>Control panel › Spaces</strong> to create team spaces, set their size limit and choose where their files are stored.</p>
         <ul>
+          <li><strong>New team space</strong> asks for the <a href="storage.html">storage location</a> too: the default location is chosen unless you pick another. <strong>New folder space</strong> shows a folder of your choosing instead, which isn't on a storage location.</li>
           <li>Add members from the space's <strong>Members</strong> dialog and give each a <a href="sharing.html#people">role</a>.</li>
-          <li>To let everyone create team spaces themselves, switch it on under <strong>Control panel › General</strong>. A space created this way gets the same size limit as its creator, and each person can create up to 20.</li>
+          <li>To let everyone create team spaces themselves, switch it on under <strong>Control panel › General</strong>. A space created this way gets the same size limit as its creator, goes on the default location, and each person can create up to 20.</li>
         </ul>
 
         <h2 id="email">Notification emails</h2>
@@ -68,7 +83,7 @@
         <p>Emails go to the address each person entered in their notification settings. Accounts that sign in with Microsoft, Google or GitHub get the verified address of that account the first time they sign in after this is set up. Links in emails use the <strong>Site URL</strong> under <strong>Control panel › General</strong>; without it, emails have no link. Emails that can't be sent are written to the server log.</p>
 
         <h2 id="privacy">What administrators can see</h2>
-        <p>Administrators manage every team space and the company space, including their trash. They cannot open personal spaces, but when they <a href="#delete">delete an account</a> they can move its files to a space they can open.</p>
+        <p>Administrators manage every team space and the company space, including their trash. They cannot open personal spaces or see what is in them, only their size, but when they <a href="#delete">delete an account</a> or <a href="#personal">remove its "My files"</a> they can move its files to a space they can open.</p>
         <p>They do see every public share link, including links to files in personal spaces, under <strong>Control panel › All share links</strong>, so they can revoke links that shouldn't be public.</p>
 
         <h2 id="password">Forgotten passwords</h2>

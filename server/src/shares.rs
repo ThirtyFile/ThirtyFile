@@ -999,7 +999,7 @@ mod tests {
     async fn share_links_show_visitors_only_what_they_need() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let folder = env.folder(&amy, &amy.root_id, "Docs").await;
+        let folder = env.folder(&amy, amy.root(), "Docs").await;
         let script = stored_file(&env, &amy, &folder, "app.js", b"alert(1)").await;
         let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
         let addr: std::net::SocketAddr = "203.0.113.5:4000".parse().unwrap();
@@ -1038,7 +1038,7 @@ mod tests {
     async fn a_download_that_fails_to_open_doesnt_use_up_the_link() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let doc = stored_file(&env, &amy, &amy.root_id, "report.pdf", b"content").await;
+        let doc = stored_file(&env, &amy, amy.root(), "report.pdf", b"content").await;
         let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: Some(1), allow_upload: false, drop_only: false, allow_download: true };
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
@@ -1059,7 +1059,7 @@ mod tests {
     async fn a_zip_that_fails_to_open_doesnt_use_up_the_link() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let folder = env.folder(&amy, &amy.root_id, "Reports").await;
+        let folder = env.folder(&amy, amy.root(), "Reports").await;
         let doc = stored_file(&env, &amy, &folder, "report.pdf", b"zipped").await;
         let req = CreateReq { node_id: folder.clone(), password: None, expires_at: None, max_downloads: Some(1), allow_upload: false, drop_only: false, allow_download: true };
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
@@ -1088,7 +1088,7 @@ mod tests {
     async fn visits_are_counted_on_the_share_and_survive_trimming_the_log() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let doc = stored_file(&env, &amy, &amy.root_id, "a.txt", b"hello").await;
+        let doc = stored_file(&env, &amy, amy.root(), "a.txt", b"hello").await;
         let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: None, allow_upload: false, drop_only: false, allow_download: true };
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
@@ -1107,8 +1107,8 @@ mod tests {
     async fn zips_give_items_with_the_same_name_a_number_and_include_each_item_once() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let one = env.folder(&amy, &amy.root_id, "One").await;
-        let two = env.folder(&amy, &amy.root_id, "Two").await;
+        let one = env.folder(&amy, amy.root(), "One").await;
+        let two = env.folder(&amy, amy.root(), "Two").await;
         let a1 = stored_file(&env, &amy, &one, "a.txt", b"first").await;
         let a2 = stored_file(&env, &amy, &two, "a.txt", b"second").await;
         let zip = |ids: Vec<&String>| {
@@ -1139,7 +1139,7 @@ mod tests {
     async fn download_limit_cannot_be_skipped_with_a_range_request() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let doc = stored_file(&env, &amy, &amy.root_id, "movie.bin", &[7u8; 4096]).await;
+        let doc = stored_file(&env, &amy, amy.root(), "movie.bin", &[7u8; 4096]).await;
         let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: Some(1), allow_upload: false, drop_only: false, allow_download: true };
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
@@ -1171,7 +1171,7 @@ mod tests {
     async fn download_endpoint_hands_out_the_same_continuation_cookie() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let doc = stored_file(&env, &amy, &amy.root_id, "movie.bin", &[7u8; 4096]).await;
+        let doc = stored_file(&env, &amy, amy.root(), "movie.bin", &[7u8; 4096]).await;
         let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: Some(1), allow_upload: false, drop_only: false, allow_download: true };
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
@@ -1200,10 +1200,10 @@ mod tests {
     async fn selections_download_through_a_link_for_the_same_share() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let folder = env.folder(&amy, &amy.root_id, "Docs").await;
+        let folder = env.folder(&amy, amy.root(), "Docs").await;
         let a = stored_file(&env, &amy, &folder, "a.txt", b"first").await;
         let b = stored_file(&env, &amy, &folder, "b.txt", b"second").await;
-        let outside = stored_file(&env, &amy, &amy.root_id, "c.txt", b"third").await;
+        let outside = stored_file(&env, &amy, amy.root(), "c.txt", b"third").await;
         let share = |max: Option<i64>| {
             let req = CreateReq { node_id: folder.clone(), password: None, expires_at: None, max_downloads: max, ..link(&folder) };
             create(State(env.st.clone()), amy.clone(), Json(req))
@@ -1239,7 +1239,7 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
-        let folder = env.folder(&amy, &amy.root_id, "Shared").await;
+        let folder = env.folder(&amy, amy.root(), "Shared").await;
         let doc = env.file(&amy, &folder, "report.txt").await;
         env.grant(&folder, &ben, "editor").await;
 
@@ -1338,7 +1338,7 @@ mod tests {
 
         // The owner of a file sees and deletes a link a colleague made on it
         let amy = env.user("amy", true).await;
-        let folder = env.folder(&amy, &amy.root_id, "Shared").await;
+        let folder = env.folder(&amy, amy.root(), "Shared").await;
         let report = env.file(&amy, &folder, "report.txt").await;
         env.grant(&folder, &ben, "editor").await;
         let Json(theirs) = create(State(env.st.clone()), ben.clone(), Json(link(&report))).await.unwrap();
@@ -1351,7 +1351,7 @@ mod tests {
     async fn changing_a_link_keeps_its_address_and_a_new_password_locks_out_earlier_visitors() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let doc = stored_file(&env, &amy, &amy.root_id, "a.txt", b"hello").await;
+        let doc = stored_file(&env, &amy, amy.root(), "a.txt", b"hello").await;
         let first = testutil::wrong_password();
         let req = CreateReq { password: Some(first.clone()), expires_at: Some(now() + 86400), ..link(&doc) };
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
@@ -1384,7 +1384,7 @@ mod tests {
     async fn link_passwords_are_long_enough_hard_to_guess_and_unlock_for_a_day() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let doc = stored_file(&env, &amy, &amy.root_id, "a.txt", b"hello").await;
+        let doc = stored_file(&env, &amy, amy.root(), "a.txt", b"hello").await;
         // As long as account passwords must be
         let short = CreateReq { password: Some("abc".into()), ..link(&doc) };
         assert_eq!(create(State(env.st.clone()), amy.clone(), Json(short)).await.unwrap_err().status, StatusCode::BAD_REQUEST);
@@ -1430,7 +1430,7 @@ mod tests {
     async fn the_link_policy_applies_to_new_and_changed_links() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let doc = env.file(&amy, &amy.root_id, "a.txt").await;
+        let doc = env.file(&amy, amy.root(), "a.txt").await;
         let Json(old) = create(State(env.st.clone()), amy.clone(), Json(link(&doc))).await.unwrap();
         set_policy(&env, json!({ "share_password_required": true, "share_max_days": 7 })).await;
         let make = |req: CreateReq| create(State(env.st.clone()), amy.clone(), Json(req));
@@ -1509,7 +1509,7 @@ mod tests {
     async fn a_folder_link_accepts_files_that_belong_to_its_creator() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let inbox = env.folder(&amy, &amy.root_id, "Inbox").await;
+        let inbox = env.folder(&amy, amy.root(), "Inbox").await;
         let sub = env.folder(&amy, &inbox, "2026").await;
         env.file(&amy, &inbox, "a.txt").await;
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(folder_link(&inbox, false))).await.unwrap();
@@ -1535,7 +1535,7 @@ mod tests {
         assert_eq!(logged, 2);
 
         // Nothing outside the shared folder, not even Amy's own root folder
-        assert_eq!(start_upload(&env, &info.id, Some(&amy.root_id), "x.txt", 1, None).await.unwrap_err().status, StatusCode::NOT_FOUND);
+        assert_eq!(start_upload(&env, &info.id, Some(amy.root()), "x.txt", 1, None).await.unwrap_err().status, StatusCode::NOT_FOUND);
         // Bad names are refused as in any upload
         assert!(start_upload(&env, &info.id, None, "a/b.txt", 1, None).await.is_err());
         // A signed-in person can't continue a visitor's upload, nor a visitor someone else's
@@ -1554,7 +1554,7 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
-        let shared = env.folder(&amy, &amy.root_id, "Shared").await;
+        let shared = env.folder(&amy, amy.root(), "Shared").await;
         let sub = env.folder(&amy, &shared, "Sub").await;
         env.grant(&shared, &ben, "editor").await;
 
@@ -1580,7 +1580,7 @@ mod tests {
 
         // A folder moved out of the shared folder during an upload: the file doesn't follow it
         let pending = start_upload(&env, &plain.id, Some(&sub), "late.txt", 4, None).await.unwrap();
-        sqlx::query("UPDATE nodes SET parent_id = ? WHERE id = ?").bind(&amy.root_id).bind(&sub).execute(&env.st.db).await.unwrap();
+        sqlx::query("UPDATE nodes SET parent_id = ? WHERE id = ?").bind(amy.root()).bind(&sub).execute(&env.st.db).await.unwrap();
         assert!(send_upload(&env, &plain.id, &pending, b"late").await.is_err());
         let (placed,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE name LIKE 'late%'").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(placed, 0);
@@ -1610,7 +1610,7 @@ mod tests {
     async fn a_link_that_only_accepts_files_shows_nothing_of_the_folder() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let inbox = env.folder(&amy, &amy.root_id, "Inbox").await;
+        let inbox = env.folder(&amy, amy.root(), "Inbox").await;
         let sub = env.folder(&amy, &inbox, "Private").await;
         let secret = stored_file(&env, &amy, &inbox, "secret.txt", b"secret").await;
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(folder_link(&inbox, true))).await.unwrap();
@@ -1669,7 +1669,7 @@ mod tests {
     async fn a_preview_only_link_serves_previews_but_no_downloads() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let folder = env.folder(&amy, &amy.root_id, "Photos").await;
+        let folder = env.folder(&amy, amy.root(), "Photos").await;
         let photo = stored_file(&env, &amy, &folder, "a.jpg", b"jpeg").await;
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(CreateReq { allow_download: false, ..link(&folder) })).await.unwrap();
         assert!(!info.allow_download);

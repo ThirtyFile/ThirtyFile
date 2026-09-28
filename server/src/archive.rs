@@ -680,7 +680,7 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
-        let docs = env.folder(&amy, &amy.root_id, "Docs").await;
+        let docs = env.folder(&amy, amy.root(), "Docs").await;
         let text = "All work and no play. ".repeat(5000);
         let a = env.stored_file(&amy, &docs, "a.txt", text.as_bytes()).await;
         let sub = env.folder(&amy, &docs, "Sub").await;
@@ -699,7 +699,7 @@ mod tests {
 
         // Someone else can't follow the job, or compress items they can't open
         assert_eq!(get(State(env.st.clone()), ben.clone(), Path(job.id.clone())).await.unwrap_err().status, StatusCode::NOT_FOUND);
-        assert!(compress_now(&env, &ben, &[&a], &ben.root_id).await.is_err());
+        assert!(compress_now(&env, &ben, &[&a], ben.root()).await.is_err());
         assert!(extract_now(&env, &ben, &zip).await.is_err());
 
         // Extracted into a new folder named after it: the same files, folders (empty ones too) and contents
@@ -735,13 +735,13 @@ mod tests {
             async move {
                 let refs: Vec<(&str, &[u8])> = entries.iter().map(|(p, d)| (*p, d.as_slice())).collect();
                 let bytes = zip_of(&refs, deflate).await;
-                let id = env.stored_file(amy, &amy.root_id, name, &bytes).await;
+                let id = env.stored_file(amy, amy.root(), name, &bytes).await;
                 let job = extract_now(env, amy, &id).await.unwrap();
                 assert_eq!(job.state, "failed", "{name}");
                 job.error.unwrap()
             }
         };
-        let before = listing(&env, &amy.root_id).await.len();
+        let before = listing(&env, amy.root()).await.len();
         assert!(fails(vec![("../evil.txt", b"x".to_vec())], false, "up.zip").await.contains("points outside"));
         assert!(fails(vec![("ok/../../evil.txt", b"x".to_vec())], false, "up2.zip").await.contains("points outside"));
         assert!(fails(vec![("/etc/evil", b"x".to_vec())], false, "abs.zip").await.contains("points outside"));
@@ -755,14 +755,14 @@ mod tests {
             (0..=MAX_EXTRACT_ENTRIES).map(|i| (&*Box::leak(format!("d{i}/").into_boxed_str()), Vec::new())).collect();
         assert!(fails(many, false, "many.zip").await.contains("more than 20000 items"));
         // Not a ZIP at all
-        let junk = env.stored_file(&amy, &amy.root_id, "junk.zip", b"this is not a zip").await;
+        let junk = env.stored_file(&amy, amy.root(), "junk.zip", b"this is not a zip").await;
         assert!(extract_now(&env, &amy, &junk).await.unwrap().error.unwrap().contains("damaged"));
 
         // An entry stating less than it holds: never more than stated is written
         let mut bytes = zip_of(&[("x.txt", &[b'x'; 1000])], false).await;
         let cd = (0..bytes.len() - 4).rev().find(|&i| bytes[i..i + 4] == 0x0201_4b50u32.to_le_bytes()).unwrap();
         bytes[cd + 24..cd + 28].copy_from_slice(&10u32.to_le_bytes());
-        let liar = env.stored_file(&amy, &amy.root_id, "liar.zip", &bytes).await;
+        let liar = env.stored_file(&amy, amy.root(), "liar.zip", &bytes).await;
         assert!(extract_now(&env, &amy, &liar).await.unwrap().error.unwrap().contains("damaged"));
 
         // What the archive holds counts against the quota before anything is extracted
@@ -771,7 +771,7 @@ mod tests {
         assert!(big.starts_with("Not enough storage space"), "{big}");
 
         // Nothing was created by any of them, and no temporary files are left
-        let names: Vec<String> = listing(&env, &amy.root_id).await.into_iter().map(|(n, _, _)| n).collect();
+        let names: Vec<String> = listing(&env, amy.root()).await.into_iter().map(|(n, _, _)| n).collect();
         assert_eq!(names.len(), before + 10, "{names:?}");
         assert!(names.iter().all(|n| n.ends_with(".zip")));
         let left: Vec<_> = std::fs::read_dir(env.st.tmp_dir()).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name()).collect();

@@ -1382,19 +1382,19 @@ mod tests {
     async fn names_differing_only_in_non_english_letter_case_are_the_same_name() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let folder = env.folder(&amy, &amy.root_id, "Été").await;
+        let folder = env.folder(&amy, amy.root(), "Été").await;
         let mut c = env.st.db.acquire().await.unwrap();
-        assert!(tree::name_taken(&mut c, &amy.root_id, "été").await.unwrap());
-        assert_eq!(tree::unique_name(&mut c, &amy.root_id, "ÉTÉ", true).await.unwrap(), "ÉTÉ (1)");
+        assert!(tree::name_taken(&mut c, amy.root(), "été").await.unwrap());
+        assert_eq!(tree::unique_name(&mut c, amy.root(), "ÉTÉ", true).await.unwrap(), "ÉTÉ (1)");
         // An uploaded folder "été/x" goes into the existing "Été"
-        let found = tree::ensure_folders(&mut c, amy.id, &amy.root_id, "été", "").await.unwrap();
+        let found = tree::ensure_folders(&mut c, amy.id, amy.root(), "été", "").await.unwrap();
         assert_eq!(found, folder);
         // The database refuses a second one too
         let dup = sqlx::query(
             "INSERT INTO nodes (id, owner_id, parent_id, kind, name, drive_id, created_at, updated_at)
              SELECT 'x', owner_id, id, 'folder', 'été', drive_id, 0, 0 FROM nodes WHERE id = ?",
         )
-        .bind(&amy.root_id)
+        .bind(amy.root())
         .execute(&mut *c)
         .await;
         assert!(dup.is_err());
@@ -1405,13 +1405,13 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         for name in ["File 10.txt", "file 2.txt", "File 1.docx", "b.pdf", "README"] {
-            env.file(&amy, &amy.root_id, name).await;
+            env.file(&amy, amy.root(), name).await;
         }
         let list = |sort: &'static str| {
             let (st, amy) = (env.st.clone(), amy.clone());
             async move {
                 let q = ListQuery { sort: Some(sort.into()), ..Default::default() };
-                let items = children(State(st), amy.clone(), Path(amy.root_id.clone()), Query(q)).await.unwrap().0.into_items();
+                let items = children(State(st), amy.clone(), Path(amy.root().to_string()), Query(q)).await.unwrap().0.into_items();
                 items.into_iter().map(|n| n.name).collect::<Vec<_>>()
             }
         };
@@ -1440,11 +1440,11 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         for name in ["Zeta", "alpha", "Folder 10", "Folder 9"] {
-            env.folder(&amy, &amy.root_id, name).await;
+            env.folder(&amy, amy.root(), name).await;
         }
         // Equal sizes, times and extensions, so the ties are ordered by name and id across page boundaries
         for (i, name) in ["File 10.txt", "file 2.txt", "File 1.docx", "b.pdf", "README", "c.TXT", "d.pdf", "e", "a.docx", "f.txt", "g.png"].iter().enumerate() {
-            let id = env.file(&amy, &amy.root_id, name).await;
+            let id = env.file(&amy, amy.root(), name).await;
             sqlx::query("UPDATE nodes SET size = ?, updated_at = ?, created_at = ? WHERE id = ?")
                 .bind((i % 3) as i64 * 100)
                 .bind(1_000 + (i % 4) as i64)
@@ -1457,13 +1457,13 @@ mod tests {
         for sort in ["name", "size", "updated", "created", "type"] {
             for order in ["asc", "desc"] {
                 let q = ListQuery { sort: Some(sort.into()), order: Some(order.into()), ..Default::default() };
-                let Json(whole) = children(State(env.st.clone()), amy.clone(), Path(amy.root_id.clone()), Query(q)).await.unwrap();
+                let Json(whole) = children(State(env.st.clone()), amy.clone(), Path(amy.root().to_string()), Query(q)).await.unwrap();
                 let Listing::All(whole) = whole else { panic!("no limit gives the whole list") };
                 let whole: Vec<String> = whole.into_iter().map(|n| n.name).collect();
                 assert_eq!(whole.len(), 15);
                 assert!(whole[..4].iter().all(|n| !n.contains('.') && n != "README" && n != "e"), "folders first: {whole:?}");
                 for limit in [1, 2, 4, 15, 100] {
-                    assert_eq!(all_pages(&env, &amy, &amy.root_id, sort, order, limit).await, whole, "{sort} {order}, {limit} per page");
+                    assert_eq!(all_pages(&env, &amy, amy.root(), sort, order, limit).await, whole, "{sort} {order}, {limit} per page");
                 }
             }
         }
@@ -1474,13 +1474,13 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         for i in 1..=6 {
-            env.file(&amy, &amy.root_id, &format!("{i}.txt")).await;
+            env.file(&amy, amy.root(), &format!("{i}.txt")).await;
         }
         let page = |after: Option<String>| {
             let (st, amy) = (env.st.clone(), amy.clone());
             async move {
                 let q = ListQuery { limit: Some(3), after, ..Default::default() };
-                match children(State(st), amy.clone(), Path(amy.root_id.clone()), Query(q)).await.unwrap().0 {
+                match children(State(st), amy.clone(), Path(amy.root().to_string()), Query(q)).await.unwrap().0 {
                     Listing::Page { items, next } => (items.into_iter().map(|n| n.name).collect::<Vec<_>>(), next),
                     Listing::All(_) => panic!("a limit gives a page"),
                 }
@@ -1491,7 +1491,7 @@ mod tests {
         // The last item of the page is renamed away and one is added before it: nothing is repeated or skipped
         let (three,): (String,) = sqlx::query_as("SELECT id FROM nodes WHERE name = '3.txt'").fetch_one(&env.st.db).await.unwrap();
         let _ = rename(State(env.st.clone()), amy.clone(), Path(three), Json(RenameReq { name: "9.txt".into() })).await.unwrap();
-        env.file(&amy, &amy.root_id, "0.txt").await;
+        env.file(&amy, amy.root(), "0.txt").await;
         let (second, next) = page(next).await;
         assert_eq!(second, ["4.txt", "5.txt", "6.txt"]);
         let (third, next) = page(next).await;
@@ -1499,7 +1499,7 @@ mod tests {
 
         // A cursor that wasn't made by the server
         let q = ListQuery { limit: Some(3), after: Some("not a cursor".into()), ..Default::default() };
-        let err = children(State(env.st.clone()), amy.clone(), Path(amy.root_id.clone()), Query(q)).await.unwrap_err();
+        let err = children(State(env.st.clone()), amy.clone(), Path(amy.root().to_string()), Query(q)).await.unwrap_err();
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
     }
 
@@ -1507,12 +1507,12 @@ mod tests {
     async fn a_listing_without_a_limit_is_a_plain_array() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        env.file(&amy, &amy.root_id, "a.txt").await;
-        let Json(whole) = children(State(env.st.clone()), amy.clone(), Path(amy.root_id.clone()), Query(ListQuery::default())).await.unwrap();
+        env.file(&amy, amy.root(), "a.txt").await;
+        let Json(whole) = children(State(env.st.clone()), amy.clone(), Path(amy.root().to_string()), Query(ListQuery::default())).await.unwrap();
         let v = serde_json::to_value(&whole).unwrap();
         assert_eq!((v.as_array().map(Vec::len), v[0]["name"].as_str(), v[0]["owner_name"].as_str()), (Some(1), Some("a.txt"), Some("amy")));
         let q = ListQuery { limit: Some(10), ..Default::default() };
-        let Json(page) = children(State(env.st.clone()), amy.clone(), Path(amy.root_id.clone()), Query(q)).await.unwrap();
+        let Json(page) = children(State(env.st.clone()), amy.clone(), Path(amy.root().to_string()), Query(q)).await.unwrap();
         let v = serde_json::to_value(&page).unwrap();
         assert_eq!((v["items"][0]["name"].as_str(), v["next"].is_null()), (Some("a.txt"), true));
     }
@@ -1523,7 +1523,7 @@ mod tests {
         let amy = env.user("amy", true).await;
         let mut files = Vec::new();
         for i in 0..7 {
-            files.push(env.file(&amy, &amy.root_id, &format!("{i}.txt")).await);
+            files.push(env.file(&amy, amy.root(), &format!("{i}.txt")).await);
         }
         let refs: Vec<&str> = files.iter().map(String::as_str).collect();
         let _ = trash(State(env.st.clone()), amy.clone(), ids(&refs)).await.unwrap();
@@ -1554,8 +1554,8 @@ mod tests {
     async fn empty_trash_counts_and_deletes_only_what_the_user_manages() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let a = env.file(&amy, &amy.root_id, "a.txt").await;
-        let b = env.file(&amy, &amy.root_id, "b.txt").await;
+        let a = env.file(&amy, amy.root(), "a.txt").await;
+        let b = env.file(&amy, amy.root(), "b.txt").await;
         let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&a, &b])).await.unwrap();
         let Json(preview) = empty_trash_preview(State(env.st.clone()), amy.clone()).await.unwrap();
         assert_eq!(preview.len(), 1);
@@ -1563,7 +1563,7 @@ mod tests {
 
         // Without permission to delete, nothing is emptied and nothing is counted
         let mut bob = env.user("bob", false).await;
-        let c = env.file(&bob, &bob.root_id, "c.txt").await;
+        let c = env.file(&bob, bob.root(), "c.txt").await;
         let _ = trash(State(env.st.clone()), bob.clone(), ids(&[&c])).await.unwrap();
         bob.can_delete = false;
         let Json(preview) = empty_trash_preview(State(env.st.clone()), bob.clone()).await.unwrap();
@@ -1600,7 +1600,7 @@ mod tests {
             sqlx::query_as::<_, (i64,)>("SELECT refcount FROM blobs WHERE hash = ?").bind(&hash).fetch_optional(&env.st.db).await.unwrap().map(|r| r.0)
         };
         // Copying the folder adds a reference per file, in one statement
-        let _ = copy_nodes(State(env.st.clone()), amy.clone(), batch(&[&folder], &amy.root_id)).await.unwrap();
+        let _ = copy_nodes(State(env.st.clone()), amy.clone(), batch(&[&folder], amy.root())).await.unwrap();
         assert_eq!(refs().await, Some(4));
 
         // Deleting the space removes it at once and its content in the background
@@ -1622,11 +1622,11 @@ mod tests {
     async fn search_finds_names_in_any_letter_case_and_filters() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let reports = env.folder(&amy, &amy.root_id, "Reports").await;
+        let reports = env.folder(&amy, amy.root(), "Reports").await;
         env.file(&amy, &reports, "Été 2026.xlsx").await;
         env.file(&amy, &reports, "budget.docx").await;
-        env.file(&amy, &amy.root_id, "ete-notes.txt").await;
-        env.file(&amy, &amy.root_id, "AB.txt").await;
+        env.file(&amy, amy.root(), "ete-notes.txt").await;
+        env.file(&amy, amy.root(), "AB.txt").await;
         let search = |q: &str, within: Option<&str>, ext: Option<&str>| {
             let (st, amy) = (env.st.clone(), amy.clone());
             let q = SearchQuery {
@@ -1655,7 +1655,7 @@ mod tests {
         assert_eq!(search("ete", Some(&reports), None).await, ["Été 2026.xlsx"]);
         assert_eq!(search("e", None, Some("docx")).await, ["budget.docx"]);
         // Renames are indexed
-        let id = env.file(&amy, &amy.root_id, "old name.txt").await;
+        let id = env.file(&amy, amy.root(), "old name.txt").await;
         let _ = rename(State(env.st.clone()), amy.clone(), Path(id), Json(RenameReq { name: "Quarterly.txt".into() })).await.unwrap();
         assert_eq!(search("quarter", None, None).await, ["Quarterly.txt"]);
         assert!(search("old name", None, None).await.is_empty());
@@ -1665,8 +1665,8 @@ mod tests {
     async fn the_same_item_selected_twice_is_copied_once() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let doc = env.file(&amy, &amy.root_id, "a.txt").await;
-        let dest = env.folder(&amy, &amy.root_id, "Copies").await;
+        let doc = env.file(&amy, amy.root(), "a.txt").await;
+        let dest = env.folder(&amy, amy.root(), "Copies").await;
         let _ = copy_nodes(State(env.st.clone()), amy.clone(), batch(&[&doc, &doc, &doc], &dest)).await.unwrap();
         let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE parent_id = ?").bind(&dest).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(n, 1);
@@ -1676,7 +1676,7 @@ mod tests {
     async fn a_file_version_never_goes_back() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let doc = env.file(&amy, &amy.root_id, "a.txt").await;
+        let doc = env.file(&amy, amy.root(), "a.txt").await;
         // Saved several times within a second: the version is ahead of the clock
         let ahead = now() + 5;
         sqlx::query("UPDATE nodes SET updated_at = ? WHERE id = ?").bind(ahead).bind(&doc).execute(&env.st.db).await.unwrap();
@@ -1689,10 +1689,10 @@ mod tests {
     async fn a_selection_with_a_folder_and_something_inside_it_can_be_trashed_and_deleted() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let folder = env.folder(&amy, &amy.root_id, "Folder").await;
+        let folder = env.folder(&amy, amy.root(), "Folder").await;
         let inner = env.folder(&amy, &folder, "Inner").await;
         let doc = env.file(&amy, &inner, "a.txt").await;
-        let other = env.file(&amy, &amy.root_id, "b.txt").await;
+        let other = env.file(&amy, amy.root(), "b.txt").await;
 
         // Moving to the trash: the folder, a file deep inside it, and a duplicate id
         let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&doc, &folder, &other, &folder])).await.unwrap();
@@ -1725,7 +1725,7 @@ mod tests {
     async fn many_listings_at_once_share_the_connection_pool() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let folder = env.folder(&amy, &amy.root_id, "docs").await;
+        let folder = env.folder(&amy, amy.root(), "docs").await;
         let doc = env.file(&amy, &folder, "a.txt").await;
         // Each listing used to hold one connection while waiting for a second one, so more listings than
         // connections at the same moment waited for each other until the pool timed out
@@ -1750,7 +1750,7 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
-        let shared = env.folder(&amy, &amy.root_id, "shared").await;
+        let shared = env.folder(&amy, amy.root(), "shared").await;
         let doc = env.file(&amy, &shared, "report.txt").await;
         env.grant(&shared, &ben, "editor").await;
 
@@ -1766,7 +1766,7 @@ mod tests {
         assert_eq!(err.status, StatusCode::FORBIDDEN);
         // The owner can
         let _ = restore(State(env.st.clone()), amy.clone(), ids(&[&shared])).await.unwrap();
-        assert_eq!(env.drive_of(&doc).await, env.drive_of(&amy.root_id).await);
+        assert_eq!(env.drive_of(&doc).await, env.drive_of(amy.root()).await);
     }
 
     #[tokio::test]
@@ -1781,7 +1781,7 @@ mod tests {
             drop(conn);
             let doc = env.file(&amy, &root, "plan.txt").await;
             let other = env.file(&amy, &root, "old.txt").await;
-            let private = env.file(&amy, &amy.root_id, "diary.txt").await;
+            let private = env.file(&amy, amy.root(), "diary.txt").await;
             (root, doc, other, private)
         };
         let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&doc, &other, &private])).await.unwrap();
@@ -1806,16 +1806,16 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
-        let shared = env.folder(&amy, &amy.root_id, "Shared with Ben").await;
+        let shared = env.folder(&amy, amy.root(), "Shared with Ben").await;
         let inner = env.folder(&amy, &shared, "Inner").await;
         let doc = env.file(&amy, &shared, "report.txt").await;
         env.grant(&shared, &ben, "editor").await;
         let amy_drive = env.drive_of(&shared).await;
 
         // Ben is only an editor via a folder share: he can't move the folder or its files into his own space
-        let err = move_nodes(State(env.st.clone()), ben.clone(), batch(&[&shared], &ben.root_id)).await.unwrap_err();
+        let err = move_nodes(State(env.st.clone()), ben.clone(), batch(&[&shared], ben.root())).await.unwrap_err();
         assert_eq!(err.status, StatusCode::FORBIDDEN);
-        let err = move_nodes(State(env.st.clone()), ben.clone(), batch(&[&doc], &ben.root_id)).await.unwrap_err();
+        let err = move_nodes(State(env.st.clone()), ben.clone(), batch(&[&doc], ben.root())).await.unwrap_err();
         assert_eq!(err.status, StatusCode::FORBIDDEN);
         assert_eq!(env.drive_of(&shared).await, amy_drive);
         assert_eq!(env.drive_of(&doc).await, amy_drive);
@@ -1831,15 +1831,15 @@ mod tests {
         assert_eq!(env.drive_of(&doc).await, env.drive_of(&company).await);
 
         // Members of the company space (everyone can edit) can move its items into their own space
-        let _ = move_nodes(State(env.st.clone()), ben.clone(), batch(&[&doc], &ben.root_id)).await.unwrap();
-        assert_eq!(env.drive_of(&doc).await, env.drive_of(&ben.root_id).await);
+        let _ = move_nodes(State(env.st.clone()), ben.clone(), batch(&[&doc], ben.root())).await.unwrap();
+        assert_eq!(env.drive_of(&doc).await, env.drive_of(ben.root()).await);
     }
 
     #[tokio::test]
     async fn space_usage_counter_follows_copies_moves_and_deletes() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let folder = env.folder(&amy, &amy.root_id, "docs").await;
+        let folder = env.folder(&amy, amy.root(), "docs").await;
         let doc = env.file(&amy, &folder, "a.bin").await;
         sqlx::query("UPDATE nodes SET size = 1000 WHERE id = ?").bind(&doc).execute(&env.st.db).await.unwrap();
         tree::recompute_usage(&env.st).await.unwrap();
@@ -1851,12 +1851,12 @@ mod tests {
                 u
             }
         };
-        let personal = env.drive_of(&amy.root_id).await;
+        let personal = env.drive_of(amy.root()).await;
         let company = env.drive_of(&env.st.shared_root().unwrap()).await;
         assert_eq!(used(personal.clone()).await, 1000);
 
         // Copy within the space: counted twice
-        let _ = copy_nodes(State(env.st.clone()), amy.clone(), batch(&[&doc], &amy.root_id)).await.unwrap();
+        let _ = copy_nodes(State(env.st.clone()), amy.clone(), batch(&[&doc], amy.root())).await.unwrap();
         assert_eq!(used(personal.clone()).await, 2000);
         // Move the folder to the company space: bytes follow
         let _ = move_nodes(State(env.st.clone()), amy.clone(), batch(&[&folder], &env.st.shared_root().unwrap())).await.unwrap();
@@ -1877,11 +1877,11 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
-        let top = env.folder(&amy, &amy.root_id, "top").await;
+        let top = env.folder(&amy, amy.root(), "top").await;
         let sub = env.folder(&amy, &top, "sub").await;
         let deep = env.folder(&amy, &sub, "deep").await;
         let gone = env.folder(&amy, &top, "gone").await;
-        let other = env.folder(&amy, &amy.root_id, "other").await;
+        let other = env.folder(&amy, amy.root(), "other").await;
         for (parent, name, size) in [(&top, "a.txt", 100), (&sub, "b.txt", 20), (&deep, "c.txt", 3), (&gone, "d.txt", 4000), (&other, "e.txt", 5)] {
             let id = env.file(&amy, parent, name).await;
             sqlx::query("UPDATE nodes SET size = ? WHERE id = ?").bind(size).bind(&id).execute(&env.st.db).await.unwrap();
@@ -1893,7 +1893,7 @@ mod tests {
         let Json(c) = contents(State(env.st.clone()), amy.clone(), of(&[&top])).await.unwrap();
         assert_eq!(c, Contents { size: 123, files: 3, folders: 2 });
         // Several folders add up, a folder inside another selected one is counted once, and a file holds nothing
-        let a = env.file(&amy, &amy.root_id, "loose.txt").await;
+        let a = env.file(&amy, amy.root(), "loose.txt").await;
         let Json(c) = contents(State(env.st.clone()), amy.clone(), of(&[&top, &sub, &other, &a])).await.unwrap();
         assert_eq!(c, Contents { size: 128, files: 4, folders: 2 });
         let Json(c) = contents(State(env.st.clone()), amy.clone(), of(&[&deep])).await.unwrap();
@@ -1981,7 +1981,7 @@ mod tests {
             root
         };
         let t = now();
-        let mine = env.file(&ben, &ben.root_id, "mine.txt").await;
+        let mine = env.file(&ben, ben.root(), "mine.txt").await;
         let opened = env.file(&amy, &team, "opened.txt").await;
         let edited = env.file(&amy, &team, "edited.txt").await;
         let _untouched = env.file(&amy, &team, "untouched.txt").await;
@@ -2025,7 +2025,7 @@ mod tests {
 
         // Only the latest few hundred opens are kept per person
         for i in 0..RECENT_OPENS_KEPT + 5 {
-            let id = env.file(&ben, &ben.root_id, &format!("{i}.txt")).await;
+            let id = env.file(&ben, ben.root(), &format!("{i}.txt")).await;
             sqlx::query("INSERT INTO recent_files (user_id, node_id, at) VALUES (?, ?, ?)").bind(ben.id).bind(&id).bind(i).execute(&env.st.db).await.unwrap();
         }
         record_open(&env.st, ben.id, &mine).await.unwrap();
@@ -2058,9 +2058,9 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let st = || State(env.st.clone());
-        let dest = env.folder(&amy, &amy.root_id, "Dest").await;
+        let dest = env.folder(&amy, amy.root(), "Dest").await;
         let there = env.file(&amy, &dest, "Report.docx").await;
-        let src = env.folder(&amy, &amy.root_id, "Src").await;
+        let src = env.folder(&amy, amy.root(), "Src").await;
         let a = env.file(&amy, &src, "report.docx").await;
 
         // The browser learns about the clash first
@@ -2086,9 +2086,9 @@ mod tests {
         assert!(name_of(&env, &there).await.2, "the replaced file is in the trash");
 
         // A folder can't be replaced by something inside it
-        let outer = env.folder(&amy, &amy.root_id, "Box").await;
+        let outer = env.folder(&amy, amy.root(), "Box").await;
         let inner = env.folder(&amy, &outer, "Box").await;
-        let err = move_nodes(st(), amy.clone(), resolved(&[&inner], Some(&amy.root_id), Resolution::Replace)).await.unwrap_err();
+        let err = move_nodes(st(), amy.clone(), resolved(&[&inner], Some(amy.root()), Resolution::Replace)).await.unwrap_err();
         assert_eq!(err.status, StatusCode::CONFLICT);
         assert!(!name_of(&env, &outer).await.2);
     }
@@ -2098,9 +2098,9 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let st = || State(env.st.clone());
-        let dest = env.folder(&amy, &amy.root_id, "Dest").await;
+        let dest = env.folder(&amy, amy.root(), "Dest").await;
         let there = env.file(&amy, &dest, "a.txt").await;
-        let a = env.file(&amy, &amy.root_id, "a.txt").await;
+        let a = env.file(&amy, amy.root(), "a.txt").await;
         let count = |parent: String| {
             let db = env.st.db.clone();
             async move {
@@ -2119,13 +2119,13 @@ mod tests {
 
         // Restoring: another "a.txt" took the name meanwhile
         let _ = trash(st(), amy.clone(), ids(&[&a])).await.unwrap();
-        let newer = env.file(&amy, &amy.root_id, "a.txt").await;
+        let newer = env.file(&amy, amy.root(), "a.txt").await;
         let Json(found) = conflicts(st(), amy.clone(), Json(ConflictsReq { dest_id: None, names: vec![], ids: vec![a.clone()] })).await.unwrap();
         assert_eq!(found.iter().map(|c| c.existing.id.as_str()).collect::<Vec<_>>(), [newer.as_str()]);
         let _ = restore(st(), amy.clone(), resolved(&[&a], None, Resolution::Skip)).await.unwrap();
         assert!(name_of(&env, &a).await.2, "skipped: still in the trash");
         let _ = restore(st(), amy.clone(), resolved(&[&a], None, Resolution::Replace)).await.unwrap();
-        assert_eq!(name_of(&env, &a).await, ("a.txt".into(), Some(amy.root_id.clone()), false));
+        assert_eq!(name_of(&env, &a).await, ("a.txt".into(), Some(amy.root().to_string()), false));
         assert!(name_of(&env, &newer).await.2);
     }
 
@@ -2162,15 +2162,15 @@ mod tests {
         // More old items than one batch takes: files, and a folder with files inside
         let mut old = Vec::new();
         for i in 0..130 {
-            old.push(file(&amy.root_id, format!("old{i}.txt"), &shared).await);
+            old.push(file(amy.root(), format!("old{i}.txt"), &shared).await);
         }
-        let folder = env.folder(&amy, &amy.root_id, "Old folder").await;
+        let folder = env.folder(&amy, amy.root(), "Old folder").await;
         for i in 0..3 {
             file(&folder, format!("inner{i}.txt"), &alone).await;
         }
         old.push(folder);
-        let recent = file(&amy.root_id, "recent.txt".into(), &shared).await;
-        let live = file(&amy.root_id, "live.txt".into(), &shared).await;
+        let recent = file(amy.root(), "recent.txt".into(), &shared).await;
+        let live = file(amy.root(), "live.txt".into(), &shared).await;
         tree::recompute_usage(&env.st).await.unwrap();
         let refs: Vec<&str> = old.iter().map(String::as_str).collect();
         let _ = trash(State(env.st.clone()), amy.clone(), ids(&refs)).await.unwrap();
@@ -2178,7 +2178,7 @@ mod tests {
         let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&recent])).await.unwrap();
 
         assert_eq!(purge_expired_trash(&env.st, 30).await.unwrap(), 131);
-        let drive = env.drive_of(&amy.root_id).await;
+        let drive = env.drive_of(amy.root()).await;
         let (left,): (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id = ? AND parent_id IS NOT NULL").bind(&drive).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(left, 2, "only the recent item in the trash and the live file are left");

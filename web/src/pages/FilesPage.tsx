@@ -1,16 +1,19 @@
 import { useEffect, useEffectEvent } from "react";
-import { useParams } from "react-router";
+import { Navigate, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { UsersRoundIcon } from "lucide-react";
+import { FolderIcon, Loader2Icon, UsersRoundIcon } from "lucide-react";
 import { OfflineBanner, ReadOnlyBanner } from "@/components/OfflineNotice";
 import { SORT_KEYS, api, type NodeInfo, type SortKey, type SortOrder } from "@/api";
 import { Explorer } from "@/components/Explorer";
-import { crumbPath, type Crumb } from "@/components/Frame";
+import { Frame, crumbPath, type Crumb } from "@/components/Frame";
+import { EmptyState } from "@/components/DataTable";
+import { ErrorState } from "@/components/ErrorState";
 import { expandPath, treePathOf } from "@/components/FolderTree";
-import { DRIVE_ICON } from "@/lib/drives";
+import { DRIVE_ICON, useDrives } from "@/lib/drives";
+import { hasPersonal, homeFolder } from "@/lib/home";
 import { useAllPages } from "@/lib/pages";
 import { pathOf } from "@/lib/paths";
-import { usePersisted } from "@/lib/session";
+import { useMe, usePersisted } from "@/lib/session";
 import { t } from "@/lib/i18n";
 
 export function useSort() {
@@ -37,9 +40,45 @@ export function locationOf(info: NodeInfo | undefined) {
   return { crumbs, rootUrl, rootLabel, icon: via ? UsersRoundIcon : DRIVE_ICON[info.drive.kind] };
 }
 
-/** Folder page: `/files` (My files), `/files/shared` (All files), `/files/:id` */
+/** Folder page: `/files` (My files, or the first space of someone without it), `/files/shared` (All files), `/files/:id` */
 export function FilesPage() {
-  const { id = "root" } = useParams();
+  const { id } = useParams();
+  const me = useMe();
+  // Someone without "My files" (the alias "root") starts in their first space instead
+  if ((!id || id === "root") && !hasPersonal(me)) return <HomeWithoutPersonal />;
+  return <FolderPage id={id ?? "root"} />;
+}
+
+/** Opens the first space of someone who has no "My files", or says that they have no space yet */
+function HomeWithoutPersonal() {
+  const me = useMe();
+  const drives = useDrives();
+  const home = homeFolder(me, drives.data);
+  if (home) return <Navigate to={`/files/${home}`} replace />;
+  return (
+    <Frame toolbar={null} crumbs={[{ label: t("All spaces"), to: "/drives", virtual: true }, { label: t("Files") }]} upTo="/drives" icon={FolderIcon}>
+      {home === null ? (
+        <EmptyState
+          icon={FolderIcon}
+          title={t("You don't have any spaces yet")}
+          hint={
+            me.personal_pending
+              ? t("Your \"My files\" is being set up, and appears here once its storage is available.")
+              : t("Ask an administrator for access to a space. Files shared with you are under \"Shared with me\".")
+          }
+        />
+      ) : drives.error ? (
+        <ErrorState message={drives.error.message} onRetry={() => drives.refetch()} />
+      ) : (
+        <div className="flex flex-1 items-center justify-center text-muted-foreground" role="status" aria-label={t("Loading…")}>
+          <Loader2Icon className="size-5 animate-spin" />
+        </div>
+      )}
+    </Frame>
+  );
+}
+
+function FolderPage({ id }: { id: string }) {
   const [sort, onSort, setSort] = useSort();
   // Refresh more often while the storage service is offline, so the notice disappears automatically once it recovers
   const info = useQuery({

@@ -23,17 +23,19 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdow
 import { cn } from "@/lib/utils";
 import { CONTROL_PANEL_ITEMS } from "@/lib/controlPanel";
 import { FileIcon as TypeIcon } from "@/components/FileIcon";
-import { folderOfPath, useFolderDrop } from "@/lib/dnd";
+import { useFolderDrop } from "@/lib/dnd";
+import { folderOfPath, hasPersonal } from "@/lib/home";
+import { useMe } from "@/lib/session";
 import { hasDraft, useDraftsVersion } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 import { currentEntry, useTabActions, useTabsState, viewedFile, type Tab } from "@/tabs";
 
 const TAB_MIME = "application/x-thirtyfile-tab";
 
-/** Decide the tab icon and default title from the URL */
-function describe(path: string): { icon: LucideIcon; title: string } {
+/** Decide the tab icon and default title from the URL (`personal`: the person has "My files", which `/files` opens) */
+function describe(path: string, personal: boolean): { icon: LucideIcon; title: string } {
   const p = path.split("?")[0];
-  if (p === "/files" || p === "/files/root") return { icon: FolderOpenIcon, title: t("My files") };
+  if (p === "/files" || p === "/files/root") return personal ? { icon: FolderOpenIcon, title: t("My files") } : { icon: FolderIcon, title: t("Files") };
   if (p === "/files/shared") return { icon: BuildingIcon, title: t("All files") };
   if (p === "/drives") return { icon: LayersIcon, title: t("All spaces") };
   if (p === "/shared-with-me") return { icon: UsersRoundIcon, title: t("Shared with me") };
@@ -54,7 +56,8 @@ function TabItem({ tab, active, onlyOne }: { tab: Tab; active: boolean; onlyOne:
   const { activate, close, closeOthers, open, move } = useTabActions();
   const [dropping, setDropping] = useState(false);
   const path = currentEntry(tab);
-  const { icon: Icon, title: fallback } = describe(path);
+  const personal = hasPersonal(useMe());
+  const { icon: Icon, title: fallback } = describe(path, personal);
   // Folder and file names come from the page; other fixed pages always use their current name (to avoid reusing a title saved before a rename)
   const dynamic = path.startsWith("/files/") || path.startsWith("/view/") || path.startsWith("/search");
   const title = (dynamic && tab.title) || fallback;
@@ -62,7 +65,7 @@ function TabItem({ tab, active, onlyOne }: { tab: Tab; active: boolean; onlyOne:
   useDraftsVersion();
   const unsaved = !!file && hasDraft(file);
   // A tab showing a folder takes items dragged onto it, like that folder in the tree
-  const folder = folderOfPath(path);
+  const folder = folderOfPath(path, personal);
   const { dropping: droppingItems, dropProps } = useFolderDrop(folder ? { id: folder, name: title } : null);
   // Asks first when there are unsaved changes
   const requestClose = () => close(tab.id);

@@ -94,13 +94,13 @@ mod tests {
     async fn an_upload_without_progress_for_a_day_no_longer_holds_space() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let drive = env.drive_of(&amy.root_id).await;
+        let drive = env.drive_of(amy.root()).await;
         // A personal space's quota is its owner's
         sqlx::query("UPDATE users SET quota_bytes = 1000 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
         let ts = crate::util::now();
         sqlx::query("INSERT INTO uploads (id, owner_id, parent_id, rel_path, name, size, offset, created_at, expires_at, drive_id) VALUES ('u1', ?, ?, '', 'big.bin', 900, 0, ?, ?, ?)")
             .bind(amy.id)
-            .bind(&amy.root_id)
+            .bind(amy.root())
             .bind(ts)
             .bind(ts + crate::upload::UPLOAD_TTL)
             .bind(&drive)

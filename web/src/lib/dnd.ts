@@ -23,14 +23,6 @@ export interface DropFolder {
   name: string;
 }
 
-/** The folder a page shows, from its path: `/files` (My files), `/files/shared` (All files) or `/files/<id>` */
-export function folderOfPath(path: string | undefined): string | null {
-  const p = path?.split(/[?#]/)[0];
-  if (p === "/files") return "root";
-  const m = p && /^\/files\/([^/]+)$/.exec(p);
-  return m ? decodeURIComponent(m[1]) : null;
-}
-
 /** The items being dragged from this page, with the folders they came from (for Undo) */
 let dragged: { ids: string[]; items: readonly { id: string; parent_id: string | null }[] } | null = null;
 

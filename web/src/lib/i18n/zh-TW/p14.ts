@@ -67,6 +67,18 @@ export default {
   "Uploaded a file": "上傳了檔案",
   // Deleting a user: moving their files
   "Their personal space \"My files\" ({size}) is removed. Files they added to other spaces, and team spaces they own, are transferred to you. Their share links are deleted.": "他的個人空間「我的檔案」（{size}）會被移除。他加到其他空間的檔案，以及他擁有的團隊空間，會轉給您。他的分享連結會被刪除。",
+  "Files they added to spaces, and team spaces they own, are transferred to you. Their share links are deleted.": "他加到各空間的檔案，以及他擁有的團隊空間，會轉給您。他的分享連結會被刪除。",
+  // Creating or removing someone's "My files" later
+  "Create \"My files\" for \"{name}\"": "為「{name}」建立「我的檔案」",
+  "A private space that only they can see.": "只有他自己看得到的個人空間。",
+  "It's waiting for {location} to be available. Creating it now replaces the wait.": "它正在等待 {location} 可以使用。現在建立就不再等待。",
+  "\"My files\" created": "已建立「我的檔案」",
+  "Remove \"My files\" of \"{name}\"?": "移除「{name}」的「我的檔案」？",
+  "Their personal space ({size}) is removed. They keep their account and their access to other spaces, and start in the first space they can use.": "他的個人空間（{size}）會被移除。他的帳號和其他空間的權限都會保留，登入後會從他可用的第一個空間開始。",
+  "Their \"My files\" is still waiting for {location} to be available. It won't be created.": "他的「我的檔案」還在等待 {location} 可以使用。移除後就不會再建立。",
+  "Remove \"My files\"": "移除「我的檔案」",
+  "\"My files\" removed": "已移除「我的檔案」",
+  "Stopped waiting to create \"My files\"": "已不再等待建立「我的檔案」",
   "To stop them signing in and keep everything as it is, disable the account instead.": "若只想讓他無法登入、其他一切保持原樣，請改為停用帳號。",
   "Their files": "他的檔案",
   "Move their files to:": "把他的檔案移到：",

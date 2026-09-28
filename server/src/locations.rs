@@ -840,13 +840,13 @@ mod tests {
             let tmp = env.dir.join("tmp").join(&hash);
             std::fs::write(&tmp, &content).unwrap();
             local.put_file(&hash, &tmp).await.unwrap();
-            let id = env.file(&amy, &amy.root_id, &format!("f{i}.txt")).await;
+            let id = env.file(&amy, amy.root(), &format!("f{i}.txt")).await;
             let mut c = env.st.db.acquire().await.unwrap();
             tree::add_blob_ref(&mut c, &hash, content.len() as i64, "local").await.unwrap();
             sqlx::query("UPDATE nodes SET blob_hash = ?, size = ? WHERE id = ?").bind(&hash).bind(content.len() as i64).bind(&id).execute(&mut *c).await.unwrap();
             hashes.push(hash);
         }
-        let drive = env.drive_of(&amy.root_id).await;
+        let drive = env.drive_of(amy.root()).await;
         run_migration(&env.st, &drive, "second").await.unwrap();
         let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blobs WHERE location_id != 'second'").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(left, 0);
@@ -888,7 +888,7 @@ mod tests {
         let tmp = env.dir.join("tmp").join(&hash);
         std::fs::write(&tmp, content).unwrap();
         env.st.storage(location).unwrap().put_file(&hash, &tmp).await.unwrap();
-        let id = env.file(amy, &amy.root_id, &format!("{content}.txt")).await;
+        let id = env.file(amy, amy.root(), &format!("{content}.txt")).await;
         let mut c = env.st.db.acquire().await.unwrap();
         tree::add_blob_ref(&mut c, &hash, content.len() as i64, location).await.unwrap();
         sqlx::query("UPDATE nodes SET blob_hash = ?, size = ? WHERE id = ?").bind(&hash).bind(content.len() as i64).bind(&id).execute(&mut *c).await.unwrap();
@@ -924,7 +924,7 @@ mod tests {
         let last = hashes[2].clone();
         let blob = env.dir.join("blobs").join(&last[0..2]).join(&last[2..4]).join(&last);
         std::fs::rename(&blob, blob.with_extension("away")).unwrap();
-        let drive = env.drive_of(&amy.root_id).await;
+        let drive = env.drive_of(amy.root()).await;
         let err = run_migration(&env.st, &drive, "second").await.unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::BAD_GATEWAY);
         // What was copied before stays moved, and its old copy is deleted later, not now
@@ -979,7 +979,7 @@ mod tests {
         let body = axum::body::Bytes::from_static(b"kept, edited");
         let _ = crate::files::save_content(State(env.st.clone()), amy.clone(), Path(id), axum::http::HeaderMap::new(), body).await.unwrap();
 
-        let drive = env.drive_of(&amy.root_id).await;
+        let drive = env.drive_of(amy.root()).await;
         run_migration(&env.st, &drive, "second").await.unwrap();
         assert_eq!(location_of(&env, &kept).await.as_deref(), Some("second"), "the earlier version moved");
         assert_eq!(location_of(&env, &moved_away).await.as_deref(), Some("third"), "not switched back to this move's copy");
@@ -1043,7 +1043,7 @@ mod tests {
         let amy = env.user("amy", true).await;
         let sales = new_team(&env, "Sales").await;
         // Every kind of space, on the built-in location
-        for root in [&admin.root_id, &amy.root_id, &env.st.shared_root().unwrap(), &sales] {
+        for root in [admin.root(), amy.root(), &env.st.shared_root().unwrap(), &sales] {
             assert_eq!(placed(&env, root).await, at(BUILTIN, "folder"));
         }
         // A folder the administrator chose is on no location
@@ -1056,25 +1056,25 @@ mod tests {
         make_default(&env, "nas").await;
         let ben = env.user("ben", true).await;
         let plans = new_team(&env, "Plans").await;
-        assert_eq!(placed(&env, &ben.root_id).await, at("nas", "folder"));
+        assert_eq!(placed(&env, ben.root()).await, at("nas", "folder"));
         assert_eq!(placed(&env, &plans).await, at("nas", "folder"));
         assert!(nas.join("users").join("ben").is_dir() && nas.join("teams").join("Plans").is_dir());
-        assert_eq!(placed(&env, &amy.root_id).await, at(BUILTIN, "folder"));
+        assert_eq!(placed(&env, amy.root()).await, at(BUILTIN, "folder"));
         assert_eq!(placed(&env, &sales).await, at(BUILTIN, "folder"));
 
         // A bucket as the default: new spaces keep the content store there
         add_location(&env, "bucket", None).await;
         make_default(&env, "bucket").await;
         let carl = env.user("carl", true).await;
-        assert_eq!(placed(&env, &carl.root_id).await, at("bucket", "store"));
+        assert_eq!(placed(&env, carl.root()).await, at("bucket", "store"));
 
         // Changing the default again moves nothing: Carl's new files still go to the bucket
         make_default(&env, BUILTIN).await;
-        assert_eq!(placed(&env, &carl.root_id).await, at("bucket", "store"));
-        assert_eq!(placed(&env, &ben.root_id).await, at("nas", "folder"));
-        let carls = env.drive_of(&carl.root_id).await;
+        assert_eq!(placed(&env, carl.root()).await, at("bucket", "store"));
+        assert_eq!(placed(&env, ben.root()).await, at("nas", "folder"));
+        let carls = env.drive_of(carl.root()).await;
         assert_eq!(tree::drive_location(&mut env.st.db.acquire().await.unwrap(), &carls).await.unwrap(), "bucket");
-        let id = env.upload(&carl, &carl.root_id, "a.txt", b"carl's").await;
+        let id = env.upload(&carl, carl.root(), "a.txt", b"carl's").await;
         let (location,): (String,) = sqlx::query_as("SELECT b.location_id FROM nodes n JOIN blobs b ON b.hash = n.blob_hash WHERE n.id = ?")
             .bind(&id)
             .fetch_one(&env.st.db)
@@ -1085,21 +1085,21 @@ mod tests {
         // Only a move changes it
         let req = serde_json::from_value(json!({ "location_id": BUILTIN, "migrate": false })).unwrap();
         let _ = set_drive_location(State(env.st.clone()), Admin(admin.clone()), Path(carls.clone()), Json(req)).await.unwrap();
-        assert_eq!(placed(&env, &carl.root_id).await, at(BUILTIN, "store"));
+        assert_eq!(placed(&env, carl.root()).await, at(BUILTIN, "store"));
     }
 
     #[tokio::test]
     async fn the_list_counts_folder_spaces_and_the_content_store() {
         let env = testutil::folders_env().await;
         let amy = env.user("amy", true).await;
-        env.upload(&amy, &amy.root_id, "notes.txt", b"twelve bytes").await;
+        env.upload(&amy, amy.root(), "notes.txt", b"twelve bytes").await;
         let company = env.st.shared_root().unwrap();
         env.upload(&env.admin().await, &company, "plan.txt", b"plan").await;
         // A space on a bucket, whose files are in the content store there
         add_location(&env, "bucket", None).await;
         make_default(&env, "bucket").await;
         let ben = env.user("ben", true).await;
-        env.upload(&ben, &ben.root_id, "a.txt", b"ben's file").await;
+        env.upload(&ben, ben.root(), "a.txt", b"ben's file").await;
         // A folder chosen by the administrator counts on no location
         let shown = env.folder_space("Scans").await;
         testutil::write_old(&shown.dir.join("scan.pdf"), b"%PDF-1.7 elsewhere");
@@ -1147,7 +1147,7 @@ mod tests {
         let err = delete(State(env.st.clone()), Admin(env.admin().await), Path("nas".into())).await.unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
         assert_eq!(err.message, "1 space still uses this location. Change it first.");
-        assert_eq!(placed(&env, &amy.root_id).await, at("nas", "folder"));
+        assert_eq!(placed(&env, amy.root()).await, at("nas", "folder"));
     }
 
     #[tokio::test]

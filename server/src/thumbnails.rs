@@ -197,7 +197,7 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
-        let pdf = env.file(&amy, &amy.root_id, "Report.pdf").await;
+        let pdf = env.file(&amy, amy.root(), "Report.pdf").await;
         let hash = "ab".repeat(32);
         sqlx::query("INSERT INTO blobs (hash, size, refcount, created_at) VALUES (?, 1000, 1, 0)").bind(&hash).execute(&env.st.db).await.unwrap();
         sqlx::query("UPDATE nodes SET mime = 'application/pdf', blob_hash = ?, size = 1000 WHERE id = ?")
@@ -209,7 +209,7 @@ mod tests {
         // Kept for Amy's space only: the same content elsewhere doesn't get it
         let content = hash;
         let hash = crate::util::sha256_hex(format!("{}:{content}", env.drive_of(&pdf).await).as_bytes());
-        let text = env.file(&amy, &amy.root_id, "notes.txt").await;
+        let text = env.file(&amy, amy.root(), "notes.txt").await;
         let get = |user: User, id: String| thumbnail(State(env.st.clone()), user, Path(id), HeaderMap::new());
         let put = |user: User, id: String, body: Bytes| upload_thumbnail(State(env.st.clone()), user, Path(id), body);
 
@@ -251,7 +251,7 @@ mod tests {
         let amy = env.user("amy", true).await;
         let get = |id: String, headers: HeaderMap| thumbnail(State(env.st.clone()), amy.clone(), Path(id), headers);
 
-        let pic = env.stored_file(&amy, &amy.root_id, "pic.png", &png(640, 320)).await;
+        let pic = env.stored_file(&amy, amy.root(), "pic.png", &png(640, 320)).await;
         let res = get(pic.clone(), HeaderMap::new()).await.unwrap();
         let etag = res.headers()[header::ETAG].clone();
         let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
@@ -263,7 +263,7 @@ mod tests {
 
         // Not a picture after all, or one too wide to decode safely: no thumbnail, and an empty one in the cache
         for (name, data) in [("broken.png", b"not a png".to_vec()), ("wide.png", png(MAX_THUMB_PIXELS_SIDE + 1, 1).to_vec())] {
-            let id = env.stored_file(&amy, &amy.root_id, name, &data).await;
+            let id = env.stored_file(&amy, amy.root(), name, &data).await;
             assert_eq!(get(id.clone(), HeaderMap::new()).await.unwrap_err().status, StatusCode::NOT_FOUND, "{name}");
             let cached = env.st.thumb_path(&crate::util::sha256_hex(&data));
             assert_eq!(std::fs::metadata(&cached).unwrap().len(), 0, "{name}");
@@ -274,7 +274,7 @@ mod tests {
         }
 
         // Too large a file isn't read at all
-        let big = env.stored_file(&amy, &amy.root_id, "big.png", &png(8, 8)).await;
+        let big = env.stored_file(&amy, amy.root(), "big.png", &png(8, 8)).await;
         sqlx::query("UPDATE nodes SET size = ? WHERE id = ?").bind(MAX_THUMB_SOURCE + 1).bind(&big).execute(&env.st.db).await.unwrap();
         assert_eq!(get(big, HeaderMap::new()).await.unwrap_err().status, StatusCode::NOT_FOUND);
     }

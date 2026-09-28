@@ -208,8 +208,8 @@ mod tests {
         let storage = env.dir.join("blobs");
         let admin = env.admin().await;
         let amy = env.user("amy", true).await;
-        assert_eq!(space_of(&env, &admin.root_id).await, ("folder".into(), folder(&storage, "users/admin")));
-        assert_eq!(space_of(&env, &amy.root_id).await, ("folder".into(), folder(&storage, "users/amy")));
+        assert_eq!(space_of(&env, admin.root()).await, ("folder".into(), folder(&storage, "users/admin")));
+        assert_eq!(space_of(&env, amy.root()).await, ("folder".into(), folder(&storage, "users/amy")));
         assert_eq!(space_of(&env, &env.st.shared_root().unwrap()).await, ("folder".into(), folder(&storage, "company")));
         assert!(storage.join("users/amy").is_dir() && storage.join("company").is_dir());
 
@@ -252,7 +252,7 @@ mod tests {
         let amy = env.user("amy", true).await;
         let st = || State(env.st.clone());
 
-        let Json(docs) = crate::nodes::create_folder(st(), amy.clone(), req(json!({ "parent_id": amy.root_id, "name": "Docs" }))).await.unwrap();
+        let Json(docs) = crate::nodes::create_folder(st(), amy.clone(), req(json!({ "parent_id": amy.root(), "name": "Docs" }))).await.unwrap();
         let a = env.upload(&amy, &docs.id, "a.txt", b"hello").await;
         assert_eq!(std::fs::read(dir.join("Docs/a.txt")).unwrap(), b"hello");
         assert_eq!(content(&env, &amy, &a).await, b"hello");
@@ -261,7 +261,7 @@ mod tests {
 
         let _ = crate::nodes::rename(st(), amy.clone(), UrlPath(a.clone()), req(json!({ "name": "b.txt" }))).await.unwrap();
         assert!(dir.join("Docs/b.txt").is_file() && !dir.join("Docs/a.txt").exists());
-        let _ = crate::nodes::move_nodes(st(), amy.clone(), req(json!({ "ids": [a], "dest_id": amy.root_id }))).await.unwrap();
+        let _ = crate::nodes::move_nodes(st(), amy.clone(), req(json!({ "ids": [a], "dest_id": amy.root() }))).await.unwrap();
         assert!(dir.join("b.txt").is_file());
 
         // Deleted: in the space's trash folder first, then gone
@@ -280,7 +280,7 @@ mod tests {
 
         // A file put there by another program shows up
         testutil::write_old(&dir.join("scanned.pdf"), b"%PDF");
-        let (drive,): (String,) = sqlx::query_as("SELECT id FROM drives WHERE root_id = ?").bind(&amy.root_id).fetch_one(&env.st.db).await.unwrap();
+        let (drive,): (String,) = sqlx::query_as("SELECT id FROM drives WHERE root_id = ?").bind(amy.root()).fetch_one(&env.st.db).await.unwrap();
         crate::folders::scan(&env.st, &drive).await.unwrap();
         assert!(env.node_at(&drive, "scanned.pdf").await.is_some());
         let (used,): (i64,) = sqlx::query_as("SELECT used_bytes FROM drives WHERE id = ?").bind(&drive).fetch_one(&env.st.db).await.unwrap();
@@ -298,7 +298,7 @@ mod tests {
         sqlx::query("UPDATE storage_locations SET is_default = (id = 's3')").execute(&env.st.db).await.unwrap();
         let amy = env.user("amy", true).await;
         let team = new_team(&env, "Remote").await;
-        assert_eq!(space_of(&env, &amy.root_id).await, ("store".into(), None));
+        assert_eq!(space_of(&env, amy.root()).await, ("store".into(), None));
         assert_eq!(space_of(&env, team["root_id"].as_str().unwrap()).await, ("store".into(), None));
         assert!(!env.dir.join("blobs/users/amy").exists());
 
@@ -313,7 +313,7 @@ mod tests {
             .unwrap();
         sqlx::query("UPDATE storage_locations SET is_default = (id = 'nas')").execute(&env.st.db).await.unwrap();
         let ben = env.user("ben", true).await;
-        assert_eq!(space_of(&env, &ben.root_id).await, ("folder".into(), folder(&nas, "users/ben")));
+        assert_eq!(space_of(&env, ben.root()).await, ("folder".into(), folder(&nas, "users/ben")));
 
         // Not mounted: the space isn't created on the disk below the mount point, whether the mount point is missing or
         // an empty folder (spaces were made in it before, so it can't really be empty)
@@ -328,6 +328,43 @@ mod tests {
         std::fs::create_dir(&nas).unwrap();
         offline().await;
         assert_eq!(std::fs::read_dir(&nas).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn an_administrator_chooses_the_location_of_a_new_space() {
+        let env = testutil::folders_env().await;
+        let nas = env.dir.join("nas");
+        std::fs::create_dir_all(&nas).unwrap();
+        sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES ('nas', 'NAS', 'local', ?, 0, 0)")
+            .bind(json!({ "path": nas.to_string_lossy() }).to_string())
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        let create = |user: crate::auth::User, v: Value| {
+            let st = env.st.clone();
+            async move { crate::drives::create(State(st), user, Json(serde_json::from_value(v).unwrap())).await.map(|Json(info)| serde_json::to_value(&info).unwrap()) }
+        };
+        let admin = env.admin().await;
+        // On the chosen location, not the default one
+        let sales = create(admin.clone(), json!({ "name": "Sales", "location_id": "nas" })).await.unwrap();
+        assert_eq!(sales["location_id"], "nas");
+        assert_eq!(space_of(&env, sales["root_id"].as_str().unwrap()).await, ("folder".into(), folder(&nas, "teams/Sales")));
+        // Without a choice: the default location
+        let plans = create(admin.clone(), json!({ "name": "Plans" })).await.unwrap();
+        assert_eq!(plans["location_id"], crate::locations::BUILTIN);
+        // A location that doesn't exist, or one with a folder of the administrator's choosing: refused
+        assert_eq!(create(admin.clone(), json!({ "name": "X", "location_id": "nope" })).await.unwrap_err().status, axum::http::StatusCode::NOT_FOUND);
+        let dir = env.dir.join("chosen");
+        std::fs::create_dir_all(&dir).unwrap();
+        let both = json!({ "name": "Y", "location_id": "nas", "source_path": dir.to_string_lossy() });
+        assert_eq!(create(admin.clone(), both).await.unwrap_err().status, axum::http::StatusCode::BAD_REQUEST);
+        // Standard users (when they may create spaces) get the default location, and can't choose
+        sqlx::query("INSERT INTO settings (key, value) VALUES ('allow_user_drives', '1')").execute(&env.st.db).await.unwrap();
+        env.st.system.write().unwrap().allow_user_drives = true;
+        let amy = env.user("amy", true).await;
+        assert_eq!(create(amy.clone(), json!({ "name": "Mine", "location_id": "nas" })).await.unwrap_err().status, axum::http::StatusCode::FORBIDDEN);
+        let mine = create(amy, json!({ "name": "Mine" })).await.unwrap();
+        assert_eq!(mine["location_id"], crate::locations::BUILTIN);
     }
 
     #[test]

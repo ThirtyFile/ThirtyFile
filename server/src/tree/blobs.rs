@@ -189,6 +189,11 @@ async fn purge_detached(st: &AppState) -> AppResult<()> {
             .fetch_all(&mut *tx)
             .await?;
             if deleted.is_empty() {
+                // Ended before the write lock is released: the DELETE took SQLite's write lock even though it deleted
+                // nothing, and a dropped transaction only rolls back later, in the background. Meanwhile the next
+                // writer's transaction, which reads first, couldn't start writing ("database is locked" at once:
+                // SQLite doesn't wait for a lock while upgrading a read transaction)
+                tx.rollback().await?;
                 break;
             }
             total += deleted.len();
@@ -590,7 +595,7 @@ mod tests {
     async fn background_removal_never_deletes_blobs_being_uploaded() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let drive = env.drive_of(&amy.root_id).await;
+        let drive = env.drive_of(amy.root()).await;
         let hash = "ab".repeat(32);
         let blob = env.dir.join("blobs").join("ab").join("ab").join(&hash);
         let tmp = env.dir.join("tmp").join("upload");

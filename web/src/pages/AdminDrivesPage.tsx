@@ -24,6 +24,7 @@ import { api, type Drive, type Migration, type ScanReport } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AccessDialog } from "@/components/AccessDialog";
+import { CreateDriveDialog } from "@/components/DriveDialogs";
 import { ConfirmDialog, ErrorText, NameDialog } from "@/components/dialogs";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { DRIVE_ICON, DRIVE_KIND_LABEL, ROLE_LABEL, driveLabel } from "@/lib/drives";
@@ -302,18 +303,11 @@ export function AdminDrivesPage() {
         }
       />
       {dialog?.t === "create" && (
-        <NameDialog
-          title={t("New team space")}
-          initial=""
-          label={t("Name (after creating it, add users or groups under \"Manage members\")")}
-          confirmText={t("Create")}
+        <CreateDriveDialog
           onClose={() => setDialog(null)}
-          onSubmit={async (name) => {
-            const d = await api.createDrive(name);
-            setDialog(null);
+          onCreated={(d) => {
             refresh();
             setSelectedId(d.id);
-            toast.success(t("Space created"));
           }}
         />
       )}

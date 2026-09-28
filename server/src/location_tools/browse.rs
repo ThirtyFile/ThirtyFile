@@ -453,9 +453,9 @@ mod tests {
         let env = testutil::env().await;
         let admin = env.admin().await;
         let amy = env.user("amy", false).await;
-        let docs = env.folder(&admin, &admin.root_id, "Docs").await;
+        let docs = env.folder(&admin, admin.root(), "Docs").await;
         env.stored_file(&admin, &docs, "report.txt", b"admin's report").await;
-        env.stored_file(&amy, &amy.root_id, "diary.txt", b"amy's diary").await;
+        env.stored_file(&amy, amy.root(), "diary.txt", b"amy's diary").await;
         // Content nothing records, and content only an earlier version uses
         let local = env.st.storage("local").unwrap();
         let orphan = crate::util::sha256_hex(b"orphan");
@@ -500,9 +500,9 @@ mod tests {
     async fn trash_versions_and_pending_deletions_are_told_apart() {
         let env = testutil::env().await;
         let admin = env.admin().await;
-        let trashed = env.stored_file(&admin, &admin.root_id, "old.txt", b"trashed").await;
+        let trashed = env.stored_file(&admin, admin.root(), "old.txt", b"trashed").await;
         sqlx::query("UPDATE nodes SET trashed_at = 1, trash_id = 't', trash_root = 1 WHERE id = ?").bind(&trashed).execute(&env.st.db).await.unwrap();
-        let file = env.stored_file(&admin, &admin.root_id, "notes.txt", b"version one").await;
+        let file = env.stored_file(&admin, admin.root(), "notes.txt", b"version one").await;
         // The file got new content: the old one is an earlier version
         let v1 = crate::util::sha256_hex(b"version one");
         sqlx::query("INSERT INTO node_versions (id, node_id, blob_hash, size, modified_at, created_at) VALUES ('v1', ?, ?, 11, 0, 0)")

@@ -560,7 +560,7 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
-        let folder = env.folder(&amy, &amy.root_id, "Shared").await;
+        let folder = env.folder(&amy, amy.root(), "Shared").await;
         env.grant(&folder, &ben, "editor").await;
         let id = new_file(&env, &amy, &folder, "notes.txt").await;
         save(&env, &amy, &id, b"one").await;
@@ -599,7 +599,7 @@ mod tests {
     async fn only_the_versions_the_settings_keep_stay_and_their_content_goes_with_them() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let id = new_file(&env, &amy, &amy.root_id, "a.txt").await;
+        let id = new_file(&env, &amy, amy.root(), "a.txt").await;
         set_policy(&env, 2, 90);
         for body in [b"1".as_slice(), b"22", b"333", b"4444"] {
             let body: &'static [u8] = Box::leak(body.to_vec().into_boxed_slice());
@@ -627,7 +627,7 @@ mod tests {
     async fn deleting_a_file_for_good_deletes_its_versions() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let id = new_file(&env, &amy, &amy.root_id, "a.txt").await;
+        let id = new_file(&env, &amy, amy.root(), "a.txt").await;
         save(&env, &amy, &id, b"one").await;
         save(&env, &amy, &id, b"two").await;
         let req = |ids: &[&str]| Json(serde_json::from_value(serde_json::json!({ "ids": ids })).unwrap());

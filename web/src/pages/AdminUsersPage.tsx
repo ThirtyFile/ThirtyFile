@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { HistoryIcon, Loader2Icon, MonitorSmartphoneIcon, ShieldCheckIcon, ShieldOffIcon, PencilIcon, RefreshCwIcon, Trash2Icon, TriangleAlertIcon, UserCheckIcon, UserPlusIcon, UsersIcon, UserXIcon } from "lucide-react";
+import { ClockIcon, FolderMinusIcon, FolderPlusIcon, HistoryIcon, Loader2Icon, MonitorSmartphoneIcon, ShieldCheckIcon, ShieldOffIcon, PencilIcon, RefreshCwIcon, Trash2Icon, TriangleAlertIcon, UserCheckIcon, UserPlusIcon, UsersIcon, UserXIcon } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { DataTable, type Column } from "@/components/DataTable";
 import { toast } from "sonner";
@@ -8,10 +8,11 @@ import { api, type Drive, type UserRow } from "@/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog, ErrorText } from "@/components/dialogs";
+import { LocationSelect, useLocationName } from "@/components/LocationSelect";
 import { confirm } from "@/components/confirm";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { useMe } from "@/lib/session";
@@ -40,6 +41,9 @@ export function AdminUsersPage() {
   const [loginsOf, setLoginsOf] = useState<UserRow | null>(null);
   const [devicesOf, setDevicesOf] = useState<UserRow | null>(null);
   const [resetting, setResetting] = useState<UserRow | null>(null);
+  // Creating or removing someone's "My files"
+  const [personalOf, setPersonalOf] = useState<{ t: "add" | "remove"; user: UserRow } | null>(null);
+  const locationName = useLocationName();
   const qc = useQueryClient();
   const users = useMemo(() => q.data?.pages.flat() ?? [], [q.data]);
   const selected = users.find((u) => u.id === selectedId) ?? null;
@@ -113,19 +117,34 @@ export function AdminUsersPage() {
     },
     {
       header: tc("space", "Used"),
-      cell: (u) => (
-        <div className="flex items-center gap-2" title={t("Includes items in the trash")}>
-          <span className="tabular-nums">
-            {formatBytes(u.used_bytes)}
-            <span className="text-muted-foreground"> / {u.quota_bytes ? formatBytes(u.quota_bytes) : tc("short", "Unlimited")}</span>
-          </span>
-          {u.quota_bytes > 0 && (
-            <span className="h-1 w-20 overflow-hidden rounded bg-muted">
-              <span className="block h-full bg-brand" style={{ width: `${Math.min(100, (u.used_bytes / u.quota_bytes) * 100)}%` }} />
+      cell: (u) =>
+        !u.personal_space ? (
+          // No "My files": say so, or that it waits for its storage location
+          u.personal_pending ? (
+            <Badge
+              variant="outline"
+              className="h-5 gap-1 border-amber-500/50 px-1.5 text-[11px] text-amber-700 dark:text-amber-300"
+              title={t("Waiting for {location}: it's created once the location is available", { location: locationName(u.personal_pending) })}
+            >
+              <ClockIcon className="size-3" />
+              {t("My files pending (location unavailable)")}
+            </Badge>
+          ) : (
+            <span className="text-muted-foreground">{t("No \"My files\"")}</span>
+          )
+        ) : (
+          <div className="flex items-center gap-2" title={t("Includes items in the trash")}>
+            <span className="tabular-nums">
+              {formatBytes(u.used_bytes)}
+              <span className="text-muted-foreground"> / {u.quota_bytes ? formatBytes(u.quota_bytes) : tc("short", "Unlimited")}</span>
             </span>
-          )}
-        </div>
-      ),
+            {u.quota_bytes > 0 && (
+              <span className="h-1 w-20 overflow-hidden rounded bg-muted">
+                <span className="block h-full bg-brand" style={{ width: `${Math.min(100, (u.used_bytes / u.quota_bytes) * 100)}%` }} />
+              </span>
+            )}
+          </div>
+        ),
     },
     {
       header: t("Last sign-in"),
@@ -182,6 +201,17 @@ export function AdminUsersPage() {
                   <ShieldOffIcon /> {t("Reset two-factor sign-in")}
                 </DropdownMenuItem>
               )}
+              <DropdownMenuSeparator />
+              {!selected.personal_space && (
+                <DropdownMenuItem onClick={() => setPersonalOf({ t: "add", user: selected })}>
+                  <FolderPlusIcon /> {t("Create \"My files\"…")}
+                </DropdownMenuItem>
+              )}
+              {(selected.personal_space || selected.personal_pending) && (
+                <DropdownMenuItem onClick={() => setPersonalOf({ t: "remove", user: selected })}>
+                  <FolderMinusIcon /> {t("Remove \"My files\"…")}
+                </DropdownMenuItem>
+              )}
               {selected.id !== me.id && (
                 <DropdownMenuItem
                   onClick={async () => {
@@ -229,7 +259,15 @@ export function AdminUsersPage() {
         }
       />
       {editing && (
-        <UserDialog user={editing === "new" ? null : editing} self={editing !== "new" && editing.id === me.id} onClose={() => setEditing(null)} />
+        <UserDialog
+          user={editing === "new" ? null : editing}
+          self={editing !== "new" && editing.id === me.id}
+          onClose={() => setEditing(null)}
+          onPersonal={(what, user) => {
+            setEditing(null);
+            setPersonalOf({ t: what, user });
+          }}
+        />
       )}
       {loginsOf && <LoginLogDialog title={t("Sign-in log for \"{name}\"", { name: loginsOf.username })} userId={loginsOf.id} onClose={() => setLoginsOf(null)} />}
       {devicesOf && <DevicesDialog user={devicesOf} onClose={() => setDevicesOf(null)} />}
@@ -248,6 +286,8 @@ export function AdminUsersPage() {
           }}
         />
       )}
+      {personalOf?.t === "add" && <AddPersonalDialog user={personalOf.user} onClose={() => setPersonalOf(null)} />}
+      {personalOf?.t === "remove" && <RemovePersonalDialog user={personalOf.user} onClose={() => setPersonalOf(null)} />}
       {deleting && (
         <DeleteUserDialog
           user={deleting}
@@ -261,12 +301,14 @@ export function AdminUsersPage() {
     </Frame>
   );
 }
-/** Deleting a user: their personal space is moved into a folder in another space (the default) or deleted */
-function DeleteUserDialog({ user, onClose, onDeleted }: { user: UserRow; onClose(): void; onDeleted(): void }) {
-  const qc = useQueryClient();
+/**
+ * What happens to the files in someone's "My files" when it goes (the user is deleted, or only their space): moved
+ * into a folder in another space (the default), or deleted. Only its size is shown, never what is in it.
+ */
+function usePersonalFiles(user: UserRow) {
   const me = useMe();
   const drives = useQuery({ queryKey: ["admin-drives"], queryFn: api.adminDrives });
-  // Their own space ("My files": a folder on the server in new installs, whose folder is kept when they are deleted)
+  // Their own space ("My files": a folder on the server in new installs, whose folder is kept when it is removed)
   const own = drives.data?.find((d) => d.kind === "personal" && d.owner_name === user.username);
   // Spaces that can take the files: not the user's own, not turned off
   const targets = (drives.data ?? []).filter((d) => !d.disabled && d !== own);
@@ -274,10 +316,182 @@ function DeleteUserDialog({ user, onClose, onDeleted }: { user: UserRow; onClose
   const [choice, setChoice] = useState<"move" | "delete">("move");
   const [target, setTarget] = useState("");
   const moveTo = target || mine?.id || targets[0]?.id || "";
+  return {
+    user,
+    own,
+    targets,
+    choice,
+    setChoice,
+    moveTo,
+    setTarget,
+    /** The query for the server */
+    files: choice === "move" ? { move_to: moveTo } : { delete_files: true },
+    /** A choice is complete (a space to move to was found) */
+    ready: !user.personal_space || choice === "delete" || !!moveTo,
+  };
+}
+
+function PersonalFilesChoice({ c }: { c: ReturnType<typeof usePersonalFiles> }) {
   const spaceLabel = (d: Drive) => (d.kind === "personal" ? t("My files of {name}", { name: d.owner_name }) : d.name);
+  const { own, user } = c;
+  return (
+    <div className="grid gap-3" role="radiogroup" aria-label={t("Their files")}>
+      <Label className="flex items-start gap-2 font-normal">
+        <input type="radio" className="mt-1 accent-brand" checked={c.choice === "move"} onChange={() => c.setChoice("move")} />
+        <span className="grid min-w-0 flex-1 gap-1.5">
+          <span>{t("Move their files to:")}</span>
+          <select
+            className="h-8 min-w-0 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            aria-label={t("Move their files to:")}
+            value={c.moveTo}
+            disabled={c.choice !== "move"}
+            onChange={(e) => c.setTarget(e.target.value)}
+          >
+            {c.targets.map((d) => (
+              <option key={d.id} value={d.id}>
+                {spaceLabel(d)}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs text-muted-foreground">
+            {own?.mode === "folder"
+              ? t("They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash stays in their folder on the server.", { name: user.username })
+              : t("They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash is emptied.", { name: user.username })}
+          </span>
+        </span>
+      </Label>
+      <Label className="flex items-start gap-2 font-normal">
+        <input type="radio" className="mt-1 accent-brand" checked={c.choice === "delete"} onChange={() => c.setChoice("delete")} />
+        {own?.mode === "folder" ? (
+          <span className="min-w-0">
+            {t("Remove their files from ThirtyFile")}
+            <span className="block text-xs break-words text-muted-foreground">
+              {t("Their folder on the server, {path}, is kept with the files in it: delete it there when it's no longer needed.", { path: own.source_path ?? "" })}
+            </span>
+          </span>
+        ) : (
+          <span>
+            {t("Delete their files permanently")}
+            <span className="block text-xs text-muted-foreground">{t("This can't be undone.")}</span>
+          </span>
+        )}
+      </Label>
+    </div>
+  );
+}
+
+/** Creating someone's "My files" later, on a storage location */
+function AddPersonalDialog({ user, onClose }: { user: UserRow; onClose(): void }) {
+  const qc = useQueryClient();
+  const system = useQuery({ queryKey: ["system"], queryFn: api.systemSettings });
+  const locationName = useLocationName();
+  // Preset from the system setting (Control panel › General); "" = the default location
+  const [location, setLocation] = useState<string | null>(null);
+  const value = location ?? system.data?.personal_location ?? "";
+  const add = useMutation({
+    mutationFn: () => api.addPersonalSpace(user.id, value || undefined),
+    onSuccess: () => {
+      toast.success(t("\"My files\" created"));
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      qc.invalidateQueries({ queryKey: ["admin-drives"] });
+      onClose();
+    },
+  });
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <form
+          className="grid gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            add.mutate();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{t("Create \"My files\" for \"{name}\"", { name: user.username })}</DialogTitle>
+            <DialogDescription>{t("A private space that only they can see.")}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-1.5">
+            <Label htmlFor="personal-add-location">{t("Storage location")}</Label>
+            <LocationSelect id="personal-add-location" value={value} onChange={setLocation} blank="default" disabled={!system.data} />
+            {user.personal_pending && (
+              <p className="text-xs text-muted-foreground">
+                {t("It's waiting for {location} to be available. Creating it now replaces the wait.", { location: locationName(user.personal_pending) })}
+              </p>
+            )}
+          </div>
+          <ErrorText>{add.error?.message}</ErrorText>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              {t("Cancel")}
+            </Button>
+            <Button type="submit" disabled={add.isPending || !system.data}>
+              {add.isPending && <Loader2Icon className="animate-spin" />}
+              {t("Create")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Removing someone's "My files" (or stopping the wait for one): they keep their account */
+function RemovePersonalDialog({ user, onClose }: { user: UserRow; onClose(): void }) {
+  const qc = useQueryClient();
+  const c = usePersonalFiles(user);
+  const locationName = useLocationName();
+  const remove = useMutation({
+    mutationFn: () => api.removePersonalSpace(user.id, user.personal_space ? c.files : {}),
+    onSuccess: () => {
+      toast.success(user.personal_space ? t("\"My files\" removed") : t("Stopped waiting to create \"My files\""));
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      qc.invalidateQueries({ queryKey: ["admin-drives"] });
+      onClose();
+    },
+  });
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <form
+          className="grid gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            remove.mutate();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{t("Remove \"My files\" of \"{name}\"?", { name: user.username })}</DialogTitle>
+            <DialogDescription>
+              {user.personal_space
+                ? t("Their personal space ({size}) is removed. They keep their account and their access to other spaces, and start in the first space they can use.", { size: formatBytes(user.used_bytes) })
+                : t("Their \"My files\" is still waiting for {location} to be available. It won't be created.", { location: locationName(user.personal_pending) })}
+            </DialogDescription>
+          </DialogHeader>
+          {user.personal_space && <PersonalFilesChoice c={c} />}
+          <ErrorText>{remove.error?.message}</ErrorText>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              {t("Cancel")}
+            </Button>
+            <Button type="submit" variant="destructive" disabled={remove.isPending || !c.ready}>
+              {remove.isPending && <Loader2Icon className="animate-spin" />}
+              {t("Remove \"My files\"")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Deleting a user: their personal space is moved into a folder in another space (the default) or deleted */
+function DeleteUserDialog({ user, onClose, onDeleted }: { user: UserRow; onClose(): void; onDeleted(): void }) {
+  const qc = useQueryClient();
+  const c = usePersonalFiles(user);
 
   const remove = useMutation({
-    mutationFn: () => api.deleteUser(user.id, choice === "move" ? { move_to: moveTo } : { delete_files: true }),
+    mutationFn: () => api.deleteUser(user.id, user.personal_space ? c.files : {}),
     onSuccess: () => {
       toast.success(t("User deleted"));
       qc.invalidateQueries({ queryKey: ["admin-users"] });
@@ -309,9 +523,11 @@ function DeleteUserDialog({ user, onClose, onDeleted }: { user: UserRow; onClose
           </DialogHeader>
           <div className="grid gap-2 text-sm text-muted-foreground">
             <p>
-              {t("Their personal space \"My files\" ({size}) is removed. Files they added to other spaces, and team spaces they own, are transferred to you. Their share links are deleted.", {
-                size: formatBytes(user.used_bytes),
-              })}
+              {user.personal_space
+                ? t("Their personal space \"My files\" ({size}) is removed. Files they added to other spaces, and team spaces they own, are transferred to you. Their share links are deleted.", {
+                    size: formatBytes(user.used_bytes),
+                  })
+                : t("Files they added to spaces, and team spaces they own, are transferred to you. Their share links are deleted.")}
             </p>
             {!user.disabled && (
               <p>
@@ -322,54 +538,13 @@ function DeleteUserDialog({ user, onClose, onDeleted }: { user: UserRow; onClose
               </p>
             )}
           </div>
-          <div className="grid gap-3" role="radiogroup" aria-label={t("Their files")}>
-            <Label className="flex items-start gap-2 font-normal">
-              <input type="radio" className="mt-1 accent-brand" checked={choice === "move"} onChange={() => setChoice("move")} />
-              <span className="grid flex-1 gap-1.5">
-                <span>{t("Move their files to:")}</span>
-                <select
-                  className="h-8 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                  aria-label={t("Move their files to:")}
-                  value={moveTo}
-                  disabled={choice !== "move"}
-                  onChange={(e) => setTarget(e.target.value)}
-                >
-                  {targets.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {spaceLabel(d)}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-xs text-muted-foreground">
-                  {own?.mode === "folder"
-                    ? t("They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash stays in their folder on the server.", { name: user.username })
-                    : t("They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash is emptied.", { name: user.username })}
-                </span>
-              </span>
-            </Label>
-            <Label className="flex items-start gap-2 font-normal">
-              <input type="radio" className="mt-1 accent-brand" checked={choice === "delete"} onChange={() => setChoice("delete")} />
-              {own?.mode === "folder" ? (
-                <span>
-                  {t("Remove their files from ThirtyFile")}
-                  <span className="block text-xs text-muted-foreground">
-                    {t("Their folder on the server, {path}, is kept with the files in it: delete it there when it's no longer needed.", { path: own.source_path ?? "" })}
-                  </span>
-                </span>
-              ) : (
-                <span>
-                  {t("Delete their files permanently")}
-                  <span className="block text-xs text-muted-foreground">{t("This can't be undone.")}</span>
-                </span>
-              )}
-            </Label>
-          </div>
+          {user.personal_space && <PersonalFilesChoice c={c} />}
           <ErrorText>{remove.error?.message ?? disable.error?.message}</ErrorText>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
               {t("Cancel")}
             </Button>
-            <Button type="submit" variant="destructive" disabled={remove.isPending || (choice === "move" && !moveTo)}>
+            <Button type="submit" variant="destructive" disabled={remove.isPending || !c.ready}>
               {remove.isPending && <Loader2Icon className="animate-spin" />}
               {t("Delete user")}
             </Button>
@@ -380,9 +555,11 @@ function DeleteUserDialog({ user, onClose, onDeleted }: { user: UserRow; onClose
   );
 }
 
-function UserDialog({ user, self, onClose }: { user: UserRow | null; self: boolean; onClose(): void }) {
+/** `onPersonal`: an existing user's "My files" is to be created or removed (in its own dialog) */
+function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow | null; self: boolean; onClose(): void; onPersonal(what: "add" | "remove", user: UserRow): void }) {
   const me = useMe();
   const qc = useQueryClient();
+  const locationName = useLocationName();
   const [username, setUsername] = useState(user?.username ?? "");
   const [displayName, setDisplayName] = useState(user?.display_name ?? "");
   const [password, setPassword] = useState("");
@@ -399,6 +576,11 @@ function UserDialog({ user, self, onClose }: { user: UserRow | null; self: boole
     if (defaultQuota !== undefined && !quotaTouched) setQuotaGb(defaultQuota ? String(+(defaultQuota / GB).toFixed(2)) : "");
   }, [defaultQuota, quotaTouched]);
   const [disabled, setDisabled] = useState(user?.disabled ?? false);
+  // New users: "My files" and its location, preset from the system settings until changed here
+  const [personal, setPersonal] = useState<boolean | null>(null);
+  const [location, setLocation] = useState<string | null>(null);
+  const withPersonal = personal ?? system.data?.personal_spaces ?? true;
+  const personalLocation = location ?? system.data?.personal_location ?? "";
 
   const save = useMutation({
     mutationFn: async () => {
@@ -411,10 +593,11 @@ function UserDialog({ user, self, onClose }: { user: UserRow | null; self: boole
         quota_bytes: quotaGb ? Math.round(Number(quotaGb) * GB) : 0,
       };
       if (user) return api.updateUser(user.id, { ...body, disabled, password: password || undefined });
-      return api.createUser({ ...body, username, password });
+      return api.createUser({ ...body, username, password, personal_space: withPersonal, personal_location: withPersonal ? personalLocation || undefined : undefined });
     },
-    onSuccess: () => {
-      toast.success(user ? t("User updated") : t("User created"));
+    onSuccess: (row) => {
+      if (row.personal_pending) toast.warning(t("User created. Their \"My files\" is created once its storage location is available."));
+      else toast.success(user ? t("User updated") : t("User created"));
       qc.invalidateQueries({ queryKey: ["admin-users"] });
       qc.invalidateQueries({ queryKey: ["me"] });
       onClose();
@@ -486,6 +669,47 @@ function UserDialog({ user, self, onClose }: { user: UserRow | null; self: boole
                 placeholder={t("Unlimited")}
               />
             </div>
+            {!user && (
+              <div className="grid gap-1.5">
+                <Label className="flex items-center gap-2 font-normal">
+                  <Checkbox checked={withPersonal} disabled={!system.data} onCheckedChange={(v) => setPersonal(!!v)} />
+                  {t("Create \"My files\" (a private space only they can see)")}
+                </Label>
+                {withPersonal && (
+                  <LocationSelect
+                    aria-label={t("Storage location of \"My files\"")}
+                    value={personalLocation}
+                    onChange={setLocation}
+                    blank="default"
+                    disabled={!system.data}
+                  />
+                )}
+              </div>
+            )}
+            {user && (
+              <div className="grid gap-1.5">
+                <div className="text-sm font-medium">{t("My files")}</div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                  <span className="min-w-0 text-muted-foreground">
+                    {user.personal_space
+                      ? t("On {location} · {size} used", { location: locationName(user.personal_location), size: formatBytes(user.used_bytes) })
+                      : user.personal_pending
+                        ? t("My files pending (location unavailable)")
+                        : t("No \"My files\"")}
+                  </span>
+                  {!user.personal_space && (
+                    <Button type="button" variant="link" className="h-auto p-0" onClick={() => onPersonal("add", user)}>
+                      {t("Create \"My files\"…")}
+                    </Button>
+                  )}
+                  {(user.personal_space || user.personal_pending) && (
+                    <Button type="button" variant="link" className="h-auto p-0 text-destructive" onClick={() => onPersonal("remove", user)}>
+                      {t("Remove \"My files\"…")}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
             {user && !self && (
               <Label className="flex items-center gap-2 font-normal">
                 <Checkbox checked={disabled} onCheckedChange={(v) => setDisabled(!!v)} />

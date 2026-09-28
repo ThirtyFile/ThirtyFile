@@ -294,7 +294,7 @@ mod tests {
     async fn only_old_content_nothing_uses_is_found() {
         let env = testutil::env().await;
         let admin = env.admin().await;
-        env.stored_file(&admin, &admin.root_id, "kept.txt", b"in use").await;
+        env.stored_file(&admin, admin.root(), "kept.txt", b"in use").await;
         let (old, _) = orphan(&env, b"old orphan", 2 * 86400).await;
         orphan(&env, b"fresh orphan", 60).await;
         // Waiting to be deleted anyway
@@ -330,7 +330,7 @@ mod tests {
         assert_eq!(items.len(), 4);
 
         // Meanwhile: a file uses one, one is written again, one is being uploaded
-        let id = env.file(&admin, &admin.root_id, "again.txt").await;
+        let id = env.file(&admin, admin.root(), "again.txt").await;
         let mut c = env.st.db.acquire().await.unwrap();
         tree::add_blob_ref(&mut c, &used_again, 10, "local").await.unwrap();
         sqlx::query("UPDATE nodes SET blob_hash = ? WHERE id = ?").bind(&used_again).bind(&id).execute(&mut *c).await.unwrap();

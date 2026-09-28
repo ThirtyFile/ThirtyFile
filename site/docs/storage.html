@@ -35,7 +35,7 @@
         <pre><code>/storage/company/…              the company space "All files"
 /storage/teams/&lt;space name&gt;/…   team spaces
 /storage/users/&lt;user name&gt;/…    each user's "My files"</code></pre>
-        <p>A space gets its folder when it is created, in the folder of the default storage location (or <code>/nas/teams/…</code>, say, when a NAS added as a <em>Local folder</em> location is the default). These are <a href="#folder-spaces">folder spaces</a>: files copied into them by other programs, over SMB or by a scanner, show up in ThirtyFile, and changes made on the web are made in the folder.</p>
+        <p>A space gets its folder when it is created, in the folder of the storage location it is created on, usually the default one (or <code>/nas/teams/…</code>, say, when it is created on a NAS added as a <em>Local folder</em> location). These are <a href="#folder-spaces">folder spaces</a>: files copied into them by other programs, over SMB or by a scanner, show up in ThirtyFile, and changes made on the web are made in the folder.</p>
         <ul>
           <li><strong>Names.</strong> A folder is named after the space or the user. Characters a file name can't have become <code>_</code>, and names ThirtyFile would hide (<code>desktop.ini</code>, say) get an <code>_</code> in front. When the folder is already there, because another space has the same name, a folder with that name was made by hand, or a deleted space left it, the new one gets a number: <code>teams/Sales (2)</code>.</li>
           <li><strong>Renaming.</strong> Renaming a space doesn't rename its folder, so programs, SMB shares and backups that use the path keep working. <strong>Control panel › Spaces</strong> shows each space's folder.</li>
@@ -50,7 +50,7 @@
           <li>Click <strong>Test connection</strong>. It writes, reads back and deletes a small file. The location can be saved once the test succeeds. Keys or accounts that may write but not delete files fail it: ThirtyFile could never remove deleted files there.</li>
           <li>Make it the <strong>default</strong> if new spaces should be created on it.</li>
         </ol>
-        <p>The default only decides where new spaces go: users' "My files", team spaces and, on a new server, "All files". Each space stays on the location it was created on, so changing the default doesn't move any existing space, and their new files keep going where their older ones are. Only <a href="#per-space">moving a space</a> changes its location.</p>
+        <p>The default only decides where new spaces go: users' "My files", team spaces and, on a new server, "All files". When creating a team space you can choose another location, and new users' "My files" can have a location of their own (see <a href="users.html#personal">Personal spaces</a>). Each space stays on the location it was created on, so changing the default doesn't move any existing space, and their new files keep going where their older ones are. Only <a href="#per-space">moving a space</a> changes its location.</p>
 
         <h3 id="list">What the list shows</h3>
         <ul>

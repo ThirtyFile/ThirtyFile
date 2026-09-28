@@ -259,7 +259,7 @@ mod tests {
         let admin = env.admin().await;
         let amy = env.user("amy", true).await;
         let bob = env.user("bob", true).await;
-        let docs = env.folder(&amy, &amy.root_id, "Docs").await;
+        let docs = env.folder(&amy, amy.root(), "Docs").await;
         let notes = env.file(&amy, &docs, "notes.txt").await;
         // A team space whose name clashes with "My files", and a folder Bob shares with Amy
         let req = serde_json::from_value(json!({ "name": "My files" })).unwrap();
@@ -267,7 +267,7 @@ mod tests {
         let team = serde_json::to_value(&team).unwrap();
         let team_root = team["root_id"].as_str().unwrap().to_string();
         env.grant(&team_root, &amy, "editor").await;
-        let plans = env.folder(&bob, &bob.root_id, "Plans").await;
+        let plans = env.folder(&bob, bob.root(), "Plans").await;
         let q1 = env.folder(&bob, &plans, "Q1").await;
         env.grant(&plans, &amy, "viewer").await;
         let none = json!({});
@@ -311,9 +311,9 @@ mod tests {
             }
         };
         assert_eq!(loc(notes).await.unwrap(), ["My files", "Docs", "notes.txt"]);
-        assert_eq!(loc(amy.root_id.clone()).await.unwrap(), ["My files"]);
+        assert_eq!(loc(amy.root().to_string()).await.unwrap(), ["My files"]);
         assert_eq!(loc(team_root).await.unwrap(), ["My files (2)"]);
         assert_eq!(loc(q1).await.unwrap(), ["Shared with me", "Plans", "Q1"]);
-        assert!(tree::node_with_role(&mut c, &amy, &bob.root_id).await.is_err());
+        assert!(tree::node_with_role(&mut c, &amy, bob.root()).await.is_err());
     }
 }

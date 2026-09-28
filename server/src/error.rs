@@ -121,8 +121,8 @@ mod tests {
         };
         let e = clash("UPDATE users SET username = 'AMY' WHERE id = ?", ben.id.to_string()).await;
         assert_eq!((e.status, e.message.as_str()), (StatusCode::CONFLICT, "Username already exists"));
-        env.folder(&amy, &amy.root_id, "Docs").await;
-        let other = env.file(&amy, &amy.root_id, "other").await;
+        env.folder(&amy, amy.root(), "Docs").await;
+        let other = env.file(&amy, amy.root(), "other").await;
         let e = clash("UPDATE nodes SET name = 'DOCS' WHERE id = ?", other).await;
         assert_eq!((e.status, e.message.as_str()), (StatusCode::CONFLICT, "An item with the same name already exists"));
     }

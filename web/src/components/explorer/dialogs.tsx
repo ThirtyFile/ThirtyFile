@@ -5,6 +5,7 @@ import { AccessDialog } from "@/components/AccessDialog";
 import { ConfirmDialog, FolderPickerDialog } from "@/components/dialogs";
 import { ShareDialog } from "@/components/ShareDialog";
 import { t } from "@/lib/i18n";
+import { homeFolder } from "@/lib/home";
 import { useMe } from "@/lib/session";
 import { trashHint } from "@/lib/utils";
 import type { ExplorerProps } from "../Explorer";
@@ -21,7 +22,7 @@ export function ExplorerDialogs({ p, s, a }: { p: ExplorerProps; s: ExplorerStat
         <FolderPickerDialog
           title={dialog.t === "move" ? t("Move {n} item to…|Move {n} items to…", { n: dialog.ids.length }) : t("Copy {n} item to…|Copy {n} items to…", { n: dialog.ids.length })}
           confirmText={dialog.t === "move" ? t("Move here") : t("Copy here")}
-          startId={p.folderId ?? "root"}
+          startId={p.folderId ?? homeFolder(me, undefined) ?? null}
           excludeIds={new Set(dialog.ids)}
           onClose={() => setDialog(null)}
           onPick={async (dest) => {
