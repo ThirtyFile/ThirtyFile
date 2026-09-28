@@ -534,7 +534,7 @@ pub async fn open_session(st: &AppState, user_id: i64, method: &str, ip: &str, h
     let token = random_token(43);
     let ts = now();
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     sqlx::query(
         "INSERT INTO sessions (token_hash, id, user_id, created_at, expires_at, user_agent, ip, method, last_used_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -603,7 +603,7 @@ pub async fn change_password(
     let new_hash = hash_password(req.new).await?;
     let current_token = get_cookie(&headers, SESSION_COOKIE).map(|t| sha256_hex(t.as_bytes())).unwrap_or_default();
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     sqlx::query("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?").bind(new_hash).bind(user.id).execute(&mut *tx).await?;
     // Other devices and app passwords stop working: whoever may have known the old password is locked out
     sign_out_everywhere(&mut tx, user.id, Some(&current_token)).await?;

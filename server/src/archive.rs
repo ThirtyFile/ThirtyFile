@@ -245,7 +245,7 @@ async fn store_new_file(st: &AppState, user: &User, folder_id: &str, name: &str,
         let _space = crate::fsops::lock_space(folder.drive()).await;
         let _w = st.write_lock.lock().await;
         let result = async {
-            let mut tx = st.db.begin().await?;
+            let mut tx = crate::db::begin_write(&st.db).await?;
             let folder = tree::folder_for(&mut tx, user, folder_id, Need::Write).await?;
             let name = crate::fsops::free_name(&mut tx, &folder, name, false).await?;
             let id = crate::fsops::place_file(&mut tx, &staged, user.id, &folder, &name).await?;
@@ -268,7 +268,7 @@ async fn store_new_file(st: &AppState, user: &User, folder_id: &str, name: &str,
     let staged = tree::stage_blob(st, folder.drive(), hash.clone(), size as i64, tmp.to_path_buf()).await?;
     let _w = st.write_lock.lock().await;
     let result = async {
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         let folder = tree::folder_for(&mut tx, user, folder_id, Need::Write).await?;
         if folder.in_folder_space() {
             return Err(AppError::conflict("Something changed at the same time. Try again."));
@@ -524,7 +524,7 @@ async fn extract_into(st: &AppState, user: &User, job: &str, zip: &Node, parent_
             staged.push((i, tree::stage_blob(st, &drive, x.hash, x.size as i64, x.tmp).await?));
         }
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         let parent = tree::folder_for(&mut tx, user, parent_id, Need::Write).await?;
         let actual: i64 = staged.iter().map(|(_, s)| s.size).sum();
         tree::check_quota(&mut tx, parent.drive(), actual).await?;

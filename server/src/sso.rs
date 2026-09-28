@@ -732,7 +732,7 @@ async fn sync_profile(st: &AppState, user_id: i64, provider: &str, ident: &Ident
     let previous = previous.map(|(p,)| crate::admin::validate_display_name(&p).unwrap_or("").to_string());
     let follow = !name.is_empty() && name != current && (current.is_empty() || previous.as_deref() == Some(current.as_str()));
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     // A later sign-in without a verified email (e.g. a multi-tenant Microsoft app) keeps the email recorded earlier
     sqlx::query("UPDATE user_identities SET last_login_at = ?, email = COALESCE(NULLIF(?, ''), email), name = ? WHERE provider = ? AND subject = ?")
         .bind(now())
@@ -855,7 +855,7 @@ async fn create_sso_user(st: &AppState, provider: &str, cfg: &ProviderConfig, id
     // Sign-in is only possible through the provider: no password can match this value until an administrator sets one
     let password_hash = NO_PASSWORD.to_string();
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     // Two sign-ins of the same person at the same time: the second one finds what the first created (checked under the lock)
     let linked: Option<(i64, String)> =
         sqlx::query_as("SELECT u.id, u.username FROM user_identities i JOIN users u ON u.id = i.user_id WHERE i.provider = ? AND i.subject = ?")
@@ -948,7 +948,7 @@ async fn link(st: &AppState, provider: &str, ident: &Identity, user_id: i64) -> 
     }
     let (username,): (String,) = sqlx::query_as("SELECT username FROM users WHERE id = ?").bind(user_id).fetch_one(&st.db).await?;
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     // One linked account per sign-in method: relinking replaces the previous one
     sqlx::query("DELETE FROM user_identities WHERE user_id = ? AND provider = ?").bind(user_id).bind(provider).execute(&mut *tx).await?;
     sqlx::query("INSERT INTO user_identities (provider, subject, user_id, email, name, created_at) VALUES (?, ?, ?, ?, ?, ?)")
@@ -1071,7 +1071,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, hea
     let detail = summary(&req);
     {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         store(&mut tx, &req).await?;
         logs::record_activity(&mut tx, &user, None, "settings", &detail).await?;
         tx.commit().await?;

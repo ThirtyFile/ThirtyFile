@@ -186,7 +186,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     // create spaces at all is the administrator's setting
     let quota = if user.is_admin() { req.quota_bytes.max(0) } else { user.quota_bytes.max(0) };
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     if !user.is_admin() {
         // Each space brings its own quota, so the number a user can create is limited
         let (own,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drives WHERE kind = 'team' AND owner_id = ?").bind(user.id).fetch_one(&mut *tx).await?;
@@ -262,7 +262,7 @@ pub async fn update(
     Json(req): Json<UpdateDriveReq>,
 ) -> AppResult<Json<DriveInfo>> {
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let (drive, role) = if user.is_admin() {
         // Administrators can change the quota of any space (including personal spaces) without gaining access to its content
         let d = tree::get_drive(&mut tx, &id).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
@@ -310,7 +310,7 @@ pub async fn update(
 /// Permanently deletes a team space (owner or administrator)
 pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let (drive, role) = manageable_drive(&mut tx, &user, &id).await?;
     if drive.kind != "team" {
         return Err(AppError::bad_request("Only team spaces can be deleted"));
@@ -472,7 +472,7 @@ pub async fn grant(
         return Err(AppError::bad_request("The expiration time must be in the future"));
     }
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let id = tree::resolve_alias(&user, &id)?;
     let node = tree::get_node(&mut tx, id).await?.filter(|n| n.trashed_at.is_none()).ok_or_else(|| AppError::not_found("Item not found"))?;
     let drive = tree::get_drive(&mut tx, node.drive()).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
@@ -532,7 +532,7 @@ pub async fn grant(
 
 pub async fn revoke(State(st): State<AppState>, user: User, Path(grant_id): Path<i64>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let (node_id, principal_type, principal_id, role): (String, String, i64, String) =
         sqlx::query_as("SELECT node_id, principal_type, principal_id, role FROM grants WHERE id = ?")
             .bind(grant_id)
@@ -674,7 +674,7 @@ async fn set_members(conn: &mut SqliteConnection, group_id: i64, members: &[i64]
 pub async fn create_group(State(st): State<AppState>, Admin(user): Admin, Json(req): Json<GroupReq>) -> AppResult<Json<Value>> {
     let name = validate_name(req.name.as_deref().unwrap_or_default())?;
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let id = crate::db::next_id(&mut tx, crate::db::Counted::Groups).await?;
     sqlx::query("INSERT INTO groups (id, name, description, created_at) VALUES (?, ?, ?, ?)")
         .bind(id)
@@ -697,7 +697,7 @@ pub async fn update_group(
     Json(req): Json<GroupReq>,
 ) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     if let Some(name) = &req.name {
         let name = validate_name(name)?;
         sqlx::query("UPDATE groups SET name = ? WHERE id = ?")
@@ -721,7 +721,7 @@ pub async fn update_group(
 
 pub async fn delete_group(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<i64>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let name = principal_name(&mut tx, "group", id).await?.unwrap_or_default();
     sqlx::query("DELETE FROM grants WHERE principal_type = 'group' AND principal_id = ?").bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM groups WHERE id = ?").bind(id).execute(&mut *tx).await?;

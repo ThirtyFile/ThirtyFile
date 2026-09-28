@@ -218,7 +218,7 @@ pub async fn confirm_code(st: &AppState, user_id: i64, code: Option<&str>) -> Ap
 async fn turn_on(st: &AppState, user_id: i64, secret: &str, step: i64) -> AppResult<Vec<String>> {
     let codes = new_recovery_codes();
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     sqlx::query("UPDATE users SET totp_secret = ?, totp_last_step = ? WHERE id = ?")
         .bind(crate::secrets::seal(&format!("user:{user_id}:totp"), secret))
         .bind(step)
@@ -232,7 +232,7 @@ async fn turn_on(st: &AppState, user_id: i64, secret: &str, step: i64) -> AppRes
 
 async fn turn_off(st: &AppState, user_id: i64) -> AppResult<bool> {
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let res = sqlx::query("UPDATE users SET totp_secret = NULL, totp_last_step = 0 WHERE id = ? AND totp_secret IS NOT NULL").bind(user_id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM recovery_codes WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
     tx.commit().await?;
@@ -521,7 +521,7 @@ pub async fn new_recovery_codes_for_me(
     let codes = new_recovery_codes();
     {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         store_recovery_codes(&mut tx, user.id, &codes).await?;
         tx.commit().await?;
     }

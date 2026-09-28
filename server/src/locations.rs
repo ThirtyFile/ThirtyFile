@@ -549,7 +549,7 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(req): J
     let (backend, config) = connect(&st, &kind, config, Folder::Claim(&id)).await?;
     let saved = async {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES (?, ?, ?, ?, 0, ?)")
             .bind(&id)
             .bind(&name)
@@ -603,7 +603,7 @@ pub async fn update(
     };
     {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         sqlx::query("UPDATE storage_locations SET name = ? WHERE id = ?").bind(&name).bind(&id).execute(&mut *tx).await?;
         if let Some((_, cfg)) = &new_backend {
             sqlx::query("UPDATE storage_locations SET config = ? WHERE id = ?").bind(sealed_config(&id, cfg)).bind(&id).execute(&mut *tx).await?;
@@ -624,7 +624,7 @@ pub async fn set_default(State(st): State<AppState>, Admin(user): Admin, Path(id
         return Err(AppError::bad_request("This storage location can't be reached right now, so it can't be set as the default"));
     }
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     // Check that it exists first (the UPDATE affects all rows, so rows_affected can't tell)
     let (name,): (String,) = sqlx::query_as("SELECT name FROM storage_locations WHERE id = ?")
         .bind(&id)
@@ -642,7 +642,7 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
         return Err(AppError::bad_request("The built-in local disk can't be deleted"));
     }
     let w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let (name, kind, config, is_default, blobs, drives): (String, String, String, bool, i64, i64) = sqlx::query_as(
         "SELECT name, kind, config, is_default, (SELECT COUNT(*) FROM blobs WHERE location_id = ?1), (SELECT COUNT(*) FROM drives WHERE location_id = ?1)
          FROM storage_locations WHERE id = ?1",
@@ -718,7 +718,7 @@ pub async fn set_drive_location(
     probe(&st, &target).await.map_err(|e| AppError::bad_request(format!("The target storage location can't be reached, so nothing was changed: {e}")))?;
     {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         let drive = tree::get_drive(&mut tx, &drive_id).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
         sqlx::query("UPDATE drives SET location_id = ? WHERE id = ?").bind(&target).bind(&drive_id).execute(&mut *tx).await?;
         let root = tree::get_node(&mut tx, &drive.root_id).await?;

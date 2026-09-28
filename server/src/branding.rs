@@ -92,7 +92,7 @@ pub async fn load(db: &sqlx::SqlitePool) -> Branding {
 
 async fn save(st: &AppState, b: &Branding, detail: &str, user: &crate::auth::User) -> AppResult<()> {
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     set_setting(&mut tx, "branding", &serde_json::to_string(b).unwrap()).await?;
     logs::record_activity(&mut tx, user, None, "settings", detail).await?;
     tx.commit().await?;

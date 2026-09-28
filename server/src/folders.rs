@@ -747,7 +747,7 @@ async fn apply(st: &AppState, drive: &Drive, ops: Vec<Op>) -> AppResult<()> {
     let mut ops = ops.into_iter().peekable();
     while ops.peek().is_some() {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         let mut n = 0;
         for op in ops.by_ref().take(BATCH) {
             apply_one(&mut tx, drive, owner, op).await?;

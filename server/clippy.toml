@@ -1,0 +1,6 @@
+disallowed-methods = [
+    # A deferred transaction that reads first can't wait for SQLite's write lock ("database is locked" at once)
+    { path = "sqlx::Pool::begin", reason = "start write transactions with db::begin_write (BEGIN IMMEDIATE)" },
+    { path = "sqlx::Connection::begin", reason = "start write transactions with db::begin_write (BEGIN IMMEDIATE)" },
+    { path = "sqlx::Acquire::begin", reason = "start write transactions with db::begin_write (BEGIN IMMEDIATE)" },
+]

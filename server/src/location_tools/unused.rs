@@ -262,7 +262,7 @@ async fn log_removal(st: &AppState, user: &User, location: &str, removed: u64) -
     }
     let detail = if removed == 1 { format!("{location}: {removed} unused item removed") } else { format!("{location}: {removed} unused items removed") };
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     logs::record_activity(&mut tx, user, None, "storage_cleanup", &detail).await?;
     tx.commit().await?;
     Ok(())

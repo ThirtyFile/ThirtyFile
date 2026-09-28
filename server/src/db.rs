@@ -170,7 +170,7 @@ pub async fn reseal_secrets(db: &SqlitePool, new_key: &[u8; 32]) -> Result<usize
         }
         crate::secrets::reseal(context, v, new_key).map(Some).map_err(sqlx::Error::Protocol)
     };
-    let mut tx = db.begin().await?;
+    let mut tx = begin_write(db).await?;
     let mut n = 0;
     if let Some((v,)) = sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'secret'").fetch_optional(&mut *tx).await?
         && let Some(sealed) = fix("settings:secret", &v)?
@@ -245,10 +245,27 @@ pub async fn set_setting(conn: &mut SqliteConnection, key: &str, value: &str) ->
     Ok(())
 }
 
-/// Ends a write transaction by what the work in it returned: committed when it succeeded, rolled back when it failed.
-/// Called before the write lock is released: a transaction that is only dropped rolls back later, in the background,
-/// and meanwhile keeps SQLite's write lock when it wrote anything. The next writer's transaction, which usually reads
-/// first, then fails at once with "database is locked", as SQLite doesn't wait for the lock while upgrading a read.
+/// Starts a transaction that writes (`BEGIN IMMEDIATE`): every transaction that may write starts here, never with
+/// `begin()` (clippy.toml refuses it). It takes SQLite's write lock at once, waiting for it up to the busy timeout
+/// (`connect`), and keeps it until it ends: start it after taking `st.write_lock`, once slow work (hashing, other
+/// storage) is done.
+///
+/// A deferred transaction (`BEGIN`) only asks for the lock at its first write, usually after reading. If another
+/// connection holds the lock then, SQLite answers "database is locked" at once instead of waiting, as waiting could
+/// deadlock. That happens when a transaction is dropped after writing (a handler returning an error with `?`): sqlx
+/// rolls it back later, in the background, so its connection may still hold the lock when the next writer, which has
+/// the server's write lock by then, starts writing.
+///
+/// Read-only transactions (a consistent view over several queries) may still use a deferred `begin()`, with
+/// `#[allow(clippy::disallowed_methods)]` and a reason.
+pub async fn begin_write(pool: &SqlitePool) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>, sqlx::Error> {
+    pool.begin_with("BEGIN IMMEDIATE").await
+}
+
+/// Ends a write transaction by what the work in it returned: committed when it succeeded, rolled back when it failed,
+/// before the write lock is released. A transaction that is only dropped rolls back later, in the background, and keeps
+/// SQLite's write lock meanwhile: harmless, as the next writer (`begin_write`) waits for it, but settling it releases
+/// the lock straight away.
 pub async fn settle<T>(tx: sqlx::Transaction<'_, sqlx::Sqlite>, res: AppResult<T>) -> AppResult<T> {
     match res {
         Ok(v) => {
@@ -349,7 +366,7 @@ pub async fn create_company_space(db: &SqlitePool, folders: Option<&Path>) -> Ap
         return Ok(());
     }
     let (admin_id,): (i64,) = sqlx::query_as("SELECT MIN(id) FROM users WHERE role = 'admin'").fetch_one(db).await?;
-    let mut tx = db.begin().await?;
+    let mut tx = begin_write(db).await?;
     let location = crate::locations::default_location(&mut tx).await?;
     let (drive_id, root_id) = create_drive(&mut tx, "All files", "company", admin_id, 0, &location).await?;
     crate::space_folders::make_folder_space(&mut tx, folders, &drive_id).await?;
@@ -501,7 +518,7 @@ pub async fn bootstrap_admin(db: &SqlitePool, password: Option<&str>, space_fold
         None => (random_token(16), true),
     };
     let password_hash = hash_password(password.clone()).await?;
-    let mut tx = db.begin().await?;
+    let mut tx = begin_write(db).await?;
     // The first administrator gets "My files" on the built-in storage (there are no settings yet)
     let location = crate::locations::default_location(&mut tx).await?;
     create_user(
@@ -623,5 +640,36 @@ mod tests {
     async fn an_empty_first_administrator_password_counts_as_not_set() {
         let hash = admin_hash(Some("")).await;
         assert!(!crate::auth::verify_password(String::new(), hash).await.unwrap());
+    }
+
+    /// A write that fails after writing drops its transaction, which sqlx rolls back later, in the background, while
+    /// the next writer already has the write lock. The writers after it (reading first, like most handlers) wait for
+    /// SQLite's lock instead of failing with "database is locked".
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_write_that_fails_after_writing_does_not_make_the_next_ones_fail() {
+        let env = crate::testutil::env().await;
+        let mut writers = tokio::task::JoinSet::new();
+        for w in 0..6 {
+            let st = env.st.clone();
+            writers.spawn(async move {
+                for i in 0..100 {
+                    let _w = st.write_lock.lock().await;
+                    let mut tx = begin_write(&st.db).await?;
+                    let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM settings").fetch_one(&mut *tx).await?;
+                    set_setting(&mut tx, &format!("stress-{w}"), &format!("{i}-{n}")).await?;
+                    if (w + i) % 3 == 0 {
+                        // Fails after writing: the transaction is dropped (as `?` does), then the lock released
+                        continue;
+                    }
+                    tx.commit().await?;
+                }
+                Ok::<_, sqlx::Error>(())
+            });
+        }
+        while let Some(res) = writers.join_next().await {
+            res.unwrap().unwrap();
+        }
+        let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM settings WHERE key LIKE 'stress-%'").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(n, 6);
     }
 }

@@ -78,6 +78,7 @@ pub async fn create(conn: &mut SqliteConnection, space_folders: Option<&FsPath>,
 /// instead of the whole transaction failing. Returns whether it was created.
 pub async fn create_or_wait(conn: &mut SqliteConnection, space_folders: Option<&FsPath>, user_id: i64, username: &str, location: &str) -> AppResult<bool> {
     // A savepoint: a failed attempt leaves nothing behind, and the caller's transaction goes on
+    #[allow(clippy::disallowed_methods, reason = "a savepoint in the caller's write transaction (db::begin_write)")]
     let mut attempt = sqlx::Connection::begin(&mut *conn).await?;
     match create(&mut attempt, space_folders, user_id, location).await {
         Ok(_) => {
@@ -131,7 +132,7 @@ pub async fn retry_pending(st: &AppState, user: Option<i64>) -> usize {
 /// Creates one waiting personal space; returns the location it was created on, or None when nothing was waiting
 async fn retry_one(st: &AppState, id: i64) -> AppResult<Option<String>> {
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let res = retry_in(st, &mut tx, id).await;
     // A failed attempt may have written already: rolled back before the lock goes (`db::settle`)
     crate::db::settle(tx, res).await
@@ -185,7 +186,7 @@ async fn location_name(conn: &mut SqliteConnection, id: &str) -> AppResult<Strin
 pub async fn add(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<i64>, Json(req): Json<AddReq>) -> AppResult<Json<UserRow>> {
     {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         let res = add_in(&st, &mut tx, &me, id, &req).await;
         // Creating the space can fail after writing (a folder that isn't available): rolled back before the lock goes
         crate::db::settle(tx, res).await?;
@@ -220,7 +221,7 @@ pub async fn remove(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     let moved = crate::admin::move_personal_first(&st, &me, id, &username, &q).await?;
     let removed = {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         let res = remove_in(&mut tx, &me, id, &username, &q, moved).await;
         // Rolled back before the lock goes when it fails (`db::settle`)
         crate::db::settle(tx, res).await?

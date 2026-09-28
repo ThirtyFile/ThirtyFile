@@ -138,7 +138,7 @@ pub async fn create(State(st): State<AppState>, Admin(me): Admin, Json(req): Jso
     let password_hash = hash_password(req.password.clone()).await?;
     let id = {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         let personal = crate::personal::choose(&st, &mut tx, req.personal_space, req.personal_location.as_deref(), true).await?;
         let id = create_user(
             &mut tx,
@@ -227,7 +227,7 @@ pub async fn update(
     }
     {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         if !changes.is_empty() {
             logs::record_activity(&mut tx, &me, None, "user_update", &format!("{}: {}", target.username, changes.join(", "))).await?;
         }
@@ -289,7 +289,7 @@ pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     let moved = move_personal_first(&st, &me, id, &row.username, &q).await?;
     let (removed, uploads) = {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         let res = delete_in(&mut tx, &me, id, &row.username, &q, moved).await;
         // Moving the files can fail after writing (the target space is full): rolled back before the lock goes
         crate::db::settle(tx, res).await?
@@ -492,7 +492,7 @@ async fn move_personal_across(st: &AppState, me: &crate::auth::User, username: &
     }
     let (dest, items, label) = {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         check_room(&mut tx, &own.root_id, target).await?;
         let top = tree::get_node(&mut tx, &target.root_id).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
         let wanted = format!("Files of {username}");
@@ -699,7 +699,7 @@ pub fn normalize_public_url(raw: &str) -> AppResult<String> {
 pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Json(req): Json<SettingsReq>) -> AppResult<Json<SystemInfo>> {
     {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         if let Some(enabled) = req.shared_enabled {
             sqlx::query("UPDATE drives SET disabled = ? WHERE kind = 'company'").bind(!enabled).execute(&mut *tx).await?;
             logs::record_activity(&mut tx, &user, None, "settings", if enabled { "Enabled All files" } else { "Disabled All files" }).await?;

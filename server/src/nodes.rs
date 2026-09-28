@@ -375,7 +375,7 @@ pub async fn create_folder(State(st): State<AppState>, user: User, Json(req): Js
     let name = validate_name(&req.name)?;
     let locks = fsops::lock(&st, &user, &[&req.parent_id]).await?;
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let parent = tree::folder_for(&mut tx, &user, &req.parent_id, Need::Write).await?;
     locks.check(&parent)?;
     if tree::name_taken(&mut tx, &parent.id, &name).await? {
@@ -402,7 +402,7 @@ pub async fn rename(
     let name = validate_name(&req.name)?;
     let locks = fsops::lock(&st, &user, &[&id]).await?;
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let node = tree::node_for(&mut tx, &user, &id, Need::Write).await?;
     locks.check(&node)?;
     let parent = node.parent_id.clone().ok_or_else(|| AppError::bad_request("The root folder of a space can't be renamed"))?;
@@ -501,7 +501,7 @@ pub async fn move_nodes(State(st): State<AppState>, user: User, Json(req): Json<
     let ids = req.ids()?;
     let locks = fsops::lock(&st, &user, &locked_ids(req.dest()?, &ids)).await?;
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Write).await?;
     locks.check(&dest)?;
     // Moves between spaces that involve a folder space copy content: done after this transaction, item by item
@@ -590,7 +590,7 @@ pub async fn copy_nodes(State(st): State<AppState>, user: User, Json(req): Json<
     let ids = req.ids()?;
     let locks = fsops::lock(&st, &user, &locked_ids(req.dest()?, &ids)).await?;
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Write).await?;
     locks.check(&dest)?;
     let mut plans = Vec::new();
@@ -677,7 +677,7 @@ pub async fn trash(State(st): State<AppState>, user: User, Json(req): Json<Batch
     let ids = req.ids()?;
     let locks = fsops::lock(&st, &user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     for id in &outermost(&mut tx, &ids).await? {
         let node = tree::node_for(&mut tx, &user, id, Need::Delete).await?;
         locks.check(&node)?;
@@ -977,7 +977,7 @@ pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<Bat
     let ids = req.ids()?;
     let locks = fsops::lock(&st, &user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     for id in &ids {
         // Restored into the original folder, or the space's root folder if that was deleted too
         let (node, parent_id) = trash_root(&mut tx, &user, id, Need::Write).await?;
@@ -1021,7 +1021,7 @@ pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<Bat
 
 pub async fn delete_forever(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let mut orphans = Vec::new();
     let mut on_disk = Vec::new();
     for id in &outermost(&mut tx, &req.ids()?).await? {
@@ -1084,7 +1084,7 @@ pub async fn empty_trash(State(st): State<AppState>, user: User) -> AppResult<Js
     .await?;
     if total > 0 {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         logs::record_activity(&mut tx, &user, None, "empty_trash", &format!("{total} {}", if total == 1 { "item" } else { "items" })).await?;
         tx.commit().await?;
     }
@@ -1107,7 +1107,7 @@ async fn purge_trash_in_batches(st: &AppState, select: &'static str, param: Stri
     let mut total = 0;
     loop {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         let ids: Vec<(String,)> = sqlx::query_as(select).bind(&param).bind(PURGE_BATCH).fetch_all(&mut *tx).await?;
         if ids.is_empty() {
             return Ok(total);
@@ -1234,7 +1234,7 @@ pub async fn set_favorite(State(st): State<AppState>, user: User, Json(req): Jso
         return Err(AppError::bad_request("Select 1 to 1000 items"));
     }
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     for id in &req.ids {
         let node = tree::owned_node(&mut tx, &user, id).await?;
         not_root(&node)?;
@@ -1286,7 +1286,7 @@ pub async fn record_open(st: &AppState, user_id: i64, node_id: &str) -> AppResul
     }
     // Like every other write: a transaction that reads before writing would otherwise fail when this commits in between
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     sqlx::query("INSERT INTO recent_files (user_id, node_id, at) VALUES (?1, ?2, ?3) ON CONFLICT (user_id, node_id) DO UPDATE SET at = ?3")
         .bind(user_id)
         .bind(node_id)
