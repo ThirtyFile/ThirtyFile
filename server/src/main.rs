@@ -1,6 +1,7 @@
 mod admin;
 mod archive;
 mod auth;
+mod beneath;
 mod dav;
 mod db;
 mod downloads;

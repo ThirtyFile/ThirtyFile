@@ -459,8 +459,14 @@ fn extract_entry(archive: &std::path::Path, entry: &ReadEntry, tmp: PathBuf, pro
 async fn run_extract(st: AppState, user: User, job: String, zip: Node, parent_id: String) -> AppResult<(String, String)> {
     // The archive is read in any order, so it is copied to a temporary file first (a folder space's file is read in place)
     let source = Source::of(&zip)?;
+    // A folder space's file stays open meanwhile, so the path keeps leading to it
+    let mut _open = None;
     let (archive, copied) = match &source {
-        Source::File(path) => (path.clone(), false),
+        Source::File(path) => {
+            let (file, stable) = path.open_stable().map_err(|_| AppError::not_found("File not found"))?;
+            _open = Some(file);
+            (stable, false)
+        }
         Source::Stored { .. } => {
             let (size, _) = source.describe(zip.size as u64).await?;
             let tmp = st.tmp_dir().join(format!("unzip-{}", new_id()));

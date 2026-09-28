@@ -163,14 +163,17 @@ fn walk(root: &Path, only: Option<&str>, report: &mut ScanReport, found: Option<
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "The folder doesn't exist"));
     }
     let (root_dev, _) = identity(&root_meta);
+    // Each folder is reached without following a symbolic link on the way (one could replace a folder meanwhile)
+    let pinned = crate::beneath::Pinned::root(root)?;
     let settle_after = (now() - SETTLE_SECONDS) as i128 * 1_000_000_000;
     let mut out = Vec::new();
     let mut queue = std::collections::VecDeque::from([only.unwrap_or("").to_string()]);
     let mut first = true;
     while let Some(dir_rel) = queue.pop_front() {
         let asked_for = std::mem::take(&mut first);
-        let dir = if dir_rel.is_empty() { root.to_path_buf() } else { root.join(&dir_rel) };
-        let read = match std::fs::read_dir(&dir) {
+        let dir = if dir_rel.is_empty() { Ok(pinned.clone()) } else { pinned.join(&dir_rel).and_then(|d| d.dir()) };
+        // The folder stays open while its items are read (their paths lead through it)
+        let (_open, read) = match dir.and_then(|d| std::fs::read_dir(d.as_path()).map(|r| (d, r))) {
             Ok(r) => r,
             // The folder asked for can't be read at all: nothing can be concluded about what it holds
             Err(e) if asked_for => return Err(e),
@@ -312,9 +315,10 @@ async fn scan_locked(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     report.read_ms = started.elapsed().as_millis() as u64;
     // An empty folder where the index has items is what a disk or share that isn't mounted looks like (its mount
     // point is an empty folder): only a folder that has the marker is really empty
-    let marker = root.join(MARKER);
+    let marker = crate::beneath::Pinned::root(&root).and_then(|r| r.join(MARKER));
+    let marked = marker.as_ref().is_ok_and(|m| std::fs::symlink_metadata(m.as_path()).is_ok_and(|x| x.is_file()));
     let has_items = indexed.iter().any(|n| n.fs_path.as_deref().is_some_and(|p| !p.is_empty()));
-    if entries.is_empty() && has_items && !marker.exists() {
+    if entries.is_empty() && has_items && !marked {
         report.error = Some(format!(
             "{} is empty, but the space still has items: if it is on a disk or network share that isn't mounted, mount it and check again. To empty the space, delete its items in ThirtyFile.",
             root.display()
@@ -322,10 +326,10 @@ async fn scan_locked(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
         save_report(st, &drive, &report).await?;
         return Ok(report);
     }
-    if !marker.exists()
-        && let Err(e) = std::fs::write(&marker, &drive.id)
+    if !marked
+        && let Err(e) = marker.and_then(|m| crate::beneath::write_new(&m, drive.id.as_bytes()))
     {
-        tracing::debug!("Couldn't write {}: {e}", marker.display());
+        tracing::debug!("Couldn't write the marker file in {}: {e}", root.display());
     }
     let indexing = std::time::Instant::now();
     let ops = plan(&drive, &indexed, &entries, true, &mut report);
@@ -335,7 +339,8 @@ async fn scan_locked(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     });
     apply(st, &drive, ops).await?;
     crate::fsops::clean_trash(st, &drive.id, &root).await?;
-    let leftovers: Vec<PathBuf> = report.leftovers.iter().map(|rel| root.join(rel)).collect();
+    let leftovers: Vec<crate::beneath::Pinned> =
+        crate::beneath::Pinned::root(&root).map(|r| report.leftovers.iter().filter_map(|rel| r.join(rel).ok()).collect()).unwrap_or_default();
     if !leftovers.is_empty() {
         tokio::task::spawn_blocking(move || crate::fsops::clean_leftovers(leftovers, crate::fsops::TRASH_GRACE)).await.map_err(AppError::internal)?;
     }
