@@ -210,6 +210,8 @@ CREATE TABLE space_moves (
   to_location     TEXT NOT NULL,
   to_name         TEXT NOT NULL DEFAULT '',
   to_mode         TEXT NOT NULL CHECK (to_mode IN ('store', 'folder')),
+  -- Into a folder: the space's new folder, chosen (and made) when the move first starts
+  to_path         TEXT,
   -- queued: waiting for its turn; running; paused and failed: stopped with what was copied kept, until it is resumed or
   -- cancelled; done: the space is on the new location; cancelled: it stayed where it was
   state           TEXT NOT NULL DEFAULT 'queued' CHECK (state IN ('queued', 'running', 'paused', 'failed', 'done', 'cancelled')),
@@ -240,20 +242,29 @@ CREATE INDEX space_moves_state ON space_moves (state, created_at);
 -- The rows go when the move has ended and cleaned up.
 CREATE TABLE space_move_items (
   move_id       TEXT NOT NULL,
-  -- What was copied: a content of the store (its hash), a file (its node) or an earlier version of a file
+  -- What was copied: a content of the store (its hash), a file or folder (its node), an earlier version of a file, or
+  -- (folder to folder) an item of the folder by its path
   item_id       TEXT NOT NULL,
-  -- 'blob', 'file' or 'version'
+  -- 'blob', 'file', 'folder', 'version' or 'path'
   kind          TEXT NOT NULL DEFAULT 'blob',
+  -- Into a folder, items are planned first (0) and copied later (1)
+  done          INTEGER NOT NULL DEFAULT 1,
   -- Content copied into the target's content store, and the location it was copied from
   hash          TEXT,
   from_location TEXT,
   size          INTEGER NOT NULL DEFAULT 0,
   -- From a folder: the file's path below the space's folder, and what it was when it was copied (identity, size and
-  -- modification time), so the original is removed only when it is still what was copied
+  -- modification time), so the original is removed only when it is still what was copied. Into a folder: its path in
+  -- the new folder
   path          TEXT,
   src_dev       INTEGER,
   src_ino       INTEGER,
   src_mtime_ns  INTEGER,
+  -- Into a folder: the name it gets there when it can't keep its own, and the copy's identity and modification time
+  name          TEXT,
+  dst_dev       INTEGER,
+  dst_ino       INTEGER,
+  dst_mtime_ns  INTEGER,
   -- The move stored the content at the target (else it was there already)
   uploaded      INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (move_id, item_id)

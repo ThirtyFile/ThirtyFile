@@ -100,7 +100,7 @@ pub async fn free_folder(conn: &mut SqliteConnection, parent: &Path, name: &str)
 
 /// The folder of the location a new space's files go to, when it is a folder of this server: the built-in location
 /// (`builtin`, the storage folder) or a *Local folder* location. None for S3, SFTP and FTP.
-async fn location_folder(conn: &mut SqliteConnection, builtin: &Path, location: &str) -> AppResult<Option<PathBuf>> {
+pub(crate) async fn location_folder(conn: &mut SqliteConnection, builtin: &Path, location: &str) -> AppResult<Option<PathBuf>> {
     let row: Option<(String, String)> =
         sqlx::query_as("SELECT kind, config FROM storage_locations WHERE id = ?").bind(location).fetch_optional(&mut *conn).await?;
     let (kind, config) = match row {

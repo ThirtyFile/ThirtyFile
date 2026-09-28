@@ -861,7 +861,7 @@ async fn place(st: &AppState, nodes: &[Node], dest: &Node, moving: bool) -> AppR
 
 /// Folders holding an item on its way into a folder (`Placed::Disk`)
 pub const MOVE_PREFIX: &str = ".thirtyfile-move-";
-const COPY_PREFIX: &str = ".thirtyfile-copy-";
+pub(crate) const COPY_PREFIX: &str = ".thirtyfile-copy-";
 
 // ───────────── Building a new folder (extracting a ZIP file) ─────────────
 

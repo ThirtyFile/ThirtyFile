@@ -1,0 +1,370 @@
+//! A folder space to a folder on another location (the built-in disk to a NAS added as a Local folder location, say),
+//! or a folder an administrator chose onto a location. The space is read-only meanwhile.
+//!
+//! When both folders are on the same file system, the folder is simply renamed to its new place (holding the space,
+//! so no scan or change runs meanwhile). Otherwise:
+//!
+//! 1. Copy: the whole folder is copied, the trash, versions and the space's marker included, each file with its date,
+//!    and checked by its size. Each copy records the original's identity, size and date.
+//! 2. Before the switch the folder is scanned and copied again where anything changed; copies of what was removed go.
+//! 3. Switch, in one transaction: the space points at its new folder, and its items at the copies (their paths below
+//!    it stay the same). Then the old folder is removed, each file only when it is still what was copied.
+
+use std::{
+    collections::HashSet,
+    io::Write,
+    path::{Path, PathBuf},
+};
+
+use super::{Ctx, Stop};
+use crate::{
+    beneath::Pinned,
+    error::{AppError, AppResult},
+    folders::MARKER,
+    fsops::disk_error,
+    util::new_id,
+};
+
+/// Scan-and-copy rounds before the switch
+const ROUNDS: usize = 10;
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: treat the two folders as being on different disks, so the folder is copied
+    pub static OTHER_DISK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn other_disk() -> bool {
+    #[cfg(test)]
+    return OTHER_DISK.with(|d| d.get());
+    #[cfg(not(test))]
+    false
+}
+
+pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
+    let (st, job) = (cx.st, cx.job);
+    let source = super::to_store::source(job)?;
+    let from = PathBuf::from(job.from_path.clone().unwrap_or_default());
+    let target = super::to_folder::target(cx).await?;
+    let (copied,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM space_move_items WHERE move_id = ?").bind(&job.id).fetch_one(&st.db).await?;
+    if copied == 0 && renamed(cx, &from, &target).await? {
+        return Ok(Stop::Done);
+    }
+    let dest = Pinned::root(&target).map_err(|_| AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, crate::storage::NOT_MOUNTED))?;
+    let (files_done, bytes_done): (i64, i64) = sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM space_move_items WHERE move_id = ?")
+        .bind(&job.id)
+        .fetch_one(&st.db)
+        .await?;
+    // What the index has: files of the space (the trash included) and their versions
+    let (files, bytes): (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM nodes WHERE drive_id = ?1 AND kind = 'file') + (SELECT COUNT(*) FROM node_versions WHERE drive_id = ?1),
+                (SELECT COALESCE(SUM(size), 0) FROM nodes WHERE drive_id = ?1 AND kind = 'file')
+                  + (SELECT COALESCE(SUM(size), 0) FROM node_versions WHERE drive_id = ?1)",
+    )
+    .bind(&job.drive_id)
+    .fetch_one(&st.db)
+    .await?;
+    cx.set_counts(files_done, bytes_done, files.max(files_done), bytes.max(bytes_done));
+    cx.flush().await?;
+    if let Some(stop) = copy_all(cx, &source, &dest, false).await? {
+        return Ok(stop);
+    }
+    for _ in 0..ROUNDS {
+        let report = crate::folders::scan(st, &job.drive_id).await?;
+        if let Some(e) = report.error {
+            return Err(AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, e));
+        }
+        if let Some(stop) = copy_all(cx, &source, &dest, true).await? {
+            return Ok(stop);
+        }
+        let failed = cx.failed_count();
+        if failed > 0 {
+            return Err(AppError::new(
+                axum::http::StatusCode::BAD_GATEWAY,
+                if failed == 1 { "1 file couldn't be copied".to_string() } else { format!("{failed} files couldn't be copied") },
+            ));
+        }
+        if let Some(stop) = cx.stop() {
+            return Ok(stop);
+        }
+        if switch(cx, &target).await? {
+            super::to_store::cleanup(st, job).await?;
+            return Ok(Stop::Done);
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(if cfg!(test) { 0 } else { 5 })).await;
+    }
+    Err(AppError::conflict("The space kept changing while it was being moved. Try again later."))
+}
+
+/// Same file system: the folder is renamed to its new place, holding the space, and the space follows in one
+/// transaction (the rename is undone when that fails). False when the folders are on different disks.
+async fn renamed(cx: &Ctx<'_>, from: &Path, to: &Path) -> AppResult<bool> {
+    let (st, job) = (cx.st, cx.job);
+    if other_disk() {
+        return Ok(false);
+    }
+    let held = crate::folders::hold(&job.drive_id).await;
+    // The new folder was made (with the marker) to keep its name: it makes way
+    let _ = std::fs::remove_file(to.join(MARKER));
+    std::fs::remove_dir(to).map_err(disk_error)?;
+    if let Err(e) = std::fs::rename(from, to) {
+        // Another disk (or a rename refused): the files are copied instead, into the folder made again
+        if e.kind() != std::io::ErrorKind::CrossesDevices {
+            tracing::info!("Renaming {} failed ({e}): its files are copied instead", from.display());
+        }
+        std::fs::create_dir(to).and_then(|()| crate::folders::mark_space(to, &job.drive_id)).map_err(disk_error)?;
+        return Ok(false);
+    }
+    let (files, bytes): (i64, i64) =
+        sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM nodes WHERE drive_id = ? AND kind = 'file'").bind(&job.drive_id).fetch_one(&st.db).await?;
+    cx.set_counts(files, bytes, files, bytes);
+    let res = {
+        let _w = st.write_lock.lock().await;
+        let mut tx = crate::db::begin_write(&st.db).await?;
+        let res = async {
+            sqlx::query("UPDATE drives SET location_id = ?2, source_path = ?3, last_scan_at = NULL, scan_report = NULL WHERE id = ?1")
+                .bind(&job.drive_id)
+                .bind(&job.to_location)
+                .bind(to.to_string_lossy())
+                .execute(&mut *tx)
+                .await?;
+            super::finish(&mut tx, cx, false, None).await
+        }
+        .await;
+        crate::db::settle(tx, res).await
+    };
+    if let Err(e) = res {
+        if let Err(b) = std::fs::rename(to, from) {
+            tracing::error!("Couldn't put {} back after a failed move: {b}", from.display());
+        }
+        return Err(e);
+    }
+    drop(held);
+    crate::folders::spaces_changed();
+    crate::folders::scan_later(st, &job.drive_id);
+    Ok(true)
+}
+
+/// An item of the folder as it was copied: identity, size and date
+#[derive(Clone, Copy, PartialEq)]
+struct Seen {
+    dev: i64,
+    ino: i64,
+    size: i64,
+    mtime_ns: i64,
+}
+
+fn seen(meta: &std::fs::Metadata) -> Seen {
+    let (dev, ino) = crate::folders::identity(meta);
+    Seen { dev, ino, size: meta.len() as i64, mtime_ns: crate::folders::mtime_ns(meta) }
+}
+
+/// Copies the folder: what isn't copied yet, or changed since. After the scan before the switch (`last`), copies of
+/// what is no longer there go too.
+async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, last: bool) -> AppResult<Option<Stop>> {
+    let (st, job) = (cx.st, cx.job);
+    let copied: std::collections::HashMap<String, (Option<i64>, i64, Option<i64>)> =
+        sqlx::query_as::<_, (String, Option<i64>, i64, Option<i64>)>("SELECT item_id, src_ino, size, src_mtime_ns FROM space_move_items WHERE move_id = ?")
+            .bind(&job.id)
+            .fetch_all(&st.db)
+            .await?
+            .into_iter()
+            .map(|(p, ino, size, mtime)| (p, (ino, size, mtime)))
+            .collect();
+    let mut found: HashSet<String> = HashSet::new();
+    let mut queue = vec![String::new()];
+    while let Some(dir) = queue.pop() {
+        let entries = {
+            let (source, dir) = (source.clone(), dir.clone());
+            tokio::task::spawn_blocking(move || -> std::io::Result<Vec<(String, std::fs::Metadata)>> {
+                let at = if dir.is_empty() { source } else { source.join(&dir)?.dir()? };
+                let mut out = Vec::new();
+                for e in std::fs::read_dir(at.as_path())? {
+                    let e = e?;
+                    let Ok(name) = e.file_name().into_string() else { continue };
+                    out.push((name, e.metadata()?));
+                }
+                Ok(out)
+            })
+            .await
+            .map_err(AppError::internal)?
+            .map_err(disk_error)?
+        };
+        for (name, meta) in entries {
+            let rel = crate::fsops::child_rel(&dir, &name);
+            // Its own marker is in the new folder already; links are left where they are
+            if (dir.is_empty() && name == MARKER) || meta.file_type().is_symlink() {
+                continue;
+            }
+            if meta.is_dir() {
+                let (dest, rel2) = (dest.clone(), rel.clone());
+                tokio::task::spawn_blocking(move || dest.join(&rel2).and_then(|d| crate::fsops::ensure_dir(&d)))
+                    .await
+                    .map_err(AppError::internal)?
+                    .map_err(disk_error)?;
+                queue.push(rel);
+                continue;
+            }
+            if !meta.is_file() {
+                continue;
+            }
+            found.insert(rel.clone());
+            let now = seen(&meta);
+            if copied.get(&rel).is_some_and(|(ino, size, mtime)| (*ino == Some(now.ino) || now.ino == 0) && *size == now.size && *mtime == Some(now.mtime_ns)) {
+                continue;
+            }
+            if let Some(stop) = cx.stop() {
+                return Ok(Some(stop));
+            }
+            let res = {
+                let (source, dest, rel2) = (source.clone(), dest.clone(), rel.clone());
+                cx.tries(
+                    |e: &std::io::Error| e.to_string() == CHANGED,
+                    || {
+                        let (source, dest, rel2) = (source.clone(), dest.clone(), rel2.clone());
+                        async move { tokio::task::spawn_blocking(move || copy_file(&source, &dest, &rel2)).await.map_err(std::io::Error::other)? }
+                    },
+                )
+                .await
+            };
+            match res {
+                Ok((src, dst)) => record(cx, &rel, src, dst).await?,
+                Err(Ok(stop)) => return Ok(Some(stop)),
+                Err(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(Err(e)) => cx.failed(Some(rel.clone()), disk_error(e).message),
+            }
+        }
+    }
+    if last {
+        // Copies of what is no longer in the folder
+        let gone: Vec<&String> = copied.keys().filter(|p| !found.contains(*p)).collect();
+        for rel in gone {
+            if let Ok(p) = dest.join(rel) {
+                let _ = std::fs::remove_file(p.as_path());
+            }
+            let _w = st.write_lock.lock().await;
+            sqlx::query("DELETE FROM space_move_items WHERE move_id = ? AND item_id = ?").bind(&job.id).bind(rel).execute(&st.db).await?;
+        }
+    }
+    Ok(None)
+}
+
+const CHANGED: &str = "The file changed while it was being copied";
+
+/// Copies a file to the same path in the new folder (under a temporary name, then renamed over an older copy), with its
+/// date; returns what the original and the copy were
+fn copy_file(source: &Pinned, dest: &Pinned, rel: &str) -> std::io::Result<(Seen, Seen)> {
+    let from = source.join(rel)?;
+    let mut src = from.open_file()?;
+    let before = seen(&src.metadata()?);
+    let to = dest.join(rel)?;
+    let dir = to.parent().ok_or_else(|| std::io::Error::other("no folder"))?;
+    let tmp = dir.join(&format!("{}{}", crate::fsops::COPY_PREFIX, new_id()))?;
+    let copied = (|| {
+        let mut out = std::fs::File::create_new(tmp.as_path())?;
+        let n = std::io::copy(&mut src, &mut out)?;
+        out.flush()?;
+        out.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_nanos(before.mtime_ns.max(0) as u64))?;
+        out.sync_all()?;
+        drop(out);
+        let after = seen(&std::fs::symlink_metadata(from.as_path())?);
+        if after != before || n as i64 != before.size {
+            return Err(std::io::Error::other(CHANGED));
+        }
+        std::fs::rename(tmp.as_path(), to.as_path())?;
+        Ok(seen(&std::fs::symlink_metadata(to.as_path())?))
+    })();
+    if copied.is_err() {
+        let _ = std::fs::remove_file(tmp.as_path());
+    }
+    copied.map(|dst| (before, dst))
+}
+
+/// Records a copy; the index follows what was read, when it differs (a scan leaves files changed in the last seconds
+/// for later)
+async fn record(cx: &Ctx<'_>, rel: &str, src: Seen, dst: Seen) -> AppResult<()> {
+    let (st, job) = (cx.st, cx.job);
+    {
+        let _w = st.write_lock.lock().await;
+        sqlx::query(
+            "INSERT OR REPLACE INTO space_move_items (move_id, item_id, kind, size, path, src_dev, src_ino, src_mtime_ns, dst_dev, dst_ino, dst_mtime_ns)
+             VALUES (?, ?, 'path', ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&job.id)
+        .bind(rel)
+        .bind(src.size)
+        .bind(rel)
+        .bind(src.dev)
+        .bind(src.ino)
+        .bind(src.mtime_ns)
+        .bind(dst.dev)
+        .bind(dst.ino)
+        .bind(dst.mtime_ns)
+        .execute(&st.db)
+        .await?;
+        sqlx::query(
+            "UPDATE nodes SET size = ?1, fs_size = ?1, fs_mtime_ns = ?2, fs_dev = ?3, fs_ino = ?4
+             WHERE drive_id = ?5 AND fs_path = ?6 AND kind = 'file' AND (fs_size IS NOT ?1 OR fs_mtime_ns IS NOT ?2)",
+        )
+        .bind(src.size)
+        .bind(src.mtime_ns)
+        .bind(src.dev)
+        .bind(src.ino)
+        .bind(&job.drive_id)
+        .bind(rel)
+        .execute(&st.db)
+        .await?;
+    }
+    cx.done(1, src.size).await
+}
+
+/// Switches the space to its new folder in one transaction, holding it. False when something isn't copied as the index
+/// has it now.
+async fn switch(cx: &Ctx<'_>, target: &Path) -> AppResult<bool> {
+    let (st, job) = (cx.st, cx.job);
+    let held = crate::folders::hold(&job.drive_id).await;
+    let w = st.write_lock.lock().await;
+    let mut tx = crate::db::begin_write(&st.db).await?;
+    let res = async {
+        let pending: Option<(i64,)> = sqlx::query_as(
+            "SELECT 1 FROM nodes n LEFT JOIN space_move_items i ON i.move_id = ?1 AND i.item_id = n.fs_path
+             WHERE n.drive_id = ?2 AND n.kind = 'file' AND (i.item_id IS NULL OR i.size IS NOT n.fs_size OR i.src_mtime_ns IS NOT n.fs_mtime_ns)
+             UNION ALL
+             SELECT 1 FROM node_versions v LEFT JOIN space_move_items i ON i.move_id = ?1 AND i.item_id = v.fs_path
+             WHERE v.drive_id = ?2 AND v.fs_path IS NOT NULL AND i.item_id IS NULL
+             LIMIT 1",
+        )
+        .bind(&job.id)
+        .bind(&job.drive_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if pending.is_some() {
+            return Ok(false);
+        }
+        sqlx::query(
+            "UPDATE nodes SET fs_dev = i.dst_dev, fs_ino = i.dst_ino, fs_mtime_ns = i.dst_mtime_ns
+             FROM space_move_items i WHERE i.move_id = ?1 AND nodes.drive_id = ?2 AND nodes.fs_path = i.item_id",
+        )
+        .bind(&job.id)
+        .bind(&job.drive_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("UPDATE drives SET location_id = ?2, source_path = ?3, last_scan_at = NULL, scan_report = NULL WHERE id = ?1")
+            .bind(&job.drive_id)
+            .bind(&job.to_location)
+            .bind(target.to_string_lossy())
+            .execute(&mut *tx)
+            .await?;
+        super::finish(&mut tx, cx, true, None).await?;
+        Ok(true)
+    }
+    .await;
+    let switched = crate::db::settle(tx, res).await?;
+    drop((w, held));
+    if switched {
+        crate::folders::spaces_changed();
+        // Folders get the new disk's identities from a scan
+        crate::folders::scan_later(st, &job.drive_id);
+    }
+    Ok(switched)
+}

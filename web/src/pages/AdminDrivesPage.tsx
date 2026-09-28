@@ -422,8 +422,7 @@ function LocationCell({ drive, move }: { drive: Drive; move?: SpaceMove }) {
 function MoveDialog({ drive, onClose, onDone }: { drive: Drive; onClose(): void; onDone(): void }) {
   const navigate = useNavigate();
   const locations = useQuery({ queryKey: ["storage-locations"], queryFn: api.storageLocations });
-  // Into a content store (S3, SFTP, FTP): the built-in storage and Local folder locations keep spaces as folders
-  const targets = (locations.data ?? []).filter((l) => l.id !== drive.location_id && l.kind !== "local");
+  const targets = (locations.data ?? []).filter((l) => l.id !== drive.location_id);
   const folder = drive.mode === "folder";
   const [value, setValue] = useState<string>("");
   const [busy, setBusy] = useState(false);
@@ -431,6 +430,9 @@ function MoveDialog({ drive, onClose, onDone }: { drive: Drive; onClose(): void;
   const current = locations.data?.find((l) => l.id === drive.location_id);
   const target = targets.find((l) => l.id === value);
   const tooSmall = target?.disk_free_bytes != null && target.disk_free_bytes < drive.used_bytes;
+  // The built-in storage and Local folder locations keep spaces as folders; files copied from or into a folder must
+  // stay as they are meanwhile
+  const readOnly = folder || target?.kind === "local";
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
@@ -477,16 +479,19 @@ function MoveDialog({ drive, onClose, onDone }: { drive: Drive; onClose(): void;
               ))}
             </select>
             {tooSmall && <p className="text-xs text-destructive">{t("There isn't enough free space there for this space.")}</p>}
-            {folder ? (
+            {readOnly ? (
               <div className="grid gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100" role="note">
                 <p>
                   {t("The space is read-only while its files are copied: people can open, download and share files, but not change them. It switches to the new location once all of them are there.")}
                 </p>
-                <p>
-                  {t("Changes made in its folder from outside ThirtyFile meanwhile are copied too. Afterwards the folder {path} is removed, apart from anything that changed at the last moment.", {
-                    path: drive.source_path ?? "",
-                  })}
-                </p>
+                {folder && (
+                  <p>
+                    {t("Changes made in its folder from outside ThirtyFile meanwhile are copied too. Afterwards the folder {path} is removed, apart from anything that changed at the last moment.", {
+                      path: drive.source_path ?? "",
+                    })}
+                  </p>
+                )}
+                {target?.kind === "local" && <p>{t("There it gets a folder of its own, like a new space's, with its files as ordinary files.")}</p>}
               </div>
             ) : (
               <p className="text-xs text-muted-foreground">
