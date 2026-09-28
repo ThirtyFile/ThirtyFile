@@ -454,6 +454,12 @@ async fn finish(st: &AppState, up: &Uploader, upload: Upload, guard: ActiveGuard
                 Err(_) => None,
             };
             crate::logs::record_share_access(&st, &share.id, up.user.id, node.as_ref(), "upload", &share.visitor);
+            // The link's creator is told the file arrived
+            if let Some(node) = &node
+                && let Err(e) = crate::notify::link_upload(&st, up.user.id, &share.id, node).await
+            {
+                tracing::warn!("Couldn't tell about a file received through a link: {}", e.message);
+            }
         }
         drop(guard);
         result

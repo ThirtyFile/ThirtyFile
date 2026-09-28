@@ -8,6 +8,8 @@
 //! - `access_expiring`: access given to them ends within three days. Not told when the access was given with that
 //!   short an expiry in the first place: the `shared` notification already said when it ends
 //! - `app_password`: an app password was made for their account (so one made by someone else doesn't go unnoticed)
+//! - `link_upload`: files arrived through a share link they made that accepts files. Files through the same link
+//!   within an hour count up the unread notification instead of adding one (and send no further email)
 //!
 //! Each person can turn each kind off, in the app and by email separately. Emails are sent in the person's interface
 //! language and time zone (the ones they last used the app with), after the change that caused them is saved.
@@ -30,7 +32,9 @@ use crate::{
     util::{format_bytes, now},
 };
 
-pub const KINDS: [&str; 4] = ["shared", "space_full", "access_expiring", "app_password"];
+pub const KINDS: [&str; 5] = ["shared", "space_full", "access_expiring", "app_password", "link_upload"];
+/// Files through one link within this long are told in one notification
+const LINK_UPLOAD_BATCH: i64 = 3600;
 /// A space is almost full from this share of its size (percent)…
 const FULL_PERCENT: i64 = 90;
 /// …and has room again below this one, after which filling it up is told again
@@ -274,6 +278,49 @@ async fn check_expiring(conn: &mut SqliteConnection, emails: &mut Vec<Outgoing>)
 
 // ───────────── Emails ─────────────
 
+/// A file arrived through a share link that accepts files: its creator (`owner`) is told, in the folder it went to.
+/// Within an hour, further files through the same link count up the unread notification.
+pub async fn link_upload(st: &AppState, owner: i64, share_id: &str, file: &crate::tree::Node) -> AppResult<()> {
+    let Some(folder_id) = file.parent_id.clone() else { return Ok(()) };
+    let emails = {
+        let _w = st.write_lock.lock().await;
+        let mut tx = st.db.begin().await?;
+        let ts = now();
+        let counted = sqlx::query(
+            "UPDATE notifications SET data = json_set(data, '$.count', COALESCE(json_extract(data, '$.count'), 1) + 1, '$.file', ?1), created_at = ?2
+             WHERE user_id = ?3 AND kind = 'link_upload' AND read_at IS NULL AND json_extract(data, '$.share') = ?4 AND created_at > ?5",
+        )
+        .bind(&file.name)
+        .bind(ts)
+        .bind(owner)
+        .bind(share_id)
+        .bind(ts - LINK_UPLOAD_BATCH)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        let emails = if counted > 0 {
+            Vec::new()
+        } else {
+            let folder = crate::tree::get_node(&mut tx, &folder_id).await?;
+            let name = match &folder {
+                Some(f) if f.name.is_empty() => crate::tree::get_drive(&mut tx, f.drive()).await?.map(|d| d.name).unwrap_or_default(),
+                Some(f) => f.name.clone(),
+                None => String::new(),
+            };
+            let notice = Notice {
+                kind: "link_upload",
+                node_id: Some(folder_id),
+                data: json!({ "share": share_id, "name": name, "item": "folder", "file": file.name, "count": 1 }),
+            };
+            add(&mut tx, &[owner], &notice).await?
+        };
+        tx.commit().await?;
+        emails
+    };
+    send_later(st, emails);
+    Ok(())
+}
+
 /// Sends the emails in the background, one after another; nothing happens when no email server is set up
 pub fn send_later(st: &AppState, emails: Vec<Outgoing>) {
     if emails.is_empty() {
@@ -386,6 +433,14 @@ pub fn render(n: &Notice, zh: bool, tz_offset: i64, site: &str, base_url: &str) 
                     format!("The space “{name}” is almost full"),
                     format!("“{name}” uses {used} of {quota} ({percent}%). Once it is full, no more files can be added. Delete files you no longer need and empty the trash, or ask an administrator for more space.\n"),
                 )
+            }
+        }
+        ("link_upload", _) => {
+            let file = d["file"].as_str().unwrap_or_default();
+            if zh {
+                (format!("有人透過連結把「{file}」傳到了「{name}」"), format!("有人透過你建立的收件連結，把「{file}」上傳到「{name}」。\n"))
+            } else {
+                (format!("“{file}” arrived in “{name}” through a link"), format!("Someone uploaded “{file}” to “{name}” through a link you made that accepts files.\n"))
             }
         }
         ("app_password", _) => {

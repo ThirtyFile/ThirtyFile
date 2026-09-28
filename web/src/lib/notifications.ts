@@ -8,6 +8,7 @@ export const NOTIFICATION_KINDS: { kind: NotificationKind; label: string; desc: 
   { kind: "shared", label: t("Shared with you"), desc: t("Someone shares a folder or file with you, or adds you to a space") },
   { kind: "space_full", label: t("Space almost full"), desc: t("A space you own or manage is 90% full") },
   { kind: "access_expiring", label: t("Access ending"), desc: t("Your access to something shared with you ends within 3 days") },
+  { kind: "link_upload", label: t("Files received through a link"), desc: t("Someone uploads files through a link you made that accepts files") },
   { kind: "app_password", label: t("New app password"), desc: t("An app password is created for your account") },
 ];
 
@@ -39,6 +40,12 @@ export function notificationText(n: AppNotification): { title: string; detail: s
       };
     case "access_expiring":
       return { title: t("Your access to “{name}” ends soon", { name }), detail: t("{role} until {time}", { role, time: ends }) };
+    case "link_upload": {
+      const count = d.count ?? 1;
+      return count > 1
+        ? { title: t("{n} files arrived in “{name}” through a link", { n: count, name }), detail: t("The last one: {file}", { file: d.file ?? "" }) }
+        : { title: t("“{file}” arrived in “{name}” through a link", { file: d.file ?? "", name }), detail: "" };
+    }
     case "app_password":
       return {
         title: t("An app password “{name}” was created for your account", { name }),
