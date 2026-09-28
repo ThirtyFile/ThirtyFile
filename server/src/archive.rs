@@ -804,7 +804,7 @@ mod tests {
         assert!(env.node_at(&space.drive, "page/page.txt").await.is_some());
         let job = extract_now(&env, &admin, &zip).await.unwrap();
         assert_eq!(job.name.as_deref(), Some("page (1)"));
-        // Nothing half-made is left, and a scan finds nothing new
+        // Nothing half-made is left once the job is done (not even for a moment), and a scan finds nothing new
         let names: Vec<String> = std::fs::read_dir(&space.dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         assert!(!names.iter().any(|n| n.starts_with(".thirtyfile-copy-")), "{names:?}");
         let r = crate::folders::scan(&env.st, &space.drive).await.unwrap();

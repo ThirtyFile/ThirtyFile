@@ -983,6 +983,9 @@ pub async fn place_folder(st: &AppState, user: &User, staged: Staging, dest_id: 
     logs::record_activity(&mut tx, user, node.as_ref(), action, detail).await?;
     tx.commit().await?;
     locks.committed();
+    // The folder that held it is empty now: removed before the change is reported done, so nothing half-made is left
+    // behind once it is (should the change fail instead, the renames are undone and `Staging` removes it all)
+    let _ = std::fs::remove_dir(staged.wrap.as_path());
     Ok((root, name))
 }
 
