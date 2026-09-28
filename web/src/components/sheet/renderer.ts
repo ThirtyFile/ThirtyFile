@@ -59,15 +59,6 @@ export function hitTest(v: View, x: number, y: number): Hit {
   return { area: "cell", r, c };
 }
 
-export function visibleRange(v: View): Range {
-  return {
-    r1: v.rows.indexAt(v.scrollY),
-    c1: v.cols.indexAt(v.scrollX),
-    r2: v.rows.indexAt(v.scrollY + v.height - HEADER_H),
-    c2: v.cols.indexAt(v.scrollX + v.width - HEADER_W),
-  };
-}
-
 // ───────────── Styles and text ─────────────
 
 const fontCache = new Map<string, string>();

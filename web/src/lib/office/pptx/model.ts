@@ -99,7 +99,6 @@ function partInfo(path: string, doc: Document | null): PartInfo | null {
 }
 
 const TITLE = new Set(["title", "ctrTitle"]);
-const BODYISH = new Set(["body", "obj", "subTitle"]);
 
 /** Placeholder on a slide (or layout) → matching placeholder in the layout */
 export function matchLayoutPh(list: Ph[], type: string, idx: string | null): Ph | undefined {
@@ -128,8 +127,6 @@ export function phStyleKind(type: string | null): "title" | "body" | "other" {
   if (["dt", "ftr", "sldNum", "hdr"].includes(type)) return "other";
   return "body";
 }
-
-export const isBodyLike = (type: string) => BODYISH.has(type);
 
 // ───────────── Loading ─────────────
 

@@ -8,9 +8,6 @@ import SheetPreview from "@/components/sheet/SheetPreview";
 import { TOO_LARGE } from "@/lib/office/ooxml";
 import { MAX_OFFICE_PREVIEW_BYTES, MAX_OFFICE_PREVIEW_LABEL } from "@/lib/office/limits";
 
-/** Office formats that can be previewed (legacy .doc / .xls / .ppt must be downloaded and opened) */
-export const OFFICE_PREVIEW_EXTS = ["docx", "xlsx", "pptx"];
-
 /** Time limit for Word / PowerPoint layout */
 const RENDER_TIMEOUT = 60_000;
 /** Time limit for the preview frame to start */

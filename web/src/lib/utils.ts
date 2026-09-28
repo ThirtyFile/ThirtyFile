@@ -51,15 +51,6 @@ export function formatDateTime(ts: number): string {
   return dateFmt.format(new Date(ts * 1000));
 }
 
-export function formatTime(ts: number): string {
-  const d = new Date(ts * 1000);
-  const diff = Date.now() / 1000 - ts;
-  if (diff < 60) return t("Just now");
-  if (diff < 3600) return t("{n} minute ago|{n} minutes ago", { n: Math.floor(diff / 60) });
-  if (diff < 86400 && new Date().getDate() === d.getDate()) return t("Today {time}", { time: d.toTimeString().slice(0, 5) });
-  return dateFmt.format(d);
-}
-
 export function formatDate(ts: number): string {
   return new Intl.DateTimeFormat(locale, { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ts * 1000));
 }

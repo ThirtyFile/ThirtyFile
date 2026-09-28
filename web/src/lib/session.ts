@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useSyncExternalStore } from "react";
 import type { Me } from "@/api";
 
 export const MeContext = createContext<Me | null>(null);
@@ -9,23 +9,71 @@ export function useMe(): Me {
   return me;
 }
 
-/** Preferences stored in localStorage (view mode, sort) */
-export function usePersisted<T>(key: string, initial: T): [T, (v: T) => void] {
-  const [value, setValue] = useState<T>(() => {
+/** Whether a stored value has the shape of the default: the same type, and for objects the same keys with the same types */
+export function sameShape(value: unknown, like: unknown): boolean {
+  if (Array.isArray(like)) return Array.isArray(value);
+  if (like === null || typeof like !== "object") return typeof value === typeof like && (typeof value !== "number" || Number.isFinite(value));
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  return Object.entries(like).every(([k, v]) => sameShape((value as Record<string, unknown>)[k], v));
+}
+
+/** One store per key, so every component showing a preference sees a change at once, also one made in another window */
+const stores = new Map<string, { value: unknown; listeners: Set<() => void> }>();
+
+function storeOf(key: string, initial: unknown, valid: (v: never) => boolean) {
+  let store = stores.get(key);
+  if (!store) {
+    store = { value: read(key, initial, valid), listeners: new Set() };
+    stores.set(key, store);
+  }
+  return store;
+}
+
+/** The stored value, or `initial` when there is none or it doesn't have the expected shape (an older format, an edit by hand) */
+function read(key: string, initial: unknown, valid: (v: never) => boolean): unknown {
+  try {
+    const raw = localStorage.getItem(key);
+    const value: unknown = raw === null ? initial : JSON.parse(raw);
+    return sameShape(value, initial) && valid(value as never) ? value : initial;
+  } catch {
+    return initial;
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    const store = e.key && stores.get(e.key);
+    if (!store) return;
+    // The default is only known to the hooks: compare with the value this window had
     try {
-      const raw = localStorage.getItem(key);
-      return raw ? (JSON.parse(raw) as T) : initial;
+      const value: unknown = e.newValue === null ? undefined : JSON.parse(e.newValue);
+      if (value === undefined || !sameShape(value, store.value)) return;
+      store.value = value;
+      store.listeners.forEach((l) => l());
     } catch {
-      return initial;
+      // Not ours to read
     }
   });
+}
+
+/** Preferences stored in localStorage (view mode, sort, pane widths); `valid` checks more than the shape */
+export function usePersisted<T>(key: string, initial: T, valid: (v: T) => boolean = () => true): [T, (v: T) => void] {
+  const store = storeOf(key, initial, valid);
+  const value = useSyncExternalStore(
+    (l) => {
+      store.listeners.add(l);
+      return () => store.listeners.delete(l);
+    },
+    () => store.value as T,
+  );
   const set = (v: T) => {
-    setValue(v);
+    store.value = v;
     try {
       localStorage.setItem(key, JSON.stringify(v));
     } catch {
-      // Ignore
+      // Storage blocked by the browser: the value lasts until the page is closed
     }
+    store.listeners.forEach((l) => l());
   };
   return [value, set];
 }

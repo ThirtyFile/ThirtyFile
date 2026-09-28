@@ -16,7 +16,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build && vite build -c vite.frame.config.ts && vite build -c vite.dict.config.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "lint": "oxlint --deny-warnings",
     "test": "vitest run",
     "test:e2e": "playwright test"

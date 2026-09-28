@@ -18,7 +18,7 @@ import {
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { AccessDialog } from "@/components/AccessDialog";
-import { api, privateSource, triggerDownload } from "@/api";
+import { api, privateSource, triggerDownload, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
 import { DetailsPane } from "@/components/DetailsPane";
 import { NameDialog } from "@/components/dialogs";
@@ -38,9 +38,6 @@ import { locationOf, useSort } from "@/pages/FilesPage";
 import { useAllPages } from "@/lib/pages";
 
 const SheetEditor = lazy(() => import("@/components/sheet/SheetEditor"));
-
-/** Size limit for saving online edits (same as the server's MAX_EDIT_BYTES) */
-const MAX_EDIT_BYTES = 20 * 1024 * 1024;
 
 /** Where focus takes the arrow keys for itself: typing, a media player's seek bar, lists, menus and the workbook */
 const OWN_ARROWS = ".cm-editor, video, audio, input, textarea, select, [contenteditable], [role=grid], [role=tree], [role=tablist], [role=menu], [role=listbox], [role=slider], [data-slot=dialog-content]";
@@ -103,7 +100,13 @@ export function FileViewPage() {
   const path = info.data?.path ?? [];
   const loc = locationOf(info.data);
   const caps = capsOf(info.data?.role, me, info.data?.read_only);
-  const canEditSheet = !!node && extOf(node.name) === "xlsx" && caps.write && node.size <= MAX_EDIT_BYTES;
+  // A save from the editor: the new version shows here, in the folder's list and in Recent
+  const onSaved = (n: Node) => {
+    qc.setQueryData(["node", id], (old: typeof info.data) => (old ? { ...old, node: { ...old.node, ...n } } : old));
+    qc.invalidateQueries({ queryKey: ["children"] });
+    qc.invalidateQueries({ queryKey: ["recent"] });
+  };
+  const canEditSheet = !!node && extOf(node.name) === "xlsx" && caps.write && node.size <= me.max_edit_bytes;
   const sheetEditing = !!node && editingId === node.id && canEditSheet;
   const rootUrl = loc.rootUrl;
   const folders = path.slice(0, -1);
@@ -212,11 +215,7 @@ export function FileViewPage() {
                       node={node}
                       source={privateSource}
                       onExit={() => setEditingId(null)}
-                      onSaved={(n) => {
-                        qc.setQueryData(["node", id], (old: typeof info.data) => (old ? { ...old, node: { ...old.node, ...n } } : old));
-                        qc.invalidateQueries({ queryKey: ["children"] });
-                        qc.invalidateQueries({ queryKey: ["recent"] });
-                      }}
+                      onSaved={onSaved}
                     />
                   </Suspense>
                 ) : (
@@ -225,11 +224,7 @@ export function FileViewPage() {
                     source={privateSource}
                     editable={caps.write}
                     embedded
-                    onSaved={(n) => {
-                      qc.setQueryData(["node", id], (old: typeof info.data) => (old ? { ...old, node: { ...old.node, ...n } } : old));
-                      qc.invalidateQueries({ queryKey: ["children"] });
-                      qc.invalidateQueries({ queryKey: ["recent"] });
-                    }}
+                    onSaved={onSaved}
                   />
                 )}
               </div>

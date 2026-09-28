@@ -13,8 +13,6 @@ import JSZip from "jszip";
 /** 1 px (96 DPI) = 9525 EMU; 1 pt = 12700 EMU; 1 twip = 1/20 pt */
 export const EMU_PER_PX = 9525;
 export const emuToPx = (emu: number) => emu / EMU_PER_PX;
-export const twipToPx = (tw: number) => (tw / 20) * (96 / 72);
-export const ptToPx = (pt: number) => (pt * 96) / 72;
 /** Round to 0.01 to keep the generated CSS short */
 export const round = (n: number) => Math.round(n * 100) / 100;
 export const px = (n: number) => `${round(n)}px`;
@@ -80,12 +78,6 @@ export function toggle(el: Element | null | undefined): boolean | undefined {
   if (!el) return undefined;
   const v = attr(el, "val");
   return v === null || !/^(0|false|off|none)$/i.test(v);
-}
-
-export function boolAttr(el: Element | null | undefined, name: string): boolean | undefined {
-  const v = attr(el, name);
-  if (v === null) return undefined;
-  return !/^(0|false|off)$/i.test(v);
 }
 
 // ───────────── Package ─────────────

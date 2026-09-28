@@ -93,8 +93,6 @@ export const twAttr = (el: Element | null | undefined, name: string) => twips(at
 
 /** twips → px */
 export const tw = (t: number) => (t / 1440) * 96;
-/** Half-points (font size) → pt */
-export const halfPt = (v: number) => v / 2;
 
 /** Whether a color string is 6-digit hex (checked before putting it into CSS) */
 export const isHex = (v: string | null | undefined): v is string => !!v && /^[0-9a-f]{6}$/i.test(v);

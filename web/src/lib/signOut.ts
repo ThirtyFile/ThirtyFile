@@ -14,6 +14,7 @@ export function leaveAfterSignOut(userId: number) {
       if (key.startsWith("tus::")) localStorage.removeItem(key);
     }
     localStorage.removeItem(`tf-tabs-${userId}`);
+    sessionStorage.removeItem(`tf-tabs-${userId}`);
   } catch {
     // Storage blocked by the browser: nothing was kept there either
   }

@@ -40,10 +40,16 @@ function fresh(path: string): TabsState {
   return { tabs: [t], active: t.id };
 }
 
+/**
+ * Each window keeps its own tabs (sessionStorage, which survives reloading that window), so two windows don't overwrite
+ * each other's; the most recent tabs of any window (localStorage) are what a new window starts with
+ */
 function set(next: TabsState) {
   state = next;
   try {
-    localStorage.setItem(storageKey, JSON.stringify(state));
+    const json = JSON.stringify(state);
+    sessionStorage.setItem(storageKey, json);
+    localStorage.setItem(storageKey, json);
   } catch {
     // Ignore when storage isn't available
   }
@@ -88,7 +94,7 @@ export function loadTabs(userId: number) {
   if (key === storageKey) return;
   storageKey = key;
   try {
-    const raw = localStorage.getItem(key);
+    const raw = sessionStorage.getItem(key) ?? localStorage.getItem(key);
     const saved = raw ? validTabs(JSON.parse(raw)) : null;
     state = saved ?? fresh(HOME);
   } catch {

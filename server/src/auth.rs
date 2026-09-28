@@ -229,6 +229,8 @@ pub struct Me {
     pub share_policy: crate::shares::SharePolicy,
     /// Earlier versions kept per file (0 = replacing a file's content keeps no version)
     pub version_keep: i64,
+    /// Largest file that can be edited and saved online (bytes)
+    pub max_edit_bytes: usize,
 }
 
 async fn me_of(st: &AppState, user: User) -> AppResult<Me> {
@@ -238,7 +240,7 @@ async fn me_of(st: &AppState, user: User) -> AppResult<Me> {
         (user.is_admin() || s.allow_user_drives, s.public_url.clone(), s.min_password_length, s.version_keep)
     };
     let share_policy = crate::shares::policy(st);
-    Ok(Me { user, used_bytes, can_create_drive, public_url, trash_days: st.trash_days, min_password_length, share_policy, version_keep })
+    Ok(Me { user, used_bytes, can_create_drive, public_url, trash_days: st.trash_days, min_password_length, share_policy, version_keep, max_edit_bytes: crate::files::MAX_EDIT_BYTES })
 }
 
 #[derive(Deserialize)]

@@ -12,7 +12,7 @@
     "noEmit": true,
     "resolveJsonModule": true,
     "paths": { "@/*": ["./src/*"] },
-    "types": ["node", "vite/client"]
+    "types": ["vite/client"]
   },
-  "include": ["src", "tests", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"]
+  "include": ["src"]
 }

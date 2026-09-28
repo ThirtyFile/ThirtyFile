@@ -454,6 +454,8 @@ export interface Me {
   share_policy: SharePolicy;
   /** Earlier versions kept per file; 0 = replacing a file's content keeps no version */
   version_keep: number;
+  /** Largest file that can be edited and saved online (bytes) */
+  max_edit_bytes: number;
 }
 
 export interface SharePolicy {
@@ -674,7 +676,8 @@ export interface PublicShare {
   node?: Node;
 }
 
-export type SortKey = "name" | "updated" | "size" | "type";
+export const SORT_KEYS = ["name", "updated", "size", "type"] as const;
+export type SortKey = (typeof SORT_KEYS)[number];
 
 /** An earlier version of a file */
 export interface FileVersion {

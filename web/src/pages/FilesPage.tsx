@@ -3,7 +3,7 @@ import { useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { UsersRoundIcon } from "lucide-react";
 import { OfflineBanner, ReadOnlyBanner } from "@/components/OfflineNotice";
-import { api, type NodeInfo, type SortKey, type SortOrder } from "@/api";
+import { SORT_KEYS, api, type NodeInfo, type SortKey, type SortOrder } from "@/api";
 import { Explorer } from "@/components/Explorer";
 import { crumbPath, type Crumb } from "@/components/Frame";
 import { expandPath } from "@/components/FolderTree";
@@ -13,7 +13,11 @@ import { usePersisted } from "@/lib/session";
 import { t } from "@/lib/i18n";
 
 export function useSort() {
-  const [sort, setSort] = usePersisted<{ key: SortKey; order: SortOrder }>("tf-sort", { key: "name", order: "asc" });
+  const [sort, setSort] = usePersisted<{ key: SortKey; order: SortOrder }>(
+    "tf-sort",
+    { key: "name", order: "asc" },
+    (s) => SORT_KEYS.includes(s.key) && (s.order === "asc" || s.order === "desc"),
+  );
   const toggle = (key: SortKey) => setSort({ key, order: sort.key === key && sort.order === "asc" ? "desc" : "asc" });
   return [sort, toggle, setSort] as const;
 }

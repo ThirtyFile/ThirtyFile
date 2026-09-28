@@ -1253,8 +1253,6 @@ function lookup(args: Node[], ctx: EvalContext, dir: "v" | "h"): Result {
   return dir === "v" ? ctx.get(g.sheet, g.r1 + i, g.c1 + idx - 1) : ctx.get(g.sheet, g.r1 + idx - 1, g.c1 + i);
 }
 
-export const FUNCTION_NAMES = Object.keys(FUNCTIONS).sort();
-
 // ───────────── Calculation engine ─────────────
 
 /**
