@@ -1116,7 +1116,7 @@ mod tests {
         let docs = env.folder(&amy, &amy.root_id, "Docs").await;
         env.stored_file(&amy, &docs, "a.txt", b"alpha").await;
         env.stored_file(&amy, &docs, "b.txt", b"beta").await;
-        let node = tree::get_node(&mut *env.st.db.acquire().await.unwrap(), &docs).await.unwrap().unwrap();
+        let node = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &docs).await.unwrap().unwrap();
         let plan = zip_plan(&env.st, vec![node.clone()], 0).await.unwrap();
         let content = |path: &str| if path.ends_with("a.txt") { &b"alpha"[..] } else { &b"beta"[..] };
         let files: Vec<&[u8]> = plan.items.iter().filter(|it| it.blob.is_some()).map(|it| content(&it.path)).collect();

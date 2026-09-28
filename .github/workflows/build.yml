@@ -110,14 +110,25 @@ jobs:
         with:
           workspaces: server
 
+      # The backend tests run under cargo-llvm-cov (the same tests as cargo test), with the coverage in the job summary
+      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        with:
+          tool: cargo-llvm-cov
       - name: Backend
         working-directory: server
         run: |
-          cargo test --locked
+          rustup component add llvm-tools-preview
+          cargo llvm-cov --locked --no-report
+          {
+            echo "### Backend coverage"
+            echo '```'
+            cargo llvm-cov report --summary-only
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
           cargo clippy --locked --all-targets -- -D warnings
 
       # Sign in, upload, preview and download in a real browser, against the server built from this commit. A debug
-      # build (it reuses what the tests compiled) that embeds the frontend, built here for it
+      # build that embeds the frontend, built here for it (the tests' build is instrumented for coverage, so it isn't reused)
       - name: End-to-end test
         env:
           THIRTYFILE_BIN: ${{ github.workspace }}/server/target/debug/thirtyfile

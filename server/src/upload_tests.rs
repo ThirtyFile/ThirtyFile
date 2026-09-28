@@ -35,7 +35,7 @@ async fn offset_of(env: &testutil::TestEnv, user: &User, id: &str) -> String {
 /// The file an upload became: its content, name and folder
 async fn file(env: &testutil::TestEnv, res: &Response) -> (Vec<u8>, String, String) {
     let id = res.headers()["x-node-id"].to_str().unwrap();
-    let node = tree::get_node(&mut *env.st.db.acquire().await.unwrap(), id).await.unwrap().unwrap();
+    let node = tree::get_node(&mut env.st.db.acquire().await.unwrap(), id).await.unwrap().unwrap();
     let mut data = Vec::new();
     let mut r = crate::files::Source::of(&node).unwrap().open(&env.st, 0, node.size as u64).await.unwrap();
     r.read_to_end(&mut data).await.unwrap();
@@ -205,11 +205,11 @@ async fn files_of_an_uploaded_folder_go_into_folders_already_there() {
     // The two files of "Day 1" share one new folder inside the existing "Trip"; "c.jpg" is in "Trip" itself
     assert_eq!(folders[0], folders[1]);
     assert_eq!(folders[2], trip);
-    let day = tree::get_node(&mut *env.st.db.acquire().await.unwrap(), &folders[0]).await.unwrap().unwrap();
+    let day = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &folders[0]).await.unwrap().unwrap();
     assert_eq!((day.name.as_str(), day.parent_id.as_deref()), ("Day 1", Some(trip.as_str())));
     // A new "Old" was made next to the one in the trash
-    let x = tree::get_node(&mut *env.st.db.acquire().await.unwrap(), &folders[3]).await.unwrap().unwrap();
-    let parent = tree::get_node(&mut *env.st.db.acquire().await.unwrap(), x.parent_id.as_deref().unwrap()).await.unwrap().unwrap();
+    let x = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &folders[3]).await.unwrap().unwrap();
+    let parent = tree::get_node(&mut env.st.db.acquire().await.unwrap(), x.parent_id.as_deref().unwrap()).await.unwrap().unwrap();
     assert_eq!(parent.name, "Old");
     assert_ne!(parent.id, old);
     assert!(parent.trashed_at.is_none());

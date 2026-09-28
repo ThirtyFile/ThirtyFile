@@ -483,3 +483,219 @@ impl Storage for FtpStorage {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use std::{
+        path::PathBuf,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    use tokio::{
+        io::{AsyncBufReadExt, BufReader},
+        net::{TcpListener, TcpStream},
+    };
+
+    use super::*;
+
+    /// A small FTP server over a temporary folder: passive mode, plain connections, and only the commands the storage
+    /// uses. It counts the connections it was given.
+    struct Server {
+        dir: PathBuf,
+        port: u16,
+        connections: Arc<AtomicUsize>,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl Drop for Server {
+        fn drop(&mut self) {
+            self.task.abort();
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    async fn server(password: &'static str) -> Server {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-ftp-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(dir.join("files")).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let connections = Arc::new(AtomicUsize::new(0));
+        let (root, count) = (dir.clone(), connections.clone());
+        let task = tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                count.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(session(stream, root.clone(), password));
+            }
+        });
+        Server { dir, port, connections, task }
+    }
+
+    async fn session(stream: TcpStream, root: PathBuf, password: &'static str) -> io::Result<()> {
+        let (r, mut w) = stream.into_split();
+        let mut lines = BufReader::new(r).lines();
+        w.write_all(b"220 Ready\r\n").await?;
+        let (mut cwd, mut rest, mut from, mut passive) = ("/".to_string(), 0usize, None, None::<TcpListener>);
+        while let Some(line) = lines.next_line().await? {
+            let (cmd, arg) = line.split_once(' ').unwrap_or((line.as_str(), ""));
+            let path = root.join(arg.trim_start_matches('/'));
+            let reply = match cmd {
+                "USER" => "331 Password please".to_string(),
+                "PASS" if arg == password => "230 Signed in".into(),
+                "PASS" => "530 Wrong password".into(),
+                "TYPE" | "NOOP" => "200 OK".into(),
+                "PWD" => format!("257 \"{cwd}\""),
+                "CWD" if path.is_dir() => {
+                    cwd = arg.to_string();
+                    "250 OK".into()
+                }
+                "MKD" if std::fs::create_dir(&path).is_ok() => "257 Created".into(),
+                "SIZE" if path.is_file() => format!("213 {}", path.metadata()?.len()),
+                "DELE" if std::fs::remove_file(&path).is_ok() => "250 Deleted".into(),
+                "RNFR" if path.exists() => {
+                    from = Some(path);
+                    "350 Go on".into()
+                }
+                "RNTO" if from.take().is_some_and(|f| std::fs::rename(f, &path).is_ok()) => "250 Renamed".into(),
+                "REST" => {
+                    rest = arg.parse().unwrap_or(0);
+                    "350 Restarting".into()
+                }
+                "PASV" => {
+                    let l = TcpListener::bind("127.0.0.1:0").await?;
+                    let p = l.local_addr()?.port();
+                    passive = Some(l);
+                    format!("227 Entering Passive Mode (127,0,0,1,{},{})", p / 256, p % 256)
+                }
+                "RETR" | "STOR" | "NLST" if (cmd == "STOR" || path.exists()) && passive.is_some() => {
+                    let (mut data, _) = passive.take().unwrap().accept().await?;
+                    w.write_all(b"150 Opening data connection\r\n").await?;
+                    // A client that stops reading (or aborts) just ends the transfer
+                    let _ = match cmd {
+                        "RETR" => data.write_all(&std::fs::read(&path)?[std::mem::take(&mut rest)..]).await,
+                        "STOR" => {
+                            let mut content = Vec::new();
+                            data.read_to_end(&mut content).await?;
+                            std::fs::write(&path, content)
+                        }
+                        _ => {
+                            let names: Vec<String> =
+                                std::fs::read_dir(&path)?.flatten().map(|e| format!("{}\r\n", e.file_name().to_string_lossy())).collect();
+                            data.write_all(names.concat().as_bytes()).await
+                        }
+                    };
+                    drop(data);
+                    "226 Done".into()
+                }
+                "ABOR" => "226 Aborted".into(),
+                "QUIT" => {
+                    w.write_all(b"221 Bye\r\n").await?;
+                    return Ok(());
+                }
+                _ => "550 Not possible".into(),
+            };
+            w.write_all(format!("{reply}\r\n").as_bytes()).await?;
+        }
+        Ok(())
+    }
+
+    fn storage(s: &Server, password: &str) -> FtpStorage {
+        let cfg = FtpConfig { host: "127.0.0.1".into(), port: s.port, username: "backup".into(), password: password.into(), path: "/files".into(), ..Default::default() };
+        FtpStorage::new(&cfg).unwrap()
+    }
+
+    async fn read(st: &FtpStorage, hash: &str, start: u64, len: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        st.open(hash, start, len).await.unwrap().read_to_end(&mut out).await.unwrap();
+        out
+    }
+
+    /// Puts content into the storage from a temporary file, as uploads do; returns its hash
+    async fn put(st: &FtpStorage, s: &Server, content: &[u8]) -> String {
+        let hash = crate::util::sha256_hex(content);
+        let src = s.dir.join(format!("src-{hash}"));
+        std::fs::write(&src, content).unwrap();
+        st.put_file(&hash, &src).await.unwrap();
+        assert!(!src.exists(), "the temporary file is removed once stored");
+        hash
+    }
+
+    #[tokio::test]
+    async fn content_is_stored_read_listed_and_deleted_over_ftp() {
+        let s = server("secret").await;
+        let st = storage(&s, "secret");
+        st.check().await.unwrap();
+
+        let hash = put(&st, &s, b"hello over ftp").await;
+        // Written under its hash, two folder levels down, with nothing left under a temporary name
+        let stored = s.dir.join(format!("files/blobs/{}/{}/{hash}", &hash[0..2], &hash[2..4]));
+        assert_eq!(std::fs::read(&stored).unwrap(), b"hello over ftp");
+        assert_eq!(std::fs::read_dir(stored.parent().unwrap()).unwrap().count(), 1);
+        // The same content again is fine
+        assert_eq!(put(&st, &s, b"hello over ftp").await, hash);
+
+        assert_eq!(read(&st, &hash, 0, 14).await, b"hello over ftp");
+        assert_eq!(read(&st, &hash, 6, 8).await, b"over ftp");
+        assert_eq!(read(&st, &hash, 0, 5).await, b"hello");
+        assert_eq!(read(&st, &hash, 0, 0).await, b"");
+        assert_eq!(st.size(&hash).await.unwrap(), Some(14));
+        let other = put(&st, &s, b"second").await;
+        let mut listed = st.list().await.unwrap();
+        listed.sort();
+        let mut want = vec![hash.clone(), other.clone()];
+        want.sort();
+        assert_eq!(listed, want);
+
+        st.delete(&hash).await.unwrap();
+        assert!(!stored.exists());
+        assert_eq!(st.size(&hash).await.unwrap(), None);
+        // Deleting what isn't there is fine; reading it says it isn't there
+        st.delete(&hash).await.unwrap();
+        assert_eq!(st.open(&hash, 0, 14).await.err().unwrap().kind(), io::ErrorKind::NotFound);
+        // Once the downloads have given their connections back, the next requests reuse them
+        for _ in 0..100 {
+            if st.permits.available_permits() == MAX_CONNECTIONS {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let before = s.connections.load(Ordering::SeqCst);
+        for _ in 0..5 {
+            st.ping().await.unwrap();
+            assert_eq!(st.size(&other).await.unwrap(), Some(6));
+        }
+        assert_eq!(s.connections.load(Ordering::SeqCst), before);
+    }
+
+    #[tokio::test]
+    async fn requests_at_once_share_a_few_connections() {
+        let s = server("secret").await;
+        let st = Arc::new(storage(&s, "secret"));
+        let hash = put(&st, &s, &[7u8; 100_000]).await;
+        let reads: Vec<_> = (0..12u64)
+            .map(|i| {
+                let (st, hash) = (st.clone(), hash.clone());
+                tokio::spawn(async move { read(&st, &hash, i * 1000, 100_000 - i * 1000).await.len() as u64 })
+            })
+            .collect();
+        for (i, r) in reads.into_iter().enumerate() {
+            assert_eq!(r.await.unwrap(), 100_000 - i as u64 * 1000);
+        }
+        let n = s.connections.load(Ordering::SeqCst);
+        assert!(n <= MAX_CONNECTIONS, "{n} connections");
+    }
+
+    #[tokio::test]
+    async fn a_wrong_password_or_a_server_that_is_gone_is_reported_as_such() {
+        let s = server("secret").await;
+        let err = storage(&s, "wrong").check().await.unwrap_err();
+        let inner = err.get_ref().and_then(|e| e.downcast_ref::<StorageError>()).unwrap();
+        assert!(inner.message.starts_with("Incorrect username or password"), "{}", inner.message);
+
+        let port = s.port;
+        drop(s);
+        let cfg = FtpConfig { host: "127.0.0.1".into(), port, username: "backup".into(), password: "secret".into(), ..Default::default() };
+        let err = FtpStorage::new(&cfg).unwrap().ping().await.unwrap_err();
+        let inner = err.get_ref().and_then(|e| e.downcast_ref::<StorageError>()).unwrap();
+        assert_eq!(inner.message, UNAVAILABLE);
+    }
+}
+
