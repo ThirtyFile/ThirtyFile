@@ -98,6 +98,8 @@ export interface Drive {
   source_path?: string;
   last_scan_at?: number | null;
   scan_report?: ScanReport | null;
+  /** A scan running now */
+  scanning?: { phase: "reading" | "indexing"; found: number; done: number; total: number; started_at: number };
 }
 
 export type StorageKind = "local" | "s3" | "sftp" | "ftp";

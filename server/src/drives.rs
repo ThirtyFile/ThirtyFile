@@ -50,6 +50,9 @@ pub struct DriveInfo {
     last_scan_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     scan_report: Option<Value>,
+    /// Folder spaces, for administrators: the scan running now
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scanning: Option<crate::folders::ScanProgress>,
 }
 
 async fn drive_info(st: &AppState, conn: &mut SqliteConnection, d: Drive, role: Option<Role>) -> AppResult<DriveInfo> {
@@ -106,6 +109,7 @@ async fn drive_infos(
             source_path: d.source_path.clone().filter(|_| details),
             last_scan_at: r.last_scan_at.filter(|_| details),
             scan_report: r.scan_report.filter(|_| details).and_then(|r| serde_json::from_str(&r).ok()),
+            scanning: if details { crate::folders::progress(&d.id) } else { None },
             used_bytes: d.used_bytes,
             id: d.id,
             name: d.name,
@@ -197,6 +201,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     if source.is_some() {
         // Index the folder right away (in the background: a large folder takes a while)
         crate::folders::scan_later(&st, &drive_id);
+        crate::folders::spaces_changed();
     }
     Ok(Json(info))
 }
@@ -274,6 +279,7 @@ pub async fn update(
     let drive = tree::get_drive(&mut tx, &drive.id).await?.unwrap();
     let info = drive_info(&st, &mut tx, drive, role).await?;
     tx.commit().await?;
+    crate::folders::spaces_changed();
     Ok(Json(info))
 }
 
@@ -292,6 +298,7 @@ pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<Strin
     sqlx::query("DELETE FROM drives WHERE id = ?").bind(&drive.id).execute(&mut *tx).await?;
     tree::log(&mut tx, &user, None, "drive_delete", &drive.name).await?;
     tx.commit().await?;
+    crate::folders::spaces_changed();
     tree::purge_detached_later(&st);
     Ok(Json(json!({ "ok": true })))
 }

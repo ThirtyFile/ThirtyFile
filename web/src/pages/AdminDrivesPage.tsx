@@ -43,7 +43,12 @@ export function AdminDrivesPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const tabs = useTabActions();
-  const q = useQuery({ queryKey: ["admin-drives"], queryFn: api.adminDrives });
+  // Refreshed every few seconds while a folder space is being scanned, to show its progress
+  const q = useQuery({
+    queryKey: ["admin-drives"],
+    queryFn: api.adminDrives,
+    refetchInterval: (query) => (query.state.data?.some((d) => d.scanning) ? 3000 : false),
+  });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{ t: "quota" | "members" | "delete" | "create" | "location" | "folder"; drive?: Drive } | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -486,7 +491,11 @@ function FolderCell({ drive }: { drive: Drive }) {
       <span className="truncate font-mono text-[12px]">{drive.source_path}</span>
       <span className={cn("truncate text-[11px]", r?.error ? "text-destructive" : "text-muted-foreground")}>
         {drive.read_only && !r?.error && `${t("Read-only")} · `}
-        {r?.error
+        {drive.scanning
+          ? drive.scanning.phase === "reading"
+            ? t("Checking the folder: {n} items read…", { n: drive.scanning.found })
+            : t("Updating: {done} of {total} changes…", { done: drive.scanning.done, total: drive.scanning.total })
+          : r?.error
           ? t("Can't read the folder")
           : drive.last_scan_at
             ? t("Checked {time}", { time: formatDateTime(drive.last_scan_at) })

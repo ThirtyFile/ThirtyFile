@@ -28,6 +28,8 @@ mod tree;
 mod twofactor;
 mod upload;
 mod util;
+#[cfg(target_os = "linux")]
+mod watch;
 mod web;
 mod zip;
 
@@ -370,6 +372,9 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     spawn_maintenance(state.clone(), cfg.trash_days);
     locations::spawn_health_monitor(state.clone());
     folders::spawn_scanner(state.clone());
+    // Folder spaces on local disks report changes as they happen
+    #[cfg(target_os = "linux")]
+    watch::spawn_watchers(state.clone());
 
     // JSON requests that take longer than this are cut off (a stuck storage service, a slow provider). Requests that
     // carry a body to store, and thumbnails (which queue), are outside the limit (`untimed`); downloads stream after

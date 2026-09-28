@@ -19,4 +19,6 @@ export default {
   "1 to 100 MB": "1 到 100 MB",
   "Larger than 100 MB": "大於 100 MB",
   "Showing the first {n} results. Add words or filters to find the rest.": "只顯示前 {n} 筆結果。請加入更多字詞或篩選條件來找到其餘項目。",
+  "Checking the folder: {n} items read…": "正在檢查資料夾：已讀取 {n} 個項目…",
+  "Updating: {done} of {total} changes…": "正在更新：{total} 項變更中已完成 {done} 項…",
 } satisfies Record<string, string>;
