@@ -201,7 +201,12 @@ jobs:
         run: |
           mkdir dist
           for arch in amd64 arm64; do
-            id=$(docker create --platform "linux/$arch" "$IMAGE@$DIGEST")
+            # Each platform's own image, by its digest in the index: pulling the index's digest a second time for the
+            # other platform fails with Docker's containerd image store ("cannot overwrite digest")
+            platform=$(docker buildx imagetools inspect --raw "$IMAGE@$DIGEST" \
+              | jq -r --arg arch "$arch" '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest')
+            if [ -z "$platform" ]; then echo "No linux/$arch image in $DIGEST" >&2; exit 1; fi
+            id=$(docker create "$IMAGE@$platform")
             docker cp "$id:/usr/local/bin/thirtyfile" "dist/thirtyfile-$VERSION-linux-$arch"
             docker cp "$id:/usr/share/licenses/thirtyfile/THIRD-PARTY-NOTICES" dist/THIRD-PARTY-NOTICES
             docker rm "$id" >/dev/null
