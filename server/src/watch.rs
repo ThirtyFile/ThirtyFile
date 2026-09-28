@@ -6,17 +6,14 @@
 //! - Network file systems (NFS, SMB/CIFS) don't report changes made by other computers, so they aren't watched: the
 //!   regular scan keeps them up to date.
 //! - When the event queue overflows, or the number of watches allowed (`fs.inotify.max_user_watches`) is reached, the
-//!   space falls back to full scans, and the log says so.
+//!   spaces fall back to full scans, and the log says so.
+//! - All spaces share one thread and one inotify instance.
 
 use std::{
     collections::{HashMap, HashSet},
     ffi::CString,
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
     time::{Duration, Instant},
 };
 
@@ -43,36 +40,31 @@ pub fn spaces_changed() {
     CHANGED.notify_one();
 }
 
-/// Starts and stops watchers as folder spaces come and go (checked every minute, and on `spaces_changed`)
+/// What the watching thread is told: the folder spaces to watch now (id → folder)
+type Spaces = HashMap<String, PathBuf>;
+
+/// Watches every folder space from one thread with one inotify instance, since every user has a folder space and
+/// Linux allows few instances per user (`fs.inotify.max_user_instances`, often 128). The list of spaces is read every
+/// minute, and on `spaces_changed`.
 pub fn spawn_watchers(st: AppState) {
     let handle = tokio::runtime::Handle::current();
+    let (tx, rx) = std::sync::mpsc::channel::<Spaces>();
+    {
+        let st = st.clone();
+        if let Err(e) = std::thread::Builder::new().name("thirtyfile-watch".into()).spawn(move || watch(st, handle, rx)) {
+            tracing::warn!("Can't watch folder spaces for changes: {e}");
+            return;
+        }
+    }
     tokio::spawn(async move {
-        let mut running: HashMap<String, (PathBuf, Arc<AtomicBool>)> = HashMap::new();
         loop {
             let spaces: Vec<(String, String)> =
                 sqlx::query_as("SELECT id, source_path FROM drives WHERE mode = 'folder' AND disabled = 0 AND source_path IS NOT NULL")
                     .fetch_all(&st.db)
                     .await
                     .unwrap_or_default();
-            let wanted: HashMap<String, PathBuf> = spaces.into_iter().map(|(id, p)| (id, PathBuf::from(p))).collect();
-            running.retain(|id, (path, stop)| {
-                let keep = wanted.get(id) == Some(path);
-                if !keep {
-                    stop.store(true, Ordering::Relaxed);
-                }
-                keep
-            });
-            for (id, path) in wanted {
-                if running.contains_key(&id) {
-                    continue;
-                }
-                let stop = Arc::new(AtomicBool::new(false));
-                running.insert(id.clone(), (path.clone(), stop.clone()));
-                let (st, handle) = (st.clone(), handle.clone());
-                std::thread::Builder::new()
-                    .name("thirtyfile-watch".into())
-                    .spawn(move || watch(st, handle, id, path, stop))
-                    .ok();
+            if tx.send(spaces.into_iter().map(|(id, p)| (id, PathBuf::from(p))).collect()).is_err() {
+                return;
             }
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(60)) => {}
@@ -102,9 +94,10 @@ fn network_fs(path: &Path) -> Option<&'static str> {
 
 struct Watcher {
     fd: libc::c_int,
-    /// Watch descriptor → folder path below the space's folder
-    dirs: HashMap<libc::c_int, String>,
-    root: PathBuf,
+    /// Watch descriptor → (space, folder path below the space's folder)
+    dirs: HashMap<libc::c_int, (String, String)>,
+    /// The watched spaces and their folders
+    roots: HashMap<String, PathBuf>,
     /// Watches could not all be added: rely on full scans
     limited: bool,
 }
@@ -117,11 +110,12 @@ impl Drop for Watcher {
 }
 
 impl Watcher {
-    /// Watches `rel` and every folder below it
-    fn add_tree(&mut self, rel: &str) {
+    /// Watches `rel` of a space and every folder below it
+    fn add_tree(&mut self, drive: &str, rel: &str) {
+        let Some(root) = self.roots.get(drive).cloned() else { return };
         let mut queue = vec![rel.to_string()];
         while let Some(rel) = queue.pop() {
-            let path = if rel.is_empty() { self.root.clone() } else { self.root.join(&rel) };
+            let path = if rel.is_empty() { root.clone() } else { root.join(&rel) };
             let Ok(c) = CString::new(path.as_os_str().as_bytes()) else { continue };
             // SAFETY: an open inotify descriptor and a valid path; IN_DONT_FOLLOW leaves symbolic links alone
             let wd = unsafe { libc::inotify_add_watch(self.fd, c.as_ptr(), WATCH_MASK | libc::IN_DONT_FOLLOW) };
@@ -129,13 +123,14 @@ impl Watcher {
                 if std::io::Error::last_os_error().raw_os_error() == Some(libc::ENOSPC) && !self.limited {
                     self.limited = true;
                     tracing::warn!(
-                        "Can't watch every folder of {} (the limit fs.inotify.max_user_watches is reached): changes there are found by the regular scan",
-                        self.root.display()
+                        "Can't watch every folder of the folder spaces (the limit fs.inotify.max_user_watches is reached, at {}): changes there are found by the regular scan",
+                        path.display()
                     );
                 }
                 continue;
             }
-            self.dirs.insert(wd, rel.clone());
+            // A folder reached twice (a bind mount inside the space, say) keeps its first owner
+            self.dirs.entry(wd).or_insert_with(|| (drive.to_string(), rel.clone()));
             let Ok(read) = std::fs::read_dir(&path) else { continue };
             for item in read.flatten() {
                 let Ok(name) = item.file_name().into_string() else { continue };
@@ -146,25 +141,51 @@ impl Watcher {
             }
         }
     }
+
+    /// Starts and stops watching spaces so the watched ones are `wanted`
+    fn update(&mut self, wanted: Spaces) {
+        let gone: Vec<String> = self.roots.iter().filter(|(id, path)| wanted.get(*id) != Some(*path)).map(|(id, _)| id.clone()).collect();
+        for id in &gone {
+            self.roots.remove(id);
+            let wds: Vec<libc::c_int> = self.dirs.iter().filter(|(_, (d, _))| d == id).map(|(wd, _)| *wd).collect();
+            for wd in wds {
+                self.dirs.remove(&wd);
+                // SAFETY: a watch descriptor of this instance
+                unsafe { libc::inotify_rm_watch(self.fd, wd) };
+            }
+        }
+        for (id, path) in wanted {
+            if self.roots.contains_key(&id) {
+                continue;
+            }
+            if let Some(kind) = network_fs(&path) {
+                tracing::info!("{} is on {kind}: changes made there by other computers are found by the regular scan", path.display());
+                continue;
+            }
+            self.roots.insert(id.clone(), path);
+            self.add_tree(&id, "");
+        }
+    }
 }
 
-fn watch(st: AppState, handle: tokio::runtime::Handle, drive_id: String, root: PathBuf, stop: Arc<AtomicBool>) {
-    if let Some(kind) = network_fs(&root) {
-        tracing::info!("{} is on {kind}: changes made there by other computers are found by the regular scan", root.display());
-        return;
-    }
+fn watch(st: AppState, handle: tokio::runtime::Handle, rx: std::sync::mpsc::Receiver<Spaces>) {
     // SAFETY: plain system call
     let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
     if fd < 0 {
-        tracing::warn!("Can't watch {} for changes: {}", root.display(), std::io::Error::last_os_error());
+        tracing::warn!("Can't watch folder spaces for changes: {}", std::io::Error::last_os_error());
         return;
     }
-    let mut w = Watcher { fd, dirs: HashMap::new(), root: root.clone(), limited: false };
-    w.add_tree("");
-    let mut changed: HashMap<String, Instant> = HashMap::new();
-    let mut rescan = false;
+    let mut w = Watcher { fd, dirs: HashMap::new(), roots: HashMap::new(), limited: false };
+    // (space, folder) → last change
+    let mut changed: HashMap<(String, String), Instant> = HashMap::new();
+    let mut overflow = false;
     let mut buf = vec![0u8; 64 * 1024];
-    while !stop.load(Ordering::Relaxed) {
+    loop {
+        match rx.try_recv() {
+            Ok(wanted) => w.update(wanted),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
         let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
         // SAFETY: one valid pollfd
         let ready = unsafe { libc::poll(&mut pfd, 1, 1000) };
@@ -180,45 +201,53 @@ fn watch(st: AppState, handle: tokio::runtime::Handle, drive_id: String, root: P
                 let name = String::from_utf8_lossy(name_bytes.split(|b| *b == 0).next().unwrap_or_default()).into_owned();
                 off = name_start + ev.len as usize;
                 if ev.mask & libc::IN_Q_OVERFLOW != 0 {
-                    rescan = true;
+                    overflow = true;
                     continue;
                 }
                 if ev.mask & libc::IN_IGNORED != 0 {
                     w.dirs.remove(&ev.wd);
                     continue;
                 }
-                let Some(dir) = w.dirs.get(&ev.wd).cloned() else { continue };
+                let Some((drive, dir)) = w.dirs.get(&ev.wd).cloned() else { continue };
                 if !name.is_empty() && crate::folders::ignored(&name) {
                     continue;
                 }
                 if ev.mask & libc::IN_ISDIR != 0 && ev.mask & (libc::IN_CREATE | libc::IN_MOVED_TO) != 0 {
-                    w.add_tree(&if dir.is_empty() { name.clone() } else { format!("{dir}/{name}") });
+                    w.add_tree(&drive, &if dir.is_empty() { name.clone() } else { format!("{dir}/{name}") });
                 }
-                changed.insert(dir, Instant::now());
+                changed.insert((drive, dir), Instant::now());
             }
         } else if ready < 0 && std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
             break;
         }
-        // Folders quiet long enough are checked
-        let due: Vec<String> = changed.iter().filter(|(_, t)| t.elapsed() >= QUIET).map(|(d, _)| d.clone()).collect();
-        if rescan || due.len() > MAX_FOLDERS {
-            if rescan {
-                tracing::info!("Too many changes at once in {}: checking the whole folder", root.display());
-            }
+        // Events were lost: every watched space is checked in full
+        if overflow {
+            overflow = false;
             changed.clear();
-            rescan = false;
-            let (st, id) = (st.clone(), drive_id.clone());
-            handle.spawn(async move { crate::folders::scan_later(&st, &id) });
+            tracing::info!("Too many changes at once in the folder spaces: checking them in full");
+            for id in w.roots.keys() {
+                let (st, id) = (st.clone(), id.clone());
+                handle.spawn(async move { crate::folders::scan_later(&st, &id) });
+            }
             continue;
         }
-        if due.is_empty() {
-            continue;
+        // Folders quiet long enough are checked, per space
+        let mut due: HashMap<String, Vec<String>> = HashMap::new();
+        changed.retain(|(drive, dir), t| {
+            if t.elapsed() < QUIET {
+                return true;
+            }
+            due.entry(drive.clone()).or_default().push(dir.clone());
+            false
+        });
+        for (drive, dirs) in due {
+            let st = st.clone();
+            if dirs.len() > MAX_FOLDERS {
+                handle.spawn(async move { crate::folders::scan_later(&st, &drive) });
+            } else {
+                handle.spawn(async move { check_folders(&st, &drive, dirs).await });
+            }
         }
-        for d in &due {
-            changed.remove(d);
-        }
-        let (st, id) = (st.clone(), drive_id.clone());
-        handle.spawn(async move { check_folders(&st, &id, due).await });
     }
 }
 
