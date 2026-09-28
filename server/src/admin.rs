@@ -1041,7 +1041,7 @@ mod tests {
         assert!(purged(&env, &b).await);
         assert_eq!(std::fs::read(storage.join("users/ben/b.txt")).unwrap(), b"ben's");
         let (detail,): (String,) = sqlx::query_as("SELECT detail FROM activity WHERE action = 'user_delete' AND detail LIKE 'ben%'").fetch_one(&env.st.db).await.unwrap();
-        assert_eq!(detail, format!("ben: files removed, their folder on the server is kept: {}", storage.join("users/ben").display()));
+        assert_eq!(detail, format!("ben: files removed, their folder on the server is kept: {}", storage.join("users").join("ben").display()));
         // A new account with the same name doesn't get the old files
         let ben = env.user("ben", true).await;
         let (folder,): (String,) = sqlx::query_as("SELECT source_path FROM drives WHERE root_id = ?").bind(&ben.root_id).fetch_one(&env.st.db).await.unwrap();

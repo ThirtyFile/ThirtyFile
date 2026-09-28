@@ -913,9 +913,8 @@ mod tests {
         OTHER_DISK.with(|d| d.set(false));
         let space = r.spaces.iter().find(|s| s.converted).unwrap();
         assert_eq!((space.copied, space.already), (1, 1), "{r:?}");
-        let dir = env.dir.join("blobs/users/amy");
         #[cfg(unix)]
-        assert_eq!(std::os::unix::fs::MetadataExt::nlink(&std::fs::metadata(dir.join("a.txt")).unwrap()), 1, "a copy, not a link");
+        assert_eq!(std::os::unix::fs::MetadataExt::nlink(&std::fs::metadata(env.dir.join("blobs/users/amy/a.txt")).unwrap()), 1, "a copy, not a link");
         assert_eq!(read(&env, &amy, &a).await, b"one");
         assert_eq!(read(&env, &amy, &b).await, b"two");
     }
