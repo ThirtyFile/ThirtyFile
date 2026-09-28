@@ -46,6 +46,143 @@ pub trait Storage: Send + Sync {
     fn list(&self) -> BoxFuture<'_, io::Result<Vec<String>>> {
         Box::pin(async { Err(io::Error::new(io::ErrorKind::Unsupported, "this storage can't be listed")) })
     }
+
+    // Items by their path in the location (its folder, or its prefix in a bucket): the step-by-step test, browsing
+    // and finding unused content (location_tools.rs). Paths are checked with `key_parts`.
+
+    /// Where content is kept, relative to the location's folder or prefix: `ab/cd/<hash>` below it
+    fn content_dir(&self) -> &'static str {
+        "blobs"
+    }
+    /// One level of the folder `dir` ("" for the top), in no particular order. A symbolic link is listed as a link and
+    /// never followed.
+    fn list_dir<'a>(&'a self, dir: &'a str) -> BoxFuture<'a, io::Result<Vec<Entry>>> {
+        let _ = dir;
+        unsupported()
+    }
+    /// The item at `key`, None when there is none
+    fn stat<'a>(&'a self, key: &'a str) -> BoxFuture<'a, io::Result<Option<Entry>>> {
+        let _ = key;
+        unsupported()
+    }
+    /// Stores a temp file at `key` the way content is stored (on S3, larger files as a multipart upload); the temp
+    /// file is removed on success
+    fn put_at<'a>(&'a self, key: &'a str, src: &'a Path) -> BoxFuture<'a, io::Result<()>> {
+        let _ = (key, src);
+        unsupported()
+    }
+    /// Reads [start, start + len) of the file at `key`, refusing a symbolic link
+    fn open_at<'a>(&'a self, key: &'a str, start: u64, len: u64) -> BoxFuture<'a, io::Result<BoxReader>> {
+        let _ = (key, start, len);
+        unsupported()
+    }
+    /// Deletes the file at `key`; a file that isn't there counts as deleted
+    fn delete_at<'a>(&'a self, key: &'a str) -> BoxFuture<'a, io::Result<()>> {
+        let _ = key;
+        unsupported()
+    }
+    /// All stored content, with sizes and times (named by the hash); `seen` hears how many were found so far
+    fn list_content<'a>(&'a self, seen: &'a (dyn Fn(u64) + Send + Sync)) -> BoxFuture<'a, io::Result<Vec<Entry>>> {
+        Box::pin(async move {
+            // Walked folder by folder: ab/cd/<hash>, the folders named by the hash's first characters
+            let base = self.content_dir();
+            let level = |e: &Entry| e.kind == EntryKind::Folder && e.name.len() == 2 && e.name.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+            let mut out = Vec::new();
+            for a in missing_is_empty(self.list_dir(base).await)?.into_iter().filter(level) {
+                for b in missing_is_empty(self.list_dir(&join_key(&[base, &a.name])).await)?.into_iter().filter(level) {
+                    let dir = join_key(&[base, &a.name, &b.name]);
+                    for f in missing_is_empty(self.list_dir(&dir).await)? {
+                        if f.kind == EntryKind::File && content_hash(&join_key(&[&dir, &f.name]), base).is_some() {
+                            out.push(f);
+                        }
+                    }
+                    seen(out.len() as u64);
+                }
+            }
+            Ok(out)
+        })
+    }
+}
+
+fn unsupported<T>() -> BoxFuture<'static, io::Result<T>> {
+    Box::pin(async { Err(io::Error::new(io::ErrorKind::Unsupported, "this storage can't do this")) })
+}
+
+/// A folder that isn't there has nothing in it
+fn missing_is_empty(r: io::Result<Vec<Entry>>) -> io::Result<Vec<Entry>> {
+    match r {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+        r => r,
+    }
+}
+
+/// What an item in a location is
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EntryKind {
+    Folder,
+    File,
+    /// A symbolic link: listed, never followed
+    Link,
+}
+
+/// An item in a location's folder
+#[derive(Debug, Clone, Serialize)]
+pub struct Entry {
+    pub name: String,
+    pub kind: EntryKind,
+    /// Bytes (files only)
+    pub size: u64,
+    /// Unix seconds, when the storage tells
+    pub modified: Option<i64>,
+}
+
+impl Entry {
+    fn file(name: impl Into<String>, size: u64, modified: Option<i64>) -> Entry {
+        Entry { name: name.into(), kind: EntryKind::File, size, modified }
+    }
+}
+
+/// The parts of a path in a location ("" is the top): '/' between them, nothing that could step out of it
+pub fn key_parts(key: &str) -> io::Result<Vec<&str>> {
+    let parts = crate::beneath::parts(key)?;
+    if parts.iter().any(|p| p.contains('\\')) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("not a path inside the location: {key}")));
+    }
+    Ok(parts)
+}
+
+/// Parts joined into a path, leaving out empty ones
+pub fn join_key(parts: &[&str]) -> String {
+    parts.iter().filter(|p| !p.is_empty()).copied().collect::<Vec<_>>().join("/")
+}
+
+/// The hash when `key` is where content is stored (`<content_dir>/ab/cd/<hash>`, as the stores write it)
+pub fn content_hash<'a>(key: &'a str, content_dir: &str) -> Option<&'a str> {
+    let rest = if content_dir.is_empty() { key } else { key.strip_prefix(content_dir)?.strip_prefix('/')? };
+    let mut parts = rest.split('/');
+    let (a, b, hash) = (parts.next()?, parts.next()?, parts.next()?);
+    let lower_hex = hash.len() == 64 && hash.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'));
+    (parts.next().is_none() && lower_hex && a == &hash[0..2] && b == &hash[2..4]).then_some(hash)
+}
+
+fn unix_seconds(t: std::time::SystemTime) -> Option<i64> {
+    t.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs() as i64)
+}
+
+/// Shown when a file could be written but not deleted: such keys or accounts pass a write test and fail later
+pub const CANT_DELETE_S3: &str = "The keys can't delete files. Allow them to delete objects in this bucket.";
+pub const CANT_DELETE_ACCOUNT: &str = "The account can't delete files in this folder.";
+pub const CANT_DELETE_LOCAL: &str = "ThirtyFile can't delete files in this folder.";
+
+/// The error of a delete that failed, as a storage error with `message` (kept as it is when the storage service
+/// can't be reached at all)
+pub fn delete_failed(e: io::Error, message: &'static str) -> io::Error {
+    let unreachable = e.get_ref().and_then(|i| i.downcast_ref::<StorageError>()).is_some_and(|se| se.message == UNAVAILABLE);
+    if unreachable {
+        return e;
+    }
+    io::Error::other(StorageError { message, detail: e.to_string() })
 }
 
 /// Whether a file name found in storage is stored content (a sha256 in hex)
@@ -96,6 +233,45 @@ impl LocalStorage {
         valid_hash(hash)?;
         Ok(self.root.join(&hash[0..2]).join(&hash[2..4]).join(hash))
     }
+
+    /// `key` in the folder, reached without following a symbolic link on the way
+    fn pinned(&self, key: &str) -> io::Result<crate::beneath::Pinned> {
+        key_parts(key)?;
+        crate::beneath::Pinned::root(&self.root)?.join(key)
+    }
+}
+
+/// Moves a temp file to `dest` (the temp file is gone on success)
+async fn move_into(src: &Path, dest: &Path) -> io::Result<()> {
+    if tokio::fs::rename(src, dest).await.is_err() {
+        // Copy instead when the temp directory and storage are on different volumes. The copy gets a name of
+        // its own, so two uploads of the same content can't write into one file, and is removed if it fails
+        let tmp = dest.with_extension(format!("partial-{}", uuid::Uuid::new_v4().simple()));
+        let copied = async {
+            tokio::fs::copy(src, &tmp).await?;
+            tokio::fs::rename(&tmp, dest).await
+        }
+        .await;
+        if let Err(e) = copied {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err(e);
+        }
+        let _ = tokio::fs::remove_file(src).await;
+    }
+    Ok(())
+}
+
+fn local_entry(name: String, meta: &std::fs::Metadata) -> Entry {
+    let t = meta.file_type();
+    let kind = if t.is_symlink() {
+        EntryKind::Link
+    } else if t.is_dir() {
+        EntryKind::Folder
+    } else {
+        EntryKind::File
+    };
+    let size = if kind == EntryKind::File { meta.len() } else { 0 };
+    Entry { name, kind, size, modified: meta.modified().ok().and_then(unix_seconds) }
 }
 
 impl Storage for LocalStorage {
@@ -107,22 +283,91 @@ impl Storage for LocalStorage {
                 return Ok(());
             }
             tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
-            if tokio::fs::rename(src, &dest).await.is_err() {
-                // Copy instead when the temp directory and storage are on different volumes. The copy gets a name of
-                // its own, so two uploads of the same content can't write into one file, and is removed if it fails
-                let tmp = dest.with_extension(format!("partial-{}", uuid::Uuid::new_v4().simple()));
-                let copied = async {
-                    tokio::fs::copy(src, &tmp).await?;
-                    tokio::fs::rename(&tmp, &dest).await
+            move_into(src, &dest).await
+        })
+    }
+
+    fn content_dir(&self) -> &'static str {
+        ""
+    }
+
+    fn list_dir<'a>(&'a self, dir: &'a str) -> BoxFuture<'a, io::Result<Vec<Entry>>> {
+        Box::pin(async move {
+            let at = self.pinned(dir)?.dir()?;
+            tokio::task::spawn_blocking(move || {
+                let mut out = Vec::new();
+                for e in std::fs::read_dir(at.as_path())? {
+                    let e = e?;
+                    // The item itself, not what a link points to
+                    let Ok(meta) = e.metadata() else { continue };
+                    out.push(local_entry(e.file_name().to_string_lossy().into_owned(), &meta));
                 }
-                .await;
-                if let Err(e) = copied {
-                    let _ = tokio::fs::remove_file(&tmp).await;
-                    return Err(e);
-                }
-                let _ = tokio::fs::remove_file(src).await;
+                Ok(out)
+            })
+            .await
+            .map_err(io::Error::other)?
+        })
+    }
+
+    fn stat<'a>(&'a self, key: &'a str) -> BoxFuture<'a, io::Result<Option<Entry>>> {
+        Box::pin(async move {
+            let found = self.pinned(key).and_then(|p| {
+                let meta = std::fs::symlink_metadata(p.as_path())?;
+                Ok(local_entry(p.name().unwrap_or_default().to_string(), &meta))
+            });
+            match found {
+                Ok(e) => Ok(Some(e)),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(e),
             }
-            Ok(())
+        })
+    }
+
+    fn put_at<'a>(&'a self, key: &'a str, src: &'a Path) -> BoxFuture<'a, io::Result<()>> {
+        Box::pin(async move {
+            let parts = key_parts(key)?;
+            let (last, dirs) = parts.split_last().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
+            // Folders on the way are made one by one, never through a link
+            let mut at = crate::beneath::Pinned::root(&self.root)?;
+            for d in dirs {
+                let next = at.join(d)?;
+                match std::fs::symlink_metadata(next.as_path()) {
+                    Ok(m) if m.is_dir() => {}
+                    Ok(_) => return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{d} isn't a folder"))),
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => match std::fs::create_dir(next.as_path()) {
+                        Err(e) if e.kind() != io::ErrorKind::AlreadyExists => return Err(e),
+                        _ => {}
+                    },
+                    Err(e) => return Err(e),
+                }
+                at = next.dir()?;
+            }
+            let dest = at.join(last)?;
+            move_into(src, dest.as_path()).await
+        })
+    }
+
+    fn open_at<'a>(&'a self, key: &'a str, start: u64, len: u64) -> BoxFuture<'a, io::Result<BoxReader>> {
+        Box::pin(async move {
+            let mut f = tokio::fs::File::from_std(self.pinned(key)?.open_file()?);
+            if start > 0 {
+                f.seek(SeekFrom::Start(start)).await?;
+            }
+            Ok(Box::pin(f.take(len)) as BoxReader)
+        })
+    }
+
+    fn delete_at<'a>(&'a self, key: &'a str) -> BoxFuture<'a, io::Result<()>> {
+        Box::pin(async move {
+            let removed = match self.pinned(key) {
+                // A link is removed itself, never what it points to
+                Ok(p) => tokio::fs::remove_file(p.as_path()).await,
+                Err(e) => Err(e),
+            };
+            match removed {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            }
         })
     }
 
@@ -184,11 +429,11 @@ impl Storage for LocalStorage {
             let probe = self.root.join(format!(".thirtyfile-check-{}", uuid::Uuid::new_v4().simple()));
             tokio::fs::write(&probe, b"ok").await?;
             let back = tokio::fs::read(&probe).await;
-            let _ = tokio::fs::remove_file(&probe).await;
+            let deleted = tokio::fs::remove_file(&probe).await;
             if back? != b"ok" {
                 return Err(io::Error::other("The content read back didn't match"));
             }
-            Ok(())
+            deleted.map_err(|e| delete_failed(e, CANT_DELETE_LOCAL))
         })
     }
 }
@@ -291,65 +536,145 @@ impl S3Storage {
         valid_hash(hash)?;
         Ok(self.key(&format!("blobs/{}/{}/{hash}", &hash[0..2], &hash[2..4])))
     }
+
+    /// A path in the location as an object key (a checked path; "" is the prefix itself)
+    fn key_at(&self, key: &str) -> io::Result<ObjectPath> {
+        key_parts(key)?;
+        Ok(ObjectPath::from(join_key(&[&self.prefix, key])))
+    }
+
+    /// Stores a temp file at `key`: one request up to 16 MiB, a multipart upload above (the temp file is kept)
+    async fn put_object(&self, key: &ObjectPath, src: &Path) -> io::Result<()> {
+        let size = tokio::fs::metadata(src).await?.len();
+        if size <= MULTIPART_THRESHOLD {
+            let data = tokio::fs::read(src).await?;
+            self.store.put(key, PutPayload::from(data)).await.map_err(s3_err)?;
+            return Ok(());
+        }
+        let upload = self.store.put_multipart(key).await.map_err(s3_err)?;
+        let chunk = part_size(size);
+        let mut writer = WriteMultipart::new_with_chunk_size(upload, chunk);
+        // Every part (except the last) has the same size: R2 requires it and AWS accepts it
+        let sent: io::Result<()> = async {
+            let mut f = tokio::fs::File::open(src).await?;
+            let mut buf = vec![0u8; MULTIPART_CHUNK];
+            loop {
+                let n = f.read(&mut buf).await?;
+                if n == 0 {
+                    return Ok(());
+                }
+                writer.wait_for_capacity(if chunk > 64 << 20 { 2 } else { 4 }).await.map_err(s3_err)?;
+                writer.write(&buf[..n]);
+            }
+        }
+        .await;
+        if let Err(e) = sent {
+            // Abort the multipart upload so unfinished parts don't stay in the bucket and keep incurring charges
+            let _ = writer.abort().await;
+            return Err(e);
+        }
+        writer.finish().await.map_err(s3_err)?;
+        Ok(())
+    }
+
+    async fn open_object(&self, key: &ObjectPath, start: u64, len: u64) -> io::Result<BoxReader> {
+        if len == 0 {
+            return Ok(Box::pin(tokio::io::empty()) as BoxReader);
+        }
+        let opts = GetOptions::new().with_range(Some(start..start + len));
+        let result = self.store.get_opts(key, opts).await.map_err(s3_err)?;
+        let stream = result.into_stream().map_err(s3_err).boxed();
+        Ok(Box::pin(StreamReader::new(stream)) as BoxReader)
+    }
+
+    async fn delete_object(&self, key: &ObjectPath) -> io::Result<()> {
+        match self.store.delete(key).await {
+            Err(object_store::Error::NotFound { .. }) | Ok(()) => Ok(()),
+            Err(e) => Err(s3_err(e)),
+        }
+    }
+}
+
+fn object_entry(meta: &object_store::ObjectMeta) -> Entry {
+    Entry::file(meta.location.filename().unwrap_or_default(), meta.size, Some(meta.last_modified.timestamp()))
 }
 
 impl Storage for S3Storage {
     fn put_file<'a>(&'a self, hash: &'a str, src: &'a Path) -> BoxFuture<'a, io::Result<()>> {
         Box::pin(async move {
-            let key = self.blob_key(hash)?;
-            let size = tokio::fs::metadata(src).await?.len();
-            if size <= MULTIPART_THRESHOLD {
-                let data = tokio::fs::read(src).await?;
-                self.store.put(&key, PutPayload::from(data)).await.map_err(s3_err)?;
-            } else {
-                let upload = self.store.put_multipart(&key).await.map_err(s3_err)?;
-                let chunk = part_size(size);
-                let mut writer = WriteMultipart::new_with_chunk_size(upload, chunk);
-                // Every part (except the last) has the same size: R2 requires it and AWS accepts it
-                let sent: io::Result<()> = async {
-                    let mut f = tokio::fs::File::open(src).await?;
-                    let mut buf = vec![0u8; MULTIPART_CHUNK];
-                    loop {
-                        let n = f.read(&mut buf).await?;
-                        if n == 0 {
-                            return Ok(());
-                        }
-                        writer.wait_for_capacity(if chunk > 64 << 20 { 2 } else { 4 }).await.map_err(s3_err)?;
-                        writer.write(&buf[..n]);
-                    }
-                }
-                .await;
-                if let Err(e) = sent {
-                    // Abort the multipart upload so unfinished parts don't stay in the bucket and keep incurring charges
-                    let _ = writer.abort().await;
-                    return Err(e);
-                }
-                writer.finish().await.map_err(s3_err)?;
-            }
+            self.put_object(&self.blob_key(hash)?, src).await?;
             let _ = tokio::fs::remove_file(src).await;
             Ok(())
         })
     }
 
     fn open<'a>(&'a self, hash: &'a str, start: u64, len: u64) -> BoxFuture<'a, io::Result<BoxReader>> {
-        Box::pin(async move {
-            if len == 0 {
-                return Ok(Box::pin(tokio::io::empty()) as BoxReader);
-            }
-            let key = self.blob_key(hash)?;
-            let opts = GetOptions::new().with_range(Some(start..start + len));
-            let result = self.store.get_opts(&key, opts).await.map_err(s3_err)?;
-            let stream = result.into_stream().map_err(s3_err).boxed();
-            Ok(Box::pin(StreamReader::new(stream)) as BoxReader)
-        })
+        Box::pin(async move { self.open_object(&self.blob_key(hash)?, start, len).await })
     }
 
     fn delete<'a>(&'a self, hash: &'a str) -> BoxFuture<'a, io::Result<()>> {
+        Box::pin(async move { self.delete_object(&self.blob_key(hash)?).await })
+    }
+
+    fn list_dir<'a>(&'a self, dir: &'a str) -> BoxFuture<'a, io::Result<Vec<Entry>>> {
         Box::pin(async move {
-            match self.store.delete(&self.blob_key(hash)?).await {
-                Err(object_store::Error::NotFound { .. }) | Ok(()) => Ok(()),
+            let prefix = self.key_at(dir)?;
+            let listed = self.store.list_with_delimiter(Some(&prefix)).await.map_err(s3_err)?;
+            let folders = listed.common_prefixes.iter().filter_map(|p| p.filename()).map(|name| Entry {
+                name: name.to_string(),
+                kind: EntryKind::Folder,
+                size: 0,
+                modified: None,
+            });
+            Ok(folders.chain(listed.objects.iter().map(object_entry)).collect())
+        })
+    }
+
+    fn stat<'a>(&'a self, key: &'a str) -> BoxFuture<'a, io::Result<Option<Entry>>> {
+        Box::pin(async move {
+            match self.store.head(&self.key_at(key)?).await {
+                Ok(meta) => Ok(Some(object_entry(&meta))),
+                Err(object_store::Error::NotFound { .. }) => Ok(None),
                 Err(e) => Err(s3_err(e)),
             }
+        })
+    }
+
+    fn put_at<'a>(&'a self, key: &'a str, src: &'a Path) -> BoxFuture<'a, io::Result<()>> {
+        Box::pin(async move {
+            self.put_object(&self.key_at(key)?, src).await?;
+            let _ = tokio::fs::remove_file(src).await;
+            Ok(())
+        })
+    }
+
+    fn open_at<'a>(&'a self, key: &'a str, start: u64, len: u64) -> BoxFuture<'a, io::Result<BoxReader>> {
+        Box::pin(async move { self.open_object(&self.key_at(key)?, start, len).await })
+    }
+
+    fn delete_at<'a>(&'a self, key: &'a str) -> BoxFuture<'a, io::Result<()>> {
+        Box::pin(async move { self.delete_object(&self.key_at(key)?).await })
+    }
+
+    fn list_content<'a>(&'a self, seen: &'a (dyn Fn(u64) + Send + Sync)) -> BoxFuture<'a, io::Result<Vec<Entry>>> {
+        Box::pin(async move {
+            // One listing of everything below blobs/ (a request per 1000 objects), not one per folder level
+            let base = self.key("blobs");
+            let mut objects = self.store.list(Some(&base));
+            let mut out = Vec::new();
+            while let Some(meta) = objects.next().await {
+                let meta = meta.map_err(s3_err)?;
+                let rel: Vec<_> = meta.location.prefix_match(&base).map(|p| p.map(|p| p.as_ref().to_string()).collect()).unwrap_or_default();
+                let key = format!("blobs/{}", rel.join("/"));
+                if content_hash(&key, "blobs").is_some() {
+                    out.push(object_entry(&meta));
+                    if out.len() % 1000 == 0 {
+                        seen(out.len() as u64);
+                    }
+                }
+            }
+            seen(out.len() as u64);
+            Ok(out)
         })
     }
 
@@ -393,11 +718,12 @@ impl Storage for S3Storage {
             let key = self.key(&format!(".thirtyfile-check/{}", uuid::Uuid::new_v4().simple()));
             self.store.put(&key, PutPayload::from_static(b"ok")).await.map_err(s3_err)?;
             let back = self.store.get(&key).await.map_err(s3_err)?.bytes().await.map_err(s3_err);
-            let _ = self.store.delete(&key).await;
+            // Keys that can write but not delete would pass and fail later, when files are deleted
+            let deleted = self.delete_object(&key).await;
             if back?.as_ref() != b"ok" {
                 return Err(io::Error::other("The content read back didn't match"));
             }
-            Ok(())
+            deleted.map_err(|e| delete_failed(e, CANT_DELETE_S3))
         })
     }
 }
@@ -645,6 +971,34 @@ mod tests {
         assert!(ok("ftp", json!({ "host": "1.1.1.1", "tls": true, "tls_insecure": true })).await.is_err());
         assert!(ok("ftp", json!({ "host": "1.1.1.1", "tls": true })).await.is_ok());
         assert!(ok("sftp", json!({ "host": "1.1.1.1" })).await.is_ok());
+    }
+
+    #[test]
+    fn paths_in_a_location_stay_inside_it() {
+        let h = format!("abcd{}", "0".repeat(60));
+        assert_eq!(content_hash(&format!("blobs/ab/cd/{h}"), "blobs"), Some(h.as_str()));
+        assert_eq!(content_hash(&format!("ab/cd/{h}"), ""), Some(h.as_str()));
+        assert_eq!(content_hash(&format!("blobs/ab/ce/{h}"), "blobs"), None, "not where the store puts it");
+        assert_eq!(content_hash(&format!("blobs/AB/CD/{}", h.to_uppercase()), "blobs"), None);
+        assert_eq!(content_hash(&format!("other/ab/cd/{h}"), "blobs"), None);
+        for bad in ["..", "a/../b", "/etc", "a//b", "a\\b"] {
+            assert!(key_parts(bad).is_err(), "{bad}");
+        }
+        let cfg = S3Config {
+            endpoint: "http://127.0.0.1:9000".into(),
+            bucket: "files".into(),
+            prefix: "/thirtyfile/".into(),
+            access_key_id: "key".into(),
+            secret_access_key: crate::testutil::password().into(),
+            path_style: true,
+            allow_http: true,
+            ..Default::default()
+        };
+        let s3 = S3Storage::new(&cfg).unwrap();
+        assert_eq!(s3.key_at(".thirtyfile-check/x").unwrap().as_ref(), "thirtyfile/.thirtyfile-check/x");
+        assert_eq!(s3.key_at("").unwrap().as_ref(), "thirtyfile");
+        assert!(s3.key_at("../other").is_err());
+        assert_eq!(s3.content_dir(), "blobs");
     }
 
     #[test]

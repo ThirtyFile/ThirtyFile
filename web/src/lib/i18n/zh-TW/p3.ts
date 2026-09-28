@@ -40,6 +40,7 @@ export default {
   "Modify storage location": "修改儲存位置",
   "Delete storage location": "刪除儲存位置",
   "Set default storage location": "設定預設儲存位置",
+  "Remove unused content": "移除未使用的內容",
   "System settings": "系統設定",
   "Archive logs": "封存紀錄",
   "Delete archive": "刪除封存檔",

@@ -34,7 +34,7 @@ fn invalid(what: &str) -> io::Error {
 }
 
 /// The parts of a path below a folder ('/' between them), refusing anything that could step out of it
-fn parts(rel: &str) -> io::Result<Vec<&str>> {
+pub fn parts(rel: &str) -> io::Result<Vec<&str>> {
     if rel.is_empty() {
         return Ok(Vec::new());
     }

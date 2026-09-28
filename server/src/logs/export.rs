@@ -173,6 +173,7 @@ fn action_label(a: &str) -> &str {
         "storage_update" => "Edit storage location",
         "storage_delete" => "Delete storage location",
         "storage_default" => "Set default storage location",
+        "storage_cleanup" => "Remove unused content",
         "settings" => "System settings",
         "log_archive" => "Archive logs",
         "log_archive_delete" => "Delete archive",

@@ -47,7 +47,7 @@
         <ol>
           <li>Open <strong>Control panel › Storage locations</strong> and click <strong>Add storage location</strong>.</li>
           <li>Choose the type and fill in the address and the login details.</li>
-          <li>Click <strong>Test connection</strong>. The location can be saved once the test succeeds.</li>
+          <li>Click <strong>Test connection</strong>. It writes, reads back and deletes a small file. The location can be saved once the test succeeds. Keys or accounts that may write but not delete files fail it: ThirtyFile could never remove deleted files there.</li>
           <li>Make it the <strong>default</strong> if new spaces should be created on it.</li>
         </ol>
         <p>The default only decides where new spaces go: users' "My files", team spaces and, on a new server, "All files". Each space stays on the location it was created on, so changing the default doesn't move any existing space, and their new files keep going where their older ones are. Only <a href="#per-space">moving a space</a> changes its location.</p>
@@ -96,6 +96,29 @@
           <li><strong>Disks and shares that aren't mounted.</strong> Once a space's folder has been checked, it holds a small hidden file, <code>.thirtyfile-space</code>. A folder without it that is suddenly empty is taken to be a disk or share that isn't mounted: the space keeps its items, shares and history, and <strong>Check for changes</strong> says so. Mount it again and check. A folder inside the space that can't be read keeps its items the same way. To empty a space, delete its items in ThirtyFile.</li>
           <li>When something goes wrong while several items are deleted, moved or restored at once, the ones already changed in the folder are put back, so nothing is half done. If ThirtyFile stops in the middle of moving an item into a space, the item is put back in that folder, under its own name, at the next check a day later.</li>
         </ul>
+
+        <h2 id="check">Checking what a location holds</h2>
+        <p>The <strong>…</strong> menu of each location under <strong>Control panel › Storage locations</strong> has three more actions. Only administrators have them.</p>
+        <h3 id="test-steps">Test step by step</h3>
+        <p>Runs every step files go through and lists each one with how long it took:</p>
+        <ol>
+          <li><strong>Connect</strong> to the location.</li>
+          <li><strong>Write a small file</strong>, then <strong>read it back</strong> and compare.</li>
+          <li><strong>Upload a larger file</strong> (24 MB) the way uploads are stored, which on S3 is an upload in parts, then <strong>download it</strong> and compare. Both show their speed in MB/s.</li>
+          <li><strong>Delete the test files</strong> and check that they are gone.</li>
+        </ol>
+        <p>The test files go in a <code>.thirtyfile-check</code> folder and are deleted afterwards, also when a step fails. The test takes at most two minutes: on a slow connection the larger file is skipped rather than left half done. A failed step says why, for example that the keys can't delete files.</p>
+        <h3 id="browse">Browse</h3>
+        <p>Shows what the location holds, one folder at a time and 200 items per page, with sizes and dates. Nothing can be changed here. Single files can be downloaded as they are stored.</p>
+        <ul>
+          <li><strong>Content store</strong> (<code>ab/cd/…</code>, under <code>blobs</code> on S3, SFTP and FTP): each item says whether a file uses it, an earlier version, a file in the trash, whether it is waiting to be deleted, or whether nothing uses it. Where a file uses it, the space and the file's path are shown.</li>
+          <li><strong>Folder spaces</strong> on the storage folder and <em>Local folder</em> locations are marked with their space.</li>
+          <li><strong>Personal spaces stay private.</strong> Other people's personal spaces are named ("Personal space of anna"), but their files aren't listed, their folder can't be opened here, and their content can't be downloaded.</li>
+          <li>Symbolic links are listed but never followed.</li>
+        </ul>
+        <h3 id="unused">Find unused content</h3>
+        <p>Looks through the content store of the location for content that no file, earlier version or item in the trash uses, for example content left behind when a server stopped halfway through an upload. It runs in the background and lists what it found, with the total size. Content written in the last 24 hours is left alone, since uploads store their content before recording it, and so is content already waiting to be deleted.</p>
+        <p><strong>Remove N items</strong> deletes exactly the content on the list, after you confirm. Each item is checked again right before it is deleted: one that was used or written again in the meantime is kept. The removal is recorded in the activity log.</p>
 
         <h2 id="offline">When a location is offline</h2>
         <p>Browsing, searching and organising folders keep working. Opening, downloading and uploading are paused, and resume by themselves when the location is back. The space is marked as offline in the meantime.</p>
