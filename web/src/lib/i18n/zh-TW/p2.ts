@@ -89,7 +89,7 @@ export default {
   "Type": "類型",
   "Usage": "使用量",
   "short::Unlimited": "不限",
-  "Includes items in the trash": "包含回收筒內的項目",
+  "Includes items in the trash": "包含垃圾桶內的項目",
   "Members": "成員",
   "short::Owner only": "本人",
   "Owner": "擁有者",

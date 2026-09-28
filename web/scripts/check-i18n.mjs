@@ -117,6 +117,37 @@ for (const [f, r] of files) {
   });
 }
 
+// 4. Messages the server sends (AppError::…("…") in server/src, outside tests and WebDAV, whose clients show no
+//    translations): each has an entry, shown with tServer(). Placeholders count as the same whatever their names.
+const shape = (s) => s.replace(/\{[^{}]*\}/g, "{}");
+const shapes = new Set([...dict.keys()].map(shape));
+// A placeholder can also stand for a word the dictionary spells out ("{} {}" for "{n} files"), in either form of a
+// plural entry ("… day|… days")
+const forms = [...dict.keys()].flatMap((k) => k.split("|"));
+const matchesSome = (msg) => {
+  const re = new RegExp("^" + msg.split(/\{[^{}]*\}/).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".+?") + "$");
+  return forms.some((k) => re.test(k));
+};
+const serverDir = toPath("../../server/src/");
+if (!only) {
+  const call = new RegExp(
+    String.raw`AppError::(?:bad_request|forbidden|conflict|not_found|new\(\s*[\w:]+\s*,)\(?\s*(?:format!\(\s*)?("(?:[^"\\]|\\.)*")`,
+    "g",
+  );
+  for (const f of walk(serverDir, /\.rs$/)) {
+    const rel = "server/src/" + relative(serverDir, f).replace(/\\/g, "/");
+    if (rel.endsWith("/dav.rs")) continue;
+    const full = readFileSync(f, "utf8");
+    // Tests come last in each file
+    const src = full.split(/\n#\[cfg\(test\)\]\n/)[0];
+    const lineOf = (i) => src.slice(0, i).split("\n").length;
+    for (const m of src.matchAll(call)) {
+      const msg = literal(m[1]);
+      if (!dict.has(msg) && !shapes.has(shape(msg)) && !matchesSome(msg)) missing.push(`${rel}:${lineOf(m.index)}: ${msg}`);
+    }
+  }
+}
+
 console.log(`Dictionary: ${dict.size} entries`);
 console.log(`Conflicting entries across dictionary files: ${conflicts.length}`);
 for (const c of conflicts) console.log("  ✗ " + c);

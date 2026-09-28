@@ -18,7 +18,7 @@ export default {
   "Rename": "重新命名",
   "Move": "移動",
   "Copy": "複製",
-  "Move to trash": "移至垃圾桶",
+  "Move to trash": "移到垃圾桶",
   "Restore": "還原",
   "Delete permanently": "永久刪除",
   "Empty trash": "清空垃圾桶",
