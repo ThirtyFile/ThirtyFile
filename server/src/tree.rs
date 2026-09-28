@@ -184,11 +184,16 @@ impl Drive {
 
 pub const DRIVE_COLS: &str = "d.id, d.name, d.kind, d.root_id, d.owner_id, d.quota_bytes, d.disabled, d.used_bytes, d.mode, d.source_path, d.read_only";
 
-/// The grant's principal matches the current user (?2 = user id, ?3 = current time)
-const PRINCIPAL_MATCH: &str = "(g.expires_at IS NULL OR g.expires_at > ?3)
+/// SQL for "the grant `g` applies to the user and hasn't expired", with the numbers of the query's parameters holding
+/// the user's id and the current time
+fn principal_match(user: u8, now: u8) -> String {
+    format!(
+        "(g.expires_at IS NULL OR g.expires_at > ?{now})
     AND (g.principal_type = 'everyone'
-      OR (g.principal_type = 'user' AND g.principal_id = ?2)
-      OR (g.principal_type = 'group' AND g.principal_id IN (SELECT group_id FROM group_members WHERE user_id = ?2)))";
+      OR (g.principal_type = 'user' AND g.principal_id = ?{user})
+      OR (g.principal_type = 'group' AND g.principal_id IN (SELECT group_id FROM group_members WHERE user_id = ?{user})))"
+    )
+}
 
 pub async fn get_drive(conn: &mut SqliteConnection, id: &str) -> AppResult<Option<Drive>> {
     let sql = format!("SELECT {DRIVE_COLS} FROM drives d WHERE d.id = ?");
@@ -208,7 +213,8 @@ pub async fn role_on(conn: &mut SqliteConnection, user: &User, node: &Node) -> A
            SELECT id, parent_id FROM nodes WHERE id = ?1
            UNION ALL SELECT n.id, n.parent_id FROM nodes n JOIN up ON n.id = up.parent_id
          )
-         SELECT g.role FROM grants g JOIN up ON g.node_id = up.id WHERE {PRINCIPAL_MATCH}"
+         SELECT g.role FROM grants g JOIN up ON g.node_id = up.id WHERE {}",
+        principal_match(2, 3)
     );
     let rows: Vec<(String,)> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).bind(user.id).bind(now()).fetch_all(conn).await?;
     for (r,) in rows {
@@ -280,9 +286,10 @@ pub async fn user_drives(conn: &mut SqliteConnection, user: &User) -> AppResult<
     }
     let sql = format!(
         "SELECT {DRIVE_COLS}, g.role FROM drives d JOIN grants g ON g.node_id = d.root_id
-         WHERE d.disabled = 0 AND ?1 = ?1 AND {PRINCIPAL_MATCH}"
+         WHERE d.disabled = 0 AND {}",
+        principal_match(1, 2)
     );
-    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(0).bind(user.id).bind(now()).fetch_all(&mut *conn).await?;
+    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(user.id).bind(now()).fetch_all(&mut *conn).await?;
     let mut map: HashMap<String, (Drive, Role)> = HashMap::new();
     for r in rows {
         let Some(role) = Role::parse(&r.role) else { continue };
@@ -323,10 +330,11 @@ pub async fn shared_with_me_outside(conn: &mut SqliteConnection, user: &User, me
     let sql = format!(
         "SELECT {NODE_COLS}, g.role, COALESCE((SELECT username FROM users WHERE id = g.granted_by), '') AS sharer
          FROM grants g JOIN nodes n ON n.id = g.node_id JOIN drives d ON d.id = n.drive_id
-         WHERE n.parent_id IS NOT NULL AND n.trashed_at IS NULL AND d.disabled = 0 AND ?1 = ?1 AND {PRINCIPAL_MATCH}
-         ORDER BY g.created_at DESC"
+         WHERE n.parent_id IS NOT NULL AND n.trashed_at IS NULL AND d.disabled = 0 AND {}
+         ORDER BY g.created_at DESC",
+        principal_match(1, 2)
     );
-    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(0).bind(user.id).bind(now()).fetch_all(&mut *conn).await?;
+    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(user.id).bind(now()).fetch_all(&mut *conn).await?;
     let mut map: HashMap<String, (Node, Role, String)> = HashMap::new();
     for r in rows {
         let Some(role) = Role::parse(&r.role) else { continue };
@@ -768,7 +776,7 @@ pub async fn remove_unreferenced(st: &AppState, blobs: Vec<BlobRef>) -> Vec<Stri
             current.is_some()
         };
         // Released when this iteration ends, also when the task is cancelled while the storage service is being called
-        let _deleting = DeletingGuard { st: st.clone(), hash: hash.clone() };
+        let _deleting = BlobMark { st: st.clone(), hash: hash.clone(), deleting: true };
         // The write lock has been released: S3 may be slow, so don't make every write in the system wait for it
         let failed = match st.storage(&location) {
             Ok(storage) => storage.delete(&hash).await.err().map(|e| e.to_string()),
@@ -825,36 +833,23 @@ pub async fn remove_unreferenced(st: &AppState, blobs: Vec<BlobRef>) -> Vec<Stri
 const RETRY_BASE: i64 = 60;
 const RETRY_MAX: i64 = 24 * 3600;
 
-struct DeletingGuard {
+
+/// Keeps a hash marked as "being staged" or "being deleted" (the caller counted it in); dropping it (commit, failure,
+/// or a cancelled request) releases the mark
+pub struct BlobMark {
     st: AppState,
     hash: String,
+    deleting: bool,
 }
 
-impl Drop for DeletingGuard {
+impl Drop for BlobMark {
     fn drop(&mut self) {
         let mut g = self.st.blob_guard.lock().unwrap();
-        if let Some(n) = g.deleting.get_mut(&self.hash) {
+        let marks = if self.deleting { &mut g.deleting } else { &mut g.staging };
+        if let Some(n) = marks.get_mut(&self.hash) {
             *n -= 1;
             if *n == 0 {
-                g.deleting.remove(&self.hash);
-            }
-        }
-    }
-}
-
-/// Keeps a hash marked as "being staged"; dropping it (commit, failure, or a cancelled request) releases the mark
-pub struct StageGuard {
-    st: AppState,
-    hash: String,
-}
-
-impl Drop for StageGuard {
-    fn drop(&mut self) {
-        let mut g = self.st.blob_guard.lock().unwrap();
-        if let Some(n) = g.staging.get_mut(&self.hash) {
-            *n -= 1;
-            if *n == 0 {
-                g.staging.remove(&self.hash);
+                marks.remove(&self.hash);
             }
         }
     }
@@ -918,12 +913,12 @@ pub struct StagedBlob {
     uploaded_to: Option<String>,
     /// Where the content already existed when staging started (its file is protected from background deletion while staged)
     existing_at: Option<String>,
-    guard: StageGuard,
+    guard: BlobMark,
 }
 
 /// Marks content as "being staged" until the guard is dropped: background deletion leaves it alone meanwhile. If the
 /// same content is being deleted right now, waits for that to finish first, so content stored afterwards isn't deleted.
-pub async fn stage_guard(st: &AppState, hash: &str) -> StageGuard {
+pub async fn stage_guard(st: &AppState, hash: &str) -> BlobMark {
     loop {
         {
             let mut g = st.blob_guard.lock().unwrap();
@@ -934,7 +929,7 @@ pub async fn stage_guard(st: &AppState, hash: &str) -> StageGuard {
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
-    StageGuard { st: st.clone(), hash: hash.to_string() }
+    BlobMark { st: st.clone(), hash: hash.to_string(), deleting: false }
 }
 
 pub async fn stage_blob(st: &AppState, drive_id: &str, hash: String, size: i64, tmp: std::path::PathBuf) -> AppResult<StagedBlob> {
