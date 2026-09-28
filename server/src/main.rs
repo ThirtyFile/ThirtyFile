@@ -1,4 +1,5 @@
 mod admin;
+mod archive;
 mod auth;
 mod dav;
 mod db;
@@ -359,6 +360,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         archive_lock: Default::default(),
         share_views: Default::default(),
         download_links: Default::default(),
+        jobs: Default::default(),
         log_tx,
     }));
 
@@ -499,6 +501,9 @@ fn file_api() -> Router<AppState> {
         .route("/files/{id}/versions/{version}/content", get(versions::content))
         .route("/download", get(files::download).post(files::create_download_link))
         .route("/download/{link}", get(files::download_by_link))
+        .route("/archive/compress", post(archive::compress))
+        .route("/archive/extract", post(archive::extract))
+        .route("/jobs/{id}", get(archive::get))
         .route_layer(middleware::from_fn(tokens::allow))
 }
 

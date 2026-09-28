@@ -3,6 +3,8 @@ import {
   ClipboardPasteIcon,
   CopyIcon,
   DownloadIcon,
+  FileArchiveIcon,
+  PackageOpenIcon,
   EyeIcon,
   FilePlusIcon,
   FolderInputIcon,
@@ -28,10 +30,11 @@ import type { ExplorerState } from "./state";
 import type { ExplorerActions } from "./actions";
 import { Kbd } from "./ui";
 import { t } from "@/lib/i18n";
+import { isZip } from "@/components/FileIcon";
 
 export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerActions) {
   const { caps, navigate, tabs, fileInput, dirInput, canCreate, canUpload, selectedNodes, selectedIds, single, allFavorite, setDialog, setDetailsOpen } = s;
-  const { refresh, open, download, toggleFavorite, cut, copy, canPaste, paste, createNew } = a;
+  const { refresh, open, download, compress, extract, toggleFavorite, cut, copy, canPaste, paste, createNew } = a;
   const newItems = (
     <>
       <DropdownMenuItem disabled={!canCreate} onClick={() => createNew("folder")}>
@@ -71,6 +74,17 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
       <DropdownMenuItem onClick={() => download(selectedIds)}>
         <DownloadIcon /> {selectedNodes.length > 1 || single?.kind === "folder" ? t("Download (ZIP)") : t("Download")}
       </DropdownMenuItem>
+      {/* Made next to the items, so only where new files can be added (not in search results or other lists) */}
+      {canUpload && (
+        <DropdownMenuItem onClick={() => compress(selectedIds)}>
+          <FileArchiveIcon /> {t("Compress to ZIP file")}
+        </DropdownMenuItem>
+      )}
+      {canUpload && single && isZip(single) && (
+        <DropdownMenuItem onClick={() => extract(single)}>
+          <PackageOpenIcon /> {t("Extract all")}
+        </DropdownMenuItem>
+      )}
       {single && (
         <DropdownMenuItem onClick={() => setDialog({ t: "access", nodeId: single.id })}>
           <UsersRoundIcon /> {t("Share with…")}

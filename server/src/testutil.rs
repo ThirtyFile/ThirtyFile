@@ -71,6 +71,7 @@ pub async fn env() -> TestEnv {
         archive_lock: Default::default(),
         share_views: Default::default(),
         download_links: Default::default(),
+        jobs: Default::default(),
         log_tx,
     }));
     let _writer = crate::logs::spawn_writer(st.clone(), log_rx);
@@ -140,6 +141,26 @@ impl TestEnv {
         .execute(&self.st.db)
         .await
         .unwrap();
+        id
+    }
+
+    /// Creates a file with real content in the local storage location
+    pub async fn stored_file(&self, owner: &User, parent: &str, name: &str, content: &[u8]) -> String {
+        let id = self.file(owner, parent, name).await;
+        let hash = crate::util::sha256_hex(content);
+        let tmp = self.dir.join("tmp").join(format!("src-{}", new_id()));
+        std::fs::write(&tmp, content).unwrap();
+        crate::storage::Storage::put_file(self.st.storage("local").unwrap().as_ref(), &hash, &tmp).await.unwrap();
+        let mut c = self.st.db.acquire().await.unwrap();
+        crate::tree::add_blob_ref(&mut c, &hash, content.len() as i64, "local").await.unwrap();
+        sqlx::query("UPDATE nodes SET blob_hash = ?, size = ?, mime = ? WHERE id = ?")
+            .bind(&hash)
+            .bind(content.len() as i64)
+            .bind(crate::util::guess_mime(name))
+            .bind(&id)
+            .execute(&mut *c)
+            .await
+            .unwrap();
         id
     }
 

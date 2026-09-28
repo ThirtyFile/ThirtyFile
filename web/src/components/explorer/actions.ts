@@ -12,6 +12,7 @@ import { confirm } from "@/components/confirm";
 import { askBeforeTransfer } from "@/components/ConflictDialog";
 import { carriesFiles, dropFiles, dropItems } from "@/lib/dnd";
 import { filesFromDrop, uploadFiles } from "@/uploads";
+import { runJob } from "@/lib/jobs";
 import { type Item, isTyping } from "./types";
 import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
@@ -78,6 +79,13 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
 
   // Multiple items or folders are zipped by the server while streaming; progress shows in the download panel at the bottom right
   const download = (ids: string[]) => ids.length && void triggerDownload(() => privateSource.downloadLink(ids));
+
+  // A new ZIP file in this folder, or a new folder with a ZIP file's contents: made on the server, followed in a message
+  const compress = (ids: string[]) => {
+    const folder = p.folderId;
+    if (folder && ids.length) void runJob(qc, () => api.compress(ids, folder));
+  };
+  const extract = (n: Item) => void runJob(qc, () => api.extract(n.id));
 
   const toggleFavorite = async () => {
     try {
@@ -254,7 +262,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         }
       : {};
 
-  return { refresh, open, download, toggleFavorite, dropInto, uploadInto, transfer, cut, copy, canPaste, paste, dragProps, createNew };
+  return { refresh, open, download, compress, extract, toggleFavorite, dropInto, uploadInto, transfer, cut, copy, canPaste, paste, dragProps, createNew };
 }
 
 export type ExplorerActions = ReturnType<typeof useExplorerActions>;

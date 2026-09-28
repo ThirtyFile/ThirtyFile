@@ -116,6 +116,11 @@ export function canBrowserThumbnail(n: Node) {
   return n.mime.startsWith("video/") && isBrowserMedia(n);
 }
 
+/** A ZIP archive the server can extract (archive.rs, is_zip) */
+export function isZip(n: NodeLike) {
+  return n.kind === "file" && (extOf(n.name) === "zip" || n.mime === "application/zip" || n.mime === "application/x-zip-compressed");
+}
+
 /** Can be opened in the text editor */
 export function isTextLike(n: Node) {
   const c = categoryOf(n);

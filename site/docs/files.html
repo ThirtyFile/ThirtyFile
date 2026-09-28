@@ -42,6 +42,22 @@
         <p>Progress is shown at the bottom right. Downloads larger than 256 MB (64 MB on phones and tablets) go straight to your browser's own download list instead, so the page doesn't hold them in memory.</p>
         <p>Up to 10,000 selected items can be downloaded at once. For more, download the folder they are in: a folder counts as one item, however much it holds.</p>
 
+        <h2 id="zip">Compressing and extracting ZIP files</h2>
+        <ul>
+          <li><strong>Compress</strong>: select items, right-click and choose <strong>Compress to ZIP file</strong>. A compressed ZIP file appears next to them, named after the item (or, for several items, after their folder). It counts against the space's storage like any other file.</li>
+          <li><strong>Extract</strong>: right-click a ZIP file and choose <strong>Extract all</strong>. Its contents go into a new folder next to it, named after the ZIP file. Names that are taken get a number, as elsewhere.</li>
+        </ul>
+        <p>Both run on the server: a message at the bottom shows how far they got, and you can keep working meanwhile. Both are recorded in the activity log.</p>
+        <p>To keep one file from filling the server, a ZIP file isn't extracted when:</p>
+        <ul>
+          <li>its contents are larger than the space has room for, or larger than 16 GB;</li>
+          <li>it holds more than 20,000 files and folders;</li>
+          <li>its contents would grow far more than ordinary files do (more than 250 times their compressed size), as in a "ZIP bomb";</li>
+          <li>a name inside it leads outside the new folder (<code>../</code> or a full path), or isn't allowed (for example it contains <code>:</code> or <code>?</code>);</li>
+          <li>it is protected with a password, or compressed with a method other than the usual one (deflate).</li>
+        </ul>
+        <p>ZIP files can't be extracted yet in a space that shows a folder on the server; download them and extract them on your computer. Compressing works there.</p>
+
         <h2 id="organise">Organising</h2>
         <ul>
           <li><strong>Select</strong>: click an item. Hold <kbd>Ctrl</kbd> to add more, <kbd>Shift</kbd> to select a range, or drag a box around items.</li>

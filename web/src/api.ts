@@ -19,6 +19,21 @@ export interface Node {
   is_favorite: boolean;
 }
 
+/** A compress or extract task running on the server (`GET /jobs/:id`) */
+export interface Job {
+  id: string;
+  kind: "compress" | "extract";
+  state: "running" | "done" | "failed";
+  /** Bytes handled so far, of `total` */
+  done: number;
+  total: number;
+  /** Why it failed (English, from the server) */
+  error: string | null;
+  /** The new ZIP file or folder, and its name */
+  node_id: string | null;
+  name: string | null;
+}
+
 export interface SearchFilter {
   /** Folder id: that folder and below */
   in?: string;
@@ -856,6 +871,11 @@ export const api = {
   recent: () => get<Located[]>("/recent").then((l) => l.map(localizeLocated)),
   favorites: (sort?: SortKey, order?: SortOrder) => get<Located[]>(`/favorites${qs({ sort, order })}`).then((l) => l.map(localizeLocated)),
   setFavorite: (ids: string[], favorite: boolean) => post("/nodes/favorite", { ids, favorite }),
+  /** Packs items into a new ZIP file in `parentId`, on the server */
+  compress: (ids: string[], parentId: string) => post<Job>("/archive/compress", { ids, parent_id: parentId, tz: new Date().getTimezoneOffset() }),
+  /** Extracts a ZIP file into a new folder next to it, on the server */
+  extract: (id: string) => post<Job>("/archive/extract", { id }),
+  job: (id: string) => get<Job>(enc`/jobs/${id}`),
   /** Save from the online editor; with baseVersion (updated_at when the file was opened), returns 409 if someone else changed the file */
   saveContent: (id: string, content: BodyInit, baseVersion?: number) =>
     request<Node>(

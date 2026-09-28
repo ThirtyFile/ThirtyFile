@@ -497,18 +497,37 @@ pub async fn thumbnail(State(st): State<AppState>, user: User, Path(id): Path<St
     thumbnail_response(&st, &headers, &node).await
 }
 
-struct ZipItem {
-    path: String,
+pub struct ZipItem {
+    pub path: String,
     /// None for folders
-    blob: Option<Source>,
-    size: u64,
-    mtime: i64,
+    pub blob: Option<Source>,
+    pub size: u64,
+    pub mtime: i64,
 }
 
-/// Packs multiple nodes (including folder contents) into a streamed ZIP. `tz` is the browser's time zone as JavaScript
-/// reports it (minutes behind UTC): ZIP times are local times, and Windows shows them as such.
-pub async fn zip_response(st: &AppState, roots: Vec<Node>, tz: i64) -> AppResult<Response> {
-    let offset = -tz.clamp(-14 * 60, 14 * 60) * 60;
+/// What a ZIP of some items holds: every file and folder in them, with its path in the ZIP
+pub struct ZipPlan {
+    pub items: Vec<ZipItem>,
+    /// The name each selected item has in the ZIP
+    pub root_names: Vec<String>,
+    /// The folder the items are in, when they are all in the same one
+    pub parent_name: Option<String>,
+}
+
+impl ZipPlan {
+    /// The ZIP's name: the item's own for one item, else the folder's they are in
+    pub fn file_name(&self, fallback: &str) -> String {
+        match (self.root_names.as_slice(), &self.parent_name) {
+            ([one], _) => format!("{one}.zip"),
+            (_, Some(parent)) => format!("{parent}.zip"),
+            _ => format!("{fallback}.zip"),
+        }
+    }
+}
+
+/// The contents of a ZIP of `roots` (including folder contents), with times shifted by `offset` seconds (ZIP times are
+/// local times)
+pub async fn zip_plan(st: &AppState, roots: Vec<Node>, offset: i64) -> AppResult<ZipPlan> {
     // Items inside other selected items come with them; selected twice counts once
     let roots = {
         let ids: Vec<String> = roots.iter().map(|n| n.id.clone()).collect();
@@ -579,12 +598,17 @@ pub async fn zip_response(st: &AppState, roots: Vec<Node>, tz: i64) -> AppResult
     if items.iter().any(|it| it.path.len() + 1 > u16::MAX as usize) {
         return Err(AppError::bad_request("A folder path is too long to put in a ZIP file"));
     }
+    Ok(ZipPlan { items, root_names, parent_name })
+}
+
+/// Packs multiple nodes (including folder contents) into a streamed ZIP. `tz` is the browser's time zone as JavaScript
+/// reports it (minutes behind UTC): ZIP times are local times, and Windows shows them as such.
+pub async fn zip_response(st: &AppState, roots: Vec<Node>, tz: i64) -> AppResult<Response> {
+    let offset = -tz.clamp(-14 * 60, 14 * 60) * 60;
+    let plan = zip_plan(st, roots, offset).await?;
+    let filename = plan.file_name("download");
+    let items = plan.items;
     let total_len = crate::zip::predicted_len(items.iter().map(|it| (it.path.as_str(), it.size, it.blob.is_none())));
-    let filename = match (root_names.as_slice(), parent_name) {
-        ([one], _) => format!("{one}.zip"),
-        (_, Some(parent)) => format!("{parent}.zip"),
-        _ => "download.zip".to_string(),
-    };
     // Open the first file before starting the response: if the storage service (e.g. S3) can't be reached, report the error directly instead of sending an empty ZIP
     let open = |st: AppState, source: Source, size: u64| async move { source.open(&st, 0, size).await };
     let mut first = None;

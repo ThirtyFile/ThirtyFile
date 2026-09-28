@@ -63,6 +63,8 @@ const ACTION_LABEL: Record<string, string> = {
   rename: t("Rename"),
   move: t("Move"),
   copy: t("Copy"),
+  compress: t("Compress to ZIP"),
+  extract: t("Extract"),
   trash: t("Move to trash"),
   restore: t("Restore"),
   delete: t("Delete permanently"),
@@ -95,7 +97,7 @@ const ACTION_LABEL: Record<string, string> = {
 
 /** Action categories for the activity log filter */
 export const ACTION_GROUPS: { label: string; actions: string[] }[] = [
-  { label: t("Files"), actions: ["upload", "create_folder", "edit", "rename", "move", "copy", "trash", "restore", "delete", "empty_trash"] },
+  { label: t("Files"), actions: ["upload", "create_folder", "edit", "rename", "move", "copy", "compress", "extract", "trash", "restore", "delete", "empty_trash"] },
   { label: t("Sharing and permissions"), actions: ["share_create", "share_update", "share_delete", "grant", "revoke"] },
   { label: t("Spaces"), actions: ["drive_create", "drive_update", "drive_delete", "drive_location"] },
   { label: t("Users and groups"), actions: ["user_create", "user_update", "user_delete", "group_create", "group_update", "group_delete"] },
