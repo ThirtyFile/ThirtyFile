@@ -26,7 +26,13 @@ function useClientSort(items: Located[] | undefined, sort: { key: SortKey; order
     if (!items || !enabled) return items ?? [];
     const dir = sort.order === "asc" ? 1 : -1;
     const val = (n: Located) =>
-      sort.key === "size" ? n.size : sort.key === "updated" ? n.updated_at : sort.key === "type" ? (n.kind === "folder" ? "" : extOf(n.name)) : n.name;
+      sort.key === "size"
+        ? n.size
+        : sort.key === "updated"
+          ? n.updated_at
+          : sort.key === "created"
+            ? n.created_at
+            : sort.key === "type" ? (n.kind === "folder" ? "" : extOf(n.name)) : n.name;
     return [...items].sort((a, b) => {
       if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
       const x = val(a);

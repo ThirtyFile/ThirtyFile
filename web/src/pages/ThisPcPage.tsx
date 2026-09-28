@@ -677,6 +677,7 @@ export function ThisPcPage() {
           }
           confirmText={t("Delete permanently")}
           destructive
+          irreversible
           onClose={() => setDialog(null)}
           onConfirm={async () => {
             await api.deleteDrive(dialog.drive.id);

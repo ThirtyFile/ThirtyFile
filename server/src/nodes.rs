@@ -243,6 +243,7 @@ enum SortCol {
     Name,
     Size,
     Updated,
+    Created,
     Type,
 }
 
@@ -251,6 +252,7 @@ impl SortCol {
         match sort {
             Some("size") => Self::Size,
             Some("updated") => Self::Updated,
+            Some("created") => Self::Created,
             Some("type") => Self::Type,
             _ => Self::Name,
         }
@@ -262,6 +264,7 @@ impl SortCol {
         match self {
             Self::Size => "n.size",
             Self::Updated => "n.updated_at",
+            Self::Created => "n.created_at",
             Self::Type => EXT,
             Self::Name => "n.name COLLATE natural_name",
         }
@@ -329,6 +332,7 @@ pub async fn list_children(conn: &mut SqliteConnection, parent_id: &str, q: &Lis
             key: match sort {
                 SortCol::Size => SortValue::Int(last.node.size),
                 SortCol::Updated => SortValue::Int(last.node.updated_at),
+                SortCol::Created => SortValue::Int(last.node.created_at),
                 SortCol::Type => SortValue::Text(last.ext.clone().unwrap_or_default()),
                 SortCol::Name => SortValue::Text(last.node.name.clone()),
             },
@@ -1441,15 +1445,16 @@ mod tests {
         // Equal sizes, times and extensions, so the ties are ordered by name and id across page boundaries
         for (i, name) in ["File 10.txt", "file 2.txt", "File 1.docx", "b.pdf", "README", "c.TXT", "d.pdf", "e", "a.docx", "f.txt", "g.png"].iter().enumerate() {
             let id = env.file(&amy, &amy.root_id, name).await;
-            sqlx::query("UPDATE nodes SET size = ?, updated_at = ? WHERE id = ?")
+            sqlx::query("UPDATE nodes SET size = ?, updated_at = ?, created_at = ? WHERE id = ?")
                 .bind((i % 3) as i64 * 100)
                 .bind(1_000 + (i % 4) as i64)
+                .bind(500 + (i % 2) as i64)
                 .bind(&id)
                 .execute(&env.st.db)
                 .await
                 .unwrap();
         }
-        for sort in ["name", "size", "updated", "type"] {
+        for sort in ["name", "size", "updated", "created", "type"] {
             for order in ["asc", "desc"] {
                 let q = ListQuery { sort: Some(sort.into()), order: Some(order.into()), ..Default::default() };
                 let Json(whole) = children(State(env.st.clone()), amy.clone(), Path(amy.root_id.clone()), Query(q)).await.unwrap();

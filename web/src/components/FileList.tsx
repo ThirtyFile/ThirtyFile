@@ -18,8 +18,7 @@ import {
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDownIcon, ChevronUpIcon, StarIcon } from "lucide-react";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
-import { Check } from "@/components/explorer/ui";
+import { DropdownMenuCheckboxItem, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Resizer } from "@/components/Resizer";
 import type { FileSource, Node, SortKey, SortOrder } from "@/api";
 import { FileIcon, canBrowserThumbnail, canThumbnail, typeLabel, typeTitle } from "@/components/FileIcon";
@@ -34,6 +33,8 @@ import {
   MIN_NAME,
   columnShown,
   groupItems,
+  columnsToHide,
+  pageRows,
   resetColumns,
   setColumnWidth,
   showColumn,
@@ -54,6 +55,8 @@ export type ViewMode = "list" | "grid" | "medium" | "compact" | "tiles";
 export interface ListNav {
   /** A letter typed: go to the next item whose name starts with the letters typed in the last second */
   typeAhead(key: string): void;
+  /** Scroll an item into view, and focus it */
+  show(id: string, focus: boolean): void;
 }
 
 type Item = Node & { location?: string };
@@ -245,7 +248,7 @@ interface Handlers {
   dateOf(n: Item): number;
   extra?(n: Item): string;
   rename(item: Item, name: string): Promise<void>;
-  renameDone(): void;
+  renameDone(item: Item, byKey: boolean): void;
 }
 type HandlersRef = RefObject<Handlers>;
 
@@ -313,7 +316,7 @@ function renameBox(r: RowProps, multiline?: boolean) {
       multiline={multiline}
       selectAll={r.item.kind === "folder"}
       onSubmit={(name) => r.h.current.rename(r.item, name)}
-      onDone={() => r.h.current.renameDone()}
+      onDone={(byKey) => r.h.current.renameDone(r.item, byKey)}
       className={multiline ? "mt-1.5" : undefined}
     />
   );
@@ -375,8 +378,10 @@ const ListRow = memo(function ListRow(r: RowProps & { checkboxes: boolean; colum
     >
       {r.checkboxes && (
         <td role="gridcell" className={cn(td, "px-[7px]")}>
+          {/* Space selects with the keyboard, so the check box isn't a Tab stop of its own */}
           <input
             type="checkbox"
+            tabIndex={-1}
             className="align-middle accent-brand"
             aria-label={t("Select {name}", { name: item.name })}
             checked={r.selected}
@@ -519,7 +524,7 @@ export function listColumns(p: Pick<FileListProps, "showLocation" | "showOwner" 
   const out: ListColumn[] = [];
   if (p.showLocation) out.push({ id: "location", label: t("Location") });
   out.push({ id: "date", label: p.dateLabel ?? t("Date modified"), sort: "updated" });
-  out.push({ id: "created", label: t("Date created") });
+  out.push({ id: "created", label: t("Date created"), sort: "created" });
   out.push({ id: "type", label: t("Type"), sort: "type" });
   out.push({ id: "size", label: t("Size"), sort: "size" });
   if (p.showOwner) out.push({ id: "owner", label: t("Uploaded by") });
@@ -532,18 +537,16 @@ export function ColumnChoices({ columns }: { columns: ListColumn[] }) {
   const prefs = useColumnPrefs();
   return (
     <>
-      <DropdownMenuItem disabled>
-        <Check on /> {t("Name")}
-      </DropdownMenuItem>
+      <DropdownMenuCheckboxItem checked disabled>
+        {t("Name")}
+      </DropdownMenuCheckboxItem>
       {columns.map((c) => (
-        <DropdownMenuItem key={c.id} onClick={() => showColumn(c.id, !columnShown(prefs, c.id))}>
-          <Check on={columnShown(prefs, c.id)} /> {c.label}
-        </DropdownMenuItem>
+        <DropdownMenuCheckboxItem key={c.id} checked={columnShown(prefs, c.id)} onCheckedChange={(on) => showColumn(c.id, on)} closeOnClick>
+          {c.label}
+        </DropdownMenuCheckboxItem>
       ))}
       <DropdownMenuSeparator />
-      <DropdownMenuItem onClick={resetColumns}>
-        <Check on={false} /> {t("Restore default columns")}
-      </DropdownMenuItem>
+      <DropdownMenuItem onClick={resetColumns}>{t("Restore default columns")}</DropdownMenuItem>
     </>
   );
 }
@@ -576,8 +579,8 @@ export function FileList(p: FileListProps) {
   /** The item with the keyboard focus: always rendered, so the focus isn't lost when it scrolls out of view */
   const [focusId, setFocusId] = useState<string | null>(null);
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
-  /** Where the first row starts in the scroll container's content, and the list's width */
-  const [geo, setGeo] = useState({ top: 0, width: 0 });
+  /** Where the first row starts in the scroll container's content, the list's width, and the width it has in view */
+  const [geo, setGeo] = useState({ top: 0, width: 0, room: 0 });
   const root = useRef<HTMLElement | null>(null);
   const head = useRef<HTMLTableSectionElement>(null);
   const pendingFocus = useRef<string | null>(null);
@@ -668,7 +671,8 @@ export function FileList(p: FileListProps) {
     setScroller((cur) => (cur === s ? cur : s));
     const top = offsetIn(el, s).top + (head.current ? head.current.offsetHeight : PAD);
     const width = el.clientWidth;
-    setGeo((g) => (g.top === top && g.width === width ? g : { top, width }));
+    const room = s === document.documentElement ? window.innerWidth : s.clientWidth;
+    setGeo((g) => (g.top === top && g.width === width && g.room === room ? g : { top, width, room }));
   }, []);
   const empty = n === 0;
   useLayoutEffect(measureGeo, [measureGeo, grid, empty]);
@@ -677,6 +681,9 @@ export function FileList(p: FileListProps) {
     if (!el) return;
     const ro = new ResizeObserver(measureGeo);
     ro.observe(el);
+    // The list can be wider than the space it has (Details view scrolling sideways): that space is watched too
+    const s = scrollParent(el);
+    if (s !== document.documentElement) ro.observe(s);
     return () => ro.disconnect();
   }, [measureGeo, grid, empty]);
 
@@ -733,13 +740,56 @@ export function FileList(p: FileListProps) {
     return Math.min(to.start + index - rows[rowOf(index)].start, to.end - 1);
   };
 
-  /** Keyboard: arrows move the selection (Shift extends it), Space selects (toggles with Ctrl), Home/End jump, Enter opens */
+  /** The item a page further down or up (PageDown, PageUp): as many rows as fit in view, less one */
+  const page = (index: number, dir: 1 | -1) => {
+    const view = scroller === document.documentElement || !scroller ? window.innerHeight : scroller.clientHeight;
+    const rowHeight = tile ? tile.h + tile.gap : ROW;
+    let at = index;
+    for (let k = pageRows(view - (grid ? PAD : HEAD), rowHeight); k > 0; k--) {
+      const next = vertical(at, dir);
+      if (next === at) break;
+      at = next;
+    }
+    return at;
+  };
+
+  /** Shift+F10 or the Menu key: open the context menu at the item, as right-clicking it does (browsers don't all do it for a focused row) */
+  const keyMenu = useRef(0);
+  const openMenu = (el: HTMLElement) => {
+    const r = (el.querySelector("[data-drag-handle]") ?? el).getBoundingClientRect();
+    keyMenu.current = Date.now() + 500;
+    el.dispatchEvent(new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: r.left + Math.min(r.width / 2, 100), clientY: r.top + r.height / 2 }));
+    // A menu opened like a right-click leaves the focus on the row: move it into the menu, so the arrow keys go through its items
+    setTimeout(() => {
+      const menu = document.querySelector<HTMLElement>("[role=menu][data-open]");
+      if (!menu) return;
+      menu.focus();
+      // Closed without doing anything that takes the focus (a dialog, the rename box): it goes back to the row, not the list around it
+      const back = new MutationObserver(() => {
+        if (menu.isConnected) return;
+        back.disconnect();
+        const at = document.activeElement;
+        if (el.isConnected && (!at || at === document.body || !at.closest("[role=menu], [role=dialog], input, textarea"))) el.focus({ preventScroll: true });
+      });
+      back.observe(document.body, { childList: true, subtree: true });
+    }, 30);
+  };
+
+  /**
+   * Keyboard: arrows move the selection (Shift extends it, Ctrl moves only the focus), Space selects (toggles with Ctrl),
+   * Home/End and PageUp/PageDown jump, Enter opens, Shift+F10 or the Menu key opens the context menu
+   */
   const keyNav = (e: KeyboardEvent<HTMLElement>, index: number) => {
     // Keys typed in a control inside the row (its checkbox, the rename box) belong to that control
     if (e.target !== e.currentTarget || items[index].id === p.renamingId) return;
     if (e.key === "Enter" && !e.altKey && !e.repeat) {
       e.preventDefault();
       p.onOpen(items[index]);
+      return;
+    }
+    if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey)) {
+      e.preventDefault();
+      openMenu(e.currentTarget);
       return;
     }
     // Alt+arrows move around folders (handled by the address bar)
@@ -751,6 +801,8 @@ export function FileList(p: FileListProps) {
     else if (e.key === "ArrowLeft" && grid) next = Math.max(0, index - 1);
     else if (e.key === "Home") next = 0;
     else if (e.key === "End") next = n - 1;
+    else if (e.key === "PageDown") next = page(index, 1);
+    else if (e.key === "PageUp") next = page(index, -1);
     else if (e.key === " ") {
       e.preventDefault();
       if (e.ctrlKey || e.metaKey) toggle(index);
@@ -759,6 +811,11 @@ export function FileList(p: FileListProps) {
     }
     if (next === null) return;
     e.preventDefault();
+    // Ctrl moves the focus and leaves the selection alone, like File Explorer: Ctrl+Space then adds or removes the item
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey) {
+      focusItem(next);
+      return;
+    }
     const item = items[next];
     const range = e.shiftKey ? rangeTo(next) : null;
     if (range) p.onSelect(range, p.anchor!);
@@ -785,7 +842,13 @@ export function FileList(p: FileListProps) {
     p.onSelect(new Set([items[next].id]), items[next].id);
     focusItem(next);
   };
-  if (p.navRef) p.navRef.current = { typeAhead };
+  const show = (id: string, focus: boolean) => {
+    const index = indexOf.get(id);
+    if (index === undefined) return;
+    if (focus) focusItem(index);
+    else v.scrollToIndex(rowOf(index));
+  };
+  if (p.navRef) p.navRef.current = { typeAhead, show };
 
   /** A finger resting on an item: selected once it has stayed long enough */
   const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number; done: boolean } | null>(null);
@@ -822,6 +885,12 @@ export function FileList(p: FileListProps) {
     focused: setFocusId,
     // Right-clicking an unselected item selects only that item
     contextMenu: (e, index) => {
+      // The browser's own menu event after Shift+F10 or the Menu key, which already opened the menu
+      if (e.nativeEvent.isTrusted && Date.now() < keyMenu.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (press.current) {
         // Android reports a long press as a right-click too: the long press handles it
         if (!p.touchMenu) {
@@ -900,7 +969,12 @@ export function FileList(p: FileListProps) {
     dateOf: p.dateOf ?? ((x) => x.updated_at),
     extra: p.extraColumn?.value,
     rename: (item, name) => p.onRename!(item, name),
-    renameDone: () => p.onRenameDone?.(),
+    renameDone: (item, byKey) => {
+      p.onRenameDone?.();
+      // Enter or Esc: the focus goes back to the item, as the rename box it was in goes away
+      const index = indexOf.get(item.id);
+      if (byKey && index !== undefined) focusItem(index);
+    },
   };
 
   // Marquee selection finds the boxed items from the row geometry: most rows aren't in the DOM
@@ -935,7 +1009,22 @@ export function FileList(p: FileListProps) {
     .filter((c) => columnShown(prefs, c.id))
     .map((c) => c.id)
     .join();
-  const shownIds = useMemo(() => (shownKey ? (shownKey.split(",") as ColumnId[]) : []), [shownKey]);
+  const widthOf = (id: ColumnId) => prefs.widths[id] ?? COLUMN_WIDTH[id];
+  // Too narrow for every column (e.g. with the details pane open): Type, then Size, make room before the list scrolls sideways
+  const hide =
+    wide && geo.room > 0
+      ? columnsToHide(
+          shownKey ? (shownKey.split(",") as ColumnId[]).filter((id) => large || id !== "location") : [],
+          widthOf,
+          (prefs.widths.name ?? MIN_NAME) + (p.showCheckboxes ? 30 : 0),
+          geo.room,
+        )
+      : [];
+  const fitKey = shownKey
+    .split(",")
+    .filter((id) => id && !hide.includes(id as ColumnId))
+    .join();
+  const shownIds = useMemo(() => (fitKey ? (fitKey.split(",") as ColumnId[]) : []), [fitKey]);
 
   if (n === 0) return <>{p.empty}</>;
 
@@ -1004,7 +1093,6 @@ export function FileList(p: FileListProps) {
   }
 
   const columns = listColumns(p).filter((c) => shownIds.includes(c.id));
-  const widthOf = (id: ColumnId) => prefs.widths[id] ?? COLUMN_WIDTH[id];
   // The name takes the space left, until it's resized: then a blank column at the end takes it
   const nameWidth = wide ? prefs.widths.name : undefined;
   const filler = nameWidth !== undefined;

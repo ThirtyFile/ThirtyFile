@@ -17,8 +17,8 @@ export function InlineRename({
 }: {
   initial: string;
   onSubmit(name: string): Promise<void>;
-  /** Called after committing or cancelling */
-  onDone(): void;
+  /** Called after committing or cancelling; `byKey` when that was Enter or Esc (not clicking elsewhere), so the caller can put the focus back */
+  onDone(byKey: boolean): void;
   /** Icon view: input that wraps */
   multiline?: boolean;
   /** Select all (folder and space names have no extension) */
@@ -48,19 +48,19 @@ export function InlineRename({
     el.style.height = `${el.scrollHeight + 2}px`;
   }, [multiline, value]);
 
-  const commit = async () => {
+  const commit = async (byKey: boolean) => {
     if (finished.current || busy) return;
     const name = value.trim();
     if (!name || name === initial) {
       finished.current = true;
-      onDone();
+      onDone(byKey);
       return;
     }
     setBusy(true);
     try {
       await onSubmit(name);
       finished.current = true;
-      onDone();
+      onDone(byKey);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Couldn't rename"));
       setBusy(false);
@@ -73,11 +73,11 @@ export function InlineRename({
     e.stopPropagation();
     if (e.key === "Enter" && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      void commit();
+      void commit(true);
     } else if (e.key === "Escape") {
       e.preventDefault();
       finished.current = true;
-      onDone();
+      onDone(true);
     }
   };
 
@@ -89,7 +89,7 @@ export function InlineRename({
     spellCheck: false,
     onChange: (e: { target: { value: string } }) => setValue(e.target.value.replace(/[\r\n]/g, "")),
     onKeyDown,
-    onBlur: () => void commit(),
+    onBlur: () => void commit(false),
     // Don't let clicks and drag-selecting text affect the outer selection and drag-and-drop
     onClick: (e: { stopPropagation(): void }) => e.stopPropagation(),
     onDoubleClick: (e: { stopPropagation(): void }) => e.stopPropagation(),

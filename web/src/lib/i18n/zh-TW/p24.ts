@@ -16,4 +16,9 @@ export default {
   "Your account isn't allowed to share, so you can't change who has access. Ask an administrator.": "你的帳號沒有分享權限，因此無法變更存取權。請洽管理員。",
   "Show {n} more folders…": "再顯示 {n} 個資料夾…",
   "{n} dropped item couldn't be read and was skipped.|{n} dropped items couldn't be read and were skipped.": "有 {n} 個拖放的項目無法讀取，已略過。",
+  "Loading…": "正在載入…",
+  "Use New › Upload files to add some.": "可以從「新增 › 上傳檔案」加入檔案。",
+  "Up one folder, with the folder you came from selected": "上移一層，並選取剛才所在的資料夾",
+  "Move the focus without changing the selection": "移動焦點，不變更選取範圍",
+  "Open the menu of the item with the focus": "開啟焦點所在項目的選單",
 } satisfies Record<string, string>;

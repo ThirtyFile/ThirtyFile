@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { columnPrefs, columnShown, dateGroup, groupItems, resetColumns, setColumnWidth, showColumn } from "@/lib/listView";
+import { COLUMN_WIDTH, columnPrefs, columnShown, columnsToHide, dateGroup, groupItems, pageRows, resetColumns, setColumnWidth, showColumn } from "@/lib/listView";
 
 /** Unix seconds of a local time */
 const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h).getTime() / 1000;
@@ -85,5 +85,31 @@ describe("column settings", () => {
     expect(columnPrefs().widths).toEqual({ size: 50, name: 1000 });
     resetColumns();
     expect(columnPrefs()).toEqual({ visible: {}, widths: {} });
+  });
+});
+
+describe("columnsToHide", () => {
+  const width = (id: keyof typeof COLUMN_WIDTH) => COLUMN_WIDTH[id];
+  const ids = ["date", "type", "size"] as const;
+  // The name takes 160 and the columns 170 + 120 + 100
+  it("hides nothing when every column fits", () => {
+    expect(columnsToHide([...ids], width, 160, 550)).toEqual([]);
+  });
+  it("hides Type first, then Size", () => {
+    expect(columnsToHide([...ids], width, 160, 500)).toEqual(["type"]);
+    expect(columnsToHide([...ids], width, 160, 400)).toEqual(["type", "size"]);
+  });
+  it("leaves the rest to scrolling sideways", () => {
+    expect(columnsToHide([...ids], width, 160, 100)).toEqual(["type", "size"]);
+    expect(columnsToHide(["date", "size"], width, 160, 300)).toEqual(["size"]);
+  });
+});
+
+describe("pageRows", () => {
+  it("moves by the rows in view, less one, and at least one", () => {
+    expect(pageRows(280, 28)).toBe(9);
+    expect(pageRows(290, 28)).toBe(9);
+    expect(pageRows(30, 28)).toBe(1);
+    expect(pageRows(0, 28)).toBe(1);
   });
 });

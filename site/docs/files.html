@@ -38,7 +38,8 @@
           <li><strong>Details</strong>: one item per row, with columns.</li>
           <li><strong>Tiles</strong>: a thumbnail with the name, type and size beside it.</li>
         </ul>
-        <p>In <strong>Details</strong>, drag the edge of a column header to make the column wider or narrower (or select the edge with <kbd>Tab</kbd> and use the arrow keys); double-click the edge to give it its usual width again. Right-click a column header, or choose <strong>View</strong> › <strong>Columns</strong>, to choose the columns: <strong>Date modified</strong>, <strong>Date created</strong> (hidden at first), <strong>Type</strong>, <strong>Size</strong>, and where a list has them <strong>Location</strong> and <strong>Uploaded by</strong>. <strong>Restore default columns</strong> undoes your changes. On a phone the list shows the name and size only.</p>
+        <p>In <strong>Details</strong>, drag the edge of a column header to make the column wider or narrower (or select the edge with <kbd>Tab</kbd> and use the arrow keys); double-click the edge to give it its usual width again. Right-click a column header, or choose <strong>View</strong> › <strong>Columns</strong>, to choose the columns: <strong>Date modified</strong>, <strong>Date created</strong> (hidden at first), <strong>Type</strong>, <strong>Size</strong>, and where a list has them <strong>Location</strong> and <strong>Uploaded by</strong>. <strong>Restore default columns</strong> undoes your changes. When the list is too narrow for all the columns (with the details pane open, for example), <strong>Type</strong> and then <strong>Size</strong> are left out before the list scrolls sideways. On a phone the list shows the name and size only.</p>
+        <p><strong>Sort</strong> orders the items by name, date modified, date created, type or size, from A to Z or the other way; clicking a column header does the same. Folders always come first.</p>
         <p><strong>View</strong> › <strong>Group by</strong> puts the items in groups, each under a heading with the number of items in it:</p>
         <ul>
           <li><strong>Type</strong>: folders first, then a group per kind of file.</li>
@@ -126,7 +127,7 @@
             <thead><tr><th>Keys</th><th>Action</th></tr></thead>
             <tbody>
               <tr><td><kbd>Enter</kbd></td><td>Open</td></tr>
-              <tr><td><kbd>Alt</kbd> + <kbd>↑</kbd></td><td>Go up one folder</td></tr>
+              <tr><td><kbd>Alt</kbd> + <kbd>↑</kbd></td><td>Go up one folder, with the folder you came from selected</td></tr>
               <tr><td><kbd>Alt</kbd> + <kbd>←</kbd> or <kbd>Backspace</kbd></td><td>Back</td></tr>
               <tr><td><kbd>Alt</kbd> + <kbd>→</kbd></td><td>Forward</td></tr>
               <tr><td><kbd>←</kbd> <kbd>→</kbd> (in an open file)</td><td>The previous or next file of its folder, in the folder's sort order</td></tr>
@@ -141,8 +142,9 @@
               <tr><td><kbd>Ctrl</kbd> + <kbd>A</kbd></td><td>Select everything</td></tr>
               <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd></td><td>New folder</td></tr>
               <tr><td><kbd>Alt</kbd> + <kbd>Enter</kbd></td><td>Show details</td></tr>
-              <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Home</kbd> <kbd>End</kbd></td><td>Move through the list (also <kbd>←</kbd> <kbd>→</kbd> in the icon view and the space tiles). Hold <kbd>Shift</kbd> to select as you go</td></tr>
+              <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Home</kbd> <kbd>End</kbd> <kbd>Page Up</kbd> <kbd>Page Down</kbd></td><td>Move through the list (also <kbd>←</kbd> <kbd>→</kbd> in the icon view and the space tiles). Hold <kbd>Shift</kbd> to select as you go, or <kbd>Ctrl</kbd> to move the focus only and leave the selection as it is</td></tr>
               <tr><td><kbd>Space</kbd></td><td>Select the item with the focus. With <kbd>Ctrl</kbd>, add it to the selection or remove it</td></tr>
+              <tr><td><kbd>Shift</kbd> + <kbd>F10</kbd> or the <kbd>Menu</kbd> key</td><td>Open the menu of the item with the focus, as right-clicking it does</td></tr>
               <tr><td>Letters</td><td>Go to the next item whose name starts with them. Type quickly to match more letters; type the same letter again for the next item starting with it</td></tr>
               <tr><td><kbd>Esc</kbd></td><td>Clear the selection, or close the preview, the details pane or the phone menu when it covers the list</td></tr>
               <tr><td><kbd>?</kbd> (<kbd>Shift</kbd> + <kbd>/</kbd>)</td><td>Show the list of shortcuts. It's also under <strong>See more</strong> (<strong>⋯</strong>) › <strong>Keyboard shortcuts</strong></td></tr>
@@ -164,6 +166,8 @@
           <li><strong>Select</strong>: hold your finger on an item for a moment. It's selected, and from then on a tap adds an item to the selection or takes it out. On a tablet, the menu for the selected items opens as well.</li>
           <li><strong>Act on the selection</strong>: while items are selected, a bar at the bottom offers <strong>Download</strong>, <strong>Share</strong>, <strong>Move</strong> and <strong>Delete</strong>, and <strong>More</strong> for everything else. <strong>×</strong> clears the selection.</li>
           <li><strong>Check boxes</strong>: turn on <strong>View</strong> › <strong>Item check boxes</strong> to show a check box on each item, in every view.</li>
+          <li><strong>Upload</strong>: choose <strong>New</strong> › <strong>Upload files</strong> or <strong>Upload folder</strong>.</li>
+          <li><strong>Address bar</strong>: a long path shows its end, the folder you are in. Swipe it to see the folders above.</li>
           <li><strong>Home screen</strong>: add the site to your home screen (in Safari, <strong>Share</strong> › <strong>Add to Home Screen</strong>; in Chrome, <strong>Add to home screen</strong> or <strong>Install app</strong>). It then opens like an app, without the browser's bars, under your site's name and logo.</li>
         </ul>
         <div class="shot phone"><img src="../assets/files-phone.webp" width="780" height="1600" loading="lazy" alt="The file list on a phone" /></div>

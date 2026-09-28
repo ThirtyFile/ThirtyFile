@@ -164,6 +164,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       description: t("Permanently deleted items can't be recovered."),
       confirmText: t("Delete permanently"),
       destructive: true,
+      irreversible: true,
     });
     if (!ok) return;
     try {

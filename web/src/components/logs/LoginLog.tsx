@@ -4,6 +4,7 @@ import { DownloadIcon, Loader2Icon } from "lucide-react";
 import { api, type LoginFilter } from "@/api";
 import { nativeDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
+import { ErrorState } from "@/components/ErrorState";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn, formatWinDate } from "@/lib/utils";
 import { DateRangeFilter, FilterBar, MultiSelect, SearchBox, rangeToUnix, type DateRange } from "./filters";
@@ -108,7 +109,7 @@ export function LoginLog({ userId, admin, className }: { userId?: number; admin?
             <Loader2Icon className="size-5 animate-spin" />
           </div>
         ) : list.error ? (
-          <p className="p-4 text-sm text-destructive">{list.error.message}</p>
+          <ErrorState message={list.error.message} onRetry={() => list.refetch()} />
         ) : !rows.length ? (
           <p className="p-6 text-center text-sm text-muted-foreground">{filtered ? t("No matching records") : t("No sign-in records yet")}</p>
         ) : (

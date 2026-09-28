@@ -27,12 +27,15 @@ import {
   XSquareIcon,
   type LucideIcon,
 } from "lucide-react";
-import type { SortKey } from "@/api";
+import type { SortKey, SortOrder } from "@/api";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -46,13 +49,14 @@ import { shortcut } from "@/lib/keys";
 import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
 import type { ExplorerActions } from "./actions";
-import { Check, Kbd } from "./ui";
+import { Kbd } from "./ui";
 import { t } from "@/lib/i18n";
 import type { GroupBy } from "@/lib/listView";
 
 const SORTS: [SortKey, string][] = [
   ["name", t("Name")],
   ["updated", t("Date modified")],
+  ["created", t("Date created")],
   ["type", t("Type")],
   ["size", t("Size")],
 ];
@@ -141,58 +145,67 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
       {p.sort && p.onSortChange && (
         <DropdownMenu>
           <DropdownMenuTrigger render={<ToolButton icon={ArrowDownUpIcon} label={t("Sort")} showLabel className="h-9 px-2.5 text-[13px]" />} />
-          <DropdownMenuContent className="w-40">
-            {SORTS.map(([k, label]) => (
-              <DropdownMenuItem key={k} onClick={() => p.onSortChange!({ key: k, order: p.sort!.order })}>
-                <Check on={p.sort!.key === k} /> {label}
-              </DropdownMenuItem>
-            ))}
+          <DropdownMenuContent className="w-44">
+            {/* Radio items, so screen readers say which one is chosen */}
+            <DropdownMenuRadioGroup value={p.sort.key} onValueChange={(k) => p.onSortChange!({ key: k as SortKey, order: p.sort!.order })}>
+              {SORTS.map(([k, label]) => (
+                <DropdownMenuRadioItem key={k} value={k} closeOnClick>
+                  {label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => p.onSortChange!({ key: p.sort!.key, order: "asc" })}>
-              <Check on={p.sort!.order === "asc"} /> {t("Ascending")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => p.onSortChange!({ key: p.sort!.key, order: "desc" })}>
-              <Check on={p.sort!.order === "desc"} /> {t("Descending")}
-            </DropdownMenuItem>
+            <DropdownMenuRadioGroup value={p.sort.order} onValueChange={(o) => p.onSortChange!({ key: p.sort!.key, order: o as SortOrder })}>
+              <DropdownMenuRadioItem value="asc" closeOnClick>
+                {t("Ascending")}
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="desc" closeOnClick>
+                {t("Descending")}
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       )}
       <DropdownMenu>
         <DropdownMenuTrigger render={<ToolButton icon={LayoutListIcon} label={t("View")} showLabel className="h-9 px-2.5 text-[13px]" />} />
-        <DropdownMenuContent className="w-48">
-          {VIEWS.map(([v, Icon, label]) => (
-            <DropdownMenuItem key={v} onClick={() => setView(v)}>
-              <Check on={view === v} /> <Icon /> {label}
-            </DropdownMenuItem>
-          ))}
+        <DropdownMenuContent className="w-52">
+          <DropdownMenuRadioGroup value={view} onValueChange={(v) => setView(v as ViewMode)}>
+            {VIEWS.map(([v, Icon, label]) => (
+              <DropdownMenuRadioItem key={v} value={v} closeOnClick>
+                <Icon /> {label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
           <DropdownMenuSeparator />
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
-              <Check on={groupBy !== "none"} /> <GroupIcon /> {t("Group by")}
+              <GroupIcon /> {t("Group by")}
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="w-44">
-              {GROUPS.map(([g, label]) => (
-                <DropdownMenuItem key={g} onClick={() => setGroupBy(g)}>
-                  <Check on={groupBy === g} /> {label}
-                </DropdownMenuItem>
-              ))}
+              <DropdownMenuRadioGroup value={groupBy} onValueChange={(g) => setGroupBy(g as GroupBy)}>
+                {GROUPS.map(([g, label]) => (
+                  <DropdownMenuRadioItem key={g} value={g} closeOnClick>
+                    {label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
             </DropdownMenuSubContent>
           </DropdownMenuSub>
           <DropdownMenuSub>
             <DropdownMenuSubTrigger disabled={view !== "list"}>
-              <Check on={false} /> <Columns3Icon /> {t("Columns")}
+              <Columns3Icon /> {t("Columns")}
             </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="w-48">
+            <DropdownMenuSubContent className="w-52">
               <ColumnChoices columns={listColumns(p)} />
             </DropdownMenuSubContent>
           </DropdownMenuSub>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setDetailsOpen(!detailsOpen)}>
-            <Check on={detailsOpen} /> <PanelRightIcon /> {t("Details pane")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setShowCheckboxes(!showCheckboxes)}>
-            <Check on={showCheckboxes} /> <SquareCheckIcon /> {t("Item check boxes")}
-          </DropdownMenuItem>
+          <DropdownMenuCheckboxItem checked={detailsOpen} onCheckedChange={(on) => setDetailsOpen(on)} closeOnClick>
+            <PanelRightIcon /> {t("Details pane")}
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem checked={showCheckboxes} onCheckedChange={(on) => setShowCheckboxes(on)} closeOnClick>
+            <SquareCheckIcon /> {t("Item check boxes")}
+          </DropdownMenuCheckboxItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <DropdownMenu>
@@ -222,7 +235,8 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
           <DropdownMenuItem disabled={none} onClick={() => setSelected(new Set())}>
             <XSquareIcon /> {t("Select none")} <Kbd>Esc</Kbd>
           </DropdownMenuItem>
-          <DropdownMenuItem disabled={none} onClick={() => setSelected(new Set(p.items.filter((n) => !selected.has(n.id)).map((n) => n.id)))}>
+          {/* With nothing selected, inverting selects everything (like File Explorer) */}
+          <DropdownMenuItem onClick={() => setSelected(new Set(p.items.filter((n) => !selected.has(n.id)).map((n) => n.id)))}>
             <SquareCheckIcon /> {t("Invert selection")}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
@@ -236,6 +250,9 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
         variant={detailsOpen ? "secondary" : "ghost"}
         className="h-9 gap-1.5 px-2.5 text-[13px] [&_svg]:size-[18px]"
         aria-pressed={detailsOpen}
+        // The label is hidden on narrow screens: the button still needs a name
+        aria-label={t("Details pane")}
+        title={`${t("Details pane")} (${shortcut("Alt+Enter")})`}
         onClick={() => setDetailsOpen(!detailsOpen)}
       >
         <PanelRightIcon />

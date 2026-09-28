@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeftIcon, ArrowRightIcon, ArrowUpIcon, CheckIcon, ChevronRightIcon, CopyIcon, RefreshCwIcon, SearchIcon, type LucideIcon } from "lucide-react";
@@ -105,7 +105,7 @@ function CrumbItem({ crumb: c, last, path }: { crumb: Crumb; last: boolean; path
           </Link>
         </NavMenu>
       ) : (
-        <span {...dropProps} className={cn("rounded px-1.5 py-1", drop)}>
+        <span {...dropProps} aria-current={last ? "page" : undefined} className={cn("rounded px-1.5 py-1", drop)}>
           {c.label}
         </span>
       )}
@@ -208,6 +208,19 @@ export function AddressBar({
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const trail = useRef<HTMLElement>(null);
+
+  // A long path doesn't fit on a phone: show its end, the folder you're in (like File Explorer), scrolling back for the rest
+  const trailKey = crumbs.map((c) => c.label).join("/");
+  useLayoutEffect(() => {
+    const el = trail.current;
+    if (!el) return;
+    const toEnd = () => (el.scrollLeft = el.scrollWidth);
+    toEnd();
+    const ro = new ResizeObserver(toEnd);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [trailKey, editing]);
 
   const refresh = async () => {
     setRefreshing(true);
@@ -287,7 +300,7 @@ export function AddressBar({
         ) : (
           <>
             <Icon className="size-4 shrink-0 text-muted-foreground" />
-            <nav aria-label={t("File path")} className="flex min-w-0 flex-1 items-center overflow-x-auto text-[13px] whitespace-nowrap">
+            <nav ref={trail} aria-label={t("File path")} className="flex min-w-0 flex-1 items-center overflow-x-auto text-[13px] whitespace-nowrap">
               {crumbs.map((c, i) => (
                 <CrumbItem key={i} crumb={c} last={i === crumbs.length - 1} path={crumbPath(crumbs.slice(0, i + 1))} />
               ))}
@@ -309,6 +322,10 @@ export function AddressBar({
         >
           {copied ? <CheckIcon /> : <CopyIcon />}
         </Button>
+        {/* Screen readers hear that the path was copied */}
+        <span role="status" className="sr-only">
+          {copied ? t("Path copied") : ""}
+        </span>
       </div>
       <SearchInput placeholder={searchPlaceholder} onSearch={onSearch} within={searchIn} inputRef={searchRef} />
     </div>

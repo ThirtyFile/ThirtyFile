@@ -4,6 +4,7 @@ import { DownloadIcon, Loader2Icon } from "lucide-react";
 import { api, type ActivityFilter } from "@/api";
 import { nativeDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
+import { ErrorState } from "@/components/ErrorState";
 import { ACTION_GROUPS, actionLabel } from "@/lib/drives";
 import { cn, formatWinDate } from "@/lib/utils";
 import { t, tServer } from "@/lib/i18n";
@@ -64,7 +65,7 @@ export function ActivityLog({ driveId, className, compact }: { driveId?: string;
             <Loader2Icon className="size-5 animate-spin" />
           </div>
         ) : list.error ? (
-          <p className="p-4 text-sm text-destructive">{list.error.message}</p>
+          <ErrorState message={list.error.message} onRetry={() => list.refetch()} />
         ) : !rows.length ? (
           <p className="p-6 text-center text-sm text-muted-foreground">{filtered ? t("No matching records") : t("No activity yet")}</p>
         ) : (

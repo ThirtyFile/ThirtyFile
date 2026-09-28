@@ -7,6 +7,7 @@ export interface ConfirmOptions {
   description?: ReactNode;
   confirmText?: string;
   destructive?: boolean;
+  irreversible?: boolean;
 }
 
 interface Request extends ConfirmOptions {
@@ -20,6 +21,7 @@ function RequestDialog({ req, onDone }: { req: Request; onDone(ok: boolean): voi
       description={req.description}
       confirmText={req.confirmText}
       destructive={req.destructive}
+      irreversible={req.irreversible}
       onConfirm={async () => onDone(true)}
       onClose={() => onDone(false)}
     />
