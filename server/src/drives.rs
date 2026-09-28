@@ -185,6 +185,14 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     // rather than being unlimited; administrators adjust it later. Each space has its own quota: whether users may
     // create spaces at all is the administrator's setting
     let quota = if user.is_admin() { req.quota_bytes.max(0) } else { user.quota_bytes.max(0) };
+    if source.is_none() {
+        // The disk of the location is asked before taking the write lock (space_folders.rs)
+        let location = match chosen {
+            Some(l) => l.to_string(),
+            None => crate::locations::default_location(&mut *st.db.acquire().await?).await?,
+        };
+        crate::space_folders::check(&st, &location).await;
+    }
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     if !user.is_admin() {

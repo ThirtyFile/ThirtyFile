@@ -854,6 +854,8 @@ async fn create_sso_user(st: &AppState, provider: &str, cfg: &ProviderConfig, id
     let quota = quota_setting.unwrap_or_else(|| st.system.read().unwrap().default_user_quota).max(0);
     // Sign-in is only possible through the provider: no password can match this value until an administrator sets one
     let password_hash = NO_PASSWORD.to_string();
+    let (create, location) = rule.as_ref().map_or((None, None), |r| (r.personal_space, r.personal_location.as_deref()));
+    crate::personal::check_ahead(st, create, location).await;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     // Two sign-ins of the same person at the same time: the second one finds what the first created (checked under the lock)
@@ -892,7 +894,6 @@ async fn create_sso_user(st: &AppState, provider: &str, cfg: &ProviderConfig, id
     crate::admin::validate_username(&username)?;
     // "My files" as the domain rule says, else by the system setting; a location that was deleted since gives way to
     // the setting's
-    let (create, location) = rule.as_ref().map_or((None, None), |r| (r.personal_space, r.personal_location.as_deref()));
     let personal = crate::personal::choose(st, &mut tx, create, location, false).await?;
     let id = create_user(
         &mut tx,

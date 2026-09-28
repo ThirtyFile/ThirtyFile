@@ -20,16 +20,31 @@
 //! Spaces on S3, SFTP and FTP keep their files in the content store (storage.rs): renaming a folder there would copy
 //! every file in it.
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
+    sync::{LazyLock, Mutex},
+    time::{Duration, Instant},
+};
 
 use sqlx::SqliteConnection;
 
 use crate::{
     error::{AppError, AppResult},
     folders::ignored,
+    state::AppState,
     storage::LocalConfig,
     util::split_name,
 };
+
+/// How long the disk of a location may take to answer: a disk or network share that stopped answering must not hold
+/// the write lock
+const DISK_TIMEOUT: Duration = Duration::from_secs(3);
+/// How long a location's folder found unavailable by `check` makes `make_folder_space` fail without asking the disk
+const UNAVAILABLE_FOR: Duration = Duration::from_secs(10);
+
+/// Locations' folders `check` found unavailable: (folder, location) → when
+static UNAVAILABLE: LazyLock<Mutex<HashMap<(PathBuf, String), Instant>>> = LazyLock::new(Default::default);
 
 /// The longest name most file systems hold, in bytes
 pub const MAX_NAME_BYTES: usize = 255;
@@ -84,18 +99,59 @@ pub fn place(root: &Path, kind: &str, name: &str, owner: &str, id: &str) -> (Pat
     }
 }
 
-/// The first of `name`, `name (2)`, `name (3)`… in `parent` that no space uses and that isn't on the disk yet (on a
-/// disk that ignores letter case, `Sales` is also taken by `sales`); None when all are taken
-pub async fn free_folder(conn: &mut SqliteConnection, parent: &Path, name: &str) -> Result<Option<PathBuf>, sqlx::Error> {
+/// Creates the first of `name`, `name (2)`, `name (3)`… in `parent` that no space uses (`taken`) and that isn't on
+/// the disk yet (on a disk that ignores letter case, `Sales` is also taken by `sales`); None when all are taken
+fn new_folder(parent: &Path, name: &str, taken: &HashSet<String>) -> std::io::Result<Option<PathBuf>> {
+    std::fs::create_dir_all(parent)?;
     for n in 1..10_000u32 {
         let candidate = parent.join(if n == 1 { name.to_string() } else { format!("{name} ({n})") });
-        let (taken,): (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM drives WHERE source_path = ?").bind(candidate.to_string_lossy()).fetch_one(&mut *conn).await?;
-        if taken == 0 && std::fs::symlink_metadata(&candidate).is_err() {
-            return Ok(Some(candidate));
+        if taken.contains(candidate.to_string_lossy().as_ref()) || std::fs::symlink_metadata(&candidate).is_ok() {
+            continue;
+        }
+        match std::fs::create_dir(&candidate) {
+            Ok(()) => return Ok(Some(candidate)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
         }
     }
     Ok(None)
+}
+
+/// The location id in the marker of the folder `root` (storage.rs, `LOCATION_MARKER`); None when it isn't there, or
+/// the disk doesn't answer within `DISK_TIMEOUT`
+async fn read_marker(root: &Path) -> Option<String> {
+    let read = async {
+        #[cfg(test)]
+        tests::hang_if_asked(root).await;
+        crate::storage::marker_of(root).await
+    };
+    tokio::time::timeout(DISK_TIMEOUT, read).await.ok()?.ok().flatten()
+}
+
+/// Before taking the write lock to create a space on `location`: whether the location's folder can take the space's
+/// folder, when the location is a folder of this server (true for the others). A location known to be offline isn't
+/// asked; a disk that doesn't answer within a few seconds counts as unavailable. For a little while after that,
+/// `make_folder_space` fails for this location without asking the disk again, so the write lock never waits for it.
+pub async fn check(st: &AppState, location: &str) -> bool {
+    let Some(builtin) = st.space_folders.as_deref() else { return true };
+    let root = match st.db.acquire().await {
+        Ok(mut c) => location_folder(&mut c, builtin, location).await.ok().flatten(),
+        Err(_) => None,
+    };
+    // Not a folder of this server, or unknown: `make_folder_space` tells
+    let Some(root) = root else { return true };
+    let root = std::path::absolute(&root).unwrap_or(root);
+    let offline = st.location_health.lock().unwrap().get(location).is_some_and(|h| !h.ok);
+    let ok = !offline && read_marker(&root).await.as_deref() == Some(location);
+    let mut unavailable = UNAVAILABLE.lock().unwrap();
+    unavailable.retain(|_, at| at.elapsed() < UNAVAILABLE_FOR);
+    let key = (root, location.to_string());
+    if ok {
+        unavailable.remove(&key);
+    } else {
+        unavailable.insert(key, Instant::now());
+    }
+    ok
 }
 
 /// The folder of the location a new space's files go to, when it is a folder of this server: the built-in location
@@ -120,6 +176,9 @@ pub(crate) async fn location_folder(conn: &mut SqliteConnection, builtin: &Path,
 /// (`drives.location_id`) is a folder of this server: creates its folder and points the space at it. `builtin`: the built-in location's folder
 /// (`AppState::space_folders`); None keeps every new space in the content store. Returns the folder; the caller calls
 /// `folders::spaces_changed` once its transaction is committed.
+///
+/// The caller holds the write lock: the disk is asked with a time limit (`DISK_TIMEOUT`), and not at all when `check`
+/// found the location's folder unavailable just before.
 pub async fn make_folder_space(conn: &mut SqliteConnection, builtin: Option<&Path>, drive_id: &str) -> AppResult<Option<PathBuf>> {
     let Some(builtin) = builtin else { return Ok(None) };
     let (name, kind, root_id, location, owner): (String, String, String, Option<String>, String) = sqlx::query_as(
@@ -134,22 +193,33 @@ pub async fn make_folder_space(conn: &mut SqliteConnection, builtin: Option<&Pat
     let root = std::path::absolute(&root).unwrap_or(root);
     // The location's folder must be there with the location's marker (storage.rs, `LOCATION_MARKER`): a disk or
     // share that isn't mounted must not get the space's folder on the disk below its mount point
-    if crate::storage::marker_of(&root).await.ok().flatten().as_deref() != Some(location.as_str()) {
-        return Err(AppError::new(
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            format!("The folder of the storage location ({}) isn't available", root.display()),
-        ));
+    let unavailable = || {
+        AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("The folder of the storage location ({}) isn't available", root.display()))
+    };
+    let checked_unavailable =
+        UNAVAILABLE.lock().unwrap().get(&(root.clone(), location.clone())).is_some_and(|at| at.elapsed() < UNAVAILABLE_FOR);
+    if checked_unavailable || read_marker(&root).await.as_deref() != Some(location.as_str()) {
+        return Err(unavailable());
     }
     let (parent, wanted) = place(&root, &kind, &name, &owner, drive_id);
-    let folder = free_folder(conn, &parent, &wanted)
-        .await?
-        .ok_or_else(|| AppError::conflict(format!("There is no free folder name for the space in {}", parent.display())))?;
-    std::fs::create_dir_all(&folder).map_err(|e| {
-        AppError::new(
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Couldn't create the folder {} for the space: {e}", folder.display()),
-        )
-    })?;
+    let taken: Vec<(String,)> = sqlx::query_as("SELECT source_path FROM drives WHERE source_path IS NOT NULL").fetch_all(&mut *conn).await?;
+    let taken: HashSet<String> = taken.into_iter().map(|(p,)| p).collect();
+    let task = {
+        let (parent, wanted) = (parent.clone(), wanted.clone());
+        tokio::task::spawn_blocking(move || new_folder(&parent, &wanted, &taken))
+    };
+    let folder = match tokio::time::timeout(DISK_TIMEOUT, task).await {
+        Ok(Ok(Ok(Some(folder)))) => folder,
+        Ok(Ok(Ok(None))) => return Err(AppError::conflict(format!("There is no free folder name for the space in {}", parent.display()))),
+        Ok(Ok(Err(e))) => {
+            return Err(AppError::new(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Couldn't create the folder {} for the space: {e}", parent.join(&wanted).display()),
+            ));
+        }
+        // The disk didn't answer in time (a folder it creates later is left unused)
+        _ => return Err(unavailable()),
+    };
     crate::folders::set_up(conn, drive_id, &root_id, &folder.to_string_lossy(), Some(&location)).await?;
     Ok(Some(folder))
 }
@@ -164,6 +234,68 @@ mod tests {
         http::HeaderMap,
     };
     use serde_json::{Value, json};
+
+    /// Folders whose disk doesn't answer (`read_marker` waits for them forever)
+    static HANGING: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+    pub(super) async fn hang_if_asked(root: &Path) {
+        if HANGING.lock().unwrap().iter().any(|p| p == root) {
+            std::future::pending::<()>().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn a_disk_that_doesnt_answer_doesnt_hold_the_write_lock() {
+        let env = testutil::folders_env().await;
+        let nas = std::path::absolute(env.dir.join("nas")).unwrap();
+        crate::storage::claim_folder(&nas, "nas").unwrap();
+        sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES ('nas', 'NAS', 'local', ?, 0, 0)")
+            .bind(json!({ "path": nas.to_string_lossy() }).to_string())
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        // Ben waits for his personal space on it
+        let ben = env.user("ben", true).await;
+        sqlx::query("DELETE FROM drives WHERE kind = 'personal' AND owner_id = ?").bind(ben.id).execute(&env.st.db).await.unwrap();
+        sqlx::query("UPDATE users SET root_id = NULL, personal_pending = 'nas' WHERE id = ?").bind(ben.id).execute(&env.st.db).await.unwrap();
+        let pending = || async {
+            let (p,): (Option<String>,) = sqlx::query_as("SELECT personal_pending FROM users WHERE id = ?").bind(ben.id).fetch_one(&env.st.db).await.unwrap();
+            p
+        };
+
+        // Its disk stops answering: the retry waits for it, but not while holding the write lock
+        HANGING.lock().unwrap().push(nas.clone());
+        let st = env.st.clone();
+        let retry = tokio::spawn(async move { crate::personal::retry_pending(&st, None).await });
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let lock = tokio::time::timeout(Duration::from_secs(1), env.st.write_lock.lock()).await;
+        assert!(lock.is_ok(), "another writer waited for the disk");
+        drop(lock);
+        // It gives up after the time limit, creating nothing
+        let created = tokio::time::timeout(DISK_TIMEOUT + Duration::from_secs(2), retry).await.expect("the retry waited past the time limit").unwrap();
+        assert_eq!(created, 0);
+        assert_eq!(pending().await.as_deref(), Some("nas"));
+        // Creating a space there right after fails without asking the disk again under the lock
+        let admin = env.admin().await;
+        let started = Instant::now();
+        let req = serde_json::from_value(json!({ "name": "Sales", "location_id": "nas" })).unwrap();
+        let err = crate::drives::create(State(env.st.clone()), admin, Json(req)).await.map(|_| ()).unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::SERVICE_UNAVAILABLE);
+        assert!(started.elapsed() < DISK_TIMEOUT * 2, "asked the disk twice: {:?}", started.elapsed());
+
+        // Known to be offline: the disk isn't asked at all
+        env.st.location_health.lock().unwrap().insert("nas".into(), crate::state::LocationHealth { ok: false, error: None, checked_at: 0 });
+        let started = Instant::now();
+        assert_eq!(crate::personal::retry_pending(&env.st, None).await, 0);
+        assert!(started.elapsed() < Duration::from_secs(1), "waited for an offline location: {:?}", started.elapsed());
+
+        // Answering and online again: the space is created
+        HANGING.lock().unwrap().retain(|p| p != &nas);
+        env.st.location_health.lock().unwrap().remove("nas");
+        assert_eq!(crate::personal::retry_pending(&env.st, None).await, 1);
+        assert_eq!(pending().await, None);
+        assert!(nas.join("users/ben").is_dir());
+    }
 
     async fn space_of(env: &testutil::TestEnv, root_id: &str) -> (String, Option<String>) {
         sqlx::query_as("SELECT mode, source_path FROM drives WHERE root_id = ?").bind(root_id).fetch_one(&env.st.db).await.unwrap()
