@@ -648,6 +648,8 @@ pub async fn save(st: &AppState, user: &User, id: &str, body: &[u8], base: Optio
     let (fs_size, fs_mtime, fs_ino): (Option<i64>, Option<i64>, Option<i64>) =
         sqlx::query_as("SELECT fs_size, fs_mtime_ns, fs_ino FROM nodes WHERE id = ?").bind(&node.id).fetch_one(&mut *tx).await?;
     let unchanged = stat(path.as_path()).is_ok_and(|s| Some(s.size) == fs_size && Some(s.mtime_ns) == fs_mtime && Some(s.ino) == fs_ino);
+    // The new content counts against the space's size limit: by how much it grows the file, or all of it as a copy
+    tree::check_quota(&mut tx, node.drive(), body.len() as i64 - if unchanged { node.size } else { 0 }).await?;
     // The new content keeps the file's permissions
     match crate::beneath::copy_permissions(&path, &tmp) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(disk_error(e)),
@@ -1409,6 +1411,30 @@ mod tests {
         assert!(r.skipped.iter().any(|s| s.contains("symbolic link")), "{r:?}");
         let _ = std::fs::remove_dir_all(&outside);
         let _ = std::fs::remove_dir_all(dir.with_extension("was-sub"));
+    }
+
+    #[tokio::test]
+    async fn saving_and_restoring_versions_keep_to_the_space_size_limit() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        write_old(&space.dir.join("notes.txt"), b"one");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (id, _) = env.node_at(&space.drive, "notes.txt").await.unwrap();
+        let limit = |bytes: i64| sqlx::query("UPDATE drives SET quota_bytes = ? WHERE id = ?").bind(bytes).bind(&space.drive).execute(&env.st.db);
+        let save = |body: &'static [u8]| crate::files::save_content(State(env.st.clone()), admin.clone(), UrlPath(id.clone()), HeaderMap::new(), Bytes::from_static(body));
+        limit(10).await.unwrap();
+        assert!(save(b"far more than ten bytes").await.is_err(), "over the limit");
+        assert_eq!(std::fs::read(space.dir.join("notes.txt")).unwrap(), b"one");
+        let _ = save(b"0123456789").await.unwrap();
+        let _ = save(b"x").await.unwrap();
+        // The earlier ten bytes don't fit once the limit is lower
+        limit(5).await.unwrap();
+        let axum::Json(list) = versions::list(State(env.st.clone()), admin.clone(), UrlPath(id.clone())).await.unwrap();
+        let list = serde_json::to_value(&list).unwrap();
+        let ten = list.as_array().unwrap().iter().find(|v| v["size"] == 10).unwrap()["id"].as_str().unwrap().to_string();
+        assert!(versions::restore(State(env.st.clone()), admin.clone(), UrlPath((id.clone(), ten))).await.is_err());
+        assert_eq!(std::fs::read(space.dir.join("notes.txt")).unwrap(), b"x");
     }
 
     #[tokio::test]

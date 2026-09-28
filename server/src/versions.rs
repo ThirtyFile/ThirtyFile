@@ -483,6 +483,8 @@ async fn restore_in_folder(st: &AppState, user: &User, node: &Node, tmp: &Path, 
         if current.drive() != node.drive() || !current.in_folder_space() {
             return Err(AppError::conflict("Something changed at the same time. Try again."));
         }
+        // The restored content counts against the space's size limit by how much it grows the file
+        tree::check_quota(&mut tx, current.drive(), size as i64 - current.size).await?;
         let removed = fsops::replace_file(&mut tx, Policy::of(st), &staged, &current, user.id).await?;
         let now_size = tree::get_node(&mut tx, &current.id).await?.map_or(0, |n| n.size);
         tree::adjust_usage(&mut tx, current.drive(), now_size - current.size).await?;
