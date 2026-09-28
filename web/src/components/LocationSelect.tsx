@@ -22,6 +22,14 @@ export function useLocationName() {
 }
 
 /**
+ * The id of the current default location, for sending the blank `"default"` choice of a LocationSelect explicitly
+ * where the server would otherwise apply another setting (a new user's "My files" follows Control panel › General)
+ */
+export function useDefaultLocationId() {
+  return useStorageLocations().data?.find((l) => l.is_default)?.id;
+}
+
+/**
  * A list of the storage locations. With `blank`, its first entry ("") stands for a choice made later: `"default"`
  * for whatever the default location is when the space is created (the current default is named), or the given text.
  */

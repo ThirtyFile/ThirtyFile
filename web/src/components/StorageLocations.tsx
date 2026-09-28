@@ -35,6 +35,7 @@ import { RowMenuArea } from "@/components/RowMenuArea";
 import { LocationBrowseDialog, LocationTestDialog, UnusedContentDialog } from "@/components/StorageTools";
 import { cn, formatBytes, formatDateTime } from "@/lib/utils";
 import { t, tServer } from "@/lib/i18n";
+import { useMoves } from "@/lib/moves";
 
 /** Dropdown (same style as the inputs) */
 const SELECT_CLASS =
@@ -81,11 +82,7 @@ export function StorageLocations() {
   const [tool, setTool] = useState<{ kind: "test" | "browse" | "unused"; location: StorageLocation } | null>(null);
   const [emptying, setEmptying] = useState<StorageLocation | null>(null);
   // Moves off each location: how far they are, and where the spaces went
-  const moves = useQuery({
-    queryKey: ["moves"],
-    queryFn: api.moves,
-    refetchInterval: (query) => (query.state.data?.moves.some((m) => m.state === "running" || m.state === "queued") ? 3000 : false),
-  });
+  const moves = useMoves(3000);
   const movesFrom = (id: string) => (moves.data?.moves ?? []).filter((m) => m.from_location === id);
   const list = q.data ?? [];
   const selected = list.find((l) => l.id === selectedId) ?? null;
@@ -158,7 +155,7 @@ export function StorageLocations() {
       <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
         <p className="text-xs leading-relaxed text-muted-foreground">
           {(() => {
-            const [before, after] = t("Where spaces keep their files. New spaces are created on the {default}; changing it doesn't move existing spaces. A space's files can be moved in \"Space management\".").split("{default}");
+            const [before, after] = t("Where spaces keep their files. New spaces are created on the {default}; changing it doesn't move existing spaces. A space's files can be moved in Control panel › Spaces.").split("{default}");
             return (
               <>
                 {before}
@@ -346,6 +343,7 @@ function MoveEverythingDialog({ location, onClose, onDone }: { location: Storage
     label: s.kind === "personal" && s.owner_name ? `${s.name} · ${s.owner_name}` : s.name,
     mode: s.mode,
     location_id: location.id,
+    source_path: s.source_path,
     used_bytes: s.used_bytes,
   }));
   return (

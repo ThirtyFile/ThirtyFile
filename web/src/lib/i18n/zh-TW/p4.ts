@@ -138,6 +138,7 @@ export default {
   "OK": "確定",
   "Shared with me: {name}": "與我共用：{name}",
   "No subfolders": "沒有子資料夾",
+  "You don't have access to any space to put it in.": "你沒有可以放入的空間。",
   "The new passwords don't match": "兩次輸入的新密碼不一致",
   "After you change it, you'll be signed out on other devices.": "變更後，其他裝置上的登入會被登出。",
   "Current password": "目前密碼",

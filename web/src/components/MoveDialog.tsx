@@ -125,14 +125,14 @@ export function MoveDialog({
                 <p>
                   {t("The space is read-only while its files are copied: people can open, download and share files, but not change them. It switches to the new location once all of them are there.")}
                 </p>
-                {fromFolder.length === 1 && movable.length === 1 && (
+                {fromFolder.length === 1 && movable.length === 1 && fromFolder[0].source_path && (
                   <p>
                     {t("Changes made in its folder from outside ThirtyFile meanwhile are copied too. Afterwards the folder {path} is removed, apart from anything that changed at the last moment.", {
                       path: fromFolder[0].source_path ?? "",
                     })}
                   </p>
                 )}
-                {fromFolder.length > 0 && movable.length > 1 && (
+                {fromFolder.length > 0 && (movable.length > 1 || !fromFolder[0].source_path) && (
                   <p>{t("Changes made in the folders of folder spaces from outside ThirtyFile meanwhile are copied too. Afterwards their folders are removed, apart from anything that changed at the last moment.")}</p>
                 )}
                 {target?.kind === "local" && <p>{t("There it gets a folder of its own, like a new space's, with its files as ordinary files.")}</p>}

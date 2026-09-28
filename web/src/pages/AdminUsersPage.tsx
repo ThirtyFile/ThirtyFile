@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClockIcon, FolderMinusIcon, FolderPlusIcon, HistoryIcon, Loader2Icon, MonitorSmartphoneIcon, ShieldCheckIcon, ShieldOffIcon, PencilIcon, RefreshCwIcon, Trash2Icon, TriangleAlertIcon, UserCheckIcon, UserPlusIcon, UsersIcon, UserXIcon } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { DataTable, type Column } from "@/components/DataTable";
@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog, ErrorText } from "@/components/dialogs";
-import { LocationSelect, useLocationName } from "@/components/LocationSelect";
+import { LocationSelect, useDefaultLocationId, useLocationName } from "@/components/LocationSelect";
 import { confirm } from "@/components/confirm";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { useMe } from "@/lib/session";
@@ -380,6 +380,14 @@ function PersonalFilesChoice({ c }: { c: ReturnType<typeof usePersonalFiles> }) 
   );
 }
 
+/**
+ * After someone's "My files" is created or removed: the lists, and the administrator's own session and spaces (the
+ * navigation pane), in case it was theirs
+ */
+function invalidatePersonal(qc: QueryClient) {
+  for (const key of ["admin-users", "admin-drives", "me", "drives"]) qc.invalidateQueries({ queryKey: [key] });
+}
+
 /** Creating someone's "My files" later, on a storage location */
 function AddPersonalDialog({ user, onClose }: { user: UserRow; onClose(): void }) {
   const qc = useQueryClient();
@@ -388,12 +396,13 @@ function AddPersonalDialog({ user, onClose }: { user: UserRow; onClose(): void }
   // Preset from the system setting (Control panel › General); "" = the default location
   const [location, setLocation] = useState<string | null>(null);
   const value = location ?? system.data?.personal_location ?? "";
+  // "Default location" is sent as the location it names: left out, the system setting would apply instead
+  const defaultLocation = useDefaultLocationId();
   const add = useMutation({
-    mutationFn: () => api.addPersonalSpace(user.id, value || undefined),
+    mutationFn: () => api.addPersonalSpace(user.id, value || defaultLocation),
     onSuccess: () => {
       toast.success(t("\"My files\" created"));
-      qc.invalidateQueries({ queryKey: ["admin-users"] });
-      qc.invalidateQueries({ queryKey: ["admin-drives"] });
+      invalidatePersonal(qc);
       onClose();
     },
   });
@@ -445,8 +454,7 @@ function RemovePersonalDialog({ user, onClose }: { user: UserRow; onClose(): voi
     mutationFn: () => api.removePersonalSpace(user.id, user.personal_space ? c.files : {}),
     onSuccess: () => {
       toast.success(user.personal_space ? t("\"My files\" removed") : t("Stopped waiting to create \"My files\""));
-      qc.invalidateQueries({ queryKey: ["admin-users"] });
-      qc.invalidateQueries({ queryKey: ["admin-drives"] });
+      invalidatePersonal(qc);
       onClose();
     },
   });
@@ -581,6 +589,8 @@ function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow | null;
   const [location, setLocation] = useState<string | null>(null);
   const withPersonal = personal ?? system.data?.personal_spaces ?? true;
   const personalLocation = location ?? system.data?.personal_location ?? "";
+  // "Default location" is sent as the location it names: left out, the system setting would apply instead
+  const defaultLocation = useDefaultLocationId();
 
   const save = useMutation({
     mutationFn: async () => {
@@ -593,7 +603,7 @@ function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow | null;
         quota_bytes: quotaGb ? Math.round(Number(quotaGb) * GB) : 0,
       };
       if (user) return api.updateUser(user.id, { ...body, disabled, password: password || undefined });
-      return api.createUser({ ...body, username, password, personal_space: withPersonal, personal_location: withPersonal ? personalLocation || undefined : undefined });
+      return api.createUser({ ...body, username, password, personal_space: withPersonal, personal_location: withPersonal ? personalLocation || defaultLocation : undefined });
     },
     onSuccess: (row) => {
       if (row.personal_pending) toast.warning(t("User created. Their \"My files\" is created once its storage location is available."));

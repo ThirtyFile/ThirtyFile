@@ -34,6 +34,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { t, tServer, tc } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
+import { useMoves } from "@/lib/moves";
 import { MoveProgress, moveRoute } from "@/pages/MovesPage";
 import { MoveDialog } from "@/components/MoveDialog";
 
@@ -85,11 +86,7 @@ export function AdminDrivesPage() {
     }
   };
   // Refreshed every few seconds while a space is being moved
-  const moves = useQuery({
-    queryKey: ["moves"],
-    queryFn: api.moves,
-    refetchInterval: (query) => (query.state.data?.moves.some((m) => m.state === "running" || m.state === "queued") ? 3000 : false),
-  });
+  const moves = useMoves(3000);
   /** The move of a space that isn't over, else its latest */
   const moveOf = (driveId: string) => {
     const of = moves.data?.moves.filter((m) => m.drive_id === driveId) ?? [];
