@@ -408,7 +408,7 @@ pub async fn rename(
     }
     if node.in_folder_space() {
         let folder = tree::get_node(&mut tx, &parent).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
-        fsops::rename(&mut tx, &node, &folder, &name).await?;
+        fsops::rename(&mut tx, &locks, &node, &folder, &name).await?;
     }
     let mime = if node.is_folder() { String::new() } else { crate::util::guess_mime(&name) };
     // The time only moves forward: it is the version the editors send back to detect changes by someone else, and
@@ -423,6 +423,7 @@ pub async fn rename(
     logs::record_activity(&mut tx, &user, Some(&node), "rename", &format!("→ {name}")).await?;
     let node = tree::get_node(&mut tx, &node.id).await?.unwrap();
     tx.commit().await?;
+    locks.committed();
     Ok(Json(node))
 }
 
@@ -557,7 +558,7 @@ pub async fn move_nodes(State(st): State<AppState>, user: User, Json(req): Json<
             tree::adjust_usage(&mut tx, node.drive(), -bytes).await?;
             tree::adjust_usage(&mut tx, dest.drive(), bytes).await?;
         } else if node.in_folder_space() {
-            fsops::rename(&mut tx, &node, &dest, &name).await?;
+            fsops::rename(&mut tx, &locks, &node, &dest, &name).await?;
         }
         sqlx::query("UPDATE nodes SET parent_id = ?, name = ? WHERE id = ?").bind(&dest.id).bind(&name).bind(&node.id).execute(&mut *tx).await?;
         node.name = name;
@@ -566,6 +567,7 @@ pub async fn move_nodes(State(st): State<AppState>, user: User, Json(req): Json<
     }
     tree::touch(&mut tx, &dest.id).await?;
     tx.commit().await?;
+    locks.committed();
     drop(_w);
     fsops::move_across(&st, &user, &dest, across).await?;
     Ok(Json(json!({ "ok": true })))
@@ -657,6 +659,7 @@ pub async fn copy_nodes(State(st): State<AppState>, user: User, Json(req): Json<
     tree::adjust_usage(&mut tx, dest.drive(), total).await?;
     tree::touch(&mut tx, &dest.id).await?;
     tx.commit().await?;
+    locks.committed();
     drop(_w);
     fsops::copy_across(&st, &user, &dest, across).await?;
     Ok(Json(json!({ "ok": true })))
@@ -670,19 +673,20 @@ pub async fn trash(State(st): State<AppState>, user: User, Json(req): Json<Batch
     for id in &outermost(&mut tx, &ids).await? {
         let node = tree::node_for(&mut tx, &user, id, Need::Delete).await?;
         locks.check(&node)?;
-        trash_one(&mut tx, &user, &node, "").await?;
+        trash_one(&mut tx, &user, &locks, &node, "").await?;
     }
     tx.commit().await?;
+    locks.committed();
     Ok(Json(json!({ "ok": true })))
 }
 
 /// Moves an item (the user may delete it) and everything in it to the trash; `detail` goes into the activity log
-async fn trash_one(conn: &mut SqliteConnection, user: &User, node: &Node, detail: &str) -> AppResult<()> {
+async fn trash_one(conn: &mut SqliteConnection, user: &User, locks: &fsops::SpaceLocks, node: &Node, detail: &str) -> AppResult<()> {
     not_root(node)?;
     let trash_id = new_id();
     if node.in_folder_space() {
         // Into the space's trash folder on disk, so it can be restored
-        fsops::trash(conn, node, &trash_id).await?;
+        fsops::trash(conn, locks, node, &trash_id).await?;
     }
     sqlx::query(
         "WITH RECURSIVE sub(id) AS (
@@ -710,7 +714,7 @@ async fn replace_existing(conn: &mut SqliteConnection, user: &User, locks: &fsop
     }
     let existing = tree::node_for(conn, user, &existing.id, Need::Delete).await?;
     locks.check(&existing)?;
-    trash_one(conn, user, &existing, "Replaced").await
+    trash_one(conn, user, locks, &existing, "Replaced").await
 }
 
 #[derive(Deserialize)]
@@ -981,7 +985,7 @@ pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<Bat
         let name = if node.in_folder_space() {
             let dest = tree::get_node(&mut tx, &parent_id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
             let name = fsops::free_name(&mut tx, &dest, &node.name, node.is_folder()).await?;
-            fsops::restore(&mut tx, &node, &dest, &name).await?;
+            fsops::restore(&mut tx, &locks, &node, &dest, &name).await?;
             name
         } else {
             tree::unique_name(&mut tx, &parent_id, &node.name, node.is_folder()).await?
@@ -1003,6 +1007,7 @@ pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<Bat
         logs::record_activity(&mut tx, &user, Some(&node), "restore", "").await?;
     }
     tx.commit().await?;
+    locks.committed();
     Ok(Json(json!({ "ok": true })))
 }
 

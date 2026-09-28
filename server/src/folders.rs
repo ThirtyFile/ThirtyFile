@@ -32,6 +32,9 @@ const SETTLE_SECONDS: i64 = 10;
 const BATCH: usize = 500;
 /// Skipped items listed in a scan report
 const MAX_REPORTED: usize = 200;
+/// A file in the folder of every folder space once it has been scanned: a folder without it that is suddenly empty is
+/// a disk or share that isn't mounted, not one whose items were all deleted
+const MARKER: &str = ".thirtyfile-space";
 
 /// One item found in the folder
 #[derive(Debug, Clone)]
@@ -65,6 +68,12 @@ pub struct ScanReport {
     pub read_ms: u64,
     #[serde(default)]
     pub index_ms: u64,
+    /// Folders that couldn't be read (paths below the space's folder): what the index has in them stays
+    #[serde(skip)]
+    unreadable: Vec<String>,
+    /// What changes left behind when they stopped halfway (`fsops::is_leftover`)
+    #[serde(skip)]
+    leftovers: Vec<String>,
 }
 
 /// A scan in progress, shown in the Control panel
@@ -157,12 +166,17 @@ fn walk(root: &Path, only: Option<&str>, report: &mut ScanReport, found: Option<
     let settle_after = (now() - SETTLE_SECONDS) as i128 * 1_000_000_000;
     let mut out = Vec::new();
     let mut queue = std::collections::VecDeque::from([only.unwrap_or("").to_string()]);
+    let mut first = true;
     while let Some(dir_rel) = queue.pop_front() {
+        let asked_for = std::mem::take(&mut first);
         let dir = if dir_rel.is_empty() { root.to_path_buf() } else { root.join(&dir_rel) };
         let read = match std::fs::read_dir(&dir) {
             Ok(r) => r,
+            // The folder asked for can't be read at all: nothing can be concluded about what it holds
+            Err(e) if asked_for => return Err(e),
             Err(e) => {
                 report.skip(format!("{}: {e}", if dir_rel.is_empty() { "/" } else { &dir_rel }));
+                report.unreadable.push(dir_rel);
                 continue;
             }
         };
@@ -172,10 +186,13 @@ fn walk(root: &Path, only: Option<&str>, report: &mut ScanReport, found: Option<
                 report.skip(format!("{}: a name that isn't valid text", show(&dir_rel, &item.file_name().to_string_lossy())));
                 continue;
             };
+            let rel = if dir_rel.is_empty() { name.clone() } else { format!("{dir_rel}/{name}") };
             if ignored(&name) {
+                if crate::fsops::is_leftover(&name) {
+                    report.leftovers.push(rel);
+                }
                 continue;
             }
-            let rel = if dir_rel.is_empty() { name.clone() } else { format!("{dir_rel}/{name}") };
             if name.chars().any(|c| c.is_control()) {
                 report.skip(format!("{rel}: the name contains control characters"));
                 continue;
@@ -272,6 +289,8 @@ async fn scan_locked(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
         .map_err(AppError::internal)?;
         res.map(|(e, r)| {
             report.skipped = r.skipped;
+            report.unreadable = r.unreadable;
+            report.leftovers = r.leftovers;
             e
         })
     };
@@ -291,6 +310,23 @@ async fn scan_locked(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     .fetch_all(&st.db)
     .await?;
     report.read_ms = started.elapsed().as_millis() as u64;
+    // An empty folder where the index has items is what a disk or share that isn't mounted looks like (its mount
+    // point is an empty folder): only a folder that has the marker is really empty
+    let marker = root.join(MARKER);
+    let has_items = indexed.iter().any(|n| n.fs_path.as_deref().is_some_and(|p| !p.is_empty()));
+    if entries.is_empty() && has_items && !marker.exists() {
+        report.error = Some(format!(
+            "{} is empty, but the space still has items: if it is on a disk or network share that isn't mounted, mount it and check again. To empty the space, delete its items in ThirtyFile.",
+            root.display()
+        ));
+        save_report(st, &drive, &report).await?;
+        return Ok(report);
+    }
+    if !marker.exists()
+        && let Err(e) = std::fs::write(&marker, &drive.id)
+    {
+        tracing::debug!("Couldn't write {}: {e}", marker.display());
+    }
     let indexing = std::time::Instant::now();
     let ops = plan(&drive, &indexed, &entries, true, &mut report);
     set_progress(drive_id, |p| {
@@ -299,6 +335,10 @@ async fn scan_locked(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     });
     apply(st, &drive, ops).await?;
     crate::fsops::clean_trash(st, &drive.id, &root).await?;
+    let leftovers: Vec<PathBuf> = report.leftovers.iter().map(|rel| root.join(rel)).collect();
+    if !leftovers.is_empty() {
+        tokio::task::spawn_blocking(move || crate::fsops::clean_leftovers(leftovers, crate::fsops::TRASH_GRACE)).await.map_err(AppError::internal)?;
+    }
     crate::versions::clean_folder(st, &drive.id, &root).await?;
     report.index_ms = indexing.elapsed().as_millis() as u64;
     if report.read_ms + report.index_ms > 10_000 {
@@ -365,14 +405,23 @@ async fn try_sync_folder(st: &AppState, folder: &Node) -> AppResult<()> {
     indexed.retain(|n| n.parent_id.as_deref() == Some(folder.id.as_str()) || n.id == folder.id);
     let ops = plan(&drive, &indexed, &entries, false, &mut report);
     let gone = ops.iter().any(|op| matches!(op, Op::Remove { .. })) || moved_in || report.removed > 0;
+    // Removals wait for the full scan (the item may have moved elsewhere), except where the path now holds the other
+    // kind (a file replaced by a folder of the same name): the new item needs its place
+    let present: HashSet<&str> = entries.iter().map(|e| e.rel.as_str()).collect();
+    let replaced: HashSet<&str> =
+        indexed.iter().filter(|n| n.fs_path.as_deref().is_some_and(|p| present.contains(p))).map(|n| n.id.as_str()).collect();
     let ops: Vec<Op> = if moved_in {
         // Something came from elsewhere: the full scan works out the whole picture
         Vec::new()
     } else {
-        ops.into_iter().filter(|op| !matches!(op, Op::Remove { .. })).collect()
+        ops.into_iter().filter(|op| !matches!(op, Op::Remove { id } if !replaced.contains(id.as_str()))).collect()
     };
     let changed = !ops.is_empty();
-    apply(st, &drive, ops).await?;
+    if let Err(e) = apply(st, &drive, ops).await {
+        drop(_scanning);
+        scan_later(st, &drive.id);
+        return Err(e);
+    }
     if changed {
         refresh_usage(st, &drive).await?;
     }
@@ -533,6 +582,10 @@ fn plan(drive: &Drive, indexed: &[Indexed], entries: &[Entry], full: bool, repor
         for n in indexed {
             let Some(path) = n.fs_path.as_deref() else { continue };
             if path.is_empty() || present.contains_key(path) || moved.contains(&n.id) || kind_changed.contains(&n.id) {
+                continue;
+            }
+            // In a folder that couldn't be read: still there, as far as anyone can tell
+            if report.unreadable.iter().any(|d| path.strip_prefix(d.as_str()).is_some_and(|rest| rest.starts_with('/'))) {
                 continue;
             }
             // Only the topmost removed item: its contents go with it

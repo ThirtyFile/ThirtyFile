@@ -5,6 +5,10 @@
 //! A web change to a folder space and a scan of it take turns (the space's scan lock, always taken before the write
 //! lock), so a scan never sees half of a change. New content is written under a name scans ignore (`.thirtyfile-…`)
 //! and renamed into place once it is complete, and renames never replace an item that is already there.
+//!
+//! A change of several items can fail after some of them were renamed on disk: the transaction then rolls back, and
+//! the renames are put back too (`SpaceLocks` keeps them until the change is committed), so the folder and the index
+//! stay as they were.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -86,16 +90,57 @@ fn incomplete() -> AppError {
 
 // ───────────── Taking turns with scans ─────────────
 
-/// Scan locks of the folder spaces a change touches, held until it is done
-pub struct SpaceLocks(Vec<(String, OwnedMutexGuard<()>)>);
+/// A rename made on disk by a change that isn't committed yet
+struct Renamed {
+    /// Where the item is now, and where it was
+    now: PathBuf,
+    was: PathBuf,
+    /// A folder made for the rename (a trash folder), removed again when undoing
+    made: Option<PathBuf>,
+}
+
+/// Scan locks of the folder spaces a change touches, held until it is done. They also keep the renames the change
+/// made on disk: unless `committed` is called, dropping them puts those back (still holding the locks), newest first.
+pub struct SpaceLocks {
+    held: Vec<(String, OwnedMutexGuard<()>)>,
+    renamed: std::sync::Mutex<Vec<Renamed>>,
+}
 
 impl SpaceLocks {
     /// An item of a folder space must be in a locked space (it could have moved to another one meanwhile)
     pub fn check(&self, n: &Node) -> AppResult<()> {
-        if n.in_folder_space() && !self.0.iter().any(|(d, _)| d == n.drive()) {
+        if n.in_folder_space() && !self.held.iter().any(|(d, _)| d == n.drive()) {
             return Err(AppError::conflict("Something changed at the same time. Try again."));
         }
         Ok(())
+    }
+
+    fn note(&self, now: PathBuf, was: PathBuf, made: Option<PathBuf>) {
+        self.renamed.lock().unwrap_or_else(|e| e.into_inner()).push(Renamed { now, was, made });
+    }
+
+    /// The change is in the index: its renames stay
+    pub fn committed(&self) {
+        self.renamed.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+}
+
+impl Drop for SpaceLocks {
+    fn drop(&mut self) {
+        let renamed = std::mem::take(self.renamed.get_mut().unwrap_or_else(|e| e.into_inner()));
+        for r in renamed.into_iter().rev() {
+            if let Some(dir) = r.was.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            match rename_new(&r.now, &r.was) {
+                Ok(()) => {
+                    if let Some(made) = r.made {
+                        let _ = std::fs::remove_dir(made);
+                    }
+                }
+                Err(e) => tracing::error!("Couldn't put {} back to {} after a failed change: {e}", r.now.display(), r.was.display()),
+            }
+        }
     }
 }
 
@@ -114,7 +159,7 @@ pub async fn lock(st: &AppState, user: &User, ids: &[&str]) -> AppResult<SpaceLo
         let guard = lock_space(&d).await;
         held.push((d, guard));
     }
-    Ok(SpaceLocks(held))
+    Ok(SpaceLocks { held, renamed: Default::default() })
 }
 
 pub async fn lock_space(drive_id: &str) -> OwnedMutexGuard<()> {
@@ -157,29 +202,68 @@ fn same_item(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Copies a file or folder on disk, including what the index doesn't have yet; symbolic links stay links
-fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
+/// An original that was copied: removed afterwards only if it is still what was copied
+struct Copied {
+    path: PathBuf,
+    is_dir: bool,
+    /// A file's size and modification time when it was copied
+    seen: Option<(u64, i64)>,
+}
+
+/// Copies a file or folder on disk, including what the index doesn't have yet; symbolic links stay links. `copied`
+/// lists the originals, folders before what is in them.
+fn copy_tree(from: &Path, to: &Path, copied: &mut Vec<Copied>) -> io::Result<()> {
     let meta = std::fs::symlink_metadata(from)?;
     if meta.is_dir() {
         std::fs::create_dir(to)?;
+        copied.push(Copied { path: from.to_path_buf(), is_dir: true, seen: None });
         for item in std::fs::read_dir(from)? {
             let item = item?;
-            copy_tree(&item.path(), &to.join(item.file_name()))?;
+            copy_tree(&item.path(), &to.join(item.file_name()), copied)?;
         }
     } else if meta.file_type().is_symlink() {
         #[cfg(unix)]
         std::os::unix::fs::symlink(std::fs::read_link(from)?, to)?;
+        copied.push(Copied { path: from.to_path_buf(), is_dir: false, seen: None });
     } else if meta.is_file() {
         // On btrfs and XFS the copy can share the original's blocks
         if std::fs::copy(from, to)? != meta.len() {
             return Err(io::Error::other("a file wasn't copied completely"));
         }
+        copied.push(Copied { path: from.to_path_buf(), is_dir: false, seen: Some((meta.len(), crate::folders::mtime_ns(&meta))) });
     }
     Ok(())
 }
 
+/// Removes the originals of a copy: files unchanged since they were copied, then folders left empty. Anything added or
+/// changed meanwhile (over SMB, say) stays, and the next scan shows it.
+fn remove_copied(copied: Vec<Copied>) {
+    for c in copied.iter().filter(|c| !c.is_dir) {
+        let unchanged = match c.seen {
+            Some((size, mtime)) => std::fs::symlink_metadata(&c.path).is_ok_and(|m| m.len() == size && crate::folders::mtime_ns(&m) == mtime),
+            None => true,
+        };
+        if !unchanged {
+            tracing::info!("Kept {}: it changed while it was being moved", c.path.display());
+            continue;
+        }
+        if let Err(e) = std::fs::remove_file(&c.path)
+            && e.kind() != io::ErrorKind::NotFound
+        {
+            tracing::warn!("Couldn't remove {} from disk: {e}", c.path.display());
+        }
+    }
+    for c in copied.iter().rev().filter(|c| c.is_dir) {
+        let _ = std::fs::remove_dir(&c.path);
+    }
+}
+
 fn remove_all(p: &Path) -> io::Result<()> {
     if std::fs::symlink_metadata(p)?.is_dir() { std::fs::remove_dir_all(p) } else { std::fs::remove_file(p) }
+}
+
+fn older_than(p: &Path, age: std::time::Duration) -> bool {
+    std::fs::symlink_metadata(p).and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|a| a >= age))
 }
 
 /// Removes items from disk in the background (the index no longer has them)
@@ -294,19 +378,22 @@ pub fn make_dir(parent: &Node, name: &str) -> AppResult<(String, Stat)> {
 
 /// Renames an item, or moves it to another folder of its space: on disk, then in the index (the caller records its
 /// new name and folder)
-pub async fn rename(conn: &mut SqliteConnection, node: &Node, dest: &Node, name: &str) -> AppResult<()> {
-    rename_new(&abs(node)?, &abs(dest)?.join(name)).map_err(disk_error)?;
+pub async fn rename(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node, dest: &Node, name: &str) -> AppResult<()> {
+    let (from, to) = (abs(node)?, abs(dest)?.join(name));
+    rename_new(&from, &to).map_err(disk_error)?;
+    locks.note(to, from, None);
     repath(conn, node.drive(), rel_of(node), &child_rel(rel_of(dest), name)).await
 }
 
 /// Moves an item to the space's trash folder, where it can be restored from
-pub async fn trash(conn: &mut SqliteConnection, node: &Node, trash_id: &str) -> AppResult<()> {
+pub async fn trash(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node, trash_id: &str) -> AppResult<()> {
     let root = PathBuf::from(node.fs_root.as_deref().unwrap_or_default());
     let dir = root.join(TRASH_DIR).join(trash_id);
     let from = abs(node)?;
     std::fs::create_dir_all(&dir).map_err(disk_error)?;
-    match rename_new(&from, &dir.join(&node.name)) {
-        Ok(()) => {}
+    let to = dir.join(&node.name);
+    match rename_new(&from, &to) {
+        Ok(()) => locks.note(to, from, Some(dir)),
         // Already gone from the server: only the index still had it
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
         Err(e) => {
@@ -318,9 +405,10 @@ pub async fn trash(conn: &mut SqliteConnection, node: &Node, trash_id: &str) -> 
 }
 
 /// Moves a trashed item back into `dest` as `name`
-pub async fn restore(conn: &mut SqliteConnection, node: &Node, dest: &Node, name: &str) -> AppResult<()> {
-    let from = abs(node)?;
-    rename_new(&from, &abs(dest)?.join(name)).map_err(disk_error)?;
+pub async fn restore(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node, dest: &Node, name: &str) -> AppResult<()> {
+    let (from, to) = (abs(node)?, abs(dest)?.join(name));
+    rename_new(&from, &to).map_err(disk_error)?;
+    locks.note(to, from.clone(), None);
     if let Some(dir) = from.parent() {
         let _ = std::fs::remove_dir(dir);
     }
@@ -337,11 +425,16 @@ pub fn trash_folder(n: &Node) -> Option<PathBuf> {
     Some(Path::new(n.fs_root.as_deref()?).join(TRASH_DIR).join(id))
 }
 
-/// Removes trash folders the index doesn't know (deleted for good while removing them from disk failed, say)
+/// Trash folders younger than this are never removed by `clean_trash`, known or not
+pub const TRASH_GRACE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
+/// Removes trash folders the index doesn't know (deleted for good while removing them from disk failed, say). Recent
+/// ones stay: something that went wrong halfway may still need them.
 pub async fn clean_trash(st: &AppState, drive_id: &str, root: &Path) -> AppResult<()> {
     let dir = root.join(TRASH_DIR);
     let Ok(read) = std::fs::read_dir(&dir) else { return Ok(()) };
-    let names: Vec<String> = read.flatten().filter_map(|e| e.file_name().into_string().ok()).collect();
+    let old = |e: &std::fs::DirEntry| older_than(e.path().as_path(), TRASH_GRACE);
+    let names: Vec<String> = read.flatten().filter(old).filter_map(|e| e.file_name().into_string().ok()).collect();
     if names.is_empty() {
         return Ok(());
     }
@@ -356,13 +449,54 @@ pub async fn clean_trash(st: &AppState, drive_id: &str, root: &Path) -> AppResul
     Ok(())
 }
 
+/// Whether a name scans ignore is something a change left behind when it stopped halfway (a restart, say)
+pub fn is_leftover(name: &str) -> bool {
+    [MOVE_PREFIX, COPY_PREFIX, UPLOAD_PREFIX, SAVE_PREFIX].iter().any(|p| name.starts_with(p))
+}
+
+/// Deals with what changes left behind (`is_leftover`, paths found by a scan) once they are old enough that no change
+/// can still be using them: an item that was being moved in is put back under its own name, where the next scan
+/// shows it; half-made copies, uploads and saves are removed. `age`: how old they must be.
+pub fn clean_leftovers(paths: Vec<PathBuf>, age: std::time::Duration) {
+    for p in paths.into_iter().filter(|p| older_than(p, age)) {
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        if name.starts_with(MOVE_PREFIX) && p.is_dir() {
+            let dir = p.parent().map(Path::to_path_buf).unwrap_or_default();
+            for item in std::fs::read_dir(&p).into_iter().flatten().flatten() {
+                let item_name = item.file_name().to_string_lossy().into_owned();
+                let is_dir = item.file_type().is_ok_and(|t| t.is_dir());
+                let back = (0..10_000u32).map(|n| if n == 0 { item_name.clone() } else { numbered_name(&item_name, n, is_dir) }).find_map(|candidate| {
+                    match rename_new(&item.path(), &dir.join(&candidate)) {
+                        Ok(()) => Some(Ok(candidate)),
+                        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => None,
+                        Err(e) => Some(Err(e)),
+                    }
+                });
+                match back {
+                    Some(Ok(n)) => tracing::warn!("Put back {} in {}: it was being moved when ThirtyFile stopped", n, dir.display()),
+                    Some(Err(e)) => tracing::warn!("Couldn't put back {}: {e}", item.path().display()),
+                    None => {}
+                }
+            }
+            let _ = std::fs::remove_dir(&p);
+        } else if let Err(e) = remove_all(&p)
+            && e.kind() != io::ErrorKind::NotFound
+        {
+            tracing::warn!("Couldn't remove {} from disk: {e}", p.display());
+        }
+    }
+}
+
 // ───────────── Uploads and saving ─────────────
+
+const UPLOAD_PREFIX: &str = ".thirtyfile-upload-";
+const SAVE_PREFIX: &str = ".thirtyfile-save-";
 
 /// Puts a finished upload into the space's folder under a name scans ignore, ready to be renamed into place: a
 /// rename when the folder is on the same disk as ThirtyFile's data, else a copy
 pub async fn stage_upload(folder: &Node, tmp: &Path, size: u64) -> AppResult<PathBuf> {
     let root = PathBuf::from(folder.fs_root.as_deref().unwrap_or_default());
-    let staged = root.join(format!(".thirtyfile-upload-{}", new_id()));
+    let staged = root.join(format!("{UPLOAD_PREFIX}{}", new_id()));
     if tokio::fs::rename(tmp, &staged).await.is_err() {
         match tokio::fs::copy(tmp, &staged).await {
             Ok(n) if n == size => {
@@ -430,7 +564,7 @@ pub async fn save(st: &AppState, user: &User, id: &str, body: &[u8], base: Optio
         sqlx::query_as("SELECT fs_size, fs_mtime_ns, fs_ino FROM nodes WHERE id = ?").bind(&node.id).fetch_one(&mut *tx).await?;
     let unchanged = stat(&path).is_ok_and(|s| Some(s.size) == fs_size && Some(s.mtime_ns) == fs_mtime && Some(s.ino) == fs_ino);
 
-    let tmp = dir.join(format!(".thirtyfile-save-{}", new_id()));
+    let tmp = dir.join(format!("{SAVE_PREFIX}{}", new_id()));
     let written = std::fs::write(&tmp, body).and_then(|()| match std::fs::metadata(&path) {
         // The new content keeps the file's permissions
         Ok(m) => std::fs::set_permissions(&tmp, m.permissions()),
@@ -501,9 +635,11 @@ pub async fn save(st: &AppState, user: &User, id: &str, body: &[u8], base: Optio
 
 /// Content of items being moved or copied to another space, put in place before the index changes
 enum Placed {
-    /// In the destination folder on disk under a temporary name; `renamed_from`: the original was renamed there (same
-    /// disk), so undoing renames it back
-    Disk { tmp: PathBuf, renamed_from: Option<PathBuf> },
+    /// In the destination folder on disk, as `tmp` inside a folder `wrap` that scans ignore (`.thirtyfile-move-…`, so
+    /// that after a restart in between, the item is still found there under its name); `renamed_from`: the original
+    /// was renamed there (same disk), so undoing renames it back; `copied`: the originals of a move that copied them
+    /// (another disk), removed once the index follows
+    Disk { wrap: PathBuf, tmp: PathBuf, renamed_from: Option<PathBuf>, copied: Vec<Copied> },
     /// In the destination's content store: one staged content per file (by node id)
     Store(HashMap<String, StagedBlob>),
 }
@@ -589,29 +725,45 @@ async fn place(st: &AppState, nodes: &[Node], dest: &Node, moving: bool) -> AppR
     if !dest.in_folder_space() {
         return Ok(Placed::Store(ingest(st, nodes, dest.drive()).await?));
     }
-    let tmp = abs(dest)?.join(format!(".thirtyfile-{}-{}", if moving { "move" } else { "copy" }, new_id()));
+    let wrap = abs(dest)?.join(format!("{}{}", if moving { MOVE_PREFIX } else { COPY_PREFIX }, new_id()));
+    tokio::fs::create_dir(&wrap).await.map_err(disk_error)?;
+    let tmp = wrap.join(&top.name);
     if moving && top.in_folder_space() {
         let from = abs(top)?;
         let renamed = if other_disk() { Err(io::ErrorKind::CrossesDevices.into()) } else { std::fs::rename(&from, &tmp) };
         match renamed {
-            Ok(()) => return Ok(Placed::Disk { tmp, renamed_from: Some(from) }),
-            Err(e) if e.kind() != io::ErrorKind::CrossesDevices => return Err(disk_error(e)),
+            Ok(()) => return Ok(Placed::Disk { wrap, tmp, renamed_from: Some(from), copied: Vec::new() }),
+            Err(e) if e.kind() != io::ErrorKind::CrossesDevices => {
+                let _ = std::fs::remove_dir(&wrap);
+                return Err(disk_error(e));
+            }
             Err(_) => {}
         }
         // Another disk: copy everything, including what the index doesn't have yet, before the original goes
         let (f, t) = (from.clone(), tmp.clone());
-        if let Err(e) = tokio::task::spawn_blocking(move || copy_tree(&f, &t)).await? {
-            remove_later(vec![tmp]);
-            return Err(disk_error(e));
+        match tokio::task::spawn_blocking(move || {
+            let mut copied = Vec::new();
+            copy_tree(&f, &t, &mut copied).map(|()| copied)
+        })
+        .await?
+        {
+            Ok(copied) => return Ok(Placed::Disk { wrap, tmp, renamed_from: None, copied }),
+            Err(e) => {
+                remove_later(vec![wrap]);
+                return Err(disk_error(e));
+            }
         }
-        return Ok(Placed::Disk { tmp, renamed_from: None });
     }
     if let Err(e) = write_tree(st, nodes, &tmp).await {
-        remove_later(vec![tmp]);
+        remove_later(vec![wrap]);
         return Err(e);
     }
-    Ok(Placed::Disk { tmp, renamed_from: None })
+    Ok(Placed::Disk { wrap, tmp, renamed_from: None, copied: Vec::new() })
 }
+
+/// Folders holding an item on its way into a folder (`Placed::Disk`)
+pub const MOVE_PREFIX: &str = ".thirtyfile-move-";
+const COPY_PREFIX: &str = ".thirtyfile-copy-";
 
 #[cfg(test)]
 thread_local! {
@@ -632,12 +784,14 @@ fn other_disk() -> bool {
 /// Takes back content put in place when the index couldn't follow
 async fn undo(st: &AppState, placed: Placed) {
     match placed {
-        Placed::Disk { tmp, renamed_from: Some(from) } => {
+        Placed::Disk { wrap, tmp, renamed_from: Some(from), .. } => {
             if std::fs::rename(&tmp, &from).is_err() && tmp.exists() {
                 tracing::warn!("Couldn't move {} back to {}", tmp.display(), from.display());
+            } else {
+                let _ = std::fs::remove_dir(&wrap);
             }
         }
-        Placed::Disk { tmp, renamed_from: None } => remove_later(vec![tmp]),
+        Placed::Disk { wrap, renamed_from: None, .. } => remove_later(vec![wrap]),
         Placed::Store(staged) => {
             for (_, s) in staged {
                 tree::abandon_staged(st, s).await;
@@ -689,17 +843,20 @@ fn id_list<'a>(ids: impl Iterator<Item = &'a str>) -> String {
 /// `items`: each item with everything in it (not in the trash), ordered by depth.
 pub async fn move_across(st: &AppState, user: &User, dest: &Node, items: Vec<Vec<Node>>) -> AppResult<()> {
     for nodes in items {
-        let placed = place(st, &nodes, dest, true).await?;
+        let mut placed = place(st, &nodes, dest, true).await?;
         let result = {
             let _w = st.write_lock.lock().await;
             commit_move(st, user, dest, &nodes, &placed).await
         };
         match result {
             Ok((extras, remove)) => {
-                let copied_from_folder = matches!(placed, Placed::Disk { renamed_from: None, .. }) && nodes[0].in_folder_space();
+                let copied = match &mut placed {
+                    Placed::Disk { copied, .. } => std::mem::take(copied),
+                    Placed::Store(_) => Vec::new(),
+                };
                 finish(st, placed, extras).await;
-                if copied_from_folder {
-                    remove_later(vec![abs(&nodes[0])?]);
+                if !copied.is_empty() {
+                    tokio::task::spawn_blocking(move || remove_copied(copied));
                 }
                 if !remove.is_empty() {
                     tokio::task::spawn_blocking(move || remove_indexed(remove));
@@ -762,9 +919,10 @@ async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
     let mut extras = Vec::new();
     let mut remove = Vec::new();
     match placed {
-        Placed::Disk { tmp, .. } => {
+        Placed::Disk { wrap, tmp, .. } => {
             let final_path = abs(dest)?.join(&top.name);
             rename_new(tmp, &final_path).map_err(disk_error)?;
+            let _ = std::fs::remove_dir(wrap);
             let dest_rel = child_rel(rel_of(dest), &top.name);
             for (n, rel) in nodes.iter().zip(layout(nodes)) {
                 let Some(rel) = rel else { continue };
@@ -849,10 +1007,11 @@ async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
     let mut extras = Vec::new();
     let mut bytes = 0i64;
     match placed {
-        Placed::Disk { tmp, .. } => {
+        Placed::Disk { wrap, tmp, .. } => {
             let name = free_name(&mut tx, dest, &top.name, top.is_folder()).await?;
             let final_path = abs(dest)?.join(&name);
             rename_new(tmp, &final_path).map_err(disk_error)?;
+            let _ = std::fs::remove_dir(wrap);
             let dest_rel = child_rel(rel_of(dest), &name);
             for (i, (n, rel)) in nodes.iter().zip(layout(nodes)).enumerate() {
                 let Some(rel) = rel else { continue };
@@ -1079,5 +1238,139 @@ mod tests {
             sqlx::query_as("SELECT id FROM nodes WHERE parent_id = ? AND name = 'x.txt'").bind(&admin.root_id).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(content(&env, &admin, &copy).await, b"x");
         assert!(one.dir.join("Sub/x.txt").is_file(), "copying leaves the original");
+    }
+
+    #[tokio::test]
+    async fn a_change_of_several_items_that_fails_halfway_puts_the_first_ones_back() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        let (dir, drive) = (&space.dir, &space.drive);
+        let st = || State(env.st.clone());
+        write_old(&dir.join("a.txt"), b"a");
+        write_old(&dir.join("b.txt"), b"b");
+        crate::folders::scan(&env.st, drive).await.unwrap();
+        let (a, _) = env.node_at(drive, "a.txt").await.unwrap();
+        let (b, _) = env.node_at(drive, "b.txt").await.unwrap();
+        let Json(docs) = crate::nodes::create_folder(st(), admin.clone(), req(json!({ "parent_id": space.root, "name": "Docs" }))).await.unwrap();
+        let unchanged = || async {
+            assert!(dir.join("a.txt").is_file() && dir.join("b.txt").is_file());
+            assert_eq!(env.node_at(drive, "a.txt").await.unwrap().0, a);
+            assert!(node(&env, &a).await.trashed_at.is_none());
+            let r = crate::folders::scan(&env.st, drive).await.unwrap();
+            assert_eq!((r.added, r.moved, r.removed), (0, 0, 0), "{r:?}");
+        };
+
+        // The space's root folder can't be deleted or moved: the first item was already changed on disk by then
+        assert!(crate::nodes::trash(st(), admin.clone(), req(json!({ "ids": [a, space.root] }))).await.is_err());
+        unchanged().await;
+        assert_eq!(std::fs::read_dir(dir.join(TRASH_DIR)).map(|r| r.count()).unwrap_or(0), 0, "no trash folder is left");
+        assert!(crate::nodes::move_nodes(st(), admin.clone(), req(json!({ "ids": [a, space.root], "dest_id": docs.id }))).await.is_err());
+        unchanged().await;
+
+        // Restoring: the first item goes back to the trash when the second one fails
+        let _ = crate::nodes::trash(st(), admin.clone(), req(json!({ "ids": [a] }))).await.unwrap();
+        let in_trash = node(&env, &a).await.fs_file().unwrap();
+        assert!(crate::nodes::restore(st(), admin.clone(), req(json!({ "ids": [a, "no-such-item"] }))).await.is_err());
+        assert!(in_trash.is_file() && !dir.join("a.txt").exists());
+        assert_eq!(node(&env, &a).await.fs_file().unwrap(), in_trash);
+        let _ = crate::nodes::restore(st(), admin.clone(), req(json!({ "ids": [a] }))).await.unwrap();
+        unchanged().await;
+
+        // Nothing went wrong: the changes stay
+        let _ = crate::nodes::move_nodes(st(), admin.clone(), req(json!({ "ids": [a, b], "dest_id": docs.id }))).await.unwrap();
+        assert!(dir.join("Docs/a.txt").is_file() && dir.join("Docs/b.txt").is_file());
+    }
+
+    #[tokio::test]
+    async fn a_folder_that_looks_empty_or_cant_be_read_keeps_its_items() {
+        let env = testutil::env().await;
+        let space = env.folder_space("NAS").await;
+        let (dir, drive) = (&space.dir, &space.drive);
+        write_old(&dir.join("a.txt"), b"a");
+        write_old(&dir.join("Sub/b.txt"), b"b");
+        crate::folders::scan(&env.st, drive).await.unwrap();
+        let (a, _) = env.node_at(drive, "a.txt").await.unwrap();
+
+        // A share that isn't mounted: its mount point is an empty folder, without the marker
+        let mounted = dir.with_extension("mounted");
+        std::fs::rename(dir, &mounted).unwrap();
+        std::fs::create_dir(dir).unwrap();
+        let r = crate::folders::scan(&env.st, drive).await.unwrap();
+        assert!(r.error.is_some() && r.removed == 0, "{r:?}");
+        assert_eq!(env.node_at(drive, "a.txt").await.unwrap().0, a);
+        std::fs::remove_dir(dir).unwrap();
+        std::fs::rename(&mounted, dir).unwrap();
+        let r = crate::folders::scan(&env.st, drive).await.unwrap();
+        assert_eq!((r.added, r.removed, r.error.is_none()), (0, 0, true), "{r:?}");
+
+        // A folder that can't be read keeps what the index has in it
+        #[cfg(unix)]
+        if unsafe { libc::geteuid() } != 0 {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(dir.join("Sub"), std::fs::Permissions::from_mode(0o000)).unwrap();
+            let r = crate::folders::scan(&env.st, drive).await;
+            std::fs::set_permissions(dir.join("Sub"), std::fs::Permissions::from_mode(0o755)).unwrap();
+            let r = r.unwrap();
+            assert_eq!(r.removed, 0, "{r:?}");
+            assert!(env.node_at(drive, "Sub/b.txt").await.is_some());
+        }
+
+        // Emptied for real (the marker is there): the items go
+        std::fs::remove_file(dir.join("a.txt")).unwrap();
+        std::fs::remove_dir_all(dir.join("Sub")).unwrap();
+        let r = crate::folders::scan(&env.st, drive).await.unwrap();
+        assert_eq!(r.removed, 3, "{r:?}");
+        assert!(env.node_at(drive, "a.txt").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_file_replaced_by_a_folder_of_the_same_name_shows_as_the_folder_when_opened() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        write_old(&space.dir.join("Report"), b"a file");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        std::fs::remove_file(space.dir.join("Report")).unwrap();
+        write_old(&space.dir.join("Report/inside.txt"), b"x");
+        let later = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+        let _ = std::fs::File::open(space.dir.join("Report")).and_then(|f| f.set_modified(later));
+        crate::folders::sync_folder(&env.st, &node(&env, &space.root).await).await;
+        let (id, _) = env.node_at(&space.drive, "Report").await.unwrap();
+        assert!(node(&env, &id).await.is_folder());
+    }
+
+    #[test]
+    fn a_move_to_another_disk_keeps_what_changed_while_it_was_copied() {
+        let top = std::env::temp_dir().join(format!("thirtyfile-copied-{}", new_id()));
+        let (from, to) = (top.join("from"), top.join("to"));
+        write_old(&from.join("same.txt"), b"same");
+        write_old(&from.join("Sub/edited.txt"), b"before");
+        let mut copied = Vec::new();
+        copy_tree(&from, &to, &mut copied).unwrap();
+        assert_eq!(std::fs::read(to.join("Sub/edited.txt")).unwrap(), b"before");
+        // Saved over SMB while the copy ran, and a file added
+        std::fs::write(from.join("Sub/edited.txt"), b"after, and longer").unwrap();
+        write_old(&from.join("new.txt"), b"new");
+        remove_copied(copied);
+        assert!(!from.join("same.txt").exists());
+        assert_eq!(std::fs::read(from.join("Sub/edited.txt")).unwrap(), b"after, and longer");
+        assert!(from.join("new.txt").is_file());
+        let _ = std::fs::remove_dir_all(&top);
+    }
+
+    #[test]
+    fn what_a_stopped_change_left_behind_is_put_back_or_removed() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-leftovers-{}", new_id()));
+        write_old(&dir.join(format!("{MOVE_PREFIX}1/Report/a.txt")), b"moving");
+        write_old(&dir.join("Report"), b"already taken");
+        write_old(&dir.join(format!("{UPLOAD_PREFIX}2")), b"half an upload");
+        assert!(is_leftover(&format!("{MOVE_PREFIX}1")) && is_leftover(&format!("{SAVE_PREFIX}3")) && !is_leftover(TRASH_DIR));
+        let found = vec![dir.join(format!("{MOVE_PREFIX}1")), dir.join(format!("{UPLOAD_PREFIX}2"))];
+        clean_leftovers(found.clone(), TRASH_GRACE);
+        assert!(found.iter().all(|p| p.exists()), "recent ones may still be in use");
+        clean_leftovers(found.clone(), std::time::Duration::ZERO);
+        assert_eq!(std::fs::read(dir.join("Report (1)/a.txt")).unwrap(), b"moving");
+        assert!(found.iter().all(|p| !p.exists()));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
