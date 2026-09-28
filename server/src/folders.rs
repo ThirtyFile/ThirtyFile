@@ -49,7 +49,7 @@ pub fn space_marker(root: &crate::beneath::Pinned) -> std::io::Result<Option<Str
 
 /// Gives the folder `source` of a new space `drive_id` the space's marker, replacing one left by a deleted space (a
 /// folder another space uses can't be chosen: `check_new_source`)
-fn mark_space(source: &Path, drive_id: &str) -> std::io::Result<()> {
+pub(crate) fn mark_space(source: &Path, drive_id: &str) -> std::io::Result<()> {
     let marker = crate::beneath::Pinned::root(source)?.join(MARKER)?;
     match std::fs::remove_file(marker.as_path()) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),

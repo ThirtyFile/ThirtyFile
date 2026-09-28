@@ -20,7 +20,9 @@
 //! One engine per direction: store.rs moves a space between content stores, to_store.rs a folder space into a content
 //! store.
 
+mod between_folders;
 mod store;
+mod to_folder;
 mod to_store;
 
 use std::{
@@ -50,7 +52,7 @@ use crate::{
 /// Most moves the Moves page lets run at the same time
 pub const MAX_JOBS: i64 = 8;
 /// States of a move that isn't over: the space is still being moved (or waits to be)
-const ACTIVE: &str = "('queued', 'running', 'paused', 'failed')";
+pub(super) const ACTIVE: &str = "('queued', 'running', 'paused', 'failed')";
 /// Items listed in a move's failures (all are counted)
 const MAX_FAILURES: usize = 100;
 /// Tries for each item before it counts as failed
@@ -463,7 +465,9 @@ async fn run(st: &AppState, job: &Job, ctl: &Control) {
         Ok(()) => match (job.from_mode.as_str(), job.to_mode.as_str()) {
             ("store", "store") => store::run(&cx).await,
             ("folder", "store") => to_store::run(&cx).await,
-            _ => Err(AppError::bad_request("This move isn't possible yet")),
+            ("store", "folder") => to_folder::run(&cx).await,
+            ("folder", "folder") => between_folders::run(&cx).await,
+            _ => Err(AppError::bad_request("This move isn't possible")),
         },
         Err(e) => Err(e),
     };
@@ -603,7 +607,7 @@ async fn finish(conn: &mut SqliteConnection, cx: &Ctx<'_>, cleanup: bool, note: 
 async fn remove_copies(st: &AppState, job: &Job) -> AppResult<()> {
     match job.to_mode.as_str() {
         "store" => store::remove_copies(st, job).await,
-        _ => Ok(()),
+        _ => to_folder::remove_copies(st, job).await,
     }
 }
 
@@ -754,9 +758,6 @@ async fn queue(
     let shown = if space.kind == "personal" && !space.owner_name.is_empty() { format!("{} · {}", space.name, space.owner_name) } else { space.name.clone() };
     if drive_busy(conn, drive_id).await? {
         return Err(AppError::conflict(format!("\"{shown}\" is already being moved")));
-    }
-    if to_mode == "folder" {
-        return Err(AppError::bad_request("Moving a space into a folder on the server isn't possible yet"));
     }
     let from_path = space.source_path.clone().filter(|_| space.mode == "folder");
     if let Some(path) = &from_path {

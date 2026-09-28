@@ -69,8 +69,8 @@
         <div class="note">Connections without encryption (plain FTP, or S3 over http) are only accepted for addresses inside your own network.</div>
 
         <h2 id="per-space">Moving a space to another location</h2>
-        <p>Under <strong>Control panel › Spaces</strong>, select a space and choose <strong>Move to another location…</strong>. The dialog shows where the space is now and how big it is, and lists the other locations, with the free space of those on this server's disks. A location without enough room for the space can't be chosen.</p>
-        <p>The move runs in the background, in three steps:</p>
+        <p>Under <strong>Control panel › Spaces</strong>, select a space and choose <strong>Move to another location…</strong>. Any space can go to any other location: between content stores, from a folder into a content store, and into a folder. The dialog shows where the space is now and how big it is, and lists the other locations, with the free space of those on this server's disks. A location without enough room for the space can't be chosen.</p>
+        <p>The move runs in the background, in three steps (here for a space in the content store; <a href="#move-folder">folder spaces</a> and <a href="#move-into-folder">moves into a folder</a> work alike, with the differences below):</p>
         <ol>
           <li><strong>Copy.</strong> Every file of the space, its earlier versions and the items in its trash are copied to the new location, and each copy is checked against the file's SHA-256 fingerprint. The space stays in use meanwhile: files uploaded or changed during the move are copied too.</li>
           <li><strong>Switch.</strong> Once everything is there, the space switches to the new location in one step. Its new files go there from then on.</li>
@@ -86,7 +86,14 @@
           <li><strong>The old folder.</strong> Once the space is on the new location, its folder is removed: each file only if it is still exactly what was copied, then the folders left empty. A file changed at the very last moment, and files ThirtyFile never shows (<code>Thumbs.db</code>, say), stay in the folder, and the move's details list them.</li>
           <li><strong>Room.</strong> Each file passes through a temporary file in ThirtyFile's data folder, which needs room for the largest file of the space. The move checks this, and that the folder is there, before it starts: a disk that isn't mounted is never taken for an empty space.</li>
         </ul>
-        <p>Spaces can't be moved into a folder (the storage folder or a <em>Local folder</em> location) yet. To put their files there, move them to a space on it.</p>
+        <h3 id="move-into-folder">Moving a space into a folder</h3>
+        <p>A space moved to the storage folder or a <em>Local folder</em> location (a NAS, say) becomes a folder space there: it gets a folder of its own, named as a new space's would be (<code>company</code>, <code>teams/&lt;name&gt;</code> or <code>users/&lt;user name&gt;</code>, with a number when that is taken), and is read-only while its files are copied.</p>
+        <ul>
+          <li><strong>From S3, SFTP or FTP.</strong> Each file is written into the new folder with its date, checked against its SHA-256, and renamed into place; the trash goes to <code>.thirtyfile-trash</code> and earlier versions to <code>.thirtyfile-versions</code>, as in every folder space. Names a folder can't hold as they are (characters a file name can't have, names scans skip such as <code>Thumbs.db</code>, names too long for the disk) get another, and the move's details say how many. Once the space has switched, the content store lets go of its files, which are deleted a minute later unless another space uses the same content.</li>
+          <li><strong>From another folder.</strong> On the same disk, the folder is simply moved to its new place, at once. On another disk, everything in the folder is copied, with the trash, the versions and files ThirtyFile doesn't show, each file with its date and checked by its size. Changes made in the folder from outside ThirtyFile meanwhile are found by a check before the switch and copied too. Then the old folder is removed, as described above.</li>
+          <li><strong>A folder you chose.</strong> A folder space showing a folder of your choice, which is on no location, can be moved onto any location the same way. Its folder is then removed from where it was.</li>
+        </ul>
+        <p>Cancelling a move into a folder removes the folder it made, with what was copied into it.</p>
 
         <h3 id="moves">Following moves</h3>
         <p><strong>Control panel › Moves</strong> lists the moves that aren't finished, then the earlier ones. For each: the space (a user's "My files" is named after the user), where it moves from and to, how many files and bytes are copied, the speed and the time left, and its state. The page refreshes by itself while a move runs.</p>
