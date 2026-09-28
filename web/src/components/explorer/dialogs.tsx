@@ -13,7 +13,7 @@ import type { ExplorerActions } from "./actions";
 
 export function ExplorerDialogs({ p, s, a }: { p: ExplorerProps; s: ExplorerState; a: ExplorerActions }) {
   const { setSelected, dialog, setDialog } = s;
-  const { refresh, transfer } = a;
+  const { refreshContents, transfer } = a;
   const me = useMe();
   return (
     <>
@@ -42,10 +42,10 @@ export function ExplorerDialogs({ p, s, a }: { p: ExplorerProps; s: ExplorerStat
           onConfirm={async () => {
             await api.trash(dialog.ids);
             // Restoring can fail, e.g. the original folder was deleted, a name conflict, or the space is full
-            toastWithUndo(t("Moved to trash"), { undo: () => api.restore(dialog.ids), undoneText: t("Restored"), after: refresh });
+            toastWithUndo(t("Moved to trash"), { undo: () => api.restore(dialog.ids), undoneText: t("Restored"), after: refreshContents });
             setDialog(null);
             setSelected(new Set());
-            refresh();
+            refreshContents();
           }}
         />
       )}

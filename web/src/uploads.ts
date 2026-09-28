@@ -124,8 +124,9 @@ export function hasActiveUploads() {
 }
 
 /**
- * Notify when uploaded files have landed, to refresh the lists: with the folders they were uploaded to, at most every
- * LANDED_MS while uploads run, and once with final = true when nothing is left to send
+ * Notify when uploaded files have landed, to refresh the lists: with the folders they were uploaded to (not for the
+ * files of an uploaded folder), at most every LANDED_MS while uploads run, and once with final = true when nothing is
+ * left to send
  */
 export function onUploadsLanded(fn: (parentIds: string[], final: boolean) => void) {
   landedListeners.add(fn);
@@ -145,8 +146,9 @@ function flushLanded() {
   landedListeners.forEach((l) => l(ids, final));
 }
 
-function landed(parentId: string) {
-  landedParents.add(parentId);
+function landed(task: UploadTask) {
+  // A file of an uploaded folder lands in a subfolder, which the refresh when the uploads end shows
+  if (!task.relativePath) landedParents.add(task.parentId);
   landedAny = true;
   if (!hasActiveUploads()) flushLanded();
   else landedTimer ??= setTimeout(flushLanded, LANDED_MS);
@@ -200,7 +202,7 @@ function start(task: UploadTask) {
       task.upload = undefined;
       pump();
       emit();
-      landed(task.parentId);
+      landed(task);
     },
     onError: (err) => {
       if (task.upload !== upload || task.status !== "uploading") return;
@@ -371,32 +373,53 @@ window.addEventListener("beforeunload", (e) => {
   if (hasActiveUploads()) e.preventDefault();
 });
 
-/** Get files from a drop event (including every file inside folders) */
+/**
+ * Get files from a drop event (including every file inside folders). Files and folders the browser can't read (no
+ * permission, removed meanwhile, a broken link) are skipped, and a message says how many.
+ */
 export async function filesFromDrop(dt: DataTransfer): Promise<PickedFile[]> {
   const entries = Array.from(dt.items)
     .filter((i) => i.kind === "file")
     .map((i) => i.webkitGetAsEntry())
     .filter((e): e is FileSystemEntry => !!e);
   if (entries.length === 0) return Array.from(dt.files).map((file) => ({ file, relativePath: "" }));
+  const { files, skipped } = await readEntries(entries);
+  if (skipped) toast.error(t("{n} dropped item couldn't be read and was skipped.|{n} dropped items couldn't be read and were skipped.", { n: skipped }));
+  return files;
+}
 
-  const out: PickedFile[] = [];
+/** Every file of dropped entries, walking into folders; `skipped` counts the files and folders that couldn't be read */
+export async function readEntries(entries: FileSystemEntry[]): Promise<{ files: PickedFile[]; skipped: number }> {
+  const files: PickedFile[] = [];
+  let skipped = 0;
   const walk = async (entry: FileSystemEntry, dir: string): Promise<void> => {
     if (entry.isFile) {
-      const file = await new Promise<File>((res, rej) => (entry as FileSystemFileEntry).file(res, rej));
-      out.push({ file, relativePath: dir });
+      try {
+        const file = await new Promise<File>((res, rej) => (entry as FileSystemFileEntry).file(res, rej));
+        files.push({ file, relativePath: dir });
+      } catch {
+        skipped++;
+      }
     } else if (entry.isDirectory) {
       const reader = (entry as FileSystemDirectoryEntry).createReader();
       const path = dir ? `${dir}/${entry.name}` : entry.name;
       // readEntries returns at most 100 entries per call, so call it repeatedly
       for (;;) {
-        const batch = await new Promise<FileSystemEntry[]>((res, rej) => reader.readEntries(res, rej));
+        let batch: FileSystemEntry[];
+        try {
+          batch = await new Promise<FileSystemEntry[]>((res, rej) => reader.readEntries(res, rej));
+        } catch {
+          // The rest of this folder can't be listed: what was read of it is still uploaded
+          skipped++;
+          break;
+        }
         if (batch.length === 0) break;
         for (const child of batch) await walk(child, path);
       }
     }
   };
   for (const e of entries) await walk(e, "");
-  return out;
+  return { files, skipped };
 }
 
 /** Get files from <input type=file webkitdirectory> */

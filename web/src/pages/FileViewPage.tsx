@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useEffectEvent, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useEffectEvent, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -36,7 +36,7 @@ import { categoryOf, isTextLike, typeLabel } from "@/components/FileIcon";
 import { capsOf } from "@/lib/drives";
 import { locationOf, useSort } from "@/pages/FilesPage";
 import { pathOf } from "@/lib/paths";
-import { useAllPages } from "@/lib/pages";
+import { hasFileAfter, useAllPages } from "@/lib/pages";
 
 const SheetEditor = lazy(() => import("@/components/sheet/SheetEditor"));
 
@@ -65,15 +65,18 @@ export function FileViewPage() {
   }, [id]);
 
   const node = info.data?.node;
-  // Previous / next file of the folder, in the order the folder is sorted in (the list shares these pages)
+  // Previous / next file of the folder, in the order the folder is sorted in. The pages are the folder list's (already
+  // loaded when the file was opened from it); otherwise only as many are loaded as it takes to find the file after this one
   const [sort] = useSort();
   const parentId = node?.parent_id ?? undefined;
+  const nodeId = node?.id;
   const siblings = useAllPages(
     ["children", parentId, sort.key, sort.order],
-    (limit, after) => api.childrenPage(parentId!, sort.key, sort.order, limit, after),
+    (limit, after, signal) => api.childrenPage(parentId!, sort.key, sort.order, limit, after, signal),
     !!parentId && node?.kind === "file",
+    { enough: useCallback((items: Node[]) => hasFileAfter(items, nodeId), [nodeId]), reuse: true },
   );
-  const files = siblings.items.filter((n) => n.kind === "file");
+  const files = useMemo(() => siblings.items.filter((n) => n.kind === "file"), [siblings.items]);
   const at = node ? files.findIndex((n) => n.id === node.id) : -1;
   const prev = at > 0 ? files[at - 1] : undefined;
   const next = at >= 0 ? files[at + 1] : undefined;
@@ -101,10 +104,11 @@ export function FileViewPage() {
   const path = info.data?.path ?? [];
   const loc = locationOf(info.data);
   const caps = capsOf(info.data?.role, me, info.data?.read_only);
-  // A save from the editor: the new version shows here, in the folder's list and in Recent
+  // A save from the editor: the new version shows here, in the folder's list and in Recent. The folder's pages aren't
+  // loaded again while the file stays open: they're only marked out of date, for the list to reload when it shows
   const onSaved = (n: Node) => {
     qc.setQueryData(["node", id], (old: typeof info.data) => (old ? { ...old, node: { ...old.node, ...n } } : old));
-    qc.invalidateQueries({ queryKey: ["children"] });
+    qc.invalidateQueries({ queryKey: ["children"], refetchType: "none" });
     qc.invalidateQueries({ queryKey: ["recent"] });
   };
   const canEditSheet = !!node && extOf(node.name) === "xlsx" && caps.write && node.size <= me.max_edit_bytes;
@@ -194,7 +198,7 @@ export function FileViewPage() {
         node && (
           <span>
             {typeLabel(node)} · {formatBytes(node.size)} · {t("Modified {date}", { date: formatWinDate(node.updated_at) })}
-            {at >= 0 && files.length > 1 && ` · ${t("{n} of {total}", { n: at + 1, total: files.length })}`}
+            {at >= 0 && siblings.complete && files.length > 1 && ` · ${t("{n} of {total}", { n: at + 1, total: files.length })}`}
           </span>
         )
       }

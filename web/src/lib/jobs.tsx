@@ -3,7 +3,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, type Job } from "@/api";
 import { t, tServer } from "@/lib/i18n";
-import { invalidateFiles } from "@/lib/queries";
+import { FOLDER_CONTENTS, invalidateFiles } from "@/lib/queries";
 
 /** How often a running task is asked for its progress */
 const POLL_MS = 700;
@@ -51,7 +51,7 @@ export async function runJob(qc: QueryClient, start: () => Promise<Job>) {
   if (job.state === "done") {
     const name = job.name ?? "";
     toast.success(job.kind === "compress" ? t("Created \"{name}\"", { name }) : t("Extracted to \"{name}\"", { name }), { id, description: undefined, duration: 5000 });
-    void invalidateFiles(qc);
+    void invalidateFiles(qc, FOLDER_CONTENTS);
   } else {
     toast.error(job.kind === "compress" ? t("Couldn't compress to ZIP") : t("Couldn't extract"), {
       id,

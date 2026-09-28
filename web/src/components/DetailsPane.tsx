@@ -11,6 +11,7 @@ import { VersionsSection } from "@/components/VersionsSection";
 import { ROLE_LABEL, actionLabel } from "@/lib/drives";
 import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
 import { t, tServer } from "@/lib/i18n";
+import { FOLDER_CONTENTS } from "@/lib/queries";
 import { usePersisted } from "@/lib/session";
 import { formatBytes, formatWinDate } from "@/lib/utils";
 
@@ -68,7 +69,7 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
   // What folders hold is summed on the server (every level, not the trash): one folder, or the folders of a selection
   const folderIds = node ? (node.kind === "folder" ? [node.id] : []) : selected.filter((n) => n.kind === "folder").map((n) => n.id);
   const contents = useQuery({
-    queryKey: node ? ["node", node.id, "contents"] : ["node", "contents", ...folderIds],
+    queryKey: [FOLDER_CONTENTS, ...folderIds],
     queryFn: () => api.contents(folderIds),
     enabled: folderIds.length > 0,
   });

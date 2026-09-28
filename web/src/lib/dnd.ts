@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { api } from "@/api";
 import { t } from "@/lib/i18n";
 import { wantsCopy } from "@/lib/keys";
-import { invalidateFiles } from "@/lib/queries";
+import { FOLDER_CONTENTS, invalidateFiles } from "@/lib/queries";
 import { moveBack, originsOf, toastWithUndo } from "@/lib/undo";
 import { askBeforeTransfer } from "@/components/ConflictDialog";
 import { filesFromDrop, uploadFiles } from "@/uploads";
@@ -61,7 +61,7 @@ export function droppedIds(dt: DataTransfer): string[] | null {
 export async function dropItems(qc: QueryClient, ids: string[], folder: DropFolder, copy: boolean) {
   ids = ids.filter((id) => id !== folder.id);
   if (!ids.length) return;
-  const refresh = () => invalidateFiles(qc);
+  const refresh = () => invalidateFiles(qc, FOLDER_CONTENTS);
   try {
     const resolutions = await askBeforeTransfer(copy ? "copy" : "move", ids, folder.id);
     if (!resolutions) return;

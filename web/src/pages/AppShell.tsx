@@ -15,6 +15,9 @@ import { SiteName } from "@/components/SiteName";
 import { MAIN_ID } from "@/components/Frame";
 import { loadTabs, syncLocation } from "@/tabs";
 import { onUploadsLanded } from "@/uploads";
+import { api, type SortKey, type SortOrder } from "@/api";
+import { refreshFirstPage } from "@/lib/pages";
+import { FOLDER_CONTENTS } from "@/lib/queries";
 import { t, tServer } from "@/lib/i18n";
 
 /** Site logo and name (from branding settings; switches automatically when there's a dark-mode logo) */
@@ -64,14 +67,19 @@ export function AppShell() {
     syncLocation(location.pathname + location.search);
   }, [location.pathname, location.search]);
 
-  // As uploaded files land, refresh the folders they went to (not every open folder), at most every 1.5 s; when the
-  // uploads end, once more every list (uploaded folders add subfolders) and the used space. A refresh already under
-  // way is left to finish instead of being restarted.
+  // As uploaded files land, refresh the first page of the folders they went to (not every open folder, nor the rest of
+  // a big folder), at most every 1.5 s; when the uploads end, once more every list (uploaded folders add subfolders)
+  // and the used space. A refresh under way then starts again, so it can't miss the last files.
   useEffect(
     () =>
       onUploadsLanded((parentIds, final) => {
-        const keys = final ? [["children"], ["recent"], ["me"]] : parentIds.map((id) => ["children", id]);
-        for (const queryKey of keys) qc.invalidateQueries({ queryKey }, { cancelRefetch: false });
+        if (final) {
+          for (const queryKey of [["children"], ["recent"], ["me"], [FOLDER_CONTENTS]]) void qc.invalidateQueries({ queryKey });
+          return;
+        }
+        // Folder lists are ["children", id, sort, order]; the folder tree's (not in pages) waits for the end
+        for (const id of parentIds)
+          void refreshFirstPage(qc, ["children", id], ([, , sort, order], limit) => api.childrenPage(id, sort as SortKey, order as SortOrder, limit));
       }),
     [qc],
   );

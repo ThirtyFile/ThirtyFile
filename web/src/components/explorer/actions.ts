@@ -6,7 +6,7 @@ import { api, privateSource, triggerDownload, type CursorPage, type Node } from 
 import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
 import { allItems } from "@/lib/pages";
-import { invalidateFiles } from "@/lib/queries";
+import { FOLDER_CONTENTS, invalidateFiles } from "@/lib/queries";
 import { type Origins, moveBack, originsOf, toastWithUndo, undoLast } from "@/lib/undo";
 import { confirm } from "@/components/confirm";
 import { askBeforeTransfer } from "@/components/ConflictDialog";
@@ -38,6 +38,8 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     setDetailsOpen,
   } = s;
   const refresh = () => invalidateFiles(qc);
+  /** After adding, moving or removing items: what folders hold changes too */
+  const refreshContents = () => invalidateFiles(qc, FOLDER_CONTENTS);
 
   /** Like Windows: when the name exists, try "Name (2)", "Name (3)"… in turn */
   const uniqueName = (base: string, ext = "") => {
@@ -57,7 +59,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       const id = kind === "folder" ? (await api.createFolder(p.folderId, name)).id : await api.createEmptyFile(p.folderId, name);
       // Only after the list reloads does the new item have a place to edit its name; if it didn't reload, don't start
       // renaming a row that isn't there (that would leave the shortcuts turned off)
-      await refresh();
+      await refreshContents();
       // The folder's pages, and the folder tree's list of subfolders
       const listed = qc
         .getQueriesData<Node[] | InfiniteData<CursorPage<Node>>>({ queryKey: ["children", p.folderId] })
@@ -117,7 +119,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         if (mode === "move") {
           const origins = new Map([...(known ?? originsOf(p.items, sent, dest))].filter(([id, parent]) => sent.includes(id) && parent !== dest));
           await api.move(sent, dest, resolutions);
-          if (origins.size) toastWithUndo(done(sent.length), { undo: () => moveBack(origins), undoneText: t("Moved back"), after: refresh });
+          if (origins.size) toastWithUndo(done(sent.length), { undo: () => moveBack(origins), undoneText: t("Moved back"), after: refreshContents });
           else toast.success(done(sent.length));
         } else {
           await api.copy(sent, dest, resolutions);
@@ -125,7 +127,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         }
       }
       setSelected(new Set());
-      refresh();
+      refreshContents();
       return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : fallback);
@@ -173,7 +175,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Operation failed"));
     }
-    refresh();
+    refreshContents();
   };
 
   // Keyboard shortcuts (moving around, search and refresh are the address bar's: see Frame)
@@ -262,7 +264,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         }
       : {};
 
-  return { refresh, open, download, compress, extract, toggleFavorite, dropInto, uploadInto, transfer, cut, copy, canPaste, paste, dragProps, createNew };
+  return { refresh, refreshContents, open, download, compress, extract, toggleFavorite, dropInto, uploadInto, transfer, cut, copy, canPaste, paste, dragProps, createNew };
 }
 
 export type ExplorerActions = ReturnType<typeof useExplorerActions>;

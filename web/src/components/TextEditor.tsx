@@ -50,7 +50,9 @@ export default function TextEditor(props: {
     setError(null);
     // The editor stays mounted when moving to another file: forget the previous file's language
     setLang(null);
-    fetchOk(props.source.contentUrl(props.node))
+    // Moving on to another file stops this download
+    const abort = new AbortController();
+    fetchOk(props.source.contentUrl(props.node), { signal: abort.signal })
       .then((r) => {
         // The version of the content just received (the node the parent holds may be older, e.g. after a conflict)
         const version = Number(r.headers.get("x-version")) || props.node.updated_at;
@@ -83,6 +85,7 @@ export default function TextEditor(props: {
     desc?.load().then((l) => !cancelled && setLang(l));
     return () => {
       cancelled = true;
+      abort.abort();
     };
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every refresh of the list: its id and date say when the file changed
   }, [props.node.id, props.node.updated_at, props.source, reload]);
