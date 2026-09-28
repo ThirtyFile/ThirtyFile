@@ -29,6 +29,8 @@ pub struct ZipWriter<W> {
     offset: u64,
     entries: Vec<Entry>,
     deflate: bool,
+    /// Tests: names are written as given (to make archives with harmful names)
+    raw_names: bool,
 }
 
 /// Unix seconds → DOS date/time (the caller shifts the seconds to the local time the ZIP should show)
@@ -47,7 +49,17 @@ fn dos_datetime(ts: i64) -> (u16, u16) {
 impl<W: AsyncWrite + Unpin> ZipWriter<W> {
     /// Files are stored as they are (the length of the ZIP can be computed in advance, see `predicted_len`)
     pub fn new(w: W) -> Self {
-        Self { w, offset: 0, entries: Vec::new(), deflate: false }
+        Self { w, offset: 0, entries: Vec::new(), deflate: false, raw_names: false }
+    }
+
+    /// Tests: writes names as they are given, without `entry_name`
+    #[cfg(test)]
+    pub fn raw_names(self) -> Self {
+        Self { raw_names: true, ..self }
+    }
+
+    fn name(&self, path: &str) -> String {
+        if self.raw_names { path.to_string() } else { entry_name(path) }
     }
 
     /// Files are compressed with deflate
@@ -91,7 +103,7 @@ impl<W: AsyncWrite + Unpin> ZipWriter<W> {
     }
 
     pub async fn add_dir(&mut self, path: &str, mtime: i64) -> std::io::Result<()> {
-        let name = format!("{}/", path.trim_end_matches('/')).into_bytes();
+        let name = format!("{}/", self.name(path.trim_end_matches('/'))).into_bytes();
         let (time, date) = dos_datetime(mtime);
         let offset = self.offset;
         self.local_header(&name, false, true, STORE, time, date).await?;
@@ -101,7 +113,7 @@ impl<W: AsyncWrite + Unpin> ZipWriter<W> {
 
     /// Writes one file; `size` is the expected size, and an error is returned if the number of bytes actually read differs.
     pub async fn add_file<R: AsyncRead + Unpin>(&mut self, path: &str, mut r: R, size: u64, mtime: i64) -> std::io::Result<()> {
-        let name = path.as_bytes().to_vec();
+        let name = self.name(path).into_bytes();
         let (time, date) = dos_datetime(mtime);
         let offset = self.offset;
         // Deflate can make incompressible data a little larger: leave room for that
@@ -250,6 +262,20 @@ impl<W: AsyncWrite + Unpin> ZipWriter<W> {
 /// Computes the total ZIP size before streaming (matching ZipWriter's output byte for byte),
 /// so the response can carry Content-Length and the browser can show download progress and time remaining.
 /// Each item is (path, size, is folder)
+/// A path as a ZIP entry name that every extractor keeps inside the folder it extracts to: in each part (between the
+/// '/'), characters Windows treats as separators or can't store (`\ : * ? " < > |`, ASCII control characters) become '_', and
+/// "." or ".." becomes "_" or "__". Names from a folder on the server may hold any of them (Linux allows all but '/').
+/// The length in bytes stays the same, so `predicted_len` still holds.
+fn entry_name(path: &str) -> String {
+    path.split('/')
+        .map(|part| match part {
+            "." | ".." => "_".repeat(part.len()),
+            _ => part.chars().map(|c| if c.is_ascii_control() || matches!(c, '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c }).collect(),
+        })
+        .collect::<Vec<String>>()
+        .join("/")
+}
+
 pub fn predicted_len<'a>(items: impl IntoIterator<Item = (&'a str, u64, bool)>) -> u64 {
     let mut offset = 0u64;
     let mut central = 0u64;
@@ -506,6 +532,23 @@ mod tests {
         }
         // Too many entries is refused up front
         assert_eq!(read_entries(&mut cursor, 3, 1 << 20).unwrap_err().kind(), std::io::ErrorKind::FileTooLarge);
+    }
+
+    #[tokio::test]
+    async fn names_windows_would_read_as_paths_are_made_harmless() {
+        // A name Linux allows (a folder on the server can hold it): Windows tools would split it at the backslashes
+        let evil = r"..\..\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\x.bat";
+        let mut zip = ZipWriter::new(Vec::new());
+        zip.add_dir("Docs/..", 1_700_000_000).await.unwrap();
+        zip.add_file(&format!("Docs/{evil}"), &b"x"[..], 1, 1_700_000_000).await.unwrap();
+        zip.add_file("Docs/a:b?.txt", &b"y"[..], 1, 1_700_000_000).await.unwrap();
+        let predicted = predicted_len([("Docs/..", 0, true), (format!("Docs/{evil}").as_str(), 1, false), ("Docs/a:b?.txt", 1, false)]);
+        let bytes = zip.finish().await.unwrap();
+        assert_eq!(bytes.len() as u64, predicted, "the length announced up front still holds");
+        let entries = read_entries(&mut std::io::Cursor::new(bytes), 10, 1 << 20).unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["Docs/__/", r"Docs/.._.._AppData_Roaming_Microsoft_Windows_Start Menu_Programs_Startup_x.bat", "Docs/a_b_.txt"]);
+        assert!(names.iter().all(|n| !n.contains('\\') && !n.split('/').any(|p| p == "..")));
     }
 
     #[tokio::test]

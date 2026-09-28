@@ -837,14 +837,16 @@ impl Predicate for Compressible {
 
 /// Basic CSRF protection: requests that modify data must have an Origin matching Host, if they carry one
 /// (behind a reverse proxy with THIRTYFILE_TRUST_PROXY set, X-Forwarded-Host is accepted too).
-/// A request signed in with an app password and without a session cookie carries no credential a browser adds by
-/// itself, so another website can't send it on someone's behalf: it isn't checked. WebDAV is the exception: it answers
-/// with a sign-in challenge, after which a browser remembers the credentials and sends them to `/dav` by itself, so
-/// requests there are always checked (WebDAV clients don't send an Origin).
+/// A request signed in with an app password as a Bearer token and without a session cookie carries no credential a
+/// browser adds by itself, so another website can't send it on someone's behalf: it isn't checked. Basic credentials
+/// are always checked: WebDAV answers with a sign-in challenge, after which a browser remembers them and may send them
+/// by itself, to `/dav` and possibly the rest of the site (WebDAV clients don't send an Origin).
 async fn same_origin(axum::extract::State(st): axum::extract::State<AppState>, req: Request, next: Next) -> Response {
     let path = req.uri().path();
     let dav = path == dav::PREFIX || path.starts_with("/dav/");
-    let app_password_only = !dav && tokens::credential(req.headers()).is_some() && auth::get_cookie(req.headers(), auth::SESSION_COOKIE).is_none();
+    let app_password_only = !dav
+        && matches!(tokens::credential(req.headers()), Some(tokens::Credential::Bearer(_)))
+        && auth::get_cookie(req.headers(), auth::SESSION_COOKIE).is_none();
     if !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS)
         && !app_password_only
         && let Some(origin) = req.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
@@ -1052,6 +1054,17 @@ mod tests {
         let headers = vec![(header::COOKIE, cookie), (header::AUTHORIZATION, format!("Bearer {token}")), (header::ORIGIN, "https://elsewhere.example".into())];
         let folder = serde_json::json!({ "parent_id": amy.root_id, "name": "Forged" });
         assert_eq!(call(&app, Method::POST, "/api/folders", &headers, Some(folder)).await.status(), StatusCode::FORBIDDEN);
+
+        // Basic credentials a browser remembered from the WebDAV sign-in prompt: checked too, without a cookie
+        let basic = format!("Basic {}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, format!("amy:{token}")));
+        let headers = vec![(header::AUTHORIZATION, basic.clone()), (header::ORIGIN, "https://elsewhere.example".into())];
+        let folder = serde_json::json!({ "parent_id": amy.root_id, "name": "Forged" });
+        assert_eq!(call(&app, Method::POST, "/api/folders", &headers, Some(folder.clone())).await.status(), StatusCode::FORBIDDEN);
+        // A script sends no Origin, or a Bearer token from anywhere: both work
+        assert_eq!(call(&app, Method::POST, "/api/folders", &[(header::AUTHORIZATION, basic)], Some(folder)).await.status(), StatusCode::OK);
+        let headers = vec![(header::AUTHORIZATION, format!("Bearer {token}")), (header::ORIGIN, "https://elsewhere.example".into())];
+        let folder = serde_json::json!({ "parent_id": amy.root_id, "name": "From a script" });
+        assert_eq!(call(&app, Method::POST, "/api/folders", &headers, Some(folder)).await.status(), StatusCode::OK);
     }
 
     #[test]

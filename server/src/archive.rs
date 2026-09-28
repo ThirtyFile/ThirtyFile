@@ -630,7 +630,9 @@ mod tests {
 
     /// A ZIP made with the writer: (path, content); a path ending in "/" is a folder
     async fn zip_of(entries: &[(&str, &[u8])], deflate: bool) -> Vec<u8> {
-        let mut zip = if deflate { ZipWriter::deflating(Vec::new()) } else { ZipWriter::new(Vec::new()) };
+        let zip = if deflate { ZipWriter::deflating(Vec::new()) } else { ZipWriter::new(Vec::new()) };
+        // Written as given: some tests need names no ZIP made here would have
+        let mut zip = zip.raw_names();
         for (path, data) in entries {
             if path.ends_with('/') {
                 zip.add_dir(path, 1_700_000_000).await.unwrap();
