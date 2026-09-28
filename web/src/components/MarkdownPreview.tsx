@@ -19,7 +19,7 @@ export default function MarkdownPreview(props: { node: Node; source: FileSource;
       .then((r) => r.arrayBuffer())
       .then((buf) => {
         if (cancelled) return;
-        const draft = getDraft(props.node.id);
+        const draft = getDraft(props.node.id, "text");
         setText(draft ? draft.text : normalizeLines(decodeText(buf).text));
       })
       .catch((e) => !cancelled && setError(e.message));

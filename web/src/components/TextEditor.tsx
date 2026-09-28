@@ -64,7 +64,7 @@ export default function TextEditor(props: {
         eol.current = lineEnding(decoded.text);
         const d = { ...decoded, text: normalizeLines(decoded.text) };
         // Restore unsaved content when switching back to the tab
-        const draft = props.editable && d.encoding !== null ? getDraft(props.node.id) : undefined;
+        const draft = props.editable && d.encoding !== null ? getDraft(props.node.id, "text") : undefined;
         if (draft && draft.base !== d.text) {
           // Someone else changed the file while these edits were unsaved: keep the edits and the version they were
           // based on, so saving is refused (409, with a reload option) instead of overwriting the other person's work
@@ -93,7 +93,7 @@ export default function TextEditor(props: {
 
   const change = (value: string) => {
     setText(value);
-    if (original !== null && editable) setDraft(props.node.id, value === original ? null : { text: value, base: original, version: base.current });
+    if (original !== null && editable) setDraft(props.node.id, value === original ? null : { kind: "text", text: value, base: original, version: base.current });
   };
 
   saveRef.current = async () => {

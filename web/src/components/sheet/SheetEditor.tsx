@@ -172,7 +172,7 @@ function Workspace({
 
   // Mark the tab "unsaved" and warn before closing the browser
   useEffect(() => {
-    setDraft(node.id, dirty ? { text: "sheet", base: String(session.base) } : null);
+    setDraft(node.id, dirty ? { kind: "sheet", base: session.base } : null);
   }, [dirty, node.id, session.base]);
 
   // ───── Layout ─────

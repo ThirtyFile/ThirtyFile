@@ -1,13 +1,26 @@
 import { useSyncExternalStore } from "react";
 
 /** Unsaved text editor content; kept when switching tabs and coming back */
-interface Draft {
+export interface TextDraft {
+  kind: "text";
   text: string;
   /** Original content when editing started; if someone else changed the file meanwhile, the draft is kept but saving is refused */
   base: string;
   /** Version (updated_at) the draft is based on, sent when saving so the server can refuse to overwrite a newer version */
   version?: number;
 }
+
+/**
+ * Marker for a workbook with unsaved changes: the changes themselves stay in the spreadsheet's session
+ * (`sheet/session.ts`); the marker only flags the tab and warns before closing
+ */
+export interface SheetDraft {
+  kind: "sheet";
+  /** Version (updated_at) the session was loaded from */
+  base: number;
+}
+
+export type Draft = TextDraft | SheetDraft;
 
 const drafts = new Map<string, Draft>();
 const listeners = new Set<() => void>();
@@ -19,8 +32,10 @@ function emit() {
   listeners.forEach((l) => l());
 }
 
-export function getDraft(nodeId: string) {
-  return drafts.get(nodeId);
+/** The draft of the given kind; a draft of another kind (e.g. a workbook's marker for a text editor) is never returned */
+export function getDraft<K extends Draft["kind"]>(nodeId: string, kind: K): Extract<Draft, { kind: K }> | undefined {
+  const d = drafts.get(nodeId);
+  return d?.kind === kind ? (d as Extract<Draft, { kind: K }>) : undefined;
 }
 
 export function setDraft(nodeId: string, draft: Draft | null) {
@@ -36,6 +51,7 @@ export function onDraftRemoved(listener: (nodeId: string) => void) {
   discardListeners.add(listener);
 }
 
+/** Whether the file has unsaved changes of any kind (for the tab marker and confirming before closing) */
 export function hasDraft(nodeId: string) {
   return drafts.has(nodeId);
 }

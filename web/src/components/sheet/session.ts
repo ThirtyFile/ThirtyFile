@@ -4,7 +4,7 @@
  */
 import JSZip from "jszip";
 import { fetchOffice, type FileSource, type Node } from "@/api";
-import { hasDraft, onDraftRemoved } from "@/lib/drafts";
+import { getDraft, onDraftRemoved } from "@/lib/drafts";
 import { dateToSerial, parseNumber, serialToDate, Calculator } from "@/lib/sheet/formula";
 import { isDatePattern } from "@/lib/sheet/format";
 import type { Cell, CellStyle, Range, Scalar, Sheet, Workbook } from "@/lib/sheet/model";
@@ -173,7 +173,7 @@ export function reusableSession(node: Node): Session | undefined {
   const s = sessions.get(node.id);
   if (!s) return undefined;
   const dirty = s.version !== s.saved;
-  if (dirty ? hasDraft(node.id) : s.base === node.updated_at) return s;
+  if (dirty ? !!getDraft(node.id, "sheet") : s.base === node.updated_at) return s;
   sessions.delete(node.id);
   return undefined;
 }
