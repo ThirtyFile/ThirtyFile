@@ -356,7 +356,9 @@ mod tests {
         // Someone else's username, the account's own password, or a changed secret: refused
         assert_eq!(with_header(&env, Method::GET, &basic("bob", &token)).await.unwrap_err(), StatusCode::UNAUTHORIZED);
         assert_eq!(with_header(&env, Method::GET, &basic("amy", testutil::password())).await.unwrap_err(), StatusCode::UNAUTHORIZED);
-        let tampered = format!("{}x", &token[..token.len() - 1]);
+        // (another last character: replacing it with a fixed one leaves the token as it was when it already ends in that)
+        let last = if token.ends_with('x') { 'y' } else { 'x' };
+        let tampered = format!("{}{last}", &token[..token.len() - 1]);
         assert_eq!(with_header(&env, Method::GET, &format!("Bearer {tampered}")).await.unwrap_err(), StatusCode::UNAUTHORIZED);
 
         // Only its owner can remove it; afterwards it stops working
