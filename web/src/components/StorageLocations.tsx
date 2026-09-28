@@ -91,7 +91,7 @@ export function StorageLocations() {
   const makeDefault = async (l: StorageLocation) => {
     try {
       await api.setDefaultStorage(l.id);
-      toast.success(t("New files will be stored in \"{name}\" by default", { name: l.name }));
+      toast.success(t("New spaces will be stored in \"{name}\"", { name: l.name }));
       refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Operation failed"));
