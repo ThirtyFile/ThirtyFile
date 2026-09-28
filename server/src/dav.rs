@@ -804,50 +804,63 @@ async fn put(st: &AppState, user: &User, segs: &[String], headers: &HeaderMap, b
     }
     drop(c);
     let tmp = st.tmp_dir().join(format!("dav-{}", new_id()));
-    let size = match receive(st, body, &tmp).await {
-        Ok(size) => size,
+    // Content for the content store is hashed as it arrives, so storing it doesn't read the file again
+    let (size, hash) = match receive(st, body, &tmp, !parent.in_folder_space()).await {
+        Ok(received) => received,
         Err(e) => {
             let _ = tokio::fs::remove_file(&tmp).await;
             return Err(e);
         }
     };
     // Stored in a task of its own, so a dropped request can't stop it halfway
-    let created = tokio::spawn(store(st.clone(), user.clone(), parent, name, tmp, size)).await.map_err(AppError::internal)??;
+    let created = tokio::spawn(store(st.clone(), user.clone(), parent, name, tmp, size, hash)).await.map_err(AppError::internal)??;
     Ok(if created { StatusCode::CREATED } else { StatusCode::NO_CONTENT }.into_response())
 }
 
-/// Writes the body to a file, within the upload size limit; returns its size
-async fn receive(st: &AppState, body: Body, path: &Path) -> AppResult<u64> {
+/// Writes the body to a file, within the upload size limit; returns its size, and with `hash` its SHA-256
+async fn receive(st: &AppState, body: Body, path: &Path, hash: bool) -> AppResult<(u64, Option<String>)> {
+    use sha2::Digest;
     let mut file = tokio::fs::File::create(path).await?;
     let mut stream = body.into_data_stream();
     let mut size = 0u64;
+    let mut hasher = hash.then(sha2::Sha256::new);
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|_| AppError::bad_request("Connection interrupted"))?;
         size += chunk.len() as u64;
         check_size(st, size)?;
         file.write_all(&chunk).await?;
+        if let Some(h) = &mut hasher {
+            h.update(&chunk);
+        }
     }
     file.flush().await?;
     file.sync_data().await?;
-    Ok(size)
+    Ok((size, hasher.map(|h| hex::encode(h.finalize()))))
 }
 
-/// Stores a received file as `name` in `parent`, replacing a file of that name; true when it was created
-async fn store(st: AppState, user: User, parent: Node, name: String, tmp: PathBuf, size: u64) -> AppResult<bool> {
+/// Stores a received file as `name` in `parent`, replacing a file of that name; true when it was created. `hash`: the
+/// content's SHA-256 when it was computed while receiving it
+async fn store(st: AppState, user: User, parent: Node, name: String, tmp: PathBuf, size: u64, hash: Option<String>) -> AppResult<bool> {
     let result = if parent.in_folder_space() {
         store_in_folder(&st, &user, &parent, &name, &tmp, size).await
     } else {
-        store_content(&st, &user, &parent, &name, &tmp, size).await
+        store_content(&st, &user, &parent, &name, &tmp, size, hash).await
     };
     let _ = tokio::fs::remove_file(&tmp).await;
     result
 }
 
-async fn store_content(st: &AppState, user: &User, parent: &Node, name: &str, tmp: &Path, size: u64) -> AppResult<bool> {
-    let (hash, hashed) = files::hash_file(tmp.to_path_buf()).await?;
-    if hashed != size {
-        return Err(AppError::bad_request("File size mismatch"));
-    }
+async fn store_content(st: &AppState, user: &User, parent: &Node, name: &str, tmp: &Path, size: u64, hash: Option<String>) -> AppResult<bool> {
+    let hash = match hash {
+        Some(h) => h,
+        None => {
+            let (hash, hashed) = files::hash_file(tmp.to_path_buf()).await?;
+            if hashed != size {
+                return Err(AppError::bad_request("File size mismatch"));
+            }
+            hash
+        }
+    };
     let size = size as i64;
     // First into the space's storage location, without holding the write lock (S3 may take a while)
     let staged = tree::stage_blob(st, parent.drive(), hash.clone(), size, tmp.to_path_buf()).await?;
@@ -986,7 +999,7 @@ async fn lock(st: &AppState, user: &User, segs: &[String], headers: &HeaderMap, 
             tokio::fs::write(&tmp, b"").await?;
             let mut path = segs[..segs.len() - 1].to_vec();
             path.push(name.clone());
-            tokio::spawn(store(st.clone(), user.clone(), parent, name, tmp, 0)).await.map_err(AppError::internal)??;
+            tokio::spawn(store(st.clone(), user.clone(), parent, name, tmp, 0, None)).await.map_err(AppError::internal)??;
             (StatusCode::CREATED, path, false)
         }
     };

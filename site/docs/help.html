@@ -59,6 +59,7 @@
         <p>To see whether every file in the database is still in its storage location, and whether a location holds files the database doesn't know (left behind by hand, for example), run:</p>
         <pre><code>docker exec thirtyfile thirtyfile check</code></pre>
         <p>It lists missing files, files with the wrong size and unknown files, for every storage location, and exits with 1 when something is wrong. Unknown files are never deleted. With <code>--verify</code> it also reads every file back and compares its content with its fingerprint (SHA-256), which takes as long as reading everything. Folder spaces aren't part of it: their files are ordinary files on the disk.</p>
+        <p>The fingerprint is computed while a file is being uploaded, also across a paused upload and a restart of ThirtyFile, so finishing a large upload doesn't read the whole file a second time. <code>--verify</code> is what tells you whether the disk still holds the same content later.</p>
 
         <h2 id="safety">How your files are protected</h2>
         <ul>

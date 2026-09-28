@@ -12,6 +12,10 @@ use axum::{
 };
 use base64::Engine;
 use futures_util::StreamExt;
+use sha2::{
+    Digest, Sha256,
+    digest::common::hazmat::{SerializableState, SerializedState},
+};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 use crate::{
@@ -45,6 +49,9 @@ struct Upload {
     node_id: Option<String>,
     /// "replace": a file with the same name gets the new content; otherwise both are kept (see migration 0014)
     on_conflict: String,
+    /// The SHA-256 state after the first `hashed` bytes (see migration 0070)
+    hash_state: Option<Vec<u8>>,
+    hashed: i64,
 }
 
 /// Who is uploading: a signed-in person, or a visitor of a share link. The file belongs to `user` either way (the
@@ -244,7 +251,7 @@ async fn check_in_share(conn: &mut sqlx::SqliteConnection, share: &ShareUpload, 
 /// An upload of this person, or of this share link: a signed-in person can't continue a visitor's upload and the other way round
 async fn load(st: &AppState, up: &Uploader, id: &str) -> AppResult<Upload> {
     sqlx::query_as(
-        "SELECT id, owner_id, parent_id, rel_path, name, size, offset, drive_id, batch, node_id, on_conflict FROM uploads
+        "SELECT id, owner_id, parent_id, rel_path, name, size, offset, drive_id, batch, node_id, on_conflict, hash_state, hashed FROM uploads
          WHERE id = ?1 AND ((?3 IS NULL AND share_id IS NULL AND owner_id = ?2) OR share_id = ?3)",
     )
         .bind(id)
@@ -359,6 +366,20 @@ pub async fn patch_as(st: &AppState, up: &Uploader, id: &str, headers: &HeaderMa
 
     let size = upload.size as u64;
     let mut offset = upload.offset as u64;
+    // Content-store uploads are hashed as the data arrives, continuing from the part received before
+    let mut hasher = None;
+    if stored_by_hash(&st, &upload).await? {
+        match hash_so_far(&st, &upload).await {
+            Ok(h) => hasher = Some(h),
+            Err(e) => {
+                // The part received so far is gone: the client has to start over
+                let _w = st.write_lock.lock().await;
+                sqlx::query("DELETE FROM uploads WHERE id = ?").bind(&id).execute(&st.db).await?;
+                let _ = tokio::fs::remove_file(upload_path(&st, &id)).await;
+                return Err(discarded(e));
+            }
+        }
+    }
     let mut file = tokio::fs::OpenOptions::new().write(true).open(upload_path(&st, &id)).await?;
     file.set_len(offset).await?;
     file.seek(SeekFrom::Start(offset)).await?;
@@ -376,6 +397,9 @@ pub async fn patch_as(st: &AppState, up: &Uploader, id: &str, headers: &HeaderMa
                     failure = Some(e.into());
                     break;
                 }
+                if let Some(h) = &mut hasher {
+                    h.update(&bytes);
+                }
                 offset += bytes.len() as u64;
             }
             Err(_) => {
@@ -390,10 +414,12 @@ pub async fn patch_as(st: &AppState, up: &Uploader, id: &str, headers: &HeaderMa
     drop(file);
     {
         let _w = st.write_lock.lock().await;
-        // Progress extends the deadline: a large upload that keeps resuming isn't discarded after 7 days
-        sqlx::query("UPDATE uploads SET offset = ?, expires_at = ? WHERE id = ?")
+        // Progress extends the deadline: a large upload that keeps resuming isn't discarded after 7 days. The hash
+        // state is saved with the offset (the data is on disk by now), so a resumed upload continues from it.
+        sqlx::query("UPDATE uploads SET offset = ?1, expires_at = ?2, hash_state = ?3, hashed = CASE WHEN ?3 IS NULL THEN 0 ELSE ?1 END WHERE id = ?4")
             .bind(offset as i64)
             .bind(now() + UPLOAD_TTL)
+            .bind(hasher.as_ref().map(|h| h.serialize().to_vec()))
             .bind(&id)
             .execute(&st.db)
             .await?;
@@ -445,6 +471,52 @@ fn discarded(e: AppError) -> AppError {
     AppError::new(e.status, format!("{}. The upload was discarded; start it again.", e.message.trim_end_matches('.'))).with_code("upload_discarded")
 }
 
+/// Whether the upload becomes content of the content store, named by its hash (files of folder spaces aren't hashed)
+async fn stored_by_hash(st: &AppState, upload: &Upload) -> AppResult<bool> {
+    let mode: Option<(String,)> = sqlx::query_as("SELECT mode FROM drives WHERE id = ?").bind(&upload.drive_id).fetch_optional(&st.db).await?;
+    Ok(mode.is_none_or(|(m,)| m != "folder"))
+}
+
+/// The hash of the part received so far as saved with it, if the saved state belongs to that part
+fn saved_hasher(upload: &Upload) -> Option<Sha256> {
+    let state = upload.hash_state.as_deref().filter(|_| upload.hashed == upload.offset)?;
+    Sha256::deserialize(&SerializedState::<Sha256>::try_from(state).ok()?).ok()
+}
+
+/// The hash of the part received so far: the saved state, else (an upload started before states were saved, or one
+/// whose state doesn't match) that part read once
+async fn hash_so_far(st: &AppState, upload: &Upload) -> AppResult<Sha256> {
+    if let Some(h) = saved_hasher(upload) {
+        return Ok(h);
+    }
+    let (path, len) = (upload_path(st, &upload.id), upload.offset.max(0) as u64);
+    let hashed = tokio::task::spawn_blocking(move || -> std::io::Result<(Sha256, u64)> {
+        use std::io::Read;
+        let mut hasher = Sha256::new();
+        if len == 0 {
+            return Ok((hasher, 0));
+        }
+        let mut f = std::fs::File::open(path)?.take(len);
+        let mut buf = vec![0u8; 1024 * 1024];
+        let mut total = 0u64;
+        loop {
+            let n = f.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+            total += n as u64;
+        }
+        Ok((hasher, total))
+    })
+    .await
+    .map_err(AppError::internal)?;
+    match hashed {
+        Ok((h, n)) if n == len => Ok(h),
+        _ => Err(AppError::not_found("The part of the file received so far is missing")),
+    }
+}
+
 /// Upload finished: compute the hash, put it in storage, create the file node (or give an existing one the new content)
 async fn finalize(st: &AppState, up: &Uploader, upload: Upload) -> AppResult<String> {
     let path = upload_path(st, &upload.id);
@@ -458,7 +530,12 @@ async fn finalize(st: &AppState, up: &Uploader, upload: Upload) -> AppResult<Str
     if parent.in_folder_space() {
         return finalize_in_folder(st, up, &upload, &path, parent).await;
     }
-    let (hash, size) = hash_file(path.clone()).await?;
+    // Hashed while it arrived; read again only without a saved state (an upload the server finished after a restart
+    // from before states were saved, say)
+    let (hash, size) = match saved_hasher(&upload).filter(|_| upload.offset == upload.size) {
+        Some(h) => (hex::encode(h.finalize()), tokio::fs::metadata(&path).await?.len()),
+        None => hash_file(path.clone()).await?,
+    };
     if size != upload.size as u64 {
         return Err(AppError::bad_request("File size mismatch"));
     }
@@ -814,6 +891,83 @@ mod tests {
         let err = head(State(env.st.clone()), amy.clone(), Path(id.clone())).await.unwrap_err();
         assert_eq!(err.status, StatusCode::NOT_FOUND);
         assert_eq!(files_named(&env, "lost").await, 0);
+    }
+
+    async fn stored_hash(env: &testutil::TestEnv, node: &str) -> String {
+        let (h,): (String,) = sqlx::query_as("SELECT blob_hash FROM nodes WHERE id = ?").bind(node).fetch_one(&env.st.db).await.unwrap();
+        h
+    }
+
+    #[tokio::test]
+    async fn uploads_are_hashed_as_they_arrive_and_resume_from_the_saved_state() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let id = begin(&env, &amy, "parts.txt", 11).await;
+        send(&env, &amy, &id, 0, b"hello").await.unwrap();
+        let (state, hashed): (Option<Vec<u8>>, i64) =
+            sqlx::query_as("SELECT hash_state, hashed FROM uploads WHERE id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
+        assert!(state.is_some());
+        assert_eq!(hashed, 5);
+        // The part received is changed on disk: the saved state is used, so the file isn't read again (a real change
+        // would be found by `thirtyfile check --verify`)
+        let path = upload_path(&env.st, &id);
+        std::fs::write(&path, b"HELLO").unwrap();
+        let done = send(&env, &amy, &id, 5, b" world").await.unwrap();
+        let node = done.headers()["x-node-id"].to_str().unwrap().to_string();
+        assert_eq!(stored_hash(&env, &node).await, crate::util::sha256_hex(b"hello world"));
+
+        // Without a saved state (an upload from before, or one whose state is behind), the received part is read once
+        for stale in ["UPDATE uploads SET hash_state = NULL WHERE id = ?", "UPDATE uploads SET hashed = 0 WHERE id = ?"] {
+            let id = begin(&env, &amy, "again.txt", 11).await;
+            send(&env, &amy, &id, 0, b"hello").await.unwrap();
+            sqlx::query(stale).bind(&id).execute(&env.st.db).await.unwrap();
+            let done = send(&env, &amy, &id, 5, b" there").await.unwrap();
+            let node = done.headers()["x-node-id"].to_str().unwrap().to_string();
+            assert_eq!(stored_hash(&env, &node).await, crate::util::sha256_hex(b"hello there"), "{stale}");
+        }
+
+        // Data received after the offset was last saved (the server stopped in between) is dropped and not hashed
+        let id = begin(&env, &amy, "cut.txt", 8).await;
+        send(&env, &amy, &id, 0, b"abcd").await.unwrap();
+        append(&upload_path(&env.st, &id), b"zz");
+        let done = send(&env, &amy, &id, 4, b"efgh").await.unwrap();
+        let node = done.headers()["x-node-id"].to_str().unwrap().to_string();
+        assert_eq!(stored_hash(&env, &node).await, crate::util::sha256_hex(b"abcdefgh"));
+
+        // The part received so far is gone: the client hears to start over
+        let id = begin(&env, &amy, "gone.txt", 8).await;
+        send(&env, &amy, &id, 0, b"abcd").await.unwrap();
+        sqlx::query("UPDATE uploads SET hash_state = NULL WHERE id = ?").bind(&id).execute(&env.st.db).await.unwrap();
+        std::fs::write(upload_path(&env.st, &id), b"").unwrap();
+        let err = send(&env, &amy, &id, 4, b"efgh").await.unwrap_err();
+        assert_eq!(err.code, Some("upload_discarded"));
+        assert_eq!(files_named(&env, "gone").await, 0);
+    }
+
+    #[tokio::test]
+    async fn an_upload_finished_after_a_restart_uses_the_saved_hash_state() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let id = begin(&env, &amy, "late.txt", 10).await;
+        send(&env, &amy, &id, 0, b"first").await.unwrap();
+        // Everything arrived and was saved, but the server stopped before the file was created
+        let mut hasher = saved_hasher(&load(&env.st, &Uploader::signed_in(amy.clone()), &id).await.unwrap()).unwrap();
+        hasher.update(b"-last");
+        append(&upload_path(&env.st, &id), b"-last");
+        sqlx::query("UPDATE uploads SET offset = 10, hashed = 10, hash_state = ? WHERE id = ?")
+            .bind(hasher.serialize().to_vec())
+            .bind(&id)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        let res = head(State(env.st.clone()), amy.clone(), Path(id.clone())).await.unwrap();
+        let node = res.headers()["x-node-id"].to_str().unwrap().to_string();
+        assert_eq!(stored_hash(&env, &node).await, crate::util::sha256_hex(b"first-last"));
+    }
+
+    fn append(path: &std::path::Path, data: &[u8]) {
+        let mut f = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+        std::io::Write::write_all(&mut f, data).unwrap();
     }
 
     #[tokio::test]
