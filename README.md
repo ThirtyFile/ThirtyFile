@@ -13,11 +13,12 @@ A self-hosted file manager that looks and works like Windows File Explorer, in y
 ![The ThirtyFile file list](site/assets/files-light.webp)
 
 - Tabs, folder tree, drag and drop, right-click menus and keyboard shortcuts
-- Preview Word, PowerPoint and Excel in the browser; edit Excel and text files online
-- Share with a link: password, expiry date and download limit
-- Keep files on a local disk or NAS, S3-compatible storage, SFTP or FTP
+- Map it as a drive on a computer or phone (WebDAV)
+- Preview Word, PowerPoint and Excel in the browser; edit Excel and text files online; earlier versions are kept
+- Share with a link (password, expiry date, download limit), or receive files through one
+- Keep files as ordinary folders on a local disk or NAS, or on S3-compatible storage, SFTP or FTP; show an existing folder as a space
 - Personal, company and team spaces, with roles and size limits
-- Sign in with a password, or with Microsoft, Google or GitHub
+- Sign in with a password and two-step verification, or with Microsoft, Google or GitHub
 - English and Traditional Chinese, dark mode, works on phones
 
 ## Install
