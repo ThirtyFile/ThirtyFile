@@ -7,6 +7,8 @@ export default {
   "Offline": "離線",
   "File locations": "檔案位置",
   "Resize navigation pane": "調整左側窗格寬度",
+  "Show current folder": "顯示目前的資料夾",
+  "Collapse all": "全部收合",
   "Recent": "最近使用",
   "My share links": "我的分享連結",
   "Trash": "垃圾桶",

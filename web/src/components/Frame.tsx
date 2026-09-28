@@ -1,43 +1,17 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { FolderIcon, PanelLeftIcon, type LucideIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { ShortcutsHost } from "@/components/ShortcutsDialog";
 import { useMe } from "@/lib/session";
 import { useBranding } from "@/lib/branding";
 import { t } from "@/lib/i18n";
-import { cn, formatBytes } from "@/lib/utils";
+import { formatBytes } from "@/lib/utils";
 import { setActiveTitle } from "@/tabs";
 import { AddressBar, crumbPath, type Crumb } from "./frame/AddressBar";
 import { LocationsNav } from "./frame/LocationsNav";
+import { ToolButton } from "./frame/ToolButton";
 
 export { crumbPath, type Crumb };
-
-// ───────────── Toolbar buttons ─────────────
-
-export function ToolButton({
-  icon: Icon,
-  label,
-  title,
-  showLabel = false,
-  className,
-  ...props
-}: React.ComponentProps<typeof Button> & {
-  icon: LucideIcon;
-  label: string;
-  title?: string;
-  showLabel?: boolean;
-}) {
-  return (
-    <Button variant="ghost" title={title ?? label} aria-label={label} className={cn("h-[30px] gap-[5px] px-2 text-xs", className)} {...props}>
-      <Icon />
-      {showLabel && <span className="max-lg:hidden">{label}</span>}
-    </Button>
-  );
-}
-
-export function ToolSeparator() {
-  return <span className="mx-1 h-5 border-l" />;
-}
+export { ToolButton, ToolSeparator } from "./frame/ToolButton";
 
 // ───────────── Frame ─────────────
 
