@@ -179,8 +179,9 @@ fn action_label(a: &str) -> &str {
 }
 
 pub(super) fn csv_field(s: &str) -> String {
-    // Content starting with = + - @ may be run as a formula in spreadsheets, so prefix it with a single quote
-    let safe = if s.starts_with(['=', '+', '-', '@']) { format!("'{s}") } else { s.to_string() };
+    // Content starting with = + - @ (or a tab or carriage return before one) may be run as a formula in spreadsheets,
+    // so prefix it with a single quote
+    let safe = if s.starts_with(['=', '+', '-', '@', '\t', '\r']) { format!("'{s}") } else { s.to_string() };
     if safe.contains([',', '"', '\n', '\r']) { format!("\"{}\"", safe.replace('"', "\"\"")) } else { safe }
 }
 

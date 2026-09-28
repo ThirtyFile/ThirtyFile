@@ -147,7 +147,7 @@ pub async fn load_secret(db: &SqlitePool) -> Result<Vec<u8>, sqlx::Error> {
         .fetch_optional(db)
         .await?
     {
-        match crate::secrets::open(&v) {
+        match crate::secrets::open("settings:secret", &v) {
             Ok(secret) => return Ok(secret.into_bytes()),
             // A database restored without its key: a new signing secret only signs everyone out and ends share links'
             // unlocked sessions, which is better than not starting
@@ -156,7 +156,7 @@ pub async fn load_secret(db: &SqlitePool) -> Result<Vec<u8>, sqlx::Error> {
     }
     let secret = random_token(64);
     sqlx::query("INSERT INTO settings (key, value) VALUES ('secret', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
-        .bind(crate::secrets::seal(&secret))
+        .bind(crate::secrets::seal("settings:secret", &secret))
         .execute(db)
         .await?;
     Ok(secret.into_bytes())
@@ -166,11 +166,11 @@ pub async fn load_secret(db: &SqlitePool) -> Result<Vec<u8>, sqlx::Error> {
 /// they are encrypted), or all of them when the key is rotated. Returns how many values were written.
 pub async fn reseal_secrets(db: &SqlitePool, new_key: &[u8; 32], all: bool) -> Result<usize, sqlx::Error> {
     use crate::secrets::{is_sealed, reseal};
-    let fix = |v: &str| -> Result<Option<String>, sqlx::Error> {
+    let fix = |context: &str, v: &str| -> Result<Option<String>, sqlx::Error> {
         if v.is_empty() || (is_sealed(v) && !all) {
             return Ok(None);
         }
-        match reseal(v, new_key) {
+        match reseal(context, v, new_key) {
             Ok(sealed) => Ok(Some(sealed)),
             // Saved with another key (a database restored without its key): left alone; reading it reports the problem
             Err(_) if !all => Ok(None),
@@ -180,7 +180,7 @@ pub async fn reseal_secrets(db: &SqlitePool, new_key: &[u8; 32], all: bool) -> R
     let mut tx = db.begin().await?;
     let mut n = 0;
     if let Some((v,)) = sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'secret'").fetch_optional(&mut *tx).await?
-        && let Some(sealed) = fix(&v)?
+        && let Some(sealed) = fix("settings:secret", &v)?
     {
         set_setting(&mut tx, "secret", &sealed).await?;
         n += 1;
@@ -191,7 +191,7 @@ pub async fn reseal_secrets(db: &SqlitePool, new_key: &[u8; 32], all: bool) -> R
         let mut changed = false;
         for p in crate::sso::PROVIDERS {
             if let Some(secret) = json[p]["client_secret"].as_str().map(str::to_string)
-                && let Some(sealed) = fix(&secret)?
+                && let Some(sealed) = fix(&format!("sso:{p}"), &secret)?
             {
                 json[p]["client_secret"] = sealed.into();
                 changed = true;
@@ -205,7 +205,7 @@ pub async fn reseal_secrets(db: &SqlitePool, new_key: &[u8; 32], all: bool) -> R
     if let Some((v,)) = sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'smtp'").fetch_optional(&mut *tx).await?
         && let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&v)
         && let Some(secret) = json["password"].as_str().map(str::to_string)
-        && let Some(sealed) = fix(&secret)?
+        && let Some(sealed) = fix("smtp", &secret)?
     {
         json["password"] = sealed.into();
         set_setting(&mut tx, "smtp", &json.to_string()).await?;
@@ -213,7 +213,7 @@ pub async fn reseal_secrets(db: &SqlitePool, new_key: &[u8; 32], all: bool) -> R
     }
     let totp: Vec<(i64, String)> = sqlx::query_as("SELECT id, totp_secret FROM users WHERE totp_secret IS NOT NULL").fetch_all(&mut *tx).await?;
     for (id, secret) in totp {
-        if let Some(sealed) = fix(&secret)? {
+        if let Some(sealed) = fix(&format!("user:{id}:totp"), &secret)? {
             sqlx::query("UPDATE users SET totp_secret = ? WHERE id = ?").bind(sealed).bind(id).execute(&mut *tx).await?;
             n += 1;
         }
@@ -224,7 +224,7 @@ pub async fn reseal_secrets(db: &SqlitePool, new_key: &[u8; 32], all: bool) -> R
         let mut changed = false;
         for field in crate::locations::SECRET_FIELDS {
             if let Some(secret) = json[field].as_str().map(str::to_string)
-                && let Some(sealed) = fix(&secret)?
+                && let Some(sealed) = fix(&format!("location:{id}:{field}"), &secret)?
             {
                 json[field] = sealed.into();
                 changed = true;

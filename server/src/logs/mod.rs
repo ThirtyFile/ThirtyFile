@@ -350,6 +350,9 @@ mod tests {
         assert_eq!(csv_field("=HYPERLINK(\"x\")"), "\"'=HYPERLINK(\"\"x\"\")\"");
         assert_eq!(csv_field("a,b"), "\"a,b\"");
         assert_eq!(csv_field("plain text"), "plain text");
+        // A tab or carriage return before a formula doesn't hide it from spreadsheets
+        assert_eq!(csv_field("\t=1+1"), "'\t=1+1");
+        assert_eq!(csv_field("\r=1+1"), "\"'\r=1+1\"");
     }
 
     #[tokio::test]

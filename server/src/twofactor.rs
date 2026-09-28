@@ -167,7 +167,7 @@ async fn use_totp(st: &AppState, user_id: i64, code: &str) -> AppResult<bool> {
     let row: Option<(Option<String>, i64)> = sqlx::query_as("SELECT totp_secret, totp_last_step FROM users WHERE id = ?").bind(user_id).fetch_optional(&st.db).await?;
     let Some((Some(stored), last)) = row else { return Ok(false) };
     // Stored encrypted like the other secrets (secrets.rs); one saved with another key can't be checked
-    let Ok(secret) = crate::secrets::open(&stored) else {
+    let Ok(secret) = crate::secrets::open(&format!("user:{user_id}:totp"), &stored) else {
         tracing::error!("The two-factor secret of user {user_id} can't be read with the current key; reset their two-factor sign-in");
         return Ok(false);
     };
@@ -220,7 +220,7 @@ async fn turn_on(st: &AppState, user_id: i64, secret: &str, step: i64) -> AppRes
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
     sqlx::query("UPDATE users SET totp_secret = ?, totp_last_step = ? WHERE id = ?")
-        .bind(crate::secrets::seal(secret))
+        .bind(crate::secrets::seal(&format!("user:{user_id}:totp"), secret))
         .bind(step)
         .bind(user_id)
         .execute(&mut *tx)

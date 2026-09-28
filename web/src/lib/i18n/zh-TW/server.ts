@@ -754,6 +754,8 @@ export default {
   "Enter the folder's full path, for example /mnt/nas/shared": "請輸入資料夾的完整路徑，例如 /mnt/nas/shared",
   "The folder doesn't exist on the server": "伺服器上沒有這個資料夾",
   "Choose a folder outside ThirtyFile's own data and storage folders": "請選擇 ThirtyFile 自己的資料和儲存資料夾以外的資料夾",
+  "This folder contains, or is inside, a folder that another space or storage location uses": "這個資料夾包含其他空間或儲存位置使用的資料夾，或位於其中",
+  "Choose a folder outside ThirtyFile's data folder": "請選擇 ThirtyFile 資料資料夾以外的資料夾",
   "This space doesn't show a folder": "這個空間不是資料夾空間",
   "This space shows a folder on the server; its files can't be moved to a storage location": "這個空間顯示的是伺服器上的資料夾，檔案不能搬到儲存位置",
   "Enter a number of minutes from 0 to 1440": "請輸入 0 到 1440 的分鐘數",

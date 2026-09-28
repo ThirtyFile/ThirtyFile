@@ -33,13 +33,14 @@ struct LocationRow {
     is_default: bool,
 }
 
-/// A location's stored settings, with its passwords and keys decrypted (secrets.rs)
-fn config_json(raw: &str) -> Value {
+/// A location's stored settings, with its passwords and keys decrypted (secrets.rs; each bound to the location and
+/// field it is stored for)
+fn config_json(id: &str, raw: &str) -> Value {
     let mut cfg: Value = serde_json::from_str(raw).unwrap_or_else(|_| json!({}));
     if let Some(obj) = cfg.as_object_mut() {
         for field in SECRET_FIELDS {
             if let Some(Value::String(v)) = obj.get_mut(field) {
-                match crate::secrets::open(v) {
+                match crate::secrets::open(&format!("location:{id}:{field}"), v) {
                     Ok(plain) => *v = plain,
                     Err(e) => {
                         tracing::error!("A saved {field} of a storage location can't be read ({e}); enter it again");
@@ -53,12 +54,12 @@ fn config_json(raw: &str) -> Value {
 }
 
 /// Settings as stored: passwords and keys encrypted
-fn sealed_config(cfg: &Value) -> String {
+fn sealed_config(id: &str, cfg: &Value) -> String {
     let mut cfg = cfg.clone();
     if let Some(obj) = cfg.as_object_mut() {
         for field in SECRET_FIELDS {
             if let Some(Value::String(v)) = obj.get_mut(field) {
-                *v = crate::secrets::seal(v);
+                *v = crate::secrets::seal(&format!("location:{id}:{field}"), v);
             }
         }
     }
@@ -74,7 +75,7 @@ pub async fn load_all(db: &SqlitePool, storage_dir: &FsPath) -> Result<(HashMap<
         if r.is_default {
             default = r.id.clone();
         }
-        match storage::build(&r.kind, &config_json(&r.config), storage_dir) {
+        match storage::build(&r.kind, &config_json(&r.id, &r.config), storage_dir) {
             Ok(s) => {
                 map.insert(r.id, s);
             }
@@ -145,7 +146,7 @@ pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<Lo
         let (used_bytes, blob_count) = blobs.get(&r.id).copied().unwrap_or_default();
         let drive_count = drives.get(&r.id).map_or(0, |d| d.0);
         let pending_deletes = pending.get(&r.id).map_or(0, |d| d.0);
-        let (mut config, has_secret) = public_config(&config_json(&r.config));
+        let (mut config, has_secret) = public_config(&config_json(&r.id, &r.config));
         if r.id == BUILTIN {
             // Shown in the list; the built-in location's folder is set with THIRTYFILE_STORAGE
             config["path"] = st.storage_dir.display().to_string().into();
@@ -190,7 +191,7 @@ async fn merged_config(st: &AppState, id: Option<&str>, kind: &str, config: Valu
     let Some(id) = id else { return Ok(config) };
     let old: Option<(String, String)> =
         sqlx::query_as("SELECT kind, config FROM storage_locations WHERE id = ?").bind(id).fetch_optional(&st.db).await?;
-    let Some((old_kind, old)) = old.map(|(k, c)| (k, config_json(&c))) else { return Ok(config) };
+    let Some((old_kind, old)) = old.map(|(k, c)| (k, config_json(id, &c))) else { return Ok(config) };
     let wanted = SECRET_FIELDS.iter().any(|f| {
         config.get(*f).and_then(Value::as_str).is_none_or(str::is_empty) && old.get(*f).and_then(Value::as_str).is_some_and(|s| !s.is_empty())
     });
@@ -380,7 +381,7 @@ pub async fn test_existing(State(st): State<AppState>, _: Admin, Path(id): Path<
         .fetch_optional(&st.db)
         .await?
         .ok_or_else(|| AppError::not_found("Storage location not found"))?;
-    let backend = connect(&st, &row.kind, config_json(&row.config)).await;
+    let backend = connect(&st, &row.kind, config_json(&row.id, &row.config)).await;
     set_health(&st, &id, backend.as_ref().err().map(|e| e.message.clone()));
     match backend {
         Ok((b, _)) => {
@@ -397,6 +398,7 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(req): J
     let name = validate_name(req.name.as_deref().unwrap_or_default())?;
     let kind = req.kind.unwrap_or_default();
     let config = req.config.unwrap_or_else(|| json!({}));
+    crate::folders::check_location_folder(&st, None, &kind, &config).await?;
     let (backend, config) = connect(&st, &kind, config).await?;
     let id = new_id();
     {
@@ -406,7 +408,7 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(req): J
             .bind(&id)
             .bind(&name)
             .bind(&kind)
-            .bind(sealed_config(&config))
+            .bind(sealed_config(&id, &config))
             .bind(now())
             .execute(&mut *tx)
             .await?;
@@ -436,6 +438,7 @@ pub async fn update(
     let new_backend = match (&req.config, id == BUILTIN) {
         (Some(cfg), false) => {
             let merged = merged_config(&st, Some(&id), &row.kind, cfg.clone()).await?;
+            crate::folders::check_location_folder(&st, Some(&id), &row.kind, &merged).await?;
             Some(connect(&st, &row.kind, merged).await?)
         }
         _ => None,
@@ -445,7 +448,7 @@ pub async fn update(
         let mut tx = st.db.begin().await?;
         sqlx::query("UPDATE storage_locations SET name = ? WHERE id = ?").bind(&name).bind(&id).execute(&mut *tx).await?;
         if let Some((_, cfg)) = &new_backend {
-            sqlx::query("UPDATE storage_locations SET config = ? WHERE id = ?").bind(sealed_config(cfg)).bind(&id).execute(&mut *tx).await?;
+            sqlx::query("UPDATE storage_locations SET config = ? WHERE id = ?").bind(sealed_config(&id, cfg)).bind(&id).execute(&mut *tx).await?;
         }
         logs::record_activity(&mut tx, &user, None, "storage_update", &name).await?;
         tx.commit().await?;

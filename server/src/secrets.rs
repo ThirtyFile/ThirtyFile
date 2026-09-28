@@ -17,11 +17,16 @@ use std::{
 
 use aes_gcm::{
     Aes256Gcm, Nonce,
-    aead::{Aead, Generate, KeyInit},
+    aead::{Aead, Generate, KeyInit, Payload},
 };
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
 
-const PREFIX: &str = "enc:v1:";
+/// Values encrypted before they were bound to where they are stored: still read, and encrypted again as `PREFIX` at
+/// startup (`db::reseal_secrets`)
+const PREFIX_V1: &str = "enc:v1:";
+/// Values encrypted together with where they are stored (the `context`, such as `user:12:totp`), as associated data:
+/// a value copied into another row or setting can't be read there
+const PREFIX: &str = "enc:v2:";
 const NONCE_LEN: usize = 12;
 
 static CIPHER: OnceLock<Aes256Gcm> = OnceLock::new();
@@ -100,50 +105,58 @@ fn cipher() -> &'static Aes256Gcm {
     CIPHER.get().expect("secrets::init runs at startup")
 }
 
-fn seal_with(cipher: &Aes256Gcm, plain: &str) -> String {
+fn seal_with(cipher: &Aes256Gcm, context: &str, plain: &str) -> String {
     let nonce = Nonce::generate();
-    let ct = cipher.encrypt(&nonce, plain.as_bytes()).expect("AES-GCM encryption doesn't fail for short values");
+    let ct = cipher
+        .encrypt(&nonce, Payload { msg: plain.as_bytes(), aad: context.as_bytes() })
+        .expect("AES-GCM encryption doesn't fail for short values");
     let mut out = nonce.to_vec();
     out.extend(ct);
     format!("{PREFIX}{}", B64.encode(out))
 }
 
-fn open_with(cipher: &Aes256Gcm, stored: &str) -> Result<String, String> {
-    let Some(b64) = stored.strip_prefix(PREFIX) else { return Ok(stored.to_string()) };
+fn open_with(cipher: &Aes256Gcm, context: &str, stored: &str) -> Result<String, String> {
+    let (b64, aad) = match (stored.strip_prefix(PREFIX), stored.strip_prefix(PREFIX_V1)) {
+        (Some(b64), _) => (b64, context.as_bytes()),
+        (None, Some(b64)) => (b64, &b""[..]),
+        _ => return Ok(stored.to_string()),
+    };
     let raw = B64.decode(b64).map_err(|_| "damaged encrypted value".to_string())?;
     if raw.len() < NONCE_LEN {
         return Err("damaged encrypted value".into());
     }
     let (nonce, ct) = raw.split_at(NONCE_LEN);
     let nonce = Nonce::try_from(nonce).map_err(|_| "damaged encrypted value".to_string())?;
-    let plain = cipher
-        .decrypt(&nonce, ct)
-        .map_err(|_| "can't decrypt a saved secret: the key (THIRTYFILE_SECRET_KEY, or secret.key in the data folder) isn't the one it was saved with".to_string())?;
+    let plain = cipher.decrypt(&nonce, Payload { msg: ct, aad }).map_err(|_| {
+        "can't decrypt a saved secret: the key (THIRTYFILE_SECRET_KEY, or secret.key in the data folder) isn't the one it was saved with, or it was saved for something else".to_string()
+    })?;
     String::from_utf8(plain).map_err(|_| "damaged encrypted value".into())
 }
 
-/// Encrypts a secret for storing in the database; an empty value stays empty ("not set")
-pub fn seal(plain: &str) -> String {
-    if plain.is_empty() { String::new() } else { seal_with(cipher(), plain) }
+/// Encrypts a secret for storing in the database at `context` (what it belongs to, such as `user:12:totp`); an empty
+/// value stays empty ("not set")
+pub fn seal(context: &str, plain: &str) -> String {
+    if plain.is_empty() { String::new() } else { seal_with(cipher(), context, plain) }
 }
 
-/// Decrypts a stored secret (a value from before encryption is returned as it is)
-pub fn open(stored: &str) -> Result<String, String> {
-    open_with(cipher(), stored)
+/// Decrypts a secret stored at `context` (a value from before encryption is returned as it is)
+pub fn open(context: &str, stored: &str) -> Result<String, String> {
+    open_with(cipher(), context, stored)
 }
 
+/// Whether a value is encrypted in the current way (bound to where it is stored)
 pub fn is_sealed(stored: &str) -> bool {
     stored.starts_with(PREFIX)
 }
 
-/// Re-encrypts every secret in the database with `new_key`: for rotating the key (`thirtyfile rotate-secret-key`)
-/// and for encrypting values saved before encryption existed
-pub fn reseal(old: &str, new_key: &[u8; 32]) -> Result<String, String> {
-    let plain = open(old)?;
+/// Re-encrypts a secret stored at `context` with `new_key`: for rotating the key (`thirtyfile rotate-secret-key`),
+/// and for values saved before encryption existed or before it was bound to where they are stored
+pub fn reseal(context: &str, old: &str, new_key: &[u8; 32]) -> Result<String, String> {
+    let plain = open(context, old)?;
     if plain.is_empty() {
         return Ok(String::new());
     }
-    Ok(seal_with(&Aes256Gcm::new(new_key.into()), &plain))
+    Ok(seal_with(&Aes256Gcm::new(new_key.into()), context, &plain))
 }
 
 #[cfg(test)]
@@ -152,20 +165,35 @@ mod tests {
 
     #[test]
     fn sealed_values_round_trip_and_need_the_same_key() {
-        let sealed = seal("hunter-2-but-generated");
+        let sealed = seal("user:1:totp", "hunter-2-but-generated");
         assert!(is_sealed(&sealed) && !sealed.contains("hunter"));
-        assert_eq!(open(&sealed).unwrap(), "hunter-2-but-generated");
+        assert_eq!(open("user:1:totp", &sealed).unwrap(), "hunter-2-but-generated");
         // Each value gets its own nonce
-        assert_ne!(seal("x"), seal("x"));
+        assert_ne!(seal("c", "x"), seal("c", "x"));
         // Old plain values still read, empty stays empty
-        assert_eq!(open("plain").unwrap(), "plain");
-        assert_eq!(seal(""), "");
+        assert_eq!(open("c", "plain").unwrap(), "plain");
+        assert_eq!(seal("c", ""), "");
         // Another key can't read it
         let other_key: [u8; 32] = rand::random();
         let other = Aes256Gcm::new(&other_key.into());
-        assert!(open_with(&other, &sealed).is_err());
-        let moved = reseal(&sealed, &other_key).unwrap();
-        assert_eq!(open_with(&other, &moved).unwrap(), "hunter-2-but-generated");
+        assert!(open_with(&other, "user:1:totp", &sealed).is_err());
+        let moved = reseal("user:1:totp", &sealed, &other_key).unwrap();
+        assert_eq!(open_with(&other, "user:1:totp", &moved).unwrap(), "hunter-2-but-generated");
+    }
+
+    #[test]
+    fn a_value_copied_elsewhere_cant_be_read_there_and_old_values_still_read() {
+        let sealed = seal("user:1:totp", "secret");
+        assert!(open("user:2:totp", &sealed).is_err(), "bound to where it is stored");
+        // Saved before values were bound (no associated data): read anywhere, and made current by reseal
+        let nonce = Nonce::generate();
+        let mut raw = nonce.to_vec();
+        raw.extend(cipher().encrypt(&nonce, &b"old"[..]).unwrap());
+        let v1 = format!("{PREFIX_V1}{}", B64.encode(raw));
+        assert!(!is_sealed(&v1));
+        assert_eq!(open("smtp", &v1).unwrap(), "old");
+        let current = reseal("smtp", &v1, test_key()).unwrap();
+        assert!(is_sealed(&current) && open("smtp", &current).unwrap() == "old" && open("sso:google", &current).is_err());
     }
 
     #[test]

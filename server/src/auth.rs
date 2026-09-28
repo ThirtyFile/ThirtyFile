@@ -94,7 +94,7 @@ pub fn get_cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
 }
 
 pub fn cookie_header(st: &AppState, name: &str, value: &str, path: &str, max_age: i64) -> String {
-    let secure = if st.secure_cookie { "; Secure" } else { "" };
+    let secure = if st.https() { "; Secure" } else { "" };
     format!("{name}={value}; Path={path}; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}")
 }
 
@@ -555,7 +555,9 @@ pub async fn logout(
         }
     }
     let cookie = cookie_header(&st, SESSION_COOKIE, "", "/", 0);
-    Ok(([(header::SET_COOKIE, cookie)], Json(serde_json::json!({ "ok": true }))))
+    // The browser drops what it cached for this site (file contents, thumbnails), so the next person at a shared
+    // computer doesn't find it there
+    Ok(([(header::SET_COOKIE, cookie), (header::HeaderName::from_static("clear-site-data"), "\"cache\"".to_string())], Json(serde_json::json!({ "ok": true }))))
 }
 
 pub async fn me(State(st): State<AppState>, user: User) -> AppResult<Json<Me>> {
