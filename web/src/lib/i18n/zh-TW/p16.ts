@@ -13,4 +13,6 @@ export default {
   // An item's history in the Details pane
   "Activity": "活動",
   "Only the {n} most recent entries are shown": "只顯示最近 {n} 筆紀錄",
+  // Recent
+  "Files you upload, edit or open show up here, also in shared spaces and folders.": "你上傳、編輯或開啟的檔案會顯示在這裡，包括共用空間和共用資料夾中的檔案。",
 };

@@ -224,7 +224,18 @@ pub async fn content(
     headers: HeaderMap,
 ) -> AppResult<Response> {
     let node = tree::owned_node(&mut *st.db.acquire().await?, &user, &id).await?;
-    let mut res = serve_blob(&st, &headers, node_blob(&node)?, q.download == Some(1)).await?;
+    let download = q.download == Some(1);
+    let mut res = serve_blob(&st, &headers, node_blob(&node)?, download).await?;
+    // Opened or previewed in the browser: listed in Recent. Downloads and app passwords (sync tools, backups) aren't
+    // opening, and recording happens after the answer so it never slows the file down
+    if !download && user.session_id.is_some() {
+        let (st, node_id) = (st.clone(), node.id.clone());
+        tokio::spawn(async move {
+            if let Err(e) = crate::nodes::record_open(&st, user.id, &node_id).await {
+                tracing::warn!("Couldn't remember an opened file for Recent: {}", e.message);
+            }
+        });
+    }
     // The version this content belongs to: the editor sends it back as X-Base-Version when saving
     res.headers_mut().insert("x-version", HeaderValue::from(node.updated_at));
     Ok(res)

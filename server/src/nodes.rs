@@ -1121,16 +1121,73 @@ pub async fn favorites(State(st): State<AppState>, user: User, Query(q): Query<L
     Ok(Json(locate(&st, &user, nodes).await?))
 }
 
-/// Recent: files I uploaded or modified (that I still have access to)
+/// Files listed in Recent
+const RECENT_LIMIT: i64 = 60;
+/// Opened files remembered per person
+const RECENT_OPENS_KEPT: i64 = 300;
+/// An open is recorded again only after this many seconds, so a video streamed in many range requests writes once
+const RECENT_OPEN_INTERVAL: i64 = 60;
+/// Candidates taken from each source (own files, newest edits) before the access check, so a person with many files
+/// or a long history doesn't make Recent slow
+const RECENT_CANDIDATES: i64 = 500;
+
+/// Remembers that the user opened a file (for Recent): at most once a minute per file, keeping the latest few hundred
+pub async fn record_open(st: &AppState, user_id: i64, node_id: &str) -> AppResult<()> {
+    let at = now();
+    // Most requests for the same file come close together (range requests, reloads): a read settles them without writing
+    let last: Option<(i64,)> =
+        sqlx::query_as("SELECT at FROM recent_files WHERE user_id = ? AND node_id = ?").bind(user_id).bind(node_id).fetch_optional(&st.db).await?;
+    if last.is_some_and(|(t,)| t > at - RECENT_OPEN_INTERVAL) {
+        return Ok(());
+    }
+    let mut tx = st.db.begin().await?;
+    sqlx::query("INSERT INTO recent_files (user_id, node_id, at) VALUES (?1, ?2, ?3) ON CONFLICT (user_id, node_id) DO UPDATE SET at = ?3")
+        .bind(user_id)
+        .bind(node_id)
+        .bind(at)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "DELETE FROM recent_files WHERE user_id = ?1 AND node_id NOT IN (
+           SELECT node_id FROM recent_files WHERE user_id = ?1 ORDER BY at DESC LIMIT ?2
+         )",
+    )
+    .bind(user_id)
+    .bind(RECENT_OPENS_KEPT)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Recent: files I uploaded, edited or opened, wherever they are (also files of others in shared spaces and folders),
+/// newest first by the latest of those times. Only files I can still open and that aren't in the trash.
 pub async fn recent(State(st): State<AppState>, user: User) -> AppResult<Json<Vec<Located>>> {
     let (drives, folders) = tree::scope(&mut *st.db.acquire().await?, &user).await?;
     let sql = format!(
-        "SELECT {NODE_COLS} FROM nodes n
-         WHERE n.owner_id = ?3 AND {} AND n.kind = 'file' AND n.trashed_at IS NULL
-         ORDER BY n.updated_at DESC LIMIT 60",
+        "WITH cand(id, at) AS (
+           SELECT * FROM (SELECT id, updated_at FROM nodes
+                          WHERE owner_id = ?3 AND kind = 'file' AND trashed_at IS NULL ORDER BY updated_at DESC LIMIT ?4)
+           UNION ALL
+           SELECT node_id, at FROM recent_files WHERE user_id = ?3
+           UNION ALL
+           SELECT * FROM (SELECT node_id, at FROM activity
+                          WHERE user_id = ?3 AND action IN ('edit', 'upload') AND node_id IS NOT NULL ORDER BY id DESC LIMIT ?4)
+         ),
+         latest(id, at) AS (SELECT id, MAX(at) FROM cand GROUP BY id)
+         SELECT {NODE_COLS} FROM latest JOIN nodes n ON n.id = latest.id
+         WHERE {} AND n.kind = 'file' AND n.trashed_at IS NULL
+         ORDER BY latest.at DESC LIMIT ?5",
         tree::scope_sql(1, 2)
     );
-    let nodes: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(drives).bind(folders).bind(user.id).fetch_all(&st.db).await?;
+    let nodes: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
+        .bind(drives)
+        .bind(folders)
+        .bind(user.id)
+        .bind(RECENT_CANDIDATES)
+        .bind(RECENT_LIMIT)
+        .fetch_all(&st.db)
+        .await?;
     Ok(Json(locate(&st, &user, nodes).await?))
 }
 
@@ -1764,5 +1821,77 @@ mod tests {
         let mine = list_trash(State(env.st.clone()), amy.clone(), Query(TrashQuery { mine: Some(true), ..Default::default() })).await.unwrap().0.into_items();
         assert!(mine.iter().any(|l| l.node.id == by_ben[0]));
         assert_eq!(mine.len(), 6);
+    }
+
+    #[tokio::test]
+    async fn recent_lists_files_i_opened_or_edited_in_shared_spaces_too() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let team = {
+            let mut conn = env.st.db.acquire().await.unwrap();
+            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0).await.unwrap();
+            crate::db::add_grant(&mut conn, &root, "user", amy.id, "owner", Some(amy.id), None).await.unwrap();
+            crate::db::add_grant(&mut conn, &root, "user", ben.id, "editor", Some(amy.id), None).await.unwrap();
+            root
+        };
+        let t = now();
+        let mine = env.file(&ben, &ben.root_id, "mine.txt").await;
+        let opened = env.file(&amy, &team, "opened.txt").await;
+        let edited = env.file(&amy, &team, "edited.txt").await;
+        let _untouched = env.file(&amy, &team, "untouched.txt").await;
+        sqlx::query("UPDATE nodes SET updated_at = ?").bind(t - 1000).execute(&env.st.db).await.unwrap();
+        sqlx::query("UPDATE nodes SET updated_at = ? WHERE id = ?").bind(t - 300).bind(&mine).execute(&env.st.db).await.unwrap();
+        record_open(&env.st, ben.id, &opened).await.unwrap();
+        sqlx::query("UPDATE recent_files SET at = ?").bind(t - 100).execute(&env.st.db).await.unwrap();
+        {
+            let mut c = env.st.db.acquire().await.unwrap();
+            let node = tree::get_node(&mut c, &edited).await.unwrap().unwrap();
+            tree::log(&mut c, &ben, Some(&node), "edit", "").await.unwrap();
+        }
+        sqlx::query("UPDATE activity SET at = ?").bind(t - 200).execute(&env.st.db).await.unwrap();
+        let names = |who: User| {
+            let st = env.st.clone();
+            async move { recent(State(st), who).await.unwrap().0.into_iter().map(|l| l.node.name).collect::<Vec<_>>() }
+        };
+
+        // Newest first by the latest of: my own file's change, my open, my edit
+        assert_eq!(names(ben.clone()).await, ["opened.txt", "edited.txt", "mine.txt"]);
+        // Amy's own files are in hers; Ben opening them doesn't put them in hers
+        assert!(!names(amy.clone()).await.contains(&"mine.txt".to_string()));
+
+        // Opening again within a minute doesn't write; later it moves the file up
+        let at = || async {
+            let (at,): (i64,) = sqlx::query_as("SELECT at FROM recent_files WHERE user_id = ? AND node_id = ?").bind(ben.id).bind(&opened).fetch_one(&env.st.db).await.unwrap();
+            at
+        };
+        sqlx::query("UPDATE recent_files SET at = ?").bind(t - 30).execute(&env.st.db).await.unwrap();
+        record_open(&env.st, ben.id, &opened).await.unwrap();
+        assert_eq!(at().await, t - 30);
+        sqlx::query("UPDATE recent_files SET at = ?").bind(t - 120).execute(&env.st.db).await.unwrap();
+        record_open(&env.st, ben.id, &opened).await.unwrap();
+        assert!(at().await >= t);
+
+        // Only files still reachable and not in the trash
+        let _ = trash(State(env.st.clone()), ben.clone(), ids(&[&edited])).await.unwrap();
+        assert_eq!(names(ben.clone()).await, ["opened.txt", "mine.txt"]);
+        env.revoke(&team, &ben).await;
+        assert_eq!(names(ben.clone()).await, ["mine.txt"]);
+
+        // Only the latest few hundred opens are kept per person
+        for i in 0..RECENT_OPENS_KEPT + 5 {
+            let id = env.file(&ben, &ben.root_id, &format!("{i}.txt")).await;
+            sqlx::query("INSERT INTO recent_files (user_id, node_id, at) VALUES (?, ?, ?)").bind(ben.id).bind(&id).bind(i).execute(&env.st.db).await.unwrap();
+        }
+        record_open(&env.st, ben.id, &mine).await.unwrap();
+        let (kept, oldest): (i64, i64) =
+            sqlx::query_as("SELECT COUNT(*), MIN(at) FROM recent_files WHERE user_id = ?").bind(ben.id).fetch_one(&env.st.db).await.unwrap();
+        // With opened.txt and mine.txt, the 7 oldest go
+        assert_eq!((kept, oldest), (RECENT_OPENS_KEPT, 7));
+        // Deleting a file for good forgets it
+        let _ = trash(State(env.st.clone()), ben.clone(), ids(&[&mine])).await.unwrap();
+        let _ = delete_forever(State(env.st.clone()), ben.clone(), ids(&[&mine])).await.unwrap();
+        let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM recent_files WHERE node_id = ?").bind(&mine).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(left, 0);
     }
 }

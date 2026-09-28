@@ -53,7 +53,7 @@ export function RecentPage() {
       crumbs={crumbs(t("Recent"))}
       icon={ClockIcon}
       onSortChange={setSort}
-      empty={<Empty icon={ClockIcon} text={t("No recent files yet")} />}
+      empty={<Empty icon={ClockIcon} text={t("No recent files yet")} hint={t("Files you upload, edit or open show up here, also in shared spaces and folders.")} />}
     />
   );
 }
