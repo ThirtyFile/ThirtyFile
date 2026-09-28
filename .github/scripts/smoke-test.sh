@@ -43,6 +43,15 @@ sign_in /tmp/new.cookies
 uids=$(docker top new -o pid,uid | awk 'NR > 1 { print $2 }' | sort -u)
 [ "$uids" = "1000" ] || fail "the server doesn't run as user 1000 (but as: $uids)"
 docker exec new thirtyfile health >/dev/null || fail "the health check command fails"
+# A new install keeps files as ordinary files: My files of admin is /storage/users/admin
+root=$(curl -fsS -b /tmp/new.cookies "$BASE/api/auth/me" | sed -n 's/.*"root_id":"\([^"]*\)".*/\1/p')
+id=$(curl -fsS -D - -o /dev/null -b /tmp/new.cookies -X POST "$BASE/api/uploads" \
+  -H 'Tus-Resumable: 1.0.0' -H 'Upload-Length: 0' \
+  -H "Upload-Metadata: filename $(b64 hello.txt),parentId $(b64 "$root")" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-node-id"{print $2}')
+[ -n "$id" ] || fail "creating a file in the new image failed"
+curl -fsS -b /tmp/new.cookies -X PUT --data-binary 'a plain file' "$BASE/api/files/$id/content" >/dev/null
+on_disk=$(docker cp new:/storage/users/admin/hello.txt - | tar -xO) || fail "My files isn't the folder /storage/users/admin"
+[ "$on_disk" = "a plain file" ] || fail "/storage/users/admin/hello.txt reads \"$on_disk\""
 docker rm -f new >/dev/null
 
 echo "== Upgrading the latest release"

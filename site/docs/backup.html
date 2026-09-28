@@ -32,7 +32,7 @@ docker run -d --name thirtyfile --restart unless-stopped …   # the same option
         <pre><code>/storage/company/…            the company space
 /storage/teams/&lt;space name&gt;/…  team spaces
 /storage/users/&lt;user name&gt;/…   personal spaces</code></pre>
-        <p>It doesn't happen by itself when you upgrade: run it when it suits you (the log mentions it at every start while spaces are left to convert). <a href="#backup">Back up</a> first, then stop ThirtyFile and run:</p>
+        <p>Spaces and users added after upgrading get these folders right away; only the spaces made before need converting. It doesn't happen by itself when you upgrade: run it when it suits you (the log mentions it at every start while spaces are left to convert). <a href="#backup">Back up</a> first, then stop ThirtyFile and run:</p>
         <pre><code>docker compose stop
 docker compose run --rm thirtyfile convert --dry-run   # only lists what would happen
 docker compose run --rm thirtyfile convert
@@ -68,7 +68,7 @@ gh attestation verify thirtyfile-1.2.3-linux-amd64 --repo ThirtyFile/ThirtyFile<
         <p>An older version doesn't start on a database a newer one has changed. To go back, stop ThirtyFile, replace <code>data/drive.db</code> with the copy made before the upgrade (<code>data/backups/drive-before-&lt;new version&gt;.db</code>), delete <code>drive.db-wal</code> and <code>drive.db-shm</code> if they are there, and start the older image. Changes made since the upgrade (new accounts, files uploaded and their names) are lost; files uploaded since then stay in the storage folder but aren't listed.</p>
 
         <h2 id="backup">Backing up</h2>
-        <p>The <code>data</code> and <code>storage</code> folders together contain everything: files, accounts, settings and logs. The database in <code>data</code> is being written all the time, so don't copy <code>drive.db</code> while ThirtyFile runs; save a copy with the backup command instead, or stop ThirtyFile while copying.</p>
+        <p>The <code>data</code> and <code>storage</code> folders together contain everything: files, accounts, settings and logs. The files in <code>storage/company</code>, <code>storage/teams</code> and <code>storage/users</code> are ordinary files, so any backup tool can copy them and they can be restored one by one; share links, permissions, the trash and earlier versions need the database too. The database in <code>data</code> is being written all the time, so don't copy <code>drive.db</code> while ThirtyFile runs; save a copy with the backup command instead, or stop ThirtyFile while copying.</p>
         <h3 id="running">Without stopping it</h3>
         <ol>
           <li>Save a consistent copy of the database (it can't be overwritten, so use a new name each time):

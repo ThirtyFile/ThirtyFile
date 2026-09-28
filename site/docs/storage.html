@@ -30,6 +30,20 @@
           </table>
         </div>
 
+        <h2 id="layout">Where the files are</h2>
+        <p>On the storage folder and on every <em>Local folder</em> location, each space is an ordinary folder, and its files are ordinary files with their own names. You can open <code>/storage</code> (the <code>storage</code> folder next to <code>compose.yaml</code>) and find everything there:</p>
+        <pre><code>/storage/company/…              the company space "All files"
+/storage/teams/&lt;space name&gt;/…   team spaces
+/storage/users/&lt;user name&gt;/…    each user's "My files"</code></pre>
+        <p>A space gets its folder when it is created, in the folder of the default storage location (or <code>/nas/teams/…</code>, say, when a NAS added as a <em>Local folder</em> location is the default). These are <a href="#folder-spaces">folder spaces</a>: files copied into them by other programs, over SMB or by a scanner, show up in ThirtyFile, and changes made on the web are made in the folder.</p>
+        <ul>
+          <li><strong>Names.</strong> A folder is named after the space or the user. Characters a file name can't have become <code>_</code>, and names ThirtyFile would hide (<code>desktop.ini</code>, say) get an <code>_</code> in front. When the folder is already there, because another space has the same name, a folder with that name was made by hand, or a deleted space left it, the new one gets a number: <code>teams/Sales (2)</code>.</li>
+          <li><strong>Renaming.</strong> Renaming a space doesn't rename its folder, so programs, SMB shares and backups that use the path keep working. <strong>Control panel › Spaces</strong> shows each space's folder.</li>
+          <li><strong>Deleting.</strong> Deleting a space, or a user with their files, removes them from ThirtyFile only: the folder and the files in it stay on the disk, for you to delete or keep. A new space or user with the same name gets a new folder, never the old files. Moving a deleted user's files to another space moves them on the disk.</li>
+          <li><strong>S3, SFTP and FTP</strong> keep files in a content store instead: names made of the file's content (<code>ab/cd/…</code>), with the names and folders only in ThirtyFile's database. Renaming a folder there would copy every file in it. Spaces created while one of these is the default location use the content store, and can be <a href="#per-space">moved to another location</a> later.</li>
+          <li><strong>After upgrading from 0.1 or 0.2</strong>, the spaces made before keep their files in the content store in <code>/storage</code> until you <a href="backup.html#convert">convert them to plain folders</a>; spaces and users added since get folders right away.</li>
+        </ul>
+
         <h2 id="add">Adding a location</h2>
         <ol>
           <li>Open <strong>Control panel › Storage locations</strong> and click <strong>Add storage location</strong>.</li>
@@ -47,17 +61,17 @@
         <div class="note">Connections without encryption (plain FTP, or S3 over http) are only accepted for addresses inside your own network.</div>
 
         <h2 id="per-space">A location for each space</h2>
-        <p>Under <strong>Control panel › Spaces</strong>, choose a storage location for a space. Files already in the space can be moved to the new location. The space stays in use while they move.</p>
+        <p>Under <strong>Control panel › Spaces</strong>, choose a storage location for a space in the content store (on S3, SFTP or FTP, or not converted yet). Files already in the space can be moved to the new location. The space stays in use while they move. A folder space stays in its folder: to put its files elsewhere, move them to another space.</p>
 
         <h2 id="folder-spaces">Folder spaces: a folder on the server as a space</h2>
-        <p>A folder space shows an existing folder on the server, such as a NAS share, as a space. Its files stay where they are, as ordinary files, and can also be changed there, for example over SMB or by a scanner.</p>
+        <p>Every space on the storage folder or a <em>Local folder</em> location is a folder space (see <a href="#layout">Where the files are</a>). You can also show an existing folder on the server, such as a NAS share, as a space. Its files stay where they are, as ordinary files, and can also be changed there, for example over SMB or by a scanner.</p>
         <ol>
           <li>Mount the folder into the container, for example <code>-v /srv/shared:/mnt/shared</code>.</li>
           <li>Under <strong>Control panel › Spaces</strong>, click <strong>New folder space</strong> and enter the path inside the container, <code>/mnt/shared</code>.</li>
           <li>Add members as for any team space.</li>
         </ol>
         <p>ThirtyFile finds changes made in the folder when someone opens it, and checks every folder space every 15 minutes (change this under <strong>Control panel › General</strong>), or right away with <strong>Check for changes</strong>. Files and folders moved or renamed in the folder keep their share links and permissions.</p>
-        <p>On a disk of the server itself, changes show up by themselves about 12 seconds after they are made: ThirtyFile watches the folders for changes. That doesn't work for NFS or SMB mounts (the server isn't told about changes other computers make there), so those rely on the regular check. With very many folders, Linux's limit on watched folders (<code>fs.inotify.max_user_watches</code>, often 8,192 or more) can be reached; the log then says so, and the regular check finds the rest. Raise it on the host with <code>sysctl fs.inotify.max_user_watches=524288</code>.</p>
+        <p>On a disk of the server itself, changes show up by themselves about 12 seconds after they are made: ThirtyFile watches the folders for changes. That doesn't work for NFS or SMB mounts (the server isn't told about changes other computers make there), so those rely on the regular check. With very many folders, Linux's limit on watched folders (<code>fs.inotify.max_user_watches</code>, often 8,192 or more) can be reached; the log then says so, and the regular check finds the rest. Raise it on the host with <code>sysctl fs.inotify.max_user_watches=524288</code>. Each folder space also takes one of Linux's watch instances (<code>fs.inotify.max_user_instances</code>, often 128); with more spaces than that (every user has one), the log says which folders aren't watched, and <code>sysctl fs.inotify.max_user_instances=1024</code> raises it.</p>
         <p>While a large folder space is being checked, <strong>Control panel › Spaces</strong> shows how far it got, and the log says how long reading the folder and updating the index took when it took more than 10 seconds. As a guide, on an SSD the first check of a folder with 200,000 files takes about half a second to read and 25 seconds to index; checking it again when nothing changed takes a second or two. Network mounts are slower to read, since every file's size and date are asked for over the network: keep the regular check at 15 minutes or more for large NFS or SMB folders.</p>
         <p>Everything done on the web changes the folder itself: uploading, creating folders, renaming, moving, copying, editing and deleting. Moving to a space on another disk copies the files, checks them, then removes the originals.</p>
         <ul>
@@ -71,7 +85,7 @@
           <li>Temporary files of office programs and systems (<code>~$…</code>, <code>Thumbs.db</code>, <code>.DS_Store</code>) aren't shown. Symbolic links, names that aren't valid text and other disks mounted inside the folder are skipped; <strong>Check for changes</strong> lists them.</li>
           <li>A file that is still being copied into the folder appears once it has stopped changing for a few seconds.</li>
         </ul>
-        <p>Spaces made with 0.1 and 0.2 keep their files in the storage folder under names made of their content (<code>ab/cd/…</code>). To turn them into folder spaces with ordinary folders, see <a href="backup.html#convert">Converting spaces to plain folders</a>.</p>
+        <p>Spaces made with 0.1 and 0.2 keep their files in the storage folder under names made of their content (<code>ab/cd/…</code>). To turn them into folder spaces with ordinary folders, like the spaces created since, see <a href="backup.html#convert">Converting spaces to plain folders</a>.</p>
 
         <h2 id="offline">When a location is offline</h2>
         <p>Browsing, searching and organising folders keep working. Opening, downloading and uploading are paused, and resume by themselves when the location is back. The space is marked as offline in the meantime.</p>

@@ -44,7 +44,7 @@ docker compose up -d
 
 Open <http://localhost:8080> and sign in as `admin`. Without `THIRTYFILE_ADMIN_PASSWORD`, the password is created at random: `docker logs thirtyfile 2>&1 | grep password`.
 
-`/data` holds accounts and settings, `/storage` holds your files.
+`/data` holds accounts and settings, `/storage` holds your files, as ordinary folders: `company`, `teams/<space name>` and `users/<user name>`.
 
 ## Guides
 
