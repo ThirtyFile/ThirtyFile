@@ -31,6 +31,7 @@ mod upload;
 mod util;
 #[cfg(target_os = "linux")]
 mod watch;
+mod versions;
 mod web;
 mod zip;
 
@@ -445,6 +446,7 @@ fn untimed() -> Router<AppState> {
     let files = Router::new()
         .route("/files/{id}/content", put(files::save_content).layer(DefaultBodyLimit::max(files::MAX_EDIT_BYTES)))
         .route("/files/{id}/thumbnail", get(files::thumbnail))
+        .route("/files/{id}/versions/{version}/restore", post(versions::restore))
         .route("/uploads", post(upload::create).options(upload::options))
         .route(
             "/uploads/{id}",
@@ -490,6 +492,8 @@ fn file_api() -> Router<AppState> {
         .route("/nodes/favorite", post(nodes::set_favorite))
         .route("/shared-with-me", get(nodes::shared_with_me))
         .route("/files/{id}/content", get(files::content))
+        .route("/files/{id}/versions", get(versions::list))
+        .route("/files/{id}/versions/{version}/content", get(versions::content))
         .route("/download", get(files::download).post(files::create_download_link))
         .route("/download/{link}", get(files::download_by_link))
         .route_layer(middleware::from_fn(tokens::allow))
@@ -797,6 +801,11 @@ fn spawn_maintenance(st: AppState, trash_days: i64) {
                     Err(e) => tracing::warn!("Failed to purge the trash: {}", e.message),
                     _ => {}
                 }
+            }
+            match versions::prune(&st).await {
+                Ok(n) if n > 0 => tracing::info!("Removed {n} earlier versions of files that are no longer kept"),
+                Err(e) => tracing::warn!("Couldn't remove earlier versions of files: {}", e.message),
+                _ => {}
             }
             if let Err(e) = upload::purge_expired(&st).await {
                 tracing::warn!("Failed to clean up expired uploads: {}", e.message);

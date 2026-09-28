@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { type Answer, type Clash, type Resolution, numberedName, resolveAll } from "@/lib/conflicts";
 import { t } from "@/lib/i18n";
+import { useMe } from "@/lib/session";
 import { formatBytes, formatDateTime } from "@/lib/utils";
 
 /** What is being done: the choices read a little differently for each */
@@ -82,6 +83,7 @@ function Details({ label, size, modified, folder }: { label: string; size?: numb
 
 function ConflictDialog({ req, onDone }: { req: Request; onDone(answer: Answer | null): void }) {
   const [forAll, setForAll] = useState(false);
+  const versionKeep = useMe().version_keep;
   const { clash, op, remaining } = req;
   const folder = clash.existing.kind === "folder";
   const incomingFolder = clash.kind === "folder";
@@ -97,7 +99,12 @@ function ConflictDialog({ req, onDone }: { req: Request; onDone(answer: Answer |
         : folder
           ? t("Replace the folder in the destination")
           : t("Replace the file in the destination"),
-      hint: op === "upload" ? undefined : t("The item there moves to the trash."),
+      hint:
+        op !== "upload"
+          ? t("The item there moves to the trash.")
+          : merge || versionKeep <= 0
+            ? undefined
+            : t("Its current content is kept as an earlier version."),
     },
     { choice: "skip", icon: SkipForwardIcon, title: incomingFolder ? t("Skip this folder") : t("Skip this file") },
     {

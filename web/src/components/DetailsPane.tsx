@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
 import { FileIcon, canThumbnail, typeLabel } from "@/components/FileIcon";
 import { Resizer } from "@/components/Resizer";
+import { VersionsSection } from "@/components/VersionsSection";
 import { ROLE_LABEL, actionLabel } from "@/lib/drives";
 import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
 import { t, tServer } from "@/lib/i18n";
@@ -156,6 +157,9 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
               message={error.message}
               onRetry={() => Promise.all([info.error && info.refetch(), shares.error && shares.refetch(), contents.error && contents.refetch()])}
             />
+          )}
+          {node.kind === "file" && !node.trashed_at && (
+            <VersionsSection node={node} canRestore={!!info.data && info.data.role !== "viewer" && !info.data.read_only} />
           )}
         </div>
       </>

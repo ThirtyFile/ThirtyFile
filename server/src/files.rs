@@ -327,17 +327,17 @@ async fn store_content(st: AppState, user: User, id: String, body: Bytes, hash: 
         node.hash()?;
         tree::check_quota(&mut tx, node.drive(), body.len() as i64 - node.size).await?;
         let extra = tree::commit_blob(&st, &mut tx, &staged).await?;
-        let orphans = tree::set_content(&mut tx, &node, &hash, body.len() as i64).await?;
+        let removed = tree::set_content(&mut tx, crate::versions::Policy::of(&st), &node, &hash, body.len() as i64, user.id).await?;
         tree::log(&mut tx, &user, Some(&node), "edit", "").await?;
         let node = tree::get_node(&mut tx, &node.id).await?.unwrap();
         tx.commit().await?;
-        Ok((node, extra, orphans))
+        Ok((node, extra, removed))
     }
     .await;
     match result {
-        Ok((node, extra, orphans)) => {
+        Ok((node, extra, removed)) => {
             tree::finish_staged(&st, staged, extra).await;
-            tree::schedule_blob_removal(&st, orphans);
+            removed.finish(&st);
             Ok(Json(node))
         }
         Err(e) => {

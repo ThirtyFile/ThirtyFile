@@ -580,17 +580,28 @@ pub async fn release_blobs(conn: &mut SqliteConnection, hashes: &[String]) -> Ap
 }
 
 /// Gives a file of the content store new content, keeping its id (and with it its shares, permissions and favourites).
-/// The caller has recorded the reference to the new content (`commit_blob`); returns content no longer used.
-pub async fn set_content(conn: &mut SqliteConnection, node: &Node, hash: &str, size: i64) -> AppResult<Vec<BlobRef>> {
-    sqlx::query("UPDATE nodes SET blob_hash = ?, size = ?, updated_at = ? WHERE id = ?")
+/// The caller has recorded the reference to the new content (`commit_blob`). The content it had becomes an earlier
+/// version (see versions.rs); returns what is no longer used, to remove after the commit.
+pub async fn set_content(
+    conn: &mut SqliteConnection,
+    policy: crate::versions::Policy,
+    node: &Node,
+    hash: &str,
+    size: i64,
+    by: i64,
+) -> AppResult<crate::versions::Removed> {
+    let author = crate::versions::content_author(conn, node).await?;
+    sqlx::query("UPDATE nodes SET blob_hash = ?, size = ?, updated_at = ?, content_by = ? WHERE id = ?")
         .bind(hash)
         .bind(size)
         .bind(now().max(node.updated_at + 1))
+        .bind(by)
         .bind(&node.id)
         .execute(&mut *conn)
         .await?;
     adjust_usage(conn, node.drive(), size - node.size).await?;
-    release_blobs(conn, &node.blob_hash.iter().cloned().collect::<Vec<_>>()).await
+    // After the file lets go of its old content, which may be released when no version keeps it
+    crate::versions::keep_stored(conn, policy, node, author).await
 }
 
 /// Adds a reference for each file of a copy, one statement for the whole list: (hash, size, location when new)
@@ -611,26 +622,32 @@ pub async fn add_blob_refs(conn: &mut SqliteConnection, blobs: &[(String, i64, S
     Ok(())
 }
 
-/// Permanently deletes a subtree (including share links), returning the physical files to delete.
+/// Permanently deletes a subtree (including share links and earlier versions of its files), returning the physical
+/// files to delete. Versions kept in a folder space's folder are removed from disk by its next scan.
 pub async fn purge_subtree(conn: &mut SqliteConnection, id: &str) -> AppResult<Vec<BlobRef>> {
     // Only the columns needed: which content the files use, and how much space they free per space
-    let rows: Vec<(Option<String>, String, i64, Option<String>)> = sqlx::query_as(
+    // (id, space, kind, size, content)
+    type Row = (String, Option<String>, String, i64, Option<String>);
+    let rows: Vec<Row> = sqlx::query_as(
         "WITH RECURSIVE sub(id) AS (
            SELECT ?1 UNION ALL SELECT c.id FROM nodes c JOIN sub ON c.parent_id = sub.id
          )
-         SELECT n.drive_id, n.kind, n.size, n.blob_hash FROM sub JOIN nodes n ON n.id = sub.id",
+         SELECT n.id, n.drive_id, n.kind, n.size, n.blob_hash FROM sub JOIN nodes n ON n.id = sub.id",
     )
     .bind(id)
     .fetch_all(&mut *conn)
     .await?;
     let mut freed: HashMap<String, i64> = HashMap::new();
     let mut hashes = Vec::new();
-    for (drive, kind, size, hash) in rows {
+    let mut files = Vec::new();
+    for (id, drive, kind, size, hash) in rows {
         if kind != "folder" {
             *freed.entry(drive.unwrap_or_default()).or_default() += size;
+            files.push(id);
         }
         hashes.extend(hash);
     }
+    let mut orphans = crate::versions::purge_nodes(conn, &serde_json::to_string(&files).unwrap()).await?;
     for (drive, bytes) in freed {
         adjust_usage(conn, &drive, -bytes).await?;
     }
@@ -643,7 +660,8 @@ pub async fn purge_subtree(conn: &mut SqliteConnection, id: &str) -> AppResult<V
     .bind(id)
     .execute(&mut *conn)
     .await?;
-    release_blobs(conn, &hashes).await
+    orphans.extend(release_blobs(conn, &hashes).await?);
+    Ok(orphans)
 }
 
 /// Nodes deleted per transaction when purging the content of deleted spaces
@@ -684,10 +702,10 @@ async fn purge_detached(st: &AppState) -> AppResult<()> {
             let _w = st.write_lock.lock().await;
             let mut tx = st.db.begin().await?;
             // Leaves first (files, then folders once they're empty): a node's children must go before it
-            let deleted: Vec<(Option<String>,)> = sqlx::query_as(
+            let deleted: Vec<(String, Option<String>)> = sqlx::query_as(
                 "DELETE FROM nodes WHERE id IN (
                    SELECT n.id FROM nodes n WHERE n.drive_id = ?1 AND NOT EXISTS (SELECT 1 FROM nodes c WHERE c.parent_id = n.id) LIMIT ?2
-                 ) RETURNING blob_hash",
+                 ) RETURNING id, blob_hash",
             )
             .bind(&drive)
             .bind(DETACHED_BATCH)
@@ -697,8 +715,10 @@ async fn purge_detached(st: &AppState) -> AppResult<()> {
                 break;
             }
             total += deleted.len();
-            let hashes: Vec<String> = deleted.into_iter().filter_map(|(h,)| h).collect();
-            let orphans = release_blobs(&mut tx, &hashes).await?;
+            let ids: Vec<&str> = deleted.iter().map(|(id, _)| id.as_str()).collect();
+            let mut orphans = crate::versions::purge_nodes(&mut tx, &serde_json::to_string(&ids).unwrap()).await?;
+            let hashes: Vec<String> = deleted.into_iter().filter_map(|(_, h)| h).collect();
+            orphans.extend(release_blobs(&mut tx, &hashes).await?);
             tx.commit().await?;
             schedule_blob_removal(st, orphans);
         }

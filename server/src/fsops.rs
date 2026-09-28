@@ -23,6 +23,7 @@ use crate::{
     state::AppState,
     tree::{self, BlobRef, Need, Node, StagedBlob},
     util::{guess_mime, new_id, now, numbered_name, split_name},
+    versions,
 };
 
 /// A folder space's trash, in its folder: `.thirtyfile-trash/<trash id>/<name>` (never indexed)
@@ -385,18 +386,26 @@ pub async fn place_file(conn: &mut SqliteConnection, staged: &Path, owner: i64, 
     Ok(id)
 }
 
-/// Puts content staged in the space's folder in place of a file (keeping the file's permissions) and indexes it; returns
-/// the new size. Unlike `save`, a file changed on the server meanwhile is replaced too: the client sending it asked for that
-pub async fn replace_file(conn: &mut SqliteConnection, staged: &Path, node: &Node) -> AppResult<i64> {
-    let path = abs(node)?;
-    if let Ok(m) = std::fs::metadata(&path) {
+/// Renames content staged in the space's folder over an existing file, which keeps its id, and indexes it (the caller
+/// counts the change in size). The file it had is kept as an earlier version first; returns what versions no longer
+/// kept leave to remove after the commit.
+pub async fn replace_file(conn: &mut SqliteConnection, policy: versions::Policy, staged: &Path, existing: &Node, by: i64) -> AppResult<versions::Removed> {
+    let to = abs(existing)?;
+    // The new content keeps the file's permissions
+    if let Ok(m) = std::fs::metadata(&to) {
         let _ = std::fs::set_permissions(staged, m.permissions());
     }
-    std::fs::rename(staged, &path).map_err(disk_error)?;
-    let s = stat(&path).map_err(disk_error)?;
-    record(conn, &node.id, node.drive(), rel_of(node), &s).await?;
-    sqlx::query("UPDATE nodes SET updated_at = ? WHERE id = ?").bind(now().max(node.updated_at + 1)).bind(&node.id).execute(&mut *conn).await?;
-    Ok(s.size)
+    let removed = versions::keep_file(conn, policy, existing, &to).await?;
+    std::fs::rename(staged, &to).map_err(disk_error)?;
+    let s = stat(&to).map_err(disk_error)?;
+    record(conn, &existing.id, existing.drive(), rel_of(existing), &s).await?;
+    sqlx::query("UPDATE nodes SET updated_at = ?, content_by = ? WHERE id = ?")
+        .bind(now().max(existing.updated_at + 1))
+        .bind(by)
+        .bind(&existing.id)
+        .execute(conn)
+        .await?;
+    Ok(removed)
 }
 
 /// Saves from the online editor into a folder space. A file changed on the server since it was indexed (or removed
@@ -459,17 +468,31 @@ pub async fn save(st: &AppState, user: &User, id: &str, body: &[u8], base: Optio
         .with_code("conflict_copy"));
     }
 
+    // The content it had is kept as an earlier version
+    let removed = match versions::keep_file(&mut tx, versions::Policy::of(st), &node, &path).await {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
+    };
     if let Err(e) = std::fs::rename(&tmp, &path) {
         let _ = std::fs::remove_file(&tmp);
         return Err(disk_error(e));
     }
     let s = stat(&path).map_err(disk_error)?;
     record(&mut tx, &node.id, node.drive(), rel_of(&node), &s).await?;
-    sqlx::query("UPDATE nodes SET updated_at = ? WHERE id = ?").bind(now().max(node.updated_at + 1)).bind(&node.id).execute(&mut *tx).await?;
+    sqlx::query("UPDATE nodes SET updated_at = ?, content_by = ? WHERE id = ?")
+        .bind(now().max(node.updated_at + 1))
+        .bind(user.id)
+        .bind(&node.id)
+        .execute(&mut *tx)
+        .await?;
     tree::adjust_usage(&mut tx, node.drive(), s.size - node.size).await?;
     tree::log(&mut tx, user, Some(&node), "edit", "").await?;
     let node = tree::get_node(&mut tx, &node.id).await?.ok_or_else(|| AppError::not_found("Item not found"))?;
     tx.commit().await?;
+    removed.finish(st);
     Ok(node)
 }
 

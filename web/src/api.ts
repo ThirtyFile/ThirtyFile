@@ -437,6 +437,8 @@ export interface Me {
   min_password_length: number;
   /** The administrators' rules for public share links */
   share_policy: SharePolicy;
+  /** Earlier versions kept per file; 0 = replacing a file's content keeps no version */
+  version_keep: number;
 }
 
 export interface SharePolicy {
@@ -591,6 +593,8 @@ export interface SystemSettingsReq {
   share_password_required?: boolean;
   share_max_days?: number;
   public_links?: boolean;
+  version_keep?: number;
+  version_days?: number;
 }
 
 /** System default interface language: "auto" follows the browser */
@@ -616,6 +620,9 @@ export interface SystemInfo {
   share_max_days: number;
   /** Public share links can be created and opened */
   public_links: boolean;
+  /** Earlier versions kept per file (0 = none), and for how many days (0 = no limit) */
+  version_keep: number;
+  version_days: number;
   stats: {
     users: number;
     groups: number;
@@ -627,6 +634,8 @@ export interface SystemInfo {
     team_bytes: number;
     team_files: number;
     trash_bytes: number;
+    /** Earlier versions of files (not counted toward the spaces' quotas) */
+    version_bytes: number;
     stored_bytes: number;
     share_links: number;
   };
@@ -651,6 +660,18 @@ export interface PublicShare {
 }
 
 export type SortKey = "name" | "updated" | "size" | "type";
+
+/** An earlier version of a file */
+export interface FileVersion {
+  id: string;
+  size: number;
+  /** Who wrote this content */
+  author_name: string;
+  /** When the file got this content */
+  modified_at: number;
+  /** When it was replaced */
+  created_at: number;
+}
 
 /** An item whose name the destination already has (see `api.conflicts`) */
 export interface NameConflict {
@@ -844,6 +865,12 @@ export const api = {
       content,
       baseVersion !== undefined ? { "X-Base-Version": String(baseVersion) } : undefined,
     ),
+  /** A file's earlier versions, newest first */
+  versions: (id: string) => get<FileVersion[]>(enc`/files/${id}/versions`),
+  /** Where to open (preview) or download an earlier version */
+  versionUrl: (id: string, version: string, download?: boolean) => enc`/api/files/${id}/versions/${version}/content` + (download ? "?download=1" : ""),
+  /** Make an earlier version the file's content again (the current content becomes a version too) */
+  restoreVersion: (id: string, version: string) => post<Node>(enc`/files/${id}/versions/${version}/restore`),
   /** Create an empty file (a zero-length tus upload completes immediately); returns the new node id */
   createEmptyFile: async (parentId: string, name: string) => {
     const b64 = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s)));

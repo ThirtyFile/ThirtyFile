@@ -401,6 +401,9 @@ pub struct SystemInfo {
     share_max_days: i64,
     /// Public share links can be created and opened
     public_links: bool,
+    /// Earlier versions kept per file (0 = none), and for how many days (0 = no limit)
+    version_keep: i64,
+    version_days: i64,
     stats: SystemStats,
 }
 
@@ -416,6 +419,8 @@ pub struct SystemStats {
     team_bytes: i64,
     team_files: i64,
     trash_bytes: i64,
+    /// Earlier versions of files (not counted toward the spaces' quotas)
+    version_bytes: i64,
     /// Storage actually used (duplicate files are stored only once)
     stored_bytes: i64,
     share_links: i64,
@@ -435,6 +440,7 @@ async fn system_info(st: &AppState) -> AppResult<SystemInfo> {
            (SELECT COALESCE(SUM(size), 0) FROM f WHERE kind = 'team') AS team_bytes,
            (SELECT COUNT(*) FROM f WHERE kind = 'team') AS team_files,
            (SELECT COALESCE(SUM(size), 0) FROM nodes WHERE kind = 'file' AND trashed_at IS NOT NULL) AS trash_bytes,
+           (SELECT COALESCE(SUM(size), 0) FROM node_versions) AS version_bytes,
            (SELECT COALESCE(SUM(size), 0) FROM blobs) AS stored_bytes,
            (SELECT COUNT(*) FROM shares) AS share_links",
     )
@@ -454,6 +460,8 @@ async fn system_info(st: &AppState) -> AppResult<SystemInfo> {
         share_password_required: s.share_password_required,
         share_max_days: s.share_max_days,
         public_links: s.public_links,
+        version_keep: s.version_keep,
+        version_days: s.version_days,
         stats,
     })
 }
@@ -475,6 +483,8 @@ pub struct SettingsReq {
     share_password_required: Option<bool>,
     share_max_days: Option<i64>,
     public_links: Option<bool>,
+    version_keep: Option<i64>,
+    version_days: Option<i64>,
 }
 
 /// Values of the default interface language: follow the browser, English, Traditional Chinese
@@ -580,8 +590,30 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
             set_setting(&mut tx, "public_links", if on { "1" } else { "0" }).await?;
             tree::log(&mut tx, &user, None, "settings", if on { "Allowed public share links" } else { "Turned off public share links" }).await?;
         }
+        if let Some(n) = req.version_keep {
+            if !(0..=crate::versions::MAX_KEEP).contains(&n) {
+                return Err(AppError::bad_request("Enter a number of versions from 0 to 1000"));
+            }
+            set_setting(&mut tx, "version_keep", &n.to_string()).await?;
+            let detail = if n == 0 { "Earlier versions of files aren't kept".to_string() } else { format!("Earlier versions kept per file: {n}") };
+            tree::log(&mut tx, &user, None, "settings", &detail).await?;
+        }
+        if let Some(d) = req.version_days {
+            if !(0..=crate::versions::MAX_DAYS).contains(&d) {
+                return Err(AppError::bad_request("Enter a number of days from 0 to 3650"));
+            }
+            set_setting(&mut tx, "version_days", &d.to_string()).await?;
+            let detail = if d == 0 { "Earlier versions of files are kept without a time limit".to_string() } else { format!("Earlier versions of files are kept for {d} days") };
+            tree::log(&mut tx, &user, None, "settings", &detail).await?;
+        }
         tx.commit().await?;
         let mut s = st.system.write().unwrap();
+        if let Some(n) = req.version_keep {
+            s.version_keep = n;
+        }
+        if let Some(d) = req.version_days {
+            s.version_days = d;
+        }
         if let Some(require) = req.require_two_factor {
             s.require_two_factor = require;
         }

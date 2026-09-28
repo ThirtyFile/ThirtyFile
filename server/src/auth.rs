@@ -227,16 +227,18 @@ pub struct Me {
     pub min_password_length: usize,
     /// The rules for public share links, so the share dialog offers only what is allowed
     pub share_policy: crate::shares::SharePolicy,
+    /// Earlier versions kept per file (0 = replacing a file's content keeps no version)
+    pub version_keep: i64,
 }
 
 async fn me_of(st: &AppState, user: User) -> AppResult<Me> {
     let used_bytes = tree::used_bytes(&st.db, user.id).await?;
-    let (can_create_drive, public_url, min_password_length) = {
+    let (can_create_drive, public_url, min_password_length, version_keep) = {
         let s = st.system.read().unwrap();
-        (user.is_admin() || s.allow_user_drives, s.public_url.clone(), s.min_password_length)
+        (user.is_admin() || s.allow_user_drives, s.public_url.clone(), s.min_password_length, s.version_keep)
     };
     let share_policy = crate::shares::policy(st);
-    Ok(Me { user, used_bytes, can_create_drive, public_url, trash_days: st.trash_days, min_password_length, share_policy })
+    Ok(Me { user, used_bytes, can_create_drive, public_url, trash_days: st.trash_days, min_password_length, share_policy, version_keep })
 }
 
 #[derive(Deserialize)]

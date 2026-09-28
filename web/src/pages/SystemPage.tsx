@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Switch } from "@base-ui/react/switch";
-import { ActivityIcon, CalendarClockIcon, DatabaseIcon, KeyRoundIcon, ShieldCheckIcon, DownloadIcon, FilesIcon, FolderSyncIcon, GlobeIcon, HardDriveIcon, LanguagesIcon, Link2Icon, Loader2Icon, LogInIcon, RefreshCwIcon, SettingsIcon, Trash2Icon, type LucideIcon } from "lucide-react";
+import { ActivityIcon, CalendarClockIcon, DatabaseIcon, KeyRoundIcon, ShieldCheckIcon, DownloadIcon, FilesIcon, FolderSyncIcon, GlobeIcon, HardDriveIcon, HistoryIcon, LanguagesIcon, Link2Icon, Loader2Icon, LogInIcon, RefreshCwIcon, SettingsIcon, Trash2Icon, type LucideIcon } from "lucide-react";
 import { Link } from "react-router";
 import { ActivityLog } from "@/components/logs/ActivityLog";
 import { ShareAccessLog } from "@/components/logs/ShareAccessLog";
@@ -162,6 +162,35 @@ function ScanIntervalInput({ value, saving, onSave }: { value: number; saving: b
         <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-muted-foreground">{t("min")}</span>
       </div>
       <Button type="submit" size="sm" disabled={saving || invalid || minutes === value}>
+        {t("Save")}
+      </Button>
+    </form>
+  );
+}
+
+/** A whole number from 0 to `max` with its unit, saved on its own (module level, so it doesn't lose focus on re-render) */
+function CountInput(props: { value: number; max: number; unit: string; label: string; saving: boolean; onSave(n: number): void }) {
+  const [text, setText] = useState(String(props.value));
+  const n = Number(text);
+  const invalid = !/^\d+$/.test(text.trim()) || n > props.max;
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!invalid && n !== props.value) props.onSave(n);
+  };
+  return (
+    <form className="flex shrink-0 items-center gap-2" onSubmit={submit}>
+      <div className="relative">
+        <Input
+          aria-label={props.label}
+          inputMode="numeric"
+          className="h-8 w-32 pr-16 text-right tabular-nums"
+          value={text}
+          aria-invalid={invalid}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-muted-foreground">{props.unit}</span>
+      </div>
+      <Button type="submit" size="sm" disabled={props.saving || invalid || n === props.value}>
         {t("Save")}
       </Button>
     </form>
@@ -490,6 +519,48 @@ export function GeneralSettingsPage() {
           </div>
         </Section>
       )}
+      {q.data && (
+        <Section title={t("Earlier versions of files")}>
+          <div className="flex flex-wrap items-start gap-4 border-b p-4">
+            <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-300">
+              <HistoryIcon className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">{t("Versions kept per file")}</div>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {t("When a file is saved over in the editor, replaced by an upload or restored, the content it had is kept as an earlier version, which people can open, download or restore from the details pane. 0 = don't keep versions (those already kept are removed within the hour). Earlier versions don't count toward the spaces' sizes.")}
+              </p>
+            </div>
+            <CountInput
+              key={q.data.version_keep}
+              value={q.data.version_keep}
+              max={1000}
+              unit={t("versions")}
+              label={t("Versions kept per file")}
+              saving={save.isPending}
+              onSave={(n) => save.mutate({ version_keep: n })}
+            />
+          </div>
+          <div className="flex flex-wrap items-start gap-4 p-4">
+            <span className="size-8 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">{t("Keep versions for")}</div>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {t("Days a version is kept after it was replaced. 0 = no time limit (only the number of versions counts).")}
+              </p>
+            </div>
+            <CountInput
+              key={q.data.version_days}
+              value={q.data.version_days}
+              max={3650}
+              unit={t("days")}
+              label={t("Keep versions for (days)")}
+              saving={save.isPending}
+              onSave={(n) => save.mutate({ version_days: n })}
+            />
+          </div>
+        </Section>
+      )}
       {confirmLinksOff && (
         <ConfirmDialog
           title={t("Turn off public share links?")}
@@ -541,6 +612,7 @@ export function UsageSettingsPage() {
         [t("All files (company)"), formatBytes(s.shared_bytes), t("{n} file|{n} files", { n: s.shared_files })],
         [t("Team space"), formatBytes(s.team_bytes), `${t("{n} space|{n} spaces", { n: s.team_drives })} · ${t("{n} file|{n} files", { n: s.team_files })}`],
         [t("Trash"), formatBytes(s.trash_bytes)],
+        [t("Earlier versions of files"), formatBytes(s.version_bytes), t("Not counted toward the spaces' sizes")],
         [t("Actual storage used"), formatBytes(s.stored_bytes), `${t("Identical content stored once")} · ${t("{n} share link|{n} share links", { n: s.share_links })}`],
       ]
     : [];

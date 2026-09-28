@@ -466,9 +466,9 @@ async fn finalize(st: &AppState, up: &Uploader, upload: Upload) -> AppResult<Str
     let staged = tree::stage_blob(st, upload.drive_id.as_deref().unwrap_or_default(), hash.clone(), size as i64, path.clone()).await?;
     let _w = st.write_lock.lock().await;
     match commit_upload(st, up, &upload, &staged, &hash, size).await {
-        Ok((id, extra, orphans)) => {
+        Ok((id, extra, removed)) => {
             tree::finish_staged(st, staged, extra).await;
-            tree::schedule_blob_removal(st, orphans);
+            removed.finish(st);
             Ok(id)
         }
         Err(e) => {
@@ -528,8 +528,8 @@ async fn finalize_in_folder(st: &AppState, up: &Uploader, upload: &Upload, path:
         let folder = tree::get_node(&mut tx, &folder_id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
         let (id, replaced) = match replaced_file(&mut tx, user, upload, &folder.id).await? {
             Some(existing) => {
-                crate::fsops::replace_file(&mut tx, &staged, &existing).await?;
-                (existing.id.clone(), Some(existing))
+                let removed = crate::fsops::replace_file(&mut tx, crate::versions::Policy::of(st), &staged, &existing, user.id).await?;
+                (existing.id.clone(), Some((existing, removed)))
             }
             None => {
                 let name = crate::fsops::free_name(&mut tx, &folder, &upload.name, false).await?;
@@ -545,11 +545,14 @@ async fn finalize_in_folder(st: &AppState, up: &Uploader, upload: &Upload, path:
             .await?;
         tree::touch(&mut tx, &folder.id).await?;
         if let Some(n) = tree::get_node(&mut tx, &id).await? {
-            let before = replaced.as_ref().map_or(0, |r| r.size);
+            let before = replaced.as_ref().map_or(0, |(r, _)| r.size);
             tree::adjust_usage(&mut tx, n.drive(), n.size - before).await?;
             tree::log(&mut tx, user, Some(&n), "upload", &if replaced.is_some() { "Replaced the existing file".to_string() } else { up.log_detail() }).await?;
         }
         tx.commit().await?;
+        if let Some((_, removed)) = replaced {
+            removed.finish(st);
+        }
         Ok(id)
     }
     .await;
@@ -565,7 +568,8 @@ async fn finalize_in_folder(st: &AppState, up: &Uploader, upload: &Upload, path:
 }
 
 /// Creates the node (or gives the file it replaces the new content) and records the content reference while holding
-/// the write lock; returns the file's id, a redundant copy of the content and content no longer used
+/// the write lock; returns the file's id, a redundant copy of the content and what the replaced content's earlier
+/// versions no longer use
 async fn commit_upload(
     st: &AppState,
     up: &Uploader,
@@ -573,7 +577,7 @@ async fn commit_upload(
     staged: &tree::StagedBlob,
     hash: &str,
     size: u64,
-) -> AppResult<(String, Option<tree::BlobRef>, Vec<tree::BlobRef>)> {
+) -> AppResult<(String, Option<tree::BlobRef>, crate::versions::Removed)> {
     let user = &up.user;
     let mut tx = st.db.begin().await?;
     // The account's upload permission may have been removed while the upload was running
@@ -597,13 +601,13 @@ async fn commit_upload(
     }
     let folder = tree::ensure_folders(&mut tx, upload.owner_id, &parent.id, &upload.rel_path, &upload.batch).await?;
     let ts = now();
-    let (id, extra, orphans) = match replaced_file(&mut tx, user, upload, &folder).await? {
+    let (id, extra, removed) = match replaced_file(&mut tx, user, upload, &folder).await? {
         Some(existing) => {
             // Admitted against the quota for its full size when it started; only the difference counts now
             let extra = tree::commit_blob(st, &mut tx, staged).await?;
-            let orphans = tree::set_content(&mut tx, &existing, hash, size as i64).await?;
+            let removed = tree::set_content(&mut tx, crate::versions::Policy::of(st), &existing, hash, size as i64, user.id).await?;
             tree::log(&mut tx, user, Some(&existing), "upload", "Replaced the existing file").await?;
-            (existing.id.clone(), extra, orphans)
+            (existing.id.clone(), extra, removed)
         }
         None => {
             let name = tree::unique_name(&mut tx, &folder, &upload.name, false).await?;
@@ -627,7 +631,7 @@ async fn commit_upload(
                 tree::adjust_usage(&mut tx, n.drive(), size as i64).await?;
                 tree::log(&mut tx, user, Some(&n), "upload", &up.log_detail()).await?;
             }
-            (id, extra, Vec::new())
+            (id, extra, crate::versions::Removed::default())
         }
     };
     // Kept for a day with the file, for clients that lost the response
@@ -639,7 +643,7 @@ async fn commit_upload(
         .await?;
     tree::touch(&mut tx, &folder).await?;
     tx.commit().await?;
-    Ok((id, extra, orphans))
+    Ok((id, extra, removed))
 }
 
 
@@ -882,9 +886,11 @@ mod tests {
         assert_eq!(files_named(&env, "report").await, 2);
         let (used,): (i64,) = sqlx::query_as("SELECT used_bytes FROM drives WHERE root_id = ?").bind(&amy.root_id).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(used, 6 + 3);
-        // The old content is no longer referenced
+        // The old content is kept as an earlier version of the file
         let (blobs,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blobs").fetch_one(&env.st.db).await.unwrap();
-        assert_eq!(blobs, 2);
+        assert_eq!(blobs, 3);
+        let (versions,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM node_versions WHERE node_id = ? AND blob_hash IS NOT NULL").bind(&original).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(versions, 1);
     }
 
     #[tokio::test]

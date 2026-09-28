@@ -299,6 +299,7 @@ async fn scan_locked(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     });
     apply(st, &drive, ops).await?;
     crate::fsops::clean_trash(st, &drive.id, &root).await?;
+    crate::versions::clean_folder(st, &drive.id, &root).await?;
     report.index_ms = indexing.elapsed().as_millis() as u64;
     if report.read_ms + report.index_ms > 10_000 {
         tracing::info!(

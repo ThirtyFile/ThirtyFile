@@ -631,7 +631,8 @@ async fn run_migration(st: &AppState, drive_id: &str, target: &str) -> AppResult
     // Content of the space not yet at the target, walked in hash order: each page continues after the last hash
     // (`?3`), so a page costs the same at the end of a large space as at the start
     const PENDING: &str = "FROM blobs b WHERE b.location_id != ?1 AND b.hash > ?3
-         AND EXISTS (SELECT 1 FROM nodes n WHERE n.blob_hash = b.hash AND n.drive_id = ?2)";
+         AND (EXISTS (SELECT 1 FROM nodes n WHERE n.blob_hash = b.hash AND n.drive_id = ?2)
+              OR EXISTS (SELECT 1 FROM node_versions v JOIN nodes n ON n.id = v.node_id WHERE v.blob_hash = b.hash AND n.drive_id = ?2))";
     let (files, bytes): (i64, i64) = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT COUNT(*), COALESCE(SUM(b.size), 0) {PENDING}")))
         .bind(target)
         .bind(drive_id)

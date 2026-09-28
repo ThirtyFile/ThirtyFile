@@ -64,12 +64,21 @@
         <h2 id="same-name">When the name is already taken</h2>
         <p>Before uploading, moving, copying, pasting or restoring from the trash, ThirtyFile checks whether the destination already has an item with the same name (letter case doesn't count, except in folders on the server). For each one it asks, showing the size and date of both:</p>
         <ul>
-          <li><strong>Replace</strong>: an uploaded file gives its content to the file already there, which keeps its shares, permissions and favourites. When moving, copying or restoring, the item already there goes to the trash, so it can still be brought back.</li>
+          <li><strong>Replace</strong>: an uploaded file gives its content to the file already there, which keeps its shares, permissions and favourites, and keeps its old content as an <a href="#versions">earlier version</a>. When moving, copying or restoring, the item already there goes to the trash, so it can still be brought back.</li>
           <li><strong>Skip</strong>: this item is left out.</li>
           <li><strong>Keep both</strong>: the new item gets a number, such as <em>Report (1).docx</em>. The upload list shows the name it was saved as.</li>
         </ul>
         <p>Tick <strong>Do this for the next conflicts</strong> to give the same answer to every remaining one, or choose <strong>Cancel</strong> to stop without changing anything. An uploaded folder whose name is taken is merged into the folder there: <strong>Replace</strong> replaces the files that have the same names inside it, <strong>Keep both</strong> keeps both of them. A copy pasted into its own folder always gets a number, as in Windows.</p>
         <p>If the folder you are uploading to is deleted, or you lose permission to add files to it, before the upload finishes, the upload fails and the upload list says why; the file doesn't end up anywhere else.</p>
+
+        <h2 id="versions">Earlier versions</h2>
+        <p>When you save a file in the online editor, replace it with an upload, or restore an earlier version, the content it had is kept as an earlier version. Select the file and open the details pane (<kbd>Alt</kbd> + <kbd>Enter</kbd>): <strong>Versions</strong> lists them, newest first, with who wrote each one and when. <strong>Open</strong> shows a version in a new browser tab, <strong>Download</strong> saves it, and <strong>Restore</strong> makes it the file's content again; what the file had until then becomes a version too, so a restore can be undone the same way.</p>
+        <ul>
+          <li>By default each file keeps its last 20 versions, each for 90 days. The administrator can change both, or turn versions off, under <strong>Control panel › General</strong>.</li>
+          <li>Earlier versions don't count toward a space's size; the administrator sees how much they take under <strong>Control panel › Storage usage</strong>.</li>
+          <li>Versions stay with the file when it is renamed or moved, also to another space. A copy starts without versions. Deleting the file for good deletes its versions.</li>
+          <li>Anyone who can open the file can see and download its versions; restoring needs permission to edit it.</li>
+        </ul>
 
         <h2 id="shortcuts">Keyboard shortcuts</h2>
         <div class="table-scroll">

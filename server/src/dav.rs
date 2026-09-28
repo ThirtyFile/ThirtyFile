@@ -859,28 +859,21 @@ async fn store_content(st: &AppState, user: &User, parent: &Node, name: &str, tm
         if folder.in_folder_space() || folder.drive() != parent.drive() {
             return Err(AppError::conflict("Something changed at the same time. Try again."));
         }
-        let (created, extra, orphans) = match child_named(&mut tx, &folder.id, name).await? {
+        let (created, extra, removed) = match child_named(&mut tx, &folder.id, name).await? {
             Some(n) if n.is_folder() => return Err(AppError::new(StatusCode::METHOD_NOT_ALLOWED, "A folder has this name")),
             Some(n) => {
                 let n = tree::node_for(&mut tx, user, &n.id, Need::Write).await?;
                 // The same content again (clients often save a file twice): nothing changes
                 if n.blob_hash.as_deref() == Some(hash.as_str()) {
-                    return Ok((false, None, Vec::new()));
+                    return Ok((false, None, crate::versions::Removed::default()));
                 }
                 tree::check_quota(&mut tx, n.drive(), size - n.size).await?;
                 let extra = tree::commit_blob(st, &mut tx, &staged).await?;
-                sqlx::query("UPDATE nodes SET blob_hash = ?, size = ?, updated_at = ? WHERE id = ?")
-                    .bind(&hash)
-                    .bind(size)
-                    .bind(now().max(n.updated_at + 1))
-                    .bind(&n.id)
-                    .execute(&mut *tx)
-                    .await?;
-                let orphans = tree::release_blobs(&mut tx, &n.blob_hash.iter().cloned().collect::<Vec<_>>()).await?;
-                tree::adjust_usage(&mut tx, n.drive(), size - n.size).await?;
+                // The content it had is kept as an earlier version
+                let removed = tree::set_content(&mut tx, crate::versions::Policy::of(st), &n, &hash, size, user.id).await?;
                 tree::touch(&mut tx, &folder.id).await?;
                 tree::log(&mut tx, user, Some(&n), "edit", "").await?;
-                (false, extra, orphans)
+                (false, extra, removed)
             }
             None => {
                 tree::check_quota(&mut tx, folder.drive(), size).await?;
@@ -904,17 +897,17 @@ async fn store_content(st: &AppState, user: &User, parent: &Node, name: &str, tm
                 tree::adjust_usage(&mut tx, folder.drive(), size).await?;
                 let node = tree::get_node(&mut tx, &id).await?;
                 tree::log(&mut tx, user, node.as_ref(), "upload", "").await?;
-                (true, extra, Vec::new())
+                (true, extra, crate::versions::Removed::default())
             }
         };
         tx.commit().await?;
-        Ok((created, extra, orphans))
+        Ok((created, extra, removed))
     }
     .await;
     match result {
-        Ok((created, extra, orphans)) => {
+        Ok((created, extra, removed)) => {
             tree::finish_staged(st, staged, extra).await;
-            tree::schedule_blob_removal(st, orphans);
+            removed.finish(st);
             Ok(created)
         }
         Err(e) => {
@@ -934,12 +927,15 @@ async fn store_in_folder(st: &AppState, user: &User, parent: &Node, name: &str, 
         if folder.drive() != parent.drive() {
             return Err(AppError::conflict("Something changed at the same time. Try again."));
         }
+        let mut removed = crate::versions::Removed::default();
         let created = match child_named(&mut tx, &folder.id, name).await? {
             Some(n) if n.is_folder() => return Err(AppError::new(StatusCode::METHOD_NOT_ALLOWED, "A folder has this name")),
             Some(n) => {
                 let n = tree::node_for(&mut tx, user, &n.id, Need::Write).await?;
                 tree::check_quota(&mut tx, n.drive(), size as i64 - n.size).await?;
-                let new_size = fsops::replace_file(&mut tx, &staged, &n).await?;
+                // The content it had is kept as an earlier version
+                removed = fsops::replace_file(&mut tx, crate::versions::Policy::of(st), &staged, &n, user.id).await?;
+                let new_size = tree::get_node(&mut tx, &n.id).await?.map_or(n.size, |x| x.size);
                 tree::adjust_usage(&mut tx, n.drive(), new_size - n.size).await?;
                 tree::log(&mut tx, user, Some(&n), "edit", "").await?;
                 false
@@ -956,6 +952,7 @@ async fn store_in_folder(st: &AppState, user: &User, parent: &Node, name: &str, 
             }
         };
         tx.commit().await?;
+        removed.finish(st);
         Ok(created)
     }
     .await;
