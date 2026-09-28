@@ -508,6 +508,8 @@ export interface SharedItem extends Located {
 
 export interface Me {
   id: number;
+  /** An administrator chose the password: the person must choose their own before anything else */
+  must_change_password: boolean;
   username: string;
   /** Shown next to the username; may be blank */
   display_name: string;
@@ -918,6 +920,9 @@ export const api = {
   resetTwoFactor: (userId: number) => request("DELETE", `/admin/users/${userId}/2fa`),
   logout: () => post("/auth/logout"),
   changePassword: (current: string, next: string) => request("PUT", "/auth/password", { current, new: next }),
+  authOptions: () => get<{ password_reset: boolean }>("/auth/options"),
+  forgotPassword: (account: string) => post("/auth/forgot", { account }),
+  resetPassword: (token: string, next: string) => post("/auth/reset", { token, new: next }),
   devices: () => get<Device[]>("/auth/sessions"),
   signOutDevice: (id: string) => request("DELETE", `/auth/sessions/${encodeURIComponent(id)}`),
   signOutOtherDevices: () => post<{ removed: number }>("/auth/sessions/others"),

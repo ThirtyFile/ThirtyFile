@@ -23,6 +23,8 @@ export const LOGIN_EVENTS: Record<string, { label: string; tone?: string }> = {
   locked: { label: t("Temporarily locked"), tone: "text-destructive font-medium" },
   logout: { label: t("Signed out") },
   password_change: { label: t("Password changed"), tone: "text-brand" },
+  password_reset_requested: { label: t("Password reset asked for"), tone: "text-muted-foreground" },
+  password_reset: { label: t("Password reset by email"), tone: "text-brand" },
   sso_denied: { label: t("Third-party sign-in denied"), tone: "text-destructive" },
   sso_provisioned: { label: t("Account created by third-party sign-in"), tone: "text-brand" },
   sso_link: { label: t("External account linked"), tone: "text-brand" },
@@ -50,7 +52,7 @@ const METHOD_LABEL: Record<string, string> = {
 };
 
 const EVENT_GROUPS = [
-  { label: t("Sign-ins"), options: ["login", "logout", "password_change", "device_signout", "signout_others", "admin_signout"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
+  { label: t("Sign-ins"), options: ["login", "logout", "password_change", "password_reset_requested", "password_reset", "device_signout", "signout_others", "admin_signout"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
   { label: t("Failed"), options: ["bad_password", "unknown_user", "disabled", "locked", "sso_denied", "app_password_failed", "2fa_failed"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
   { label: t("External accounts"), options: ["sso_provisioned", "sso_link", "sso_unlink"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
   {

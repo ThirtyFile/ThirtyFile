@@ -127,7 +127,8 @@ impl TestEnv {
 
     /// The user a request with this cookie is signed in as, if any
     pub async fn session_user(&self, cookie: &str) -> Option<User> {
-        self.request_user(axum::http::Request::builder().header(axum::http::header::COOKIE, cookie)).await
+        // (the page a session always reaches, even one that must change its password first)
+        self.request_user(axum::http::Request::builder().uri("/api/auth/me").header(axum::http::header::COOKIE, cookie)).await
     }
 
     /// Runs the `User` extractor on a request

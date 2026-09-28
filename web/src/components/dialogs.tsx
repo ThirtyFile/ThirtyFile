@@ -274,7 +274,8 @@ export function FolderPickerDialog(props: {
   );
 }
 
-export function ChangePasswordDialog({ onClose }: { onClose(): void }) {
+/** `required`: the password an administrator chose must be replaced; the dialog can't be closed without it */
+export function ChangePasswordDialog({ onClose, required = false }: { onClose(): void; required?: boolean }) {
   const me = useMe();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -286,12 +287,16 @@ export function ChangePasswordDialog({ onClose }: { onClose(): void }) {
   });
   const errorId = useId();
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent>
+    <Dialog open onOpenChange={(o) => !o && !required && onClose()}>
+      <DialogContent showCloseButton={!required}>
         <form onSubmit={run} className="grid gap-4">
           <DialogHeader>
-            <DialogTitle>{t("Change password")}</DialogTitle>
-            <DialogDescription>{t("After you change it, you'll be signed out on other devices.")}</DialogDescription>
+            <DialogTitle>{required ? t("Choose your own password") : t("Change password")}</DialogTitle>
+            <DialogDescription>
+              {required
+                ? t("Your administrator chose your current password. Choose one only you know before you continue.")
+                : t("After you change it, you'll be signed out on other devices.")}
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="pw-cur">{t("Current password")}</Label>
@@ -303,9 +308,15 @@ export function ChangePasswordDialog({ onClose }: { onClose(): void }) {
             <ErrorText id={errorId}>{error}</ErrorText>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
-              {t("Cancel")}
-            </Button>
+            {required ? (
+              <Button type="button" variant="outline" onClick={() => void api.logout().then(() => window.location.assign("/login"))}>
+                {t("Sign out")}
+              </Button>
+            ) : (
+              <Button type="button" variant="outline" onClick={onClose}>
+                {t("Cancel")}
+              </Button>
+            )}
             <Button type="submit" disabled={busy || !current || !next}>
               {busy && <Loader2Icon className="animate-spin" />}
               {t("Change password")}

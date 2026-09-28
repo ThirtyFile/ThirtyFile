@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useId, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRightIcon, KeyRoundIcon, Loader2Icon, UserRoundIcon } from "lucide-react";
 import { api, ApiError, type Me, type TwoFactorSetup } from "@/api";
@@ -141,6 +141,7 @@ export function LoginPage() {
   const qc = useQueryClient();
   const b = useBranding();
   const providers = useQuery({ queryKey: ["sso-providers"], queryFn: api.ssoProviders, staleTime: 60_000 });
+  const options = useQuery({ queryKey: ["auth-options"], queryFn: api.authOptions, staleTime: 60_000 });
   const nextPath = (() => {
     const next = params.get("next");
     // Only allow same-site paths (same rule as the server's safe_next): "//host" and "/\host" are treated by browsers as other sites
@@ -490,6 +491,11 @@ export function LoginPage() {
                   {busy ? <Loader2Icon className="size-4 animate-spin" /> : <ArrowRightIcon className="size-4" />}
                 </button>
               </div>
+              {options.data?.password_reset && (
+                <Link to="/reset-password" className="justify-self-center text-sm text-white/85 underline-offset-4 hover:underline">
+                  {t("Forgot password?")}
+                </Link>
+              )}
             </div>
           )}
 
