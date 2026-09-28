@@ -126,7 +126,10 @@ impl Steps {
         };
         if step.outcome == Outcome::Ok {
             step.bytes = Some(bytes);
-            step.speed = Some(bytes as f64 / took.as_secs_f64().max(0.001) / 1e6);
+            // A local folder on the same disk as the temp folder takes the file by renaming it: no speed to tell
+            if took >= Duration::from_millis(10) {
+                step.speed = Some(bytes as f64 / took.as_secs_f64() / 1e6);
+            }
         }
     }
 
@@ -435,8 +438,11 @@ mod tests {
         );
         let large = report.step("write_large").unwrap();
         assert_eq!(large.bytes, Some(3 << 20));
-        assert!(large.speed.is_some_and(|s| s > 0.0));
-        assert!(report.step("read_large").unwrap().speed.is_some());
+        // A rename on the same disk has no speed to tell
+        assert!(large.speed.is_none_or(|s| s > 0.0));
+        let mut steps = Steps::new();
+        steps.push_transfer("read_large", Duration::from_millis(500), 24_000_000, Ok(()));
+        assert_eq!(steps.list[0].speed, Some(48.0));
         assert!(leftovers(&dir).is_empty(), "{:?}", leftovers(&dir));
         let tmp: Vec<_> = std::fs::read_dir(env.st.tmp_dir()).unwrap().flatten().collect();
         assert!(tmp.is_empty(), "temp files are removed");
