@@ -110,34 +110,32 @@ jobs:
         with:
           workspaces: server
 
-      # The backend tests run under cargo-llvm-cov (the same tests as cargo test), with the coverage in the job summary
+      # The backend tests (cargo test) and the end-to-end test in a real browser (sign in, upload, preview, download)
+      # run against one build instrumented for coverage (cargo llvm-cov show-env): the dependencies are compiled once
+      # for both, and the coverage in the job summary counts what the browser test reaches too. The frontend is built
+      # first, so the server embeds it (build.rs) and the tests and the server compile alike.
       - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: cargo-llvm-cov
-      - name: Backend
-        working-directory: server
+      - name: Backend and end-to-end test
         run: |
+          (cd web && pnpm build && pnpm exec playwright install --with-deps chromium)
+          cd server
           rustup component add llvm-tools-preview
-          cargo llvm-cov --locked --no-report
-          {
-            echo "### Backend coverage"
-            echo '```'
-            cargo llvm-cov report --summary-only
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          (
+            source <(cargo llvm-cov show-env --export-prefix)
+            cargo llvm-cov clean --workspace
+            cargo test --locked
+            cargo build --locked
+            (cd ../web && THIRTYFILE_BIN="$CARGO_LLVM_COV_TARGET_DIR/debug/thirtyfile" pnpm test:e2e)
+            {
+              echo "### Backend coverage (tests and the browser test)"
+              echo '```'
+              cargo llvm-cov report --summary-only
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          )
           cargo clippy --locked --all-targets -- -D warnings
-
-      # Sign in, upload, preview and download in a real browser, against the server built from this commit. A debug
-      # build that embeds the frontend, built here for it (the tests' build is instrumented for coverage, so it isn't reused)
-      - name: End-to-end test
-        env:
-          THIRTYFILE_BIN: ${{ github.workspace }}/server/target/debug/thirtyfile
-        run: |
-          (cd web && pnpm build)
-          (cd server && cargo build --locked)
-          cd web
-          pnpm exec playwright install --with-deps chromium
-          pnpm test:e2e
 
       # Known security problems in dependencies, their licences and where they come from (server/deny.toml)
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
@@ -218,7 +216,9 @@ jobs:
           images: ${{ env.IMAGE }}
           labels: org.opencontainers.image.version=${{ steps.tags.outputs.version }}
 
-      # The backend is cross-compiled in the Dockerfile, so arm64 needs no emulation. Pull requests build amd64 only, to be quicker
+      # The backend is cross-compiled in the Dockerfile, so arm64 needs no emulation. Pull requests build amd64 only, to be quicker,
+      # and with the `ci` profile (server/Cargo.toml): the same code, compiled in parallel and without link-time
+      # optimisation, so it builds in about half the time; releases keep the release profile
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -231,6 +231,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VERSION=${{ steps.tags.outputs.version }}
+            CARGO_PROFILE=${{ inputs.release_version && 'release' || 'ci' }}
           # Releases store an SBOM and the full build provenance with the image; release.yml also signs the provenance
           sbom: ${{ !!inputs.release_version }}
           provenance: ${{ inputs.release_version && 'mode=max' || 'false' }}
