@@ -820,11 +820,16 @@ export default {
   "Choose either to move the user's files or to delete them": "請選擇移動或刪除該使用者的檔案，只能擇一",
   "Choose where to move the user's files, or choose to delete them": "請選擇要把該使用者的檔案移到哪裡，或選擇刪除",
   "Choose a space other than the user's own": "請選擇該使用者自己以外的空間",
-  "Files can't be moved into a space that shows a folder on the server": "檔案無法移到顯示伺服器資料夾的空間",
   "That space is turned off": "該空間已停用",
   "\"{name}\" doesn't have room for {size} more. Choose another space, or give it more space first.": "「{name}」沒有空間再放 {size}。請選擇其他空間，或先加大它的容量。",
   "{username}: files moved to {place}": "{username}：檔案已移到 {place}",
   "{username}: files deleted": "{username}：檔案已刪除",
+  "{username}: files removed, their folder on the server is kept: {path}": "{username}：檔案已從 ThirtyFile 移除，伺服器上的資料夾保留在 {path}",
+  // New spaces get a folder in the storage folder (space_folders.rs, drives.rs)
+  "The folder of the storage location ({path}) isn't available": "無法使用儲存位置的資料夾（{path}）",
+  "There is no free folder name for the space in {path}": "{path} 中已沒有可給這個空間使用的資料夾名稱",
+  "Couldn't create the folder {path} for the space: {error}": "無法為這個空間建立資料夾 {path}：{error}",
+  "{name} (its folder on the server is kept: {path})": "{name}（伺服器上的資料夾保留在 {path}）",
   // Thumbnails made in the browser (thumbnails.rs)
   "This file doesn't take a thumbnail": "這個檔案不能設定縮圖",
   "The thumbnail is too large": "縮圖過大",

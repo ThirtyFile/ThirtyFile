@@ -32,13 +32,27 @@ impl Drop for TestEnv {
     }
 }
 
+/// A server whose spaces keep their files in the content store, as most tests of files, shares and permissions want
+/// (they work the same in folder spaces, which have tests of their own)
 pub async fn env() -> TestEnv {
+    make_env(false).await
+}
+
+/// A server as installed today: every space of the built-in storage is a folder space, in `blobs/company`,
+/// `blobs/teams/<name>` and `blobs/users/<name>`
+pub async fn folders_env() -> TestEnv {
+    make_env(true).await
+}
+
+async fn make_env(space_folders: bool) -> TestEnv {
     let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", new_id()));
     for d in ["tmp", "thumbs", "blobs"] {
         std::fs::create_dir_all(dir.join(d)).unwrap();
     }
+    let space_folders = space_folders.then(|| dir.join("blobs"));
     let db = db::connect(&dir.join("drive.db"), 16).await.unwrap();
-    db::bootstrap_admin(&db, Some(password())).await.unwrap();
+    db::bootstrap_admin(&db, Some(password()), space_folders.as_deref()).await.unwrap();
+    db::create_company_space(&db, space_folders.as_deref()).await.unwrap();
     let system = db::load_system_settings(&db).await.unwrap();
     let mut storages: HashMap<String, Arc<dyn Storage>> = HashMap::new();
     storages.insert("local".into(), Arc::new(LocalStorage::new(dir.join("blobs")).unwrap()));
@@ -50,6 +64,7 @@ pub async fn env() -> TestEnv {
         migrations: Default::default(),
         data_dir: dir.clone(),
         storage_dir: dir.join("blobs"),
+        space_folders,
         secret: vec![7; 32],
         secure_cookie: false,
         trash_days: 30,
@@ -85,7 +100,7 @@ impl TestEnv {
         let password_hash = auth::hash_password(password().into()).await.unwrap();
         let id = db::create_user(
             &mut conn,
-            NewUser { username: name, password_hash: &password_hash, role: "user", can_write: true, can_delete: true, can_share, quota_bytes: 0, source: "password", provisioned_by: None },
+            NewUser { username: name, password_hash: &password_hash, role: "user", can_write: true, can_delete: true, can_share, quota_bytes: 0, source: "password", provisioned_by: None, space_folders: self.st.space_folders.as_deref() },
         )
         .await
         .unwrap();
@@ -162,6 +177,27 @@ impl TestEnv {
             .await
             .unwrap();
         id
+    }
+
+    /// Uploads a file as the web does (tus): into the content store or a folder space, whichever `parent` is in.
+    /// Returns its id.
+    pub async fn upload(&self, user: &User, parent: &str, name: &str, content: &'static [u8]) -> String {
+        use axum::{
+            extract::{Path, State},
+            http::{HeaderMap, header},
+        };
+        use base64::Engine;
+        let b64 = |s: &str| base64::engine::general_purpose::STANDARD.encode(s);
+        let mut h = HeaderMap::new();
+        h.insert("upload-length", content.len().to_string().parse().unwrap());
+        h.insert("upload-metadata", format!("filename {},parentId {}", b64(name), b64(parent)).parse().unwrap());
+        let res = crate::upload::create(State(self.st.clone()), user.clone(), h).await.unwrap();
+        let upload = res.headers()[header::LOCATION].to_str().unwrap().rsplit('/').next().unwrap().to_string();
+        let mut h = HeaderMap::new();
+        h.insert(header::CONTENT_TYPE, "application/offset+octet-stream".parse().unwrap());
+        h.insert("upload-offset", "0".parse().unwrap());
+        let res = crate::upload::patch(State(self.st.clone()), user.clone(), Path(upload), h, axum::body::Body::from(content)).await.unwrap();
+        res.headers()["x-node-id"].to_str().unwrap().to_string()
     }
 
     pub async fn grant(&self, node: &str, to: &User, role: &str) {

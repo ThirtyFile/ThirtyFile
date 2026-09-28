@@ -26,6 +26,7 @@ mod privileges;
 mod secrets;
 mod sessions;
 mod shares;
+mod space_folders;
 mod state;
 mod storage;
 #[cfg(test)]
@@ -181,10 +182,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let storage = storage_dir(&cfg.data, cfg.storage.as_deref());
 
-    // Before the runtime starts its threads, so that all of them run as the new user
+    // Before the runtime starts its threads, so that all of them run as the new user. The storage folder set is
+    // given too when 0.1's /data/blobs is still in use: new spaces get their folders there
     #[cfg(unix)]
     if let Some(user) = &cfg.run_as {
-        privileges::drop_to(user, &[&cfg.data, &storage])?;
+        let mut folders = vec![cfg.data.as_path(), storage.as_path()];
+        folders.extend(cfg.storage.as_deref().filter(|s| *s != storage));
+        privileges::drop_to(user, &folders)?;
     }
 
     runtime()?.block_on(run(cfg, storage))
@@ -351,7 +355,12 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         ),
         (None, None) => None,
     };
-    db::bootstrap_admin(&db, admin_password.as_deref()).await.map_err(|e| e.message)?;
+    // New spaces of the built-in location get their folders in the storage folder set now: for 0.1, whose content is
+    // still in /data/blobs, that is /storage (as for `thirtyfile convert`)
+    let space_folders = std::path::absolute(cfg.storage.as_ref().unwrap_or(&storage))?;
+    std::fs::create_dir_all(&space_folders)?;
+    db::bootstrap_admin(&db, admin_password.as_deref(), Some(&space_folders)).await.map_err(|e| e.message)?;
+    db::create_company_space(&db, Some(&space_folders)).await.map_err(|e| e.message)?;
     let secret = db::load_secret(&db).await?;
     let system = db::load_system_settings(&db).await?;
     // Settings that are probably wrong together: said once at startup
@@ -389,6 +398,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         migrations: Default::default(),
         data_dir: cfg.data.clone(),
         storage_dir: storage,
+        space_folders: Some(space_folders),
         secret,
         secure_cookie: cfg.secure_cookie,
         trash_days: cfg.trash_days,

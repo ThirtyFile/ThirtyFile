@@ -32,8 +32,9 @@ use sqlx::SqlitePool;
 use crate::{
     folders::ignored,
     fsops::{self, TRASH_DIR},
+    space_folders::{self, disk_name},
     storage::{Storage, is_hash},
-    util::{new_id, now, numbered_name, split_name},
+    util::{new_id, now, numbered_name},
     versions::VERSIONS_DIR,
 };
 
@@ -41,8 +42,6 @@ type Res<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 /// Files recorded per transaction
 const BATCH: usize = 500;
-/// The longest name most file systems hold, in bytes
-const MAX_NAME_BYTES: usize = 255;
 
 #[derive(Debug, Default)]
 pub struct Report {
@@ -355,34 +354,22 @@ fn shown_space(space: &Space) -> String {
 }
 
 /// Where a space's files go: `company`, `teams/<name>` or `users/<user name>` in the location's folder, with a number
-/// when that folder already exists (made by hand, or another space with the same name). Remembered at once, so a
-/// conversion run again continues in the same folder.
+/// when that folder already exists (made by hand, or another space with the same name), as for new spaces
+/// (space_folders.rs). Remembered at once, so a conversion run again continues in the same folder.
 async fn choose_folder(db: &SqlitePool, root: &Path, space: &Space, dry_run: bool) -> Res<PathBuf> {
-    let (parent, name) = match space.kind.as_str() {
-        "company" => (root.to_path_buf(), "company".to_string()),
-        "team" => (root.join("teams"), folder_name(&space.name, &space.id)),
-        _ => (root.join("users"), folder_name(if space.owner.is_empty() { &space.name } else { &space.owner }, &space.id)),
+    let (parent, name) = space_folders::place(root, &space.kind, &space.name, &space.owner, &space.id);
+    let mut c = db.acquire().await?;
+    let Some(folder) = space_folders::free_folder(&mut c, &parent, &name).await? else {
+        return Err(format!("no free folder for the space \"{}\" in {}", space.name, parent.display()).into());
     };
-    for n in 1..10_000u32 {
-        let candidate = parent.join(if n == 1 { name.clone() } else { format!("{name} ({n})") });
-        let path = candidate.to_string_lossy().into_owned();
-        let (taken,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drives WHERE source_path = ?").bind(&path).fetch_one(db).await?;
-        if taken > 0 || std::fs::symlink_metadata(&candidate).is_ok() {
-            continue;
-        }
-        if !dry_run {
-            sqlx::query("UPDATE drives SET source_path = ? WHERE id = ? AND mode = 'store'").bind(&path).bind(&space.id).execute(db).await?;
-        }
-        return Ok(candidate);
+    if !dry_run {
+        sqlx::query("UPDATE drives SET source_path = ? WHERE id = ? AND mode = 'store'")
+            .bind(folder.to_string_lossy())
+            .bind(&space.id)
+            .execute(&mut *c)
+            .await?;
     }
-    Err(format!("no free folder for the space \"{}\" in {}", space.name, parent.display()).into())
-}
-
-/// A space's name as a folder name
-fn folder_name(name: &str, id: &str) -> String {
-    let (name, _) = disk_name(name.trim(), true);
-    let name = name.trim_end_matches(['.', ' ']);
-    if name.is_empty() { id.to_string() } else { name.to_string() }
+    Ok(folder)
 }
 
 /// Where every item goes, below the space's folder
@@ -456,39 +443,6 @@ fn assign<'a>(dir: &str, mut kids: Vec<&'a Item>, p: &mut Plan, queue: &mut VecD
             p.files.push(Want { node: it.id.clone(), version: None, rel, hash: it.blob_hash.clone(), size: it.size });
         }
     }
-}
-
-/// The name an item gets on disk, and why it differs: characters a file name can't have become `_`, names longer
-/// than disks allow are shortened, and names scans skip (`Thumbs.db`, `~$…` and other temporary files) get an
-/// underscore, as the item would otherwise disappear from the space
-fn disk_name(name: &str, is_dir: bool) -> (String, Option<&'static str>) {
-    let mut why = None;
-    let mut out: String = name.chars().map(|c| if c.is_control() || c == '/' || c == '\\' { '_' } else { c }).collect();
-    if out != name || out.is_empty() || out == "." || out == ".." {
-        if out.is_empty() || out == "." || out == ".." {
-            out = format!("_{out}");
-        }
-        why = Some("it has characters a file name can't have");
-    }
-    if out.len() > MAX_NAME_BYTES {
-        let (stem, ext) = split_name(&out, is_dir);
-        let ext = if ext.len() <= 32 { ext } else { "" };
-        // Room for a number, should the shorter name be taken
-        let mut cut = (MAX_NAME_BYTES - ext.len() - 12).min(stem.len());
-        while !stem.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        out = format!("{}{ext}", &stem[..cut]);
-        why = Some("the name is too long for the disk");
-    }
-    if ignored(&out) {
-        out = format!("_{out}");
-        if ignored(&out) {
-            out.push('_');
-        }
-        why = Some("scans skip names like this one");
-    }
-    (out, why)
 }
 
 fn under(top: &Path, rel: &str) -> PathBuf {
@@ -994,7 +948,7 @@ mod tests {
         let p = plan("root", &items, &[], &mut r);
         let mut rels: Vec<&str> = p.files.iter().map(|w| w.rel.as_str()).chain(p.folders.iter().map(|(_, rel)| rel.as_str())).collect();
         rels.sort();
-        let short = format!("{}.txt", "x".repeat(MAX_NAME_BYTES - 4 - 12));
+        let short = format!("{}.txt", "x".repeat(space_folders::MAX_NAME_BYTES - 4 - 12));
         let mut want = vec!["", "Notes.txt", "notes (1).txt", "_Thumbs.db", "_~$draft.docx", "_movie.mp4.part_", short.as_str(), "Plans", "plans (1)"];
         want.sort();
         assert_eq!(rels, want);

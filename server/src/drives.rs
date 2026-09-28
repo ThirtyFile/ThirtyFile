@@ -189,10 +189,16 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     }
     let (drive_id, root_id) = create_drive(&mut tx, &name, "team", user.id, quota).await?;
     add_grant(&mut tx, &root_id, "user", user.id, "owner", Some(user.id), None).await?;
-    if let Some(source) = &source {
-        crate::folders::set_up(&mut tx, &drive_id, &root_id, source).await?;
-        sqlx::query("UPDATE drives SET read_only = ? WHERE id = ?").bind(req.read_only).bind(&drive_id).execute(&mut *tx).await?;
-    }
+    // A folder chosen by the administrator, else a new folder in the storage location's folder when the location is
+    // on this server (space_folders.rs); S3, SFTP and FTP keep the content store
+    let folder_space = match &source {
+        Some(source) => {
+            crate::folders::set_up(&mut tx, &drive_id, &root_id, source).await?;
+            sqlx::query("UPDATE drives SET read_only = ? WHERE id = ?").bind(req.read_only).bind(&drive_id).execute(&mut *tx).await?;
+            true
+        }
+        None => crate::space_folders::make_folder_space(&mut tx, st.space_folders.as_deref(), &drive_id).await?.is_some(),
+    };
     let root = tree::get_node(&mut tx, &root_id).await?.unwrap();
     logs::record_activity(&mut tx, &user, Some(&root), "drive_create", source.as_deref().unwrap_or_default()).await?;
     let drive = tree::get_drive(&mut tx, &drive_id).await?.unwrap();
@@ -202,6 +208,8 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     if source.is_some() {
         // Index the folder right away (in the background: a large folder takes a while)
         crate::folders::scan_later(&st, &drive_id);
+    }
+    if folder_space {
         crate::folders::spaces_changed();
     }
     Ok(Json(info))
@@ -295,9 +303,14 @@ pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<Strin
     if !(user.is_admin() || role == Some(Role::Owner)) {
         return Err(AppError::forbidden("Only the space owner or an administrator can delete a space"));
     }
-    // The space disappears now; its files are deleted in the background, a batch at a time
+    // The space disappears now; its files are deleted in the background, a batch at a time. A folder space's folder
+    // stays on the disk with everything in it (space_folders.rs): only ThirtyFile's index of it is deleted
     sqlx::query("DELETE FROM drives WHERE id = ?").bind(&drive.id).execute(&mut *tx).await?;
-    logs::record_activity(&mut tx, &user, None, "drive_delete", &drive.name).await?;
+    let detail = match drive.source_path.as_deref().filter(|_| drive.is_folder()) {
+        Some(path) => format!("{} (its folder on the server is kept: {path})", drive.name),
+        None => drive.name.clone(),
+    };
+    logs::record_activity(&mut tx, &user, None, "drive_delete", &detail).await?;
     tx.commit().await?;
     crate::folders::spaces_changed();
     tree::purge_detached_later(&st);

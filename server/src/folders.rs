@@ -711,7 +711,9 @@ pub fn check_source(st: &AppState, path: &str) -> AppResult<String> {
     if !real.is_dir() {
         return Err(AppError::bad_request("The folder doesn't exist on the server"));
     }
-    for own in [&st.data_dir, &st.storage_dir] {
+    // (new spaces get their folders in the storage folder, which differs from `storage_dir` while 0.1's /data/blobs is
+    // in use)
+    for own in [Some(&st.data_dir), Some(&st.storage_dir), st.space_folders.as_ref()].into_iter().flatten() {
         if let Ok(own) = std::fs::canonicalize(own)
             && (real.starts_with(&own) || own.starts_with(&real))
         {

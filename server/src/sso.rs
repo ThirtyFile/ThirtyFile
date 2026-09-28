@@ -870,6 +870,7 @@ async fn create_sso_user(st: &AppState, provider: &str, cfg: &ProviderConfig, id
             quota_bytes: quota,
             source: provider,
             provisioned_by: Some(&ident.subject),
+            space_folders: st.space_folders.as_deref(),
         },
     )
     .await?;
@@ -897,6 +898,7 @@ async fn create_sso_user(st: &AppState, provider: &str, cfg: &ProviderConfig, id
         logs::record_activity(&mut tx, &user, None, "user_create", &detail).await?;
     }
     tx.commit().await?;
+    crate::folders::spaces_changed();
     tracing::info!("Automatically created account {username} via {} sign-in", label(provider));
     Ok((id, username))
 }
@@ -1535,7 +1537,7 @@ mod tests {
             let mut c = env.st.db.acquire().await.unwrap();
             crate::db::create_user(
                 &mut c,
-                NewUser { username: &format!("bulk{i}@example.com"), password_hash: &hash, role: "user", can_write: true, can_delete: true, can_share: true, quota_bytes: 0, source: "google", provisioned_by: None },
+                NewUser { username: &format!("bulk{i}@example.com"), password_hash: &hash, role: "user", can_write: true, can_delete: true, can_share: true, quota_bytes: 0, source: "google", provisioned_by: None, space_folders: None },
             )
             .await
             .unwrap();

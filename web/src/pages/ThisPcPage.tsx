@@ -668,7 +668,13 @@ export function ThisPcPage() {
       {dialog?.t === "delete" && (
         <ConfirmDialog
           title={t("Delete space \"{name}\"?", { name: dialog.drive.name })}
-          description={t("All files in this space ({size}) will be permanently deleted and no member will be able to access them. This can't be undone.", { size: formatBytes(dialog.drive.used_bytes) })}
+          description={
+            dialog.drive.mode === "folder"
+              ? t("The space is removed from ThirtyFile and no member will be able to access it. Its folder on the server is kept with the files in it ({size}), for an administrator to delete.", {
+                  size: formatBytes(dialog.drive.used_bytes),
+                })
+              : t("All files in this space ({size}) will be permanently deleted and no member will be able to access them. This can't be undone.", { size: formatBytes(dialog.drive.used_bytes) })
+          }
           confirmText={t("Delete permanently")}
           destructive
           onClose={() => setDialog(null)}

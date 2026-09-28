@@ -266,8 +266,10 @@ function DeleteUserDialog({ user, onClose, onDeleted }: { user: UserRow; onClose
   const qc = useQueryClient();
   const me = useMe();
   const drives = useQuery({ queryKey: ["admin-drives"], queryFn: api.adminDrives });
-  // Spaces that can take the files: not the user's own, not a folder on the server, not turned off
-  const targets = (drives.data ?? []).filter((d) => d.mode !== "folder" && !d.disabled && !(d.kind === "personal" && d.owner_name === user.username));
+  // Their own space ("My files": a folder on the server in new installs, whose folder is kept when they are deleted)
+  const own = drives.data?.find((d) => d.kind === "personal" && d.owner_name === user.username);
+  // Spaces that can take the files: not the user's own, not turned off
+  const targets = (drives.data ?? []).filter((d) => !d.disabled && d !== own);
   const mine = targets.find((d) => d.kind === "personal" && d.owner_name === me.username);
   const [choice, setChoice] = useState<"move" | "delete">("move");
   const [target, setTarget] = useState("");
@@ -339,16 +341,27 @@ function DeleteUserDialog({ user, onClose, onDeleted }: { user: UserRow; onClose
                   ))}
                 </select>
                 <span className="text-xs text-muted-foreground">
-                  {t("They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash is emptied.", { name: user.username })}
+                  {own?.mode === "folder"
+                    ? t("They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash stays in their folder on the server.", { name: user.username })
+                    : t("They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash is emptied.", { name: user.username })}
                 </span>
               </span>
             </Label>
             <Label className="flex items-start gap-2 font-normal">
               <input type="radio" className="mt-1 accent-brand" checked={choice === "delete"} onChange={() => setChoice("delete")} />
-              <span>
-                {t("Delete their files permanently")}
-                <span className="block text-xs text-muted-foreground">{t("This can't be undone.")}</span>
-              </span>
+              {own?.mode === "folder" ? (
+                <span>
+                  {t("Remove their files from ThirtyFile")}
+                  <span className="block text-xs text-muted-foreground">
+                    {t("Their folder on the server, {path}, is kept with the files in it: delete it there when it's no longer needed.", { path: own.source_path ?? "" })}
+                  </span>
+                </span>
+              ) : (
+                <span>
+                  {t("Delete their files permanently")}
+                  <span className="block text-xs text-muted-foreground">{t("This can't be undone.")}</span>
+                </span>
+              )}
             </Label>
           </div>
           <ErrorText>{remove.error?.message ?? disable.error?.message}</ErrorText>

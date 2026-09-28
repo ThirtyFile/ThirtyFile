@@ -363,7 +363,14 @@ export function AdminDrivesPage() {
       {dialog?.t === "delete" && dialog.drive && (
         <ConfirmDialog
           title={t("Delete space \"{name}\"?", { name: dialog.drive.name })}
-          description={t("All files in this space ({size}) will be permanently deleted. This can't be undone.", { size: formatBytes(dialog.drive.used_bytes) })}
+          description={
+            dialog.drive.mode === "folder"
+              ? t("The space is removed from ThirtyFile. Its folder on the server, {path}, is kept with the files in it ({size}): delete it there when it's no longer needed.", {
+                  path: dialog.drive.source_path ?? "",
+                  size: formatBytes(dialog.drive.used_bytes),
+                })
+              : t("All files in this space ({size}) will be permanently deleted. This can't be undone.", { size: formatBytes(dialog.drive.used_bytes) })
+          }
           confirmText={t("Delete permanently")}
           destructive
           onClose={() => setDialog(null)}

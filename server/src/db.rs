@@ -308,22 +308,27 @@ pub async fn add_grant(
     Ok(())
 }
 
-/// Loads system settings; on first startup creates the "All files" company space (editable by everyone).
+/// On the first start, creates the company space "All files" (editable by everyone): a folder space in `folders`
+/// (see `AppState::space_folders`) when its location is a folder of this server
+pub async fn create_company_space(db: &SqlitePool, folders: Option<&Path>) -> AppResult<()> {
+    let (exists,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM drives WHERE kind = 'company')").fetch_one(db).await?;
+    if exists {
+        return Ok(());
+    }
+    let (admin_id,): (i64,) = sqlx::query_as("SELECT MIN(id) FROM users WHERE role = 'admin'").fetch_one(db).await?;
+    let mut tx = db.begin().await?;
+    let (drive_id, root_id) = create_drive(&mut tx, "All files", "company", admin_id, 0).await?;
+    crate::space_folders::make_folder_space(&mut tx, folders, &drive_id).await?;
+    add_grant(&mut tx, &root_id, "everyone", 0, "editor", None, None).await?;
+    set_setting(&mut tx, "shared_root_id", &root_id).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Loads system settings (the company space is created first, by `create_company_space`)
 pub async fn load_system_settings(db: &SqlitePool) -> Result<SystemSettings, sqlx::Error> {
-    let company: Option<(String, bool)> =
-        sqlx::query_as("SELECT root_id, disabled FROM drives WHERE kind = 'company' LIMIT 1").fetch_optional(db).await?;
-    let (shared_root_id, disabled) = match company {
-        Some(c) => c,
-        None => {
-            let (admin_id,): (i64,) = sqlx::query_as("SELECT MIN(id) FROM users WHERE role = 'admin'").fetch_one(db).await?;
-            let mut tx = db.begin().await?;
-            let (_, root_id) = create_drive(&mut tx, "All files", "company", admin_id, 0).await?;
-            add_grant(&mut tx, &root_id, "everyone", 0, "editor", None, None).await?;
-            set_setting(&mut tx, "shared_root_id", &root_id).await?;
-            tx.commit().await?;
-            (root_id, false)
-        }
-    };
+    let (shared_root_id, disabled): (String, bool) =
+        sqlx::query_as("SELECT root_id, disabled FROM drives WHERE kind = 'company' LIMIT 1").fetch_one(db).await?;
     let allow_user_drives = get_setting(db, "allow_user_drives").await?.as_deref() == Some("1");
     let default_user_quota = get_setting(db, "default_user_quota").await?.and_then(|v| v.parse().ok()).unwrap_or(0).max(0);
     let public_url = get_setting(db, "public_url").await?.unwrap_or_default();
@@ -382,6 +387,9 @@ pub struct NewUser<'a> {
     pub source: &'a str,
     /// Automatically created accounts: the provider's identifier of the person
     pub provisioned_by: Option<&'a str>,
+    /// `AppState::space_folders`: their "My files" is a folder space in `users/<user name>` when its location is a
+    /// folder of this server
+    pub space_folders: Option<&'a Path>,
 }
 
 /// Tables whose ids are never given out twice
@@ -411,7 +419,8 @@ pub async fn next_id(conn: &mut SqliteConnection, table: Counted) -> Result<i64,
     Ok(id)
 }
 
-/// Creates a user and their personal space, returning the user id. The caller must hold the write lock.
+/// Creates a user and their personal space, returning the user id. The caller must hold the write lock, and calls
+/// `folders::spaces_changed` after committing (the personal space may be a folder space).
 pub async fn create_user(conn: &mut SqliteConnection, u: NewUser<'_>) -> AppResult<i64> {
     let id = next_id(conn, Counted::Users).await?;
     sqlx::query(
@@ -431,14 +440,15 @@ pub async fn create_user(conn: &mut SqliteConnection, u: NewUser<'_>) -> AppResu
     .bind(u.provisioned_by)
     .execute(&mut *conn)
     .await?;
-    let (_, root_id) = create_drive(conn, "My files", "personal", id, 0).await?;
+    let (drive_id, root_id) = create_drive(conn, "My files", "personal", id, 0).await?;
+    crate::space_folders::make_folder_space(conn, u.space_folders, &drive_id).await?;
     add_grant(conn, &root_id, "user", id, "owner", Some(id), None).await?;
     sqlx::query("UPDATE users SET root_id = ? WHERE id = ?").bind(&root_id).bind(id).execute(&mut *conn).await?;
     Ok(id)
 }
 
-/// Creates the default administrator when there are no users.
-pub async fn bootstrap_admin(db: &SqlitePool, password: Option<&str>) -> AppResult<()> {
+/// Creates the default administrator when there are no users. `space_folders`: see `NewUser`.
+pub async fn bootstrap_admin(db: &SqlitePool, password: Option<&str>, space_folders: Option<&Path>) -> AppResult<()> {
     let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users").fetch_one(db).await?;
     if count > 0 {
         return Ok(());
@@ -463,6 +473,7 @@ pub async fn bootstrap_admin(db: &SqlitePool, password: Option<&str>) -> AppResu
             quota_bytes: 0,
             source: "password",
             provisioned_by: None,
+            space_folders,
         },
     )
     .await?;
@@ -483,7 +494,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));
         std::fs::create_dir_all(&dir).unwrap();
         let db = connect(&dir.join("drive.db"), 16).await.unwrap();
-        bootstrap_admin(&db, password).await.unwrap();
+        bootstrap_admin(&db, password, None).await.unwrap();
         let (hash,): (String,) = sqlx::query_as("SELECT password_hash FROM users WHERE username = 'admin'").fetch_one(&db).await.unwrap();
         db.close().await;
         let _ = std::fs::remove_dir_all(&dir);
