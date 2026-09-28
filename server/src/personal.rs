@@ -62,6 +62,17 @@ pub async fn choose(st: &AppState, conn: &mut SqliteConnection, create: Option<b
     }
 }
 
+/// Before taking the write lock to create a personal space: asks the disk of the location `choose` picks whether its
+/// folder is available (`space_folders::check`), so the write lock doesn't wait for a disk that doesn't answer
+pub async fn check_ahead(st: &AppState, create: Option<bool>, location: Option<&str>) {
+    let Ok(mut c) = st.db.acquire().await else { return };
+    let chosen = choose(st, &mut c, create, location, false).await;
+    drop(c);
+    if let Ok(Some(location)) = chosen {
+        crate::space_folders::check(st, &location).await;
+    }
+}
+
 /// Creates the personal space of user `user_id` on `location`, in the caller's transaction (under the write lock), and
 /// returns its root folder. Fails when the location's folder isn't available (space_folders.rs); the caller then
 /// rolls back. `space_folders`: see `AppState::space_folders`. The caller calls `folders::spaces_changed` after
@@ -100,7 +111,9 @@ pub async fn create_or_wait(conn: &mut SqliteConnection, space_folders: Option<&
 /// Tries again to create the personal spaces waiting for their location: every user's, or only `user`'s (when they
 /// sign in). Failures are only logged. Returns how many were created.
 pub async fn retry_pending(st: &AppState, user: Option<i64>) -> usize {
-    let rows: Vec<(i64, String)> = match sqlx::query_as("SELECT id, username FROM users WHERE personal_pending IS NOT NULL AND (?1 IS NULL OR id = ?1)")
+    let rows: Vec<(i64, String, String)> = match sqlx::query_as(
+        "SELECT id, username, personal_pending FROM users WHERE personal_pending IS NOT NULL AND (?1 IS NULL OR id = ?1)",
+    )
         .bind(user)
         .fetch_all(&st.db)
         .await
@@ -112,7 +125,12 @@ pub async fn retry_pending(st: &AppState, user: Option<i64>) -> usize {
         }
     };
     let mut created = 0;
-    for (id, username) in rows {
+    for (id, username, location) in rows {
+        // Asked before taking the write lock: a location that is offline, or whose disk doesn't answer, is left for later
+        if !crate::space_folders::check(st, &location).await {
+            tracing::debug!("The personal space of {username} still can't be created: storage location {location} isn't available");
+            continue;
+        }
         match retry_one(st, id).await {
             Ok(Some(location)) => {
                 created += 1;
@@ -155,9 +173,11 @@ async fn retry_in(st: &AppState, tx: &mut SqliteConnection, id: i64) -> AppResul
     Ok(Some(location))
 }
 
-/// Tries the waiting personal spaces again every minute (a location that is back is used within a minute)
+/// Tries the waiting personal spaces again every minute (a location that is back is used within a minute). First makes
+/// personal spaces left read-only by a removal that was interrupted writable again (`admin::release_interrupted`).
 pub fn spawn_retry(st: AppState) {
     tokio::spawn(async move {
+        crate::admin::release_interrupted(&st).await;
         let mut tick = tokio::time::interval(RETRY_INTERVAL);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
@@ -184,6 +204,7 @@ async fn location_name(conn: &mut SqliteConnection, id: &str) -> AppResult<Strin
 /// Gives a user a personal space now (it replaces one waiting for its location). Fails, changing nothing, when the
 /// location's folder isn't available.
 pub async fn add(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<i64>, Json(req): Json<AddReq>) -> AppResult<Json<UserRow>> {
+    check_ahead(&st, Some(true), req.location_id.as_deref()).await;
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
@@ -219,13 +240,14 @@ async fn add_in(st: &AppState, tx: &mut SqliteConnection, me: &crate::auth::User
 pub async fn remove(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<i64>, Query(q): Query<DeleteQuery>) -> AppResult<Json<UserRow>> {
     let username = crate::admin::get_row(&st, id).await?.username;
     let moved = crate::admin::move_personal_first(&st, &me, id, &username, &q).await?;
-    let removed = {
+    let res = {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
-        let res = remove_in(&mut tx, &me, id, &username, &q, moved).await;
+        let res = remove_in(&mut tx, &me, id, &username, &q, moved.as_ref()).await;
         // Rolled back before the lock goes when it fails (`db::settle`)
-        crate::db::settle(tx, res).await?
+        crate::db::settle(tx, res).await
     };
+    let removed = crate::admin::Moved::kept_on_error(moved.as_ref(), &st, res).await?;
     if let Some(removed) = removed {
         removed.finish(&st).await;
     }
@@ -238,7 +260,7 @@ async fn remove_in(
     id: i64,
     username: &str,
     q: &DeleteQuery,
-    moved: Option<String>,
+    moved: Option<&crate::admin::Moved>,
 ) -> AppResult<Option<crate::admin::Removed>> {
     let (pending,): (Option<String>,) = sqlx::query_as("SELECT personal_pending FROM users WHERE id = ?").bind(id).fetch_one(&mut *tx).await?;
     let removed = crate::admin::remove_personal_in(tx, me, id, username, q, moved).await?;

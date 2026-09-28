@@ -136,6 +136,7 @@ pub async fn create(State(st): State<AppState>, Admin(me): Admin, Json(req): Jso
     validate_role(&req.role)?;
     let display_name = validate_display_name(&req.display_name)?.to_string();
     let password_hash = hash_password(req.password.clone()).await?;
+    crate::personal::check_ahead(&st, req.personal_space, req.personal_location.as_deref()).await;
     let id = {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
@@ -287,13 +288,14 @@ pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     }
     let row = get_row(&st, id).await?;
     let moved = move_personal_first(&st, &me, id, &row.username, &q).await?;
-    let (removed, uploads) = {
+    let res = {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
-        let res = delete_in(&mut tx, &me, id, &row.username, &q, moved).await;
+        let res = delete_in(&mut tx, &me, id, &row.username, &q, moved.as_ref()).await;
         // Moving the files can fail after writing (the target space is full): rolled back before the lock goes
-        crate::db::settle(tx, res).await?
+        crate::db::settle(tx, res).await
     };
+    let (removed, uploads) = Moved::kept_on_error(moved.as_ref(), &st, res).await?;
     if let Some(removed) = removed {
         removed.finish(&st).await;
     }
@@ -310,7 +312,7 @@ async fn delete_in(
     id: i64,
     username: &str,
     q: &DeleteQuery,
-    moved: Option<String>,
+    moved: Option<&Moved>,
 ) -> AppResult<(Option<Removed>, Vec<(String,)>)> {
     let removed = remove_personal_in(tx, me, id, username, q, moved).await?;
     let detail = match removed.as_ref().and_then(|r| r.detail.as_deref()) {
@@ -363,10 +365,61 @@ impl Removed {
     }
 }
 
+/// The files of a personal space moved by `move_personal_first`, before the space is removed. The space stays
+/// read-only (`drives.moving`) until the transaction that removes it; should that fail, `kept_on_error` makes it
+/// writable again.
+pub struct Moved {
+    /// Where the files went, for the log
+    place: String,
+    drive_id: String,
+}
+
+impl Moved {
+    /// Passes on the result of removing the space; when it failed, the space stays and is writable again
+    pub async fn kept_on_error<T>(moved: Option<&Moved>, st: &AppState, res: AppResult<T>) -> AppResult<T> {
+        if res.is_err()
+            && let Some(m) = moved
+        {
+            release(st, &m.drive_id).await;
+        }
+        res
+    }
+}
+
+/// Makes a personal space writable again when removing it failed
+async fn release(st: &AppState, drive_id: &str) {
+    let _w = st.write_lock.lock().await;
+    let res = async {
+        let mut tx = crate::db::begin_write(&st.db).await?;
+        sqlx::query("UPDATE drives SET moving = 0 WHERE id = ?").bind(drive_id).execute(&mut *tx).await?;
+        tx.commit().await
+    }
+    .await;
+    if let Err(e) = res {
+        tracing::warn!("Couldn't make the personal space {drive_id} writable again: {e}");
+    }
+}
+
+/// At startup: personal spaces left read-only by a removal that ThirtyFile stopped in the middle of (and not by a move
+/// to another storage location) are writable again; what wasn't moved yet is still in them
+pub async fn release_interrupted(st: &AppState) {
+    let rows: Result<Vec<(String,)>, _> = sqlx::query_as("SELECT id FROM drives WHERE kind = 'personal' AND moving = 1").fetch_all(&st.db).await;
+    for (drive_id,) in rows.unwrap_or_default() {
+        let busy = match st.db.acquire().await {
+            Ok(mut c) => crate::moves::drive_busy(&mut c, &drive_id).await.unwrap_or(true),
+            Err(_) => true,
+        };
+        if !busy {
+            release(st, &drive_id).await;
+        }
+    }
+}
+
 /// Before removing a personal space whose files go to or come from a folder space: moves them on the disk first, item
-/// by item (the removal can't happen halfway: should a move fail, the space stays, with what wasn't moved yet).
-/// Returns where they went, for the log; None when nothing had to move this way.
-pub async fn move_personal_first(st: &AppState, me: &crate::auth::User, user_id: i64, username: &str, q: &DeleteQuery) -> AppResult<Option<String>> {
+/// by item (the removal can't happen halfway: should a move fail, the space stays, with what wasn't moved yet). The
+/// space is read-only from the moment its items are listed until it is removed, so nothing added meanwhile is lost
+/// with it. Returns where they went; None when nothing had to move this way.
+pub async fn move_personal_first(st: &AppState, me: &crate::auth::User, user_id: i64, username: &str, q: &DeleteQuery) -> AppResult<Option<Moved>> {
     if q.move_to.is_some() && q.delete_files {
         return Err(AppError::bad_request("Choose either to move the user's files or to delete them"));
     }
@@ -387,13 +440,14 @@ pub async fn move_personal_first(st: &AppState, me: &crate::auth::User, user_id:
     if !(own.is_folder() || target.is_folder()) {
         return Ok(None);
     }
-    Ok(Some(move_personal_across(st, me, username, &own, &target).await?))
+    let place = move_personal_across(st, me, username, &own, &target).await?;
+    Ok(Some(Moved { place, drive_id: own.id }))
 }
 
 /// Removes the personal space of user `id` in the transaction (under the write lock), when deleting the user or only
 /// their space: its files are moved into a new folder "Files of <username>" in the space `q.move_to`, or deleted with
-/// it (`q.delete_files`); one of the two must be chosen when it holds anything. `moved`: where `move_personal_first`
-/// put them already. The user is left without a personal space, and without one waiting to be created. None when
+/// it (`q.delete_files`); one of the two must be chosen when it holds anything. `moved`: what `move_personal_first`
+/// moved already; the space must hold nothing else by now. The user is left without a personal space, and without one waiting to be created. None when
 /// they had none. The caller calls `Removed::finish` after committing.
 pub async fn remove_personal_in(
     tx: &mut sqlx::SqliteConnection,
@@ -401,7 +455,7 @@ pub async fn remove_personal_in(
     id: i64,
     username: &str,
     q: &DeleteQuery,
-    moved: Option<String>,
+    moved: Option<&Moved>,
 ) -> AppResult<Option<Removed>> {
     let personal: Option<(String, String, Option<String>)> =
         sqlx::query_as("SELECT id, root_id, CASE WHEN mode = 'folder' THEN source_path END FROM drives WHERE kind = 'personal' AND owner_id = ?")
@@ -417,8 +471,15 @@ pub async fn remove_personal_in(
         crate::moves::refuse_busy(tx, target).await?;
     }
     let (has_files,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM nodes WHERE parent_id = ?)").bind(&root_id).fetch_one(&mut *tx).await?;
-    let detail = if let Some(place) = moved {
-        Some(format!("files moved to {place}"))
+    let detail = if let Some(m) = moved {
+        // Checked again under the write lock: anything that got in after the files were listed (a scan of the folder,
+        // say) would otherwise be deleted with the space
+        let (left,): (bool,) =
+            sqlx::query_as("SELECT EXISTS (SELECT 1 FROM nodes WHERE parent_id = ? AND trashed_at IS NULL)").bind(&root_id).fetch_one(&mut *tx).await?;
+        if left || m.drive_id != drive_id {
+            return Err(AppError::conflict("Something changed at the same time. Try again."));
+        }
+        Some(format!("files moved to {}", m.place))
     } else if has_files {
         match &q.move_to {
             Some(target) => Some(format!("files moved to {}", move_personal_files(tx, me, username, &drive_id, &root_id, target).await?)),
@@ -530,10 +591,19 @@ async fn move_personal_across(st: &AppState, me: &crate::auth::User, username: &
             items.push(nodes);
         }
         let label = format!("{} › {name}", space_label(&mut tx, target).await?);
+        // Read-only from now until the space is removed: an item added later wouldn't be moved, and would be deleted
+        // with the space. Another removal under way already is left to finish.
+        let marked = sqlx::query("UPDATE drives SET moving = 1 WHERE id = ? AND moving = 0").bind(&own.id).execute(&mut *tx).await?;
+        if marked.rows_affected() == 0 {
+            return Err(AppError::conflict("Something changed at the same time. Try again."));
+        }
         tx.commit().await?;
         (dest, items, label)
     };
-    crate::fsops::move_across(st, me, &dest, items).await?;
+    if let Err(e) = crate::fsops::move_across(st, me, &dest, items).await {
+        release(st, &own.id).await;
+        return Err(e);
+    }
     Ok(label)
 }
 
@@ -1108,6 +1178,62 @@ mod tests {
         let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id = ? AND name = 'big.bin'").bind(&bens).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(n, 1);
         assert_eq!(used(&env, &bens).await, 1000);
+    }
+
+    #[tokio::test]
+    async fn files_added_while_a_personal_space_is_removed_are_kept() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let amy = env.user("amy", true).await;
+        let a = env.stored_file(&amy, amy.root(), "a.txt", b"first").await;
+        let space = env.folder_space("Scans").await;
+        let amys = env.drive_of(amy.root()).await;
+        let q: DeleteQuery = serde_json::from_value(json!({ "move_to": space.drive })).unwrap();
+        let moving = || async {
+            let (m,): (bool,) = sqlx::query_as("SELECT moving FROM drives WHERE id = ?").bind(&amys).fetch_one(&env.st.db).await.unwrap();
+            m
+        };
+
+        // Deleting Amy moves her files on the disk first; until her space is gone, nothing can be added to it
+        let moved = move_personal_first(&env.st, &admin, amy.id, "amy", &q).await.unwrap();
+        assert!(moved.is_some());
+        assert_eq!(env.drive_of(&a).await, space.drive);
+        assert!(moving().await, "read-only while it is removed");
+        let err = env.try_upload(&amy, amy.root(), "late.txt", b"late").await.unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::FORBIDDEN);
+
+        // Something that got in all the same (indexed by a scan, say) stops the removal, checked under the write lock
+        let late = env.stored_file(&amy, amy.root(), "late.txt", b"late").await;
+        let res = {
+            let _w = env.st.write_lock.lock().await;
+            let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+            let res = delete_in(&mut tx, &admin, amy.id, "amy", &q, moved.as_ref()).await;
+            crate::db::settle(tx, res).await
+        };
+        let err = Moved::kept_on_error(moved.as_ref(), &env.st, res).await.map(|_| ()).unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::CONFLICT);
+        // Amy, her space and the late file are still there, and the space is writable again
+        assert!(get_row(&env.st, amy.id).await.is_ok());
+        assert_eq!(env.drive_of(&late).await, amys);
+        assert!(!moving().await);
+
+        // Trying again moves the rest
+        let _ = delete_user(&env, amy.id, json!({ "move_to": space.drive })).await.unwrap();
+        assert!(get_row(&env.st, amy.id).await.is_err());
+        assert_eq!(env.drive_of(&late).await, space.drive);
+        assert_eq!(std::fs::read(space.dir.join("Files of amy (1)/late.txt")).unwrap(), b"late");
+    }
+
+    #[tokio::test]
+    async fn a_removal_stopped_midway_leaves_the_space_writable_after_a_restart() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let amys = env.drive_of(amy.root()).await;
+        sqlx::query("UPDATE drives SET moving = 1 WHERE id = ?").bind(&amys).execute(&env.st.db).await.unwrap();
+        release_interrupted(&env.st).await;
+        let (m,): (bool,) = sqlx::query_as("SELECT moving FROM drives WHERE id = ?").bind(&amys).fetch_one(&env.st.db).await.unwrap();
+        assert!(!m);
+        env.upload(&amy, amy.root(), "a.txt", b"a").await;
     }
 
     /// Waits for the background purge of a deleted space to remove a node
