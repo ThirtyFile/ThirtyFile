@@ -599,6 +599,11 @@ async fn commit_upload(
     if parent.in_folder_space() || parent.space_read_only {
         return Err(AppError::conflict("Something changed at the same time. Try again."));
     }
+    // It was admitted against the quota of the space it started in: a folder moved to another space meanwhile must
+    // have room there too
+    if upload.drive_id.as_deref() != Some(parent.drive()) {
+        tree::check_quota(&mut tx, parent.drive(), size as i64).await?;
+    }
     let folder = tree::ensure_folders(&mut tx, upload.owner_id, &parent.id, &upload.rel_path, &upload.batch).await?;
     let ts = now();
     let (id, extra, removed) = match replaced_file(&mut tx, user, upload, &folder).await? {
@@ -709,6 +714,10 @@ pub async fn purge_expired(st: &AppState) -> AppResult<usize> {
     }
     Ok(ids.len())
 }
+
+#[cfg(test)]
+#[path = "upload_tests.rs"]
+mod more_tests;
 
 #[cfg(test)]
 mod tests {

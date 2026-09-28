@@ -914,4 +914,260 @@ mod tests {
         assert_eq!(put(ben.clone(), pdf.clone(), png(100, 100)).await.unwrap(), StatusCode::NO_CONTENT);
         assert_eq!(std::fs::read(env.st.thumb_path(&hash)).unwrap(), body.to_vec());
     }
+
+    #[test]
+    fn ranges_are_read_as_the_http_spec_says() {
+        assert_eq!(parse_range("bytes=2-4", 10), Ok(Some((2, 4))));
+        assert_eq!(parse_range(" bytes= 2 - 4 ", 10), Ok(Some((2, 4))));
+        // Open ended, past the end, and the last n bytes (more than there are is the whole file)
+        assert_eq!(parse_range("bytes=8-", 10), Ok(Some((8, 9))));
+        assert_eq!(parse_range("bytes=5-100", 10), Ok(Some((5, 9))));
+        assert_eq!(parse_range("bytes=-3", 10), Ok(Some((7, 9))));
+        assert_eq!(parse_range("bytes=-100", 10), Ok(Some((0, 9))));
+        // Other units and several ranges: the whole file
+        assert_eq!(parse_range("items=0-1", 10), Ok(None));
+        assert_eq!(parse_range("bytes=0-1,4-5", 10), Ok(None));
+        // Unsatisfiable or malformed, and any range of an empty file
+        for bad in ["bytes=10-", "bytes=5-3", "bytes=-0", "bytes=abc", "bytes=1", "bytes=-x"] {
+            assert_eq!(parse_range(bad, 10), Err(()), "{bad}");
+        }
+        for bad in ["bytes=0-", "bytes=0-0", "bytes=-5"] {
+            assert_eq!(parse_range(bad, 0), Err(()), "{bad} of an empty file");
+        }
+    }
+
+    /// Reads a file through `content` with these request headers: status, headers and body
+    async fn fetch(env: &testutil::TestEnv, user: &User, id: &str, headers: &[(header::HeaderName, &str)]) -> (StatusCode, HeaderMap, Vec<u8>) {
+        let mut h = HeaderMap::new();
+        for (k, v) in headers {
+            h.insert(k.clone(), v.parse().unwrap());
+        }
+        let q = Query(ContentQuery { download: None });
+        let res = content(State(env.st.clone()), user.clone(), Path(id.to_string()), q, h).await.unwrap();
+        let (parts, body) = res.into_parts();
+        (parts.status, parts.headers, axum::body::to_bytes(body, usize::MAX).await.unwrap().to_vec())
+    }
+
+    #[tokio::test]
+    async fn downloads_answer_ranges_and_conditions() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let id = env.stored_file(&amy, &amy.root_id, "abc.txt", b"abcdefghij").await;
+
+        let (status, h, body) = fetch(&env, &amy, &id, &[]).await;
+        assert_eq!((status, body.as_slice()), (StatusCode::OK, &b"abcdefghij"[..]));
+        assert_eq!((&h[header::CONTENT_LENGTH], &h[header::ACCEPT_RANGES]), (&HeaderValue::from(10), &HeaderValue::from_static("bytes")));
+        let etag = h[header::ETAG].to_str().unwrap().to_string();
+
+        for (range, want, content_range) in [("bytes=2-4", &b"cde"[..], "bytes 2-4/10"), ("bytes=-3", b"hij", "bytes 7-9/10"), ("bytes=8-", b"ij", "bytes 8-9/10")] {
+            let (status, h, body) = fetch(&env, &amy, &id, &[(header::RANGE, range)]).await;
+            assert_eq!((status, body.as_slice()), (StatusCode::PARTIAL_CONTENT, want), "{range}");
+            assert_eq!(h[header::CONTENT_RANGE], content_range);
+            assert_eq!(h[header::CONTENT_LENGTH], want.len().to_string().as_str());
+        }
+        let (status, h, _) = fetch(&env, &amy, &id, &[(header::RANGE, "bytes=10-")]).await;
+        assert_eq!((status, &h[header::CONTENT_RANGE]), (StatusCode::RANGE_NOT_SATISFIABLE, &HeaderValue::from_static("bytes */10")));
+
+        // If-Range: the part only while the file is still the one the client has, otherwise all of it
+        let (status, _, body) = fetch(&env, &amy, &id, &[(header::RANGE, "bytes=2-4"), (header::IF_RANGE, &etag)]).await;
+        assert_eq!((status, body.as_slice()), (StatusCode::PARTIAL_CONTENT, &b"cde"[..]));
+        for other in ["\"something-else\"", "Wed, 21 Oct 2015 07:28:00 GMT"] {
+            let (status, _, body) = fetch(&env, &amy, &id, &[(header::RANGE, "bytes=2-4"), (header::IF_RANGE, other)]).await;
+            assert_eq!((status, body.len()), (StatusCode::OK, 10), "{other}");
+        }
+        // The browser's copy is current
+        let (status, _, body) = fetch(&env, &amy, &id, &[(header::IF_NONE_MATCH, &etag)]).await;
+        assert_eq!((status, body.len()), (StatusCode::NOT_MODIFIED, 0));
+
+        // An empty file has nothing to give a part of
+        let empty = env.stored_file(&amy, &amy.root_id, "empty.txt", b"").await;
+        let (status, h, body) = fetch(&env, &amy, &empty, &[]).await;
+        assert_eq!((status, body.len(), &h[header::CONTENT_LENGTH]), (StatusCode::OK, 0, &HeaderValue::from(0)));
+        for range in ["bytes=0-", "bytes=-5"] {
+            let (status, h, _) = fetch(&env, &amy, &empty, &[(header::RANGE, range)]).await;
+            assert_eq!((status, &h[header::CONTENT_RANGE]), (StatusCode::RANGE_NOT_SATISFIABLE, &HeaderValue::from_static("bytes */0")));
+        }
+    }
+
+    async fn save(env: &testutil::TestEnv, user: &User, id: &str, base: Option<&str>, body: &'static [u8]) -> AppResult<Node> {
+        let mut h = HeaderMap::new();
+        if let Some(b) = base {
+            h.insert("x-base-version", b.parse().unwrap());
+        }
+        save_content(State(env.st.clone()), user.clone(), Path(id.to_string()), h, Bytes::from_static(body)).await.map(|Json(n)| n)
+    }
+
+    async fn count(env: &testutil::TestEnv, sql: &'static str, id: &str) -> i64 {
+        let (n,): (i64,) = sqlx::query_as(sql).bind(id).fetch_one(&env.st.db).await.unwrap();
+        n
+    }
+
+    #[tokio::test]
+    async fn saving_from_the_editor_checks_the_version_and_the_space_left() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let id = env.stored_file(&amy, &amy.root_id, "notes.txt", b"first").await;
+        let versions = "SELECT COUNT(*) FROM node_versions WHERE node_id = ?";
+        let (_, h, _) = fetch(&env, &amy, &id, &[]).await;
+        let opened = h["x-version"].to_str().unwrap().to_string();
+
+        // The same content again changes nothing: no new version, no new time
+        let same = save(&env, &amy, &id, Some(&opened), b"first").await.unwrap();
+        assert_eq!(same.updated_at.to_string(), opened);
+        assert_eq!(count(&env, versions, &id).await, 0);
+
+        // Saved from the version opened; a second editor still on that version is told someone else changed it
+        let saved = save(&env, &amy, &id, Some(&opened), b"second").await.unwrap();
+        assert_ne!(saved.updated_at.to_string(), opened);
+        let err = save(&env, &amy, &id, Some(&opened), b"third").await.unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert_eq!(fetch(&env, &amy, &id, &[]).await.2, b"second");
+        assert_eq!(count(&env, versions, &id).await, 1);
+        // Without a version (an older client) the save goes through
+        save(&env, &amy, &id, None, b"third").await.unwrap();
+
+        // Someone who may only read the file can't save it, and nothing is stored for them
+        env.grant(&id, &ben, "viewer").await;
+        assert!(save(&env, &ben, &id, None, b"ben was here").await.is_err());
+        let stored = "SELECT COUNT(*) FROM blobs WHERE hash = ?";
+        assert_eq!(count(&env, stored, &crate::util::sha256_hex(b"ben was here")).await, 0);
+
+        // Only the growth counts against the quota: growing past it is refused, shrinking always works
+        let drive = env.drive_of(&amy.root_id).await;
+        let used = "SELECT used_bytes FROM drives WHERE id = ?";
+        sqlx::query("UPDATE users SET quota_bytes = 8 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+        tree::recompute_usage(&env.st).await.unwrap();
+        save(&env, &amy, &id, None, b"12345678").await.unwrap();
+        let err = save(&env, &amy, &id, None, b"123456789").await.unwrap_err();
+        assert_eq!(err.status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(fetch(&env, &amy, &id, &[]).await.2, b"12345678");
+        assert_eq!(count(&env, used, &drive).await, 8);
+        assert_eq!(count(&env, stored, &crate::util::sha256_hex(b"123456789")).await, 0);
+        save(&env, &amy, &id, None, b"1").await.unwrap();
+        assert_eq!(count(&env, used, &drive).await, 1);
+    }
+
+    /// Where the local storage keeps a content
+    fn blob_file(env: &testutil::TestEnv, content: &[u8]) -> std::path::PathBuf {
+        let hash = crate::util::sha256_hex(content);
+        env.dir.join("blobs").join(&hash[0..2]).join(&hash[2..4]).join(&hash)
+    }
+
+    /// Every entry of a ZIP, sorted: its name, and the content of a file
+    fn unzip(bytes: &[u8]) -> Vec<(String, Option<Vec<u8>>)> {
+        let mut cursor = std::io::Cursor::new(bytes.to_vec());
+        let entries = crate::zip::read_entries(&mut cursor, 1000, 1 << 20).unwrap();
+        let mut out = Vec::new();
+        for e in &entries {
+            let data = if e.is_dir {
+                None
+            } else {
+                let mut data = Vec::new();
+                crate::zip::open_entry(&mut cursor, e).unwrap().read_to_end(&mut data).unwrap();
+                Some(data)
+            };
+            out.push((e.name.clone(), data));
+        }
+        out.sort();
+        out
+    }
+
+    #[tokio::test]
+    async fn zip_downloads_hold_nested_folders_but_not_the_trash() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let docs = env.folder(&amy, &amy.root_id, "Docs").await;
+        let sub = env.folder(&amy, &docs, "Sub").await;
+        env.folder(&amy, &sub, "Deep").await;
+        env.stored_file(&amy, &docs, "a.txt", b"alpha").await;
+        env.stored_file(&amy, &sub, "b.txt", b"beta").await;
+        let top = env.stored_file(&amy, &amy.root_id, "top.txt", b"top").await;
+        let binned = env.stored_file(&amy, &docs, "binned.txt", b"binned").await;
+        let old = env.folder(&amy, &sub, "Old").await;
+        env.stored_file(&amy, &old, "c.txt", b"gamma").await;
+        let body = serde_json::json!({ "ids": [binned, old] });
+        let _ = crate::nodes::trash(State(env.st.clone()), amy.clone(), Json(serde_json::from_value(body).unwrap())).await.unwrap();
+
+        let q = Query(DownloadQuery { ids: format!("{docs},{top}"), tz: Some(0) });
+        let res = download(State(env.st.clone()), amy.clone(), q, HeaderMap::new()).await.unwrap();
+        assert_eq!(res.headers()[header::CONTENT_TYPE], "application/zip");
+        let announced: usize = res.headers()[header::CONTENT_LENGTH].to_str().unwrap().parse().unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(bytes.len(), announced);
+        let file = |s: &str| Some(s.as_bytes().to_vec());
+        assert_eq!(
+            unzip(&bytes),
+            [
+                ("Docs/".to_string(), None),
+                ("Docs/Sub/".into(), None),
+                ("Docs/Sub/Deep/".into(), None),
+                ("Docs/Sub/b.txt".into(), file("beta")),
+                ("Docs/a.txt".into(), file("alpha")),
+                ("top.txt".into(), file("top")),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_zip_whose_content_cant_be_read_fails_instead_of_arriving_cut_short() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let docs = env.folder(&amy, &amy.root_id, "Docs").await;
+        env.stored_file(&amy, &docs, "a.txt", b"alpha").await;
+        env.stored_file(&amy, &docs, "b.txt", b"beta").await;
+        let node = tree::get_node(&mut *env.st.db.acquire().await.unwrap(), &docs).await.unwrap().unwrap();
+        let plan = zip_plan(&env.st, vec![node.clone()], 0).await.unwrap();
+        let content = |path: &str| if path.ends_with("a.txt") { &b"alpha"[..] } else { &b"beta"[..] };
+        let files: Vec<&[u8]> = plan.items.iter().filter(|it| it.blob.is_some()).map(|it| content(&it.path)).collect();
+        let (first, second) = (files[0], files[1]);
+
+        // A later file is missing: the answer has started, so the download ends with an error
+        let away = blob_file(&env, second).with_extension("away");
+        std::fs::rename(blob_file(&env, second), &away).unwrap();
+        let res = zip_response(&env.st, vec![node.clone()], 0).await.unwrap();
+        assert!(axum::body::to_bytes(res.into_body(), usize::MAX).await.is_err());
+        std::fs::rename(&away, blob_file(&env, second)).unwrap();
+
+        // The first one is missing: reported before answering
+        std::fs::rename(blob_file(&env, first), &away).unwrap();
+        assert!(zip_response(&env.st, vec![node.clone()], 0).await.is_err());
+        std::fs::rename(&away, blob_file(&env, first)).unwrap();
+        let res = zip_response(&env.st, vec![node], 0).await.unwrap();
+        assert_eq!(unzip(&axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap()).len(), 3);
+    }
+
+    #[tokio::test]
+    async fn thumbnails_are_made_once_and_pictures_that_cant_be_read_are_remembered() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let get = |id: String, headers: HeaderMap| thumbnail(State(env.st.clone()), amy.clone(), Path(id), headers);
+
+        let pic = env.stored_file(&amy, &amy.root_id, "pic.png", &png(640, 320)).await;
+        let res = get(pic.clone(), HeaderMap::new()).await.unwrap();
+        let etag = res.headers()[header::ETAG].clone();
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let img = image::load_from_memory_with_format(&body, image::ImageFormat::Jpeg).unwrap();
+        assert_eq!((img.width(), img.height()), (THUMB_SIZE, THUMB_SIZE / 2));
+        let mut h = HeaderMap::new();
+        h.insert(header::IF_NONE_MATCH, etag);
+        assert_eq!(get(pic, h).await.unwrap().status(), StatusCode::NOT_MODIFIED);
+
+        // Not a picture after all, or one too wide to decode safely: no thumbnail, and an empty one in the cache
+        for (name, data) in [("broken.png", b"not a png".to_vec()), ("wide.png", png(MAX_THUMB_PIXELS_SIDE + 1, 1).to_vec())] {
+            let id = env.stored_file(&amy, &amy.root_id, name, &data).await;
+            assert_eq!(get(id.clone(), HeaderMap::new()).await.unwrap_err().status, StatusCode::NOT_FOUND, "{name}");
+            let cached = env.st.thumb_path(&crate::util::sha256_hex(&data));
+            assert_eq!(std::fs::metadata(&cached).unwrap().len(), 0, "{name}");
+            // Asked again, the cache answers: the content isn't read (it could no longer be there)
+            std::fs::remove_file(blob_file(&env, &data)).unwrap();
+            let err = get(id, HeaderMap::new()).await.unwrap_err();
+            assert_eq!((err.status, err.message.as_str()), (StatusCode::NOT_FOUND, "No thumbnail"), "{name}");
+        }
+
+        // Too large a file isn't read at all
+        let big = env.stored_file(&amy, &amy.root_id, "big.png", &png(8, 8)).await;
+        sqlx::query("UPDATE nodes SET size = ? WHERE id = ?").bind(MAX_THUMB_SOURCE + 1).bind(&big).execute(&env.st.db).await.unwrap();
+        assert_eq!(get(big, HeaderMap::new()).await.unwrap_err().status, StatusCode::NOT_FOUND);
+    }
 }
