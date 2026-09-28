@@ -47,7 +47,7 @@
         <ol>
           <li>Open <strong>Control panel › Storage locations</strong> and click <strong>Add storage location</strong>.</li>
           <li>Choose the type and fill in the address and the login details.</li>
-          <li>Click <strong>Test connection</strong>. It writes, reads back and deletes a small file. The location can be saved once the test succeeds. Keys or accounts that may write but not delete files fail it: ThirtyFile could never remove deleted files there.</li>
+          <li>Click <strong>Test connection</strong>. It writes, reads back and deletes a small file. The location can be saved once the test succeeds. Keys or accounts that may write but not delete files fail it: ThirtyFile could never remove deleted files there. For a <em>Local folder</em>, saving creates the folder when it isn't there yet (see <a href="#not-mounted">Disks and shares that aren't mounted</a>).</li>
           <li>Make it the <strong>default</strong> if new spaces should be created on it.</li>
         </ol>
         <p>The default only decides where new spaces go: users' "My files", team spaces and, on a new server, "All files". When creating a team space you can choose another location, and new users' "My files" can have a location of their own (see <a href="users.html#personal">Personal spaces</a>). Each space stays on the location it was created on, so changing the default doesn't move any existing space, and their new files keep going where their older ones are. Only <a href="#per-space">moving a space</a> changes its location.</p>
@@ -121,7 +121,17 @@
         <p><strong>Remove N items</strong> deletes exactly the content on the list, after you confirm. Each item is checked again right before it is deleted: one that was used or written again in the meantime is kept. The removal is recorded in the activity log.</p>
 
         <h2 id="offline">When a location is offline</h2>
-        <p>Browsing, searching and organising folders keep working. Opening, downloading and uploading are paused, and resume by themselves when the location is back. The space is marked as offline in the meantime.</p>
+        <p>Browsing, searching and organising folders keep working. Opening, downloading and uploading are paused, and resume by themselves when the location is back. The space is marked as offline in the meantime. In a folder space, whose folders are on the disk, organising folders is paused too.</p>
+
+        <h3 id="not-mounted">Disks and shares that aren't mounted</h3>
+        <p>A <em>Local folder</em> location is often a disk or a network share mounted on the server, such as <code>/mnt/nas/thirtyfile</code>. When it isn't mounted, its folder is missing or is an empty folder on the server's own disk. ThirtyFile never writes there: files would land on the wrong disk and be hidden once the share is mounted again.</p>
+        <ul>
+          <li><strong>The marker file.</strong> Adding a <em>Local folder</em> location, or changing its folder, creates the folder when it isn't there yet and puts a small file in it, <code>.thirtyfile-location</code>, holding the location's id. <strong>Test connection</strong> before saving creates nothing. Nothing else ever creates the folder.</li>
+          <li><strong>Unavailable.</strong> From then on, the location is used only while its folder holds that file. Otherwise the list shows it as offline with <em>The folder isn't there, or a different disk is mounted there</em>, and its spaces refuse uploads and changes with the same message. Nothing is created or written, not even a space's folder.</li>
+          <li><strong>Back again.</strong> Mount the disk or share again: the location is checked every 20 seconds while it is offline, and is used again as soon as the file is back, without a restart.</li>
+          <li><strong>Another location's folder.</strong> A folder whose <code>.thirtyfile-location</code> names another location is refused. Deleting a location removes its file, so its folder can be used again. A folder that still holds the location's own file, when you change its folder back, is taken as it is.</li>
+        </ul>
+        <p>The storage folder (<code>/storage</code> in Docker, set with <code>THIRTYFILE_STORAGE</code>) gets the same file, holding <code>local</code>, at the first start: when the folder is new or empty. If the storage folder has files in it but no <code>.thirtyfile-location</code>, or one of another location, ThirtyFile doesn't start and says so in the log: it may be a different disk than the one it used. Check the volume or mount. When it really is the right folder, create the file with the word <code>local</code> in it.</p>
       </main>
     </div>
     <script src="../assets/site.js"></script>

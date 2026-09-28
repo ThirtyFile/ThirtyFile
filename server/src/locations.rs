@@ -66,12 +66,14 @@ fn sealed_config(id: &str, cfg: &Value) -> String {
     cfg.to_string()
 }
 
-/// Loads all storage locations at startup; locations that can't be built are logged as warnings and skipped (reading their files reports "unavailable")
+/// Loads all storage locations at startup; locations that can't be built are logged as warnings and skipped (reading their files reports "unavailable").
+/// Nothing is created: a Local folder location whose folder isn't there (or lacks its marker) is loaded, and the
+/// health check reports it unavailable until the folder is back.
 pub async fn load_all(db: &SqlitePool, storage_dir: &FsPath) -> Result<HashMap<String, Arc<dyn Storage>>, sqlx::Error> {
     let rows: Vec<LocationRow> = sqlx::query_as("SELECT id, name, kind, config, is_default FROM storage_locations").fetch_all(db).await?;
     let mut map = HashMap::new();
     for r in rows {
-        match storage::build(&r.kind, &config_json(&r.id, &r.config), storage_dir) {
+        match storage::build(&r.id, &r.kind, &config_json(&r.id, &r.config), storage_dir) {
             Ok(s) => {
                 map.insert(r.id, s);
             }
@@ -409,12 +411,48 @@ pub fn spawn_health_monitor(st: AppState) {
     });
 }
 
+/// What connecting does with a Local folder location's folder (storage.rs, `LOCATION_MARKER`)
+#[derive(Clone, Copy)]
+enum Folder<'a> {
+    /// Used as it is: it must hold the marker of the location with this id
+    Existing(&'a str),
+    /// An administrator adds the location with this id, or changes its folder: the folder is created when it isn't
+    /// there, and gets the location's marker
+    Claim(&'a str),
+    /// Settings tried before they are saved (the location's id when it is being edited): nothing is created
+    Try(Option<&'a str>),
+}
+
 /// Tidies up the settings, builds the backend and runs a connection test (write, read back and delete a small file); returns the tidied settings to save
-async fn connect(st: &AppState, kind: &str, config: Value) -> AppResult<(Arc<dyn Storage>, Value)> {
+async fn connect(st: &AppState, kind: &str, config: Value, folder: Folder<'_>) -> AppResult<(Arc<dyn Storage>, Value)> {
     let config = storage::normalize(kind, config).await;
     storage::check_insecure_target(kind, &config).await.map_err(AppError::bad_request)?;
-    let backend = storage::build(kind, &config, &st.storage_dir).map_err(|e| AppError::bad_request(format!("Invalid settings: {e}")))?;
-    tokio::time::timeout(Duration::from_secs(20), backend.check())
+    let id = match folder {
+        Folder::Existing(id) | Folder::Claim(id) => id,
+        Folder::Try(id) => id.unwrap_or_default(),
+    };
+    let invalid = |e: std::io::Error| AppError::bad_request(format!("Invalid settings: {e}"));
+    let backend = storage::build(id, kind, &config, &st.storage_dir).map_err(invalid)?;
+    let checked = async {
+        if kind != "local" {
+            return backend.check().await;
+        }
+        let root = storage::local_root(id, &config, &st.storage_dir)?;
+        match folder {
+            Folder::Existing(_) => backend.check().await,
+            Folder::Claim(id) => {
+                let (dir, owner) = (root.clone(), id.to_string());
+                let wrote = tokio::task::spawn_blocking(move || storage::claim_folder(&dir, &owner)).await.map_err(std::io::Error::other)??;
+                let checked = backend.check().await;
+                if checked.is_err() && wrote {
+                    storage::release_folder(&root, id).await;
+                }
+                checked
+            }
+            Folder::Try(_) => try_folder(&root, id).await,
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(20), checked)
         .await
         .map_err(|_| AppError::bad_request("Connection timed out. Check the endpoint and network."))?
         .map_err(|e| {
@@ -432,6 +470,29 @@ async fn connect(st: &AppState, kind: &str, config: Value) -> AppResult<(Arc<dyn
     Ok((backend, config))
 }
 
+/// Tries a Local folder location's folder before its settings are saved, creating nothing: a folder of another
+/// location is refused; a folder that is there is written to; a folder that isn't there yet (it is created when the
+/// settings are saved) is tried in the nearest folder above it that is
+async fn try_folder(root: &FsPath, id: &str) -> std::io::Result<()> {
+    match storage::marker_of(root).await? {
+        Some(m) if !id.is_empty() && m == id => storage::LocalStorage::new(root.to_path_buf(), id).check().await,
+        Some(_) => Err(std::io::Error::other(storage::StorageError { message: storage::FOLDER_TAKEN, detail: root.display().to_string() })),
+        None => {
+            let mut dir = root;
+            while !tokio::fs::metadata(dir).await.is_ok_and(|m| m.is_dir()) {
+                dir = dir.parent().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no folder on the way is there"))?;
+            }
+            storage::write_probe(dir).await
+        }
+    }
+}
+
+/// Whether the settings of the location `id` point at another folder than the saved ones (Local folder locations)
+fn folder_changed(kind: &str, saved: &Value, config: &Value) -> bool {
+    let path = |c: &Value| c["path"].as_str().map(str::trim).unwrap_or_default().to_string();
+    kind == "local" && path(saved) != path(config)
+}
+
 #[derive(Deserialize)]
 pub struct TestReq {
     /// Sent when editing an existing location, to keep its saved secrets
@@ -442,7 +503,20 @@ pub struct TestReq {
 
 pub async fn test(State(st): State<AppState>, _: Admin, Json(req): Json<TestReq>) -> AppResult<Json<Value>> {
     let config = merged_config(&st, req.id.as_deref(), &req.kind, req.config).await?;
-    let (_, config) = connect(&st, &req.kind, config).await?;
+    // An existing location's folder, unchanged: it must be there with its marker
+    let saved = match req.id.as_deref() {
+        Some(id) => sqlx::query_as::<_, (String,)>("SELECT config FROM storage_locations WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&st.db)
+            .await?
+            .map(|(c,)| config_json(id, &c)),
+        None => None,
+    };
+    let folder = match (req.id.as_deref(), saved) {
+        (Some(id), Some(saved)) if !folder_changed(&req.kind, &saved, &config) => Folder::Existing(id),
+        (id, _) => Folder::Try(id),
+    };
+    let (_, config) = connect(&st, &req.kind, config, folder).await?;
     Ok(Json(json!({ "ok": true, "region": config.get("region"), "host_key": config.get("host_key") })))
 }
 
@@ -452,7 +526,7 @@ pub async fn test_existing(State(st): State<AppState>, _: Admin, Path(id): Path<
         .fetch_optional(&st.db)
         .await?
         .ok_or_else(|| AppError::not_found("Storage location not found"))?;
-    let backend = connect(&st, &row.kind, config_json(&row.id, &row.config)).await;
+    let backend = connect(&st, &row.kind, config_json(&row.id, &row.config), Folder::Existing(&id)).await;
     set_health(&st, &id, backend.as_ref().err().map(|e| e.message.clone()));
     match backend {
         Ok((b, _)) => {
@@ -470,9 +544,10 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(req): J
     let kind = req.kind.unwrap_or_default();
     let config = req.config.unwrap_or_else(|| json!({}));
     crate::folders::check_location_folder(&st, None, &kind, &config).await?;
-    let (backend, config) = connect(&st, &kind, config).await?;
     let id = new_id();
-    {
+    // A Local folder location's folder is created here, with the location's marker
+    let (backend, config) = connect(&st, &kind, config, Folder::Claim(&id)).await?;
+    let saved = async {
         let _w = st.write_lock.lock().await;
         let mut tx = st.db.begin().await?;
         sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES (?, ?, ?, ?, 0, ?)")
@@ -485,6 +560,16 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(req): J
             .await?;
         logs::record_activity(&mut tx, &user, None, "storage_create", &name).await?;
         tx.commit().await?;
+        AppResult::Ok(())
+    }
+    .await;
+    if let Err(e) = saved {
+        if kind == "local"
+            && let Ok(root) = storage::local_root(&id, &config, &st.storage_dir)
+        {
+            storage::release_folder(&root, &id).await;
+        }
+        return Err(e);
     }
     st.storages.write().unwrap().insert(id.clone(), backend);
     Ok(Json(json!({ "id": id })))
@@ -510,7 +595,9 @@ pub async fn update(
         (Some(cfg), false) => {
             let merged = merged_config(&st, Some(&id), &row.kind, cfg.clone()).await?;
             crate::folders::check_location_folder(&st, Some(&id), &row.kind, &merged).await?;
-            Some(connect(&st, &row.kind, merged).await?)
+            // A Local folder location moved to another folder: that folder is created here, with the marker
+            let folder = if folder_changed(&row.kind, &config_json(&id, &row.config), &merged) { Folder::Claim(&id) } else { Folder::Existing(&id) };
+            Some(connect(&st, &row.kind, merged, folder).await?)
         }
         _ => None,
     };
@@ -525,7 +612,9 @@ pub async fn update(
         tx.commit().await?;
     }
     if let Some((backend, _)) = new_backend {
-        st.storages.write().unwrap().insert(id, backend);
+        st.storages.write().unwrap().insert(id.clone(), backend);
+        // Just checked
+        set_health(&st, &id, None);
     }
     Ok(Json(json!({ "ok": true })))
 }
@@ -552,10 +641,10 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
     if id == BUILTIN {
         return Err(AppError::bad_request("The built-in local disk can't be deleted"));
     }
-    let _w = st.write_lock.lock().await;
+    let w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
-    let (name, is_default, blobs, drives): (String, bool, i64, i64) = sqlx::query_as(
-        "SELECT name, is_default, (SELECT COUNT(*) FROM blobs WHERE location_id = ?1), (SELECT COUNT(*) FROM drives WHERE location_id = ?1)
+    let (name, kind, config, is_default, blobs, drives): (String, String, String, bool, i64, i64) = sqlx::query_as(
+        "SELECT name, kind, config, is_default, (SELECT COUNT(*) FROM blobs WHERE location_id = ?1), (SELECT COUNT(*) FROM drives WHERE location_id = ?1)
          FROM storage_locations WHERE id = ?1",
     )
     .bind(&id)
@@ -584,8 +673,15 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
     sqlx::query("DELETE FROM pending_blob_deletes WHERE location_id = ?").bind(&id).execute(&mut *tx).await?;
     logs::record_activity(&mut tx, &user, None, "storage_delete", &name).await?;
     tx.commit().await?;
+    drop(w);
     st.storages.write().unwrap().remove(&id);
     st.location_health.lock().unwrap().remove(&id);
+    // Its folder no longer names it, so a location can be added there again
+    if kind == "local"
+        && let Ok(root) = storage::local_root(&id, &config_json(&id, &config), &st.storage_dir)
+    {
+        storage::release_folder(&root, &id).await;
+    }
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -830,7 +926,7 @@ mod tests {
     async fn moving_a_space_moves_every_file_across_pages() {
         let env = testutil::env().await;
         let amy = env.user("amy", false).await;
-        env.st.storages.write().unwrap().insert("second".into(), Arc::new(crate::storage::LocalStorage::new(env.dir.join("second")).unwrap()));
+        env.st.storages.write().unwrap().insert("second".into(), Arc::new(crate::storage::LocalStorage::create(env.dir.join("second"), "second").unwrap()));
         let local = env.st.storage("local").unwrap();
         let mut hashes = Vec::new();
         // More than one page of 50
@@ -914,7 +1010,7 @@ mod tests {
     async fn a_move_stops_at_missing_content_and_continues_where_it_stopped() {
         let env = testutil::env().await;
         let amy = env.user("amy", false).await;
-        env.st.storages.write().unwrap().insert("second".into(), Arc::new(crate::storage::LocalStorage::new(env.dir.join("second")).unwrap()));
+        env.st.storages.write().unwrap().insert("second".into(), Arc::new(crate::storage::LocalStorage::create(env.dir.join("second"), "second").unwrap()));
         let mut hashes = Vec::new();
         for name in ["one", "two", "three"] {
             hashes.push(file_in(&env, &amy, "local", name).await);
@@ -953,7 +1049,7 @@ mod tests {
         let hooked_dir = env.dir.join("hooked");
         let dir = hooked_dir.clone();
         let hooked = Hooked {
-            inner: crate::storage::LocalStorage::new(hooked_dir).unwrap(),
+            inner: crate::storage::LocalStorage::create(hooked_dir, "hooked").unwrap(),
             on_open: Box::new(move |hash| {
                 let (db, a, b, dir) = (db.clone(), a.clone(), b.clone(), dir.clone());
                 Box::pin(async move {
@@ -970,7 +1066,7 @@ mod tests {
             }),
         };
         env.st.storages.write().unwrap().insert("hooked".into(), Arc::new(hooked));
-        env.st.storages.write().unwrap().insert("second".into(), Arc::new(crate::storage::LocalStorage::new(env.dir.join("second")).unwrap()));
+        env.st.storages.write().unwrap().insert("second".into(), Arc::new(crate::storage::LocalStorage::create(env.dir.join("second"), "second").unwrap()));
         file_in(&env, &amy, "hooked", "moved").await;
         file_in(&env, &amy, "hooked", "deleted").await;
         let kept = file_in(&env, &amy, "hooked", "kept").await;
@@ -1013,7 +1109,7 @@ mod tests {
             .execute(&env.st.db)
             .await
             .unwrap();
-        let backend = crate::storage::LocalStorage::new(folder.map_or_else(|| env.dir.join(id), FsPath::to_path_buf)).unwrap();
+        let backend = crate::storage::LocalStorage::create(folder.map_or_else(|| env.dir.join(id), FsPath::to_path_buf), id).unwrap();
         env.st.storages.write().unwrap().insert(id.into(), Arc::new(backend));
     }
 
@@ -1148,6 +1244,174 @@ mod tests {
         assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
         assert_eq!(err.message, "1 space still uses this location. Change it first.");
         assert_eq!(placed(&env, amy.root()).await, at("nas", "folder"));
+    }
+
+    /// A folder outside the test's data folder (Local folder locations can't be inside it), removed when dropped
+    struct Outside(std::path::PathBuf);
+
+    impl Outside {
+        fn new() -> Outside {
+            let dir = std::env::temp_dir().join(format!("thirtyfile-disk-{}", new_id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            Outside(dir)
+        }
+    }
+
+    impl Drop for Outside {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn local(dir: &FsPath) -> Value {
+        json!({ "kind": "local", "config": { "path": dir.to_string_lossy() } })
+    }
+
+    async fn add_local(env: &testutil::TestEnv, name: &str, dir: &FsPath) -> AppResult<String> {
+        let mut req = local(dir);
+        req["name"] = name.into();
+        let Json(v) = create(State(env.st.clone()), Admin(env.admin().await), Json(serde_json::from_value(req).unwrap())).await?;
+        Ok(v["id"].as_str().unwrap().to_string())
+    }
+
+    async fn move_to(env: &testutil::TestEnv, id: &str, dir: &FsPath) -> AppResult<()> {
+        let req = serde_json::from_value(json!({ "config": { "path": dir.to_string_lossy() } })).unwrap();
+        update(State(env.st.clone()), Admin(env.admin().await), Path(id.into()), Json(req)).await.map(|_| ())
+    }
+
+    fn marker(dir: &FsPath) -> Option<String> {
+        std::fs::read_to_string(dir.join(storage::LOCATION_MARKER)).ok()
+    }
+
+    #[tokio::test]
+    async fn a_local_folder_location_is_used_only_while_its_folder_holds_its_marker() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let disk = Outside::new();
+        let dir = disk.0.join("nas").join("thirtyfile");
+        let away = disk.0.join("away");
+
+        // Trying the settings before adding creates nothing; adding creates the folder with the location's marker
+        let _ = test(State(env.st.clone()), Admin(admin.clone()), Json(serde_json::from_value(local(&dir)).unwrap())).await.unwrap();
+        assert!(!disk.0.join("nas").exists());
+        let id = add_local(&env, "NAS", &dir).await.unwrap();
+        assert_eq!(marker(&dir).as_deref(), Some(id.as_str()));
+        probe(&env.st, &id).await.unwrap();
+        make_default(&env, &id).await;
+        let team = new_team(&env, "Sales").await;
+        make_default(&env, BUILTIN).await;
+        env.upload(&admin, &team, "before.txt", b"before").await;
+
+        // Not mounted: the folder is gone. The location is unavailable, and nothing is made or written.
+        std::fs::rename(&dir, &away).unwrap();
+        let unmounted = |what: &str| (axum::http::StatusCode::SERVICE_UNAVAILABLE, storage::NOT_MOUNTED.to_string(), what.to_string());
+        for what in ["missing", "an empty mount point", "another location's folder"] {
+            match what {
+                "an empty mount point" => std::fs::create_dir_all(&dir).unwrap(),
+                "another location's folder" => std::fs::write(dir.join(storage::LOCATION_MARKER), "another").unwrap(),
+                _ => {}
+            }
+            assert_eq!(probe(&env.st, &id).await.unwrap_err(), storage::NOT_MOUNTED, "{what}");
+            assert_eq!(env.st.location_offline(&id).as_deref(), Some(storage::NOT_MOUNTED));
+            let err = env.try_upload(&admin, &team, "after.txt", b"after").await.unwrap_err();
+            assert_eq!((err.status, err.message, what.to_string()), unmounted(what));
+            let err = test_existing(State(env.st.clone()), Admin(admin.clone()), Path(id.clone())).await.unwrap_err();
+            assert_eq!(err.message, storage::NOT_MOUNTED, "{what}");
+            // Its settings can't be saved either while the folder isn't there
+            assert!(move_to(&env, &id, &dir).await.is_err(), "{what}");
+            let steps = crate::location_tools::test_steps(State(env.st.clone()), Admin(admin.clone()), Path(id.clone())).await.unwrap();
+            assert!(!steps.ok && steps.step("connect").unwrap().message.as_deref() == Some(storage::NOT_MOUNTED), "{what}");
+        }
+        assert_eq!(std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect::<Vec<_>>(), [storage::LOCATION_MARKER]);
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        // Mounted again: available at the next check, without a restart
+        std::fs::rename(&away, &dir).unwrap();
+        probe(&env.st, &id).await.unwrap();
+        assert_eq!(env.st.location_offline(&id), None);
+        env.upload(&admin, &team, "after.txt", b"after").await;
+    }
+
+    #[tokio::test]
+    async fn a_local_folder_location_takes_only_a_folder_of_its_own() {
+        let env = testutil::env().await;
+        let disk = Outside::new();
+        let (first, second, other) = (disk.0.join("first"), disk.0.join("second"), disk.0.join("other"));
+        let id = add_local(&env, "First", &first).await.unwrap();
+
+        // A folder holding another location's marker is refused, when adding a location and when changing its folder
+        storage::claim_folder(&other, "someone-else").unwrap();
+        let err = add_local(&env, "Other", &other).await.unwrap_err();
+        assert_eq!(err.message, storage::FOLDER_TAKEN);
+        assert_eq!(move_to(&env, &id, &other).await.unwrap_err().message, storage::FOLDER_TAKEN);
+        assert_eq!(marker(&other).as_deref(), Some("someone-else"));
+
+        // Another folder is created with the marker; its earlier folder, which still holds its marker, is taken back
+        move_to(&env, &id, &second).await.unwrap();
+        assert_eq!(marker(&second).as_deref(), Some(id.as_str()));
+        move_to(&env, &id, &first).await.unwrap();
+        probe(&env.st, &id).await.unwrap();
+
+        // A deleted location leaves its folder free for another
+        let _ = delete(State(env.st.clone()), Admin(env.admin().await), Path(id.clone())).await.unwrap();
+        assert_eq!(marker(&first), None);
+        let again = add_local(&env, "Again", &first).await.unwrap();
+        assert_eq!(marker(&first).as_deref(), Some(again.as_str()));
+    }
+
+    #[tokio::test]
+    async fn a_folder_space_whose_folder_is_missing_is_never_made_again() {
+        let env = testutil::folders_env().await;
+        let admin = env.admin().await;
+        let nas = env.dir.join("nas");
+        add_location(&env, "nas", Some(&nas)).await;
+        make_default(&env, "nas").await;
+        let team = new_team(&env, "Plans").await;
+        make_default(&env, BUILTIN).await;
+        let drive = env.drive_of(&team).await;
+        env.upload(&admin, &team, "a.txt", b"one").await;
+        assert!(nas.join("teams/Plans/a.txt").is_file());
+
+        let away = env.dir.join("nas-away");
+        std::fs::rename(&nas, &away).unwrap();
+        let _ = probe(&env.st, "nas").await;
+        for mount_point in [false, true] {
+            if mount_point {
+                std::fs::create_dir(&nas).unwrap();
+            }
+            // Shown as offline, and changes are refused
+            let Json(info) = crate::nodes::get(State(env.st.clone()), admin.clone(), Path(team.clone())).await.unwrap();
+            assert_eq!(serde_json::to_value(&info).unwrap()["offline"], storage::NOT_MOUNTED);
+            let err = env.try_upload(&admin, &team, "b.txt", b"two").await.unwrap_err();
+            assert_eq!(err.status, axum::http::StatusCode::SERVICE_UNAVAILABLE);
+            assert!(err.message.starts_with(storage::NOT_MOUNTED), "{}", err.message);
+            let req = serde_json::from_value(json!({ "parent_id": team, "name": "Docs" })).unwrap();
+            let err = crate::nodes::create_folder(State(env.st.clone()), admin.clone(), Json(req)).await.unwrap_err();
+            assert_eq!(err.message, storage::NOT_MOUNTED);
+            // A scan keeps the index: the files aren't deleted, just not there right now
+            let report = crate::folders::scan(&env.st, &drive).await.unwrap();
+            assert!(report.error.is_some());
+            assert!(env.node_at(&drive, "a.txt").await.is_some());
+            assert_eq!(nas.exists(), mount_point, "nothing made");
+            if mount_point {
+                assert_eq!(std::fs::read_dir(&nas).unwrap().count(), 0, "nothing made in the empty mount point");
+                std::fs::remove_dir(&nas).unwrap();
+            }
+        }
+
+        // Another disk mounted there, with a folder at the same place: a scan doesn't take its items for the space's
+        std::fs::create_dir_all(nas.join("teams/Plans")).unwrap();
+        std::fs::write(nas.join(storage::LOCATION_MARKER), "another").unwrap();
+        testutil::write_old(&nas.join("teams/Plans/other.txt"), b"other");
+        let report = crate::folders::scan(&env.st, &drive).await.unwrap();
+        assert_eq!(report.error.as_deref(), Some(storage::NOT_MOUNTED));
+        assert!(env.node_at(&drive, "a.txt").await.is_some() && env.node_at(&drive, "other.txt").await.is_none());
+        std::fs::remove_dir_all(&nas).unwrap();
+
+        std::fs::rename(&away, &nas).unwrap();
+        probe(&env.st, "nas").await.unwrap();
+        env.upload(&admin, &team, "b.txt", b"two").await;
+        assert!(nas.join("teams/Plans/b.txt").is_file());
     }
 
     #[tokio::test]

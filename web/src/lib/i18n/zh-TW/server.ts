@@ -253,6 +253,8 @@ export default {
   "The content read back didn't match": "讀回的內容不一致",
   "Invalid endpoint URL. It should be https://hostname": "端點網址格式不正確，應為 https://主機名稱",
   "Enter an absolute path": "請輸入絕對路徑",
+  "The folder isn't there, or a different disk is mounted there": "資料夾不在，或那裡掛載的是另一顆磁碟",
+  "Another storage location uses this folder (it holds that location's .thirtyfile-location file)": "另一個儲存位置正在使用這個資料夾（資料夾中有該位置的 .thirtyfile-location 檔案）",
   "Enter a bucket name": "請輸入 bucket 名稱",
   "Unsupported storage type": "不支援的儲存類型",
   // Storage locations: connection tests and health checks (locations.rs, state.rs)

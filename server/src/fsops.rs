@@ -67,7 +67,8 @@ fn rel_of(n: &Node) -> &str {
 
 /// The item on disk, reached without following a symbolic link on the way (`beneath`)
 fn abs(n: &Node) -> AppResult<Pinned> {
-    n.fs_pinned().map_err(gone_or_disk_error)
+    let rel = n.fs_path.as_deref().ok_or_else(|| gone_or_disk_error(io::ErrorKind::NotFound.into()))?;
+    space_root(n)?.join(rel).map_err(gone_or_disk_error)
 }
 
 /// A path that no longer leads to the item: a folder on the way is missing, or was replaced by a link
@@ -82,9 +83,14 @@ fn gone_or_disk_error(e: io::Error) -> AppError {
     }
 }
 
-/// A space's folder
+/// A space's folder. When it isn't there (its disk or share isn't mounted, say), nothing is changed: it is never
+/// made again, which would put the space's files on the disk below the mount point.
 fn space_root(n: &Node) -> AppResult<Pinned> {
-    Pinned::root(Path::new(n.fs_root.as_deref().unwrap_or_default())).map_err(gone_or_disk_error)
+    let root = n.fs_root.as_deref().ok_or_else(|| gone_or_disk_error(io::ErrorKind::NotFound.into()))?;
+    Pinned::root(Path::new(root)).map_err(|e| match e.kind() {
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory => AppError::new(StatusCode::SERVICE_UNAVAILABLE, crate::storage::NOT_MOUNTED),
+        _ => gone_or_disk_error(e),
+    })
 }
 
 /// A disk error as people see it

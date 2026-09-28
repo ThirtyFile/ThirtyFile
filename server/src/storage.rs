@@ -219,14 +219,110 @@ pub fn dir_levels(dir: &str) -> Vec<String> {
 
 // ───────────── Local folder ─────────────
 
+/// The file in a Local folder location's folder that says which location the folder is: it holds the location's id.
+/// It is written only when an administrator adds the location or changes its folder (the built-in location's at its
+/// first start, `prepare_builtin`). A location whose folder doesn't hold its marker is unavailable, and nothing is
+/// created or written there: a disk or network share that isn't mounted leaves an empty folder (or none) at its
+/// mount point, and files written there would land on the server's own disk and be hidden once it is mounted again.
+pub const LOCATION_MARKER: &str = ".thirtyfile-location";
+/// Shown when a Local folder location's folder isn't there, or doesn't hold the location's marker
+pub const NOT_MOUNTED: &str = "The folder isn't there, or a different disk is mounted there";
+/// Shown when an administrator chooses a folder whose marker names another location
+pub const FOLDER_TAKEN: &str = "Another storage location uses this folder (it holds that location's .thirtyfile-location file)";
+
+/// The location id in the marker of the folder `root`; None when the folder or the marker isn't there
+pub async fn marker_of(root: &Path) -> io::Result<Option<String>> {
+    match tokio::fs::read(root.join(LOCATION_MARKER)).await {
+        Ok(b) => Ok(Some(String::from_utf8_lossy(&b).trim().to_string())),
+        Err(e) if matches!(e.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// An administrator added the location `id` with the folder `root`, or changed its folder to it: the folder is
+/// created when it isn't there, and gets the location's marker. A folder whose marker names another location is
+/// refused (`FOLDER_TAKEN`); one that already holds this location's (added again) is taken as it is. Returns
+/// whether the marker was written now.
+pub fn claim_folder(root: &Path, id: &str) -> io::Result<bool> {
+    std::fs::create_dir_all(root)?;
+    let marker = root.join(LOCATION_MARKER);
+    match std::fs::read(&marker) {
+        Ok(b) if String::from_utf8_lossy(&b).trim() == id => Ok(false),
+        Ok(_) => Err(io::Error::other(StorageError { message: FOLDER_TAKEN, detail: root.display().to_string() })),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => std::fs::write(&marker, id).map(|()| true),
+        Err(e) => Err(e),
+    }
+}
+
+/// Removes the marker of the location `id` from its folder, when it holds that one (the location is deleted, or
+/// adding it failed): the folder can be used for a location again
+pub async fn release_folder(root: &Path, id: &str) {
+    if marker_of(root).await.ok().flatten().is_some_and(|m| m == id) {
+        let _ = tokio::fs::remove_file(root.join(LOCATION_MARKER)).await;
+    }
+}
+
+/// The built-in location's folder (the storage folder) at startup. A fresh install creates it, or finds it empty (a
+/// Docker volume that isn't mounted is an empty folder too, where nothing was): it gets the marker. A folder with
+/// items in it must already hold the built-in location's marker, or ThirtyFile doesn't start: it may be a different
+/// disk than the one ThirtyFile used.
+pub fn prepare_builtin(root: &Path) -> Result<(), String> {
+    let builtin = crate::locations::BUILTIN;
+    let failed = |e: io::Error| format!("Can't use the storage folder {}: {e}", root.display());
+    std::fs::create_dir_all(root).map_err(failed)?;
+    let marker = root.join(LOCATION_MARKER);
+    match std::fs::read(&marker) {
+        Ok(b) if String::from_utf8_lossy(&b).trim() == builtin => Ok(()),
+        Ok(_) => Err(format!(
+            "The storage folder {} belongs to another storage location (its {LOCATION_MARKER} file names another one). Check THIRTYFILE_STORAGE and the disks mounted there.",
+            root.display()
+        )),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            if std::fs::read_dir(root).map_err(failed)?.next().is_some() {
+                return Err(format!(
+                    "The storage folder {} has items in it but no {LOCATION_MARKER} file: it may be a different disk than the one ThirtyFile used. Check THIRTYFILE_STORAGE and the disks mounted there. If it is the right folder, create the file {} holding the word {builtin}.",
+                    root.display(),
+                    marker.display()
+                ));
+            }
+            std::fs::write(&marker, builtin).map_err(failed)
+        }
+        Err(e) => Err(failed(e)),
+    }
+}
+
 pub struct LocalStorage {
     root: PathBuf,
+    /// The location's id, which its folder's marker must hold
+    id: String,
 }
 
 impl LocalStorage {
-    pub fn new(root: PathBuf) -> io::Result<Self> {
-        std::fs::create_dir_all(&root)?;
-        Ok(Self { root })
+    /// The location `id` in the folder `root`. Nothing on the disk is touched: the folder is checked before every
+    /// write (`verify`).
+    pub fn new(root: PathBuf, id: &str) -> Self {
+        Self { root, id: id.to_string() }
+    }
+
+    /// Claims `root` for the location `id` (`claim_folder`) and uses it (tests: a location added in the database)
+    #[cfg(test)]
+    pub fn create(root: PathBuf, id: &str) -> io::Result<Self> {
+        claim_folder(&root, id)?;
+        Ok(Self::new(root, id))
+    }
+
+    /// The folder is there and holds this location's marker: one small read, so health checks can run it often
+    async fn verify(&self) -> io::Result<()> {
+        match marker_of(&self.root).await? {
+            Some(id) if id == self.id => Ok(()),
+            found => Err(io::Error::other(StorageError {
+                message: NOT_MOUNTED,
+                detail: match found {
+                    Some(_) => format!("{} holds another location's {LOCATION_MARKER}", self.root.display()),
+                    None => format!("{} or its {LOCATION_MARKER} isn't there", self.root.display()),
+                },
+            })),
+        }
     }
 
     fn path(&self, hash: &str) -> io::Result<PathBuf> {
@@ -239,6 +335,18 @@ impl LocalStorage {
         key_parts(key)?;
         crate::beneath::Pinned::root(&self.root)?.join(key)
     }
+}
+
+/// Writes, reads back and deletes a small file in `dir`
+pub async fn write_probe(dir: &Path) -> io::Result<()> {
+    let probe = dir.join(format!(".thirtyfile-check-{}", uuid::Uuid::new_v4().simple()));
+    tokio::fs::write(&probe, b"ok").await?;
+    let back = tokio::fs::read(&probe).await;
+    let deleted = tokio::fs::remove_file(&probe).await;
+    if back? != b"ok" {
+        return Err(io::Error::other("The content read back didn't match"));
+    }
+    deleted.map_err(|e| delete_failed(e, CANT_DELETE_LOCAL))
 }
 
 /// Moves a temp file to `dest` (the temp file is gone on success)
@@ -278,6 +386,8 @@ impl Storage for LocalStorage {
     fn put_file<'a>(&'a self, hash: &'a str, src: &'a Path) -> BoxFuture<'a, io::Result<()>> {
         Box::pin(async move {
             let dest = self.path(hash)?;
+            // Below the verified folder, the folders named by the hash are made as needed
+            self.verify().await?;
             if tokio::fs::try_exists(&dest).await? {
                 let _ = tokio::fs::remove_file(src).await;
                 return Ok(());
@@ -293,6 +403,8 @@ impl Storage for LocalStorage {
 
     fn list_dir<'a>(&'a self, dir: &'a str) -> BoxFuture<'a, io::Result<Vec<Entry>>> {
         Box::pin(async move {
+            // An empty mount point would look like a location that holds nothing
+            self.verify().await?;
             let at = self.pinned(dir)?.dir()?;
             tokio::task::spawn_blocking(move || {
                 let mut out = Vec::new();
@@ -327,6 +439,7 @@ impl Storage for LocalStorage {
         Box::pin(async move {
             let parts = key_parts(key)?;
             let (last, dirs) = parts.split_last().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
+            self.verify().await?;
             // Folders on the way are made one by one, never through a link
             let mut at = crate::beneath::Pinned::root(&self.root)?;
             for d in dirs {
@@ -359,6 +472,8 @@ impl Storage for LocalStorage {
 
     fn delete_at<'a>(&'a self, key: &'a str) -> BoxFuture<'a, io::Result<()>> {
         Box::pin(async move {
+            // A file that isn't there counts as deleted: only true when the folder is really there
+            self.verify().await?;
             let removed = match self.pinned(key) {
                 // A link is removed itself, never what it points to
                 Ok(p) => tokio::fs::remove_file(p.as_path()).await,
@@ -383,7 +498,10 @@ impl Storage for LocalStorage {
 
     fn delete<'a>(&'a self, hash: &'a str) -> BoxFuture<'a, io::Result<()>> {
         Box::pin(async move {
-            match tokio::fs::remove_file(self.path(hash)?).await {
+            let path = self.path(hash)?;
+            // Content that isn't there counts as deleted: only true when the folder is really there
+            self.verify().await?;
+            match tokio::fs::remove_file(path).await {
                 Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
                 _ => Ok(()),
             }
@@ -403,6 +521,7 @@ impl Storage for LocalStorage {
     fn list(&self) -> BoxFuture<'_, io::Result<Vec<String>>> {
         let root = self.root.clone();
         Box::pin(async move {
+            self.verify().await?;
             // ab/cd/<hash>; anything else in the folder isn't content
             tokio::task::spawn_blocking(move || {
                 let mut out = Vec::new();
@@ -423,17 +542,14 @@ impl Storage for LocalStorage {
         })
     }
 
+    fn ping(&self) -> BoxFuture<'_, io::Result<()>> {
+        Box::pin(self.verify())
+    }
+
     fn check(&self) -> BoxFuture<'_, io::Result<()>> {
         Box::pin(async move {
-            tokio::fs::create_dir_all(&self.root).await?;
-            let probe = self.root.join(format!(".thirtyfile-check-{}", uuid::Uuid::new_v4().simple()));
-            tokio::fs::write(&probe, b"ok").await?;
-            let back = tokio::fs::read(&probe).await;
-            let deleted = tokio::fs::remove_file(&probe).await;
-            if back? != b"ok" {
-                return Err(io::Error::other("The content read back didn't match"));
-            }
-            deleted.map_err(|e| delete_failed(e, CANT_DELETE_LOCAL))
+            self.verify().await?;
+            write_probe(&self.root).await
         })
     }
 }
@@ -904,22 +1020,24 @@ fn normalize_host(mut config: serde_json::Value) -> serde_json::Value {
     config
 }
 
-/// Builds a backend from storage location settings; the built-in `local` location always uses `default_root`
-pub fn build(kind: &str, config: &serde_json::Value, default_root: &Path) -> io::Result<Arc<dyn Storage>> {
+/// The folder of a Local folder location (`id`): the built-in location's is always `default_root`
+pub fn local_root(id: &str, config: &serde_json::Value, default_root: &Path) -> io::Result<PathBuf> {
+    if id == crate::locations::BUILTIN {
+        return Ok(default_root.to_path_buf());
+    }
+    let cfg: LocalConfig = serde_json::from_value(config.clone()).unwrap_or_default();
+    let p = PathBuf::from(cfg.path.trim());
+    if !p.is_absolute() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Enter an absolute path"));
+    }
+    Ok(p)
+}
+
+/// Builds the backend of the storage location `id` from its settings. Nothing is created or written: a Local folder
+/// location's folder is checked on use (`LocalStorage::verify`).
+pub fn build(id: &str, kind: &str, config: &serde_json::Value, default_root: &Path) -> io::Result<Arc<dyn Storage>> {
     match kind {
-        "local" => {
-            let cfg: LocalConfig = serde_json::from_value(config.clone()).unwrap_or_default();
-            let root = if cfg.path.trim().is_empty() {
-                default_root.to_path_buf()
-            } else {
-                let p = PathBuf::from(cfg.path.trim());
-                if !p.is_absolute() {
-                    return Err(io::Error::new(io::ErrorKind::InvalidInput, "Enter an absolute path"));
-                }
-                p
-            };
-            Ok(Arc::new(LocalStorage::new(root)?))
-        }
+        "local" => Ok(Arc::new(LocalStorage::new(local_root(id, config, default_root)?, id))),
         "s3" => {
             let cfg: S3Config = serde_json::from_value(config.clone()).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
             if cfg.bucket.trim().is_empty() {
@@ -999,6 +1117,72 @@ mod tests {
         assert_eq!(s3.key_at("").unwrap().as_ref(), "thirtyfile");
         assert!(s3.key_at("../other").is_err());
         assert_eq!(s3.content_dir(), "blobs");
+    }
+
+    #[test]
+    fn the_built_in_folder_gets_its_marker_only_when_new_or_empty() {
+        let base = std::env::temp_dir().join(format!("thirtyfile-builtin-{}", crate::util::new_id()));
+        let marker = |dir: &Path| std::fs::read_to_string(dir.join(LOCATION_MARKER)).ok();
+        // A fresh install: the folder is created with the marker, and used from then on
+        let fresh = base.join("storage");
+        prepare_builtin(&fresh).unwrap();
+        assert_eq!(marker(&fresh).as_deref(), Some("local"));
+        std::fs::create_dir_all(fresh.join("users/admin")).unwrap();
+        prepare_builtin(&fresh).unwrap();
+        // An empty folder (a Docker volume that isn't mounted is one too): nothing was there
+        let empty = base.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        prepare_builtin(&empty).unwrap();
+        assert_eq!(marker(&empty).as_deref(), Some("local"));
+        // Items but no marker, or another location's: it may be another disk, so it isn't used or changed
+        let full = base.join("full");
+        std::fs::create_dir_all(full.join("users/amy")).unwrap();
+        assert!(prepare_builtin(&full).unwrap_err().contains(LOCATION_MARKER));
+        assert_eq!(marker(&full), None);
+        let other = base.join("other");
+        claim_folder(&other, "nas").unwrap();
+        assert!(prepare_builtin(&other).is_err());
+        assert_eq!(marker(&other).as_deref(), Some("nas"));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn a_local_folder_is_checked_before_anything_is_written() {
+        let base = std::env::temp_dir().join(format!("thirtyfile-local-{}", crate::util::new_id()));
+        let root = base.join("nas");
+        let s = LocalStorage::new(root.clone(), "nas");
+        let tmp = base.join("tmp");
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(&tmp, b"x").unwrap();
+        let hash = crate::util::sha256_hex(b"x");
+        let not_mounted = |e: io::Error| e.get_ref().and_then(|i| i.downcast_ref::<StorageError>()).map(|se| se.message);
+        // Missing, empty or someone else's: every use that writes, deletes or lists is refused, and nothing is made
+        for what in ["missing", "empty", "another"] {
+            match what {
+                "empty" => std::fs::create_dir(&root).unwrap(),
+                "another" => std::fs::write(root.join(LOCATION_MARKER), "another").unwrap(),
+                _ => {}
+            }
+            assert_eq!(not_mounted(s.ping().await.unwrap_err()), Some(NOT_MOUNTED), "{what}");
+            assert_eq!(not_mounted(s.check().await.unwrap_err()), Some(NOT_MOUNTED), "{what}");
+            assert_eq!(not_mounted(s.put_file(&hash, &tmp).await.unwrap_err()), Some(NOT_MOUNTED), "{what}");
+            assert_eq!(not_mounted(s.put_at(".thirtyfile-check/a", &tmp).await.unwrap_err()), Some(NOT_MOUNTED), "{what}");
+            assert_eq!(not_mounted(s.delete(&hash).await.unwrap_err()), Some(NOT_MOUNTED), "{what}");
+            assert_eq!(not_mounted(s.delete_at("a").await.unwrap_err()), Some(NOT_MOUNTED), "{what}");
+            assert_eq!(not_mounted(s.list_dir("").await.unwrap_err()), Some(NOT_MOUNTED), "{what}");
+            assert_eq!(not_mounted(s.list().await.unwrap_err()), Some(NOT_MOUNTED), "{what}");
+            let made = std::fs::read_dir(&root).map(|d| d.count()).unwrap_or(0);
+            assert_eq!(made, usize::from(what == "another"), "{what}");
+            assert!(tmp.is_file(), "the temp file is kept");
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+        // Its own folder: the content's folders are made below it
+        claim_folder(&root, "nas").unwrap();
+        s.ping().await.unwrap();
+        s.check().await.unwrap();
+        s.put_file(&hash, &tmp).await.unwrap();
+        assert!(root.join(&hash[0..2]).join(&hash[2..4]).join(&hash).is_file());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

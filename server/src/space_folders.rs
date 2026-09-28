@@ -132,26 +132,13 @@ pub async fn make_folder_space(conn: &mut SqliteConnection, builtin: Option<&Pat
     let Some(location) = location else { return Ok(None) };
     let Some(root) = location_folder(conn, builtin, &location).await? else { return Ok(None) };
     let root = std::path::absolute(&root).unwrap_or(root);
-    // The location's folder itself must be there: a NAS that isn't mounted must not get the folder on the disk
-    // below it
-    let unavailable = || {
-        AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("The folder of the storage location ({}) isn't available", root.display()))
-    };
-    if !root.is_dir() {
-        return Err(unavailable());
-    }
-    // The mount point of a disk or share that isn't mounted is an empty folder: when spaces were made in it before,
-    // it can't really be empty now
-    let empty = std::fs::read_dir(&root).map_err(|_| unavailable())?.next().is_none();
-    if empty {
-        let pattern = format!("{}%", crate::util::like_escape(&format!("{}{}", root.to_string_lossy(), std::path::MAIN_SEPARATOR)));
-        let (used,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drives WHERE mode = 'folder' AND source_path LIKE ? ESCAPE '\\'")
-            .bind(pattern)
-            .fetch_one(&mut *conn)
-            .await?;
-        if used > 0 {
-            return Err(unavailable());
-        }
+    // The location's folder must be there with the location's marker (storage.rs, `LOCATION_MARKER`): a disk or
+    // share that isn't mounted must not get the space's folder on the disk below its mount point
+    if crate::storage::marker_of(&root).await.ok().flatten().as_deref() != Some(location.as_str()) {
+        return Err(AppError::new(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            format!("The folder of the storage location ({}) isn't available", root.display()),
+        ));
     }
     let (parent, wanted) = place(&root, &kind, &name, &owner, drive_id);
     let folder = free_folder(conn, &parent, &wanted)
@@ -304,7 +291,7 @@ mod tests {
 
         // A Local folder location (a NAS): the spaces' folders go in its folder
         let nas = env.dir.join("nas");
-        std::fs::create_dir_all(&nas).unwrap();
+        crate::storage::claim_folder(&nas, "nas").unwrap();
         let config = json!({ "path": nas.to_string_lossy() }).to_string();
         sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES ('nas', 'NAS', 'local', ?, 0, 0)")
             .bind(&config)
@@ -328,6 +315,10 @@ mod tests {
         std::fs::create_dir(&nas).unwrap();
         offline().await;
         assert_eq!(std::fs::read_dir(&nas).unwrap().count(), 0);
+        // Another location's folder mounted there: not this location's either
+        std::fs::write(nas.join(crate::storage::LOCATION_MARKER), "other").unwrap();
+        offline().await;
+        assert_eq!(std::fs::read_dir(&nas).unwrap().count(), 1);
     }
 
     #[tokio::test]

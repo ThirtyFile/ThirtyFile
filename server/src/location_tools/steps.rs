@@ -78,7 +78,7 @@ impl Report {
 /// location wasn't connected (its settings couldn't be loaded at start), it is connected from now on.
 pub async fn test_steps(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Report>> {
     let loc = location(&st, &id).await?;
-    let backend = match storage::build(&loc.kind, &loc.config, &st.storage_dir) {
+    let backend = match storage::build(&loc.id, &loc.kind, &loc.config, &st.storage_dir) {
         Ok(b) => b,
         Err(e) => {
             let mut steps = Steps::new();
@@ -419,7 +419,7 @@ mod tests {
 
     fn picky(env: &testutil::TestEnv, refuse_delete: bool, garble: bool) -> (Arc<dyn Storage>, PathBuf) {
         let dir = env.dir.join(format!("picky-{}", new_id()));
-        (Arc::new(Picky { inner: LocalStorage::new(dir.clone()).unwrap(), refuse_delete, garble }), dir)
+        (Arc::new(Picky { inner: LocalStorage::create(dir.clone(), "picky").unwrap(), refuse_delete, garble }), dir)
     }
 
     fn outcomes(r: &Report) -> Vec<(&str, Outcome)> {

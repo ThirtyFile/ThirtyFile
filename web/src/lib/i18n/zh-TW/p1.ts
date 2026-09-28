@@ -189,6 +189,7 @@ export default {
   "For example: Company RustFS": "例如：公司 RustFS",
   "The built-in location's folder is set on the server with THIRTYFILE_STORAGE. Only its name can be changed.": "內建位置的資料夾由伺服器的 THIRTYFILE_STORAGE 設定，只能修改名稱。",
   "Folder path (absolute path on the server; can be a NAS mount point)": "資料夾路徑（伺服器上的絕對路徑，可以是 NAS 掛載點）",
+  "Saving creates the folder with a .thirtyfile-location file in it. Later, the location is used only while that file is there, so a disk or share that isn't mounted is never written to.": "儲存時會建立這個資料夾，並在其中放一個 .thirtyfile-location 檔案。之後只有在這個檔案還在時才會使用這個位置，因此不會寫入尚未掛載的磁碟或共用資料夾。",
   "/mnt/nas/thirtyfile or D:\\thirtyfile": "/mnt/nas/thirtyfile 或 D:\\thirtyfile",
   "Service": "服務",
   "Endpoint (leave blank for AWS)": "端點（AWS 留空）",

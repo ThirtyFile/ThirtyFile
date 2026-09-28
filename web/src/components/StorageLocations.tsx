@@ -475,7 +475,12 @@ function StorageDialog({ location, onClose, onSaved }: { location: StorageLocati
                   </div>
                 )}
                 {kind === "local" ? (
-                  <>{field("path", t("Folder path (absolute path on the server; can be a NAS mount point)"), { placeholder: t("/mnt/nas/thirtyfile or D:\\thirtyfile") })}</>
+                  <>
+                    {field("path", t("Folder path (absolute path on the server; can be a NAS mount point)"), { placeholder: t("/mnt/nas/thirtyfile or D:\\thirtyfile") })}
+                    <p className="text-xs text-muted-foreground">
+                      {t("Saving creates the folder with a .thirtyfile-location file in it. Later, the location is used only while that file is there, so a disk or share that isn't mounted is never written to.")}
+                    </p>
+                  </>
                 ) : kind === "sftp" || kind === "ftp" ? (
                   <RemoteFields
                     kind={kind}

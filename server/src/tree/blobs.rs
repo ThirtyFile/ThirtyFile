@@ -523,7 +523,7 @@ mod tests {
     async fn failed_deletes_are_retried_after_the_location_recovers() {
         let env = testutil::env().await;
         let flaky = std::sync::Arc::new(Flaky {
-            inner: crate::storage::LocalStorage::new(env.dir.join("flaky")).unwrap(),
+            inner: crate::storage::LocalStorage::create(env.dir.join("flaky"), "flaky").unwrap(),
             down: std::sync::atomic::AtomicBool::new(true),
         });
         env.st.storages.write().unwrap().insert("flaky".into(), flaky.clone());

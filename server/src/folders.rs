@@ -284,6 +284,13 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     let drive = folder_drive(st, drive_id).await?;
     let root = PathBuf::from(drive.source_path.clone().unwrap_or_default());
     let mut report = ScanReport { at: now(), ..Default::default() };
+    // A space on a location: the location's folder must be its own (storage.rs, `LOCATION_MARKER`). Another disk
+    // mounted there, with a folder at the same place, would make every item look deleted.
+    if let Some(e) = location_unavailable(st, drive_id).await? {
+        report.error = Some(e);
+        save_report(st, &drive, &report).await?;
+        return Ok(report);
+    }
     set_progress(drive_id, |_| {});
     let _progress = ProgressGuard(drive_id.to_string());
     let started = std::time::Instant::now();
@@ -555,6 +562,17 @@ pub(crate) fn changing(drive_id: &str) {
 
 fn generation(drive_id: &str) -> u64 {
     generations().lock().unwrap().get(drive_id).copied().unwrap_or(0)
+}
+
+/// Why the storage location a folder space is on can't be used now (its folder isn't there, or holds another
+/// location's marker); None when it can, or the space is on no location
+async fn location_unavailable(st: &AppState, drive_id: &str) -> AppResult<Option<String>> {
+    let (location,): (Option<String>,) = sqlx::query_as("SELECT location_id FROM drives WHERE id = ?").bind(drive_id).fetch_one(&st.db).await?;
+    let Some(location) = location else { return Ok(None) };
+    Ok(match st.storage(&location) {
+        Ok(s) => s.ping().await.err().map(|e| crate::locations::describe(&e)),
+        Err(e) => Some(e.message),
+    })
 }
 
 async fn folder_drive(st: &AppState, drive_id: &str) -> AppResult<Drive> {
