@@ -190,20 +190,23 @@ mod tests {
         let token = random_token(43);
         sqlx::query("UPDATE password_resets SET token_hash = ? WHERE user_id = ?").bind(sha256_hex(token.as_bytes())).bind(amy.id).execute(&env.st.db).await.unwrap();
         let reset_req = |token: &str, new: &str| reset(State(env.st.clone()), addr(), HeaderMap::new(), Json(ResetReq { token: token.into(), new: new.into() }));
-        assert!(reset_req(&token, "abc").await.is_err(), "too short");
-        assert!(reset_req("wrong", "a new long password").await.is_err());
-        assert!(reset_req(&token, "a new long password").await.is_ok());
-        assert!(reset_req(&token, "another long password").await.is_err(), "once only");
+        // (passwords made for the test, not written in the code)
+        let (new, another, short) = (random_token(20), random_token(20), random_token(3));
+        assert!(reset_req(&token, &short).await.is_err(), "too short");
+        assert!(reset_req("wrong", &new).await.is_err());
+        assert!(reset_req(&token, &new).await.is_ok());
+        assert!(reset_req(&token, &another).await.is_err(), "once only");
         let (sessions,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE user_id = ?").bind(amy.id).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(sessions, 0);
-        assert!(auth::confirm_password(&env.st, amy.id, "a new long password".into()).await.is_ok());
+        assert!(auth::confirm_password(&env.st, amy.id, new).await.is_ok());
     }
 
     #[tokio::test]
     async fn a_password_an_administrator_chose_must_be_changed_first() {
         let env = testutil::env().await;
         let admin = env.admin().await;
-        let req = serde_json::from_value(json!({ "username": "ben", "password": "first password", "role": "user", "can_write": true, "can_delete": true, "can_share": true })).unwrap();
+        let (first, own) = (random_token(20), random_token(20));
+        let req = serde_json::from_value(json!({ "username": "ben", "password": first, "role": "user", "can_write": true, "can_delete": true, "can_share": true })).unwrap();
         let _ = crate::admin::create(State(env.st.clone()), auth::Admin(admin), Json(req)).await.unwrap();
         let (id,): (i64,) = sqlx::query_as("SELECT id FROM users WHERE username = 'ben'").fetch_one(&env.st.db).await.unwrap();
         let ben = auth::user_by_id(&env.st, &mut env.st.db.acquire().await.unwrap(), id).await.unwrap().unwrap();
@@ -217,7 +220,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(axum::http::header::COOKIE, cookie.parse().unwrap());
         let me = env.request_user(request("/api/auth/password")).await.unwrap();
-        let req = serde_json::from_value(json!({ "current": "first password", "new": "my own password" })).unwrap();
+        let req = serde_json::from_value(json!({ "current": first, "new": own })).unwrap();
         let _ = auth::change_password(State(env.st.clone()), addr(), headers, me, Json(req)).await.unwrap();
         assert!(env.request_user(request("/api/nodes/root/children")).await.is_some());
     }
