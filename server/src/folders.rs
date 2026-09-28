@@ -576,6 +576,14 @@ pub(crate) fn drive_lock(drive_id: &str) -> Arc<tokio::sync::Mutex<()>> {
     LOCKS.get_or_init(Default::default).lock().unwrap().entry(drive_id.to_string()).or_default().clone()
 }
 
+/// Holds a folder space still while a move switches it over (moves/): no scan updates its index and no change from the
+/// web is made meanwhile (both wait). The scan lock first, as everywhere.
+pub(crate) async fn hold(drive_id: &str) -> (tokio::sync::OwnedMutexGuard<()>, tokio::sync::OwnedMutexGuard<()>) {
+    let scanning = scan_lock(drive_id).lock_owned().await;
+    let changing = drive_lock(drive_id).lock_owned().await;
+    (scanning, changing)
+}
+
 /// Scans of a space, one at a time (a scan asked for while one runs waits for it, `scan_later` skips)
 fn scan_lock(drive_id: &str) -> Arc<tokio::sync::Mutex<()>> {
     static LOCKS: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();

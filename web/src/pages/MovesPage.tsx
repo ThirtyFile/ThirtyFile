@@ -307,6 +307,7 @@ function MoveDetails({ move: m, onClose }: { move: SpaceMove; onClose(): void })
           ))}
         </dl>
         {m.error && <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{tServer(m.error)}</p>}
+        {m.note && <p className="rounded-md bg-muted px-3 py-2 text-sm break-words whitespace-pre-line">{m.note.split("\n").map((l) => tServer(l)).join("\n")}</p>}
         {m.failures.length > 0 && (
           <div className="grid gap-1.5">
             <p className="text-sm">{t("{n} file couldn't be copied:|{n} files couldn't be copied:", { n: m.failed_items })}</p>

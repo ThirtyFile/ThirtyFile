@@ -2,7 +2,7 @@ import { useEffect, useEffectEvent } from "react";
 import { Navigate, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { FolderIcon, Loader2Icon, UsersRoundIcon } from "lucide-react";
-import { OfflineBanner, ReadOnlyBanner } from "@/components/OfflineNotice";
+import { MovingBanner, OfflineBanner, ReadOnlyBanner } from "@/components/OfflineNotice";
 import { SORT_KEYS, api, type NodeInfo, type SortKey, type SortOrder } from "@/api";
 import { Explorer } from "@/components/Explorer";
 import { Frame, crumbPath, type Crumb } from "@/components/Frame";
@@ -112,6 +112,8 @@ function FolderPage({ id }: { id: string }) {
       notice={
         info.data?.offline ? (
           <OfflineBanner reason={info.data.offline} />
+        ) : info.data?.moving ? (
+          <MovingBanner />
         ) : info.data?.read_only ? (
           <ReadOnlyBanner />
         ) : undefined

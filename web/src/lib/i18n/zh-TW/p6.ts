@@ -178,6 +178,8 @@ export default {
   "Folder spaces show folders on the server. Changes made there (for example over SMB) appear when someone opens the folder, and all folders are checked this often. 0 = only when someone opens a folder or clicks \"Check for changes\".": "資料夾空間顯示的是伺服器上的資料夾。在那裡做的變更（例如透過 SMB）會在有人開啟資料夾時出現，而且每隔這段時間會檢查全部資料夾。0 = 只在有人開啟資料夾或按下「檢查變更」時檢查。",
   "Checked the folder": "檢查資料夾",
   "This space is read-only. You can open, download and share its files.": "這個空間是唯讀的，可以開啟、下載和分享其中的檔案。",
+  "This space is being moved to another storage location.": "這個空間正在搬到其他儲存位置。",
+  "It is read-only until the move finishes: you can open, download and share its files, but not change them.": "搬移完成前是唯讀的：可以開啟、下載和分享其中的檔案，但不能變更。",
   "\"{name}\" is read-only now": "「{name}」現在是唯讀的",
   "\"{name}\" can be changed from the web now": "現在可以從網頁修改「{name}」",
   "Allow changes from the web": "允許從網頁修改",

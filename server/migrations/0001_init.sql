@@ -205,6 +205,8 @@ CREATE TABLE space_moves (
   from_location   TEXT,
   from_name       TEXT NOT NULL DEFAULT '',
   from_mode       TEXT NOT NULL CHECK (from_mode IN ('store', 'folder')),
+  -- A folder space's folder, removed once the space is on the new location
+  from_path       TEXT,
   to_location     TEXT NOT NULL,
   to_name         TEXT NOT NULL DEFAULT '',
   to_mode         TEXT NOT NULL CHECK (to_mode IN ('store', 'folder')),
@@ -222,6 +224,8 @@ CREATE TABLE space_moves (
   failures        TEXT NOT NULL DEFAULT '[]',
   -- Why the move stopped (failed)
   error           TEXT,
+  -- What a finished move left behind: items of the old folder that changed during the move, or that ThirtyFile doesn't show
+  note            TEXT,
   created_by      INTEGER,
   created_by_name TEXT NOT NULL DEFAULT '',
   created_at      INTEGER NOT NULL,
@@ -236,12 +240,22 @@ CREATE INDEX space_moves_state ON space_moves (state, created_at);
 -- The rows go when the move has ended and cleaned up.
 CREATE TABLE space_move_items (
   move_id       TEXT NOT NULL,
-  -- What was copied: a content of the store (its hash)
+  -- What was copied: a content of the store (its hash), a file (its node) or an earlier version of a file
   item_id       TEXT NOT NULL,
+  -- 'blob', 'file' or 'version'
+  kind          TEXT NOT NULL DEFAULT 'blob',
   -- Content copied into the target's content store, and the location it was copied from
   hash          TEXT,
   from_location TEXT,
   size          INTEGER NOT NULL DEFAULT 0,
+  -- From a folder: the file's path below the space's folder, and what it was when it was copied (identity, size and
+  -- modification time), so the original is removed only when it is still what was copied
+  path          TEXT,
+  src_dev       INTEGER,
+  src_ino       INTEGER,
+  src_mtime_ns  INTEGER,
+  -- The move stored the content at the target (else it was there already)
+  uploaded      INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (move_id, item_id)
 );
 CREATE INDEX space_move_items_hash ON space_move_items (hash) WHERE hash IS NOT NULL;
@@ -277,6 +291,9 @@ CREATE TABLE drives (
   source_path TEXT,
   -- Browse, download and share only
   read_only   INTEGER NOT NULL DEFAULT 0,
+  -- Being moved to another storage location in a way that needs its files to stay as they are (from or to a folder,
+  -- moves/): read-only until the move is finished or cancelled
+  moving      INTEGER NOT NULL DEFAULT 0,
   last_scan_at INTEGER,
   -- What the last scan found and skipped (JSON), shown in the Control panel
   scan_report TEXT,
