@@ -54,7 +54,8 @@
   --accent-foreground: #1f2328;
   --destructive: #d92d20;
   --border: #e4e7ec;
-  --input: #d0d5dd;
+  /* Text field borders: at least 3:1 against the page and muted backgrounds */
+  --input: #858d99;
   --ring: #2563eb;
   --sidebar: #f7f8fa;
   --brand: #2563eb;

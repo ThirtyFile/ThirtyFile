@@ -7,7 +7,6 @@ export default {
   "Keyboard shortcuts": "鍵盤快速鍵",
   "Like File Explorer. Shortcuts don't apply while you're typing in a box.": "與檔案總管相同。在輸入框中輸入文字時，快速鍵不會作用。",
   "Getting around": "瀏覽",
-  "Up one folder": "上移一層",
   "Go to the address bar": "移到網址列",
   "Go to the search box": "移到搜尋方塊",
   "Refresh the list": "重新整理清單",

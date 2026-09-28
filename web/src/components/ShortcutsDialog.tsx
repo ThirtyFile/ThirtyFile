@@ -33,7 +33,7 @@ const groups = (): [string, [string, string][]][] => [
   [
     t("Getting around"),
     [
-      ["Alt+↑", t("Up one folder")],
+      ["Alt+↑", t("Up one folder, with the folder you came from selected")],
       ["Alt+← / Backspace", t("Back")],
       ["Alt+→", t("Forward")],
       ["Ctrl+L / Alt+D", t("Go to the address bar")],
@@ -45,7 +45,8 @@ const groups = (): [string, [string, string][]][] => [
   [
     t("Selecting"),
     [
-      ["↑ / ↓ / Home / End", t("Move through the list (also ← and → in the icon view); hold Shift to select as you go")],
+      ["↑ / ↓ / Home / End / PgUp / PgDn", t("Move through the list (also ← and → in the icon view); hold Shift to select as you go")],
+      ["Ctrl+↑ / Ctrl+↓", t("Move the focus without changing the selection")],
       ["Space", t("Select the item with the focus")],
       ["Ctrl+Space", t("Add the item with the focus to the selection, or remove it")],
       ["Ctrl+A", t("Select everything")],
@@ -57,6 +58,7 @@ const groups = (): [string, [string, string][]][] => [
     t("Working with items"),
     [
       ["Enter", t("Open")],
+      ["Shift+F10", t("Open the menu of the item with the focus")],
       ["F2", t("Rename")],
       ["Ctrl+X / Ctrl+C / Ctrl+V", t("Cut, copy, paste")],
       ["Ctrl+Z", t("Undo the last move, rename or delete")],

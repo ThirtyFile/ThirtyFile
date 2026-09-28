@@ -753,7 +753,7 @@ export interface PublicShare {
   node?: Node;
 }
 
-export const SORT_KEYS = ["name", "updated", "size", "type"] as const;
+export const SORT_KEYS = ["name", "updated", "created", "size", "type"] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
 
 /** An earlier version of a file */

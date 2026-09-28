@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRightIcon, FolderIcon, FolderPlusIcon, HardDriveIcon, HomeIcon, Loader2Icon } from "lucide-react";
 import { api, type Crumb } from "@/api";
@@ -31,8 +31,18 @@ function useSubmit(fn: () => Promise<void>) {
   return { busy, error, run };
 }
 
-export function ErrorText({ children }: { children: ReactNode }) {
-  return children ? <p className="text-sm text-destructive">{children}</p> : null;
+/** An error under a form, read out when it appears; give it an `id` and point the field at it with `errorProps` */
+export function ErrorText({ children, id }: { children: ReactNode; id?: string }) {
+  return children ? (
+    <p id={id} role="alert" className="text-sm text-destructive">
+      {children}
+    </p>
+  ) : null;
+}
+
+/** A field's link to the ErrorText below it, while there is an error */
+export function errorProps(error: unknown, id: string) {
+  return error ? { "aria-invalid": true, "aria-describedby": id } : {};
 }
 
 export function NameDialog(props: {
@@ -46,6 +56,7 @@ export function NameDialog(props: {
   const [name, setName] = useState(props.initial ?? "");
   const ref = useRef<HTMLInputElement>(null);
   const { busy, error, run } = useSubmit(() => props.onSubmit(name.trim()));
+  const errorId = useId();
 
   useEffect(() => {
     // When renaming, select only the base name so it can be typed over directly
@@ -68,8 +79,8 @@ export function NameDialog(props: {
           </DialogHeader>
           <div className="grid gap-2">
             {props.label && <Label htmlFor="name-input">{props.label}</Label>}
-            <Input id="name-input" ref={ref} value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" />
-            <ErrorText>{error}</ErrorText>
+            <Input id="name-input" ref={ref} value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" {...errorProps(error, errorId)} />
+            <ErrorText id={errorId}>{error}</ErrorText>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={props.onClose}>
@@ -91,6 +102,8 @@ export function ConfirmDialog(props: {
   description?: ReactNode;
   confirmText?: string;
   destructive?: boolean;
+  /** Can't be undone (e.g. deleting permanently): Cancel has the focus, so pressing Enter doesn't do it */
+  irreversible?: boolean;
   onConfirm(): Promise<void>;
   onClose(): void;
 }) {
@@ -104,10 +117,10 @@ export function ConfirmDialog(props: {
         </DialogHeader>
         <ErrorText>{error}</ErrorText>
         <DialogFooter>
-          <Button variant="outline" onClick={props.onClose}>
+          <Button variant="outline" onClick={props.onClose} autoFocus={props.irreversible}>
             {t("Cancel")}
           </Button>
-          <Button variant={props.destructive ? "destructive" : "default"} disabled={busy} onClick={() => run()} autoFocus>
+          <Button variant={props.destructive ? "destructive" : "default"} disabled={busy} onClick={() => run()} autoFocus={!props.irreversible}>
             {busy && <Loader2Icon className="animate-spin" />}
             {props.confirmText ?? t("OK")}
           </Button>
@@ -271,6 +284,7 @@ export function ChangePasswordDialog({ onClose }: { onClose(): void }) {
     await api.changePassword(current, next);
     onClose();
   });
+  const errorId = useId();
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
@@ -285,8 +299,8 @@ export function ChangePasswordDialog({ onClose }: { onClose(): void }) {
             <Label htmlFor="pw-new">{t("New password (at least {n} characters)", { n: me.min_password_length })}</Label>
             <Input id="pw-new" type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
             <Label htmlFor="pw-cfm">{t("Confirm new password")}</Label>
-            <Input id="pw-cfm" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
-            <ErrorText>{error}</ErrorText>
+            <Input id="pw-cfm" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" {...errorProps(error, errorId)} />
+            <ErrorText id={errorId}>{error}</ErrorText>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>

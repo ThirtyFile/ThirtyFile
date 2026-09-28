@@ -204,6 +204,7 @@ export function TrashPage() {
           }
           confirmText={t("Delete permanently")}
           destructive
+          irreversible
           onClose={() => setConfirm(null)}
           onConfirm={async () => {
             if (confirm === "empty") await api.emptyTrash();

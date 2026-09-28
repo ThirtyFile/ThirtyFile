@@ -93,8 +93,9 @@ export function Explorer(p: ExplorerProps) {
   const dimmed = useMemo(() => (clip?.mode === "cut" ? new Set(clip.ids) : undefined), [clip]);
   const footer = (
     <>
+      {/* Not "0 items" while the folder loads */}
       <span>
-        {t("{n} item|{n} items", { n: p.items.length })}
+        {p.loading ? t("Loading…") : t("{n} item|{n} items", { n: p.items.length })}
         {p.loadingMore && ` · ${t("Loading more items…")}`}
       </span>
       {selectedNodes.length > 0 && (
@@ -202,7 +203,8 @@ export function Explorer(p: ExplorerProps) {
                     <div className="flex min-h-52 flex-col items-center justify-center gap-2 py-10 text-muted-foreground">
                       <FolderOpenIcon className="size-9 stroke-[1.4]" />
                       <p>{t("No files here yet")}</p>
-                      {canUpload && <p className="text-xs">{t("Drag files or folders here to upload them.")}</p>}
+                      {/* Phones can't drag files in */}
+                      {canUpload && <p className="text-xs">{phone ? t("Use New › Upload files to add some.") : t("Drag files or folders here to upload them.")}</p>}
                       {p.offline && <p className="text-xs">{t("Storage service offline. You can't upload right now.")}</p>}
                       {p.emptyHint && <p className="text-xs">{p.emptyHint}</p>}
                     </div>

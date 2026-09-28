@@ -3,6 +3,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { Loader2Icon } from "lucide-react";
 import { api, type ShareAccessFilter } from "@/api";
 import { Button } from "@/components/ui/button";
+import { ErrorState } from "@/components/ErrorState";
 import { cn, formatWinDate } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 import { shownCount } from "@/components/logs/shown";
@@ -89,7 +90,7 @@ export function ShareAccessLog({ shareId, admin, className }: { shareId?: string
             <Loader2Icon className="size-5 animate-spin" />
           </div>
         ) : list.error ? (
-          <p className="p-4 text-sm text-destructive">{list.error.message}</p>
+          <ErrorState message={list.error.message} onRetry={() => list.refetch()} />
         ) : !rows.length ? (
           <p className="p-6 text-center text-sm text-muted-foreground">{filtered ? t("No matching records") : t("No one has accessed this yet")}</p>
         ) : (

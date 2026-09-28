@@ -13,6 +13,30 @@ export const MIN_COLUMN = 50;
 export const MIN_NAME = 160;
 export const MAX_COLUMN = 1000;
 
+/** Columns that make room, in this order, when the list is too narrow for all of them (before it scrolls sideways) */
+const GIVE_WAY: ColumnId[] = ["type", "size"];
+
+/**
+ * The columns to leave out so the others fit in `room` pixels, of which the name (and the check boxes) take `fixed`:
+ * Type, then Size. When that isn't enough the list scrolls sideways
+ */
+export function columnsToHide(ids: ColumnId[], widthOf: (id: ColumnId) => number, fixed: number, room: number): ColumnId[] {
+  let total = ids.reduce((sum, id) => sum + widthOf(id), fixed);
+  const out: ColumnId[] = [];
+  for (const id of GIVE_WAY) {
+    if (total <= room) break;
+    if (!ids.includes(id)) continue;
+    total -= widthOf(id);
+    out.push(id);
+  }
+  return out;
+}
+
+/** How many rows PageUp and PageDown move: those that fit in a view `height` high, less one so the last stays in sight (at least one) */
+export function pageRows(height: number, rowHeight: number) {
+  return Math.max(1, Math.floor(height / rowHeight) - 1);
+}
+
 /** Shown unless turned off; Date created is off until turned on */
 const SHOWN: Record<ColumnId, boolean> = { location: true, date: true, created: false, type: true, size: true, owner: true, extra: true };
 

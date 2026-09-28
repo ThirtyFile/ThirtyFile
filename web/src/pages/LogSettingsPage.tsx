@@ -269,6 +269,7 @@ export function LogSettingsPage() {
           })}
           confirmText={t("Delete permanently")}
           destructive
+          irreversible
           onClose={() => setDeleting(null)}
           onConfirm={async () => {
             await api.deleteLogArchive(deleting.id);

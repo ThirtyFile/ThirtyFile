@@ -41,10 +41,29 @@ export function useExplorerState(p: ExplorerProps) {
 
   // Clear the selection when switching folders
   const place = `${p.folderId}|${p.crumbs.map((c) => c.label).join("/")}`;
+  /** The folder shown before this one (the folder id is unknown for a moment while the next folder loads) */
+  const lastFolder = useRef(p.folderId);
+  const cameFrom = useRef<string | undefined>(undefined);
   useEffect(() => {
     setSelected(new Set());
     setAnchor(null);
+    if (p.folderId && p.folderId !== lastFolder.current) {
+      cameFrom.current = lastFolder.current;
+      lastFolder.current = p.folderId;
+    }
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the folder id is part of the place
   }, [place]);
+  // Going up (or back) to the folder holding the one shown before selects that one, like File Explorer; the focus
+  // goes to it too when it was lost with the list (Alt+Up, Backspace), not when it's on a button that was clicked
+  useEffect(() => {
+    const id = cameFrom.current;
+    if (!id || !p.items.some((n) => n.id === id)) return;
+    cameFrom.current = undefined;
+    setSelected(new Set([id]));
+    setAnchor(id);
+    const focus = !document.activeElement || document.activeElement === document.body;
+    setTimeout(() => listNav.current?.show(id, focus));
+  }, [p.items]);
 
   return {
     me,
