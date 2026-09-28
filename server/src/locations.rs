@@ -655,9 +655,9 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
     // Every space records its location (folder spaces on a Local folder location too), so this counts them all
     if drives > 0 {
         return Err(AppError::bad_request(if drives == 1 {
-            format!("{drives} space still uses this location. Change it first.")
+            format!("{drives} space still uses this location. Move it to another location first.")
         } else {
-            format!("{drives} spaces still use this location. Change them first.")
+            format!("{drives} spaces still use this location. Move them to another location first.")
         }));
     }
     // A space being moved to it isn't on it yet, but content is being copied there
@@ -838,7 +838,7 @@ mod tests {
         assert_eq!(blobs, 0);
         let err = delete(State(env.st.clone()), Admin(env.admin().await), Path("nas".into())).await.unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
-        assert_eq!(err.message, "1 space still uses this location. Change it first.");
+        assert_eq!(err.message, "1 space still uses this location. Move it to another location first.");
         assert_eq!(placed(&env, amy.root()).await, at("nas", "folder"));
     }
 

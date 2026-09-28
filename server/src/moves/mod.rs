@@ -685,8 +685,11 @@ pub struct CreateReq {
     location_id: String,
 }
 
-/// Queues a move of each space to the location; returns the moves' ids
-pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(req): Json<CreateReq>) -> AppResult<Json<Value>> {
+/// Queues a move of each space to the location, in the order given (they run one after the other, or a few at a time);
+/// returns the moves' ids. Nothing is queued when one of them can't be moved.
+pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(mut req): Json<CreateReq>) -> AppResult<Json<Value>> {
+    let mut seen = std::collections::HashSet::new();
+    req.drive_ids.retain(|id| seen.insert(id.clone()));
     if req.drive_ids.is_empty() {
         return Err(AppError::bad_request("Choose the spaces to move"));
     }

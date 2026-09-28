@@ -17,10 +17,12 @@ import {
   ShieldAlertIcon,
   StarIcon,
   Trash2Icon,
+  TruckIcon,
   XCircleIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type StorageConfig, type StorageKind, type StorageLocation } from "@/api";
+import { api, moveActive, type SpaceMove, type StorageConfig, type StorageKind, type StorageLocation } from "@/api";
+import { MoveDialog } from "@/components/MoveDialog";
 import { DRIVE_ICON, DRIVE_KIND_LABEL } from "@/lib/drives";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -77,6 +79,14 @@ export function StorageLocations() {
   const [showing, setShowing] = useState<StorageLocation | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
   const [tool, setTool] = useState<{ kind: "test" | "browse" | "unused"; location: StorageLocation } | null>(null);
+  const [emptying, setEmptying] = useState<StorageLocation | null>(null);
+  // Moves off each location: how far they are, and where the spaces went
+  const moves = useQuery({
+    queryKey: ["moves"],
+    queryFn: api.moves,
+    refetchInterval: (query) => (query.state.data?.moves.some((m) => m.state === "running" || m.state === "queued") ? 3000 : false),
+  });
+  const movesFrom = (id: string) => (moves.data?.moves ?? []).filter((m) => m.from_location === id);
   const list = q.data ?? [];
   const selected = list.find((l) => l.id === selectedId) ?? null;
   const refresh = () => {
@@ -116,6 +126,9 @@ export function StorageLocations() {
       </DropdownMenuItem>
       <DropdownMenuItem onClick={() => setShowing(l)}>
         <LayersIcon /> {t("Spaces on this location")}
+      </DropdownMenuItem>
+      <DropdownMenuItem disabled={l.drive_count === 0} onClick={() => setEmptying(l)}>
+        <TruckIcon /> {t("Move everything to…")}
       </DropdownMenuItem>
       <DropdownMenuItem onClick={() => setTool({ kind: "test", location: l })}>
         <ListChecksIcon /> {t("Test step by step")}
@@ -210,6 +223,13 @@ export function StorageLocations() {
                         {tServer(l.health_error)}
                       </div>
                     )}
+                    <MovedOff
+                      location={l}
+                      moves={movesFrom(l.id)}
+                      list={list}
+                      onDefault={makeDefault}
+                      onDelete={() => setDeleting(l)}
+                    />
                     {l.pending_deletes > 0 && (
                       <div className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">
                         {t("{n} deleted file hasn't been removed from here yet; it will be retried automatically once the connection is restored|{n} deleted files haven't been removed from here yet; they will be retried automatically once the connection is restored", { n: l.pending_deletes })}
@@ -278,6 +298,11 @@ export function StorageLocations() {
         />
       )}
       {showing && <SpacesDialog location={showing} onClose={() => setShowing(null)} />}
+      {emptying && <MoveEverythingDialog location={emptying} onClose={() => setEmptying(null)} onDone={() => {
+        setEmptying(null);
+        refresh();
+        qc.invalidateQueries({ queryKey: ["moves"] });
+      }} />}
       {tool?.kind === "test" && <LocationTestDialog location={tool.location} onClose={() => setTool(null)} />}
       {tool?.kind === "browse" && <LocationBrowseDialog location={tool.location} onClose={() => setTool(null)} />}
       {tool?.kind === "unused" && <UnusedContentDialog location={tool.location} onClose={() => setTool(null)} />}
@@ -296,6 +321,95 @@ export function StorageLocations() {
             refresh();
           }}
         />
+      )}
+    </div>
+  );
+}
+
+/** "Move everything to…": every space on a location, moved to another one (a move each, one after the other) */
+function MoveEverythingDialog({ location, onClose, onDone }: { location: StorageLocation; onClose(): void; onDone(): void }) {
+  const q = useQuery({ queryKey: ["storage-location-spaces", location.id], queryFn: () => api.storageLocationSpaces(location.id) });
+  if (!q.data) {
+    return q.error ? (
+      <Dialog open onOpenChange={(o) => !o && onClose()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("Move everything on \"{name}\"", { name: location.name })}</DialogTitle>
+          </DialogHeader>
+          <ErrorText>{q.error instanceof Error ? q.error.message : t("Operation failed")}</ErrorText>
+        </DialogContent>
+      </Dialog>
+    ) : null;
+  }
+  const spaces = q.data.map((s) => ({
+    id: s.id,
+    label: s.kind === "personal" && s.owner_name ? `${s.name} · ${s.owner_name}` : s.name,
+    mode: s.mode,
+    location_id: location.id,
+    used_bytes: s.used_bytes,
+  }));
+  return (
+    <MoveDialog
+      spaces={spaces}
+      title={t("Move everything on \"{name}\"", { name: location.name })}
+      description={t("Its space ({size}) is moved to the location you choose. Once it's there, this location can be deleted.|Each of its {n} spaces ({size}) is moved to the location you choose, one after the other. Once they're all there, this location can be deleted.", {
+        n: spaces.length,
+        size: formatBytes(spaces.reduce((n, s) => n + s.used_bytes, 0)),
+      })}
+      from={location.id}
+      onClose={onClose}
+      onDone={onDone}
+    />
+  );
+}
+
+/**
+ * Under a location its spaces are being moved off: how far that is; once nothing is left on it, the offer to make the
+ * location they went to the default and to delete this one
+ */
+function MovedOff({
+  location: l,
+  moves,
+  list,
+  onDefault,
+  onDelete,
+}: {
+  location: StorageLocation;
+  moves: SpaceMove[];
+  list: StorageLocation[];
+  onDefault(l: StorageLocation): void;
+  onDelete(): void;
+}) {
+  const active = moves.filter(moveActive);
+  if (active.length > 0) {
+    const done = moves.filter((m) => m.state === "done" && m.finished_at && m.finished_at >= Math.min(...active.map((a) => a.created_at))).length;
+    return (
+      <div className="mt-0.5 text-xs text-brand">
+        {t("Moving its spaces to other locations: {done} of {total} done", { done, total: active.length + done })}
+      </div>
+    );
+  }
+  const last = moves.find((m) => m.state === "done");
+  if (!last || l.builtin || l.drive_count > 0 || l.blob_count > 0) return null;
+  const to = list.find((x) => x.id === last.to_location);
+  // The old copies go a minute after each space switched: deleting the location before would leave them there
+  const clearing = l.pending_deletes > 0;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+      <span className="text-muted-foreground">
+        {clearing
+          ? t("Its spaces were moved. The old copies are being removed from here; then it can be deleted.")
+          : t("Its spaces were moved; nothing uses this location any more.")}
+      </span>
+      {l.is_default && to && (
+        <Button size="xs" variant="outline" onClick={(e) => { e.stopPropagation(); onDefault(to); }}>
+          {t("Make \"{name}\" the default", { name: to.name })}
+        </Button>
+      )}
+      {!l.is_default && !clearing && (
+        <Button size="xs" variant="outline" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
+          <Trash2Icon /> {t("Delete this location")}
+        </Button>
       )}
     </div>
   );
