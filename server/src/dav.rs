@@ -38,18 +38,15 @@ use crate::{
     auth::User,
     error::{AppError, AppResult},
     files, fsops, nodes,
+    paths::{Found, SHARED, Target, child_named, resolve, tops},
     state::AppState,
     tokens,
-    tree::{self, NODE_COLS, Need, Node},
+    tree::{self, Need, Node},
     util::{guess_mime, new_id, now, numbered_name, validate_name},
 };
 
 /// Where WebDAV is served
 pub const PREFIX: &str = "/dav";
-/// The folder of items shared from spaces the user isn't a member of
-const SHARED: &str = "Shared with me";
-/// The user's own personal space
-const MY_FILES: &str = "My files";
 /// Largest XML request body (PROPFIND, PROPPATCH, LOCK)
 const MAX_XML: usize = 1024 * 1024;
 /// Largest file a PUT may send when no upload size limit is set (sizes are summed as i64 for quotas)
@@ -173,112 +170,7 @@ fn destination(headers: &HeaderMap) -> AppResult<Vec<String>> {
     segments(path).ok_or_else(|| AppError::new(StatusCode::BAD_GATEWAY, "The destination isn't on this WebDAV server"))
 }
 
-fn same_name(a: &str, b: &str) -> bool {
-    a == b || a.to_lowercase() == b.to_lowercase()
-}
-
 // ───────────── Finding items ─────────────
-
-/// What `/dav/` shows: each space and each item shared with the user, under a name unique among them
-struct Tops {
-    /// (name, root folder id)
-    spaces: Vec<(String, String)>,
-    /// (name, item)
-    shared: Vec<(String, Node)>,
-}
-
-/// Adds the first of `base`, `numbered(2)`, `numbered(3)`… that isn't taken yet (ignoring letter case)
-fn claim(taken: &mut HashSet<String>, base: &str, numbered: impl Fn(u32) -> String) -> String {
-    let mut name = base.to_string();
-    let mut n = 2;
-    while !taken.insert(name.to_lowercase()) {
-        name = numbered(n);
-        n += 1;
-    }
-    name
-}
-
-async fn tops(conn: &mut SqliteConnection, user: &User) -> AppResult<Tops> {
-    let mut drives = tree::user_drives(conn, user).await?;
-    let rank = |k: &str| match k {
-        "personal" => 0,
-        "company" => 1,
-        _ => 2,
-    };
-    // A fixed order, so that numbered names stay with the same space
-    drives.sort_by(|a, b| rank(&a.0.kind).cmp(&rank(&b.0.kind)).then_with(|| a.0.name.cmp(&b.0.name)).then_with(|| a.0.id.cmp(&b.0.id)));
-    let member_of: Vec<String> = drives.iter().map(|(d, _)| d.id.clone()).collect();
-    let mut taken = HashSet::from([SHARED.to_lowercase()]);
-    let spaces = drives
-        .into_iter()
-        .map(|(d, _)| {
-            let base = if d.kind == "personal" && d.owner_id == Some(user.id) { MY_FILES.to_string() } else { d.name.clone() };
-            (claim(&mut taken, &base, |n| format!("{base} ({n})")), d.root_id)
-        })
-        .collect();
-    let mut items = tree::shared_with_me_outside(conn, user, &member_of).await?;
-    items.sort_by(|a, b| a.0.name.cmp(&b.0.name).then_with(|| a.0.id.cmp(&b.0.id)));
-    let mut taken = HashSet::new();
-    let shared = items
-        .into_iter()
-        .map(|(n, _, _)| {
-            let name = claim(&mut taken, &n.name, |k| numbered_name(&n.name, k, n.is_folder()));
-            (name, n)
-        })
-        .collect();
-    Ok(Tops { spaces, shared })
-}
-
-enum Target {
-    /// `/dav/`
-    Root,
-    /// `/dav/Shared with me/`
-    Shared,
-    Node(Box<Node>),
-}
-
-struct Found {
-    target: Target,
-    /// The path as it is named here (the names of the items, not as the request spelled them)
-    path: Vec<String>,
-}
-
-/// The item in a folder with this name (not in the trash): any letter case in the content store, exact in folder spaces
-async fn child_named(conn: &mut SqliteConnection, parent_id: &str, name: &str) -> AppResult<Option<Node>> {
-    let sql = format!(
-        "SELECT {NODE_COLS} FROM nodes n WHERE n.parent_id = ?1 AND n.trashed_at IS NULL
-         AND n.name_key = CASE WHEN n.fs_path IS NULL THEN unicode_lower(?2) ELSE ?2 END LIMIT 1"
-    );
-    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(parent_id).bind(name).fetch_optional(conn).await?)
-}
-
-/// Finds what a path names; None when it doesn't exist or the user has no access to it
-async fn resolve(conn: &mut SqliteConnection, user: &User, segs: &[String]) -> AppResult<Option<Found>> {
-    let Some((first, rest)) = segs.split_first() else { return Ok(Some(Found { target: Target::Root, path: Vec::new() })) };
-    let tops = tops(conn, user).await?;
-    let (mut path, start, rest) = if same_name(first, SHARED) {
-        let Some((item, rest)) = rest.split_first() else { return Ok(Some(Found { target: Target::Shared, path: vec![SHARED.into()] })) };
-        let Some((name, node)) = tops.shared.iter().find(|(name, _)| same_name(name, item)) else { return Ok(None) };
-        (vec![SHARED.to_string(), name.clone()], node.id.clone(), rest)
-    } else {
-        let Some((name, root)) = tops.spaces.iter().find(|(name, _)| same_name(name, first)) else { return Ok(None) };
-        (vec![name.clone()], root.clone(), rest)
-    };
-    let mut current = start;
-    for (i, seg) in rest.iter().enumerate() {
-        let Some(child) = child_named(conn, &current, seg).await? else { return Ok(None) };
-        if i + 1 < rest.len() && !child.is_folder() {
-            return Ok(None);
-        }
-        path.push(child.name.clone());
-        current = child.id;
-    }
-    match tree::node_with_role(conn, user, &current).await {
-        Ok((node, _)) => Ok(Some(Found { target: Target::Node(Box::new(node)), path })),
-        Err(e) if e.status == StatusCode::NOT_FOUND => Ok(None),
-        Err(e) => Err(e),
-    }
-}
 
 /// The folder a new item at this path goes into, and the item's name
 async fn parent_of(conn: &mut SqliteConnection, user: &User, segs: &[String]) -> AppResult<(Node, String)> {

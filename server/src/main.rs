@@ -19,6 +19,7 @@ mod ftp;
 mod sftp;
 mod sso;
 mod nodes;
+mod paths;
 #[cfg(unix)]
 mod privileges;
 mod secrets;
@@ -533,6 +534,7 @@ fn file_api() -> Router<AppState> {
         .route("/nodes/conflicts", post(nodes::conflicts))
         .route("/nodes/trash", post(nodes::trash))
         .route("/nodes/contents", post(nodes::contents))
+        .route("/nodes/find", post(paths::find))
         .route("/folders", post(nodes::create_folder))
         .route("/trash", get(nodes::list_trash))
         .route("/trash/restore", post(nodes::restore))

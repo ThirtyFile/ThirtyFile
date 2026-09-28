@@ -81,10 +81,20 @@ export interface NodeInfo {
   drive: { id: string; name: string; kind: DriveKind; root_id: string };
   role: Role;
   via_share: boolean;
+  /** The path that names it, as typed into the address bar or used over WebDAV: ["My files", "Reports"] (see lib/paths.ts); null when no path reaches it */
+  location: string[] | null;
   /** Why the storage service holding the content is offline (e.g. S3 disconnected) */
   offline: string | null;
   /** A read-only space: browse, download and share only */
   read_only: boolean;
+}
+
+/** What a path typed into the address bar names (`api.findPath`) */
+export interface FoundPath {
+  place: "spaces" | "shared" | "folder" | "file";
+  id: string | null;
+  /** The path as it is named (letter case as stored) */
+  path: string[];
 }
 
 /** What the last scan of a folder space found */
@@ -909,6 +919,8 @@ export const api = {
     get<Node[]>(enc`/nodes/${id}/children` + qs({ sort, order, folders_only: foldersOnly ? "true" : undefined })),
   childrenPage: (id: string, sort: SortKey, order: SortOrder, limit: number, after?: string) =>
     get<CursorPage<Node>>(enc`/nodes/${id}/children` + qs({ sort, order, limit: String(limit), after })),
+  /** What a typed path names; `aliases` maps names as the UI language shows them to the ones paths use */
+  findPath: (path: string, aliases: Record<string, string>) => post<FoundPath>("/nodes/find", { path, aliases }),
   createFolder: (parent_id: string, name: string) => post<Node>("/folders", { parent_id, name }),
   rename: (id: string, name: string) => request<Node>("PATCH", enc`/nodes/${id}`, { name }),
   /** `resolutions`: what to do with each item (by id) whose name the destination already has */

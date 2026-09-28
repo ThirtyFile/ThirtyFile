@@ -32,7 +32,8 @@ import {
   Trash2Icon,
   type LucideIcon,
 } from "lucide-react";
-import { api } from "@/api";
+import { api, ApiError } from "@/api";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -60,6 +61,7 @@ import { FolderTree } from "@/components/FolderTree";
 import { ShortcutsHost, openShortcuts } from "@/components/ShortcutsDialog";
 import { isTyping } from "@/components/explorer/types";
 import { folderOfPath, useFolderDrop } from "@/lib/dnd";
+import { appLink, pathAliases, urlOf } from "@/lib/paths";
 import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
 import { shortcut } from "@/lib/keys";
 import { usePersisted, useMe } from "@/lib/session";
@@ -383,7 +385,70 @@ function CrumbItem({ crumb: c, last, path }: { crumb: Crumb; last: boolean; path
   );
 }
 
-/** Windows 11 style address bar: click empty space to show the full path, which can be copied directly */
+/**
+ * The address bar being typed in: shows the full path to copy, and goes to a path typed or pasted into it (see
+ * lib/paths.ts), or to a link to a page of this site. Escape or leaving the box puts the path back
+ */
+function PathInput({ path, onDone }: { path: string; onDone(): void }) {
+  const navigate = useNavigate();
+  const { openFile } = useTabActions();
+  const [text, setText] = useState(path);
+  const [finding, setFinding] = useState(false);
+  const ref = useRef<HTMLInputElement>(null);
+
+  const go = async () => {
+    const typed = text.trim();
+    if (!typed || typed === path) return onDone();
+    const link = appLink(typed, window.location.origin);
+    if (link) {
+      onDone();
+      return navigate(link);
+    }
+    setFinding(true);
+    try {
+      const found = await api.findPath(typed, pathAliases());
+      onDone();
+      if (found.place === "file") openFile(urlOf(found));
+      else navigate(urlOf(found));
+    } catch (e) {
+      setFinding(false);
+      toast.error(
+        e instanceof ApiError && e.status === 404
+          ? t("Can't find \"{path}\". Check the spelling and try again.", { path: typed })
+          : e instanceof Error
+            ? e.message
+            : t("Couldn't open this path"),
+      );
+      ref.current?.focus();
+      ref.current?.select();
+    }
+  };
+
+  return (
+    <input
+      ref={ref}
+      className="h-full min-w-0 flex-1 bg-transparent text-[13px] outline-none select-text"
+      aria-label={t("Full path")}
+      title={t("Type or paste a path, then press Enter")}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      readOnly={finding}
+      autoFocus
+      spellCheck={false}
+      autoComplete="off"
+      onFocus={(e) => e.currentTarget.select()}
+      onBlur={() => !finding && onDone()}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onDone();
+        else if (e.key === "Enter") void go();
+        else return;
+        e.preventDefault();
+      }}
+    />
+  );
+}
+
+/** Windows 11 style address bar: click empty space to show the full path, which can be copied, or type or paste another path to go there */
 function AddressBar({
   crumbs,
   path,
@@ -490,18 +555,7 @@ function AddressBar({
         }}
       >
         {editing ? (
-          <input
-            className="h-full min-w-0 flex-1 bg-transparent text-[13px] outline-none select-text"
-            aria-label={t("Full path")}
-            value={path}
-            readOnly
-            autoFocus
-            onFocus={(e) => e.currentTarget.select()}
-            onBlur={() => setEditing(false)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape" || e.key === "Enter") setEditing(false);
-            }}
-          />
+          <PathInput path={path} onDone={() => setEditing(false)} />
         ) : (
           <>
             <Icon className="size-4 shrink-0 text-muted-foreground" />

@@ -35,6 +35,7 @@ import { toastWithUndo } from "@/lib/undo";
 import { categoryOf, isTextLike, typeLabel } from "@/components/FileIcon";
 import { capsOf } from "@/lib/drives";
 import { locationOf, useSort } from "@/pages/FilesPage";
+import { pathOf } from "@/lib/paths";
 import { useAllPages } from "@/lib/pages";
 
 const SheetEditor = lazy(() => import("@/components/sheet/SheetEditor"));
@@ -185,7 +186,7 @@ export function FileViewPage() {
       toolbar={toolbar}
       icon={FileIcon}
       crumbs={node ? loc.crumbs : [{ label: "…" }]}
-      path={crumbPath(loc.crumbs)}
+      path={pathOf(info.data) ?? crumbPath(loc.crumbs)}
       upTo={node ? parentUrl : null}
       activeFolder={folders.length ? folders[folders.length - 1].id : undefined}
       searchPlaceholder={t("Search files")}

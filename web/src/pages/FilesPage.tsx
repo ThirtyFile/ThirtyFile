@@ -9,6 +9,7 @@ import { crumbPath, type Crumb } from "@/components/Frame";
 import { expandPath } from "@/components/FolderTree";
 import { DRIVE_ICON } from "@/lib/drives";
 import { useAllPages } from "@/lib/pages";
+import { pathOf } from "@/lib/paths";
 import { usePersisted } from "@/lib/session";
 import { t } from "@/lib/i18n";
 
@@ -92,7 +93,7 @@ export function FilesPage() {
       folder={node}
       icon={loc.icon}
       crumbs={loc.crumbs}
-      path={crumbPath(loc.crumbs)}
+      path={pathOf(info.data) ?? crumbPath(loc.crumbs)}
       emptyHint={info.data?.drive.kind === "company" ? t("This space is shared with the whole company. Everyone can see the files uploaded here.") : undefined}
     />
   );

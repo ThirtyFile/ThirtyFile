@@ -558,7 +558,7 @@ export function ThisPcPage() {
     <Frame
       toolbar={toolbar}
       icon={LayersIcon}
-      crumbs={[{ label: t("All spaces") }]}
+      crumbs={[{ label: t("All spaces"), virtual: true }]}
       upTo={null}
       searchPlaceholder={t("Search all spaces")}
       footer={

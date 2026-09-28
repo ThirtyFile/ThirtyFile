@@ -14,7 +14,7 @@ use sqlx::SqliteConnection;
 use crate::{
     auth::User,
     error::{AppError, AppResult},
-    fsops,
+    fsops, paths,
     state::AppState,
     tree::{self, Crumb, NODE_COLS, Need, Node, Role},
     util::{new_id, now, validate_name},
@@ -44,6 +44,9 @@ pub struct NodeInfo {
     role: Role,
     /// Accessed through a folder share (rather than as a space member)
     via_share: bool,
+    /// The path that names this item for the user, as typed into the address bar or used over WebDAV (see paths.rs):
+    /// `["My files", "Reports"]`; None when no path reaches it
+    location: Option<Vec<String>>,
     /// Reason the storage location holding the content is offline (files: where the content is; folders: the space's location)
     offline: Option<String>,
     /// A read-only space: browse, download and share only
@@ -67,6 +70,7 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
     let (mut node, role) = tree::node_with_role(&mut c, &user, &id).await?;
     let drive = tree::get_drive(&mut c, node.drive()).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
     let (path, via_share) = visible_path(&mut c, &user, &node).await?;
+    let location = paths::location_of(&mut c, &user, &node).await?;
     tree::mark_favorites(&mut c, user.id, [&mut node]).await?;
     let is_root = node.parent_id.is_none();
     // Folder spaces are on the server itself: nothing to be offline
@@ -87,6 +91,7 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
         drive: DriveBrief { id: drive.id, name: drive.name, kind: drive.kind, root_id: drive.root_id },
         role,
         via_share,
+        location,
         offline,
         read_only,
     }))

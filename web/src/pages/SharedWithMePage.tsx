@@ -15,7 +15,7 @@ export function SharedWithMePage() {
       showOwner
       upTo="/drives"
       icon={UsersRoundIcon}
-      crumbs={[{ label: t("All spaces"), to: "/drives" }, { label: t("Shared with me") }]}
+      crumbs={[{ label: t("All spaces"), to: "/drives", virtual: true }, { label: t("Shared with me") }]}
       empty={
         <div className="flex min-h-52 flex-col items-center justify-center gap-2 py-10 text-muted-foreground">
           <UsersRoundIcon className="size-9 stroke-[1.4]" />

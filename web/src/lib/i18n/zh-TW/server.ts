@@ -867,4 +867,6 @@ export default {
   // Activity log: Control panel › Email (mail.rs)
   "Email notifications are sent through {server}": "通知郵件經由 {server} 寄送",
   "Email notifications are off": "不以電子郵件寄送通知",
+  // Paths typed into the address bar (paths.rs)
+  "Nothing was found at this path": "這個路徑找不到任何項目",
 } satisfies Record<string, string>;
