@@ -274,7 +274,7 @@ export default {
   "Failed to move files: Incorrect username, password, or private key. Couldn't sign in to SFTP. ({detail})": "搬移檔案失敗：帳號、密碼或私鑰錯誤，無法登入 SFTP（{detail}）",
   "Failed to move files: Incorrect username or password. Couldn't sign in to FTP. ({detail})": "搬移檔案失敗：帳號或密碼錯誤，無法登入 FTP（{detail}）",
   "Failed to move files: FTPS encrypted connection failed: the server may not support TLS, or its certificate couldn't be verified (for self-signed certificates, select \"Skip certificate verification\") ({detail})": "搬移檔案失敗：FTPS 加密連線失敗：伺服器可能不支援 TLS，或憑證無法驗證（自簽憑證請勾選「略過憑證驗證」）（{detail}）",
-  // Log settings and archiving (logs.rs)
+  // Log settings and archiving (logs/)
   "{label} must be between 0 and 36500": "{label}必須介於 0 到 36500 之間",
   "Activity log retention (days)": "活動紀錄保留天數",
   "Share link visit log retention (days)": "分享連結訪問紀錄保留天數",
