@@ -409,6 +409,7 @@ pub async fn load_system_settings(db: &SqlitePool) -> Result<SystemSettings, sql
         .and_then(|v| v.parse().ok())
         .unwrap_or(crate::versions::DEFAULT_DAYS)
         .clamp(0, crate::versions::MAX_DAYS);
+    let move_jobs = get_setting(db, "move_jobs").await?.and_then(|v| v.parse().ok()).unwrap_or(1).clamp(1, crate::moves::MAX_JOBS);
     Ok(SystemSettings {
         shared_enabled: !disabled,
         shared_root_id,
@@ -426,6 +427,7 @@ pub async fn load_system_settings(db: &SqlitePool) -> Result<SystemSettings, sql
         public_links,
         version_keep,
         version_days,
+        move_jobs,
     })
 }
 

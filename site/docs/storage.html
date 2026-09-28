@@ -58,7 +58,7 @@
           <li><strong>Free space</strong>: for the storage folder and <em>Local folder</em> locations, how much is free on the disk that holds the folder, and how big it is.</li>
           <li><strong>Files and spaces</strong>: how many contents the content store keeps there, and how many spaces are on the location. Click the number of spaces to list them, with their kind, owner and size. What is in them isn't shown.</li>
         </ul>
-        <p>A location can't be deleted while a space is on it, or while its content store still keeps files. A folder space an administrator made from a folder of their choice (<a href="#folder-spaces">below</a>) isn't on any location.</p>
+        <p>A location can't be deleted while a space is on it, while a space is being moved to or from it, or while its content store still keeps files. A folder space an administrator made from a folder of their choice (<a href="#folder-spaces">below</a>) isn't on any location.</p>
 
         <h3>Provider notes</h3>
         <ul>
@@ -68,8 +68,27 @@
         </ul>
         <div class="note">Connections without encryption (plain FTP, or S3 over http) are only accepted for addresses inside your own network.</div>
 
-        <h2 id="per-space">A location for each space</h2>
-        <p>Under <strong>Control panel › Spaces</strong>, choose a storage location for a space in the content store (on S3, SFTP or FTP). New files go to the chosen location from then on, and files already in the space can be moved to it. The space stays in use while they move. A folder space stays in its folder: to put its files elsewhere, move them to another space.</p>
+        <h2 id="per-space">Moving a space to another location</h2>
+        <p>Under <strong>Control panel › Spaces</strong>, select a space in the content store (on S3, SFTP or FTP) and choose <strong>Move to another location…</strong>. The dialog shows where the space is now and how big it is, and lists the other locations, with the free space of those on this server's disks. A location without enough room for the space can't be chosen.</p>
+        <p>The move runs in the background, in three steps:</p>
+        <ol>
+          <li><strong>Copy.</strong> Every file of the space, its earlier versions and the items in its trash are copied to the new location, and each copy is checked against the file's SHA-256 fingerprint. The space stays in use meanwhile: files uploaded or changed during the move are copied too.</li>
+          <li><strong>Switch.</strong> Once everything is there, the space switches to the new location in one step. Its new files go there from then on.</li>
+          <li><strong>Clean up.</strong> The old copies are deleted a minute later, so downloads that are reading them can finish.</li>
+        </ol>
+        <p>Until the switch, the space is where it was: a move that stops or is cancelled changes nothing for the people using it. A file whose content is the same as another file's is kept only once in the whole system, so content a space shares with spaces elsewhere moves with it, and those spaces read it from the new location too.</p>
+        <p>Folder spaces can't be moved to another location yet. To put their files elsewhere, move them to another space.</p>
+
+        <h3 id="moves">Following moves</h3>
+        <p><strong>Control panel › Moves</strong> lists the moves that aren't finished, then the earlier ones. For each: the space (a user's "My files" is named after the user), where it moves from and to, how many files and bytes are copied, the speed and the time left, and its state. The page refreshes by itself while a move runs.</p>
+        <ul>
+          <li><strong>One at a time.</strong> Moves run one after the other, in the order they were started; the others wait. <strong>At the same time</strong> lets up to eight run together, on a server with more processors and a fast network.</li>
+          <li><strong>Pause and resume.</strong> A paused move stops after the file it is copying and keeps what it copied. Resumed, it waits for its turn, then continues where it stopped. If ThirtyFile stops or restarts during a move, the move continues the same way when it starts again.</li>
+          <li><strong>Cancel.</strong> The space stays where it was, and what was copied to the new location is removed.</li>
+          <li><strong>Errors.</strong> A file that can't be copied is tried three times. When some still can't be copied, the rest are copied anyway, and the move stops as <em>Stopped by an error</em> without switching. <strong>Details</strong> lists those files (for a user's "My files", without their names, which administrators don't see) and the reason. Fix the cause, then resume the move to try them again, or cancel it. A new location that can't be reached stops the move the same way.</li>
+          <li><strong>History.</strong> Finished and cancelled moves stay on the list, with who started them and when. The activity log also records when each move starts, finishes, fails or is cancelled.</li>
+        </ul>
+        <p>A space being moved can't be deleted, and neither can the user whose "My files" it is, until the move is finished or cancelled.</p>
 
         <h2 id="folder-spaces">Folder spaces: a folder on the server as a space</h2>
         <p>Every space on the storage folder or a <em>Local folder</em> location is a folder space (see <a href="#layout">Where the files are</a>). You can also show an existing folder on the server, such as a NAS share, as a space. Its files stay where they are, as ordinary files, and can also be changed there, for example over SMB or by a scanner.</p>

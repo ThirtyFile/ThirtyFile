@@ -132,6 +132,7 @@ export default {
   // Download progress
   "{s} s left": "剩餘 {s} 秒",
   "{m} min {s} s left": "剩餘 {m} 分 {s} 秒",
+  "{h} h {m} min left": "剩餘 {h} 小時 {m} 分",
   "Completed · {size}": "已完成 · {size}",
   "Canceled": "已取消",
   "Download failed": "下載失敗",

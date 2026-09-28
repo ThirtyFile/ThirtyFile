@@ -14,6 +14,7 @@ mod location_tools;
 mod locations;
 mod logs;
 mod mail;
+mod moves;
 mod notify;
 mod branding;
 mod check;
@@ -343,7 +344,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     let state = AppState(Arc::new(Inner {
         db,
         storages: std::sync::RwLock::new(storages),
-        migrations: Default::default(),
+        moves: Default::default(),
         data_dir: cfg.data.clone(),
         storage_dir: storage,
         space_folders: Some(space_folders),
@@ -384,6 +385,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     }
     spawn_maintenance(state.clone(), cfg.trash_days);
     locations::spawn_health_monitor(state.clone());
+    moves::spawn_runner(state.clone());
     personal::spawn_retry(state.clone());
     folders::spawn_scanner(state.clone());
     // Folder spaces on local disks report changes as they happen
@@ -746,9 +748,11 @@ fn api() -> Router<AppState> {
         .route("/admin/settings", get(admin::get_settings).patch(admin::update_settings))
         .route("/admin/drives", get(drives::admin_list))
         .route("/admin/drives/{id}/scan", post(drives::scan))
-        .route("/admin/drives/{id}/location", axum::routing::put(locations::set_drive_location))
-        .route("/admin/drives/{id}/migrate", post(locations::migrate))
-        .route("/admin/migrations", get(locations::migrations))
+        .route("/admin/moves", get(moves::list).post(moves::create))
+        .route("/admin/moves/settings", axum::routing::put(moves::update_settings))
+        .route("/admin/moves/{id}/pause", post(moves::pause))
+        .route("/admin/moves/{id}/resume", post(moves::resume))
+        .route("/admin/moves/{id}/cancel", post(moves::cancel))
         .route("/admin/storage", get(locations::list).post(locations::create))
         .route("/admin/storage/test", post(locations::test))
         .route("/admin/storage/{id}", patch(locations::update).delete(locations::delete))

@@ -190,6 +190,62 @@ CREATE TABLE pending_blob_deletes (
 );
 CREATE INDEX pending_blob_deletes_location ON pending_blob_deletes (location_id, created_at);
 
+-- Moves of spaces to another storage location (moves/): one job per space, run in the background a few at a time, and
+-- kept afterwards as the history of moves. Names are copied so the history stays readable after spaces, users or
+-- locations are deleted.
+CREATE TABLE space_moves (
+  id              TEXT PRIMARY KEY,
+  -- No foreign key: the history outlives the space
+  drive_id        TEXT NOT NULL,
+  space_name      TEXT NOT NULL,
+  space_kind      TEXT NOT NULL,
+  -- Personal spaces: the owner's user name (they are all called "My files")
+  owner_name      TEXT NOT NULL DEFAULT '',
+  -- Where the space was when the move was asked for: its location (NULL for a folder an administrator chose) and mode
+  from_location   TEXT,
+  from_name       TEXT NOT NULL DEFAULT '',
+  from_mode       TEXT NOT NULL CHECK (from_mode IN ('store', 'folder')),
+  to_location     TEXT NOT NULL,
+  to_name         TEXT NOT NULL DEFAULT '',
+  to_mode         TEXT NOT NULL CHECK (to_mode IN ('store', 'folder')),
+  -- queued: waiting for its turn; running; paused and failed: stopped with what was copied kept, until it is resumed or
+  -- cancelled; done: the space is on the new location; cancelled: it stayed where it was
+  state           TEXT NOT NULL DEFAULT 'queued' CHECK (state IN ('queued', 'running', 'paused', 'failed', 'done', 'cancelled')),
+  -- Files (and earlier versions) to copy, and how many are copied
+  files_total     INTEGER NOT NULL DEFAULT 0,
+  bytes_total     INTEGER NOT NULL DEFAULT 0,
+  files_done      INTEGER NOT NULL DEFAULT 0,
+  bytes_done      INTEGER NOT NULL DEFAULT 0,
+  -- Items that couldn't be copied after a few tries: how many, and the first of them as JSON
+  -- ([{"item": path or null, "error": …}]; never a name from a personal space)
+  failed_items    INTEGER NOT NULL DEFAULT 0,
+  failures        TEXT NOT NULL DEFAULT '[]',
+  -- Why the move stopped (failed)
+  error           TEXT,
+  created_by      INTEGER,
+  created_by_name TEXT NOT NULL DEFAULT '',
+  created_at      INTEGER NOT NULL,
+  started_at      INTEGER,
+  finished_at     INTEGER
+);
+CREATE INDEX space_moves_drive ON space_moves (drive_id, state);
+CREATE INDEX space_moves_state ON space_moves (state, created_at);
+
+-- What an unfinished move copied: a move that stops (paused, failed, or a restart) continues from here, a cancelled one
+-- removes what it copied, and background deletion leaves content copied for a move alone (tree::claim_for_deletion).
+-- The rows go when the move has ended and cleaned up.
+CREATE TABLE space_move_items (
+  move_id       TEXT NOT NULL,
+  -- What was copied: a content of the store (its hash)
+  item_id       TEXT NOT NULL,
+  -- Content copied into the target's content store, and the location it was copied from
+  hash          TEXT,
+  from_location TEXT,
+  size          INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (move_id, item_id)
+);
+CREATE INDEX space_move_items_hash ON space_move_items (hash) WHERE hash IS NOT NULL;
+
 -- ───────────── Files ─────────────
 
 -- Spaces: every user's personal drive, the company-wide drive and team drives.
