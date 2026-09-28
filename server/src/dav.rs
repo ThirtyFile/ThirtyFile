@@ -258,7 +258,7 @@ fn parse(xml: &[u8]) -> AppResult<Parsed> {
     loop {
         let (ns, event) = r.read_resolved_event().map_err(|_| bad())?;
         let ns = match ns {
-            ResolveResult::Bound(n) => String::from_utf8_lossy(n.as_ref()).into_owned(),
+            ResolveResult::Bound(n) => n.as_ref().to_owned(),
             _ => String::new(),
         };
         let (start, empty) = match &event {
@@ -267,7 +267,7 @@ fn parse(xml: &[u8]) -> AppResult<Parsed> {
             _ => (None, false),
         };
         if let Some(e) = start {
-            let local = String::from_utf8_lossy(e.local_name().as_ref()).into_owned();
+            let local = e.local_name().as_ref().to_owned();
             let in_prop = open.last().is_some_and(|(n, l)| n == DAV_NS && l == "prop");
             let in_owner = open.iter().any(|(n, l)| n == DAV_NS && l == "owner");
             if in_prop {
@@ -291,7 +291,7 @@ fn parse(xml: &[u8]) -> AppResult<Parsed> {
                 open.pop();
             }
             Event::Text(t) if open.iter().any(|(n, l)| n == DAV_NS && l == "owner") => {
-                out.owner.push_str(&t.decode().map_err(|_| bad())?);
+                out.owner.push_str(&t.xml10_content());
             }
             Event::Eof => break,
             _ => {}
