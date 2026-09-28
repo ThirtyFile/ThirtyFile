@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "unicorn", "oxc", "vitest"],
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/exhaustive-deps": "error",
+    // Rules for the React Compiler, which the project doesn't use: state set from effects, refs read while
+    // rendering, Date.now() in render, sheets changed in place and the list virtualizer are deliberate here
+    "react/set-state-in-effect": "off",
+    "react/refs": "off",
+    "react/purity": "off",
+    "react/immutability": "off",
+    "react/incompatible-library": "off",
+    // new Array(n) is meant as a length throughout (chart series)
+    "unicorn/no-new-array": "off",
+    // Copying before a loop that removes items from the same collection (live attribute lists, maps) is deliberate
+    "unicorn/no-useless-spread": "off"
+  },
+  "ignorePatterns": ["dist", "node_modules", "public", "test-results"]
+}

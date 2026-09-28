@@ -135,6 +135,7 @@ function FramePreview({ node, source, kind }: { node: Node; source: FileSource; 
       window.clearTimeout(readyTimer);
       window.removeEventListener("message", onMessage);
     };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every refresh of the list: its id and date say when the file changed
   }, [node.id, node.updated_at, source, kind, srcDoc]);
   return (
     <div className="relative size-full overflow-hidden bg-neutral-200 dark:bg-neutral-800">
@@ -169,6 +170,7 @@ function XlsxPreview({ node, source }: { node: Node; source: FileSource }) {
     return () => {
       cancelled = true;
     };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every refresh of the list: its id and date say when the file changed
   }, [node.id, node.updated_at, source]);
   return (
     <div className="relative size-full bg-white">

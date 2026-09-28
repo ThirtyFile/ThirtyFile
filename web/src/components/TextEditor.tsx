@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { LanguageDescription, type LanguageSupport } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
@@ -84,9 +84,12 @@ export default function TextEditor(props: {
     return () => {
       cancelled = true;
     };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every refresh of the list: its id and date say when the file changed
   }, [props.node.id, props.node.updated_at, props.source, reload]);
 
-  useEffect(() => props.onDirtyChange?.(dirty), [dirty]);
+  // Reported when it changes; the parent's callback may be new on every render
+  const reportDirty = useEffectEvent((d: boolean) => props.onDirtyChange?.(d));
+  useEffect(() => reportDirty(dirty), [dirty]);
 
   const change = (value: string) => {
     setText(value);

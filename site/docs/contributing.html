@@ -52,7 +52,7 @@
         <h2 id="checks">Checks</h2>
         <p>Run these before opening a pull request. The same checks run on GitHub.</p>
         <pre><code>cd server && cargo test && cargo clippy --all-targets
-cd ../web && pnpm typecheck && node scripts/check-i18n.mjs && pnpm test</code></pre>
+cd ../web && pnpm typecheck && pnpm lint && node scripts/check-i18n.mjs && pnpm test</code></pre>
         <p>The end-to-end test signs in, uploads and previews files in a real browser (Playwright), against a server built from the repository:</p>
         <pre><code>cd web && pnpm build && (cd ../server && cargo build --release) && pnpm test:e2e</code></pre>
         <ul>

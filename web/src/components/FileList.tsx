@@ -135,6 +135,7 @@ function BrowserThumb({ node, source, className, iconClass }: { node: Node; sour
       seen.disconnect();
       job?.release();
     };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every refresh of the list: its id and date say when the file changed
   }, [node.id, node.updated_at, source]);
   if (url) return <img src={url} draggable={false} onError={() => setUrl(null)} className={cn("object-contain", className)} alt="" />;
   return (
@@ -458,13 +459,14 @@ export function FileList(p: FileListProps) {
     setGeo((g) => (g.top === top && g.width === width ? g : { top, width }));
   }, []);
   useLayoutEffect(measureGeo);
+  const empty = n === 0;
   useEffect(() => {
     const el = root.current;
     if (!el) return;
     const ro = new ResizeObserver(measureGeo);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [measureGeo, grid, n === 0]);
+  }, [measureGeo, grid, empty]);
 
   // Keyboard moves: focus the item once its row is rendered
   useLayoutEffect(() => {
@@ -478,11 +480,11 @@ export function FileList(p: FileListProps) {
 
   // A new item is renamed right after it's created, wherever it sorts: bring it into view
   const renamingIndex = p.renamingId ? indexOf.get(p.renamingId) : undefined;
+  const renamingShown = renamingIndex !== undefined;
   useEffect(() => {
     if (renamingIndex !== undefined) v.scrollToIndex(Math.floor(renamingIndex / cols));
-    // Only when renaming starts, not while the list reloads
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.renamingId, renamingIndex === undefined]);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- only when renaming starts, not while the list reloads
+  }, [p.renamingId, renamingShown]);
 
   const focusItem = (index: number) => {
     const id = p.items[index].id;

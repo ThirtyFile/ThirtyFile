@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useEffectEvent, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -83,18 +83,20 @@ export function FileViewPage() {
   // Images, media and unpreviewable files use a custom context menu; text, Word and Excel keep the browser menu so text can be copied
   const customMenu = !!node && ["image", "video", "audio", "other", "archive"].includes(categoryOf(node)) && !isTextLike(node);
   const sheetEditingNow = !!node && editingId === node.id;
+  // An effect event: the listener always sees the current neighbours without subscribing again
+  const onArrowKey = useEffectEvent((e: KeyboardEvent) => {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || dialog || sheetEditingNow) return;
+    if ((e.target as HTMLElement)?.closest?.(OWN_ARROWS) || document.querySelector("[data-slot=dialog-content], [role=menu]")) return;
+    const target = e.key === "ArrowLeft" ? prev : e.key === "ArrowRight" ? next : undefined;
+    if (!target) return;
+    e.preventDefault();
+    goTo(target);
+  });
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || dialog || sheetEditingNow) return;
-      if ((e.target as HTMLElement)?.closest?.(OWN_ARROWS) || document.querySelector("[data-slot=dialog-content], [role=menu]")) return;
-      const target = e.key === "ArrowLeft" ? prev : e.key === "ArrowRight" ? next : undefined;
-      if (!target) return;
-      e.preventDefault();
-      goTo(target);
-    };
+    const onKey = (e: KeyboardEvent) => onArrowKey(e);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [prev?.id, next?.id, dialog, sheetEditingNow]);
+  }, []);
 
   if (node?.kind === "folder") return <Navigate to={`/files/${node.id}`} replace />;
 

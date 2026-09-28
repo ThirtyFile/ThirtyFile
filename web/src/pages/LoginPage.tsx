@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRightIcon, KeyRoundIcon, Loader2Icon, UserRoundIcon } from "lucide-react";
@@ -207,9 +207,9 @@ export function LoginPage() {
   });
 
   // When entering the sign-in screen or switching accounts, put the cursor in the field to fill
+  const focusFirst = useEffectEvent(() => focusField());
   useEffect(() => {
-    if (stage === "signin" && !error) focusField();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (stage === "signin" && !error) focusFirst();
   }, [stage, who, error]);
 
   // The code field of two-factor sign-in

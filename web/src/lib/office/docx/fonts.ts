@@ -21,6 +21,7 @@ export interface FontSlots {
 /** Strip characters that could break CSS before putting a font name into a style attribute */
 export function cleanFace(face: string | null | undefined): string | undefined {
   if (!face) return undefined;
+  // oxlint-disable-next-line no-control-regex -- control characters are removed on purpose
   const v = face.replace(/[;{}<>\\"'`\u0000-\u001f]/g, "").trim().slice(0, 64);
   return v || undefined;
 }

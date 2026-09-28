@@ -22,6 +22,7 @@ export function Preview(props: {
   onSaved?(n: Node): void;
 }) {
   const node = props.files[props.index];
+  const { onIndexChange, onClose } = props;
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
@@ -42,11 +43,11 @@ export function Preview(props: {
       const next = props.index + delta;
       if (next < 0 || next >= props.files.length || !(await guard())) return;
       setDirty(false);
-      props.onIndexChange(next);
+      onIndexChange(next);
     },
-    [props.index, props.files.length, guard, props.onIndexChange],
+    [props.index, props.files.length, guard, onIndexChange],
   );
-  const close = useCallback(async () => (await guard()) && props.onClose(), [guard, props.onClose]);
+  const close = useCallback(async () => (await guard()) && onClose(), [guard, onClose]);
   // Esc is handled below (it must not close while typing in an editor)
   const root = useRef<HTMLDivElement>(null);
   useOverlayFocus(root, !!node);

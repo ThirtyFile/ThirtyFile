@@ -170,8 +170,7 @@ export function useMarquee({
       window.removeEventListener("blur", stop);
       stop();
     };
-    // update and stop only read refs
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- update and stop only read refs
   }, []);
 
   const onMouseDown = (e: ReactMouseEvent<HTMLElement>) => {

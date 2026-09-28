@@ -598,7 +598,9 @@ function criteria(c: Value): (v: Value) => boolean {
           .replace(/~\?/g, "\u0002")
           .replace(/\*/g, ".*")
           .replace(/\?/g, ".")
+          // oxlint-disable-next-line no-control-regex -- placeholders for escaped wildcards, set just above
           .replace(/\u0001/g, "\\*")
+          // oxlint-disable-next-line no-control-regex
           .replace(/\u0002/g, "\\?") +
         "$",
       "is",

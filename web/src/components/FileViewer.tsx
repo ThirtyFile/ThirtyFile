@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useEffectEvent, useState } from "react";
 import { DownloadIcon, Loader2Icon } from "lucide-react";
 import { triggerDownload, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
@@ -73,8 +73,9 @@ function MarkdownFile(props: Parameters<typeof FileViewer>[0]) {
   const { node, embedded } = props;
   const [mode, setMode] = useState<"preview" | "edit">(() => (hasDraft(node.id) ? "edit" : "preview"));
   // Unsaved changes are reported by the editor; the rendered view has none of its own
+  const reportClean = useEffectEvent(() => props.onDirtyChange?.(false));
   useEffect(() => {
-    if (mode === "preview") props.onDirtyChange?.(false);
+    if (mode === "preview") reportClean();
   }, [mode]);
   const toggle = (
     <div role="group" aria-label={t("View")} className="flex shrink-0 overflow-hidden rounded-md border text-xs">

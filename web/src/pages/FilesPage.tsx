@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useEffectEvent } from "react";
 import { useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { UsersRoundIcon } from "lucide-react";
@@ -54,10 +54,12 @@ export function FilesPage() {
   const loc = locationOf(info.data);
 
   // Expand the left-hand tree down to the current folder
-  useEffect(() => {
+  const expandHere = useEffectEvent(() => {
     if (!info.data || info.data.via_share) return;
     expandPath(["this-pc", info.data.drive.root_id, ...path.slice(0, -1).map((c) => c.id)]);
-  }, [path.map((c) => c.id).join(), node?.id]);
+  });
+  const pathKey = path.map((c) => c.id).join();
+  useEffect(() => expandHere(), [pathKey, node?.id]);
 
   const parent = path.length >= 2 ? `/files/${path[path.length - 2].id}` : path.length === 1 ? loc.rootUrl : "/drives";
 

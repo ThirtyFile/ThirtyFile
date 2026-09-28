@@ -86,7 +86,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      # Only type-checked here: the Docker image job builds the frontend. The backend tests don't need it (without
+      # Only type-checked and linted (oxlint, web/.oxlintrc.json) here: the Docker image job builds the frontend. The backend tests don't need it (without
       # web/dist, the server is compiled without pages)
       - name: Frontend
         working-directory: web
@@ -94,6 +94,7 @@ jobs:
           pnpm install --frozen-lockfile
           node scripts/check-i18n.mjs
           pnpm typecheck
+          pnpm lint
 
       # Unit tests (Vitest), with the coverage in the job summary
       - name: Frontend tests

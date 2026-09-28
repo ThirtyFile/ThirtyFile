@@ -134,7 +134,6 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
     shown.current = saved;
     if (!dirtyRef.current) reset(saved);
     // reset only sets state
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saved]);
 
   const save = useMutation({

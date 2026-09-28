@@ -15,7 +15,7 @@ Security problems are reported privately: see the [security policy](SECURITY.md)
 3. Run the checks:
    ```bash
    cd server && cargo test && cargo clippy --all-targets
-   cd ../web && pnpm typecheck && node scripts/check-i18n.mjs && pnpm test
+   cd ../web && pnpm typecheck && pnpm lint && node scripts/check-i18n.mjs && pnpm test
    ```
 4. Open a pull request with a title that says what changes, one label (`enhancement`, `bug`, `performance`, `accessibility`, `documentation`, `dependencies` or `maintenance`), and `Closes #123` in the description.
 

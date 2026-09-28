@@ -38,10 +38,11 @@ export function useExplorerState(p: ExplorerProps) {
   const allFavorite = selectedNodes.length > 0 && selectedNodes.every((n) => n.is_favorite);
 
   // Clear the selection when switching folders
+  const place = `${p.folderId}|${p.crumbs.map((c) => c.label).join("/")}`;
   useEffect(() => {
     setSelected(new Set());
     setAnchor(null);
-  }, [p.folderId, p.crumbs.map((c) => c.label).join("/")]);
+  }, [place]);
 
   return {
     me,

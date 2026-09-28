@@ -26,6 +26,7 @@ export default function MarkdownPreview(props: { node: Node; source: FileSource;
     return () => {
       cancelled = true;
     };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every refresh of the list: its id and date say when the file changed
   }, [props.node.id, props.node.updated_at, props.source]);
 
   const html = useMemo(() => (text === null ? "" : renderMarkdown(text)), [text]);

@@ -79,7 +79,7 @@ export default function SheetEditor(props: { node: Node; source: FileSource; onS
       cancelled = true;
     };
     // Load only when the file changes or a reload is requested; updated_at changing after a save doesn't require reloading
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every save
   }, [node.id, reload]);
 
   if (error)
@@ -181,12 +181,12 @@ function Workspace({
   const colsCount = Math.min(MAX_COLS, Math.max(sheet.maxCol + 10, 26, (wholeRows ? range.c1 : range.c2) + 8));
   const rows = useMemo(
     () => new Axis(rowsCount, (i) => sheet.rowHeights.get(i) ?? sheet.defaultRowHeight),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the sheet is changed in place: session.version and layoutVer say when its row heights changed
     [sheet, rowsCount, session.version, layoutVer],
   );
   const cols = useMemo(
     () => new Axis(colsCount, (i) => sheet.colWidths.get(i) ?? sheet.defaultColWidth),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- as above, for column widths
     [sheet, colsCount, session.version, layoutVer],
   );
   const view = (): View => ({ width: size.w, height: size.h, scrollX: scroll.current.x, scrollY: scroll.current.y, rows, cols });
@@ -228,7 +228,7 @@ function Workspace({
         clip: st.clip,
       });
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- draws from stateRef and the workbook, which change in place; these say when the geometry changed
   }, [size, rows, cols, sheet]);
   useEffect(() => redraw());
 
@@ -473,7 +473,7 @@ function Workspace({
         }
       }
     return { count, nums, sum };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the cells are changed in place: session.version says when
   }, [range.r1, range.r2, range.c1, range.c2, sheetIdx, session.version]);
 
   const nameBox =

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import { Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
@@ -49,6 +49,7 @@ export default function SheetPreview({ buffer, onError }: { buffer: ArrayBuffer;
   const [sheetIdx, setSheetIdx] = useState(0);
   const drawingFrame = useDrawingFrame(data?.drawingParts ?? null);
 
+  const fail = useEffectEvent((message: string) => onError(message));
   useEffect(() => {
     let cancelled = false;
     let pkg: OoxmlPackage | null = null;
@@ -66,12 +67,11 @@ export default function SheetPreview({ buffer, onError }: { buffer: ArrayBuffer;
       if (cancelled) return pkg.dispose();
       setSheetIdx(book.active ?? 0);
       setData({ book, pkg, theme, dxfs: readDxfs(styles, theme, palette), palette, drawingParts: parts });
-    })().catch((e) => !cancelled && onError(e instanceof Error ? e.message : t("Couldn't open this spreadsheet")));
+    })().catch((e) => !cancelled && fail(e instanceof Error ? e.message : t("Couldn't open this spreadsheet")));
     return () => {
       cancelled = true;
       pkg?.dispose();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buffer]);
 
   if (!data)

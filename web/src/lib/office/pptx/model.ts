@@ -220,7 +220,7 @@ export async function loadSlide(pres: Pres, index: number): Promise<SlideInfo | 
   const lRel = await pres.pkg.relOfType(ref.path, "/slideLayout");
   const layout = lRel ? await loadLayout(pres, lRel.target) : null;
   const master = layout?.master ?? null;
-  const clrMap = { ...(master?.clrMap ?? DEFAULT_CLRMAP), ...(overrideMap(layout?.root ?? null) ?? {}), ...(overrideMap(info.root) ?? {}) };
+  const clrMap = { ...(master?.clrMap ?? DEFAULT_CLRMAP), ...overrideMap(layout?.root ?? null), ...overrideMap(info.root) };
   const theme = master?.theme ?? null;
   return { ...info, pres, layout, master, theme, cc: { theme, clrMap }, num: index + 1 };
 }
