@@ -2,7 +2,7 @@ import { useState, type MouseEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDownIcon, FolderOpenIcon, Grid2X2Icon, ListIcon, PanelTopIcon, RefreshCwIcon, SettingsIcon } from "lucide-react";
-import { api } from "@/api";
+import { api, moveActive } from "@/api";
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -35,6 +35,8 @@ export function ControlPanelPage() {
   const system = useQuery({ queryKey: ["system"], queryFn: api.systemSettings });
   const locations = useQuery({ queryKey: ["storage-locations"], queryFn: api.storageLocations });
   const drives = useQuery({ queryKey: ["admin-drives"], queryFn: api.adminDrives });
+  const moves = useQuery({ queryKey: ["moves"], queryFn: api.moves });
+  const unfinished = moves.data?.moves.filter(moveActive).length;
   // The company space can be renamed, so the summary uses its current name
   const company = drives.data?.find((d) => d.kind === "company")?.name ?? t("All files");
 
@@ -49,6 +51,7 @@ export function ControlPanelPage() {
         storage: locations.data
           ? t("{n} location · Default: {name}|{n} locations · Default: {name}", { n: locations.data.length, name: defaultLocation?.name ?? "—" })
           : undefined,
+        moves: unfinished === undefined ? undefined : unfinished ? t("{n} move not finished|{n} moves not finished", { n: unfinished }) : t("No moves in progress"),
         usage: t("{size} used on disk", { size: formatBytes(s.stored_bytes) }),
         general: system.data?.shared_enabled ? t("\"{name}\" enabled", { name: company }) : t("\"{name}\" disabled", { name: company }),
       }

@@ -380,6 +380,9 @@ pub async fn move_personal_first(st: &AppState, me: &crate::auth::User, user_id:
         return Ok(None);
     };
     let target = tree::get_drive(&mut c, target).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
+    // Neither may be on its way to another storage location
+    crate::moves::refuse_busy(&mut c, &own.id).await?;
+    crate::moves::refuse_busy(&mut c, &target.id).await?;
     drop(c);
     if !(own.is_folder() || target.is_folder()) {
         return Ok(None);
@@ -409,6 +412,10 @@ pub async fn remove_personal_in(
         sqlx::query("UPDATE users SET personal_pending = NULL WHERE id = ?").bind(id).execute(&mut *tx).await?;
         return Ok(None);
     };
+    crate::moves::refuse_busy(tx, &drive_id).await?;
+    if let Some(target) = &q.move_to {
+        crate::moves::refuse_busy(tx, target).await?;
+    }
     let (has_files,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM nodes WHERE parent_id = ?)").bind(&root_id).fetch_one(&mut *tx).await?;
     let detail = if let Some(place) = moved {
         Some(format!("files moved to {place}"))

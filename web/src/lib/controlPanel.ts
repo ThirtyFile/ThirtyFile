@@ -9,6 +9,7 @@ import {
   MailIcon,
   PaletteIcon,
   PieChartIcon,
+  TruckIcon,
   SlidersHorizontalIcon,
   UsersIcon,
   UsersRoundIcon,
@@ -16,7 +17,20 @@ import {
 } from "lucide-react";
 import { t, tc } from "@/lib/i18n";
 
-export type ControlPanelKey = "users" | "groups" | "shares" | "drives" | "storage" | "usage" | "general" | "branding" | "sso" | "email" | "activity" | "logs";
+export type ControlPanelKey =
+  | "users"
+  | "groups"
+  | "shares"
+  | "drives"
+  | "storage"
+  | "moves"
+  | "usage"
+  | "general"
+  | "branding"
+  | "sso"
+  | "email"
+  | "activity"
+  | "logs";
 
 export interface ControlPanelItem {
   key: ControlPanelKey;
@@ -92,6 +106,16 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     tone: "bg-amber-500/12 text-amber-700 dark:text-amber-300",
     category: "storage",
     keywords: "s3 r2 aws minio rustfs nas 本機 磁碟 bucket 預設 storage location local disk default", // i18n-ignore: bilingual search keywords
+  },
+  {
+    key: "moves",
+    to: "/admin/moves",
+    title: t("Moves"),
+    desc: t("Spaces being moved to another storage location, with their progress; pause, resume or cancel them"),
+    icon: TruckIcon,
+    tone: "bg-orange-500/12 text-orange-700 dark:text-orange-300",
+    category: "storage",
+    keywords: "搬移 移動 儲存位置 進度 暫停 繼續 取消 move migrate storage location progress pause resume cancel", // i18n-ignore: bilingual search keywords
   },
   {
     key: "usage",

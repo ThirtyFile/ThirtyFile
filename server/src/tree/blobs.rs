@@ -263,6 +263,24 @@ async fn claim_for_deletion(st: &AppState, hash: &str, location: &str) -> Option
         let _ = forget_pending(st, hash, location).await;
         return None;
     }
+    // Copied there by a move that hasn't ended: the move is about to use it, or removes it itself when cancelled.
+    // Looked at again in an hour.
+    match crate::moves::copied_for_move(&st.db, hash, location).await {
+        Ok(false) => {}
+        Ok(true) => {
+            let _ = sqlx::query("UPDATE pending_blob_deletes SET created_at = ? WHERE hash = ? AND location_id = ?")
+                .bind(now() + 3600)
+                .bind(hash)
+                .bind(location)
+                .execute(&st.db)
+                .await;
+            return None;
+        }
+        Err(e) => {
+            tracing::warn!("Failed to check whether physical file {hash} is being moved: {e}");
+            return None;
+        }
+    }
     let mut g = st.blob_guard.lock().unwrap();
     if g.staging.contains_key(hash) {
         return None;

@@ -262,18 +262,48 @@ export interface UnusedJob {
   failed: number;
 }
 
-export interface Migration {
+export type MoveState = "queued" | "running" | "paused" | "failed" | "done" | "cancelled";
+
+/** A move of a space to another storage location (Control panel › Moves) */
+export interface SpaceMove {
+  id: string;
   drive_id: string;
-  target: string;
-  total_files: number;
-  total_bytes: number;
-  done_files: number;
-  done_bytes: number;
-  running: boolean;
+  space_name: string;
+  space_kind: DriveKind;
+  /** Personal spaces: the owner's user name */
+  owner_name: string;
+  /** null: a folder an administrator chose, on no location */
+  from_location: string | null;
+  from_name: string;
+  from_mode: "store" | "folder";
+  to_location: string;
+  to_name: string;
+  to_mode: "store" | "folder";
+  state: MoveState;
+  files_total: number;
+  bytes_total: number;
+  files_done: number;
+  bytes_done: number;
+  failed_items: number;
+  /** The first items that couldn't be copied; `item` is null in personal spaces */
+  failures: { item: string | null; error: string }[];
   error: string | null;
-  started_at: number;
+  created_by_name: string;
+  created_at: number;
+  started_at: number | null;
   finished_at: number | null;
+  /** Running moves: bytes copied per second lately */
+  speed?: number | null;
 }
+
+export interface MovesList {
+  moves: SpaceMove[];
+  /** Moves that run at the same time */
+  concurrency: number;
+}
+
+/** Whether a move isn't over: the space is being moved, or waits to be */
+export const moveActive = (m: SpaceMove) => m.state === "queued" || m.state === "running" || m.state === "paused" || m.state === "failed";
 
 export type PrincipalType = "user" | "group" | "everyone";
 
@@ -1209,13 +1239,21 @@ export const api = {
   setDefaultStorage: (id: string) => post(enc`/admin/storage/${id}/default`),
   storageLocationSpaces: (id: string) =>
     get<LocationSpace[]>(enc`/admin/storage/${id}/spaces`).then((l) => l.map((s) => ({ ...s, name: driveName(s) }))),
-  setDriveLocation: (driveId: string, location_id: string, migrate: boolean) =>
-    request("PUT", enc`/admin/drives/${driveId}/location`, {
-      location_id,
-      migrate,
-    }),
-  migrateDrive: (driveId: string) => post(enc`/admin/drives/${driveId}/migrate`),
-  migrations: () => get<Migration[]>("/admin/migrations"),
+  moves: () =>
+    get<MovesList>("/admin/moves").then((l) => ({
+      ...l,
+      moves: l.moves.map((m) => ({
+        ...m,
+        space_name: driveName({ kind: m.space_kind, name: m.space_name }),
+        from_name: m.from_location ? locationName(m.from_location, m.from_name) : m.from_name,
+        to_name: locationName(m.to_location, m.to_name),
+      })),
+    })),
+  startMoves: (drive_ids: string[], location_id: string) => post<{ ids: string[] }>("/admin/moves", { drive_ids, location_id }),
+  pauseMove: (id: string) => post(enc`/admin/moves/${id}/pause`),
+  resumeMove: (id: string) => post(enc`/admin/moves/${id}/resume`),
+  cancelMove: (id: string) => post(enc`/admin/moves/${id}/cancel`),
+  setMoveConcurrency: (concurrency: number) => request("PUT", "/admin/moves/settings", { concurrency }),
   groups: () => get<Group[]>("/admin/groups"),
   createGroup: (req: { name: string; description?: string; members?: number[] }) => post<{ id: number }>("/admin/groups", req),
   updateGroup: (id: number, req: { name?: string; description?: string; members?: number[] }) => request("PATCH", enc`/admin/groups/${id}`, req),

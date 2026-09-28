@@ -1,4 +1,4 @@
-//! Storage locations (System settings › Storage locations) and space move jobs.
+//! Storage locations (System settings › Storage locations). Moving spaces between them is in moves/.
 
 use std::{collections::HashMap, path::Path as FsPath, sync::Arc, time::Duration};
 
@@ -9,14 +9,12 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{SqliteConnection, SqlitePool};
-use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{
     auth::Admin,
     error::{AppError, AppResult},
     logs,
-    state::{AppState, LocationHealth, MigrationStatus},
+    state::{AppState, LocationHealth},
     storage::{self, Storage},
     tree,
     util::{self, new_id, now, validate_name},
@@ -662,6 +660,10 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
             format!("{drives} spaces still use this location. Change them first.")
         }));
     }
+    // A space being moved to it isn't on it yet, but content is being copied there
+    if crate::moves::location_busy(&mut tx, &id).await? {
+        return Err(AppError::bad_request("A space is being moved to or from this location. Wait until the move finishes, or cancel it."));
+    }
     if blobs > 0 {
         return Err(AppError::bad_request(format!(
             "This location still stores {blobs} {}. Move the spaces that use it to another location first.",
@@ -685,411 +687,10 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
     Ok(Json(json!({ "ok": true })))
 }
 
-// ───────────── Space storage locations and moves ─────────────
-
-#[derive(Deserialize)]
-pub struct DriveLocationReq {
-    /// The location the space is moved to: recorded on the space until the next move
-    location_id: String,
-    /// Also move existing files to the new location
-    #[serde(default)]
-    migrate: bool,
-}
-
-pub async fn set_drive_location(
-    State(st): State<AppState>,
-    Admin(user): Admin,
-    Path(drive_id): Path<String>,
-    Json(req): Json<DriveLocationReq>,
-) -> AppResult<Json<Value>> {
-    refuse_folder_space(&st, &drive_id).await?;
-    let target = req.location_id;
-    let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM storage_locations WHERE id = ?").bind(&target).fetch_optional(&st.db).await?;
-    if exists.is_none() {
-        return Err(AppError::bad_request("Storage location not found"));
-    }
-    if !st.storages.read().unwrap().contains_key(&target) {
-        return Err(AppError::bad_request("This storage location can't be reached right now"));
-    }
-    if st.migrations.lock().unwrap().get(&drive_id).is_some_and(|j| j.running) {
-        return Err(AppError::conflict("This space is being moved. Wait until the move finishes before changing it."));
-    }
-    // First make sure the target location is really reachable; otherwise later uploads to this space would all fail
-    probe(&st, &target).await.map_err(|e| AppError::bad_request(format!("The target storage location can't be reached, so nothing was changed: {e}")))?;
-    {
-        let _w = st.write_lock.lock().await;
-        let mut tx = crate::db::begin_write(&st.db).await?;
-        let drive = tree::get_drive(&mut tx, &drive_id).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
-        sqlx::query("UPDATE drives SET location_id = ? WHERE id = ?").bind(&target).bind(&drive_id).execute(&mut *tx).await?;
-        let root = tree::get_node(&mut tx, &drive.root_id).await?;
-        logs::record_activity(&mut tx, &user, root.as_ref(), "drive_location", &target).await?;
-        tx.commit().await?;
-    }
-    if req.migrate {
-        start_migration(&st, &drive_id).await?;
-    }
-    Ok(Json(json!({ "ok": true })))
-}
-
-/// A folder space's files are a folder on the server: they can't be moved to a storage location
-async fn refuse_folder_space(st: &AppState, drive_id: &str) -> AppResult<()> {
-    let (mode,): (String,) = sqlx::query_as("SELECT mode FROM drives WHERE id = ?")
-        .bind(drive_id)
-        .fetch_optional(&st.db)
-        .await?
-        .ok_or_else(|| AppError::not_found("Space not found"))?;
-    if mode == "folder" {
-        return Err(AppError::bad_request("This space shows a folder on the server; its files can't be moved to a storage location"));
-    }
-    Ok(())
-}
-
-pub async fn migrate(State(st): State<AppState>, _: Admin, Path(drive_id): Path<String>) -> AppResult<Json<Value>> {
-    refuse_folder_space(&st, &drive_id).await?;
-    let target = tree::drive_location(&mut *st.db.acquire().await?, &drive_id).await?;
-    probe(&st, &target).await.map_err(|e| AppError::bad_request(format!("The target storage location can't be reached: {e}")))?;
-    start_migration(&st, &drive_id).await?;
-    Ok(Json(json!({ "ok": true })))
-}
-
-pub async fn migrations(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<MigrationStatus>>> {
-    let mut list: Vec<MigrationStatus> = st.migrations.lock().unwrap().values().cloned().collect();
-    list.sort_by_key(|m| std::cmp::Reverse(m.started_at));
-    Ok(Json(list))
-}
-
-async fn start_migration(st: &AppState, drive_id: &str) -> AppResult<()> {
-    let target = tree::drive_location(&mut *st.db.acquire().await?, drive_id).await?;
-    st.storage(&target)?;
-    {
-        let mut jobs = st.migrations.lock().unwrap();
-        if jobs.get(drive_id).is_some_and(|j| j.running) {
-            return Err(AppError::conflict("This space is being moved"));
-        }
-        jobs.insert(
-            drive_id.to_string(),
-            MigrationStatus { drive_id: drive_id.to_string(), target: target.clone(), running: true, started_at: now(), ..Default::default() },
-        );
-    }
-    let st = st.clone();
-    let drive_id = drive_id.to_string();
-    tokio::spawn(async move {
-        let result = run_migration(&st, &drive_id, &target).await;
-        let mut jobs = st.migrations.lock().unwrap();
-        if let Some(job) = jobs.get_mut(&drive_id) {
-            job.running = false;
-            job.finished_at = Some(now());
-            if let Err(e) = result {
-                tracing::warn!("Moving space {drive_id} failed: {}", e.message);
-                job.error = Some(e.message);
-            }
-        }
-    });
-    Ok(())
-}
-
-fn update_job(st: &AppState, drive_id: &str, f: impl FnOnce(&mut MigrationStatus)) {
-    if let Some(job) = st.migrations.lock().unwrap().get_mut(drive_id) {
-        f(job);
-    }
-}
-
-/// Moves file content used by the space that isn't in the target location yet. Verifies the sha256 after copying, then switches the reference;
-/// the copy in the old location is deleted only after a minute (letting in-flight downloads finish).
-async fn run_migration(st: &AppState, drive_id: &str, target: &str) -> AppResult<()> {
-    // Content of the space not yet at the target, walked in hash order: each page continues after the last hash
-    // (`?3`), so a page costs the same at the end of a large space as at the start
-    const PENDING: &str = "FROM blobs b WHERE b.location_id != ?1 AND b.hash > ?3
-         AND (EXISTS (SELECT 1 FROM nodes n WHERE n.blob_hash = b.hash AND n.drive_id = ?2)
-              OR EXISTS (SELECT 1 FROM node_versions v JOIN nodes n ON n.id = v.node_id WHERE v.blob_hash = b.hash AND n.drive_id = ?2))";
-    let (files, bytes): (i64, i64) = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT COUNT(*), COALESCE(SUM(b.size), 0) {PENDING}")))
-        .bind(target)
-        .bind(drive_id)
-        .bind("")
-        .fetch_one(&st.db)
-        .await?;
-    update_job(st, drive_id, |j| {
-        j.total_files = files;
-        j.total_bytes = bytes;
-    });
-    let dst = st.storage(target)?;
-    let mut moved: Vec<(String, String)> = Vec::new();
-    let mut last = String::new();
-    loop {
-        let rows: Vec<(String, i64, String)> =
-            sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT b.hash, b.size, b.location_id {PENDING} ORDER BY b.hash LIMIT 50")))
-                .bind(target)
-                .bind(drive_id)
-                .bind(&last)
-                .fetch_all(&st.db)
-                .await?;
-        let Some((hash, ..)) = rows.last() else { break };
-        last = hash.clone();
-        for (hash, size, from) in rows {
-            if let Some(old) = move_blob(st, &dst, target, hash, size, from).await? {
-                moved.push(old);
-            }
-            update_job(st, drive_id, |j| {
-                j.done_files += 1;
-                j.done_bytes += size;
-            });
-        }
-    }
-    // Old copies are deleted later (letting in-flight downloads finish); this doesn't affect whether the job completes.
-    // Before deleting, confirm the old location is no longer current (don't delete if it was moved back meanwhile), and don't hold the write lock while calling the storage service
-    if !moved.is_empty() {
-        let st = st.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(60)).await;
-            tree::remove_unreferenced(&st, moved).await;
-        });
-    }
-    Ok(())
-}
-
-/// Moves one content from `from` to `target` (`dst`); returns the old copy to delete once it was moved, None when
-/// there was nothing left to move
-async fn move_blob(st: &AppState, dst: &Arc<dyn Storage>, target: &str, hash: String, size: i64, from: String) -> AppResult<Option<(String, String)>> {
-    // Held from copying until the reference is switched: a deletion of this content still pending at the
-    // target (from an earlier move away from it) must not remove the copy this move keeps or writes there
-    let _staging = tree::stage_guard(st, &hash).await;
-    let src = st.storage(&from)?;
-    if let Err(e) = copy_verified(st, &src, dst, &hash, size).await {
-        // Deleted by someone during the move (or moved elsewhere meanwhile): nothing left to move for it
-        let current: Option<(String,)> = sqlx::query_as("SELECT location_id FROM blobs WHERE hash = ?").bind(&hash).fetch_optional(&st.db).await?;
-        if e.kind() == std::io::ErrorKind::NotFound && current.is_none_or(|(loc,)| loc != from) {
-            tree::schedule_blob_removal(st, vec![(hash, target.to_string())]);
-            return Ok(None);
-        }
-        return Err(AppError::new(axum::http::StatusCode::BAD_GATEWAY, format!("Failed to move files: {e}")));
-    }
-
-    let switched = {
-        let _w = st.write_lock.lock().await;
-        sqlx::query("UPDATE blobs SET location_id = ? WHERE hash = ? AND location_id = ?")
-            .bind(target)
-            .bind(&hash)
-            .bind(&from)
-            .execute(&st.db)
-            .await?
-            .rows_affected()
-            == 1
-    };
-    if !switched {
-        // The blob was released or moved elsewhere while it was being copied: the copy just written to the
-        // target is unreferenced (remove_unreferenced checks again before deleting)
-        tree::schedule_blob_removal(st, vec![(hash, target.to_string())]);
-        return Ok(None);
-    }
-    // Recorded right away: if a later file fails and the job stops, the copies already moved are still cleaned up
-    tree::defer_blob_removal(st, &[(hash.clone(), from.clone())], 60).await;
-    Ok(Some((hash, from)))
-}
-
-/// Copies one content to `dst` through a temp file, checking its sha256 and size
-async fn copy_verified(st: &AppState, src: &Arc<dyn Storage>, dst: &Arc<dyn Storage>, hash: &str, size: i64) -> std::io::Result<()> {
-    let tmp = st.tmp_dir().join(format!("migrate-{}", new_id()));
-    let copied = async {
-        // Hashed while it is copied, so the content is read once before it is stored at the target
-        let mut reader = src.open(hash, 0, size as u64).await?;
-        let mut file = tokio::fs::File::create(&tmp).await?;
-        let mut hasher = Sha256::new();
-        let mut len = 0u64;
-        let mut buf = vec![0u8; 256 * 1024];
-        loop {
-            let n = reader.read(&mut buf).await?;
-            if n == 0 {
-                break;
-            }
-            hasher.update(&buf[..n]);
-            file.write_all(&buf[..n]).await?;
-            len += n as u64;
-        }
-        file.flush().await?;
-        drop(file);
-        if hex::encode(hasher.finalize()) != hash || len != size as u64 {
-            return Err(std::io::Error::other("Verification of the copied content failed"));
-        }
-        dst.put_file(hash, &tmp).await
-    }
-    .await;
-    let _ = tokio::fs::remove_file(&tmp).await;
-    copied
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testutil;
-
-    #[tokio::test]
-    async fn moving_a_space_moves_every_file_across_pages() {
-        let env = testutil::env().await;
-        let amy = env.user("amy", false).await;
-        env.st.storages.write().unwrap().insert("second".into(), Arc::new(crate::storage::LocalStorage::create(env.dir.join("second"), "second").unwrap()));
-        let local = env.st.storage("local").unwrap();
-        let mut hashes = Vec::new();
-        // More than one page of 50
-        for i in 0..60 {
-            let content = format!("file {i}");
-            let hash = hex::encode(Sha256::digest(content.as_bytes()));
-            let tmp = env.dir.join("tmp").join(&hash);
-            std::fs::write(&tmp, &content).unwrap();
-            local.put_file(&hash, &tmp).await.unwrap();
-            let id = env.file(&amy, amy.root(), &format!("f{i}.txt")).await;
-            let mut c = env.st.db.acquire().await.unwrap();
-            tree::add_blob_ref(&mut c, &hash, content.len() as i64, "local").await.unwrap();
-            sqlx::query("UPDATE nodes SET blob_hash = ?, size = ? WHERE id = ?").bind(&hash).bind(content.len() as i64).bind(&id).execute(&mut *c).await.unwrap();
-            hashes.push(hash);
-        }
-        let drive = env.drive_of(amy.root()).await;
-        run_migration(&env.st, &drive, "second").await.unwrap();
-        let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blobs WHERE location_id != 'second'").fetch_one(&env.st.db).await.unwrap();
-        assert_eq!(left, 0);
-        let second = env.st.storage("second").unwrap();
-        for hash in &hashes {
-            let mut content = String::new();
-            second.open(hash, 0, 64).await.unwrap().read_to_string(&mut content).await.unwrap();
-            assert!(content.starts_with("file "), "{hash} wasn't copied");
-        }
-    }
-
-    /// A local storage that runs a hook before each read, to change things while a move is copying
-    struct Hooked {
-        inner: crate::storage::LocalStorage,
-        on_open: Box<dyn Fn(String) -> futures_util::future::BoxFuture<'static, ()> + Send + Sync>,
-    }
-
-    impl Storage for Hooked {
-        fn put_file<'a>(&'a self, hash: &'a str, src: &'a FsPath) -> futures_util::future::BoxFuture<'a, std::io::Result<()>> {
-            self.inner.put_file(hash, src)
-        }
-        fn open<'a>(&'a self, hash: &'a str, start: u64, len: u64) -> futures_util::future::BoxFuture<'a, std::io::Result<storage::BoxReader>> {
-            Box::pin(async move {
-                (self.on_open)(hash.to_string()).await;
-                self.inner.open(hash, start, len).await
-            })
-        }
-        fn delete<'a>(&'a self, hash: &'a str) -> futures_util::future::BoxFuture<'a, std::io::Result<()>> {
-            self.inner.delete(hash)
-        }
-        fn check(&self) -> futures_util::future::BoxFuture<'_, std::io::Result<()>> {
-            self.inner.check()
-        }
-    }
-
-    /// A file in Amy's space whose content is stored in `location`; returns the content's hash
-    async fn file_in(env: &testutil::TestEnv, amy: &crate::auth::User, location: &str, content: &str) -> String {
-        let hash = hex::encode(Sha256::digest(content.as_bytes()));
-        let tmp = env.dir.join("tmp").join(&hash);
-        std::fs::write(&tmp, content).unwrap();
-        env.st.storage(location).unwrap().put_file(&hash, &tmp).await.unwrap();
-        let id = env.file(amy, amy.root(), &format!("{content}.txt")).await;
-        let mut c = env.st.db.acquire().await.unwrap();
-        tree::add_blob_ref(&mut c, &hash, content.len() as i64, location).await.unwrap();
-        sqlx::query("UPDATE nodes SET blob_hash = ?, size = ? WHERE id = ?").bind(&hash).bind(content.len() as i64).bind(&id).execute(&mut *c).await.unwrap();
-        hash
-    }
-
-    async fn location_of(env: &testutil::TestEnv, hash: &str) -> Option<String> {
-        sqlx::query_as::<_, (String,)>("SELECT location_id FROM blobs WHERE hash = ?").bind(hash).fetch_optional(&env.st.db).await.unwrap().map(|r| r.0)
-    }
-
-    /// When the copy at this location is due to be deleted, if it is
-    async fn deletion_of(env: &testutil::TestEnv, hash: &str, location: &str) -> Option<i64> {
-        sqlx::query_as::<_, (i64,)>("SELECT created_at FROM pending_blob_deletes WHERE hash = ? AND location_id = ?")
-            .bind(hash)
-            .bind(location)
-            .fetch_optional(&env.st.db)
-            .await
-            .unwrap()
-            .map(|r| r.0)
-    }
-
-    #[tokio::test]
-    async fn a_move_stops_at_missing_content_and_continues_where_it_stopped() {
-        let env = testutil::env().await;
-        let amy = env.user("amy", false).await;
-        env.st.storages.write().unwrap().insert("second".into(), Arc::new(crate::storage::LocalStorage::create(env.dir.join("second"), "second").unwrap()));
-        let mut hashes = Vec::new();
-        for name in ["one", "two", "three"] {
-            hashes.push(file_in(&env, &amy, "local", name).await);
-        }
-        hashes.sort();
-        // The last one in the order the move goes is gone from the storage
-        let last = hashes[2].clone();
-        let blob = env.dir.join("blobs").join(&last[0..2]).join(&last[2..4]).join(&last);
-        std::fs::rename(&blob, blob.with_extension("away")).unwrap();
-        let drive = env.drive_of(amy.root()).await;
-        let err = run_migration(&env.st, &drive, "second").await.unwrap_err();
-        assert_eq!(err.status, axum::http::StatusCode::BAD_GATEWAY);
-        // What was copied before stays moved, and its old copy is deleted later, not now
-        for hash in &hashes[..2] {
-            assert_eq!(location_of(&env, hash).await.as_deref(), Some("second"));
-            assert!(deletion_of(&env, hash, "local").await.is_some_and(|at| at > now()), "{hash}");
-            assert!(env.st.storage("local").unwrap().open(hash, 0, 1).await.is_ok(), "the old copy is still there for downloads");
-        }
-        assert_eq!(location_of(&env, &last).await.as_deref(), Some("local"));
-
-        // Back again: the next run moves only what is left
-        std::fs::rename(blob.with_extension("away"), &blob).unwrap();
-        std::fs::remove_dir_all(env.dir.join("second").join(&hashes[0][0..2])).unwrap();
-        run_migration(&env.st, &drive, "second").await.unwrap();
-        assert_eq!(location_of(&env, &last).await.as_deref(), Some("second"));
-        assert!(env.st.storage("second").unwrap().open(&hashes[0], 0, 1).await.is_err(), "copied once, not again");
-    }
-
-    #[tokio::test]
-    async fn content_changed_during_a_move_is_left_as_it_became() {
-        let env = testutil::env().await;
-        let amy = env.user("amy", false).await;
-        let db = env.st.db.clone();
-        let (moved_away, deleted) = (hex::encode(Sha256::digest(b"moved")), hex::encode(Sha256::digest(b"deleted")));
-        let (a, b) = (moved_away.clone(), deleted.clone());
-        let hooked_dir = env.dir.join("hooked");
-        let dir = hooked_dir.clone();
-        let hooked = Hooked {
-            inner: crate::storage::LocalStorage::create(hooked_dir, "hooked").unwrap(),
-            on_open: Box::new(move |hash| {
-                let (db, a, b, dir) = (db.clone(), a.clone(), b.clone(), dir.clone());
-                Box::pin(async move {
-                    if hash == a {
-                        // Another move took it elsewhere meanwhile
-                        sqlx::query("UPDATE blobs SET location_id = 'third' WHERE hash = ?").bind(&hash).execute(&db).await.unwrap();
-                    } else if hash == b {
-                        // Its file was deleted for good meanwhile
-                        sqlx::query("UPDATE nodes SET blob_hash = NULL WHERE blob_hash = ?").bind(&hash).execute(&db).await.unwrap();
-                        sqlx::query("DELETE FROM blobs WHERE hash = ?").bind(&hash).execute(&db).await.unwrap();
-                        std::fs::remove_file(dir.join(&hash[0..2]).join(&hash[2..4]).join(&hash)).unwrap();
-                    }
-                })
-            }),
-        };
-        env.st.storages.write().unwrap().insert("hooked".into(), Arc::new(hooked));
-        env.st.storages.write().unwrap().insert("second".into(), Arc::new(crate::storage::LocalStorage::create(env.dir.join("second"), "second").unwrap()));
-        file_in(&env, &amy, "hooked", "moved").await;
-        file_in(&env, &amy, "hooked", "deleted").await;
-        let kept = file_in(&env, &amy, "hooked", "kept").await;
-        // Earlier content of a file moves too
-        let id = sqlx::query_as::<_, (String,)>("SELECT id FROM nodes WHERE blob_hash = ?").bind(&kept).fetch_one(&env.st.db).await.unwrap().0;
-        let body = axum::body::Bytes::from_static(b"kept, edited");
-        let _ = crate::files::save_content(State(env.st.clone()), amy.clone(), Path(id), axum::http::HeaderMap::new(), body).await.unwrap();
-
-        let drive = env.drive_of(amy.root()).await;
-        run_migration(&env.st, &drive, "second").await.unwrap();
-        assert_eq!(location_of(&env, &kept).await.as_deref(), Some("second"), "the earlier version moved");
-        assert_eq!(location_of(&env, &moved_away).await.as_deref(), Some("third"), "not switched back to this move's copy");
-        assert_eq!(location_of(&env, &deleted).await, None);
-        // The copies this move wrote for those two are no longer used: they are listed for deletion
-        for _ in 0..50 {
-            if deletion_of(&env, &moved_away, "second").await.is_some() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        assert!(deletion_of(&env, &moved_away, "second").await.is_some());
-        assert!(deletion_of(&env, &kept, "hooked").await.is_some());
-    }
 
     /// Adds a storage location (in the database and connected); `folder`: a Local folder location's folder, else one
     /// that works like a bucket (its content in a folder of the test)
@@ -1177,11 +778,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(location, "bucket");
-
-        // Only a move changes it
-        let req = serde_json::from_value(json!({ "location_id": BUILTIN, "migrate": false })).unwrap();
-        let _ = set_drive_location(State(env.st.clone()), Admin(admin.clone()), Path(carls.clone()), Json(req)).await.unwrap();
-        assert_eq!(placed(&env, carl.root()).await, at(BUILTIN, "store"));
     }
 
     #[tokio::test]

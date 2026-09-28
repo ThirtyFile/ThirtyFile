@@ -318,6 +318,7 @@ pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<Strin
     if !(user.is_admin() || role == Some(Role::Owner)) {
         return Err(AppError::forbidden("Only the space owner or an administrator can delete a space"));
     }
+    crate::moves::refuse_busy(&mut tx, &drive.id).await?;
     // The space disappears now; its files are deleted in the background, a batch at a time. A folder space's folder
     // stays on the disk with everything in it (space_folders.rs): only ThirtyFile's index of it is deleted
     sqlx::query("DELETE FROM drives WHERE id = ?").bind(&drive.id).execute(&mut *tx).await?;

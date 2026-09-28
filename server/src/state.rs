@@ -33,8 +33,8 @@ pub struct Inner {
     pub db: SqlitePool,
     /// Connected storage locations: location id → backend
     pub storages: RwLock<HashMap<String, Arc<dyn Storage>>>,
-    /// Space move jobs: space id → progress
-    pub migrations: Mutex<HashMap<String, MigrationStatus>>,
+    /// Moves of spaces to other storage locations that are running now (moves/)
+    pub moves: crate::moves::Moves,
     pub data_dir: PathBuf,
     /// Folder of the built-in `local` storage location
     pub storage_dir: PathBuf,
@@ -118,20 +118,8 @@ pub struct SystemSettings {
     pub version_keep: i64,
     /// Days an earlier version is kept after it was replaced (0 = no limit)
     pub version_days: i64,
-}
-
-#[derive(Debug, Clone, Default, serde::Serialize)]
-pub struct MigrationStatus {
-    pub drive_id: String,
-    pub target: String,
-    pub total_files: i64,
-    pub total_bytes: i64,
-    pub done_files: i64,
-    pub done_bytes: i64,
-    pub running: bool,
-    pub error: Option<String>,
-    pub started_at: i64,
-    pub finished_at: Option<i64>,
+    /// Moves of spaces to another storage location that run at the same time (moves/); the others wait their turn
+    pub move_jobs: i64,
 }
 
 impl std::ops::Deref for AppState {

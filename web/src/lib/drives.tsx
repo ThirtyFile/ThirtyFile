@@ -76,6 +76,10 @@ const ACTION_LABEL: Record<string, string> = {
   scan: t("Checked the folder"),
   drive_update: t("Update space"),
   drive_delete: t("Delete space"),
+  move_start: t("Start moving to another location"),
+  move_done: t("Moved to another location"),
+  move_failed: t("Moving to another location failed"),
+  move_cancel: t("Cancel moving to another location"),
   group_create: t("Create group"),
   group_update: t("Update group"),
   group_delete: t("Delete group"),
@@ -85,7 +89,6 @@ const ACTION_LABEL: Record<string, string> = {
   share_create: t("Create share link"),
   share_update: t("Change share link"),
   share_delete: t("Delete share link"),
-  drive_location: t("Change storage location"),
   storage_create: t("Add storage location"),
   storage_update: t("Modify storage location"),
   storage_delete: t("Delete storage location"),
@@ -100,7 +103,7 @@ const ACTION_LABEL: Record<string, string> = {
 export const ACTION_GROUPS: { label: string; actions: string[] }[] = [
   { label: t("Files"), actions: ["upload", "create_folder", "edit", "rename", "move", "copy", "compress", "extract", "trash", "restore", "delete", "empty_trash"] },
   { label: t("Sharing and permissions"), actions: ["share_create", "share_update", "share_delete", "grant", "revoke"] },
-  { label: t("Spaces"), actions: ["drive_create", "drive_update", "drive_delete", "drive_location"] },
+  { label: t("Spaces"), actions: ["drive_create", "drive_update", "drive_delete", "move_start", "move_done", "move_failed", "move_cancel"] },
   { label: t("Users and groups"), actions: ["user_create", "user_update", "user_delete", "group_create", "group_update", "group_delete"] },
   {
     label: t("System"),

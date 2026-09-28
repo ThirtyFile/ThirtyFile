@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArchiveIcon,
   CirclePlusIcon,
   FolderOpenIcon,
   FolderSyncIcon,
@@ -13,6 +12,7 @@ import {
   PanelTopIcon,
   RefreshCwIcon,
   Trash2Icon,
+  TruckIcon,
   UsersRoundIcon,
 } from "lucide-react";
 import { useNavigate } from "react-router";
@@ -20,7 +20,7 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdow
 import { DataTable, type Column } from "@/components/DataTable";
 import { useTabActions } from "@/tabs";
 import { toast } from "sonner";
-import { api, type Drive, type Migration, type ScanReport } from "@/api";
+import { api, moveActive, type Drive, type ScanReport, type SpaceMove } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AccessDialog } from "@/components/AccessDialog";
@@ -35,7 +35,8 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { t, tServer, tc } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
-import { STORAGE_KIND_LABEL } from "@/components/StorageLocations";
+import { locationLabel } from "@/components/LocationSelect";
+import { MoveProgress, moveRoute } from "@/pages/MovesPage";
 
 const GB = 1024 ** 3;
 
@@ -53,7 +54,7 @@ export function AdminDrivesPage() {
     refetchInterval: (query) => (scanning || query.state.data?.some((d) => d.scanning) ? 3000 : false),
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<{ t: "quota" | "members" | "delete" | "create" | "location" | "folder"; drive?: Drive } | null>(null);
+  const [dialog, setDialog] = useState<{ t: "quota" | "members" | "delete" | "create" | "move" | "folder"; drive?: Drive } | null>(null);
   /** Read-only folder spaces can be browsed, downloaded and shared, but not changed from the web */
   const setReadOnly = async (d: Drive, readOnly: boolean) => {
     try {
@@ -82,13 +83,17 @@ export function AdminDrivesPage() {
       setScanning(false);
     }
   };
-  // Refresh every 1.5 seconds while a migration job is running
-  const migrations = useQuery({
-    queryKey: ["migrations"],
-    queryFn: api.migrations,
-    refetchInterval: (query) => (query.state.data?.some((m) => m.running) ? 1500 : false),
+  // Refreshed every few seconds while a space is being moved
+  const moves = useQuery({
+    queryKey: ["moves"],
+    queryFn: api.moves,
+    refetchInterval: (query) => (query.state.data?.moves.some((m) => m.state === "running" || m.state === "queued") ? 3000 : false),
   });
-  const jobOf = (driveId: string) => migrations.data?.find((m) => m.drive_id === driveId);
+  /** The move of a space that isn't over, else its latest */
+  const moveOf = (driveId: string) => {
+    const of = moves.data?.moves.filter((m) => m.drive_id === driveId) ?? [];
+    return of.find(moveActive) ?? of[0];
+  };
   const drives = q.data ?? [];
   const selected = drives.find((d) => d.id === selectedId) ?? null;
   const refresh = () => {
@@ -124,12 +129,12 @@ export function AdminDrivesPage() {
         />
       ) : (
         <ToolButton
-          icon={ArchiveIcon}
-          label={t("Storage location")}
+          icon={TruckIcon}
+          label={t("Move to another location…")}
           showLabel
           className="h-9 px-2.5 text-[13px]"
           disabled={!selected}
-          onClick={() => selected && setDialog({ t: "location", drive: selected })}
+          onClick={() => selected && setDialog({ t: "move", drive: selected })}
         />
       )}
       <ToolButton
@@ -217,7 +222,7 @@ export function AdminDrivesPage() {
     {
       header: t("Storage location"),
       className: "w-[150px]",
-      cell: (d) => (d.mode === "folder" ? <FolderCell drive={d} /> : <LocationCell drive={d} job={jobOf(d.id)} />),
+      cell: (d) => (d.mode === "folder" ? <FolderCell drive={d} /> : <LocationCell drive={d} move={moveOf(d.id)} />),
     },
   ];
 
@@ -272,8 +277,8 @@ export function AdminDrivesPage() {
                   </DropdownMenuItem>
                 </>
               ) : (
-                <DropdownMenuItem onClick={() => setDialog({ t: "location", drive: selected })}>
-                  <ArchiveIcon /> {t("Change storage location…")}
+                <DropdownMenuItem onClick={() => setDialog({ t: "move", drive: selected })}>
+                  <TruckIcon /> {t("Move to another location…")}
                 </DropdownMenuItem>
               )}
               {selected.kind !== "personal" && (
@@ -338,14 +343,14 @@ export function AdminDrivesPage() {
           }}
         />
       )}
-      {dialog?.t === "location" && dialog.drive && (
-        <LocationDialog
+      {dialog?.t === "move" && dialog.drive && (
+        <MoveDialog
           drive={dialog.drive}
           onClose={() => setDialog(null)}
           onDone={() => {
             setDialog(null);
             refresh();
-            qc.invalidateQueries({ queryKey: ["migrations"] });
+            qc.invalidateQueries({ queryKey: ["moves"] });
           }}
         />
       )}
@@ -386,34 +391,42 @@ export function AdminDrivesPage() {
   );
 }
 
-/** Storage location column: location name, with progress while migrating */
-function LocationCell({ drive, job }: { drive: Drive; job?: Migration }) {
-  if (job?.running) {
-    const pct = job.total_bytes ? Math.round((job.done_bytes / job.total_bytes) * 100) : 100;
-    const cleaning = job.done_files >= job.total_files;
+/** Storage location column: the location, and the move of the space when there is one */
+function LocationCell({ drive, move }: { drive: Drive; move?: SpaceMove }) {
+  if (move && (move.state === "running" || move.state === "queued" || move.state === "paused")) {
     return (
-      <span className="grid gap-0.5 text-[11px]">
-        <span className="text-brand">{cleaning ? t("Move complete, cleaning up old copies…") : t("Moving {done}/{total} ({pct}%)", { done: job.done_files, total: job.total_files, pct })}</span>
-        <span className="h-1 overflow-hidden rounded bg-muted">
-          <span className="block h-full bg-brand transition-[width]" style={{ width: `${pct}%` }} />
+      <span className="grid min-w-0 gap-0.5 text-[11px]" title={moveRoute(move)}>
+        <span className="truncate text-brand">
+          {move.state === "running"
+            ? t("Moving to {name}", { name: move.to_name })
+            : move.state === "queued"
+              ? t("Waiting to move to {name}", { name: move.to_name })
+              : t("Move to {name} paused", { name: move.to_name })}
         </span>
+        <MoveProgress m={move} compact />
       </span>
     );
   }
   return (
-    <span className="flex min-w-0 items-center gap-1" title={job?.error ? tServer(job.error) : undefined}>
+    <span className="flex min-w-0 items-center gap-1" title={move?.error ? tServer(move.error) : undefined}>
       <span className="truncate">{drive.location_name || "—"}</span>
-      {job?.error && <span className="shrink-0 text-[11px] text-destructive">{t("Move failed")}</span>}
+      {move?.state === "failed" && <span className="shrink-0 text-[11px] text-destructive">{t("Move stopped")}</span>}
     </span>
   );
 }
 
-function LocationDialog({ drive, onClose, onDone }: { drive: Drive; onClose(): void; onDone(): void }) {
+/** Moving a space to another storage location: where it is, where it can go, and what happens meanwhile */
+function MoveDialog({ drive, onClose, onDone }: { drive: Drive; onClose(): void; onDone(): void }) {
+  const navigate = useNavigate();
   const locations = useQuery({ queryKey: ["storage-locations"], queryFn: api.storageLocations });
-  const [value, setValue] = useState<string>(drive.location_id ?? "");
-  const [migrate, setMigrate] = useState(true);
+  // A space in the content store goes to another content store (S3, SFTP, FTP)
+  const targets = (locations.data ?? []).filter((l) => l.id !== drive.location_id && l.kind !== "local");
+  const [value, setValue] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const current = locations.data?.find((l) => l.id === drive.location_id);
+  const target = targets.find((l) => l.id === value);
+  const tooSmall = target?.disk_free_bytes != null && target.disk_free_bytes < drive.used_bytes;
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
@@ -424,8 +437,10 @@ function LocationDialog({ drive, onClose, onDone }: { drive: Drive; onClose(): v
             setBusy(true);
             setError(null);
             try {
-              await api.setDriveLocation(drive.id, value, migrate);
-              toast.success(migrate ? t("Started moving files in the background") : t("Storage location changed"));
+              await api.startMoves([drive.id], value);
+              toast.success(t("\"{name}\" is being moved in the background", { name: driveLabel(drive, true) }), {
+                action: { label: t("Show moves"), onClick: () => navigate("/admin/moves") },
+              });
               onDone();
             } catch (err) {
               setError(err instanceof Error ? err.message : t("Couldn't make the change"));
@@ -435,28 +450,32 @@ function LocationDialog({ drive, onClose, onDone }: { drive: Drive; onClose(): v
           }}
         >
           <DialogHeader>
-            <DialogTitle>{t("Storage location for \"{name}\"", { name: driveLabel(drive, true) })}</DialogTitle>
-            <DialogDescription>{t("New uploads will be stored here. Existing files can be moved in the background, and the space stays usable while they move.")}</DialogDescription>
+            <DialogTitle>{t("Move \"{name}\" to another location", { name: driveLabel(drive, true) })}</DialogTitle>
+            <DialogDescription>
+              {t("Now on {location} · {size}", { location: current ? locationLabel(current) : drive.location_name || "—", size: formatBytes(drive.used_bytes) })}
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
+            <Label htmlFor="move-target">{t("Move to")}</Label>
             <select
+              id="move-target"
               className="h-9 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
               value={value}
               onChange={(e) => setValue(e.target.value)}
-              aria-label={t("Storage location")}
             >
-              {locations.data?.map((l) => (
+              <option value="" disabled>
+                {t("Choose a location")}
+              </option>
+              {targets.map((l) => (
                 <option key={l.id} value={l.id} disabled={!l.connected}>
-                  {l.connected
-                    ? t("{name} ({kind})", { name: l.name, kind: STORAGE_KIND_LABEL[l.kind] })
-                    : t("{name} ({kind}) — can't connect", { name: l.name, kind: STORAGE_KIND_LABEL[l.kind] })}
+                  {l.disk_free_bytes != null && l.connected ? t("{location} · {free} free", { location: locationLabel(l), free: formatBytes(l.disk_free_bytes) }) : locationLabel(l)}
                 </option>
               ))}
             </select>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" className="accent-brand" checked={migrate} onChange={(e) => setMigrate(e.target.checked)} />
-              {t("Also move existing files to the new location ({size})", { size: formatBytes(drive.used_bytes) })}
-            </label>
+            {tooSmall && <p className="text-xs text-destructive">{t("There isn't enough free space there for this space.")}</p>}
+            <p className="text-xs text-muted-foreground">
+              {t("The space stays usable while its files are copied, and switches to the new location once all of them are there. The copies are checked before the old files are removed.")}
+            </p>
             <p className="text-xs text-muted-foreground">{t("Files with identical content are stored only once across the system. If other spaces have the same files, they'll be moved too.")}</p>
             <ErrorText>{error}</ErrorText>
           </div>
@@ -464,9 +483,9 @@ function LocationDialog({ drive, onClose, onDone }: { drive: Drive; onClose(): v
             <Button type="button" variant="outline" onClick={onClose}>
               {t("Cancel")}
             </Button>
-            <Button type="submit" disabled={busy || !value}>
+            <Button type="submit" disabled={busy || !value || tooSmall}>
               {busy && <Loader2Icon className="animate-spin" />}
-              {t("Apply")}
+              {t("Move")}
             </Button>
           </DialogFooter>
         </form>
