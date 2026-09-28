@@ -12,7 +12,7 @@
 //! - Once everything of a space is in place and checked, the space becomes a folder space in one transaction. Items
 //!   keep their ids, and with them their shares, permissions, favourites and versions; content nothing uses any more is
 //!   then removed from the content store
-//! - What was written is recorded (`convert_files`, migration 0071), so a conversion that stopped halfway skips it when
+//! - What was written is recorded (`convert_files`, migration 0022), so a conversion that stopped halfway skips it when
 //!   it runs again. Until the space is converted its folder belongs to the conversion: whatever else is in it goes
 //! - Spaces on S3, SFTP or FTP stay as they are. Files in the storage folders that the database doesn't know are
 //!   listed in the report and never touched

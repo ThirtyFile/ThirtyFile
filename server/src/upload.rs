@@ -49,7 +49,7 @@ struct Upload {
     node_id: Option<String>,
     /// "replace": a file with the same name gets the new content; otherwise both are kept (see migration 0014)
     on_conflict: String,
-    /// The SHA-256 state after the first `hashed` bytes (see migration 0070)
+    /// The SHA-256 state after the first `hashed` bytes (see migration 0021)
     hash_state: Option<Vec<u8>>,
     hashed: i64,
 }
