@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en" data-root=".." data-page="webdav">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mapping it as a drive · ThirtyFile</title>
+    <meta name="description" content="Open your ThirtyFile spaces in Windows File Explorer, macOS Finder, the Files app of your phone or rclone, over WebDAV with an app password." />
+    <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <link rel="stylesheet" href="../assets/site.css" />
+  </head>
+  <body>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="Guides"><noscript><a href="index.html">Install</a></noscript></nav>
+      <main class="article">
+        <h1>Mapping it as a drive (WebDAV)</h1>
+        <p class="lead">Open your ThirtyFile spaces in Windows File Explorer, macOS Finder, the Files app of your phone or rclone, as if they were a drive on your computer.</p>
+
+        <h2 id="address">The address and signing in</h2>
+        <p>ThirtyFile speaks WebDAV at <code>/dav/</code> on its own address, for example:</p>
+        <pre><code>https://files.example.com/dav/</code></pre>
+        <p>Sign in with your <strong>username</strong> and an <a href="account.html#app-passwords">app password</a>, never your own password. Create one for each computer or phone under <strong>App passwords</strong> in the account menu:</p>
+        <ul>
+          <li>Choose <strong>Read and change files</strong> to work with your files. A read-only app password can open and download files but can't save, create, rename, move or delete anything.</li>
+          <li>Accounts that sign in with Microsoft, Google or GitHub use an app password here too.</li>
+          <li>Two-factor sign-in doesn't ask for a code here. Wrong app passwords count towards the usual limit: after 30 from one address, that address has to wait 15 minutes.</li>
+        </ul>
+
+        <h2 id="layout">What you see</h2>
+        <p>The top folder holds one folder per space you can use:</p>
+        <ul>
+          <li><strong>My files</strong>, your personal space.</li>
+          <li>The company space (<strong>All files</strong>, unless your administrator renamed it) and your team spaces, by their names. If two have the same name, the later one gets a number, such as <strong>Projects (2)</strong>.</li>
+          <li><strong>Shared with me</strong>: folders and files other people shared with you from spaces you aren't a member of.</li>
+        </ul>
+        <p>Everything works as it does in the browser: what you may change depends on your permissions, read-only spaces can't be changed, the space's storage limit and the upload size limit apply, and every change shows in the activity log. <strong>Deleting</strong> a file or folder moves it to the trash, where you can restore it in the browser.</p>
+
+        <h2 id="windows">Windows</h2>
+        <ol>
+          <li>In File Explorer, right-click <strong>This PC</strong> and choose <strong>Map network drive</strong> (on Windows 11, it's under <strong>… (See more)</strong> in the toolbar).</li>
+          <li>Pick a drive letter and enter the address in <strong>Folder</strong>: <code>https://files.example.com/dav/</code></li>
+          <li>Tick <strong>Connect using different credentials</strong>, choose <strong>Finish</strong>, and enter your username and the app password. Tick <strong>Remember my credentials</strong> to connect again after a restart.</li>
+        </ol>
+        <div class="note">Windows only sends passwords over HTTPS. ThirtyFile needs to be <a href="internet.html">behind HTTPS</a> with a certificate Windows trusts; a plain <code>http://</code> address is refused unless the registry value <code>BasicAuthLevel</code> of the WebClient service is changed, which isn't recommended. Windows also limits files to 50 MB by default (<code>FileSizeLimitInBytes</code>, under <code>HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters</code>; the largest value is 4 GB).</div>
+
+        <h2 id="macos">macOS</h2>
+        <ol>
+          <li>In Finder, choose <strong>Go › Connect to Server</strong> (<kbd>⌘</kbd> <kbd>K</kbd>).</li>
+          <li>Enter <code>https://files.example.com/dav/</code> and choose <strong>Connect</strong>.</li>
+          <li>Choose <strong>Registered User</strong> and enter your username and the app password. Tick <strong>Remember this password in my keychain</strong> if you like.</li>
+        </ol>
+        <p>The spaces appear as a drive in the Finder sidebar under <strong>Locations</strong>. Finder saves hidden files starting with <code>._</code> next to files with extra information; they appear in the browser too, and can be deleted.</p>
+
+        <h2 id="phones">iPhone, iPad and Android</h2>
+        <ul>
+          <li><strong>iPhone and iPad</strong>: in the Files app, tap <strong>…</strong> at the top of <strong>Browse</strong>, choose <strong>Connect to Server</strong>, enter <code>https://files.example.com/dav/</code>, then choose <strong>Registered User</strong> with your username and the app password.</li>
+          <li><strong>Android</strong> has no WebDAV built in: use a file manager app that supports WebDAV (for example Material Files, Solid Explorer or CX File Explorer), add a WebDAV connection with the address, your username and the app password.</li>
+        </ul>
+
+        <h2 id="rclone">rclone</h2>
+        <p><a href="https://rclone.org/">rclone</a> copies and syncs files with ThirtyFile from the command line, for example for backups. Set it up once (it asks for the app password and stores it scrambled):</p>
+        <pre><code>rclone config create thirtyfile webdav url=https://files.example.com/dav/ vendor=other user=amy pass=tfa_… --obscure</code></pre>
+        <p>Then use it like any other rclone remote:</p>
+        <pre><code>rclone ls "thirtyfile:My files"
+rclone copy ~/Pictures "thirtyfile:My files/Pictures" --progress
+rclone mount thirtyfile: ~/ThirtyFile --vfs-cache-mode writes</code></pre>
+        <p>A read-only app password is enough for <code>rclone copy</code> <em>from</em> ThirtyFile, for example to back your files up to another place.</p>
+
+        <h2 id="limits">Good to know</h2>
+        <ul>
+          <li>Each file is sent in one piece. When ThirtyFile is behind a reverse proxy, the proxy must let large requests through: see <a href="internet.html#nginx">Putting it on the internet</a>.</li>
+          <li>Names follow the same rules as in the browser: characters Windows doesn't allow in names (<code>\ / : * ? " &lt; &gt; |</code>) are refused.</li>
+          <li>Office and other programs lock files while they are open. ThirtyFile answers these locks so that saving works, but doesn't enforce them: when two people save the same file at the same time, the last one wins. Use the browser's online editor for working on a file together.</li>
+          <li>Folders on the server (folder spaces) work too: changes are made in the folder itself, and files added on the server show up when the folder is opened.</li>
+          <li>Moving an item that was shared with you to one of your own spaces isn't allowed, as in the browser; copy it instead.</li>
+          <li>Each folder is listed one level at a time; a client that asks for a whole tree at once is told to ask folder by folder, which all common clients do.</li>
+        </ul>
+      </main>
+    </div>
+    <script src="../assets/site.js"></script>
+  </body>
+</html>

@@ -4,7 +4,7 @@
 //! A token is `tfa_<id>_<secret>`; only its SHA-256 is stored, and it is shown once when created. It is sent as
 //! `Authorization: Bearer <token>`, or as the password of HTTP Basic sign-in (username + app password). Tokens only work
 //! on the routes that allow them (file operations, see `allow` in main.rs): the account itself, sign-in methods, sharing
-//! and administration always need a browser session. A read-only token is refused for anything but GET and HEAD.
+//! and administration always need a browser session. A read-only token is refused for anything but reading (see `reads_only`).
 
 use std::net::SocketAddr;
 
@@ -143,7 +143,7 @@ pub async fn authenticate(parts: &Parts, st: &AppState, credential: Credential) 
             return Err(AppError::new(StatusCode::UNAUTHORIZED, "Wrong or expired app password"));
         }
     };
-    if found.scope == "read" && !matches!(parts.method, Method::GET | Method::HEAD) {
+    if found.scope == "read" && !reads_only(&parts.method) {
         return Err(AppError::forbidden("This app password can only read files"));
     }
     if found.last_used_at.is_none_or(|t| now() - t >= auth::SESSION_TOUCH) {
@@ -151,6 +151,12 @@ pub async fn authenticate(parts: &Parts, st: &AppState, credential: Credential) 
     }
     let mut conn = st.db.acquire().await?;
     auth::user_by_id(st, &mut conn, found.user_id).await?.ok_or_else(AppError::unauthorized)
+}
+
+/// Methods that change nothing: all a read-only app password may use (OPTIONS and PROPFIND are WebDAV's way of
+/// asking what is there, see dav.rs)
+pub fn reads_only(method: &Method) -> bool {
+    matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS) || method.as_str() == "PROPFIND"
 }
 
 /// Records that an app password was used (in the background, at most every few minutes)

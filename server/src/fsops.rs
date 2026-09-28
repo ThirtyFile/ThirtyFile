@@ -385,6 +385,20 @@ pub async fn place_file(conn: &mut SqliteConnection, staged: &Path, owner: i64, 
     Ok(id)
 }
 
+/// Puts content staged in the space's folder in place of a file (keeping the file's permissions) and indexes it; returns
+/// the new size. Unlike `save`, a file changed on the server meanwhile is replaced too: the client sending it asked for that
+pub async fn replace_file(conn: &mut SqliteConnection, staged: &Path, node: &Node) -> AppResult<i64> {
+    let path = abs(node)?;
+    if let Ok(m) = std::fs::metadata(&path) {
+        let _ = std::fs::set_permissions(staged, m.permissions());
+    }
+    std::fs::rename(staged, &path).map_err(disk_error)?;
+    let s = stat(&path).map_err(disk_error)?;
+    record(conn, &node.id, node.drive(), rel_of(node), &s).await?;
+    sqlx::query("UPDATE nodes SET updated_at = ? WHERE id = ?").bind(now().max(node.updated_at + 1)).bind(&node.id).execute(&mut *conn).await?;
+    Ok(s.size)
+}
+
 /// Saves from the online editor into a folder space. A file changed on the server since it was indexed (or removed
 /// there) isn't overwritten: the new content is saved next to it as "name (conflict copy)" and the save reports a
 /// conflict.

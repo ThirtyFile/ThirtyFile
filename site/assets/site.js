@@ -16,6 +16,7 @@
       ["preview", "Preview and editing"],
       ["sharing", "Sharing"],
       ["account", "Your account"],
+      ["webdav", "Mapping it as a drive"],
     ]],
     ["Administration", [
       ["users", "Users and spaces"],

@@ -59,7 +59,7 @@ server {
     }
 }</code></pre>
         <ul>
-          <li><code>client_max_body_size 64m</code> is the smallest value that works: uploads are sent in parts of 32 MB, and the online editors save files of up to 20 MB in one request. With nginx's default of 1 MB, uploads and saves fail with "413 Request Entity Too Large". Larger files still upload, part by part.</li>
+          <li><code>client_max_body_size 64m</code> is the smallest value that works: uploads are sent in parts of 32 MB, and the online editors save files of up to 20 MB in one request. With nginx's default of 1 MB, uploads and saves fail with "413 Request Entity Too Large". Larger files still upload, part by part. <a href="webdav.html">WebDAV</a> clients send each file in one request: to use them through nginx, add a <code>location /dav/</code> block with the same lines and <code>client_max_body_size 0</code> (no limit; ThirtyFile's own upload size limit still applies).</li>
           <li><code>proxy_http_version 1.1</code> keeps connections to ThirtyFile open between requests, and <code>proxy_buffering off</code> with <code>proxy_request_buffering off</code> let large downloads and uploads stream instead of being stored on the proxy's disk first.</li>
           <li>The first <code>server</code> block sends visitors who type <code>http://</code> to the HTTPS address.</li>
         </ul>

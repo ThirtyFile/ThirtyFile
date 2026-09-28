@@ -31,6 +31,11 @@ function describe(p: AppPassword) {
   return parts.join(" · ");
 }
 
+/** Where WebDAV clients connect: the site's public URL when one is set, else the address in use now */
+function davAddress(publicUrl: string) {
+  return `${(publicUrl || window.location.origin).replace(/\/+$/, "")}/dav/`;
+}
+
 /** Account menu › App passwords: tokens for scripts, backups and file clients (shown once when created) */
 export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
   const me = useMe();
@@ -91,6 +96,9 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
             </div>
             <p className="text-xs text-muted-foreground">
               {t("Send it as the header \"Authorization: Bearer <app password>\", or sign in with the username {username} and the app password as the password.", { username: me.username })}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {t("To open your files as a drive in File Explorer, Finder or a phone's Files app, connect to {address} over WebDAV with this username and app password.", { address: davAddress(me.public_url) })}
             </p>
             <div className="flex justify-end">
               <Button type="button" size="sm" variant="outline" onClick={() => setCreated(null)}>

@@ -1,5 +1,6 @@
 mod admin;
 mod auth;
+mod dav;
 mod db;
 mod drives;
 mod error;
@@ -41,7 +42,7 @@ use axum::{
     http::{Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{delete, get, head, patch, post, put},
+    routing::{any, delete, get, head, patch, post, put},
 };
 use clap::{Parser, Subcommand};
 use tower::ServiceExt;
@@ -398,6 +399,11 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
 fn router(state: AppState) -> Router {
     Router::new()
         .nest("/api", api().layer(TimeoutLayer::with_status_code(StatusCode::GATEWAY_TIMEOUT, Duration::from_secs(120))).merge(untimed()))
+        // WebDAV (dav.rs): outside the request timeout too, as it receives and sends whole files
+        .route(dav::PREFIX, any(dav::handle))
+        .route("/dav/", any(dav::handle))
+        .route("/dav/{*path}", any(dav::handle))
+        .route("/", any(dav::server_root))
         .fallback(web::serve)
         .layer(middleware::from_fn_with_state(state.clone(), same_origin))
         // gzip / brotli for JSON, HTML, JS, CSS and SVG (see `Compressible`); file contents and other downloads are never compressed
@@ -746,9 +752,13 @@ impl Predicate for Compressible {
 /// Basic CSRF protection: requests that modify data must have an Origin matching Host, if they carry one
 /// (behind a reverse proxy with THIRTYFILE_TRUST_PROXY set, X-Forwarded-Host is accepted too).
 /// A request signed in with an app password and without a session cookie carries no credential a browser adds by
-/// itself, so another website can't send it on someone's behalf: it isn't checked.
+/// itself, so another website can't send it on someone's behalf: it isn't checked. WebDAV is the exception: it answers
+/// with a sign-in challenge, after which a browser remembers the credentials and sends them to `/dav` by itself, so
+/// requests there are always checked (WebDAV clients don't send an Origin).
 async fn same_origin(axum::extract::State(st): axum::extract::State<AppState>, req: Request, next: Next) -> Response {
-    let app_password_only = tokens::credential(req.headers()).is_some() && auth::get_cookie(req.headers(), auth::SESSION_COOKIE).is_none();
+    let path = req.uri().path();
+    let dav = path == dav::PREFIX || path.starts_with("/dav/");
+    let app_password_only = !dav && tokens::credential(req.headers()).is_some() && auth::get_cookie(req.headers(), auth::SESSION_COOKIE).is_none();
     if !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS)
         && !app_password_only
         && let Some(origin) = req.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
