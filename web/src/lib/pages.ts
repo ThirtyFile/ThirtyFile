@@ -26,7 +26,8 @@ export function useAllPages<T extends { id: string }>(
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next,
     enabled,
-    refetchOnMount: !reuse,
+    // Loaded pages stay as they are until a change marks them out of date
+    ...(reuse ? { staleTime: Infinity } : {}),
   });
   const { hasNextPage, isFetchingNextPage, isError, fetchNextPage } = q;
   const items = useMemo(() => allItems(q.data), [q.data]);
