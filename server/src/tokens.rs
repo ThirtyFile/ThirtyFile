@@ -200,6 +200,35 @@ pub struct CreateReq {
     /// Days until it stops working; None = never
     #[serde(default)]
     expires_days: Option<i64>,
+    /// The account's current password (accounts that have one)
+    #[serde(default)]
+    password: Option<String>,
+    /// A two-factor code, when the account has two-factor sign-in
+    #[serde(default)]
+    code: Option<String>,
+}
+
+/// Accounts without a password (single sign-on) confirm who they are by having signed in this recently
+const RECENT_SIGN_IN: i64 = 10 * 60;
+
+/// An app password keeps working after the browser session that made it ends, so making one asks who it is again:
+/// the password (and a two-factor code when the account has one), or for accounts that sign in with Microsoft,
+/// Google or GitHub, a recent sign-in
+async fn confirm_identity(st: &AppState, user: &User, password: Option<String>, code: Option<&str>) -> AppResult<()> {
+    let (hash,): (String,) = sqlx::query_as("SELECT password_hash FROM users WHERE id = ?").bind(user.id).fetch_one(&st.db).await?;
+    if hash == crate::sso::NO_PASSWORD {
+        let signed_in: Option<(i64,)> =
+            sqlx::query_as("SELECT created_at FROM sessions WHERE id = ? AND user_id = ?").bind(&user.session_id).bind(user.id).fetch_optional(&st.db).await?;
+        if signed_in.is_none_or(|(at,)| now() - at > RECENT_SIGN_IN) {
+            return Err(AppError::forbidden("Sign out and sign in again, then create the app password within 10 minutes").with_code("sign_in_again"));
+        }
+        return Ok(());
+    }
+    let Some(password) = password.filter(|p| !p.is_empty()) else {
+        return Err(AppError::bad_request("Enter your current password"));
+    };
+    crate::auth::confirm_password(st, user.id, password).await?;
+    crate::twofactor::confirm_code(st, user.id, code).await
 }
 
 /// Creates an app password; the token is in the response and can't be shown again
@@ -220,6 +249,8 @@ pub async fn create(
     if req.expires_days.is_some_and(|d| !(1..=MAX_DAYS).contains(&d)) {
         return Err(AppError::bad_request("An app password can be valid for 1 to 3650 days"));
     }
+    confirm_identity(&st, &user, req.password, req.code.as_deref()).await?;
+    let ip = client_ip(&st, addr, &headers);
     let id = random_token(ID_LEN);
     let token = format!("{PREFIX}{id}_{}", random_token(SECRET_LEN));
     let ts = now();
@@ -240,7 +271,18 @@ pub async fn create(
             .execute(&st.db)
             .await?;
     }
-    logs::record_login_via(&st, Some(user.id), &user.username, "app_password_created", "app_password", &client_ip(&st, addr, &headers), &headers);
+    logs::record_login_via(&st, Some(user.id), &user.username, "app_password_created", "app_password", &ip, &headers);
+    // Told in the app and by email, so an app password someone else made doesn't go unnoticed
+    let notice = crate::notify::Notice {
+        kind: "app_password",
+        node_id: None,
+        data: json!({ "name": name, "scope": req.scope, "ip": ip }),
+    };
+    let emails = {
+        let _w = st.write_lock.lock().await;
+        crate::notify::add(&mut *st.db.acquire().await?, &[user.id], &notice).await?
+    };
+    crate::notify::send_later(&st, emails);
     let sql = format!("SELECT {COLS} FROM app_passwords WHERE id = ?");
     let row: AppPassword = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&id).fetch_one(&st.db).await?;
     Ok(Json(json!({ "token": token, "app_password": row })))
@@ -274,7 +316,7 @@ mod tests {
     }
 
     async fn new_token(env: &testutil::TestEnv, user: &User, scope: &str, expires_days: Option<i64>) -> (String, String) {
-        let req = CreateReq { name: "Backup".into(), scope: scope.into(), expires_days };
+        let req = CreateReq { name: "Backup".into(), scope: scope.into(), expires_days, password: Some(testutil::password().into()), code: None };
         let Json(v) = create(State(env.st.clone()), user.clone(), addr(), HeaderMap::new(), Json(req)).await.unwrap();
         (v["token"].as_str().unwrap().to_string(), v["app_password"]["id"].as_str().unwrap().to_string())
     }
@@ -368,7 +410,7 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let bad = |name: &str, scope: &str, days: Option<i64>| {
-            let req = CreateReq { name: name.into(), scope: scope.into(), expires_days: days };
+            let req = CreateReq { name: name.into(), scope: scope.into(), expires_days: days, password: Some(testutil::password().into()), code: None };
             create(State(env.st.clone()), amy.clone(), addr(), HeaderMap::new(), Json(req))
         };
         assert!(bad(" ", "read", None).await.is_err());
@@ -379,5 +421,99 @@ mod tests {
         let Json(v) = bad("ok", "read", Some(7)).await.unwrap();
         let expires = v["app_password"]["expires_at"].as_i64().unwrap();
         assert!((expires - now() - 7 * 86400).abs() < 5);
+    }
+
+    async fn count(env: &testutil::TestEnv, table: &str, user: &User) -> i64 {
+        let sql = format!("SELECT COUNT(*) FROM {table} WHERE user_id = ?");
+        let (n,): (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(sql)).bind(user.id).fetch_one(&env.st.db).await.unwrap();
+        n
+    }
+
+    #[tokio::test]
+    async fn making_an_app_password_asks_who_it_is_again() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let (session, _) = env.sign_in(&amy, "Browser").await;
+        let make = |password: Option<&str>, code: Option<&str>| {
+            let req = serde_json::from_value(json!({ "name": "Backup", "scope": "write", "password": password, "code": code })).unwrap();
+            create(State(env.st.clone()), session.clone(), addr(), HeaderMap::new(), Json(req))
+        };
+        // A session alone isn't enough: the password must come with it
+        assert!(make(None, None).await.is_err());
+        assert!(make(Some(&testutil::wrong_password()), None).await.is_err());
+        assert!(make(Some(testutil::password()), None).await.is_ok());
+        // The owner is told, in the app
+        let (kind,): (String,) = sqlx::query_as("SELECT kind FROM notifications WHERE user_id = ?").bind(amy.id).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(kind, "app_password");
+
+        // With two-factor sign-in, a code too
+        let codes = crate::twofactor::tests::set_up_for(&env, &amy).await;
+        let err = make(Some(testutil::password()), None).await.unwrap_err();
+        assert_eq!(err.code, Some("two_factor_code"));
+        assert!(make(Some(testutil::password()), Some("000000")).await.is_err());
+        assert!(make(Some(testutil::password()), Some(&codes[0])).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn accounts_without_a_password_make_one_right_after_signing_in() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?").bind(crate::sso::NO_PASSWORD).bind(amy.id).execute(&env.st.db).await.unwrap();
+        let (session, _) = env.sign_in(&amy, "Browser").await;
+        let make = || {
+            let req = serde_json::from_value(json!({ "name": "Backup", "scope": "read" })).unwrap();
+            create(State(env.st.clone()), session.clone(), addr(), HeaderMap::new(), Json(req))
+        };
+        assert!(make().await.is_ok());
+        sqlx::query("UPDATE sessions SET created_at = created_at - 3600 WHERE user_id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+        assert_eq!(make().await.unwrap_err().code, Some("sign_in_again"));
+    }
+
+    #[tokio::test]
+    async fn changing_or_resetting_the_password_removes_app_passwords() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let amy = env.user("amy", true).await;
+        let (session, cookie) = env.sign_in(&amy, "Browser").await;
+        let _ = env.sign_in(&amy, "Laptop").await;
+
+        let _ = new_token(&env, &amy, "write", None).await;
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, cookie.parse().unwrap());
+        let req = serde_json::from_value(json!({ "current": testutil::password(), "new": "another long password" })).unwrap();
+        let _ = auth::change_password(State(env.st.clone()), addr(), headers, session, Json(req)).await.unwrap();
+        assert_eq!((count(&env, "app_passwords", &amy).await, count(&env, "sessions", &amy).await), (0, 1), "only this browser stays signed in");
+
+        // (the password everyone has in the tests again)
+        sqlx::query("UPDATE users SET password_hash = (SELECT password_hash FROM users WHERE id = ?) WHERE id = ?").bind(admin.id).bind(amy.id).execute(&env.st.db).await.unwrap();
+        let _ = new_token(&env, &amy, "write", None).await;
+        let req = serde_json::from_value(json!({ "password": "reset by the admin" })).unwrap();
+        let _ = crate::admin::update(State(env.st.clone()), auth::Admin(admin.clone()), Path(amy.id), Json(req)).await.unwrap();
+        assert_eq!((count(&env, "app_passwords", &amy).await, count(&env, "sessions", &amy).await), (0, 0));
+
+        // Resetting two-factor sign-in (a lost phone): whatever was signed in with it stops working too
+        sqlx::query("UPDATE users SET password_hash = (SELECT password_hash FROM users WHERE id = ?) WHERE id = ?").bind(admin.id).bind(amy.id).execute(&env.st.db).await.unwrap();
+        let _ = crate::twofactor::tests::set_up_for(&env, &amy).await;
+        let _ = env.sign_in(&amy, "Phone").await;
+        sqlx::query("INSERT INTO app_passwords (id, user_id, name, token_hash, scope, created_at) VALUES ('x', ?, 'Old', 'h', 'read', 0)").bind(amy.id).execute(&env.st.db).await.unwrap();
+        let _ = crate::twofactor::admin_reset(State(env.st.clone()), auth::Admin(admin), Path(amy.id), addr(), HeaderMap::new()).await.unwrap();
+        assert_eq!((count(&env, "app_passwords", &amy).await, count(&env, "sessions", &amy).await), (0, 0));
+    }
+
+    #[tokio::test]
+    async fn requiring_two_factor_sign_in_ends_sessions_without_it() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let (me, _) = env.sign_in(&admin, "Admin browser").await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let _ = env.sign_in(&amy, "Browser").await;
+        let _ = crate::twofactor::tests::set_up_for(&env, &ben).await;
+        let _ = env.sign_in(&ben, "Browser").await;
+        let req = serde_json::from_value(json!({ "require_two_factor": true })).unwrap();
+        let _ = crate::admin::update_settings(State(env.st.clone()), auth::Admin(me), Json(req)).await.unwrap();
+        assert_eq!(count(&env, "sessions", &amy).await, 0, "set up at the next sign-in");
+        assert_eq!(count(&env, "sessions", &ben).await, 1, "already signs in with a code");
+        assert_eq!(count(&env, "sessions", &admin).await, 1, "the administrator's own browser is asked next time");
     }
 }

@@ -927,7 +927,7 @@ mod tests {
     use tower::ServiceExt;
 
     async fn app_password(env: &TestEnv, user: &User, scope: &str) -> String {
-        let req = serde_json::from_value(json!({ "name": "Drive", "scope": scope })).unwrap();
+        let req = serde_json::from_value(json!({ "name": "Drive", "scope": scope, "password": crate::testutil::password() })).unwrap();
         let addr = ConnectInfo(std::net::SocketAddr::from(([10, 0, 0, 9], 5000)));
         let Json(v) = tokens::create(State(env.st.clone()), user.clone(), addr, HeaderMap::new(), Json(req)).await.unwrap();
         v["token"].as_str().unwrap().to_string()

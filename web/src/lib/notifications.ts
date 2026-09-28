@@ -8,6 +8,7 @@ export const NOTIFICATION_KINDS: { kind: NotificationKind; label: string; desc: 
   { kind: "shared", label: t("Shared with you"), desc: t("Someone shares a folder or file with you, or adds you to a space") },
   { kind: "space_full", label: t("Space almost full"), desc: t("A space you own or manage is 90% full") },
   { kind: "access_expiring", label: t("Access ending"), desc: t("Your access to something shared with you ends within 3 days") },
+  { kind: "app_password", label: t("New app password"), desc: t("An app password is created for your account") },
 ];
 
 /** The name as the app shows it elsewhere: spaces the system named itself are translated */
@@ -38,6 +39,11 @@ export function notificationText(n: AppNotification): { title: string; detail: s
       };
     case "access_expiring":
       return { title: t("Your access to “{name}” ends soon", { name }), detail: t("{role} until {time}", { role, time: ends }) };
+    case "app_password":
+      return {
+        title: t("An app password “{name}” was created for your account", { name }),
+        detail: t("From {ip}. If you didn't create it, remove it under App passwords and change your password.", { ip: d.ip || "—" }),
+      };
     default:
       return { title: name, detail: "" };
   }

@@ -235,8 +235,11 @@ pub async fn update(
         .bind(id)
         .execute(&mut *tx)
         .await?;
-        // When the password is changed or the account disabled, sign the user out on all devices
-        if password_hash.is_some() || req.disabled == Some(true) {
+        // When the password is reset, sign the user out on all devices and remove their app passwords; a disabled
+        // account is signed out (its app passwords stop working while it is disabled)
+        if password_hash.is_some() {
+            crate::auth::sign_out_everywhere(&mut tx, id, None).await?;
+        } else if req.disabled == Some(true) {
             sqlx::query("DELETE FROM sessions WHERE user_id = ?").bind(id).execute(&mut *tx).await?;
         }
         tx.commit().await?;
@@ -655,6 +658,18 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
         }
         if let Some(require) = req.require_two_factor {
             set_setting(&mut tx, "require_two_factor", if require { "1" } else { "0" }).await?;
+            // Turned on: password sign-ins without a second factor end (they set it up when signing in again), except
+            // the administrator's own, who is asked the next time
+            if require && !st.system.read().unwrap().require_two_factor {
+                sqlx::query(
+                    "DELETE FROM sessions WHERE method = 'password' AND id IS NOT ?
+                       AND user_id IN (SELECT id FROM users WHERE totp_secret IS NULL AND password_hash != ?)",
+                )
+                .bind(&user.session_id)
+                .bind(crate::sso::NO_PASSWORD)
+                .execute(&mut *tx)
+                .await?;
+            }
             let detail = if require { "Two-factor sign-in required for password accounts" } else { "Two-factor sign-in optional" };
             logs::record_activity(&mut tx, &user, None, "settings", detail).await?;
         }

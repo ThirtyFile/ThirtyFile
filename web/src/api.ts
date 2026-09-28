@@ -270,7 +270,7 @@ export interface SsoProvider {
   label: string;
 }
 
-export type NotificationKind = "shared" | "space_full" | "access_expiring";
+export type NotificationKind = "shared" | "space_full" | "access_expiring" | "app_password";
 
 /** What a notification shows; names are copied when it was made */
 export interface NotificationData {
@@ -288,6 +288,9 @@ export interface NotificationData {
   used?: number;
   quota?: number;
   percent?: number;
+  /** App passwords: what it may do, and the address it was made from */
+  scope?: "read" | "write";
+  ip?: string;
 }
 
 /** A notification under the bell (`GET /notifications`) */
@@ -910,7 +913,7 @@ export const api = {
   signOutUserDevice: (userId: number, id: string) => request("DELETE", `/admin/users/${userId}/sessions/${encodeURIComponent(id)}`),
   signOutUserDevices: (userId: number) => request<{ removed: number }>("DELETE", `/admin/users/${userId}/sessions`),
   appPasswords: () => get<AppPassword[]>("/auth/app-passwords"),
-  createAppPassword: (req: { name: string; scope: "read" | "write"; expires_days?: number }) =>
+  createAppPassword: (req: { name: string; scope: "read" | "write"; expires_days?: number; password?: string; code?: string }) =>
     post<{ token: string; app_password: AppPassword }>("/auth/app-passwords", req),
   deleteAppPassword: (id: string) => request("DELETE", `/auth/app-passwords/${encodeURIComponent(id)}`),
 

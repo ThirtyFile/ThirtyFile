@@ -337,10 +337,12 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         if res.rows_affected() == 0 {
             return Err(format!("User not found: {username}").into());
         }
-        sqlx::query("DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)")
-            .bind(username)
-            .execute(&db)
-            .await?;
+        for table in ["sessions", "app_passwords"] {
+            sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table} WHERE user_id = (SELECT id FROM users WHERE username = ?)")))
+                .bind(username)
+                .execute(&db)
+                .await?;
+        }
         println!("Password reset");
         return Ok(());
     }
@@ -985,7 +987,7 @@ mod tests {
 
     async fn app_password(env: &testutil::TestEnv, user: &auth::User, scope: &str) -> String {
         let (_, cookie) = env.sign_in(user, "Test").await;
-        let res = call(&router(env.st.clone()), Method::POST, "/api/auth/app-passwords", &[(header::COOKIE, cookie)], Some(serde_json::json!({ "name": "Script", "scope": scope }))).await;
+        let res = call(&router(env.st.clone()), Method::POST, "/api/auth/app-passwords", &[(header::COOKIE, cookie)], Some(serde_json::json!({ "name": "Script", "scope": scope, "password": testutil::password() }))).await;
         assert_eq!(res.status(), StatusCode::OK);
         let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
         serde_json::from_slice::<serde_json::Value>(&body).unwrap()["token"].as_str().unwrap().to_string()
