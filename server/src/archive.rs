@@ -30,6 +30,7 @@ use crate::{
     auth::User,
     error::{AppError, AppResult},
     files::Source,
+    fsops,
     logs,
     state::AppState,
     tree::{self, Need, Node},
@@ -338,11 +339,6 @@ pub async fn extract(State(st): State<AppState>, user: User, Json(req): Json<Ext
         let parent = tree::folder_for(&mut c, &user, &parent_id, Need::Write).await?;
         (zip, parent)
     };
-    if parent.in_folder_space() {
-        return Err(AppError::bad_request(
-            "ZIP files can't be extracted in a space that shows a folder on the server yet. Download the file and extract it on your computer.",
-        ));
-    }
     let job = start(&st, &user, "extract")?;
     spawn(&st, &job.id, run_extract(st.clone(), user, job.id.clone(), zip, parent.id));
     Ok(Json(job))
@@ -508,9 +504,13 @@ async fn extract_into(st: &AppState, user: &User, job: &str, zip: &Node, parent_
     })
     .await??;
     update(st, job, |j| j.total = total);
-    let drive = tree::get_node(&mut *st.db.acquire().await?, parent_id).await?.map(|n| n.drive().to_string()).unwrap_or_default();
+    let parent = tree::folder_for(&mut *st.db.acquire().await?, user, parent_id, Need::Write).await?;
+    let drive = parent.drive().to_string();
     // What the archive states is checked against the quota before anything is extracted
     tree::check_quota(&mut *st.db.acquire().await?, &drive, total as i64).await?;
+    if parent.in_folder_space() {
+        return extract_into_folder(st, user, job, zip, &parent, archive, plan).await;
+    }
 
     let mut staged: Vec<(usize, tree::StagedBlob)> = Vec::new();
     let result = async {
@@ -579,6 +579,38 @@ async fn extract_into(st: &AppState, user: &User, job: &str, zip: &Node, parent_
             Err(e)
         }
     }
+}
+
+/// Extracting into a folder space: the entries are written into a new folder under a name scans ignore, which is put in
+/// place and indexed once everything is out (`fsops::place_folder`); should anything fail, it is removed again
+async fn extract_into_folder(
+    st: &AppState,
+    user: &User,
+    job: &str,
+    zip: &Node,
+    parent: &Node,
+    archive: &std::path::Path,
+    plan: Vec<Planned>,
+) -> AppResult<(String, String)> {
+    let staged = fsops::staging(parent)?;
+    for p in &plan {
+        let dir = fsops::make_dirs(&staged.top, &p.dirs).map_err(fsops::disk_error)?;
+        let Some(file) = &p.file else { continue };
+        let (archive, entry, tmp) = (archive.to_path_buf(), p.entry.clone(), st.tmp_dir().join(format!("unzip-{}", new_id())));
+        let (st2, job2, file) = (st.clone(), job.to_string(), file.clone());
+        tokio::task::spawn_blocking(move || -> AppResult<()> {
+            let x = extract_entry(&archive, &entry, tmp, &|n| update(&st2, &job2, |j| j.done += n))?;
+            let moved = fsops::move_in(&x.tmp, &dir, &file);
+            if moved.is_err() {
+                let _ = std::fs::remove_file(&x.tmp);
+            }
+            moved.map_err(fsops::disk_error)
+        })
+        .await??;
+    }
+    // The new folder is named after the archive
+    let stem = validate_name(split_name(&zip.name, false).0).unwrap_or_else(|_| "Extracted".into());
+    fsops::place_folder(st, user, staged, &parent.id, &stem, "extract", &zip.name).await
 }
 
 #[cfg(test)]
@@ -747,7 +779,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn folder_spaces_take_new_zip_files_but_not_extraction() {
+    async fn zip_files_are_made_and_extracted_in_folder_spaces() {
         let env = testutil::env().await;
         let admin = env.admin().await;
         let space = env.folder_space("Scans").await;
@@ -763,8 +795,39 @@ mod tests {
         assert_eq!(entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["page.txt"]);
         assert!(env.node_at(&space.drive, "page.zip").await.is_some());
 
+        // Extracted into a folder named after it, on disk and in the index; again: a numbered folder
         let zip = job.node_id.unwrap();
-        let err = extract(State(env.st.clone()), admin.clone(), Json(ExtractReq { id: zip })).await.unwrap_err();
-        assert!(err.message.contains("can't be extracted in a space that shows a folder"), "{}", err.message);
+        let job = extract_now(&env, &admin, &zip).await.unwrap();
+        assert_eq!((job.state, job.name.as_deref()), ("done", Some("page")), "{:?}", job.error);
+        assert_eq!(std::fs::read(space.dir.join("page/page.txt")).unwrap(), b"scanned page");
+        assert_eq!(env.node_at(&space.drive, "page").await.unwrap().0, job.node_id.clone().unwrap());
+        assert!(env.node_at(&space.drive, "page/page.txt").await.is_some());
+        let job = extract_now(&env, &admin, &zip).await.unwrap();
+        assert_eq!(job.name.as_deref(), Some("page (1)"));
+        // Nothing half-made is left, and a scan finds nothing new
+        let names: Vec<String> = std::fs::read_dir(&space.dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert!(!names.iter().any(|n| n.starts_with(".thirtyfile-copy-")), "{names:?}");
+        let r = crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        assert_eq!((r.added, r.removed), (0, 0), "{r:?}");
+
+        // A damaged archive leaves nothing behind
+        let bad = space.dir.join("bad.zip");
+        let mut bytes = zip_of(&[("a/b.txt", b"hello")], false).await;
+        let len = bytes.len();
+        bytes[len / 2] ^= 0xff;
+        std::fs::write(&bad, &bytes).unwrap();
+        testutil::write_old(&bad, &bytes);
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (bad_id, _) = env.node_at(&space.drive, "bad.zip").await.unwrap();
+        let job = extract_now(&env, &admin, &bad_id).await.unwrap();
+        assert_eq!(job.state, "failed");
+        assert!(!space.dir.join("bad").exists());
+        for _ in 0..50 {
+            if !std::fs::read_dir(&space.dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with(".thirtyfile-copy-")) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(!std::fs::read_dir(&space.dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with(".thirtyfile-copy-")));
     }
 }
