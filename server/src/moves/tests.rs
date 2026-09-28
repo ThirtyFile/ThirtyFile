@@ -1082,3 +1082,339 @@ async fn a_batch_is_refused_whole_when_one_space_cant_go() {
     let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM space_moves WHERE drive_id = ?").bind(&b).fetch_one(&env.st.db).await.unwrap();
     assert_eq!(n, 0);
 }
+
+// ───────────── Stopped, cancelled or resumed at the wrong moment ─────────────
+
+/// Sets one of the engine's test switches for as long as it is held
+struct Switch<T: Copy + 'static>(&'static std::thread::LocalKey<std::cell::Cell<T>>, T);
+
+fn switch_on<T: Copy + 'static>(key: &'static std::thread::LocalKey<std::cell::Cell<T>>, value: T) -> Switch<T> {
+    Switch(key, key.with(|c| c.replace(value)))
+}
+
+impl<T: Copy + 'static> Drop for Switch<T> {
+    fn drop(&mut self) {
+        self.0.with(|c| c.set(self.1));
+    }
+}
+
+/// ThirtyFile stops while the move runs: at the next start it waits for its turn again
+async fn restart(env: &TestEnv, id: &str) {
+    sqlx::query("UPDATE space_moves SET state = 'running' WHERE id = ?").bind(id).execute(&env.st.db).await.unwrap();
+    recover(&env.st).await.unwrap();
+    assert_eq!(state(env, id).await, "queued");
+}
+
+async fn to_path(env: &TestEnv, id: &str) -> std::path::PathBuf {
+    let (path,): (String,) = sqlx::query_as("SELECT to_path FROM space_moves WHERE id = ?").bind(id).fetch_one(&env.st.db).await.unwrap();
+    path.into()
+}
+
+#[tokio::test]
+async fn a_move_stopped_right_after_renaming_the_folder_is_finished_or_put_back() {
+    for cancelled in [false, true] {
+        let env = testutil::folders_env().await;
+        let admin = env.admin().await;
+        let nas = add_nas(&env, "nas").await;
+        let company = env.st.shared_root().unwrap();
+        let all = env.drive_of(&company).await;
+        let (old, new) = (env.dir.join("blobs").join("company"), nas.join("company"));
+        let a = env.upload(&admin, &company, "a.txt", b"the space's file").await;
+        let id = move_to(&env, &[&all], "nas").await.unwrap();
+        {
+            let _stop = switch_on(&between_folders::STOP_AFTER_RENAME, true);
+            run_move(&env, &id).await;
+        }
+        restart(&env, &id).await;
+        // Renamed, the switch not recorded: the space's files are in the new folder only
+        assert!(new.join("a.txt").is_file() && !old.exists());
+        if cancelled {
+            let _ = cancel(State(env.st.clone()), Admin(admin.clone()), Path(id.clone())).await.unwrap();
+            assert_eq!(state(&env, &id).await, "cancelled");
+            assert!(!new.exists(), "the folder is put back");
+            assert_eq!(space_state(&env, &all).await, ("folder".into(), Some("local".into()), Some(old.to_string_lossy().into_owned()), false));
+        } else {
+            assert_eq!(run_move(&env, &id).await, "done");
+            assert!(!old.exists());
+            assert_eq!(space_state(&env, &all).await, ("folder".into(), Some("nas".into()), Some(new.to_string_lossy().into_owned()), false));
+        }
+        assert_eq!(read(&env, &admin, &a).await, b"the space's file", "cancelled: {cancelled}");
+        let report = crate::folders::scan(&env.st, &all).await.unwrap();
+        assert_eq!((report.added, report.removed), (0, 0), "{report:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_move_that_switched_stays_done_when_its_old_folder_cant_be_removed() {
+    for to in ["nas", "bucket"] {
+        let env = testutil::folders_env().await;
+        let admin = env.admin().await;
+        let nas = add_nas(&env, "nas").await;
+        add_bucket(&env, "bucket").await;
+        let company = env.st.shared_root().unwrap();
+        let all = env.drive_of(&company).await;
+        let old = env.dir.join("blobs").join("company");
+        let a = env.upload(&admin, &company, "a.txt", b"moved").await;
+        let id = move_to(&env, &[&all], to).await.unwrap();
+        {
+            let (_copy, _fail) = (switch_on(&between_folders::OTHER_DISK, true), switch_on(&to_store::FAIL_CLEANUP, true));
+            assert_eq!(run_move(&env, &id).await, "done", "{to}");
+        }
+        assert!(old.join("a.txt").is_file(), "{to}: the old folder is still there");
+        assert_eq!(read(&env, &admin, &a).await, b"moved");
+        // Over: it can be neither resumed (which would take the moved files for copies) nor cancelled
+        assert!(resume(State(env.st.clone()), Admin(admin.clone()), Path(id.clone())).await.is_err());
+        assert!(cancel(State(env.st.clone()), Admin(admin.clone()), Path(id.clone())).await.is_err());
+        // The old folder goes at the next start
+        recover(&env.st).await.unwrap();
+        assert!(!old.exists(), "{to}");
+        assert_eq!(read(&env, &admin, &a).await, b"moved");
+        if to == "nas" {
+            // Even a move that ended up as failed after its switch never removes the space's folder when cancelled
+            sqlx::query("UPDATE space_moves SET state = 'failed' WHERE id = ?").bind(&id).execute(&env.st.db).await.unwrap();
+            let _ = cancel(State(env.st.clone()), Admin(admin.clone()), Path(id.clone())).await.unwrap();
+            assert!(nas.join("company").join("a.txt").is_file());
+            assert_eq!(read(&env, &admin, &a).await, b"moved");
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn names_only_letter_case_tells_apart_stop_a_move_to_a_folder_that_ignores_case() {
+    let env = testutil::folders_env().await;
+    let admin = env.admin().await;
+    let nas = add_nas(&env, "nas").await;
+    let company = env.st.shared_root().unwrap();
+    let all = env.drive_of(&company).await;
+    let old = env.dir.join("blobs").join("company");
+    testutil::write_old(&old.join("Report.txt"), b"upper");
+    testutil::write_old(&old.join("report.txt"), b"lower");
+    testutil::write_old(&old.join("Docs").join("a.txt"), b"in Docs");
+    testutil::write_old(&old.join("docs").join("b.txt"), b"in docs");
+    testutil::write_old(&old.join("other.txt"), b"no clash");
+    crate::folders::scan(&env.st, &all).await.unwrap();
+    let id = move_to(&env, &[&all], "nas").await.unwrap();
+    let (_copy, _case) = (switch_on(&between_folders::OTHER_DISK, true), switch_on(&between_folders::IGNORES_CASE, true));
+    assert_eq!(run_move(&env, &id).await, "failed");
+    let Json(list) = list(State(env.st.clone()), Admin(admin.clone())).await.unwrap();
+    let m = serde_json::to_value(&list).unwrap()["moves"][0].clone();
+    assert_eq!(m["error"], "4 files couldn't be copied");
+    let mut items: Vec<String> = m["failures"].as_array().unwrap().iter().map(|f| f["item"].as_str().unwrap().to_string()).collect();
+    items.sort();
+    assert_eq!(items, ["Docs", "Report.txt", "docs", "report.txt"]);
+    assert_eq!(space_state(&env, &all).await.1.as_deref(), Some("local"));
+    // Renamed apart, the move finishes, and nothing is lost
+    std::fs::rename(old.join("report.txt"), old.join("report (2).txt")).unwrap();
+    std::fs::rename(old.join("docs"), old.join("docs (2)")).unwrap();
+    let _ = resume(State(env.st.clone()), Admin(admin.clone()), Path(id.clone())).await.unwrap();
+    assert_eq!(run_move(&env, &id).await, "done");
+    let new = nas.join("company");
+    for (rel, content) in [("Report.txt", &b"upper"[..]), ("report (2).txt", b"lower"), ("Docs/a.txt", b"in Docs"), ("docs (2)/b.txt", b"in docs"), ("other.txt", b"no clash")] {
+        assert_eq!(std::fs::read(new.join(rel)).unwrap(), content, "{rel}");
+    }
+}
+
+#[tokio::test]
+async fn a_move_on_the_same_disk_copies_when_the_new_folder_cant_make_way() {
+    let env = testutil::folders_env().await;
+    let admin = env.admin().await;
+    add_nas(&env, "nas").await;
+    let company = env.st.shared_root().unwrap();
+    let all = env.drive_of(&company).await;
+    let a = env.upload(&admin, &company, "a.txt", b"the space's file").await;
+    let id = move_to(&env, &[&all], "nas").await.unwrap();
+    // Its new folder is made, then the move is paused; something else is put in the new folder meanwhile
+    {
+        let _copy = switch_on(&between_folders::OTHER_DISK, true);
+        let (job, ctl) = take_job(&env, &id).await;
+        ctl.pause.store(true, SeqCst);
+        run(&env.st, &job, &ctl).await;
+    }
+    assert_eq!(state(&env, &id).await, "paused");
+    let new = to_path(&env, &id).await;
+    std::fs::write(new.join("stray.txt"), b"not the space's").unwrap();
+    // The folder can't be renamed into its place: its files are copied instead
+    let _ = resume(State(env.st.clone()), Admin(admin.clone()), Path(id.clone())).await.unwrap();
+    assert_eq!(run_move(&env, &id).await, "done");
+    assert_eq!(space_state(&env, &all).await, ("folder".into(), Some("nas".into()), Some(new.to_string_lossy().into_owned()), false));
+    assert_eq!(read(&env, &admin, &a).await, b"the space's file");
+    assert_eq!(std::fs::read(new.join("stray.txt")).unwrap(), b"not the space's");
+}
+
+#[tokio::test]
+async fn a_copy_or_move_into_a_space_moved_meanwhile_is_refused() {
+    let env = testutil::folders_env().await;
+    add_bucket(&env, "bucket").await;
+    make_default_bucket(&env).await;
+    let admin = env.admin().await;
+    let amy = env.user("amy", true).await;
+    let mine = env.drive_of(amy.root()).await;
+    let company = env.st.shared_root().unwrap();
+    let f = env.upload(&admin, &company, "c.txt", b"from the company space").await;
+    // The destination as a copy or move started: in the content store
+    let stale = crate::tree::get_node(&mut env.st.db.acquire().await.unwrap(), amy.root()).await.unwrap().unwrap();
+    assert!(!stale.in_folder_space());
+    // Before it is recorded, the space moves into a folder
+    let id = move_to(&env, &[&mine], "local").await.unwrap();
+    assert_eq!(run_move(&env, &id).await, "done");
+    let node = crate::tree::get_node(&mut env.st.db.acquire().await.unwrap(), &f).await.unwrap().unwrap();
+    let err = crate::fsops::copy_across(&env.st, &amy, &stale, vec![vec![node.clone()]]).await.unwrap_err();
+    assert_eq!(err.status, axum::http::StatusCode::CONFLICT, "{}", err.message);
+    let err = crate::fsops::move_across(&env.st, &amy, &stale, vec![vec![node]]).await.unwrap_err();
+    assert_eq!(err.status, axum::http::StatusCode::CONFLICT, "{}", err.message);
+    let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id = ? AND kind = 'file'").bind(&mine).fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(n, 0, "nothing was added to the folder space");
+    assert_eq!(read(&env, &admin, &f).await, b"from the company space");
+    // While a space is being moved, it is refused as read-only
+    let bob = env.user("bob", true).await;
+    let bobs = env.drive_of(bob.root()).await;
+    let dest = crate::tree::get_node(&mut env.st.db.acquire().await.unwrap(), bob.root()).await.unwrap().unwrap();
+    let id = move_to(&env, &[&bobs], "local").await.unwrap();
+    let (job, ctl) = take_job(&env, &id).await;
+    ctl.pause.store(true, SeqCst);
+    run(&env.st, &job, &ctl).await;
+    let node = crate::tree::get_node(&mut env.st.db.acquire().await.unwrap(), &f).await.unwrap().unwrap();
+    let err = crate::fsops::copy_across(&env.st, &bob, &dest, vec![vec![node]]).await.unwrap_err();
+    assert_eq!(err.status, axum::http::StatusCode::FORBIDDEN, "{}", err.message);
+}
+
+#[tokio::test]
+async fn content_stored_by_a_move_is_kept_from_deletion_until_the_copy_is_recorded() {
+    let env = testutil::folders_env().await;
+    let admin = env.admin().await;
+    add_bucket(&env, "bucket").await;
+    let company = env.st.shared_root().unwrap();
+    let all = env.drive_of(&company).await;
+    let content = b"stored where it was deleted from before";
+    let f = env.upload(&admin, &company, "f.txt", content).await;
+    // The same content was at the bucket before (a space moved away from it), and its deletion there is due
+    sqlx::query("INSERT INTO pending_blob_deletes (hash, location_id, created_at, attempts, last_error) VALUES (?, 'bucket', 0, 0, 'deferred')")
+        .bind(crate::util::sha256_hex(content))
+        .execute(&env.st.db)
+        .await
+        .unwrap();
+    let id = move_to(&env, &[&all], "bucket").await.unwrap();
+    // Background deletion runs right after the content is stored again, before the copy is recorded
+    let st = env.st.clone();
+    to_store::AFTER_STORE.lock().unwrap().push((
+        id.clone(),
+        Arc::new(move |_| {
+            let st = st.clone();
+            Box::pin(async move {
+                crate::tree::retry_pending_deletes(&st, "bucket").await;
+            })
+        }),
+    ));
+    let ended = run_move(&env, &id).await;
+    to_store::AFTER_STORE.lock().unwrap().retain(|(m, _)| *m != id);
+    assert_eq!(ended, "done");
+    assert!(stored(&env, "bucket", content).is_file());
+    assert_eq!(read(&env, &admin, &f).await, content);
+}
+
+#[tokio::test]
+async fn a_move_into_a_folder_finishes_when_items_it_planned_are_deleted_meanwhile() {
+    let env = testutil::folders_env().await;
+    add_bucket(&env, "bucket").await;
+    make_default_bucket(&env).await;
+    let amy = env.user("amy", true).await;
+    let mine = env.drive_of(amy.root()).await;
+    let files = many_files(&env, &amy, 4).await;
+    let old = env.upload(&amy, amy.root(), "old.txt", b"in the trash").await;
+    trash(&env, &amy, &old).await;
+    let notes = env.upload(&amy, amy.root(), "notes.txt", b"first").await;
+    save(&env, &amy, &notes, b"second").await;
+    let id = move_to(&env, &[&mine], "local").await.unwrap();
+    let (job, ctl) = take_job(&env, &id).await;
+    stop_reading(&env, "bucket", &ctl, 1, false);
+    run(&env.st, &job, &ctl).await;
+    assert_eq!(state(&env, &id).await, "paused");
+    // While it is paused, the trash is emptied and earlier versions are no longer kept
+    sqlx::query("UPDATE nodes SET trashed_at = 0 WHERE id = ?").bind(&old).execute(&env.st.db).await.unwrap();
+    assert_eq!(crate::nodes::purge_expired_trash(&env.st, 1).await.unwrap(), 1);
+    sqlx::query("UPDATE node_versions SET created_at = 0").execute(&env.st.db).await.unwrap();
+    env.st.system.write().unwrap().version_days = 1;
+    assert_eq!(crate::versions::prune(&env.st).await.unwrap(), 1);
+    let _ = resume(State(env.st.clone()), Admin(env.admin().await), Path(id.clone())).await.unwrap();
+    let ended = run_move(&env, &id).await;
+    let (error,): (Option<String>,) = sqlx::query_as("SELECT error || failures FROM space_moves WHERE id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(ended, "done", "{error:?}");
+    for (id, content) in &files {
+        assert_eq!(read(&env, &amy, id).await, *content);
+    }
+    assert_eq!(read(&env, &amy, &notes).await, b"second");
+    assert_eq!(space_state(&env, &mine).await.0, "folder");
+}
+
+#[tokio::test]
+async fn free_space_is_needed_only_for_what_is_left_to_copy() {
+    let env = testutil::folders_env().await;
+    let admin = env.admin().await;
+    add_nas(&env, "nas").await;
+    add_bucket(&env, "bucket").await;
+    // A folder renamed on its disk needs no room
+    let company = env.st.shared_root().unwrap();
+    let all = env.drive_of(&company).await;
+    let a = env.upload(&admin, &company, "a.txt", b"renamed, not copied").await;
+    let id = move_to(&env, &[&all], "nas").await.unwrap();
+    {
+        let _full = switch_on(&FREE_SPACE, Some(1));
+        assert_eq!(run_move(&env, &id).await, "done");
+    }
+    assert_eq!(read(&env, &admin, &a).await, b"renamed, not copied");
+
+    // A move resumed after copying half of the space needs room for the other half
+    make_default_bucket(&env).await;
+    let amy = env.user("amy", true).await;
+    let mine = env.drive_of(amy.root()).await;
+    let mut files = Vec::new();
+    for i in 0..10 {
+        let content: &'static [u8] = format!("{i:<1000}").into_bytes().leak();
+        files.push((env.upload(&amy, amy.root(), &format!("f{i}.txt"), content).await, content));
+    }
+    let id = move_to(&env, &[&mine], "local").await.unwrap();
+    let (job, ctl) = take_job(&env, &id).await;
+    stop_reading(&env, "bucket", &ctl, 5, false);
+    run(&env.st, &job, &ctl).await;
+    assert_eq!(state(&env, &id).await, "paused");
+    let _ = resume(State(env.st.clone()), Admin(admin.clone()), Path(id.clone())).await.unwrap();
+    {
+        let _room = switch_on(&FREE_SPACE, Some(6_500));
+        let ended = run_move(&env, &id).await;
+        let (error,): (Option<String>,) = sqlx::query_as("SELECT error FROM space_moves WHERE id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(ended, "done", "{error:?}");
+    }
+    for (id, content) in &files {
+        assert_eq!(read(&env, &amy, id).await, *content);
+    }
+}
+
+#[tokio::test]
+async fn files_written_into_a_folder_are_finished_off_the_thread_that_serves_requests() {
+    let env = testutil::folders_env().await;
+    add_bucket(&env, "bucket").await;
+    make_default_bucket(&env).await;
+    let amy = env.user("amy", true).await;
+    let mine = env.drive_of(amy.root()).await;
+    many_files(&env, &amy, 3).await;
+    let id = move_to(&env, &[&mine], "local").await.unwrap();
+    assert_eq!(run_move(&env, &id).await, "done");
+    // The test's runtime runs every task on this thread: dating, syncing and renaming the files ran elsewhere
+    let finished = to_folder::FINISHED_ON.lock().unwrap();
+    assert!(!finished.is_empty());
+    assert!(!finished.contains(&std::thread::current().id()));
+}
+
+#[tokio::test]
+async fn the_checks_before_a_switch_start_from_the_space_not_from_every_content() {
+    let env = testutil::env().await;
+    for sql in [format!("SELECT 1 {} LIMIT 1", store::PENDING_IN_SPACE), format!("DELETE FROM space_move_items {}", to_store::NO_LONGER_THERE)] {
+        let plan: Vec<(i64, i64, i64, String)> =
+            sqlx::query_as(sqlx::AssertSqlSafe(format!("EXPLAIN QUERY PLAN {sql}"))).fetch_all(&env.st.db).await.unwrap();
+        let steps: Vec<&str> = plan.iter().map(|p| p.3.as_str()).collect();
+        // Each content is looked up by its hash, never found by reading the contents of a location, or all of them
+        assert!(steps.iter().any(|s| s.contains("USING INDEX sqlite_autoindex_blobs_1 (hash=?)")), "{steps:?}");
+        assert!(!steps.iter().any(|s| s.starts_with("SCAN b") || s.contains("blobs_location") || s.contains("(hash>?)")), "{steps:?}");
+    }
+}

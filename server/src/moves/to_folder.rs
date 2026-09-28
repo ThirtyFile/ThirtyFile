@@ -20,7 +20,10 @@ use std::{
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use super::{Ctx, Job, Stop};
+use super::{
+    Ctx, Job, Stop,
+    between_folders::{Found, find_folder},
+};
 use crate::{
     beneath::Pinned,
     error::{AppError, AppResult},
@@ -107,6 +110,7 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
     let (st, job) = (cx.st, cx.job);
     let folder = target(cx).await?;
     for _ in 0..ROUNDS {
+        drop_gone(st, job).await?;
         plan(st, job).await?;
         let counts: (i64, i64, i64, i64) = sqlx::query_as(
             "SELECT COALESCE(SUM(done), 0), COALESCE(SUM(CASE WHEN done = 1 THEN size END), 0), COUNT(*), COALESCE(SUM(size), 0)
@@ -159,6 +163,25 @@ struct Want {
     name: Option<String>,
     hash: Option<String>,
     size: i64,
+}
+
+/// Files and versions not copied yet that are gone meanwhile (the trash emptied, earlier versions no longer kept):
+/// taken off the plan. `only`: just this one.
+async fn drop_gone(st: &AppState, job: &Job) -> AppResult<()> {
+    drop_gone_items(st, job, None).await
+}
+
+async fn drop_gone_items(st: &AppState, job: &Job, only: Option<&str>) -> AppResult<()> {
+    let _w = st.write_lock.lock().await;
+    sqlx::query(
+        "DELETE FROM space_move_items WHERE move_id = ?1 AND done = 0 AND kind IN ('file', 'version') AND (?2 IS NULL OR item_id = ?2)
+           AND NOT EXISTS (SELECT 1 FROM nodes n WHERE n.id = item_id) AND NOT EXISTS (SELECT 1 FROM node_versions v WHERE v.id = item_id)",
+    )
+    .bind(&job.id)
+    .bind(only)
+    .execute(&st.db)
+    .await?;
+    Ok(())
 }
 
 /// Plans a path in the folder for every item and version that has none yet (all of them the first time)
@@ -400,7 +423,16 @@ async fn copy_one(cx: &Ctx<'_>, root: &Pinned, id: &str, rel: &str, hash: Option
         Ok(seen) => seen,
         Err(Ok(stop)) => return Ok(Some(stop)),
         Err(Err(e)) if e.kind() == std::io::ErrorKind::NotFound || e.to_string() == VERIFY_FAILED => {
-            cx.failed(Some(if name.is_empty() { rel.to_string() } else { name.to_string() }), e.to_string());
+            // Gone meanwhile (deleted for good, say): nothing to copy for it any more
+            drop_gone_items(st, job, Some(id)).await?;
+            let (planned,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM space_move_items WHERE move_id = ? AND item_id = ?")
+                .bind(&job.id)
+                .bind(id)
+                .fetch_one(&st.db)
+                .await?;
+            if planned == 1 {
+                cx.failed(Some(if name.is_empty() { rel.to_string() } else { name.to_string() }), e.to_string());
+            }
             return Ok(None);
         }
         Err(Err(e)) => return Err(AppError::new(axum::http::StatusCode::BAD_GATEWAY, format!("Failed to move files: {}", crate::locations::describe(&e)))),
@@ -450,24 +482,35 @@ async fn write_one(st: &AppState, dir: &Pinned, name: &str, hash: Option<&str>, 
         }
         out.flush().await?;
         let out = out.into_std().await;
-        out.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(modified.max(0) as u64))?;
-        out.sync_all()?;
-        drop(out);
-        let to = dir.join(name)?;
-        // Left by an earlier try that stopped after renaming: replaced
-        match std::fs::symlink_metadata(to.as_path()) {
-            Ok(m) if m.is_file() => std::fs::remove_file(to.as_path())?,
-            _ => {}
-        }
-        crate::fsops::rename_new(tmp.as_path(), to.as_path())?;
-        identity(to.as_path())
+        let (tmp, to) = (tmp.clone(), dir.join(name)?);
+        // Waiting for the disk blocks: not on the thread that serves requests
+        tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            FINISHED_ON.lock().unwrap().push(std::thread::current().id());
+            out.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(modified.max(0) as u64))?;
+            out.sync_all()?;
+            drop(out);
+            // Left by an earlier try that stopped after renaming: replaced
+            match std::fs::symlink_metadata(to.as_path()) {
+                Ok(m) if m.is_file() => std::fs::remove_file(to.as_path())?,
+                _ => {}
+            }
+            crate::fsops::rename_new(tmp.as_path(), to.as_path())?;
+            identity(to.as_path())
+        })
+        .await
+        .map_err(std::io::Error::other)?
     }
     .await;
     if written.is_err() {
-        let _ = std::fs::remove_file(tmp.as_path());
+        let _ = tokio::fs::remove_file(tmp.as_path()).await;
     }
     written
 }
+
+/// Tests: the threads that finished writing a file into the folder (dated, synced and renamed it)
+#[cfg(test)]
+pub static FINISHED_ON: std::sync::Mutex<Vec<std::thread::ThreadId>> = std::sync::Mutex::new(Vec::new());
 
 /// Switches the space to its folder in one transaction. False when an item isn't planned or copied yet.
 async fn switch(cx: &Ctx<'_>, folder: &Path) -> AppResult<bool> {
@@ -576,21 +619,44 @@ async fn switch(cx: &Ctx<'_>, folder: &Path) -> AppResult<bool> {
     Ok(switched)
 }
 
-/// A cancelled move into a folder: the folder it made goes, with what was copied into it (only a folder holding the
-/// space's marker, so nothing else is ever removed)
+/// A cancelled move into a folder: the folder it made goes, with what was copied into it. Only a folder holding the
+/// space's marker goes, and never one a space uses (or one inside it, or holding it), so nothing else is ever removed.
+/// A folder renamed to its new place by a move that stopped before the switch was recorded is renamed back instead.
 pub async fn remove_copies(st: &AppState, job: &Job) -> AppResult<()> {
-    let (chosen,): (Option<String>,) = sqlx::query_as("SELECT to_path FROM space_moves WHERE id = ?").bind(&job.id).fetch_one(&st.db).await?;
+    let (chosen, renamed): (Option<String>, bool) =
+        sqlx::query_as("SELECT to_path, renamed FROM space_moves WHERE id = ?").bind(&job.id).fetch_one(&st.db).await?;
     if let Some(path) = chosen {
-        let drive = job.drive_id.clone();
-        tokio::task::spawn_blocking(move || {
-            let folder = PathBuf::from(&path);
-            let ours = Pinned::root(&folder).ok().and_then(|r| crate::folders::space_marker(&r).ok().flatten()).is_some_and(|id| id == drive);
-            if ours && let Err(e) = std::fs::remove_dir_all(&folder) {
-                tracing::warn!("Couldn't remove {path} after a cancelled move: {e}");
+        let folder = PathBuf::from(&path);
+        let from = PathBuf::from(job.from_path.clone().unwrap_or_default());
+        if renamed && job.from_path.is_some() && find_folder(&job.drive_id, &from, &folder).await? == Found::New {
+            let (f, t) = (from.clone(), folder.clone());
+            match tokio::task::spawn_blocking(move || std::fs::rename(&t, &f)).await.map_err(AppError::internal)? {
+                Ok(()) => {
+                    let _w = st.write_lock.lock().await;
+                    sqlx::query("UPDATE space_moves SET renamed = 0 WHERE id = ?").bind(&job.id).execute(&st.db).await?;
+                }
+                Err(e) => tracing::error!("Couldn't put {} back after a cancelled move: {e}", from.display()),
             }
-        })
-        .await
-        .map_err(AppError::internal)?;
+            return Ok(());
+        }
+        let used: Vec<(String,)> = sqlx::query_as("SELECT source_path FROM drives WHERE source_path IS NOT NULL").fetch_all(&st.db).await?;
+        let in_use = used.iter().any(|(p,)| {
+            let p = Path::new(p);
+            p.starts_with(&folder) || folder.starts_with(p)
+        });
+        if in_use {
+            tracing::error!("{path} is a space's folder: it is kept, although the move that made it was cancelled");
+        } else {
+            let drive = job.drive_id.clone();
+            tokio::task::spawn_blocking(move || {
+                let ours = Pinned::root(&folder).ok().and_then(|r| crate::folders::space_marker(&r).ok().flatten()).is_some_and(|id| id == drive);
+                if ours && let Err(e) = std::fs::remove_dir_all(&folder) {
+                    tracing::warn!("Couldn't remove {path} after a cancelled move: {e}");
+                }
+            })
+            .await
+            .map_err(AppError::internal)?;
+        }
     }
     let _w = st.write_lock.lock().await;
     sqlx::query("DELETE FROM space_move_items WHERE move_id = ?").bind(&job.id).execute(&st.db).await?;

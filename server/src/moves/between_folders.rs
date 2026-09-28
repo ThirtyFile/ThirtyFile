@@ -41,16 +41,34 @@ fn other_disk() -> bool {
     false
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Tests: ThirtyFile stops right after the folder was renamed, before the switch is recorded
+    pub static STOP_AFTER_RENAME: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Tests: the new folder doesn't tell letter case apart (as on CIFS or exFAT)
+    pub static IGNORES_CASE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn not_mounted() -> AppError {
+    AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, crate::storage::NOT_MOUNTED)
+}
+
 pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
     let (st, job) = (cx.st, cx.job);
-    let source = super::to_store::source(job)?;
     let from = PathBuf::from(job.from_path.clone().unwrap_or_default());
+    if resume_rename(cx, &from).await? {
+        return Ok(Stop::Done);
+    }
+    let source = super::to_store::source(job)?;
     let target = super::to_folder::target(cx).await?;
     let (copied,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM space_move_items WHERE move_id = ?").bind(&job.id).fetch_one(&st.db).await?;
     if copied == 0 && renamed(cx, &from, &target).await? {
         return Ok(Stop::Done);
     }
-    let dest = Pinned::root(&target).map_err(|_| AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, crate::storage::NOT_MOUNTED))?;
+    // Copied: the new folder's disk must have room for what is left
+    super::check_room(st, &job.to_location, super::left_to_copy(st, job).await?).await?;
+    let dest = Pinned::root(&target).map_err(|_| not_mounted())?;
+    let ignores_case = ignores_case(&dest).await?;
     let (files_done, bytes_done): (i64, i64) = sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM space_move_items WHERE move_id = ?")
         .bind(&job.id)
         .fetch_one(&st.db)
@@ -66,7 +84,7 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
     .await?;
     cx.set_counts(files_done, bytes_done, files.max(files_done), bytes.max(bytes_done));
     cx.flush().await?;
-    if let Some(stop) = copy_all(cx, &source, &dest, false).await? {
+    if let Some(stop) = copy_all(cx, &source, &dest, ignores_case, false).await? {
         return Ok(stop);
     }
     for _ in 0..ROUNDS {
@@ -74,7 +92,7 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
         if let Some(e) = report.error {
             return Err(AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, e));
         }
-        if let Some(stop) = copy_all(cx, &source, &dest, true).await? {
+        if let Some(stop) = copy_all(cx, &source, &dest, ignores_case, true).await? {
             return Ok(stop);
         }
         let failed = cx.failed_count();
@@ -88,7 +106,7 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
             return Ok(stop);
         }
         if switch(cx, &target).await? {
-            super::to_store::cleanup(st, job).await?;
+            super::clean_up(st, job).await;
             return Ok(Stop::Done);
         }
         tokio::time::sleep(std::time::Duration::from_secs(if cfg!(test) { 0 } else { 5 })).await;
@@ -96,29 +114,78 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
     Err(AppError::conflict("The space kept changing while it was being moved. Try again later."))
 }
 
+/// Records whether the space's folder may have been renamed to its new place without the switch being recorded yet
+/// (`space_moves.renamed`)
+async fn set_renamed(cx: &Ctx<'_>, renamed: bool) -> AppResult<()> {
+    let _w = cx.st.write_lock.lock().await;
+    sqlx::query("UPDATE space_moves SET renamed = ? WHERE id = ?").bind(renamed).bind(&cx.job.id).execute(&cx.st.db).await?;
+    Ok(())
+}
+
 /// Same file system: the folder is renamed to its new place, holding the space, and the space follows in one
-/// transaction (the rename is undone when that fails). False when the folders are on different disks.
+/// transaction (the rename is undone when that fails). The step is recorded first, so a move stopped in between
+/// finishes it when it runs again (`resume_rename`), or puts the folder back when it is cancelled
+/// (to_folder::remove_copies). False when the folder is copied instead: the folders are on different disks, or the
+/// new folder can't make way.
 async fn renamed(cx: &Ctx<'_>, from: &Path, to: &Path) -> AppResult<bool> {
-    let (st, job) = (cx.st, cx.job);
+    let job = cx.job;
     if other_disk() {
         return Ok(false);
     }
     let held = crate::folders::hold(&job.drive_id).await;
-    // The new folder was made (with the marker) to keep its name: it makes way
-    let _ = std::fs::remove_file(to.join(MARKER));
-    std::fs::remove_dir(to).map_err(disk_error)?;
-    if let Err(e) = std::fs::rename(from, to) {
-        // Another disk (or a rename refused): the files are copied instead, into the folder made again
-        if e.kind() != std::io::ErrorKind::CrossesDevices {
-            tracing::info!("Renaming {} failed ({e}): its files are copied instead", from.display());
+    set_renamed(cx, true).await?;
+    let (f, t, drive) = (from.to_path_buf(), to.to_path_buf(), job.drive_id.clone());
+    let moved = tokio::task::spawn_blocking(move || -> std::io::Result<bool> {
+        // The new folder was made (with the marker) to keep its name: it makes way
+        let _ = std::fs::remove_file(t.join(MARKER));
+        if let Err(e) = std::fs::remove_dir(&t) {
+            // Something else is in it: it keeps its marker, and the files are copied into it
+            tracing::info!("{} can't make way for the space's folder ({e}): its files are copied instead", t.display());
+            crate::folders::mark_space(&t, &drive)?;
+            return Ok(false);
         }
-        std::fs::create_dir(to).and_then(|()| crate::folders::mark_space(to, &job.drive_id)).map_err(disk_error)?;
+        if let Err(e) = std::fs::rename(&f, &t) {
+            // Another disk (or a rename refused): the files are copied instead, into the folder made again
+            if e.kind() != std::io::ErrorKind::CrossesDevices {
+                tracing::info!("Renaming {} failed ({e}): its files are copied instead", f.display());
+            }
+            std::fs::create_dir(&t).and_then(|()| crate::folders::mark_space(&t, &drive))?;
+            return Ok(false);
+        }
+        Ok(true)
+    })
+    .await
+    .map_err(AppError::internal)?
+    .map_err(disk_error)?;
+    if !moved {
+        set_renamed(cx, false).await?;
         return Ok(false);
     }
+    #[cfg(test)]
+    if STOP_AFTER_RENAME.with(|s| s.get()) {
+        return Err(AppError::internal("ThirtyFile stopped (test)"));
+    }
+    if let Err(e) = commit_rename(cx, to).await {
+        let (f, t) = (from.to_path_buf(), to.to_path_buf());
+        let back = tokio::task::spawn_blocking(move || std::fs::rename(&t, &f)).await.map_err(AppError::internal)?;
+        match back {
+            Ok(()) => set_renamed(cx, false).await?,
+            // Still recorded as renamed: the next run records the switch, a cancel tries again to put it back
+            Err(b) => tracing::error!("Couldn't put {} back after a failed move: {b}", from.display()),
+        }
+        return Err(e);
+    }
+    drop(held);
+    Ok(true)
+}
+
+/// Records the switch to the renamed folder, in one transaction
+async fn commit_rename(cx: &Ctx<'_>, to: &Path) -> AppResult<()> {
+    let (st, job) = (cx.st, cx.job);
     let (files, bytes): (i64, i64) =
         sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM nodes WHERE drive_id = ? AND kind = 'file'").bind(&job.drive_id).fetch_one(&st.db).await?;
     cx.set_counts(files, bytes, files, bytes);
-    let res = {
+    {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let res = async {
@@ -128,21 +195,96 @@ async fn renamed(cx: &Ctx<'_>, from: &Path, to: &Path) -> AppResult<bool> {
                 .bind(to.to_string_lossy())
                 .execute(&mut *tx)
                 .await?;
+            sqlx::query("UPDATE space_moves SET renamed = 0 WHERE id = ?").bind(&job.id).execute(&mut *tx).await?;
             super::finish(&mut tx, cx, false, None).await
         }
         .await;
-        crate::db::settle(tx, res).await
-    };
-    if let Err(e) = res {
-        if let Err(b) = std::fs::rename(to, from) {
-            tracing::error!("Couldn't put {} back after a failed move: {b}", from.display());
-        }
-        return Err(e);
+        crate::db::settle(tx, res).await?;
     }
-    drop(held);
     crate::folders::spaces_changed();
     crate::folders::scan_later(st, &job.drive_id);
-    Ok(true)
+    Ok(())
+}
+
+/// Where the space's folder is: in its old place, in the new one, or in neither (a disk that isn't mounted)
+#[derive(Debug, PartialEq)]
+pub(super) enum Found {
+    Old,
+    New,
+    Neither,
+}
+
+/// Finds the space's folder by its marker, after a rename that may or may not have happened
+pub(super) async fn find_folder(drive_id: &str, from: &Path, to: &Path) -> AppResult<Found> {
+    let (drive, from, to) = (drive_id.to_string(), from.to_path_buf(), to.to_path_buf());
+    tokio::task::spawn_blocking(move || {
+        let ours = |p: &Path| Pinned::root(p).ok().and_then(|r| crate::folders::space_marker(&r).ok().flatten()).is_some_and(|id| id == drive);
+        if ours(&from) {
+            Found::Old
+        } else if ours(&to) {
+            Found::New
+        } else {
+            Found::Neither
+        }
+    })
+    .await
+    .map_err(AppError::internal)
+}
+
+/// A move that stopped after the step before the rename (`renamed`) was recorded: when the folder is in its new place,
+/// the switch is recorded now (true); when it is still in its old place, the new folder is made again where it made way,
+/// and the move goes on as usual (false)
+async fn resume_rename(cx: &Ctx<'_>, from: &Path) -> AppResult<bool> {
+    let (st, job) = (cx.st, cx.job);
+    let (to, renamed): (Option<String>, bool) =
+        sqlx::query_as("SELECT to_path, renamed FROM space_moves WHERE id = ?").bind(&job.id).fetch_one(&st.db).await?;
+    let (Some(to), true) = (to, renamed) else { return Ok(false) };
+    let to = PathBuf::from(to);
+    let held = crate::folders::hold(&job.drive_id).await;
+    match find_folder(&job.drive_id, from, &to).await? {
+        Found::New => {
+            commit_rename(cx, &to).await?;
+            drop(held);
+            Ok(true)
+        }
+        Found::Old => {
+            let (t, drive) = (to.clone(), job.drive_id.clone());
+            tokio::task::spawn_blocking(move || {
+                match std::fs::create_dir(&t) {
+                    Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => return Err(e),
+                    _ => {}
+                }
+                crate::folders::mark_space(&t, &drive)
+            })
+            .await
+            .map_err(AppError::internal)?
+            .map_err(disk_error)?;
+            set_renamed(cx, false).await?;
+            Ok(false)
+        }
+        Found::Neither => Err(not_mounted()),
+    }
+}
+
+/// Whether the new folder's file system takes names that differ only in letter case for the same name (CIFS, exFAT,
+/// and Windows and macOS disks by default)
+async fn ignores_case(dest: &Pinned) -> AppResult<bool> {
+    #[cfg(test)]
+    if IGNORES_CASE.with(|c| c.get()) {
+        return Ok(true);
+    }
+    let dest = dest.clone();
+    tokio::task::spawn_blocking(move || -> std::io::Result<bool> {
+        let name = format!("{}case-{}", crate::fsops::COPY_PREFIX, new_id());
+        let probe = dest.join(&name)?;
+        std::fs::File::create_new(probe.as_path())?;
+        let same = dest.join(&name.to_uppercase()).and_then(|p| std::fs::symlink_metadata(p.as_path())).is_ok();
+        let _ = std::fs::remove_file(probe.as_path());
+        Ok(same)
+    })
+    .await
+    .map_err(AppError::internal)?
+    .map_err(disk_error)
 }
 
 /// An item of the folder as it was copied: identity, size and date
@@ -160,8 +302,10 @@ fn seen(meta: &std::fs::Metadata) -> Seen {
 }
 
 /// Copies the folder: what isn't copied yet, or changed since. After the scan before the switch (`last`), copies of
-/// what is no longer there go too.
-async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, last: bool) -> AppResult<Option<Stop>> {
+/// what is no longer there go too. When the new folder doesn't tell letter case apart (`ignores_case`), items whose
+/// names differ only in letter case would become one there: they aren't copied, and are listed as failed after the
+/// scan, so the move stops until they are renamed.
+async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, ignores_case: bool, last: bool) -> AppResult<Option<Stop>> {
     let (st, job) = (cx.st, cx.job);
     let copied: std::collections::HashMap<String, (Option<i64>, i64, Option<i64>)> =
         sqlx::query_as::<_, (String, Option<i64>, i64, Option<i64>)>("SELECT item_id, src_ino, size, src_mtime_ns FROM space_move_items WHERE move_id = ?")
@@ -190,10 +334,17 @@ async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, last: bool) -> A
             .map_err(AppError::internal)?
             .map_err(disk_error)?
         };
+        let clashing = if ignores_case { case_clashes(entries.iter().map(|(name, _)| name.as_str())) } else { HashSet::new() };
         for (name, meta) in entries {
             let rel = crate::fsops::child_rel(&dir, &name);
             // Its own marker is in the new folder already; links are left where they are
             if (dir.is_empty() && name == MARKER) || meta.file_type().is_symlink() {
+                continue;
+            }
+            if clashing.contains(&name) {
+                if last {
+                    cx.failed(Some(rel), CASE_CLASH.to_string());
+                }
                 continue;
             }
             if meta.is_dir() {
@@ -250,6 +401,17 @@ async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, last: bool) -> A
 }
 
 const CHANGED: &str = "The file changed while it was being copied";
+const CASE_CLASH: &str =
+    "Another item in its folder has the same name in other letter case, which the new folder can't tell apart. Rename one of them, then resume the move.";
+
+/// The names of a folder that another of its names equals but for letter case
+fn case_clashes<'a>(names: impl Iterator<Item = &'a str>) -> HashSet<String> {
+    let mut by_key: std::collections::HashMap<String, Vec<&str>> = std::collections::HashMap::new();
+    for name in names {
+        by_key.entry(name.to_lowercase()).or_default().push(name);
+    }
+    by_key.into_values().filter(|names| names.len() > 1).flatten().map(str::to_string).collect()
+}
 
 /// Copies a file to the same path in the new folder (under a temporary name, then renamed over an older copy), with its
 /// date; returns what the original and the copy were
