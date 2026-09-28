@@ -53,12 +53,12 @@ pub struct NodeInfo {
 /// The path visible to the user: space members see the full path; people with shared access only see from the shared folder down
 async fn visible_path(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppResult<(Vec<Crumb>, bool)> {
     let path = tree::path_of(conn, &node.id).await?;
-    let member_of: Vec<String> = tree::user_drives(conn, user).await?.into_iter().map(|(d, _)| d.id).collect();
+    let member_of = tree::member_of(conn, user).await?;
     if member_of.iter().any(|d| d == node.drive()) {
         return Ok((path, false));
     }
-    let shared: HashSet<String> = tree::shared_with_me_outside(conn, user, &member_of).await?.into_iter().map(|(n, _, _)| n.id).collect();
-    let start = path.iter().position(|c| shared.contains(&c.id)).unwrap_or(0);
+    let shared = tree::shared_ids(conn, user, &member_of).await?;
+    let start = tree::shared_start(&path, &shared).unwrap_or(0);
     Ok((path.into_iter().skip(start).collect(), true))
 }
 
@@ -806,7 +806,7 @@ async fn locate(st: &AppState, user: &User, mut nodes: Vec<Node>) -> AppResult<V
     }
     let shared: HashSet<String> = if nodes.iter().any(|n| !drives.contains_key(n.drive())) {
         let member_of: Vec<String> = drives.keys().cloned().collect();
-        tree::shared_with_me_outside(&mut c, user, &member_of).await?.into_iter().map(|(n, _, _)| n.id).collect()
+        tree::shared_ids(&mut c, user, &member_of).await?
     } else {
         HashSet::new()
     };
@@ -821,7 +821,7 @@ async fn locate(st: &AppState, user: &User, mut nodes: Vec<Node>) -> AppResult<V
         };
         let space = drives.get(node.drive()).cloned();
         // Accessed through a folder share: only shown from the shared folder down
-        let start = if space.is_some() { 0 } else { path.iter().position(|c| shared.contains(&c.id)).unwrap_or(path.len()) };
+        let start = if space.is_some() { 0 } else { tree::shared_start(&path, &shared).unwrap_or(path.len()) };
         let location_path: Vec<String> = path[start..].iter().map(|p| p.name.clone()).collect();
         let first = space.as_ref().map_or(SHARED_WITH_ME, |s| s.name.as_str());
         let location = std::iter::once(first).chain(location_path.iter().map(String::as_str)).collect::<Vec<_>>().join("/");

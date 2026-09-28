@@ -1,6 +1,6 @@
 //! Shared file tree logic: node queries, permissions (space and folder grants), ancestors/subtrees, name conflicts, blob reference counting, quotas.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use sqlx::{SqliteConnection, SqlitePool};
@@ -312,10 +312,26 @@ pub async fn user_drives(conn: &mut SqliteConnection, user: &User) -> AppResult<
     Ok(out)
 }
 
+/// Ids of the spaces the user is a member of
+pub async fn member_of(conn: &mut SqliteConnection, user: &User) -> AppResult<Vec<String>> {
+    Ok(user_drives(conn, user).await?.into_iter().map(|(d, _)| d.id).collect())
+}
+
 /// Folders / files others shared with me (excluding items in spaces I'm already a member of): (node, role, sharer)
 pub async fn shared_with_me(conn: &mut SqliteConnection, user: &User) -> AppResult<Vec<(Node, Role, String)>> {
-    let member_of: Vec<String> = user_drives(conn, user).await?.into_iter().map(|(d, _)| d.id).collect();
+    let member_of = member_of(conn, user).await?;
     shared_with_me_outside(conn, user, &member_of).await
+}
+
+/// Ids of the items shared with the user in spaces they aren't a member of (`member_of`)
+pub async fn shared_ids(conn: &mut SqliteConnection, user: &User, member_of: &[String]) -> AppResult<HashSet<String>> {
+    Ok(shared_with_me_outside(conn, user, member_of).await?.into_iter().map(|(n, _, _)| n.id).collect())
+}
+
+/// For someone who only has a folder of the space shared with them: where `path` (from the root down) becomes visible
+/// to them, at the first shared folder in it; None when it doesn't pass one
+pub fn shared_start(path: &[Crumb], shared: &HashSet<String>) -> Option<usize> {
+    path.iter().position(|c| shared.contains(&c.id))
 }
 
 /// Same as `shared_with_me`, for callers that already have the user's space list (saves the grants query)
@@ -359,8 +375,8 @@ pub fn scope_sql(drives_param: usize, folders_param: usize) -> String {
 
 /// The user's accessible scope: (space id JSON, shared folder id JSON)
 pub async fn scope(conn: &mut SqliteConnection, user: &User) -> AppResult<(String, String)> {
-    let drives: Vec<String> = user_drives(conn, user).await?.into_iter().map(|(d, _)| d.id).collect();
-    let folders: Vec<String> = shared_with_me_outside(conn, user, &drives).await?.into_iter().map(|(n, _, _)| n.id).collect();
+    let drives = member_of(conn, user).await?;
+    let folders: Vec<String> = shared_ids(conn, user, &drives).await?.into_iter().collect();
     Ok((serde_json::to_string(&drives).unwrap(), serde_json::to_string(&folders).unwrap()))
 }
 

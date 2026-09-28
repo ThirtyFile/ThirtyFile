@@ -402,12 +402,11 @@ pub async fn access(State(st): State<AppState>, user: User, Path(id): Path<Strin
     // Someone who only has the folder shared with them (not a member of the space) sees the grants from the shared
     // folder down, like the path they see: the folders above it and who else can access them are not theirs to know
     if !can_manage {
-        let member_of: Vec<String> = tree::user_drives(&mut c, &user).await?.into_iter().map(|(d, _)| d.id).collect();
+        let member_of = tree::member_of(&mut c, &user).await?;
         if !member_of.iter().any(|d| d == node.drive()) {
-            let shared: std::collections::HashSet<String> =
-                tree::shared_with_me_outside(&mut c, &user, &member_of).await?.into_iter().map(|(n, _, _)| n.id).collect();
+            let shared = tree::shared_ids(&mut c, &user, &member_of).await?;
             let path = tree::path_of(&mut c, &node.id).await?;
-            let visible: std::collections::HashSet<&str> = match path.iter().position(|c| shared.contains(&c.id)) {
+            let visible: std::collections::HashSet<&str> = match tree::shared_start(&path, &shared) {
                 Some(start) => path[start..].iter().map(|c| c.id.as_str()).collect(),
                 None => Default::default(),
             };
