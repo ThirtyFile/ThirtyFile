@@ -245,6 +245,23 @@ pub async fn set_setting(conn: &mut SqliteConnection, key: &str, value: &str) ->
     Ok(())
 }
 
+/// Ends a write transaction by what the work in it returned: committed when it succeeded, rolled back when it failed.
+/// Called before the write lock is released: a transaction that is only dropped rolls back later, in the background,
+/// and meanwhile keeps SQLite's write lock when it wrote anything. The next writer's transaction, which usually reads
+/// first, then fails at once with "database is locked", as SQLite doesn't wait for the lock while upgrading a read.
+pub async fn settle<T>(tx: sqlx::Transaction<'_, sqlx::Sqlite>, res: AppResult<T>) -> AppResult<T> {
+    match res {
+        Ok(v) => {
+            tx.commit().await?;
+            Ok(v)
+        }
+        Err(e) => {
+            tx.rollback().await?;
+            Err(e)
+        }
+    }
+}
+
 pub async fn location_exists(conn: &mut SqliteConnection, id: &str) -> Result<bool, sqlx::Error> {
     let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM storage_locations WHERE id = ?").bind(id).fetch_one(&mut *conn).await?;
     Ok(n > 0)

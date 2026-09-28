@@ -287,12 +287,35 @@ pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     }
     let row = get_row(&st, id).await?;
     let moved = move_personal_first(&st, &me, id, &row.username, &q).await?;
-    let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
-    let removed = remove_personal_in(&mut tx, &me, id, &row.username, &q, moved).await?;
+    let (removed, uploads) = {
+        let _w = st.write_lock.lock().await;
+        let mut tx = st.db.begin().await?;
+        let res = delete_in(&mut tx, &me, id, &row.username, &q, moved).await;
+        // Moving the files can fail after writing (the target space is full): rolled back before the lock goes
+        crate::db::settle(tx, res).await?
+    };
+    if let Some(removed) = removed {
+        removed.finish(&st).await;
+    }
+    for (u,) in uploads {
+        let _ = tokio::fs::remove_file(st.tmp_dir().join(format!("upload-{u}"))).await;
+    }
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// Deletes the user in the transaction: returns their removed personal space and the uploads that were cancelled
+async fn delete_in(
+    tx: &mut sqlx::SqliteConnection,
+    me: &crate::auth::User,
+    id: i64,
+    username: &str,
+    q: &DeleteQuery,
+    moved: Option<String>,
+) -> AppResult<(Option<Removed>, Vec<(String,)>)> {
+    let removed = remove_personal_in(tx, me, id, username, q, moved).await?;
     let detail = match removed.as_ref().and_then(|r| r.detail.as_deref()) {
-        Some(d) => format!("{}: {d}", row.username),
-        None => row.username.clone(),
+        Some(d) => format!("{username}: {d}"),
+        None => username.to_string(),
     };
     let uploads: Vec<(String,)> = sqlx::query_as("SELECT id FROM uploads WHERE owner_id = ?").bind(id).fetch_all(&mut *tx).await?;
     sqlx::query("DELETE FROM uploads WHERE owner_id = ?").bind(id).execute(&mut *tx).await?;
@@ -305,7 +328,7 @@ pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     .fetch_all(&mut *tx)
     .await?;
     for (node_id,) in owned {
-        add_grant(&mut tx, &node_id, "user", me.id, "owner", Some(me.id), None).await?;
+        add_grant(tx, &node_id, "user", me.id, "owner", Some(me.id), None).await?;
     }
     sqlx::query("DELETE FROM grants WHERE principal_type = 'user' AND principal_id = ?").bind(id).execute(&mut *tx).await?;
     sqlx::query("UPDATE drives SET owner_id = ? WHERE owner_id = ?").bind(me.id).bind(id).execute(&mut *tx).await?;
@@ -313,15 +336,8 @@ pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     // The trash shows "—" for items deleted by a removed account (a later account could get the same id)
     sqlx::query("UPDATE nodes SET trashed_by = NULL WHERE trashed_by = ?").bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM users WHERE id = ?").bind(id).execute(&mut *tx).await?;
-    logs::record_activity(&mut tx, &me, None, "user_delete", &detail).await?;
-    tx.commit().await?;
-    if let Some(removed) = removed {
-        removed.finish(&st).await;
-    }
-    for (u,) in uploads {
-        let _ = tokio::fs::remove_file(st.tmp_dir().join(format!("upload-{u}"))).await;
-    }
-    Ok(Json(json!({ "ok": true })))
+    logs::record_activity(tx, me, None, "user_delete", &detail).await?;
+    Ok((removed, uploads))
 }
 
 /// A personal space removed in a transaction (`remove_personal_in`)
@@ -384,13 +400,15 @@ pub async fn remove_personal_in(
     q: &DeleteQuery,
     moved: Option<String>,
 ) -> AppResult<Option<Removed>> {
-    sqlx::query("UPDATE users SET personal_pending = NULL WHERE id = ?").bind(id).execute(&mut *tx).await?;
     let personal: Option<(String, String, Option<String>)> =
         sqlx::query_as("SELECT id, root_id, CASE WHEN mode = 'folder' THEN source_path END FROM drives WHERE kind = 'personal' AND owner_id = ?")
             .bind(id)
             .fetch_optional(&mut *tx)
             .await?;
-    let Some((drive_id, root_id, folder)) = personal else { return Ok(None) };
+    let Some((drive_id, root_id, folder)) = personal else {
+        sqlx::query("UPDATE users SET personal_pending = NULL WHERE id = ?").bind(id).execute(&mut *tx).await?;
+        return Ok(None);
+    };
     let (has_files,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM nodes WHERE parent_id = ?)").bind(&root_id).fetch_one(&mut *tx).await?;
     let detail = if let Some(place) = moved {
         Some(format!("files moved to {place}"))
@@ -410,7 +428,7 @@ pub async fn remove_personal_in(
     sqlx::query("DELETE FROM uploads WHERE drive_id = ?").bind(&drive_id).execute(&mut *tx).await?;
     // The space disappears now; what is still in it is deleted in the background (`Removed::finish`)
     sqlx::query("DELETE FROM drives WHERE id = ?").bind(&drive_id).execute(&mut *tx).await?;
-    sqlx::query("UPDATE users SET root_id = NULL WHERE id = ?").bind(id).execute(&mut *tx).await?;
+    sqlx::query("UPDATE users SET root_id = NULL, personal_pending = NULL WHERE id = ?").bind(id).execute(&mut *tx).await?;
     Ok(Some(Removed { detail, uploads: uploads.into_iter().map(|(u,)| u).collect(), folder: folder.is_some() }))
 }
 

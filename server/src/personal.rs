@@ -132,21 +132,25 @@ pub async fn retry_pending(st: &AppState, user: Option<i64>) -> usize {
 async fn retry_one(st: &AppState, id: i64) -> AppResult<Option<String>> {
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
+    let res = retry_in(st, &mut tx, id).await;
+    // A failed attempt may have written already: rolled back before the lock goes (`db::settle`)
+    crate::db::settle(tx, res).await
+}
+
+async fn retry_in(st: &AppState, tx: &mut SqliteConnection, id: i64) -> AppResult<Option<String>> {
     // Checked again under the lock: another retry or an administrator may have been quicker
     let row: Option<(Option<String>, Option<String>)> = sqlx::query_as("SELECT root_id, personal_pending FROM users WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?;
     let location = match row {
         Some((None, Some(location))) => location,
         Some((Some(_), Some(_))) => {
             sqlx::query("UPDATE users SET personal_pending = NULL WHERE id = ?").bind(id).execute(&mut *tx).await?;
-            tx.commit().await?;
             return Ok(None);
         }
         _ => return Ok(None),
     };
     // A location deleted meanwhile: the default one
-    let location = if crate::db::location_exists(&mut tx, &location).await? { location } else { crate::locations::default_location(&mut tx).await? };
-    create(&mut tx, st.space_folders.as_deref(), id, &location).await?;
-    tx.commit().await?;
+    let location = if crate::db::location_exists(tx, &location).await? { location } else { crate::locations::default_location(tx).await? };
+    create(tx, st.space_folders.as_deref(), id, &location).await?;
     Ok(Some(location))
 }
 
@@ -182,25 +186,31 @@ pub async fn add(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<i6
     {
         let _w = st.write_lock.lock().await;
         let mut tx = st.db.begin().await?;
-        let row: Option<(String, Option<String>)> = sqlx::query_as("SELECT username, root_id FROM users WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?;
-        let (username, root) = row.ok_or_else(|| AppError::not_found("User not found"))?;
-        if root.is_some() {
-            return Err(AppError::conflict("This user already has a personal space"));
-        }
-        let location = match req.location_id.as_deref().filter(|l| !l.is_empty()) {
-            Some(l) => {
-                crate::db::check_location(&mut tx, l).await?;
-                l.to_string()
-            }
-            None => policy_location(&st, &mut tx).await?,
-        };
-        create(&mut tx, st.space_folders.as_deref(), id, &location).await?;
-        let name = location_name(&mut tx, &location).await?;
-        logs::record_activity(&mut tx, &me, None, "user_update", &format!("{username}: added My files on {name}")).await?;
-        tx.commit().await?;
+        let res = add_in(&st, &mut tx, &me, id, &req).await;
+        // Creating the space can fail after writing (a folder that isn't available): rolled back before the lock goes
+        crate::db::settle(tx, res).await?;
     }
     crate::folders::spaces_changed();
     Ok(Json(crate::admin::get_row(&st, id).await?))
+}
+
+async fn add_in(st: &AppState, tx: &mut SqliteConnection, me: &crate::auth::User, id: i64, req: &AddReq) -> AppResult<()> {
+    let row: Option<(String, Option<String>)> = sqlx::query_as("SELECT username, root_id FROM users WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?;
+    let (username, root) = row.ok_or_else(|| AppError::not_found("User not found"))?;
+    if root.is_some() {
+        return Err(AppError::conflict("This user already has a personal space"));
+    }
+    let location = match req.location_id.as_deref().filter(|l| !l.is_empty()) {
+        Some(l) => {
+            crate::db::check_location(tx, l).await?;
+            l.to_string()
+        }
+        None => policy_location(st, tx).await?,
+    };
+    create(tx, st.space_folders.as_deref(), id, &location).await?;
+    let name = location_name(tx, &location).await?;
+    logs::record_activity(tx, me, None, "user_update", &format!("{username}: added My files on {name}")).await?;
+    Ok(())
 }
 
 /// Removes a user's personal space: its files are moved into a folder "Files of <username>" in another space
@@ -211,24 +221,36 @@ pub async fn remove(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     let removed = {
         let _w = st.write_lock.lock().await;
         let mut tx = st.db.begin().await?;
-        let (pending,): (Option<String>,) = sqlx::query_as("SELECT personal_pending FROM users WHERE id = ?").bind(id).fetch_one(&mut *tx).await?;
-        let removed = crate::admin::remove_personal_in(&mut tx, &me, id, &username, &q, moved).await?;
-        let detail = match &removed {
-            Some(r) => match &r.detail {
-                Some(d) => format!("{username}: removed My files, {d}"),
-                None => format!("{username}: removed My files"),
-            },
-            None if pending.is_some() => format!("{username}: stopped waiting to create My files"),
-            None => return Err(AppError::bad_request("This user doesn't have a personal space")),
-        };
-        logs::record_activity(&mut tx, &me, None, "user_update", &detail).await?;
-        tx.commit().await?;
-        removed
+        let res = remove_in(&mut tx, &me, id, &username, &q, moved).await;
+        // Rolled back before the lock goes when it fails (`db::settle`)
+        crate::db::settle(tx, res).await?
     };
     if let Some(removed) = removed {
         removed.finish(&st).await;
     }
     Ok(Json(crate::admin::get_row(&st, id).await?))
+}
+
+async fn remove_in(
+    tx: &mut SqliteConnection,
+    me: &crate::auth::User,
+    id: i64,
+    username: &str,
+    q: &DeleteQuery,
+    moved: Option<String>,
+) -> AppResult<Option<crate::admin::Removed>> {
+    let (pending,): (Option<String>,) = sqlx::query_as("SELECT personal_pending FROM users WHERE id = ?").bind(id).fetch_one(&mut *tx).await?;
+    let removed = crate::admin::remove_personal_in(tx, me, id, username, q, moved).await?;
+    let detail = match &removed {
+        Some(r) => match &r.detail {
+            Some(d) => format!("{username}: removed My files, {d}"),
+            None => format!("{username}: removed My files"),
+        },
+        None if pending.is_some() => format!("{username}: stopped waiting to create My files"),
+        None => return Err(AppError::bad_request("This user doesn't have a personal space")),
+    };
+    logs::record_activity(tx, me, None, "user_update", &detail).await?;
+    Ok(removed)
 }
 
 #[cfg(test)]

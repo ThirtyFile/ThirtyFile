@@ -189,6 +189,11 @@ async fn purge_detached(st: &AppState) -> AppResult<()> {
             .fetch_all(&mut *tx)
             .await?;
             if deleted.is_empty() {
+                // Ended before the write lock is released: the DELETE took SQLite's write lock even though it deleted
+                // nothing, and a dropped transaction only rolls back later, in the background. Meanwhile the next
+                // writer's transaction, which reads first, couldn't start writing ("database is locked" at once:
+                // SQLite doesn't wait for a lock while upgrading a read transaction)
+                tx.rollback().await?;
                 break;
             }
             total += deleted.len();
