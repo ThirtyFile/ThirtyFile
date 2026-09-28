@@ -113,9 +113,12 @@ impl Watcher {
     /// Watches `rel` of a space and every folder below it
     fn add_tree(&mut self, drive: &str, rel: &str) {
         let Some(root) = self.roots.get(drive).cloned() else { return };
+        let Ok(pinned) = crate::beneath::Pinned::root(&root) else { return };
         let mut queue = vec![rel.to_string()];
         while let Some(rel) = queue.pop() {
-            let path = if rel.is_empty() { root.clone() } else { root.join(&rel) };
+            // Reached without following a symbolic link on the way, so a folder swapped for a link isn't watched
+            let Ok(dir) = (if rel.is_empty() { Ok(pinned.clone()) } else { pinned.join(&rel).and_then(|d| d.dir()) }) else { continue };
+            let path = dir.as_path();
             let Ok(c) = CString::new(path.as_os_str().as_bytes()) else { continue };
             // SAFETY: an open inotify descriptor and a valid path; IN_DONT_FOLLOW leaves symbolic links alone
             let wd = unsafe { libc::inotify_add_watch(self.fd, c.as_ptr(), WATCH_MASK | libc::IN_DONT_FOLLOW) };
@@ -124,14 +127,14 @@ impl Watcher {
                     self.limited = true;
                     tracing::warn!(
                         "Can't watch every folder of the folder spaces (the limit fs.inotify.max_user_watches is reached, at {}): changes there are found by the regular scan",
-                        path.display()
+                        root.join(&rel).display()
                     );
                 }
                 continue;
             }
             // A folder reached twice (a bind mount inside the space, say) keeps its first owner
             self.dirs.entry(wd).or_insert_with(|| (drive.to_string(), rel.clone()));
-            let Ok(read) = std::fs::read_dir(&path) else { continue };
+            let Ok(read) = std::fs::read_dir(path) else { continue };
             for item in read.flatten() {
                 let Ok(name) = item.file_name().into_string() else { continue };
                 if crate::folders::ignored(&name) || !item.file_type().is_ok_and(|t| t.is_dir()) {

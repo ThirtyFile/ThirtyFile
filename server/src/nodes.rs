@@ -1024,7 +1024,7 @@ pub async fn delete_forever(State(st): State<AppState>, user: User, Json(req): J
     }
     tx.commit().await?;
     tree::schedule_blob_removal(&st, orphans);
-    fsops::remove_later(on_disk);
+    fsops::remove_below_later(on_disk);
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -1114,7 +1114,7 @@ async fn purge_trash_in_batches(st: &AppState, select: &'static str, param: Stri
         }
         tx.commit().await?;
         tree::schedule_blob_removal(st, orphans);
-        fsops::remove_later(on_disk);
+        fsops::remove_below_later(on_disk);
         total += ids.len();
     }
 }

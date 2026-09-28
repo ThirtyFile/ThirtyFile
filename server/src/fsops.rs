@@ -13,7 +13,7 @@
 use std::{
     collections::{HashMap, HashSet},
     io,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use axum::http::StatusCode;
@@ -22,6 +22,7 @@ use tokio::sync::OwnedMutexGuard;
 
 use crate::{
     auth::User,
+    beneath::Pinned,
     error::{AppError, AppResult},
     files::Source,
     logs,
@@ -64,13 +65,26 @@ fn rel_of(n: &Node) -> &str {
     n.fs_path.as_deref().unwrap_or_default()
 }
 
-/// The item on disk
-fn abs(n: &Node) -> AppResult<PathBuf> {
-    n.fs_file().ok_or_else(|| AppError::not_found("Item not found"))
+/// The item on disk, reached without following a symbolic link on the way (`beneath`)
+fn abs(n: &Node) -> AppResult<Pinned> {
+    n.fs_pinned().map_err(gone_or_disk_error)
 }
 
-fn under(top: &Path, rel: &str) -> PathBuf {
-    if rel.is_empty() { top.to_path_buf() } else { top.join(rel) }
+/// A path that no longer leads to the item: a folder on the way is missing, or was replaced by a link
+fn gone_or_disk_error(e: io::Error) -> AppError {
+    match e.kind() {
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory | io::ErrorKind::InvalidInput => {
+            AppError::not_found("The item is no longer in the folder on the server")
+        }
+        #[cfg(unix)]
+        _ if e.raw_os_error() == Some(libc::ELOOP) => AppError::not_found("The item is no longer in the folder on the server"),
+        _ => disk_error(e),
+    }
+}
+
+/// A space's folder
+fn space_root(n: &Node) -> AppResult<Pinned> {
+    Pinned::root(Path::new(n.fs_root.as_deref().unwrap_or_default())).map_err(gone_or_disk_error)
 }
 
 /// A disk error as people see it
@@ -93,10 +107,10 @@ fn incomplete() -> AppError {
 /// A rename made on disk by a change that isn't committed yet
 struct Renamed {
     /// Where the item is now, and where it was
-    now: PathBuf,
-    was: PathBuf,
+    now: Pinned,
+    was: Pinned,
     /// A folder made for the rename (a trash folder), removed again when undoing
-    made: Option<PathBuf>,
+    made: Option<Pinned>,
 }
 
 /// Scan locks of the folder spaces a change touches, held until it is done. They also keep the renames the change
@@ -115,7 +129,7 @@ impl SpaceLocks {
         Ok(())
     }
 
-    fn note(&self, now: PathBuf, was: PathBuf, made: Option<PathBuf>) {
+    fn note(&self, now: Pinned, was: Pinned, made: Option<Pinned>) {
         self.renamed.lock().unwrap_or_else(|e| e.into_inner()).push(Renamed { now, was, made });
     }
 
@@ -129,16 +143,13 @@ impl Drop for SpaceLocks {
     fn drop(&mut self) {
         let renamed = std::mem::take(self.renamed.get_mut().unwrap_or_else(|e| e.into_inner()));
         for r in renamed.into_iter().rev() {
-            if let Some(dir) = r.was.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            match rename_new(&r.now, &r.was) {
+            match rename_new(r.now.as_path(), r.was.as_path()) {
                 Ok(()) => {
                     if let Some(made) = r.made {
-                        let _ = std::fs::remove_dir(made);
+                        let _ = std::fs::remove_dir(made.as_path());
                     }
                 }
-                Err(e) => tracing::error!("Couldn't put {} back to {} after a failed change: {e}", r.now.display(), r.was.display()),
+                Err(e) => tracing::error!("Couldn't put {:?} back after a failed change: {e}", r.was.name().unwrap_or_default()),
             }
         }
     }
@@ -202,72 +213,113 @@ fn same_item(a: &Path, b: &Path) -> bool {
     }
 }
 
+/// `rel` below `p` ("" for `p` itself), without following a link on the way
+fn below(p: &Pinned, rel: &str) -> io::Result<Pinned> {
+    if rel.is_empty() { Ok(p.clone()) } else { p.join(rel) }
+}
+
 /// An original that was copied: removed afterwards only if it is still what was copied
 struct Copied {
-    path: PathBuf,
+    /// Below the item that was copied ("" for the item itself)
+    rel: String,
     is_dir: bool,
     /// A file's size and modification time when it was copied
     seen: Option<(u64, i64)>,
 }
 
+/// The originals of a move to another disk: the item, and what was copied of it
+struct CopiedTree {
+    top: Pinned,
+    items: Vec<Copied>,
+}
+
 /// Copies a file or folder on disk, including what the index doesn't have yet; symbolic links stay links. `copied`
-/// lists the originals, folders before what is in them.
-fn copy_tree(from: &Path, to: &Path, copied: &mut Vec<Copied>) -> io::Result<()> {
-    let meta = std::fs::symlink_metadata(from)?;
+/// lists the originals (by their path below the item), folders before what is in them.
+fn copy_tree(from: &Pinned, to: &Pinned, rel: &str, copied: &mut Vec<Copied>) -> io::Result<()> {
+    let meta = std::fs::symlink_metadata(from.as_path())?;
     if meta.is_dir() {
-        std::fs::create_dir(to)?;
-        copied.push(Copied { path: from.to_path_buf(), is_dir: true, seen: None });
-        for item in std::fs::read_dir(from)? {
-            let item = item?;
-            copy_tree(&item.path(), &to.join(item.file_name()), copied)?;
+        std::fs::create_dir(to.as_path())?;
+        copied.push(Copied { rel: rel.to_string(), is_dir: true, seen: None });
+        let (from_dir, to_dir) = (from.dir()?, to.dir()?);
+        for item in std::fs::read_dir(from_dir.as_path())? {
+            let name = item?.file_name().into_string().map_err(|_| io::Error::other("a name that isn't valid text"))?;
+            copy_tree(&from_dir.join(&name)?, &to_dir.join(&name)?, &child_rel(rel, &name), copied)?;
         }
     } else if meta.file_type().is_symlink() {
         #[cfg(unix)]
-        std::os::unix::fs::symlink(std::fs::read_link(from)?, to)?;
-        copied.push(Copied { path: from.to_path_buf(), is_dir: false, seen: None });
+        std::os::unix::fs::symlink(std::fs::read_link(from.as_path())?, to.as_path())?;
+        copied.push(Copied { rel: rel.to_string(), is_dir: false, seen: None });
     } else if meta.is_file() {
-        // On btrfs and XFS the copy can share the original's blocks
-        if std::fs::copy(from, to)? != meta.len() {
+        if crate::beneath::copy_file(from, to.as_path())? != meta.len() {
             return Err(io::Error::other("a file wasn't copied completely"));
         }
-        copied.push(Copied { path: from.to_path_buf(), is_dir: false, seen: Some((meta.len(), crate::folders::mtime_ns(&meta))) });
+        copied.push(Copied { rel: rel.to_string(), is_dir: false, seen: Some((meta.len(), crate::folders::mtime_ns(&meta))) });
     }
     Ok(())
 }
 
 /// Removes the originals of a copy: files unchanged since they were copied, then folders left empty. Anything added or
 /// changed meanwhile (over SMB, say) stays, and the next scan shows it.
-fn remove_copied(copied: Vec<Copied>) {
-    for c in copied.iter().filter(|c| !c.is_dir) {
+fn remove_copied(copied: CopiedTree) {
+    let at = |rel: &str| below(&copied.top, rel);
+    for c in copied.items.iter().filter(|c| !c.is_dir) {
+        let Ok(p) = at(&c.rel) else { continue };
         let unchanged = match c.seen {
-            Some((size, mtime)) => std::fs::symlink_metadata(&c.path).is_ok_and(|m| m.len() == size && crate::folders::mtime_ns(&m) == mtime),
+            Some((size, mtime)) => std::fs::symlink_metadata(p.as_path()).is_ok_and(|m| m.len() == size && crate::folders::mtime_ns(&m) == mtime),
             None => true,
         };
         if !unchanged {
-            tracing::info!("Kept {}: it changed while it was being moved", c.path.display());
+            tracing::info!("Kept {:?}: it changed while it was being moved", c.rel);
             continue;
         }
-        if let Err(e) = std::fs::remove_file(&c.path)
+        if let Err(e) = std::fs::remove_file(p.as_path())
             && e.kind() != io::ErrorKind::NotFound
         {
-            tracing::warn!("Couldn't remove {} from disk: {e}", c.path.display());
+            tracing::warn!("Couldn't remove {:?} from disk: {e}", c.rel);
         }
     }
-    for c in copied.iter().rev().filter(|c| c.is_dir) {
-        let _ = std::fs::remove_dir(&c.path);
+    for c in copied.items.iter().rev().filter(|c| c.is_dir) {
+        if let Ok(p) = at(&c.rel) {
+            let _ = std::fs::remove_dir(p.as_path());
+        }
     }
 }
 
-fn remove_all(p: &Path) -> io::Result<()> {
-    if std::fs::symlink_metadata(p)?.is_dir() { std::fs::remove_dir_all(p) } else { std::fs::remove_file(p) }
+fn remove_all(p: &Pinned) -> io::Result<()> {
+    // Neither follows a symbolic link: a link is removed itself
+    if std::fs::symlink_metadata(p.as_path())?.is_dir() { std::fs::remove_dir_all(p.as_path()) } else { std::fs::remove_file(p.as_path()) }
 }
 
-fn older_than(p: &Path, age: std::time::Duration) -> bool {
-    std::fs::symlink_metadata(p).and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|a| a >= age))
+fn older_than(p: &Pinned, age: std::time::Duration) -> bool {
+    std::fs::symlink_metadata(p.as_path()).and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|a| a >= age))
+}
+
+/// Makes a folder, or uses the one already there (not a link)
+pub fn ensure_dir(p: &Pinned) -> io::Result<()> {
+    match std::fs::create_dir(p.as_path()) {
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists && std::fs::symlink_metadata(p.as_path()).is_ok_and(|m| m.is_dir()) => Ok(()),
+        r => r,
+    }
+}
+
+/// Removes items below a space's folder from disk in the background (the index no longer has them)
+pub fn remove_below_later(paths: Vec<crate::beneath::Below>) {
+    if paths.is_empty() {
+        return;
+    }
+    tokio::task::spawn_blocking(move || {
+        for b in paths {
+            if let Err(e) = b.pin().and_then(|p| remove_all(&p))
+                && e.kind() != io::ErrorKind::NotFound
+            {
+                tracing::warn!("Couldn't remove {:?} from disk: {e}", b.rel);
+            }
+        }
+    });
 }
 
 /// Removes items from disk in the background (the index no longer has them)
-pub fn remove_later(paths: Vec<PathBuf>) {
+pub fn remove_later(paths: Vec<Pinned>) {
     if paths.is_empty() {
         return;
     }
@@ -276,7 +328,7 @@ pub fn remove_later(paths: Vec<PathBuf>) {
             if let Err(e) = remove_all(&p)
                 && e.kind() != io::ErrorKind::NotFound
             {
-                tracing::warn!("Couldn't remove {} from disk: {e}", p.display());
+                tracing::warn!("Couldn't remove {:?} from disk: {e}", p.name().unwrap_or_default());
             }
         }
     });
@@ -286,10 +338,11 @@ pub fn remove_later(paths: Vec<PathBuf>) {
 
 /// A name that neither the index nor the disk has in `parent` yet: `name`, else "name (1)", "name (2)"…
 pub async fn free_name(conn: &mut SqliteConnection, parent: &Node, name: &str, is_folder: bool) -> AppResult<String> {
-    let dir = abs(parent)?;
+    let dir = abs(parent)?.dir().map_err(gone_or_disk_error)?;
     for n in 0..10_000u32 {
         let candidate = if n == 0 { name.to_string() } else { numbered_name(name, n, is_folder) };
-        if !tree::name_taken(conn, &parent.id, &candidate).await? && std::fs::symlink_metadata(dir.join(&candidate)).is_err() {
+        let on_disk = dir.join(&candidate).is_ok_and(|p| std::fs::symlink_metadata(p.as_path()).is_ok());
+        if !tree::name_taken(conn, &parent.id, &candidate).await? && !on_disk {
             return Ok(candidate);
         }
     }
@@ -367,37 +420,34 @@ async fn repath(conn: &mut SqliteConnection, drive_id: &str, old: &str, new: &st
 
 /// Makes a folder on disk; one that was made on the server meanwhile is used as it is
 pub fn make_dir(parent: &Node, name: &str) -> AppResult<(String, Stat)> {
-    let path = abs(parent)?.join(name);
-    match std::fs::create_dir(&path) {
-        Ok(()) => {}
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists && std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir()) => {}
-        Err(e) => return Err(disk_error(e)),
-    }
-    Ok((child_rel(rel_of(parent), name), stat(&path).map_err(disk_error)?))
+    let path = abs(parent)?.join(name).map_err(gone_or_disk_error)?;
+    ensure_dir(&path).map_err(disk_error)?;
+    Ok((child_rel(rel_of(parent), name), stat(path.as_path()).map_err(disk_error)?))
 }
 
 /// Renames an item, or moves it to another folder of its space: on disk, then in the index (the caller records its
 /// new name and folder)
 pub async fn rename(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node, dest: &Node, name: &str) -> AppResult<()> {
-    let (from, to) = (abs(node)?, abs(dest)?.join(name));
-    rename_new(&from, &to).map_err(disk_error)?;
+    let (from, to) = (abs(node)?, abs(dest)?.join(name).map_err(gone_or_disk_error)?);
+    rename_new(from.as_path(), to.as_path()).map_err(disk_error)?;
     locks.note(to, from, None);
     repath(conn, node.drive(), rel_of(node), &child_rel(rel_of(dest), name)).await
 }
 
 /// Moves an item to the space's trash folder, where it can be restored from
 pub async fn trash(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node, trash_id: &str) -> AppResult<()> {
-    let root = PathBuf::from(node.fs_root.as_deref().unwrap_or_default());
-    let dir = root.join(TRASH_DIR).join(trash_id);
+    let root = space_root(node)?;
     let from = abs(node)?;
-    std::fs::create_dir_all(&dir).map_err(disk_error)?;
-    let to = dir.join(&node.name);
-    match rename_new(&from, &to) {
+    ensure_dir(&root.join(TRASH_DIR).map_err(disk_error)?).map_err(disk_error)?;
+    let dir = root.join(&format!("{TRASH_DIR}/{trash_id}")).map_err(disk_error)?;
+    std::fs::create_dir(dir.as_path()).map_err(disk_error)?;
+    let to = dir.join(&node.name).map_err(disk_error)?;
+    match rename_new(from.as_path(), to.as_path()) {
         Ok(()) => locks.note(to, from, Some(dir)),
         // Already gone from the server: only the index still had it
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
         Err(e) => {
-            let _ = std::fs::remove_dir(&dir);
+            let _ = std::fs::remove_dir(dir.as_path());
             return Err(disk_error(e));
         }
     }
@@ -406,23 +456,21 @@ pub async fn trash(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node,
 
 /// Moves a trashed item back into `dest` as `name`
 pub async fn restore(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node, dest: &Node, name: &str) -> AppResult<()> {
-    let (from, to) = (abs(node)?, abs(dest)?.join(name));
-    rename_new(&from, &to).map_err(disk_error)?;
-    locks.note(to, from.clone(), None);
-    if let Some(dir) = from.parent() {
-        let _ = std::fs::remove_dir(dir);
-    }
+    let (from, to) = (abs(node)?, abs(dest)?.join(name).map_err(gone_or_disk_error)?);
+    rename_new(from.as_path(), to.as_path()).map_err(disk_error)?;
+    // Its emptied trash folder stays until `clean_trash` (should the change fail, the item goes back into it)
+    locks.note(to, from, None);
     repath(conn, node.drive(), rel_of(node), &child_rel(rel_of(dest), name)).await
 }
 
 /// The folder holding a trashed item of a folder space, removed from disk when the item is deleted for good
-pub fn trash_folder(n: &Node) -> Option<PathBuf> {
+pub fn trash_folder(n: &Node) -> Option<crate::beneath::Below> {
     let mut parts = n.fs_path.as_deref()?.split('/');
     if parts.next()? != TRASH_DIR {
         return None;
     }
-    let id = parts.next().filter(|id| !id.is_empty() && *id != "." && *id != "..")?;
-    Some(Path::new(n.fs_root.as_deref()?).join(TRASH_DIR).join(id))
+    let id = parts.next()?;
+    Some(crate::beneath::Below::new(n.fs_root.as_deref()?, format!("{TRASH_DIR}/{id}")))
 }
 
 /// Trash folders younger than this are never removed by `clean_trash`, known or not
@@ -431,10 +479,13 @@ pub const TRASH_GRACE: std::time::Duration = std::time::Duration::from_secs(24 *
 /// Removes trash folders the index doesn't know (deleted for good while removing them from disk failed, say). Recent
 /// ones stay: something that went wrong halfway may still need them.
 pub async fn clean_trash(st: &AppState, drive_id: &str, root: &Path) -> AppResult<()> {
-    let dir = root.join(TRASH_DIR);
-    let Ok(read) = std::fs::read_dir(&dir) else { return Ok(()) };
-    let old = |e: &std::fs::DirEntry| older_than(e.path().as_path(), TRASH_GRACE);
-    let names: Vec<String> = read.flatten().filter(old).filter_map(|e| e.file_name().into_string().ok()).collect();
+    let Ok(dir) = Pinned::root(root).and_then(|r| r.join(TRASH_DIR)).and_then(|t| t.dir()) else { return Ok(()) };
+    let Ok(read) = std::fs::read_dir(dir.as_path()) else { return Ok(()) };
+    let names: Vec<String> = read
+        .flatten()
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| dir.join(n).is_ok_and(|p| older_than(&p, TRASH_GRACE)))
+        .collect();
     if names.is_empty() {
         return Ok(());
     }
@@ -445,7 +496,7 @@ pub async fn clean_trash(st: &AppState, drive_id: &str, root: &Path) -> AppResul
         .into_iter()
         .map(|(t,)| t)
         .collect();
-    remove_later(names.into_iter().filter(|n| !known.contains(n)).map(|n| dir.join(n)).collect());
+    remove_below_later(names.into_iter().filter(|n| !known.contains(n)).map(|n| crate::beneath::Below::new(root, format!("{TRASH_DIR}/{n}"))).collect());
     Ok(())
 }
 
@@ -457,33 +508,36 @@ pub fn is_leftover(name: &str) -> bool {
 /// Deals with what changes left behind (`is_leftover`, paths found by a scan) once they are old enough that no change
 /// can still be using them: an item that was being moved in is put back under its own name, where the next scan
 /// shows it; half-made copies, uploads and saves are removed. `age`: how old they must be.
-pub fn clean_leftovers(paths: Vec<PathBuf>, age: std::time::Duration) {
+pub fn clean_leftovers(paths: Vec<Pinned>, age: std::time::Duration) {
     for p in paths.into_iter().filter(|p| older_than(p, age)) {
-        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-        if name.starts_with(MOVE_PREFIX) && p.is_dir() {
-            let dir = p.parent().map(Path::to_path_buf).unwrap_or_default();
-            for item in std::fs::read_dir(&p).into_iter().flatten().flatten() {
-                let item_name = item.file_name().to_string_lossy().into_owned();
-                let is_dir = item.file_type().is_ok_and(|t| t.is_dir());
-                let back = (0..10_000u32).map(|n| if n == 0 { item_name.clone() } else { numbered_name(&item_name, n, is_dir) }).find_map(|candidate| {
-                    match rename_new(&item.path(), &dir.join(&candidate)) {
-                        Ok(()) => Some(Ok(candidate)),
-                        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => None,
-                        Err(e) => Some(Err(e)),
-                    }
-                });
-                match back {
-                    Some(Ok(n)) => tracing::warn!("Put back {} in {}: it was being moved when ThirtyFile stopped", n, dir.display()),
-                    Some(Err(e)) => tracing::warn!("Couldn't put back {}: {e}", item.path().display()),
-                    None => {}
-                }
+        let name = p.name().unwrap_or_default();
+        let (Some(dir), true) = (p.parent(), name.starts_with(MOVE_PREFIX)) else {
+            if let Err(e) = remove_all(&p)
+                && e.kind() != io::ErrorKind::NotFound
+            {
+                tracing::warn!("Couldn't remove {name:?} from disk: {e}");
             }
-            let _ = std::fs::remove_dir(&p);
-        } else if let Err(e) = remove_all(&p)
-            && e.kind() != io::ErrorKind::NotFound
-        {
-            tracing::warn!("Couldn't remove {} from disk: {e}", p.display());
+            continue;
+        };
+        let Ok(inside) = p.dir() else { continue };
+        for item in std::fs::read_dir(inside.as_path()).into_iter().flatten().flatten() {
+            let Ok(item_name) = item.file_name().into_string() else { continue };
+            let Ok(from) = inside.join(&item_name) else { continue };
+            let is_dir = item.file_type().is_ok_and(|t| t.is_dir());
+            let back = (0..10_000u32).map(|n| if n == 0 { item_name.clone() } else { numbered_name(&item_name, n, is_dir) }).find_map(|candidate| {
+                match dir.join(&candidate).and_then(|to| rename_new(from.as_path(), to.as_path())) {
+                    Ok(()) => Some(Ok(candidate)),
+                    Err(e) if e.kind() == io::ErrorKind::AlreadyExists => None,
+                    Err(e) => Some(Err(e)),
+                }
+            });
+            match back {
+                Some(Ok(n)) => tracing::warn!("Put back {n:?}: it was being moved when ThirtyFile stopped"),
+                Some(Err(e)) => tracing::warn!("Couldn't put back {item_name:?}: {e}"),
+                None => {}
+            }
         }
+        let _ = std::fs::remove_dir(p.as_path());
     }
 }
 
@@ -494,16 +548,23 @@ const SAVE_PREFIX: &str = ".thirtyfile-save-";
 
 /// Puts a finished upload into the space's folder under a name scans ignore, ready to be renamed into place: a
 /// rename when the folder is on the same disk as ThirtyFile's data, else a copy
-pub async fn stage_upload(folder: &Node, tmp: &Path, size: u64) -> AppResult<PathBuf> {
-    let root = PathBuf::from(folder.fs_root.as_deref().unwrap_or_default());
-    let staged = root.join(format!("{UPLOAD_PREFIX}{}", new_id()));
-    if tokio::fs::rename(tmp, &staged).await.is_err() {
-        match tokio::fs::copy(tmp, &staged).await {
+pub async fn stage_upload(folder: &Node, tmp: &Path, size: u64) -> AppResult<Pinned> {
+    let staged = space_root(folder)?.join(&format!("{UPLOAD_PREFIX}{}", new_id())).map_err(disk_error)?;
+    if tokio::fs::rename(tmp, staged.as_path()).await.is_err() {
+        let (from, to) = (tmp.to_path_buf(), staged.clone());
+        let copied = tokio::task::spawn_blocking(move || {
+            let mut src = std::fs::File::open(&from)?;
+            let mut dst = std::fs::File::create_new(to.as_path())?;
+            let n = io::copy(&mut src, &mut dst)?;
+            dst.sync_all().map(|()| n)
+        })
+        .await?;
+        match copied {
             Ok(n) if n == size => {
                 let _ = tokio::fs::remove_file(tmp).await;
             }
             copied => {
-                let _ = tokio::fs::remove_file(&staged).await;
+                let _ = tokio::fs::remove_file(staged.as_path()).await;
                 return Err(copied.err().map(disk_error).unwrap_or_else(incomplete));
             }
         }
@@ -512,10 +573,10 @@ pub async fn stage_upload(folder: &Node, tmp: &Path, size: u64) -> AppResult<Pat
 }
 
 /// Renames content staged in the space's folder into `folder` as `name` and indexes it; returns the new item's id
-pub async fn place_file(conn: &mut SqliteConnection, staged: &Path, owner: i64, folder: &Node, name: &str) -> AppResult<String> {
-    let to = abs(folder)?.join(name);
-    rename_new(staged, &to).map_err(disk_error)?;
-    let s = stat(&to).map_err(disk_error)?;
+pub async fn place_file(conn: &mut SqliteConnection, staged: &Pinned, owner: i64, folder: &Node, name: &str) -> AppResult<String> {
+    let to = abs(folder)?.join(name).map_err(gone_or_disk_error)?;
+    rename_new(staged.as_path(), to.as_path()).map_err(disk_error)?;
+    let s = stat(to.as_path()).map_err(disk_error)?;
     let id = new_id();
     insert(conn, &id, owner, folder, name, &child_rel(rel_of(folder), name), &s).await?;
     Ok(id)
@@ -524,15 +585,13 @@ pub async fn place_file(conn: &mut SqliteConnection, staged: &Path, owner: i64, 
 /// Renames content staged in the space's folder over an existing file, which keeps its id, and indexes it (the caller
 /// counts the change in size). The file it had is kept as an earlier version first; returns what versions no longer
 /// kept leave to remove after the commit.
-pub async fn replace_file(conn: &mut SqliteConnection, policy: versions::Policy, staged: &Path, existing: &Node, by: i64) -> AppResult<versions::Removed> {
+pub async fn replace_file(conn: &mut SqliteConnection, policy: versions::Policy, staged: &Pinned, existing: &Node, by: i64) -> AppResult<versions::Removed> {
     let to = abs(existing)?;
     // The new content keeps the file's permissions
-    if let Ok(m) = std::fs::metadata(&to) {
-        let _ = std::fs::set_permissions(staged, m.permissions());
-    }
+    let _ = crate::beneath::copy_permissions(&to, staged);
     let removed = versions::keep_file(conn, policy, existing, &to).await?;
-    std::fs::rename(staged, &to).map_err(disk_error)?;
-    let s = stat(&to).map_err(disk_error)?;
+    std::fs::rename(staged.as_path(), to.as_path()).map_err(disk_error)?;
+    let s = stat(to.as_path()).map_err(disk_error)?;
     record(conn, &existing.id, existing.drive(), rel_of(existing), &s).await?;
     sqlx::query("UPDATE nodes SET updated_at = ?, content_by = ? WHERE id = ?")
         .bind(now().max(existing.updated_at + 1))
@@ -559,19 +618,19 @@ pub async fn save(st: &AppState, user: &User, id: &str, body: &[u8], base: Optio
         return Err(conflict());
     }
     let path = abs(&node)?;
-    let dir = path.parent().map(Path::to_path_buf).ok_or_else(|| AppError::not_found("Item not found"))?;
+    let dir = path.parent().ok_or_else(|| AppError::not_found("Item not found"))?;
     let (fs_size, fs_mtime, fs_ino): (Option<i64>, Option<i64>, Option<i64>) =
         sqlx::query_as("SELECT fs_size, fs_mtime_ns, fs_ino FROM nodes WHERE id = ?").bind(&node.id).fetch_one(&mut *tx).await?;
-    let unchanged = stat(&path).is_ok_and(|s| Some(s.size) == fs_size && Some(s.mtime_ns) == fs_mtime && Some(s.ino) == fs_ino);
+    let unchanged = stat(path.as_path()).is_ok_and(|s| Some(s.size) == fs_size && Some(s.mtime_ns) == fs_mtime && Some(s.ino) == fs_ino);
 
-    let tmp = dir.join(format!("{SAVE_PREFIX}{}", new_id()));
-    let written = std::fs::write(&tmp, body).and_then(|()| match std::fs::metadata(&path) {
-        // The new content keeps the file's permissions
-        Ok(m) => std::fs::set_permissions(&tmp, m.permissions()),
-        Err(_) => Ok(()),
+    let tmp = dir.join(&format!("{SAVE_PREFIX}{}", new_id())).map_err(disk_error)?;
+    // The new content keeps the file's permissions
+    let written = crate::beneath::write_new(&tmp, body).and_then(|()| match crate::beneath::copy_permissions(&path, &tmp) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        r => r,
     });
     if let Err(e) = written {
-        let _ = std::fs::remove_file(&tmp);
+        let _ = std::fs::remove_file(tmp.as_path());
         return Err(disk_error(e));
     }
 
@@ -587,7 +646,7 @@ pub async fn save(st: &AppState, user: &User, id: &str, body: &[u8], base: Optio
         let (name, copy_id) = match placed {
             Ok(p) => p,
             Err(e) => {
-                let _ = std::fs::remove_file(&tmp);
+                let _ = std::fs::remove_file(tmp.as_path());
                 return Err(e);
             }
         };
@@ -607,15 +666,15 @@ pub async fn save(st: &AppState, user: &User, id: &str, body: &[u8], base: Optio
     let removed = match versions::keep_file(&mut tx, versions::Policy::of(st), &node, &path).await {
         Ok(r) => r,
         Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
+            let _ = std::fs::remove_file(tmp.as_path());
             return Err(e);
         }
     };
-    if let Err(e) = std::fs::rename(&tmp, &path) {
-        let _ = std::fs::remove_file(&tmp);
+    if let Err(e) = std::fs::rename(tmp.as_path(), path.as_path()) {
+        let _ = std::fs::remove_file(tmp.as_path());
         return Err(disk_error(e));
     }
-    let s = stat(&path).map_err(disk_error)?;
+    let s = stat(path.as_path()).map_err(disk_error)?;
     record(&mut tx, &node.id, node.drive(), rel_of(&node), &s).await?;
     sqlx::query("UPDATE nodes SET updated_at = ?, content_by = ? WHERE id = ?")
         .bind(now().max(node.updated_at + 1))
@@ -639,7 +698,7 @@ enum Placed {
     /// that after a restart in between, the item is still found there under its name); `renamed_from`: the original
     /// was renamed there (same disk), so undoing renames it back; `copied`: the originals of a move that copied them
     /// (another disk), removed once the index follows
-    Disk { wrap: PathBuf, tmp: PathBuf, renamed_from: Option<PathBuf>, copied: Vec<Copied> },
+    Disk { wrap: Pinned, tmp: Pinned, renamed_from: Option<Pinned>, copied: Option<CopiedTree> },
     /// In the destination's content store: one staged content per file (by node id)
     Store(HashMap<String, StagedBlob>),
 }
@@ -659,19 +718,22 @@ fn layout(nodes: &[Node]) -> Vec<Option<String>> {
 }
 
 /// Writes the items to `top` on disk, from wherever their content is
-async fn write_tree(st: &AppState, nodes: &[Node], top: &Path) -> AppResult<()> {
+async fn write_tree(st: &AppState, nodes: &[Node], top: &Pinned) -> AppResult<()> {
     for (n, rel) in nodes.iter().zip(layout(nodes)) {
         let Some(rel) = rel else { continue };
-        let to = under(top, &rel);
+        let to = below(top, &rel).map_err(disk_error)?;
         if n.is_folder() {
-            tokio::fs::create_dir(&to).await.map_err(disk_error)?;
+            tokio::fs::create_dir(to.as_path()).await.map_err(disk_error)?;
             continue;
         }
         match Source::of(n)? {
             Source::File(from) => {
-                // On btrfs and XFS the copy can share the original's blocks
-                let want = tokio::fs::metadata(&from).await.map_err(disk_error)?.len();
-                if tokio::fs::copy(&from, &to).await.map_err(disk_error)? != want {
+                let copied = tokio::task::spawn_blocking(move || {
+                    let want = std::fs::symlink_metadata(from.as_path())?.len();
+                    crate::beneath::copy_file(&from, to.as_path()).map(|got| got == want)
+                })
+                .await?;
+                if !copied.map_err(disk_error)? {
                     return Err(incomplete());
                 }
             }
@@ -680,7 +742,7 @@ async fn write_tree(st: &AppState, nodes: &[Node], top: &Path) -> AppResult<()> 
                     .open(st, 0, n.size as u64)
                     .await
                     .map_err(|e| AppError::new(StatusCode::BAD_GATEWAY, format!("Couldn't read \"{}\": {e}", n.name)))?;
-                let mut file = tokio::fs::File::create(&to).await.map_err(disk_error)?;
+                let mut file = tokio::fs::OpenOptions::new().write(true).create_new(true).open(to.as_path()).await.map_err(disk_error)?;
                 let got = tokio::io::copy(&mut reader, &mut file).await.map_err(disk_error)?;
                 file.sync_all().await.map_err(disk_error)?;
                 if got != n.size as u64 {
@@ -698,7 +760,8 @@ async fn ingest(st: &AppState, nodes: &[Node], drive: &str) -> AppResult<HashMap
     for n in nodes.iter().filter(|n| !n.is_folder()) {
         let tmp = st.tmp_dir().join(new_id());
         let stored = async {
-            tokio::fs::copy(abs(n)?, &tmp).await.map_err(disk_error)?;
+            let (from, to) = (abs(n)?, tmp.clone());
+            tokio::task::spawn_blocking(move || crate::beneath::copy_file(&from, &to)).await?.map_err(disk_error)?;
             let (hash, size) = crate::files::hash_file(tmp.clone()).await?;
             tree::stage_blob(st, drive, hash, size as i64, tmp.clone()).await
         }
@@ -725,16 +788,16 @@ async fn place(st: &AppState, nodes: &[Node], dest: &Node, moving: bool) -> AppR
     if !dest.in_folder_space() {
         return Ok(Placed::Store(ingest(st, nodes, dest.drive()).await?));
     }
-    let wrap = abs(dest)?.join(format!("{}{}", if moving { MOVE_PREFIX } else { COPY_PREFIX }, new_id()));
-    tokio::fs::create_dir(&wrap).await.map_err(disk_error)?;
-    let tmp = wrap.join(&top.name);
+    let wrap = abs(dest)?.join(&format!("{}{}", if moving { MOVE_PREFIX } else { COPY_PREFIX }, new_id())).map_err(gone_or_disk_error)?;
+    tokio::fs::create_dir(wrap.as_path()).await.map_err(disk_error)?;
+    let tmp = wrap.join(&top.name).map_err(disk_error)?;
     if moving && top.in_folder_space() {
         let from = abs(top)?;
-        let renamed = if other_disk() { Err(io::ErrorKind::CrossesDevices.into()) } else { std::fs::rename(&from, &tmp) };
+        let renamed = if other_disk() { Err(io::ErrorKind::CrossesDevices.into()) } else { std::fs::rename(from.as_path(), tmp.as_path()) };
         match renamed {
-            Ok(()) => return Ok(Placed::Disk { wrap, tmp, renamed_from: Some(from), copied: Vec::new() }),
+            Ok(()) => return Ok(Placed::Disk { wrap, tmp, renamed_from: Some(from), copied: None }),
             Err(e) if e.kind() != io::ErrorKind::CrossesDevices => {
-                let _ = std::fs::remove_dir(&wrap);
+                let _ = std::fs::remove_dir(wrap.as_path());
                 return Err(disk_error(e));
             }
             Err(_) => {}
@@ -742,12 +805,12 @@ async fn place(st: &AppState, nodes: &[Node], dest: &Node, moving: bool) -> AppR
         // Another disk: copy everything, including what the index doesn't have yet, before the original goes
         let (f, t) = (from.clone(), tmp.clone());
         match tokio::task::spawn_blocking(move || {
-            let mut copied = Vec::new();
-            copy_tree(&f, &t, &mut copied).map(|()| copied)
+            let mut items = Vec::new();
+            copy_tree(&f, &t, "", &mut items).map(|()| CopiedTree { top: f, items })
         })
         .await?
         {
-            Ok(copied) => return Ok(Placed::Disk { wrap, tmp, renamed_from: None, copied }),
+            Ok(copied) => return Ok(Placed::Disk { wrap, tmp, renamed_from: None, copied: Some(copied) }),
             Err(e) => {
                 remove_later(vec![wrap]);
                 return Err(disk_error(e));
@@ -758,7 +821,7 @@ async fn place(st: &AppState, nodes: &[Node], dest: &Node, moving: bool) -> AppR
         remove_later(vec![wrap]);
         return Err(e);
     }
-    Ok(Placed::Disk { wrap, tmp, renamed_from: None, copied: Vec::new() })
+    Ok(Placed::Disk { wrap, tmp, renamed_from: None, copied: None })
 }
 
 /// Folders holding an item on its way into a folder (`Placed::Disk`)
@@ -785,10 +848,10 @@ fn other_disk() -> bool {
 async fn undo(st: &AppState, placed: Placed) {
     match placed {
         Placed::Disk { wrap, tmp, renamed_from: Some(from), .. } => {
-            if std::fs::rename(&tmp, &from).is_err() && tmp.exists() {
-                tracing::warn!("Couldn't move {} back to {}", tmp.display(), from.display());
+            if std::fs::rename(tmp.as_path(), from.as_path()).is_err() && std::fs::symlink_metadata(tmp.as_path()).is_ok() {
+                tracing::warn!("Couldn't move {:?} back where it was", from.name().unwrap_or_default());
             } else {
-                let _ = std::fs::remove_dir(&wrap);
+                let _ = std::fs::remove_dir(wrap.as_path());
             }
         }
         Placed::Disk { wrap, renamed_from: None, .. } => remove_later(vec![wrap]),
@@ -851,15 +914,17 @@ pub async fn move_across(st: &AppState, user: &User, dest: &Node, items: Vec<Vec
         match result {
             Ok((extras, remove)) => {
                 let copied = match &mut placed {
-                    Placed::Disk { copied, .. } => std::mem::take(copied),
-                    Placed::Store(_) => Vec::new(),
+                    Placed::Disk { copied, .. } => copied.take(),
+                    Placed::Store(_) => None,
                 };
                 finish(st, placed, extras).await;
-                if !copied.is_empty() {
+                if let Some(copied) = copied {
                     tokio::task::spawn_blocking(move || remove_copied(copied));
                 }
-                if !remove.is_empty() {
-                    tokio::task::spawn_blocking(move || remove_indexed(remove));
+                if !remove.is_empty()
+                    && let Ok(root) = space_root(&nodes[0])
+                {
+                    tokio::task::spawn_blocking(move || remove_indexed(&root, remove));
                 }
             }
             Err(e) => {
@@ -873,22 +938,25 @@ pub async fn move_across(st: &AppState, user: &User, dest: &Node, items: Vec<Vec
 
 /// Removes the files that were stored elsewhere, then their folders if nothing else is left in them (an item the
 /// index didn't have yet stays, and the next scan shows it)
-fn remove_indexed(paths: Vec<(PathBuf, bool)>) {
-    for (p, _) in paths.iter().filter(|(_, d)| !d) {
-        if let Err(e) = std::fs::remove_file(p)
+fn remove_indexed(root: &Pinned, paths: Vec<(String, bool)>) {
+    for (rel, _) in paths.iter().filter(|(_, d)| !d) {
+        let Ok(p) = root.join(rel) else { continue };
+        if let Err(e) = std::fs::remove_file(p.as_path())
             && e.kind() != io::ErrorKind::NotFound
         {
-            tracing::warn!("Couldn't remove {} from disk: {e}", p.display());
+            tracing::warn!("Couldn't remove {rel:?} from disk: {e}");
         }
     }
-    for (p, _) in paths.iter().rev().filter(|(_, d)| *d) {
-        let _ = std::fs::remove_dir(p);
+    for (rel, _) in paths.iter().rev().filter(|(_, d)| *d) {
+        if let Ok(p) = root.join(rel) {
+            let _ = std::fs::remove_dir(p.as_path());
+        }
     }
 }
 
 /// The index side of a move; returns content no longer used and (for items now in the content store) what to remove
-/// from disk
-async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], placed: &Placed) -> AppResult<(Vec<BlobRef>, Vec<(PathBuf, bool)>)> {
+/// from disk (paths below the space's folder)
+async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], placed: &Placed) -> AppResult<(Vec<BlobRef>, Vec<(String, bool)>)> {
     let mut tx = st.db.begin().await?;
     let top = &nodes[0];
     // Everything must still be as it was when the content was copied: items added to a folder of the content store
@@ -920,14 +988,14 @@ async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
     let mut remove = Vec::new();
     match placed {
         Placed::Disk { wrap, tmp, .. } => {
-            let final_path = abs(dest)?.join(&top.name);
-            rename_new(tmp, &final_path).map_err(disk_error)?;
-            let _ = std::fs::remove_dir(wrap);
+            let final_path = abs(dest)?.join(&top.name).map_err(gone_or_disk_error)?;
+            rename_new(tmp.as_path(), final_path.as_path()).map_err(disk_error)?;
+            let _ = std::fs::remove_dir(wrap.as_path());
             let dest_rel = child_rel(rel_of(dest), &top.name);
             for (n, rel) in nodes.iter().zip(layout(nodes)) {
                 let Some(rel) = rel else { continue };
                 let full = if rel.is_empty() { dest_rel.clone() } else { format!("{dest_rel}/{rel}") };
-                match stat(&under(&final_path, &rel)) {
+                match below(&final_path, &rel).and_then(|p| stat(p.as_path())) {
                     Ok(s) => record(&mut tx, &n.id, dest.drive(), &full, &s).await?,
                     // Gone from the server before it could be moved: gone from the index too
                     Err(_) => {
@@ -958,8 +1026,8 @@ async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
                     extras.extend(tree::commit_blob(st, &mut tx, s).await?);
                     sqlx::query("UPDATE nodes SET blob_hash = ?, size = ? WHERE id = ?").bind(&s.hash).bind(s.size).bind(&n.id).execute(&mut *tx).await?;
                 }
-                if let Ok(p) = abs(n) {
-                    remove.push((p, n.is_folder()));
+                if let Some(rel) = n.fs_path.clone().filter(|r| !r.is_empty()) {
+                    remove.push((rel, n.is_folder()));
                 }
             }
         }
@@ -1009,14 +1077,14 @@ async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
     match placed {
         Placed::Disk { wrap, tmp, .. } => {
             let name = free_name(&mut tx, dest, &top.name, top.is_folder()).await?;
-            let final_path = abs(dest)?.join(&name);
-            rename_new(tmp, &final_path).map_err(disk_error)?;
-            let _ = std::fs::remove_dir(wrap);
+            let final_path = abs(dest)?.join(&name).map_err(gone_or_disk_error)?;
+            rename_new(tmp.as_path(), final_path.as_path()).map_err(disk_error)?;
+            let _ = std::fs::remove_dir(wrap.as_path());
             let dest_rel = child_rel(rel_of(dest), &name);
             for (i, (n, rel)) in nodes.iter().zip(layout(nodes)).enumerate() {
                 let Some(rel) = rel else { continue };
                 let parent = if i == 0 { dest.id.clone() } else { ids.get(n.parent_id.as_deref().unwrap_or_default()).cloned().unwrap_or_default() };
-                let Ok(s) = stat(&under(&final_path, &rel)) else { continue };
+                let Ok(s) = below(&final_path, &rel).and_then(|p| stat(p.as_path())) else { continue };
                 if parent.is_empty() {
                     continue;
                 }
@@ -1155,9 +1223,49 @@ mod tests {
         // Deleted for good: gone from disk too
         let _ = crate::nodes::trash(st(), admin.clone(), req(json!({ "ids": [a] }))).await.unwrap();
         let folder = trash_folder(&node(&env, &a).await).unwrap();
+        let folder = folder.root.join(&folder.rel);
         assert!(folder.is_dir());
         let _ = crate::nodes::delete_forever(st(), admin.clone(), req(json!({ "ids": [a] }))).await.unwrap();
         assert!(eventually_gone(&folder).await);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_folder_swapped_for_a_link_leads_nowhere() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        let (dir, drive) = (&space.dir, &space.drive);
+        let st = || State(env.st.clone());
+        write_old(&dir.join("Sub/drive.db"), b"indexed");
+        write_old(&dir.join("a.txt"), b"a");
+        crate::folders::scan(&env.st, drive).await.unwrap();
+        let (file, _) = env.node_at(drive, "Sub/drive.db").await.unwrap();
+        let (sub, _) = env.node_at(drive, "Sub").await.unwrap();
+        let (a, _) = env.node_at(drive, "a.txt").await.unwrap();
+
+        // Someone with access to the folder (over SMB, say) replaces the indexed folder with a link elsewhere
+        let outside = dir.with_extension("outside");
+        write_old(&outside.join("drive.db"), b"SECRET");
+        std::fs::rename(dir.join("Sub"), dir.with_extension("was-sub")).unwrap();
+        std::os::unix::fs::symlink(&outside, dir.join("Sub")).unwrap();
+
+        let q = Query(serde_json::from_value(json!({})).unwrap());
+        let read = crate::files::content(st(), admin.clone(), UrlPath(file.clone()), q, HeaderMap::new()).await;
+        assert!(read.is_err(), "read through the link");
+        assert!(crate::nodes::create_folder(st(), admin.clone(), req(json!({ "parent_id": sub, "name": "New" }))).await.is_err());
+        assert!(crate::nodes::move_nodes(st(), admin.clone(), req(json!({ "ids": [a], "dest_id": sub }))).await.is_err());
+        assert!(crate::nodes::trash(st(), admin.clone(), req(json!({ "ids": [file] }))).await.is_err());
+        let mut left: Vec<String> = std::fs::read_dir(&outside).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        assert_eq!(left, ["drive.db"], "nothing was written there");
+        assert_eq!(std::fs::read(outside.join("drive.db")).unwrap(), b"SECRET");
+        assert!(dir.join("a.txt").is_file());
+        // A scan doesn't index what the link leads to
+        let r = crate::folders::scan(&env.st, drive).await.unwrap();
+        assert!(r.skipped.iter().any(|s| s.contains("symbolic link")), "{r:?}");
+        let _ = std::fs::remove_dir_all(&outside);
+        let _ = std::fs::remove_dir_all(dir.with_extension("was-sub"));
     }
 
     #[tokio::test]
@@ -1368,13 +1476,14 @@ mod tests {
         let (from, to) = (top.join("from"), top.join("to"));
         write_old(&from.join("same.txt"), b"same");
         write_old(&from.join("Sub/edited.txt"), b"before");
-        let mut copied = Vec::new();
-        copy_tree(&from, &to, &mut copied).unwrap();
+        let pin = |p: &Path| Pinned::root(p.parent().unwrap()).unwrap().join(p.file_name().unwrap().to_str().unwrap()).unwrap();
+        let mut items = Vec::new();
+        copy_tree(&pin(&from), &pin(&to), "", &mut items).unwrap();
         assert_eq!(std::fs::read(to.join("Sub/edited.txt")).unwrap(), b"before");
         // Saved over SMB while the copy ran, and a file added
         std::fs::write(from.join("Sub/edited.txt"), b"after, and longer").unwrap();
         write_old(&from.join("new.txt"), b"new");
-        remove_copied(copied);
+        remove_copied(CopiedTree { top: pin(&from), items });
         assert!(!from.join("same.txt").exists());
         assert_eq!(std::fs::read(from.join("Sub/edited.txt")).unwrap(), b"after, and longer");
         assert!(from.join("new.txt").is_file());
@@ -1388,10 +1497,12 @@ mod tests {
         write_old(&dir.join("Report"), b"already taken");
         write_old(&dir.join(format!("{UPLOAD_PREFIX}2")), b"half an upload");
         assert!(is_leftover(&format!("{MOVE_PREFIX}1")) && is_leftover(&format!("{SAVE_PREFIX}3")) && !is_leftover(TRASH_DIR));
-        let found = vec![dir.join(format!("{MOVE_PREFIX}1")), dir.join(format!("{UPLOAD_PREFIX}2"))];
-        clean_leftovers(found.clone(), TRASH_GRACE);
+        let found = [dir.join(format!("{MOVE_PREFIX}1")), dir.join(format!("{UPLOAD_PREFIX}2"))];
+        let root = Pinned::root(&dir).unwrap();
+        let pinned = || vec![root.join(&format!("{MOVE_PREFIX}1")).unwrap(), root.join(&format!("{UPLOAD_PREFIX}2")).unwrap()];
+        clean_leftovers(pinned(), TRASH_GRACE);
         assert!(found.iter().all(|p| p.exists()), "recent ones may still be in use");
-        clean_leftovers(found.clone(), std::time::Duration::ZERO);
+        clean_leftovers(pinned(), std::time::Duration::ZERO);
         assert_eq!(std::fs::read(dir.join("Report (1)/a.txt")).unwrap(), b"moving");
         assert!(found.iter().all(|p| !p.exists()));
         let _ = std::fs::remove_dir_all(&dir);

@@ -20,6 +20,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::{
     auth::User,
+    beneath::{Below, Pinned},
     error::{AppError, AppResult},
     files::{Blob, Source, serve_blob},
     fsops,
@@ -55,14 +56,14 @@ impl Policy {
 #[must_use]
 pub struct Removed {
     pub blobs: Vec<BlobRef>,
-    pub files: Vec<PathBuf>,
+    pub files: Vec<Below>,
 }
 
 impl Removed {
     /// After the transaction is committed
     pub fn finish(self, st: &AppState) {
         tree::schedule_blob_removal(st, self.blobs);
-        fsops::remove_later(self.files);
+        fsops::remove_below_later(self.files);
     }
 }
 
@@ -106,20 +107,25 @@ pub async fn keep_stored(conn: &mut SqliteConnection, policy: Policy, node: &Nod
 /// the space's versions folder (copied where the disk has no hard links). The rename that follows gives the name new
 /// content, so the version is the only name left for the old file, and writing to the file in place later can't change
 /// it. Nothing happens when versions are off.
-pub async fn keep_file(conn: &mut SqliteConnection, policy: Policy, node: &Node, path: &Path) -> AppResult<Removed> {
+pub async fn keep_file(conn: &mut SqliteConnection, policy: Policy, node: &Node, path: &Pinned) -> AppResult<Removed> {
     if policy.keep <= 0 {
         return Ok(Removed::default());
     }
     let Some(root) = node.fs_root.as_deref() else { return Ok(Removed::default()) };
-    let Ok(meta) = std::fs::metadata(path) else { return Ok(Removed::default()) };
+    let Ok(meta) = std::fs::symlink_metadata(path.as_path()) else { return Ok(Removed::default()) };
+    if !meta.is_file() {
+        return Ok(Removed::default());
+    }
     let id = new_id();
     let rel = format!("{VERSIONS_DIR}/{}/{id}", node.id);
-    let to = Path::new(root).join(&rel);
-    let kept = std::fs::create_dir_all(to.parent().unwrap()).and_then(|()| match std::fs::hard_link(path, &to) {
-        Ok(()) => Ok(()),
-        Err(_) => std::fs::copy(path, &to).map(|_| ()),
+    let to = version_file(Path::new(root), &node.id, &id).and_then(|to| {
+        // A hard link never follows a symbolic link (on Linux)
+        match std::fs::hard_link(path.as_path(), to.as_path()) {
+            Ok(()) => Ok(to),
+            Err(_) => crate::beneath::copy_file(path, to.as_path()).map(|_| to),
+        }
     });
-    kept.map_err(fsops::disk_error)?;
+    let to = to.map_err(fsops::disk_error)?;
     let (author_id, author_name) = content_author(conn, node).await?;
     let inserted = sqlx::query(
         "INSERT INTO node_versions (id, node_id, drive_id, fs_path, size, author_id, author_name, modified_at, created_at)
@@ -137,7 +143,7 @@ pub async fn keep_file(conn: &mut SqliteConnection, policy: Policy, node: &Node,
     .execute(&mut *conn)
     .await;
     if let Err(e) = inserted {
-        let _ = std::fs::remove_file(&to);
+        let _ = std::fs::remove_file(to.as_path());
         return Err(e.into());
     }
     prune_node(conn, &node.id, policy).await
@@ -159,8 +165,8 @@ async fn released(conn: &mut SqliteConnection, rows: Vec<(Option<String>, Option
                     sqlx::query_as("SELECT source_path FROM drives WHERE id = ? AND mode = 'folder'").bind(&drive).fetch_optional(&mut *conn).await?;
                 roots.insert(drive.clone(), root.map(|r| r.0));
             }
-            if let Some(path) = version_path(roots[&drive].as_deref(), Some(&rel)) {
-                files.push(path);
+            if let Some(b) = version_path(roots[&drive].as_deref(), Some(&rel)) {
+                files.push(b);
             }
         }
     }
@@ -168,13 +174,22 @@ async fn released(conn: &mut SqliteConnection, rows: Vec<(Option<String>, Option
 }
 
 /// A folder-space version's file, only ever inside the space's versions folder
-fn version_path(root: Option<&str>, rel: Option<&str>) -> Option<PathBuf> {
+fn version_path(root: Option<&str>, rel: Option<&str>) -> Option<Below> {
     let (root, rel) = (root?, rel?);
     let mut parts = rel.split('/');
     if parts.next()? != VERSIONS_DIR || rel.split('/').any(|p| p.is_empty() || p == "." || p == "..") {
         return None;
     }
-    Some(Path::new(root).join(rel))
+    Some(Below::new(root, rel))
+}
+
+/// Where a new version of the file `node_id` goes: `.thirtyfile-versions/<node id>/<id>`, making the folders
+fn version_file(root: &Path, node_id: &str, id: &str) -> std::io::Result<Pinned> {
+    let folder = Pinned::root(root)?.join(VERSIONS_DIR)?;
+    fsops::ensure_dir(&folder)?;
+    let folder = folder.join(node_id)?;
+    fsops::ensure_dir(&folder)?;
+    folder.join(id)
 }
 
 /// Removes a file's versions beyond the number kept
@@ -241,17 +256,19 @@ pub async fn prune(st: &AppState) -> AppResult<usize> {
 /// Removes files in a folder space's versions folder that no version refers to any more (the file was deleted for
 /// good, or removing it failed earlier). Run with each scan of the space.
 pub async fn clean_folder(st: &AppState, drive_id: &str, root: &Path) -> AppResult<()> {
-    let dir = root.join(VERSIONS_DIR);
-    let Ok(read) = std::fs::read_dir(&dir) else { return Ok(()) };
+    let Ok(dir) = Pinned::root(root).and_then(|r| r.join(VERSIONS_DIR)).and_then(|d| d.dir()) else { return Ok(()) };
+    let Ok(read) = std::fs::read_dir(dir.as_path()) else { return Ok(()) };
     let mut found = Vec::new();
     for node_dir in read.flatten() {
-        let Ok(files) = std::fs::read_dir(node_dir.path()) else { continue };
+        let Ok(node) = node_dir.file_name().into_string() else { continue };
+        let Ok(node_dir) = dir.join(&node) else { continue };
+        let Ok(inside) = node_dir.dir() else { continue };
+        let Ok(files) = std::fs::read_dir(inside.as_path()) else { continue };
         let names: Vec<String> = files.flatten().filter_map(|f| f.file_name().into_string().ok()).collect();
-        let node = node_dir.file_name().to_string_lossy().into_owned();
         if names.is_empty() {
-            let _ = std::fs::remove_dir(node_dir.path());
+            let _ = std::fs::remove_dir(node_dir.as_path());
         }
-        found.extend(names.into_iter().map(|n| (format!("{VERSIONS_DIR}/{node}/{n}"), node_dir.path().join(n))));
+        found.extend(names.into_iter().map(|n| format!("{VERSIONS_DIR}/{node}/{n}")));
     }
     if found.is_empty() {
         return Ok(());
@@ -264,7 +281,7 @@ pub async fn clean_folder(st: &AppState, drive_id: &str, root: &Path) -> AppResu
             .into_iter()
             .map(|(p,)| p)
             .collect();
-    fsops::remove_later(found.into_iter().filter(|(rel, _)| !known.contains(rel)).map(|(_, p)| p).collect());
+    fsops::remove_below_later(found.into_iter().filter(|rel| !known.contains(rel)).map(|rel| Below::new(root, rel)).collect());
     Ok(())
 }
 
@@ -326,7 +343,7 @@ async fn version_source(conn: &mut SqliteConnection, node: &Node, version: &str)
     .ok_or_else(|| AppError::not_found("This version no longer exists"))?;
     let source = match (&v.blob_hash, version_path(v.fs_root.as_deref(), v.fs_path.as_deref())) {
         (Some(hash), _) => Source::Stored { hash: hash.clone(), location: v.location.unwrap_or_else(|| "local".into()) },
-        (None, Some(path)) => Source::File(path),
+        (None, Some(b)) => Source::File(b.pin().map_err(|_| AppError::not_found("This version no longer exists"))?),
         (None, None) => return Err(AppError::not_found("This version no longer exists")),
     };
     Ok((source, v.size as u64))

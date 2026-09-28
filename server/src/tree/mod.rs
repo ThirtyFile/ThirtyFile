@@ -81,7 +81,8 @@ impl Node {
     pub fn drive(&self) -> &str {
         self.drive_id.as_deref().unwrap_or_default()
     }
-    /// The file on the server, for items of a folder space
+    /// The file on the server, for items of a folder space (tests: to look at it; the server uses `fs_pinned`)
+    #[cfg(test)]
     pub fn fs_file(&self) -> Option<std::path::PathBuf> {
         let (root, rel) = (self.fs_root.as_deref()?, self.fs_path.as_deref()?);
         // Paths come from scanning the folder; never step outside it whatever they say
@@ -89,6 +90,13 @@ impl Node {
             return None;
         }
         Some(if rel.is_empty() { std::path::PathBuf::from(root) } else { std::path::Path::new(root).join(rel) })
+    }
+    /// The file on the server, for items of a folder space, reached without following a symbolic link on the way
+    pub fn fs_pinned(&self) -> std::io::Result<crate::beneath::Pinned> {
+        let (Some(root), Some(rel)) = (self.fs_root.as_deref(), self.fs_path.as_deref()) else {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "not in a folder space"));
+        };
+        crate::beneath::Pinned::root(std::path::Path::new(root))?.join(rel)
     }
     /// Whether it belongs to a folder space (changed on the server's folder, not through the content store)
     pub fn in_folder_space(&self) -> bool {

@@ -66,13 +66,13 @@ pub enum Source {
     /// In a storage location, named by its hash
     Stored { hash: String, location: String },
     /// A file in a folder space
-    File(PathBuf),
+    File(crate::beneath::Pinned),
 }
 
 impl Source {
     pub fn of(n: &Node) -> AppResult<Source> {
         if n.in_folder_space() {
-            return n.fs_file().map(Source::File).ok_or_else(|| AppError::not_found("File not found"));
+            return n.fs_pinned().map(Source::File).map_err(|_| AppError::not_found("File not found"));
         }
         let (hash, location) = n.blob()?;
         Ok(Source::Stored { hash: hash.to_string(), location: location.to_string() })
@@ -84,7 +84,8 @@ impl Source {
         match self {
             Source::Stored { hash, .. } => Ok((indexed_size, hash.clone())),
             Source::File(path) => {
-                let meta = tokio::fs::metadata(path).await.map_err(|_| AppError::not_found("File not found"))?;
+                // Not following a symbolic link: what the index has is a file
+                let meta = tokio::fs::symlink_metadata(path.as_path()).await.map_err(|_| AppError::not_found("File not found"))?;
                 if !meta.is_file() {
                     return Err(AppError::not_found("File not found"));
                 }
@@ -102,7 +103,8 @@ impl Source {
             },
             Source::File(path) => {
                 use tokio::io::AsyncSeekExt;
-                let mut f = tokio::fs::File::open(path).await?;
+                let f = path.clone();
+                let mut f = tokio::fs::File::from_std(tokio::task::spawn_blocking(move || f.open_file()).await.map_err(std::io::Error::other)??);
                 if start > 0 {
                     f.seek(std::io::SeekFrom::Start(start)).await?;
                 }
