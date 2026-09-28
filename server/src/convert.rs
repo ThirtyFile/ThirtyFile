@@ -3,9 +3,10 @@
 //!
 //! - Each space gets a folder in the folder of its storage location (the storage folder for the built-in one):
 //!   `company`, `teams/<space name>` or `users/<user name>`
-//! - Every file is written to its path: a hard link to the stored content where both are on the same disk, so it takes
-//!   no extra space (content several files share becomes several links to one copy), else a copy checked against its
-//!   SHA-256. The trash goes to `.thirtyfile-trash/<trash id>/` and earlier versions to
+//! - Every file is written to its path: a hard link to the stored content where both are on the same disk and nothing
+//!   else uses that content, so it takes no extra space, else a copy checked against its SHA-256. Content several files
+//!   or versions share is copied for each: files linked together would change together when one is written in place
+//!   (over SMB, say). The trash goes to `.thirtyfile-trash/<trash id>/` and earlier versions to
 //!   `.thirtyfile-versions/<file id>/<version id>`, as in every folder space
 //! - Names a folder can't hold as they are (two that differ only in letter case, names scans skip, names too long for
 //!   the disk) get another one, listed in the report
@@ -230,17 +231,25 @@ async fn convert_space(
     .fetch_all(db)
     .await?;
     // Every content the space uses must be in a folder of this server
-    let used: Vec<(String, String)> = sqlx::query_as(
-        "SELECT hash, location_id FROM blobs WHERE hash IN (SELECT blob_hash FROM nodes WHERE drive_id = ?1)
+    let used: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT hash, location_id,
+                (SELECT COUNT(*) FROM nodes n WHERE n.blob_hash = blobs.hash)
+                  + (SELECT COUNT(*) FROM node_versions v WHERE v.blob_hash = blobs.hash)
+         FROM blobs WHERE hash IN (SELECT blob_hash FROM nodes WHERE drive_id = ?1)
             OR hash IN (SELECT v.blob_hash FROM node_versions v JOIN nodes n ON n.id = v.node_id WHERE n.drive_id = ?1)",
     )
     .bind(&space.id)
     .fetch_all(db)
     .await?;
     let mut sources: HashMap<String, PathBuf> = HashMap::new();
-    for (hash, location) in used {
+    // Content only one file or version uses: that one can be a hard link to it
+    let mut single: HashSet<String> = HashSet::new();
+    for (hash, location, uses) in used {
         match storages.get(&location).and_then(|s| s.local_file(&hash)) {
             Some(p) => {
+                if uses == 1 {
+                    single.insert(hash.clone());
+                }
                 sources.insert(hash, p);
             }
             None => {
@@ -303,7 +312,8 @@ async fn convert_space(
                 continue;
             }
         };
-        match put(src, &dest, w.hash.as_deref(), w.size) {
+        let may_link = w.hash.as_ref().is_some_and(|h| single.contains(h));
+        match put(src, &dest, w.hash.as_deref(), w.size, may_link) {
             Ok(true) => r.linked += 1,
             Ok(false) => r.copied += 1,
             Err(e) => {
@@ -468,15 +478,15 @@ fn make_dir(path: &Path) -> io::Result<()> {
     std::fs::create_dir_all(path)
 }
 
-/// Puts content at `dest`: a hard link to the stored file where the disk allows one (true), else a copy checked
-/// against the content's SHA-256 (false). It is written under a temporary name first, so a file at `dest` is always
-/// complete.
-fn put(src: Option<&Path>, dest: &Path, hash: Option<&str>, size: i64) -> io::Result<bool> {
+/// Puts content at `dest`: a hard link to the stored file where `may_link` and the disk allows one (true), else a copy
+/// checked against the content's SHA-256 (false). It is written under a temporary name first, so a file at `dest` is
+/// always complete.
+fn put(src: Option<&Path>, dest: &Path, hash: Option<&str>, size: i64, may_link: bool) -> io::Result<bool> {
     if let Some(dir) = dest.parent() {
         make_dir(dir)?;
     }
     let tmp = dest.with_file_name(format!(".thirtyfile-convert-{}", new_id()));
-    let placed = write_temp(src, &tmp, hash, size).and_then(|linked| {
+    let placed = write_temp(src, &tmp, hash, size, may_link).and_then(|linked| {
         if std::fs::symlink_metadata(dest).is_ok_and(|m| m.is_dir()) {
             std::fs::remove_dir_all(dest)?;
         }
@@ -489,7 +499,7 @@ fn put(src: Option<&Path>, dest: &Path, hash: Option<&str>, size: i64) -> io::Re
     placed
 }
 
-fn write_temp(src: Option<&Path>, tmp: &Path, hash: Option<&str>, size: i64) -> io::Result<bool> {
+fn write_temp(src: Option<&Path>, tmp: &Path, hash: Option<&str>, size: i64, may_link: bool) -> io::Result<bool> {
     let Some(src) = src else {
         std::fs::File::create(tmp)?.sync_all()?;
         return Ok(false);
@@ -497,8 +507,8 @@ fn write_temp(src: Option<&Path>, tmp: &Path, hash: Option<&str>, size: i64) -> 
     if std::fs::metadata(src).is_err() {
         return Err(io::Error::new(io::ErrorKind::NotFound, "its content is missing from the storage folder"));
     }
-    let linked = if other_disk() { Err(io::ErrorKind::CrossesDevices.into()) } else { std::fs::hard_link(src, tmp) };
-    // Otherwise another disk, or one without hard links: copied
+    let linked = if other_disk() || !may_link { Err(io::ErrorKind::CrossesDevices.into()) } else { std::fs::hard_link(src, tmp) };
+    // Otherwise shared content, another disk, or one without hard links: copied
     if linked.is_ok() {
         if std::fs::metadata(tmp)?.len() != size as u64 {
             return Err(io::Error::other("the stored content has another size than the database says"));
@@ -790,7 +800,7 @@ mod tests {
         let ben = env.user("ben", true).await;
         let docs = env.folder(&amy, &amy.root_id, "Docs").await;
         let report = env.stored_file(&amy, &docs, "report.txt", b"hello").await;
-        // The same content twice: one copy in the store, two links on disk
+        // The same content in three files (one of Ben's): one copy in the store, three files on disk
         let copy = env.stored_file(&amy, &amy.root_id, "copy.txt", b"hello").await;
         env.grant(&docs, &ben, "viewer").await;
         let body = |b: &'static [u8]| Bytes::from_static(b);
@@ -810,8 +820,9 @@ mod tests {
         let dir = env.dir.join("blobs/users/amy");
         assert_eq!(std::fs::read(dir.join("Docs/report.txt")).unwrap(), b"hello again");
         assert_eq!(std::fs::read(dir.join("copy.txt")).unwrap(), b"hello");
+        // Not linked together: writing one in place (over SMB, say) must not change the others
         #[cfg(unix)]
-        assert_eq!(inode(&dir.join("copy.txt")), inode(&env.dir.join("blobs/users/ben/ben.txt")));
+        assert_ne!(inode(&dir.join("copy.txt")), inode(&env.dir.join("blobs/users/ben/ben.txt")));
         // Same ids: the file, its share with Ben, its version and the trash
         assert_eq!(read(&env, &amy, &report).await, b"hello again");
         assert_eq!(read(&env, &ben, &report).await, b"hello again");
