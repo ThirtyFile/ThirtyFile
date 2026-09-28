@@ -285,6 +285,9 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     if password.is_none() && policy.password_required {
         return Err(AppError::bad_request("Share links must have a password"));
     }
+    if let Some(p) = password {
+        auth::validate_password(p, auth::min_password(&st))?;
+    }
     check_expiry(&policy, req.expires_at)?;
     check_max_downloads(req.max_downloads)?;
     let password_hash = match password {
@@ -378,6 +381,9 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
     let password = req.password.as_deref().map(str::trim);
     if password == Some("") && policy.password_required {
         return Err(AppError::bad_request("Share links must have a password"));
+    }
+    if let Some(p) = password.filter(|p| !p.is_empty()) {
+        auth::validate_password(p, auth::min_password(&st))?;
     }
     if let Some(t) = req.expires_at {
         check_expiry(&policy, t)?;
@@ -505,12 +511,32 @@ fn continues_download(st: &AppState, headers: &HeaderMap, token: &str, share: &S
     expires > now() && auth::cookie_matches(headers, &name, &download_value(st, share, expires))
 }
 
-fn unlock_value(st: &AppState, share: &Share) -> String {
+/// How long a share link stays unlocked after the password was entered
+const UNLOCK_SECS: i64 = 86400;
+
+/// The unlock cookie's value: when it stops working, signed together with the share and its password (changing the
+/// password locks everyone out again). The browser keeps the cookie only as long, but a copied value ends then too.
+fn unlock_value(st: &AppState, share: &Share, expires: i64) -> String {
     let mut mac = Hmac::<Sha256>::new_from_slice(&st.secret).expect("hmac key");
+    mac.update(b"unlock:");
     mac.update(share.id.as_bytes());
     mac.update(b":");
     mac.update(share.password_hash.as_deref().unwrap_or_default().as_bytes());
-    hex::encode(mac.finalize().into_bytes())
+    mac.update(b":");
+    mac.update(expires.to_string().as_bytes());
+    format!("{expires}.{}", hex::encode(mac.finalize().into_bytes()))
+}
+
+/// Whether the share has no password, or the request carries its unlock cookie and that hasn't expired
+fn unlocked(st: &AppState, headers: &HeaderMap, token: &str, share: &Share) -> bool {
+    if share.password_hash.is_none() {
+        return true;
+    }
+    let name = cookie_name(token);
+    let Some(expires) = auth::get_cookie(headers, &name).and_then(|v| v.split_once('.')).and_then(|(e, _)| e.parse::<i64>().ok()) else {
+        return false;
+    };
+    expires > now() && auth::cookie_matches(headers, &name, &unlock_value(st, share, expires))
 }
 
 fn gone() -> AppError {
@@ -550,7 +576,7 @@ async fn find_share(st: &AppState, token: &str) -> AppResult<(Share, Node)> {
 /// Finds the share and checks it has been unlocked (when it has a password)
 async fn open_share(st: &AppState, token: &str, headers: &HeaderMap) -> AppResult<(Share, Node)> {
     let (share, node) = find_share(st, token).await?;
-    if share.password_hash.is_some() && !auth::cookie_matches(headers, &cookie_name(token), &unlock_value(st, &share)) {
+    if !unlocked(st, headers, token, &share) {
         return Err(AppError::new(StatusCode::UNAUTHORIZED, "This share requires a password").with_code("password"));
     }
     Ok((share, node))
@@ -633,8 +659,7 @@ pub async fn public_info(
         record_share_access(&st, &share.id, share.owner_id, Some(&node), "view", &visitor);
         note_access(&st, &share.id, true).await;
     }
-    let unlocked =
-        share.password_hash.is_none() || auth::cookie_matches(&headers, &cookie_name(&token), &unlock_value(&st, &share));
+    let unlocked = unlocked(&st, &headers, &token, &share);
     let mut info = json!({
         "token": share.id,
         // Only once unlocked: the link alone shouldn't tell who in the organisation has which account
@@ -678,13 +703,22 @@ pub async fn unlock(
     if !auth::begin_attempt(&st, &key, UNLOCK_ATTEMPTS) {
         return Err(AppError::new(StatusCode::TOO_MANY_REQUESTS, "Too many attempts. Try again later."));
     }
+    // And for the link from any address: after a few wrong passwords each try waits longer (as for accounts), which
+    // slows down guessing from many addresses without locking the link's real visitors out
+    let link_key = format!("share:{token}");
+    if let Err(wait) = auth::begin_account_attempt(&st, &link_key) {
+        auth::attempt_succeeded(&st, &key);
+        return Err(AppError::new(StatusCode::TOO_MANY_REQUESTS, format!("Too many wrong passwords for this link. Try again in {wait} seconds.")));
+    }
     if !verify_password(req.password, hash).await? {
         record_share_access(&st, &share.id, share.owner_id, None, "password_fail", &visitor);
         return Err(AppError::bad_request("Incorrect password"));
     }
     auth::attempt_succeeded(&st, &key);
+    auth::attempt_succeeded(&st, &link_key);
     record_share_access(&st, &share.id, share.owner_id, None, "unlock", &visitor);
-    let cookie = cookie_header(&st, &cookie_name(&token), &unlock_value(&st, &share), &format!("/api/public/shares/{token}"), 86400);
+    let value = unlock_value(&st, &share, now() + UNLOCK_SECS);
+    let cookie = cookie_header(&st, &cookie_name(&token), &value, &format!("/api/public/shares/{token}"), UNLOCK_SECS);
     Ok(([(header::SET_COOKIE, cookie)], Json(json!({ "ok": true }))).into_response())
 }
 
@@ -1344,6 +1378,52 @@ mod tests {
         assert!(open_share(&env.st, &info.id, &HeaderMap::new()).await.is_ok());
         let (logged,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM activity WHERE action = 'share_update'").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(logged, 3);
+    }
+
+    #[tokio::test]
+    async fn link_passwords_are_long_enough_hard_to_guess_and_unlock_for_a_day() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let doc = stored_file(&env, &amy, &amy.root_id, "a.txt", b"hello").await;
+        // As long as account passwords must be
+        let short = CreateReq { password: Some("abc".into()), ..link(&doc) };
+        assert_eq!(create(State(env.st.clone()), amy.clone(), Json(short)).await.unwrap_err().status, StatusCode::BAD_REQUEST);
+        let password = testutil::wrong_password();
+        let Json(info) = create(State(env.st.clone()), amy.clone(), Json(CreateReq { password: Some(password.clone()), ..link(&doc) })).await.unwrap();
+        assert!(change(&env, &amy, &info.id, json!({ "password": "abc" })).await.is_err());
+
+        let try_from = |ip: &str, password: String| {
+            let addr: std::net::SocketAddr = format!("{ip}:1").parse().unwrap();
+            let visitor = Visitor { ip: String::new(), user_agent: String::new() };
+            unlock(State(env.st.clone()), Path(info.id.clone()), ConnectInfo(addr), HeaderMap::new(), visitor, Json(UnlockReq { password }))
+        };
+        // Guesses from many addresses (each within its own limit): after ten, the link makes everyone wait
+        let mut waited = false;
+        for i in 0..16 {
+            if let Err(e) = try_from(&format!("198.51.100.{i}"), format!("guess number {i}")).await
+                && e.status == StatusCode::TOO_MANY_REQUESTS
+            {
+                waited = true;
+                break;
+            }
+        }
+        assert!(waited, "guessing from many addresses is slowed down");
+        env.st.login_failures.lock().unwrap().clear();
+
+        // The unlock lasts a day, even when the cookie is kept longer
+        let res = try_from("203.0.113.9", password).await.unwrap();
+        let cookie = res.headers()[header::SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_string();
+        let with = |cookie: &str| {
+            let mut h = HeaderMap::new();
+            h.insert(header::COOKIE, cookie.parse().unwrap());
+            h
+        };
+        assert!(open_share(&env.st, &info.id, &with(&cookie)).await.is_ok());
+        let (share, _) = find_share(&env.st, &info.id).await.unwrap();
+        let old = format!("{}={}", cookie_name(&info.id), unlock_value(&env.st, &share, now() - 1));
+        assert!(open_share(&env.st, &info.id, &with(&old)).await.is_err());
+        let forged = cookie.replace(cookie.split('=').nth(1).unwrap().split('.').next().unwrap(), &(now() + 999_999).to_string());
+        assert!(open_share(&env.st, &info.id, &with(&forged)).await.is_err(), "the time is signed");
     }
 
     #[tokio::test]

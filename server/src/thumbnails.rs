@@ -38,14 +38,17 @@ fn browser_thumbnailable(n: &Node) -> bool {
     !n.is_folder() && (n.mime == "application/pdf" || n.mime.starts_with("video/")) && (n.blob_hash.is_some() || n.in_folder_space())
 }
 
-/// Where a file's thumbnail is cached, and the content's size as it is now. Stored content is keyed by its hash; a
-/// folder space's file by its identity, size and time, so a changed file gets a new thumbnail
+/// Where a file's thumbnail is cached, and the content's size as it is now. Stored content the server draws itself is
+/// keyed by its hash (the same picture wherever it is). A thumbnail a browser drew (`browser_thumbnailable`) is kept
+/// for the space only: people elsewhere with the same content never see one someone else uploaded. A folder space's
+/// file is keyed by its space, identity, size and time, so a changed file gets a new thumbnail.
 async fn thumb_key(n: &Node) -> AppResult<(Source, u64, String)> {
     let source = Source::of(n)?;
     let (size, tag) = source.describe(n.size as u64).await?;
     let hash = match &source {
-        Source::Stored { hash, .. } => hash.clone(),
-        Source::File(_) => crate::util::sha256_hex(tag.as_bytes()),
+        Source::Stored { hash, .. } if !browser_thumbnailable(n) => hash.clone(),
+        Source::Stored { hash, .. } => crate::util::sha256_hex(format!("{}:{hash}", n.drive()).as_bytes()),
+        Source::File(_) => crate::util::sha256_hex(format!("{}:{tag}", n.drive()).as_bytes()),
     };
     Ok((source, size, hash))
 }
@@ -134,11 +137,12 @@ pub const MAX_THUMB_UPLOAD: usize = 512 * 1024;
 /// Largest side of an uploaded thumbnail (a browser makes them about THUMB_SIZE; it is scaled down to that)
 const MAX_THUMB_UPLOAD_SIDE: u32 = 1024;
 
-/// A thumbnail the browser made for a PDF or video the user can open (see `browser_thumbnailable`). Only a small JPEG
-/// or PNG is taken, decoded with tight limits and encoded again, so what is kept is always a plain JPEG of the usual
-/// size. A thumbnail already in the cache is kept: it belongs to the same content.
+/// A thumbnail the browser made for a PDF or video the user may change (see `browser_thumbnailable`): whoever sees
+/// it could change the file itself anyway, so a viewer can't choose the picture others see. Only a small JPEG or PNG
+/// is taken, decoded with tight limits and encoded again, so what is kept is always a plain JPEG of the usual size. A
+/// thumbnail already in the cache is kept: it belongs to the same content.
 pub async fn upload_thumbnail(State(st): State<AppState>, user: User, Path(id): Path<String>, body: Bytes) -> AppResult<StatusCode> {
-    let node = tree::owned_node(&mut *st.db.acquire().await?, &user, &id).await?;
+    let node = tree::node_for(&mut *st.db.acquire().await?, &user, &id, tree::Need::Write).await?;
     if !browser_thumbnailable(&node) {
         return Err(AppError::bad_request("This file doesn't take a thumbnail"));
     }
@@ -202,6 +206,9 @@ mod tests {
             .execute(&env.st.db)
             .await
             .unwrap();
+        // Kept for Amy's space only: the same content elsewhere doesn't get it
+        let content = hash;
+        let hash = crate::util::sha256_hex(format!("{}:{content}", env.drive_of(&pdf).await).as_bytes());
         let text = env.file(&amy, &amy.root_id, "notes.txt").await;
         let get = |user: User, id: String| thumbnail(State(env.st.clone()), user, Path(id), HeaderMap::new());
         let put = |user: User, id: String, body: Bytes| upload_thumbnail(State(env.st.clone()), user, Path(id), body);
@@ -229,10 +236,13 @@ mod tests {
         let img = image::load_from_memory_with_format(&body, image::ImageFormat::Jpeg).unwrap();
         assert_eq!((img.width(), img.height()), (THUMB_SIZE, 200));
 
-        // A thumbnail already made stays (another reader's upload doesn't replace it)
+        // Someone who may only view the file can't choose the picture others see; an editor's upload doesn't replace it
         env.grant(&pdf, &ben, "viewer").await;
+        assert_eq!(put(ben.clone(), pdf.clone(), png(100, 100)).await.unwrap_err().status, StatusCode::FORBIDDEN);
+        env.grant(&pdf, &ben, "editor").await;
         assert_eq!(put(ben.clone(), pdf.clone(), png(100, 100)).await.unwrap(), StatusCode::NO_CONTENT);
         assert_eq!(std::fs::read(env.st.thumb_path(&hash)).unwrap(), body.to_vec());
+        assert!(!env.st.thumb_path(&content).exists(), "not kept by content alone");
     }
 
     #[tokio::test]

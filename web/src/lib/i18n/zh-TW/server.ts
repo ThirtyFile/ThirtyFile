@@ -880,4 +880,6 @@ export default {
   "Enter a code from your authenticator app": "請輸入驗證器 App 上的驗證碼",
   "Enter your current password": "請輸入目前的密碼",
   "Sign out and sign in again, then create the app password within 10 minutes": "請登出後重新登入，並在 10 分鐘內建立應用程式密碼",
+  // Share-link passwords (shares.rs)
+  "Too many wrong passwords for this link. Try again in {n} seconds.": "此連結的密碼錯誤次數過多，請 {n} 秒後再試",
 } satisfies Record<string, string>;
