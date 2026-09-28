@@ -448,7 +448,9 @@ async fn folder_drive(st: &AppState, drive_id: &str) -> AppResult<Drive> {
 /// Works out what to change. `full`: the entries are the whole folder, so indexed items not found were removed.
 fn plan(drive: &Drive, indexed: &[Indexed], entries: &[Entry], full: bool, report: &mut ScanReport) -> Vec<Op> {
     let by_path: HashMap<&str, &Indexed> = indexed.iter().filter_map(|n| n.fs_path.as_deref().map(|p| (p, n))).collect();
-    let present: HashSet<&str> = entries.iter().map(|e| e.rel.as_str()).collect();
+    // Path → kind of what the folder holds now (a map: looking entries up one by one made unchanged scans of large
+    // folders quadratic, over five minutes for 200,000 items)
+    let present: HashMap<&str, &str> = entries.iter().map(|e| (e.rel.as_str(), e.kind())).collect();
     // Indexed items whose path is gone (or now holds the other kind): candidates for a move, else removed
     let mut missing: HashMap<(i64, i64), &Indexed> = HashMap::new();
     let mut kind_changed = HashSet::new();
@@ -457,11 +459,11 @@ fn plan(drive: &Drive, indexed: &[Indexed], entries: &[Entry], full: bool, repor
         if path.is_empty() {
             continue;
         }
-        let kind_differs = entries.iter().any(|e| e.rel == path && (e.kind() != n.kind));
+        let kind_differs = present.get(path).is_some_and(|k| *k != n.kind);
         if kind_differs {
             kind_changed.insert(n.id.clone());
         }
-        if (!present.contains(path) || kind_differs)
+        if (!present.contains_key(path) || kind_differs)
             && let (Some(dev), Some(ino)) = (n.fs_dev, n.fs_ino)
             && ino != 0
         {
@@ -529,12 +531,12 @@ fn plan(drive: &Drive, indexed: &[Indexed], entries: &[Entry], full: bool, repor
         // Settling files keep their node: they are still there
         for n in indexed {
             let Some(path) = n.fs_path.as_deref() else { continue };
-            if path.is_empty() || present.contains(path) || moved.contains(&n.id) || kind_changed.contains(&n.id) {
+            if path.is_empty() || present.contains_key(path) || moved.contains(&n.id) || kind_changed.contains(&n.id) {
                 continue;
             }
             // Only the topmost removed item: its contents go with it
             let parent_gone = n.parent_id.as_ref().and_then(|p| by_id.get(p.as_str())).is_some_and(|x| {
-                x.fs_path.as_deref().is_some_and(|pp| !pp.is_empty() && !present.contains(pp) && !moved.contains(&x.id))
+                x.fs_path.as_deref().is_some_and(|pp| !pp.is_empty() && !present.contains_key(pp) && !moved.contains(&x.id))
             });
             if !parent_gone {
                 ops.push(Op::Remove { id: n.id.clone() });
@@ -545,7 +547,7 @@ fn plan(drive: &Drive, indexed: &[Indexed], entries: &[Entry], full: bool, repor
         for n in indexed {
             if let Some(path) = n.fs_path.as_deref()
                 && !path.is_empty()
-                && !present.contains(path)
+                && !present.contains_key(path)
                 && !moved.contains(&n.id)
             {
                 ops.push(Op::Remove { id: n.id.clone() });
