@@ -409,7 +409,6 @@ function LocationCell({ drive, job }: { drive: Drive; job?: Migration }) {
   return (
     <span className="flex min-w-0 items-center gap-1" title={job?.error ? tServer(job.error) : undefined}>
       <span className="truncate">{drive.location_name || "—"}</span>
-      {drive.location_is_default && <span className="shrink-0 text-[11px] text-muted-foreground">{t("(default)")}</span>}
       {job?.error && <span className="shrink-0 text-[11px] text-destructive">{t("Move failed")}</span>}
     </span>
   );
@@ -417,11 +416,10 @@ function LocationCell({ drive, job }: { drive: Drive; job?: Migration }) {
 
 function LocationDialog({ drive, onClose, onDone }: { drive: Drive; onClose(): void; onDone(): void }) {
   const locations = useQuery({ queryKey: ["storage-locations"], queryFn: api.storageLocations });
-  const [value, setValue] = useState<string>(drive.location_is_default ? "" : drive.location_id);
+  const [value, setValue] = useState<string>(drive.location_id ?? "");
   const [migrate, setMigrate] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const def = locations.data?.find((l) => l.is_default);
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
@@ -432,7 +430,7 @@ function LocationDialog({ drive, onClose, onDone }: { drive: Drive; onClose(): v
             setBusy(true);
             setError(null);
             try {
-              await api.setDriveLocation(drive.id, value || null, migrate);
+              await api.setDriveLocation(drive.id, value, migrate);
               toast.success(migrate ? t("Started moving files in the background") : t("Storage location changed"));
               onDone();
             } catch (err) {
@@ -453,7 +451,6 @@ function LocationDialog({ drive, onClose, onDone }: { drive: Drive; onClose(): v
               onChange={(e) => setValue(e.target.value)}
               aria-label={t("Storage location")}
             >
-              <option value="">{def ? t("Use default location (currently {name})", { name: def.name }) : t("Use default location")}</option>
               {locations.data?.map((l) => (
                 <option key={l.id} value={l.id} disabled={!l.connected}>
                   {l.connected
@@ -473,7 +470,7 @@ function LocationDialog({ drive, onClose, onDone }: { drive: Drive; onClose(): v
             <Button type="button" variant="outline" onClick={onClose}>
               {t("Cancel")}
             </Button>
-            <Button type="submit" disabled={busy}>
+            <Button type="submit" disabled={busy || !value}>
               {busy && <Loader2Icon className="animate-spin" />}
               {t("Apply")}
             </Button>

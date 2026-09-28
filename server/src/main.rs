@@ -241,7 +241,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     let db = db::connect(&cfg.data.join("drive.db"), cfg.db_cache_mb).await?;
 
     if let Some(Command::Check { verify }) = &cfg.command {
-        let (storages, _) = locations::load_all(&db, &storage).await?;
+        let storages = locations::load_all(&db, &storage).await?;
         let reports = check::run(&db, &storages, *verify, |id, n| eprintln!("Checking storage location {id} ({n} file(s))…")).await?;
         let problems = check::print(&reports);
         std::process::exit(if problems == 0 { 0 } else { 1 });
@@ -322,7 +322,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     if !cfg.secure_cookie && cfg.trust_proxy.enabled() {
         tracing::warn!("THIRTYFILE_TRUST_PROXY is on but THIRTYFILE_SECURE_COOKIE is off: if the proxy serves HTTPS, set THIRTYFILE_SECURE_COOKIE=true");
     }
-    let (storages, default_location) = locations::load_all(&db, &storage).await?;
+    let storages = locations::load_all(&db, &storage).await?;
     let log_settings = logs::load_settings(&db).await;
     let branding = branding::load(&db).await;
     let sso_settings = sso::load(&db).await;
@@ -340,7 +340,6 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     let state = AppState(Arc::new(Inner {
         db,
         storages: std::sync::RwLock::new(storages),
-        default_location: std::sync::RwLock::new(default_location),
         migrations: Default::default(),
         data_dir: cfg.data.clone(),
         storage_dir: storage,
@@ -748,6 +747,7 @@ fn api() -> Router<AppState> {
         .route("/admin/storage/{id}", patch(locations::update).delete(locations::delete))
         .route("/admin/storage/{id}/test", post(locations::test_existing))
         .route("/admin/storage/{id}/default", post(locations::set_default))
+        .route("/admin/storage/{id}/spaces", get(locations::spaces))
         .route("/admin/groups", get(drives::list_groups).post(drives::create_group))
         .route("/admin/groups/{id}", patch(drives::update_group).delete(drives::delete_group))
         .fallback(|| async { error::AppError::not_found("API not found") })

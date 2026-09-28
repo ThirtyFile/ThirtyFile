@@ -925,9 +925,16 @@ pub async fn check_location_folder(st: &AppState, id: Option<&str>, kind: &str, 
     Ok(())
 }
 
-/// Creates the index root of a new folder space (called when the space is created)
-pub async fn set_up(conn: &mut SqliteConnection, drive_id: &str, root_id: &str, source: &str) -> AppResult<()> {
-    sqlx::query("UPDATE drives SET mode = 'folder', source_path = ? WHERE id = ?").bind(source).bind(drive_id).execute(&mut *conn).await?;
+/// Makes a new space a folder space showing `source` and creates its index root (called when the space is created).
+/// `location`: the storage location whose folder holds `source` (space_folders.rs), None for a folder an administrator
+/// chose, which is on no location.
+pub async fn set_up(conn: &mut SqliteConnection, drive_id: &str, root_id: &str, source: &str, location: Option<&str>) -> AppResult<()> {
+    sqlx::query("UPDATE drives SET mode = 'folder', source_path = ?, location_id = ? WHERE id = ?")
+        .bind(source)
+        .bind(location)
+        .bind(drive_id)
+        .execute(&mut *conn)
+        .await?;
     sqlx::query("UPDATE nodes SET fs_path = '' WHERE id = ?").bind(root_id).execute(&mut *conn).await?;
     Ok(())
 }

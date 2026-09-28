@@ -60,7 +60,6 @@ async fn make_env(space_folders: bool) -> TestEnv {
     let st = AppState(Arc::new(Inner {
         db,
         storages: std::sync::RwLock::new(storages),
-        default_location: std::sync::RwLock::new("local".into()),
         migrations: Default::default(),
         data_dir: dir.clone(),
         storage_dir: dir.join("blobs"),

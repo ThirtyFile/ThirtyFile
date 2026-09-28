@@ -275,7 +275,7 @@ async fn store_new_file(st: &AppState, user: &User, folder_id: &str, name: &str,
         }
         tree::check_quota(&mut tx, folder.drive(), size as i64).await?;
         let name = tree::unique_name(&mut tx, &folder.id, name, false).await?;
-        let extra = tree::commit_blob(st, &mut tx, &staged).await?;
+        let extra = tree::commit_blob(&mut tx, &staged).await?;
         let id = insert_file(&mut tx, user, &folder.id, &name, &hash, size as i64).await?;
         tree::touch(&mut tx, &folder.id).await?;
         tree::adjust_usage(&mut tx, folder.drive(), size as i64).await?;
@@ -553,7 +553,7 @@ async fn extract_into(st: &AppState, user: &User, job: &str, zip: &Node, parent_
             }
             let (Some(file), Some(blob)) = (&p.file, blobs.remove(&i)) else { continue };
             let name = tree::unique_name(&mut tx, &folder, file, false).await?;
-            extras.extend(tree::commit_blob(st, &mut tx, blob).await?);
+            extras.extend(tree::commit_blob(&mut tx, blob).await?);
             insert_file(&mut tx, user, &folder, &name, &blob.hash, blob.size).await?;
         }
         tree::adjust_usage(&mut tx, parent.drive(), actual).await?;

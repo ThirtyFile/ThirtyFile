@@ -245,13 +245,16 @@ pub async fn set_setting(conn: &mut SqliteConnection, key: &str, value: &str) ->
     Ok(())
 }
 
-/// Creates a space and its root folder, returning (space id, root folder id). The caller creates the access grants separately.
+/// Creates a space and its root folder on the storage location `location_id`, returning (space id, root folder id).
+/// The space records the location for good (only a move changes it, locations.rs): its files go there, or its folder
+/// once `space_folders::make_folder_space` makes it a folder space. The caller creates the access grants separately.
 pub async fn create_drive(
     conn: &mut SqliteConnection,
     name: &str,
     kind: &str,
     owner_id: i64,
     quota_bytes: i64,
+    location_id: &str,
 ) -> Result<(String, String), sqlx::Error> {
     let drive_id = new_id();
     let root_id = new_id();
@@ -268,7 +271,7 @@ pub async fn create_drive(
     .execute(&mut *conn)
     .await?;
     sqlx::query(
-        "INSERT INTO drives (id, name, kind, root_id, owner_id, quota_bytes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO drives (id, name, kind, root_id, owner_id, quota_bytes, created_by, created_at, location_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&drive_id)
     .bind(name)
@@ -278,6 +281,7 @@ pub async fn create_drive(
     .bind(quota_bytes)
     .bind(owner_id)
     .bind(ts)
+    .bind(location_id)
     .execute(&mut *conn)
     .await?;
     Ok((drive_id, root_id))
@@ -319,7 +323,8 @@ pub async fn create_company_space(db: &SqlitePool, folders: Option<&Path>) -> Ap
     }
     let (admin_id,): (i64,) = sqlx::query_as("SELECT MIN(id) FROM users WHERE role = 'admin'").fetch_one(db).await?;
     let mut tx = db.begin().await?;
-    let (drive_id, root_id) = create_drive(&mut tx, "All files", "company", admin_id, 0).await?;
+    let location = crate::locations::default_location(&mut tx).await?;
+    let (drive_id, root_id) = create_drive(&mut tx, "All files", "company", admin_id, 0, &location).await?;
     crate::space_folders::make_folder_space(&mut tx, folders, &drive_id).await?;
     add_grant(&mut tx, &root_id, "everyone", 0, "editor", None, None).await?;
     set_setting(&mut tx, "shared_root_id", &root_id).await?;
@@ -421,7 +426,7 @@ pub async fn next_id(conn: &mut SqliteConnection, table: Counted) -> Result<i64,
     Ok(id)
 }
 
-/// Creates a user and their personal space, returning the user id. The caller must hold the write lock, and calls
+/// Creates a user and their personal space (on the current default storage location), returning the user id. The caller must hold the write lock, and calls
 /// `folders::spaces_changed` after committing (the personal space may be a folder space).
 pub async fn create_user(conn: &mut SqliteConnection, u: NewUser<'_>) -> AppResult<i64> {
     let id = next_id(conn, Counted::Users).await?;
@@ -442,7 +447,8 @@ pub async fn create_user(conn: &mut SqliteConnection, u: NewUser<'_>) -> AppResu
     .bind(u.provisioned_by)
     .execute(&mut *conn)
     .await?;
-    let (drive_id, root_id) = create_drive(conn, "My files", "personal", id, 0).await?;
+    let location = crate::locations::default_location(conn).await?;
+    let (drive_id, root_id) = create_drive(conn, "My files", "personal", id, 0, &location).await?;
     crate::space_folders::make_folder_space(conn, u.space_folders, &drive_id).await?;
     add_grant(conn, &root_id, "user", id, "owner", Some(id), None).await?;
     sqlx::query("UPDATE users SET root_id = ? WHERE id = ?").bind(&root_id).bind(id).execute(&mut *conn).await?;

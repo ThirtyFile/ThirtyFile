@@ -119,10 +119,9 @@ export interface Drive {
   owner_name: string;
   member_count: number;
   disabled: boolean;
-  /** Storage location for new files */
-  location_id: string;
+  /** The storage location the space is on (kept when the default changes); null for a folder an administrator chose */
+  location_id: string | null;
   location_name: string;
-  location_is_default: boolean;
   /** Why the storage service is offline: can be browsed, but not opened, downloaded or uploaded to */
   offline: string | null;
   /** "folder": the space shows a folder on the server */
@@ -178,9 +177,27 @@ export interface StorageLocation {
   checked_at: number | null;
   /** Number of files whose deletion failed and will be retried once the connection recovers */
   pending_deletes: number;
+  /** The content store there plus the indexed size of the folder spaces on it */
   used_bytes: number;
+  /** Of used_bytes, the folder spaces' part */
+  folder_bytes: number;
   blob_count: number;
+  /** Spaces on this location, of every kind */
   drive_count: number;
+  /** Locations on this server's disks: the disk's free and total bytes (null when unknown) */
+  disk_free_bytes: number | null;
+  disk_total_bytes: number | null;
+}
+
+/** A space on a storage location: what it is, not what is in it */
+export interface LocationSpace {
+  id: string;
+  name: string;
+  kind: DriveKind;
+  mode: "store" | "folder";
+  /** Personal spaces: the owner's user name */
+  owner_name: string;
+  used_bytes: number;
 }
 
 export interface Migration {
@@ -809,7 +826,7 @@ const localizeLocated = <T extends Located>(n: T): T => ({
   location: [n.location_space ? driveName(n.location_space) : t("Shared with me"), ...(n.location_path ?? [])].join("/"),
 });
 
-const localizeDrive = (d: Drive): Drive => ({ ...d, name: driveName(d), location_name: locationName(d.location_id, d.location_name) });
+const localizeDrive = (d: Drive): Drive => ({ ...d, name: driveName(d), location_name: locationName(d.location_id ?? "", d.location_name) });
 
 export class ApiError extends Error {
   constructor(
@@ -1093,7 +1110,9 @@ export const api = {
     post<{ ok: boolean; region?: string; host_key?: string }>("/admin/storage/test", req),
   testExistingStorage: (id: string) => post(enc`/admin/storage/${id}/test`),
   setDefaultStorage: (id: string) => post(enc`/admin/storage/${id}/default`),
-  setDriveLocation: (driveId: string, location_id: string | null, migrate: boolean) =>
+  storageLocationSpaces: (id: string) =>
+    get<LocationSpace[]>(enc`/admin/storage/${id}/spaces`).then((l) => l.map((s) => ({ ...s, name: driveName(s) }))),
+  setDriveLocation: (driveId: string, location_id: string, migrate: boolean) =>
     request("PUT", enc`/admin/drives/${driveId}/location`, {
       location_id,
       migrate,

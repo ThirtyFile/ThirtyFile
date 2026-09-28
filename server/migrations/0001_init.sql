@@ -206,8 +206,11 @@ CREATE TABLE drives (
   disabled    INTEGER NOT NULL DEFAULT 0,
   created_by  INTEGER,
   created_at  INTEGER NOT NULL,
-  -- NULL = the default storage location
-  location_id TEXT,
+  -- The storage location the space was created on, or an administrator moved it to (locations.rs): a content-store
+  -- space keeps its files there, a folder space made on the built-in storage or a Local folder location has its folder
+  -- in that location's folder. Changing the default location doesn't change it: the default is only where new spaces
+  -- go. NULL only for a folder space showing a folder an administrator chose, which is on no location.
+  location_id TEXT REFERENCES storage_locations (id),
   -- 'store': files in a storage location, named by their content; 'folder': the files in `source_path` as they are
   mode        TEXT NOT NULL DEFAULT 'store' CHECK (mode IN ('store', 'folder')),
   -- Absolute path of the folder (folder spaces)
@@ -216,7 +219,8 @@ CREATE TABLE drives (
   read_only   INTEGER NOT NULL DEFAULT 0,
   last_scan_at INTEGER,
   -- What the last scan found and skipped (JSON), shown in the Control panel
-  scan_report TEXT
+  scan_report TEXT,
+  CHECK (location_id IS NOT NULL OR mode = 'folder')
 );
 CREATE INDEX drives_owner ON drives (owner_id, kind);
 

@@ -33,8 +33,6 @@ pub struct Inner {
     pub db: SqlitePool,
     /// Connected storage locations: location id → backend
     pub storages: RwLock<HashMap<String, Arc<dyn Storage>>>,
-    /// New files go here when a space has no location assigned
-    pub default_location: RwLock<String>,
     /// Space move jobs: space id → progress
     pub migrations: Mutex<HashMap<String, MigrationStatus>>,
     pub data_dir: PathBuf,

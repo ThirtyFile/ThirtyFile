@@ -164,7 +164,7 @@ async fn an_upload_whose_folder_moved_to_a_full_space_fails() {
     // A team space with room for 8 bytes, 4 of them taken
     let team_root = {
         let mut conn = env.st.db.acquire().await.unwrap();
-        let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 8).await.unwrap();
+        let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 8, "local").await.unwrap();
         crate::db::add_grant(&mut conn, &root, "user", amy.id, "owner", Some(amy.id), None).await.unwrap();
         root
     };

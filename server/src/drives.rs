@@ -34,10 +34,10 @@ pub struct DriveInfo {
     owner_name: String,
     member_count: i64,
     disabled: bool,
-    /// Storage location for new files (the default location when not set)
-    location_id: String,
+    /// The storage location the space is on: where its files go (content store), or whose folder holds its folder
+    /// (folder spaces). None for a folder space showing a folder an administrator chose.
+    location_id: Option<String>,
     location_name: String,
-    location_is_default: bool,
     /// Reason the storage location is offline (e.g. S3 disconnected); browsing works, but opening, downloading and uploading don't
     offline: Option<String>,
     /// "store" or "folder" (a folder on the server)
@@ -79,30 +79,29 @@ async fn drive_infos(
         last_scan_at: Option<i64>,
         scan_report: Option<String>,
     }
-    let default_location = st.default_location.read().unwrap().clone();
     let ids = serde_json::to_string(&drives.iter().map(|(d, _)| d.id.as_str()).collect::<Vec<_>>()).unwrap();
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT d.id, d.location_id, COALESCE(l.name, '') AS location_name,
                 CASE WHEN d.kind = 'personal' THEN COALESCE(u.quota_bytes, 0) ELSE d.quota_bytes END AS quota_bytes,
                 COALESCE(u.username, '') AS owner_name, COALESCE(g.n, 0) AS member_count, d.last_scan_at, d.scan_report
          FROM drives d
-         LEFT JOIN storage_locations l ON l.id = COALESCE(d.location_id, ?2)
+         LEFT JOIN storage_locations l ON l.id = d.location_id
          LEFT JOIN users u ON u.id = d.owner_id
          LEFT JOIN (SELECT node_id, COUNT(*) AS n FROM grants GROUP BY node_id) g ON g.node_id = d.root_id
          WHERE d.id IN (SELECT value FROM json_each(?1))",
     )
     .bind(&ids)
-    .bind(&default_location)
     .fetch_all(&mut *conn)
     .await?;
     let mut rows: HashMap<String, Row> = rows.into_iter().map(|r| (r.id.clone(), r)).collect();
     let mut out = Vec::with_capacity(drives.len());
     for (d, role) in drives {
         let r = rows.remove(&d.id).ok_or_else(|| AppError::not_found("Space not found"))?;
-        let location_is_default = r.location_id.is_none();
-        let location_id = r.location_id.unwrap_or_else(|| default_location.clone());
         // A folder space is on the server itself: nothing to be offline
-        let offline = if d.is_folder() { None } else { st.location_offline(&location_id) };
+        let offline = match &r.location_id {
+            Some(location) if !d.is_folder() => st.location_offline(location),
+            _ => None,
+        };
         let details = scan_details && d.is_folder();
         out.push(DriveInfo {
             mode: d.mode.clone(),
@@ -121,9 +120,8 @@ async fn drive_infos(
             owner_name: r.owner_name,
             member_count: r.member_count,
             disabled: d.disabled,
-            location_id,
+            location_id: r.location_id,
             location_name: r.location_name,
-            location_is_default,
             offline,
         });
     }
@@ -188,13 +186,15 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
             return Err(AppError::bad_request("You can create at most 20 spaces. Ask an administrator for more."));
         }
     }
-    let (drive_id, root_id) = create_drive(&mut tx, &name, "team", user.id, quota).await?;
+    // On the default location, for good: changing the default later doesn't move it
+    let location = crate::locations::default_location(&mut tx).await?;
+    let (drive_id, root_id) = create_drive(&mut tx, &name, "team", user.id, quota, &location).await?;
     add_grant(&mut tx, &root_id, "user", user.id, "owner", Some(user.id), None).await?;
-    // A folder chosen by the administrator, else a new folder in the storage location's folder when the location is
-    // on this server (space_folders.rs); S3, SFTP and FTP keep the content store
+    // A folder chosen by the administrator (on no location), else a new folder in the storage location's folder when
+    // the location is on this server (space_folders.rs); S3, SFTP and FTP keep the content store
     let folder_space = match &source {
         Some(source) => {
-            crate::folders::set_up(&mut tx, &drive_id, &root_id, source).await?;
+            crate::folders::set_up(&mut tx, &drive_id, &root_id, source, None).await?;
             sqlx::query("UPDATE drives SET read_only = ? WHERE id = ?").bind(req.read_only).bind(&drive_id).execute(&mut *tx).await?;
             true
         }
@@ -804,7 +804,7 @@ mod tests {
         let carol = env.user("carol", true).await;
         let root = {
             let mut conn = env.st.db.acquire().await.unwrap();
-            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0).await.unwrap();
+            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0, "local").await.unwrap();
             crate::db::add_grant(&mut conn, &root, "user", amy.id, "owner", Some(amy.id), None).await.unwrap();
             root
         };

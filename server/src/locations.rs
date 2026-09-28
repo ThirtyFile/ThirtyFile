@@ -8,7 +8,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -19,7 +19,7 @@ use crate::{
     state::{AppState, LocationHealth, MigrationStatus},
     storage::{self, Storage},
     tree,
-    util::{new_id, now, validate_name},
+    util::{self, new_id, now, validate_name},
 };
 
 pub const BUILTIN: &str = "local";
@@ -67,14 +67,10 @@ fn sealed_config(id: &str, cfg: &Value) -> String {
 }
 
 /// Loads all storage locations at startup; locations that can't be built are logged as warnings and skipped (reading their files reports "unavailable")
-pub async fn load_all(db: &SqlitePool, storage_dir: &FsPath) -> Result<(HashMap<String, Arc<dyn Storage>>, String), sqlx::Error> {
+pub async fn load_all(db: &SqlitePool, storage_dir: &FsPath) -> Result<HashMap<String, Arc<dyn Storage>>, sqlx::Error> {
     let rows: Vec<LocationRow> = sqlx::query_as("SELECT id, name, kind, config, is_default FROM storage_locations").fetch_all(db).await?;
     let mut map = HashMap::new();
-    let mut default = BUILTIN.to_string();
     for r in rows {
-        if r.is_default {
-            default = r.id.clone();
-        }
         match storage::build(&r.kind, &config_json(&r.id, &r.config), storage_dir) {
             Ok(s) => {
                 map.insert(r.id, s);
@@ -82,7 +78,14 @@ pub async fn load_all(db: &SqlitePool, storage_dir: &FsPath) -> Result<(HashMap<
             Err(e) => tracing::warn!("Storage location \"{}\" is unavailable: {e}", r.name),
         }
     }
-    Ok((map, default))
+    Ok(map)
+}
+
+/// The default storage location: where new spaces are created. A space records its location when it is created
+/// (`db::create_drive`), so changing the default later doesn't move existing spaces.
+pub async fn default_location(conn: &mut SqliteConnection) -> Result<String, sqlx::Error> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT id FROM storage_locations WHERE is_default = 1 LIMIT 1").fetch_optional(conn).await?;
+    Ok(row.map_or_else(|| BUILTIN.to_string(), |r| r.0))
 }
 
 // ───────────── Management API ─────────────
@@ -104,9 +107,18 @@ pub struct LocationInfo {
     checked_at: Option<i64>,
     /// Number of physical files whose deletion failed and is awaiting retry
     pending_deletes: i64,
+    /// Space used on the location: the content store there, plus the indexed size of the folder spaces on it
     used_bytes: i64,
+    /// Of `used_bytes`, the folder spaces' part
+    folder_bytes: i64,
+    /// Files in the content store there
     blob_count: i64,
+    /// Spaces on the location (`drives.location_id`), of every kind and mode
     drive_count: i64,
+    /// Locations on this server's disks (built-in and Local folder): free and total bytes of the disk holding the
+    /// folder, when the system tells
+    disk_free_bytes: Option<u64>,
+    disk_total_bytes: Option<u64>,
 }
 
 /// Fields that aren't returned to the browser (leaving them blank when editing keeps the existing value), and are
@@ -127,30 +139,49 @@ fn public_config(cfg: &Value) -> (Value, bool) {
     (c, has_secret)
 }
 
+/// Free and total bytes of the disk holding `path`; None when the system doesn't tell within a few seconds (a NAS
+/// that stopped answering must not hold the list)
+async fn disk_of(path: std::path::PathBuf) -> Option<(u64, u64)> {
+    let task = tokio::task::spawn_blocking(move || util::disk_space(&path));
+    tokio::time::timeout(Duration::from_secs(3), task).await.ok()?.ok()?
+}
+
 pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<LocationInfo>>> {
     let rows: Vec<LocationRow> =
         sqlx::query_as("SELECT id, name, kind, config, is_default FROM storage_locations ORDER BY (id = 'local') DESC, created_at")
             .fetch_all(&st.db)
             .await?;
-    // Totals of every location in three grouped queries (blobs by the covering index blobs_location_size)
+    // Totals of every location in three grouped queries (blobs by the covering index blobs_location_size; spaces are
+    // few). A folder space's size is its index's (`drives.used_bytes`, kept up to date by every change and scan).
     let db = &st.db;
     let totals = |sql: &'static str| async move {
         let rows: Vec<(String, i64, i64)> = sqlx::query_as(sql).fetch_all(db).await?;
         AppResult::Ok(rows.into_iter().map(|(id, a, b)| (id, (a, b))).collect::<std::collections::HashMap<_, _>>())
     };
     let blobs = totals("SELECT location_id, COALESCE(SUM(size), 0), COUNT(*) FROM blobs GROUP BY location_id").await?;
-    let drives = totals("SELECT location_id, COUNT(*), 0 FROM drives WHERE location_id IS NOT NULL GROUP BY location_id").await?;
+    let drives = totals(
+        "SELECT location_id, COUNT(*), COALESCE(SUM(CASE WHEN mode = 'folder' THEN used_bytes ELSE 0 END), 0)
+         FROM drives WHERE location_id IS NOT NULL GROUP BY location_id",
+    )
+    .await?;
     let pending = totals("SELECT location_id, COUNT(*), 0 FROM pending_blob_deletes GROUP BY location_id").await?;
     let mut out = Vec::new();
+    let mut disks = Vec::new();
     for r in rows {
-        let (used_bytes, blob_count) = blobs.get(&r.id).copied().unwrap_or_default();
-        let drive_count = drives.get(&r.id).map_or(0, |d| d.0);
+        let (store_bytes, blob_count) = blobs.get(&r.id).copied().unwrap_or_default();
+        let (drive_count, folder_bytes) = drives.get(&r.id).copied().unwrap_or_default();
         let pending_deletes = pending.get(&r.id).map_or(0, |d| d.0);
         let (mut config, has_secret) = public_config(&config_json(&r.id, &r.config));
         if r.id == BUILTIN {
             // Shown in the list; the built-in location's folder is set with THIRTYFILE_STORAGE
             config["path"] = st.storage_dir.display().to_string().into();
         }
+        // On this server's disks: the disk holding the folder (a Local folder location without a folder uses the
+        // storage folder, as space_folders.rs does)
+        disks.push((r.kind == "local").then(|| {
+            let path = config["path"].as_str().map(str::trim).filter(|p| !p.is_empty());
+            path.map_or_else(|| st.storage_dir.clone(), std::path::PathBuf::from)
+        }));
         let health = st.location_health.lock().unwrap().get(&r.id).cloned();
         let connected = st.storages.read().unwrap().contains_key(&r.id) && health.as_ref().is_none_or(|h| h.ok);
         out.push(LocationInfo {
@@ -165,12 +196,52 @@ pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<Lo
             health_error: health.as_ref().and_then(|h| h.error.clone()),
             checked_at: health.map(|h| h.checked_at),
             pending_deletes,
-            used_bytes,
+            used_bytes: store_bytes + folder_bytes,
+            folder_bytes,
             blob_count,
             drive_count,
+            disk_free_bytes: None,
+            disk_total_bytes: None,
         });
     }
+    let sizes = futures_util::future::join_all(disks.into_iter().map(|p| async move { disk_of(p?).await })).await;
+    for (info, size) in out.iter_mut().zip(sizes) {
+        (info.disk_free_bytes, info.disk_total_bytes) = size.unzip();
+    }
     Ok(Json(out))
+}
+
+/// A space on a storage location, as its list shows it: what the space is, not what is in it (administrators don't
+/// see into personal spaces)
+#[derive(Serialize, sqlx::FromRow)]
+pub struct LocationSpace {
+    id: String,
+    name: String,
+    kind: String,
+    /// "store" or "folder"
+    mode: String,
+    /// The owner's user name (personal spaces)
+    owner_name: String,
+    used_bytes: i64,
+}
+
+/// The spaces on a storage location (Control panel › Storage locations)
+pub async fn spaces(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Vec<LocationSpace>>> {
+    let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM storage_locations WHERE id = ?").bind(&id).fetch_optional(&st.db).await?;
+    if exists.is_none() {
+        return Err(AppError::not_found("Storage location not found"));
+    }
+    let list: Vec<LocationSpace> = sqlx::query_as(
+        "SELECT d.id, d.name, d.kind, d.mode, CASE WHEN d.kind = 'personal' THEN COALESCE(u.username, '') ELSE '' END AS owner_name,
+                d.used_bytes
+         FROM drives d LEFT JOIN users u ON u.id = d.owner_id
+         WHERE d.location_id = ?
+         ORDER BY CASE d.kind WHEN 'company' THEN 0 WHEN 'team' THEN 1 ELSE 2 END, d.name, owner_name",
+    )
+    .bind(&id)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(list))
 }
 
 #[derive(Deserialize)]
@@ -474,7 +545,6 @@ pub async fn set_default(State(st): State<AppState>, Admin(user): Admin, Path(id
     sqlx::query("UPDATE storage_locations SET is_default = (id = ?)").bind(&id).execute(&mut *tx).await?;
     logs::record_activity(&mut tx, &user, None, "storage_default", &name).await?;
     tx.commit().await?;
-    *st.default_location.write().unwrap() = id;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -495,6 +565,7 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
     if is_default {
         return Err(AppError::bad_request("Set another location as the default first"));
     }
+    // Every space records its location (folder spaces on a Local folder location too), so this counts them all
     if drives > 0 {
         return Err(AppError::bad_request(if drives == 1 {
             format!("{drives} space still uses this location. Change it first.")
@@ -522,8 +593,8 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
 
 #[derive(Deserialize)]
 pub struct DriveLocationReq {
-    /// null means use the default location
-    location_id: Option<String>,
+    /// The location the space is moved to: recorded on the space until the next move
+    location_id: String,
     /// Also move existing files to the new location
     #[serde(default)]
     migrate: bool,
@@ -536,28 +607,26 @@ pub async fn set_drive_location(
     Json(req): Json<DriveLocationReq>,
 ) -> AppResult<Json<Value>> {
     refuse_folder_space(&st, &drive_id).await?;
-    if let Some(loc) = &req.location_id {
-        let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM storage_locations WHERE id = ?").bind(loc).fetch_optional(&st.db).await?;
-        if exists.is_none() {
-            return Err(AppError::bad_request("Storage location not found"));
-        }
-        if !st.storages.read().unwrap().contains_key(loc) {
-            return Err(AppError::bad_request("This storage location can't be reached right now"));
-        }
+    let target = req.location_id;
+    let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM storage_locations WHERE id = ?").bind(&target).fetch_optional(&st.db).await?;
+    if exists.is_none() {
+        return Err(AppError::bad_request("Storage location not found"));
+    }
+    if !st.storages.read().unwrap().contains_key(&target) {
+        return Err(AppError::bad_request("This storage location can't be reached right now"));
     }
     if st.migrations.lock().unwrap().get(&drive_id).is_some_and(|j| j.running) {
         return Err(AppError::conflict("This space is being moved. Wait until the move finishes before changing it."));
     }
     // First make sure the target location is really reachable; otherwise later uploads to this space would all fail
-    let target = req.location_id.clone().unwrap_or_else(|| st.default_location.read().unwrap().clone());
     probe(&st, &target).await.map_err(|e| AppError::bad_request(format!("The target storage location can't be reached, so nothing was changed: {e}")))?;
     {
         let _w = st.write_lock.lock().await;
         let mut tx = st.db.begin().await?;
         let drive = tree::get_drive(&mut tx, &drive_id).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
-        sqlx::query("UPDATE drives SET location_id = ? WHERE id = ?").bind(&req.location_id).bind(&drive_id).execute(&mut *tx).await?;
+        sqlx::query("UPDATE drives SET location_id = ? WHERE id = ?").bind(&target).bind(&drive_id).execute(&mut *tx).await?;
         let root = tree::get_node(&mut tx, &drive.root_id).await?;
-        logs::record_activity(&mut tx, &user, root.as_ref(), "drive_location", req.location_id.as_deref().unwrap_or("Default")).await?;
+        logs::record_activity(&mut tx, &user, root.as_ref(), "drive_location", &target).await?;
         tx.commit().await?;
     }
     if req.migrate {
@@ -581,7 +650,7 @@ async fn refuse_folder_space(st: &AppState, drive_id: &str) -> AppResult<()> {
 
 pub async fn migrate(State(st): State<AppState>, _: Admin, Path(drive_id): Path<String>) -> AppResult<Json<Value>> {
     refuse_folder_space(&st, &drive_id).await?;
-    let target = tree::drive_location(&st, &mut *st.db.acquire().await?, &drive_id).await?;
+    let target = tree::drive_location(&mut *st.db.acquire().await?, &drive_id).await?;
     probe(&st, &target).await.map_err(|e| AppError::bad_request(format!("The target storage location can't be reached: {e}")))?;
     start_migration(&st, &drive_id).await?;
     Ok(Json(json!({ "ok": true })))
@@ -594,7 +663,7 @@ pub async fn migrations(State(st): State<AppState>, _: Admin) -> AppResult<Json<
 }
 
 async fn start_migration(st: &AppState, drive_id: &str) -> AppResult<()> {
-    let target = tree::drive_location(st, &mut *st.db.acquire().await?, drive_id).await?;
+    let target = tree::drive_location(&mut *st.db.acquire().await?, drive_id).await?;
     st.storage(&target)?;
     {
         let mut jobs = st.migrations.lock().unwrap();
@@ -924,6 +993,161 @@ mod tests {
         }
         assert!(deletion_of(&env, &moved_away, "second").await.is_some());
         assert!(deletion_of(&env, &kept, "hooked").await.is_some());
+    }
+
+    /// Adds a storage location (in the database and connected); `folder`: a Local folder location's folder, else one
+    /// that works like a bucket (its content in a folder of the test)
+    async fn add_location(env: &testutil::TestEnv, id: &str, folder: Option<&FsPath>) {
+        let (kind, config) = match folder {
+            Some(dir) => {
+                std::fs::create_dir_all(dir).unwrap();
+                ("local", json!({ "path": dir.to_string_lossy() }))
+            }
+            None => ("s3", json!({ "bucket": "files" })),
+        };
+        sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES (?, ?, ?, ?, 0, 0)")
+            .bind(id)
+            .bind(id.to_uppercase())
+            .bind(kind)
+            .bind(config.to_string())
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        let backend = crate::storage::LocalStorage::new(folder.map_or_else(|| env.dir.join(id), FsPath::to_path_buf)).unwrap();
+        env.st.storages.write().unwrap().insert(id.into(), Arc::new(backend));
+    }
+
+    async fn make_default(env: &testutil::TestEnv, id: &str) {
+        let _ = set_default(State(env.st.clone()), Admin(env.admin().await), Path(id.into())).await.unwrap();
+    }
+
+    /// A space's recorded location and mode
+    async fn placed(env: &testutil::TestEnv, root_id: &str) -> (Option<String>, String) {
+        sqlx::query_as("SELECT location_id, mode FROM drives WHERE root_id = ?").bind(root_id).fetch_one(&env.st.db).await.unwrap()
+    }
+
+    async fn new_team(env: &testutil::TestEnv, name: &str) -> String {
+        let req = serde_json::from_value(json!({ "name": name })).unwrap();
+        let Json(info) = crate::drives::create(State(env.st.clone()), env.admin().await, Json(req)).await.unwrap();
+        serde_json::to_value(&info).unwrap()["root_id"].as_str().unwrap().to_string()
+    }
+
+    fn at(location: &str, mode: &str) -> (Option<String>, String) {
+        (Some(location.into()), mode.into())
+    }
+
+    #[tokio::test]
+    async fn spaces_keep_the_location_they_were_created_on() {
+        let env = testutil::folders_env().await;
+        let admin = env.admin().await;
+        let amy = env.user("amy", true).await;
+        let sales = new_team(&env, "Sales").await;
+        // Every kind of space, on the built-in location
+        for root in [&admin.root_id, &amy.root_id, &env.st.shared_root().unwrap(), &sales] {
+            assert_eq!(placed(&env, root).await, at(BUILTIN, "folder"));
+        }
+        // A folder the administrator chose is on no location
+        let shown = env.folder_space("Scans").await;
+        assert_eq!(placed(&env, &shown.root).await, (None, "folder".into()));
+
+        // A Local folder location as the default: new spaces get their folder there, the earlier ones stay
+        let nas = env.dir.join("nas");
+        add_location(&env, "nas", Some(&nas)).await;
+        make_default(&env, "nas").await;
+        let ben = env.user("ben", true).await;
+        let plans = new_team(&env, "Plans").await;
+        assert_eq!(placed(&env, &ben.root_id).await, at("nas", "folder"));
+        assert_eq!(placed(&env, &plans).await, at("nas", "folder"));
+        assert!(nas.join("users").join("ben").is_dir() && nas.join("teams").join("Plans").is_dir());
+        assert_eq!(placed(&env, &amy.root_id).await, at(BUILTIN, "folder"));
+        assert_eq!(placed(&env, &sales).await, at(BUILTIN, "folder"));
+
+        // A bucket as the default: new spaces keep the content store there
+        add_location(&env, "bucket", None).await;
+        make_default(&env, "bucket").await;
+        let carl = env.user("carl", true).await;
+        assert_eq!(placed(&env, &carl.root_id).await, at("bucket", "store"));
+
+        // Changing the default again moves nothing: Carl's new files still go to the bucket
+        make_default(&env, BUILTIN).await;
+        assert_eq!(placed(&env, &carl.root_id).await, at("bucket", "store"));
+        assert_eq!(placed(&env, &ben.root_id).await, at("nas", "folder"));
+        let carls = env.drive_of(&carl.root_id).await;
+        assert_eq!(tree::drive_location(&mut env.st.db.acquire().await.unwrap(), &carls).await.unwrap(), "bucket");
+        let id = env.upload(&carl, &carl.root_id, "a.txt", b"carl's").await;
+        let (location,): (String,) = sqlx::query_as("SELECT b.location_id FROM nodes n JOIN blobs b ON b.hash = n.blob_hash WHERE n.id = ?")
+            .bind(&id)
+            .fetch_one(&env.st.db)
+            .await
+            .unwrap();
+        assert_eq!(location, "bucket");
+
+        // Only a move changes it
+        let req = serde_json::from_value(json!({ "location_id": BUILTIN, "migrate": false })).unwrap();
+        let _ = set_drive_location(State(env.st.clone()), Admin(admin.clone()), Path(carls.clone()), Json(req)).await.unwrap();
+        assert_eq!(placed(&env, &carl.root_id).await, at(BUILTIN, "store"));
+    }
+
+    #[tokio::test]
+    async fn the_list_counts_folder_spaces_and_the_content_store() {
+        let env = testutil::folders_env().await;
+        let amy = env.user("amy", true).await;
+        env.upload(&amy, &amy.root_id, "notes.txt", b"twelve bytes").await;
+        let company = env.st.shared_root().unwrap();
+        env.upload(&env.admin().await, &company, "plan.txt", b"plan").await;
+        // A space on a bucket, whose files are in the content store there
+        add_location(&env, "bucket", None).await;
+        make_default(&env, "bucket").await;
+        let ben = env.user("ben", true).await;
+        env.upload(&ben, &ben.root_id, "a.txt", b"ben's file").await;
+        // A folder chosen by the administrator counts on no location
+        let shown = env.folder_space("Scans").await;
+        testutil::write_old(&shown.dir.join("scan.pdf"), b"%PDF-1.7 elsewhere");
+        crate::folders::scan(&env.st, &shown.drive).await.unwrap();
+
+        let Json(list) = list(State(env.st.clone()), Admin(env.admin().await)).await.unwrap();
+        let list = serde_json::to_value(&list).unwrap();
+        let find = |id: &str| list.as_array().unwrap().iter().find(|l| l["id"] == id).unwrap().clone();
+        let local = find(BUILTIN);
+        // "My files" of the administrator and Amy, and "All files"
+        assert_eq!((local["drive_count"].as_i64(), local["used_bytes"].as_i64(), local["folder_bytes"].as_i64()), (Some(3), Some(16), Some(16)));
+        assert_eq!(local["blob_count"], 0);
+        assert!(!cfg!(any(unix, windows)) || local["disk_total_bytes"].as_u64().unwrap() > 0);
+        assert!(!cfg!(any(unix, windows)) || local["disk_free_bytes"].as_u64().is_some());
+        let bucket = find("bucket");
+        assert_eq!((bucket["drive_count"].as_i64(), bucket["used_bytes"].as_i64(), bucket["blob_count"].as_i64()), (Some(1), Some(10), Some(1)));
+        assert_eq!(bucket["folder_bytes"], 0);
+        assert!(bucket["disk_total_bytes"].is_null(), "a bucket isn't a disk of this server");
+
+        // The spaces on a location: what they are and their size
+        let Json(on_local) = spaces(State(env.st.clone()), Admin(env.admin().await), Path(BUILTIN.into())).await.unwrap();
+        let on_local = serde_json::to_value(&on_local).unwrap();
+        let rows: Vec<(String, String, i64)> = on_local
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| (s["kind"].as_str().unwrap().into(), s["owner_name"].as_str().unwrap().into(), s["used_bytes"].as_i64().unwrap()))
+            .collect();
+        assert_eq!(rows, [("company".into(), "".into(), 4), ("personal".into(), "admin".into(), 0), ("personal".into(), "amy".into(), 12)]);
+        let Json(on_bucket) = spaces(State(env.st.clone()), Admin(env.admin().await), Path("bucket".into())).await.unwrap();
+        assert_eq!(serde_json::to_value(&on_bucket).unwrap()[0]["mode"], "store");
+    }
+
+    #[tokio::test]
+    async fn a_location_holding_a_folder_space_cant_be_deleted() {
+        let env = testutil::folders_env().await;
+        let nas = env.dir.join("nas");
+        add_location(&env, "nas", Some(&nas)).await;
+        make_default(&env, "nas").await;
+        let amy = env.user("amy", true).await;
+        make_default(&env, BUILTIN).await;
+        // Nothing of Amy's is in the content store: her space alone keeps the location
+        let (blobs,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blobs").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(blobs, 0);
+        let err = delete(State(env.st.clone()), Admin(env.admin().await), Path("nas".into())).await.unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(err.message, "1 space still uses this location. Change it first.");
+        assert_eq!(placed(&env, &amy.root_id).await, at("nas", "folder"));
     }
 
     #[tokio::test]

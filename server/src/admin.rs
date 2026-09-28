@@ -1078,7 +1078,7 @@ mod tests {
         let theirs = env.stored_file(&amy, &company, "report.txt", b"report").await;
         let team_root = {
             let mut conn = env.st.db.acquire().await.unwrap();
-            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0).await.unwrap();
+            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0, "local").await.unwrap();
             crate::db::add_grant(&mut conn, &root, "user", amy.id, "owner", Some(amy.id), None).await.unwrap();
             root
         };
