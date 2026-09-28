@@ -1029,6 +1029,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_earlier_version_stays_as_it_was_when_the_file_is_written_in_place() {
+        use std::io::Write;
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        write_old(&space.dir.join("notes.txt"), b"one");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (id, _) = env.node_at(&space.drive, "notes.txt").await.unwrap();
+        let _ = crate::files::save_content(State(env.st.clone()), admin.clone(), UrlPath(id.clone()), HeaderMap::new(), Bytes::from_static(b"two"))
+            .await
+            .unwrap();
+        // The version keeps the file that was replaced (a hard link to it): the file's name now has new content, so
+        // a program writing to the file in place (over SMB, say) changes only that
+        std::fs::OpenOptions::new().append(true).open(space.dir.join("notes.txt")).unwrap().write_all(b" and more").unwrap();
+        let kept: Vec<Vec<u8>> = std::fs::read_dir(space.dir.join(versions::VERSIONS_DIR).join(&id))
+            .unwrap()
+            .flatten()
+            .map(|e| std::fs::read(e.path()).unwrap())
+            .collect();
+        assert_eq!(kept, [b"one".to_vec()]);
+    }
+
+    #[tokio::test]
     async fn items_move_and_copy_between_folder_spaces_and_the_content_store() {
         let env = testutil::env().await;
         let one = env.folder_space("One").await;

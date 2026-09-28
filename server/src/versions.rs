@@ -103,7 +103,9 @@ pub async fn keep_stored(conn: &mut SqliteConnection, policy: Policy, node: &Nod
 }
 
 /// Before the file of a folder space at `path` is replaced (renamed over): it is kept as a version, hard-linked into
-/// the space's versions folder (copied where the disk has no hard links). Nothing happens when versions are off.
+/// the space's versions folder (copied where the disk has no hard links). The rename that follows gives the name new
+/// content, so the version is the only name left for the old file, and writing to the file in place later can't change
+/// it. Nothing happens when versions are off.
 pub async fn keep_file(conn: &mut SqliteConnection, policy: Policy, node: &Node, path: &Path) -> AppResult<Removed> {
     if policy.keep <= 0 {
         return Ok(Removed::default());
