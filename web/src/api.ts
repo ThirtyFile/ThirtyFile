@@ -200,6 +200,8 @@ export interface LocationSpace {
   /** Personal spaces: the owner's user name */
   owner_name: string;
   used_bytes: number;
+  /** Folder spaces: their folder on the server */
+  source_path?: string;
 }
 
 /** One step of a storage location's step-by-step test */

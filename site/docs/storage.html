@@ -69,7 +69,7 @@
         <div class="note">Connections without encryption (plain FTP, or S3 over http) are only accepted for addresses inside your own network.</div>
 
         <h2 id="per-space">Moving a space to another location</h2>
-        <p>Under <strong>Control panel › Spaces</strong>, select a space and choose <strong>Move to another location…</strong>. Any space can go to any other location: between content stores, from a folder into a content store, and into a folder. The dialog shows where the space is now and how big it is, and lists the other locations, with the free space of those on this server's disks. A location without enough room for the space can't be chosen.</p>
+        <p>Under <strong>Control panel › Spaces</strong>, select a space and choose <strong>Move to another location…</strong>. Any space can go to any other location: between content stores, from a folder into a content store, and into a folder. The dialog shows where the space is now and how big it is, and lists the other locations, with the free space of those on this server's disks. When the chosen location doesn't have enough room for the space, the dialog says so and the move can't start.</p>
         <p>The move runs in the background, in three steps (here for a space in the content store; <a href="#move-folder">folder spaces</a> and <a href="#move-into-folder">moves into a folder</a> work alike, with the differences below):</p>
         <ol>
           <li><strong>Copy.</strong> Every file of the space, its earlier versions and the items in its trash are copied to the new location, and each copy is checked against the file's SHA-256 fingerprint. The space stays in use meanwhile: files uploaded or changed during the move are copied too.</li>

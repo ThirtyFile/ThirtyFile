@@ -170,6 +170,9 @@ export function FolderPickerDialog(props: {
     }
   }, [start.data, start.isError, startId, drives.data, picked]);
 
+  // Someone without any space (and not starting in a shared folder) has nowhere to put things
+  const nowhere = !current && drives.data?.length === 0 && (!startId || start.isError);
+
   const folders = useQuery({
     queryKey: ["children", current, "folders"],
     queryFn: ({ signal }) => api.children(current, "name", "asc", true, signal),
@@ -235,7 +238,9 @@ export function FolderPickerDialog(props: {
           ))}
         </div>
         <div className="h-64 overflow-y-auto rounded-lg border">
-          {folders.isLoading || !current ? (
+          {nowhere ? (
+            <div className="flex h-full items-center justify-center px-4 text-center text-sm text-muted-foreground">{t("You don't have access to any space to put it in.")}</div>
+          ) : folders.isLoading || !current ? (
             <div className="flex h-full items-center justify-center text-muted-foreground">
               <Loader2Icon className="size-5 animate-spin" />
             </div>

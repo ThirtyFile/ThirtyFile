@@ -302,7 +302,7 @@ export function GeneralSettingsPage() {
               <div className="min-w-0 flex-1">
                 <div className="font-medium">{t("Allow regular users to create team spaces")}</div>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  {t("When off, only administrators can create team spaces. When on, users can create their own spaces and invite members; storage limits are still set by administrators in \"Space management\".")}
+                  {t("When off, only administrators can create team spaces. When on, users can create their own spaces and invite members; storage limits are still set by administrators in Control panel › Spaces.")}
                 </p>
               </div>
               <Toggle
@@ -343,7 +343,7 @@ export function GeneralSettingsPage() {
                 {t("Location of new users' \"My files\"")}
               </label>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                {t("The storage location where new personal spaces are created. \"Default location\" follows the default under \"Storage\" at the time each user is added. If the location isn't available (a disk that isn't mounted), the user is still created, and their \"My files\" is created once it's available again.")}
+                {t("The storage location where new personal spaces are created. \"Default location\" follows the default under \"Storage locations\" at the time each user is added. If the location isn't available (a disk that isn't mounted), the user is still created, and their \"My files\" is created once it's available again.")}
               </p>
             </div>
             <LocationSelect

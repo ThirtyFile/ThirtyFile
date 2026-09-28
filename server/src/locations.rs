@@ -223,6 +223,9 @@ pub struct LocationSpace {
     /// The owner's user name (personal spaces)
     owner_name: String,
     used_bytes: i64,
+    /// The server folder of a folder space ("Move everything to…" names it)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_path: Option<String>,
 }
 
 /// The spaces on a storage location (Control panel › Storage locations)
@@ -233,7 +236,7 @@ pub async fn spaces(State(st): State<AppState>, _: Admin, Path(id): Path<String>
     }
     let list: Vec<LocationSpace> = sqlx::query_as(
         "SELECT d.id, d.name, d.kind, d.mode, CASE WHEN d.kind = 'personal' THEN COALESCE(u.username, '') ELSE '' END AS owner_name,
-                d.used_bytes
+                d.used_bytes, CASE WHEN d.mode = 'folder' THEN d.source_path END AS source_path
          FROM drives d LEFT JOIN users u ON u.id = d.owner_id
          WHERE d.location_id = ?
          ORDER BY CASE d.kind WHEN 'company' THEN 0 WHEN 'team' THEN 1 ELSE 2 END, d.name, owner_name",

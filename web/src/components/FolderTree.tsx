@@ -8,32 +8,46 @@ import { NavMenu } from "@/components/NavMenu";
 import { ToolButton } from "@/components/frame/ToolButton";
 import { DRIVE_ICON, useDrives } from "@/lib/drives";
 import { t, tServer } from "@/lib/i18n";
+import { treeStorageKey } from "@/lib/signOut";
 import { cn } from "@/lib/utils";
 
 // ───────────── Folder tree state (kept across page switches and reloads) ─────────────
 
-/** localStorage key of the expanded items, so the tree looks the same after a reload (removed when signing out, lib/signOut.ts) */
-const TREE_STORAGE_KEY = "tf-tree-expanded";
 /** At most this many expanded items are remembered: the most recently expanded ones (ids of deleted folders drop out over time) */
 const TREE_STORED_MAX = 500;
 
-function loadExpanded(): Set<string> {
+function loadExpanded(key: string): string[] {
   try {
-    const stored: unknown = JSON.parse(localStorage.getItem(TREE_STORAGE_KEY) ?? "[]");
-    if (!Array.isArray(stored)) return new Set();
-    return new Set(stored.filter((id): id is string => typeof id === "string").slice(-TREE_STORED_MAX));
+    const stored: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
+    if (!Array.isArray(stored)) return [];
+    return stored.filter((id): id is string => typeof id === "string").slice(-TREE_STORED_MAX);
   } catch {
     // Storage blocked by the browser, or not ours to read: start with everything collapsed
-    return new Set();
+    return [];
   }
 }
 
-let expanded = loadExpanded();
+/**
+ * localStorage key of the signed-in user's expanded items (lib/signOut.ts: treeStorageKey), so the tree looks the
+ * same after a reload; null until the user is known (items expanded before are kept when their tree is loaded)
+ */
+let treeKey: string | null = null;
+let expanded = new Set<string>();
 const treeListeners = new Set<() => void>();
+
+/** Loads the tree of the signed-in user, as they left it */
+export function loadTree(userId: number) {
+  const key = treeStorageKey(userId);
+  if (key === treeKey) return;
+  const early = treeKey === null ? [...expanded] : [];
+  treeKey = key;
+  replaceExpanded(new Set([...loadExpanded(key), ...early]));
+}
+
 function replaceExpanded(next: Set<string>) {
   expanded = next;
   try {
-    localStorage.setItem(TREE_STORAGE_KEY, JSON.stringify([...next].slice(-TREE_STORED_MAX)));
+    if (treeKey) localStorage.setItem(treeKey, JSON.stringify([...next].slice(-TREE_STORED_MAX)));
   } catch {
     // Storage blocked by the browser: the tree is remembered until the page is closed
   }

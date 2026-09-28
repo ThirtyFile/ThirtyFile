@@ -14,6 +14,7 @@ import { logoUrl, useBranding } from "@/lib/branding";
 import { SiteName } from "@/components/SiteName";
 import { MAIN_ID } from "@/components/Frame";
 import { loadTabs, syncLocation } from "@/tabs";
+import { loadTree } from "@/components/FolderTree";
 import { onUploadsLanded } from "@/uploads";
 import { api, type SortKey, type SortOrder } from "@/api";
 import { refreshFirstPage } from "@/lib/pages";
@@ -46,8 +47,11 @@ export function AppShell() {
   const qc = useQueryClient();
   const location = useLocation();
   const navigate = useNavigate();
-  // Before the first paint, so the tab bar shows this user's tabs right away
-  useLayoutEffect(() => loadTabs(me.id), [me.id]);
+  // Before the first paint, so the tab bar and the navigation pane show this user's tabs and folders right away
+  useLayoutEffect(() => {
+    loadTabs(me.id);
+    loadTree(me.id);
+  }, [me.id]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRightIcon, InfoIcon, PauseIcon, PlayIcon, RefreshCwIcon, TruckIcon, XIcon, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, moveActive, type MoveState, type SpaceMove } from "@/api";
@@ -13,6 +13,7 @@ import { DRIVE_ICON } from "@/lib/drives";
 import { controlPanelItem, useSettingsSearch } from "@/lib/controlPanel";
 import { t, tServer } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
+import { useMoves } from "@/lib/moves";
 import { cn, formatBytes, formatDateTime } from "@/lib/utils";
 
 export const MOVE_STATE_LABEL: Record<MoveState, string> = {
@@ -71,15 +72,19 @@ export function MovesPage() {
   const qc = useQueryClient();
   const { title, icon } = controlPanelItem("moves");
   const searchSettings = useSettingsSearch();
+  // Screen readers are told when a move finishes, stops by an error or is paused (not of its progress)
+  const [announcement, setAnnouncement] = useState("");
   // Refreshed every second and a half while a move runs or waits, and now and then while one is paused or stopped
   // (it may be resumed elsewhere)
-  const q = useQuery({
-    queryKey: ["moves"],
-    queryFn: api.moves,
-    refetchInterval: (query) => {
-      const moves = query.state.data?.moves ?? [];
-      return moves.some((m) => m.state === "running" || m.state === "queued") ? 1500 : moves.some(moveActive) ? 10_000 : false;
-    },
+  const q = useMoves(1500, 10_000, (changes) => {
+    const said = changes.flatMap(({ move: m }) => {
+      const name = moveSpaceLabel(m);
+      if (m.state === "done") return [t("\"{name}\" was moved to {to}.", { name, to: m.to_name })];
+      if (m.state === "failed") return [t("Moving \"{name}\" stopped by an error.", { name })];
+      if (m.state === "paused") return [t("Moving \"{name}\" is paused.", { name })];
+      return [];
+    });
+    if (said.length) setAnnouncement(said.join(" "));
   });
   const moves = q.data?.moves ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -257,6 +262,9 @@ export function MovesPage() {
         menu={menu}
         empty={<EmptyState icon={TruckIcon} title={t("No moves yet")} hint={t("Move a space from Control panel › Spaces.")} />}
       />
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </div>
       {dialog?.t === "details" && <MoveDetails move={moves.find((m) => m.id === dialog.move.id) ?? dialog.move} onClose={() => setDialog(null)} />}
       {dialog?.t === "cancel" && (
         <ConfirmDialog
