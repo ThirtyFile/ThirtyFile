@@ -84,6 +84,8 @@
           <li>Deleting a folder space removes it from ThirtyFile only; the folder and its files stay on the server.</li>
           <li>Temporary files of office programs and systems (<code>~$…</code>, <code>Thumbs.db</code>, <code>.DS_Store</code>) aren't shown. Symbolic links, names that aren't valid text and other disks mounted inside the folder are skipped; <strong>Check for changes</strong> lists them.</li>
           <li>A file that is still being copied into the folder appears once it has stopped changing for a few seconds.</li>
+          <li><strong>Disks and shares that aren't mounted.</strong> Once a space's folder has been checked, it holds a small hidden file, <code>.thirtyfile-space</code>. A folder without it that is suddenly empty is taken to be a disk or share that isn't mounted: the space keeps its items, shares and history, and <strong>Check for changes</strong> says so. Mount it again and check. A folder inside the space that can't be read keeps its items the same way. To empty a space, delete its items in ThirtyFile.</li>
+          <li>When something goes wrong while several items are deleted, moved or restored at once, the ones already changed in the folder are put back, so nothing is half done. If ThirtyFile stops in the middle of moving an item into a space, the item is put back in that folder, under its own name, at the next check a day later.</li>
         </ul>
         <p>Spaces made with 0.1 and 0.2 keep their files in the storage folder under names made of their content (<code>ab/cd/…</code>). To turn them into folder spaces with ordinary folders, like the spaces created since, see <a href="backup.html#convert">Converting spaces to plain folders</a>.</p>
 

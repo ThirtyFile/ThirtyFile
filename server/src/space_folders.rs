@@ -137,11 +137,24 @@ pub async fn make_folder_space(conn: &mut SqliteConnection, builtin: Option<&Pat
     let root = std::path::absolute(&root).unwrap_or(root);
     // The location's folder itself must be there: a NAS that isn't mounted must not get the folder on the disk
     // below it
+    let unavailable = || {
+        AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("The folder of the storage location ({}) isn't available", root.display()))
+    };
     if !root.is_dir() {
-        return Err(AppError::new(
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            format!("The folder of the storage location ({}) isn't available", root.display()),
-        ));
+        return Err(unavailable());
+    }
+    // The mount point of a disk or share that isn't mounted is an empty folder: when spaces were made in it before,
+    // it can't really be empty now
+    let empty = std::fs::read_dir(&root).map_err(|_| unavailable())?.next().is_none();
+    if empty {
+        let pattern = format!("{}%", crate::util::like_escape(&format!("{}{}", root.to_string_lossy(), std::path::MAIN_SEPARATOR)));
+        let (used,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drives WHERE mode = 'folder' AND source_path LIKE ? ESCAPE '\\'")
+            .bind(pattern)
+            .fetch_one(&mut *conn)
+            .await?;
+        if used > 0 {
+            return Err(unavailable());
+        }
     }
     let (parent, wanted) = place(&root, &kind, &name, &owner, drive_id);
     let folder = free_folder(conn, &parent, &wanted)
@@ -305,12 +318,19 @@ mod tests {
         let ben = env.user("ben", true).await;
         assert_eq!(space_of(&env, &ben.root_id).await, ("folder".into(), folder(&nas, "users/ben")));
 
-        // Not mounted: the space isn't created on the disk below the mount point
+        // Not mounted: the space isn't created on the disk below the mount point, whether the mount point is missing or
+        // an empty folder (spaces were made in it before, so it can't really be empty)
         std::fs::remove_dir_all(&nas).unwrap();
-        let req = serde_json::from_value(json!({ "name": "Offline" })).unwrap();
-        let Err(err) = crate::drives::create(State(env.st.clone()), env.admin().await, Json(req)).await else { panic!("created below the mount point") };
-        assert_eq!(err.status, axum::http::StatusCode::SERVICE_UNAVAILABLE);
+        let offline = || async {
+            let req = serde_json::from_value(json!({ "name": "Offline" })).unwrap();
+            let Err(err) = crate::drives::create(State(env.st.clone()), env.admin().await, Json(req)).await else { panic!("created below the mount point") };
+            assert_eq!(err.status, axum::http::StatusCode::SERVICE_UNAVAILABLE);
+        };
+        offline().await;
         assert!(!nas.exists());
+        std::fs::create_dir(&nas).unwrap();
+        offline().await;
+        assert_eq!(std::fs::read_dir(&nas).unwrap().count(), 0);
     }
 
     #[test]
