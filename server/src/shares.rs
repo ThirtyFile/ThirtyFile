@@ -1518,6 +1518,19 @@ mod tests {
         assert_eq!(node(&env, &id).await.parent_id.as_deref(), Some(inbox.as_str()));
         assert_eq!(start_upload(&env, &info.id, Some(&sub), "x.pdf", 1, None).await.unwrap_err().status, StatusCode::NOT_FOUND);
 
+        // A visitor asking to replace a file of the same name gets a numbered copy: the file there stays as it is
+        use base64::Engine;
+        let b64 = |s: &str| base64::engine::general_purpose::STANDARD.encode(s);
+        let mut h = HeaderMap::new();
+        h.insert("upload-length", "5".parse().unwrap());
+        h.insert("upload-metadata", format!("filename {},onConflict {}", b64("secret.txt"), b64("replace")).parse().unwrap());
+        let res = public_upload_create(State(env.st.clone()), Path(info.id.clone()), h, visitor()).await.unwrap();
+        let up = res.headers()[header::LOCATION].to_str().unwrap().rsplit('/').next().unwrap().to_string();
+        let copy = send_upload(&env, &info.id, &up, b"hacks").await.unwrap().expect("the upload finished");
+        assert_ne!(copy, secret);
+        assert_eq!(node(&env, &copy).await.name, "secret (1).txt");
+        assert_eq!(node(&env, &secret).await.size, 6);
+
         // A visitor can't keep any number of uploads open at once
         for i in 0..upload::MAX_PENDING_PER_SHARE {
             sqlx::query("INSERT INTO uploads (id, owner_id, parent_id, name, size, created_at, expires_at, share_id) VALUES (?, ?, ?, 'x', 1, ?, ?, ?)")
