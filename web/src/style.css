@@ -120,6 +120,105 @@
   outline: none;
 }
 
+/* Rendered Markdown (MarkdownPreview) */
+.markdown-body {
+  font-size: 14px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+.markdown-body :where(p, ul, ol, blockquote, pre, table, hr) {
+  margin: 0 0 1em;
+}
+.markdown-body :where(h1, h2, h3, h4, h5, h6) {
+  margin: 1.5em 0 0.6em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.markdown-body h1 {
+  font-size: 1.8em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+}
+.markdown-body h2 {
+  font-size: 1.4em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--border);
+}
+.markdown-body h3 {
+  font-size: 1.2em;
+}
+.markdown-body :where(ul, ol) {
+  padding-left: 1.8em;
+}
+.markdown-body ul {
+  list-style: disc;
+}
+.markdown-body ol {
+  list-style: decimal;
+}
+.markdown-body li + li {
+  margin-top: 0.25em;
+}
+.markdown-body li > input[type="checkbox"] {
+  margin-right: 0.4em;
+  vertical-align: -0.1em;
+}
+.markdown-body a[href] {
+  color: #0b62d6;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.dark .markdown-body a[href] {
+  color: #6ea8fe;
+}
+.markdown-body blockquote {
+  padding-left: 1em;
+  border-left: 3px solid var(--border);
+  color: var(--muted-foreground);
+}
+.markdown-body code {
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+  background: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+.markdown-body pre {
+  padding: 0.8em 1em;
+  border-radius: 6px;
+  background: var(--muted);
+  overflow-x: auto;
+}
+.markdown-body pre code {
+  padding: 0;
+  background: none;
+}
+.markdown-body table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.markdown-body :where(th, td) {
+  padding: 0.35em 0.75em;
+  border: 1px solid var(--border);
+}
+.markdown-body th {
+  font-weight: 600;
+  background: var(--muted);
+}
+.markdown-body hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+.markdown-body img {
+  display: inline-block;
+  max-width: 100%;
+}
+
 /* Login page wallpaper petals: slow swaying */
 .tf-bloom {
   transform-box: view-box;

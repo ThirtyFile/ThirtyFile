@@ -445,7 +445,10 @@ fn untimed() -> Router<AppState> {
     // File operations: app passwords work here too
     let files = Router::new()
         .route("/files/{id}/content", put(files::save_content).layer(DefaultBodyLimit::max(files::MAX_EDIT_BYTES)))
-        .route("/files/{id}/thumbnail", get(files::thumbnail))
+        .route(
+            "/files/{id}/thumbnail",
+            get(files::thumbnail).merge(put(files::upload_thumbnail).layer(DefaultBodyLimit::max(files::MAX_THUMB_UPLOAD))),
+        )
         .route("/files/{id}/versions/{version}/restore", post(versions::restore))
         .route("/uploads", post(upload::create).options(upload::options))
         .route(

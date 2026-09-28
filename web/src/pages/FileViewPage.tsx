@@ -2,6 +2,8 @@ import { Suspense, lazy, useEffect, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
   DownloadIcon,
   FileIcon,
   FolderOpenIcon,
@@ -32,12 +34,16 @@ import { invalidateFiles } from "@/lib/queries";
 import { toastWithUndo } from "@/lib/undo";
 import { categoryOf, isTextLike, typeLabel } from "@/components/FileIcon";
 import { capsOf } from "@/lib/drives";
-import { locationOf } from "@/pages/FilesPage";
+import { locationOf, useSort } from "@/pages/FilesPage";
+import { useAllPages } from "@/lib/pages";
 
 const SheetEditor = lazy(() => import("@/components/sheet/SheetEditor"));
 
 /** Size limit for saving online edits (same as the server's MAX_EDIT_BYTES) */
 const MAX_EDIT_BYTES = 20 * 1024 * 1024;
+
+/** Where focus takes the arrow keys for itself: typing, a media player's seek bar, lists, menus and the workbook */
+const OWN_ARROWS = ".cm-editor, video, audio, input, textarea, select, [contenteditable], [role=grid], [role=tree], [role=tablist], [role=menu], [role=listbox], [role=slider], [data-slot=dialog-content]";
 
 /** File opened in a tab: `/view/:id` */
 export function FileViewPage() {
@@ -61,8 +67,35 @@ export function FileViewPage() {
   }, [id]);
 
   const node = info.data?.node;
+  // Previous / next file of the folder, in the order the folder is sorted in (the list shares these pages)
+  const [sort] = useSort();
+  const parentId = node?.parent_id ?? undefined;
+  const siblings = useAllPages(
+    ["children", parentId, sort.key, sort.order],
+    (limit, after) => api.childrenPage(parentId!, sort.key, sort.order, limit, after),
+    !!parentId && node?.kind === "file",
+  );
+  const files = siblings.items.filter((n) => n.kind === "file");
+  const at = node ? files.findIndex((n) => n.id === node.id) : -1;
+  const prev = at > 0 ? files[at - 1] : undefined;
+  const next = at >= 0 ? files[at + 1] : undefined;
+  const goTo = (n: { id: string } | undefined) => n && navigate(`/view/${n.id}`);
   // Images, media and unpreviewable files use a custom context menu; text, Word and Excel keep the browser menu so text can be copied
   const customMenu = !!node && ["image", "video", "audio", "other", "archive"].includes(categoryOf(node)) && !isTextLike(node);
+  const sheetEditingNow = !!node && editingId === node.id;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || dialog || sheetEditingNow) return;
+      if ((e.target as HTMLElement)?.closest?.(OWN_ARROWS) || document.querySelector("[data-slot=dialog-content], [role=menu]")) return;
+      const target = e.key === "ArrowLeft" ? prev : e.key === "ArrowRight" ? next : undefined;
+      if (!target) return;
+      e.preventDefault();
+      goTo(target);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [prev?.id, next?.id, dialog, sheetEditingNow]);
+
   if (node?.kind === "folder") return <Navigate to={`/files/${node.id}`} replace />;
 
   const path = info.data?.path ?? [];
@@ -123,6 +156,13 @@ export function FileViewPage() {
         </>
       )}
       <span className="flex-1" />
+      {at >= 0 && files.length > 1 && (
+        <>
+          <ToolButton icon={ChevronLeftIcon} label={t("Previous (←)")} className="size-9 px-0 [&_svg]:size-[18px]" disabled={!prev} onClick={() => goTo(prev)} />
+          <ToolButton icon={ChevronRightIcon} label={t("Next (→)")} className="size-9 px-0 [&_svg]:size-[18px]" disabled={!next} onClick={() => goTo(next)} />
+          <ToolSeparator />
+        </>
+      )}
       <Button
         variant={detailsOpen ? "secondary" : "ghost"}
         className="h-9 gap-1.5 px-2.5 text-[13px] [&_svg]:size-[18px]"
@@ -148,6 +188,7 @@ export function FileViewPage() {
         node && (
           <span>
             {typeLabel(node)} · {formatBytes(node.size)} · {t("Modified {date}", { date: formatWinDate(node.updated_at) })}
+            {at >= 0 && files.length > 1 && ` · ${t("{n} of {total}", { n: at + 1, total: files.length })}`}
           </span>
         )
       }

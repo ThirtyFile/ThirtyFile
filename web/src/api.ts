@@ -982,6 +982,8 @@ export const api = {
 export interface FileSource {
   contentUrl(n: Node, download?: boolean): string;
   thumbUrl(n: Node): string;
+  /** Keeps a thumbnail made in the browser (PDFs, videos) on the server; missing where that isn't possible (share links) */
+  saveThumb?(n: Node, image: Blob): Promise<void>;
   /**
    * Link to download the given items from: one item goes in the URL; several are sent to the server, which answers
    * with a short-lived link (a URL holding hundreds of ids is too long for many reverse proxies)
@@ -999,6 +1001,7 @@ function downloadLink(base: string, ids: string[]): Promise<string> {
 export const privateSource: FileSource = {
   contentUrl: (n, download) => enc`/api/files/${n.id}/content` + (download ? "?download=1" : ""),
   thumbUrl: (n) => enc`/api/files/${n.id}/thumbnail?v=${n.updated_at}`,
+  saveThumb: async (n, image) => void (await fetchOk(enc`/api/files/${n.id}/thumbnail`, { method: "PUT", body: image, headers: { "Content-Type": image.type } })),
   downloadLink: (ids) => downloadLink("/download", ids),
 };
 

@@ -18,7 +18,8 @@ import {
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDownIcon, ChevronUpIcon, StarIcon } from "lucide-react";
 import type { FileSource, Node, SortKey, SortOrder } from "@/api";
-import { FileIcon, canThumbnail, typeLabel, typeTitle } from "@/components/FileIcon";
+import { FileIcon, canBrowserThumbnail, canThumbnail, typeLabel, typeTitle } from "@/components/FileIcon";
+import { browserThumb, knownThumb } from "@/lib/thumbs";
 import type { Box, MeasureHits } from "@/components/useMarquee";
 import { cn, formatWinDate, formatWinSize } from "@/lib/utils";
 import { InlineRename } from "@/components/InlineRename";
@@ -94,6 +95,7 @@ const PAD = 12;
 
 export function Thumb({ node, source, className, iconClass }: { node: Node; source: FileSource; className?: string; iconClass?: string }) {
   const [failed, setFailed] = useState(false);
+  if (canBrowserThumbnail(node)) return <BrowserThumb node={node} source={source} className={className} iconClass={iconClass} />;
   if (canThumbnail(node) && !failed) {
     return (
       <img
@@ -107,6 +109,39 @@ export function Thumb({ node, source, className, iconClass }: { node: Node; sour
     );
   }
   return <FileIcon node={node} className={iconClass} />;
+}
+
+/** A PDF's or video's thumbnail: the server's, or made here once the item is on screen (lib/thumbs.ts); the icon until then */
+function BrowserThumb({ node, source, className, iconClass }: { node: Node; source: FileSource; className?: string; iconClass?: string }) {
+  const [url, setUrl] = useState<string | null | undefined>(() => knownThumb(node, source));
+  const box = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const known = knownThumb(node, source);
+    setUrl(known);
+    if (known !== undefined || !box.current) return;
+    let job: ReturnType<typeof browserThumb> | null = null;
+    let cancelled = false;
+    const seen = new IntersectionObserver(
+      (entries) => {
+        if (job || !entries.some((e) => e.isIntersecting)) return;
+        job = browserThumb(node, source);
+        void job.promise.then((u) => !cancelled && setUrl(u));
+      },
+      { rootMargin: "200px" },
+    );
+    seen.observe(box.current);
+    return () => {
+      cancelled = true;
+      seen.disconnect();
+      job?.release();
+    };
+  }, [node.id, node.updated_at, source]);
+  if (url) return <img src={url} draggable={false} onError={() => setUrl(null)} className={cn("object-contain", className)} alt="" />;
+  return (
+    <span ref={box} className="inline-flex shrink-0">
+      <FileIcon node={node} className={iconClass} />
+    </span>
+  );
 }
 
 const th =

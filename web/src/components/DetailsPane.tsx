@@ -4,7 +4,8 @@ import { XIcon } from "lucide-react";
 import { api, privateSource, type FolderContents, type HistoryEntry, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
-import { FileIcon, canThumbnail, typeLabel } from "@/components/FileIcon";
+import { FileIcon, canBrowserThumbnail, canThumbnail, typeLabel } from "@/components/FileIcon";
+import { Thumb } from "@/components/FileList";
 import { Resizer } from "@/components/Resizer";
 import { VersionsSection } from "@/components/VersionsSection";
 import { ROLE_LABEL, actionLabel } from "@/lib/drives";
@@ -134,8 +135,8 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
     body = (
       <>
         <div className="flex h-44 shrink-0 items-center justify-center border-b bg-muted/30 p-4">
-          {node.kind === "file" && canThumbnail(node) ? (
-            <img src={privateSource.thumbUrl(node)} alt="" className="max-h-full max-w-full rounded object-contain shadow" />
+          {node.kind === "file" && (canThumbnail(node) || canBrowserThumbnail(node)) ? (
+            <Thumb key={node.id} node={node} source={privateSource} className="max-h-full max-w-full rounded shadow" iconClass="size-16" />
           ) : (
             <FileIcon node={node} className="size-16" />
           )}

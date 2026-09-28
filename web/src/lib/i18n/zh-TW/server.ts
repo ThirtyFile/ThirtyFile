@@ -824,4 +824,8 @@ export default {
   "\"{name}\" doesn't have room for {size} more. Choose another space, or give it more space first.": "「{name}」沒有空間再放 {size}。請選擇其他空間，或先加大它的容量。",
   "{username}: files moved to {place}": "{username}：檔案已移到 {place}",
   "{username}: files deleted": "{username}：檔案已刪除",
+  // Thumbnails made in the browser (files.rs)
+  "This file doesn't take a thumbnail": "這個檔案不能設定縮圖",
+  "The thumbnail is too large": "縮圖過大",
+  "The thumbnail must be a JPEG or PNG picture of at most 1024 × 1024 pixels": "縮圖必須是不超過 1024 × 1024 像素的 JPEG 或 PNG 圖片",
 } satisfies Record<string, string>;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { LanguageDescription, type LanguageSupport } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
@@ -20,6 +20,8 @@ export default function TextEditor(props: {
   onDirtyChange?(dirty: boolean): void;
   /** Embedded in a tab (fills the whole area); otherwise floating-window style */
   embedded?: boolean;
+  /** Shown first in the bar above the text (the Markdown view's Preview / Edit switch) */
+  toolbar?: ReactNode;
 }) {
   const { dark } = useTheme();
   const [original, setOriginal] = useState<string | null>(null);
@@ -148,6 +150,7 @@ export default function TextEditor(props: {
       }
     >
       <div className="flex h-10 items-center gap-2 border-b px-3 text-xs text-muted-foreground">
+        {props.toolbar}
         {encoding === null ? (
           <span>{t("Unknown encoding: opened read-only so the file isn't damaged")}</span>
         ) : (

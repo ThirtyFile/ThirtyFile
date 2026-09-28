@@ -1,28 +1,20 @@
-import { Suspense, lazy, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { DownloadIcon, Loader2Icon } from "lucide-react";
 import { triggerDownload, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
-import { FileIcon, categoryOf, isTextLike } from "@/components/FileIcon";
+import { FileIcon, categoryOf, isBrowserMedia, isTextLike } from "@/components/FileIcon";
+import { hasDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 import { cn, extOf, formatBytes } from "@/lib/utils";
 import { MAX_OFFICE_PREVIEW_BYTES } from "@/lib/office/limits";
 
 const TextEditor = lazy(() => import("@/components/TextEditor"));
 const OfficeViewer = lazy(() => import("@/components/OfficeViewer"));
+const MarkdownPreview = lazy(() => import("@/components/MarkdownPreview"));
 
 /** Office files that can be previewed (.docx / .xlsx / .pptx; legacy formats need downloading) */
 export function isOfficePreviewable(n: Node) {
   return ["docx", "xlsx", "pptx"].includes(extOf(n.name)) && n.size <= MAX_OFFICE_PREVIEW_BYTES;
-}
-
-/** Pictures and videos most browsers can't show (HEIC, TIFF, AVI, MKV…): offered for download instead of a broken preview */
-const NOT_IN_BROWSER_EXT = /^(heic|heif|tiff?|psd|avi|mkv|wmv|flv|wma|aiff?|ape)$/;
-const NOT_IN_BROWSER_MIME = /^(image\/(heic|heif|tiff|vnd\.adobe\.photoshop)|video\/(x-msvideo|x-matroska|x-ms-wmv|x-flv)|audio\/(x-ms-wma|x-aiff|aiff))$/;
-
-/** A picture or video the browser can show */
-function isBrowserMedia(n: Node) {
-  const c = categoryOf(n);
-  return (c === "image" || c === "video" || c === "audio") && !NOT_IN_BROWSER_EXT.test(extOf(n.name)) && !NOT_IN_BROWSER_MIME.test(n.mime.toLowerCase());
 }
 
 export function canPreview(n: Node) {
@@ -56,6 +48,7 @@ export function FileViewer(props: {
         </Suspense>
       </div>
     );
+  if (isTextLike(node) && cat === "markdown") return <MarkdownFile key={node.id} {...props} />;
   if (isTextLike(node))
     return (
       <Suspense fallback={<Loader2Icon className={cn("size-6 animate-spin", embedded ? "text-muted-foreground" : "text-white/70")} />}>
@@ -70,6 +63,51 @@ export function FileViewer(props: {
       </Suspense>
     );
   return <NoPreview node={node} source={props.source} allowDownload={props.allowDownload} reason={t("Preview isn't available for this file type")} />;
+}
+
+/**
+ * A Markdown file: shown rendered, with a switch to the text editor (or, read-only, to the source). Unsaved edits
+ * open straight in the editor; they are kept as a draft, so switching back and forth loses nothing
+ */
+function MarkdownFile(props: Parameters<typeof FileViewer>[0]) {
+  const { node, embedded } = props;
+  const [mode, setMode] = useState<"preview" | "edit">(() => (hasDraft(node.id) ? "edit" : "preview"));
+  // Unsaved changes are reported by the editor; the rendered view has none of its own
+  useEffect(() => {
+    if (mode === "preview") props.onDirtyChange?.(false);
+  }, [mode]);
+  const toggle = (
+    <div role="group" aria-label={t("View")} className="flex shrink-0 overflow-hidden rounded-md border text-xs">
+      {(["preview", "edit"] as const).map((m) => (
+        <button
+          key={m}
+          type="button"
+          aria-pressed={mode === m}
+          onClick={() => setMode(m)}
+          className={cn("px-2.5 py-1 hover:bg-muted", mode === m && "bg-secondary font-medium text-foreground")}
+        >
+          {m === "preview" ? t("Preview") : props.editable ? t("Edit") : t("Source")}
+        </button>
+      ))}
+    </div>
+  );
+  return (
+    <Suspense fallback={<Loader2Icon className={cn("size-6 animate-spin", embedded ? "text-muted-foreground" : "text-white/70")} />}>
+      {mode === "preview" ? (
+        <MarkdownPreview node={node} source={props.source} embedded={embedded} toolbar={toggle} />
+      ) : (
+        <TextEditor
+          node={node}
+          source={props.source}
+          editable={props.editable}
+          embedded={embedded}
+          toolbar={toggle}
+          onSaved={props.onSaved}
+          onDirtyChange={props.onDirtyChange}
+        />
+      )}
+    </Suspense>
+  );
 }
 
 /** Picture or video; if the browser can't show it after all (format or codec), offer the download instead of a broken image or an empty player */

@@ -39,6 +39,7 @@ const groups = (): [string, [string, string][]][] => [
       ["Ctrl+L / Alt+D", t("Go to the address bar")],
       ["Ctrl+F / F3", t("Go to the search box")],
       ["F5", t("Refresh the list")],
+      ["← / →", t("In an open file: the previous or next file of its folder")],
     ],
   ],
   [

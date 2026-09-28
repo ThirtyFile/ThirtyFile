@@ -353,21 +353,46 @@ fn thumbnailable(n: &Node) -> bool {
         && (n.blob_hash.is_some() || n.in_folder_space())
 }
 
-pub async fn thumbnail_response(st: &AppState, headers: &HeaderMap, n: &Node) -> AppResult<Response> {
-    if !thumbnailable(n) {
-        return Err(AppError::not_found("No thumbnail"));
-    }
+/// PDFs and videos: the server has no decoder for them, so the browser draws the thumbnail (the first page, a frame)
+/// and uploads it (`upload_thumbnail`); the server only keeps it in the thumbnail cache
+fn browser_thumbnailable(n: &Node) -> bool {
+    !n.is_folder() && (n.mime == "application/pdf" || n.mime.starts_with("video/")) && (n.blob_hash.is_some() || n.in_folder_space())
+}
+
+/// Where a file's thumbnail is cached, and the content's size as it is now. Stored content is keyed by its hash; a
+/// folder space's file by its identity, size and time, so a changed file gets a new thumbnail
+async fn thumb_key(n: &Node) -> AppResult<(Source, u64, String)> {
     let source = Source::of(n)?;
     let (size, tag) = source.describe(n.size as u64).await?;
-    if size > MAX_THUMB_SOURCE as u64 {
-        return Err(AppError::not_found("No thumbnail"));
-    }
-    // Stored content: its hash. A folder space's file: a key from its identity, size and time, so a changed file gets
-    // a new thumbnail
     let hash = match &source {
         Source::Stored { hash, .. } => hash.clone(),
         Source::File(_) => crate::util::sha256_hex(tag.as_bytes()),
     };
+    Ok((source, size, hash))
+}
+
+/// A cached thumbnail, with the headers that let the browser keep it
+fn thumb_reply(data: Vec<u8>, etag: String) -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, "image/jpeg".to_string()),
+            (header::CACHE_CONTROL, "private, max-age=604800".to_string()),
+            (header::ETAG, etag),
+        ],
+        data,
+    )
+        .into_response()
+}
+
+pub async fn thumbnail_response(st: &AppState, headers: &HeaderMap, n: &Node) -> AppResult<Response> {
+    let made_here = thumbnailable(n);
+    if !made_here && !browser_thumbnailable(n) {
+        return Err(AppError::not_found("No thumbnail"));
+    }
+    let (source, size, hash) = thumb_key(n).await?;
+    if made_here && size > MAX_THUMB_SOURCE as u64 {
+        return Err(AppError::not_found("No thumbnail"));
+    }
     let hash = hash.as_str();
     // The thumbnail is derived from the content: a matching ETag means the browser's copy is current (no disk read, no body)
     let etag = format!("\"t{hash}\"");
@@ -375,6 +400,13 @@ pub async fn thumbnail_response(st: &AppState, headers: &HeaderMap, n: &Node) ->
         return Ok((StatusCode::NOT_MODIFIED, [(header::ETAG, etag), (header::CACHE_CONTROL, "private, max-age=604800".to_string())]).into_response());
     }
     let path = st.thumb_path(hash);
+    if !made_here {
+        // Only one a browser uploaded; until there is one, the browser showing the file makes it
+        return match tokio::fs::read(&path).await {
+            Ok(data) if !data.is_empty() => Ok(thumb_reply(data, etag)),
+            _ => Err(AppError::not_found("No thumbnail")),
+        };
+    }
     if !tokio::fs::try_exists(&path).await? {
         let _permit = st.thumb_permits.acquire().await.map_err(AppError::internal)?;
         if !tokio::fs::try_exists(&path).await? {
@@ -388,33 +420,76 @@ pub async fn thumbnail_response(st: &AppState, headers: &HeaderMap, n: &Node) ->
                 limits.max_image_height = Some(MAX_THUMB_PIXELS_SIDE);
                 limits.max_alloc = Some(max_alloc);
                 reader.limits(limits);
-                let img = reader.decode().ok()?;
-                let thumb = image::DynamicImage::ImageRgb8(img.thumbnail(THUMB_SIZE, THUMB_SIZE).to_rgb8());
-                let mut out = Vec::new();
-                thumb.write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 80)).ok()?;
-                Some(out)
+                thumb_jpeg(&reader.decode().ok()?)
             })
             .await?;
-            tokio::fs::create_dir_all(path.parent().unwrap()).await?;
             // Write an empty file for images that can't be decoded, so we don't retry every time
-            let tmp = path.with_extension(format!("{}.tmp", new_id()));
-            tokio::fs::write(&tmp, jpeg.unwrap_or_default()).await?;
-            tokio::fs::rename(&tmp, &path).await?;
+            write_thumb(&path, &jpeg.unwrap_or_default()).await?;
         }
     }
     let data = tokio::fs::read(&path).await?;
     if data.is_empty() {
         return Err(AppError::not_found("No thumbnail"));
     }
-    Ok((
-        [
-            (header::CONTENT_TYPE, "image/jpeg".to_string()),
-            (header::CACHE_CONTROL, "private, max-age=604800".to_string()),
-            (header::ETAG, etag),
-        ],
-        data,
-    )
-        .into_response())
+    Ok(thumb_reply(data, etag))
+}
+
+/// Scales a picture down to the thumbnail size and encodes it as JPEG
+fn thumb_jpeg(img: &image::DynamicImage) -> Option<Vec<u8>> {
+    let thumb = image::DynamicImage::ImageRgb8(img.thumbnail(THUMB_SIZE, THUMB_SIZE).to_rgb8());
+    let mut out = Vec::new();
+    thumb.write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 80)).ok()?;
+    Some(out)
+}
+
+/// Puts a thumbnail in the cache in one step (written beside it, then renamed), so a reader never sees half of one
+async fn write_thumb(path: &std::path::Path, data: &[u8]) -> std::io::Result<()> {
+    tokio::fs::create_dir_all(path.parent().unwrap()).await?;
+    let tmp = path.with_extension(format!("{}.tmp", new_id()));
+    tokio::fs::write(&tmp, data).await?;
+    tokio::fs::rename(&tmp, path).await
+}
+
+/// Largest thumbnail a browser may upload
+pub const MAX_THUMB_UPLOAD: usize = 512 * 1024;
+/// Largest side of an uploaded thumbnail (a browser makes them about THUMB_SIZE; it is scaled down to that)
+const MAX_THUMB_UPLOAD_SIDE: u32 = 1024;
+
+/// A thumbnail the browser made for a PDF or video the user can open (see `browser_thumbnailable`). Only a small JPEG
+/// or PNG is taken, decoded with tight limits and encoded again, so what is kept is always a plain JPEG of the usual
+/// size. A thumbnail already in the cache is kept: it belongs to the same content.
+pub async fn upload_thumbnail(State(st): State<AppState>, user: User, Path(id): Path<String>, body: Bytes) -> AppResult<StatusCode> {
+    let node = tree::owned_node(&mut *st.db.acquire().await?, &user, &id).await?;
+    if !browser_thumbnailable(&node) {
+        return Err(AppError::bad_request("This file doesn't take a thumbnail"));
+    }
+    if body.len() > MAX_THUMB_UPLOAD {
+        return Err(AppError::new(StatusCode::PAYLOAD_TOO_LARGE, "The thumbnail is too large"));
+    }
+    let (_, _, hash) = thumb_key(&node).await?;
+    let path = st.thumb_path(&hash);
+    if tokio::fs::metadata(&path).await.is_ok_and(|m| m.len() > 0) {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    let _permit = st.thumb_permits.acquire().await.map_err(AppError::internal)?;
+    let jpeg = tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
+        let format = image::guess_format(&body).ok()?;
+        if !matches!(format, image::ImageFormat::Jpeg | image::ImageFormat::Png) {
+            return None;
+        }
+        let mut reader = image::ImageReader::with_format(std::io::Cursor::new(body), format);
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(MAX_THUMB_UPLOAD_SIDE);
+        limits.max_image_height = Some(MAX_THUMB_UPLOAD_SIDE);
+        limits.max_alloc = Some(16 * 1024 * 1024);
+        reader.limits(limits);
+        thumb_jpeg(&reader.decode().ok()?)
+    })
+    .await
+    .map_err(AppError::internal)?
+    .ok_or_else(|| AppError::bad_request("The thumbnail must be a JPEG or PNG picture of at most 1024 × 1024 pixels"))?;
+    write_thumb(&path, &jpeg).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn thumbnail(State(st): State<AppState>, user: User, Path(id): Path<String>, headers: HeaderMap) -> AppResult<Response> {
@@ -760,5 +835,59 @@ mod tests {
         assert_eq!(links.values().filter(|l| l.owner == "user:1").count(), DOWNLOAD_LINKS_PER_OWNER);
         assert!(!links.contains_key(&first));
         assert!(tokens.iter().all(|t| links.contains_key(t)) && links.contains_key(&other));
+    }
+
+    /// A PNG of the given size, as a browser would upload it
+    fn png(w: u32, h: u32) -> Bytes {
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(w, h).write_to(&mut out, image::ImageFormat::Png).unwrap();
+        Bytes::from(out.into_inner())
+    }
+
+    #[tokio::test]
+    async fn browsers_upload_thumbnails_of_pdfs_they_can_open() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let pdf = env.file(&amy, &amy.root_id, "Report.pdf").await;
+        let hash = "ab".repeat(32);
+        sqlx::query("INSERT INTO blobs (hash, size, refcount, created_at) VALUES (?, 1000, 1, 0)").bind(&hash).execute(&env.st.db).await.unwrap();
+        sqlx::query("UPDATE nodes SET mime = 'application/pdf', blob_hash = ?, size = 1000 WHERE id = ?")
+            .bind(&hash)
+            .bind(&pdf)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        let text = env.file(&amy, &amy.root_id, "notes.txt").await;
+        let get = |user: User, id: String| thumbnail(State(env.st.clone()), user, Path(id), HeaderMap::new());
+        let put = |user: User, id: String, body: Bytes| upload_thumbnail(State(env.st.clone()), user, Path(id), body);
+
+        // No thumbnail until a browser makes one
+        assert_eq!(get(amy.clone(), pdf.clone()).await.unwrap_err().status, StatusCode::NOT_FOUND);
+        // Someone who can't open the file can't give it a thumbnail; nor can a file the server doesn't take them for
+        assert!(put(ben.clone(), pdf.clone(), png(320, 200)).await.is_err());
+        assert_eq!(put(amy.clone(), text, png(320, 200)).await.unwrap_err().status, StatusCode::BAD_REQUEST);
+        // Only small JPEG or PNG pictures
+        assert_eq!(put(amy.clone(), pdf.clone(), Bytes::from_static(b"<svg/>")).await.unwrap_err().status, StatusCode::BAD_REQUEST);
+        let mut gif = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(10, 10).write_to(&mut gif, image::ImageFormat::Gif).unwrap();
+        assert_eq!(put(amy.clone(), pdf.clone(), Bytes::from(gif.into_inner())).await.unwrap_err().status, StatusCode::BAD_REQUEST);
+        assert_eq!(put(amy.clone(), pdf.clone(), png(4000, 10)).await.unwrap_err().status, StatusCode::BAD_REQUEST);
+        let huge = Bytes::from(vec![0u8; MAX_THUMB_UPLOAD + 1]);
+        assert_eq!(put(amy.clone(), pdf.clone(), huge).await.unwrap_err().status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(!env.st.thumb_path(&hash).exists());
+
+        // It is encoded again as a JPEG no larger than the other thumbnails, and kept by content
+        assert_eq!(put(amy.clone(), pdf.clone(), png(640, 400)).await.unwrap(), StatusCode::NO_CONTENT);
+        let res = get(amy.clone(), pdf.clone()).await.unwrap();
+        assert_eq!(res.headers()[header::CONTENT_TYPE], "image/jpeg");
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let img = image::load_from_memory_with_format(&body, image::ImageFormat::Jpeg).unwrap();
+        assert_eq!((img.width(), img.height()), (THUMB_SIZE, 200));
+
+        // A thumbnail already made stays (another reader's upload doesn't replace it)
+        env.grant(&pdf, &ben, "viewer").await;
+        assert_eq!(put(ben.clone(), pdf.clone(), png(100, 100)).await.unwrap(), StatusCode::NO_CONTENT);
+        assert_eq!(std::fs::read(env.st.thumb_path(&hash)).unwrap(), body.to_vec());
     }
 }
