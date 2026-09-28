@@ -13,4 +13,5 @@ export default {
   "An app password is created for your account": "你的帳號建立了應用程式密碼",
   "An app password “{name}” was created for your account": "你的帳號建立了應用程式密碼「{name}」",
   "From {ip}. If you didn't create it, remove it under App passwords and change your password.": "來源位址 {ip}。如果不是你建立的，請在「應用程式密碼」中移除它，並變更你的密碼。",
+  "Your account isn't allowed to share, so you can't change who has access. Ask an administrator.": "你的帳號沒有分享權限，因此無法變更存取權。請洽管理員。",
 } satisfies Record<string, string>;

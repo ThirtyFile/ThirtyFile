@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { ErrorText } from "@/components/dialogs";
 import { useConfirm } from "@/components/confirm";
-import { ROLE_HINT, ROLE_LABEL } from "@/lib/drives";
+import { ROLE_HINT, ROLE_LABEL, atLeast } from "@/lib/drives";
 import { useMe } from "@/lib/session";
 import { cn, formatDate } from "@/lib/utils";
 import { t, tServer, tc } from "@/lib/i18n";
@@ -293,7 +293,9 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
             </div>
             {!info.can_manage && (
               <p className="text-xs text-muted-foreground">
-                {t("Your role is “{role}”. Only managers can change access.", { role: info.my_role ? ROLE_LABEL[info.my_role] : "—" })}
+                {atLeast(info.my_role, "manager") && !me.can_share
+                  ? t("Your account isn't allowed to share, so you can't change who has access. Ask an administrator.")
+                  : t("Your role is “{role}”. Only managers can change access.", { role: info.my_role ? ROLE_LABEL[info.my_role] : "—" })}
               </p>
             )}
           </>

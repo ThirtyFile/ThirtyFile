@@ -387,10 +387,13 @@ async fn require_other_owner(conn: &mut SqliteConnection, node_id: &str, princip
     Ok(())
 }
 
+/// Whether the user may give and take away access here: managers (and administrators, except in personal spaces)
+/// whose account may share. Giving people access is sharing, like a share link; leaving is always possible.
 async fn can_manage_node(conn: &mut SqliteConnection, user: &User, node: &Node, drive: &Drive) -> AppResult<(bool, Option<Role>)> {
     let role = tree::role_on(conn, user, node).await?;
     let admin_override = user.is_admin() && drive.kind != "personal";
-    Ok((admin_override || role.is_some_and(|r| r >= Role::Manager), role))
+    let may_share = user.can_share || user.is_admin();
+    Ok(((admin_override || role.is_some_and(|r| r >= Role::Manager)) && may_share, role))
 }
 
 pub async fn access(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Json<AccessInfo>> {
@@ -849,5 +852,34 @@ mod tests {
         let admin = env.admin().await;
         let Json(info) = create(State(env.st.clone()), admin, Json(CreateDriveReq { name: "Big".into(), quota_bytes: 0, source_path: None, read_only: false })).await.unwrap();
         assert_eq!(info.quota_bytes, 0, "administrators may create unlimited spaces");
+    }
+
+    #[tokio::test]
+    async fn accounts_that_may_not_share_cannot_give_people_access() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", false);
+        let ben = env.user("ben", true);
+        let (amy, ben) = (amy.await, ben.await);
+        let folder = env.folder(&amy, &amy.root_id, "Mine").await;
+        let everyone = Json(GrantReq { principal_type: "everyone".into(), principal_id: 0, role: "editor".into(), expires_at: None });
+        // Amy owns the folder, but her account may not share: not with Ben, not with everyone
+        let err = grant(State(env.st.clone()), amy.clone(), Path(folder.clone()), grant_req(&ben, "viewer", None)).await.unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::FORBIDDEN);
+        assert!(grant(State(env.st.clone()), amy.clone(), Path(folder.clone()), everyone).await.is_err());
+        let Json(info) = access(State(env.st.clone()), amy.clone(), Path(folder.clone())).await.unwrap();
+        assert!(!info.can_manage, "the access dialog shows it read-only");
+
+        // Access someone else gave stays hers to leave, not to remove for others
+        env.grant(&folder, &ben, "viewer").await;
+        let ben_grant = grant_id(&env, &folder, &ben).await;
+        assert!(revoke(State(env.st.clone()), amy.clone(), Path(ben_grant)).await.is_err());
+        let theirs = env.folder(&ben, &ben.root_id, "Theirs").await;
+        env.grant(&theirs, &amy, "editor").await;
+        let _ = revoke(State(env.st.clone()), amy.clone(), Path(grant_id(&env, &theirs, &amy).await)).await.unwrap();
+
+        // An administrator can always manage access (outside personal spaces)
+        let admin = env.admin().await;
+        let company = env.st.shared_root().unwrap();
+        let _ = grant(State(env.st.clone()), admin, Path(company), grant_req(&ben, "viewer", None)).await.unwrap();
     }
 }
