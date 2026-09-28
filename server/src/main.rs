@@ -24,6 +24,7 @@ mod nodes;
 mod paths;
 #[cfg(unix)]
 mod privileges;
+mod reset;
 mod secrets;
 mod sessions;
 mod shares;
@@ -337,6 +338,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         if res.rows_affected() == 0 {
             return Err(format!("User not found: {username}").into());
         }
+        sqlx::query("UPDATE users SET must_change_password = 1 WHERE username = ?").bind(username).execute(&db).await?;
         for table in ["sessions", "app_passwords"] {
             sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table} WHERE user_id = (SELECT id FROM users WHERE username = ?)")))
                 .bind(username)
@@ -725,6 +727,9 @@ fn api() -> Router<AppState> {
     Router::new()
         .route("/health", get(health))
         .route("/auth/login", post(auth::login))
+        .route("/auth/options", get(reset::options))
+        .route("/auth/forgot", post(reset::forgot))
+        .route("/auth/reset", post(reset::reset))
         .route("/auth/login/2fa", post(twofactor::login_code))
         .route("/auth/login/2fa/setup", post(twofactor::login_setup))
         .route("/auth/logout", post(auth::logout))

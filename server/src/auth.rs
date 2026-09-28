@@ -98,7 +98,7 @@ pub fn cookie_header(st: &AppState, name: &str, value: &str, path: &str, max_age
     format!("{name}={value}; Path={path}; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}")
 }
 
-pub const USER_COLS: &str = "u.id, u.username, u.display_name, u.role, u.can_write, u.can_delete, u.can_share, u.quota_bytes, u.root_id";
+pub const USER_COLS: &str = "u.id, u.username, u.display_name, u.role, u.can_write, u.can_delete, u.can_share, u.quota_bytes, u.root_id, u.must_change_password";
 
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 pub struct User {
@@ -112,6 +112,8 @@ pub struct User {
     pub can_share: bool,
     pub quota_bytes: i64,
     pub root_id: String,
+    /// An administrator chose the password (a new account, a reset): the person sets their own before anything else
+    pub must_change_password: bool,
     /// Root folder id of the shared space; None when the shared space is disabled
     #[sqlx(skip)]
     pub shared_root: Option<String>,
@@ -165,6 +167,11 @@ impl FromRequestParts<AppState> for User {
             touch_session(st.clone(), row.session_id.clone(), ip);
         }
         let mut user = row.user;
+        // A password an administrator chose must be changed first: until then only that (and what the page needs for
+        // it) is reachable
+        if user.must_change_password && !["/auth/me", "/auth/password", "/auth/logout"].iter().any(|p| parts.uri.path().ends_with(p)) {
+            return Err(AppError::forbidden("Choose a new password first").with_code("password_change_required"));
+        }
         user.shared_root = st.shared_root();
         user.session_id = Some(row.session_id);
         Ok(user)
@@ -581,7 +588,7 @@ pub async fn change_password(
     let current_token = get_cookie(&headers, SESSION_COOKIE).map(|t| sha256_hex(t.as_bytes())).unwrap_or_default();
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
-    sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?").bind(new_hash).bind(user.id).execute(&mut *tx).await?;
+    sqlx::query("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?").bind(new_hash).bind(user.id).execute(&mut *tx).await?;
     // Other devices and app passwords stop working: whoever may have known the old password is locked out
     sign_out_everywhere(&mut tx, user.id, Some(&current_token)).await?;
     tx.commit().await?;

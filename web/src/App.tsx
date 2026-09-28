@@ -15,6 +15,8 @@ import { FavoritesPage, RecentPage, SearchPage } from "@/pages/ListPages";
 import { ThisPcPage } from "@/pages/ThisPcPage";
 import { SharedWithMePage } from "@/pages/SharedWithMePage";
 import { LoginPage } from "@/pages/LoginPage";
+import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
+import { ChangePasswordDialog } from "@/components/dialogs";
 import { PublicSharePage } from "@/pages/PublicSharePage";
 import { SharesPage } from "@/pages/SharesPage";
 import { TrashPage } from "@/pages/TrashPage";
@@ -91,6 +93,14 @@ function RequireAuth() {
       </div>
     );
 
+  // A password an administrator chose is replaced first; the server allows nothing else meanwhile
+  if (me.data.must_change_password)
+    return (
+      <MeContext.Provider value={me.data}>
+        <ChangePasswordDialog required onClose={() => void qc.invalidateQueries({ queryKey: ["me"] })} />
+      </MeContext.Provider>
+    );
+
   return (
     <MeContext.Provider value={me.data}>
       <AppShell />
@@ -118,6 +128,7 @@ export function App() {
       <ConflictHost />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/share/:token/:nodeId?" element={<PublicSharePage />} />
         {/* Old short URL format, so links already shared still open */}
         <Route path="/s/:token/:nodeId?" element={<LegacyShareRedirect />} />

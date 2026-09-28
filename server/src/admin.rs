@@ -144,6 +144,8 @@ pub async fn create(State(st): State<AppState>, Admin(me): Admin, Json(req): Jso
         if !display_name.is_empty() {
             sqlx::query("UPDATE users SET display_name = ? WHERE id = ?").bind(&display_name).bind(id).execute(&mut *tx).await?;
         }
+        // The first password is the administrator's: the person chooses their own when signing in
+        sqlx::query("UPDATE users SET must_change_password = 1 WHERE id = ?").bind(id).execute(&mut *tx).await?;
         logs::record_activity(&mut tx, &me, None, "user_create", &format!("{username} ({})", if req.role == "admin" { "administrator" } else { "standard user" })).await?;
         tx.commit().await?;
         crate::folders::spaces_changed();
@@ -239,6 +241,7 @@ pub async fn update(
         // account is signed out (its app passwords stop working while it is disabled)
         if password_hash.is_some() {
             crate::auth::sign_out_everywhere(&mut tx, id, None).await?;
+            sqlx::query("UPDATE users SET must_change_password = 1 WHERE id = ?").bind(id).execute(&mut *tx).await?;
         } else if req.disabled == Some(true) {
             sqlx::query("DELETE FROM sessions WHERE user_id = ?").bind(id).execute(&mut *tx).await?;
         }
