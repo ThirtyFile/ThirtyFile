@@ -14,7 +14,7 @@ import { confirm } from "@/components/confirm";
 import type { ThemeMode } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { t, tServer, tc } from "@/lib/i18n";
-import { Section, SettingsFrame, Toggle } from "@/pages/SystemPage";
+import { Section, SettingsFrame, Toggle } from "@/pages/SettingsFrame";
 
 /** Preset color schemes: each has an accent color tuned separately for light and dark mode */
 const PRESETS = [

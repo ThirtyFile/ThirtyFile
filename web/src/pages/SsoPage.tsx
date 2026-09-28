@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
 import { copyText } from "@/lib/utils";
 import { t } from "@/lib/i18n";
-import { Section, SettingsFrame, Toggle } from "@/pages/SystemPage";
+import { Section, SettingsFrame, Toggle } from "@/pages/SettingsFrame";
 
 const PROVIDERS: SsoProviderId[] = ["microsoft", "google", "github"];
 

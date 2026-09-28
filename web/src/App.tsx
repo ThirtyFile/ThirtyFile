@@ -29,11 +29,11 @@ const AdminUsersPage = page(() => import("@/pages/AdminUsersPage"), "AdminUsersP
 const GroupsPage = page(() => import("@/pages/GroupsPage"), "GroupsPage");
 const AdminSharesPage = page(() => import("@/pages/AdminSharesPage"), "AdminSharesPage");
 const AdminDrivesPage = page(() => import("@/pages/AdminDrivesPage"), "AdminDrivesPage");
-const GeneralSettingsPage = page(() => import("@/pages/SystemPage"), "GeneralSettingsPage");
-const StorageSettingsPage = page(() => import("@/pages/SystemPage"), "StorageSettingsPage");
-const UsageSettingsPage = page(() => import("@/pages/SystemPage"), "UsageSettingsPage");
-const ActivitySettingsPage = page(() => import("@/pages/SystemPage"), "ActivitySettingsPage");
-const LogSettingsPage = page(() => import("@/pages/SystemPage"), "LogSettingsPage");
+const GeneralSettingsPage = page(() => import("@/pages/GeneralSettingsPage"), "GeneralSettingsPage");
+const StorageSettingsPage = page(() => import("@/pages/StorageSettingsPage"), "StorageSettingsPage");
+const UsageSettingsPage = page(() => import("@/pages/UsageSettingsPage"), "UsageSettingsPage");
+const ActivitySettingsPage = page(() => import("@/pages/ActivitySettingsPage"), "ActivitySettingsPage");
+const LogSettingsPage = page(() => import("@/pages/LogSettingsPage"), "LogSettingsPage");
 const SsoPage = page(() => import("@/pages/SsoPage"), "SsoPage");
 const EmailPage = page(() => import("@/pages/EmailPage"), "EmailPage");
 const BrandingPage = page(() => import("@/pages/BrandingPage"), "BrandingPage");

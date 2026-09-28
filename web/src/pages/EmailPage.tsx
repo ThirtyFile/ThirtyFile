@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorText } from "@/components/dialogs";
-import { Section, SettingsFrame, Toggle } from "@/pages/SystemPage";
+import { Section, SettingsFrame, Toggle } from "@/pages/SettingsFrame";
 import { t } from "@/lib/i18n";
 import { SMTP_PORT, portForSecurity } from "@/lib/notifications";
 import { useMe } from "@/lib/session";
