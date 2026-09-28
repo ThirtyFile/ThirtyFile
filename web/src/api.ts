@@ -260,6 +260,67 @@ export interface SsoProvider {
   label: string;
 }
 
+export type NotificationKind = "shared" | "space_full" | "access_expiring";
+
+/** What a notification shows; names are copied when it was made */
+export interface NotificationData {
+  /** The folder, file or space */
+  name?: string;
+  /** Whether a whole space was shared ("space"), or a folder or file */
+  item?: "space" | "folder" | "file";
+  drive_kind?: DriveKind;
+  role?: Role;
+  /** Who shared it */
+  by?: string;
+  /** When the access ends */
+  expires_at?: number | null;
+  /** Almost full spaces: bytes used, the space's size, and the share used */
+  used?: number;
+  quota?: number;
+  percent?: number;
+}
+
+/** A notification under the bell (`GET /notifications`) */
+export interface AppNotification {
+  id: number;
+  kind: NotificationKind;
+  data: NotificationData;
+  /** What opening it shows (it may have been deleted since) */
+  node_id: string | null;
+  created_at: number;
+  read: boolean;
+}
+
+export interface NotificationPrefs {
+  in_app: boolean;
+  email: boolean;
+}
+
+export interface NotificationSettings {
+  /** Where emails go; blank = none */
+  email: string;
+  /** An administrator set up an email server */
+  email_ready: boolean;
+  kinds: Record<NotificationKind, NotificationPrefs>;
+}
+
+export type SmtpSecurity = "starttls" | "tls" | "none";
+
+/** Control panel › Email: the server notification emails are sent through */
+export interface EmailSettings {
+  enabled: boolean;
+  host: string;
+  port: number;
+  security: SmtpSecurity;
+  username: string;
+  /** A password is saved (it is never sent back) */
+  has_password: boolean;
+  from: string;
+  insecure: boolean;
+}
+
+export type EmailSettingsReq = Omit<EmailSettings, "has_password" | "port"> & { port?: number; password: string };
+
 export interface LinkedIdentity {
   provider: string;
   email: string;
@@ -967,6 +1028,18 @@ export const api = {
   ssoLink: (provider: string, next: string) => post<{ url: string }>(enc`/auth/sso/${provider}/link`, { next }),
   myIdentities: () => get<{ linked: LinkedIdentity[]; available: string[] }>("/auth/identities"),
   unlinkIdentity: (provider: string) => request("DELETE", enc`/auth/identities/${provider}`),
+  /** Also tells the server the time zone, for the times in emails */
+  notifications: () => get<{ items: AppNotification[]; unread: number }>(`/notifications${qs({ tz: String(new Date().getTimezoneOffset()) })}`),
+  /** Without ids: all of them */
+  markNotificationsRead: (ids?: number[]) => post("/notifications/read", { ids }),
+  deleteNotification: (id: number) => request("DELETE", enc`/notifications/${id}`),
+  clearNotifications: () => request("DELETE", "/notifications"),
+  notificationSettings: () => get<NotificationSettings>("/notifications/settings"),
+  updateNotificationSettings: (req: { email?: string; kinds?: Partial<Record<NotificationKind, NotificationPrefs>> }) =>
+    request<NotificationSettings>("PUT", "/notifications/settings", req),
+  emailSettings: () => get<EmailSettings>("/admin/email"),
+  updateEmailSettings: (req: EmailSettingsReq) => request<EmailSettings>("PUT", "/admin/email", req),
+  testEmail: (req: EmailSettingsReq & { to: string }) => post("/admin/email/test", req),
   ssoSettings: () => get<SsoSettings>("/admin/sso"),
   updateSsoSettings: (s: SsoSettingsReq) => request<SsoSettings>("PUT", "/admin/sso", s),
   logStatus: () => get<LogStatus>("/admin/logs"),

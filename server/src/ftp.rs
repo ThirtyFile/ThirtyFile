@@ -123,19 +123,22 @@ impl ServerCertVerifier for AcceptAnyCert {
     }
 }
 
-/// The TLS set-up is built once for each kind (verifying or not) and shared by every connection: loading the platform's
-/// certificate verifier is slow
 fn tls_connector(insecure: bool) -> io::Result<AsyncRustlsConnector> {
+    Ok(tokio_rustls::TlsConnector::from(client_tls(insecure)?).into())
+}
+
+/// The TLS set-up is built once for each kind (verifying or not) and shared by every connection (FTPS here, email in
+/// mail.rs): loading the platform's certificate verifier is slow
+pub fn client_tls(insecure: bool) -> io::Result<Arc<ClientConfig>> {
     static CONFIGS: [std::sync::OnceLock<Arc<ClientConfig>>; 2] = [std::sync::OnceLock::new(), std::sync::OnceLock::new()];
     let slot = &CONFIGS[usize::from(insecure)];
-    let config = match slot.get() {
+    Ok(match slot.get() {
         Some(c) => c.clone(),
         None => {
             let c = tls_config(insecure)?;
             slot.get_or_init(|| c).clone()
         }
-    };
-    Ok(tokio_rustls::TlsConnector::from(config).into())
+    })
 }
 
 fn tls_config(insecure: bool) -> io::Result<Arc<ClientConfig>> {

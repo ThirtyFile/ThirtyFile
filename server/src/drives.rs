@@ -470,6 +470,7 @@ pub async fn grant(
             .bind(principal_id)
             .fetch_optional(&mut *tx)
             .await?;
+    let is_new = existing.is_none();
     if let Some(old) = existing.and_then(|(r,)| Role::parse(&r)) {
         if !user.is_admin() && my_role.is_some_and(|r| old > r) {
             return Err(AppError::forbidden("You can't change the access of someone whose role is higher than yours"));
@@ -479,8 +480,21 @@ pub async fn grant(
         }
     }
     add_grant(&mut tx, &node.id, &req.principal_type, principal_id, role.as_str(), Some(user.id), req.expires_at).await?;
+    // New access is announced to the people it is for; a changed role or expiry isn't
+    let emails = if is_new {
+        let (grant_id,): (i64,) = sqlx::query_as("SELECT id FROM grants WHERE node_id = ? AND principal_type = ? AND principal_id = ?")
+            .bind(&node.id)
+            .bind(&req.principal_type)
+            .bind(principal_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        crate::notify::shared(&mut tx, &user, &node, &drive, grant_id).await?
+    } else {
+        Vec::new()
+    };
     tree::log(&mut tx, &user, Some(&node), "grant", &format!("{name} → {}", role_label(role))).await?;
     tx.commit().await?;
+    crate::notify::send_later(&st, emails);
     Ok(Json(json!({ "ok": true })))
 }
 

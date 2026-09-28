@@ -10,6 +10,8 @@ mod folders;
 mod fsops;
 mod locations;
 mod logs;
+mod mail;
+mod notify;
 mod branding;
 mod check;
 mod ftp;
@@ -692,6 +694,12 @@ fn api() -> Router<AppState> {
         .route("/auth/identities", get(sso::my_identities))
         .route("/auth/identities/{provider}", delete(sso::unlink))
         .route("/admin/sso", get(sso::get_settings).put(sso::update_settings))
+        .route("/admin/email", get(mail::get_settings).put(mail::update_settings))
+        .route("/admin/email/test", post(mail::test))
+        .route("/notifications", get(notify::list).delete(notify::clear))
+        .route("/notifications/read", post(notify::mark_read))
+        .route("/notifications/settings", get(notify::get_settings).put(notify::update_settings))
+        .route("/notifications/{id}", delete(notify::delete))
         .route("/branding", get(branding::get))
         .route("/branding.css", get(branding::css))
         .route("/branding/logo", get(branding::logo))
@@ -809,6 +817,10 @@ fn spawn_maintenance(st: AppState, trash_days: i64) {
                     Err(e) => tracing::warn!("Failed to purge the trash: {}", e.message),
                     _ => {}
                 }
+            }
+            // Spaces that are almost full and access that ends soon (#64)
+            if let Err(e) = notify::check(&st).await {
+                tracing::warn!("Couldn't check for notifications: {}", e.message);
             }
             match versions::prune(&st).await {
                 Ok(n) if n > 0 => tracing::info!("Removed {n} earlier versions of files that are no longer kept"),

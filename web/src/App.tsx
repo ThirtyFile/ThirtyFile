@@ -35,6 +35,7 @@ const UsageSettingsPage = page(() => import("@/pages/SystemPage"), "UsageSetting
 const ActivitySettingsPage = page(() => import("@/pages/SystemPage"), "ActivitySettingsPage");
 const LogSettingsPage = page(() => import("@/pages/SystemPage"), "LogSettingsPage");
 const SsoPage = page(() => import("@/pages/SsoPage"), "SsoPage");
+const EmailPage = page(() => import("@/pages/EmailPage"), "EmailPage");
 const BrandingPage = page(() => import("@/pages/BrandingPage"), "BrandingPage");
 
 function Spinner() {
@@ -217,6 +218,14 @@ export function App() {
             element={
               <AdminOnly>
                 <SsoPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/admin/email"
+            element={
+              <AdminOnly>
+                <EmailPage />
               </AdminOnly>
             }
           />

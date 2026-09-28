@@ -708,6 +708,10 @@ async fn sync_profile(st: &AppState, user_id: i64, provider: &str, ident: &Ident
     if follow {
         sqlx::query("UPDATE users SET display_name = ? WHERE id = ?").bind(name).bind(user_id).execute(&mut *tx).await?;
     }
+    // Where notification emails go, until the person enters an address themselves (notify.rs)
+    if ident.email_verified && crate::mail::valid_address(&ident.email) {
+        sqlx::query("UPDATE users SET email = ? WHERE id = ? AND email = ''").bind(&ident.email).bind(user_id).execute(&mut *tx).await?;
+    }
     tx.commit().await?;
     Ok(())
 }

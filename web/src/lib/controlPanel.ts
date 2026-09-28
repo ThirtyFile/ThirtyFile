@@ -6,6 +6,7 @@ import {
   HardDriveIcon,
   KeyRoundIcon,
   Link2Icon,
+  MailIcon,
   PaletteIcon,
   PieChartIcon,
   SlidersHorizontalIcon,
@@ -15,7 +16,7 @@ import {
 } from "lucide-react";
 import { t, tc } from "@/lib/i18n";
 
-export type ControlPanelKey = "users" | "groups" | "shares" | "drives" | "storage" | "usage" | "general" | "branding" | "sso" | "activity" | "logs";
+export type ControlPanelKey = "users" | "groups" | "shares" | "drives" | "storage" | "usage" | "general" | "branding" | "sso" | "email" | "activity" | "logs";
 
 export interface ControlPanelItem {
   key: ControlPanelKey;
@@ -131,6 +132,16 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     tone: "bg-amber-500/12 text-amber-600 dark:text-amber-300",
     category: "users",
     keywords: "sso 單一登入 三方登入 第三方 oauth oidc microsoft entra azure ad office 365 google workspace github 登入 帳號 連結 single sign-on third-party sign in login account link", // i18n-ignore: bilingual search keywords
+  },
+  {
+    key: "email",
+    to: "/admin/email",
+    title: t("Email"),
+    desc: t("The email server that sends notifications about shares, full spaces and access that ends soon"),
+    icon: MailIcon,
+    tone: "bg-cyan-500/12 text-cyan-700 dark:text-cyan-300",
+    category: "system",
+    keywords: "郵件 電子郵件 信箱 寄信 通知 鈴鐺 email mail smtp server notification notify bell starttls tls", // i18n-ignore: bilingual search keywords
   },
   {
     key: "activity",

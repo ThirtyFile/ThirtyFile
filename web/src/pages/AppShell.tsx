@@ -5,6 +5,7 @@ import { SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useQueryClient } from "@tanstack/react-query";
 import { TabBar } from "@/components/TabBar";
+import { NotificationBell } from "@/components/NotificationBell";
 import { UploadPanel } from "@/components/UploadPanel";
 import { DownloadPanel } from "@/components/DownloadPanel";
 import { useMe } from "@/lib/session";
@@ -90,9 +91,16 @@ export function AppShell() {
       >
         {t("Skip to main content")}
       </a>
-      <ErrorBoundary>
-        <TabBar />
-      </ErrorBoundary>
+      <div className="flex shrink-0 bg-sidebar">
+        <div className="min-w-0 flex-1">
+          <ErrorBoundary>
+            <TabBar />
+          </ErrorBoundary>
+        </div>
+        <ErrorBoundary>
+          <NotificationBell />
+        </ErrorBoundary>
+      </div>
       <div className="min-h-0 flex-1">
         {/* An error in one page only affects the content area; the tab bar and upload panel keep working */}
         <ErrorBoundary resetKey={location.pathname}>

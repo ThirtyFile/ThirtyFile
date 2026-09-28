@@ -6,6 +6,7 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   ArrowUpIcon,
+  BellIcon,
   CheckIcon,
   ChevronRightIcon,
   ChevronsUpDownIcon,
@@ -52,6 +53,7 @@ import { LinkedAccountsDialog } from "@/components/LinkedAccountsDialog";
 import { DevicesDialog } from "@/components/DevicesDialog";
 import { AppPasswordsDialog } from "@/components/AppPasswordsDialog";
 import { TwoFactorDialog } from "@/components/TwoFactor";
+import { NotificationSettingsDialog } from "@/components/NotificationSettingsDialog";
 import { NavMenu } from "@/components/NavMenu";
 import { Resizer } from "@/components/Resizer";
 import { FolderTree } from "@/components/FolderTree";
@@ -129,6 +131,7 @@ function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean; activ
   const [showDevices, setShowDevices] = useState(false);
   const [showAppPasswords, setShowAppPasswords] = useState(false);
   const [showTwoFactor, setShowTwoFactor] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   const [width, setWidth] = usePersisted("tf-nav-width", NAV_DEFAULT_WIDTH);
   const usedPct = me.quota_bytes > 0 ? Math.min(100, (me.used_bytes / me.quota_bytes) * 100) : 0;
   const usage = me.quota_bytes > 0 ? `${formatBytes(me.used_bytes)} / ${formatBytes(me.quota_bytes)}` : formatBytes(me.used_bytes);
@@ -229,6 +232,9 @@ function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean; activ
             <DropdownMenuItem onClick={() => setShowLogins(true)}>
               <HistoryIcon /> {t("My sign-in history")}
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setShowNotifications(true)}>
+              <BellIcon /> {t("Notification settings")}
+            </DropdownMenuItem>
             {canToggle && (
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>{dark ? <MoonIcon /> : <SunIcon />} {t("Appearance")}</DropdownMenuSubTrigger>
@@ -268,6 +274,7 @@ function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean; activ
       {showDevices && <DevicesDialog onClose={() => setShowDevices(false)} />}
       {showAppPasswords && <AppPasswordsDialog onClose={() => setShowAppPasswords(false)} />}
       {showTwoFactor && <TwoFactorDialog onClose={() => setShowTwoFactor(false)} />}
+      {showNotifications && <NotificationSettingsDialog onClose={() => setShowNotifications(false)} />}
       {showLogins && (
         <LoginLogDialog
           title={t("My sign-in history")}
