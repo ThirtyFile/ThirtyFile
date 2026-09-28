@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { DownloadIcon, Loader2Icon } from "lucide-react";
-import { api, triggerDownload, type LoginFilter } from "@/api";
+import { api, type LoginFilter } from "@/api";
+import { nativeDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn, formatWinDate } from "@/lib/utils";
@@ -25,14 +26,37 @@ export const LOGIN_EVENTS: Record<string, { label: string; tone?: string }> = {
   sso_provisioned: { label: t("Account created by third-party sign-in"), tone: "text-brand" },
   sso_link: { label: t("External account linked"), tone: "text-brand" },
   sso_unlink: { label: t("External account unlinked") },
+  device_signout: { label: t("Device signed out") },
+  signout_others: { label: t("Signed out on other devices") },
+  admin_signout: { label: t("Signed out by an administrator"), tone: "text-amber-600 dark:text-amber-400" },
+  app_password_failed: { label: t("Wrong app password"), tone: "text-destructive" },
+  app_password_created: { label: t("App password created"), tone: "text-brand" },
+  app_password_revoked: { label: t("App password removed") },
+  "2fa_failed": { label: t("Wrong two-factor code"), tone: "text-destructive" },
+  "2fa_enabled": { label: t("Two-factor sign-in turned on"), tone: "text-brand" },
+  "2fa_disabled": { label: t("Two-factor sign-in turned off"), tone: "text-amber-600 dark:text-amber-400" },
+  "2fa_reset": { label: t("Two-factor sign-in reset by an administrator"), tone: "text-amber-600 dark:text-amber-400" },
+  recovery_code_used: { label: t("Recovery code used"), tone: "text-amber-600 dark:text-amber-400" },
+  recovery_codes_new: { label: t("New recovery codes") },
 };
 
-const METHOD_LABEL: Record<string, string> = { password: tc("method", "Password"), microsoft: "Microsoft", google: "Google", github: "GitHub" };
+const METHOD_LABEL: Record<string, string> = {
+  password: tc("method", "Password"),
+  microsoft: "Microsoft",
+  google: "Google",
+  github: "GitHub",
+  app_password: t("App password"),
+};
 
 const EVENT_GROUPS = [
-  { label: t("Sign-ins"), options: ["login", "logout", "password_change"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
-  { label: t("Failed"), options: ["bad_password", "unknown_user", "disabled", "locked", "sso_denied"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
+  { label: t("Sign-ins"), options: ["login", "logout", "password_change", "device_signout", "signout_others", "admin_signout"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
+  { label: t("Failed"), options: ["bad_password", "unknown_user", "disabled", "locked", "sso_denied", "app_password_failed", "2fa_failed"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
   { label: t("External accounts"), options: ["sso_provisioned", "sso_link", "sso_unlink"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
+  {
+    label: t("Two-factor sign-in"),
+    options: ["2fa_enabled", "2fa_disabled", "2fa_reset", "recovery_code_used", "recovery_codes_new"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })),
+  },
+  { label: t("App passwords"), options: ["app_password_created", "app_password_revoked"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
 ];
 
 /**
@@ -67,7 +91,7 @@ export function LoginLog({ userId, admin, className }: { userId?: number; admin?
             className="h-8 text-xs"
             disabled={!rows.length}
             title={t("Export records that match the filters (up to 100,000)")}
-            onClick={() => triggerDownload(api.loginLogExportUrl(filter))}
+            onClick={() => nativeDownload(api.loginLogExportUrl(filter))}
           >
             <DownloadIcon /> {t("Export CSV")}
           </Button>
@@ -120,7 +144,7 @@ export function LoginLog({ userId, admin, className }: { userId?: number; admin?
                     <td className={cn("px-2.5 py-1.5 whitespace-nowrap", ev?.tone)}>{ev?.label ?? r.event}</td>
                     <td className="px-2.5 py-1.5 whitespace-nowrap">
                       <span className="inline-flex items-center gap-1.5">
-                        {r.method !== "password" && <ProviderIcon provider={r.method} className="size-3.5" />}
+                        {r.method !== "password" && r.method !== "app_password" && <ProviderIcon provider={r.method} className="size-3.5" />}
                         {METHOD_LABEL[r.method] ?? r.method}
                       </span>
                     </td>

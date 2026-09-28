@@ -165,8 +165,8 @@ const UNDERLINE: Record<string, string> = {
 function scriptOf(lang: string | null): string {
   const l = (lang ?? "").toLowerCase();
   if (/^zh-(cn|sg)|^zh-hans/.test(l)) return "Hans";
-  if (/^ja/.test(l)) return "Jpan";
-  if (/^ko/.test(l)) return "Hang";
+  if (l.startsWith("ja")) return "Jpan";
+  if (l.startsWith("ko")) return "Hang";
   return "Hant";
 }
 
@@ -343,7 +343,7 @@ export function autoNumText(scheme: string, n: number): string {
   }
   if (/ParenBoth/.test(tail)) return `(${v})`;
   if (/ParenR/.test(tail)) return `${v})`;
-  if (/Period/.test(tail)) return /^ea1/.test(kind) ? `${v}、` : `${v}.`; // i18n-ignore: ideographic comma after East Asian numbering
+  if (/Period/.test(tail)) return kind.startsWith("ea1") ? `${v}、` : `${v}.`; // i18n-ignore: ideographic comma after East Asian numbering
   if (/Comma/.test(tail)) return `${v},`;
   return v;
 }

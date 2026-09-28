@@ -1,17 +1,24 @@
-import { useEffect } from "react";
+import { useEffect, useEffectEvent } from "react";
 import { useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { UsersRoundIcon } from "lucide-react";
 import { OfflineBanner, ReadOnlyBanner } from "@/components/OfflineNotice";
-import { api, type NodeInfo, type SortKey, type SortOrder } from "@/api";
+import { SORT_KEYS, api, type NodeInfo, type SortKey, type SortOrder } from "@/api";
 import { Explorer } from "@/components/Explorer";
-import { crumbPath, expandPath, type Crumb } from "@/components/Frame";
+import { crumbPath, type Crumb } from "@/components/Frame";
+import { expandPath } from "@/components/FolderTree";
 import { DRIVE_ICON } from "@/lib/drives";
+import { useAllPages } from "@/lib/pages";
+import { pathOf } from "@/lib/paths";
 import { usePersisted } from "@/lib/session";
 import { t } from "@/lib/i18n";
 
 export function useSort() {
-  const [sort, setSort] = usePersisted<{ key: SortKey; order: SortOrder }>("tf-sort", { key: "name", order: "asc" });
+  const [sort, setSort] = usePersisted<{ key: SortKey; order: SortOrder }>(
+    "tf-sort",
+    { key: "name", order: "asc" },
+    (s) => SORT_KEYS.includes(s.key) && (s.order === "asc" || s.order === "desc"),
+  );
   const toggle = (key: SortKey) => setSort({ key, order: sort.key === key && sort.order === "asc" ? "desc" : "asc" });
   return [sort, toggle, setSort] as const;
 }
@@ -42,19 +49,22 @@ export function FilesPage() {
   });
   const node = info.data?.node;
   const folderId = node?.id;
-  const children = useQuery({
-    queryKey: ["children", folderId, sort.key, sort.order],
-    queryFn: () => api.children(folderId!, sort.key, sort.order),
-    enabled: !!folderId,
-  });
+  // Large folders come in pages: the first shows at once, the rest loads in the background
+  const children = useAllPages(
+    ["children", folderId, sort.key, sort.order],
+    (limit, after) => api.childrenPage(folderId!, sort.key, sort.order, limit, after),
+    !!folderId,
+  );
   const path = info.data?.path ?? [];
   const loc = locationOf(info.data);
 
   // Expand the left-hand tree down to the current folder
-  useEffect(() => {
+  const expandHere = useEffectEvent(() => {
     if (!info.data || info.data.via_share) return;
     expandPath(["this-pc", info.data.drive.root_id, ...path.slice(0, -1).map((c) => c.id)]);
-  }, [path.map((c) => c.id).join(), node?.id]);
+  });
+  const pathKey = path.map((c) => c.id).join();
+  useEffect(() => expandHere(), [pathKey, node?.id]);
 
   const parent = path.length >= 2 ? `/files/${path[path.length - 2].id}` : path.length === 1 ? loc.rootUrl : "/drives";
 
@@ -69,8 +79,9 @@ export function FilesPage() {
       }
       readOnly={info.data?.read_only}
       offline={info.data?.offline}
-      items={children.data ?? []}
+      items={children.items}
       loading={info.isLoading || children.isLoading}
+      loadingMore={children.loadingMore}
       error={info.error ?? children.error}
       folderId={folderId}
       role={info.data?.role}
@@ -82,7 +93,7 @@ export function FilesPage() {
       folder={node}
       icon={loc.icon}
       crumbs={loc.crumbs}
-      path={crumbPath(loc.crumbs)}
+      path={pathOf(info.data) ?? crumbPath(loc.crumbs)}
       emptyHint={info.data?.drive.kind === "company" ? t("This space is shared with the whole company. Everyone can see the files uploaded here.") : undefined}
     />
   );

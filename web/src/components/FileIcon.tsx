@@ -89,8 +89,36 @@ export function FileIcon({ node, className }: { node: NodeLike; className?: stri
   return <Icon className={cn("shrink-0", color, className)} strokeWidth={1.7} aria-hidden="true" />;
 }
 
+/** Pictures and videos most browsers can't show (HEIC, TIFF, AVI, MKV…): offered for download instead of a broken preview */
+const NOT_IN_BROWSER_EXT = /^(heic|heif|tiff?|psd|avi|mkv|wmv|flv|wma|aiff?|ape)$/;
+const NOT_IN_BROWSER_MIME = /^(image\/(heic|heif|tiff|vnd\.adobe\.photoshop)|video\/(x-msvideo|x-matroska|x-ms-wmv|x-flv)|audio\/(x-ms-wma|x-aiff|aiff))$/;
+
+/** A picture, video or sound the browser can show */
+export function isBrowserMedia(n: NodeLike) {
+  const c = categoryOf(n);
+  return (c === "image" || c === "video" || c === "audio") && !NOT_IN_BROWSER_EXT.test(extOf(n.name)) && !NOT_IN_BROWSER_MIME.test(n.mime.toLowerCase());
+}
+
 export function canThumbnail(n: Node) {
   return ["image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"].includes(n.mime) && n.size <= 60 * 1024 * 1024;
+}
+
+/** Largest PDF whose thumbnail the browser makes (pdf.js reads only the parts of the file it needs, but a huge file may still be slow) */
+const MAX_PDF_THUMB = 200 * 1024 * 1024;
+
+/**
+ * PDFs and videos: the server can't read them, so the browser that shows them draws the thumbnail (the first page, a
+ * frame) and uploads it for everyone (lib/thumbs.ts). The same types the server takes (files.rs, browser_thumbnailable)
+ */
+export function canBrowserThumbnail(n: Node) {
+  if (n.kind !== "file" || n.size === 0) return false;
+  if (n.mime === "application/pdf") return n.size <= MAX_PDF_THUMB;
+  return n.mime.startsWith("video/") && isBrowserMedia(n);
+}
+
+/** A ZIP archive the server can extract (archive.rs, is_zip) */
+export function isZip(n: NodeLike) {
+  return n.kind === "file" && (extOf(n.name) === "zip" || n.mime === "application/zip" || n.mime === "application/x-zip-compressed");
 }
 
 /** Can be opened in the text editor */

@@ -30,7 +30,7 @@ import { t, tServer } from "@/lib/i18n";
 
 /** Dropdown (same style as the inputs) */
 const SELECT_CLASS =
-  "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30 [&>option]:bg-popover [&>option]:text-popover-foreground";
+  "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring dark:bg-input/30 [&>option]:bg-popover [&>option]:text-popover-foreground";
 
 export const STORAGE_KIND_LABEL: Record<StorageKind, string> = {
   s3: t("S3-compatible"),
@@ -91,7 +91,7 @@ export function StorageLocations() {
   const makeDefault = async (l: StorageLocation) => {
     try {
       await api.setDefaultStorage(l.id);
-      toast.success(t("New files will be stored in \"{name}\" by default", { name: l.name }));
+      toast.success(t("New spaces will be stored in \"{name}\"", { name: l.name }));
       refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Operation failed"));
@@ -167,7 +167,7 @@ export function StorageLocations() {
                   onDoubleClick={() => setEditing(l)}
                   className={cn(
                     "flex items-center gap-3 px-4 py-3 select-none hover:bg-muted/50",
-                    selectedId === l.id && "bg-accent hover:bg-accent",
+                    selectedId === l.id && "bg-selection shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection",
                   )}
                 >
                   <Icon

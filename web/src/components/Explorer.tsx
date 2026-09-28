@@ -1,22 +1,26 @@
-import type { ReactNode } from "react";
+import { useMemo, useRef, type ReactNode } from "react";
 import { FolderOpenIcon, Grid2X2Icon, ListIcon, UploadCloudIcon, type LucideIcon } from "lucide-react";
 import { api, privateSource, type Node, type Role, type SortKey, type SortOrder } from "@/api";
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DetailsPane } from "@/components/DetailsPane";
+import { ErrorState } from "@/components/ErrorState";
 import { FileList } from "@/components/FileList";
-import { useMarquee } from "@/components/useMarquee";
+import { MarqueeBox, useMarquee, type MeasureHits } from "@/components/useMarquee";
 import { Frame, type Crumb } from "@/components/Frame";
 import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
+import { toastWithUndo } from "@/lib/undo";
 import { formatBytes } from "@/lib/utils";
-import { enqueue, filesFromInput } from "@/uploads";
+import { filesFromInput, uploadFiles } from "@/uploads";
 import { useExplorerState } from "./explorer/state";
 import { useExplorerActions } from "./explorer/actions";
 import { explorerMenus } from "./explorer/menus";
 import { explorerToolbar } from "./explorer/toolbar";
 import { ExplorerDialogs } from "./explorer/dialogs";
+import { SelectionBar } from "./explorer/selectionBar";
+import { useMediaQuery } from "@/lib/focus";
 import type { Item } from "./explorer/types";
 
 export interface ExplorerProps {
@@ -26,6 +30,8 @@ export interface ExplorerProps {
   offline?: string | null;
   items: Item[];
   loading: boolean;
+  /** Further pages of a large folder are still loading in the background */
+  loadingMore?: boolean;
   error?: Error | null;
   /** Current folder; when set, uploading and creating are possible */
   folderId?: string;
@@ -78,12 +84,19 @@ export function Explorer(p: ExplorerProps) {
     dialog,
     setDialog,
   } = s;
-  const { open, moveInto, dragProps, refresh } = a;
-  // Hold the left button and drag on empty space to marquee-select (disabled while renaming)
-  const marquee = useMarquee({ selected, onSelect: setSelected, enabled: !p.loading && dialog?.t !== "rename" });
+  const { open, dropInto, uploadInto, dragProps, refresh } = a;
+  // Hold the left button and drag on empty space to marquee-select (disabled while renaming); the list gives its row geometry
+  const measure = useRef<MeasureHits>(null);
+  const marquee = useMarquee({ selected, onSelect: setSelected, enabled: !p.loading && dialog?.t !== "rename", measure });
+  // Phones: a bar with the selected items' actions takes the place of the context menu on a long press
+  const phone = useMediaQuery("(max-width: 47.99rem)");
+  const dimmed = useMemo(() => (clip?.mode === "cut" ? new Set(clip.ids) : undefined), [clip]);
   const footer = (
     <>
-      <span>{t("{n} item|{n} items", { n: p.items.length })}</span>
+      <span>
+        {t("{n} item|{n} items", { n: p.items.length })}
+        {p.loadingMore && ` · ${t("Loading more items…")}`}
+      </span>
       {selectedNodes.length > 0 && (
         <span className="border-l pl-3">
           {t("{n} item selected|{n} items selected", { n: selectedNodes.length })}
@@ -103,10 +116,10 @@ export function Explorer(p: ExplorerProps) {
 
   const footerRight = (
     <span className="flex items-center gap-0.5">
-      <Button variant={view === "list" ? "secondary" : "ghost"} size="icon-xs" aria-label={t("Details")} title={t("Details")} onClick={() => setView("list")}>
+      <Button variant={view === "list" ? "secondary" : "ghost"} aria-pressed={view === "list"} size="icon-xs" aria-label={t("Details")} title={t("Details")} onClick={() => setView("list")}>
         <ListIcon />
       </Button>
-      <Button variant={view === "grid" ? "secondary" : "ghost"} size="icon-xs" aria-label={t("Large icons")} title={t("Large icons")} onClick={() => setView("grid")}>
+      <Button variant={view === "grid" ? "secondary" : "ghost"} aria-pressed={view === "grid"} size="icon-xs" aria-label={t("Large icons")} title={t("Large icons")} onClick={() => setView("grid")}>
         <Grid2X2Icon />
       </Button>
     </span>
@@ -122,6 +135,7 @@ export function Explorer(p: ExplorerProps) {
       activeFolder={p.folderId}
       footer={footer}
       footerRight={footerRight}
+      keys
     >
       {p.notice}
       <div className="relative flex min-h-0 flex-1">
@@ -129,7 +143,8 @@ export function Explorer(p: ExplorerProps) {
           <ContextMenuTrigger
             className="relative min-h-0 flex-1 overflow-auto outline-none"
             onContextMenuCapture={(e) => {
-              if (!(e.target as HTMLElement).closest("[data-node-id]")) setSelected(new Set());
+              // The column headers have their own menu, which leaves the selection alone
+              if (!(e.target as HTMLElement).closest("[data-node-id], thead")) setSelected(new Set());
             }}
             onClick={(e) => {
               if (!(e.target as HTMLElement).closest("[data-node-id]")) setSelected(new Set());
@@ -137,12 +152,7 @@ export function Explorer(p: ExplorerProps) {
             {...dragProps}
             {...marquee.containerProps}
           >
-            {marquee.box && (
-              <div
-                className="pointer-events-none absolute z-10 border border-brand bg-brand/15"
-                style={{ left: marquee.box.x, top: marquee.box.y, width: marquee.box.w, height: marquee.box.h }}
-              />
-            )}
+            <MarqueeBox store={marquee.box} />
             {p.loading ? (
               <div className="grid gap-1.5 p-3">
                 {Array.from({ length: 8 }, (_, i) => (
@@ -150,7 +160,7 @@ export function Explorer(p: ExplorerProps) {
                 ))}
               </div>
             ) : p.error ? (
-              <div className="p-10 text-center text-sm text-destructive">{p.error.message}</div>
+              <ErrorState message={p.error.message} onRetry={a.refresh} />
             ) : (
               <FileList
                 items={p.items}
@@ -166,15 +176,25 @@ export function Explorer(p: ExplorerProps) {
                 onOpenInNewTab={(n) => tabs.open(n.kind === "folder" ? `/files/${n.id}` : `/view/${n.id}`, { reuse: n.kind === "file" })}
                 sort={p.sort}
                 onSort={p.onSort}
+                groupBy={s.groupBy}
+                groupReversed={
+                  s.groupBy === "date" ? p.sort?.key === "updated" && p.sort.order === "asc" : s.groupBy === "type" && p.sort?.key === "type" && p.sort.order === "desc"
+                }
                 showLocation={p.showLocation}
                 showOwner={p.showOwner}
                 showCheckboxes={showCheckboxes}
-                dimmed={clip?.mode === "cut" ? new Set(clip.ids) : undefined}
-                onMoveInto={caps.write && p.folderId ? moveInto : undefined}
+                touchMenu={!phone}
+                dimmed={dimmed}
+                measureRef={measure}
+                navRef={s.listNav}
+                onDropInto={caps.write && p.folderId ? dropInto : undefined}
+                onUploadInto={s.canUpload ? uploadInto : undefined}
                 renamingId={dialog?.t === "rename" ? dialog.node.id : null}
                 onRename={async (n, name) => {
                   await api.rename(n.id, name);
                   refresh();
+                  if (name !== n.name)
+                    toastWithUndo(t("Renamed to \"{name}\"", { name }), { undo: () => api.rename(n.id, n.name), undoneText: t("Renamed back"), after: refresh });
                 }}
                 onRenameDone={() => setDialog(null)}
                 empty={
@@ -203,6 +223,7 @@ export function Explorer(p: ExplorerProps) {
         </ContextMenu>
         {detailsOpen && <DetailsPane selected={selectedNodes} folder={p.folder} onClose={() => setDetailsOpen(false)} />}
       </div>
+      {phone && selectedNodes.length > 0 && <SelectionBar p={p} s={s} a={a} menuItems={menuItems} />}
 
       <input
         ref={fileInput}
@@ -210,7 +231,7 @@ export function Explorer(p: ExplorerProps) {
         multiple
         hidden
         onChange={(e) => {
-          if (e.target.files?.length) enqueue(filesFromInput(e.target.files), p.folderId!);
+          if (e.target.files?.length) void uploadFiles(filesFromInput(e.target.files), p.folderId!);
           e.target.value = "";
         }}
       />
@@ -221,7 +242,7 @@ export function Explorer(p: ExplorerProps) {
         // @ts-expect-error webkitdirectory isn't in the standard types
         webkitdirectory=""
         onChange={(e) => {
-          if (e.target.files?.length) enqueue(filesFromInput(e.target.files), p.folderId!);
+          if (e.target.files?.length) void uploadFiles(filesFromInput(e.target.files), p.folderId!);
           e.target.value = "";
         }}
       />

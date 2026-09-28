@@ -34,6 +34,9 @@ export function ControlPanelPage() {
   const [collapsed, setCollapsed] = useState<string[]>([]);
   const system = useQuery({ queryKey: ["system"], queryFn: api.systemSettings });
   const locations = useQuery({ queryKey: ["storage-locations"], queryFn: api.storageLocations });
+  const drives = useQuery({ queryKey: ["admin-drives"], queryFn: api.adminDrives });
+  // The company space can be renamed, so the summary uses its current name
+  const company = drives.data?.find((d) => d.kind === "company")?.name ?? t("All files");
 
   const s = system.data?.stats;
   const defaultLocation = locations.data?.find((l) => l.is_default);
@@ -41,12 +44,13 @@ export function ControlPanelPage() {
     ? {
         users: t("{n} user|{n} users", { n: s.users }),
         groups: t("{n} group|{n} groups", { n: s.groups }),
+        shares: system.data?.public_links ? t("{n} share link|{n} share links", { n: s.share_links }) : t("Public links turned off"),
         drives: t("{n} team space|{n} team spaces", { n: s.team_drives }),
         storage: locations.data
           ? t("{n} location · Default: {name}|{n} locations · Default: {name}", { n: locations.data.length, name: defaultLocation?.name ?? "—" })
           : undefined,
         usage: t("{size} used on disk", { size: formatBytes(s.stored_bytes) }),
-        general: system.data?.shared_enabled ? t("\"All files\" enabled") : t("\"All files\" disabled"),
+        general: system.data?.shared_enabled ? t("\"{name}\" enabled", { name: company }) : t("\"{name}\" disabled", { name: company }),
       }
     : {};
 
@@ -102,10 +106,10 @@ export function ControlPanelPage() {
         }}
       />
       <div className="flex-1" />
-      <Button variant={view === "tiles" ? "secondary" : "ghost"} size="icon-sm" aria-label={t("Large icons")} title={t("Large icons")} onClick={() => setView("tiles")}>
+      <Button variant={view === "tiles" ? "secondary" : "ghost"} aria-pressed={view === "tiles"} size="icon-sm" aria-label={t("Large icons")} title={t("Large icons")} onClick={() => setView("tiles")}>
         <Grid2X2Icon />
       </Button>
-      <Button variant={view === "list" ? "secondary" : "ghost"} size="icon-sm" aria-label={t("Details")} title={t("Details")} onClick={() => setView("list")}>
+      <Button variant={view === "list" ? "secondary" : "ghost"} aria-pressed={view === "list"} size="icon-sm" aria-label={t("Details")} title={t("Details")} onClick={() => setView("list")}>
         <ListIcon />
       </Button>
     </>
@@ -117,8 +121,8 @@ export function ControlPanelPage() {
       key={item.key}
       {...itemProps(item)}
       className={cn(
-        "flex cursor-default gap-3 rounded-md border border-transparent p-3 outline-none select-none hover:bg-muted/70 focus-visible:border-ring",
-        sel === item.key && "border-ring bg-accent hover:bg-accent",
+        "flex cursor-default gap-3 rounded-md border border-transparent p-3 outline-none select-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
+        sel === item.key && "border-brand bg-selection hover:bg-selection",
       )}
     >
       <span className={cn("flex size-11 shrink-0 items-center justify-center rounded-lg", item.tone)}>
@@ -147,7 +151,7 @@ export function ControlPanelPage() {
           <tr
             key={item.key}
             {...itemProps(item)}
-            className={cn("h-8 cursor-default outline-none hover:bg-muted/70", sel === item.key && "bg-accent hover:bg-accent")}
+            className={cn("h-8 cursor-default outline-none hover:bg-muted/70", sel === item.key && "bg-selection shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection")}
           >
             <td className="truncate px-2 pl-3">
               <span className="flex items-center gap-2">
@@ -204,8 +208,7 @@ export function ControlPanelPage() {
                     className="mt-4 mb-2 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
                   >
                     <ChevronDownIcon className={cn("size-3.5 transition-transform", !isOpen && "-rotate-90")} />
-                    {label}
-                    {t(" ({n})", { n: inCat.length })}
+                    {t("{label} ({n})", { label, n: inCat.length })}
                   </button>
                   {isOpen && <div className={grid}>{inCat.map(tile)}</div>}
                 </section>

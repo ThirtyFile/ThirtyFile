@@ -1,19 +1,20 @@
 import { useRef, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckIcon, FolderIcon, ImageUpIcon, Loader2Icon, MonitorIcon, MoonIcon, SunIcon, Trash2Icon, UndoIcon } from "lucide-react";
+import { CheckIcon, FolderIcon, ImageUpIcon, Loader2Icon, MonitorIcon, MoonIcon, SunIcon, Trash2Icon, TriangleAlertIcon, UndoIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type BrandingReq } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { backgroundUrl, brandForeground, DEFAULT_BRANDING, logoUrl, useBranding, type Branding } from "@/lib/branding";
+import { backgroundUrl, brandForeground, contrastRatio, DEFAULT_BRANDING, logoUrl, PAGE_BACKGROUND, useBranding, type Branding } from "@/lib/branding";
 import { SiteName } from "@/components/SiteName";
 import { formatClock, formatDate, LoginAvatar, LoginWallpaper } from "@/pages/LoginPage";
+import { confirm } from "@/components/confirm";
 import type { ThemeMode } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { t, tServer, tc } from "@/lib/i18n";
-import { Section, SettingsFrame, Toggle } from "@/pages/SystemPage";
+import { Section, SettingsFrame, Toggle } from "@/pages/SettingsFrame";
 
 /** Preset color schemes: each has an accent color tuned separately for light and dark mode */
 const PRESETS = [
@@ -150,6 +151,7 @@ function BrandingForm({ saved }: { saved: Branding }) {
           <p className="-mt-2 text-xs text-muted-foreground">
             {t("The accent color is used for buttons, selected items, links, and focus rings. Dark mode usually needs a slightly brighter color than light mode to stay legible. Button text is automatically set to black or white based on the accent color.")}
           </p>
+          <ContrastWarning light={draft.light_brand} dark={draft.dark_brand} />
           <div className="grid gap-3 sm:grid-cols-2">
             <ThemePreview b={preview} mode="light" />
             <ThemePreview b={preview} mode="dark" />
@@ -363,7 +365,20 @@ function LogoSlot({ variant, saved }: { variant: "light" | "dark"; saved: Brandi
           {has ? t("Replace") : t("Upload")}
         </Button>
         {has && (
-          <Button variant="ghost" size="sm" disabled={remove.isPending} onClick={() => remove.mutate()}>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={remove.isPending}
+            onClick={async () => {
+              const ok = await confirm({
+                title: dark ? t("Remove the dark mode logo?") : t("Remove the logo?"),
+                description: t("The image is deleted. To use it again, you'll need to upload it again."),
+                confirmText: t("Remove"),
+                destructive: true,
+              });
+              if (ok) remove.mutate();
+            }}
+          >
             <Trash2Icon /> {t("Remove")}
           </Button>
         )}
@@ -382,7 +397,7 @@ function ThemePreview({ b, mode }: { b: Branding; mode: "light" | "dark" }) {
   const selection = `color-mix(in srgb, ${brand} ${mode === "dark" ? 24 : 13}%, ${s.bg})`;
   const logo = (b.has_logo_dark && mode === "dark") || b.has_logo ? logoUrl(b, mode === "dark") : "/favicon.svg";
   const row = (label: string, selected = false) => (
-    <div className="flex items-center gap-1.5 rounded px-1.5 py-1" style={selected ? { background: selection } : undefined}>
+    <div className="flex items-center gap-1.5 rounded px-1.5 py-1" style={selected ? { background: selection, boxShadow: `inset 3px 0 0 ${brand}` } : undefined}>
       <FolderIcon className="size-3" style={{ color: selected ? brand : s.muted }} />
       <span style={{ color: selected ? brand : s.fg }}>{label}</span>
     </div>
@@ -470,7 +485,20 @@ function BackgroundSlot({ saved }: { saved: Branding }) {
               {has ? t("Replace") : t("Upload")}
             </Button>
             {has && (
-              <Button variant="ghost" size="sm" disabled={remove.isPending} onClick={() => remove.mutate()}>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={remove.isPending}
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: t("Remove the background image?"),
+                    description: t("The image is deleted. To use it again, you'll need to upload it again."),
+                    confirmText: t("Remove"),
+                    destructive: true,
+                  });
+                  if (ok) remove.mutate();
+                }}
+              >
                 <Trash2Icon /> {t("Remove")}
               </Button>
             )}
@@ -525,6 +553,36 @@ function LoginPreview({ b }: { b: Branding }) {
         </div>,
         "scale-110 blur-sm",
       )}
+    </div>
+  );
+}
+
+/** Focus rings, selection bars and links need at least 3:1 against the page (WCAG 1.4.11); text on the accent needs 4.5:1 */
+function ContrastWarning({ light, dark }: { light: string; dark: string }) {
+  const valid = (c: string) => /^#[0-9a-f]{6}$/i.test(c);
+  const problems = (
+    [
+      [light, PAGE_BACKGROUND.light, t("light mode")],
+      [dark, PAGE_BACKGROUND.dark, t("dark mode")],
+    ] as const
+  ).flatMap(([color, page, mode]) => {
+    if (!valid(color)) return [];
+    const page_ = contrastRatio(color, page);
+    const text = contrastRatio(color, brandForeground(color));
+    const out = [];
+    if (page_ < 3) out.push(t("In {mode}, the accent color stands out too little from the page ({ratio}:1, at least 3:1 is needed): focus rings and selected items are hard to see.", { mode, ratio: page_.toFixed(2) }));
+    if (text < 4.5) out.push(t("In {mode}, button text on the accent color is hard to read ({ratio}:1, at least 4.5:1 is needed).", { mode, ratio: text.toFixed(2) }));
+    return out;
+  });
+  if (!problems.length) return null;
+  return (
+    <div role="status" className="-mt-1 flex gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs">
+      <TriangleAlertIcon className="size-4 shrink-0 text-amber-600" aria-hidden="true" />
+      <div className="grid gap-1">
+        {problems.map((p) => (
+          <p key={p}>{p}</p>
+        ))}
+      </div>
     </div>
   );
 }

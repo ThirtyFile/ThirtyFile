@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { DownloadIcon, Loader2Icon } from "lucide-react";
-import { api, triggerDownload, type ActivityFilter } from "@/api";
+import { api, type ActivityFilter } from "@/api";
+import { nativeDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { ACTION_GROUPS, actionLabel } from "@/lib/drives";
 import { cn, formatWinDate } from "@/lib/utils";
@@ -46,7 +47,7 @@ export function ActivityLog({ driveId, className, compact }: { driveId?: string;
             className="h-8 text-xs"
             disabled={!rows.length}
             title={t("Export records that match the filters (up to 100,000)")}
-            onClick={() => triggerDownload(api.activityExportUrl(filter))}
+            onClick={() => nativeDownload(api.activityExportUrl(filter))}
           >
             <DownloadIcon /> {t("Export CSV")}
           </Button>
@@ -78,22 +79,26 @@ export function ActivityLog({ driveId, className, compact }: { driveId?: string;
               </tr>
             </thead>
             <tbody>
-              {rows.map((a) => (
-                <tr key={a.id} className="border-b border-border/40 hover:bg-muted/50">
-                  <td className="px-2.5 py-1.5 whitespace-nowrap text-muted-foreground">{formatWinDate(a.at)}</td>
-                  <td className="truncate px-2.5 py-1.5">
-                    <button type="button" className="hover:text-brand hover:underline" title={t("Show only this user")} onClick={() => setUser(a.username)}>
-                      {a.username}
-                    </button>
-                  </td>
-                  <td className="px-2.5 py-1.5 whitespace-nowrap">{actionLabel(a.action)}</td>
-                  <td className="max-w-0 truncate px-2.5 py-1.5" title={`${a.node_name} ${tServer(a.detail)}`}>
-                    {a.node_name || (a.node_id ? defaultName(a.drive_name) : "")}
-                    {a.detail && <span className="ml-1.5 text-muted-foreground">{tServer(a.detail)}</span>}
-                  </td>
-                  {!driveId && <td className="truncate px-2.5 py-1.5 text-muted-foreground max-md:hidden">{a.drive_name === null ? "—" : defaultName(a.drive_name)}</td>}
-                </tr>
-              ))}
+              {rows.map((a) => {
+                // Translated once per row (the cell and its tooltip show the same text)
+                const detail = tServer(a.detail);
+                return (
+                  <tr key={a.id} className="border-b border-border/40 hover:bg-muted/50">
+                    <td className="px-2.5 py-1.5 whitespace-nowrap text-muted-foreground">{formatWinDate(a.at)}</td>
+                    <td className="truncate px-2.5 py-1.5">
+                      <button type="button" className="hover:text-brand hover:underline" title={t("Show only this user")} onClick={() => setUser(a.username)}>
+                        {a.username}
+                      </button>
+                    </td>
+                    <td className="px-2.5 py-1.5 whitespace-nowrap">{actionLabel(a.action)}</td>
+                    <td className="max-w-0 truncate px-2.5 py-1.5" title={`${a.node_name} ${detail}`}>
+                      {a.node_name || (a.node_id ? defaultName(a.drive_name) : "")}
+                      {detail && <span className="ml-1.5 text-muted-foreground">{detail}</span>}
+                    </td>
+                    {!driveId && <td className="truncate px-2.5 py-1.5 text-muted-foreground max-md:hidden">{a.drive_name === null ? "—" : defaultName(a.drive_name)}</td>}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

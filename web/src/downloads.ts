@@ -4,7 +4,8 @@
 
 import { useSyncExternalStore } from "react";
 import { toast } from "sonner";
-import { t, tServer } from "@/lib/i18n";
+import { responseError } from "@/api";
+import { t } from "@/lib/i18n";
 
 export type DownloadStatus = "downloading" | "done" | "error" | "canceled";
 
@@ -20,25 +21,30 @@ export interface DownloadTask {
   rate: number;
   status: DownloadStatus;
   error?: string;
-  url: string;
+  /** Where the download came from, to start it again */
+  source: DownloadSource;
   controller: AbortController;
 }
 
+/** A URL, or a function that makes one when the download starts (a short-lived link for several items) */
+export type DownloadSource = string | (() => Promise<string>);
+
 /**
- * Limit for downloading in the page; larger files are handed to the browser to download directly.
- * Phones (touch devices) or computers with little memory use a lower limit, so the tab isn't killed by the system for running out of memory
+ * Limit for downloading in the page; larger files are handed to the browser to download directly (to disk, without
+ * holding the file in memory). Phones (touch devices) or computers with little memory use a lower limit, so the tab
+ * isn't killed by the system for running out of memory. It is also the most that is fetched and thrown away when the
+ * size isn't known up front
  */
 const IN_APP_LIMIT = (() => {
   const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
   const coarse = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
-  return coarse || (memory !== undefined && memory <= 4) ? 256 * 1024 ** 2 : 1024 ** 3;
+  return coarse || (memory !== undefined && memory <= 4) ? 64 * 1024 ** 2 : 256 * 1024 ** 2;
 })();
 /** Merge chunks into a Blob every time this much is received (the browser can move large Blobs to disk), to avoid keeping both the chunks and the full file */
-const FLUSH_BYTES = 64 * 1024 ** 2;
+const FLUSH_BYTES = 16 * 1024 ** 2;
 
-/** Reason shown when the pre-check fails (a HEAD response has no body, so only the status code can be used) */
-/** Message for a failed HEAD/GET, translated when shown (this module may be evaluated before the dictionary is ready) */
-function headError(status: number): string {
+/** Message for a failed download whose response carries no readable reason, translated when shown (this module may be evaluated before the dictionary is ready) */
+function statusError(status: number): string {
   switch (status) {
     case 403:
       return t("You don't have permission to download this item");
@@ -85,7 +91,7 @@ export function nativeDownload(url: string) {
   a.remove();
 }
 
-function filenameFrom(res: Response, fallback: string) {
+export function filenameFrom(res: Response, fallback: string) {
   const cd = res.headers.get("content-disposition") ?? "";
   const star = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(cd);
   if (star) {
@@ -96,15 +102,6 @@ function filenameFrom(res: Response, fallback: string) {
     }
   }
   return /filename\s*=\s*"?([^";]+)"?/i.exec(cd)?.[1] ?? fallback;
-}
-
-async function errorOf(res: Response) {
-  try {
-    const error = ((await res.json()) as { error?: string }).error;
-    return error ? tServer(error) : t("Download failed ({status})", { status: res.status });
-  } catch {
-    return headError(res.status);
-  }
 }
 
 function save(blob: Blob, name: string) {
@@ -120,41 +117,54 @@ function save(blob: Blob, name: string) {
 }
 
 /** Download with progress; zip means a zipped download (multiple items or folders) */
-export async function download(url: string, opts: { zip?: boolean; name?: string } = {}) {
-  // First check that it can be downloaded and get the size: show the reason on failure; hand oversized files to the browser
-  let size: number | null = null;
+export async function download(source: DownloadSource, opts: { zip?: boolean; name?: string } = {}) {
+  let url: string;
   try {
-    const head = await fetch(url, { method: "HEAD", credentials: "same-origin" });
-    if (!head.ok) {
-      // Direct fetch, so the session check in api.request doesn't apply: hand it over the same way
-      if (head.status === 401) window.dispatchEvent(new Event("tf:unauthorized"));
-      else toast.error(headError(head.status));
-      return;
-    }
-    size = Number(head.headers.get("content-length")) || null;
-  } catch {
-    // On network errors, try anyway
-  }
-  if ((size !== null && size > IN_APP_LIMIT) || typeof ReadableStream === "undefined") {
-    nativeDownload(url);
-    toast.info(t("Large file: downloading directly in your browser. Check the browser's download list for progress."));
+    url = typeof source === "string" ? source : await source();
+  } catch (e) {
+    // The server refused the selection (e.g. too many items); the message is already translated
+    toast.error(e instanceof Error ? e.message : t("Download failed"));
     return;
   }
+  if (typeof ReadableStream === "undefined") return nativeDownload(url);
 
   const id = `d${++seq}`;
   const controller = new AbortController();
   const zip = !!opts.zip;
   tasks = [
-    { id, name: opts.name ?? (zip ? t("Download.zip") : t("Downloading…")), zip, total: size, received: 0, rate: 0, status: "downloading", url, controller },
+    { id, name: opts.name ?? (zip ? t("Download.zip") : t("Downloading…")), zip, total: null, received: 0, rate: 0, status: "downloading", source, controller },
     ...tasks,
   ];
   emit();
+  const drop = () => {
+    tasks = tasks.filter((x) => x.id !== id);
+    emit();
+  };
+  // Too large to keep in the page: stop reading and let the browser download it itself (to disk, with its own progress)
+  const handOver = () => {
+    controller.abort();
+    drop();
+    nativeDownload(url);
+    toast.info(t("Large file: downloading directly in your browser. Check the browser's download list for progress."));
+  };
   try {
+    // One request: the status and size come with the response, so there is no separate check first (a HEAD request
+    // would make the server open the file or walk the folder once more)
     const res = await fetch(url, { credentials: "same-origin", signal: controller.signal });
-    if (res.status === 401) window.dispatchEvent(new Event("tf:unauthorized"));
-    if (!res.ok || !res.body) throw new Error(await errorOf(res));
+    if (!res.ok) {
+      const error = await responseError(res, url, statusError(res.status));
+      if (res.status === 401) {
+        // The session expired: responseError sent the user to sign in, like api.request
+        controller.abort();
+        drop();
+        return;
+      }
+      throw error;
+    }
+    if (!res.body) throw new Error(statusError(res.status));
+    const total = Number(res.headers.get("content-length")) || null;
+    if (total !== null && total > IN_APP_LIMIT) return handOver();
     const name = filenameFrom(res, opts.name ?? "download");
-    const total = Number(res.headers.get("content-length")) || size;
     // The server zips multiple items or folders
     update(id, { name, total, zip: zip || res.headers.get("content-type") === "application/zip" });
 
@@ -177,15 +187,8 @@ export async function download(url: string, opts: { zip?: boolean; name?: string
         chunks = [];
         pending = 0;
       }
-      // Size unknown up front (e.g. zipped download) and over the limit: let the browser download it directly instead
-      if (!total && received > IN_APP_LIMIT) {
-        controller.abort();
-        tasks = tasks.filter((x) => x.id !== id);
-        emit();
-        nativeDownload(url);
-        toast.info(t("Large file: downloading directly in your browser. Check the browser's download list for progress."));
-        return;
-      }
+      // Size unknown up front (rare: e.g. a proxy that compresses responses) and over the limit: let the browser download it directly instead
+      if (!total && received > IN_APP_LIMIT) return handOver();
       const now = performance.now();
       // Update the display every 0.25 seconds; speed is a smoothed average over recent samples
       if (now - lastAt >= 250) {
@@ -219,7 +222,7 @@ export function retryDownload(id: string) {
   if (!t) return;
   tasks = tasks.filter((x) => x.id !== id);
   emit();
-  void download(t.url, { zip: t.zip, name: t.name });
+  void download(t.source, { zip: t.zip, name: t.name });
 }
 
 export function clearDownloads() {

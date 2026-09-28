@@ -1,16 +1,18 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import JSZip from "jszip";
 import { Loader2Icon } from "lucide-react";
+import { toast } from "sonner";
 import { readXlsx } from "@/lib/sheet/xlsx";
-import { Axis, MAX_COLS, MAX_ROWS, key, type Workbook } from "@/lib/sheet/model";
+import { Axis, MAX_COLS, MAX_ROWS, colName, key, type Workbook } from "@/lib/sheet/model";
 import { Calculator, type Value } from "@/lib/sheet/formula";
 import { OoxmlPackage } from "@/lib/office/ooxml";
 import { parseTheme, type Theme } from "@/lib/office/theme";
 import { readDrawings, type DrawingItem } from "@/lib/office/xlsx/anchors";
 import { frameDocument, loadFrameScript } from "@/components/officeFrame";
 import { computeConditional, readDxfs, type CellDecoration, type Dxf } from "@/lib/sheet/conditional";
-import { t } from "@/lib/i18n";
+import { t, tc } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { HEADER_H, HEADER_W, draw, type View } from "./renderer";
+import { HEADER_H, HEADER_W, cellText, draw, visibleCells, type View } from "./renderer";
 
 interface Loaded {
   book: Workbook;
@@ -19,6 +21,23 @@ interface Loaded {
   /** Differential formats for conditional formatting, and custom indexed colors */
   dxfs: Dxf[];
   palette?: string[];
+  /** What the drawing frame needs, as a small package; null when no sheet has pictures, charts or shapes */
+  drawingParts: ArrayBuffer | null;
+}
+
+/** Cell data, formulas, macros and the like: large, and not needed to draw pictures, charts and shapes */
+const CELL_DATA = /^xl\/(worksheets\/[^/]+\.xml|sharedStrings\.xml|calcChain\.xml|vbaProject\.bin|pivotCache\/|externalLinks\/)/;
+
+/**
+ * The workbook without its cell data, for the drawing frame. Entries are copied as they are, still compressed, so this
+ * neither unzips nor compresses them again; null when there is nothing to draw, so the frame isn't loaded at all.
+ */
+async function drawingParts(zip: JSZip): Promise<ArrayBuffer | null> {
+  const paths = Object.keys(zip.files);
+  if (!paths.some((p) => /^xl\/drawings\/[^/]+\.xml$/.test(p))) return null;
+  const parts = new JSZip();
+  for (const p of paths) if (!zip.files[p].dir && !CELL_DATA.test(p)) parts.files[p] = zip.files[p];
+  return parts.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
 }
 
 /**
@@ -28,8 +47,9 @@ interface Loaded {
 export default function SheetPreview({ buffer, onError }: { buffer: ArrayBuffer; onError(message: string): void }) {
   const [data, setData] = useState<Loaded | null>(null);
   const [sheetIdx, setSheetIdx] = useState(0);
-  const drawingFrame = useDrawingFrame(buffer);
+  const drawingFrame = useDrawingFrame(data?.drawingParts ?? null);
 
+  const fail = useEffectEvent((message: string) => onError(message));
   useEffect(() => {
     let cancelled = false;
     let pkg: OoxmlPackage | null = null;
@@ -43,15 +63,15 @@ export default function SheetPreview({ buffer, onError }: { buffer: ArrayBuffer;
       const styles = await pkg.xml("xl/styles.xml");
       const custom = Array.from(styles?.getElementsByTagNameNS("*", "rgbColor") ?? []).map((c) => (c.getAttribute("rgb") ?? "").slice(-6));
       const palette = custom.length ? custom : undefined;
+      const parts = await drawingParts(zip);
       if (cancelled) return pkg.dispose();
       setSheetIdx(book.active ?? 0);
-      setData({ book, pkg, theme, dxfs: readDxfs(styles, theme, palette), palette });
-    })().catch((e) => !cancelled && onError(e instanceof Error ? e.message : t("Couldn't open this spreadsheet")));
+      setData({ book, pkg, theme, dxfs: readDxfs(styles, theme, palette), palette, drawingParts: parts });
+    })().catch((e) => !cancelled && fail(e instanceof Error ? e.message : t("Couldn't open this spreadsheet")));
     return () => {
       cancelled = true;
       pkg?.dispose();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buffer]);
 
   if (!data)
@@ -76,6 +96,7 @@ export default function SheetPreview({ buffer, onError }: { buffer: ArrayBuffer;
             <button
               key={s.id}
               type="button"
+              aria-current={i === sheetIdx ? "true" : undefined}
               onClick={() => setSheetIdx(i)}
               className={cn(
                 "relative shrink-0 border-r px-3 py-1.5 whitespace-nowrap hover:bg-muted",
@@ -94,7 +115,7 @@ export default function SheetPreview({ buffer, onError }: { buffer: ArrayBuffer;
 
 /**
  * Pictures, charts and shapes are rendered by the same sandboxed frame as Word / PowerPoint previews (no same-origin rights,
- * no network), laid over the canvas. The host sends the workbook once, then the sheet and the column/row positions to draw at,
+ * no network), laid over the canvas, and only loaded for workbooks that have them. The host sends the drawing parts once, then the sheet and the column/row positions to draw at,
  * and the scroll offset as the user scrolls.
  */
 interface DrawingFrame {
@@ -104,7 +125,7 @@ interface DrawingFrame {
   scroll(x: number, y: number): void;
 }
 
-function useDrawingFrame(buffer: ArrayBuffer): DrawingFrame {
+function useDrawingFrame(parts: ArrayBuffer | null): DrawingFrame {
   const iframe = useRef<HTMLIFrameElement>(null);
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
   const state = useRef({
@@ -113,12 +134,16 @@ function useDrawingFrame(buffer: ArrayBuffer): DrawingFrame {
     pending: null as { sheet: string; cols: Float64Array; rows: Float64Array; frozen: { rows: number; cols: number } } | null,
     scroll: { x: 0, y: 0 },
   });
+  const wanted = parts !== null;
   useEffect(() => {
+    if (!wanted) return;
     loadFrameScript().then(
       (js) => setSrcDoc(frameDocument(js, true)),
       () => {},
     );
-  }, []);
+  }, [wanted]);
+  // "*": the sandboxed frame has an opaque origin, which no target origin can name. Only that frame receives it
+  // (its contentWindow), and it only accepts messages from this page (window.parent)
   const post = useCallback((msg: object, transfer?: Transferable[]) => {
     iframe.current?.contentWindow?.postMessage(msg, "*", transfer ?? []);
   }, []);
@@ -126,14 +151,20 @@ function useDrawingFrame(buffer: ArrayBuffer): DrawingFrame {
     const st = state.current;
     st.ready = false;
     st.loaded = false;
+    // The frame says "ready" once its script has started. If it never does (the script was blocked, e.g. a page left
+    // open across an upgrade, or it failed while starting), say so instead of leaving charts and pictures silently out
+    const readyTimer = srcDoc
+      ? window.setTimeout(() => {
+          if (!st.ready) toast.warning(t("Charts and pictures in this workbook couldn't be shown. Reload the page."));
+        }, 10_000)
+      : 0;
     const onMessage = (e: MessageEvent) => {
       if (e.source !== iframe.current?.contentWindow) return;
       const msg = e.data as { type?: string };
       if (msg.type === "ready") {
         st.ready = true;
-        // The frame gets its own copy of the workbook (transferred, so it doesn't stay in this page's memory)
-        const copy = buffer.slice(0);
-        post({ type: "load", kind: "xlsx", buffer: copy }, [copy]);
+        // Transferred, so it doesn't stay in this page's memory
+        if (parts?.byteLength) post({ type: "load", kind: "xlsx", buffer: parts }, [parts]);
       } else if (msg.type === "done" && !st.loaded) {
         st.loaded = true;
         if (st.pending) {
@@ -146,11 +177,14 @@ function useDrawingFrame(buffer: ArrayBuffer): DrawingFrame {
       }
     };
     window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [buffer, srcDoc, post]);
+    return () => {
+      window.clearTimeout(readyTimer);
+      window.removeEventListener("message", onMessage);
+    };
+  }, [parts, srcDoc, post]);
   return useMemo(
     () => ({
-      element: srcDoc ? (
+      element: srcDoc && wanted ? (
         <iframe
           ref={iframe}
           srcDoc={srcDoc}
@@ -174,9 +208,12 @@ function useDrawingFrame(buffer: ArrayBuffer): DrawingFrame {
         if (state.current.loaded) post({ type: "scroll", x, y });
       },
     }),
-    [srcDoc, post],
+    [srcDoc, wanted, post],
   );
 }
+
+/** Most rows and columns copied into the screen reader table (a full screen of a typical sheet fits) */
+const MIRROR = { rows: 100, cols: 40 };
 
 function Grid({ data, sheetIdx, drawingFrame }: { data: Loaded; sheetIdx: number; drawingFrame: DrawingFrame }) {
   const { book, pkg, theme, dxfs, palette } = data;
@@ -286,6 +323,21 @@ function Grid({ data, sheetIdx, drawingFrame }: { data: Loaded; sheetIdx: number
   useEffect(() => redraw());
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
 
+  // Screen readers can't read the canvas: the cells on screen are copied into an off-screen table, updated once scrolling stops
+  const descId = useId();
+  const [mirrorAt, setMirrorAt] = useState({ x: 0, y: 0 });
+  const mirrorTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(mirrorTimer.current), []);
+  const mirror = useMemo(() => {
+    if (!size.w) return null;
+    const shown = visibleCells({ width: size.w, height: size.h, scrollX: mirrorAt.x, scrollY: mirrorAt.y, rows, cols, frozen: sheet.frozen }, MIRROR);
+    const text = { sheet, sheetIndex: sheetIdx, styles: book.styles, calc: values };
+    // Empty rows, and empty columns after the last filled one, are left out; the headers keep the row numbers and column letters
+    const lines = shown.rows.map((r) => ({ r, cells: shown.cols.map((c) => cellText(text, r, c)) })).filter((l) => l.cells.some(Boolean));
+    const width = Math.max(0, ...lines.map((l) => l.cells.findLastIndex(Boolean) + 1));
+    return { cols: shown.cols.slice(0, width), lines: lines.map((l) => ({ r: l.r, cells: l.cells.slice(0, width) })) };
+  }, [size, mirrorAt, rows, cols, sheet, sheetIdx, book, values]);
+
   // Drawing objects are rendered by the sandboxed frame at these column/row positions
   useEffect(() => {
     const frozen = { rows: sheet.frozen?.rows ?? 0, cols: sheet.frozen?.cols ?? 0 };
@@ -295,16 +347,60 @@ function Grid({ data, sheetIdx, drawingFrame }: { data: Loaded; sheetIdx: number
 
   return (
     <div ref={wrapRef} className="relative min-h-0 flex-1 overflow-hidden">
-      <canvas ref={canvasRef} className="absolute inset-0" style={{ width: size.w, height: size.h }} />
+      <canvas ref={canvasRef} aria-hidden className="absolute inset-0" style={{ width: size.w, height: size.h }} />
       <div
-        className="absolute inset-0 overflow-auto"
+        role="region"
+        aria-label={tc("sheet", "Sheet {name}", { name: sheet.name })}
+        aria-describedby={descId}
+        tabIndex={0}
+        className="absolute inset-0 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset"
         onScroll={(e) => {
           scroll.current = { x: e.currentTarget.scrollLeft, y: e.currentTarget.scrollTop };
           redraw();
+          clearTimeout(mirrorTimer.current);
+          mirrorTimer.current = setTimeout(() => setMirrorAt({ ...scroll.current }), 200);
         }}
       >
         <div style={{ width: cols.total + HEADER_W + 40, height: rows.total + HEADER_H + 40 }} />
       </div>
+      <p id={descId} className="sr-only">
+        {t("The cells on screen are listed in the table that follows. Scroll with the arrow keys to show other cells.")}
+      </p>
+      {mirror && (
+        <table className="sr-only">
+          <caption>{tc("sheet", "Cells on screen in {name}", { name: sheet.name })}</caption>
+          {mirror.lines.length > 0 ? (
+            <>
+              <thead>
+                <tr>
+                  <td />
+                  {mirror.cols.map((c) => (
+                    <th key={c} scope="col">
+                      {colName(c)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {mirror.lines.map(({ r, cells }) => (
+                  <tr key={r}>
+                    <th scope="row">{r + 1}</th>
+                    {cells.map((text, i) => (
+                      <td key={mirror.cols[i]}>{text}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </>
+          ) : (
+            <tbody>
+              <tr>
+                <td>{t("The cells on screen are empty.")}</td>
+              </tr>
+            </tbody>
+          )}
+        </table>
+      )}
     </div>
   );
 }

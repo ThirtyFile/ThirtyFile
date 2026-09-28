@@ -43,7 +43,12 @@ export function AdminDrivesPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const tabs = useTabActions();
-  const q = useQuery({ queryKey: ["admin-drives"], queryFn: api.adminDrives });
+  // Refreshed every few seconds while a folder space is being scanned, to show its progress
+  const q = useQuery({
+    queryKey: ["admin-drives"],
+    queryFn: api.adminDrives,
+    refetchInterval: (query) => (query.state.data?.some((d) => d.scanning) ? 3000 : false),
+  });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{ t: "quota" | "members" | "delete" | "create" | "location" | "folder"; drive?: Drive } | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -358,7 +363,14 @@ export function AdminDrivesPage() {
       {dialog?.t === "delete" && dialog.drive && (
         <ConfirmDialog
           title={t("Delete space \"{name}\"?", { name: dialog.drive.name })}
-          description={t("All files in this space ({size}) will be permanently deleted. This can't be undone.", { size: formatBytes(dialog.drive.used_bytes) })}
+          description={
+            dialog.drive.mode === "folder"
+              ? t("The space is removed from ThirtyFile. Its folder on the server, {path}, is kept with the files in it ({size}): delete it there when it's no longer needed.", {
+                  path: dialog.drive.source_path ?? "",
+                  size: formatBytes(dialog.drive.used_bytes),
+                })
+              : t("All files in this space ({size}) will be permanently deleted. This can't be undone.", { size: formatBytes(dialog.drive.used_bytes) })
+          }
           confirmText={t("Delete permanently")}
           destructive
           onClose={() => setDialog(null)}
@@ -431,7 +443,7 @@ function LocationDialog({ drive, onClose, onDone }: { drive: Drive; onClose(): v
           </DialogHeader>
           <div className="grid gap-2">
             <select
-              className="h-9 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className="h-9 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
               value={value}
               onChange={(e) => setValue(e.target.value)}
               aria-label={t("Storage location")}
@@ -486,7 +498,11 @@ function FolderCell({ drive }: { drive: Drive }) {
       <span className="truncate font-mono text-[12px]">{drive.source_path}</span>
       <span className={cn("truncate text-[11px]", r?.error ? "text-destructive" : "text-muted-foreground")}>
         {drive.read_only && !r?.error && `${t("Read-only")} · `}
-        {r?.error
+        {drive.scanning
+          ? drive.scanning.phase === "reading"
+            ? t("Checking the folder: {n} items read…", { n: drive.scanning.found })
+            : t("Updating: {done} of {total} changes…", { done: drive.scanning.done, total: drive.scanning.total })
+          : r?.error
           ? t("Can't read the folder")
           : drive.last_scan_at
             ? t("Checked {time}", { time: formatDateTime(drive.last_scan_at) })

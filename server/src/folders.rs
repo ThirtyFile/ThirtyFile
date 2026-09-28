@@ -60,6 +60,51 @@ pub struct ScanReport {
     /// Items that couldn't be indexed, with the reason
     pub skipped: Vec<String>,
     pub error: Option<String>,
+    /// How long reading the folder and updating the index took (milliseconds)
+    #[serde(default)]
+    pub read_ms: u64,
+    #[serde(default)]
+    pub index_ms: u64,
+}
+
+/// A scan in progress, shown in the Control panel
+#[derive(Debug, Clone, Serialize)]
+pub struct ScanProgress {
+    /// "reading" the folder, then "indexing" the changes
+    pub phase: &'static str,
+    /// Items read so far
+    pub found: usize,
+    /// Index changes made so far, and in all
+    pub done: usize,
+    pub total: usize,
+    pub started_at: i64,
+}
+
+fn progress_map() -> &'static Mutex<HashMap<String, ScanProgress>> {
+    static MAP: OnceLock<Mutex<HashMap<String, ScanProgress>>> = OnceLock::new();
+    MAP.get_or_init(Default::default)
+}
+
+/// The scan of this space running now, if any
+pub fn progress(drive_id: &str) -> Option<ScanProgress> {
+    progress_map().lock().unwrap().get(drive_id).cloned()
+}
+
+fn set_progress(drive_id: &str, f: impl FnOnce(&mut ScanProgress)) {
+    let mut map = progress_map().lock().unwrap();
+    let p = map
+        .entry(drive_id.to_string())
+        .or_insert_with(|| ScanProgress { phase: "reading", found: 0, done: 0, total: 0, started_at: now() });
+    f(p);
+}
+
+/// Removes the progress entry when a scan ends, however it ends
+struct ProgressGuard(String);
+
+impl Drop for ProgressGuard {
+    fn drop(&mut self) {
+        progress_map().lock().unwrap_or_else(|e| e.into_inner()).remove(&self.0);
+    }
 }
 
 impl ScanReport {
@@ -74,7 +119,7 @@ impl ScanReport {
 }
 
 /// Names that are never indexed: temporary and bookkeeping files of office programs, operating systems and ThirtyFile
-fn ignored(name: &str) -> bool {
+pub(crate) fn ignored(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     name.starts_with("~$")
         || name.starts_with(".~lock")
@@ -103,7 +148,7 @@ pub(crate) fn identity(_: &std::fs::Metadata) -> (i64, i64) {
 
 /// Reads the folder: every item below `root` (or only the items directly in `only`, a path below it), parents
 /// before their contents. Runs on a blocking thread.
-fn walk(root: &Path, only: Option<&str>, report: &mut ScanReport) -> std::io::Result<Vec<Entry>> {
+fn walk(root: &Path, only: Option<&str>, report: &mut ScanReport, found: Option<&dyn Fn(usize)>) -> std::io::Result<Vec<Entry>> {
     let root_meta = std::fs::metadata(root)?;
     if !root_meta.is_dir() {
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "The folder doesn't exist"));
@@ -168,6 +213,9 @@ fn walk(root: &Path, only: Option<&str>, report: &mut ScanReport) -> std::io::Re
             }
             out.push(c);
         }
+        if let Some(found) = found {
+            found(out.len());
+        }
     }
     Ok(out)
 }
@@ -210,10 +258,18 @@ async fn scan_locked(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     let drive = folder_drive(st, drive_id).await?;
     let root = PathBuf::from(drive.source_path.clone().unwrap_or_default());
     let mut report = ScanReport { at: now(), ..Default::default() };
+    set_progress(drive_id, |_| {});
+    let _progress = ProgressGuard(drive_id.to_string());
+    let started = std::time::Instant::now();
     let walked = {
-        let root = root.clone();
+        let (root, id) = (root.clone(), drive_id.to_string());
         let mut r = ScanReport::default();
-        let res = tokio::task::spawn_blocking(move || walk(&root, None, &mut r).map(|e| (e, r))).await.map_err(AppError::internal)?;
+        let res = tokio::task::spawn_blocking(move || {
+            let found = |n: usize| set_progress(&id, |p| p.found = n);
+            walk(&root, None, &mut r, Some(&found)).map(|e| (e, r))
+        })
+        .await
+        .map_err(AppError::internal)?;
         res.map(|(e, r)| {
             report.skipped = r.skipped;
             e
@@ -234,9 +290,26 @@ async fn scan_locked(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     .bind(&drive.id)
     .fetch_all(&st.db)
     .await?;
+    report.read_ms = started.elapsed().as_millis() as u64;
+    let indexing = std::time::Instant::now();
     let ops = plan(&drive, &indexed, &entries, true, &mut report);
+    set_progress(drive_id, |p| {
+        p.phase = "indexing";
+        p.total = ops.len();
+    });
     apply(st, &drive, ops).await?;
     crate::fsops::clean_trash(st, &drive.id, &root).await?;
+    crate::versions::clean_folder(st, &drive.id, &root).await?;
+    report.index_ms = indexing.elapsed().as_millis() as u64;
+    if report.read_ms + report.index_ms > 10_000 {
+        tracing::info!(
+            "Scanned the folder space {}: {} items read in {} s, index updated in {} s",
+            drive.name,
+            entries.len(),
+            report.read_ms / 1000,
+            report.index_ms / 1000
+        );
+    }
     finish(st, &drive, &report).await?;
     Ok(report)
 }
@@ -261,7 +334,7 @@ async fn try_sync_folder(st: &AppState, folder: &Node) -> AppResult<()> {
     let entries = {
         let rel = rel.clone();
         let mut r = ScanReport::default();
-        let res = tokio::task::spawn_blocking(move || walk(&root, Some(&rel), &mut r)).await.map_err(AppError::internal)?;
+        let res = tokio::task::spawn_blocking(move || walk(&root, Some(&rel), &mut r, None)).await.map_err(AppError::internal)?;
         match res {
             Ok(e) => e,
             Err(_) => return Ok(()),
@@ -308,6 +381,12 @@ async fn try_sync_folder(st: &AppState, folder: &Node) -> AppResult<()> {
         scan_later(st, &drive.id);
     }
     Ok(())
+}
+
+/// Folder spaces were added, changed or removed: file system watching follows right away
+pub fn spaces_changed() {
+    #[cfg(target_os = "linux")]
+    crate::watch::spaces_changed();
 }
 
 /// Starts a full scan in the background unless one is running. The lock is taken before the task starts, so a scan
@@ -370,7 +449,9 @@ async fn folder_drive(st: &AppState, drive_id: &str) -> AppResult<Drive> {
 /// Works out what to change. `full`: the entries are the whole folder, so indexed items not found were removed.
 fn plan(drive: &Drive, indexed: &[Indexed], entries: &[Entry], full: bool, report: &mut ScanReport) -> Vec<Op> {
     let by_path: HashMap<&str, &Indexed> = indexed.iter().filter_map(|n| n.fs_path.as_deref().map(|p| (p, n))).collect();
-    let present: HashSet<&str> = entries.iter().map(|e| e.rel.as_str()).collect();
+    // Path → kind of what the folder holds now (a map: looking entries up one by one made unchanged scans of large
+    // folders quadratic, over five minutes for 200,000 items)
+    let present: HashMap<&str, &str> = entries.iter().map(|e| (e.rel.as_str(), e.kind())).collect();
     // Indexed items whose path is gone (or now holds the other kind): candidates for a move, else removed
     let mut missing: HashMap<(i64, i64), &Indexed> = HashMap::new();
     let mut kind_changed = HashSet::new();
@@ -379,11 +460,11 @@ fn plan(drive: &Drive, indexed: &[Indexed], entries: &[Entry], full: bool, repor
         if path.is_empty() {
             continue;
         }
-        let kind_differs = entries.iter().any(|e| e.rel == path && (e.kind() != n.kind));
+        let kind_differs = present.get(path).is_some_and(|k| *k != n.kind);
         if kind_differs {
             kind_changed.insert(n.id.clone());
         }
-        if (!present.contains(path) || kind_differs)
+        if (!present.contains_key(path) || kind_differs)
             && let (Some(dev), Some(ino)) = (n.fs_dev, n.fs_ino)
             && ino != 0
         {
@@ -451,12 +532,12 @@ fn plan(drive: &Drive, indexed: &[Indexed], entries: &[Entry], full: bool, repor
         // Settling files keep their node: they are still there
         for n in indexed {
             let Some(path) = n.fs_path.as_deref() else { continue };
-            if path.is_empty() || present.contains(path) || moved.contains(&n.id) || kind_changed.contains(&n.id) {
+            if path.is_empty() || present.contains_key(path) || moved.contains(&n.id) || kind_changed.contains(&n.id) {
                 continue;
             }
             // Only the topmost removed item: its contents go with it
             let parent_gone = n.parent_id.as_ref().and_then(|p| by_id.get(p.as_str())).is_some_and(|x| {
-                x.fs_path.as_deref().is_some_and(|pp| !pp.is_empty() && !present.contains(pp) && !moved.contains(&x.id))
+                x.fs_path.as_deref().is_some_and(|pp| !pp.is_empty() && !present.contains_key(pp) && !moved.contains(&x.id))
             });
             if !parent_gone {
                 ops.push(Op::Remove { id: n.id.clone() });
@@ -467,7 +548,7 @@ fn plan(drive: &Drive, indexed: &[Indexed], entries: &[Entry], full: bool, repor
         for n in indexed {
             if let Some(path) = n.fs_path.as_deref()
                 && !path.is_empty()
-                && !present.contains(path)
+                && !present.contains_key(path)
                 && !moved.contains(&n.id)
             {
                 ops.push(Op::Remove { id: n.id.clone() });
@@ -494,10 +575,15 @@ async fn apply(st: &AppState, drive: &Drive, ops: Vec<Op>) -> AppResult<()> {
     while ops.peek().is_some() {
         let _w = st.write_lock.lock().await;
         let mut tx = st.db.begin().await?;
+        let mut n = 0;
         for op in ops.by_ref().take(BATCH) {
             apply_one(&mut tx, drive, owner, op).await?;
+            n += 1;
         }
         tx.commit().await?;
+        if progress_map().lock().unwrap().contains_key(&drive.id) {
+            set_progress(&drive.id, |p| p.done += n);
+        }
     }
     Ok(())
 }
@@ -625,7 +711,9 @@ pub fn check_source(st: &AppState, path: &str) -> AppResult<String> {
     if !real.is_dir() {
         return Err(AppError::bad_request("The folder doesn't exist on the server"));
     }
-    for own in [&st.data_dir, &st.storage_dir] {
+    // (new spaces get their folders in the storage folder, which differs from `storage_dir` while 0.1's /data/blobs is
+    // in use)
+    for own in [Some(&st.data_dir), Some(&st.storage_dir), st.space_folders.as_ref()].into_iter().flatten() {
         if let Ok(own) = std::fs::canonicalize(own)
             && (real.starts_with(&own) || own.starts_with(&real))
         {

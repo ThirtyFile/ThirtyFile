@@ -216,7 +216,7 @@ export function useGridMouse(ctx: WorkspaceCtx) {
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the listeners use refs and stable setters; they are attached again when the grid's geometry changes
   }, [rows, cols, size, sheet, sheetIdx]);
 
   const onDoubleClick = (e: MouseEvent<HTMLDivElement>) => {

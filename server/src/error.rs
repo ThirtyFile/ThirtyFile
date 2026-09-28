@@ -56,10 +56,25 @@ impl IntoResponse for AppError {
 impl From<sqlx::Error> for AppError {
     fn from(e: sqlx::Error) -> Self {
         if let sqlx::Error::Database(db) = &e
-            && db.is_unique_violation() {
-                return Self::conflict("An item with the same name already exists");
-            }
+            && db.is_unique_violation()
+        {
+            return Self::conflict(unique_violation(db.message()));
+        }
         Self::internal(e)
+    }
+}
+
+/// What a unique constraint violation means, by the table it is on. SQLite names the columns ("UNIQUE constraint failed:
+/// users.username"), or the index when it is on an expression ("... failed: index 'nodes_name_uq'"). Callers that
+/// expect a clash with something more specific check for it themselves.
+fn unique_violation(message: &str) -> &'static str {
+    let what = message.rsplit_once("failed: ").map_or("", |(_, w)| w).trim_start_matches("index '");
+    let table = what.split(['.', '\'']).next().unwrap_or_default();
+    match table {
+        "nodes" | "nodes_name_uq" => "An item with the same name already exists",
+        "users" => "Username already exists",
+        "groups" => "A group with this name already exists",
+        _ => "This already exists",
     }
 }
 
@@ -77,5 +92,38 @@ impl From<std::io::Error> for AppError {
 impl From<tokio::task::JoinError> for AppError {
     fn from(e: tokio::task::JoinError) -> Self {
         Self::internal(e)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil;
+
+    #[test]
+    fn unique_violations_are_named_by_their_table() {
+        assert_eq!(unique_violation("UNIQUE constraint failed: index 'nodes_name_uq'"), "An item with the same name already exists");
+        assert_eq!(unique_violation("UNIQUE constraint failed: nodes.parent_id, nodes.name_key"), "An item with the same name already exists");
+        assert_eq!(unique_violation("UNIQUE constraint failed: users.username"), "Username already exists");
+        assert_eq!(unique_violation("UNIQUE constraint failed: groups.name"), "A group with this name already exists");
+        assert_eq!(unique_violation("UNIQUE constraint failed: node_versions.id"), "This already exists");
+        assert_eq!(unique_violation("something else"), "This already exists");
+    }
+
+    #[tokio::test]
+    async fn database_unique_violations_get_the_message_of_their_table() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let clash = |sql: &'static str, id: String| {
+            let db = env.st.db.clone();
+            async move { AppError::from(sqlx::query(sql).bind(id).execute(&db).await.unwrap_err()) }
+        };
+        let e = clash("UPDATE users SET username = 'AMY' WHERE id = ?", ben.id.to_string()).await;
+        assert_eq!((e.status, e.message.as_str()), (StatusCode::CONFLICT, "Username already exists"));
+        env.folder(&amy, &amy.root_id, "Docs").await;
+        let other = env.file(&amy, &amy.root_id, "other").await;
+        let e = clash("UPDATE nodes SET name = 'DOCS' WHERE id = ?", other).await;
+        assert_eq!((e.status, e.message.as_str()), (StatusCode::CONFLICT, "An item with the same name already exists"));
     }
 }

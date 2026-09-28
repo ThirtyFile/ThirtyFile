@@ -1,11 +1,16 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 
-interface Box {
+export interface Box {
   x: number;
   y: number;
   w: number;
   h: number;
 }
+
+/** The ids of the items a box touches (the box in the container's content coordinates) */
+export type HitTest = (box: Box) => Iterable<string>;
+/** Measures a list once when a marquee starts: lists that only render the rows in view find the boxed items from their row geometry */
+export type MeasureHits = (container: HTMLElement) => HitTest;
 
 /** Distance (pixels) to move before marquee selection starts, so a plain click isn't treated as a marquee */
 const THRESHOLD = 4;
@@ -13,13 +18,59 @@ const THRESHOLD = 4;
 const EDGE = 28;
 const SPEED = 14;
 
+/** The box being drawn; only the small MarqueeBox component re-renders as it changes, not the page around it */
+function boxStore() {
+  let box: Box | null = null;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => box,
+    set(next: Box | null) {
+      box = next;
+      listeners.forEach((l) => l());
+    },
+    subscribe(l: () => void) {
+      listeners.add(l);
+      return () => {
+        listeners.delete(l);
+      };
+    },
+  };
+}
+export type MarqueeStore = ReturnType<typeof boxStore>;
+
+/** Item boxes from the DOM (every item rendered), for lists without their own geometry */
+function domHits(container: HTMLElement): HitTest {
+  const r = container.getBoundingClientRect();
+  const sl = container.scrollLeft - r.left;
+  const st = container.scrollTop - r.top;
+  const boxes = Array.from(container.querySelectorAll<HTMLElement>("[data-node-id]"), (el) => {
+    // In list view the whole row counts (like full-row selection in Windows Details view)
+    const hit = el.getBoundingClientRect();
+    return { id: el.dataset.nodeId!, x: hit.left + sl, y: hit.top + st, w: hit.width, h: hit.height };
+  });
+  return function* (b) {
+    for (const it of boxes) if (!(it.x + it.w < b.x || it.x > b.x + b.w || it.y + it.h < b.y || it.y > b.y + b.h)) yield it.id;
+  };
+}
+
 /**
  * Mouse marquee selection (like Windows File Explorer): hold the left button on empty space and drag to select every item in the box; with Ctrl held, toggle the boxed items.
  * Items are marked with `data-node-id` and count as selected when any part is boxed; in list view `data-drag-handle` (the name) is for drag-moving, so marquee doesn't start there.
- * Put the returned props on the scrollable container (which must be position: relative); box is the selection box to draw (in container content coordinates).
+ * Put the returned props on the scrollable container (which must be position: relative) and render `<MarqueeBox store={box} />` inside it.
+ * `measure` gives the list's own geometry (FileList renders only the rows in view); without it the items are measured in the DOM.
  */
-export function useMarquee({ selected, onSelect, enabled = true }: { selected: Set<string>; onSelect(ids: Set<string>): void; enabled?: boolean }) {
-  const [box, setBox] = useState<Box | null>(null);
+export function useMarquee({
+  selected,
+  onSelect,
+  enabled = true,
+  measure,
+}: {
+  selected: Set<string>;
+  onSelect(ids: Set<string>): void;
+  enabled?: boolean;
+  measure?: RefObject<MeasureHits | null>;
+}) {
+  const [box] = useState(boxStore);
   const drag = useRef<{
     container: HTMLElement;
     start: { x: number; y: number };
@@ -28,8 +79,8 @@ export function useMarquee({ selected, onSelect, enabled = true }: { selected: S
     toggle: boolean;
     active: boolean;
     frame: number;
-    /** Item boxes in container content coordinates, measured once when the marquee starts (layout doesn't change during a drag) */
-    boxes: { id: string; x: number; y: number; w: number; h: number }[] | null;
+    /** Measured once when the marquee starts (layout doesn't change during a drag) */
+    hits: HitTest | null;
     /** A mousemove already scheduled an update for the next frame */
     scheduled: boolean;
   } | null>(null);
@@ -39,6 +90,8 @@ export function useMarquee({ selected, onSelect, enabled = true }: { selected: S
   select.current = onSelect;
   const current = useRef(selected);
   current.current = selected;
+  const measureRef = useRef(measure);
+  measureRef.current = measure;
 
   const update = () => {
     const d = drag.current;
@@ -51,22 +104,13 @@ export function useMarquee({ selected, onSelect, enabled = true }: { selected: S
       d.active = true;
     }
     const b = { x: Math.min(x, d.start.x), y: Math.min(y, d.start.y), w: Math.abs(x - d.start.x), h: Math.abs(y - d.start.y) };
-    setBox(b);
-    if (!d.boxes) {
-      // Measured once: thousands of getBoundingClientRect calls per mousemove would make large folders stutter
-      const sl = d.container.scrollLeft - r.left;
-      const st = d.container.scrollTop - r.top;
-      d.boxes = Array.from(d.container.querySelectorAll<HTMLElement>("[data-node-id]"), (el) => {
-        // In list view the whole row counts (like full-row selection in Windows Details view)
-        const hit = el.getBoundingClientRect();
-        return { id: el.dataset.nodeId!, x: hit.left + sl, y: hit.top + st, w: hit.width, h: hit.height };
-      });
-    }
+    box.set(b);
+    // Measured once: thousands of getBoundingClientRect calls per mousemove would make large folders stutter
+    d.hits ??= (measureRef.current?.current ?? domHits)(d.container);
     const next = new Set(d.base);
-    for (const it of d.boxes) {
-      if (it.x + it.w < b.x || it.x > b.x + b.w || it.y + it.h < b.y || it.y > b.y + b.h) continue;
-      if (d.toggle && d.base.has(it.id)) next.delete(it.id);
-      else next.add(it.id);
+    for (const id of d.hits(b)) {
+      if (d.toggle && d.base.has(id)) next.delete(id);
+      else next.add(id);
     }
     // Only re-render the list when the selection actually changed
     const cur = current.current;
@@ -97,7 +141,7 @@ export function useMarquee({ selected, onSelect, enabled = true }: { selected: S
     cancelAnimationFrame(d.frame);
     drag.current = null;
     if (d.active) {
-      setBox(null);
+      box.set(null);
       // The click after releasing the mouse shouldn't clear the selection again
       suppressClick.current = true;
       setTimeout(() => (suppressClick.current = false), 0);
@@ -126,8 +170,7 @@ export function useMarquee({ selected, onSelect, enabled = true }: { selected: S
       window.removeEventListener("blur", stop);
       stop();
     };
-    // update and stop only read refs
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- update and stop only read refs
   }, []);
 
   const onMouseDown = (e: ReactMouseEvent<HTMLElement>) => {
@@ -149,7 +192,7 @@ export function useMarquee({ selected, onSelect, enabled = true }: { selected: S
       toggle,
       active: false,
       frame: requestAnimationFrame(autoScroll),
-      boxes: null,
+      hits: null,
       scheduled: false,
     };
   };
@@ -163,4 +206,11 @@ export function useMarquee({ selected, onSelect, enabled = true }: { selected: S
   };
 
   return { box, containerProps: { onMouseDown, onClickCapture } };
+}
+
+/** The marquee selection box, drawn in the scrollable container */
+export function MarqueeBox({ store }: { store: MarqueeStore }) {
+  const box = useSyncExternalStore(store.subscribe, store.get);
+  if (!box) return null;
+  return <div className="pointer-events-none absolute z-10 border border-brand bg-brand/15" style={{ left: box.x, top: box.y, width: box.w, height: box.h }} />;
 }

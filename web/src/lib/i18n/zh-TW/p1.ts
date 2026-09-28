@@ -87,7 +87,7 @@ export default {
   "FTP/FTPS": "FTP／FTPS",
   "Connected to \"{name}\" successfully": "「{name}」連線正常",
   "Connection failed": "連線失敗",
-  "New files will be stored in \"{name}\" by default": "新檔案預設存放在「{name}」",
+  "New spaces will be stored in \"{name}\"": "新空間將存放在「{name}」",
   "Test connection": "測試連線",
   "Set as default location": "設為預設位置",
   "Where file contents are actually stored. Each space can be assigned a location in \"Space management\"; spaces without one use the {default}.": "檔案內容實際存放的地方。每個空間可以在「空間管理」指定位置；未指定的空間使用{default}。",

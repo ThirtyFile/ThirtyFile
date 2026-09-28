@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { ChevronRightIcon, FolderIcon, HardDriveIcon, HomeIcon, Loader2Icon } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronRightIcon, FolderIcon, FolderPlusIcon, HardDriveIcon, HomeIcon, Loader2Icon } from "lucide-react";
 import { api, type Crumb } from "@/api";
+import { ErrorState } from "@/components/ErrorState";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useDrives } from "@/lib/drives";
+import { useMe } from "@/lib/session";
 import { t } from "@/lib/i18n";
+import { invalidateFiles } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
 function useSubmit(fn: () => Promise<void>) {
@@ -151,6 +154,22 @@ export function FolderPickerDialog(props: {
     queryFn: () => api.children(current, "name", "asc", true),
   });
   const { busy, error, run } = useSubmit(() => props.onPick(current));
+  const qc = useQueryClient();
+  const [naming, setNaming] = useState(false);
+  // Like Windows' Move to dialog: a new folder is made inside the folder being browsed, then opened so it's the destination
+  const newFolderName = () => {
+    const taken = new Set(folders.data?.map((f) => f.name.toLowerCase()));
+    for (let i = 1; ; i++) {
+      const name = i === 1 ? t("New folder") : `${t("New folder")} (${i})`;
+      if (!taken.has(name.toLowerCase())) return name;
+    }
+  };
+  const createFolder = async (name: string) => {
+    const f = await api.createFolder(current, name);
+    void invalidateFiles(qc);
+    setTrail([...trail, { id: f.id, name: f.name }]);
+    setNaming(false);
+  };
 
   return (
     <Dialog open onOpenChange={(o) => !o && props.onClose()}>
@@ -161,7 +180,7 @@ export function FolderPickerDialog(props: {
         <label className="flex items-center gap-2 text-sm">
           <HardDriveIcon className="size-4 text-muted-foreground" />
           <select
-            className="h-8 flex-1 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="h-8 flex-1 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={t("Spaces")}
             value={drives.data?.some((d) => d.root_id === base.id) ? base.id : ""}
             onChange={(e) => {
@@ -175,8 +194,7 @@ export function FolderPickerDialog(props: {
             {!drives.data?.some((d) => d.root_id === base.id) && <option value="">{t("Shared with me: {name}", { name: base.name })}</option>}
             {drives.data?.map((d) => (
               <option key={d.id} value={d.root_id}>
-                {d.name}
-                {d.kind === "team" ? t(" (team space)") : d.kind === "company" ? t(" (company-wide)") : ""}
+                {d.kind === "team" ? t("{name} (team space)", { name: d.name }) : d.kind === "company" ? t("{name} (company-wide)", { name: d.name }) : d.name}
               </option>
             ))}
           </select>
@@ -199,6 +217,8 @@ export function FolderPickerDialog(props: {
             <div className="flex h-full items-center justify-center text-muted-foreground">
               <Loader2Icon className="size-5 animate-spin" />
             </div>
+          ) : folders.error ? (
+            <ErrorState message={folders.error.message} onRetry={() => folders.refetch()} className="h-full min-h-0" />
           ) : folders.data?.length ? (
             folders.data.map((f) => {
               const disabled = props.excludeIds.has(f.id);
@@ -222,6 +242,9 @@ export function FolderPickerDialog(props: {
         </div>
         <ErrorText>{error}</ErrorText>
         <DialogFooter>
+          <Button variant="outline" className="sm:mr-auto" disabled={!folders.data || props.excludeIds.has(current)} onClick={() => setNaming(true)}>
+            <FolderPlusIcon /> {t("New folder")}
+          </Button>
           <Button variant="outline" onClick={props.onClose}>
             {t("Cancel")}
           </Button>
@@ -230,12 +253,16 @@ export function FolderPickerDialog(props: {
             {props.confirmText}
           </Button>
         </DialogFooter>
+        {naming && (
+          <NameDialog title={t("New folder")} label={t("Name")} initial={newFolderName()} confirmText={t("Create")} onSubmit={createFolder} onClose={() => setNaming(false)} />
+        )}
       </DialogContent>
     </Dialog>
   );
 }
 
 export function ChangePasswordDialog({ onClose }: { onClose(): void }) {
+  const me = useMe();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -255,7 +282,7 @@ export function ChangePasswordDialog({ onClose }: { onClose(): void }) {
           <div className="grid gap-2">
             <Label htmlFor="pw-cur">{t("Current password")}</Label>
             <Input id="pw-cur" type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
-            <Label htmlFor="pw-new">{t("New password (at least 6 characters)")}</Label>
+            <Label htmlFor="pw-new">{t("New password (at least {n} characters)", { n: me.min_password_length })}</Label>
             <Input id="pw-new" type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
             <Label htmlFor="pw-cfm">{t("Confirm new password")}</Label>
             <Input id="pw-cfm" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />

@@ -32,13 +32,27 @@ impl Drop for TestEnv {
     }
 }
 
+/// A server whose spaces keep their files in the content store, as most tests of files, shares and permissions want
+/// (they work the same in folder spaces, which have tests of their own)
 pub async fn env() -> TestEnv {
+    make_env(false).await
+}
+
+/// A server as installed today: every space of the built-in storage is a folder space, in `blobs/company`,
+/// `blobs/teams/<name>` and `blobs/users/<name>`
+pub async fn folders_env() -> TestEnv {
+    make_env(true).await
+}
+
+async fn make_env(space_folders: bool) -> TestEnv {
     let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", new_id()));
     for d in ["tmp", "thumbs", "blobs"] {
         std::fs::create_dir_all(dir.join(d)).unwrap();
     }
-    let db = db::connect(&dir.join("drive.db")).await.unwrap();
-    db::bootstrap_admin(&db, Some("admin-test-password")).await.unwrap();
+    let space_folders = space_folders.then(|| dir.join("blobs"));
+    let db = db::connect(&dir.join("drive.db"), 16).await.unwrap();
+    db::bootstrap_admin(&db, Some(password()), space_folders.as_deref()).await.unwrap();
+    db::create_company_space(&db, space_folders.as_deref()).await.unwrap();
     let system = db::load_system_settings(&db).await.unwrap();
     let mut storages: HashMap<String, Arc<dyn Storage>> = HashMap::new();
     storages.insert("local".into(), Arc::new(LocalStorage::new(dir.join("blobs")).unwrap()));
@@ -50,14 +64,18 @@ pub async fn env() -> TestEnv {
         migrations: Default::default(),
         data_dir: dir.clone(),
         storage_dir: dir.join("blobs"),
+        space_folders,
         secret: vec![7; 32],
         secure_cookie: false,
+        trash_days: 30,
         trust_proxy: Default::default(),
         max_upload: 0,
         write_lock: tokio::sync::Mutex::new(()),
         active_uploads: Default::default(),
         login_failures: Default::default(),
+        detached_purge: Default::default(),
         thumb_permits: tokio::sync::Semaphore::new(2),
+        thumb_decode_bytes: crate::thumbnails::MAX_THUMB_DECODE_BYTES,
         system: std::sync::RwLock::new(system),
         blob_guard: Default::default(),
         logs: std::sync::RwLock::new(Default::default()),
@@ -67,6 +85,8 @@ pub async fn env() -> TestEnv {
         sso_pending: Default::default(),
         archive_lock: Default::default(),
         share_views: Default::default(),
+        download_links: Default::default(),
+        jobs: Default::default(),
         log_tx,
     }));
     let _writer = crate::logs::spawn_writer(st.clone(), log_rx);
@@ -80,7 +100,7 @@ impl TestEnv {
         let password_hash = auth::hash_password(password().into()).await.unwrap();
         let id = db::create_user(
             &mut conn,
-            NewUser { username: name, password_hash: &password_hash, role: "user", can_write: true, can_delete: true, can_share, quota_bytes: 0, source: "password", provisioned_by: None },
+            NewUser { username: name, password_hash: &password_hash, role: "user", can_write: true, can_delete: true, can_share, quota_bytes: 0, source: "password", provisioned_by: None, space_folders: self.st.space_folders.as_deref() },
         )
         .await
         .unwrap();
@@ -91,6 +111,29 @@ impl TestEnv {
         let mut conn = self.st.db.acquire().await.unwrap();
         let (id,): (i64,) = sqlx::query_as("SELECT id FROM users WHERE role = 'admin'").fetch_one(&mut *conn).await.unwrap();
         auth::user_by_id(&self.st, &mut conn, id).await.unwrap().unwrap()
+    }
+
+    /// Signs `user` in from a browser with this User-Agent (from 10.0.0.1): the user as the session sees them, and the
+    /// `name=value` cookie to send
+    pub async fn sign_in(&self, user: &User, agent: &str) -> (User, String) {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(axum::http::header::USER_AGENT, agent.parse().unwrap());
+        let set = auth::open_session(&self.st, user.id, "password", "10.0.0.1", &headers).await.unwrap();
+        let cookie = set.split(';').next().unwrap().to_string();
+        let session = self.session_user(&cookie).await.expect("a new session works");
+        (session, cookie)
+    }
+
+    /// The user a request with this cookie is signed in as, if any
+    pub async fn session_user(&self, cookie: &str) -> Option<User> {
+        self.request_user(axum::http::Request::builder().header(axum::http::header::COOKIE, cookie)).await
+    }
+
+    /// Runs the `User` extractor on a request
+    pub async fn request_user(&self, req: axum::http::request::Builder) -> Option<User> {
+        use axum::extract::FromRequestParts;
+        let (mut parts, _) = req.body(()).unwrap().into_parts();
+        User::from_request_parts(&mut parts, &self.st).await.ok()
     }
 
     pub async fn folder(&self, owner: &User, parent: &str, name: &str) -> String {
@@ -114,6 +157,47 @@ impl TestEnv {
         .await
         .unwrap();
         id
+    }
+
+    /// Creates a file with real content in the local storage location
+    pub async fn stored_file(&self, owner: &User, parent: &str, name: &str, content: &[u8]) -> String {
+        let id = self.file(owner, parent, name).await;
+        let hash = crate::util::sha256_hex(content);
+        let tmp = self.dir.join("tmp").join(format!("src-{}", new_id()));
+        std::fs::write(&tmp, content).unwrap();
+        crate::storage::Storage::put_file(self.st.storage("local").unwrap().as_ref(), &hash, &tmp).await.unwrap();
+        let mut c = self.st.db.acquire().await.unwrap();
+        crate::tree::add_blob_ref(&mut c, &hash, content.len() as i64, "local").await.unwrap();
+        sqlx::query("UPDATE nodes SET blob_hash = ?, size = ?, mime = ? WHERE id = ?")
+            .bind(&hash)
+            .bind(content.len() as i64)
+            .bind(crate::util::guess_mime(name))
+            .bind(&id)
+            .execute(&mut *c)
+            .await
+            .unwrap();
+        id
+    }
+
+    /// Uploads a file as the web does (tus): into the content store or a folder space, whichever `parent` is in.
+    /// Returns its id.
+    pub async fn upload(&self, user: &User, parent: &str, name: &str, content: &'static [u8]) -> String {
+        use axum::{
+            extract::{Path, State},
+            http::{HeaderMap, header},
+        };
+        use base64::Engine;
+        let b64 = |s: &str| base64::engine::general_purpose::STANDARD.encode(s);
+        let mut h = HeaderMap::new();
+        h.insert("upload-length", content.len().to_string().parse().unwrap());
+        h.insert("upload-metadata", format!("filename {},parentId {}", b64(name), b64(parent)).parse().unwrap());
+        let res = crate::upload::create(State(self.st.clone()), user.clone(), h).await.unwrap();
+        let upload = res.headers()[header::LOCATION].to_str().unwrap().rsplit('/').next().unwrap().to_string();
+        let mut h = HeaderMap::new();
+        h.insert(header::CONTENT_TYPE, "application/offset+octet-stream".parse().unwrap());
+        h.insert("upload-offset", "0".parse().unwrap());
+        let res = crate::upload::patch(State(self.st.clone()), user.clone(), Path(upload), h, axum::body::Body::from(content)).await.unwrap();
+        res.headers()["x-node-id"].to_str().unwrap().to_string()
     }
 
     pub async fn grant(&self, node: &str, to: &User, role: &str) {
@@ -178,4 +262,10 @@ pub fn write_old(path: &std::path::Path, content: &[u8]) {
     std::fs::write(path, content).unwrap();
     let f = std::fs::File::options().write(true).open(path).unwrap();
     f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(60)).unwrap();
+}
+
+/// Where the local storage keeps a content
+pub fn blob_file(env: &TestEnv, content: &[u8]) -> std::path::PathBuf {
+    let hash = crate::util::sha256_hex(content);
+    env.dir.join("blobs").join(&hash[0..2]).join(&hash[2..4]).join(&hash)
 }

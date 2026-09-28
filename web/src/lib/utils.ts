@@ -28,10 +28,14 @@ const winDateFmt = new Intl.DateTimeFormat(locale, {
   day: "numeric",
   hour: "numeric",
   minute: "2-digit",
-  hour12: true,
+  // English follows the region's clock (en-GB: 24-hour)
+  hour12: locale === "zh-TW" ? true : undefined,
 });
 
-/** Windows File Explorer format: 9/3/2026 10:15 PM (zh-TW: 2026/9/3 with the Chinese PM marker before 10:15) */
+/**
+ * Windows File Explorer format: 9/3/2026 10:15 PM, 03/09/2026 22:15 in en-GB
+ * (zh-TW: 2026/9/3 with the Chinese PM marker before 10:15)
+ */
 export function formatWinDate(ts: number): string {
   const s = winDateFmt.format(new Date(ts * 1000));
   return locale === "zh-TW" ? s.replace(/\s*(上午|下午)\s*/, " $1 ") : s.replace(",", ""); // i18n-ignore: tidies the Chinese AM/PM markers in formatted dates
@@ -47,6 +51,7 @@ export function formatDateTime(ts: number): string {
   return dateFmt.format(new Date(ts * 1000));
 }
 
+/** A recent time in words ("Just now", "5 minutes ago", "Today 14:05"), otherwise the date */
 export function formatTime(ts: number): string {
   const d = new Date(ts * 1000);
   const diff = Date.now() / 1000 - ts;
@@ -59,6 +64,9 @@ export function formatTime(ts: number): string {
 export function formatDate(ts: number): string {
   return new Intl.DateTimeFormat(locale, { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ts * 1000));
 }
+
+/** Sorts names the way File Explorer does: "File 2" before "File 10", letter case ignored (the server sorts the same way) */
+export const nameCollator = new Intl.Collator(locale, { numeric: true, sensitivity: "base" });
 
 export function extOf(name: string): string {
   const i = name.lastIndexOf(".");
@@ -77,4 +85,11 @@ export async function copyText(text: string) {
     document.execCommand("copy");
     ta.remove();
   }
+}
+
+/** How long removed items stay in the trash, for the texts that explain it */
+export function trashHint(days: number) {
+  return days > 0
+    ? t("Removed items stay in the trash for {n} day and can be restored until then.|Removed items stay in the trash for {n} days and can be restored until then.", { n: days })
+    : t("Removed items stay in the trash and can be restored until it's emptied.");
 }

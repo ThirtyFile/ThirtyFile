@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en" data-root=".." data-page="account">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Your account · ThirtyFile</title>
+    <meta name="description" content="Your password, two-factor sign-in, the devices you're signed in on, app passwords for scripts, your sign-in history, and notifications." />
+    <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <link rel="stylesheet" href="../assets/site.css" />
+  </head>
+  <body>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="Guides"><noscript><a href="index.html">Install</a></noscript></nav>
+      <main class="article">
+        <h1>Your account</h1>
+        <p class="lead">Your password, two-factor sign-in, the devices you're signed in on, app passwords for scripts, your sign-in history, and notifications.</p>
+        <p>Everything on this page is in the <strong>account menu</strong>: click your name at the bottom of the list on the left.</p>
+
+        <h2 id="password">Password</h2>
+        <p><strong>Change password</strong> asks for the current password and a new one. Your other devices are signed out afterwards. A new password needs at least 6 characters, or more if your administrator set a longer minimum.</p>
+
+        <h2 id="two-factor">Two-factor sign-in</h2>
+        <p>With two-factor sign-in, your password alone isn't enough: after it, sign-in asks for a six-digit code from an authenticator app on your phone, such as Microsoft Authenticator, Google Authenticator or 1Password. The code changes every 30 seconds and works only once.</p>
+        <ol>
+          <li>Open <strong>Two-factor sign-in</strong> and choose <strong>Set up</strong>. Enter your password.</li>
+          <li>Scan the QR code with the app. If you can't scan it, type the key shown under it into the app.</li>
+          <li>Enter the code the app shows to confirm, and two-factor sign-in is on.</li>
+          <li>Save the ten <strong>recovery codes</strong> shown next, for example in a password manager or on paper. Each one signs you in once instead of a code, if you lose your phone. They are shown only this once.</li>
+        </ol>
+        <p>From the same dialog you can create new recovery codes (the old ones stop working), move to another phone or app with <strong>Change app</strong>, or turn two-factor sign-in off. Each asks for your password.</p>
+        <ul>
+          <li>After five wrong codes you have to enter your password again. After ten wrong codes for one account, further codes are refused for up to 15 minutes.</li>
+          <li>Sign-in with Microsoft, Google or GitHub doesn't ask for a code: those providers have their own two-step verification. <a href="#app-passwords">App passwords</a> don't ask for one either.</li>
+          <li>If an administrator requires two-factor sign-in, you're asked to set it up right after your password the next time you sign in, and you can't turn it off.</li>
+        </ul>
+        <div class="note">Lost your phone and your recovery codes? Ask an administrator to reset your two-factor sign-in. You can then sign in with your password and set it up again.</div>
+
+        <h2 id="devices">Signed-in devices</h2>
+        <p><strong>Devices</strong> lists every browser signed in to your account: the browser and system, the address it last used, when it signed in and when it was last used. The one you're using is marked <strong>This device</strong>.</p>
+        <ul>
+          <li><strong>Sign out</strong> next to a device ends its session right away. It has to sign in again.</li>
+          <li><strong>Sign out everywhere else</strong> signs out every device except this one.</li>
+        </ul>
+        <div class="note">If you see a device you don't recognise, sign it out here. If you sign in with a password, change it too. If you sign in with Microsoft, Google or GitHub, you have no password here: signing the device out is what ends its access, and it is worth checking that account's own security page as well.</div>
+
+        <h2 id="app-passwords">App passwords</h2>
+        <p>Scripts, backup tools and file clients can't sign in through the sign-in page. Give each one its own app password under <strong>App passwords</strong>. This is also the way for accounts that sign in with Microsoft, Google or GitHub, which have no password of their own.</p>
+        <ul>
+          <li>Give it a <strong>name</strong> that says where it's used, choose whether it may only <strong>read files</strong> or also <strong>change</strong> them, and when it <strong>expires</strong>.</li>
+          <li>The app password is shown once, right after you create it. Copy it then: only a fingerprint of it is kept, so nobody can show it again.</li>
+          <li>The list shows when and from which address each one was last used. <strong>Remove</strong> one and whatever uses it stops working right away.</li>
+        </ul>
+        <p>Send it in the <code>Authorization</code> header, or as the password of HTTP Basic sign-in together with your username:</p>
+        <pre><code>curl -H "Authorization: Bearer tfa_…" https://drive.example.com/api/auth/me
+curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;file id&gt;/content?download=1"</code></pre>
+        <p>With an app password you can also open your files as a drive in File Explorer, Finder or your phone's Files app: see <a href="webdav.html">Mapping it as a drive</a>.</p>
+        <p>App passwords work for files only: browsing, searching, downloading, uploading, and organising files and folders. They can't change your password, create app passwords, link sign-in methods, share links or use the Control panel, and they never get a cookie. One that may only read files is refused for anything that changes something.</p>
+        <div class="note">Signing out devices and changing your password don't affect app passwords. Remove the ones you no longer trust. An app password stops working when its account is disabled or deleted. Wrong app passwords count towards the same limit as wrong passwords: after 30 from one address, that address has to wait 15 minutes.</div>
+
+        <h2 id="history">Sign-in history</h2>
+        <p><strong>My sign-in history</strong> shows your sign-ins, failed attempts, sign-outs, password changes, and app passwords created, removed or used with a wrong secret, with the address and browser of each.</p>
+
+        <h2 id="notifications">Notifications</h2>
+        <p>The <strong>bell</strong> at the top right, next to the tabs, tells you about:</p>
+        <ul>
+          <li><strong>Shared with you</strong>: someone shared a folder or file with you, or added you to a space, directly or through a group you're in. Access given to everyone isn't announced, and neither is a change to access you already had.</li>
+          <li><strong>Space almost full</strong>: a space you own or manage is 90% full. Your personal space counts, and so do team spaces where you're an owner or manager. You're told once, and again only after the space had room again.</li>
+          <li><strong>Access ending</strong>: access someone gave you ends within 3 days. When it was given with a shorter time to begin with, the share itself already said so.</li>
+        </ul>
+        <p>A number on the bell counts the ones you haven't read. Click one to open what it is about. <strong>Mark all as read</strong> and <strong>Clear all</strong> are at the bottom of the list. Notifications are kept for 90 days.</p>
+        <p><strong>Notification settings</strong>, at the bottom of the bell's list or in the account menu, turns each kind on or off, in the app and by email separately. Emails go to the <strong>email address</strong> you enter there. If you sign in with Microsoft, Google or GitHub, the address that account gives is filled in the first time, and you can change it. Leave it blank to get no emails.</p>
+        <div class="note">Emails are only sent once an administrator has set up an email server (<a href="users.html#email">Notification emails</a>). They are written in the language you last used ThirtyFile in, with times in your time zone.</div>
+      </main>
+    </div>
+    <script src="../assets/site.js"></script>
+  </body>
+</html>

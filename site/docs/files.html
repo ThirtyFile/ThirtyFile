@@ -23,27 +23,102 @@
         <ul>
           <li><strong>Menu on the left</strong>: recent files, favourites, your spaces, items shared with you, your share links and the trash.</li>
           <li><strong>Tabs</strong>: open several folders or files side by side. Click <strong>+</strong> for a new tab, or middle-click a folder to open it in one.</li>
-          <li><strong>Address bar</strong>: shows where you are. Click any part of it to go there.</li>
-          <li><strong>Search</strong>: finds items by name in the current space.</li>
-          <li><strong>View</strong>: switch between a detailed list and large icons with thumbnails.</li>
+          <li><strong>Address bar</strong>: shows where you are. Click any part of it to go there, or click the empty space beside the path (or press <kbd>Ctrl</kbd> + <kbd>L</kbd>) to see the full path, copy it, or type or paste another path and press <kbd>Enter</kbd> to go there (see <a href="#paths">Paths</a>).</li>
+          <li><strong>Search</strong>: finds items whose name contains what you type, in the folder you are in and its subfolders (from Recent, Favorites and other lists: everywhere you have access). Letter case and accents don't matter, in any language. On the results page you can widen the search to everywhere, and filter by type, date modified and size. At most 300 results are shown; the page says so when there are more.</li>
+          <li><strong>View</strong>: choose how the list looks (see <a href="#views">Views, columns and groups</a>). The two buttons at the bottom right switch between <strong>Details</strong> and <strong>Large icons</strong>.</li>
         </ul>
+        <p><strong>Recent</strong> lists the files you uploaded, edited or opened, newest first, wherever they are: your own files, and files of others in shared spaces and folders. Opening means viewing a file in the browser (the viewer, the editor or the preview pane); downloads and file clients using an app password don't count. Files you can no longer open, and files in the trash, are left out.</p>
+        <p>A folder with thousands of items opens with its first items right away, and the rest loads in the background: the status bar shows <strong>Loading more items…</strong> until the list is complete. You can scroll, select and open items in the meantime; <kbd>Ctrl</kbd> + <kbd>A</kbd> selects everything loaded so far.</p>
+
+        <h2 id="views">Views, columns and groups</h2>
+        <p>The <strong>View</strong> menu has the same views as File Explorer:</p>
+        <ul>
+          <li><strong>Large icons</strong> and <strong>Medium icons</strong>: thumbnails of pictures, PDFs and videos (see <a href="preview.html#thumbnails">Thumbnails</a>) with the names below them.</li>
+          <li><strong>List</strong>: small icons and names side by side in columns, to see many items at once.</li>
+          <li><strong>Details</strong>: one item per row, with columns.</li>
+          <li><strong>Tiles</strong>: a thumbnail with the name, type and size beside it.</li>
+        </ul>
+        <p>In <strong>Details</strong>, drag the edge of a column header to make the column wider or narrower (or select the edge with <kbd>Tab</kbd> and use the arrow keys); double-click the edge to give it its usual width again. Right-click a column header, or choose <strong>View</strong> › <strong>Columns</strong>, to choose the columns: <strong>Date modified</strong>, <strong>Date created</strong> (hidden at first), <strong>Type</strong>, <strong>Size</strong>, and where a list has them <strong>Location</strong> and <strong>Uploaded by</strong>. <strong>Restore default columns</strong> undoes your changes. On a phone the list shows the name and size only.</p>
+        <p><strong>View</strong> › <strong>Group by</strong> puts the items in groups, each under a heading with the number of items in it:</p>
+        <ul>
+          <li><strong>Type</strong>: folders first, then a group per kind of file.</li>
+          <li><strong>Date modified</strong>: <strong>Today</strong>, <strong>Yesterday</strong>, <strong>Earlier this week</strong>, <strong>Last week</strong>, <strong>Earlier this month</strong>, <strong>Last month</strong>, <strong>Earlier this year</strong> and <strong>A long time ago</strong> (weeks start on Monday).</li>
+        </ul>
+        <p>Within a group, items keep the order the list is sorted in. Sorting the other way by the same thing (oldest first, or by type from Z to A) turns the groups around too. The view, the columns and the grouping are remembered in your browser for every folder.</p>
+
+        <h2 id="paths">Paths</h2>
+        <p>A path names a folder or file the same way everywhere: in the address bar, and over <a href="webdav.html">WebDAV</a>. It starts at the top, where all your spaces are, for example <code>/My files/Reports/2026.xlsx</code>:</p>
+        <ul>
+          <li><code>/</code> is <strong>All spaces</strong>.</li>
+          <li><strong>My files</strong> is your personal space. The company space (<strong>All files</strong>, unless your administrator renamed it) and your team spaces go by their names. If two have the same name, the later one gets a number, such as <strong>Projects (2)</strong>, and the same number is used on WebDAV.</li>
+          <li><strong>Shared with me</strong> holds folders and files other people shared with you from spaces you aren't a member of: <code>/Shared with me/Plans/Q1</code>. Two shared items with the same name are numbered too.</li>
+        </ul>
+        <p>The names ThirtyFile gives (<strong>My files</strong>, <strong>All files</strong> and <strong>Shared with me</strong>) show in the language you chose, and a path you type may use them in that language or in English. Letter case doesn't matter, <code>\</code> works like <code>/</code>, and you can also paste a WebDAV address or a link to a page of ThirtyFile. When nothing is at the path you typed, or you don't have access to it, the address bar says so and keeps what you typed, so you can correct it. Recent, Favorites, the trash and other lists aren't in a space, so their paths can't be typed.</p>
 
         <h2 id="upload">Uploading</h2>
         <ul>
-          <li>Drag files or whole folders from your computer into the list, or</li>
+          <li>Drag files or whole folders from your computer into the list. Drop them on a folder, in the list, the folder tree, the address bar or a tab showing it, to upload them into that folder instead, or</li>
           <li>click <strong>New</strong> and choose <strong>Upload files</strong> or <strong>Upload folder</strong>.</li>
         </ul>
-        <p>Progress is shown at the bottom right. If the connection drops, or you close the page by accident, the upload continues where it stopped the next time you add the same file.</p>
+        <p>Progress is shown at the bottom right. When you upload more than 100 files, only the files being sent, paused or failed are listed, and the others are counted below them. Right-click the list to retry every failed file at once. While files are still uploading, the browser asks before you close or reload the page. If the connection drops, or you close the page anyway, the upload continues where it stopped the next time you add the same file.</p>
 
         <h2 id="download">Downloading</h2>
         <p>Select one or more items and click <strong>Download</strong>. Several items, or a folder, arrive as one ZIP file.</p>
+        <p>Progress is shown at the bottom right. Downloads larger than 256 MB (64 MB on phones and tablets) go straight to your browser's own download list instead, so the page doesn't hold them in memory.</p>
+        <p>Up to 10,000 selected items can be downloaded at once. For more, download the folder they are in: a folder counts as one item, however much it holds.</p>
+
+        <h2 id="zip">Compressing and extracting ZIP files</h2>
+        <ul>
+          <li><strong>Compress</strong>: select items, right-click and choose <strong>Compress to ZIP file</strong>. A compressed ZIP file appears next to them, named after the item (or, for several items, after their folder). It counts against the space's storage like any other file.</li>
+          <li><strong>Extract</strong>: right-click a ZIP file and choose <strong>Extract all</strong>. Its contents go into a new folder next to it, named after the ZIP file. Names that are taken get a number, as elsewhere.</li>
+        </ul>
+        <p>Both run on the server: a message at the bottom shows how far they got, and you can keep working meanwhile. Both are recorded in the activity log.</p>
+        <p>To keep one file from filling the server, a ZIP file isn't extracted when:</p>
+        <ul>
+          <li>its contents are larger than the space has room for, or larger than 16 GB;</li>
+          <li>it holds more than 20,000 files and folders;</li>
+          <li>its contents would grow far more than ordinary files do (more than 250 times their compressed size), as in a "ZIP bomb";</li>
+          <li>a name inside it leads outside the new folder (<code>../</code> or a full path), or isn't allowed (for example it contains <code>:</code> or <code>?</code>);</li>
+          <li>it is protected with a password, or compressed with a method other than the usual one (deflate).</li>
+        </ul>
+        <p>ZIP files can't be extracted yet in a space that shows a folder on the server; download them and extract them on your computer. Compressing works there.</p>
 
         <h2 id="organise">Organising</h2>
         <ul>
           <li><strong>Select</strong>: click an item. Hold <kbd>Ctrl</kbd> to add more, <kbd>Shift</kbd> to select a range, or drag a box around items.</li>
-          <li><strong>Move</strong>: drag items onto a folder, or cut and paste.</li>
+          <li><strong>Move</strong>: drag items onto a folder, cut and paste, or right-click and choose <strong>Move to…</strong>. You can drop on a folder in the list, in the folder tree (hold the items over a closed folder for a moment to open it), on a part of the address bar, or on a tab showing a folder. In the <strong>Move to…</strong> window, <strong>New folder</strong> makes a folder inside the one you are looking at and opens it.</li>
+          <li><strong>Copy</strong>: hold <kbd>Ctrl</kbd> (<kbd>Option</kbd> on a Mac) while you drop the items, copy and paste, or right-click and choose <strong>Copy to…</strong>.</li>
           <li><strong>Rename</strong>: press <kbd>F2</kbd>.</li>
           <li><strong>Right-click</strong> an item for everything else: copy to, move to, favourites, properties.</li>
+        </ul>
+        <p>After you move, rename or delete items, the message at the bottom has an <strong>Undo</strong> button for a few seconds. It moves the items back, gives back the old name, or restores them from the trash. <kbd>Ctrl</kbd> + <kbd>Z</kbd> in the list does the same for the last of these actions.</p>
+
+        <h2 id="details">Details</h2>
+        <p>Click <strong>Details pane</strong> in the toolbar, or press <kbd>Alt</kbd> + <kbd>Enter</kbd>, to show the details pane on the right. It describes the selected item, or the open folder when nothing is selected.</p>
+        <ul>
+          <li><strong>Size</strong> and <strong>Contains</strong>: for a folder, the size of everything inside it at every level, and how many files and folders that is. Items in the trash are not counted. A large folder takes a moment to add up.</li>
+          <li>With several items selected, the pane shows how many files and folders they make up together, counting what the selected folders hold, and their total size.</li>
+          <li><strong>Activity</strong>: who uploaded, edited, renamed, moved, copied, deleted or restored the item, and when. For a folder, this includes what happened to everything now inside it (including items in the trash); for the root folder of a space, the whole space. Only the 50 most recent entries are shown.</li>
+        </ul>
+        <p>Everyone who can open an item sees its activity. Changes to sharing and permissions (who was given access, share links) are shown only to the space's managers and owners. The complete log, with filters and export, stays in <a href="logs.html">the activity log</a>.</p>
+
+        <h2 id="same-name">When the name is already taken</h2>
+        <p>Before uploading, moving, copying, pasting or restoring from the trash, ThirtyFile checks whether the destination already has an item with the same name (letter case doesn't count, except in folders on the server). For each one it asks, showing the size and date of both:</p>
+        <ul>
+          <li><strong>Replace</strong>: an uploaded file gives its content to the file already there, which keeps its shares, permissions and favourites, and keeps its old content as an <a href="#versions">earlier version</a>. When moving, copying or restoring, the item already there goes to the trash, so it can still be brought back.</li>
+          <li><strong>Skip</strong>: this item is left out.</li>
+          <li><strong>Keep both</strong>: the new item gets a number, such as <em>Report (1).docx</em>. The upload list shows the name it was saved as.</li>
+        </ul>
+        <p>Tick <strong>Do this for the next conflicts</strong> to give the same answer to every remaining one, or choose <strong>Cancel</strong> to stop without changing anything. An uploaded folder whose name is taken is merged into the folder there: <strong>Replace</strong> replaces the files that have the same names inside it, <strong>Keep both</strong> keeps both of them. A copy pasted into its own folder always gets a number, as in Windows.</p>
+        <p>If the folder you are uploading to is deleted, or you lose permission to add files to it, before the upload finishes, the upload fails and the upload list says why; the file doesn't end up anywhere else.</p>
+
+        <h2 id="versions">Earlier versions</h2>
+        <p>When you save a file in the online editor, replace it with an upload, or restore an earlier version, the content it had is kept as an earlier version. Select the file and open the details pane (<kbd>Alt</kbd> + <kbd>Enter</kbd>): <strong>Versions</strong> lists them, newest first, with who wrote each one and when. <strong>Open</strong> shows a version in a new browser tab, <strong>Download</strong> saves it, and <strong>Restore</strong> makes it the file's content again; what the file had until then becomes a version too, so a restore can be undone the same way.</p>
+        <ul>
+          <li>By default each file keeps its last 20 versions, each for 90 days. The administrator can change both, or turn versions off, under <strong>Control panel › General</strong>.</li>
+          <li>Earlier versions don't count toward a space's size; the administrator sees how much they take under <strong>Control panel › Storage usage</strong>.</li>
+          <li>Versions stay with the file when it is renamed or moved, also to another space. A copy starts without versions. Deleting the file for good deletes its versions.</li>
+          <li>Anyone who can open the file can see and download its versions; restoring needs permission to edit it.</li>
         </ul>
 
         <h2 id="shortcuts">Keyboard shortcuts</h2>
@@ -52,24 +127,46 @@
             <thead><tr><th>Keys</th><th>Action</th></tr></thead>
             <tbody>
               <tr><td><kbd>Enter</kbd></td><td>Open</td></tr>
-              <tr><td><kbd>Backspace</kbd></td><td>Go up one folder</td></tr>
+              <tr><td><kbd>Alt</kbd> + <kbd>↑</kbd></td><td>Go up one folder</td></tr>
+              <tr><td><kbd>Alt</kbd> + <kbd>←</kbd> or <kbd>Backspace</kbd></td><td>Back</td></tr>
+              <tr><td><kbd>Alt</kbd> + <kbd>→</kbd></td><td>Forward</td></tr>
+              <tr><td><kbd>←</kbd> <kbd>→</kbd> (in an open file)</td><td>The previous or next file of its folder, in the folder's sort order</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>L</kbd> or <kbd>Alt</kbd> + <kbd>D</kbd></td><td>Go to the address bar, with the full path selected for copying or typing another path</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>F</kbd> or <kbd>F3</kbd></td><td>Go to the search box</td></tr>
+              <tr><td><kbd>F5</kbd></td><td>Refresh the list (the page itself isn't reloaded)</td></tr>
               <tr><td><kbd>F2</kbd></td><td>Rename</td></tr>
               <tr><td><kbd>Delete</kbd></td><td>Move to the trash</td></tr>
+              <tr><td><kbd>Shift</kbd> + <kbd>Delete</kbd></td><td>Delete permanently, without going through the trash. It asks first, and only works where you may delete</td></tr>
               <tr><td><kbd>Ctrl</kbd> + <kbd>X</kbd> / <kbd>C</kbd> / <kbd>V</kbd></td><td>Cut, copy, paste</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd></td><td>Undo the last move, rename or delete, also after its message has gone</td></tr>
               <tr><td><kbd>Ctrl</kbd> + <kbd>A</kbd></td><td>Select everything</td></tr>
               <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd></td><td>New folder</td></tr>
               <tr><td><kbd>Alt</kbd> + <kbd>Enter</kbd></td><td>Show details</td></tr>
-              <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Home</kbd> <kbd>End</kbd></td><td>Move through the list</td></tr>
-              <tr><td><kbd>Esc</kbd></td><td>Clear the selection</td></tr>
+              <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Home</kbd> <kbd>End</kbd></td><td>Move through the list (also <kbd>←</kbd> <kbd>→</kbd> in the icon view and the space tiles). Hold <kbd>Shift</kbd> to select as you go</td></tr>
+              <tr><td><kbd>Space</kbd></td><td>Select the item with the focus. With <kbd>Ctrl</kbd>, add it to the selection or remove it</td></tr>
+              <tr><td>Letters</td><td>Go to the next item whose name starts with them. Type quickly to match more letters; type the same letter again for the next item starting with it</td></tr>
+              <tr><td><kbd>Esc</kbd></td><td>Clear the selection, or close the preview, the details pane or the phone menu when it covers the list</td></tr>
+              <tr><td><kbd>?</kbd> (<kbd>Shift</kbd> + <kbd>/</kbd>)</td><td>Show the list of shortcuts. It's also under <strong>See more</strong> (<strong>⋯</strong>) › <strong>Keyboard shortcuts</strong></td></tr>
+              <tr><td><kbd>Tab</kbd> (first press on a page)</td><td>Show the <strong>Skip to main content</strong> link, which jumps past the bars and the navigation pane</td></tr>
             </tbody>
           </table>
         </div>
+        <p>On a Mac, use <kbd>⌘</kbd> for <kbd>Ctrl</kbd> and <kbd>Option</kbd> for <kbd>Alt</kbd>; the menus and the list of shortcuts show them that way. Shortcuts don't apply while you are typing in a box, except <kbd>F5</kbd>.</p>
+        <p>The folder tree on the left is one stop for <kbd>Tab</kbd>. In it, <kbd>↑</kbd> and <kbd>↓</kbd> move between folders, <kbd>→</kbd> expands a folder (or goes to its first subfolder), <kbd>←</kbd> collapses it (or goes to the folder above), <kbd>Home</kbd> and <kbd>End</kbd> jump to the first and last folder, and <kbd>Enter</kbd> opens the folder.</p>
 
         <h2 id="trash">The trash</h2>
-        <p>Deleted items go to the trash, where they can be restored. They are removed for good after 30 days, or when you empty the trash.</p>
+        <p>Deleted items go to the trash, where they can be restored. They are removed for good after 30 days (the administrator can change this with <a href="settings.html"><code>THIRTYFILE_TRASH_DAYS</code></a>, or keep them until the trash is emptied), or when you empty the trash. The trash page shows how many days apply.</p>
+        <p>The trash lists deleted items of every space you can open. <strong>Empty trash</strong> deletes only the items of the spaces you manage (your own files, and team spaces where you are a manager); it asks first, naming each space and how many items go. Items of spaces you can only view stay.</p>
+        <p>The <strong>Deleted by</strong> column shows who moved each item to the trash (on wider screens). Items deleted before ThirtyFile recorded this, or by an account that was removed since, show a dash. To see only what you deleted yourself, choose <strong>Deleted by me</strong> above the list; <strong>Deleted by everyone</strong> shows the whole trash again.</p>
 
         <h2 id="phone">On a phone</h2>
         <p>The same site works on a phone. Tap an item to open it, and use the buttons above the list for everything else.</p>
+        <ul>
+          <li><strong>Select</strong>: hold your finger on an item for a moment. It's selected, and from then on a tap adds an item to the selection or takes it out. On a tablet, the menu for the selected items opens as well.</li>
+          <li><strong>Act on the selection</strong>: while items are selected, a bar at the bottom offers <strong>Download</strong>, <strong>Share</strong>, <strong>Move</strong> and <strong>Delete</strong>, and <strong>More</strong> for everything else. <strong>×</strong> clears the selection.</li>
+          <li><strong>Check boxes</strong>: turn on <strong>View</strong> › <strong>Item check boxes</strong> to show a check box on each item, in every view.</li>
+          <li><strong>Home screen</strong>: add the site to your home screen (in Safari, <strong>Share</strong> › <strong>Add to Home Screen</strong>; in Chrome, <strong>Add to home screen</strong> or <strong>Install app</strong>). It then opens like an app, without the browser's bars, under your site's name and logo.</li>
+        </ul>
         <div class="shot phone"><img src="../assets/files-phone.webp" width="780" height="1600" loading="lazy" alt="The file list on a phone" /></div>
       </main>
     </div>

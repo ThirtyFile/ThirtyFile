@@ -18,7 +18,7 @@
         <h1>Upgrade and backup</h1>
         <p class="lead">Keep ThirtyFile up to date, and keep a copy of your data somewhere safe.</p>
         <h2 id="upgrade">Upgrading</h2>
-        <p><a href="#backup">Back up</a> first. Your files and settings are kept, and the database is updated when the new version starts.</p>
+        <p><a href="#backup">Back up</a> first. Your files and settings are kept, and the database is updated when the new version starts. Before it changes the database, ThirtyFile saves a copy of it in <code>data/backups/drive-before-&lt;version&gt;.db</code> (the last three are kept).</p>
         <h3>docker run</h3>
         <pre><code>docker pull ghcr.io/thirtyfile/thirtyfile:latest
 docker stop thirtyfile && docker rm thirtyfile
@@ -26,40 +26,84 @@ docker run -d --name thirtyfile --restart unless-stopped …   # the same option
         <h3>Docker Compose</h3>
         <pre><code>docker compose pull && docker compose up -d</code></pre>
         <h3 id="from-0-1">Upgrading from 0.1.0</h3>
-        <p>Version 0.1.0 kept your files in the <code>blobs</code> folder inside <code>/data</code>. They stay there and keep working; the log says so when ThirtyFile starts. To move them to <code>/storage</code>, stop ThirtyFile, move everything inside <code>blobs</code> into the storage folder, and start it again.</p>
+        <p>Version 0.1.0 kept your files in the <code>blobs</code> folder inside <code>/data</code>. They stay there and keep working; the log says so when ThirtyFile starts. To move them to <code>/storage</code>, <a href="#convert">convert the spaces to plain folders</a>: that writes them to <code>/storage</code> and empties <code>blobs</code>. Or stop ThirtyFile, move everything inside <code>blobs</code> into the storage folder, and start it again.</p>
+        <h3 id="convert">Converting spaces to plain folders</h3>
+        <p>Versions 0.1 and 0.2 keep the files of every space in a content store: <code>/storage/ab/cd/…</code>, named after their content, with the names and folders only in the database. Opening <code>/storage</code> shows nothing you can use, and other programs can't change the files. The conversion turns these spaces into <a href="storage.html#folder-spaces">folder spaces</a>, whose files are ordinary files in ordinary folders:</p>
+        <pre><code>/storage/company/…            the company space
+/storage/teams/&lt;space name&gt;/…  team spaces
+/storage/users/&lt;user name&gt;/…   personal spaces</code></pre>
+        <p>Spaces and users added after upgrading get these folders right away; only the spaces made before need converting. It doesn't happen by itself when you upgrade: run it when it suits you (the log mentions it at every start while spaces are left to convert). <a href="#backup">Back up</a> first, then stop ThirtyFile and run:</p>
+        <pre><code>docker compose stop
+docker compose run --rm thirtyfile convert --dry-run   # only lists what would happen
+docker compose run --rm thirtyfile convert
+docker compose start</code></pre>
+        <p>(With <code>docker run</code>: <code>docker stop thirtyfile</code>, then <code>docker run --rm -v …same volumes… ghcr.io/thirtyfile/thirtyfile convert</code>.) ThirtyFile and the conversion never run at the same time: whichever starts second stops with a message.</p>
+        <ul>
+          <li><strong>No extra disk space.</strong> Each file becomes a hard link to its stored content, so it isn't copied. A file several people uploaded (stored once) becomes several links to the same copy, so it still takes the space of one. When the stored files are on another disk or Docker volume than the folders (<code>/data/blobs</code> from 0.1, say), they are copied instead and checked against their fingerprint, one space at a time.</li>
+          <li><strong>Nothing changes for people.</strong> Every file and folder keeps its identity, so share links, permissions, favourites, Recent and earlier versions keep working. The trash of each space moves to its <code>.thirtyfile-trash</code> folder, earlier versions to <code>.thirtyfile-versions</code>.</li>
+          <li><strong>A space changes only once it is complete.</strong> Its files are written and checked first; then the space becomes a folder space, and only then is its content removed from the store (content another space still uses stays until that space is converted too). The conversion can be stopped at any time and run again: files already written are skipped. Until a space is converted, don't change its new folder by hand: the conversion removes what doesn't belong there.</li>
+          <li><strong>Some names change.</strong> Names a folder can't hold as they are get another one, and the report lists each: two names that differ only in letter case (<em>notes (1).txt</em>), names ThirtyFile doesn't show in folders (<em>Thumbs.db</em>, <em>~$…</em> and other temporary files get an underscore, <em>_Thumbs.db</em>), and names too long for the disk.</li>
+          <li><strong>What stays as it is.</strong> Spaces on S3, SFTP or FTP stay in their content store, as does a space with a file whose stored content is missing or turns out damaged (the report names it; <a href="help.html#check"><code>thirtyfile check</code></a> tells you more). Files you put in <code>/storage</code> yourself are listed in the report and never touched.</li>
+          <li><strong>Hard links.</strong> Files that were stored once for several uploads stay linked after the conversion. ThirtyFile always writes new content to a new file, so saving one of them on the web never changes the others; a program that changes files in place (over SMB, say) changes all the links at once.</li>
+        </ul>
+        <p>Spaces on a <em>Local folder</em> storage location are converted the same way, into <code>company</code>, <code>teams</code> and <code>users</code> in that location's folder.</p>
         <h3>Which version you get</h3>
         <div class="table-scroll">
           <table>
             <thead><tr><th>Tag</th><th>Contents</th></tr></thead>
             <tbody>
-              <tr><td><code>latest</code></td><td>The newest release. The right choice for most people</td></tr>
+              <tr><td><code>1</code></td><td>The newest release of one major version (from 1.0.0 on). Picks up new features and repairs but never a version that changes something you rely on (2.0.0), so it is the safe tag for updating automatically</td></tr>
+              <tr><td><code>latest</code></td><td>The newest release, including a new major version: read its notes before you upgrade</td></tr>
               <tr><td><code>1.2</code>, <code>1.2.3</code></td><td>One release line, or one exact release, if you want to decide yourself when to move on</td></tr>
+              <tr><td><code>1.2.3-rc.1</code></td><td>A pre-release, for trying out what is coming. Only available under its own number: the other tags never point to a pre-release</td></tr>
             </tbody>
           </table>
         </div>
-        <p>The changes in each release are listed on the <a href="https://github.com/ThirtyFile/ThirtyFile/releases">releases page</a>.</p>
+        <p>Before 1.0.0 there is no major-version tag: <code>0.3</code> is the closest, since any 0.x release may change things. The changes in each release are listed on the <a href="https://github.com/ThirtyFile/ThirtyFile/releases">releases page</a>, which also has <code>compose.yaml</code> and the server as a single program for Linux on amd64 and arm64, with their SHA-256 checksums in <code>SHA256SUMS</code>.</p>
+        <p>Every released image comes with a list of what it contains (an SBOM) and a signed record of how it was built. To check that an image or a program was built by ThirtyFile's own release workflow, use the <a href="https://cli.github.com/">GitHub CLI</a>:</p>
+        <pre><code>gh attestation verify oci://ghcr.io/thirtyfile/thirtyfile:1.2.3 --repo ThirtyFile/ThirtyFile
+gh attestation verify thirtyfile-1.2.3-linux-amd64 --repo ThirtyFile/ThirtyFile</code></pre>
+        <p>The licences of the libraries inside ThirtyFile are in <code>/usr/share/licenses/thirtyfile/THIRD-PARTY-NOTICES</code> in the image, and in <code>THIRD-PARTY-NOTICES</code> on the releases page.</p>
+        <h3 id="downgrade">Going back to an older version</h3>
+        <p>An older version doesn't start on a database a newer one has changed. To go back, stop ThirtyFile, replace <code>data/drive.db</code> with the copy made before the upgrade (<code>data/backups/drive-before-&lt;new version&gt;.db</code>), delete <code>drive.db-wal</code> and <code>drive.db-shm</code> if they are there, and start the older image. Changes made since the upgrade (new accounts, files uploaded and their names) are lost; files uploaded since then stay in the storage folder but aren't listed.</p>
 
         <h2 id="backup">Backing up</h2>
-        <p>The <code>data</code> and <code>storage</code> folders together contain everything: files, accounts, settings and logs. Stop ThirtyFile while copying them, so that the copy is consistent.</p>
-        <h3>docker run</h3>
+        <p>The <code>data</code> and <code>storage</code> folders together contain everything: files, accounts, settings and logs. The files in <code>storage/company</code>, <code>storage/teams</code> and <code>storage/users</code> are ordinary files, so any backup tool can copy them and they can be restored one by one; share links, permissions, the trash and earlier versions need the database too. The database in <code>data</code> is being written all the time, so don't copy <code>drive.db</code> while ThirtyFile runs; save a copy with the backup command instead, or stop ThirtyFile while copying.</p>
+        <h3 id="running">Without stopping it</h3>
+        <ol>
+          <li>Save a consistent copy of the database (it can't be overwritten, so use a new name each time):
+            <pre><code>docker exec thirtyfile thirtyfile backup /data/backups/drive-$(date +%F).db</code></pre></li>
+          <li>Copy <code>storage</code>, and <code>data</code> without <code>drive.db*</code>, <code>thumbs</code> and <code>tmp</code> (thumbnails are made again, and <code>tmp</code> holds only uploads in progress):
+            <pre><code>sudo tar czf thirtyfile-$(date +%F).tar.gz -C /srv/thirtyfile \
+  --exclude='data/drive.db*' --exclude=data/secret.key --exclude=data/thumbs --exclude=data/tmp data storage</code></pre></li>
+        </ol>
+        <p>Files uploaded while the archive is being made may be in the archive without being in the saved database, or the other way round; either way the backup restores. To run it every night, put both commands in a script and add it to cron, for example <code>0 3 * * * /usr/local/bin/thirtyfile-backup.sh</code>, and delete archives older than a few weeks in the same script.</p>
+        <h3>With ThirtyFile stopped</h3>
         <pre><code>docker stop thirtyfile
 sudo tar czf thirtyfile-backup.tar.gz -C /srv/thirtyfile data storage
 docker start thirtyfile</code></pre>
-        <h3>Docker Compose</h3>
-        <p>In the folder of <code>compose.yaml</code>:</p>
-        <pre><code>docker compose stop
-sudo tar czf thirtyfile-backup.tar.gz data storage
-docker compose start</code></pre>
-        <p>This writes <code>thirtyfile-backup.tar.gz</code> into the current folder. Copy it to another computer or disk.</p>
-        <div class="note"><strong>Files on S3, SFTP or FTP are not in the backup.</strong> Back up that storage with its own tools. The backup still contains the list of files and who may see them.</div>
+        <p>With Docker Compose, use <code>docker compose stop</code> and <code>docker compose start</code> in the folder of <code>compose.yaml</code>, and <code>data storage</code> relative to it.</p>
+        <div class="note"><strong>Also back up:</strong> storage locations mounted besides <code>/storage</code> (a NAS folder added as a <em>Local folder</em> location, folder spaces), and files on S3, SFTP or FTP with the storage's own tools. The backup contains the list of those files and who may see them, not their content.</div>
 
         <h2 id="restore">Restoring</h2>
-        <p>Unpack the backup where the folders belong, then start the container as usual:</p>
-        <pre><code>sudo tar xzf thirtyfile-backup.tar.gz -C /srv/thirtyfile</code></pre>
-        <p>With Docker Compose, unpack it in the folder of <code>compose.yaml</code> instead.</p>
+        <ol>
+          <li>Stop ThirtyFile and unpack the archive where the folders belong: <code>sudo tar xzf thirtyfile-backup.tar.gz -C /srv/thirtyfile</code> (with Docker Compose, in the folder of <code>compose.yaml</code>).</li>
+          <li>If the archive was made without stopping, put the saved database in place: copy <code>data/backups/drive-&lt;date&gt;.db</code> to <code>data/drive.db</code>, and delete <code>drive.db-wal</code> and <code>drive.db-shm</code>.</li>
+          <li>Start the same version of ThirtyFile the backup came from (or a newer one), sign in, and open a few files, including one uploaded recently.</li>
+        </ol>
+        <p>The database also holds the secret that signs sessions and unlocked share links: restored together with <code>secret.key</code> (see <a href="#key">below</a>), people stay signed in; without the key, everyone signs in again, and storage locations and single sign-on need their passwords entered again. Share links themselves keep working either way. Moving to a new server works the same way: install ThirtyFile there, restore the backup, and change the Site URL if the address changed.</p>
+        <p>Test a restore now and then on another computer: a backup is only as good as the last time it was restored.</p>
+
+        <h2 id="key">The key for saved passwords</h2>
+        <p>The passwords and keys of storage locations, the single sign-on client secrets, the two-factor sign-in secrets and the secret that signs sessions and share links are saved in the database encrypted. The key is in <code>data/secret.key</code> (created on first start), or wherever <code>THIRTYFILE_SECRET_KEY</code> or <code>THIRTYFILE_SECRET_KEY_FILE</code> point. A copy of the database alone then gives none of them away.</p>
+        <ul>
+          <li><strong>Back up the key separately</strong>, for example in a password manager, and leave it out of the regular backup (as in the command above). Without it, restoring works, but the storage locations and single sign-on need their passwords entered again, and everyone has to sign in again.</li>
+          <li>To keep the key out of the data folder entirely, create one (<code>openssl rand -hex 32</code>) and give it with <code>THIRTYFILE_SECRET_KEY_FILE</code> (a Docker secret) or <code>THIRTYFILE_SECRET_KEY</code>. An existing key file's content can be used the same way.</li>
+          <li><strong>A new key</strong>, for example after a backup that included it went astray: stop ThirtyFile and run <code>docker compose run --rm thirtyfile rotate-secret-key</code> (or <code>docker run --rm -v …same volumes… ghcr.io/thirtyfile/thirtyfile rotate-secret-key</code>). It re-encrypts everything and replaces <code>secret.key</code>. With <code>THIRTYFILE_SECRET_KEY</code>, give the new key in <code>THIRTYFILE_NEW_SECRET_KEY</code> for that run, then switch the setting to it.</li>
+        </ul>
 
         <h2 id="safe">Keep backups safe</h2>
-        <p>A backup contains the keys and passwords of your storage locations and single sign-on, and the logs with visitors' IP addresses. Treat it like a password: store it where only administrators can reach it.</p>
+        <p>A backup contains your files, the accounts, and the logs with visitors' IP addresses; with <code>secret.key</code> in it, also everything needed to read the saved passwords. Treat it like a password: store it where only administrators can reach it.</p>
       </main>
     </div>
     <script src="../assets/site.js"></script>

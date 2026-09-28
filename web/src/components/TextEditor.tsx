@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { LanguageDescription, type LanguageSupport } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { EditorView, keymap } from "@codemirror/view";
 import { Loader2Icon, SaveIcon } from "lucide-react";
 import { toast } from "sonner";
-import { ApiError, api, type FileSource, type Node } from "@/api";
+import { ApiError, api, fetchOk, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
 import { getDraft, setDraft } from "@/lib/drafts";
-import { t, tServer } from "@/lib/i18n";
+import { t } from "@/lib/i18n";
 import { decodeText, encodeText, lineEnding, normalizeLines, type TextEncodingName } from "@/lib/textEncoding";
 import { useTheme } from "@/lib/theme";
 
@@ -20,6 +20,8 @@ export default function TextEditor(props: {
   onDirtyChange?(dirty: boolean): void;
   /** Embedded in a tab (fills the whole area); otherwise floating-window style */
   embedded?: boolean;
+  /** Shown first in the bar above the text (the Markdown view's Preview / Edit switch) */
+  toolbar?: ReactNode;
 }) {
   const { dark } = useTheme();
   const [original, setOriginal] = useState<string | null>(null);
@@ -48,12 +50,8 @@ export default function TextEditor(props: {
     setError(null);
     // The editor stays mounted when moving to another file: forget the previous file's language
     setLang(null);
-    fetch(props.source.contentUrl(props.node))
-      .then(async (r) => {
-        if (!r.ok) {
-          const msg = await r.json().then((d) => d.error as string | undefined).catch(() => undefined);
-          throw new Error(msg ? tServer(msg) : t("Couldn't read the file ({status})", { status: r.status }));
-        }
+    fetchOk(props.source.contentUrl(props.node))
+      .then((r) => {
         // The version of the content just received (the node the parent holds may be older, e.g. after a conflict)
         const version = Number(r.headers.get("x-version")) || props.node.updated_at;
         return r.arrayBuffer().then((buf) => ({ buf, version }));
@@ -66,7 +64,7 @@ export default function TextEditor(props: {
         eol.current = lineEnding(decoded.text);
         const d = { ...decoded, text: normalizeLines(decoded.text) };
         // Restore unsaved content when switching back to the tab
-        const draft = props.editable && d.encoding !== null ? getDraft(props.node.id) : undefined;
+        const draft = props.editable && d.encoding !== null ? getDraft(props.node.id, "text") : undefined;
         if (draft && draft.base !== d.text) {
           // Someone else changed the file while these edits were unsaved: keep the edits and the version they were
           // based on, so saving is refused (409, with a reload option) instead of overwriting the other person's work
@@ -86,13 +84,16 @@ export default function TextEditor(props: {
     return () => {
       cancelled = true;
     };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every refresh of the list: its id and date say when the file changed
   }, [props.node.id, props.node.updated_at, props.source, reload]);
 
-  useEffect(() => props.onDirtyChange?.(dirty), [dirty]);
+  // Reported when it changes; the parent's callback may be new on every render
+  const reportDirty = useEffectEvent((d: boolean) => props.onDirtyChange?.(d));
+  useEffect(() => reportDirty(dirty), [dirty]);
 
   const change = (value: string) => {
     setText(value);
-    if (original !== null && editable) setDraft(props.node.id, value === original ? null : { text: value, base: original, version: base.current });
+    if (original !== null && editable) setDraft(props.node.id, value === original ? null : { kind: "text", text: value, base: original, version: base.current });
   };
 
   saveRef.current = async () => {
@@ -152,6 +153,7 @@ export default function TextEditor(props: {
       }
     >
       <div className="flex h-10 items-center gap-2 border-b px-3 text-xs text-muted-foreground">
+        {props.toolbar}
         {encoding === null ? (
           <span>{t("Unknown encoding: opened read-only so the file isn't damaged")}</span>
         ) : (

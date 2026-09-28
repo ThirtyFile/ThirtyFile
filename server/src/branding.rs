@@ -17,8 +17,8 @@ use crate::{
     auth::Admin,
     db::{get_setting, set_setting},
     error::{AppError, AppResult},
+    logs,
     state::AppState,
-    tree,
     util::now,
 };
 
@@ -94,7 +94,7 @@ async fn save(st: &AppState, b: &Branding, detail: &str, user: &crate::auth::Use
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
     set_setting(&mut tx, "branding", &serde_json::to_string(b).unwrap()).await?;
-    tree::log(&mut tx, user, None, "settings", detail).await?;
+    logs::record_activity(&mut tx, user, None, "settings", detail).await?;
     tx.commit().await?;
     *st.branding.write().unwrap() = b.clone();
     Ok(())
@@ -132,18 +132,44 @@ pub async fn css(State(st): State<AppState>) -> Response {
     ([(header::CONTENT_TYPE, "text/css; charset=utf-8"), (header::CACHE_CONTROL, "public, max-age=31536000, immutable")], body).into_response()
 }
 
-/// Generates CSS variables from the accent color; button text, focus ring and selection background are all derived from it, computed separately for light and dark
+/// Web app manifest, so the site can be added to a phone's home screen and opens there without the browser's bars.
+/// It's fetched from this origin, which the page's Content-Security-Policy allows (`default-src 'self'`).
+pub async fn manifest(State(st): State<AppState>) -> Response {
+    let body = manifest_json(&st.branding.read().unwrap()).to_string();
+    ([(header::CONTENT_TYPE, "application/manifest+json"), (header::CACHE_CONTROL, "no-cache")], body).into_response()
+}
+
+/// Named after the site; the icon is the uploaded logo, else the default one (both scale, so one icon fits every size)
+fn manifest_json(b: &Branding) -> Value {
+    let icon = match &b.logo {
+        Some(logo) => json!({ "src": format!("/api/branding/logo?v={}", b.version), "sizes": "any", "type": logo.mime }),
+        None => json!({ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }),
+    };
+    json!({
+        "name": b.site_name,
+        "short_name": b.site_name,
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "background_color": "#ffffff",
+        "theme_color": b.light_brand,
+        "icons": [icon],
+    })
+}
+
+/// Generates CSS variables from the accent color; button text, focus ring and selection background are all derived from it, computed separately for light and dark.
+/// The focus ring is the accent color itself: a tint of it would fall below 3:1 against the page
 pub fn palette_css(b: &Branding) -> String {
     let mut out = String::new();
-    for (selector, color, default, bg, ring, sel) in
-        [(":root", &b.light_brand, DEFAULT_LIGHT, "#ffffff", 55, 13), (".dark", &b.dark_brand, DEFAULT_DARK, "#1c1c1e", 65, 24)]
+    for (selector, color, default, bg, sel) in
+        [(":root", &b.light_brand, DEFAULT_LIGHT, "#ffffff", 13), (".dark", &b.dark_brand, DEFAULT_DARK, "#1c1c1e", 24)]
     {
         if color.eq_ignore_ascii_case(default) || !is_hex_color(color) {
             continue;
         }
-        let fg = if luminance(color) > 0.3 { "#111111" } else { "#ffffff" };
+        let fg = if luminance(color) > 0.19 { "#111111" } else { "#ffffff" };
         out.push_str(&format!(
-            "{selector}{{--brand:{color};--brand-foreground:{fg};--ring:color-mix(in srgb,{color} {ring}%,{bg});--selection:color-mix(in srgb,{color} {sel}%,{bg})}}\n"
+            "{selector}{{--brand:{color};--brand-foreground:{fg};--ring:{color};--selection:color-mix(in srgb,{color} {sel}%,{bg})}}\n"
         ));
     }
     out
@@ -153,7 +179,7 @@ fn is_hex_color(s: &str) -> bool {
     s.len() == 7 && s.starts_with('#') && s[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
-/// sRGB relative luminance (0 black – 1 white); above 0.3, black text has higher contrast than white
+/// sRGB relative luminance (0 black – 1 white); above 0.19, #111111 text has higher contrast than white
 fn luminance(hex: &str) -> f64 {
     let ch = |i: usize| {
         let v = u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0) as f64 / 255.0;
@@ -439,7 +465,7 @@ mod tests {
 
         let b = env.st.branding.read().unwrap().clone();
         let css = palette_css(&b);
-        assert!(css.contains(":root{--brand:#7c3aed;--brand-foreground:#ffffff"));
+        assert!(css.contains(":root{--brand:#7c3aed;--brand-foreground:#ffffff;--ring:#7c3aed;"), "the focus ring is the accent color at full strength");
         assert!(css.contains(".dark{--brand:#a78bfa;--brand-foreground:#111111"), "a light accent color gets dark text");
         // Default colors produce no output, keeping the original styles
         assert_eq!(palette_css(&Branding::default()), "");
@@ -453,6 +479,20 @@ mod tests {
         assert!(html.contains(r#"<script>window.__TF_DEFAULT_LANG__="en";window.__TF_BRANDING__="#));
         assert!(html.contains("tf-brand-css"));
         assert!(!html.contains("</script><b>"), "settings content must not escape the script tag");
+    }
+
+    #[test]
+    fn manifest_takes_the_site_name_and_logo() {
+        let mut b = Branding { site_name: "Stellar Cloud".into(), ..Branding::default() };
+        let m = manifest_json(&b);
+        assert_eq!(m["name"], "Stellar Cloud");
+        assert_eq!(m["display"], "standalone");
+        assert_eq!(m["icons"][0]["src"], "/favicon.svg", "the default icon without a logo");
+        b.logo = Some(LogoFile { file: "logo.png".into(), mime: "image/png".into() });
+        b.version = 7;
+        let m = manifest_json(&b);
+        assert_eq!(m["icons"][0]["src"], "/api/branding/logo?v=7");
+        assert_eq!(m["icons"][0]["type"], "image/png");
     }
 
     #[tokio::test]

@@ -5,14 +5,16 @@ import { SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useQueryClient } from "@tanstack/react-query";
 import { TabBar } from "@/components/TabBar";
+import { NotificationBell } from "@/components/NotificationBell";
 import { UploadPanel } from "@/components/UploadPanel";
 import { DownloadPanel } from "@/components/DownloadPanel";
 import { useMe } from "@/lib/session";
 import { cn } from "@/lib/utils";
 import { logoUrl, useBranding } from "@/lib/branding";
 import { SiteName } from "@/components/SiteName";
+import { MAIN_ID } from "@/components/Frame";
 import { loadTabs, syncLocation } from "@/tabs";
-import { onUploadDone } from "@/uploads";
+import { onUploadsLanded } from "@/uploads";
 import { t, tServer } from "@/lib/i18n";
 
 /** Site logo and name (from branding settings; switches automatically when there's a dark-mode logo) */
@@ -62,28 +64,51 @@ export function AppShell() {
     syncLocation(location.pathname + location.search);
   }, [location.pathname, location.search]);
 
-  // After uploads complete, refresh the list and used space
+  // As uploaded files land, refresh the folders they went to (not every open folder), at most every 1.5 s; when the
+  // uploads end, once more every list (uploaded folders add subfolders) and the used space. A refresh already under
+  // way is left to finish instead of being restarted.
   useEffect(
     () =>
-      onUploadDone(() => {
-        for (const key of ["children", "recent", "me"]) qc.invalidateQueries({ queryKey: [key] });
+      onUploadsLanded((parentIds, final) => {
+        const keys = final ? [["children"], ["recent"], ["me"]] : parentIds.map((id) => ["children", id]);
+        for (const queryKey of keys) qc.invalidateQueries({ queryKey }, { cancelRefetch: false });
       }),
     [qc],
   );
 
   return (
     <div className="flex h-full flex-col">
-      <ErrorBoundary>
-        <TabBar />
-      </ErrorBoundary>
+      {/* First stop for Tab: past the tab bar, address bar, command bar and navigation pane */}
+      <a
+        href={`#${MAIN_ID}`}
+        onClick={(e) => {
+          const main = document.getElementById(MAIN_ID);
+          if (!main) return;
+          e.preventDefault();
+          main.focus();
+        }}
+        className="sr-only rounded-md bg-background px-3 py-2 text-sm font-medium shadow-lg ring-2 ring-ring focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50"
+      >
+        {t("Skip to main content")}
+      </a>
+      <div className="flex shrink-0 bg-sidebar">
+        <div className="min-w-0 flex-1">
+          <ErrorBoundary>
+            <TabBar />
+          </ErrorBoundary>
+        </div>
+        <ErrorBoundary>
+          <NotificationBell />
+        </ErrorBoundary>
+      </div>
       <div className="min-h-0 flex-1">
         {/* An error in one page only affects the content area; the tab bar and upload panel keep working */}
         <ErrorBoundary resetKey={location.pathname}>
           <Outlet />
         </ErrorBoundary>
       </div>
-      {/* Transfer progress at the bottom right: downloads above, uploads below */}
-      <div className="fixed right-4 bottom-4 z-40 flex w-[min(380px,calc(100vw-2rem))] flex-col gap-2">
+      {/* Transfer progress at the bottom right: downloads above, uploads below (above the phone selection bar while it shows) */}
+      <div className="fixed right-4 bottom-[calc(var(--tf-bottom-inset,0px)+1rem)] z-40 flex w-[min(380px,calc(100vw-2rem))] flex-col gap-2">
         <DownloadPanel />
         <UploadPanel />
       </div>

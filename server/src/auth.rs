@@ -3,7 +3,7 @@ use axum::{
     Json,
     extract::{ConnectInfo, FromRequestParts, State},
     http::{HeaderMap, header, request::Parts},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 
@@ -19,9 +19,9 @@ pub const SESSION_COOKIE: &str = "tf_session";
 const SESSION_TTL: i64 = 30 * 24 * 3600;
 const FAIL_WINDOW: i64 = 15 * 60;
 /// Limit on consecutive failures for one username from one IP (counted per username + IP, so an attacker can't use it to lock the real user out from elsewhere)
-const FAIL_LIMIT: usize = 5;
+pub const FAIL_LIMIT: usize = 5;
 /// Limit on total failures from one IP within the time window (blocks attempts against many usernames)
-const IP_FAIL_LIMIT: usize = 30;
+pub const IP_FAIL_LIMIT: usize = 30;
 /// Failures against one account (from any address) before each further attempt has to wait
 const ACCOUNT_FREE_FAILURES: usize = 10;
 /// The longest wait between attempts against one account; the account itself is never locked
@@ -66,9 +66,18 @@ pub async fn verify_password(password: String, hash: String) -> AppResult<bool> 
     .await?)
 }
 
-pub fn validate_password(p: &str) -> AppResult<()> {
-    if p.chars().count() < 6 {
-        return Err(AppError::bad_request("Password must be at least 6 characters"));
+/// The shortest password allowed, and the highest the minimum can be set to (Control panel › General)
+pub const MIN_PASSWORD: usize = 6;
+pub const MAX_MIN_PASSWORD: usize = 64;
+
+/// The minimum password length currently set
+pub fn min_password(st: &AppState) -> usize {
+    st.system.read().unwrap().min_password_length
+}
+
+pub fn validate_password(p: &str, min: usize) -> AppResult<()> {
+    if p.chars().count() < min {
+        return Err(AppError::bad_request(format!("Password must be at least {min} characters")));
     }
     Ok(())
 }
@@ -106,6 +115,10 @@ pub struct User {
     /// Root folder id of the shared space; None when the shared space is disabled
     #[sqlx(skip)]
     pub shared_root: Option<String>,
+    /// The sign-in session (device) the request came with; None for users loaded by id
+    #[sqlx(skip)]
+    #[serde(skip)]
+    pub session_id: Option<String>,
 }
 
 impl User {
@@ -114,24 +127,64 @@ impl User {
     }
 }
 
+/// A session's "last used" time and address are updated at most this often, so requests don't each write to the database
+pub const SESSION_TOUCH: i64 = 5 * 60;
+
+#[derive(sqlx::FromRow)]
+struct SessionRow {
+    #[sqlx(flatten)]
+    user: User,
+    session_id: String,
+    last_used_at: Option<i64>,
+}
+
 impl FromRequestParts<AppState> for User {
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, st: &AppState) -> Result<Self, Self::Rejection> {
+        // App passwords only count on the routes that allow them (file operations); elsewhere the header is ignored
+        if parts.extensions.get::<crate::tokens::AllowAppPasswords>().is_some()
+            && let Some(credential) = crate::tokens::credential(&parts.headers)
+        {
+            return crate::tokens::authenticate(parts, st, credential).await;
+        }
         let token = get_cookie(&parts.headers, SESSION_COOKIE).ok_or_else(AppError::unauthorized)?;
         let sql = format!(
-            "SELECT {USER_COLS} FROM sessions s JOIN users u ON u.id = s.user_id
+            "SELECT {USER_COLS}, s.id AS session_id, s.last_used_at FROM sessions s JOIN users u ON u.id = s.user_id
              WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled = 0"
         );
-        let mut user = sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(sql.as_str()))
+        let ts = now();
+        let row = sqlx::query_as::<_, SessionRow>(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(sha256_hex(token.as_bytes()))
-            .bind(now())
+            .bind(ts)
             .fetch_optional(&st.db)
             .await?
             .ok_or_else(AppError::unauthorized)?;
+        if row.last_used_at.is_none_or(|t| ts - t >= SESSION_TOUCH) {
+            let ip = parts.extensions.get::<ConnectInfo<std::net::SocketAddr>>().map(|c| client_ip(st, c.0, &parts.headers));
+            touch_session(st.clone(), row.session_id.clone(), ip);
+        }
+        let mut user = row.user;
         user.shared_root = st.shared_root();
+        user.session_id = Some(row.session_id);
         Ok(user)
     }
+}
+
+/// Records that a session was used (in the background, so the request doesn't wait for the write)
+fn touch_session(st: AppState, id: String, ip: Option<String>) {
+    tokio::spawn(async move {
+        let _w = st.write_lock.lock().await;
+        let res = sqlx::query("UPDATE sessions SET last_used_at = ?, ip = COALESCE(?, ip) WHERE id = ?")
+            .bind(now())
+            .bind(ip)
+            .bind(&id)
+            .execute(&st.db)
+            .await;
+        if let Err(e) = res {
+            tracing::debug!("Couldn't record the use of a session: {e}");
+        }
+    });
 }
 
 /// Loads a (non-disabled) user by id, for permission checks that don't go through a sign-in session, e.g. public share links
@@ -168,21 +221,32 @@ pub struct Me {
     pub can_create_drive: bool,
     /// The site's public URL (for building share links); blank = use the browser's current URL
     pub public_url: String,
+    /// Days before trashed items are deleted for good (0 = kept until the trash is emptied)
+    pub trash_days: i64,
+    /// Shortest password allowed
+    pub min_password_length: usize,
+    /// The rules for public share links, so the share dialog offers only what is allowed
+    pub share_policy: crate::shares::SharePolicy,
+    /// Earlier versions kept per file (0 = replacing a file's content keeps no version)
+    pub version_keep: i64,
+    /// Largest file that can be edited and saved online (bytes)
+    pub max_edit_bytes: usize,
 }
 
 async fn me_of(st: &AppState, user: User) -> AppResult<Me> {
     let used_bytes = tree::used_bytes(&st.db, user.id).await?;
-    let (can_create_drive, public_url) = {
+    let (can_create_drive, public_url, min_password_length, version_keep) = {
         let s = st.system.read().unwrap();
-        (user.is_admin() || s.allow_user_drives, s.public_url.clone())
+        (user.is_admin() || s.allow_user_drives, s.public_url.clone(), s.min_password_length, s.version_keep)
     };
-    Ok(Me { user, used_bytes, can_create_drive, public_url })
+    let share_policy = crate::shares::policy(st);
+    Ok(Me { user, used_bytes, can_create_drive, public_url, trash_days: st.trash_days, min_password_length, share_policy, version_keep, max_edit_bytes: crate::files::MAX_EDIT_BYTES })
 }
 
 #[derive(Deserialize)]
 pub struct LoginReq {
-    username: String,
-    password: String,
+    pub username: String,
+    pub password: String,
 }
 
 /// Counts an attempt against `key` *before* the password is checked, so parallel requests can't all slip past the
@@ -218,6 +282,13 @@ pub fn begin_account_attempt(st: &AppState, key: &str) -> Result<(), i64> {
     }
     list.push(ts);
     Ok(())
+}
+
+/// Whether `key` already reached `limit` failures within the window. For checks that are fast (a hash of a random token
+/// rather than a password hash): the attempt is checked first and only a failure is counted, with `begin_attempt`.
+pub fn attempts_exhausted(st: &AppState, key: &str, limit: usize) -> bool {
+    let cutoff = now() - FAIL_WINDOW;
+    st.login_failures.lock().unwrap().get(key).is_some_and(|list| list.iter().filter(|t| **t > cutoff).count() >= limit)
 }
 
 /// Removes the attempt recorded by `begin_attempt` (the password was right)
@@ -349,13 +420,14 @@ pub async fn login(
     ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
     headers: HeaderMap,
     Json(req): Json<LoginReq>,
-) -> AppResult<impl IntoResponse> {
+) -> AppResult<Response> {
     let ip = client_ip(&st, addr, &headers);
     let username = req.username.trim();
     let limit_ip = limit_key_ip(&ip);
-    let key = format!("u:{}|{limit_ip}", username.to_lowercase());
+    // Usernames are unique regardless of the case of A–Z only (`COLLATE NOCASE`), so the keys fold the same letters
+    let key = format!("u:{}|{limit_ip}", username.to_ascii_lowercase());
     let ip_key = format!("ip:{limit_ip}");
-    let account_key = format!("a:{}", username.to_lowercase());
+    let account_key = format!("a:{}", username.to_ascii_lowercase());
     // Attempts during the lockout aren't logged individually (one "locked" entry was logged when the lockout began), so the log can't be flooded
     let too_many = AppError::new(axum::http::StatusCode::TOO_MANY_REQUESTS, "Too many failed sign-in attempts. Try again in 15 minutes.");
     if !begin_attempt(&st, &key, FAIL_LIMIT) {
@@ -408,27 +480,55 @@ pub async fn login(
     }
     attempt_succeeded(&st, &ip_key);
 
-    let cookie = open_session(&st, id).await?;
-    logs::record_login(&st, Some(id), username, "login", &ip, &headers);
+    // With two-factor sign-in, the password only gets a short-lived ticket for the second step
+    if let Some(pending) = crate::twofactor::after_password(&st, id).await? {
+        return Ok(Json(pending).into_response());
+    }
+    finish_login(&st, id, username, &ip, &headers, None).await
+}
+
+/// Signs a user in after every step of password sign-in passed: opens the session and answers with the user (and the
+/// recovery codes when two-factor sign-in was just set up)
+pub async fn finish_login(st: &AppState, id: i64, username: &str, ip: &str, headers: &HeaderMap, recovery_codes: Option<Vec<String>>) -> AppResult<Response> {
+    let cookie = open_session(st, id, "password", ip, headers).await?;
+    logs::record_login(st, Some(id), username, "login", ip, headers);
     let sql = format!("SELECT {USER_COLS} FROM users u WHERE u.id = ?");
     let mut user: User = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(id).fetch_one(&st.db).await?;
     user.shared_root = st.shared_root();
-    Ok(([(header::SET_COOKIE, cookie)], Json(me_of(&st, user).await?)))
+    let mut body = serde_json::to_value(me_of(st, user).await?).map_err(AppError::internal)?;
+    if let Some(codes) = recovery_codes {
+        body["recovery_codes"] = serde_json::json!(codes);
+    }
+    Ok(([(header::SET_COOKIE, cookie)], Json(body)).into_response())
 }
 
-/// Creates a sign-in session and updates "last sign-in", returning the cookie to set (shared by password and third-party sign-in)
-pub async fn open_session(st: &AppState, user_id: i64) -> AppResult<String> {
+/// The browser's User-Agent as stored with sessions and log entries (at most 300 characters)
+pub fn user_agent(headers: &HeaderMap) -> String {
+    headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or_default().chars().take(300).collect()
+}
+
+/// Creates a sign-in session and updates "last sign-in", returning the cookie to set (shared by password and third-party
+/// sign-in). `method` (password or the provider), the address and the browser are shown in the list of signed-in devices.
+pub async fn open_session(st: &AppState, user_id: i64, method: &str, ip: &str, headers: &HeaderMap) -> AppResult<String> {
     let token = random_token(43);
     let ts = now();
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
-    sqlx::query("INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)")
-        .bind(sha256_hex(token.as_bytes()))
-        .bind(user_id)
-        .bind(ts)
-        .bind(ts + SESSION_TTL)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "INSERT INTO sessions (token_hash, id, user_id, created_at, expires_at, user_agent, ip, method, last_used_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(sha256_hex(token.as_bytes()))
+    .bind(crate::util::new_id())
+    .bind(user_id)
+    .bind(ts)
+    .bind(ts + SESSION_TTL)
+    .bind(user_agent(headers))
+    .bind(ip)
+    .bind(method)
+    .bind(ts)
+    .execute(&mut *tx)
+    .await?;
     sqlx::query("UPDATE users SET last_login_at = ? WHERE id = ?").bind(ts).bind(user_id).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(cookie_header(st, SESSION_COOKIE, &token, "/", SESSION_TTL))
@@ -475,18 +575,8 @@ pub async fn change_password(
     user: User,
     Json(req): Json<ChangePasswordReq>,
 ) -> AppResult<Json<serde_json::Value>> {
-    validate_password(&req.new)?;
-    // Limited like signing in, so a session in the wrong hands can't be used to guess the password itself
-    let key = format!("pw:{}", user.id);
-    if !begin_attempt(&st, &key, FAIL_LIMIT) {
-        return Err(AppError::new(axum::http::StatusCode::TOO_MANY_REQUESTS, "Too many failed attempts. Try again in 15 minutes."));
-    }
-    let (hash,): (String,) =
-        sqlx::query_as("SELECT password_hash FROM users WHERE id = ?").bind(user.id).fetch_one(&st.db).await?;
-    if !verify_password(req.current, hash).await? {
-        return Err(AppError::bad_request("Current password is incorrect"));
-    }
-    st.login_failures.lock().unwrap().remove(&key);
+    validate_password(&req.new, min_password(&st))?;
+    confirm_password(&st, user.id, req.current).await?;
     let new_hash = hash_password(req.new).await?;
     let current_token = get_cookie(&headers, SESSION_COOKIE).map(|t| sha256_hex(t.as_bytes())).unwrap_or_default();
     let _w = st.write_lock.lock().await;
@@ -501,6 +591,21 @@ pub async fn change_password(
     tx.commit().await?;
     logs::record_login(&st, Some(user.id), &user.username, "password_change", &client_ip(&st, addr, &headers), &headers);
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Checks the signed-in user's current password before a sensitive change (changing it, two-factor settings).
+/// Limited like signing in, so a session in the wrong hands can't be used to guess the password itself.
+pub async fn confirm_password(st: &AppState, user_id: i64, password: String) -> AppResult<()> {
+    let key = format!("pw:{user_id}");
+    if !begin_attempt(st, &key, FAIL_LIMIT) {
+        return Err(AppError::new(axum::http::StatusCode::TOO_MANY_REQUESTS, "Too many failed attempts. Try again in 15 minutes."));
+    }
+    let (hash,): (String,) = sqlx::query_as("SELECT password_hash FROM users WHERE id = ?").bind(user_id).fetch_one(&st.db).await?;
+    if !verify_password(password, hash).await? {
+        return Err(AppError::bad_request("Current password is incorrect"));
+    }
+    st.login_failures.lock().unwrap().remove(&key);
+    Ok(())
 }
 
 #[cfg(test)]

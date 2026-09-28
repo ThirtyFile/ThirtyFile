@@ -20,12 +20,24 @@ services:
     environment:
       # Password of the admin account, used on the first start only (or put it in a .env file in this folder)
       THIRTYFILE_ADMIN_PASSWORD: ${THIRTYFILE_ADMIN_PASSWORD:-}
-      TZ: Asia/Taipei
+      # Time zone, for example Asia/Taipei (or set TZ in a .env file in this folder)
+      TZ: ${TZ:-UTC}
       # Enable when served over HTTPS behind a reverse proxy:
       # THIRTYFILE_SECURE_COOKIE: "true"
       # THIRTYFILE_TRUST_PROXY: "true"
       # THIRTYFILE_MAX_UPLOAD_MB: "0"
       # THIRTYFILE_TRASH_DAYS: "30"
+    # Memory: about 100–300 MB in use; on a small NAS you can cap it (ThirtyFile adjusts to the limit on start)
+    # mem_limit: 512m
+    # Run with as few privileges as possible: the server starts as root only to give the data folders to user 1000
+    # (THIRTYFILE_RUN_AS), then switches to it. The root filesystem stays read-only; everything is written to
+    # /data and /storage
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_READ_SEARCH]
+    security_opt: ["no-new-privileges:true"]
+    # To reach NAS folders by group, add the group's id; the server keeps it after switching user:
+    # group_add: ["2001"]
     # Raise the open file limit for very large folders
     ulimits:
       nofile: 65536

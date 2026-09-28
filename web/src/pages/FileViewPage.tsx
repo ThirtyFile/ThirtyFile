@@ -1,7 +1,9 @@
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useEffectEvent, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
   DownloadIcon,
   FileIcon,
   FolderOpenIcon,
@@ -16,7 +18,7 @@ import {
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { AccessDialog } from "@/components/AccessDialog";
-import { api, privateSource, triggerDownload } from "@/api";
+import { api, privateSource, triggerDownload, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
 import { DetailsPane } from "@/components/DetailsPane";
 import { NameDialog } from "@/components/dialogs";
@@ -29,14 +31,17 @@ import { extOf, formatBytes, formatWinDate } from "@/lib/utils";
 import { hasDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
+import { toastWithUndo } from "@/lib/undo";
 import { categoryOf, isTextLike, typeLabel } from "@/components/FileIcon";
 import { capsOf } from "@/lib/drives";
-import { locationOf } from "@/pages/FilesPage";
+import { locationOf, useSort } from "@/pages/FilesPage";
+import { pathOf } from "@/lib/paths";
+import { useAllPages } from "@/lib/pages";
 
 const SheetEditor = lazy(() => import("@/components/sheet/SheetEditor"));
 
-/** Size limit for saving online edits (same as the server's MAX_EDIT_BYTES) */
-const MAX_EDIT_BYTES = 20 * 1024 * 1024;
+/** Where focus takes the arrow keys for itself: typing, a media player's seek bar, lists, menus and the workbook */
+const OWN_ARROWS = ".cm-editor, video, audio, input, textarea, select, [contenteditable], [role=grid], [role=tree], [role=tablist], [role=menu], [role=listbox], [role=slider], [data-slot=dialog-content]";
 
 /** File opened in a tab: `/view/:id` */
 export function FileViewPage() {
@@ -60,14 +65,49 @@ export function FileViewPage() {
   }, [id]);
 
   const node = info.data?.node;
+  // Previous / next file of the folder, in the order the folder is sorted in (the list shares these pages)
+  const [sort] = useSort();
+  const parentId = node?.parent_id ?? undefined;
+  const siblings = useAllPages(
+    ["children", parentId, sort.key, sort.order],
+    (limit, after) => api.childrenPage(parentId!, sort.key, sort.order, limit, after),
+    !!parentId && node?.kind === "file",
+  );
+  const files = siblings.items.filter((n) => n.kind === "file");
+  const at = node ? files.findIndex((n) => n.id === node.id) : -1;
+  const prev = at > 0 ? files[at - 1] : undefined;
+  const next = at >= 0 ? files[at + 1] : undefined;
+  const goTo = (n: { id: string } | undefined) => n && navigate(`/view/${n.id}`);
   // Images, media and unpreviewable files use a custom context menu; text, Word and Excel keep the browser menu so text can be copied
   const customMenu = !!node && ["image", "video", "audio", "other", "archive"].includes(categoryOf(node)) && !isTextLike(node);
+  const sheetEditingNow = !!node && editingId === node.id;
+  // An effect event: the listener always sees the current neighbours without subscribing again
+  const onArrowKey = useEffectEvent((e: KeyboardEvent) => {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || dialog || sheetEditingNow) return;
+    if ((e.target as HTMLElement)?.closest?.(OWN_ARROWS) || document.querySelector("[data-slot=dialog-content], [role=menu]")) return;
+    const target = e.key === "ArrowLeft" ? prev : e.key === "ArrowRight" ? next : undefined;
+    if (!target) return;
+    e.preventDefault();
+    goTo(target);
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => onArrowKey(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   if (node?.kind === "folder") return <Navigate to={`/files/${node.id}`} replace />;
 
   const path = info.data?.path ?? [];
   const loc = locationOf(info.data);
   const caps = capsOf(info.data?.role, me, info.data?.read_only);
-  const canEditSheet = !!node && extOf(node.name) === "xlsx" && caps.write && node.size <= MAX_EDIT_BYTES;
+  // A save from the editor: the new version shows here, in the folder's list and in Recent
+  const onSaved = (n: Node) => {
+    qc.setQueryData(["node", id], (old: typeof info.data) => (old ? { ...old, node: { ...old.node, ...n } } : old));
+    qc.invalidateQueries({ queryKey: ["children"] });
+    qc.invalidateQueries({ queryKey: ["recent"] });
+  };
+  const canEditSheet = !!node && extOf(node.name) === "xlsx" && caps.write && node.size <= me.max_edit_bytes;
   const sheetEditing = !!node && editingId === node.id && canEditSheet;
   const rootUrl = loc.rootUrl;
   const folders = path.slice(0, -1);
@@ -93,7 +133,7 @@ export function FileViewPage() {
       />
       <ToolButton
         icon={Share2Icon}
-        label={t("Share")}
+        label={t("Create share link")}
         className="size-9 px-0 [&_svg]:size-[18px]"
         disabled={!node || !caps.share}
         onClick={() => setDialog("share")}
@@ -122,6 +162,13 @@ export function FileViewPage() {
         </>
       )}
       <span className="flex-1" />
+      {at >= 0 && files.length > 1 && (
+        <>
+          <ToolButton icon={ChevronLeftIcon} label={t("Previous (←)")} className="size-9 px-0 [&_svg]:size-[18px]" disabled={!prev} onClick={() => goTo(prev)} />
+          <ToolButton icon={ChevronRightIcon} label={t("Next (→)")} className="size-9 px-0 [&_svg]:size-[18px]" disabled={!next} onClick={() => goTo(next)} />
+          <ToolSeparator />
+        </>
+      )}
       <Button
         variant={detailsOpen ? "secondary" : "ghost"}
         className="h-9 gap-1.5 px-2.5 text-[13px] [&_svg]:size-[18px]"
@@ -129,7 +176,7 @@ export function FileViewPage() {
         onClick={() => setDetailsOpen(!detailsOpen)}
       >
         <PanelRightIcon />
-        <span className="max-lg:hidden">{t("Details")}</span>
+        <span className="max-lg:hidden">{t("Details pane")}</span>
       </Button>
     </>
   );
@@ -139,7 +186,7 @@ export function FileViewPage() {
       toolbar={toolbar}
       icon={FileIcon}
       crumbs={node ? loc.crumbs : [{ label: "…" }]}
-      path={crumbPath(loc.crumbs)}
+      path={pathOf(info.data) ?? crumbPath(loc.crumbs)}
       upTo={node ? parentUrl : null}
       activeFolder={folders.length ? folders[folders.length - 1].id : undefined}
       searchPlaceholder={t("Search files")}
@@ -147,6 +194,7 @@ export function FileViewPage() {
         node && (
           <span>
             {typeLabel(node)} · {formatBytes(node.size)} · {t("Modified {date}", { date: formatWinDate(node.updated_at) })}
+            {at >= 0 && files.length > 1 && ` · ${t("{n} of {total}", { n: at + 1, total: files.length })}`}
           </span>
         )
       }
@@ -168,11 +216,7 @@ export function FileViewPage() {
                       node={node}
                       source={privateSource}
                       onExit={() => setEditingId(null)}
-                      onSaved={(n) => {
-                        qc.setQueryData(["node", id], (old: typeof info.data) => (old ? { ...old, node: { ...old.node, ...n } } : old));
-                        qc.invalidateQueries({ queryKey: ["children"] });
-                        qc.invalidateQueries({ queryKey: ["recent"] });
-                      }}
+                      onSaved={onSaved}
                     />
                   </Suspense>
                 ) : (
@@ -181,11 +225,7 @@ export function FileViewPage() {
                     source={privateSource}
                     editable={caps.write}
                     embedded
-                    onSaved={(n) => {
-                      qc.setQueryData(["node", id], (old: typeof info.data) => (old ? { ...old, node: { ...old.node, ...n } } : old));
-                      qc.invalidateQueries({ queryKey: ["children"] });
-                      qc.invalidateQueries({ queryKey: ["recent"] });
-                    }}
+                    onSaved={onSaved}
                   />
                 )}
               </div>
@@ -223,9 +263,12 @@ export function FileViewPage() {
           confirmText={t("Rename")}
           onClose={() => setDialog(null)}
           onSubmit={async (name) => {
+            const before = node.name;
             await api.rename(node.id, name);
             setDialog(null);
             invalidateFiles(qc);
+            if (name !== before)
+              toastWithUndo(t("Renamed to \"{name}\"", { name }), { undo: () => api.rename(node.id, before), undoneText: t("Renamed back"), after: () => invalidateFiles(qc) });
           }}
         />
       )}

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AlertCircleIcon, CheckCircle2Icon, ChevronDownIcon, ChevronUpIcon, FileArchiveIcon, FileDownIcon, RotateCwIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { confirm } from "@/components/confirm";
 import { cn, formatBytes } from "@/lib/utils";
 import { cancelDownload, clearDownloads, removeDownload, retryDownload, useDownloads, type DownloadTask } from "@/downloads";
 import { t } from "@/lib/i18n";
@@ -45,20 +46,34 @@ export function DownloadPanel() {
     <div className="overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-xl">
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <span className="flex-1 truncate text-sm font-medium">{title}</span>
-        <Button size="icon-xs" variant="ghost" onClick={() => setCollapsed(!collapsed)} title={collapsed ? t("Expand") : t("Collapse")}>
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label={collapsed ? t("Expand") : t("Collapse")}
+          title={collapsed ? t("Expand") : t("Collapse")}
+          onClick={() => setCollapsed(!collapsed)}
+        >
           {collapsed ? <ChevronUpIcon /> : <ChevronDownIcon />}
         </Button>
         <Button
           size="icon-xs"
           variant="ghost"
+          aria-label={t("Close")}
           title={t("Close")}
-          onClick={() => (active.length ? window.confirm(t("Cancel all downloads in progress?")) && clearDownloads() : clearDownloads())}
+          onClick={async () => {
+            if (active.length && !(await confirm({ title: t("Cancel all downloads in progress?"), confirmText: t("Cancel downloads"), destructive: true }))) return;
+            clearDownloads();
+          }}
         >
           <XIcon />
         </Button>
       </div>
+      {/* Read out by screen readers once everything has finished (not on every percent) */}
+      <div role="status" className="sr-only">
+        {active.length ? "" : title}
+      </div>
       {active.length > 0 && (
-        <div className="h-0.5 bg-muted">
+        <div role="progressbar" aria-label={t("Download progress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} className="h-0.5 bg-muted">
           <div className="h-full bg-brand transition-[width]" style={{ width: `${pct}%` }} />
         </div>
       )}
@@ -78,7 +93,14 @@ export function DownloadPanel() {
                     {task.status === "downloading" && task.total && <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">{p}%</span>}
                   </div>
                   {task.status === "downloading" && (
-                    <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
+                    <div
+                      role="progressbar"
+                      aria-label={task.name}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={task.total ? p : undefined}
+                      className="mt-1 h-1 overflow-hidden rounded-full bg-muted"
+                    >
                       <div
                         className={cn("h-full rounded-full bg-brand transition-[width]", !task.total && "w-1/3 animate-pulse")}
                         style={task.total ? { width: `${p}%` } : undefined}
@@ -90,7 +112,7 @@ export function DownloadPanel() {
                   </div>
                 </div>
                 {task.status === "downloading" ? (
-                  <Button size="icon-xs" variant="ghost" title={t("Cancel download")} onClick={() => cancelDownload(task.id)}>
+                  <Button size="icon-xs" variant="ghost" aria-label={t("Cancel download")} title={t("Cancel download")} onClick={() => cancelDownload(task.id)}>
                     <XIcon />
                   </Button>
                 ) : task.status === "done" ? (
@@ -98,10 +120,10 @@ export function DownloadPanel() {
                 ) : (
                   <span className="flex shrink-0 items-center">
                     {task.status === "error" && <AlertCircleIcon className="size-4 text-destructive" />}
-                    <Button size="icon-xs" variant="ghost" title={t("Download again")} onClick={() => retryDownload(task.id)}>
+                    <Button size="icon-xs" variant="ghost" aria-label={t("Download again")} title={t("Download again")} onClick={() => retryDownload(task.id)}>
                       <RotateCwIcon />
                     </Button>
-                    <Button size="icon-xs" variant="ghost" title={t("Remove")} onClick={() => removeDownload(task.id)}>
+                    <Button size="icon-xs" variant="ghost" aria-label={t("Remove")} title={t("Remove")} onClick={() => removeDownload(task.id)}>
                       <XIcon />
                     </Button>
                   </span>

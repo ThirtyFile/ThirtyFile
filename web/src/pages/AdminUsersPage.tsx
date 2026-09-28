@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { HistoryIcon, Loader2Icon, PencilIcon, RefreshCwIcon, Trash2Icon, TriangleAlertIcon, UserCheckIcon, UserPlusIcon, UsersIcon, UserXIcon } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { HistoryIcon, Loader2Icon, MonitorSmartphoneIcon, ShieldCheckIcon, ShieldOffIcon, PencilIcon, RefreshCwIcon, Trash2Icon, TriangleAlertIcon, UserCheckIcon, UserPlusIcon, UsersIcon, UserXIcon } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { DataTable, type Column } from "@/components/DataTable";
 import { toast } from "sonner";
-import { api, type UserRow } from "@/api";
+import { api, type Drive, type UserRow } from "@/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -12,25 +12,36 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog, ErrorText } from "@/components/dialogs";
+import { confirm } from "@/components/confirm";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { useMe } from "@/lib/session";
 import { useSettingsSearch } from "@/lib/controlPanel";
 import { t, tc } from "@/lib/i18n";
 import { formatBytes, formatDate, formatDateTime } from "@/lib/utils";
 import { LoginLogDialog } from "@/components/logs/LoginLog";
+import { DevicesDialog } from "@/components/DevicesDialog";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
 
 const GB = 1024 ** 3;
+const USERS_PAGE = 200;
 
 export function AdminUsersPage() {
   const me = useMe();
-  const q = useQuery({ queryKey: ["admin-users"], queryFn: api.users });
+  // Loaded a page at a time: there is one account per person, so the list can be long
+  const q = useInfiniteQuery({
+    queryKey: ["admin-users", "pages"],
+    queryFn: ({ pageParam }) => api.usersPage(pageParam, USERS_PAGE),
+    initialPageParam: 0,
+    getNextPageParam: (last) => (last.length < USERS_PAGE ? undefined : last[last.length - 1].id),
+  });
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [editing, setEditing] = useState<UserRow | "new" | null>(null);
   const [deleting, setDeleting] = useState<UserRow | null>(null);
   const [loginsOf, setLoginsOf] = useState<UserRow | null>(null);
+  const [devicesOf, setDevicesOf] = useState<UserRow | null>(null);
+  const [resetting, setResetting] = useState<UserRow | null>(null);
   const qc = useQueryClient();
-  const users = q.data ?? [];
+  const users = useMemo(() => q.data?.pages.flat() ?? [], [q.data]);
   const selected = users.find((u) => u.id === selectedId) ?? null;
 
   const toolbar = (
@@ -47,6 +58,7 @@ export function AdminUsersPage() {
       />
       <ToolSeparator />
       <ToolButton icon={HistoryIcon} label={t("Sign-in log")} showLabel disabled={!selected} onClick={() => selected && setLoginsOf(selected)} />
+      <ToolButton icon={MonitorSmartphoneIcon} label={t("Devices")} showLabel disabled={!selected} onClick={() => selected && setDevicesOf(selected)} />
     </>
   );
 
@@ -76,6 +88,11 @@ export function AdminUsersPage() {
             <Badge variant="outline" className="h-4 px-1.5 text-[10px]" title={t("Created automatically by {provider} sign-in", { provider: SSO_LABEL[u.source as SsoProviderId] ?? u.source })}>
               {t("Auto-created")}
             </Badge>
+          )}
+          {u.two_factor && (
+            <span className="text-emerald-600 dark:text-emerald-400" title={t("Two-factor sign-in is on")}>
+              <ShieldCheckIcon className="size-3.5" />
+            </span>
           )}
           {u.role === "admin" && <Badge className="h-4 px-1.5 text-[10px]">{t("Administrator")}</Badge>}
           {u.disabled && (
@@ -128,7 +145,16 @@ export function AdminUsersPage() {
       searchPlaceholder={t("Search settings")}
       onSearch={searchSettings}
       icon={UsersIcon}
-      footer={<span>{t("{n} user|{n} users", { n: users.length })}</span>}
+      footer={
+        <span className="flex items-center gap-2">
+          {t("{n} user|{n} users", { n: users.length })}
+          {q.hasNextPage && (
+            <Button variant="link" size="sm" className="h-auto p-0" disabled={q.isFetchingNextPage} onClick={() => q.fetchNextPage()}>
+              {t("Show more")}
+            </Button>
+          )}
+        </span>
+      }
     >
       <DataTable
         rows={users}
@@ -148,9 +174,27 @@ export function AdminUsersPage() {
               <DropdownMenuItem onClick={() => setLoginsOf(selected)}>
                 <HistoryIcon /> {t("Sign-in log")}
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setDevicesOf(selected)}>
+                <MonitorSmartphoneIcon /> {t("Devices")}
+              </DropdownMenuItem>
+              {selected.two_factor && (
+                <DropdownMenuItem onClick={() => setResetting(selected)}>
+                  <ShieldOffIcon /> {t("Reset two-factor sign-in")}
+                </DropdownMenuItem>
+              )}
               {selected.id !== me.id && (
                 <DropdownMenuItem
                   onClick={async () => {
+                    if (
+                      !selected.disabled &&
+                      !(await confirm({
+                        title: t("Disable account \"{name}\"?", { name: selected.username }),
+                        description: t("They can no longer sign in, and their share links stop working until the account is enabled again."),
+                        confirmText: t("Disable account"),
+                        destructive: true,
+                      }))
+                    )
+                      return;
                     try {
                       await api.updateUser(selected.id, { disabled: !selected.disabled });
                       toast.success(selected.disabled ? t("Account enabled") : t("Account disabled"));
@@ -188,26 +232,156 @@ export function AdminUsersPage() {
         <UserDialog user={editing === "new" ? null : editing} self={editing !== "new" && editing.id === me.id} onClose={() => setEditing(null)} />
       )}
       {loginsOf && <LoginLogDialog title={t("Sign-in log for \"{name}\"", { name: loginsOf.username })} userId={loginsOf.id} onClose={() => setLoginsOf(null)} />}
-      {deleting && (
+      {devicesOf && <DevicesDialog user={devicesOf} onClose={() => setDevicesOf(null)} />}
+      {resetting && (
         <ConfirmDialog
-          title={t("Delete user \"{name}\"?", { name: deleting.username })}
-          description={t("This permanently deletes all of this user's files ({size}) and share links. This can't be undone.", { size: formatBytes(deleting.used_bytes) })}
-          confirmText={t("Delete user")}
+          title={t("Reset two-factor sign-in for \"{name}\"?", { name: resetting.username })}
+          description={t("For someone who lost their phone and recovery codes. Their authenticator app and recovery codes stop working, and they sign in with just their password until they set it up again (right away, if two-factor sign-in is required).")}
+          confirmText={t("Reset")}
           destructive
-          onClose={() => setDeleting(null)}
+          onClose={() => setResetting(null)}
           onConfirm={async () => {
-            await api.deleteUser(deleting.id);
-            toast.success(t("User deleted"));
+            await api.resetTwoFactor(resetting.id);
+            toast.success(t("Two-factor sign-in reset"));
+            setResetting(null);
+            qc.invalidateQueries({ queryKey: ["admin-users"] });
+          }}
+        />
+      )}
+      {deleting && (
+        <DeleteUserDialog
+          user={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
             setDeleting(null);
             setSelectedId(null);
-            qc.invalidateQueries({ queryKey: ["admin-users"] });
           }}
         />
       )}
     </Frame>
   );
 }
+/** Deleting a user: their personal space is moved into a folder in another space (the default) or deleted */
+function DeleteUserDialog({ user, onClose, onDeleted }: { user: UserRow; onClose(): void; onDeleted(): void }) {
+  const qc = useQueryClient();
+  const me = useMe();
+  const drives = useQuery({ queryKey: ["admin-drives"], queryFn: api.adminDrives });
+  // Their own space ("My files": a folder on the server in new installs, whose folder is kept when they are deleted)
+  const own = drives.data?.find((d) => d.kind === "personal" && d.owner_name === user.username);
+  // Spaces that can take the files: not the user's own, not turned off
+  const targets = (drives.data ?? []).filter((d) => !d.disabled && d !== own);
+  const mine = targets.find((d) => d.kind === "personal" && d.owner_name === me.username);
+  const [choice, setChoice] = useState<"move" | "delete">("move");
+  const [target, setTarget] = useState("");
+  const moveTo = target || mine?.id || targets[0]?.id || "";
+  const spaceLabel = (d: Drive) => (d.kind === "personal" ? t("My files of {name}", { name: d.owner_name }) : d.name);
+
+  const remove = useMutation({
+    mutationFn: () => api.deleteUser(user.id, choice === "move" ? { move_to: moveTo } : { delete_files: true }),
+    onSuccess: () => {
+      toast.success(t("User deleted"));
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      qc.invalidateQueries({ queryKey: ["admin-drives"] });
+      onDeleted();
+    },
+  });
+  const disable = useMutation({
+    mutationFn: () => api.updateUser(user.id, { disabled: true }),
+    onSuccess: () => {
+      toast.success(t("Account disabled"));
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      onClose();
+    },
+  });
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <form
+          className="grid gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            remove.mutate();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{t("Delete user \"{name}\"?", { name: user.username })}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-2 text-sm text-muted-foreground">
+            <p>
+              {t("Their personal space \"My files\" ({size}) is removed. Files they added to other spaces, and team spaces they own, are transferred to you. Their share links are deleted.", {
+                size: formatBytes(user.used_bytes),
+              })}
+            </p>
+            {!user.disabled && (
+              <p>
+                {t("To stop them signing in and keep everything as it is, disable the account instead.")}{" "}
+                <Button type="button" variant="link" className="h-auto p-0" disabled={disable.isPending} onClick={() => disable.mutate()}>
+                  {t("Disable account")}
+                </Button>
+              </p>
+            )}
+          </div>
+          <div className="grid gap-3" role="radiogroup" aria-label={t("Their files")}>
+            <Label className="flex items-start gap-2 font-normal">
+              <input type="radio" className="mt-1 accent-brand" checked={choice === "move"} onChange={() => setChoice("move")} />
+              <span className="grid flex-1 gap-1.5">
+                <span>{t("Move their files to:")}</span>
+                <select
+                  className="h-8 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                  aria-label={t("Move their files to:")}
+                  value={moveTo}
+                  disabled={choice !== "move"}
+                  onChange={(e) => setTarget(e.target.value)}
+                >
+                  {targets.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {spaceLabel(d)}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-muted-foreground">
+                  {own?.mode === "folder"
+                    ? t("They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash stays in their folder on the server.", { name: user.username })
+                    : t("They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash is emptied.", { name: user.username })}
+                </span>
+              </span>
+            </Label>
+            <Label className="flex items-start gap-2 font-normal">
+              <input type="radio" className="mt-1 accent-brand" checked={choice === "delete"} onChange={() => setChoice("delete")} />
+              {own?.mode === "folder" ? (
+                <span>
+                  {t("Remove their files from ThirtyFile")}
+                  <span className="block text-xs text-muted-foreground">
+                    {t("Their folder on the server, {path}, is kept with the files in it: delete it there when it's no longer needed.", { path: own.source_path ?? "" })}
+                  </span>
+                </span>
+              ) : (
+                <span>
+                  {t("Delete their files permanently")}
+                  <span className="block text-xs text-muted-foreground">{t("This can't be undone.")}</span>
+                </span>
+              )}
+            </Label>
+          </div>
+          <ErrorText>{remove.error?.message ?? disable.error?.message}</ErrorText>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              {t("Cancel")}
+            </Button>
+            <Button type="submit" variant="destructive" disabled={remove.isPending || (choice === "move" && !moveTo)}>
+              {remove.isPending && <Loader2Icon className="animate-spin" />}
+              {t("Delete user")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function UserDialog({ user, self, onClose }: { user: UserRow | null; self: boolean; onClose(): void }) {
+  const me = useMe();
   const qc = useQueryClient();
   const [username, setUsername] = useState(user?.username ?? "");
   const [displayName, setDisplayName] = useState(user?.display_name ?? "");
@@ -275,7 +449,7 @@ function UserDialog({ user, self, onClose }: { user: UserRow | null; self: boole
               )}
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="u-pw">{user ? t("Reset password (leave blank to keep current)") : t("Password (at least 6 characters)")}</Label>
+              <Label htmlFor="u-pw">{user ? t("Reset password (leave blank to keep current)") : t("Password (at least {n} characters)", { n: me.min_password_length })}</Label>
               <Input id="u-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
             </div>
             <div className="grid gap-1.5">

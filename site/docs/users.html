@@ -24,9 +24,28 @@
           <li><strong>Role</strong>: administrators can open the Control panel. Users cannot.</li>
           <li><strong>Permissions</strong>: whether the person may edit, delete and share. Without them the account can only view.</li>
           <li><strong>Space size</strong>: how much the person may store. <code>0</code> means no limit.</li>
-          <li><strong>Disable</strong> an account to stop it signing in without deleting its files.</li>
+          <li><strong>Disable</strong> an account to stop it signing in without deleting its files. Its <a href="account.html#app-passwords">app passwords</a> stop working too.</li>
+          <li><strong>Reset two-factor sign-in</strong> is for someone who lost their phone and their recovery codes. A shield next to the name shows who has it on.</li>
+          <li><strong>Devices</strong> lists the browsers where the person is signed in. Sign out one of them, or all of them with <strong>Sign out everywhere</strong>. It is recorded in the activity log and in the person's sign-in history.</li>
         </ul>
         <p>The <strong>Used</strong> column includes items in the trash.</p>
+
+        <h3 id="delete">Deleting an account</h3>
+        <p>Select the user and click <strong>Delete</strong>. Their personal space <strong>My files</strong> is removed, so choose what happens to what is in it:</p>
+        <ul>
+          <li><strong>Move their files to</strong> another person's personal space, a team space or the company space. This is the default. The files keep their folders and go into a new folder named after the person, for example <em>Files of amy</em> (numbered if that name is taken). They count toward that space's size: when it doesn't have room, nothing is deleted and you're asked to choose another space or make it bigger. Nothing is copied, so this is quick even for large spaces. The person's trash is emptied, not moved. Folders they shared with colleagues stay shared.</li>
+          <li><strong>Delete their files permanently</strong>. This can't be undone.</li>
+        </ul>
+        <p>Either way, files they added to other spaces, and team spaces they own, are transferred to you, and the share links they created are deleted.</p>
+        <div class="note">To stop someone signing in without changing anything else, <strong>disable</strong> the account instead. Their files stay, and their share links stop working until the account is enabled again.</div>
+
+        <h2 id="security">Sign-in security</h2>
+        <p>Under <strong>Control panel › General › Users</strong>:</p>
+        <ul>
+          <li><strong>Require two-factor sign-in for password accounts</strong>: signing in with a password also asks for a code from an authenticator app. People who haven't set it up are asked to right after their password, before they get in, and can't turn it off. Devices that are already signed in stay signed in; sign them out under <strong>Devices</strong> if needed. Accounts that sign in with Microsoft, Google or GitHub rely on that provider, and <a href="account.html#app-passwords">app passwords</a> keep working without a code.</li>
+          <li><strong>Minimum password length</strong>: 6 characters unless you choose more, up to 64. It applies to passwords set or changed from then on.</li>
+        </ul>
+        <p>How people set up two-factor sign-in is described in <a href="account.html#two-factor">Your account</a>.</p>
 
         <h2 id="groups">Groups</h2>
         <p>A group is a list of people, for example one department. Give a group access to a space or folder instead of adding people one by one. When someone joins or leaves the group, their access follows.</p>
@@ -38,8 +57,19 @@
           <li>To let everyone create team spaces themselves, switch it on under <strong>Control panel › General</strong>. A space created this way gets the same size limit as its creator, and each person can create up to 20.</li>
         </ul>
 
+        <h2 id="email">Notification emails</h2>
+        <p>Everyone is told under the bell in the app when something is shared with them, when a space they own or manage is almost full, and when their access ends soon (see <a href="account.html#notifications">Notifications</a>). To also send these by email, enter your organization's email server under <strong>Control panel › Email</strong>:</p>
+        <ul>
+          <li><strong>Server</strong> and <strong>Port</strong>, and the <strong>Encryption</strong>: STARTTLS (usually port 587), TLS from the start (usually 465), or none for a relay on your own network (usually 25). Certificates are checked against the system's; <strong>Accept a self-signed certificate</strong> skips that for a server on your own network.</li>
+          <li><strong>Username</strong> and <strong>Password</strong>, if the server asks for them. The password is stored encrypted and never shown again; leave it blank to keep it.</li>
+          <li><strong>Sender address</strong>: emails come from it, with the site name (<strong>Branding</strong>) as the sender's name. The server must allow sending from it.</li>
+          <li>Switch on <strong>Send notifications by email</strong> and <strong>Save</strong>. <strong>Send test email</strong> tries the settings on the page, saved or not, and says what went wrong.</li>
+        </ul>
+        <p>Emails go to the address each person entered in their notification settings. Accounts that sign in with Microsoft, Google or GitHub get the verified address of that account the first time they sign in after this is set up. Links in emails use the <strong>Site URL</strong> under <strong>Control panel › General</strong>; without it, emails have no link. Emails that can't be sent are written to the server log.</p>
+
         <h2 id="privacy">What administrators can see</h2>
-        <p>Administrators manage every team space and the company space, including their trash. They cannot open personal spaces.</p>
+        <p>Administrators manage every team space and the company space, including their trash. They cannot open personal spaces, but when they <a href="#delete">delete an account</a> they can move its files to a space they can open.</p>
+        <p>They do see every public share link, including links to files in personal spaces, under <strong>Control panel › All share links</strong>, so they can revoke links that shouldn't be public.</p>
 
         <h2 id="password">Forgotten passwords</h2>
         <p>An administrator sets a new password under <strong>Control panel › Users</strong>. If the administrator's own password is lost, see <a href="help.html#password">Troubleshooting</a>.</p>

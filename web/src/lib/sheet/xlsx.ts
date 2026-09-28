@@ -241,7 +241,10 @@ async function related(zip: JSZip, path: string, type: string): Promise<string[]
 export type Snapshot = Map<string, SheetState>;
 
 export async function readXlsx(buf: ArrayBuffer): Promise<{ zip: JSZip; book: Workbook; snapshot: Snapshot }> {
-  const zip = await JSZip.loadAsync(buf);
+  // JSZip's own errors ("Corrupted zip…") are English and cryptic
+  const zip = await JSZip.loadAsync(buf).catch(() => {
+    throw new Error(t("This file isn't a valid Office document (it may be damaged, or wasn't created by Office), so it can't be opened online. Download it to check."));
+  });
   try {
     checkZipSizes(zip);
   } catch {

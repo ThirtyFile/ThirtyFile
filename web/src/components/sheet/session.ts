@@ -3,9 +3,8 @@
  * Switching tabs and coming back reuses the same session, so unsaved changes aren't lost.
  */
 import JSZip from "jszip";
-import type { FileSource, Node } from "@/api";
-import { hasDraft, onDraftRemoved } from "@/lib/drafts";
-import { t } from "@/lib/i18n";
+import { fetchOffice, type FileSource, type Node } from "@/api";
+import { getDraft, onDraftRemoved } from "@/lib/drafts";
 import { dateToSerial, parseNumber, serialToDate, Calculator } from "@/lib/sheet/formula";
 import { isDatePattern } from "@/lib/sheet/format";
 import type { Cell, CellStyle, Range, Scalar, Sheet, Workbook } from "@/lib/sheet/model";
@@ -174,16 +173,15 @@ export function reusableSession(node: Node): Session | undefined {
   const s = sessions.get(node.id);
   if (!s) return undefined;
   const dirty = s.version !== s.saved;
-  if (dirty ? hasDraft(node.id) : s.base === node.updated_at) return s;
+  if (dirty ? !!getDraft(node.id, "sheet") : s.base === node.updated_at) return s;
   sessions.delete(node.id);
   return undefined;
 }
 
+/** Load a workbook into a new session. It isn't kept for reuse until `keepSession` (the editor may be closed while loading) */
 export async function openSession(node: Node, source: FileSource): Promise<Session> {
-  const r = await fetch(source.contentUrl(node));
-  if (!r.ok) throw new Error(t("Couldn't read the file ({status})", { status: r.status }));
-  const { zip, book, snapshot } = await readXlsx(await r.arrayBuffer());
-  const s: Session = {
+  const { zip, book, snapshot } = await readXlsx(await fetchOffice(source.contentUrl(node)));
+  return {
     zip,
     book,
     snapshot,
@@ -197,8 +195,10 @@ export async function openSession(node: Node, source: FileSource): Promise<Sessi
     sheet: 0,
     sel: { anchor: [0, 0], focus: [0, 0] },
   };
-  sessions.set(node.id, s);
-  return s;
+}
+
+export function keepSession(nodeId: string, s: Session) {
+  sessions.set(nodeId, s);
 }
 
 /** Release memory when there are no unsaved changes (the workbook and original zip can be large) */

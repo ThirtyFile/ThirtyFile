@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
 import { copyText } from "@/lib/utils";
 import { t } from "@/lib/i18n";
-import { Section, SettingsFrame, Toggle } from "@/pages/SystemPage";
+import { Section, SettingsFrame, Toggle } from "@/pages/SettingsFrame";
 
 const PROVIDERS: SsoProviderId[] = ["microsoft", "google", "github"];
 
@@ -134,7 +134,6 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
     shown.current = saved;
     if (!dirtyRef.current) reset(saved);
     // reset only sets state
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saved]);
 
   const save = useMutation({
@@ -308,7 +307,7 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
                   id={`sso-${id}-provisioning`}
                   value={draft[id].provisioning}
                   onChange={(e) => setProvider(id, { provisioning: e.target.value as SsoProvisioning })}
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring"
                 >
                   {PROVISIONING.map((o) => (
                     <option key={o.value} value={o.value}>

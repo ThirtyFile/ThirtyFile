@@ -1,15 +1,24 @@
 # Makes a release, started by hand: Actions › Release › Run workflow, with the new version number.
-# Tests what is on main right now, publishes the Docker images for both platforms
-#   ghcr.io/thirtyfile/thirtyfile:1.2.3, :1.2 and :latest
-# and then creates the tag v1.2.3 and the GitHub release, with notes put together from the merged pull
-# requests (see .github/release.yml). Nothing is tagged or released if the tests or the image build fail.
+# Tests what is on main right now while building the Docker image for both platforms (build.yml pushes it by digest
+# only). Once both have passed, gives that very image its tags
+#   ghcr.io/thirtyfile/thirtyfile:1.2.3, :1.2, :1 (from 1.0.0 on; none for 0.x) and :latest
+# and then creates the tag v1.2.3 and the GitHub release, with notes put together from the merged pull requests
+# (see .github/release.yml), the server programs for amd64 and arm64 taken from the image, their SHA-256 checksums,
+# LICENSE, THIRD-PARTY-NOTICES and compose.yaml. The image carries an SBOM and build provenance; the provenance of the
+# image and of the programs is signed (GitHub attestations). Nothing is tagged or released if the tests or the image
+# build fail.
+#
+# Pre-releases (1.2.3-rc.1, anything with a "-") only get their own image tag and are marked as pre-releases on
+# GitHub, so `latest` and the release lines never move to them. A release of the same commit as the last pre-release
+# (1.2.3 right after 1.2.3-rc.1, with nothing merged in between) tags the pre-release's image instead of building
+# it again: people get exactly what they tried.
 name: Release
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "New version, such as 1.2.3 (without the v)"
+        description: "New version, such as 1.2.3 or 1.2.3-rc.1 (without the v)"
         type: string
         required: true
 
@@ -20,6 +29,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  IMAGE: ghcr.io/thirtyfile/thirtyfile
+
 jobs:
   prepare:
     name: Check version
@@ -27,6 +39,10 @@ jobs:
     timeout-minutes: 15
     outputs:
       version: ${{ steps.check.outputs.version }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+      tags: ${{ steps.check.outputs.tags }}
+      reuse: ${{ steps.check.outputs.reuse }}
+      notes_start: ${{ steps.check.outputs.notes_start }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,24 +52,63 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           fail() { echo "::error::$1"; exit 1; }
+          # Sorts versions the way semantic versioning does, pre-releases before their release:
+          # 1.2.3-rc.2 < 1.2.3-rc.10 < 1.2.3 (sort -V puts "~" before everything, even the end)
+          vsort() { sed 's/-/~/' | sort -V | sed 's/~/-/'; }
           [ "$GITHUB_REF" = "refs/heads/main" ] || fail "Releases are made from main: choose main under \"Use workflow from\"."
           VERSION="${VERSION#v}"
-          echo "$VERSION" | grep -qE '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
-            || fail "\"$VERSION\" is not a version number such as 1.2.3."
+          echo "$VERSION" | grep -qE '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$' \
+            || fail "\"$VERSION\" is not a version number such as 1.2.3, or 1.2.3-rc.1 for a pre-release."
           git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null && fail "v$VERSION has already been released."
-          previous=$(git tag -l 'v*' --sort=-v:refname | head -n 1)
+
+          previous=$(git tag -l 'v*' | sed 's/^v//' | vsort | tail -n 1)
+          reuse=""
           if [ -n "$previous" ]; then
-            newest=$(printf '%s\n%s\n' "${previous#v}" "$VERSION" | sort -V | tail -n 1)
-            [ "$newest" = "$VERSION" ] || fail "$VERSION must be newer than the last release, $previous."
-            [ -n "$(git log --oneline "$previous..HEAD")" ] || fail "Nothing has changed on main since $previous."
-            echo "Changes since $previous:"
-            git log --oneline "$previous..HEAD"
+            newest=$(printf '%s\n%s\n' "$previous" "$VERSION" | vsort | tail -n 1)
+            [ "$newest" = "$VERSION" ] || fail "$VERSION must be newer than the last release, v$previous."
+            if [ -z "$(git log --oneline "v$previous..HEAD")" ]; then
+              case "$previous" in
+                *-*) reuse="$previous"
+                     echo "Nothing has changed since the pre-release v$previous: its image is published as $VERSION." ;;
+                *) fail "Nothing has changed on main since v$previous." ;;
+              esac
+            else
+              echo "Changes since v$previous:"
+              git log --oneline "v$previous..HEAD"
+            fi
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # Image tags. A release line (1.2) and the major version (1, from 1.0.0 on) follow the newest release in
+          # them; before 1.0.0 every minor version may break things, so there is no "0"
+          case "$VERSION" in
+            *-*) prerelease=true; tags="$VERSION" ;;
+            *) prerelease=false
+               major="${VERSION%%.*}"
+               tags="$VERSION ${VERSION%.*}"
+               if [ "$major" != 0 ]; then tags="$tags $major"; fi
+               tags="$tags latest" ;;
+          esac
+
+          # The notes of a release list everything since the previous release, skipping the pre-releases in between
+          notes_start=""
+          if [ "$prerelease" = false ]; then
+            last=$(git tag -l 'v*' | sed 's/^v//' | grep -v -- - | vsort | tail -n 1) || true
+            if [ -n "$last" ]; then notes_start="v$last"; fi
+          fi
+
+          echo "Image tags: $tags"
+          {
+            echo "version=$VERSION"
+            echo "prerelease=$prerelease"
+            echo "tags=$tags"
+            echo "reuse=$reuse"
+            echo "notes_start=$notes_start"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     name: Build
     needs: prepare
+    if: needs.prepare.outputs.reuse == ''
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read
@@ -61,16 +116,114 @@ jobs:
     with:
       release_version: ${{ needs.prepare.outputs.version }}
 
-  publish:
-    name: Tag and release
+  # Tags the image build.yml pushed, or the pre-release's image, by its digest: nothing is rebuilt, so the published
+  # image is the one that was tested
+  images:
+    name: Tag images
     needs: [prepare, build]
+    if: >-
+      !cancelled() && needs.prepare.result == 'success' &&
+      (needs.build.result == 'success' || (needs.build.result == 'skipped' && needs.prepare.outputs.reuse != ''))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: write
+      # Signed provenance: a Sigstore certificate for this workflow (id-token), stored as an attestation
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.tag.outputs.digest }}
+    steps:
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: tag
+        env:
+          REUSE: ${{ needs.prepare.outputs.reuse }}
+          BUILT: ${{ needs.build.outputs.digest }}
+        run: |
+          if [ -n "$REUSE" ]; then
+            digest=$(docker buildx imagetools inspect "$IMAGE:$REUSE" --format '{{json .Manifest}}' | jq -r .digest)
+          else
+            digest="$BUILT"
+          fi
+          case "$digest" in sha256:*) ;; *) echo "::error::No image digest (got \"$digest\")."; exit 1 ;; esac
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      # Signed build provenance for a newly built image (a reused pre-release image already has it), pushed next to
+      # the image. Check it with: gh attestation verify oci://ghcr.io/thirtyfile/thirtyfile:1.2.3 -R ThirtyFile/ThirtyFile
+      - if: needs.prepare.outputs.reuse == ''
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.tag.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - env:
+          TAGS: ${{ needs.prepare.outputs.tags }}
+          DIGEST: ${{ steps.tag.outputs.digest }}
+        run: |
+          args=()
+          for tag in $TAGS; do args+=(-t "$IMAGE:$tag"); done
+          docker buildx imagetools create "${args[@]}" "$IMAGE@$DIGEST"
+          docker buildx imagetools inspect "$IMAGE@$DIGEST"
+
+  publish:
+    name: GitHub release
+    needs: [prepare, images]
+    if: ${{ !cancelled() && needs.images.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
+      packages: read
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      DIGEST: ${{ needs.images.outputs.digest }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The server is one static program: the same file as in the image, for running without Docker, with the
+      # licence notices of what it contains
+      - name: Files for the release
+        run: |
+          mkdir dist
+          for arch in amd64 arm64; do
+            id=$(docker create --platform "linux/$arch" "$IMAGE@$DIGEST")
+            docker cp "$id:/usr/local/bin/thirtyfile" "dist/thirtyfile-$VERSION-linux-$arch"
+            docker cp "$id:/usr/share/licenses/thirtyfile/THIRD-PARTY-NOTICES" dist/THIRD-PARTY-NOTICES
+            docker rm "$id" >/dev/null
+          done
+          cp compose.yaml LICENSE dist/
+          cd dist
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+
+      # Signed build provenance for the programs: gh attestation verify thirtyfile-1.2.3-linux-amd64 -R ThirtyFile/ThirtyFile
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/thirtyfile-*
+
       # Tags exactly the commit that was tested and built, even if main has moved on since
       - env:
           GH_TOKEN: ${{ github.token }}
           TAG: v${{ needs.prepare.outputs.version }}
-        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          NOTES_START: ${{ needs.prepare.outputs.notes_start }}
+        run: |
+          args=(--repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$TAG" --generate-notes)
+          if [ "$PRERELEASE" = true ]; then args+=(--prerelease); fi
+          if [ -n "$NOTES_START" ]; then args+=(--notes-start-tag "$NOTES_START"); fi
+          gh release create "$TAG" "${args[@]}" dist/*

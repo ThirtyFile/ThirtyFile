@@ -598,7 +598,9 @@ function criteria(c: Value): (v: Value) => boolean {
           .replace(/~\?/g, "\u0002")
           .replace(/\*/g, ".*")
           .replace(/\?/g, ".")
+          // oxlint-disable-next-line no-control-regex -- placeholders for escaped wildcards, set just above
           .replace(/\u0001/g, "\\*")
+          // oxlint-disable-next-line no-control-regex
           .replace(/\u0002/g, "\\?") +
         "$",
       "is",
@@ -1250,8 +1252,6 @@ function lookup(args: Node[], ctx: EvalContext, dir: "v" | "h"): Result {
   if (i < 0) return ERR.na;
   return dir === "v" ? ctx.get(g.sheet, g.r1 + i, g.c1 + idx - 1) : ctx.get(g.sheet, g.r1 + idx - 1, g.c1 + i);
 }
-
-export const FUNCTION_NAMES = Object.keys(FUNCTIONS).sort();
 
 // ───────────── Calculation engine ─────────────
 

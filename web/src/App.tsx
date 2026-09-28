@@ -4,6 +4,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "re
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon } from "lucide-react";
 import { api, ApiError } from "@/api";
+import { Button } from "@/components/ui/button";
 import { MeContext } from "@/lib/session";
 import { t } from "@/lib/i18n";
 import { useApplyBranding } from "@/lib/branding";
@@ -17,6 +18,8 @@ import { LoginPage } from "@/pages/LoginPage";
 import { PublicSharePage } from "@/pages/PublicSharePage";
 import { SharesPage } from "@/pages/SharesPage";
 import { TrashPage } from "@/pages/TrashPage";
+import { ConfirmHost } from "@/components/confirm";
+import { ConflictHost } from "@/components/ConflictDialog";
 
 // Administration pages: loaded only when an administrator opens them
 const page = <M, K extends keyof M>(load: () => Promise<M>, name: K) =>
@@ -24,13 +27,15 @@ const page = <M, K extends keyof M>(load: () => Promise<M>, name: K) =>
 const ControlPanelPage = page(() => import("@/pages/ControlPanelPage"), "ControlPanelPage");
 const AdminUsersPage = page(() => import("@/pages/AdminUsersPage"), "AdminUsersPage");
 const GroupsPage = page(() => import("@/pages/GroupsPage"), "GroupsPage");
+const AdminSharesPage = page(() => import("@/pages/AdminSharesPage"), "AdminSharesPage");
 const AdminDrivesPage = page(() => import("@/pages/AdminDrivesPage"), "AdminDrivesPage");
-const GeneralSettingsPage = page(() => import("@/pages/SystemPage"), "GeneralSettingsPage");
-const StorageSettingsPage = page(() => import("@/pages/SystemPage"), "StorageSettingsPage");
-const UsageSettingsPage = page(() => import("@/pages/SystemPage"), "UsageSettingsPage");
-const ActivitySettingsPage = page(() => import("@/pages/SystemPage"), "ActivitySettingsPage");
-const LogSettingsPage = page(() => import("@/pages/SystemPage"), "LogSettingsPage");
+const GeneralSettingsPage = page(() => import("@/pages/GeneralSettingsPage"), "GeneralSettingsPage");
+const StorageSettingsPage = page(() => import("@/pages/StorageSettingsPage"), "StorageSettingsPage");
+const UsageSettingsPage = page(() => import("@/pages/UsageSettingsPage"), "UsageSettingsPage");
+const ActivitySettingsPage = page(() => import("@/pages/ActivitySettingsPage"), "ActivitySettingsPage");
+const LogSettingsPage = page(() => import("@/pages/LogSettingsPage"), "LogSettingsPage");
 const SsoPage = page(() => import("@/pages/SsoPage"), "SsoPage");
+const EmailPage = page(() => import("@/pages/EmailPage"), "EmailPage");
 const BrandingPage = page(() => import("@/pages/BrandingPage"), "BrandingPage");
 
 function Spinner() {
@@ -75,7 +80,16 @@ function RequireAuth() {
     );
   if (me.error instanceof ApiError && me.error.status === 401)
     return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
-  if (!me.data) return <div className="p-10 text-center text-destructive">{me.error?.message ?? t("Can't connect to the server")}</div>;
+  if (!me.data)
+    return (
+      <div className="flex flex-col items-center gap-3 p-10 text-center">
+        <p className="text-destructive">{me.error instanceof ApiError ? me.error.message : t("Can't connect to the server")}</p>
+        <Button variant="outline" size="sm" disabled={me.isFetching} onClick={() => void me.refetch()}>
+          {me.isFetching && <Loader2Icon className="animate-spin" />}
+          {t("Retry")}
+        </Button>
+      </div>
+    );
 
   return (
     <MeContext.Provider value={me.data}>
@@ -97,115 +111,137 @@ function AdminOnly({ children }: { children: React.ReactNode }) {
 export function App() {
   useApplyBranding();
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/share/:token/:nodeId?" element={<PublicSharePage />} />
-      {/* Old short URL format, so links already shared still open */}
-      <Route path="/s/:token/:nodeId?" element={<LegacyShareRedirect />} />
-      <Route element={<RequireAuth />}>
-        <Route index element={<Navigate to="/files" replace />} />
-        <Route path="/files/:id?" element={<FilesPage />} />
-        <Route path="/view/:id" element={<FileViewPage />} />
-        <Route path="/all" element={<Navigate to="/files/shared" replace />} />
-        <Route path="/drives" element={<ThisPcPage />} />
-        <Route path="/shared-with-me" element={<SharedWithMePage />} />
-        <Route path="/recent" element={<RecentPage />} />
-        <Route path="/favorites" element={<FavoritesPage />} />
-        <Route path="/search" element={<SearchPage />} />
-        <Route path="/shares" element={<SharesPage />} />
-        <Route path="/trash" element={<TrashPage />} />
-        <Route
-          path="/admin"
-          element={
-            <AdminOnly>
-              <ControlPanelPage />
-            </AdminOnly>
-          }
-        />
-        <Route
-          path="/admin/users"
-          element={
-            <AdminOnly>
-              <AdminUsersPage />
-            </AdminOnly>
-          }
-        />
-        <Route
-          path="/admin/groups"
-          element={
-            <AdminOnly>
-              <GroupsPage />
-            </AdminOnly>
-          }
-        />
-        <Route
-          path="/admin/drives"
-          element={
-            <AdminOnly>
-              <AdminDrivesPage />
-            </AdminOnly>
-          }
-        />
-        <Route
-          path="/admin/general"
-          element={
-            <AdminOnly>
-              <GeneralSettingsPage />
-            </AdminOnly>
-          }
-        />
-        <Route
-          path="/admin/storage"
-          element={
-            <AdminOnly>
-              <StorageSettingsPage />
-            </AdminOnly>
-          }
-        />
-        <Route
-          path="/admin/usage"
-          element={
-            <AdminOnly>
-              <UsageSettingsPage />
-            </AdminOnly>
-          }
-        />
-        <Route
-          path="/admin/activity"
-          element={
-            <AdminOnly>
-              <ActivitySettingsPage />
-            </AdminOnly>
-          }
-        />
-        <Route
-          path="/admin/logs"
-          element={
-            <AdminOnly>
-              <LogSettingsPage />
-            </AdminOnly>
-          }
-        />
-        <Route
-          path="/admin/sso"
-          element={
-            <AdminOnly>
-              <SsoPage />
-            </AdminOnly>
-          }
-        />
-        <Route
-          path="/admin/branding"
-          element={
-            <AdminOnly>
-              <BrandingPage />
-            </AdminOnly>
-          }
-        />
-        {/* Old URL: system settings were merged into the control panel */}
-        <Route path="/admin/system" element={<Navigate to="/admin" replace />} />
-        <Route path="*" element={<Navigate to="/files" replace />} />
-      </Route>
-    </Routes>
+    <>
+      {/* Questions asked with confirm() from outside components */}
+      <ConfirmHost />
+      {/* "Replace or skip" questions before uploading, moving, copying or restoring */}
+      <ConflictHost />
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/share/:token/:nodeId?" element={<PublicSharePage />} />
+        {/* Old short URL format, so links already shared still open */}
+        <Route path="/s/:token/:nodeId?" element={<LegacyShareRedirect />} />
+        <Route element={<RequireAuth />}>
+          <Route index element={<Navigate to="/files" replace />} />
+          <Route path="/files/:id?" element={<FilesPage />} />
+          <Route path="/view/:id" element={<FileViewPage />} />
+          <Route path="/all" element={<Navigate to="/files/shared" replace />} />
+          <Route path="/drives" element={<ThisPcPage />} />
+          <Route path="/shared-with-me" element={<SharedWithMePage />} />
+          <Route path="/recent" element={<RecentPage />} />
+          <Route path="/favorites" element={<FavoritesPage />} />
+          <Route path="/search" element={<SearchPage />} />
+          <Route path="/shares" element={<SharesPage />} />
+          <Route path="/trash" element={<TrashPage />} />
+          <Route
+            path="/admin"
+            element={
+              <AdminOnly>
+                <ControlPanelPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/admin/users"
+            element={
+              <AdminOnly>
+                <AdminUsersPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/admin/shares"
+            element={
+              <AdminOnly>
+                <AdminSharesPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/admin/groups"
+            element={
+              <AdminOnly>
+                <GroupsPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/admin/drives"
+            element={
+              <AdminOnly>
+                <AdminDrivesPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/admin/general"
+            element={
+              <AdminOnly>
+                <GeneralSettingsPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/admin/storage"
+            element={
+              <AdminOnly>
+                <StorageSettingsPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/admin/usage"
+            element={
+              <AdminOnly>
+                <UsageSettingsPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/admin/activity"
+            element={
+              <AdminOnly>
+                <ActivitySettingsPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/admin/logs"
+            element={
+              <AdminOnly>
+                <LogSettingsPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/admin/sso"
+            element={
+              <AdminOnly>
+                <SsoPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/admin/email"
+            element={
+              <AdminOnly>
+                <EmailPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/admin/branding"
+            element={
+              <AdminOnly>
+                <BrandingPage />
+              </AdminOnly>
+            }
+          />
+          {/* Old URL: system settings were merged into the control panel */}
+          <Route path="/admin/system" element={<Navigate to="/admin" replace />} />
+          <Route path="*" element={<Navigate to="/files" replace />} />
+        </Route>
+      </Routes>
+    </>
   );
 }

@@ -1,6 +1,7 @@
-//! File content: downloads (with Range support), saving from the online editor, thumbnails, ZIP downloads.
+//! File content: downloads (with Range support) and saving from the online editor. Thumbnails are in thumbnails.rs,
+//! ZIP downloads of several items in downloads.rs.
 
-use std::{collections::HashMap, io::Read, path::PathBuf};
+use std::{io::Read, path::PathBuf};
 
 use axum::{
     Json,
@@ -12,25 +13,18 @@ use axum::{
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
-use futures_util::StreamExt;
 use tokio_util::io::ReaderStream;
 
 use crate::{
     auth::User,
     error::{AppError, AppResult},
+    logs,
     state::AppState,
     tree::{self, Node},
-    util::{content_disposition, new_id, now},
-    zip::ZipWriter,
+    util::{content_disposition, new_id},
 };
 
 pub const MAX_EDIT_BYTES: usize = 20 * 1024 * 1024;
-/// Size limit for thumbnail source files: the source is read entirely into memory (at most two at a time)
-const MAX_THUMB_SOURCE: i64 = 20 * 1024 * 1024;
-/// Decoding limit: keeps malicious images that are tiny on disk but huge when decoded (e.g. a 30000×30000 PNG) from exhausting memory
-const MAX_THUMB_PIXELS_SIDE: u32 = 12_000;
-const MAX_THUMB_DECODE_BYTES: u64 = 256 * 1024 * 1024;
-const THUMB_SIZE: u32 = 320;
 
 /// Parses a single Range. Ok(None) = return the whole file; Err = 416.
 fn parse_range(value: &str, size: u64) -> Result<Option<(u64, u64)>, ()> {
@@ -223,7 +217,18 @@ pub async fn content(
     headers: HeaderMap,
 ) -> AppResult<Response> {
     let node = tree::owned_node(&mut *st.db.acquire().await?, &user, &id).await?;
-    let mut res = serve_blob(&st, &headers, node_blob(&node)?, q.download == Some(1)).await?;
+    let download = q.download == Some(1);
+    let mut res = serve_blob(&st, &headers, node_blob(&node)?, download).await?;
+    // Opened or previewed in the browser: listed in Recent. Downloads and app passwords (sync tools, backups) aren't
+    // opening, and recording happens after the answer so it never slows the file down
+    if !download && user.session_id.is_some() {
+        let (st, node_id) = (st.clone(), node.id.clone());
+        tokio::spawn(async move {
+            if let Err(e) = crate::nodes::record_open(&st, user.id, &node_id).await {
+                tracing::warn!("Couldn't remember an opened file for Recent: {}", e.message);
+            }
+        });
+    }
     // The version this content belongs to: the editor sends it back as X-Base-Version when saving
     res.headers_mut().insert("x-version", HeaderValue::from(node.updated_at));
     Ok(res)
@@ -273,7 +278,11 @@ pub async fn save_content(
             .await
             .map_err(AppError::internal)?;
     }
-    let hash = hex::encode(Sha256::digest(&body));
+    // Up to 20 MB: hashed on a blocking thread, not on the async worker every other request shares
+    let hash = {
+        let body = body.clone();
+        tokio::task::spawn_blocking(move || hex::encode(Sha256::digest(&body))).await.map_err(AppError::internal)?
+    };
     if node.blob_hash.as_deref() == Some(hash.as_str()) {
         return Ok(Json(node));
     }
@@ -308,28 +317,20 @@ async fn store_content(st: AppState, user: User, id: String, body: Bytes, hash: 
         if base.is_some_and(|b| b != node.updated_at) {
             return Err(conflict());
         }
-        let old_hash = node.hash()?.to_string();
+        node.hash()?;
         tree::check_quota(&mut tx, node.drive(), body.len() as i64 - node.size).await?;
         let extra = tree::commit_blob(&st, &mut tx, &staged).await?;
-        sqlx::query("UPDATE nodes SET blob_hash = ?, size = ?, updated_at = ? WHERE id = ?")
-            .bind(&hash)
-            .bind(body.len() as i64)
-            .bind(now().max(node.updated_at + 1))
-            .bind(&node.id)
-            .execute(&mut *tx)
-            .await?;
-        let orphans = tree::release_blobs(&mut tx, &[old_hash]).await?;
-        tree::adjust_usage(&mut tx, node.drive(), body.len() as i64 - node.size).await?;
-        tree::log(&mut tx, &user, Some(&node), "edit", "").await?;
+        let removed = tree::set_content(&mut tx, crate::versions::Policy::of(&st), &node, &hash, body.len() as i64, user.id).await?;
+        logs::record_activity(&mut tx, &user, Some(&node), "edit", "").await?;
         let node = tree::get_node(&mut tx, &node.id).await?.unwrap();
         tx.commit().await?;
-        Ok((node, extra, orphans))
+        Ok((node, extra, removed))
     }
     .await;
     match result {
-        Ok((node, extra, orphans)) => {
+        Ok((node, extra, removed)) => {
             tree::finish_staged(&st, staged, extra).await;
-            tree::schedule_blob_removal(&st, orphans);
+            removed.finish(&st);
             Ok(Json(node))
         }
         Err(e) => {
@@ -339,263 +340,141 @@ async fn store_content(st: AppState, user: User, id: String, body: Bytes, hash: 
     }
 }
 
-fn thumbnailable(n: &Node) -> bool {
-    matches!(n.mime.as_str(), "image/jpeg" | "image/png" | "image/gif" | "image/webp" | "image/bmp")
-        && n.size <= MAX_THUMB_SOURCE
-        && (n.blob_hash.is_some() || n.in_folder_space())
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil;
 
-pub async fn thumbnail_response(st: &AppState, headers: &HeaderMap, n: &Node) -> AppResult<Response> {
-    if !thumbnailable(n) {
-        return Err(AppError::not_found("No thumbnail"));
-    }
-    let source = Source::of(n)?;
-    let (size, tag) = source.describe(n.size as u64).await?;
-    if size > MAX_THUMB_SOURCE as u64 {
-        return Err(AppError::not_found("No thumbnail"));
-    }
-    // Stored content: its hash. A folder space's file: a key from its identity, size and time, so a changed file gets
-    // a new thumbnail
-    let hash = match &source {
-        Source::Stored { hash, .. } => hash.clone(),
-        Source::File(_) => crate::util::sha256_hex(tag.as_bytes()),
-    };
-    let hash = hash.as_str();
-    // The thumbnail is derived from the content: a matching ETag means the browser's copy is current (no disk read, no body)
-    let etag = format!("\"t{hash}\"");
-    if headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
-        return Ok((StatusCode::NOT_MODIFIED, [(header::ETAG, etag), (header::CACHE_CONTROL, "private, max-age=604800".to_string())]).into_response());
-    }
-    let path = st.thumb_path(hash);
-    if !tokio::fs::try_exists(&path).await? {
-        let _permit = st.thumb_permits.acquire().await.map_err(AppError::internal)?;
-        if !tokio::fs::try_exists(&path).await? {
-            let mut data = Vec::with_capacity(size as usize);
-            source.open(st, 0, size).await?.read_to_end(&mut data).await?;
-            let jpeg = tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
-                let mut reader = image::ImageReader::new(std::io::Cursor::new(data)).with_guessed_format().ok()?;
-                let mut limits = image::Limits::default();
-                limits.max_image_width = Some(MAX_THUMB_PIXELS_SIDE);
-                limits.max_image_height = Some(MAX_THUMB_PIXELS_SIDE);
-                limits.max_alloc = Some(MAX_THUMB_DECODE_BYTES);
-                reader.limits(limits);
-                let img = reader.decode().ok()?;
-                let thumb = image::DynamicImage::ImageRgb8(img.thumbnail(THUMB_SIZE, THUMB_SIZE).to_rgb8());
-                let mut out = Vec::new();
-                thumb.write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 80)).ok()?;
-                Some(out)
-            })
-            .await?;
-            tokio::fs::create_dir_all(path.parent().unwrap()).await?;
-            // Write an empty file for images that can't be decoded, so we don't retry every time
-            let tmp = path.with_extension(format!("{}.tmp", new_id()));
-            tokio::fs::write(&tmp, jpeg.unwrap_or_default()).await?;
-            tokio::fs::rename(&tmp, &path).await?;
+    #[test]
+    fn ranges_are_read_as_the_http_spec_says() {
+        assert_eq!(parse_range("bytes=2-4", 10), Ok(Some((2, 4))));
+        assert_eq!(parse_range(" bytes= 2 - 4 ", 10), Ok(Some((2, 4))));
+        // Open ended, past the end, and the last n bytes (more than there are is the whole file)
+        assert_eq!(parse_range("bytes=8-", 10), Ok(Some((8, 9))));
+        assert_eq!(parse_range("bytes=5-100", 10), Ok(Some((5, 9))));
+        assert_eq!(parse_range("bytes=-3", 10), Ok(Some((7, 9))));
+        assert_eq!(parse_range("bytes=-100", 10), Ok(Some((0, 9))));
+        // Other units and several ranges: the whole file
+        assert_eq!(parse_range("items=0-1", 10), Ok(None));
+        assert_eq!(parse_range("bytes=0-1,4-5", 10), Ok(None));
+        // Unsatisfiable or malformed, and any range of an empty file
+        for bad in ["bytes=10-", "bytes=5-3", "bytes=-0", "bytes=abc", "bytes=1", "bytes=-x"] {
+            assert_eq!(parse_range(bad, 10), Err(()), "{bad}");
+        }
+        for bad in ["bytes=0-", "bytes=0-0", "bytes=-5"] {
+            assert_eq!(parse_range(bad, 0), Err(()), "{bad} of an empty file");
         }
     }
-    let data = tokio::fs::read(&path).await?;
-    if data.is_empty() {
-        return Err(AppError::not_found("No thumbnail"));
-    }
-    Ok((
-        [
-            (header::CONTENT_TYPE, "image/jpeg".to_string()),
-            (header::CACHE_CONTROL, "private, max-age=604800".to_string()),
-            (header::ETAG, etag),
-        ],
-        data,
-    )
-        .into_response())
-}
 
-pub async fn thumbnail(State(st): State<AppState>, user: User, Path(id): Path<String>, headers: HeaderMap) -> AppResult<Response> {
-    let node = tree::owned_node(&mut *st.db.acquire().await?, &user, &id).await?;
-    thumbnail_response(&st, &headers, &node).await
-}
+    /// Reads a file through `content` with these request headers: status, headers and body
+    async fn fetch(env: &testutil::TestEnv, user: &User, id: &str, headers: &[(header::HeaderName, &str)]) -> (StatusCode, HeaderMap, Vec<u8>) {
+        let mut h = HeaderMap::new();
+        for (k, v) in headers {
+            h.insert(k.clone(), v.parse().unwrap());
+        }
+        let q = Query(ContentQuery { download: None });
+        let res = content(State(env.st.clone()), user.clone(), Path(id.to_string()), q, h).await.unwrap();
+        let (parts, body) = res.into_parts();
+        (parts.status, parts.headers, axum::body::to_bytes(body, usize::MAX).await.unwrap().to_vec())
+    }
 
-struct ZipItem {
-    path: String,
-    /// None for folders
-    blob: Option<Source>,
-    size: u64,
-    mtime: i64,
-}
+    #[tokio::test]
+    async fn downloads_answer_ranges_and_conditions() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let id = env.stored_file(&amy, &amy.root_id, "abc.txt", b"abcdefghij").await;
 
-/// Packs multiple nodes (including folder contents) into a streamed ZIP. `tz` is the browser's time zone as JavaScript
-/// reports it (minutes behind UTC): ZIP times are local times, and Windows shows them as such.
-pub async fn zip_response(st: &AppState, roots: Vec<Node>, tz: i64) -> AppResult<Response> {
-    let offset = -tz.clamp(-14 * 60, 14 * 60) * 60;
-    // Items inside other selected items come with them; selected twice counts once
-    let roots = {
-        let ids: Vec<String> = roots.iter().map(|n| n.id.clone()).collect();
-        let keep: std::collections::HashSet<String> =
-            crate::nodes::outermost(&mut *st.db.acquire().await?, &ids).await?.into_iter().collect();
-        let mut seen = std::collections::HashSet::new();
-        roots.into_iter().filter(|n| keep.contains(&n.id) && seen.insert(n.id.clone())).collect::<Vec<_>>()
-    };
-    let mut items = Vec::new();
-    let mut root_names: Vec<String> = Vec::new();
-    // Multi-select download: the ZIP is named after the containing folder (the space name for a space's root folder)
-    let mut parent_name = None;
-    {
-        let mut c = st.db.acquire().await?;
-        if let Some(parent) = roots.first().and_then(|r| r.parent_id.clone())
-            && roots.iter().all(|r| r.parent_id.as_deref() == Some(parent.as_str()))
-            && let Some(p) = tree::get_node(&mut c, &parent).await?
-        {
-            parent_name = Some(if p.name.is_empty() {
-                tree::get_drive(&mut c, p.drive()).await?.map(|d| d.name).unwrap_or_default()
-            } else {
-                p.name
-            })
-            .filter(|n| !n.is_empty());
-        }
-        for root in &roots {
-            // A space's root folder has no name: use the space name, otherwise paths in the ZIP would become "/filename"
-            let mut root_name = if root.name.is_empty() {
-                tree::get_drive(&mut c, root.drive()).await?.map(|d| d.name).unwrap_or_else(|| "download".into())
-            } else {
-                root.name.clone()
-            };
-            // Items with the same name from different folders (search results, favourites) get a number
-            let base = root_name.clone();
-            let mut n = 1;
-            while root_names.iter().any(|r| r.eq_ignore_ascii_case(&root_name)) {
-                root_name = crate::util::numbered_name(&base, n, root.is_folder());
-                n += 1;
-            }
-            root_names.push(root_name.clone());
-            let mut paths: HashMap<String, String> = HashMap::new();
-            for (n, depth) in tree::subtree(&mut c, &root.id).await? {
-                if n.trashed_at.is_some() {
-                    continue;
-                }
-                let path = if depth == 0 {
-                    root_name.clone()
-                } else {
-                    match n.parent_id.as_ref().and_then(|p| paths.get(p)) {
-                        Some(parent) => format!("{parent}/{}", n.name),
-                        None => continue,
-                    }
-                };
-                paths.insert(n.id.clone(), path.clone());
-                let blob = if n.is_folder() { None } else { Source::of(&n).ok() };
-                // The length of the ZIP is announced up front: a folder space's file is measured as it is now
-                let size = match &blob {
-                    Some(s @ Source::File(_)) => s.describe(n.size as u64).await.map(|(size, _)| size).unwrap_or(0),
-                    _ => n.size as u64,
-                };
-                if !n.is_folder() && blob.is_none() {
-                    continue;
-                }
-                items.push(ZipItem { path, blob, size, mtime: n.updated_at + offset });
-            }
-        }
-    }
-    if items.iter().any(|it| it.path.len() + 1 > u16::MAX as usize) {
-        return Err(AppError::bad_request("A folder path is too long to put in a ZIP file"));
-    }
-    let total_len = crate::zip::predicted_len(items.iter().map(|it| (it.path.as_str(), it.size, it.blob.is_none())));
-    let filename = match (root_names.as_slice(), parent_name) {
-        ([one], _) => format!("{one}.zip"),
-        (_, Some(parent)) => format!("{parent}.zip"),
-        _ => "download.zip".to_string(),
-    };
-    // Open the first file before starting the response: if the storage service (e.g. S3) can't be reached, report the error directly instead of sending an empty ZIP
-    let open = |st: AppState, source: Source, size: u64| async move { source.open(&st, 0, size).await };
-    let mut first = None;
-    if let Some((i, item)) = items.iter().enumerate().find(|(_, it)| it.blob.is_some()) {
-        let source = item.blob.clone().unwrap();
-        first = Some((i, open(st.clone(), source, item.size).await?));
-    }
-    let (writer, reader) = tokio::io::duplex(512 * 1024);
-    // If packing fails midway, notify the response stream so the connection ends with an error (the browser shows a failed download) rather than saving a truncated ZIP
-    let (done_tx, done_rx) = tokio::sync::oneshot::channel::<bool>();
-    let st = st.clone();
-    tokio::spawn(async move {
-        let mut zip = ZipWriter::new(writer);
-        for (i, item) in items.into_iter().enumerate() {
-            let res = match item.blob {
-                None => zip.add_dir(&item.path, item.mtime).await,
-                Some(source) => {
-                    let opened = match first.take() {
-                        Some((j, r)) if j == i => Ok(r),
-                        other => {
-                            first = other;
-                            open(st.clone(), source, item.size).await
-                        }
-                    };
-                    match opened {
-                        Ok(r) => zip.add_file(&item.path, r, item.size, item.mtime).await,
-                        Err(e) => Err(e),
-                    }
-                }
-            };
-            if let Err(e) = res {
-                // The user canceled the download, or reading a file failed (e.g. the storage service disconnected)
-                tracing::warn!("zip stream aborted: {e}");
-                let _ = done_tx.send(false);
-                return;
-            }
-        }
-        let ok = match zip.finish().await {
-            Ok(_) => true,
-            Err(e) => {
-                tracing::warn!("zip stream aborted: {e}");
-                false
-            }
-        };
-        let _ = done_tx.send(ok);
-    });
-    let tail = futures_util::stream::once(async move {
-        match done_rx.await {
-            Ok(true) => None,
-            _ => Some(Err(std::io::Error::other("The zip download was interrupted"))),
-        }
-    })
-    .filter_map(|x| async move { x });
-    let body = ReaderStream::new(reader).chain(tail);
-    Ok((
-        [
-            // Compute the total size in advance so the browser can show download progress and time remaining
-            (header::CONTENT_LENGTH, total_len.to_string()),
-            (header::CONTENT_TYPE, "application/zip".to_string()),
-            (header::CONTENT_DISPOSITION, content_disposition("attachment", &filename)),
-            (header::CACHE_CONTROL, "no-store".to_string()),
-        ],
-        Body::from_stream(body),
-    )
-        .into_response())
-}
+        let (status, h, body) = fetch(&env, &amy, &id, &[]).await;
+        assert_eq!((status, body.as_slice()), (StatusCode::OK, &b"abcdefghij"[..]));
+        assert_eq!((&h[header::CONTENT_LENGTH], &h[header::ACCEPT_RANGES]), (&HeaderValue::from(10), &HeaderValue::from_static("bytes")));
+        let etag = h[header::ETAG].to_str().unwrap().to_string();
 
-#[derive(Deserialize)]
-pub struct DownloadQuery {
-    ids: String,
-    /// The browser's time zone (JavaScript's getTimezoneOffset), for the times inside a ZIP
-    tz: Option<i64>,
-}
+        for (range, want, content_range) in [("bytes=2-4", &b"cde"[..], "bytes 2-4/10"), ("bytes=-3", b"hij", "bytes 7-9/10"), ("bytes=8-", b"ij", "bytes 8-9/10")] {
+            let (status, h, body) = fetch(&env, &amy, &id, &[(header::RANGE, range)]).await;
+            assert_eq!((status, body.as_slice()), (StatusCode::PARTIAL_CONTENT, want), "{range}");
+            assert_eq!(h[header::CONTENT_RANGE], content_range);
+            assert_eq!(h[header::CONTENT_LENGTH], want.len().to_string().as_str());
+        }
+        let (status, h, _) = fetch(&env, &amy, &id, &[(header::RANGE, "bytes=10-")]).await;
+        assert_eq!((status, &h[header::CONTENT_RANGE]), (StatusCode::RANGE_NOT_SATISFIABLE, &HeaderValue::from_static("bytes */10")));
 
-/// Multi-select download: a single file is downloaded directly, anything else is packed into a ZIP
-pub async fn download(
-    State(st): State<AppState>,
-    user: User,
-    Query(q): Query<DownloadQuery>,
-    headers: HeaderMap,
-) -> AppResult<Response> {
-    let ids: Vec<&str> = q.ids.split(',').filter(|s| !s.is_empty()).take(1000).collect();
-    if ids.is_empty() {
-        return Err(AppError::bad_request("Select items to download"));
-    }
-    let mut roots = Vec::new();
-    {
-        let mut c = st.db.acquire().await?;
-        for id in ids {
-            roots.push(tree::owned_node(&mut c, &user, id).await?);
+        // If-Range: the part only while the file is still the one the client has, otherwise all of it
+        let (status, _, body) = fetch(&env, &amy, &id, &[(header::RANGE, "bytes=2-4"), (header::IF_RANGE, &etag)]).await;
+        assert_eq!((status, body.as_slice()), (StatusCode::PARTIAL_CONTENT, &b"cde"[..]));
+        for other in ["\"something-else\"", "Wed, 21 Oct 2015 07:28:00 GMT"] {
+            let (status, _, body) = fetch(&env, &amy, &id, &[(header::RANGE, "bytes=2-4"), (header::IF_RANGE, other)]).await;
+            assert_eq!((status, body.len()), (StatusCode::OK, 10), "{other}");
+        }
+        // The browser's copy is current
+        let (status, _, body) = fetch(&env, &amy, &id, &[(header::IF_NONE_MATCH, &etag)]).await;
+        assert_eq!((status, body.len()), (StatusCode::NOT_MODIFIED, 0));
+
+        // An empty file has nothing to give a part of
+        let empty = env.stored_file(&amy, &amy.root_id, "empty.txt", b"").await;
+        let (status, h, body) = fetch(&env, &amy, &empty, &[]).await;
+        assert_eq!((status, body.len(), &h[header::CONTENT_LENGTH]), (StatusCode::OK, 0, &HeaderValue::from(0)));
+        for range in ["bytes=0-", "bytes=-5"] {
+            let (status, h, _) = fetch(&env, &amy, &empty, &[(header::RANGE, range)]).await;
+            assert_eq!((status, &h[header::CONTENT_RANGE]), (StatusCode::RANGE_NOT_SATISFIABLE, &HeaderValue::from_static("bytes */0")));
         }
     }
-    if let [one] = roots.as_slice()
-        && !one.is_folder() {
-            return serve_blob(&st, &headers, node_blob(one)?, true).await;
+
+    async fn save(env: &testutil::TestEnv, user: &User, id: &str, base: Option<&str>, body: &'static [u8]) -> AppResult<Node> {
+        let mut h = HeaderMap::new();
+        if let Some(b) = base {
+            h.insert("x-base-version", b.parse().unwrap());
         }
-    zip_response(&st, roots, q.tz.unwrap_or(0)).await
+        save_content(State(env.st.clone()), user.clone(), Path(id.to_string()), h, Bytes::from_static(body)).await.map(|Json(n)| n)
+    }
+
+    async fn count(env: &testutil::TestEnv, sql: &'static str, id: &str) -> i64 {
+        let (n,): (i64,) = sqlx::query_as(sql).bind(id).fetch_one(&env.st.db).await.unwrap();
+        n
+    }
+
+    #[tokio::test]
+    async fn saving_from_the_editor_checks_the_version_and_the_space_left() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let id = env.stored_file(&amy, &amy.root_id, "notes.txt", b"first").await;
+        let versions = "SELECT COUNT(*) FROM node_versions WHERE node_id = ?";
+        let (_, h, _) = fetch(&env, &amy, &id, &[]).await;
+        let opened = h["x-version"].to_str().unwrap().to_string();
+
+        // The same content again changes nothing: no new version, no new time
+        let same = save(&env, &amy, &id, Some(&opened), b"first").await.unwrap();
+        assert_eq!(same.updated_at.to_string(), opened);
+        assert_eq!(count(&env, versions, &id).await, 0);
+
+        // Saved from the version opened; a second editor still on that version is told someone else changed it
+        let saved = save(&env, &amy, &id, Some(&opened), b"second").await.unwrap();
+        assert_ne!(saved.updated_at.to_string(), opened);
+        let err = save(&env, &amy, &id, Some(&opened), b"third").await.unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert_eq!(fetch(&env, &amy, &id, &[]).await.2, b"second");
+        assert_eq!(count(&env, versions, &id).await, 1);
+        // Without a version (an older client) the save goes through
+        save(&env, &amy, &id, None, b"third").await.unwrap();
+
+        // Someone who may only read the file can't save it, and nothing is stored for them
+        env.grant(&id, &ben, "viewer").await;
+        assert!(save(&env, &ben, &id, None, b"ben was here").await.is_err());
+        let stored = "SELECT COUNT(*) FROM blobs WHERE hash = ?";
+        assert_eq!(count(&env, stored, &crate::util::sha256_hex(b"ben was here")).await, 0);
+
+        // Only the growth counts against the quota: growing past it is refused, shrinking always works
+        let drive = env.drive_of(&amy.root_id).await;
+        let used = "SELECT used_bytes FROM drives WHERE id = ?";
+        sqlx::query("UPDATE users SET quota_bytes = 8 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+        tree::recompute_usage(&env.st).await.unwrap();
+        save(&env, &amy, &id, None, b"12345678").await.unwrap();
+        let err = save(&env, &amy, &id, None, b"123456789").await.unwrap_err();
+        assert_eq!(err.status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(fetch(&env, &amy, &id, &[]).await.2, b"12345678");
+        assert_eq!(count(&env, used, &drive).await, 8);
+        assert_eq!(count(&env, stored, &crate::util::sha256_hex(b"123456789")).await, 0);
+        save(&env, &amy, &id, None, b"1").await.unwrap();
+        assert_eq!(count(&env, used, &drive).await, 1);
+    }
 }

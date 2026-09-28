@@ -392,6 +392,7 @@ const METRIC: Record<string, string> = {
 };
 
 /** Generic families (serif, sans-serif…) must not be quoted, or they'd be treated as a font literally named "sans-serif"; all other font names are quoted */
+// oxlint-disable-next-line no-control-regex -- control characters are removed on purpose
 const quote = (f: string) => (/^(serif|sans-serif|monospace|cursive|fantasy|system-ui)$/.test(f) ? f : `"${f.replace(/["\\\x00-\x1f;{}]/g, "")}"`);
 
 /**

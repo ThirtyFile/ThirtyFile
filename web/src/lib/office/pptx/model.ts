@@ -99,7 +99,6 @@ function partInfo(path: string, doc: Document | null): PartInfo | null {
 }
 
 const TITLE = new Set(["title", "ctrTitle"]);
-const BODYISH = new Set(["body", "obj", "subTitle"]);
 
 /** Placeholder on a slide (or layout) → matching placeholder in the layout */
 export function matchLayoutPh(list: Ph[], type: string, idx: string | null): Ph | undefined {
@@ -128,8 +127,6 @@ export function phStyleKind(type: string | null): "title" | "body" | "other" {
   if (["dt", "ftr", "sldNum", "hdr"].includes(type)) return "other";
   return "body";
 }
-
-export const isBodyLike = (type: string) => BODYISH.has(type);
 
 // ───────────── Loading ─────────────
 
@@ -220,7 +217,7 @@ export async function loadSlide(pres: Pres, index: number): Promise<SlideInfo | 
   const lRel = await pres.pkg.relOfType(ref.path, "/slideLayout");
   const layout = lRel ? await loadLayout(pres, lRel.target) : null;
   const master = layout?.master ?? null;
-  const clrMap = { ...(master?.clrMap ?? DEFAULT_CLRMAP), ...(overrideMap(layout?.root ?? null) ?? {}), ...(overrideMap(info.root) ?? {}) };
+  const clrMap = { ...(master?.clrMap ?? DEFAULT_CLRMAP), ...overrideMap(layout?.root ?? null), ...overrideMap(info.root) };
   const theme = master?.theme ?? null;
   return { ...info, pres, layout, master, theme, cc: { theme, clrMap }, num: index + 1 };
 }

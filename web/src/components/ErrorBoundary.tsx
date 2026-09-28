@@ -21,7 +21,9 @@ export class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: s
     console.error("Render error", error, info.componentStack);
   }
 
+  // A new reset key (another page or file) clears the error
   componentDidUpdate(prev: { resetKey?: string }) {
+    // oxlint-disable-next-line react/no-did-update-set-state -- only when the key changed, so it can't loop
     if (this.state.error && prev.resetKey !== this.props.resetKey) this.setState({ error: null });
   }
 

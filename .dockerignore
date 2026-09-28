@@ -2,6 +2,9 @@
 **/target
 **/node_modules
 web/dist
+web/coverage
+web/test-results
+web/playwright-report
 **/*.tsbuildinfo
 
 # Data and local settings (may contain accounts, secrets and session tokens)

@@ -37,6 +37,28 @@ pub trait Storage: Send + Sync {
     fn host_key(&self) -> Option<String> {
         None
     }
+    /// Size of stored content, None when it isn't there (`thirtyfile check`)
+    fn size<'a>(&'a self, hash: &'a str) -> BoxFuture<'a, io::Result<Option<u64>>> {
+        let _ = hash;
+        Box::pin(async { Err(io::Error::new(io::ErrorKind::Unsupported, "this storage can't be checked")) })
+    }
+    /// Hashes of all stored content (`thirtyfile check`); other files in the storage are left out
+    fn list(&self) -> BoxFuture<'_, io::Result<Vec<String>>> {
+        Box::pin(async { Err(io::Error::new(io::ErrorKind::Unsupported, "this storage can't be listed")) })
+    }
+    /// A folder on this server: the folder, and where it keeps stored content (`thirtyfile convert`)
+    fn local_root(&self) -> Option<&Path> {
+        None
+    }
+    fn local_file(&self, hash: &str) -> Option<PathBuf> {
+        let _ = hash;
+        None
+    }
+}
+
+/// Whether a file name found in storage is stored content (a sha256 in hex)
+pub fn is_hash(name: &str) -> bool {
+    valid_hash(name).is_ok()
 }
 
 pub fn valid_hash(hash: &str) -> io::Result<()> {
@@ -44,6 +66,26 @@ pub fn valid_hash(hash: &str) -> io::Result<()> {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid blob hash"));
     }
     Ok(())
+}
+
+/// The folders to create, top down, for a remote folder path: "/a/b" → "/a", "/a/b"; "a/./b" → "a", "a/./b"
+pub fn dir_levels(dir: &str) -> Vec<String> {
+    let mut levels = Vec::new();
+    let mut path = String::new();
+    for part in dir.split('/') {
+        if part.is_empty() {
+            path.push('/');
+            continue;
+        }
+        if !path.is_empty() && !path.ends_with('/') {
+            path.push('/');
+        }
+        path.push_str(part);
+        if part != "." {
+            levels.push(path.clone());
+        }
+    }
+    levels
 }
 
 // ───────────── Local folder ─────────────
@@ -109,6 +151,47 @@ impl Storage for LocalStorage {
                 _ => Ok(()),
             }
         })
+    }
+
+    fn size<'a>(&'a self, hash: &'a str) -> BoxFuture<'a, io::Result<Option<u64>>> {
+        Box::pin(async move {
+            match tokio::fs::metadata(self.path(hash)?).await {
+                Ok(m) => Ok(Some(m.len())),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(e),
+            }
+        })
+    }
+
+    fn list(&self) -> BoxFuture<'_, io::Result<Vec<String>>> {
+        let root = self.root.clone();
+        Box::pin(async move {
+            // ab/cd/<hash>; anything else in the folder isn't content
+            tokio::task::spawn_blocking(move || {
+                let mut out = Vec::new();
+                for a in std::fs::read_dir(&root)?.flatten().filter(|e| e.file_name().len() == 2) {
+                    for b in std::fs::read_dir(a.path())?.flatten().filter(|e| e.file_name().len() == 2) {
+                        for f in std::fs::read_dir(b.path())?.flatten() {
+                            let name = f.file_name().to_string_lossy().into_owned();
+                            if is_hash(&name) && f.file_type().is_ok_and(|t| t.is_file()) {
+                                out.push(name);
+                            }
+                        }
+                    }
+                }
+                Ok(out)
+            })
+            .await
+            .map_err(io::Error::other)?
+        })
+    }
+
+    fn local_root(&self) -> Option<&Path> {
+        Some(&self.root)
+    }
+
+    fn local_file(&self, hash: &str) -> Option<PathBuf> {
+        self.path(hash).ok()
     }
 
     fn check(&self) -> BoxFuture<'_, io::Result<()>> {
@@ -283,6 +366,31 @@ impl Storage for S3Storage {
                 Err(object_store::Error::NotFound { .. }) | Ok(()) => Ok(()),
                 Err(e) => Err(s3_err(e)),
             }
+        })
+    }
+
+    fn size<'a>(&'a self, hash: &'a str) -> BoxFuture<'a, io::Result<Option<u64>>> {
+        Box::pin(async move {
+            match self.store.head(&self.blob_key(hash)?).await {
+                Ok(meta) => Ok(Some(meta.size)),
+                Err(object_store::Error::NotFound { .. }) => Ok(None),
+                Err(e) => Err(s3_err(e)),
+            }
+        })
+    }
+
+    fn list(&self) -> BoxFuture<'_, io::Result<Vec<String>>> {
+        Box::pin(async move {
+            let prefix = self.key("blobs");
+            let mut objects = self.store.list(Some(&prefix));
+            let mut out = Vec::new();
+            while let Some(meta) = objects.next().await {
+                let meta = meta.map_err(s3_err)?;
+                if let Some(name) = meta.location.filename().filter(|n| is_hash(n)) {
+                    out.push(name.to_string());
+                }
+            }
+            Ok(out)
         })
     }
 
@@ -525,6 +633,13 @@ pub fn build(kind: &str, config: &serde_json::Value, default_root: &Path) -> io:
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn remote_folders_are_created_level_by_level() {
+        assert_eq!(super::dir_levels("/srv/blobs/ab"), ["/srv", "/srv/blobs", "/srv/blobs/ab"]);
+        assert_eq!(super::dir_levels("./blobs/ab"), ["./blobs", "./blobs/ab"]);
+        assert!(super::dir_levels("").is_empty());
+    }
+
     use super::*;
 
     #[tokio::test]

@@ -94,7 +94,7 @@ export function DataTable<T>(p: {
                   onKeyDown={onKeyDown}
                   onClick={() => p.onSelect(k)}
                   onDoubleClick={p.onOpen && (() => p.onOpen!(row))}
-                  className={cn("cursor-default outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset aria-selected:bg-accent", p.rowClassName?.(row))}
+                  className={cn("cursor-default outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset aria-selected:bg-selection aria-selected:shadow-[inset_3px_0_0_var(--color-brand)]", p.rowClassName?.(row))}
                 >
                   {p.columns.map((c, i) => (
                     <td

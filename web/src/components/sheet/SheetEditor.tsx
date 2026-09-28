@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Loader2Icon, Redo2Icon, SaveIcon, Undo2Icon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { ApiError, type FileSource, type Node } from "@/api";
@@ -25,7 +25,7 @@ import {
 import { checkFormula } from "@/lib/sheet/formula";
 import { formatGeneral } from "@/lib/sheet/format";
 import { deriveStyle } from "@/lib/sheet/ops";
-import { HEADER_H, HEADER_W, cellRect, draw, fontOf, type View } from "./renderer";
+import { HEADER_H, HEADER_W, cellRect, cellText, draw, fontOf, type View } from "./renderer";
 import { SheetToolbar } from "./SheetToolbar";
 import { SheetMenu, type MenuTarget } from "./SheetMenu";
 import * as history from "./history";
@@ -38,6 +38,7 @@ import { saveSession } from "./save";
 import {
   dropSession,
   editText,
+  keepSession,
   openSession,
   parseInput,
   releaseIfClean,
@@ -67,13 +68,18 @@ export default function SheetEditor(props: { node: Node; source: FileSource; onS
     setSession(null);
     setError(null);
     openSession(node, props.source)
-      .then((s) => !cancelled && setSession(s))
+      .then((s) => {
+        // Closed (or moved to another file) while loading: don't keep the workbook in memory
+        if (cancelled) return;
+        keepSession(node.id, s);
+        setSession(s);
+      })
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : t("Couldn't open this spreadsheet")));
     return () => {
       cancelled = true;
     };
     // Load only when the file changes or a reload is requested; updated_at changing after a save doesn't require reloading
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every save
   }, [node.id, reload]);
 
   if (error)
@@ -166,7 +172,7 @@ function Workspace({
 
   // Mark the tab "unsaved" and warn before closing the browser
   useEffect(() => {
-    setDraft(node.id, dirty ? { text: "sheet", base: String(session.base) } : null);
+    setDraft(node.id, dirty ? { kind: "sheet", base: session.base } : null);
   }, [dirty, node.id, session.base]);
 
   // ───── Layout ─────
@@ -175,12 +181,12 @@ function Workspace({
   const colsCount = Math.min(MAX_COLS, Math.max(sheet.maxCol + 10, 26, (wholeRows ? range.c1 : range.c2) + 8));
   const rows = useMemo(
     () => new Axis(rowsCount, (i) => sheet.rowHeights.get(i) ?? sheet.defaultRowHeight),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the sheet is changed in place: session.version and layoutVer say when its row heights changed
     [sheet, rowsCount, session.version, layoutVer],
   );
   const cols = useMemo(
     () => new Axis(colsCount, (i) => sheet.colWidths.get(i) ?? sheet.defaultColWidth),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- as above, for column widths
     [sheet, colsCount, session.version, layoutVer],
   );
   const view = (): View => ({ width: size.w, height: size.h, scrollX: scroll.current.x, scrollY: scroll.current.y, rows, cols });
@@ -222,7 +228,7 @@ function Workspace({
         clip: st.clip,
       });
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- draws from stateRef and the workbook, which change in place; these say when the geometry changed
   }, [size, rows, cols, sheet]);
   useEffect(() => redraw());
 
@@ -467,13 +473,27 @@ function Workspace({
         }
       }
     return { count, nums, sum };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the cells are changed in place: session.version says when
   }, [range.r1, range.r2, range.c1, range.c2, sheetIdx, session.version]);
 
   const nameBox =
     wholeRows && wholeCols ? t("All") : range.r1 === range.r2 && range.c1 === range.c2 ? cellName(active[0], active[1]) : rangeName(range);
   const rowCount = wholeCols ? 1 : range.r2 - range.r1 + 1;
   const colCount = wholeRows ? 1 : range.c2 - range.c1 + 1;
+
+  // Screen readers can't read the canvas: the active cell and its value (or the selected range) are announced when they change.
+  // Nothing while editing: the cell's text box is read out itself
+  const descId = useId();
+  const activeText = cellText({ sheet, sheetIndex: sheetIdx, styles: book.styles, calc }, active[0], active[1]);
+  const announcement = editing
+    ? ""
+    : range.r1 !== range.r2 || range.c1 !== range.c2
+      ? tc("sheet", "{range} selected", { range: nameBox })
+      : activeCell?.f
+        ? tc("sheet", "{cell}, {value}, formula {formula}", { cell: nameBox, value: activeText, formula: barText })
+        : activeText
+          ? tc("sheet", "{cell}, {value}", { cell: nameBox, value: activeText })
+          : tc("sheet", "{cell}, empty", { cell: nameBox });
 
   return (
     <div className="flex size-full flex-col bg-background text-foreground">
@@ -484,7 +504,7 @@ function Workspace({
       <div className="flex h-10 shrink-0 items-center gap-2 border-b px-2">
         <input
           aria-label={t("Name box")}
-          className="h-7 w-24 shrink-0 rounded border bg-background px-2 text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="h-7 w-24 shrink-0 rounded border bg-background px-2 text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring"
           defaultValue={nameBox}
           key={nameBox}
           onKeyDown={(e) => {
@@ -504,7 +524,7 @@ function Workspace({
         <input
           ref={barRef}
           aria-label={t("Formula bar")}
-          className="h-7 min-w-0 flex-1 rounded border bg-background px-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="h-7 min-w-0 flex-1 rounded border bg-background px-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
           value={barText}
           onFocus={() => {
             if (!editing) startEdit(barText, "edit", "bar");
@@ -547,11 +567,13 @@ function Workspace({
       {/* Cell area */}
       <ContextMenu>
         <ContextMenuTrigger className="relative min-h-0 flex-1 overflow-hidden">
-          <div ref={wrapRef} className="absolute inset-0">
-            <canvas ref={canvasRef} className="absolute inset-0" style={{ width: size.w, height: size.h }} />
+          <div ref={wrapRef} role="group" aria-label={tc("sheet", "Sheet {name}", { name: sheet.name })} className="absolute inset-0">
+            <canvas ref={canvasRef} aria-hidden className="absolute inset-0" style={{ width: size.w, height: size.h }} />
+            {/* Not a Tab stop of its own: the keyboard moves through the cells from the cell's text box, which scrolls this along */}
             <div
               ref={scrollRef}
-              className="absolute inset-0 overflow-auto"
+              tabIndex={-1}
+              className="absolute inset-0 overflow-auto outline-none"
               style={{ cursor }}
               onScroll={(e) => {
                 scroll.current = { x: e.currentTarget.scrollLeft, y: e.currentTarget.scrollTop };
@@ -567,6 +589,7 @@ function Workspace({
             <textarea
               ref={inputRef}
               aria-label={t("Cell contents")}
+              aria-describedby={descId}
               spellCheck={false}
               className={cn(
                 "absolute z-10 resize-none overflow-hidden border-2 border-[#2563eb] bg-white px-[2px] leading-tight text-[#1f2328] outline-none",
@@ -602,6 +625,12 @@ function Workspace({
                   commitEdit(null);
               }}
             />
+            <p id={descId} className="sr-only">
+              {t("Arrow keys move between cells and Shift with the arrow keys selects. Type to replace the cell's contents, or press F2 to edit them; Enter confirms and Esc cancels.")}
+            </p>
+            <div role="status" className="sr-only">
+              {announcement}
+            </div>
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
@@ -643,6 +672,7 @@ function Workspace({
             <button
               key={s.id}
               type="button"
+              aria-current={i === sheetIdx ? "true" : undefined}
               className={cn(
                 "shrink-0 border-r px-3 py-1.5 whitespace-nowrap hover:bg-muted",
                 i === sheetIdx ? "border-b-2 border-b-[#2563eb] bg-background font-medium text-[#2563eb]" : "text-muted-foreground",

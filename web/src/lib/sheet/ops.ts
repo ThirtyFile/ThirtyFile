@@ -245,7 +245,7 @@ function clean(s: CellStyle): CellStyle {
  */
 export function deriveStyle(book: Workbook, base: number | undefined, change: (s: CellStyle) => CellStyle): number {
   const from = base ?? 0;
-  const next = clean(change({ ...(book.styles[from] ?? {}) }));
+  const next = clean(change({ ...book.styles[from] }));
   const origin = from >= book.xfCount ? (book.styleBase.get(from) ?? 0) : from;
   const k = styleKey(next);
   // Reuse an existing original-file style with exactly the same appearance and the same base

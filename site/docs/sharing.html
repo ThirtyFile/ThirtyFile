@@ -18,8 +18,8 @@
         <h1>Sharing</h1>
         <p class="lead">There are two ways to share: with people who have an account, and with anyone through a link.</p>
         <h2 id="people">Share with colleagues</h2>
-        <p>Right-click a folder or file and choose <strong>Share with…</strong>. Type a username or group, choose what they may do, and optionally a date when the access ends.</p>
-        <p>The item appears under <strong>Shared with me</strong> in their menu.</p>
+        <p>Right-click a folder or file and choose <strong>Share with…</strong>. Type a username or group, choose what they may do, and optionally a date when the access ends, then click <strong>Add</strong>.</p>
+        <p>The item appears under <strong>Shared with me</strong> in their menu, and they are told under the bell (and by email, if it is set up): see <a href="account.html#notifications">Notifications</a>.</p>
 
         <h3>Roles</h3>
         <div class="table-scroll">
@@ -27,7 +27,7 @@
             <thead><tr><th>Role</th><th>Can</th></tr></thead>
             <tbody>
               <tr><td><strong>Viewer</strong></td><td>Browse, preview and download</td></tr>
-              <tr><td><strong>Editor</strong></td><td>Also upload, edit, delete and create share links</td></tr>
+              <tr><td><strong>Editor</strong></td><td>Also upload, edit, delete and create share links, each only if their account is allowed to (<strong>Control panel › Users</strong>)</td></tr>
               <tr><td><strong>Manager</strong></td><td>Also manage members and sharing</td></tr>
               <tr><td><strong>Owner</strong></td><td>Also delete the space</td></tr>
             </tbody>
@@ -35,24 +35,49 @@
         </div>
 
         <h2 id="links">Share with a link</h2>
-        <p>Right-click an item and choose <strong>Create share link</strong>. Anyone with the link can view and download, without an account.</p>
+        <p>Right-click an item and choose <strong>Create share link</strong>, or select it and click <strong>Create share link</strong> on the toolbar. Anyone with the link can view and download, without an account, unless you choose otherwise.</p>
         <div class="shot narrow"><img src="../assets/share-dialog.webp" width="1024" height="496" loading="lazy" alt="The share link dialog" /></div>
         <ul>
           <li><strong>Expiration</strong>: the link stops working after 1, 7, 30 or 90 days, or never.</li>
           <li><strong>Password</strong>: visitors must enter it before they see anything. Send the password separately from the link.</li>
           <li><strong>Download limit</strong>: the link stops working after this many downloads.</li>
+          <li><strong>Visitors can</strong>: whether they may download, and for a folder, whether they may upload files. See below.</li>
         </ul>
-        <p>To change a link, delete it and create a new one.</p>
+        <p>To change a link's password, expiry, download limit or what visitors can do, click <strong>Edit link</strong> next to it. The address stays the same. After a new password, people who opened the link before must enter the new one.</p>
+
+        <h3 id="receive">Receive files with a link</h3>
+        <p>To collect files, for example from customers, create a link to a folder and tick <strong>Upload files</strong>. Visitors then get an <strong>Upload</strong> button and can drag files onto the folder.</p>
+        <ul>
+          <li>Tick <strong>Only upload</strong> as well, and visitors see nothing of what is in the folder and can't download anything; they only get a box to send files into the folder itself.</li>
+          <li>Uploaded files belong to you, count toward the space's size, and follow the usual rules for names and the upload size limit. A file whose name is taken gets a number, like <code>report (1).pdf</code>.</li>
+          <li>Each upload is recorded in the activity log, under your name with <em>Through share link</em>, and in the link's access log.</li>
+          <li>Uploads only work while you can still change the folder. When you lose that permission, or the folder is moved out of the shared folder, uploads through the link stop.</li>
+        </ul>
+
+        <h3 id="view-only">Links for viewing only</h3>
+        <p>Untick <strong>Download</strong> and visitors can only preview files: the download buttons and the ZIP download are gone, and the server refuses downloads through the link.</p>
+        <div class="note">This is a deterrent, not a protection. To show a preview, the whole file is still sent to the visitor's browser, and someone determined can save it from there, or take a screenshot. Don't rely on it for files that must not leave the company.</div>
 
         <h2 id="manage">Your links</h2>
-        <p><strong>My share links</strong> in the menu lists every link you created, with its expiry date and how often it was used. Delete a link there to stop it working right away.</p>
-        <div class="note">A link also stops working when you lose access to the item yourself, for example when you leave a team space.</div>
+        <p><strong>My share links</strong> in the menu lists every link you created, with its expiry date and how often it was used. Select a link to copy, edit or delete it; <strong>Delete link</strong> stops it working right away.</p>
+        <p>Switch the list to <strong>All links I can manage</strong> to also see links other people made in spaces you manage, and on files you own. You can edit and delete those links too, and see who opened them. The share dialog and the details pane of an item show the same links.</p>
+        <div class="note">A link also stops working when its creator loses access to the item or the permission to share, for example when they leave a team space, and when their account is disabled. Deleting an account deletes the links it created.</div>
+
+        <h2 id="admin">For administrators</h2>
+        <p><strong>Control panel › All share links</strong> lists every public link, in every space, with who created it. Filter by space, by creator, and by whether the link still works, then edit or delete links, or open their access log.</p>
+        <p>Under <strong>Control panel › General › Share links</strong>, set the rules for links:</p>
+        <ul>
+          <li><strong>Allow public share links</strong>: when off, no one can create links, and every existing link stops working until you turn it back on. The links aren't deleted.</li>
+          <li><strong>Require a password</strong>: new links must have a password, and passwords can't be removed.</li>
+          <li><strong>Longest expiry</strong>: new and changed links must expire within this many days.</li>
+        </ul>
+        <p>The last two rules apply to links created or changed afterwards. Links created earlier keep working as they are; find them in <strong>All share links</strong> and edit or delete them.</p>
 
         <h2 id="spaces">Spaces</h2>
         <p>A space is a drive with its own members and size limit.</p>
         <ul>
           <li><strong>My files</strong>: your personal space. Only you can see it, unless you share something from it.</li>
-          <li><strong>All files</strong>: the company-wide space.</li>
+          <li><strong>All files</strong>: the company-wide space. An administrator can give it another name.</li>
           <li><strong>Team spaces</strong>: for a department or project. Managers add and remove members.</li>
         </ul>
       </main>

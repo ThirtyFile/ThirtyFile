@@ -60,7 +60,7 @@ export function createFormatting(ctx: WorkspaceCtx) {
     const thin = { style: "thin" };
     const thick = { style: "medium" };
     restyle((s, r, c, g) => {
-      const b: Borders = { ...(s.border ?? {}) };
+      const b: Borders = { ...s.border };
       const top = r === g.r1;
       const bottom = r === g.r2;
       const left = c === g.c1;

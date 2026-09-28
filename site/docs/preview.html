@@ -22,15 +22,20 @@
           <table>
             <thead><tr><th>Type</th><th>View</th><th>Edit</th></tr></thead>
             <tbody>
-              <tr><td>Pictures, video, audio, PDF</td><td>Yes</td><td></td></tr>
+              <tr><td>Pictures (.jpg, .png, .gif, .webp, .avif, .svg, .bmp, .ico)</td><td>Yes</td><td></td></tr>
+              <tr><td>Video (.mp4, .webm, .mov)</td><td>Yes</td><td></td></tr>
+              <tr><td>Audio (.mp3, .wav, .ogg, .flac, .aac, .m4a)</td><td>Yes</td><td></td></tr>
+              <tr><td>PDF</td><td>Yes</td><td></td></tr>
               <tr><td>Word (.docx)</td><td>Yes</td><td></td></tr>
               <tr><td>PowerPoint (.pptx)</td><td>Yes</td><td></td></tr>
               <tr><td>Excel (.xlsx)</td><td>Yes</td><td>Yes</td></tr>
+              <tr><td>Markdown (.md)</td><td>Yes, as a formatted page</td><td>Yes</td></tr>
               <tr><td>Text and code</td><td>Yes</td><td>Yes</td></tr>
             </tbody>
           </table>
         </div>
-        <p>Double-click a file to open it in a tab.</p>
+        <p>Double-click a file to open it in a tab. To go to the previous or next file of the same folder, press <kbd>←</kbd> or <kbd>→</kbd>, or click the arrows at the right of the toolbar. The files come in the order the folder is sorted in, and the status bar shows where you are (for example <strong>3 of 12</strong>). While you are typing in a file, or the cursor is in a video's controls, the arrow keys keep their usual job there; click outside first.</p>
+        <p>Most browsers can't show HEIC, TIFF or Photoshop pictures, AVI, MKV, WMV or FLV videos, or WMA and AIFF sound, so these offer a download button instead. The same happens when your browser can't play a particular video or sound file.</p>
 
         <h2 id="excel">Editing Excel workbooks</h2>
         <p>Open a workbook and click <strong>Edit workbook</strong>.</p>
@@ -40,13 +45,22 @@
           <li>Use the toolbar for bold, colours, borders, alignment, number formats and merged cells.</li>
           <li>Copy and paste works between cells, and to and from Excel on your computer.</li>
           <li>Insert or delete rows and columns from the <strong>Insert</strong> and <strong>Delete</strong> menus. Formulas are adjusted for you.</li>
-          <li>Press <kbd>Ctrl</kbd> + <kbd>Z</kbd> to undo and <kbd>Ctrl</kbd> + <kbd>S</kbd> to save.</li>
+          <li>Press <kbd>Ctrl</kbd> + <kbd>Z</kbd> to undo and <kbd>Ctrl</kbd> + <kbd>S</kbd> to save. Undo goes back up to 200 steps, of which at most 20 can be row or column inserts and deletes.</li>
+          <li>With a screen reader, move with the arrow keys: the address and value of the cell you move to (or the range you select) are read out.</li>
         </ul>
+        <p>In a workbook that is only being viewed, screen readers find the cells shown on screen in a table after the sheet. Scroll the sheet with the arrow keys and the table follows.</p>
         <p>Saving changes only the cells you edited. Charts, pictures and everything else in the workbook stay as they were.</p>
         <div class="note">Workbooks larger than 20 MB can be viewed but not edited online. Download them and use Excel instead.</div>
 
         <h2 id="text">Editing text files</h2>
         <p>Text and code files open in an editor with colours for most programming languages. Press <kbd>Ctrl</kbd> + <kbd>S</kbd> to save.</p>
+
+        <h2 id="markdown">Markdown</h2>
+        <p>Markdown files open as a formatted page: headings, lists, tables, task lists and code. Switch to <strong>Edit</strong> above the page to change the text (<strong>Source</strong> when you may only view the file), and back to <strong>Preview</strong> to see the result, unsaved changes included.</p>
+        <p>The page is shown safely: HTML written in the file is not run, links open in a new tab, and only pictures embedded in the file itself are shown. Pictures from other websites are left out, so opening the file doesn't tell those sites about it.</p>
+
+        <h2 id="thumbnails">Thumbnails</h2>
+        <p>In the icon views (<strong>Large icons</strong>, <strong>Medium icons</strong> and <strong>Tiles</strong>), pictures, PDFs and videos show a thumbnail. The server makes those of pictures. For PDFs (the first page) and videos (a frame near the start), the first browser that shows the file makes the thumbnail and keeps it on the server, so everyone who can open the file sees it from then on. Videos your browser can't play, and PDFs larger than 200 MB, keep their icon.</p>
 
         <h2 id="together">When two people edit the same file</h2>
         <p>If someone else saved the file while you were editing, your save is stopped and you are told, so nobody's work is overwritten without notice. Copy your changes, reload the file, and add them again.</p>

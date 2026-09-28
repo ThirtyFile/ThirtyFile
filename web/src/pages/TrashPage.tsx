@@ -1,28 +1,46 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArchiveRestoreIcon, FolderOpenIcon, RefreshCwIcon, SquareCheckIcon, Trash2Icon, TrashIcon } from "lucide-react";
+import { ArchiveRestoreIcon, FilterIcon, FolderOpenIcon, RefreshCwIcon, SquareCheckIcon, Trash2Icon, TrashIcon } from "lucide-react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import { api, privateSource } from "@/api";
+import { api, driveName, privateSource, type Located } from "@/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/dialogs";
+import { askBeforeTransfer } from "@/components/ConflictDialog";
+import { ErrorState } from "@/components/ErrorState";
 import { FileList } from "@/components/FileList";
 import { Frame, ToolButton } from "@/components/Frame";
 import { useMe } from "@/lib/session";
-import { t } from "@/lib/i18n";
+import { locale, t } from "@/lib/i18n";
+import { useAllPages } from "@/lib/pages";
 import { invalidateFiles } from "@/lib/queries";
+import { trashHint } from "@/lib/utils";
 
 export function TrashPage() {
   const me = useMe();
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const q = useQuery({ queryKey: ["trash"], queryFn: api.listTrash });
+  // Deleted by me, or by everyone (the items of every space whose trash the person sees)
+  const [deletedBy, setDeletedBy] = useState<"everyone" | "me">("everyone");
+  const mine = deletedBy === "me";
+  const q = useAllPages(["trash", "pages", deletedBy], (limit, after) => api.trashPage(limit, after, mine));
+  // Empty trash deletes only the spaces the person manages; the trash also lists items of spaces they can only view
+  const emptyable = useQuery({ queryKey: ["trash", "empty"], queryFn: api.emptyTrashPreview, enabled: me.can_delete });
+  const emptyCount = (emptyable.data ?? []).reduce((sum, s) => sum + s.items, 0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<"delete" | "empty" | null>(null);
-  const items = q.data ?? [];
+  const items = q.items;
   const ids = [...selected];
 
   const done = (msg: string) => {
@@ -33,8 +51,12 @@ export function TrashPage() {
 
   const restore = async () => {
     try {
-      await api.restore(ids);
-      done(t("Restored {n} item|Restored {n} items", { n: ids.length }));
+      // Asks first when an item's name was taken in its folder meanwhile
+      const resolutions = await askBeforeTransfer("restore", ids);
+      if (!resolutions) return;
+      const sent = ids.filter((id) => resolutions[id] !== "skip");
+      if (sent.length) await api.restore(sent, resolutions);
+      done(t("Restored {n} item|Restored {n} items", { n: sent.length }));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Couldn't restore"));
     }
@@ -44,8 +66,25 @@ export function TrashPage() {
     <>
       <ToolButton icon={ArchiveRestoreIcon} label={t("Restore")} showLabel disabled={!ids.length} onClick={restore} />
       <ToolButton icon={Trash2Icon} label={t("Delete permanently")} showLabel disabled={!ids.length || !me.can_delete} onClick={() => setConfirm("delete")} />
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={<ToolButton icon={FilterIcon} label={mine ? t("Deleted by me") : t("Deleted by everyone")} showLabel className={mine ? "text-brand" : undefined} />}
+        />
+        <DropdownMenuContent className="w-48">
+          <DropdownMenuRadioGroup
+            value={deletedBy}
+            onValueChange={(v) => {
+              setDeletedBy(v as "everyone" | "me");
+              setSelected(new Set());
+            }}
+          >
+            <DropdownMenuRadioItem value="everyone">{t("Deleted by everyone")}</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="me">{t("Deleted by me")}</DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <span className="flex-1" />
-      <ToolButton icon={TrashIcon} label={t("Empty trash")} showLabel disabled={!items.length || !me.can_delete} onClick={() => setConfirm("empty")} />
+      <ToolButton icon={TrashIcon} label={t("Empty trash")} showLabel disabled={!emptyCount || !me.can_delete} onClick={() => setConfirm("empty")} />
     </>
   );
 
@@ -57,7 +96,11 @@ export function TrashPage() {
       footer={
         <span>
           {t("{n} item|{n} items", { n: items.length })}
-          {selected.size > 0 && ` · ${t("{n} selected", { n: selected.size })}`} · {t("Items are permanently deleted after 30 days")}
+          {q.loadingMore && ` · ${t("Loading more items…")}`}
+          {selected.size > 0 && ` · ${t("{n} selected", { n: selected.size })}`} ·{" "}
+          {me.trash_days > 0
+            ? t("Items are permanently deleted after {n} day|Items are permanently deleted after {n} days", { n: me.trash_days })
+            : t("Items stay until the trash is emptied")}
         </span>
       }
     >
@@ -73,6 +116,8 @@ export function TrashPage() {
                 <Skeleton key={i} className="h-6" />
               ))}
             </div>
+          ) : q.error ? (
+            <ErrorState message={q.error.message} onRetry={() => q.refetch()} />
           ) : (
             <FileList
               items={items}
@@ -88,11 +133,12 @@ export function TrashPage() {
               showLocation
               dateLabel={t("Date deleted")}
               dateOf={(n) => n.trashed_at ?? n.updated_at}
+              extraColumn={{ label: t("Deleted by"), value: (n) => (n as Located).deleted_by ?? "—" }}
               empty={
                 <div className="flex min-h-52 flex-col items-center justify-center gap-2 py-10 text-muted-foreground">
                   <Trash2Icon className="size-9 stroke-[1.4]" />
-                  <p>{t("Trash is empty")}</p>
-                  <p className="text-xs">{t("Removed files stay in the trash and can be restored at any time.")}</p>
+                  <p>{mine ? t("You haven't deleted anything that's in the trash") : t("Trash is empty")}</p>
+                  <p className="text-xs">{trashHint(me.trash_days)}</p>
                 </div>
               }
             />
@@ -133,7 +179,7 @@ export function TrashPage() {
               {me.can_delete && (
                 <>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem variant="destructive" onClick={() => setConfirm("empty")} disabled={!items.length}>
+                  <DropdownMenuItem variant="destructive" onClick={() => setConfirm("empty")} disabled={!emptyCount}>
                     <TrashIcon /> {t("Empty trash")}
                   </DropdownMenuItem>
                 </>
@@ -144,8 +190,18 @@ export function TrashPage() {
       </ContextMenu>
       {confirm && (
         <ConfirmDialog
-          title={confirm === "empty" ? t("Empty trash?") : t("Permanently delete {n} item?|Permanently delete {n} items?", { n: ids.length })}
-          description={t("Permanently deleted items can't be recovered.")}
+          title={
+            confirm === "empty"
+              ? t("Permanently delete {n} item?|Permanently delete {n} items?", { n: emptyCount })
+              : t("Permanently delete {n} item?|Permanently delete {n} items?", { n: ids.length })
+          }
+          description={
+            confirm === "empty"
+              ? t("Empties the trash of: {spaces}. Permanently deleted items can't be recovered.", {
+                  spaces: (emptyable.data ?? []).map((s) => `${driveName(s)} (${s.items.toLocaleString(locale)})`).join(", "),
+                })
+              : t("Permanently deleted items can't be recovered.")
+          }
           confirmText={t("Delete permanently")}
           destructive
           onClose={() => setConfirm(null)}

@@ -1,5 +1,7 @@
 //! Spaces, members and folder sharing (grants), groups, activity log.
 
+use std::collections::HashMap;
+
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -12,6 +14,7 @@ use crate::{
     auth::{Admin, User},
     db::{add_grant, create_drive},
     error::{AppError, AppResult},
+    logs,
     state::AppState,
     tree::{self, DRIVE_COLS, Drive, Node, Role},
     util::{now, validate_name},
@@ -48,59 +51,90 @@ pub struct DriveInfo {
     last_scan_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     scan_report: Option<Value>,
+    /// Folder spaces, for administrators: the scan running now
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scanning: Option<crate::folders::ScanProgress>,
 }
 
 async fn drive_info(st: &AppState, conn: &mut SqliteConnection, d: Drive, role: Option<Role>) -> AppResult<DriveInfo> {
+    Ok(drive_infos(st, conn, vec![(d, role)], false).await?.pop().expect("one space in, one out"))
+}
+
+/// What the space cards show, for many spaces in one query (the lists don't run a query per space). With
+/// `scan_details`, folder spaces also report their folder and last scan (administrators).
+async fn drive_infos(
+    st: &AppState,
+    conn: &mut SqliteConnection,
+    drives: Vec<(Drive, Option<Role>)>,
+    scan_details: bool,
+) -> AppResult<Vec<DriveInfo>> {
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        id: String,
+        location_id: Option<String>,
+        location_name: String,
+        quota_bytes: i64,
+        owner_name: String,
+        member_count: i64,
+        last_scan_at: Option<i64>,
+        scan_report: Option<String>,
+    }
     let default_location = st.default_location.read().unwrap().clone();
-    // Everything the card shows in one query (the space list runs this once per space)
-    let (explicit, location_name, quota_bytes, owner_name, member_count): (Option<String>, String, i64, String, i64) = sqlx::query_as(
-        "SELECT d.location_id,
-                COALESCE((SELECT name FROM storage_locations WHERE id = COALESCE(d.location_id, ?2)), ''),
-                CASE WHEN d.kind = 'personal' THEN COALESCE((SELECT quota_bytes FROM users WHERE id = d.owner_id), 0) ELSE d.quota_bytes END,
-                COALESCE((SELECT username FROM users WHERE id = d.owner_id), ''),
-                (SELECT COUNT(*) FROM grants WHERE node_id = d.root_id)
-         FROM drives d WHERE d.id = ?1",
+    let ids = serde_json::to_string(&drives.iter().map(|(d, _)| d.id.as_str()).collect::<Vec<_>>()).unwrap();
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT d.id, d.location_id, COALESCE(l.name, '') AS location_name,
+                CASE WHEN d.kind = 'personal' THEN COALESCE(u.quota_bytes, 0) ELSE d.quota_bytes END AS quota_bytes,
+                COALESCE(u.username, '') AS owner_name, COALESCE(g.n, 0) AS member_count, d.last_scan_at, d.scan_report
+         FROM drives d
+         LEFT JOIN storage_locations l ON l.id = COALESCE(d.location_id, ?2)
+         LEFT JOIN users u ON u.id = d.owner_id
+         LEFT JOIN (SELECT node_id, COUNT(*) AS n FROM grants GROUP BY node_id) g ON g.node_id = d.root_id
+         WHERE d.id IN (SELECT value FROM json_each(?1))",
     )
-    .bind(&d.id)
+    .bind(&ids)
     .bind(&default_location)
-    .fetch_one(&mut *conn)
+    .fetch_all(&mut *conn)
     .await?;
-    let used_bytes = d.used_bytes;
-    let location_is_default = explicit.is_none();
-    let location_id = explicit.unwrap_or(default_location);
-    // A folder space is on the server itself: nothing to be offline
-    let offline = if d.is_folder() { None } else { st.location_offline(&location_id) };
-    Ok(DriveInfo {
-        mode: d.mode.clone(),
-        read_only: d.read_only,
-        source_path: None,
-        last_scan_at: None,
-        scan_report: None,
-        id: d.id,
-        name: d.name,
-        kind: d.kind,
-        root_id: d.root_id,
-        role,
-        used_bytes,
-        quota_bytes,
-        owner_name,
-        member_count,
-        disabled: d.disabled,
-        location_id,
-        location_name,
-        location_is_default,
-        offline,
-    })
+    let mut rows: HashMap<String, Row> = rows.into_iter().map(|r| (r.id.clone(), r)).collect();
+    let mut out = Vec::with_capacity(drives.len());
+    for (d, role) in drives {
+        let r = rows.remove(&d.id).ok_or_else(|| AppError::not_found("Space not found"))?;
+        let location_is_default = r.location_id.is_none();
+        let location_id = r.location_id.unwrap_or_else(|| default_location.clone());
+        // A folder space is on the server itself: nothing to be offline
+        let offline = if d.is_folder() { None } else { st.location_offline(&location_id) };
+        let details = scan_details && d.is_folder();
+        out.push(DriveInfo {
+            mode: d.mode.clone(),
+            read_only: d.read_only,
+            source_path: d.source_path.clone().filter(|_| details),
+            last_scan_at: r.last_scan_at.filter(|_| details),
+            scan_report: r.scan_report.filter(|_| details).and_then(|r| serde_json::from_str(&r).ok()),
+            scanning: if details { crate::folders::progress(&d.id) } else { None },
+            used_bytes: d.used_bytes,
+            id: d.id,
+            name: d.name,
+            kind: d.kind,
+            root_id: d.root_id,
+            role,
+            quota_bytes: r.quota_bytes,
+            owner_name: r.owner_name,
+            member_count: r.member_count,
+            disabled: d.disabled,
+            location_id,
+            location_name: r.location_name,
+            location_is_default,
+            offline,
+        });
+    }
+    Ok(out)
 }
 
 /// Spaces I can access
 pub async fn list(State(st): State<AppState>, user: User) -> AppResult<Json<Vec<DriveInfo>>> {
     let mut c = st.db.acquire().await?;
-    let mut out = Vec::new();
-    for (d, role) in tree::user_drives(&mut c, &user).await? {
-        out.push(drive_info(&st, &mut c, d, Some(role)).await?);
-    }
-    Ok(Json(out))
+    let drives = tree::user_drives(&mut c, &user).await?.into_iter().map(|(d, role)| (d, Some(role))).collect();
+    Ok(Json(drive_infos(&st, &mut c, drives, false).await?))
 }
 
 fn can_create_drive(st: &AppState, user: &User) -> bool {
@@ -132,7 +166,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
         Some(_) if !user.is_admin() => return Err(AppError::forbidden("Only administrators can show a folder on the server as a space")),
         Some(p) => {
             let p = crate::folders::check_source(&st, p)?;
-            let (taken,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drives WHERE mode = 'folder' AND source_path = ?").bind(&p).fetch_one(&st.db).await?;
+            let (taken,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drives WHERE source_path = ?").bind(&p).fetch_one(&st.db).await?;
             if taken > 0 {
                 return Err(AppError::conflict("Another space already shows this folder"));
             }
@@ -155,12 +189,18 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     }
     let (drive_id, root_id) = create_drive(&mut tx, &name, "team", user.id, quota).await?;
     add_grant(&mut tx, &root_id, "user", user.id, "owner", Some(user.id), None).await?;
-    if let Some(source) = &source {
-        crate::folders::set_up(&mut tx, &drive_id, &root_id, source).await?;
-        sqlx::query("UPDATE drives SET read_only = ? WHERE id = ?").bind(req.read_only).bind(&drive_id).execute(&mut *tx).await?;
-    }
+    // A folder chosen by the administrator, else a new folder in the storage location's folder when the location is
+    // on this server (space_folders.rs); S3, SFTP and FTP keep the content store
+    let folder_space = match &source {
+        Some(source) => {
+            crate::folders::set_up(&mut tx, &drive_id, &root_id, source).await?;
+            sqlx::query("UPDATE drives SET read_only = ? WHERE id = ?").bind(req.read_only).bind(&drive_id).execute(&mut *tx).await?;
+            true
+        }
+        None => crate::space_folders::make_folder_space(&mut tx, st.space_folders.as_deref(), &drive_id).await?.is_some(),
+    };
     let root = tree::get_node(&mut tx, &root_id).await?.unwrap();
-    tree::log(&mut tx, &user, Some(&root), "drive_create", source.as_deref().unwrap_or_default()).await?;
+    logs::record_activity(&mut tx, &user, Some(&root), "drive_create", source.as_deref().unwrap_or_default()).await?;
     let drive = tree::get_drive(&mut tx, &drive_id).await?.unwrap();
     let info = drive_info(&st, &mut tx, drive, Some(Role::Owner)).await?;
     tx.commit().await?;
@@ -168,6 +208,9 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     if source.is_some() {
         // Index the folder right away (in the background: a large folder takes a while)
         crate::folders::scan_later(&st, &drive_id);
+    }
+    if folder_space {
+        crate::folders::spaces_changed();
     }
     Ok(Json(info))
 }
@@ -241,10 +284,11 @@ pub async fn update(
         sqlx::query("UPDATE drives SET read_only = ? WHERE id = ?").bind(read_only).bind(&drive.id).execute(&mut *tx).await?;
     }
     let root = tree::get_node(&mut tx, &drive.root_id).await?.unwrap();
-    tree::log(&mut tx, &user, Some(&root), "drive_update", "").await?;
+    logs::record_activity(&mut tx, &user, Some(&root), "drive_update", "").await?;
     let drive = tree::get_drive(&mut tx, &drive.id).await?.unwrap();
     let info = drive_info(&st, &mut tx, drive, role).await?;
     tx.commit().await?;
+    crate::folders::spaces_changed();
     Ok(Json(info))
 }
 
@@ -259,11 +303,17 @@ pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<Strin
     if !(user.is_admin() || role == Some(Role::Owner)) {
         return Err(AppError::forbidden("Only the space owner or an administrator can delete a space"));
     }
+    // The space disappears now; its files are deleted in the background, a batch at a time. A folder space's folder
+    // stays on the disk with everything in it (space_folders.rs): only ThirtyFile's index of it is deleted
     sqlx::query("DELETE FROM drives WHERE id = ?").bind(&drive.id).execute(&mut *tx).await?;
-    let orphans = tree::purge_subtree(&mut tx, &drive.root_id).await?;
-    tree::log(&mut tx, &user, None, "drive_delete", &drive.name).await?;
+    let detail = match drive.source_path.as_deref().filter(|_| drive.is_folder()) {
+        Some(path) => format!("{} (its folder on the server is kept: {path})", drive.name),
+        None => drive.name.clone(),
+    };
+    logs::record_activity(&mut tx, &user, None, "drive_delete", &detail).await?;
     tx.commit().await?;
-    tree::schedule_blob_removal(&st, orphans);
+    crate::folders::spaces_changed();
+    tree::purge_detached_later(&st);
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -272,23 +322,13 @@ pub async fn admin_list(State(st): State<AppState>, Admin(user): Admin) -> AppRe
     let mut c = st.db.acquire().await?;
     let sql = format!("SELECT {DRIVE_COLS} FROM drives d ORDER BY CASE d.kind WHEN 'company' THEN 0 WHEN 'team' THEN 1 ELSE 2 END, d.name");
     let drives: Vec<Drive> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).fetch_all(&mut *c).await?;
-    let mut out = Vec::new();
-    for d in drives {
-        let root = tree::get_node(&mut c, &d.root_id).await?.unwrap();
-        let role = tree::role_on(&mut c, &user, &root).await?;
-        let source_path = d.source_path.clone().filter(|_| d.is_folder());
-        let mut info = drive_info(&st, &mut c, d, role).await?;
-        if source_path.is_some() {
-            // Administrators see which folder a folder space shows and what its last scan found
-            let (at, report): (Option<i64>, Option<String>) =
-                sqlx::query_as("SELECT last_scan_at, scan_report FROM drives WHERE id = ?").bind(&info.id).fetch_one(&mut *c).await?;
-            info.last_scan_at = at;
-            info.scan_report = report.and_then(|r| serde_json::from_str(&r).ok());
-            info.source_path = source_path;
-        }
-        out.push(info);
-    }
-    Ok(Json(out))
+    // The administrator's own role (same as role_on for each root: grants, and managing the company space)
+    let roles: HashMap<String, Role> = tree::user_drives(&mut c, &user).await?.into_iter().map(|(d, r)| (d.id, r)).collect();
+    let drives = drives.into_iter().map(|d| {
+        let role = roles.get(&d.id).copied();
+        (d, role)
+    });
+    Ok(Json(drive_infos(&st, &mut c, drives.collect(), true).await?))
 }
 
 // ───────────── Access (space members / folder sharing) ─────────────
@@ -376,12 +416,11 @@ pub async fn access(State(st): State<AppState>, user: User, Path(id): Path<Strin
     // Someone who only has the folder shared with them (not a member of the space) sees the grants from the shared
     // folder down, like the path they see: the folders above it and who else can access them are not theirs to know
     if !can_manage {
-        let member_of: Vec<String> = tree::user_drives(&mut c, &user).await?.into_iter().map(|(d, _)| d.id).collect();
+        let member_of = tree::member_of(&mut c, &user).await?;
         if !member_of.iter().any(|d| d == node.drive()) {
-            let shared: std::collections::HashSet<String> =
-                tree::shared_with_me_outside(&mut c, &user, &member_of).await?.into_iter().map(|(n, _, _)| n.id).collect();
+            let shared = tree::shared_ids(&mut c, &user, &member_of).await?;
             let path = tree::path_of(&mut c, &node.id).await?;
-            let visible: std::collections::HashSet<&str> = match path.iter().position(|c| shared.contains(&c.id)) {
+            let visible: std::collections::HashSet<&str> = match tree::shared_start(&path, &shared) {
                 Some(start) => path[start..].iter().map(|c| c.id.as_str()).collect(),
                 None => Default::default(),
             };
@@ -445,6 +484,7 @@ pub async fn grant(
             .bind(principal_id)
             .fetch_optional(&mut *tx)
             .await?;
+    let is_new = existing.is_none();
     if let Some(old) = existing.and_then(|(r,)| Role::parse(&r)) {
         if !user.is_admin() && my_role.is_some_and(|r| old > r) {
             return Err(AppError::forbidden("You can't change the access of someone whose role is higher than yours"));
@@ -454,8 +494,21 @@ pub async fn grant(
         }
     }
     add_grant(&mut tx, &node.id, &req.principal_type, principal_id, role.as_str(), Some(user.id), req.expires_at).await?;
-    tree::log(&mut tx, &user, Some(&node), "grant", &format!("{name} → {}", role_label(role))).await?;
+    // New access is announced to the people it is for; a changed role or expiry isn't
+    let emails = if is_new {
+        let (grant_id,): (i64,) = sqlx::query_as("SELECT id FROM grants WHERE node_id = ? AND principal_type = ? AND principal_id = ?")
+            .bind(&node.id)
+            .bind(&req.principal_type)
+            .bind(principal_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        crate::notify::shared(&mut tx, &user, &node, &drive, grant_id).await?
+    } else {
+        Vec::new()
+    };
+    logs::record_activity(&mut tx, &user, Some(&node), "grant", &format!("{name} → {}", role_label(role))).await?;
     tx.commit().await?;
+    crate::notify::send_later(&st, emails);
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -489,7 +542,7 @@ pub async fn revoke(State(st): State<AppState>, user: User, Path(grant_id): Path
     }
     let name = principal_name(&mut tx, &principal_type, principal_id).await?.unwrap_or_default();
     sqlx::query("DELETE FROM grants WHERE id = ?").bind(grant_id).execute(&mut *tx).await?;
-    tree::log(&mut tx, &user, Some(&node), "revoke", &name).await?;
+    logs::record_activity(&mut tx, &user, Some(&node), "revoke", &name).await?;
     tx.commit().await?;
     Ok(Json(json!({ "ok": true })))
 }
@@ -528,14 +581,14 @@ pub struct DirectoryQuery {
 }
 
 pub async fn directory(State(st): State<AppState>, _: User, Query(q): Query<DirectoryQuery>) -> AppResult<Json<Vec<Principal>>> {
-    let term = format!("%{}%", q.q.trim().replace(['%', '_'], ""));
+    let term = format!("%{}%", crate::util::like_escape(q.q.trim()));
     let rows: Vec<Principal> = sqlx::query_as(
         "SELECT 'group' AS principal_type, g.id AS principal_id, g.name,
                 (SELECT CASE COUNT(*) WHEN 1 THEN '1 member' ELSE COUNT(*) || ' members' END FROM group_members WHERE group_id = g.id) AS detail
-         FROM groups g WHERE g.name LIKE ?1
+         FROM groups g WHERE g.name LIKE ?1 ESCAPE '\\'
          UNION ALL
          SELECT 'user', u.id, u.username, CASE u.role WHEN 'admin' THEN 'Administrator' ELSE 'User' END
-         FROM users u WHERE u.disabled = 0 AND u.username LIKE ?1
+         FROM users u WHERE u.disabled = 0 AND u.username LIKE ?1 ESCAPE '\\'
          ORDER BY 1 DESC, 3 LIMIT 30",
     )
     .bind(term)
@@ -564,16 +617,20 @@ pub struct GroupMember {
 pub async fn list_groups(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<GroupInfo>>> {
     let groups: Vec<(i64, String, String, i64)> =
         sqlx::query_as("SELECT id, name, description, created_at FROM groups ORDER BY name").fetch_all(&st.db).await?;
-    let mut out = Vec::new();
-    for (id, name, description, created_at) in groups {
-        let members: Vec<GroupMember> = sqlx::query_as(
-            "SELECT u.id, u.username FROM group_members m JOIN users u ON u.id = m.user_id WHERE m.group_id = ? ORDER BY u.username",
-        )
-        .bind(id)
-        .fetch_all(&st.db)
-        .await?;
-        out.push(GroupInfo { id, name, description, created_at, members });
+    // Every group's members in one query
+    let members: Vec<(i64, i64, String)> = sqlx::query_as(
+        "SELECT m.group_id, u.id, u.username FROM group_members m JOIN users u ON u.id = m.user_id ORDER BY u.username",
+    )
+    .fetch_all(&st.db)
+    .await?;
+    let mut by_group: HashMap<i64, Vec<GroupMember>> = HashMap::new();
+    for (group_id, id, username) in members {
+        by_group.entry(group_id).or_default().push(GroupMember { id, username });
     }
+    let out = groups
+        .into_iter()
+        .map(|(id, name, description, created_at)| GroupInfo { id, name, description, created_at, members: by_group.remove(&id).unwrap_or_default() })
+        .collect();
     Ok(Json(out))
 }
 
@@ -610,7 +667,7 @@ pub async fn create_group(State(st): State<AppState>, Admin(user): Admin, Json(r
         .await
         .map_err(|e| if matches!(&e, sqlx::Error::Database(d) if d.is_unique_violation()) { AppError::conflict("A group with this name already exists") } else { e.into() })?;
     set_members(&mut tx, id, req.members.as_deref().unwrap_or_default()).await?;
-    tree::log(&mut tx, &user, None, "group_create", &name).await?;
+    logs::record_activity(&mut tx, &user, None, "group_create", &name).await?;
     tx.commit().await?;
     Ok(Json(json!({ "id": id })))
 }
@@ -625,7 +682,12 @@ pub async fn update_group(
     let mut tx = st.db.begin().await?;
     if let Some(name) = &req.name {
         let name = validate_name(name)?;
-        sqlx::query("UPDATE groups SET name = ? WHERE id = ?").bind(&name).bind(id).execute(&mut *tx).await?;
+        sqlx::query("UPDATE groups SET name = ? WHERE id = ?")
+            .bind(&name)
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| if matches!(&e, sqlx::Error::Database(d) if d.is_unique_violation()) { AppError::conflict("A group with this name already exists") } else { e.into() })?;
     }
     if let Some(d) = &req.description {
         sqlx::query("UPDATE groups SET description = ? WHERE id = ?").bind(d).bind(id).execute(&mut *tx).await?;
@@ -634,7 +696,7 @@ pub async fn update_group(
         set_members(&mut tx, id, m).await?;
     }
     let name = principal_name(&mut tx, "group", id).await?.unwrap_or_default();
-    tree::log(&mut tx, &user, None, "group_update", &name).await?;
+    logs::record_activity(&mut tx, &user, None, "group_update", &name).await?;
     tx.commit().await?;
     Ok(Json(json!({ "ok": true })))
 }
@@ -649,9 +711,9 @@ pub async fn delete_group(State(st): State<AppState>, Admin(user): Admin, Path(i
     let mut sso = st.sso.read().unwrap().clone();
     let changed = sso.forget_group(id);
     if changed {
-        crate::db::set_setting(&mut tx, "sso", &serde_json::to_string(&sso).unwrap()).await?;
+        crate::sso::store(&mut tx, &sso).await?;
     }
-    tree::log(&mut tx, &user, None, "group_delete", &name).await?;
+    logs::record_activity(&mut tx, &user, None, "group_delete", &name).await?;
     tx.commit().await?;
     if changed {
         *st.sso.write().unwrap() = sso;

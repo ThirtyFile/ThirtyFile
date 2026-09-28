@@ -1,12 +1,13 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRightIcon, KeyRoundIcon, Loader2Icon, UserRoundIcon } from "lucide-react";
-import { api } from "@/api";
+import { api, ApiError, type Me, type TwoFactorSetup } from "@/api";
 import { backgroundUrl, logoUrl, useBranding, type Branding } from "@/lib/branding";
 import { SiteName } from "@/components/SiteName";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { LanguageSwitch } from "@/components/LanguageSwitch";
+import { RecoveryCodes, SetupCode } from "@/components/TwoFactor";
 import { cn } from "@/lib/utils";
 import { lang, locale, t, tServer } from "@/lib/i18n";
 
@@ -31,9 +32,9 @@ function saveLastUser(username: string) {
   }
 }
 
-/** Lock screen time: no AM/PM shown (same as an OS lock screen) */
+/** Lock screen time: no AM/PM shown (same as an OS lock screen); English follows the region's clock */
 export function formatClock(d: Date) {
-  return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", hourCycle: lang === "en" ? "h12" : "h23" })
+  return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", hourCycle: lang === "en" ? undefined : "h23" })
     .formatToParts(d)
     .filter((p) => p.type !== "dayPeriod")
     .map((p) => p.value)
@@ -131,7 +132,8 @@ export function LoginAvatar({ name, className, iconClassName }: { name: string |
 const FIELD =
   "h-10 w-full rounded-md border border-white/25 bg-black/30 px-3 text-sm text-white outline-none backdrop-blur-md transition placeholder:text-white/65 focus:border-white/50 focus:bg-black/45 focus:shadow-[inset_0_-2px_0_var(--brand)] disabled:opacity-60";
 
-type Stage = "lock" | "signin" | "welcome";
+/** code: the second step of two-factor sign-in; setup: setting it up first (required by the administrator); codes: the new recovery codes */
+type Stage = "lock" | "signin" | "code" | "setup" | "codes" | "welcome";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -157,8 +159,14 @@ export function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  /** Two-factor sign-in: the ticket from the correct password, the app to set up, the code typed, the new recovery codes */
+  const [ticket, setTicket] = useState("");
+  const [setup, setSetup] = useState<TwoFactorSetup | null>(null);
+  const [code, setCode] = useState("");
+  const [recovery, setRecovery] = useState<{ me: Me; codes: string[] } | null>(null);
   const userRef = useRef<HTMLInputElement>(null);
   const pwRef = useRef<HTMLInputElement>(null);
+  const codeRef = useRef<HTMLInputElement>(null);
   /** After dismissing the error message, retype the password directly */
   const retry = useRef(false);
   const now = useNow();
@@ -199,10 +207,15 @@ export function LoginPage() {
   });
 
   // When entering the sign-in screen or switching accounts, put the cursor in the field to fill
+  const focusFirst = useEffectEvent(() => focusField());
   useEffect(() => {
-    if (stage === "signin" && !error) focusField();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (stage === "signin" && !error) focusFirst();
   }, [stage, who, error]);
+
+  // The code field of two-factor sign-in
+  useEffect(() => {
+    if ((stage === "code" || stage === "setup") && !error) requestAnimationFrame(() => codeRef.current?.focus());
+  }, [stage, error]);
 
   // Return to the lock screen after the sign-in screen has been idle for a while (with no password typed)
   useEffect(() => {
@@ -220,8 +233,20 @@ export function LoginPage() {
     };
   }, [b.login_lock, stage, busy, password]);
 
+  const backToPassword = () => {
+    setTicket("");
+    setSetup(null);
+    setCode("");
+    setStage("signin");
+  };
+
   const onSigninKey = (e: ReactKeyboardEvent) => {
-    if (e.key === "Escape" && b.login_lock && !busy) {
+    if (e.key === "Escape" && !busy && (stage === "code" || stage === "setup")) {
+      setError(null);
+      backToPassword();
+      return;
+    }
+    if (e.key === "Escape" && b.login_lock && !busy && stage === "signin") {
       setError(null);
       setPassword("");
       setStage("lock");
@@ -240,6 +265,16 @@ export function LoginPage() {
     retry.current = true;
     setError(null);
     setPassword("");
+    setCode("");
+  };
+
+  /** Signed in: show "Welcome" briefly before entering (same as an OS sign-in) */
+  const enter = async (me: Me) => {
+    saveLastUser(me.username);
+    setStage("welcome");
+    await new Promise((r) => setTimeout(r, 700));
+    qc.setQueryData(["me"], me);
+    navigate(nextPath, { replace: true });
   };
 
   const account = (who ?? username).trim();
@@ -249,20 +284,52 @@ export function LoginPage() {
     setBusy(true);
     setError(null);
     try {
-      const me = await api.login(account, password);
-      saveLastUser(me.username);
-      setStage("welcome");
-      // Show "Welcome" briefly before entering (same as an OS sign-in)
-      await new Promise((r) => setTimeout(r, 700));
-      qc.setQueryData(["me"], me);
-      navigate(nextPath, { replace: true });
+      const r = await api.login(account, password);
+      if ("two_factor" in r) {
+        // The password was right: now the second step
+        setTicket(r.ticket);
+        setPassword("");
+        setCode("");
+        if (r.two_factor === "setup") {
+          setSetup(await api.loginSetup(r.ticket));
+          setStage("setup");
+        } else {
+          setStage("code");
+        }
+        setBusy(false);
+        return;
+      }
+      await enter(r);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("Sign-in failed"));
       setBusy(false);
     }
   };
 
-  const shownUser = stage === "welcome" ? account : who;
+  const submitCode = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!code.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { recovery_codes, ...me } = await api.loginCode(ticket, code.trim());
+      setTicket("");
+      if (recovery_codes?.length) {
+        setRecovery({ me, codes: recovery_codes });
+        setStage("codes");
+        setBusy(false);
+        return;
+      }
+      await enter(me);
+    } catch (err) {
+      // The ticket expired or took too many wrong codes: start again from the password
+      if (err instanceof ApiError && err.code === "two_factor_expired") backToPassword();
+      setError(err instanceof Error ? err.message : t("Sign-in failed"));
+      setBusy(false);
+    }
+  };
+
+  const shownUser = stage === "lock" || stage === "signin" ? who : account;
   const heading = shownUser ?? (b.login_title || b.site_name);
   const subtitle = tServer(b.login_subtitle);
   const logo = b.has_logo ? logoUrl(b, true) : "/favicon.svg";
@@ -309,8 +376,8 @@ export function LoginPage() {
           stage === "lock" && "pointer-events-none scale-95 opacity-0",
         )}
       >
-        <form onSubmit={submit} className="flex w-full max-w-72 flex-col items-center text-center" aria-label={t("Sign in")}>
-          <LoginAvatar name={shownUser} className="size-36 text-6xl sm:size-44 sm:text-7xl" iconClassName="size-20 sm:size-24" />
+        <form onSubmit={stage === "code" || stage === "setup" ? submitCode : submit} className="flex w-full max-w-72 flex-col items-center text-center" aria-label={t("Sign in")}>
+          {stage !== "setup" && stage !== "codes" && <LoginAvatar name={shownUser} className="size-36 text-6xl sm:size-44 sm:text-7xl" iconClassName="size-20 sm:size-24" />}
           <h1 className="mt-5 max-w-full truncate text-[1.75rem] font-semibold [text-shadow:0_1px_12px_rgb(0_0_0/0.3)]">{heading}</h1>
           {subtitle && <p className="mt-1 max-w-full text-sm whitespace-pre-line text-white/80">{subtitle}</p>}
 
@@ -329,6 +396,57 @@ export function LoginPage() {
                 className="h-9 min-w-28 rounded-md bg-white/15 px-4 text-sm ring-1 ring-white/30 backdrop-blur-md hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none"
               >
                 {t("OK")}
+              </button>
+            </div>
+          ) : stage === "codes" && recovery ? (
+            <div className="mt-6 grid w-full gap-3 text-left">
+              <p className="text-sm font-medium">{t("Two-factor sign-in is on.")}</p>
+              <RecoveryCodes codes={recovery.codes} />
+              <button
+                type="button"
+                autoFocus
+                onClick={() => enter(recovery.me)}
+                className="h-10 rounded-md bg-brand px-4 text-sm text-brand-foreground hover:bg-brand/85 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none"
+              >
+                {t("Continue")}
+              </button>
+            </div>
+          ) : stage === "code" || stage === "setup" ? (
+            <div className="mt-6 grid w-full gap-2.5">
+              {stage === "setup" && setup ? (
+                <>
+                  <p className="text-sm text-white/85">{t("Your administrator requires two-factor sign-in. Scan the QR code with an authenticator app, then enter the 6-digit code it shows.")}</p>
+                  <SetupCode setup={setup} className="my-1" />
+                </>
+              ) : (
+                <p className="text-sm text-white/85">{t("Enter the 6-digit code from your authenticator app, or one of your recovery codes.")}</p>
+              )}
+              <div className="relative">
+                <input
+                  ref={codeRef}
+                  className={cn(FIELD, "pr-11 text-center tracking-widest")}
+                  placeholder={t("Code")}
+                  aria-label={t("Code")}
+                  autoComplete="one-time-code"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  maxLength={16}
+                  value={code}
+                  disabled={busy}
+                  onChange={(e) => setCode(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  aria-label={t("Sign in")}
+                  title={t("Sign in")}
+                  disabled={busy || !code.trim()}
+                  className="absolute top-1 right-1 grid size-8 place-items-center rounded bg-brand text-brand-foreground hover:bg-brand/85 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none disabled:bg-white/15 disabled:text-white/60"
+                >
+                  {busy ? <Loader2Icon className="size-4 animate-spin" /> : <ArrowRightIcon className="size-4" />}
+                </button>
+              </div>
+              <button type="button" disabled={busy} onClick={backToPassword} className="text-sm text-white/85 underline-offset-4 hover:underline">
+                {t("Back")}
               </button>
             </div>
           ) : (
@@ -375,7 +493,7 @@ export function LoginPage() {
             </div>
           )}
 
-          {stage !== "welcome" && !!providers.data?.length && (
+          {stage === "signin" && !!providers.data?.length && (
             <div className="mt-7 grid justify-items-center gap-2">
               <span className="text-xs text-white/75">{t("Sign-in options")}</span>
               <div className="flex flex-wrap justify-center gap-2">
@@ -398,7 +516,7 @@ export function LoginPage() {
           )}
 
           {/* Phones: switch-account goes below the sign-in box */}
-          {lastUser && stage !== "welcome" && (
+          {lastUser && (stage === "lock" || stage === "signin") && (
             <button
               type="button"
               onClick={() => switchUser(who ? null : lastUser)}

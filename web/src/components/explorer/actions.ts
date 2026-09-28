@@ -1,11 +1,18 @@
-/** File explorer actions: open, download, favorite, cut / copy / paste, new folder / text file, keyboard shortcuts and drag-and-drop upload */
+/** File explorer actions: open, download, favorite, cut / copy / paste, new folder / text file, delete for good, keyboard shortcuts and drag-and-drop upload */
 import { useEffect, type DragEvent } from "react";
+import type { InfiniteData } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { api, privateSource, triggerDownload, type Node } from "@/api";
+import { api, privateSource, triggerDownload, type CursorPage, type Node } from "@/api";
 import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
+import { allItems } from "@/lib/pages";
 import { invalidateFiles } from "@/lib/queries";
-import { enqueue, filesFromDrop } from "@/uploads";
+import { type Origins, moveBack, originsOf, toastWithUndo, undoLast } from "@/lib/undo";
+import { confirm } from "@/components/confirm";
+import { askBeforeTransfer } from "@/components/ConflictDialog";
+import { carriesFiles, dropFiles, dropItems } from "@/lib/dnd";
+import { filesFromDrop, uploadFiles } from "@/uploads";
+import { runJob } from "@/lib/jobs";
 import { type Item, isTyping } from "./types";
 import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
@@ -51,7 +58,10 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       // Only after the list reloads does the new item have a place to edit its name; if it didn't reload, don't start
       // renaming a row that isn't there (that would leave the shortcuts turned off)
       await refresh();
-      const listed = qc.getQueriesData<Node[]>({ queryKey: ["children", p.folderId] }).some(([, d]) => d?.some((n) => n.id === id));
+      // The folder's pages, and the folder tree's list of subfolders
+      const listed = qc
+        .getQueriesData<Node[] | InfiniteData<CursorPage<Node>>>({ queryKey: ["children", p.folderId] })
+        .some(([, d]) => (Array.isArray(d) ? d : allItems(d)).some((n) => n.id === id));
       if (!listed) return;
       setSelected(new Set([id]));
       setAnchor(id);
@@ -68,7 +78,14 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
   };
 
   // Multiple items or folders are zipped by the server while streaming; progress shows in the download panel at the bottom right
-  const download = (ids: string[]) => ids.length && void triggerDownload(privateSource.downloadUrl(ids));
+  const download = (ids: string[]) => ids.length && void triggerDownload(() => privateSource.downloadLink(ids));
+
+  // A new ZIP file in this folder, or a new folder with a ZIP file's contents: made on the server, followed in a message
+  const compress = (ids: string[]) => {
+    const folder = p.folderId;
+    if (folder && ids.length) void runJob(qc, () => api.compress(ids, folder));
+  };
+  const extract = (n: Item) => void runJob(qc, () => api.extract(n.id));
 
   const toggleFavorite = async () => {
     try {
@@ -80,20 +97,46 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     }
   };
 
-  const moveInto = async (ids: string[], folder: Node) => {
+  // Items dragged onto a folder in the list move there (or are copied, with Ctrl); files from the computer are uploaded there
+  const dropInto = async (ids: string[], folder: Node, copy: boolean) => {
+    await dropItems(qc, ids, folder, copy);
+    setSelected(new Set());
+  };
+
+  /**
+   * Moves or copies items to a folder, asking first what to do with names the folder already has (replace, skip or
+   * keep both). `done` words the message for the number of items that went; a move can be undone from it. False when
+   * it was cancelled or failed (the reason is shown).
+   */
+  const transfer = async (mode: "move" | "copy", ids: string[], dest: string, done: (n: number) => string, fallback: string, known?: Origins) => {
     try {
-      await api.move(ids, folder.id);
-      toast.success(t("Moved {n} item to \"{name}\"|Moved {n} items to \"{name}\"", { n: ids.length, name: folder.name }));
+      const resolutions = await askBeforeTransfer(mode, ids, dest);
+      if (!resolutions) return false;
+      const sent = ids.filter((id) => resolutions[id] !== "skip");
+      if (sent.length) {
+        if (mode === "move") {
+          const origins = new Map([...(known ?? originsOf(p.items, sent, dest))].filter(([id, parent]) => sent.includes(id) && parent !== dest));
+          await api.move(sent, dest, resolutions);
+          if (origins.size) toastWithUndo(done(sent.length), { undo: () => moveBack(origins), undoneText: t("Moved back"), after: refresh });
+          else toast.success(done(sent.length));
+        } else {
+          await api.copy(sent, dest, resolutions);
+          toast.success(done(sent.length));
+        }
+      }
       setSelected(new Set());
       refresh();
+      return true;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Couldn't move"));
+      toast.error(e instanceof Error ? e.message : fallback);
+      return false;
     }
   };
+  const uploadInto = (dt: DataTransfer, folder: Node) => void dropFiles(dt, folder);
 
   const cut = () => {
     if (!selectedIds.length || !caps.write) return;
-    setClipboard({ mode: "cut", ids: selectedIds });
+    setClipboard({ mode: "cut", ids: selectedIds, origins: originsOf(selectedNodes, selectedIds, "") });
     toast(t("{n} item cut. Go to the destination folder and select Paste to move it.|{n} items cut. Go to the destination folder and select Paste to move them.", { n: selectedIds.length }));
   };
   const copy = () => {
@@ -104,22 +147,36 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
   const canPaste = !!clip && canCreate;
   const paste = async () => {
     if (!clip || !p.folderId) return;
-    try {
-      if (clip.mode === "cut") {
-        await api.move(clip.ids, p.folderId);
-        setClipboard(null);
-        toast.success(t("Moved {n} item|Moved {n} items", { n: clip.ids.length }));
-      } else {
-        await api.copy(clip.ids, p.folderId);
-        toast.success(t("Pasted {n} item|Pasted {n} items", { n: clip.ids.length }));
-      }
-      refresh();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Couldn't paste"));
+    if (clip.mode === "cut") {
+      const moved = await transfer("move", clip.ids, p.folderId, (n) => t("Moved {n} item|Moved {n} items", { n }), t("Couldn't paste"), clip.origins ?? new Map());
+      if (moved) setClipboard(null);
+    } else {
+      await transfer("copy", clip.ids, p.folderId, (n) => t("Pasted {n} item|Pasted {n} items", { n }), t("Couldn't paste"));
     }
   };
 
-  // Keyboard shortcuts
+  /** Shift+Delete: delete for good without going through the trash, after asking */
+  const deleteForever = async (ids: string[]) => {
+    const ok = await confirm({
+      title: t("Permanently delete {n} item?|Permanently delete {n} items?", { n: ids.length }),
+      description: t("Permanently deleted items can't be recovered."),
+      confirmText: t("Delete permanently"),
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      // Only items in the trash can be deleted for good: put them there first
+      await api.trash(ids);
+      await api.deleteForever(ids);
+      toast.success(t("Permanently deleted"));
+      setSelected(new Set());
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("Operation failed"));
+    }
+    refresh();
+  };
+
+  // Keyboard shortcuts (moving around, search and refresh are the address bar's: see Frame)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (dialog || isTyping(e.target) || document.querySelector("[role=dialog]")) return;
@@ -137,6 +194,13 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         setSelected(new Set(p.items.map((n) => n.id)));
       } else if (e.altKey && e.key === "Enter") {
         setDetailsOpen(true);
+      } else if (mod && !e.shiftKey && key === "z") {
+        // Ctrl+Z: take back the last move, rename or delete
+        e.preventDefault();
+        undoLast();
+      } else if (e.key === "Delete" && e.shiftKey && selectedNodes.length && caps.del) {
+        e.preventDefault();
+        void deleteForever(selectedIds);
       } else if (e.key === "Delete" && selectedNodes.length && caps.del) {
         setDialog({ t: "trash", ids: selectedIds });
       } else if (mod && e.shiftKey && key === "n" && canCreate) {
@@ -150,32 +214,37 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         open(single);
       } else if (e.key === "Escape") {
         setSelected(new Set());
-      } else if (e.key === "Backspace" && p.upTo) {
-        navigate(p.upTo);
+      } else if (e.key.length === 1 && e.key !== " " && e.key !== "?" && !mod && !e.altKey) {
+        // Typing letters goes to the next item whose name starts with them
+        e.preventDefault();
+        s.listNav.current?.typeAhead(e.key);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  // Upload files dragged in from the desktop; when the storage service is offline, intercept and explain (otherwise the browser would open the dropped file)
+  // Upload files dragged in from the desktop (into the folder shown, or the folder row they're dropped on); when the storage service is offline, intercept and explain (otherwise the browser would open the dropped file)
   const dragProps = canUpload
     ? {
         onDragOver: (e: DragEvent) => {
-          if (!e.dataTransfer.types.includes("Files")) return;
+          if (!carriesFiles(e.dataTransfer)) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = "copy";
-          setDragging(true);
+          // Over a folder row, the files go into that folder: don't say they go into this one
+          setDragging(!(e.target as HTMLElement).closest("[data-drop-folder]"));
         },
         onDragLeave: (e: DragEvent) => {
           if (!e.currentTarget.contains(e.relatedTarget as globalThis.Node | null)) setDragging(false);
         },
+        // A folder row that takes the drop stops it there
+        onDropCapture: () => setDragging(false),
         onDrop: async (e: DragEvent) => {
-          if (!e.dataTransfer.types.includes("Files")) return;
+          if (!carriesFiles(e.dataTransfer)) return;
           e.preventDefault();
           setDragging(false);
           const picked = await filesFromDrop(e.dataTransfer);
-          if (picked.length) enqueue(picked, p.folderId!);
+          if (picked.length) void uploadFiles(picked, p.folderId!);
         },
       }
     : canCreate && p.offline
@@ -193,7 +262,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         }
       : {};
 
-  return { refresh, open, download, toggleFavorite, moveInto, cut, copy, canPaste, paste, dragProps, createNew };
+  return { refresh, open, download, compress, extract, toggleFavorite, dropInto, uploadInto, transfer, cut, copy, canPaste, paste, dragProps, createNew };
 }
 
 export type ExplorerActions = ReturnType<typeof useExplorerActions>;

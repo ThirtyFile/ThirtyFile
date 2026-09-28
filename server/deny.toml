@@ -11,7 +11,8 @@ ignore = [
 ]
 
 [licenses]
-# Permissive licences only: ThirtyFile is Apache-2.0 and ships as one binary with its dependencies
+# Permissive licences only: ThirtyFile is Apache-2.0 and ships as one binary with its dependencies.
+# about.toml (the licence notices in the Docker image) accepts the same list: keep both equal.
 allow = [
   "0BSD",
   "Apache-2.0",

@@ -5,6 +5,8 @@ import {
   DatabaseIcon,
   HardDriveIcon,
   KeyRoundIcon,
+  Link2Icon,
+  MailIcon,
   PaletteIcon,
   PieChartIcon,
   SlidersHorizontalIcon,
@@ -14,7 +16,7 @@ import {
 } from "lucide-react";
 import { t, tc } from "@/lib/i18n";
 
-export type ControlPanelKey = "users" | "groups" | "drives" | "storage" | "usage" | "general" | "branding" | "sso" | "activity" | "logs";
+export type ControlPanelKey = "users" | "groups" | "shares" | "drives" | "storage" | "usage" | "general" | "branding" | "sso" | "email" | "activity" | "logs";
 
 export interface ControlPanelItem {
   key: ControlPanelKey;
@@ -62,6 +64,16 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     keywords: "成員 授權 group member access", // i18n-ignore: bilingual search keywords
   },
   {
+    key: "shares",
+    to: "/admin/shares",
+    title: t("All share links"),
+    desc: t("Find and revoke public links to any file, filtered by space, creator and whether they still work"),
+    icon: Link2Icon,
+    tone: "bg-teal-500/12 text-teal-700 dark:text-teal-300",
+    category: "users",
+    keywords: "分享連結 公開 連結 撤銷 刪除 到期 密碼 share link public revoke delete expired password", // i18n-ignore: bilingual search keywords
+  },
+  {
     key: "drives",
     to: "/admin/drives",
     title: tc("admin", "Spaces"),
@@ -99,7 +111,7 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     icon: SlidersHorizontalIcon,
     tone: "bg-brand/12 text-brand",
     category: "system",
-    keywords: "網址 網域 url domain 分享連結 全部檔案 公司 共用 團隊空間 建立 新使用者 預設 空間大小 配額 容量 語言 中文 英文 預設語言 general site address share link all files company shared team space create new user default size quota language english chinese", // i18n-ignore: bilingual search keywords
+    keywords: "網址 網域 url domain 分享連結 全部檔案 公司 共用 團隊空間 建立 新使用者 預設 空間大小 配額 容量 語言 中文 英文 預設語言 兩步驟驗證 驗證碼 密碼長度 安全 版本 較早版本 歷程 general site address share link all files company shared team space create new user default size quota language english chinese two-factor 2fa totp authenticator password length security versions history", // i18n-ignore: bilingual search keywords
   },
   {
     key: "branding",
@@ -120,6 +132,16 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     tone: "bg-amber-500/12 text-amber-600 dark:text-amber-300",
     category: "users",
     keywords: "sso 單一登入 三方登入 第三方 oauth oidc microsoft entra azure ad office 365 google workspace github 登入 帳號 連結 single sign-on third-party sign in login account link", // i18n-ignore: bilingual search keywords
+  },
+  {
+    key: "email",
+    to: "/admin/email",
+    title: t("Email"),
+    desc: t("The email server that sends notifications about shares, full spaces and access that ends soon"),
+    icon: MailIcon,
+    tone: "bg-cyan-500/12 text-cyan-700 dark:text-cyan-300",
+    category: "system",
+    keywords: "郵件 電子郵件 信箱 寄信 通知 鈴鐺 email mail smtp server notification notify bell starttls tls", // i18n-ignore: bilingual search keywords
   },
   {
     key: "activity",

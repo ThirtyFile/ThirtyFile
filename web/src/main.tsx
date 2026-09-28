@@ -40,7 +40,12 @@ loadDictionary()
               <App />
             </ErrorBoundary>
           </BrowserRouter>
-          <Toaster position="bottom-center" />
+          {/* --tf-bottom-inset: room for the phone selection bar while it shows */}
+          <Toaster
+            position="bottom-center"
+            offset={{ bottom: "calc(var(--tf-bottom-inset, 0px) + 24px)" }}
+            mobileOffset={{ bottom: "calc(var(--tf-bottom-inset, 0px) + 16px)" }}
+          />
         </QueryClientProvider>
       </React.StrictMode>,
     );

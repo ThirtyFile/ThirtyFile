@@ -66,7 +66,24 @@ pub fn content_disposition(kind: &str, name: &str) -> String {
     format!("{kind}; filename=\"{fallback}\"; filename*=UTF-8''{}", utf8_percent_encode(name, RFC5987))
 }
 
-/// Generates a non-conflicting name: "report.pdf" → "report (1).pdf"
+/// Escapes `\`, `%` and `_` for a `LIKE` pattern (the query says `ESCAPE '\'`)
+pub fn like_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+}
+
+/// Days since 1970-01-01 → (year, month, day) in the Gregorian calendar (Howard Hinnant's civil_from_days)
+pub fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (yoe + era * 400 + i64::from(m <= 2), m, d)
+}
+
 /// A name's stem and extension (with the dot); folders have no extension
 pub fn split_name(name: &str, is_folder: bool) -> (&str, &str) {
     match name.rfind('.') {
@@ -75,9 +92,90 @@ pub fn split_name(name: &str, is_folder: bool) -> (&str, &str) {
     }
 }
 
+/// Compares names the way File Explorer sorts them: letter case is ignored in every language, and runs of digits
+/// compare by their value, so "File 2" comes before "File 10". Names that only differ in case or leading zeros still
+/// get a fixed order, so sorting is stable.
+pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let (la, lb) = (a.to_lowercase(), b.to_lowercase());
+    let (mut x, mut y) = (la.chars().peekable(), lb.chars().peekable());
+    loop {
+        match (x.peek().copied(), y.peek().copied()) {
+            (None, None) => break,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(c), Some(d)) if c.is_ascii_digit() && d.is_ascii_digit() => {
+                let take = |it: &mut std::iter::Peekable<std::str::Chars>| {
+                    let mut digits = String::new();
+                    while let Some(c) = it.next_if(char::is_ascii_digit) {
+                        digits.push(c);
+                    }
+                    digits
+                };
+                let (m, n) = (take(&mut x), take(&mut y));
+                let (m, n) = (m.trim_start_matches('0'), n.trim_start_matches('0'));
+                let ord = m.len().cmp(&n.len()).then_with(|| m.cmp(n));
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+            }
+            (Some(c), Some(d)) => {
+                if c != d {
+                    return c.cmp(&d);
+                }
+                x.next();
+                y.next();
+            }
+        }
+    }
+    la.cmp(&lb).then_with(|| a.cmp(b))
+}
+
+/// Generates a non-conflicting name: "report.pdf" → "report (1).pdf"
 pub fn numbered_name(name: &str, n: u32, is_folder: bool) -> String {
     let (stem, ext) = split_name(name, is_folder);
     format!("{stem} ({n}){ext}")
+}
+
+/// Free and total bytes of the file system holding `path` (what an unprivileged user may still write)
+#[cfg(unix)]
+pub fn disk_space(path: &std::path::Path) -> Option<(u64, u64)> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    // SAFETY: `c` is a valid NUL-terminated path and `st` a writable statvfs
+    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
+        return None;
+    }
+    let block = st.f_frsize as u64;
+    Some((st.f_bavail as u64 * block, st.f_blocks as u64 * block))
+}
+
+#[cfg(not(unix))]
+pub fn disk_space(_path: &std::path::Path) -> Option<(u64, u64)> {
+    None
+}
+
+/// Memory the server may use: the container's limit (cgroup v2 or v1) when there is one, else the computer's memory
+pub fn memory_limit() -> Option<u64> {
+    let read = |p: &str| std::fs::read_to_string(p).ok();
+    let cgroup = read("/sys/fs/cgroup/memory.max")
+        .or_else(|| read("/sys/fs/cgroup/memory/memory.limit_in_bytes"))
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        // "max", or v1's "no limit" (a number near u64::MAX)
+        .filter(|&v| v < 1 << 60);
+    let total = read("/proc/meminfo").and_then(|m| {
+        let line = m.lines().find(|l| l.starts_with("MemTotal:"))?;
+        line.split_whitespace().nth(1)?.parse::<u64>().ok().map(|kb| kb * 1024)
+    });
+    match (cgroup, total) {
+        (Some(c), Some(t)) => Some(c.min(t)),
+        (c, t) => c.or(t),
+    }
+}
+
+pub fn format_bytes_u64(bytes: u64) -> String {
+    format_bytes(i64::try_from(bytes).unwrap_or(i64::MAX))
 }
 
 /// Converts bytes to a human-readable size, e.g. 10 GB, 512 MB (for the activity log)
@@ -94,6 +192,22 @@ pub fn format_bytes(bytes: i64) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dates_and_like_patterns() {
+        assert_eq!(super::civil_from_days(0), (1970, 1, 1));
+        assert_eq!(super::civil_from_days(11_016), (2000, 2, 29));
+        assert_eq!(super::civil_from_days(-1), (1969, 12, 31));
+        assert_eq!(super::like_escape(r"50%_off\x"), r"50\%\_off\\x");
+    }
+
+    #[test]
+    fn natural_order_compares_numbers_by_value_and_ignores_case() {
+        let mut names = vec!["File 10.txt", "file 2.txt", "File 1.txt", "Été", "abc", "ÉTÉ 3", "File 02.txt", "B"];
+        names.sort_by(|a, b| super::natural_cmp(a, b));
+        assert_eq!(names, ["abc", "B", "File 1.txt", "File 02.txt", "file 2.txt", "File 10.txt", "Été", "ÉTÉ 3"]);
+        assert_eq!(super::natural_cmp("a", "A"), std::cmp::Ordering::Greater);
+    }
+
     #[test]
     fn names_windows_cannot_create_are_rejected() {
         use super::validate_name;
