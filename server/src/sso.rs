@@ -739,6 +739,13 @@ fn domain_allowed(settings: &SsoSettings, cfg: &ProviderConfig, email: &str) -> 
     list.contains(&domain)
 }
 
+/// The account a verified email signs in to when no account is linked to the external identity yet: the one whose
+/// username is that email, if an administrator created it, or if single sign-on created it for that very email.
+/// Accounts created by single sign-on get a username changed from the email (`amy+files@…` becomes `amy_files@…`),
+/// so a username alone doesn't say whose account it is.
+const MATCHING_USER: &str = "u.username = ?1
+     AND (u.source = 'password' OR EXISTS (SELECT 1 FROM user_identities i WHERE i.user_id = u.id AND lower(i.email) = lower(?1)))";
+
 /// Finds (or creates) the user to sign in, per the provider's policy: already linked → existing user whose username is the email → create automatically.
 /// Returns (user id, username, whether the account was just created)
 async fn resolve_user(st: &AppState, provider: &str, ident: &Identity) -> AppResult<(i64, String, bool)> {
@@ -772,9 +779,9 @@ async fn resolve_user(st: &AppState, provider: &str, ident: &Identity) -> AppRes
     if !domain_allowed(&settings, &cfg, &ident.email) {
         return Err(AppError::forbidden(format!("The domain of {} isn't allowed to sign in to this site", ident.email)));
     }
-    // An existing user whose username is this email: link automatically
+    // An existing user whose username is this email: link automatically (see `MATCHING_USER`)
     let existing: Option<(i64, String, bool)> =
-        sqlx::query_as("SELECT id, username, disabled FROM users WHERE username = ?").bind(&ident.email).fetch_optional(&st.db).await?;
+        sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT id, username, disabled FROM users u WHERE {MATCHING_USER}"))).bind(&ident.email).fetch_optional(&st.db).await?;
     let mut created = false;
     let (id, username) = match existing {
         Some((_, _, true)) => return Err(AppError::forbidden("This account is disabled. Contact your administrator.")),
@@ -835,7 +842,8 @@ async fn create_sso_user(st: &AppState, provider: &str, cfg: &ProviderConfig, id
     if let Some(found) = linked {
         return Ok(found);
     }
-    let existing: Option<(i64, String)> = sqlx::query_as("SELECT id, username FROM users WHERE username = ?").bind(&ident.email).fetch_optional(&mut *tx).await?;
+    let existing: Option<(i64, String)> =
+        sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT id, username FROM users u WHERE {MATCHING_USER}"))).bind(&ident.email).fetch_optional(&mut *tx).await?;
     if let Some(found) = existing {
         return Ok(found);
     }
@@ -1407,6 +1415,42 @@ mod tests {
         sqlx::query("UPDATE users SET disabled = 1 WHERE username = 'amy@example.com'").execute(&env.st.db).await.unwrap();
         let r = login(&env, &m, "google", None, |n| google(n, "g-1", "amy@example.com", true)).await;
         assert!(location(&r).contains("sso_error"));
+        *MOCK_BASE.lock().unwrap() = None;
+    }
+
+    #[tokio::test]
+    async fn an_address_only_signs_in_to_the_account_made_for_it() {
+        let _g = SERIAL.lock().await;
+        let env = testutil::env().await;
+        let (m, base) = mock_server().await;
+        *MOCK_BASE.lock().unwrap() = Some(base);
+        enable(&env, |s| s.google.provisioning = Some(Provisioning::Create));
+        let user_of = |subject: &'static str| {
+            let db = env.st.db.clone();
+            async move {
+                let (id,): (i64,) = sqlx::query_as("SELECT user_id FROM user_identities WHERE subject = ?").bind(subject).fetch_one(&db).await.unwrap();
+                id
+            }
+        };
+
+        // "amy+files@…" gets the username "amy_files@…"
+        let r = login(&env, &m, "google", None, |n| google(n, "g-30", "amy+files@example.com", true)).await;
+        assert_eq!(location(&r), "/files/abc");
+        let amy = user_of("g-30").await;
+        let (name,): (String,) = sqlx::query_as("SELECT username FROM users WHERE id = ?").bind(amy).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(name, "amy_files@example.com");
+        // Someone else whose address really is "amy_files@…" gets an account of their own, not Amy's
+        let r = login(&env, &m, "google", None, |n| google(n, "g-31", "amy_files@example.com", true)).await;
+        assert_eq!(location(&r), "/files/abc");
+        assert_ne!(user_of("g-31").await, amy);
+
+        // The same address from another provider still finds the account made for it
+        let r = login(&env, &m, "google", None, |n| google(n, "g-32", "ben@example.com", true)).await;
+        assert_eq!(location(&r), "/files/abc");
+        let ben = user_of("g-32").await;
+        let r = login(&env, &m, "google", None, |n| google(n, "g-33", "Ben@Example.com", true)).await;
+        assert_eq!(location(&r), "/files/abc");
+        assert_eq!(user_of("g-33").await, ben);
         *MOCK_BASE.lock().unwrap() = None;
     }
 
