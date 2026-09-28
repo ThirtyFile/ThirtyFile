@@ -25,7 +25,7 @@ docker stop thirtyfile && docker rm thirtyfile
 docker run -d --name thirtyfile --restart unless-stopped …   # the same options as when you installed it</code></pre>
         <h3>Docker Compose</h3>
         <pre><code>docker compose pull && docker compose up -d</code></pre>
-        <p>Versions up to 0.3 can't be upgraded to newer ones, as the database was started over: install the new version with empty <code>data</code> and <code>storage</code> folders, then copy your files into it.</p>
+        <p>Versions up to 0.3 can't be upgraded to newer ones, as the database was started over: install the new version with empty <code>data</code> and <code>storage</code> folders, then copy your files into it. Started on data from 0.3 or older, a newer version stops at once and says so in the log, before it writes anything into the <code>data</code> or <code>storage</code> folder, so the old data stays as it was. It also stops with a plain message on a database a newer version has changed (see <a href="#downgrade">Going back to an older version</a>).</p>
         <h3>Which version you get</h3>
         <div class="table-scroll">
           <table>

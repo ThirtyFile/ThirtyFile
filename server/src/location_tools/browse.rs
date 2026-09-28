@@ -2,7 +2,9 @@
 //! of the content store is shown with the space and file it belongs to; a folder space's folder with its space.
 //!
 //! Administrators don't see the files in other people's personal spaces (as in Space management): the space is
-//! named, its files aren't, its folder can't be opened here, and its content can't be downloaded.
+//! named, its files aren't, its folder can't be opened here, and its content can't be downloaded. That holds for any
+//! spelling of the folder's path (letter case, compared by the folder's identity on the disk), and while the space
+//! is being moved: the folder it is copied into, the content copied so far, and the old folder until it is cleaned up.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -97,14 +99,17 @@ pub async fn browse(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     let path = q.path.trim_matches('/').to_string();
     storage::key_parts(&path).map_err(|_| AppError::bad_request("Invalid path"))?;
     let mut c = st.db.acquire().await?;
-    let spaces = match loc.folder(&st) {
-        Some(folder) => folder_spaces(&mut c, me.id, &id, &folder).await?,
+    let folder = loc.folder(&st);
+    let spaces = match &folder {
+        Some(folder) => folder_spaces(&mut c, me.id, &id, folder).await?,
         None => Vec::new(),
     };
-    let within = space_at(&spaces, &path);
-    if let Some(s) = within.as_ref().filter(|s| s.private) {
-        return Err(private_space(s));
+    if let Some(folder) = &folder
+        && let Some(s) = private_space_at(&spaces, folder, &path).await
+    {
+        return Err(private_space(&s));
     }
+    let within = space_at(&spaces, &path);
     let backend = st.storage(&id)?;
     let mut entries = backend.list_dir(&path).await.map_err(|e| read_error(&e))?;
     entries.sort_by(|a, b| a.name.cmp(&b.name));
@@ -118,7 +123,7 @@ pub async fn browse(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
         .drain(start..end)
         .map(|entry| {
             let key = storage::join_key(&[&path, &entry.name]);
-            let space = (entry.kind == EntryKind::Folder).then(|| spaces.iter().find(|(p, _)| *p == key).map(|(_, s)| s.clone())).flatten();
+            let space = (entry.kind == EntryKind::Folder).then(|| spaces.iter().find(|f| f.path.to_lowercase() == key.to_lowercase()).map(|f| f.space.clone())).flatten();
             let role = if space.is_some() {
                 Some("space")
             } else if entry.name.starts_with(".thirtyfile") {
@@ -177,18 +182,39 @@ fn is_content_folder(key: &str, content_dir: &str) -> bool {
     parts.len() <= 2 && parts.iter().all(|p| p.len() == 2 && p.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
 }
 
-/// The folder spaces on location `location` (as `drives.location_id` records it): (their path in the location's
-/// `folder`, the space)
-async fn folder_spaces(c: &mut SqliteConnection, me: i64, location: &str, folder: &FsPath) -> AppResult<Vec<(String, SpaceRef)>> {
+/// A folder space's folder in a location's folder
+struct SpaceFolder {
+    /// Its path in the location's folder
+    path: String,
+    /// Its identity on the disk (`folder_id`), when it is there
+    id: Option<FolderId>,
+    space: SpaceRef,
+}
+
+/// The folder spaces on location `location` (as `drives.location_id` records it), with their folders in the location's
+/// `folder`. A space being moved has more than one folder there until the move has cleaned up: the one it is being
+/// copied into (`to_path`) and the one it leaves (`from_path`), which may still hold files after the move is done.
+/// The space's own folder comes first.
+async fn folder_spaces(c: &mut SqliteConnection, me: i64, location: &str, folder: &FsPath) -> AppResult<Vec<SpaceFolder>> {
     let rows: Vec<(String, String, String, Option<i64>, String, String)> = sqlx::query_as(
-        "SELECT d.id, d.name, d.kind, d.owner_id, COALESCE(u.username, ''), d.source_path
-         FROM drives d LEFT JOIN users u ON u.id = d.owner_id
-         WHERE d.mode = 'folder' AND d.source_path IS NOT NULL AND d.location_id = ?",
+        "SELECT id, name, kind, owner_id, owner, path FROM (
+           SELECT 0 AS o, d.id, d.name, d.kind, d.owner_id, COALESCE(u.username, '') AS owner, d.source_path AS path
+           FROM drives d LEFT JOIN users u ON u.id = d.owner_id
+           WHERE d.mode = 'folder' AND d.source_path IS NOT NULL AND d.location_id = ?1
+           UNION ALL
+           SELECT 1, d.id, d.name, d.kind, d.owner_id, COALESCE(u.username, ''), m.to_path
+           FROM space_moves m JOIN drives d ON d.id = m.drive_id LEFT JOIN users u ON u.id = d.owner_id
+           WHERE m.to_path IS NOT NULL AND m.to_location = ?1 AND m.state <> 'done'
+           UNION ALL
+           SELECT 1, d.id, d.name, d.kind, d.owner_id, COALESCE(u.username, ''), m.from_path
+           FROM space_moves m JOIN drives d ON d.id = m.drive_id LEFT JOIN users u ON u.id = d.owner_id
+           WHERE m.from_path IS NOT NULL AND m.from_location = ?1
+         ) ORDER BY o",
     )
     .bind(location)
     .fetch_all(&mut *c)
     .await?;
-    let mut out = Vec::new();
+    let mut out: Vec<SpaceFolder> = Vec::new();
     for (id, name, kind, owner_id, owner, source) in rows {
         let source = PathBuf::from(source);
         let source = std::path::absolute(&source).unwrap_or(source);
@@ -197,19 +223,87 @@ async fn folder_spaces(c: &mut SqliteConnection, me: i64, location: &str, folder
         if parts.is_empty() {
             continue;
         }
+        let path = parts.join("/");
+        if out.iter().any(|f| f.space.id == id && f.path == path) {
+            continue;
+        }
         let private = kind == "personal" && owner_id != Some(me);
-        out.push((parts.join("/"), SpaceRef { id, name, kind, owner, private }));
+        let found = source.clone();
+        let fid = tokio::task::spawn_blocking(move || folder_id(&found)).await.ok().flatten();
+        out.push(SpaceFolder { path, id: fid, space: SpaceRef { id, name, kind, owner, private } });
     }
     Ok(out)
 }
 
-/// The folder space whose folder `key` is, or is in
-fn space_at(spaces: &[(String, SpaceRef)], key: &str) -> Option<SpaceRef> {
-    spaces
-        .iter()
-        .filter(|(p, _)| key == p || key.strip_prefix(p.as_str()).is_some_and(|r| r.starts_with('/')))
-        .max_by_key(|(p, _)| p.len())
-        .map(|(_, s)| s.clone())
+/// A folder's identity on the disk: its device and inode, or (where the system doesn't tell them) its real path in
+/// lower case, which letter case and short names don't change
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FolderId {
+    #[cfg(unix)]
+    Inode(u64, u64),
+    #[cfg(not(unix))]
+    Path(String),
+}
+
+/// The identity of the folder at `path` (a link is not followed: it is no folder); None when there is no folder there
+fn folder_id(path: &FsPath) -> Option<FolderId> {
+    let meta = std::fs::symlink_metadata(path).ok().filter(std::fs::Metadata::is_dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some(FolderId::Inode(meta.dev(), meta.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        Some(FolderId::Path(std::fs::canonicalize(path).ok()?.to_string_lossy().to_lowercase()))
+    }
+}
+
+/// Whether `key` is `path` or in it, ignoring letter case (file systems that ignore it, SMB, NTFS or macOS, open
+/// `USERS/amy` for `users/amy`)
+fn is_in(key: &str, path: &str) -> bool {
+    let (key, path) = (key.to_lowercase(), path.to_lowercase());
+    key == path || key.strip_prefix(path.as_str()).is_some_and(|r| r.starts_with('/'))
+}
+
+/// The folder space whose folder `key` is, or is in (the most specific one, the space's own folder first)
+fn space_at(spaces: &[SpaceFolder], key: &str) -> Option<SpaceRef> {
+    let mut best: Option<&SpaceFolder> = None;
+    for f in spaces.iter().filter(|f| is_in(key, &f.path)) {
+        if best.is_none_or(|b| f.path.len() > b.path.len()) {
+            best = Some(f);
+        }
+    }
+    best.map(|f| f.space.clone())
+}
+
+/// Someone else's personal space whose folder `key` (in the location's `folder`) is, or is in. Besides the path, each
+/// folder on the way is compared by its identity on the disk, so another spelling of a folder's name can't get past.
+async fn private_space_at(spaces: &[SpaceFolder], folder: &FsPath, key: &str) -> Option<SpaceRef> {
+    if let Some(s) = space_at(spaces, key).filter(|s| s.private) {
+        return Some(s);
+    }
+    let private: Vec<(FolderId, SpaceRef)> = spaces.iter().filter(|f| f.space.private).filter_map(|f| Some((f.id.clone()?, f.space.clone()))).collect();
+    if private.is_empty() || key.is_empty() {
+        return None;
+    }
+    let (folder, key) = (folder.to_path_buf(), key.to_string());
+    tokio::task::spawn_blocking(move || {
+        let root = crate::beneath::Pinned::root(&folder).ok()?;
+        let parts: Vec<&str> = key.split('/').collect();
+        for n in 1..=parts.len() {
+            let Ok(at) = root.join(&parts[..n].join("/")) else { break };
+            let Some(id) = folder_id(at.as_path()) else { break };
+            if let Some((_, s)) = private.iter().find(|(p, _)| *p == id) {
+                return Some(s.clone());
+            }
+        }
+        None
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 /// Who uses each content at `location`, for one page of content (a few queries for the page, not one per item)
@@ -326,13 +420,16 @@ async fn spaces_by_id(c: &mut SqliteConnection, me: i64, ids: &[&str]) -> AppRes
         .collect())
 }
 
-/// Whether a content is used in someone else's personal space (by a file or an earlier version)
+/// Whether a content is used in someone else's personal space (by a file or an earlier version), or was copied for
+/// a move of one that hasn't cleaned up yet (into a content store, it is the space's only once the move switches)
 async fn in_private_space(c: &mut SqliteConnection, me: i64, hash: &str) -> AppResult<bool> {
     let (found,): (bool,) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM nodes n JOIN drives d ON d.id = n.drive_id
                         WHERE n.blob_hash = ?1 AND d.kind = 'personal' AND d.owner_id IS NOT ?2)
              OR EXISTS (SELECT 1 FROM node_versions v JOIN nodes n ON n.id = v.node_id JOIN drives d ON d.id = n.drive_id
-                        WHERE v.blob_hash = ?1 AND d.kind = 'personal' AND d.owner_id IS NOT ?2)",
+                        WHERE v.blob_hash = ?1 AND d.kind = 'personal' AND d.owner_id IS NOT ?2)
+             OR EXISTS (SELECT 1 FROM space_move_items i JOIN space_moves m ON m.id = i.move_id JOIN drives d ON d.id = m.drive_id
+                        WHERE i.hash = ?1 AND d.kind = 'personal' AND d.owner_id IS NOT ?2)",
     )
     .bind(hash)
     .bind(me)
@@ -355,12 +452,14 @@ pub async fn download(State(st): State<AppState>, Admin(me): Admin, Path(id): Pa
     }
     let mut c = st.db.acquire().await?;
     if let Some(folder) = loc.folder(&st)
-        && let Some(s) = space_at(&folder_spaces(&mut c, me.id, &id, &folder).await?, key).filter(|s| s.private)
+        && let Some(s) = private_space_at(&folder_spaces(&mut c, me.id, &id, &folder).await?, &folder, key).await
     {
         return Err(private_space(&s));
     }
     let backend = st.storage(&id)?;
-    if let Some(hash) = storage::content_hash(key, backend.content_dir())
+    // Where letter case is ignored, `AB/CD/<HASH>` opens the content `ab/cd/<hash>`
+    let lower = key.to_ascii_lowercase();
+    if let Some(hash) = storage::content_hash(&lower, backend.content_dir())
         && in_private_space(&mut c, me.id, hash).await?
     {
         return Err(AppError::forbidden("This content belongs to someone's personal space. Administrators can't download it."));
@@ -546,5 +645,75 @@ mod tests {
         // The administrator's own space opens, and says which space it is
         let own = page(&env, &admin, &format!("users/{}", admin.username), None, 100).await.unwrap();
         assert_eq!(own.space.unwrap().owner, admin.username);
+    }
+
+    fn get(env: &testutil::TestEnv, admin: &crate::auth::User, path: &str) -> impl std::future::Future<Output = AppResult<Response>> {
+        download(State(env.st.clone()), Admin(admin.clone()), Path("local".into()), Query(DownloadQuery { path: path.into() }))
+    }
+
+    #[tokio::test]
+    async fn another_spelling_of_a_personal_spaces_folder_stays_closed() {
+        let env = testutil::folders_env().await;
+        let admin = env.admin().await;
+        let _amy = env.user("amy", false).await;
+        std::fs::write(env.dir.join("blobs/users/amy/diary.txt"), b"private").unwrap();
+        // File systems that ignore letter case (NTFS, SMB, macOS) open these as users/amy
+        for path in ["USERS/amy", "users/AMY", "Users/Amy"] {
+            assert_eq!(page(&env, &admin, path, None, 100).await.unwrap_err().status, StatusCode::FORBIDDEN, "{path}");
+            assert_eq!(get(&env, &admin, &format!("{path}/diary.txt")).await.unwrap_err().status, StatusCode::FORBIDDEN, "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn content_keys_in_upper_case_are_checked_too() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let amy = env.user("amy", false).await;
+        env.stored_file(&amy, amy.root(), "diary.txt", b"amy's diary").await;
+        let h = crate::util::sha256_hex(b"amy's diary");
+        for key in [format!("{}/{}/{}", &h[0..2], &h[2..4], h.to_uppercase()), format!("{}/{}/{h}", h[0..2].to_uppercase(), h[2..4].to_uppercase())] {
+            assert_eq!(get(&env, &admin, &key).await.unwrap_err().status, StatusCode::FORBIDDEN, "{key}");
+        }
+    }
+
+    #[tokio::test]
+    async fn what_a_move_copies_for_someone_elses_personal_space_stays_closed() {
+        let env = testutil::folders_env().await;
+        let admin = env.admin().await;
+        let amy = env.user("amy", false).await;
+        let drive = env.drive_of(amy.root()).await;
+        let blobs = env.dir.join("blobs");
+        // A move into another folder of the location, not switched yet: the new folder is hers already
+        let new = blobs.join("users/amy-moving");
+        std::fs::create_dir_all(&new).unwrap();
+        std::fs::write(new.join("diary.txt"), b"private").unwrap();
+        sqlx::query(
+            "INSERT INTO space_moves (id, drive_id, space_name, space_kind, from_location, from_mode, from_path, to_location, to_mode, to_path, state, created_at)
+             VALUES ('m1', ?, 'My files', 'personal', 'local', 'folder', ?, 'local', 'folder', ?, 'running', 0)",
+        )
+        .bind(&drive)
+        .bind(blobs.join("users/amy").to_string_lossy())
+        .bind(new.to_string_lossy())
+        .execute(&env.st.db)
+        .await
+        .unwrap();
+        assert_eq!(page(&env, &admin, "users/amy-moving", None, 100).await.unwrap_err().status, StatusCode::FORBIDDEN);
+        assert_eq!(get(&env, &admin, "users/amy-moving/diary.txt").await.unwrap_err().status, StatusCode::FORBIDDEN);
+        let users = page(&env, &admin, "users", None, 100).await.unwrap();
+        let moving = users.items.iter().find(|i| i.entry.name == "amy-moving").unwrap();
+        assert!(moving.space.as_ref().is_some_and(|s| s.private && s.owner == "amy"));
+
+        // A move into a content store: what it copied is hers before the switch
+        let copied = crate::util::sha256_hex(b"copied for amy");
+        let tmp = env.dir.join("tmp").join("copied");
+        std::fs::write(&tmp, b"copied for amy").unwrap();
+        env.st.storage("local").unwrap().put_file(&copied, &tmp).await.unwrap();
+        sqlx::query("INSERT INTO space_move_items (move_id, item_id, kind, hash, from_location, size) VALUES ('m1', 'n1', 'file', ?, 'local', 14)")
+            .bind(&copied)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        let key = format!("{}/{}/{copied}", &copied[0..2], &copied[2..4]);
+        assert_eq!(get(&env, &admin, &key).await.unwrap_err().status, StatusCode::FORBIDDEN);
     }
 }

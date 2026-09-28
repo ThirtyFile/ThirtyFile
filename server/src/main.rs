@@ -179,10 +179,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The built-in storage location's folder
     let storage = cfg.storage.clone().unwrap_or_else(|| cfg.data.join("blobs"));
 
-    // Before the runtime starts its threads, so that all of them run as the new user
+    // Data this version can't use (from 0.3 or older, say) stops the start before anything is written into the data
+    // or storage folder
+    let checked = tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(db::check_existing(&cfg.data.join("drive.db")));
+    if let Err(message) = checked {
+        return Err(message.into());
+    }
+
+    // Before the runtime starts its threads, so that all of them run as the new user. A storage folder that isn't
+    // there isn't made here: whether it may be made is decided once the database is open (`storage::prepare_builtin`).
     #[cfg(unix)]
     if let Some(user) = &cfg.run_as {
-        privileges::drop_to(user, &[cfg.data.as_path(), storage.as_path()])?;
+        let folders: Vec<&std::path::Path> = [cfg.data.as_path(), storage.as_path()].into_iter().filter(|f| *f == cfg.data.as_path() || f.exists()).collect();
+        privileges::drop_to(user, &folders)?;
     }
 
     runtime()?.block_on(run(cfg, storage))
@@ -237,8 +246,6 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     for dir in ["tmp", "thumbs"] {
         std::fs::create_dir_all(cfg.data.join(dir))?;
     }
-    // Created with its marker on a fresh install; a storage folder with items but no marker stops the start
-    crate::storage::prepare_builtin(&storage)?;
     let key_source = secrets::KeySource::from_settings(cfg.secret_key.clone(), cfg.secret_key_file.clone(), &cfg.data);
     let key = key_source.load()?;
     secrets::init(&key);
@@ -306,6 +313,14 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     }
 
     let _lock = lock_data(&cfg.data)?;
+    // The storage folder: made with its marker on a new install. When the database records files or spaces there, a
+    // missing or empty folder (a volume that isn't mounted) or one without the marker stops the start.
+    let (recorded,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM blobs WHERE location_id = 'local') OR EXISTS (SELECT 1 FROM drives WHERE location_id = 'local')",
+    )
+    .fetch_one(&db)
+    .await?;
+    crate::storage::prepare_builtin(&storage, recorded)?;
     let admin_password = match (&cfg.admin_password, &cfg.admin_password_file) {
         (Some(p), _) => Some(p.clone()),
         (None, Some(file)) => Some(

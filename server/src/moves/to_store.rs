@@ -499,13 +499,15 @@ pub async fn cleanup(st: &AppState, job: &Job) -> AppResult<()> {
     }
     let folder = PathBuf::from(&folder);
     let rest = tokio::task::spawn_blocking(move || remove_empty(&folder)).await.map_err(AppError::internal)?;
+    let old = job.from_path.as_deref().unwrap_or_default();
     let note = match (left, rest.len()) {
         (0, 0) => None,
-        _ => Some(format!(
-            "Some items were left in the old folder {}: {}",
-            job.from_path.as_deref().unwrap_or_default(),
-            rest.iter().take(5).cloned().collect::<Vec<_>>().join(", ")
-        )),
+        // Administrators read the note: a personal space's file names stay private, only how many is told
+        (_, n) if job.space_kind == "personal" => Some(match n.max(left) {
+            1 => format!("1 item was left in the old folder {old}"),
+            n => format!("{n} items were left in the old folder {old}"),
+        }),
+        _ => Some(format!("Some items were left in the old folder {old}: {}", rest.iter().take(5).cloned().collect::<Vec<_>>().join(", "))),
     };
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
@@ -550,4 +552,44 @@ fn remove_empty(folder: &std::path::Path) -> Vec<String> {
         let _ = std::fs::remove_dir(folder);
     }
     left
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil;
+
+    /// The note of a move whose old folder kept `names` after cleaning up
+    async fn note_after_cleanup(env: &testutil::TestEnv, kind: &str, names: &[&str]) -> String {
+        let folder = env.dir.join(format!("old-{}", new_id()));
+        for name in names {
+            testutil::write_old(&folder.join(name), b"kept");
+        }
+        let id = new_id();
+        sqlx::query(
+            "INSERT INTO space_moves (id, drive_id, space_name, space_kind, from_mode, from_path, to_location, to_mode, state, created_at)
+             VALUES (?, 'd', 'S', ?, 'folder', ?, 'local', 'store', 'done', 0)",
+        )
+        .bind(&id)
+        .bind(kind)
+        .bind(folder.to_string_lossy())
+        .execute(&env.st.db)
+        .await
+        .unwrap();
+        let job = super::super::job(&mut env.st.db.acquire().await.unwrap(), &id).await.unwrap().unwrap();
+        cleanup(&env.st, &job).await.unwrap();
+        sqlx::query_as::<_, (String,)>("SELECT note FROM space_moves WHERE id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap().0
+    }
+
+    #[tokio::test]
+    async fn what_a_personal_space_leaves_behind_is_counted_not_named() {
+        let env = testutil::env().await;
+        let team = note_after_cleanup(&env, "team", &["plan.txt"]).await;
+        assert!(team.ends_with(": plan.txt"), "{team}");
+        let personal = note_after_cleanup(&env, "personal", &["diary.txt", "letters.txt"]).await;
+        assert!(personal.starts_with("2 items were left in the old folder "), "{personal}");
+        assert!(!personal.contains("diary") && !personal.contains("letters"), "{personal}");
+        let one = note_after_cleanup(&env, "personal", &["diary.txt"]).await;
+        assert!(one.starts_with("1 item was left in the old folder ") && !one.contains("diary"), "{one}");
+    }
 }

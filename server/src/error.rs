@@ -83,7 +83,7 @@ impl From<std::io::Error> for AppError {
         if let Some(se) = e.get_ref().and_then(|inner| inner.downcast_ref::<crate::storage::StorageError>()) {
             tracing::warn!("{se}");
             crate::locations::request_recheck();
-            return Self::new(StatusCode::SERVICE_UNAVAILABLE, se.message);
+            return Self::new(StatusCode::SERVICE_UNAVAILABLE, se.text());
         }
         Self::internal(e)
     }

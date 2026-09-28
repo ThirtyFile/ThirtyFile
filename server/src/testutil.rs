@@ -49,7 +49,7 @@ async fn make_env(space_folders: bool) -> TestEnv {
     for d in ["tmp", "thumbs", "blobs"] {
         std::fs::create_dir_all(dir.join(d)).unwrap();
     }
-    crate::storage::prepare_builtin(&dir.join("blobs")).unwrap();
+    crate::storage::prepare_builtin(&dir.join("blobs"), false).unwrap();
     let space_folders = space_folders.then(|| dir.join("blobs"));
     let db = db::connect(&dir.join("drive.db"), 16).await.unwrap();
     db::bootstrap_admin(&db, Some(password()), space_folders.as_deref()).await.unwrap();

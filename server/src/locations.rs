@@ -293,7 +293,7 @@ pub(crate) fn describe(e: &std::io::Error) -> String {
         && se.message != storage::UNAVAILABLE
         && se.message != storage::DENIED_KEYS
     {
-        return se.message.to_string();
+        return se.text().into_owned();
     }
     let full = e.to_string();
     // Look for keywords only in the underlying error, not in our own explanation text
@@ -324,6 +324,184 @@ fn friendly(detail: &str, err: &str) -> String {
     msg.to_string()
 }
 
+// ───────────── Markers of S3, SFTP and FTP locations ─────────────
+//
+// Like a Local folder location's folder (storage.rs, `LOCATION_MARKER`), the place of an S3, SFTP or FTP location holds
+// a `.thirtyfile-location` file: the location's id on the first line, this installation's id on the second. It is
+// written when the location is added (or its first health check or cleanup finds it missing, for a location added
+// before markers were written), and "Remove unused content" refuses to run in a place whose marker names another
+// location or another installation: that content isn't unused, it is someone else's.
+
+/// The id of this installation of ThirtyFile, made once and kept in the settings
+pub async fn install_id(st: &AppState) -> AppResult<String> {
+    if let Some(id) = crate::db::get_setting(&st.db, "install_id").await? {
+        return Ok(id);
+    }
+    let _w = st.write_lock.lock().await;
+    let mut tx = crate::db::begin_write(&st.db).await?;
+    let res = async {
+        sqlx::query("INSERT OR IGNORE INTO settings (key, value) VALUES ('install_id', ?)").bind(new_id()).execute(&mut *tx).await?;
+        let (id,): (String,) = sqlx::query_as("SELECT value FROM settings WHERE key = 'install_id'").fetch_one(&mut *tx).await?;
+        AppResult::Ok(id)
+    }
+    .await;
+    crate::db::settle(tx, res).await
+}
+
+/// What the marker in a remote location's place says
+#[derive(Debug, PartialEq, Eq)]
+pub enum Marker {
+    /// There is none (or it names a location of this installation that no longer exists)
+    Missing,
+    /// It names this location (and this installation, or none)
+    Ours,
+    /// It names another location of this installation, or another installation
+    Taken,
+}
+
+/// Reads the marker in the place of `s`; None when there is none
+async fn read_marker(s: &dyn Storage) -> std::io::Result<Option<(String, String)>> {
+    let Some(entry) = s.stat(storage::LOCATION_MARKER).await? else { return Ok(None) };
+    let mut body = Vec::new();
+    let reader = s.open_at(storage::LOCATION_MARKER, 0, entry.size.min(4096)).await?;
+    tokio::io::AsyncReadExt::read_to_end(&mut tokio::io::AsyncReadExt::take(reader, 4096), &mut body).await?;
+    let text = String::from_utf8_lossy(&body);
+    let mut lines = text.lines().map(str::trim);
+    Ok(Some((lines.next().unwrap_or_default().to_string(), lines.next().unwrap_or_default().to_string())))
+}
+
+/// Whose the place of `s` is, for the location `id` (None: a location not added yet)
+pub async fn marker_state(st: &AppState, id: Option<&str>, s: &dyn Storage) -> AppResult<Marker> {
+    let read = read_marker(s).await.map_err(|e| AppError::bad_request(describe(&e)))?;
+    let Some((location, install)) = read else { return Ok(Marker::Missing) };
+    let ours = install_id(st).await?;
+    if !install.is_empty() && install != ours {
+        return Ok(Marker::Taken);
+    }
+    if Some(location.as_str()) == id {
+        return Ok(Marker::Ours);
+    }
+    // A location of this installation that was deleted without its marker being removed: the place is free
+    let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM storage_locations WHERE id = ?").bind(&location).fetch_optional(&st.db).await?;
+    Ok(if exists.is_some() { Marker::Taken } else { Marker::Missing })
+}
+
+/// Writes the marker of the location `id` in the place of `s`
+async fn write_marker(st: &AppState, id: &str, s: &dyn Storage) -> AppResult<()> {
+    let body = format!("{id}\n{}\n", install_id(st).await?);
+    let tmp = st.data_dir.join("tmp").join(format!("marker-{}", new_id()));
+    tokio::fs::write(&tmp, body).await?;
+    let put = s.put_at(storage::LOCATION_MARKER, &tmp).await;
+    let _ = tokio::fs::remove_file(&tmp).await;
+    put.map_err(|e| AppError::bad_request(describe(&e)))
+}
+
+/// Remote locations whose marker was found or written since the server started (health checks read it once)
+static MARKED: std::sync::Mutex<std::collections::BTreeSet<String>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
+
+/// Makes the place of `s` the location `id`'s: refused when its marker names another location or installation,
+/// written when there is none (and completed with this installation's id). Returns whether it was written.
+pub async fn claim_place(st: &AppState, id: &str, s: &dyn Storage) -> AppResult<bool> {
+    match marker_state(st, Some(id), s).await? {
+        Marker::Taken => Err(AppError::conflict(storage::PLACE_TAKEN)),
+        Marker::Ours if read_marker(s).await.ok().flatten().is_some_and(|(_, install)| !install.is_empty()) => {
+            MARKED.lock().unwrap().insert(id.to_string());
+            Ok(false)
+        }
+        _ => {
+            write_marker(st, id, s).await?;
+            MARKED.lock().unwrap().insert(id.to_string());
+            Ok(true)
+        }
+    }
+}
+
+/// Removes the marker of the location `id` from the place of `s`, when it holds that one (the location is deleted,
+/// adding it failed, or it moved to another place)
+async fn release_place(st: &AppState, id: &str, s: &dyn Storage) {
+    MARKED.lock().unwrap().remove(id);
+    if matches!(marker_state(st, Some(id), s).await, Ok(Marker::Ours))
+        && let Err(e) = s.delete_at(storage::LOCATION_MARKER).await
+    {
+        tracing::warn!("Couldn't remove the {} file of storage location {id}: {e}", storage::LOCATION_MARKER);
+    }
+}
+
+/// Before content of the location `id` is looked for or removed as unused: an S3, SFTP or FTP location's place must
+/// be its own (a Local folder location's folder is checked on every use)
+pub async fn require_own_place(st: &AppState, id: &str, kind: &str, s: &dyn Storage) -> AppResult<()> {
+    if kind == "local" {
+        return Ok(());
+    }
+    claim_place(st, id, s).await.map(|_| ())
+}
+
+/// After a successful health check: an S3, SFTP or FTP location added before markers were written gets one
+async fn mark_after_check(st: &AppState, id: &str, s: &dyn Storage) {
+    if MARKED.lock().unwrap().contains(id) {
+        return;
+    }
+    let kind: Option<(String,)> = sqlx::query_as("SELECT kind FROM storage_locations WHERE id = ?").bind(id).fetch_optional(&st.db).await.ok().flatten();
+    match kind {
+        Some((kind,)) if kind != "local" => match claim_place(st, id, s).await {
+            Ok(true) => tracing::info!("Wrote the {} file of storage location {id}", storage::LOCATION_MARKER),
+            Ok(false) => {}
+            Err(e) => tracing::warn!("Storage location {id}: {}", e.message),
+        },
+        _ => {
+            MARKED.lock().unwrap().insert(id.to_string());
+        }
+    }
+}
+
+/// Where a location keeps its files, for telling two locations in the same place apart: the kind, the service and the
+/// bucket and prefix (S3), or the server and folder (SFTP, FTP; with the account when the folder is relative to its
+/// home folder). None for Local folder locations, whose folders hold a marker checked on every use.
+fn place_of(kind: &str, cfg: &Value) -> Option<String> {
+    let text = |f: &str| cfg.get(f).and_then(Value::as_str).unwrap_or_default().trim().to_string();
+    match kind {
+        "s3" => {
+            let mut endpoint = text("endpoint").trim_end_matches('/').to_ascii_lowercase();
+            let mut bucket = text("bucket");
+            // Pasted as https://host/bucket (as storage::normalize reads it)
+            if let Some((scheme, rest)) = endpoint.clone().split_once("://") {
+                let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
+                if bucket.is_empty() {
+                    bucket = path.split('/').next().unwrap_or_default().to_string();
+                }
+                endpoint = format!("{scheme}://{host}");
+            }
+            Some(format!("s3 {endpoint} {bucket} {}", text("prefix").trim_matches('/')))
+        }
+        "sftp" | "ftp" => {
+            let cfg = storage::normalize_host(cfg.clone());
+            let text = |f: &str| cfg.get(f).and_then(Value::as_str).unwrap_or_default().trim().to_string();
+            let default_port = if kind == "sftp" { 22 } else { 21 };
+            let port = cfg.get("port").and_then(Value::as_u64).filter(|p| *p != 0).unwrap_or(default_port);
+            let path = text("path");
+            let path = path.trim_end_matches('/');
+            let path = if path == "." { "" } else { path };
+            // A relative folder is in the account's home folder
+            let account = if path.starts_with('/') { String::new() } else { text("username") };
+            Some(format!("{kind} {} {port} {account} {path}", text("host").to_ascii_lowercase()))
+        }
+        _ => None,
+    }
+}
+
+/// Refuses settings whose place (`place_of`) another location already uses: "Remove unused content" in one would
+/// delete the other's files
+async fn check_place_free(conn: &mut SqliteConnection, id: Option<&str>, kind: &str, cfg: &Value) -> AppResult<()> {
+    let Some(place) = place_of(kind, cfg) else { return Ok(()) };
+    let rows: Vec<(String, String, String)> = sqlx::query_as("SELECT id, name, config FROM storage_locations WHERE kind = ?").bind(kind).fetch_all(conn).await?;
+    for (other, name, raw) in rows {
+        if Some(other.as_str()) != id && place_of(kind, &config_json(&other, &raw)).as_deref() == Some(place.as_str()) {
+            return Err(AppError::conflict(format!("The storage location \"{name}\" already uses this place (the same bucket and prefix, or the same server and folder)")));
+        }
+    }
+    Ok(())
+}
+
 // ───────────── Connection health monitoring ─────────────
 
 /// Sends just one HEAD request every 30 seconds (about US$0.03 per month on AWS); a disconnect shows as offline in the UI within half a minute
@@ -351,6 +529,9 @@ pub async fn probe(st: &AppState, id: &str) -> Result<(), String> {
         Ok(Err(e)) => Err(describe(&e)),
         Err(_) => Err("Connection timed out. Check that the service is running.".to_string()),
     };
+    if res.is_ok() {
+        let _ = tokio::time::timeout(PROBE_TIMEOUT, mark_after_check(st, id, storage.as_ref())).await;
+    }
     let was_ok = st.location_health.lock().unwrap().get(id).is_none_or(|h| h.ok);
     set_health(st, id, res.clone().err());
     match (&res, was_ok) {
@@ -517,7 +698,12 @@ pub async fn test(State(st): State<AppState>, _: Admin, Json(req): Json<TestReq>
         (Some(id), Some(saved)) if !folder_changed(&req.kind, &saved, &config) => Folder::Existing(id),
         (id, _) => Folder::Try(id),
     };
-    let (_, config) = connect(&st, &req.kind, config, folder).await?;
+    check_place_free(&mut *st.db.acquire().await?, req.id.as_deref(), &req.kind, &config).await?;
+    let (backend, config) = connect(&st, &req.kind, config, folder).await?;
+    // Nothing is written: a place that holds another location's marker is refused
+    if req.kind != "local" && marker_state(&st, req.id.as_deref(), backend.as_ref()).await? == Marker::Taken {
+        return Err(AppError::conflict(storage::PLACE_TAKEN));
+    }
     Ok(Json(json!({ "ok": true, "region": config.get("region"), "host_key": config.get("host_key") })))
 }
 
@@ -531,6 +717,9 @@ pub async fn test_existing(State(st): State<AppState>, _: Admin, Path(id): Path<
     set_health(&st, &id, backend.as_ref().err().map(|e| e.message.clone()));
     match backend {
         Ok((b, _)) => {
+            if row.kind != "local" {
+                claim_place(&st, &id, b.as_ref()).await?;
+            }
             st.storages.write().unwrap().insert(id.clone(), b);
             // In the background: up to 1000 deletions on a slow storage service shouldn't hold the request
             retry_in_background(&st, &id);
@@ -545,23 +734,30 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(req): J
     let kind = req.kind.unwrap_or_default();
     let config = req.config.unwrap_or_else(|| json!({}));
     crate::folders::check_location_folder(&st, None, &kind, &config).await?;
+    check_place_free(&mut *st.db.acquire().await?, None, &kind, &config).await?;
     let id = new_id();
     // A Local folder location's folder is created here, with the location's marker
     let (backend, config) = connect(&st, &kind, config, Folder::Claim(&id)).await?;
+    // An S3, SFTP or FTP location's place gets its marker too
+    let wrote = if kind == "local" { false } else { claim_place(&st, &id, backend.as_ref()).await? };
     let saved = async {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
-        sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES (?, ?, ?, ?, 0, ?)")
-            .bind(&id)
-            .bind(&name)
-            .bind(&kind)
-            .bind(sealed_config(&id, &config))
-            .bind(now())
-            .execute(&mut *tx)
-            .await?;
-        logs::record_activity(&mut tx, &user, None, "storage_create", &name).await?;
-        tx.commit().await?;
-        AppResult::Ok(())
+        let res = async {
+            check_place_free(&mut tx, None, &kind, &config).await?;
+            sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES (?, ?, ?, ?, 0, ?)")
+                .bind(&id)
+                .bind(&name)
+                .bind(&kind)
+                .bind(sealed_config(&id, &config))
+                .bind(now())
+                .execute(&mut *tx)
+                .await?;
+            logs::record_activity(&mut tx, &user, None, "storage_create", &name).await?;
+            AppResult::Ok(())
+        }
+        .await;
+        crate::db::settle(tx, res).await
     }
     .await;
     if let Err(e) = saved {
@@ -569,6 +765,9 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(req): J
             && let Ok(root) = storage::local_root(&id, &config, &st.storage_dir)
         {
             storage::release_folder(&root, &id).await;
+        }
+        if wrote {
+            release_place(&st, &id, backend.as_ref()).await;
         }
         return Err(e);
     }
@@ -591,33 +790,113 @@ pub async fn update(
         Some(n) => validate_name(n)?,
         None => row.name.clone(),
     };
+    let saved = config_json(&id, &row.config);
+    // A Local folder location's folder changed while spaces or content are on it: from the old folder to the new one
+    let mut moved: Option<(std::path::PathBuf, std::path::PathBuf)> = None;
+    let mut changed_folder = false;
     // The built-in local location can only be renamed
     let new_backend = match (&req.config, id == BUILTIN) {
         (Some(cfg), false) => {
             let merged = merged_config(&st, Some(&id), &row.kind, cfg.clone()).await?;
             crate::folders::check_location_folder(&st, Some(&id), &row.kind, &merged).await?;
-            // A Local folder location moved to another folder: that folder is created here, with the marker
-            let folder = if folder_changed(&row.kind, &config_json(&id, &row.config), &merged) { Folder::Claim(&id) } else { Folder::Existing(&id) };
-            Some(connect(&st, &row.kind, merged, folder).await?)
+            check_place_free(&mut *st.db.acquire().await?, Some(&id), &row.kind, &merged).await?;
+            changed_folder = folder_changed(&row.kind, &saved, &merged);
+            let folder = if !changed_folder {
+                Folder::Existing(&id)
+            } else if in_use(&mut *st.db.acquire().await?, &id).await? {
+                // The spaces' folders and the content are in the old folder: the new one must be a copy of it,
+                // marker included, and the spaces' folders follow
+                let invalid = |e: std::io::Error| AppError::bad_request(e.to_string());
+                let new_root = storage::local_root(&id, &merged, &st.storage_dir).map_err(invalid)?;
+                if storage::marker_of(&new_root).await.ok().flatten().as_deref() != Some(id.as_str()) {
+                    return Err(AppError::conflict(IN_USE));
+                }
+                moved = Some((storage::local_root(&id, &saved, &st.storage_dir).map_err(invalid)?, new_root));
+                Folder::Existing(&id)
+            } else {
+                // Nothing on it: the new folder is created here, with the marker
+                Folder::Claim(&id)
+            };
+            let (backend, config) = connect(&st, &row.kind, merged, folder).await?;
+            if row.kind != "local" {
+                claim_place(&st, &id, backend.as_ref()).await?;
+            }
+            Some((backend, config))
         }
         _ => None,
     };
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
-        sqlx::query("UPDATE storage_locations SET name = ? WHERE id = ?").bind(&name).bind(&id).execute(&mut *tx).await?;
-        if let Some((_, cfg)) = &new_backend {
-            sqlx::query("UPDATE storage_locations SET config = ? WHERE id = ?").bind(sealed_config(&id, cfg)).bind(&id).execute(&mut *tx).await?;
+        let res = async {
+            sqlx::query("UPDATE storage_locations SET name = ? WHERE id = ?").bind(&name).bind(&id).execute(&mut *tx).await?;
+            if let Some((_, cfg)) = &new_backend {
+                check_place_free(&mut tx, Some(&id), &row.kind, cfg).await?;
+                match &moved {
+                    Some((from, to)) => follow_folder(&mut tx, &id, from, to).await?,
+                    // Something was put on it meanwhile
+                    None if changed_folder && in_use(&mut tx, &id).await? => return Err(AppError::conflict(IN_USE)),
+                    None => {}
+                }
+                sqlx::query("UPDATE storage_locations SET config = ? WHERE id = ?").bind(sealed_config(&id, cfg)).bind(&id).execute(&mut *tx).await?;
+            }
+            logs::record_activity(&mut tx, &user, None, "storage_update", &name).await?;
+            AppResult::Ok(())
         }
-        logs::record_activity(&mut tx, &user, None, "storage_update", &name).await?;
-        tx.commit().await?;
+        .await;
+        crate::db::settle(tx, res).await?;
     }
-    if let Some((backend, _)) = new_backend {
-        st.storages.write().unwrap().insert(id.clone(), backend);
+    if let Some((backend, cfg)) = new_backend {
+        let place_moved = row.kind != "local" && place_of(&row.kind, &saved) != place_of(&row.kind, &cfg);
+        let old = st.storages.write().unwrap().insert(id.clone(), backend);
         // Just checked
         set_health(&st, &id, None);
+        if moved.is_some() {
+            crate::folders::spaces_changed();
+        }
+        // An S3, SFTP or FTP location moved to another place: the old one is free again
+        if place_moved && let Some(old) = old {
+            release_place(&st, &id, old.as_ref()).await;
+            MARKED.lock().unwrap().insert(id.clone());
+        }
     }
     Ok(Json(json!({ "ok": true })))
+}
+
+/// Shown when a Local folder location's folder is changed while spaces or content are on it, to a folder that isn't
+/// a copy of it
+const IN_USE: &str = "Spaces or files are on this location, so its folder can only change to a copy of it. Copy everything in the folder to the new one first, including its .thirtyfile-location file, then change the folder.";
+
+/// Whether spaces or content are on the location `id`, or being moved to or from it
+async fn in_use(conn: &mut SqliteConnection, id: &str) -> AppResult<bool> {
+    let (n,): (i64,) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM drives WHERE location_id = ?1) + (SELECT COUNT(*) FROM blobs WHERE location_id = ?1)",
+    )
+    .bind(id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(n > 0 || crate::moves::location_busy(conn, id).await?)
+}
+
+/// The folder spaces of the location `id` follow its folder from `from` to `to`
+async fn follow_folder(conn: &mut SqliteConnection, id: &str, from: &FsPath, to: &FsPath) -> AppResult<()> {
+    if crate::moves::location_busy(&mut *conn, id).await? {
+        return Err(AppError::conflict("A space is being moved to or from this location. Wait until the move finishes, or cancel it."));
+    }
+    let rows: Vec<(String, String)> = sqlx::query_as("SELECT id, source_path FROM drives WHERE location_id = ? AND source_path IS NOT NULL")
+        .bind(id)
+        .fetch_all(&mut *conn)
+        .await?;
+    let from_abs = std::path::absolute(from).unwrap_or_else(|_| from.to_path_buf());
+    for (drive, source) in rows {
+        let source = std::path::PathBuf::from(source);
+        let rel = source
+            .strip_prefix(from)
+            .or_else(|_| source.strip_prefix(&from_abs))
+            .map_err(|_| AppError::internal(format!("The folder of space {drive} isn't in its location's folder")))?;
+        sqlx::query("UPDATE drives SET source_path = ? WHERE id = ?").bind(to.join(rel).to_string_lossy()).bind(&drive).execute(&mut *conn).await?;
+    }
+    Ok(())
 }
 
 pub async fn set_default(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
@@ -679,8 +958,14 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
     logs::record_activity(&mut tx, &user, None, "storage_delete", &name).await?;
     tx.commit().await?;
     drop(w);
-    st.storages.write().unwrap().remove(&id);
+    let backend = st.storages.write().unwrap().remove(&id);
     st.location_health.lock().unwrap().remove(&id);
+    // An S3, SFTP or FTP location's place no longer names it either
+    if kind != "local"
+        && let Some(backend) = backend
+    {
+        release_place(&st, &id, backend.as_ref()).await;
+    }
     // Its folder no longer names it, so a location can be added there again
     if kind == "local"
         && let Ok(root) = storage::local_root(&id, &config_json(&id, &config), &st.storage_dir)
@@ -1021,6 +1306,105 @@ mod tests {
         probe(&env.st, "nas").await.unwrap();
         env.upload(&admin, &team, "b.txt", b"two").await;
         assert!(nas.join("teams/Plans/b.txt").is_file());
+    }
+
+    #[tokio::test]
+    async fn a_local_folder_location_in_use_moves_only_to_a_copy_of_its_folder() {
+        let env = testutil::folders_env().await;
+        let admin = env.admin().await;
+        let disk = Outside::new();
+        let (first, second, copy) = (disk.0.join("first"), disk.0.join("second"), disk.0.join("copy"));
+        let id = add_local(&env, "NAS", &first).await.unwrap();
+        make_default(&env, &id).await;
+        let team = new_team(&env, "Sales").await;
+        make_default(&env, BUILTIN).await;
+        env.upload(&admin, &team, "plan.txt", b"the plan").await;
+        let drive = env.drive_of(&team).await;
+
+        // Another folder, which isn't a copy of it: the space's folder would stay behind
+        let err = move_to(&env, &id, &second).await.unwrap_err();
+        assert_eq!(err.message, IN_USE);
+        assert!(!second.exists(), "nothing made");
+        let saved: (String,) = sqlx::query_as("SELECT config FROM storage_locations WHERE id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
+        assert!(saved.0.contains("first"));
+
+        // A copy of the folder, marker included: the location and its spaces' folders follow
+        copy_dir(&first, &copy);
+        move_to(&env, &id, &copy).await.unwrap();
+        let (source,): (String,) = sqlx::query_as("SELECT source_path FROM drives WHERE id = ?").bind(&drive).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(std::path::PathBuf::from(source), copy.join("teams").join("Sales"));
+        std::fs::remove_dir_all(&first).unwrap();
+        env.upload(&admin, &team, "after.txt", b"after").await;
+        assert!(copy.join("teams/Sales/after.txt").is_file());
+    }
+
+    fn copy_dir(from: &FsPath, to: &FsPath) {
+        std::fs::create_dir_all(to).unwrap();
+        for e in std::fs::read_dir(from).unwrap() {
+            let e = e.unwrap();
+            if e.file_type().unwrap().is_dir() {
+                copy_dir(&e.path(), &to.join(e.file_name()));
+            } else {
+                std::fs::copy(e.path(), to.join(e.file_name())).unwrap();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn two_locations_never_share_a_place() {
+        let env = testutil::env().await;
+        let s3 = |endpoint: &str, bucket: &str, prefix: &str| json!({ "endpoint": endpoint, "bucket": bucket, "prefix": prefix });
+        let place = |kind: &str, cfg: Value| place_of(kind, &cfg).unwrap();
+        // The same bucket and prefix, written differently
+        assert_eq!(place("s3", s3("https://S3.example.com/", "files", "/drive/")), place("s3", s3("https://s3.example.com/files", "", "drive")));
+        assert_ne!(place("s3", s3("https://s3.example.com", "files", "drive")), place("s3", s3("https://s3.example.com", "files", "other")));
+        assert_ne!(place("s3", s3("https://s3.example.com", "files", "")), place("s3", s3("https://s3.example.com", "photos", "")));
+        // The same server and folder; a relative folder is in the account's home folder
+        let host = |host: &str, user: &str, path: &str| json!({ "host": host, "username": user, "path": path });
+        assert_eq!(place("sftp", host("NAS.example.com", "a", "/data/")), place("sftp", host("sftp://b@nas.example.com:22/data", "", "")));
+        assert_ne!(place("sftp", host("nas.example.com", "a", "data")), place("sftp", host("nas.example.com", "b", "data")));
+        assert_ne!(place("sftp", host("nas.example.com", "a", "/data")), place("ftp", host("nas.example.com", "a", "/data")));
+        assert!(place_of("local", &json!({ "path": "/mnt/nas" })).is_none());
+
+        sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES ('b1', 'Bucket', 's3', ?, 0, 0)")
+            .bind(s3("https://s3.example.com", "files", "drive").to_string())
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        let req = json!({ "name": "Again", "kind": "s3", "config": s3("https://s3.example.com/files", "", "/drive") });
+        let err = create(State(env.st.clone()), Admin(env.admin().await), Json(serde_json::from_value(req).unwrap())).await.unwrap_err();
+        assert_eq!((err.status, err.message.as_str()), (axum::http::StatusCode::CONFLICT, "The storage location \"Bucket\" already uses this place (the same bucket and prefix, or the same server and folder)"));
+        // Editing a location to point there is refused too; itself is no duplicate
+        let mut c = env.st.db.acquire().await.unwrap();
+        assert!(check_place_free(&mut c, Some("b2"), "s3", &s3("https://s3.example.com", "files", "drive")).await.is_err());
+        check_place_free(&mut c, Some("b1"), "s3", &s3("https://s3.example.com", "files", "drive")).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_remote_place_holds_a_marker_naming_its_location_and_installation() {
+        let env = testutil::env().await;
+        // Ids of their own: health checks remember the locations they marked
+        let (id, other) = (format!("b{}", new_id()), format!("o{}", new_id()));
+        // Works like a bucket; a location added before markers were written has none with this installation's id
+        add_location(&env, &id, None).await;
+        let s = env.st.storage(&id).unwrap();
+        let file = env.dir.join(&id).join(storage::LOCATION_MARKER);
+        // Its first successful health check writes it
+        probe(&env.st, &id).await.unwrap();
+        let install = install_id(&env.st).await.unwrap();
+        assert_eq!(install_id(&env.st).await.unwrap(), install, "made once");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), format!("{id}\n{install}\n"));
+        assert_eq!(marker_state(&env.st, Some(&id), s.as_ref()).await.unwrap(), Marker::Ours);
+        // Another location of this installation, or another installation: taken
+        add_location(&env, &other, None).await;
+        assert_eq!(marker_state(&env.st, Some(&other), s.as_ref()).await.unwrap(), Marker::Taken);
+        std::fs::write(&file, format!("{id}\nsomeone-else\n")).unwrap();
+        assert_eq!(marker_state(&env.st, Some(&id), s.as_ref()).await.unwrap(), Marker::Taken);
+        // A location of this installation that is gone: free
+        std::fs::write(&file, format!("{id}\n{install}\n")).unwrap();
+        assert_eq!(marker_state(&env.st, Some("new"), s.as_ref()).await.unwrap(), Marker::Taken);
+        sqlx::query("DELETE FROM storage_locations WHERE id = ?").bind(&id).execute(&env.st.db).await.unwrap();
+        assert_eq!(marker_state(&env.st, Some("new"), s.as_ref()).await.unwrap(), Marker::Missing);
     }
 
     #[tokio::test]
