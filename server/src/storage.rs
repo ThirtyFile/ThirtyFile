@@ -219,21 +219,48 @@ pub fn dir_levels(dir: &str) -> Vec<String> {
 
 // ───────────── Local folder ─────────────
 
-/// The file in a Local folder location's folder that says which location the folder is: it holds the location's id.
-/// It is written only when an administrator adds the location or changes its folder (the built-in location's at its
-/// first start, `prepare_builtin`). A location whose folder doesn't hold its marker is unavailable, and nothing is
+/// The file in a Local folder location's folder that says which location the folder is: it holds the location's id
+/// (on its first line; S3, SFTP and FTP locations have one too, with the installation's id on a second line,
+/// `locations::claim_place`). It is written only when an administrator adds the location or changes its folder (the
+/// built-in location's at the first start of a new server, `prepare_builtin`). A location whose folder doesn't hold its marker is unavailable, and nothing is
 /// created or written there: a disk or network share that isn't mounted leaves an empty folder (or none) at its
 /// mount point, and files written there would land on the server's own disk and be hidden once it is mounted again.
 pub const LOCATION_MARKER: &str = ".thirtyfile-location";
 /// Shown when a Local folder location's folder isn't there, or doesn't hold the location's marker
 pub const NOT_MOUNTED: &str = "The folder isn't there, or a different disk is mounted there";
+/// Shown when a Local folder location's folder is there and has items, but no marker: it may be the right folder whose
+/// marker was lost (a copy that left out hidden files, say). Followed by the location's id, which the file must hold.
+pub const MARKER_MISSING: &str = "The folder has items but no .thirtyfile-location file. If it is this location's folder, create that file in it holding this line:";
 /// Shown when an administrator chooses a folder whose marker names another location
 pub const FOLDER_TAKEN: &str = "Another storage location uses this folder (it holds that location's .thirtyfile-location file)";
+/// Shown when an S3, SFTP or FTP location's marker names another location, or another installation of ThirtyFile
+pub const PLACE_TAKEN: &str =
+    "Another storage location uses this place: its .thirtyfile-location file names another location or another ThirtyFile installation";
+/// Items a disk or a NAS puts in a folder by itself: they don't make a storage folder "used"
+pub const SYSTEM_ENTRIES: [&str; 6] = ["lost+found", "#recycle", "@eaDir", ".DS_Store", "System Volume Information", "$RECYCLE.BIN"];
+
+/// Whether the folder `dir` has nothing in it but `SYSTEM_ENTRIES`
+pub fn nothing_but_system_entries(dir: &Path) -> io::Result<bool> {
+    for e in std::fs::read_dir(dir)? {
+        let name = e?.file_name();
+        let name = name.to_string_lossy();
+        if !SYSTEM_ENTRIES.iter().any(|s| s.eq_ignore_ascii_case(&name)) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// The location a marker names: its first line. A second line, when there is one, names the ThirtyFile installation
+/// (`locations::install_id`), which the markers of S3, SFTP and FTP locations hold.
+pub fn marker_location(body: &[u8]) -> String {
+    String::from_utf8_lossy(body).lines().next().unwrap_or_default().trim().to_string()
+}
 
 /// The location id in the marker of the folder `root`; None when the folder or the marker isn't there
 pub async fn marker_of(root: &Path) -> io::Result<Option<String>> {
     match tokio::fs::read(root.join(LOCATION_MARKER)).await {
-        Ok(b) => Ok(Some(String::from_utf8_lossy(&b).trim().to_string())),
+        Ok(b) => Ok(Some(marker_location(&b))),
         Err(e) if matches!(e.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => Ok(None),
         Err(e) => Err(e),
     }
@@ -247,7 +274,7 @@ pub fn claim_folder(root: &Path, id: &str) -> io::Result<bool> {
     std::fs::create_dir_all(root)?;
     let marker = root.join(LOCATION_MARKER);
     match std::fs::read(&marker) {
-        Ok(b) if String::from_utf8_lossy(&b).trim() == id => Ok(false),
+        Ok(b) if marker_location(&b) == id => Ok(false),
         Ok(_) => Err(io::Error::other(StorageError { message: FOLDER_TAKEN, detail: root.display().to_string() })),
         Err(e) if e.kind() == io::ErrorKind::NotFound => std::fs::write(&marker, id).map(|()| true),
         Err(e) => Err(e),
@@ -262,28 +289,50 @@ pub async fn release_folder(root: &Path, id: &str) {
     }
 }
 
-/// The built-in location's folder (the storage folder) at startup. A fresh install creates it, or finds it empty (a
-/// Docker volume that isn't mounted is an empty folder too, where nothing was): it gets the marker. A folder with
-/// items in it must already hold the built-in location's marker, or ThirtyFile doesn't start: it may be a different
-/// disk than the one ThirtyFile used.
-pub fn prepare_builtin(root: &Path) -> Result<(), String> {
+/// The built-in location's folder (the storage folder) at startup, once the database is open. `recorded`: the database
+/// records content or spaces on the built-in location.
+///
+/// A new install creates the folder, or finds it empty (items a disk or NAS makes by itself, `SYSTEM_ENTRIES`, don't
+/// count): it gets the marker. When the database records something there, a missing or empty folder is never taken:
+/// a disk or Docker volume that isn't mounted leaves exactly that, and uploads would land on the wrong disk. A folder
+/// with items in it must already hold the built-in location's marker. Otherwise ThirtyFile doesn't start.
+pub fn prepare_builtin(root: &Path, recorded: bool) -> Result<(), String> {
     let builtin = crate::locations::BUILTIN;
     let failed = |e: io::Error| format!("Can't use the storage folder {}: {e}", root.display());
-    std::fs::create_dir_all(root).map_err(failed)?;
+    let unmounted = || {
+        format!(
+            "The storage folder {} is missing or empty, but the database records files and spaces stored there. The disk or volume that holds them may not be mounted. Check THIRTYFILE_STORAGE and the disks and volumes mounted there, then start ThirtyFile again.",
+            root.display()
+        )
+    };
     let marker = root.join(LOCATION_MARKER);
     match std::fs::read(&marker) {
-        Ok(b) if String::from_utf8_lossy(&b).trim() == builtin => Ok(()),
+        Ok(b) if marker_location(&b) == builtin => Ok(()),
         Ok(_) => Err(format!(
             "The storage folder {} belongs to another storage location (its {LOCATION_MARKER} file names another one). Check THIRTYFILE_STORAGE and the disks mounted there.",
             root.display()
         )),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            if std::fs::read_dir(root).map_err(failed)?.next().is_some() {
+        Err(e) if matches!(e.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => {
+            let empty = match nothing_but_system_entries(root) {
+                Ok(empty) => empty,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    if recorded {
+                        return Err(unmounted());
+                    }
+                    std::fs::create_dir_all(root).map_err(failed)?;
+                    true
+                }
+                Err(e) => return Err(failed(e)),
+            };
+            if !empty {
                 return Err(format!(
                     "The storage folder {} has items in it but no {LOCATION_MARKER} file: it may be a different disk than the one ThirtyFile used. Check THIRTYFILE_STORAGE and the disks mounted there. If it is the right folder, create the file {} holding the word {builtin}.",
                     root.display(),
                     marker.display()
                 ));
+            }
+            if recorded {
+                return Err(unmounted());
             }
             std::fs::write(&marker, builtin).map_err(failed)
         }
@@ -315,13 +364,20 @@ impl LocalStorage {
     async fn verify(&self) -> io::Result<()> {
         match marker_of(&self.root).await? {
             Some(id) if id == self.id => Ok(()),
-            found => Err(io::Error::other(StorageError {
+            Some(_) => Err(io::Error::other(StorageError {
                 message: NOT_MOUNTED,
-                detail: match found {
-                    Some(_) => format!("{} holds another location's {LOCATION_MARKER}", self.root.display()),
-                    None => format!("{} or its {LOCATION_MARKER} isn't there", self.root.display()),
-                },
+                detail: format!("{} holds another location's {LOCATION_MARKER}", self.root.display()),
             })),
+            None => {
+                // A folder with items but no marker: say which file is missing and what it must hold. A missing or
+                // empty folder is a disk that isn't mounted.
+                let root = self.root.clone();
+                let has_items = tokio::task::spawn_blocking(move || nothing_but_system_entries(&root).map(|empty| !empty)).await.map_err(io::Error::other)?;
+                Err(io::Error::other(match has_items {
+                    Ok(true) => StorageError { message: MARKER_MISSING, detail: self.id.clone() },
+                    _ => StorageError { message: NOT_MOUNTED, detail: format!("{} or its {LOCATION_MARKER} isn't there", self.root.display()) },
+                }))
+            }
         }
     }
 
@@ -608,6 +664,13 @@ impl std::fmt::Display for StorageError {
 }
 
 impl std::error::Error for StorageError {}
+
+impl StorageError {
+    /// What people are shown: the message, with the location's id when the message asks for it (`MARKER_MISSING`)
+    pub fn text(&self) -> std::borrow::Cow<'static, str> {
+        if self.message == MARKER_MISSING { format!("{} {}", self.message, self.detail).into() } else { self.message.into() }
+    }
+}
 
 fn s3_err(e: object_store::Error) -> io::Error {
     let message = match &e {
@@ -988,7 +1051,7 @@ pub fn is_private_ip(ip: &std::net::IpAddr) -> bool {
 }
 
 /// SFTP / FTP: when the host field is pasted as `sftp://host:2222/data`, split out the port and folder
-fn normalize_host(mut config: serde_json::Value) -> serde_json::Value {
+pub(crate) fn normalize_host(mut config: serde_json::Value) -> serde_json::Value {
     let Some(obj) = config.as_object_mut() else { return config };
     let raw = obj.get("host").and_then(|v| v.as_str()).unwrap_or_default().trim().to_string();
     let rest = raw.split_once("://").map(|(_, r)| r).unwrap_or(&raw);
@@ -1125,24 +1188,41 @@ mod tests {
         let marker = |dir: &Path| std::fs::read_to_string(dir.join(LOCATION_MARKER)).ok();
         // A fresh install: the folder is created with the marker, and used from then on
         let fresh = base.join("storage");
-        prepare_builtin(&fresh).unwrap();
+        prepare_builtin(&fresh, false).unwrap();
         assert_eq!(marker(&fresh).as_deref(), Some("local"));
         std::fs::create_dir_all(fresh.join("users/admin")).unwrap();
-        prepare_builtin(&fresh).unwrap();
-        // An empty folder (a Docker volume that isn't mounted is one too): nothing was there
+        prepare_builtin(&fresh, true).unwrap();
+        // An empty folder, or one with only what a disk or NAS makes by itself: nothing was there
         let empty = base.join("empty");
-        std::fs::create_dir_all(&empty).unwrap();
-        prepare_builtin(&empty).unwrap();
+        for system in SYSTEM_ENTRIES {
+            std::fs::create_dir_all(empty.join(system)).unwrap();
+        }
+        prepare_builtin(&empty, false).unwrap();
         assert_eq!(marker(&empty).as_deref(), Some("local"));
         // Items but no marker, or another location's: it may be another disk, so it isn't used or changed
         let full = base.join("full");
         std::fs::create_dir_all(full.join("users/amy")).unwrap();
-        assert!(prepare_builtin(&full).unwrap_err().contains(LOCATION_MARKER));
+        assert!(prepare_builtin(&full, false).unwrap_err().contains(LOCATION_MARKER));
         assert_eq!(marker(&full), None);
         let other = base.join("other");
         claim_folder(&other, "nas").unwrap();
-        assert!(prepare_builtin(&other).is_err());
+        assert!(prepare_builtin(&other, false).is_err());
         assert_eq!(marker(&other).as_deref(), Some("nas"));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_missing_or_empty_built_in_folder_is_never_taken_when_the_database_records_files_there() {
+        let base = std::env::temp_dir().join(format!("thirtyfile-unmounted-{}", crate::util::new_id()));
+        // A volume that isn't mounted: the folder is missing, or an empty mount point (with a disk's own entries)
+        let missing = base.join("missing");
+        let e = prepare_builtin(&missing, true).unwrap_err();
+        assert!(e.contains("may not be mounted"), "{e}");
+        assert!(!missing.exists(), "nothing is made");
+        let empty = base.join("empty");
+        std::fs::create_dir_all(empty.join("lost+found")).unwrap();
+        assert!(prepare_builtin(&empty, true).unwrap_err().contains("may not be mounted"));
+        assert!(!empty.join(LOCATION_MARKER).exists());
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -1182,6 +1262,24 @@ mod tests {
         s.check().await.unwrap();
         s.put_file(&hash, &tmp).await.unwrap();
         assert!(root.join(&hash[0..2]).join(&hash[2..4]).join(&hash).is_file());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn a_folder_with_items_but_no_marker_says_what_the_marker_must_hold() {
+        let base = std::env::temp_dir().join(format!("thirtyfile-nomarker-{}", crate::util::new_id()));
+        let root = base.join("nas");
+        std::fs::create_dir_all(root.join("teams/Sales")).unwrap();
+        let s = LocalStorage::new(root.clone(), "loc-42");
+        let err = s.ping().await.unwrap_err();
+        let se = err.get_ref().and_then(|i| i.downcast_ref::<StorageError>()).unwrap();
+        assert_eq!(se.message, MARKER_MISSING);
+        assert_eq!(se.text(), format!("{MARKER_MISSING} loc-42"));
+        assert_eq!(crate::error::AppError::from(err).message, format!("{MARKER_MISSING} loc-42"));
+        // Written as it says, the folder is used again
+        std::fs::write(root.join(LOCATION_MARKER), "loc-42
+").unwrap();
+        s.ping().await.unwrap();
         let _ = std::fs::remove_dir_all(&base);
     }
 

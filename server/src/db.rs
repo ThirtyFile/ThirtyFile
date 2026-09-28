@@ -13,7 +13,7 @@ use crate::{
 };
 
 /// Opens the database; `cache_mb` is the page cache of each connection (`THIRTYFILE_DB_CACHE_MB`)
-pub async fn connect(path: &Path, cache_mb: u32) -> Result<SqlitePool, sqlx::Error> {
+pub async fn connect(path: &Path, cache_mb: u32) -> Result<SqlitePool, Box<dyn std::error::Error>> {
     let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", path.display()))?
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
@@ -36,10 +36,65 @@ pub async fn connect(path: &Path, cache_mb: u32) -> Result<SqlitePool, sqlx::Err
         .connect_with(opts)
         .await?;
     let migrator = sqlx::migrate!("./migrations");
+    // Said plainly, before the database is copied or changed (`check_existing` usually said it already)
+    if let Ok(applied) = sqlx::query_as::<_, (i64, Vec<u8>)>("SELECT version, checksum FROM _sqlx_migrations WHERE success = 1").fetch_all(&pool).await
+        && let Some(message) = unusable(&applied, &migrator)
+    {
+        return Err(message.into());
+    }
     backup_before_migrations(&pool, &migrator, path).await?;
     migrator.run(&pool).await?;
     optimize(&pool).await;
     Ok(pool)
+}
+
+/// The upgrade guide, which says what to do with data from a version that can't be upgraded
+pub const UPGRADE_GUIDE: &str = "https://thirtyfile.github.io/ThirtyFile/docs/backup.html#upgrade";
+
+/// Plain messages for a database this version can't use: its migrations (`_sqlx_migrations`: version and checksum)
+/// compared with this version's. None when it can be used (new, current, or with migrations still to apply).
+fn unusable(applied: &[(i64, Vec<u8>)], migrator: &sqlx::migrate::Migrator) -> Option<String> {
+    let known = |v: i64| migrator.iter().find(|m| m.version == v && !m.migration_type.is_down_migration());
+    let first = applied.iter().find(|(v, _)| *v == 1);
+    let same_start = first.is_some_and(|(_, sum)| known(1).is_some_and(|m| m.checksum.as_ref() == sum.as_slice()));
+    let newest = applied.iter().map(|(v, _)| *v).max()?;
+    if newest > 1 && !same_start {
+        // 0.3 and older kept one migration per change; the database was started over after 0.3
+        return Some(format!(
+            "This database is from ThirtyFile 0.3 or older, which can't be upgraded to this version. Nothing was changed. See how to move your files over in the upgrade guide: {UPGRADE_GUIDE}"
+        ));
+    }
+    if let Some((v, _)) = applied.iter().find(|(v, _)| known(*v).is_none()) {
+        return Some(format!(
+            "This database was changed by a newer version of ThirtyFile (it has change {v}, which this version doesn't know). Start the newer version again, or restore the copy saved before the upgrade: {UPGRADE_GUIDE}"
+        ));
+    }
+    if let Some((v, _)) = applied.iter().find(|(v, sum)| known(*v).is_some_and(|m| m.checksum.as_ref() != sum.as_slice())) {
+        return Some(format!(
+            "This database was made by a different build of ThirtyFile (its change {v} isn't the one this version has): an older release or a development build. It can't be used by this version. Nothing was changed. See the upgrade guide: {UPGRADE_GUIDE}"
+        ));
+    }
+    None
+}
+
+/// Before anything is written into the data or storage folder: stops with a plain message when the database in
+/// `path` is one this version can't use (from 0.3 or older, from a newer version, or from another build). A database
+/// that isn't there, or can't be read here, is left to `connect`.
+pub async fn check_existing(path: &Path) -> Result<(), String> {
+    if !path.is_file() {
+        return Ok(());
+    }
+    let Ok(opts) = SqliteConnectOptions::from_str(&format!("sqlite://{}", path.display())) else { return Ok(()) };
+    let opts = opts.read_only(true).create_if_missing(false);
+    let Ok(mut conn) = sqlx::ConnectOptions::connect(&opts).await else { return Ok(()) };
+    let applied: Result<Vec<(i64, Vec<u8>)>, _> =
+        sqlx::query_as("SELECT version, checksum FROM _sqlx_migrations WHERE success = 1").fetch_all(&mut conn).await;
+    let _ = sqlx::Connection::close(conn).await;
+    match applied {
+        Ok(applied) => unusable(&applied, &sqlx::migrate!("./migrations")).map_or(Ok(()), Err),
+        // No migrations table: a new database
+        Err(_) => Ok(()),
+    }
 }
 
 /// Brings the query planner's statistics up to date where they are missing or old (after connecting, and daily): without
@@ -552,6 +607,58 @@ pub async fn bootstrap_admin(db: &SqlitePool, password: Option<&str>, space_fold
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A database file whose migrations table holds `applied` (version, checksum), as an earlier version left it
+    async fn database_with(dir: &Path, applied: &[(i64, Vec<u8>)]) -> std::path::PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        let path = dir.join("drive.db");
+        let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", path.display())).unwrap().create_if_missing(true);
+        let mut c = sqlx::ConnectOptions::connect(&opts).await.unwrap();
+        sqlx::query(
+            "CREATE TABLE _sqlx_migrations (version BIGINT PRIMARY KEY, description TEXT NOT NULL, installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                            success BOOLEAN NOT NULL, checksum BLOB NOT NULL, execution_time BIGINT NOT NULL)",
+        )
+        .execute(&mut c)
+        .await
+        .unwrap();
+        for (v, sum) in applied {
+            sqlx::query("INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (?, 'old', 1, ?, 0)")
+                .bind(v)
+                .bind(sum)
+                .execute(&mut c)
+                .await
+                .unwrap();
+        }
+        sqlx::Connection::close(c).await.unwrap();
+        path
+    }
+
+    #[tokio::test]
+    async fn databases_this_version_cant_use_are_refused_plainly_and_left_alone() {
+        let base = std::env::temp_dir().join(format!("thirtyfile-old-{}", crate::util::new_id()));
+        let current = sqlx::migrate!("./migrations").iter().find(|m| m.version == 1).unwrap().checksum.to_vec();
+        let cases = [
+            // 0.3 kept a migration per change
+            ("0.3", (1..=24).map(|v| (v, vec![v as u8; 48])).collect::<Vec<_>>(), "ThirtyFile 0.3 or older"),
+            ("newer", vec![(1, current.clone()), (2, vec![2; 48])], "a newer version"),
+            ("other build", vec![(1, vec![9; 48])], "a different build"),
+        ];
+        for (what, applied, says) in cases {
+            let dir = base.join(what.replace(' ', "-"));
+            let path = database_with(&dir, &applied).await;
+            let e = check_existing(&path).await.unwrap_err();
+            assert!(e.contains(says) && e.contains(UPGRADE_GUIDE), "{what}: {e}");
+            let e = connect(&path, 16).await.unwrap_err().to_string();
+            assert!(e.contains(says), "{what}: {e}");
+            assert!(!dir.join("backups").exists(), "{what}: nothing copied");
+        }
+        // A new database, and one from this version, are fine
+        check_existing(&base.join("none").join("drive.db")).await.unwrap();
+        let db = connect(&base.join("drive.db"), 16).await.unwrap();
+        db.close().await;
+        check_existing(&base.join("drive.db")).await.unwrap();
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     async fn admin_hash(password: Option<&str>) -> String {
         let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));

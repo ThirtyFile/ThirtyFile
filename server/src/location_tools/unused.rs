@@ -21,7 +21,7 @@ use super::location;
 use crate::{
     auth::{Admin, User},
     error::{AppError, AppResult},
-    locations::describe,
+    locations::{self, describe},
     logs,
     state::AppState,
     storage::{self, Storage},
@@ -86,8 +86,10 @@ pub async fn unused_status(_: Admin, Path(id): Path<String>) -> Json<Option<Job>
 
 /// Starts a search in the background; its progress is read with `unused_status`
 pub async fn find_unused(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Job>> {
-    location(&st, &id).await?;
+    let loc = location(&st, &id).await?;
     let backend = st.storage(&id)?;
+    // Content in a place another location or installation uses isn't unused: it is theirs
+    locations::require_own_place(&st, &id, &loc.kind, backend.as_ref()).await?;
     let job = Job {
         scan_id: new_id(),
         phase: "scanning",
@@ -183,6 +185,7 @@ pub struct RemoveReq {
 /// Removes exactly the content the search `scan_id` found, in the background
 pub async fn remove_unused(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>, Json(req): Json<RemoveReq>) -> AppResult<Json<Job>> {
     let loc = location(&st, &id).await?;
+    locations::require_own_place(&st, &id, &loc.kind, st.storage(&id)?.as_ref()).await?;
     let (job, items) = {
         let mut jobs = JOBS.lock().unwrap();
         let job = jobs.get_mut(&id).filter(|j| j.scan_id == req.scan_id && j.phase == "found").ok_or_else(|| {
@@ -343,6 +346,34 @@ mod tests {
         assert_eq!(r, Removal { removed: 1, bytes: 7, kept: 3, failed: 0 });
         assert!(!gone_file.exists());
         assert!(used_file.exists() && rewritten_file.exists() && uploading_file.exists());
+    }
+
+    #[tokio::test]
+    async fn a_place_another_location_or_installation_uses_is_never_cleaned_up() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        // Works like a bucket (kind s3), its content in a folder of the test
+        let id = format!("b{}", new_id());
+        sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES (?, 'Bucket', 's3', '{\"bucket\":\"b\"}', 0, 0)")
+            .bind(&id)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        let dir = env.dir.join(&id);
+        env.st.storages.write().unwrap().insert(id.clone(), std::sync::Arc::new(crate::storage::LocalStorage::create(dir.clone(), &id).unwrap()));
+        let marker = dir.join(storage::LOCATION_MARKER);
+        // Another installation's marker (the place was set up by another ThirtyFile with a location of the same id)
+        std::fs::write(&marker, format!("{id}\nanother-installation\n")).unwrap();
+        let err = find_unused(State(env.st.clone()), Admin(admin.clone()), Path(id.clone())).await.unwrap_err();
+        assert_eq!((err.status, err.message.as_str()), (StatusCode::CONFLICT, storage::PLACE_TAKEN));
+        let req = RemoveReq { scan_id: "x".into() };
+        let err = remove_unused(State(env.st.clone()), Admin(admin.clone()), Path(id.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(err.message, storage::PLACE_TAKEN);
+        // Its own marker, without the installation (written before it was added): completed, and the search runs
+        std::fs::write(&marker, &id).unwrap();
+        let _ = find_unused(State(env.st.clone()), Admin(admin.clone()), Path(id.clone())).await.unwrap();
+        let install = locations::install_id(&env.st).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), format!("{id}\n{install}\n"));
     }
 
     #[tokio::test]

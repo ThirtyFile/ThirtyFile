@@ -253,6 +253,25 @@ impl SftpStorage {
         Ok(if key.is_empty() { self.root.clone() } else { format!("{}/{key}", self.root) })
     }
 
+    /// Refuses a symbolic link in `key` below the location's folder: in every folder on the way, and in the last part
+    /// too when `last` is set. A link may point anywhere on that server, such as into a folder the location doesn't
+    /// own.
+    async fn no_links(&self, conn: &Conn, key: &str, last: bool) -> io::Result<()> {
+        let parts = crate::storage::key_parts(key)?;
+        let n = if last { parts.len() } else { parts.len().saturating_sub(1) };
+        for i in 1..=n {
+            let path = format!("{}/{}", self.root, parts[..i].join("/"));
+            match conn.sftp.symlink_metadata(path.as_str()).await {
+                Ok(m) if m.file_type().is_symlink() => return Err(io::Error::new(io::ErrorKind::InvalidInput, "a symbolic link")),
+                Ok(_) => {}
+                // Nothing there: what comes next says so
+                Err(e) if is_not_found(&e) => return Ok(()),
+                Err(e) => return Err(sftp_err(e)),
+            }
+        }
+        Ok(())
+    }
+
     async fn open_path(&self, path: String, start: u64, len: u64) -> io::Result<BoxReader> {
         if len == 0 {
             return Ok(Box::pin(tokio::io::empty()) as BoxReader);
@@ -405,6 +424,7 @@ impl Storage for SftpStorage {
         Box::pin(async move {
             let path = self.path_at(dir)?;
             let conn = self.conn().await?;
+            self.no_links(&conn, dir, true).await?;
             let listed = conn.sftp.read_dir(path.as_str()).await.map_err(sftp_err)?;
             Ok(listed.filter(|e| e.file_name() != "." && e.file_name() != "..").map(|e| sftp_entry(e.file_name(), &e.metadata())).collect())
         })
@@ -414,6 +434,7 @@ impl Storage for SftpStorage {
         Box::pin(async move {
             let path = self.path_at(key)?;
             let conn = self.conn().await?;
+            self.no_links(&conn, key, false).await?;
             // The item itself: a link isn't followed
             match conn.sftp.symlink_metadata(path.as_str()).await {
                 Ok(m) => Ok(Some(sftp_entry(key.rsplit('/').next().unwrap_or_default().to_string(), &m))),
@@ -441,10 +462,9 @@ impl Storage for SftpStorage {
         Box::pin(async move {
             let path = self.path_at(key)?;
             let conn = self.conn().await?;
-            // A link may point anywhere on that server: refused
-            if conn.sftp.symlink_metadata(path.as_str()).await.map_err(sftp_err)?.file_type().is_symlink() {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, "a symbolic link"));
-            }
+            // A link may point anywhere on that server, on the way or at the end: refused
+            self.no_links(&conn, key, true).await?;
+            conn.sftp.symlink_metadata(path.as_str()).await.map_err(sftp_err)?;
             self.open_path(path, start, len).await
         })
     }
@@ -599,7 +619,8 @@ mod tests {
         }
 
         async fn lstat(&mut self, id: u32, path: String) -> Result<Attrs, StatusCode> {
-            self.stat(id, path).await
+            let meta = std::fs::symlink_metadata(self.path(&path)).map_err(code)?;
+            Ok(Attrs { id, attrs: FileAttributes::from(&meta) })
         }
 
         async fn fstat(&mut self, id: u32, handle: String) -> Result<Attrs, StatusCode> {
@@ -812,6 +833,31 @@ mod tests {
         let report = crate::location_tools::steps::run(&env.st, st.clone(), "sftp", 1 << 20).await;
         assert!(report.ok, "{report:?}");
         assert_eq!(std::fs::read_dir(s.dir.join("files/.thirtyfile-check")).unwrap().count(), 0, "the test files are deleted");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn links_on_the_way_are_never_followed_over_sftp() {
+        use tokio::io::AsyncReadExt;
+        let s = server(testutil::password()).await;
+        let st = storage(&s, testutil::password(), "");
+        // Outside the location's folder, on the same server
+        let outside = s.dir.join("outside");
+        std::fs::create_dir_all(outside.join("inner")).unwrap();
+        std::fs::write(outside.join("inner/secret.txt"), b"secret").unwrap();
+        std::fs::create_dir_all(s.dir.join("files/real")).unwrap();
+        std::fs::write(s.dir.join("files/real/ok.txt"), b"ok").unwrap();
+        std::os::unix::fs::symlink(&outside, s.dir.join("files/away")).unwrap();
+
+        let mut out = Vec::new();
+        st.open_at("real/ok.txt", 0, 2).await.unwrap().read_to_end(&mut out).await.unwrap();
+        assert_eq!(out, b"ok");
+        assert!(st.list_dir("away").await.is_err());
+        assert!(st.list_dir("away/inner").await.is_err(), "a link in the middle of the path");
+        assert!(st.stat("away/inner/secret.txt").await.is_err());
+        assert!(st.open_at("away/inner/secret.txt", 0, 6).await.is_err());
+        let top = st.list_dir("").await.unwrap();
+        assert_eq!(top.iter().find(|e| e.name == "away").unwrap().kind, crate::storage::EntryKind::Link);
     }
 
     /// The message a storage error shows people

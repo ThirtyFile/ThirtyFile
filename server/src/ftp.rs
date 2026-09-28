@@ -284,6 +284,25 @@ impl FtpStorage {
         Ok(if key.is_empty() { self.root.clone() } else { self.path(key) })
     }
 
+    /// Refuses a symbolic link in `key` below the location's folder: in every folder on the way, and in the last part
+    /// too when `last` is set (each folder on the way is listed, as FTP has no command that doesn't follow links). A
+    /// link may point anywhere on that server, such as into a folder the location doesn't own.
+    async fn no_links(&self, c: &mut Conn, key: &str, last: bool) -> io::Result<()> {
+        let parts = crate::storage::key_parts(key)?;
+        let n = if last { parts.len() } else { parts.len().saturating_sub(1) };
+        for i in 0..n {
+            let dir = self.path_at(&parts[..i].join("/"))?;
+            let lines = timed(c.ftp.list(Some(dir.as_str()).filter(|p| !p.is_empty()))).await?;
+            match lines.iter().filter_map(|l| l.parse::<suppaftp::list::File>().ok()).find(|f| f.name() == parts[i]) {
+                Some(f) if f.is_symlink() => return Err(io::Error::new(io::ErrorKind::InvalidInput, "a symbolic link")),
+                Some(_) => {}
+                // Nothing there: what comes next says so
+                None => return Ok(()),
+            }
+        }
+        Ok(())
+    }
+
     /// Writes a temp file to `path` in the folder `dir`, through a temporary name
     async fn put_to(&self, c: &mut Conn, dir: &str, path: &str, src: &Path) -> io::Result<()> {
         self.ensure_dir(c, dir).await?;
@@ -460,6 +479,7 @@ impl Storage for FtpStorage {
         Box::pin(async move {
             let path = self.path_at(dir)?;
             let (mut c, _permit) = self.checkout().await?;
+            self.no_links(&mut c, dir, true).await?;
             let lines = timed(c.ftp.list(Some(path.as_str()).filter(|p| !p.is_empty()))).await?;
             self.checkin(c);
             let mut out = Vec::new();
@@ -488,6 +508,7 @@ impl Storage for FtpStorage {
         Box::pin(async move {
             let path = self.path_at(key)?;
             let (mut c, _permit) = self.checkout().await?;
+            self.no_links(&mut c, key, false).await?;
             // SIZE answers for files only: a folder or a missing file is "not found"
             let size = match timed(c.ftp.size(path.as_str())).await {
                 Ok(n) => n as u64,
@@ -517,7 +538,15 @@ impl Storage for FtpStorage {
     }
 
     fn open_at<'a>(&'a self, key: &'a str, start: u64, len: u64) -> BoxFuture<'a, io::Result<BoxReader>> {
-        Box::pin(async move { self.open_path(self.path_at(key)?, start, len).await })
+        Box::pin(async move {
+            let path = self.path_at(key)?;
+            // A link may point anywhere on that server, on the way or at the end: refused
+            let (mut c, permit) = self.checkout().await?;
+            self.no_links(&mut c, key, true).await?;
+            self.checkin(c);
+            drop(permit);
+            self.open_path(path, start, len).await
+        })
     }
 
     fn delete_at<'a>(&'a self, key: &'a str) -> BoxFuture<'a, io::Result<()>> {
@@ -667,9 +696,15 @@ mod tests {
                             let lines: Vec<String> = std::fs::read_dir(&path)?
                                 .flatten()
                                 .map(|e| {
-                                    let m = e.metadata().unwrap();
+                                    // The entry itself: a link is listed as one, with where it points
+                                    let m = std::fs::symlink_metadata(e.path()).unwrap();
+                                    let name = e.file_name().to_string_lossy().into_owned();
+                                    if m.file_type().is_symlink() {
+                                        let to = std::fs::read_link(e.path()).unwrap();
+                                        return format!("lrwxrwxrwx 1 ftp ftp {} Jan 2 2024 {name} -> {}\r\n", m.len(), to.display());
+                                    }
                                     let kind = if m.is_dir() { 'd' } else { '-' };
-                                    format!("{kind}rw-r--r-- 1 ftp ftp {} Jan 2 2024 {}\r\n", m.len(), e.file_name().to_string_lossy())
+                                    format!("{kind}rw-r--r-- 1 ftp ftp {} Jan 2 2024 {name}\r\n", m.len())
                                 })
                                 .collect();
                             data.write_all(lines.concat().as_bytes()).await
@@ -784,6 +819,32 @@ mod tests {
         let report = crate::location_tools::steps::run(&env.st, st.clone(), "ftp", 1 << 20).await;
         assert!(report.ok, "{report:?}");
         assert_eq!(std::fs::read_dir(s.dir.join("files/.thirtyfile-check")).unwrap().count(), 0, "the test files are deleted");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn links_on_the_way_are_never_followed_over_ftp() {
+        use tokio::io::AsyncReadExt;
+        let s = server(testutil::password()).await;
+        let st = storage(&s, testutil::password());
+        // Outside the location's folder, on the same server
+        let outside = s.dir.join("outside");
+        std::fs::create_dir_all(outside.join("inner")).unwrap();
+        std::fs::write(outside.join("inner/secret.txt"), b"secret").unwrap();
+        std::fs::create_dir_all(s.dir.join("files/real")).unwrap();
+        std::fs::write(s.dir.join("files/real/ok.txt"), b"ok").unwrap();
+        std::os::unix::fs::symlink(&outside, s.dir.join("files/away")).unwrap();
+
+        let mut out = Vec::new();
+        st.open_at("real/ok.txt", 0, 2).await.unwrap().read_to_end(&mut out).await.unwrap();
+        assert_eq!(out, b"ok");
+        assert_eq!(st.list_dir("real").await.unwrap().len(), 1);
+        assert!(st.list_dir("away").await.is_err());
+        assert!(st.list_dir("away/inner").await.is_err(), "a link in the middle of the path");
+        assert!(st.stat("away/inner/secret.txt").await.is_err());
+        assert!(st.open_at("away/inner/secret.txt", 0, 6).await.is_err());
+        let top = st.list_dir("").await.unwrap();
+        assert_eq!(top.iter().find(|e| e.name == "away").unwrap().kind, crate::storage::EntryKind::Link);
     }
 
     #[tokio::test]
