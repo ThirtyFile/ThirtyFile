@@ -1141,9 +1141,6 @@ async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
     if current.trashed_at.is_some() || current.parent_id != top.parent_id || current.drive_id != top.drive_id || current.fs_root != top.fs_root {
         return Err(changed());
     }
-    if current.space_read_only {
-        return Err(tree::read_only_error(&current));
-    }
     still_there(&mut tx, dest).await?;
     let planned: HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
     let now_there: Vec<String> = tree::subtree(&mut tx, &top.id).await?.into_iter().filter(|(n, _)| n.trashed_at.is_none()).map(|(n, _)| n.id).collect();
