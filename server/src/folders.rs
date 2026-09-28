@@ -266,36 +266,62 @@ enum Op {
     Remove { id: String },
 }
 
-/// Scans a whole folder space and brings its index up to date
+/// Scans a whole folder space and brings its index up to date (after a scan of it already running, if any)
 pub async fn scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
-    let lock = drive_lock(drive_id);
+    let lock = scan_lock(drive_id);
     let _scanning = lock.lock().await;
-    scan_locked(st, drive_id).await
+    run_scan(st, drive_id).await
 }
 
-/// `scan`, with the space's scan lock already held
-async fn scan_locked(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
+/// Reads before taking the space's lock this many times when changes from the web keep coming in meanwhile; then the
+/// folder is read with the lock held
+const UNLOCKED_READS: u32 = 2;
+
+/// `scan`, with the space's scan lock already held. The folder is read without the space's lock, so uploads and other
+/// changes to the space don't wait for a long read; the lock is held while the index is brought up to date. A change
+/// from the web during the read (`changing`) means the read may be out of date: it is done again.
+async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     let drive = folder_drive(st, drive_id).await?;
     let root = PathBuf::from(drive.source_path.clone().unwrap_or_default());
     let mut report = ScanReport { at: now(), ..Default::default() };
     set_progress(drive_id, |_| {});
     let _progress = ProgressGuard(drive_id.to_string());
     let started = std::time::Instant::now();
-    let walked = {
-        let (root, id) = (root.clone(), drive_id.to_string());
-        let mut r = ScanReport::default();
-        let res = tokio::task::spawn_blocking(move || {
-            let found = |n: usize| set_progress(&id, |p| p.found = n);
-            walk(&root, None, &mut r, Some(&found)).map(|e| (e, r))
-        })
-        .await
-        .map_err(AppError::internal)?;
-        res.map(|(e, r)| {
-            report.skipped = r.skipped;
-            report.unreadable = r.unreadable;
-            report.leftovers = r.leftovers;
-            e
-        })
+    let mut reads = 0;
+    let (walked, _changing) = loop {
+        let held = if reads >= UNLOCKED_READS { Some(drive_lock(drive_id).lock_owned().await) } else { None };
+        // Taken after the changes in progress are done (waiting for the lock): any change counted from now on
+        // happened while the folder was being read
+        let before = if held.is_some() {
+            generation(drive_id)
+        } else {
+            let _wait = drive_lock(drive_id).lock_owned().await;
+            generation(drive_id)
+        };
+        let walked = {
+            let (root, id) = (root.clone(), drive_id.to_string());
+            let mut r = ScanReport::default();
+            let res = tokio::task::spawn_blocking(move || {
+                let found = |n: usize| set_progress(&id, |p| p.found = n);
+                walk(&root, None, &mut r, Some(&found)).map(|e| (e, r))
+            })
+            .await
+            .map_err(AppError::internal)?;
+            res.map(|(e, r)| {
+                report.skipped = r.skipped;
+                report.unreadable = r.unreadable;
+                report.leftovers = r.leftovers;
+                e
+            })
+        };
+        let lock = match held {
+            Some(l) => l,
+            None => drive_lock(drive_id).lock_owned().await,
+        };
+        if reads >= UNLOCKED_READS || generation(drive_id) == before {
+            break (walked, lock);
+        }
+        reads += 1;
     };
     let entries = match walked {
         Ok(e) => e,
@@ -371,9 +397,10 @@ pub async fn sync_folder(st: &AppState, folder: &Node) {
 async fn try_sync_folder(st: &AppState, folder: &Node) -> AppResult<()> {
     let (Some(rel), true) = (folder.fs_path.clone(), folder.is_folder()) else { return Ok(()) };
     let drive = folder_drive(st, folder.drive()).await?;
-    // A full scan running now covers this folder too
+    // Takes turns with changes from the web and with scans updating the index (both hold the lock only briefly: a
+    // scan reads the folder without it), so a change seen here is never skipped
     let lock = drive_lock(&drive.id);
-    let Ok(_scanning) = lock.try_lock() else { return Ok(()) };
+    let _scanning = lock.lock().await;
     let root = PathBuf::from(drive.source_path.clone().unwrap_or_default());
     let mut report = ScanReport::default();
     let entries = {
@@ -446,14 +473,27 @@ pub fn spaces_changed() {
 /// Starts a full scan in the background unless one is running. The lock is taken before the task starts, so a scan
 /// asked for afterwards waits for this one instead of possibly running first
 pub fn scan_later(st: &AppState, drive_id: &str) {
-    let Ok(scanning) = drive_lock(drive_id).try_lock_owned() else { return };
+    let Ok(scanning) = scan_lock(drive_id).try_lock_owned() else { return };
     let (st, id) = (st.clone(), drive_id.to_string());
     tokio::spawn(async move {
         let _scanning = scanning;
-        if let Err(e) = scan_locked(&st, &id).await {
+        if let Err(e) = run_scan(&st, &id).await {
             tracing::warn!("Scanning a folder space failed: {}", e.message);
         }
     });
+}
+
+/// Spaces watched for changes are scanned this many times less often than the interval set in the Control panel
+const WATCHED_SCAN_FACTOR: i64 = 4;
+
+fn watched(drive_id: &str) -> bool {
+    #[cfg(target_os = "linux")]
+    return crate::watch::is_watched(drive_id);
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = drive_id;
+        false
+    }
 }
 
 /// Scans every folder space whose last scan is older than the interval set in the Control panel (0 = never)
@@ -465,8 +505,8 @@ pub fn spawn_scanner(st: AppState) {
             if minutes <= 0 {
                 continue;
             }
-            let due: Vec<(String,)> = match sqlx::query_as(
-                "SELECT id FROM drives WHERE mode = 'folder' AND disabled = 0 AND COALESCE(last_scan_at, 0) <= ?",
+            let due: Vec<(String, i64)> = match sqlx::query_as(
+                "SELECT id, COALESCE(last_scan_at, 0) FROM drives WHERE mode = 'folder' AND disabled = 0 AND COALESCE(last_scan_at, 0) <= ?",
             )
             .bind(now() - minutes * 60)
             .fetch_all(&st.db)
@@ -478,7 +518,11 @@ pub fn spawn_scanner(st: AppState) {
                     continue;
                 }
             };
-            for (id,) in due {
+            for (id, last) in due {
+                // Watched spaces only need the regular scan for what watching can miss
+                if watched(&id) && last > now() - minutes * 60 * WATCHED_SCAN_FACTOR {
+                    continue;
+                }
                 if let Err(e) = scan(&st, &id).await {
                     tracing::warn!("Scanning a folder space failed: {}", e.message);
                 }
@@ -487,9 +531,30 @@ pub fn spawn_scanner(st: AppState) {
     });
 }
 
+/// The lock a change to a folder space and the index update of a scan or sync take turns with
 pub(crate) fn drive_lock(drive_id: &str) -> Arc<tokio::sync::Mutex<()>> {
     static LOCKS: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
     LOCKS.get_or_init(Default::default).lock().unwrap().entry(drive_id.to_string()).or_default().clone()
+}
+
+/// Scans of a space, one at a time (a scan asked for while one runs waits for it, `scan_later` skips)
+fn scan_lock(drive_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    LOCKS.get_or_init(Default::default).lock().unwrap().entry(drive_id.to_string()).or_default().clone()
+}
+
+fn generations() -> &'static Mutex<HashMap<String, u64>> {
+    static GENERATIONS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+    GENERATIONS.get_or_init(Default::default)
+}
+
+/// A change from the web is about to change the space's folder (it holds the space's lock)
+pub(crate) fn changing(drive_id: &str) {
+    *generations().lock().unwrap().entry(drive_id.to_string()).or_default() += 1;
+}
+
+fn generation(drive_id: &str) -> u64 {
+    generations().lock().unwrap().get(drive_id).copied().unwrap_or(0)
 }
 
 async fn folder_drive(st: &AppState, drive_id: &str) -> AppResult<Drive> {

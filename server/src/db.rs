@@ -38,7 +38,16 @@ pub async fn connect(path: &Path, cache_mb: u32) -> Result<SqlitePool, sqlx::Err
     let migrator = sqlx::migrate!("./migrations");
     backup_before_migrations(&pool, &migrator, path).await?;
     migrator.run(&pool).await?;
+    optimize(&pool).await;
     Ok(pool)
+}
+
+/// Brings the query planner's statistics up to date where they are missing or old (after connecting, and daily): without
+/// them SQLite can pick an index that reads a whole space instead of the one that finds a single path
+pub async fn optimize(pool: &SqlitePool) {
+    if let Err(e) = sqlx::query("PRAGMA optimize=0x10002").execute(pool).await {
+        tracing::warn!("Couldn't update the database statistics: {e}");
+    }
 }
 
 /// Automatic backups kept before upgrades (the oldest are removed)

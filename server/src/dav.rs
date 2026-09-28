@@ -506,8 +506,11 @@ async fn propfind(st: &AppState, user: &User, segs: &[String], headers: &HeaderM
             out.add(&href(&path, node.is_folder()), &want, node_props(&node, &display, q));
             if depth == 1 && node.is_folder() {
                 if node.in_folder_space() {
-                    // Changes made on the server's folder show up when it is opened, as on the web
+                    // Changes made on the server's folder show up when it is opened, as on the web (without holding
+                    // a connection meanwhile: syncing takes its own)
+                    drop(c);
                     crate::folders::sync_folder(st, &node).await;
+                    c = st.db.acquire().await?;
                 }
                 let mut list = nodes::list_children(&mut c, &node.id, &nodes::ListQuery::default()).await?;
                 for n in std::mem::take(list.items_mut()) {
@@ -677,11 +680,19 @@ async fn put(st: &AppState, user: &User, segs: &[String], headers: &HeaderMap, b
         let parent = tree::folder_for(&mut c, user, &parent.id, Need::Write).await?;
         (parent, name)
     };
-    if parent.in_folder_space() {
-        crate::folders::sync_folder(st, &parent).await;
-    }
     let mut c = st.db.acquire().await?;
-    let existing = child_named(&mut c, &parent.id, &name).await?;
+    let mut existing = child_named(&mut c, &parent.id, &name).await?;
+    // Only when the index and the folder on the server disagree about this name is the folder looked at again:
+    // copying thousands of files into one folder mustn't re-read it for each
+    if parent.in_folder_space() {
+        let on_disk = parent.fs_pinned().and_then(|p| p.join(&name)).is_ok_and(|p| std::fs::symlink_metadata(p.as_path()).is_ok());
+        if on_disk != existing.is_some() {
+            drop(c);
+            crate::folders::sync_folder(st, &parent).await;
+            c = st.db.acquire().await?;
+            existing = child_named(&mut c, &parent.id, &name).await?;
+        }
+    }
     if let Some(n) = &existing {
         if n.is_folder() {
             return Err(AppError::new(StatusCode::METHOD_NOT_ALLOWED, "A folder has this name"));
