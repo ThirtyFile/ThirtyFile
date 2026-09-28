@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Starts the image built for a pull request the way people run it, and upgrades the latest release to it.
+# Starts the image built for a release the way people run it. Upgrading an earlier release isn't tested: until
+# ThirtyFile has installs to upgrade, the database schema changes in place (server/migrations/0001_init.sql)
 #   smoke-test.sh <image>
 set -euo pipefail
 IMAGE="$1"
-PREVIOUS="ghcr.io/thirtyfile/thirtyfile:latest"
 PASSWORD="smoke-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 PORT=18080
 # Overridable for running the script inside a container: SMOKE_BASE=http://host.docker.internal:18080
@@ -54,32 +54,4 @@ on_disk=$(docker cp new:/storage/users/admin/hello.txt - | tar -xO) || fail "My 
 [ "$on_disk" = "a plain file" ] || fail "/storage/users/admin/hello.txt reads \"$on_disk\""
 docker rm -f new >/dev/null
 
-echo "== Upgrading the latest release"
-docker pull -q "$PREVIOUS" >/dev/null
-# Releases up to 0.3 kept the database's whole migration history, which newer versions don't upgrade from (#170)
-previous_version=$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$PREVIOUS")
-case "$previous_version" in
-  0.[0-3].*)
-    echo "The latest release ($previous_version) predates the current database schema: nothing to upgrade from"
-    echo "All good"
-    exit 0
-    ;;
-esac
-start previous "$PREVIOUS" upgrade-data upgrade-storage
-wait_healthy "The latest release"
-sign_in /tmp/old.cookies
-root=$(curl -fsS -b /tmp/old.cookies "$BASE/api/auth/me" | sed -n 's/.*"root_id":"\([^"]*\)".*/\1/p')
-id=$(curl -fsS -D - -o /dev/null -b /tmp/old.cookies -X POST "$BASE/api/uploads" \
-  -H 'Tus-Resumable: 1.0.0' -H 'Upload-Length: 0' \
-  -H "Upload-Metadata: filename $(b64 kept.txt),parentId $(b64 "$root")" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-node-id"{print $2}')
-[ -n "$id" ] || fail "creating a file in the latest release failed"
-curl -fsS -b /tmp/old.cookies -X PUT --data-binary 'kept across the upgrade' "$BASE/api/files/$id/content" >/dev/null
-docker rm -f previous >/dev/null
-
-start upgraded "$IMAGE" upgrade-data upgrade-storage
-wait_healthy "The upgraded image"
-sign_in /tmp/up.cookies
-content=$(curl -fsS -b /tmp/up.cookies "$BASE/api/files/$id/content")
-[ "$content" = "kept across the upgrade" ] || fail "the file written by the latest release reads \"$content\" after upgrading"
-docker rm -f upgraded >/dev/null
 echo "All good"

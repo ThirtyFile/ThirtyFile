@@ -1,12 +1,12 @@
 # Makes a release, started by hand: Actions › Release › Run workflow, with the new version number.
-# Tests what is on main right now while building the Docker image for both platforms (build.yml pushes it by digest
-# only). Once both have passed, gives that very image its tags
+# Tests what is on main right now, scans it with CodeQL (codeql.yml) and builds the Docker image for both platforms
+# (build.yml pushes it by digest only), side by side. Once all of them have passed, gives that very image its tags
 #   ghcr.io/thirtyfile/thirtyfile:1.2.3, :1.2, :1 (from 1.0.0 on; none for 0.x) and :latest
 # and then creates the tag v1.2.3 and the GitHub release, with notes put together from the merged pull requests
 # (see .github/release.yml), the server programs for amd64 and arm64 taken from the image, their SHA-256 checksums,
 # LICENSE, THIRD-PARTY-NOTICES and compose.yaml. The image carries an SBOM and build provenance; the provenance of the
-# image and of the programs is signed (GitHub attestations). Nothing is tagged or released if the tests or the image
-# build fail.
+# image and of the programs is signed (GitHub attestations). Nothing is tagged or released if the tests, the scan (it
+# stops on open alerts of high or critical severity) or the image build fail.
 #
 # Pre-releases (1.2.3-rc.1, anything with a "-") only get their own image tag and are marked as pre-releases on
 # GitHub, so `latest` and the release lines never move to them. A release of the same commit as the last pre-release
@@ -116,13 +116,21 @@ jobs:
     with:
       release_version: ${{ needs.prepare.outputs.version }}
 
+  codeql:
+    name: CodeQL
+    needs: prepare
+    uses: ./.github/workflows/codeql.yml
+    permissions:
+      contents: read
+      security-events: write
+
   # Tags the image build.yml pushed, or the pre-release's image, by its digest: nothing is rebuilt, so the published
   # image is the one that was tested
   images:
     name: Tag images
-    needs: [prepare, build]
+    needs: [prepare, build, codeql]
     if: >-
-      !cancelled() && needs.prepare.result == 'success' &&
+      !cancelled() && needs.prepare.result == 'success' && needs.codeql.result == 'success' &&
       (needs.build.result == 'success' || (needs.build.result == 'skipped' && needs.prepare.outputs.reuse != ''))
     runs-on: ubuntu-latest
     timeout-minutes: 10
