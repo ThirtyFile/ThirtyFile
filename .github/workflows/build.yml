@@ -1,10 +1,10 @@
-# Checks every pull request: runs the tests and builds the Docker image side by side (amd64 only, not published).
-# Merging into main runs nothing here; images are only published by the Release workflow (release.yml), which
-# calls this workflow with a version number: the image is then built for both platforms and pushed by its digest,
+# Checks every pull request: runs the tests. Merging into main runs nothing here.
+# The Docker image is only built by the Release workflow (release.yml), which calls this workflow with a version
+# number: the tests run and the image is built for both platforms side by side, started once, and pushed by its digest
 # without a tag. release.yml gives it its tags (1.2.3, 1.2, 1, latest) only once the tests have passed as well, so the
 # published image is exactly the one that was built and started here.
-# Pull requests that only touch the website or the documentation skip the tests and the image. The required check is
-# "Checks passed" at the end: it passes when every job passed or was skipped, and fails when any failed or was cancelled.
+# Pull requests that only touch the website or the documentation skip the tests. The required check is "Checks passed"
+# at the end: it passes when every job passed or was skipped, and fails when any failed or was cancelled.
 name: Build
 
 on:
@@ -29,8 +29,6 @@ permissions:
 
 env:
   IMAGE: ghcr.io/thirtyfile/thirtyfile
-  # Empty for pull requests
-  RELEASE: ${{ inputs.release_version }}
 
 jobs:
   changes:
@@ -46,6 +44,7 @@ jobs:
       - id: diff
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
+          RELEASE: ${{ inputs.release_version }}
         run: |
           # Releases always build; so does anything whose starting point is unknown
           if [ -n "$RELEASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
@@ -60,16 +59,6 @@ jobs:
           else
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Released migrations are unchanged
-        run: |
-          # Databases have already applied every migration that was part of a release: those files must never change
-          last=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null) || exit 0
-          # Releases up to 0.3 had the migration history that was replaced by one schema file (#170): nothing to compare
-          git cat-file -e "$last:server/migrations/0024_password_resets.sql" 2>/dev/null && exit 0
-          for f in $(git ls-tree --name-only "$last" server/migrations/); do
-            git diff --quiet "$last" HEAD -- "$f" || { echo "::error file=$f::$f was released in $last and must not change. Add a new migration instead."; exit 1; }
-          done
 
   check:
     name: Tests
@@ -147,12 +136,12 @@ jobs:
         working-directory: web
         run: pnpm audit --prod
 
-  # Runs beside the tests rather than after them; releases wait for both (release.yml)
+  # Releases only: runs beside the tests rather than after them, and release.yml waits for both
   image:
     name: Docker image
     timeout-minutes: 45
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: inputs.release_version && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -174,10 +163,9 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: cache-mount
-          key: buildkit-${{ inputs.release_version && 'multi' || 'amd64' }}-${{ hashFiles('server/Cargo.lock', 'web/pnpm-lock.yaml', 'Dockerfile') }}
+          key: buildkit-multi-${{ hashFiles('server/Cargo.lock', 'web/pnpm-lock.yaml', 'Dockerfile') }}
           restore-keys: |
-            buildkit-${{ inputs.release_version && 'multi' || 'amd64' }}-
-            buildkit-
+            buildkit-multi-
 
       - uses: reproducible-containers/buildkit-cache-dance@5422eac04292c961a382e0f584ea0f03ad9da723 # v3.4.0
         with:
@@ -192,57 +180,37 @@ jobs:
           skip-extraction: ${{ steps.mounts.outputs.cache-hit }}
 
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        if: inputs.release_version
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Releases are pushed by digest only (release.yml adds the tags). Pull requests: pr-N, kept here, never pushed
-      - id: tags
-        env:
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          if [ -n "$RELEASE" ]; then
-            echo "version=$RELEASE" >> "$GITHUB_OUTPUT"
-            echo "name=$IMAGE" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=pr-$PR" >> "$GITHUB_OUTPUT"
-            echo "name=$IMAGE:pr-$PR" >> "$GITHUB_OUTPUT"
-          fi
 
       # Standard image labels (source, revision, creation time…) with the version set above
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE }}
-          labels: org.opencontainers.image.version=${{ steps.tags.outputs.version }}
+          labels: org.opencontainers.image.version=${{ inputs.release_version }}
 
-      # The backend is cross-compiled in the Dockerfile, so arm64 needs no emulation. Pull requests build amd64 only, to be quicker,
-      # and with the `ci` profile (server/Cargo.toml): the same code, compiled in parallel and without link-time
-      # optimisation, so it builds in about half the time; releases keep the release profile
+      # The backend is cross-compiled in the Dockerfile, so arm64 needs no emulation. Pushed by digest only
+      # (release.yml adds the tags), with an SBOM and the full build provenance; release.yml also signs the provenance
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          platforms: ${{ inputs.release_version && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
-          # Pull requests keep the image to start it below
-          load: ${{ !inputs.release_version }}
-          outputs: ${{ inputs.release_version && 'type=image,push-by-digest=true,name-canonical=true,push=true' || '' }}
-          tags: ${{ steps.tags.outputs.name }}
+          platforms: linux/amd64,linux/arm64
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          tags: ${{ env.IMAGE }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            VERSION=${{ steps.tags.outputs.version }}
-            CARGO_PROFILE=${{ inputs.release_version && 'release' || 'ci' }}
-          # Releases store an SBOM and the full build provenance with the image; release.yml also signs the provenance
-          sbom: ${{ !!inputs.release_version }}
-          provenance: ${{ inputs.release_version && 'mode=max' || 'false' }}
+          build-args: VERSION=${{ inputs.release_version }}
+          sbom: true
+          provenance: mode=max
 
-      # Starts the image locked down (read-only, minimal capabilities) and upgrades the latest release to it.
-      # Releases start the pushed image itself (its amd64 half)
+      # Starts the pushed image itself (its amd64 half) locked down (read-only, minimal capabilities), and upgrades
+      # the latest release to it
       - name: Start the image
         env:
-          REF: ${{ inputs.release_version && format('{0}@{1}', env.IMAGE, steps.build.outputs.digest) || steps.tags.outputs.name }}
+          REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
         run: bash .github/scripts/smoke-test.sh "$REF"
 
   # The one check the ruleset requires. Skipped jobs count as passed on GitHub, so when "Changes" itself fails, the

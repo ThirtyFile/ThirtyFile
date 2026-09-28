@@ -56,14 +56,11 @@ COPY --from=web /src/web/dist /src/web/dist
 # The version `thirtyfile --version` and /api/health report
 ARG VERSION=dev
 ENV THIRTYFILE_VERSION=$VERSION
-# The Cargo profile: `release` for images people run, `ci` for the images pull requests build to test (quicker to
-# compile, see server/Cargo.toml)
-ARG CARGO_PROFILE=release
 # Dependencies and build output are cached, so rebuilds after code changes only recompile what changed
 RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=thirtyfile-target-${TARGETARCH},target=/src/server/target \
-    xx-cargo build --profile "$CARGO_PROFILE" --locked \
- && install -m 755 "target/$(xx-cargo --print-target-triple)/$CARGO_PROFILE/thirtyfile" /thirtyfile \
+    xx-cargo build --release --locked \
+ && install -m 755 "target/$(xx-cargo --print-target-triple)/release/thirtyfile" /thirtyfile \
  && xx-verify --static /thirtyfile
 
 # ───────────── 3) Third-party notices ─────────────
