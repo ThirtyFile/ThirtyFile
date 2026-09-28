@@ -164,6 +164,12 @@ impl Inner {
             .cloned()
             .ok_or_else(|| crate::error::AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("Storage location \"{location}\" is currently unavailable")))
     }
+    /// Whether the site is served over HTTPS: THIRTYFILE_SECURE_COOKIE, or a Site URL that starts with https. Cookies are
+    /// then marked Secure and browsers are told to use HTTPS only (HSTS).
+    pub fn https(&self) -> bool {
+        self.secure_cookie || self.system.read().unwrap().public_url.starts_with("https://")
+    }
+
     pub fn tmp_dir(&self) -> PathBuf {
         self.data_dir.join("tmp")
     }

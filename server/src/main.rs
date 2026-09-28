@@ -370,9 +370,6 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     if !cfg.secure_cookie && cfg.trust_proxy.enabled() {
         tracing::warn!("THIRTYFILE_TRUST_PROXY is on but THIRTYFILE_SECURE_COOKIE is off: if the proxy serves HTTPS, set THIRTYFILE_SECURE_COOKIE=true");
     }
-    if !cfg.secure_cookie && system.public_url.starts_with("https://") {
-        tracing::warn!("The site URL uses https but THIRTYFILE_SECURE_COOKIE is off: set THIRTYFILE_SECURE_COOKIE=true");
-    }
     let (storages, default_location) = locations::load_all(&db, &storage).await?;
     match convert::pending(&db).await {
         Ok(n) if n > 0 => tracing::info!(
@@ -473,6 +470,7 @@ fn router(state: AppState) -> Router {
         .route("/", any(dav::server_root))
         .fallback(web::serve)
         .layer(middleware::from_fn_with_state(state.clone(), same_origin))
+        .layer(middleware::from_fn_with_state(state.clone(), forwarding))
         // gzip / brotli for JSON, HTML, JS, CSS and SVG (see `Compressible`); file contents and other downloads are never compressed
         // Level 4: brotli's default (11) spends far more CPU per response than it saves on JSON and HTML; gzip 4 is likewise the sweet spot
         .layer(CompressionLayer::new().gzip(true).br(true).quality(CompressionLevel::Precise(4)).compress_when(Compressible))
@@ -835,6 +833,22 @@ impl Predicate for Compressible {
     }
 }
 
+/// What a reverse proxy tells about the request (`X-Forwarded-Host`, `X-Forwarded-Proto`) counts only when it comes from
+/// a trusted proxy address (THIRTYFILE_TRUST_PROXY), like the visitor's address in `X-Forwarded-For`: from anyone else
+/// the headers are removed before anything reads them. An HTTPS site also tells browsers to use HTTPS only (HSTS).
+async fn forwarding(axum::extract::State(st): axum::extract::State<AppState>, mut req: Request, next: Next) -> Response {
+    let peer = req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().map(|c| c.0.ip());
+    if !peer.is_some_and(|p| st.trust_proxy.trusts(p)) {
+        req.headers_mut().remove("x-forwarded-host");
+        req.headers_mut().remove("x-forwarded-proto");
+    }
+    let mut res = next.run(req).await;
+    if st.https() {
+        res.headers_mut().insert(header::STRICT_TRANSPORT_SECURITY, header::HeaderValue::from_static("max-age=31536000"));
+    }
+    res
+}
+
 /// Basic CSRF protection: requests that modify data must have an Origin matching Host, if they carry one
 /// (behind a reverse proxy with THIRTYFILE_TRUST_PROXY set, X-Forwarded-Host is accepted too).
 /// A request signed in with an app password as a Bearer token and without a session cookie carries no credential a
@@ -1041,6 +1055,32 @@ mod tests {
         assert_eq!(call(&app, Method::GET, &format!("/api/nodes/{}/children", amy.root_id), &auth, None).await.status(), StatusCode::OK);
         let folder = serde_json::json!({ "parent_id": amy.root_id, "name": "Nope" });
         assert_eq!(call(&app, Method::POST, "/api/folders", &auth, Some(folder)).await.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn proxy_headers_count_only_from_a_trusted_proxy_and_https_sites_ask_for_https() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let app = router(env.st.clone());
+        let (_, cookie) = env.sign_in(&amy, "Test").await;
+        // Not from a trusted proxy (THIRTYFILE_TRUST_PROXY is off): X-Forwarded-Host can't make another site's request look
+        // like this one's
+        let forged = vec![
+            (header::COOKIE, cookie.clone()),
+            (header::ORIGIN, "https://evil.example".into()),
+            (header::HeaderName::from_static("x-forwarded-host"), "evil.example".into()),
+        ];
+        let folder = serde_json::json!({ "parent_id": amy.root_id, "name": "Forged" });
+        assert_eq!(call(&app, Method::POST, "/api/folders", &forged, Some(folder)).await.status(), StatusCode::FORBIDDEN);
+        assert!(call(&app, Method::GET, "/api/auth/me", &[(header::COOKIE, cookie.clone())], None).await.headers().get(header::STRICT_TRANSPORT_SECURITY).is_none());
+
+        // An https Site URL: cookies are Secure and browsers are told to keep to HTTPS; signing out clears their cache
+        env.st.system.write().unwrap().public_url = "https://drive.example.com".into();
+        let res = call(&app, Method::GET, "/api/auth/me", &[(header::COOKIE, cookie.clone())], None).await;
+        assert_eq!(res.headers()[header::STRICT_TRANSPORT_SECURITY], "max-age=31536000");
+        assert!(auth::cookie_header(&env.st, "x", "y", "/", 1).ends_with("; Secure"));
+        let res = call(&app, Method::POST, "/api/auth/logout", &[(header::COOKIE, cookie)], None).await;
+        assert_eq!(res.headers()["clear-site-data"], "\"cache\"");
     }
 
     #[tokio::test]

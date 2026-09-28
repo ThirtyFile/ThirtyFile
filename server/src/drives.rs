@@ -170,6 +170,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
             if taken > 0 {
                 return Err(AppError::conflict("Another space already shows this folder"));
             }
+            crate::folders::check_new_source(&st, &p).await?;
             Some(p)
         }
         None => None,

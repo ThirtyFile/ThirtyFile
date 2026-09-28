@@ -194,7 +194,7 @@ pub async fn load(db: &sqlx::SqlitePool) -> SsoSettings {
         let c = s.provider_mut(p).unwrap();
         c.provisioning.get_or_insert(legacy);
         // Client secrets are stored encrypted (secrets.rs)
-        match crate::secrets::open(&c.client_secret) {
+        match crate::secrets::open(&format!("sso:{p}"), &c.client_secret) {
             Ok(plain) => c.client_secret = plain,
             Err(e) => {
                 tracing::error!("The {p} client secret can't be read ({e}); sign-in with {p} is off until it is entered again");
@@ -210,7 +210,7 @@ pub async fn store(conn: &mut sqlx::SqliteConnection, settings: &SsoSettings) ->
     let mut sealed = settings.clone();
     for p in PROVIDERS {
         let c = sealed.provider_mut(p).unwrap();
-        c.client_secret = crate::secrets::seal(&c.client_secret);
+        c.client_secret = crate::secrets::seal(&format!("sso:{p}"), &c.client_secret);
     }
     set_setting(conn, "sso", &serde_json::to_string(&sealed).unwrap()).await
 }
@@ -313,7 +313,7 @@ pub fn base_url(st: &AppState, headers: &HeaderMap) -> String {
         .and_then(|v| v.rsplit(',').next())
         .map(str::trim)
         .filter(|v| matches!(*v, "http" | "https"));
-    let scheme = forwarded.unwrap_or(if st.secure_cookie { "https" } else { "http" });
+    let scheme = forwarded.unwrap_or(if st.https() { "https" } else { "http" });
     format!("{scheme}://{host}")
 }
 
@@ -461,7 +461,7 @@ pub async fn start(
     let cookie = format!(
         "{STATE_COOKIE}={state}; HttpOnly; SameSite=Lax; Path=/api/auth/sso; Max-Age={}{}",
         PENDING_TTL.as_secs(),
-        if st.secure_cookie { "; Secure" } else { "" }
+        if st.https() { "; Secure" } else { "" }
     );
     ([(header::SET_COOKIE, cookie)], Redirect::to(&url)).into_response()
 }

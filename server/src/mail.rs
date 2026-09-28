@@ -70,7 +70,7 @@ pub async fn load(db: &sqlx::SqlitePool) -> SmtpSettings {
         }),
         _ => SmtpSettings::default(),
     };
-    match crate::secrets::open(&s.password) {
+    match crate::secrets::open("smtp", &s.password) {
         Ok(plain) => s.password = plain,
         Err(e) => {
             tracing::error!("The email server password can't be read ({e}); emails aren't sent until it is entered again");
@@ -82,7 +82,7 @@ pub async fn load(db: &sqlx::SqlitePool) -> SmtpSettings {
 }
 
 pub async fn store(conn: &mut sqlx::SqliteConnection, settings: &SmtpSettings) -> Result<(), sqlx::Error> {
-    let sealed = SmtpSettings { password: crate::secrets::seal(&settings.password), ..settings.clone() };
+    let sealed = SmtpSettings { password: crate::secrets::seal("smtp", &settings.password), ..settings.clone() };
     set_setting(conn, "smtp", &serde_json::to_string(&sealed).unwrap()).await
 }
 
