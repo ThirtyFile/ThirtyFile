@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, useSyncExternalStore, t
 import { Link, NavLink } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRightIcon, CloudOffIcon, FolderIcon, FolderOpenIcon, LayersIcon, type LucideIcon } from "lucide-react";
-import { api } from "@/api";
+import { api, type Node } from "@/api";
 import { useFolderDrop } from "@/lib/dnd";
 import { NavMenu } from "@/components/NavMenu";
 import { DRIVE_ICON, useDrives } from "@/lib/drives";
@@ -83,11 +83,42 @@ function Expander({ id, open, hidden }: { id: string; open: boolean; hidden?: bo
   );
 }
 
+/** Subfolders shown at first, and added with each "Show more": a folder of thousands would otherwise draw them all at once */
+const TREE_PAGE = 100;
+
+/** The subfolders of an expanded folder, the first TREE_PAGE of them until more are asked for */
+function Subfolders({ parentId, folders, depth, activeId }: { parentId: string; folders: Node[]; depth: number; activeId?: string }) {
+  const expandedIds = useExpanded();
+  const [shown, setShown] = useState(TREE_PAGE);
+  // The folder open on the right, and the folders expanded on the way to it, stay in view
+  const kept = folders.findLastIndex((f) => f.id === activeId || expandedIds.has(f.id));
+  const count = Math.max(shown, kept + 1);
+  const more = useTreeItem(`${parentId}:more`, depth + 2, Math.min(count + 1, folders.length), folders.length);
+  return (
+    <>
+      {folders.slice(0, count).map((f, i) => (
+        <TreeFolder key={f.id} id={f.id} name={f.name} depth={depth + 1} pos={i + 1} size={folders.length} activeId={activeId} />
+      ))}
+      {count < folders.length && (
+        <button
+          type="button"
+          {...more}
+          className={cn(row, "w-full pr-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+          style={{ paddingLeft: (depth + 1) * 12 + 20 }}
+          onClick={() => setShown(count + TREE_PAGE)}
+        >
+          {t("Show {n} more folders…", { n: Math.min(TREE_PAGE, folders.length - count) })}
+        </button>
+      )}
+    </>
+  );
+}
+
 function TreeFolder({ id, name, depth, pos, size, activeId }: { id: string; name: string; depth: number; pos: number; size: number; activeId?: string }) {
   const open = useExpanded().has(id);
   const children = useQuery({
     queryKey: ["children", id, "folders"],
-    queryFn: () => api.children(id, "name", "asc", true),
+    queryFn: ({ signal }) => api.children(id, "name", "asc", true, signal),
     enabled: open,
   });
   const empty = children.data?.length === 0;
@@ -116,10 +147,7 @@ function TreeFolder({ id, name, depth, pos, size, activeId }: { id: string; name
           </Link>
         </div>
       </NavMenu>
-      {open &&
-        children.data?.map((c, i) => (
-          <TreeFolder key={c.id} id={c.id} name={c.name} depth={depth + 1} pos={i + 1} size={children.data.length} activeId={activeId} />
-        ))}
+      {open && children.data && <Subfolders parentId={id} folders={children.data} depth={depth} activeId={activeId} />}
     </>
   );
 }
@@ -150,7 +178,7 @@ function SpaceRoot({
   const open = useExpanded().has(rootId);
   const folders = useQuery({
     queryKey: ["children", rootId, "folders"],
-    queryFn: () => api.children(rootId, "name", "asc", true),
+    queryFn: ({ signal }) => api.children(rootId, "name", "asc", true, signal),
     enabled: open,
   });
   const empty = folders.data?.length === 0;
@@ -180,10 +208,7 @@ function SpaceRoot({
           </Link>
         </div>
       </NavMenu>
-      {open &&
-        folders.data?.map((f, i) => (
-          <TreeFolder key={f.id} id={f.id} name={f.name} depth={depth + 1} pos={i + 1} size={folders.data.length} activeId={activeId} />
-        ))}
+      {open && folders.data && <Subfolders parentId={rootId} folders={folders.data} depth={depth} activeId={activeId} />}
     </>
   );
 }

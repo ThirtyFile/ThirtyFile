@@ -115,7 +115,9 @@ function FramePreview({ node, source, kind }: { node: Node; source: FileSource; 
       }
     };
     window.addEventListener("message", onMessage);
-    fetchOffice(source.contentUrl(node))
+    // Moving on to another file stops this download
+    const abort = new AbortController();
+    fetchOffice(source.contentUrl(node), abort.signal)
       .then((buf) => {
         buffer = buf;
         send();
@@ -128,6 +130,7 @@ function FramePreview({ node, source, kind }: { node: Node; source: FileSource; 
       });
     return () => {
       cancelled = true;
+      abort.abort();
       window.clearTimeout(timer);
       window.clearTimeout(readyTimer);
       window.removeEventListener("message", onMessage);
@@ -161,11 +164,13 @@ function XlsxPreview({ node, source }: { node: Node; source: FileSource }) {
     let cancelled = false;
     setBuffer(null);
     setError(null);
-    fetchOffice(source.contentUrl(node))
+    const abort = new AbortController();
+    fetchOffice(source.contentUrl(node), abort.signal)
       .then((buf) => !cancelled && setBuffer(buf))
       .catch((e) => !cancelled && setError(viewError(e, t("Couldn't open this spreadsheet"))));
     return () => {
       cancelled = true;
+      abort.abort();
     };
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every refresh of the list: its id and date say when the file changed
   }, [node.id, node.updated_at, source]);

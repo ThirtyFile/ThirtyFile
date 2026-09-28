@@ -52,7 +52,7 @@ export function FilesPage() {
   // Large folders come in pages: the first shows at once, the rest loads in the background
   const children = useAllPages(
     ["children", folderId, sort.key, sort.order],
-    (limit, after) => api.childrenPage(folderId!, sort.key, sort.order, limit, after),
+    (limit, after, signal) => api.childrenPage(folderId!, sort.key, sort.order, limit, after, signal),
     !!folderId,
   );
   const path = info.data?.path ?? [];

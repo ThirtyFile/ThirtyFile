@@ -23,7 +23,7 @@ import { Frame, ToolButton } from "@/components/Frame";
 import { useMe } from "@/lib/session";
 import { locale, t } from "@/lib/i18n";
 import { useAllPages } from "@/lib/pages";
-import { invalidateFiles } from "@/lib/queries";
+import { FOLDER_CONTENTS, invalidateFiles } from "@/lib/queries";
 import { trashHint } from "@/lib/utils";
 
 export function TrashPage() {
@@ -33,7 +33,7 @@ export function TrashPage() {
   // Deleted by me, or by everyone (the items of every space whose trash the person sees)
   const [deletedBy, setDeletedBy] = useState<"everyone" | "me">("everyone");
   const mine = deletedBy === "me";
-  const q = useAllPages(["trash", "pages", deletedBy], (limit, after) => api.trashPage(limit, after, mine));
+  const q = useAllPages(["trash", "pages", deletedBy], (limit, after, signal) => api.trashPage(limit, after, mine, signal));
   // Empty trash deletes only the spaces the person manages; the trash also lists items of spaces they can only view
   const emptyable = useQuery({ queryKey: ["trash", "empty"], queryFn: api.emptyTrashPreview, enabled: me.can_delete });
   const emptyCount = (emptyable.data ?? []).reduce((sum, s) => sum + s.items, 0);
@@ -46,7 +46,7 @@ export function TrashPage() {
   const done = (msg: string) => {
     toast.success(msg);
     setSelected(new Set());
-    invalidateFiles(qc);
+    invalidateFiles(qc, FOLDER_CONTENTS);
   };
 
   const restore = async () => {

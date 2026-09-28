@@ -14,4 +14,6 @@ export default {
   "An app password “{name}” was created for your account": "你的帳號建立了應用程式密碼「{name}」",
   "From {ip}. If you didn't create it, remove it under App passwords and change your password.": "來源位址 {ip}。如果不是你建立的，請在「應用程式密碼」中移除它，並變更你的密碼。",
   "Your account isn't allowed to share, so you can't change who has access. Ask an administrator.": "你的帳號沒有分享權限，因此無法變更存取權。請洽管理員。",
+  "Show {n} more folders…": "再顯示 {n} 個資料夾…",
+  "{n} dropped item couldn't be read and was skipped.|{n} dropped items couldn't be read and were skipped.": "有 {n} 個拖放的項目無法讀取，已略過。",
 } satisfies Record<string, string>;

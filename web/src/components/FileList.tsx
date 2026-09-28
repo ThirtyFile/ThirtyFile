@@ -659,7 +659,8 @@ export function FileList(p: FileListProps) {
     initialRect: { width: 0, height: typeof window === "undefined" ? 800 : window.innerHeight },
   });
 
-  // Find the scroll container, and where the rows start in it (measured after every render and on resize)
+  // Find the scroll container, and where the rows start in it: measured before the first paint of a view, then when the
+  // list changes size (not after every render: that reads the layout on every frame of a marquee drag)
   const measureGeo = useCallback(() => {
     const el = root.current;
     if (!el) return;
@@ -669,8 +670,8 @@ export function FileList(p: FileListProps) {
     const width = el.clientWidth;
     setGeo((g) => (g.top === top && g.width === width ? g : { top, width }));
   }, []);
-  useLayoutEffect(measureGeo);
   const empty = n === 0;
+  useLayoutEffect(measureGeo, [measureGeo, grid, empty]);
   useEffect(() => {
     const el = root.current;
     if (!el) return;

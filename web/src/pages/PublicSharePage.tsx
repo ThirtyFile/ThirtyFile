@@ -20,7 +20,7 @@ import { UploadPanel } from "@/components/UploadPanel";
 import { enqueue, filesFromDrop, filesFromInput, onUploadsLanded, type PickedFile } from "@/uploads";
 import { cn, formatBytes, formatDate } from "@/lib/utils";
 import { t, tc } from "@/lib/i18n";
-import { useAllPages } from "@/lib/pages";
+import { refreshFirstPage, useAllPages } from "@/lib/pages";
 
 export function PublicSharePage() {
   const { token = "" } = useParams();
@@ -284,9 +284,19 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
   const [anchor, setAnchor] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>("list");
   const [previewId, setPreviewId] = useState<string | null>(null);
+  // This stays mounted from one folder to the next: what was selected or previewed belongs to the folder left
+  const [shownFolder, setShownFolder] = useState(current);
+  if (shownFolder !== current) {
+    setShownFolder(current);
+    setSelected(new Set());
+    setAnchor(null);
+    setPreviewId(null);
+  }
 
   const info = useQuery({ queryKey: ["public-node", share.token, current], queryFn: () => api.publicNode(share.token, current) });
-  const children = useAllPages(["public-children", share.token, current], (limit, after) => api.publicChildrenPage(share.token, current, limit, after));
+  const children = useAllPages(["public-children", share.token, current], (limit, after, signal) =>
+    api.publicChildrenPage(share.token, current, limit, after, signal),
+  );
   const items = children.items;
   const files = useMemo(() => items.filter((n) => n.kind === "file"), [items]);
   const previewIndex = previewId ? files.findIndex((f) => f.id === previewId) : -1;
@@ -299,8 +309,18 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
   const send = (files: PickedFile[]) => upload(files, current);
   const drop = useFileDrop(share.allow_upload, send);
   const picker = useFilePicker(send);
-  // Files that finish uploading appear in the list
-  useEffect(() => onUploadsLanded(() => qc.invalidateQueries({ queryKey: ["public-children", share.token] }, { cancelRefetch: false })), [qc, share.token]);
+  // Files that finish uploading appear in the list: the first page of the folder while uploads run, every page (the
+  // loading of one under way started again, so it can't miss them) when they end
+  useEffect(
+    () =>
+      onUploadsLanded((parentIds, final) => {
+        if (final) void qc.invalidateQueries({ queryKey: ["public-children", share.token] });
+        else
+          for (const id of parentIds)
+            void refreshFirstPage(qc, ["public-children", share.token, id], (_, limit) => api.publicChildrenPage(share.token, id, limit));
+      }),
+    [qc, share.token],
+  );
 
   return (
     <div className="flex h-fit min-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl border bg-background shadow-sm">

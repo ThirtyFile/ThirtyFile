@@ -151,7 +151,7 @@ export function FolderPickerDialog(props: {
 
   const folders = useQuery({
     queryKey: ["children", current, "folders"],
-    queryFn: () => api.children(current, "name", "asc", true),
+    queryFn: ({ signal }) => api.children(current, "name", "asc", true, signal),
   });
   const { busy, error, run } = useSubmit(() => props.onPick(current));
   const qc = useQueryClient();

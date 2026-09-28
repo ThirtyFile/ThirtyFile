@@ -15,7 +15,9 @@ export default function MarkdownPreview(props: { node: Node; source: FileSource;
     let cancelled = false;
     setText(null);
     setError(null);
-    fetchOk(props.source.contentUrl(props.node))
+    // Moving on to another file stops this download
+    const abort = new AbortController();
+    fetchOk(props.source.contentUrl(props.node), { signal: abort.signal })
       .then((r) => r.arrayBuffer())
       .then((buf) => {
         if (cancelled) return;
@@ -25,6 +27,7 @@ export default function MarkdownPreview(props: { node: Node; source: FileSource;
       .catch((e) => !cancelled && setError(e.message));
     return () => {
       cancelled = true;
+      abort.abort();
     };
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every refresh of the list: its id and date say when the file changed
   }, [props.node.id, props.node.updated_at, props.source]);

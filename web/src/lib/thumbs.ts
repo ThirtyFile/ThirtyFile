@@ -36,16 +36,33 @@ function pump() {
   }
 }
 
-/** Finished thumbnails (the URL to show, or null when none could be made) and those on their way, by thumbnail address */
+/** Thumbnails kept here at most; the oldest are forgotten first (and the ones made in this page released) */
+const KEEP = 300;
+
+/** Finished thumbnails (the URL to show, or null when none can be made) and those on their way, by thumbnail address */
 const done = new Map<string, string | null>();
-const pending = new Map<string, { promise: Promise<string | null>; users: number }>();
+const pending = new Map<string, { promise: Promise<string | null>; users: number; abort: AbortController }>();
 
 /** The server address of the thumbnail names the file and its version (and the share link it is seen through) */
 const keyOf = (n: Node, source: FileSource) => source.thumbUrl(n);
 
+function remember(key: string, url: string | null) {
+  done.delete(key);
+  done.set(key, url);
+  for (const [old, oldUrl] of done) {
+    if (done.size <= KEEP) break;
+    done.delete(old);
+    if (oldUrl?.startsWith("blob:")) URL.revokeObjectURL(oldUrl);
+  }
+}
+
 /** A thumbnail already known for this file version: its URL, null when none can be made, undefined when not known yet */
 export function knownThumb(n: Node, source: FileSource): string | null | undefined {
-  return done.get(keyOf(n, source));
+  const key = keyOf(n, source);
+  const url = done.get(key);
+  // Used again: kept longer
+  if (url !== undefined) remember(key, url);
+  return url;
 }
 
 /**
@@ -58,15 +75,20 @@ export function browserThumb(n: Node, source: FileSource): { promise: Promise<st
   if (done.has(key)) return { promise: Promise.resolve(done.get(key)!), release: () => {} };
   let entry = pending.get(key);
   if (!entry) {
-    const e = { users: 0, promise: null as unknown as Promise<string | null> };
-    e.promise = find(n, source, () => e.users > 0).then(
-      (url) => {
-        done.set(key, url);
-        return url;
-      },
-      // Skipped because no list wanted it any more (or the server couldn't be reached): tried again next time
-      () => null,
-    ).finally(() => pending.delete(key));
+    const e = { users: 0, promise: null as unknown as Promise<string | null>, abort: new AbortController() };
+    e.promise = find(n, source, () => e.users > 0, e.abort.signal)
+      .then(
+        (url) => {
+          remember(key, url);
+          return url;
+        },
+        // Skipped or stopped because no list wanted it any more, or it failed (the server or the file couldn't be
+        // read): not remembered, so it is tried again next time
+        () => null,
+      )
+      .finally(() => {
+        if (pending.get(key) === e) pending.delete(key);
+      });
     pending.set(key, e);
     entry = e;
   }
@@ -76,15 +98,20 @@ export function browserThumb(n: Node, source: FileSource): { promise: Promise<st
   return {
     promise: e.promise,
     release: () => {
-      if (!released) e.users--;
+      if (released) return;
       released = true;
+      // Nobody waits for it any more: stop reading the file; a list that wants it later starts again
+      if (--e.users === 0) {
+        e.abort.abort();
+        if (pending.get(key) === e) pending.delete(key);
+      }
     },
   };
 }
 
-async function find(n: Node, source: FileSource, wanted: () => boolean): Promise<string | null> {
+async function find(n: Node, source: FileSource, wanted: () => boolean, signal: AbortSignal): Promise<string | null> {
   const url = source.thumbUrl(n);
-  const res = await fetch(url, { credentials: "same-origin" });
+  const res = await fetch(url, { credentials: "same-origin", signal });
   if (res.ok) {
     // Read to the end, so the browser keeps it for the image that shows it next
     await res.blob();
@@ -95,7 +122,7 @@ async function find(n: Node, source: FileSource, wanted: () => boolean): Promise
   const image = await new Promise<Blob | null>((resolve, reject) => {
     queue.push({
       wanted,
-      start: () => draw(n, source).then(resolve, () => resolve(null)),
+      start: () => draw(n, source, signal).then(resolve, reject),
       skip: () => reject(new Error("skipped")),
     });
     pump();
@@ -113,29 +140,43 @@ async function find(n: Node, source: FileSource, wanted: () => boolean): Promise
   return URL.createObjectURL(image);
 }
 
-async function draw(n: Node, source: FileSource): Promise<Blob | null> {
-  const canvas = n.mime === "application/pdf" ? await (await import("./pdfThumb")).pdfFirstPage(source.contentUrl(n), THUMB_SIDE) : await videoFrame(source.contentUrl(n));
+/** The thumbnail, or null when the file can't give one (not a readable PDF or video); fails when it couldn't be read */
+async function draw(n: Node, source: FileSource, signal: AbortSignal): Promise<Blob | null> {
+  signal.throwIfAborted();
+  const canvas =
+    n.mime === "application/pdf"
+      ? await (await import("./pdfThumb")).pdfFirstPage(source.contentUrl(n), THUMB_SIDE, signal)
+      : await videoFrame(source.contentUrl(n), signal);
   return canvas && new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
 }
 
 /** A frame a little way into the video (the very first is often black), drawn at thumbnail size */
-function videoFrame(url: string): Promise<HTMLCanvasElement | null> {
-  return new Promise((resolve) => {
+function videoFrame(url: string, signal: AbortSignal): Promise<HTMLCanvasElement | null> {
+  return new Promise((resolve, reject) => {
     const video = document.createElement("video");
     video.muted = true;
     video.preload = "metadata";
     video.playsInline = true;
     let finished = false;
-    const finish = (canvas: HTMLCanvasElement | null) => {
+    const finish = (canvas: HTMLCanvasElement | null, error?: Error) => {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
       video.removeAttribute("src");
       video.load();
-      resolve(canvas);
+      if (error) reject(error);
+      else resolve(canvas);
     };
-    const timer = setTimeout(() => finish(null), 20_000);
-    video.addEventListener("error", () => finish(null));
+    const onAbort = () => finish(null, new Error("stopped"));
+    signal.addEventListener("abort", onAbort);
+    const timer = setTimeout(() => finish(null, new Error("timed out")), 20_000);
+    // A format the browser can't play has no thumbnail; a network error is tried again next time
+    video.addEventListener("error", () => {
+      const code = video.error?.code;
+      const unplayable = code === MediaError.MEDIA_ERR_DECODE || code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
+      finish(null, unplayable ? undefined : new Error("unreadable"));
+    });
     video.addEventListener("loadedmetadata", () => {
       const d = video.duration;
       video.currentTime = Number.isFinite(d) && d > 0 ? Math.min(1, d / 10) : 0;

@@ -140,11 +140,17 @@ export async function download(source: DownloadSource, opts: { zip?: boolean; na
     tasks = tasks.filter((x) => x.id !== id);
     emit();
   };
-  // Too large to keep in the page: stop reading and let the browser download it itself (to disk, with its own progress)
-  const handOver = () => {
+  // Too large to keep in the page: stop reading and let the browser download it itself (to disk, with its own
+  // progress). A short-lived link may have expired while the first part was read: a new one is asked for first.
+  const handOver = async (fresh: boolean) => {
     controller.abort();
     drop();
-    nativeDownload(url);
+    try {
+      nativeDownload(fresh && typeof source !== "string" ? await source() : url);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("Download failed"));
+      return;
+    }
     toast.info(t("Large file: downloading directly in your browser. Check the browser's download list for progress."));
   };
   try {
@@ -163,7 +169,7 @@ export async function download(source: DownloadSource, opts: { zip?: boolean; na
     }
     if (!res.body) throw new Error(statusError(res.status));
     const total = Number(res.headers.get("content-length")) || null;
-    if (total !== null && total > IN_APP_LIMIT) return handOver();
+    if (total !== null && total > IN_APP_LIMIT) return await handOver(false);
     const name = filenameFrom(res, opts.name ?? "download");
     // The server zips multiple items or folders
     update(id, { name, total, zip: zip || res.headers.get("content-type") === "application/zip" });
@@ -188,7 +194,7 @@ export async function download(source: DownloadSource, opts: { zip?: boolean; na
         pending = 0;
       }
       // Size unknown up front (rare: e.g. a proxy that compresses responses) and over the limit: let the browser download it directly instead
-      if (!total && received > IN_APP_LIMIT) return handOver();
+      if (!total && received > IN_APP_LIMIT) return await handOver(true);
       const now = performance.now();
       // Update the display every 0.25 seconds; speed is a smoothed average over recent samples
       if (now - lastAt >= 250) {

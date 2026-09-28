@@ -43,15 +43,16 @@ export function AdminDrivesPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const tabs = useTabActions();
+  /** A check started here is running (its request answers only when the check is done) */
+  const [scanning, setScanning] = useState(false);
   // Refreshed every few seconds while a folder space is being scanned, to show its progress
   const q = useQuery({
     queryKey: ["admin-drives"],
     queryFn: api.adminDrives,
-    refetchInterval: (query) => (query.state.data?.some((d) => d.scanning) ? 3000 : false),
+    refetchInterval: (query) => (scanning || query.state.data?.some((d) => d.scanning) ? 3000 : false),
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{ t: "quota" | "members" | "delete" | "create" | "location" | "folder"; drive?: Drive } | null>(null);
-  const [scanning, setScanning] = useState(false);
   /** Read-only folder spaces can be browsed, downloaded and shared, but not changed from the web */
   const setReadOnly = async (d: Drive, readOnly: boolean) => {
     try {
@@ -66,6 +67,8 @@ export function AdminDrivesPage() {
   /** Checks a folder space for changes made on the server's folder now */
   const scanNow = async (d: Drive) => {
     setScanning(true);
+    // A big folder takes a while: the list shows how far the check is as soon as it has started
+    const started = setTimeout(refresh, 500);
     try {
       const r = await api.scanDrive(d.id);
       if (r.error) toast.error(tServer(r.error));
@@ -74,6 +77,7 @@ export function AdminDrivesPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Couldn't check the folder"));
     } finally {
+      clearTimeout(started);
       setScanning(false);
     }
   };

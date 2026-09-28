@@ -813,9 +813,17 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown, raw?: BodyInit, extraHeaders?: Record<string, string>): Promise<T> {
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  raw?: BodyInit,
+  extraHeaders?: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method,
+    signal,
     credentials: "same-origin",
     headers: {
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
@@ -860,8 +868,8 @@ export async function fetchOk(url: string, init?: RequestInit): Promise<Response
 }
 
 /** An Office file's content (.docx / .xlsx / .pptx), checked to be an Office Open XML package */
-export async function fetchOffice(url: string): Promise<ArrayBuffer> {
-  return checkOoxml(await (await fetchOk(url)).arrayBuffer());
+export async function fetchOffice(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+  return checkOoxml(await (await fetchOk(url, { signal })).arrayBuffer());
 }
 
 /** .docx / .xlsx / .pptx are really ZIP archives; check the header first so the preview and editor don't throw a cryptic error or show a blank page */
@@ -874,7 +882,8 @@ function checkOoxml(buf: ArrayBuffer) {
   throw new ApiError(t("This file isn't a valid Office document (it may be damaged, or wasn't created by Office), so it can't be opened online. Download it to check."), 0);
 }
 
-const get = <T>(p: string) => request<T>("GET", p);
+/** `signal` stops the request when its answer isn't wanted any more (React Query passes one to each query) */
+const get = <T>(p: string, signal?: AbortSignal) => request<T>("GET", p, undefined, undefined, undefined, signal);
 /** Convert filters to query parameters (skipping empty values) */
 const toParams = (o: object) =>
   Object.fromEntries(Object.entries(o).flatMap(([k, v]) => (v === undefined || v === null || v === "" ? [] : [[k, String(v)]]))) as Record<
@@ -921,10 +930,10 @@ export const api = {
   deleteAppPassword: (id: string) => request("DELETE", `/auth/app-passwords/${encodeURIComponent(id)}`),
 
   node: (id: string) => get<NodeInfo>(enc`/nodes/${id}`).then((n) => ({ ...n, drive: { ...n.drive, name: driveName(n.drive) } })),
-  children: (id: string, sort?: SortKey, order?: SortOrder, foldersOnly?: boolean) =>
-    get<Node[]>(enc`/nodes/${id}/children` + qs({ sort, order, folders_only: foldersOnly ? "true" : undefined })),
-  childrenPage: (id: string, sort: SortKey, order: SortOrder, limit: number, after?: string) =>
-    get<CursorPage<Node>>(enc`/nodes/${id}/children` + qs({ sort, order, limit: String(limit), after })),
+  children: (id: string, sort?: SortKey, order?: SortOrder, foldersOnly?: boolean, signal?: AbortSignal) =>
+    get<Node[]>(enc`/nodes/${id}/children` + qs({ sort, order, folders_only: foldersOnly ? "true" : undefined }), signal),
+  childrenPage: (id: string, sort: SortKey, order: SortOrder, limit: number, after?: string, signal?: AbortSignal) =>
+    get<CursorPage<Node>>(enc`/nodes/${id}/children` + qs({ sort, order, limit: String(limit), after }), signal),
   /** What a typed path names; `aliases` maps names as the UI language shows them to the ones paths use */
   findPath: (path: string, aliases: Record<string, string>) => post<FoundPath>("/nodes/find", { path, aliases }),
   createFolder: (parent_id: string, name: string) => post<Node>("/folders", { parent_id, name }),
@@ -940,8 +949,8 @@ export const api = {
   /** Size and number of items inside these folders (files among the ids hold nothing) */
   contents: (ids: string[]) => post<FolderContents>("/nodes/contents", { ids }),
   /** With mine, only the items the person deleted */
-  trashPage: (limit: number, after?: string, mine?: boolean) =>
-    get<CursorPage<Located>>(`/trash${qs({ limit: String(limit), after, mine: mine ? "true" : undefined })}`).then((p) => ({ ...p, items: p.items.map(localizeLocated) })),
+  trashPage: (limit: number, after?: string, mine?: boolean, signal?: AbortSignal) =>
+    get<CursorPage<Located>>(`/trash${qs({ limit: String(limit), after, mine: mine ? "true" : undefined })}`, signal).then((p) => ({ ...p, items: p.items.map(localizeLocated) })),
   restore: (ids: string[], resolutions?: Record<string, Resolution>) => post("/trash/restore", { ids, resolutions }),
   deleteForever: (ids: string[]) => post("/trash/delete", { ids }),
   emptyTrash: () => post("/trash/empty"),
@@ -1088,8 +1097,8 @@ export const api = {
   publicShare: (token: string) => get<PublicShare>(enc`/public/shares/${token}`),
   unlockShare: (token: string, password: string) => post(enc`/public/shares/${token}/unlock`, { password }),
   publicNode: (token: string, id: string) => get<{ node: Node; path: Crumb[] }>(enc`/public/shares/${token}/nodes/${id}`),
-  publicChildrenPage: (token: string, id: string, limit: number, after?: string) =>
-    get<CursorPage<Node>>(enc`/public/shares/${token}/nodes/${id}/children` + qs({ limit: String(limit), after })),
+  publicChildrenPage: (token: string, id: string, limit: number, after?: string, signal?: AbortSignal) =>
+    get<CursorPage<Node>>(enc`/public/shares/${token}/nodes/${id}/children` + qs({ limit: String(limit), after }), signal),
 };
 
 /** Source of file content URLs; signed-in files and public shares use the same components */
