@@ -182,7 +182,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
     let saved = load(&st.db).await;
     let s = settings_from(req, &saved)?;
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     store(&mut tx, &s).await?;
     let detail = if s.enabled { format!("Email notifications are sent through {}:{}", s.host, s.port) } else { "Email notifications are off".to_string() };
     logs::record_activity(&mut tx, &user, None, "settings", &detail).await?;

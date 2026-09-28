@@ -186,7 +186,7 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
     let id = new_id();
     {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         let parent = tree::folder_for(&mut tx, user, &parent_id, tree::Need::Write).await?;
         if let Some(s) = &up.share {
             check_in_share(&mut tx, s, &parent.id).await?;
@@ -595,7 +595,7 @@ async fn finalize_in_folder(st: &AppState, up: &Uploader, upload: &Upload, path:
     let _space = crate::fsops::lock_space(parent.drive()).await;
     let _w = st.write_lock.lock().await;
     let result = async {
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         // The account's upload permission, or the folder, may have changed while the upload was running
         if !user.can_write && !user.is_admin() {
             return Err(AppError::forbidden("You no longer have permission to upload files"));
@@ -662,7 +662,7 @@ async fn commit_upload(
     size: u64,
 ) -> AppResult<(String, Option<tree::BlobRef>, crate::versions::Removed)> {
     let user = &up.user;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     // The account's upload permission may have been removed while the upload was running
     if !user.can_write && !user.is_admin() {
         return Err(AppError::forbidden("You no longer have permission to upload files"));

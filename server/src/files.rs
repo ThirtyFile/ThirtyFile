@@ -313,7 +313,7 @@ async fn store_content(st: AppState, user: User, id: String, body: Bytes, hash: 
 
     let _w = st.write_lock.lock().await;
     let result = async {
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         // Re-read while holding the write lock so concurrent saves don't overwrite each other
         let node = tree::node_for(&mut tx, &user, &id, tree::Need::Write).await?;
         if base.is_some_and(|b| b != node.updated_at) {

@@ -649,7 +649,7 @@ pub async fn save(st: &AppState, user: &User, id: &str, body: &[u8], base: Optio
     let _discard = Discard(Some(tmp.clone()));
     let _space = lock_space(&drive).await;
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let node = tree::node_for(&mut tx, user, id, Need::Write).await?;
     if node.drive() != drive {
         return Err(AppError::conflict("Something changed at the same time. Try again."));
@@ -955,7 +955,7 @@ pub async fn place_folder(st: &AppState, user: &User, staged: Staging, dest_id: 
     let bytes: i64 = items.iter().filter(|(_, s)| !s.is_dir).map(|(_, s)| s.size).sum();
     let locks = lock(st, user, &[dest_id]).await?;
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let dest = tree::folder_for(&mut tx, user, dest_id, Need::Write).await?;
     locks.check(&dest)?;
     tree::check_quota(&mut tx, dest.drive(), bytes).await?;
@@ -1115,7 +1115,7 @@ fn remove_indexed(root: &Pinned, paths: Vec<(String, bool)>) {
 /// The index side of a move; returns content no longer used and (for items now in the content store) what to remove
 /// from disk (paths below the space's folder)
 async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], placed: &Placed) -> AppResult<(Vec<BlobRef>, Vec<(String, bool)>)> {
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let top = &nodes[0];
     // Everything must still be as it was when the content was copied: items added to a folder of the content store
     // meanwhile would be left behind
@@ -1224,7 +1224,7 @@ pub async fn copy_across(st: &AppState, user: &User, dest: &Node, plans: Vec<Vec
 }
 
 async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: &[Node], placed: &Placed) -> AppResult<Vec<BlobRef>> {
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let top = &nodes[0];
     if tree::get_node(&mut tx, &dest.id).await?.is_none_or(|d| d.trashed_at.is_some()) {
         return Err(AppError::not_found("The destination folder no longer exists"));

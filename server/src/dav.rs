@@ -770,7 +770,7 @@ async fn store_content(st: &AppState, user: &User, parent: &Node, name: &str, tm
     let staged = tree::stage_blob(st, parent.drive(), hash.clone(), size, tmp.to_path_buf()).await?;
     let _w = st.write_lock.lock().await;
     let result = async {
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         // Looked at again under the write lock: the folder or the file may have changed meanwhile
         let folder = tree::folder_for(&mut tx, user, &parent.id, Need::Write).await?;
         if folder.in_folder_space() || folder.drive() != parent.drive() {
@@ -839,7 +839,7 @@ async fn store_in_folder(st: &AppState, user: &User, parent: &Node, name: &str, 
     let _space = fsops::lock_space(parent.drive()).await;
     let _w = st.write_lock.lock().await;
     let result = async {
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         let folder = tree::folder_for(&mut tx, user, &parent.id, Need::Write).await?;
         if folder.drive() != parent.drive() {
             return Err(AppError::conflict("Something changed at the same time. Try again."));

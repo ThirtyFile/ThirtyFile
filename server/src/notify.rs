@@ -162,7 +162,7 @@ pub async fn check(st: &AppState) -> AppResult<usize> {
     let mut told = 0;
     {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         told += check_spaces(&mut tx, &mut emails).await?;
         told += check_expiring(&mut tx, &mut emails).await?;
         let ts = now();
@@ -284,7 +284,7 @@ pub async fn link_upload(st: &AppState, owner: i64, share_id: &str, file: &crate
     let Some(folder_id) = file.parent_id.clone() else { return Ok(()) };
     let emails = {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         let ts = now();
         let counted = sqlx::query(
             "UPDATE notifications SET data = json_set(data, '$.count', COALESCE(json_extract(data, '$.count'), 1) + 1, '$.file', ?1), created_at = ?2
@@ -620,7 +620,7 @@ pub async fn update_settings(State(st): State<AppState>, user: User, Json(req): 
     }
     {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         if let Some(e) = &email {
             sqlx::query("UPDATE users SET email = ? WHERE id = ?").bind(e).bind(user.id).execute(&mut *tx).await?;
         }

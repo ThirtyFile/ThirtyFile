@@ -226,7 +226,7 @@ pub async fn purge_nodes(conn: &mut SqliteConnection, ids: &str) -> AppResult<Ve
 pub async fn prune(st: &AppState) -> AppResult<usize> {
     let policy = Policy::of(st);
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let mut rows: Vec<(Option<String>, Option<String>, Option<String>)> =
         sqlx::query_as("DELETE FROM node_versions WHERE node_id NOT IN (SELECT id FROM nodes) RETURNING blob_hash, drive_id, fs_path")
             .fetch_all(&mut *tx)
@@ -441,7 +441,7 @@ async fn restore_stored(st: &AppState, user: &User, node: &Node, tmp: PathBuf) -
     };
     let _w = st.write_lock.lock().await;
     let result = async {
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         let current = tree::node_for(&mut tx, user, &node.id, Need::Write).await?;
         if current.in_folder_space() || current.drive() != node.drive() {
             return Err(AppError::conflict("Something changed at the same time. Try again."));
@@ -478,7 +478,7 @@ async fn restore_in_folder(st: &AppState, user: &User, node: &Node, tmp: &Path, 
     let _space = fsops::lock_space(node.drive()).await;
     let _w = st.write_lock.lock().await;
     let result = async {
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         let current = tree::node_for(&mut tx, user, &node.id, Need::Write).await?;
         if current.drive() != node.drive() || !current.in_folder_space() {
             return Err(AppError::conflict("Something changed at the same time. Try again."));

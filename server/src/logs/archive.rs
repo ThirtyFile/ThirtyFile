@@ -75,7 +75,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
     }
     {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         set_setting(&mut tx, "log_settings", &serde_json::to_string(&s).unwrap()).await?;
         let days = |d: i64| if d == 0 { "never cleaned up".to_string() } else { plural(d, "day", "days") };
         let detail = format!(
@@ -99,7 +99,7 @@ pub async fn archive_now(State(st): State<AppState>, Admin(user): Admin) -> AppR
     let summary = run_archive(&st).await?;
     {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         record_activity(&mut tx, &user, None, "log_archive", &summary.describe()).await?;
         tx.commit().await?;
     }
@@ -131,7 +131,7 @@ pub async fn download_archive(State(st): State<AppState>, _: Admin, headers: Hea
 
 pub async fn delete_archive(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<i64>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let (file, rows): (String, i64) =
         sqlx::query_as("SELECT file, rows FROM log_archives WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?.ok_or_else(|| AppError::not_found("Archive not found"))?;
     sqlx::query("DELETE FROM log_archives WHERE id = ?").bind(id).execute(&mut *tx).await?;
@@ -272,7 +272,7 @@ pub async fn run_archive(st: &AppState) -> AppResult<ArchiveSummary> {
         }
     }
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     set_setting(&mut tx, "log_archived_at", &now().to_string()).await?;
     tx.commit().await?;
     Ok(sum)
@@ -332,7 +332,7 @@ async fn archive_batch(st: &AppState, kind: &str, cutoff: i64) -> AppResult<i64>
     .map_err(AppError::internal)??;
 
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {kind} WHERE id <= ? AND at < ?"))).bind(max_id).bind(cutoff).execute(&mut *tx).await?;
     sqlx::query("INSERT INTO log_archives (kind, from_at, to_at, rows, bytes, file, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
         .bind(kind)

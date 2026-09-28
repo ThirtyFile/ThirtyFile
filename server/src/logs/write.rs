@@ -86,7 +86,7 @@ pub fn spawn_writer(st: AppState, mut rx: tokio::sync::mpsc::Receiver<LogEvent>)
 async fn write_batch(st: &AppState, batch: &[LogEvent]) {
     let _w = st.write_lock.lock().await;
     let written: Result<(), sqlx::Error> = async {
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         for e in batch {
             match e {
                 LogEvent::ShareAccess { at, share_id, owner_id, node_id, node_name, event, ip, user_agent } => {

@@ -72,7 +72,7 @@ pub async fn forgot(State(st): State<AppState>, ConnectInfo(addr): ConnectInfo<S
         let ts = now();
         {
             let _w = st.write_lock.lock().await;
-            let mut tx = st.db.begin().await?;
+            let mut tx = crate::db::begin_write(&st.db).await?;
             // Only the newest link works
             sqlx::query("DELETE FROM password_resets WHERE user_id = ? OR expires_at < ?").bind(id).bind(ts).execute(&mut *tx).await?;
             sqlx::query("INSERT INTO password_resets (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)")
@@ -139,7 +139,7 @@ pub async fn reset(State(st): State<AppState>, ConnectInfo(addr): ConnectInfo<So
     let hash = hash_password(req.new).await?;
     {
         let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         sqlx::query("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?").bind(hash).bind(id).execute(&mut *tx).await?;
         sqlx::query("DELETE FROM password_resets WHERE user_id = ?").bind(id).execute(&mut *tx).await?;
         auth::sign_out_everywhere(&mut tx, id, None).await?;
@@ -173,7 +173,7 @@ mod tests {
         let mut smtp = crate::mail::tests::settings(1);
         smtp.enabled = true;
         {
-            let mut tx = env.st.db.begin().await.unwrap();
+            let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
             crate::mail::store(&mut tx, &smtp).await.unwrap();
             tx.commit().await.unwrap();
         }

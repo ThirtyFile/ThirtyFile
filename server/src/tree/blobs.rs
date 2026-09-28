@@ -177,7 +177,7 @@ async fn purge_detached(st: &AppState) -> AppResult<()> {
         let mut total = 0;
         loop {
             let _w = st.write_lock.lock().await;
-            let mut tx = st.db.begin().await?;
+            let mut tx = crate::db::begin_write(&st.db).await?;
             // Leaves first (files, then folders once they're empty): a node's children must go before it
             let deleted: Vec<(String, Option<String>)> = sqlx::query_as(
                 "DELETE FROM nodes WHERE id IN (
@@ -189,10 +189,7 @@ async fn purge_detached(st: &AppState) -> AppResult<()> {
             .fetch_all(&mut *tx)
             .await?;
             if deleted.is_empty() {
-                // Ended before the write lock is released: the DELETE took SQLite's write lock even though it deleted
-                // nothing, and a dropped transaction only rolls back later, in the background. Meanwhile the next
-                // writer's transaction, which reads first, couldn't start writing ("database is locked" at once:
-                // SQLite doesn't wait for a lock while upgrading a read transaction)
+                // Ended before the write lock is released (see `db::settle`)
                 tx.rollback().await?;
                 break;
             }

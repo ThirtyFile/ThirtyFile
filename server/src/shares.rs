@@ -296,7 +296,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     };
     let token = random_token(SHARE_TOKEN_LEN);
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let node = tree::node_for(&mut tx, &user, &req.node_id, tree::Need::Share).await?;
     if node.parent_id.is_none() {
         return Err(AppError::bad_request("The root folder can't be shared"));
@@ -396,7 +396,7 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
         _ => None,
     };
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let (old_hash, node) = manageable_share(&mut tx, &user, &id).await?;
     let (was_upload, was_drop, was_download): (bool, bool, bool) =
         sqlx::query_as("SELECT allow_upload, drop_only, allow_download FROM shares WHERE id = ?").bind(&id).fetch_one(&mut *tx).await?;
@@ -457,7 +457,7 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
 
 pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
-    let mut tx = st.db.begin().await?;
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let (_, node) = manageable_share(&mut tx, &user, &id).await?;
     sqlx::query("DELETE FROM shares WHERE id = ?").bind(&id).execute(&mut *tx).await?;
     logs::record_activity(&mut tx, &user, Some(&node), "share_delete", &format!("/share/{id}")).await?;
