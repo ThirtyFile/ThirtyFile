@@ -582,15 +582,19 @@ pub async fn change_password(
     let _w = st.write_lock.lock().await;
     let mut tx = st.db.begin().await?;
     sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?").bind(new_hash).bind(user.id).execute(&mut *tx).await?;
-    // Sign out other devices
-    sqlx::query("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?")
-        .bind(user.id)
-        .bind(current_token)
-        .execute(&mut *tx)
-        .await?;
+    // Other devices and app passwords stop working: whoever may have known the old password is locked out
+    sign_out_everywhere(&mut tx, user.id, Some(&current_token)).await?;
     tx.commit().await?;
     logs::record_login(&st, Some(user.id), &user.username, "password_change", &client_ip(&st, addr, &headers), &headers);
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Ends a user's sign-in sessions (all but the one whose token hash is `keep`) and removes their app passwords: after
+/// the password changed or was reset, or two-factor sign-in was reset
+pub async fn sign_out_everywhere(conn: &mut sqlx::SqliteConnection, user_id: i64, keep: Option<&str>) -> AppResult<()> {
+    sqlx::query("DELETE FROM sessions WHERE user_id = ? AND token_hash IS NOT ?").bind(user_id).bind(keep).execute(&mut *conn).await?;
+    sqlx::query("DELETE FROM app_passwords WHERE user_id = ?").bind(user_id).execute(&mut *conn).await?;
+    Ok(())
 }
 
 /// Checks the signed-in user's current password before a sensitive change (changing it, two-factor settings).

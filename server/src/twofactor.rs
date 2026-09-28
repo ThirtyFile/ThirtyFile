@@ -193,6 +193,27 @@ async fn check_code(st: &AppState, user_id: i64, code: &str) -> AppResult<Option
     Ok(use_recovery_code(st, user_id, code).await?.then_some(Accepted::Recovery))
 }
 
+/// Before a sensitive change by a signed-in user (creating an app password): when their account has two-factor
+/// sign-in, a code from the app or a recovery code must come with it. Limited like codes at sign-in.
+pub async fn confirm_code(st: &AppState, user_id: i64, code: Option<&str>) -> AppResult<()> {
+    let (secret,): (Option<String>,) = sqlx::query_as("SELECT totp_secret FROM users WHERE id = ?").bind(user_id).fetch_one(&st.db).await?;
+    if secret.is_none() {
+        return Ok(());
+    }
+    let Some(code) = code.filter(|c| !c.trim().is_empty()) else {
+        return Err(AppError::bad_request("Enter a code from your authenticator app").with_code("two_factor_code"));
+    };
+    let key = format!("2fa:{user_id}");
+    if !auth::begin_attempt(st, &key, ACCOUNT_LIMIT) {
+        return Err(too_many());
+    }
+    if check_code(st, user_id, code).await?.is_none() {
+        return Err(AppError::bad_request("Wrong code. Check that the time on your phone is right, and try again.").with_code("two_factor_code"));
+    }
+    auth::attempt_succeeded(st, &key);
+    Ok(())
+}
+
 /// Turns two-factor sign-in on with a confirmed secret, returning new recovery codes
 async fn turn_on(st: &AppState, user_id: i64, secret: &str, step: i64) -> AppResult<Vec<String>> {
     let codes = new_recovery_codes();
@@ -525,6 +546,8 @@ pub async fn admin_reset(
         {
             let _w = st.write_lock.lock().await;
             let mut conn = st.db.acquire().await?;
+            // Whatever may have been signed in with the lost phone stops working: signed-in devices and app passwords
+            crate::auth::sign_out_everywhere(&mut conn, user_id, None).await?;
             logs::record_activity(&mut conn, &me, None, "user_update", &format!("{username}: reset two-factor sign-in")).await?;
         }
         logs::record_login(&st, Some(user_id), &username, "2fa_reset", &client_ip(&st, addr, &headers), &headers);
@@ -533,7 +556,7 @@ pub async fn admin_reset(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{auth::LoginReq, testutil};
 
@@ -566,6 +589,11 @@ mod tests {
         let Json(v) = enable(State(env.st.clone()), user.clone(), addr(), HeaderMap::new(), Json(EnableReq { code: now_code })).await.unwrap();
         let codes: Vec<String> = serde_json::from_value(v["recovery_codes"].clone()).unwrap();
         (secret, codes)
+    }
+
+    /// Turns two-factor sign-in on for `user`; returns the recovery codes
+    pub(crate) async fn set_up_for(env: &testutil::TestEnv, user: &User) -> Vec<String> {
+        set_up(env, user).await.1
     }
 
     fn next_code(secret: &[u8]) -> String {
@@ -724,8 +752,8 @@ mod tests {
         use axum::extract::FromRequestParts;
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let _ = set_up(&env, &amy).await;
-        let req = serde_json::from_value(json!({ "name": "Backup", "scope": "read" })).unwrap();
+        let (_, codes) = set_up(&env, &amy).await;
+        let req = serde_json::from_value(json!({ "name": "Backup", "scope": "read", "password": testutil::password(), "code": codes[0] })).unwrap();
         let Json(v) = crate::tokens::create(State(env.st.clone()), amy.clone(), addr(), HeaderMap::new(), Json(req)).await.unwrap();
         let token = v["token"].as_str().unwrap();
         let req = axum::http::Request::builder().header(axum::http::header::AUTHORIZATION, format!("Bearer {token}")).body(()).unwrap();

@@ -50,6 +50,8 @@
         <p>Scripts, backup tools and file clients can't sign in through the sign-in page. Give each one its own app password under <strong>App passwords</strong>. This is also the way for accounts that sign in with Microsoft, Google or GitHub, which have no password of their own.</p>
         <ul>
           <li>Give it a <strong>name</strong> that says where it's used, choose whether it may only <strong>read files</strong> or also <strong>change</strong> them, and when it <strong>expires</strong>.</li>
+          <li>Enter your current password, and with two-factor sign-in a code from your app. Accounts that sign in with Microsoft, Google or GitHub have no password to enter: they create app passwords within 10 minutes of signing in.</li>
+          <li>You get a notification for every app password created for your account, so one you didn't create doesn't go unnoticed.</li>
           <li>The app password is shown once, right after you create it. Copy it then: only a fingerprint of it is kept, so nobody can show it again.</li>
           <li>The list shows when and from which address each one was last used. <strong>Remove</strong> one and whatever uses it stops working right away.</li>
         </ul>
@@ -58,7 +60,7 @@
 curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;file id&gt;/content?download=1"</code></pre>
         <p>With an app password you can also open your files as a drive in File Explorer, Finder or your phone's Files app: see <a href="webdav.html">Mapping it as a drive</a>.</p>
         <p>App passwords work for files only: browsing, searching, downloading, uploading, and organising files and folders. They can't change your password, create app passwords, link sign-in methods, share links or use the Control panel, and they never get a cookie. One that may only read files is refused for anything that changes something.</p>
-        <div class="note">Signing out devices and changing your password don't affect app passwords. Remove the ones you no longer trust. An app password stops working when its account is disabled or deleted. Wrong app passwords count towards the same limit as wrong passwords: after 30 from one address, that address has to wait 15 minutes.</div>
+        <div class="note">Changing your password removes all your app passwords, as does an administrator resetting your password or your two-factor sign-in: create new ones afterwards. Signing out devices doesn't affect them; remove the ones you no longer trust. An app password stops working when its account is disabled or deleted. Wrong app passwords count towards the same limit as wrong passwords: after 30 from one address, that address has to wait 15 minutes.</div>
 
         <h2 id="history">Sign-in history</h2>
         <p><strong>My sign-in history</strong> shows your sign-ins, failed attempts, sign-outs, password changes, and app passwords created, removed or used with a wrong secret, with the address and browser of each.</p>

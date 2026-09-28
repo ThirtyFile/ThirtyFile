@@ -41,6 +41,13 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
   const me = useMe();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["app-passwords"], queryFn: api.appPasswords });
+  // Making one asks for the password again (and a code with two-factor sign-in); accounts without a password must
+  // have signed in recently instead
+  const tf = useQuery({ queryKey: ["two-factor"], queryFn: api.twoFactor });
+  const hasPassword = tf.data?.has_password ?? true;
+  const needsCode = !!tf.data?.enabled;
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [scope, setScope] = useState<"read" | "write">("read");
   const [days, setDays] = useState(90);
@@ -48,10 +55,20 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
   const [created, setCreated] = useState<{ name: string; token: string } | null>(null);
 
   const create = useMutation({
-    mutationFn: () => api.createAppPassword({ name: name.trim(), scope, expires_days: days || undefined }),
+    mutationFn: () =>
+      api.createAppPassword({
+        name: name.trim(),
+        scope,
+        expires_days: days || undefined,
+        password: hasPassword ? password : undefined,
+        code: needsCode ? code.trim() : undefined,
+      }),
     onSuccess: (r) => {
       setCreated({ name: r.app_password.name, token: r.token });
       setName("");
+      setPassword("");
+      setCode("");
+      qc.invalidateQueries({ queryKey: ["notifications"] });
       qc.invalidateQueries({ queryKey: ["app-passwords"] });
     },
   });
@@ -63,9 +80,10 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
     },
     onError: (e) => toast.error(e.message),
   });
+  const ready = !!name.trim() && (!hasPassword || !!password) && (!needsCode || !!code.trim());
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (name.trim() && !create.isPending) create.mutate();
+    if (ready && !create.isPending) create.mutate();
   };
 
   return (
@@ -112,6 +130,22 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
               <Label htmlFor="ap-name">{t("Name")}</Label>
               <Input id="ap-name" value={name} maxLength={60} placeholder={t("For example: Nightly backup")} onChange={(e) => setName(e.target.value)} autoComplete="off" />
             </div>
+            {hasPassword ? (
+              <div className="flex flex-wrap gap-2">
+                <div className="grid min-w-40 flex-1 gap-1.5">
+                  <Label htmlFor="ap-password">{t("Your current password")}</Label>
+                  <Input id="ap-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+                </div>
+                {needsCode && (
+                  <div className="grid w-40 gap-1.5">
+                    <Label htmlFor="ap-code">{t("Code from your app")}</Label>
+                    <Input id="ap-code" value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">{t("For your security, app passwords can only be created within 10 minutes of signing in.")}</p>
+            )}
             <div className="flex flex-wrap items-end gap-2">
               <div className="grid gap-1.5">
                 <Label htmlFor="ap-scope">{t("Access")}</Label>
@@ -130,7 +164,7 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
                   ))}
                 </select>
               </div>
-              <Button type="submit" className="ml-auto" disabled={!name.trim() || create.isPending}>
+              <Button type="submit" className="ml-auto" disabled={!ready || create.isPending}>
                 {create.isPending ? <Loader2Icon className="animate-spin" /> : <PlusIcon />}
                 {t("Create")}
               </Button>

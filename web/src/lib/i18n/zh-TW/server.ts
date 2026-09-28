@@ -876,4 +876,8 @@ export default {
   "Email notifications are off": "不以電子郵件寄送通知",
   // Paths typed into the address bar (paths.rs)
   "Nothing was found at this path": "這個路徑找不到任何項目",
+  // Creating an app password (tokens.rs, twofactor.rs)
+  "Enter a code from your authenticator app": "請輸入驗證器 App 上的驗證碼",
+  "Enter your current password": "請輸入目前的密碼",
+  "Sign out and sign in again, then create the app password within 10 minutes": "請登出後重新登入，並在 10 分鐘內建立應用程式密碼",
 } satisfies Record<string, string>;

@@ -7,6 +7,7 @@
 //!   files" administrators) is almost full. Told once, and again only after the space had room again
 //! - `access_expiring`: access given to them ends within three days. Not told when the access was given with that
 //!   short an expiry in the first place: the `shared` notification already said when it ends
+//! - `app_password`: an app password was made for their account (so one made by someone else doesn't go unnoticed)
 //!
 //! Each person can turn each kind off, in the app and by email separately. Emails are sent in the person's interface
 //! language and time zone (the ones they last used the app with), after the change that caused them is saved.
@@ -29,7 +30,7 @@ use crate::{
     util::{format_bytes, now},
 };
 
-pub const KINDS: [&str; 3] = ["shared", "space_full", "access_expiring"];
+pub const KINDS: [&str; 4] = ["shared", "space_full", "access_expiring", "app_password"];
 /// A space is almost full from this share of its size (percent)…
 const FULL_PERCENT: i64 = 90;
 /// …and has room again below this one, after which filling it up is told again
@@ -384,6 +385,23 @@ pub fn render(n: &Notice, zh: bool, tz_offset: i64, site: &str, base_url: &str) 
                 (
                     format!("The space “{name}” is almost full"),
                     format!("“{name}” uses {used} of {quota} ({percent}%). Once it is full, no more files can be added. Delete files you no longer need and empty the trash, or ask an administrator for more space.\n"),
+                )
+            }
+        }
+        ("app_password", _) => {
+            let ip = d["ip"].as_str().unwrap_or_default();
+            let (read_only, name) = (d["scope"].as_str() == Some("read"), d["name"].as_str().unwrap_or_default());
+            if zh {
+                let access = if read_only { "只能讀取檔案" } else { "可讀取及變更檔案" };
+                (
+                    format!("你的帳號建立了應用程式密碼「{name}」"),
+                    format!("你的帳號剛建立了應用程式密碼「{name}」（{access}），來源位址 {ip}。\n\n如果不是你建立的，請在帳號選單的「應用程式密碼」中移除它，並變更你的密碼。\n"),
+                )
+            } else {
+                let access = if read_only { "read files only" } else { "read and change files" };
+                (
+                    format!("An app password “{name}” was created for your account"),
+                    format!("The app password “{name}” ({access}) was just created for your account, from {ip}.\n\nIf you didn't create it, remove it under App passwords in the account menu and change your password.\n"),
                 )
             }
         }
