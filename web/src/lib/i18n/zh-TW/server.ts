@@ -4,6 +4,7 @@ export default {
   "Please sign in": "請先登入",
   "A server error occurred": "伺服器發生錯誤",
   "An item with the same name already exists": "已有同名的項目",
+  "This already exists": "這筆資料已存在",
   "Name can't be blank": "名稱不可為空白",
   "Name is too long": "名稱過長",
   "Invalid name": "名稱無效",
