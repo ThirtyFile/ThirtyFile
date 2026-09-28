@@ -60,7 +60,7 @@ pub async fn env() -> TestEnv {
         login_failures: Default::default(),
         detached_purge: Default::default(),
         thumb_permits: tokio::sync::Semaphore::new(2),
-        thumb_decode_bytes: crate::files::MAX_THUMB_DECODE_BYTES,
+        thumb_decode_bytes: crate::thumbnails::MAX_THUMB_DECODE_BYTES,
         system: std::sync::RwLock::new(system),
         blob_guard: Default::default(),
         logs: std::sync::RwLock::new(Default::default()),
@@ -226,4 +226,10 @@ pub fn write_old(path: &std::path::Path, content: &[u8]) {
     std::fs::write(path, content).unwrap();
     let f = std::fs::File::options().write(true).open(path).unwrap();
     f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(60)).unwrap();
+}
+
+/// Where the local storage keeps a content
+pub fn blob_file(env: &TestEnv, content: &[u8]) -> std::path::PathBuf {
+    let hash = crate::util::sha256_hex(content);
+    env.dir.join("blobs").join(&hash[0..2]).join(&hash[2..4]).join(&hash)
 }

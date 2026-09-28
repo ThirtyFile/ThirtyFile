@@ -57,8 +57,8 @@ pub struct Inner {
     pub archive_lock: tokio::sync::Mutex<()>,
     /// Last logged page view per "share|address": repeated views within a minute aren't logged again
     pub share_views: Mutex<HashMap<String, i64>>,
-    /// Selections waiting to be downloaded through a short-lived link: link token → selection (see `files::store_download_link`)
-    pub download_links: Mutex<HashMap<String, crate::files::DownloadLink>>,
+    /// Selections waiting to be downloaded through a short-lived link: link token → selection (see `downloads::store_download_link`)
+    pub download_links: Mutex<HashMap<String, crate::downloads::DownloadLink>>,
     /// Compress and extract tasks running or recently finished, by id
     pub jobs: Mutex<HashMap<String, crate::archive::Job>>,
     /// Purge of deleted spaces' content: (running, asked to run again)

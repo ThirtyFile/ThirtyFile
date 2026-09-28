@@ -168,10 +168,10 @@ pub async fn compress(State(st): State<AppState>, user: User, Json(req): Json<Co
     if ids.is_empty() {
         return Err(AppError::bad_request("Select items to compress"));
     }
-    if ids.len() > crate::files::MAX_DOWNLOAD_ITEMS {
+    if ids.len() > crate::downloads::MAX_DOWNLOAD_ITEMS {
         return Err(AppError::bad_request(format!(
             "At most {} items can be compressed at once. Compress the folder they are in, or select fewer items.",
-            crate::files::MAX_DOWNLOAD_ITEMS
+            crate::downloads::MAX_DOWNLOAD_ITEMS
         )));
     }
     // Checked now, so a problem is reported at once rather than as a failed task
@@ -191,7 +191,7 @@ pub async fn compress(State(st): State<AppState>, user: User, Json(req): Json<Co
 }
 
 /// Like Windows: one item gives "name.zip" (without a file's own extension), several are named after their folder
-fn zip_name(plan: &crate::files::ZipPlan, roots: &[Node]) -> String {
+fn zip_name(plan: &crate::downloads::ZipPlan, roots: &[Node]) -> String {
     let name = match roots {
         [one] if !one.is_folder() && !plan.root_names.is_empty() => format!("{}.zip", split_name(&plan.root_names[0], false).0),
         _ => plan.file_name("Archive"),
@@ -200,7 +200,7 @@ fn zip_name(plan: &crate::files::ZipPlan, roots: &[Node]) -> String {
 }
 
 async fn run_compress(st: AppState, user: User, job: String, roots: Vec<Node>, dest_id: String, offset: i64) -> AppResult<(String, String)> {
-    let plan = crate::files::zip_plan(&st, roots.clone(), offset).await?;
+    let plan = crate::downloads::zip_plan(&st, roots.clone(), offset).await?;
     let name = zip_name(&plan, &roots);
     let total: u64 = plan.items.iter().map(|it| it.size).sum();
     update(&st, &job, |j| j.total = total);

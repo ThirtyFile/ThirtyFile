@@ -16,10 +16,12 @@ use sqlx::SqliteConnection;
 use crate::{
     auth::{self, User, cookie_header, hash_password, verify_password},
     error::{AppError, AppResult},
-    files::{self, DownloadQuery, node_blob, serve_blob},
+    downloads::{self, DownloadQuery},
+    files::{self, node_blob, serve_blob},
     logs::{self, Visitor, record_share_access},
     nodes::{ListQuery as ChildrenQuery, Listing, list_children},
     state::AppState,
+    thumbnails,
     tree::{self, Crumb, Node, Role},
     upload,
     util::{now, random_token},
@@ -791,7 +793,7 @@ pub async fn public_thumbnail(
     let (share, root) = open_share(&st, &token, &headers).await?;
     ensure_visible(&share)?;
     let node = shared_node(&st, &share, &root, &id).await?;
-    files::thumbnail_response(&st, &headers, &node).await
+    thumbnails::thumbnail_response(&st, &headers, &node).await
 }
 
 /// The items to download, each of which must be within the share
@@ -812,7 +814,7 @@ pub async fn public_download(
     visitor: Visitor,
 ) -> AppResult<Response> {
     let (share, root) = open_share(&st, &token, &headers).await?;
-    let ids = files::download_ids(q.ids.split(','))?;
+    let ids = downloads::download_ids(q.ids.split(','))?;
     let roots = shared_nodes(&st, &share, &root, &ids).await?;
     serve_public_download(&st, &token, share, roots, q.tz.unwrap_or(0), &headers, &visitor).await
 }
@@ -823,14 +825,14 @@ pub async fn create_public_download_link(
     State(st): State<AppState>,
     Path(token): Path<String>,
     headers: HeaderMap,
-    Json(req): Json<files::DownloadReq>,
+    Json(req): Json<downloads::DownloadReq>,
 ) -> AppResult<Json<Value>> {
     let (share, root) = open_share(&st, &token, &headers).await?;
     ensure_download(&share)?;
-    let ids = files::download_ids(&req.ids)?;
+    let ids = downloads::download_ids(&req.ids)?;
     ensure_quota_left(&share)?;
     shared_nodes(&st, &share, &root, &ids).await?;
-    let link = files::store_download_link(&st, format!("share:{token}"), ids, req.tz.unwrap_or(0));
+    let link = downloads::store_download_link(&st, format!("share:{token}"), ids, req.tz.unwrap_or(0));
     Ok(Json(json!({ "url": format!("/api/public/shares/{token}/download/{link}") })))
 }
 
@@ -841,7 +843,7 @@ pub async fn public_download_by_link(
     headers: HeaderMap,
     visitor: Visitor,
 ) -> AppResult<Response> {
-    let (ids, tz) = files::download_link(&st, &format!("share:{token}"), &link)?;
+    let (ids, tz) = downloads::download_link(&st, &format!("share:{token}"), &link)?;
     let (share, root) = open_share(&st, &token, &headers).await?;
     let roots = shared_nodes(&st, &share, &root, &ids).await?;
     serve_public_download(&st, &token, share, roots, tz, &headers, &visitor).await
@@ -870,7 +872,7 @@ async fn serve_public_download(
     // reached doesn't use up the link
     let mut res = match roots.as_slice() {
         [one] if !one.is_folder() => serve_blob(st, headers, node_blob(one)?, true).await?,
-        _ => files::zip_response(st, roots.clone(), tz).await?,
+        _ => downloads::zip_response(st, roots.clone(), tz).await?,
     };
     if !continuation {
         count_download(st, &share).await?;
@@ -1085,7 +1087,7 @@ mod tests {
                     roots.push(tree::get_node(&mut c, id).await.unwrap().unwrap());
                 }
                 drop(c);
-                let res = files::zip_response(&st, roots, -480).await.unwrap();
+                let res = downloads::zip_response(&st, roots, -480).await.unwrap();
                 let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
                 String::from_utf8_lossy(&body).into_owned()
             }
@@ -1176,7 +1178,7 @@ mod tests {
         let Json(other) = share(None).await.unwrap();
         let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
         let make = |token: String, ids: Vec<&String>| {
-            let req = files::DownloadReq { ids: ids.into_iter().cloned().collect(), tz: None };
+            let req = downloads::DownloadReq { ids: ids.into_iter().cloned().collect(), tz: None };
             create_public_download_link(State(env.st.clone()), Path(token), HeaderMap::new(), Json(req))
         };
         let get = |token: String, url: &str| {

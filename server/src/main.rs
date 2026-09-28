@@ -3,6 +3,7 @@ mod archive;
 mod auth;
 mod dav;
 mod db;
+mod downloads;
 mod drives;
 mod error;
 mod files;
@@ -29,6 +30,7 @@ mod state;
 mod storage;
 #[cfg(test)]
 mod testutil;
+mod thumbnails;
 mod tokens;
 mod tree;
 mod twofactor;
@@ -374,7 +376,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     let memory = util::memory_limit();
     let small = memory.is_some_and(|m| m < 2 * 1024 * 1024 * 1024);
     let thumb_jobs = cfg.thumbnail_jobs.unwrap_or(if small { 1 } else { 2 });
-    let thumb_decode_bytes = memory.map_or(files::MAX_THUMB_DECODE_BYTES, |m| (m / 8).clamp(64 * 1024 * 1024, files::MAX_THUMB_DECODE_BYTES));
+    let thumb_decode_bytes = memory.map_or(thumbnails::MAX_THUMB_DECODE_BYTES, |m| (m / 8).clamp(64 * 1024 * 1024, thumbnails::MAX_THUMB_DECODE_BYTES));
     tracing::info!(
         "Memory: {}, {thumb_jobs} thumbnail(s) at a time, {} MB database cache per connection",
         memory.map_or("unknown".to_string(), util::format_bytes_u64),
@@ -497,7 +499,7 @@ fn untimed() -> Router<AppState> {
         .route("/files/{id}/content", put(files::save_content).layer(DefaultBodyLimit::max(files::MAX_EDIT_BYTES)))
         .route(
             "/files/{id}/thumbnail",
-            get(files::thumbnail).merge(put(files::upload_thumbnail).layer(DefaultBodyLimit::max(files::MAX_THUMB_UPLOAD))),
+            get(thumbnails::thumbnail).merge(put(thumbnails::upload_thumbnail).layer(DefaultBodyLimit::max(thumbnails::MAX_THUMB_UPLOAD))),
         )
         .route("/files/{id}/versions/{version}/restore", post(versions::restore))
         .route("/uploads", post(upload::create).options(upload::options))
@@ -548,8 +550,8 @@ fn file_api() -> Router<AppState> {
         .route("/files/{id}/content", get(files::content))
         .route("/files/{id}/versions", get(versions::list))
         .route("/files/{id}/versions/{version}/content", get(versions::content))
-        .route("/download", get(files::download).post(files::create_download_link))
-        .route("/download/{link}", get(files::download_by_link))
+        .route("/download", get(downloads::download).post(downloads::create_download_link))
+        .route("/download/{link}", get(downloads::download_by_link))
         .route("/archive/compress", post(archive::compress))
         .route("/archive/extract", post(archive::extract))
         .route("/jobs/{id}", get(archive::get))
