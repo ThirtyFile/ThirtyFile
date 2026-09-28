@@ -163,7 +163,7 @@ async fn copy_one(cx: &Ctx<'_>, dst: &Arc<dyn Storage>, hash: &str, size: i64, f
 }
 
 /// Lists content at a location for deletion after `delay` seconds, unless it is used by then (an earlier date stays)
-async fn defer_removal(st: &AppState, hash: &str, location: &str, delay: i64) -> AppResult<()> {
+pub(super) async fn defer_removal(st: &AppState, hash: &str, location: &str, delay: i64) -> AppResult<()> {
     let _w = st.write_lock.lock().await;
     sqlx::query(
         "INSERT INTO pending_blob_deletes (hash, location_id, created_at, attempts, last_error) VALUES (?, ?, ?, 0, 'deferred')
@@ -268,7 +268,7 @@ async fn switch(cx: &Ctx<'_>) -> AppResult<bool> {
         .execute(&mut *tx)
         .await?;
         sqlx::query("UPDATE drives SET location_id = ? WHERE id = ?").bind(&job.to_location).bind(&job.drive_id).execute(&mut *tx).await?;
-        super::finish(&mut tx, cx).await?;
+        super::finish(&mut tx, cx, false, None).await?;
         Ok(true)
     }
     .await;

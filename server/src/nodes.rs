@@ -52,6 +52,8 @@ pub struct NodeInfo {
     offline: Option<String>,
     /// A read-only space: browse, download and share only
     read_only: bool,
+    /// The space is being moved to another storage location, and is read-only until the move finishes
+    moving: bool,
 }
 
 /// The path visible to the user: space members see the full path; people with shared access only see from the shared folder down
@@ -86,7 +88,7 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
         };
         st.location_offline(&location)
     };
-    let read_only = drive.read_only;
+    let (read_only, moving) = (drive.read_only || drive.moving, drive.moving);
     Ok(Json(NodeInfo {
         node,
         path,
@@ -97,6 +99,7 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
         location,
         offline,
         read_only,
+        moving,
     }))
 }
 
@@ -953,7 +956,7 @@ async fn trash_root(conn: &mut SqliteConnection, user: &User, id: &str, need: Ne
     let role = trash_role(conn, user, &node).await?.ok_or_else(not_found)?;
     tree::allows(user, role, need)?;
     if node.space_read_only {
-        return Err(tree::read_only_space());
+        return Err(tree::read_only_error(&node));
     }
     let parent = match &node.parent_id {
         Some(p) => tree::get_node(conn, p).await?.filter(|p| p.trashed_at.is_none()),
@@ -1044,7 +1047,7 @@ async fn empty_trash_drives(conn: &mut SqliteConnection, user: &User) -> AppResu
     }
     let ids = trash_drives(conn, user, Role::Manager).await?;
     let writable: Vec<(String,)> =
-        sqlx::query_as("SELECT id FROM drives WHERE id IN (SELECT value FROM json_each(?)) AND read_only = 0")
+        sqlx::query_as("SELECT id FROM drives WHERE id IN (SELECT value FROM json_each(?)) AND read_only = 0 AND moving = 0")
             .bind(serde_json::to_string(&ids).unwrap())
             .fetch_all(conn)
             .await?;

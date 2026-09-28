@@ -465,12 +465,17 @@ async fn spaces_and_locations_being_moved_are_kept() {
 }
 
 #[tokio::test]
-async fn folder_spaces_cant_be_moved_yet() {
-    let env = testutil::env().await;
+async fn spaces_cant_be_moved_into_a_folder_yet() {
+    let env = testutil::folders_env().await;
     add_bucket(&env, "bucket").await;
-    let space = env.folder_space("Scans").await;
-    let err = move_to(&env, &[&space.drive], "bucket").await.unwrap_err();
+    make_default_bucket(&env).await;
+    let amy = env.user("amy", true).await;
+    let err = move_to(&env, &[&env.drive_of(amy.root()).await], "local").await.unwrap_err();
     assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
+}
+
+async fn make_default_bucket(env: &TestEnv) {
+    sqlx::query("UPDATE storage_locations SET is_default = (id = 'bucket')").execute(&env.st.db).await.unwrap();
 }
 
 #[tokio::test]
@@ -512,4 +517,288 @@ async fn moves_run_one_at_a_time_unless_set_otherwise() {
     }
     assert_eq!((state(&env, &first).await, state(&env, &second).await), ("done".into(), "done".into()));
     assert!(env.st.moves.running.lock().unwrap().is_empty());
+}
+
+// ───────────── Folder spaces into a content store ─────────────
+
+/// A content store that calls a hook each time something is stored in it
+struct PutHook {
+    inner: LocalStorage,
+    on_put: Box<dyn Fn(String) -> BoxFuture<'static, ()> + Send + Sync>,
+}
+
+impl Storage for PutHook {
+    fn put_file<'a>(&'a self, hash: &'a str, src: &'a FsPath) -> BoxFuture<'a, std::io::Result<()>> {
+        Box::pin(async move {
+            (self.on_put)(hash.to_string()).await;
+            self.inner.put_file(hash, src).await
+        })
+    }
+    fn open<'a>(&'a self, hash: &'a str, start: u64, len: u64) -> BoxFuture<'a, std::io::Result<storage::BoxReader>> {
+        self.inner.open(hash, start, len)
+    }
+    fn delete<'a>(&'a self, hash: &'a str) -> BoxFuture<'a, std::io::Result<()>> {
+        self.inner.delete(hash)
+    }
+    fn check(&self) -> BoxFuture<'_, std::io::Result<()>> {
+        self.inner.check()
+    }
+}
+
+/// The bucket of `add_bucket`, with a hook each time something is stored in it
+fn hook_bucket(env: &TestEnv, id: &str, on_put: impl Fn(String) -> BoxFuture<'static, ()> + Send + Sync + 'static) {
+    let hooked = PutHook { inner: LocalStorage::new(env.dir.join(id), id), on_put: Box::new(on_put) };
+    env.st.storages.write().unwrap().insert(id.into(), Arc::new(hooked));
+}
+
+/// Pauses or cancels a move once `at` files are stored in the bucket
+fn stop_on_put(env: &TestEnv, ctl: &Arc<Control>, at: usize, cancel: bool) {
+    let (ctl, puts) = (ctl.clone(), Arc::new(AtomicUsize::new(0)));
+    hook_bucket(env, "bucket", move |_| {
+        if puts.fetch_add(1, SeqCst) + 1 == at {
+            (if cancel { &ctl.cancel } else { &ctl.pause }).store(true, SeqCst);
+        }
+        Box::pin(async {})
+    });
+}
+
+async fn space_state(env: &TestEnv, drive: &str) -> (String, Option<String>, Option<String>, bool) {
+    sqlx::query_as("SELECT mode, location_id, source_path, moving FROM drives WHERE id = ?").bind(drive).fetch_one(&env.st.db).await.unwrap()
+}
+
+async fn trash(env: &TestEnv, user: &crate::auth::User, id: &str) {
+    let req = serde_json::from_value(json!({ "ids": [id] })).unwrap();
+    let _ = crate::nodes::trash(State(env.st.clone()), user.clone(), Json(req)).await.unwrap();
+}
+
+async fn save(env: &TestEnv, user: &crate::auth::User, id: &str, body: &'static [u8]) {
+    let _ = crate::files::save_content(State(env.st.clone()), user.clone(), Path(id.to_string()), HeaderMap::new(), axum::body::Bytes::from_static(body))
+        .await
+        .unwrap();
+}
+
+async fn version_contents(env: &TestEnv, user: &crate::auth::User, id: &str) -> Vec<Vec<u8>> {
+    let versions: Vec<(String,)> = sqlx::query_as("SELECT id FROM node_versions WHERE node_id = ? ORDER BY created_at, rowid").bind(id).fetch_all(&env.st.db).await.unwrap();
+    let mut out = Vec::new();
+    for (v,) in versions {
+        let q = Query(serde_json::from_value(json!({})).unwrap());
+        let res = crate::versions::content(State(env.st.clone()), user.clone(), Path((id.to_string(), v)), q, HeaderMap::new()).await.unwrap();
+        out.push(axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap().to_vec());
+    }
+    out
+}
+
+#[tokio::test]
+async fn a_folder_space_moves_into_a_content_store_with_its_trash_and_versions() {
+    let env = testutil::folders_env().await;
+    let admin = env.admin().await;
+    let amy = env.user("amy", true).await;
+    add_bucket(&env, "bucket").await;
+    let company = env.st.shared_root().unwrap();
+    let (all, mine) = (env.drive_of(&company).await, env.drive_of(amy.root()).await);
+    let folder = env.dir.join("blobs").join("company");
+    let docs = env.folder(&admin, &company, "Docs").await;
+    let plan = env.upload(&admin, &docs, "plan.txt", b"plan, first").await;
+    save(&env, &admin, &plan, b"plan, second").await;
+    save(&env, &admin, &plan, b"plan, third").await;
+    let mut files = Vec::new();
+    for i in 0..30 {
+        let content: &'static [u8] = format!("company file {i}").into_bytes().leak();
+        files.push((env.upload(&admin, &company, &format!("f{i}.txt"), content).await, content));
+    }
+    let old = env.upload(&admin, &docs, "old.txt", b"in the trash").await;
+    trash(&env, &admin, &old).await;
+    // Put there by other programs: two names only letter case tells apart (a disk that tells them apart), and a
+    // file ThirtyFile never shows
+    if cfg!(unix) {
+        testutil::write_old(&folder.join("Case.txt"), b"upper");
+        testutil::write_old(&folder.join("case.txt"), b"lower");
+    }
+    testutil::write_old(&folder.join("Thumbs.db"), b"thumbnails");
+    crate::folders::scan(&env.st, &all).await.unwrap();
+    let diary = env.upload(&amy, amy.root(), "diary.txt", b"dear diary").await;
+    let used_before = sqlx::query_as::<_, (i64,)>("SELECT used_bytes FROM drives WHERE id = ?").bind(&all).fetch_one(&env.st.db).await.unwrap().0;
+
+    let ids = [move_to(&env, &[&all], "bucket").await.unwrap(), move_to(&env, &[&mine], "bucket").await.unwrap()];
+    for id in &ids {
+        assert_eq!(run_move(&env, id).await, "done");
+    }
+    assert_eq!(space_state(&env, &all).await, ("store".into(), Some("bucket".into()), None, false));
+    assert_eq!(space_state(&env, &mine).await, ("store".into(), Some("bucket".into()), None, false));
+    // Everything is read from the content store now
+    assert_eq!(read(&env, &admin, &plan).await, b"plan, third");
+    assert_eq!(version_contents(&env, &admin, &plan).await, [b"plan, first".to_vec(), b"plan, second".to_vec()]);
+    for (id, content) in &files {
+        assert_eq!(read(&env, &admin, id).await, *content);
+    }
+    assert_eq!(read(&env, &amy, &diary).await, b"dear diary");
+    assert_eq!(blob_location(&env, b"plan, first").await.as_deref(), Some("bucket"));
+    let (with_path,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id IN (?, ?) AND fs_path IS NOT NULL").bind(&all).bind(&mine).fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(with_path, 0);
+    let used_after = sqlx::query_as::<_, (i64,)>("SELECT used_bytes FROM drives WHERE id = ?").bind(&all).fetch_one(&env.st.db).await.unwrap().0;
+    assert_eq!(used_after, used_before);
+    // The trash is the store's trash: restored, it opens
+    let req = serde_json::from_value(json!({ "ids": [old] })).unwrap();
+    let _ = crate::nodes::restore(State(env.st.clone()), admin.clone(), Json(req)).await.unwrap();
+    assert_eq!(read(&env, &admin, &old).await, b"in the trash");
+    if cfg!(unix) {
+        let names: Vec<(String,)> =
+            sqlx::query_as("SELECT name FROM nodes WHERE parent_id = ? AND lower(name) LIKE 'case%' ORDER BY name").bind(&company).fetch_all(&env.st.db).await.unwrap();
+        assert_eq!(names, [("Case.txt".into(),), ("case (1).txt".into(),)]);
+    }
+    // The old folders are gone, apart from what ThirtyFile never showed, which the move names
+    assert!(!env.dir.join("blobs/users/amy").exists());
+    let left: Vec<String> = std::fs::read_dir(&folder).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(left, ["Thumbs.db"]);
+    let (note,): (Option<String>,) = sqlx::query_as("SELECT note FROM space_moves WHERE id = ?").bind(&ids[0]).fetch_one(&env.st.db).await.unwrap();
+    assert!(note.as_deref().unwrap_or_default().contains("Thumbs.db"), "{note:?}");
+    if cfg!(unix) {
+        assert!(note.unwrap().contains("1 item got another name"));
+    }
+    // A personal space keeps its root
+    let (root,): (String,) = sqlx::query_as("SELECT root_id FROM users WHERE id = ?").bind(amy.id).fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(root, amy.root());
+    // New files go to the bucket
+    env.upload(&admin, &company, "new.txt", b"after").await;
+    assert_eq!(blob_location(&env, b"after").await.as_deref(), Some("bucket"));
+}
+
+#[tokio::test]
+async fn a_folder_space_is_read_only_while_it_moves_and_changes_in_the_folder_are_moved_too() {
+    let env = testutil::folders_env().await;
+    let admin = env.admin().await;
+    add_bucket(&env, "bucket").await;
+    let company = env.st.shared_root().unwrap();
+    let all = env.drive_of(&company).await;
+    let folder = env.dir.join("blobs").join("company");
+    let mut files = Vec::new();
+    for i in 0..20 {
+        let content: &'static [u8] = format!("file {i}").into_bytes().leak();
+        files.push((env.upload(&admin, &company, &format!("f{i:02}.txt"), content).await, content));
+    }
+    let id = move_to(&env, &[&all], "bucket").await.unwrap();
+    // Waiting its turn, the space can still be changed
+    env.upload(&admin, &company, "queued.txt", b"while waiting").await;
+
+    let (job, ctl) = take_job(&env, &id).await;
+    stop_on_put(&env, &ctl, 8, false);
+    run(&env.st, &job, &ctl).await;
+    assert_eq!(state(&env, &id).await, "paused");
+    assert_eq!(space_state(&env, &all).await, ("folder".into(), Some("local".into()), Some(folder.to_string_lossy().into_owned()), true));
+    // Read-only meanwhile, and people are told why
+    let err = env.try_upload(&admin, &company, "refused.txt", b"no").await.unwrap_err();
+    assert_eq!((err.status, err.message.as_str()), (axum::http::StatusCode::FORBIDDEN, "This space is being moved to another storage location. It is read-only until the move finishes."));
+    let Json(info) = crate::nodes::get(State(env.st.clone()), admin.clone(), Path(company.clone())).await.unwrap();
+    let info = serde_json::to_value(&info).unwrap();
+    assert_eq!((info["moving"].as_bool(), info["read_only"].as_bool()), (Some(true), Some(true)));
+    assert_eq!(read(&env, &admin, &files[0].0).await, files[0].1, "files still open");
+
+    // Changed on the server meanwhile (over SMB, say): a file copied already, a new one, one removed
+    testutil::write_old(&folder.join("f00.txt"), b"file 0, changed on the server");
+    testutil::write_old(&folder.join("Scans").join("scan.pdf"), b"%PDF new on the server");
+    std::fs::remove_file(folder.join("f01.txt")).unwrap();
+    // ThirtyFile stops while the move runs, and continues after the start
+    let _ = resume(State(env.st.clone()), Admin(admin.clone()), Path(id.clone())).await.unwrap();
+    let (job, ctl) = take_job(&env, &id).await;
+    stop_on_put(&env, &ctl, 3, false);
+    run(&env.st, &job, &ctl).await;
+    sqlx::query("UPDATE space_moves SET state = 'running' WHERE id = ?").bind(&id).execute(&env.st.db).await.unwrap();
+    recover(&env.st).await.unwrap();
+    assert!(space_state(&env, &all).await.3, "still read-only after the restart");
+    // And a file changed after the last look at the folder (just now, so the scan leaves it for later): the space
+    // keeps what was copied, and the changed file stays in the old folder
+    let (job, ctl) = take_job(&env, &id).await;
+    let written = Arc::new(AtomicUsize::new(0));
+    let (f, w) = (folder.clone(), written.clone());
+    hook_bucket(&env, "bucket", move |_| {
+        if w.fetch_add(1, SeqCst) == 0 {
+            std::fs::write(f.join("f19.txt"), b"file 19, changed at the last moment").unwrap();
+        }
+        Box::pin(async {})
+    });
+    run(&env.st, &job, &ctl).await;
+    let (error,): (Option<String>,) = sqlx::query_as("SELECT error || ' ' || failures FROM space_moves WHERE id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(state(&env, &id).await, "done", "{error:?}");
+    assert_eq!(space_state(&env, &all).await, ("store".into(), Some("bucket".into()), None, false));
+    assert_eq!(read(&env, &admin, &files[0].0).await, b"file 0, changed on the server");
+    let (scan,) = sqlx::query_as::<_, (String,)>("SELECT id FROM nodes WHERE drive_id = ? AND name = 'scan.pdf'").bind(&all).fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(read(&env, &admin, &scan).await, b"%PDF new on the server");
+    let gone: Option<(String,)> = sqlx::query_as("SELECT id FROM nodes WHERE id = ?").bind(&files[1].0).fetch_optional(&env.st.db).await.unwrap();
+    assert!(gone.is_none());
+    let queued = sqlx::query_as::<_, (String,)>("SELECT id FROM nodes WHERE drive_id = ? AND name = 'queued.txt'").bind(&all).fetch_one(&env.st.db).await.unwrap().0;
+    assert_eq!(read(&env, &admin, &queued).await, b"while waiting");
+    // The space got the content that was copied; the file changed since is kept in the old folder, and named
+    let f19 = sqlx::query_as::<_, (String,)>("SELECT id FROM nodes WHERE drive_id = ? AND name = 'f19.txt'").bind(&all).fetch_one(&env.st.db).await.unwrap().0;
+    if read(&env, &admin, &f19).await == b"file 19" {
+        assert_eq!(std::fs::read(folder.join("f19.txt")).unwrap(), b"file 19, changed at the last moment");
+        let (note,): (Option<String>,) = sqlx::query_as("SELECT note FROM space_moves WHERE id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
+        assert!(note.unwrap().contains("f19.txt"));
+    }
+    assert!(!folder.join("f00.txt").exists() && !folder.join("Scans").exists(), "what was copied is gone from the folder");
+    // Writable again
+    env.upload(&admin, &company, "after.txt", b"after the move").await;
+}
+
+#[tokio::test]
+async fn a_cancelled_move_of_a_folder_space_leaves_its_folder_as_it_was() {
+    let env = testutil::folders_env().await;
+    let admin = env.admin().await;
+    add_bucket(&env, "bucket").await;
+    let company = env.st.shared_root().unwrap();
+    let all = env.drive_of(&company).await;
+    let folder = env.dir.join("blobs").join("company");
+    let mut files = Vec::new();
+    for i in 0..10 {
+        let content: &'static [u8] = format!("file {i}").into_bytes().leak();
+        files.push((env.upload(&admin, &company, &format!("f{i}.txt"), content).await, content));
+    }
+    let id = move_to(&env, &[&all], "bucket").await.unwrap();
+    let (job, ctl) = take_job(&env, &id).await;
+    stop_on_put(&env, &ctl, 4, true);
+    run(&env.st, &job, &ctl).await;
+    assert_eq!(state(&env, &id).await, "cancelled");
+    assert_eq!(space_state(&env, &all).await, ("folder".into(), Some("local".into()), Some(folder.to_string_lossy().into_owned()), false));
+    for (id, content) in &files {
+        assert_eq!(read(&env, &admin, id).await, *content);
+    }
+    assert!(stored(&env, "bucket", files.iter().map(|f| f.1).find(|c| stored(&env, "bucket", c).exists()).unwrap_or(b"none")).exists());
+    delete_due(&env, "bucket").await;
+    assert!(files.iter().all(|(_, c)| !stored(&env, "bucket", c).exists()), "what was copied goes");
+    let (blobs,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blobs").fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(blobs, 0);
+    env.upload(&admin, &company, "after.txt", b"writable again").await;
+    assert!(folder.join("after.txt").is_file());
+}
+
+#[tokio::test]
+async fn a_folder_that_isnt_there_is_never_moved_as_an_empty_space() {
+    let env = testutil::folders_env().await;
+    let admin = env.admin().await;
+    add_bucket(&env, "bucket").await;
+    let company = env.st.shared_root().unwrap();
+    let all = env.drive_of(&company).await;
+    let folder = env.dir.join("blobs").join("company");
+    let away = env.dir.join("away");
+    let a = env.upload(&admin, &company, "a.txt", b"still here").await;
+    // Not there when the move is asked for: refused
+    std::fs::rename(&folder, &away).unwrap();
+    let err = move_to(&env, &[&all], "bucket").await.unwrap_err();
+    assert_eq!((err.status, err.message.as_str()), (axum::http::StatusCode::SERVICE_UNAVAILABLE, storage::NOT_MOUNTED));
+    // Gone when it starts: it stops, and the space is as it was
+    std::fs::rename(&away, &folder).unwrap();
+    let id = move_to(&env, &[&all], "bucket").await.unwrap();
+    std::fs::rename(&folder, &away).unwrap();
+    std::fs::create_dir(&folder).unwrap();
+    assert_eq!(run_move(&env, &id).await, "failed");
+    let (error,): (Option<String>,) = sqlx::query_as("SELECT error FROM space_moves WHERE id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(error.as_deref(), Some(storage::NOT_MOUNTED), "an empty folder without the marker isn't the space's");
+    assert_eq!(space_state(&env, &all).await.0, "folder");
+    let (blobs,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blobs").fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(blobs, 0);
+    // Back: resumed, it finishes
+    std::fs::remove_dir(&folder).unwrap();
+    std::fs::rename(&away, &folder).unwrap();
+    let _ = resume(State(env.st.clone()), Admin(admin.clone()), Path(id.clone())).await.unwrap();
+    assert_eq!(run_move(&env, &id).await, "done");
+    assert_eq!(read(&env, &admin, &a).await, b"still here");
 }

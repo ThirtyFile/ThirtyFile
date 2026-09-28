@@ -25,7 +25,8 @@ pub const NODE_COLS: &str =
      COALESCE((SELECT username FROM users WHERE id = n.owner_id), '') AS owner_name,
      (SELECT location_id FROM blobs WHERE hash = n.blob_hash) AS blob_location,
      n.fs_path, (SELECT source_path FROM drives WHERE id = n.drive_id AND mode = 'folder') AS fs_root,
-     (SELECT read_only FROM drives WHERE id = n.drive_id) AS space_read_only";
+     (SELECT read_only OR moving FROM drives WHERE id = n.drive_id) AS space_read_only,
+     (SELECT moving FROM drives WHERE id = n.drive_id) AS space_moving";
 
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 pub struct Node {
@@ -61,10 +62,14 @@ pub struct Node {
     #[serde(skip)]
     #[sqlx(default)]
     pub fs_root: Option<String>,
-    /// The space is read-only: browse, download and share only
+    /// The space is read-only: browse, download and share only (also while it is being moved, `space_moving`)
     #[serde(skip)]
     #[sqlx(default)]
     pub space_read_only: bool,
+    /// The space is being moved to another storage location, and is read-only until the move is over
+    #[serde(skip)]
+    #[sqlx(default)]
+    pub space_moving: bool,
 }
 
 impl Node {
@@ -127,6 +132,8 @@ pub struct Drive {
     pub source_path: Option<String>,
     /// Browse, download and share only
     pub read_only: bool,
+    /// Being moved to another storage location: read-only until the move is over (moves/)
+    pub moving: bool,
 }
 
 impl Drive {
@@ -135,7 +142,7 @@ impl Drive {
     }
 }
 
-pub const DRIVE_COLS: &str = "d.id, d.name, d.kind, d.root_id, d.owner_id, d.quota_bytes, d.disabled, d.used_bytes, d.mode, d.source_path, d.read_only";
+pub const DRIVE_COLS: &str = "d.id, d.name, d.kind, d.root_id, d.owner_id, d.quota_bytes, d.disabled, d.used_bytes, d.mode, d.source_path, d.read_only, d.moving";
 
 pub async fn get_drive(conn: &mut SqliteConnection, id: &str) -> AppResult<Option<Drive>> {
     let sql = format!("SELECT {DRIVE_COLS} FROM drives d WHERE d.id = ?");

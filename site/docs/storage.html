@@ -69,7 +69,7 @@
         <div class="note">Connections without encryption (plain FTP, or S3 over http) are only accepted for addresses inside your own network.</div>
 
         <h2 id="per-space">Moving a space to another location</h2>
-        <p>Under <strong>Control panel › Spaces</strong>, select a space in the content store (on S3, SFTP or FTP) and choose <strong>Move to another location…</strong>. The dialog shows where the space is now and how big it is, and lists the other locations, with the free space of those on this server's disks. A location without enough room for the space can't be chosen.</p>
+        <p>Under <strong>Control panel › Spaces</strong>, select a space and choose <strong>Move to another location…</strong>. The dialog shows where the space is now and how big it is, and lists the other locations, with the free space of those on this server's disks. A location without enough room for the space can't be chosen.</p>
         <p>The move runs in the background, in three steps:</p>
         <ol>
           <li><strong>Copy.</strong> Every file of the space, its earlier versions and the items in its trash are copied to the new location, and each copy is checked against the file's SHA-256 fingerprint. The space stays in use meanwhile: files uploaded or changed during the move are copied too.</li>
@@ -77,7 +77,16 @@
           <li><strong>Clean up.</strong> The old copies are deleted a minute later, so downloads that are reading them can finish.</li>
         </ol>
         <p>Until the switch, the space is where it was: a move that stops or is cancelled changes nothing for the people using it. A file whose content is the same as another file's is kept only once in the whole system, so content a space shares with spaces elsewhere moves with it, and those spaces read it from the new location too.</p>
-        <p>Folder spaces can't be moved to another location yet. To put their files elsewhere, move them to another space.</p>
+        <h3 id="move-folder">Moving a folder space into S3, SFTP or FTP</h3>
+        <p>A folder space (a space on the storage folder or a <em>Local folder</em> location, or a folder you chose) can be moved into the content store of an S3, SFTP or FTP location. Its files become content-store files there, with the same names, folders, share links, permissions, trash and earlier versions.</p>
+        <ul>
+          <li><strong>Read-only meanwhile.</strong> From the moment the move starts until it is finished or cancelled, people can open, download and share the space's files, but not change them; the space shows a notice saying so. A paused or stopped move keeps it read-only, as what was copied must stay as it is: resume the move, or cancel it to open the space up again. A move waiting for its first turn doesn't make the space read-only yet.</li>
+          <li><strong>Changes in the folder.</strong> Files changed, added or removed in the folder from outside ThirtyFile during the move (over SMB, by a scanner) are found by a check of the folder right before the switch, and copied too. Better still, stop other programs from writing there until the move is finished.</li>
+          <li><strong>Names.</strong> The content store doesn't tell apart names that differ only in letter case, which a folder can hold side by side ("Report.docx" and "report.docx"). One of them gets a number, "report (1).docx", and the move's details say how many were renamed.</li>
+          <li><strong>The old folder.</strong> Once the space is on the new location, its folder is removed: each file only if it is still exactly what was copied, then the folders left empty. A file changed at the very last moment, and files ThirtyFile never shows (<code>Thumbs.db</code>, say), stay in the folder, and the move's details list them.</li>
+          <li><strong>Room.</strong> Each file passes through a temporary file in ThirtyFile's data folder, which needs room for the largest file of the space. The move checks this, and that the folder is there, before it starts: a disk that isn't mounted is never taken for an empty space.</li>
+        </ul>
+        <p>Spaces can't be moved into a folder (the storage folder or a <em>Local folder</em> location) yet. To put their files there, move them to a space on it.</p>
 
         <h3 id="moves">Following moves</h3>
         <p><strong>Control panel › Moves</strong> lists the moves that aren't finished, then the earlier ones. For each: the space (a user's "My files" is named after the user), where it moves from and to, how many files and bytes are copied, the speed and the time left, and its state. The page refreshes by itself while a move runs.</p>

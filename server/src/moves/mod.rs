@@ -14,9 +14,14 @@
 //! removes what was copied. Items that can't be copied are tried a few times, then listed, and the move stops as
 //! failed until an administrator resumes or cancels it.
 //!
-//! One engine per direction: store.rs moves a space between content stores.
+//! A move that copies from or to a folder makes the space read-only meanwhile (`drives.moving`): the folder must stay
+//! as it was copied. Changes made in a folder from outside ThirtyFile are found by a scan before the switch.
+//!
+//! One engine per direction: store.rs moves a space between content stores, to_store.rs a folder space into a content
+//! store.
 
 mod store;
+mod to_store;
 
 use std::{
     collections::HashMap,
@@ -107,8 +112,10 @@ pub struct Job {
     pub drive_id: String,
     pub space_name: String,
     pub space_kind: String,
+    pub from_location: Option<String>,
     pub from_name: String,
     pub from_mode: String,
+    pub from_path: Option<String>,
     pub to_location: String,
     pub to_name: String,
     pub to_mode: String,
@@ -117,7 +124,7 @@ pub struct Job {
 }
 
 const JOB_COLS: &str =
-    "id, drive_id, space_name, space_kind, from_name, from_mode, to_location, to_name, to_mode, created_by, created_by_name";
+    "id, drive_id, space_name, space_kind, from_location, from_name, from_mode, from_path, to_location, to_name, to_mode, created_by, created_by_name";
 
 async fn job(conn: &mut SqliteConnection, id: &str) -> AppResult<Option<Job>> {
     Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {JOB_COLS} FROM space_moves WHERE id = ?"))).bind(id).fetch_optional(conn).await?)
@@ -268,6 +275,13 @@ pub async fn copied_for_move(db: &SqlitePool, hash: &str, location: &str) -> Res
     Ok(row.is_some())
 }
 
+impl Job {
+    /// Whether the space must stay as it is while its files are copied: a folder is copied, or written
+    fn locks_space(&self) -> bool {
+        self.from_mode == "folder" || self.to_mode == "folder"
+    }
+}
+
 /// Whether a space is being moved, or waits to be (a move that isn't over)
 pub async fn drive_busy(conn: &mut SqliteConnection, drive_id: &str) -> Result<bool, sqlx::Error> {
     let row: Option<(i64,)> =
@@ -357,14 +371,19 @@ async fn recover(st: &AppState) -> AppResult<()> {
         let _w = st.write_lock.lock().await;
         sqlx::query("UPDATE space_moves SET state = 'queued' WHERE state = 'running'").execute(&st.db).await?;
     }
-    let unfinished: Vec<(String,)> = sqlx::query_as(
-        "SELECT id FROM space_moves m WHERE state = 'cancelled' AND EXISTS (SELECT 1 FROM space_move_items i WHERE i.move_id = m.id)",
+    let unfinished: Vec<(String, String)> = sqlx::query_as(
+        "SELECT id, state FROM space_moves m WHERE state IN ('cancelled', 'done') AND EXISTS (SELECT 1 FROM space_move_items i WHERE i.move_id = m.id)",
     )
     .fetch_all(&st.db)
     .await?;
-    for (id,) in unfinished {
+    for (id, state) in unfinished {
         if let Some(job) = job(&mut *st.db.acquire().await?, &id).await? {
-            remove_copies(st, &job).await?;
+            if state == "done" {
+                // Switched over, but the old folder wasn't removed yet
+                to_store::cleanup(st, &job).await?;
+            } else {
+                remove_copies(st, &job).await?;
+            }
         }
     }
     Ok(())
@@ -397,15 +416,29 @@ async fn start_due(st: &AppState) -> AppResult<()> {
 async fn take(st: &AppState, job: &Job) -> AppResult<Option<Arc<Control>>> {
     let ctl = Arc::new(Control::default());
     st.moves.running.lock().unwrap().insert(job.id.clone(), ctl.clone());
-    let taken = {
+    let taken = async {
         let _w = st.write_lock.lock().await;
-        sqlx::query("UPDATE space_moves SET state = 'running', started_at = COALESCE(started_at, ?), error = NULL WHERE id = ? AND state = 'queued'")
+        let mut tx = crate::db::begin_write(&st.db).await?;
+        let res = async {
+            let taken = sqlx::query(
+                "UPDATE space_moves SET state = 'running', started_at = COALESCE(started_at, ?), error = NULL WHERE id = ? AND state = 'queued'",
+            )
             .bind(now())
             .bind(&job.id)
-            .execute(&st.db)
-            .await
-            .map(|r| r.rows_affected() == 1)
-    };
+            .execute(&mut *tx)
+            .await?
+            .rows_affected()
+                == 1;
+            // Read-only from the first start until the move is over
+            if taken && job.locks_space() {
+                sqlx::query("UPDATE drives SET moving = 1 WHERE id = ?").bind(&job.drive_id).execute(&mut *tx).await?;
+            }
+            AppResult::Ok(taken)
+        }
+        .await;
+        crate::db::settle(tx, res).await
+    }
+    .await;
     if !matches!(taken, Ok(true)) {
         st.moves.running.lock().unwrap().remove(&job.id);
     }
@@ -429,6 +462,7 @@ async fn run(st: &AppState, job: &Job, ctl: &Control) {
     let res = match prepare(&cx).await {
         Ok(()) => match (job.from_mode.as_str(), job.to_mode.as_str()) {
             ("store", "store") => store::run(&cx).await,
+            ("folder", "store") => to_store::run(&cx).await,
             _ => Err(AppError::bad_request("This move isn't possible yet")),
         },
         Err(e) => Err(e),
@@ -457,7 +491,29 @@ async fn prepare(cx: &Ctx<'_>) -> AppResult<()> {
         .fetch_optional(&cx.st.db)
         .await?
         .ok_or_else(|| AppError::not_found("Space not found"))?;
-    check_room(cx.st, &cx.job.to_location, used).await
+    check_room(cx.st, &cx.job.to_location, used).await?;
+    if cx.job.from_mode == "folder" {
+        // The location holding the folder (a disk that may not be mounted), and the folder itself
+        if let Some(from) = &cx.job.from_location {
+            crate::locations::probe(cx.st, from).await.map_err(|e| AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, e))?;
+        }
+        to_store::source(cx.job)?;
+        // Each file goes through a temp file in the data folder: the largest must fit
+        let (largest,): (i64,) = sqlx::query_as("SELECT COALESCE(MAX(size), 0) FROM nodes WHERE drive_id = ? AND kind = 'file'")
+            .bind(&cx.job.drive_id)
+            .fetch_one(&cx.st.db)
+            .await?;
+        let tmp = cx.st.tmp_dir();
+        let free = tokio::task::spawn_blocking(move || crate::util::disk_space(&tmp)).await.ok().flatten().map(|(free, _)| free);
+        if let Some(free) = free.filter(|f| (*f as i64) < largest) {
+            return Err(AppError::bad_request(format!(
+                "There isn't enough free space in ThirtyFile's data folder for the largest file: {needed} is needed, {free} is free",
+                needed = crate::util::format_bytes_u64(largest.max(0) as u64),
+                free = crate::util::format_bytes_u64(free)
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// On a disk of this server (the built-in storage, a Local folder location): refuses when the disk has less free space
@@ -510,28 +566,35 @@ async fn cancelled(st: &AppState, job: &Job) -> AppResult<()> {
 
 async fn mark_cancelled(conn: &mut SqliteConnection, job: &Job) -> AppResult<()> {
     sqlx::query("UPDATE space_moves SET state = 'cancelled', finished_at = ?, error = NULL WHERE id = ?").bind(now()).bind(&job.id).execute(&mut *conn).await?;
+    sqlx::query("UPDATE drives SET moving = 0 WHERE id = ?").bind(&job.drive_id).execute(&mut *conn).await?;
     log(conn, job, "move_cancel", &route(job)).await?;
     Ok(())
 }
 
-/// In the transaction that switches the space over: the move is done, and its record of copies goes
-async fn finish(conn: &mut SqliteConnection, cx: &Ctx<'_>) -> AppResult<()> {
+/// In the transaction that switches the space over: the move is done, and the space can be changed again. Its record
+/// of copies goes, unless `cleanup` still needs it (to remove the originals: to_store::cleanup). `note`: what the switch
+/// changed that people should know.
+async fn finish(conn: &mut SqliteConnection, cx: &Ctx<'_>, cleanup: bool, note: Option<&str>) -> AppResult<()> {
     let (files, bytes) = {
         let p = cx.ctl.progress.lock().unwrap();
         (p.files_done, p.bytes_done)
     };
     sqlx::query(
         "UPDATE space_moves SET state = 'done', finished_at = ?4, files_done = ?1, bytes_done = ?2, files_total = ?1, bytes_total = ?2,
-                                failed_items = 0, failures = '[]', error = NULL
+                                failed_items = 0, failures = '[]', error = NULL, note = ?5
          WHERE id = ?3",
     )
     .bind(files)
     .bind(bytes)
     .bind(&cx.job.id)
     .bind(now())
+    .bind(note)
     .execute(&mut *conn)
     .await?;
-    sqlx::query("DELETE FROM space_move_items WHERE move_id = ?").bind(&cx.job.id).execute(&mut *conn).await?;
+    sqlx::query("UPDATE drives SET moving = 0 WHERE id = ?").bind(&cx.job.drive_id).execute(&mut *conn).await?;
+    if !cleanup {
+        sqlx::query("DELETE FROM space_move_items WHERE move_id = ?").bind(&cx.job.id).execute(&mut *conn).await?;
+    }
     log(conn, cx.job, "move_done", &route(cx.job)).await?;
     Ok(())
 }
@@ -568,6 +631,7 @@ pub struct MoveInfo {
     #[serde(skip)]
     failures: String,
     error: Option<String>,
+    note: Option<String>,
     created_by_name: String,
     created_at: i64,
     started_at: Option<i64>,
@@ -591,7 +655,7 @@ pub struct MovesList {
 pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<MovesList>> {
     let mut moves: Vec<MoveInfo> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT id, drive_id, space_name, space_kind, owner_name, from_location, from_name, from_mode, to_location, to_name, to_mode, state,
-                files_total, bytes_total, files_done, bytes_done, failed_items, failures, error, created_by_name, created_at, started_at,
+                files_total, bytes_total, files_done, bytes_done, failed_items, failures, error, note, created_by_name, created_at, started_at,
                 finished_at
          FROM space_moves ORDER BY state IN {ACTIVE} DESC, created_at DESC, rowid DESC LIMIT {HISTORY}"
     )))
@@ -675,9 +739,11 @@ async fn queue(
         location_id: Option<String>,
         location_name: String,
         mode: String,
+        source_path: Option<String>,
     }
     let space: Space = sqlx::query_as(
-        "SELECT d.name, d.kind, COALESCE(u.username, '') AS owner_name, d.location_id, COALESCE(l.name, '') AS location_name, d.mode
+        "SELECT d.name, d.kind, COALESCE(u.username, '') AS owner_name, d.location_id, COALESCE(l.name, '') AS location_name, d.mode,
+                d.source_path
          FROM drives d LEFT JOIN users u ON u.id = d.owner_id AND d.kind = 'personal' LEFT JOIN storage_locations l ON l.id = d.location_id
          WHERE d.id = ?",
     )
@@ -689,11 +755,17 @@ async fn queue(
     if drive_busy(conn, drive_id).await? {
         return Err(AppError::conflict(format!("\"{shown}\" is already being moved")));
     }
-    if space.mode == "folder" {
-        return Err(AppError::bad_request(format!("\"{shown}\" shows a folder on the server; moving it to another location isn't possible yet")));
-    }
     if to_mode == "folder" {
         return Err(AppError::bad_request("Moving a space into a folder on the server isn't possible yet"));
+    }
+    let from_path = space.source_path.clone().filter(|_| space.mode == "folder");
+    if let Some(path) = &from_path {
+        // Its folder must be there: a disk that isn't mounted mustn't look like an empty space
+        let root = crate::beneath::Pinned::root(std::path::Path::new(path));
+        let marked = root.and_then(|r| crate::folders::space_marker(&r)).ok().flatten();
+        if marked.as_deref() != Some(drive_id) {
+            return Err(AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, crate::storage::NOT_MOUNTED));
+        }
     }
     // Already there: only content still kept elsewhere (from an earlier move, say) is gathered there
     if space.location_id.as_deref() == Some(target) && space.mode == to_mode && !store::scattered(conn, drive_id, target).await? {
@@ -701,9 +773,9 @@ async fn queue(
     }
     let id = new_id();
     sqlx::query(
-        "INSERT INTO space_moves (id, drive_id, space_name, space_kind, owner_name, from_location, from_name, from_mode, to_location, to_name, to_mode,
-                                  created_by, created_by_name, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO space_moves (id, drive_id, space_name, space_kind, owner_name, from_location, from_name, from_mode, from_path, to_location,
+                                  to_name, to_mode, created_by, created_by_name, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(drive_id)
@@ -713,6 +785,7 @@ async fn queue(
     .bind(&space.location_id)
     .bind(&space.location_name)
     .bind(&space.mode)
+    .bind(&from_path)
     .bind(target)
     .bind(to_name)
     .bind(to_mode)

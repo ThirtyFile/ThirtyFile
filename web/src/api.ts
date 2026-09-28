@@ -87,6 +87,8 @@ export interface NodeInfo {
   offline: string | null;
   /** A read-only space: browse, download and share only */
   read_only: boolean;
+  /** The space is being moved to another storage location, and is read-only until the move finishes */
+  moving: boolean;
 }
 
 /** What a path typed into the address bar names (`api.findPath`) */
@@ -288,6 +290,8 @@ export interface SpaceMove {
   /** The first items that couldn't be copied; `item` is null in personal spaces */
   failures: { item: string | null; error: string }[];
   error: string | null;
+  /** What a finished move left behind, or changed */
+  note: string | null;
   created_by_name: string;
   created_at: number;
   started_at: number | null;

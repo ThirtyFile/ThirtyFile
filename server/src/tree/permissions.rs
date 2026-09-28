@@ -124,7 +124,7 @@ pub async fn node_for(conn: &mut SqliteConnection, user: &User, id: &str, need: 
     let (n, role) = node_with_role(conn, user, id).await?;
     allows(user, role, need)?;
     if matches!(need, Need::Write | Need::Delete) && n.space_read_only {
-        return Err(read_only_space());
+        return Err(read_only_error(&n));
     }
     Ok(n)
 }
@@ -132,6 +132,15 @@ pub async fn node_for(conn: &mut SqliteConnection, user: &User, id: &str, need: 
 /// A read-only space can be browsed, downloaded and shared
 pub fn read_only_space() -> AppError {
     AppError::forbidden("This space is read-only")
+}
+
+/// Why the space of `n` can't be changed: it is read-only, or being moved to another storage location
+pub fn read_only_error(n: &Node) -> AppError {
+    if n.space_moving {
+        AppError::forbidden("This space is being moved to another storage location. It is read-only until the move finishes.")
+    } else {
+        read_only_space()
+    }
 }
 
 pub async fn folder_for(conn: &mut SqliteConnection, user: &User, id: &str, need: Need) -> AppResult<Node> {

@@ -118,7 +118,7 @@ export function AdminDrivesPage() {
         onClick={() => setDialog({ t: "folder" })}
       />
       <ToolSeparator />
-      {selected?.mode === "folder" ? (
+      {selected?.mode === "folder" && (
         <ToolButton
           icon={RefreshCwIcon}
           label={t("Check for changes")}
@@ -127,16 +127,15 @@ export function AdminDrivesPage() {
           disabled={scanning}
           onClick={() => scanNow(selected)}
         />
-      ) : (
-        <ToolButton
-          icon={TruckIcon}
-          label={t("Move to another location…")}
-          showLabel
-          className="h-9 px-2.5 text-[13px]"
-          disabled={!selected}
-          onClick={() => selected && setDialog({ t: "move", drive: selected })}
-        />
       )}
+      <ToolButton
+        icon={TruckIcon}
+        label={t("Move to another location…")}
+        showLabel
+        className="h-9 px-2.5 text-[13px]"
+        disabled={!selected}
+        onClick={() => selected && setDialog({ t: "move", drive: selected })}
+      />
       <ToolButton
         icon={GaugeIcon}
         label={t("Change quota")}
@@ -222,7 +221,11 @@ export function AdminDrivesPage() {
     {
       header: t("Storage location"),
       className: "w-[150px]",
-      cell: (d) => (d.mode === "folder" ? <FolderCell drive={d} /> : <LocationCell drive={d} move={moveOf(d.id)} />),
+      cell: (d) => {
+        const move = moveOf(d.id);
+        const moving = move && (move.state === "running" || move.state === "queued" || move.state === "paused");
+        return d.mode === "folder" && !moving ? <FolderCell drive={d} move={move} /> : <LocationCell drive={d} move={move} />;
+      },
     },
   ];
 
@@ -266,21 +269,21 @@ export function AdminDrivesPage() {
               <DropdownMenuItem onClick={() => setDialog({ t: "quota", drive: selected })}>
                 <GaugeIcon /> {t("Change quota")}
               </DropdownMenuItem>
-              {selected.mode === "folder" ? (
-                <>
-                  <DropdownMenuItem disabled={scanning} onClick={() => scanNow(selected)}>
-                    <RefreshCwIcon /> {t("Check for changes")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setReadOnly(selected, !selected.read_only)}>
-                    {selected.read_only ? <LockOpenIcon /> : <LockIcon />}
-                    {selected.read_only ? t("Allow changes from the web") : t("Make read-only")}
-                  </DropdownMenuItem>
-                </>
-              ) : (
-                <DropdownMenuItem onClick={() => setDialog({ t: "move", drive: selected })}>
-                  <TruckIcon /> {t("Move to another location…")}
+              {selected.mode === "folder" && (
+                <DropdownMenuItem disabled={scanning} onClick={() => scanNow(selected)}>
+                  <RefreshCwIcon /> {t("Check for changes")}
                 </DropdownMenuItem>
               )}
+              {/* Only a folder space can be made read-only; one moved into the content store can be opened up again */}
+              {(selected.mode === "folder" || selected.read_only) && (
+                <DropdownMenuItem onClick={() => setReadOnly(selected, !selected.read_only)}>
+                  {selected.read_only ? <LockOpenIcon /> : <LockIcon />}
+                  {selected.read_only ? t("Allow changes from the web") : t("Make read-only")}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={() => setDialog({ t: "move", drive: selected })}>
+                <TruckIcon /> {t("Move to another location…")}
+              </DropdownMenuItem>
               {selected.kind !== "personal" && (
                 <DropdownMenuItem onClick={() => setDialog({ t: "members", drive: selected })}>
                   <UsersRoundIcon /> {t("Manage members")}
@@ -419,8 +422,9 @@ function LocationCell({ drive, move }: { drive: Drive; move?: SpaceMove }) {
 function MoveDialog({ drive, onClose, onDone }: { drive: Drive; onClose(): void; onDone(): void }) {
   const navigate = useNavigate();
   const locations = useQuery({ queryKey: ["storage-locations"], queryFn: api.storageLocations });
-  // A space in the content store goes to another content store (S3, SFTP, FTP)
+  // Into a content store (S3, SFTP, FTP): the built-in storage and Local folder locations keep spaces as folders
   const targets = (locations.data ?? []).filter((l) => l.id !== drive.location_id && l.kind !== "local");
+  const folder = drive.mode === "folder";
   const [value, setValue] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -473,9 +477,22 @@ function MoveDialog({ drive, onClose, onDone }: { drive: Drive; onClose(): void;
               ))}
             </select>
             {tooSmall && <p className="text-xs text-destructive">{t("There isn't enough free space there for this space.")}</p>}
-            <p className="text-xs text-muted-foreground">
-              {t("The space stays usable while its files are copied, and switches to the new location once all of them are there. The copies are checked before the old files are removed.")}
-            </p>
+            {folder ? (
+              <div className="grid gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100" role="note">
+                <p>
+                  {t("The space is read-only while its files are copied: people can open, download and share files, but not change them. It switches to the new location once all of them are there.")}
+                </p>
+                <p>
+                  {t("Changes made in its folder from outside ThirtyFile meanwhile are copied too. Afterwards the folder {path} is removed, apart from anything that changed at the last moment.", {
+                    path: drive.source_path ?? "",
+                  })}
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {t("The space stays usable while its files are copied, and switches to the new location once all of them are there. The copies are checked before the old files are removed.")}
+              </p>
+            )}
             <p className="text-xs text-muted-foreground">{t("Files with identical content are stored only once across the system. If other spaces have the same files, they'll be moved too.")}</p>
             <ErrorText>{error}</ErrorText>
           </div>
@@ -504,14 +521,15 @@ function scanSummary(r: ScanReport) {
   return r.skipped.length ? `${main} · ${t("{n} item skipped|{n} items skipped", { n: r.skipped.length })}` : main;
 }
 
-/** A folder space's folder and its last check */
-function FolderCell({ drive }: { drive: Drive }) {
+/** A folder space's folder and its last check (and a move that stopped) */
+function FolderCell({ drive, move }: { drive: Drive; move?: SpaceMove }) {
   const r = drive.scan_report;
   const title = [drive.source_path, r?.error ? tServer(r.error) : r ? scanSummary(r) : "", ...(r?.skipped ?? [])].filter(Boolean).join("\n");
   return (
     <span className="flex min-w-0 flex-col" title={title}>
       <span className="truncate font-mono text-[12px]">{drive.source_path}</span>
       <span className={cn("truncate text-[11px]", r?.error ? "text-destructive" : "text-muted-foreground")}>
+        {move?.state === "failed" && <span className="text-destructive" title={move.error ? tServer(move.error) : undefined}>{`${t("Move stopped")} · `}</span>}
         {drive.read_only && !r?.error && `${t("Read-only")} · `}
         {drive.scanning
           ? drive.scanning.phase === "reading"

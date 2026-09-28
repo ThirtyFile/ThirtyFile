@@ -1,4 +1,4 @@
-import { CloudOffIcon, LockIcon, RefreshCwIcon } from "lucide-react";
+import { CloudOffIcon, LockIcon, RefreshCwIcon, TruckIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { t, tServer } from "@/lib/i18n";
 
@@ -22,6 +22,19 @@ export function ReadOnlyBanner() {
     <div className="flex shrink-0 items-start gap-2 border-b bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
       <LockIcon className="mt-px size-4 shrink-0" />
       <div className="min-w-0">{t("This space is read-only. You can open, download and share its files.")}</div>
+    </div>
+  );
+}
+
+/** The space is being moved to another storage location: read-only until the move finishes */
+export function MovingBanner() {
+  return (
+    <div role="status" className="flex shrink-0 items-start gap-2 border-b border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-900 dark:text-sky-100">
+      <TruckIcon className="mt-px size-4 shrink-0" />
+      <div className="min-w-0">
+        <span className="font-medium">{t("This space is being moved to another storage location.")}</span>{" "}
+        {t("It is read-only until the move finishes: you can open, download and share its files, but not change them.")}
+      </div>
     </div>
   );
 }

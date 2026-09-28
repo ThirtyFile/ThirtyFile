@@ -293,7 +293,8 @@ pub async fn update(
         if !user.is_admin() {
             return Err(AppError::forbidden("Only administrators can make a space read-only"));
         }
-        if !drive.is_folder() {
+        // A folder space moved into the content store stays read-only until it is opened up again
+        if read_only && !drive.is_folder() {
             return Err(AppError::bad_request("Only spaces that show a folder on the server can be read-only"));
         }
         sqlx::query("UPDATE drives SET read_only = ? WHERE id = ?").bind(read_only).bind(&drive.id).execute(&mut *tx).await?;
