@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Single sign-on · ThirtyFile</title>
-    <meta name="description" content="Let people sign in with the Microsoft, Google or GitHub account they already have." />
+    <meta name="description" content="Let people sign in with the Microsoft, Google or GitHub account they already have, or through your own identity provider (OpenID Connect)." />
     <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -16,7 +16,7 @@
       <nav class="docs-nav" aria-label="Guides"><noscript><a href="index.html">Install</a></noscript></nav>
       <main class="article">
         <h1>Single sign-on</h1>
-        <p class="lead">Let people sign in with the Microsoft, Google or GitHub account they already have.</p>
+        <p class="lead">Let people sign in with the Microsoft, Google or GitHub account they already have, or through your own identity provider (OpenID Connect).</p>
         <h2 id="setup">Setting up a provider</h2>
         <ol>
           <li>Set the <strong>Site URL</strong> under <strong>Control panel › General</strong> first.</li>
@@ -33,6 +33,10 @@
 
         <h3>GitHub</h3>
         <p>GitHub › Settings › Developer settings › OAuth Apps › New OAuth App. Enter the redirect address as the callback URL, then generate a client secret.</p>
+
+        <h3 id="oidc">OpenID Connect (Keycloak, Authentik, Authelia, Zitadel…)</h3>
+        <p>Create a confidential client (a web application) in your identity provider with the redirect address, and note its client ID and secret. In ThirtyFile, enter the <strong>Issuer URL</strong> (for Keycloak, <code>https://auth.example.com/realms/&lt;realm&gt;</code>) and a <strong>name for the sign-in button</strong>, such as "Company login". When you save, ThirtyFile reads the provider's settings from <code>&lt;issuer&gt;/.well-known/openid-configuration</code>; the issuer must be an https address, and the document must name the same issuer.</p>
+        <p>The provider must include the person's email address and mark it as verified (the <code>email</code> scope and claim, and <code>email_verified</code>), otherwise people can only link the account themselves. Allowed domains, domain rules, linking and automatic accounts work as with the other providers.</p>
 
         <h2 id="who">Who may sign in</h2>
         <p>Each provider has its own rule for people who sign in for the first time:</p>
