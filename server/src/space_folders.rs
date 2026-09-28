@@ -7,8 +7,7 @@
 //! - `teams/<space name>` for team spaces
 //! - `users/<user name>` for each user's "My files"
 //!
-//! The folder is named when the space is created (`thirtyfile convert` names the folders of spaces from 0.1 and 0.2
-//! the same way):
+//! The folder is named when the space is created:
 //! - characters a file name can't have become `_`, and a name too long for the disk is shortened; a name with
 //!   nothing left uses the space's id
 //! - a folder that is taken, by another space or already on the disk (made by hand, or kept from a deleted space),
@@ -19,8 +18,7 @@
 //!   remove or keep (as with any folder space)
 //!
 //! Spaces on S3, SFTP and FTP keep their files in the content store (storage.rs): renaming a folder there would copy
-//! every file in it. Spaces already in the content store stay there until `thirtyfile convert` turns them into
-//! folders.
+//! every file in it.
 
 use std::path::{Path, PathBuf};
 

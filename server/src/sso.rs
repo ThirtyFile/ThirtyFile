@@ -52,12 +52,13 @@ pub fn label(provider: &str) -> &'static str {
 }
 
 /// What happens when someone signs in with an external account that isn't linked to a user yet
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provisioning {
     /// Only accounts linked under "Sign-in methods" can sign in
     Off,
     /// An existing user whose username is the (verified) email is linked automatically
+    #[default]
     Link,
     /// Like `Link`, and people without an account get one created automatically
     Create,
@@ -111,8 +112,7 @@ pub struct ProviderConfig {
     pub client_secret: String,
     /// Microsoft: tenant (directory) ID or domain; blank = any organization account
     pub tenant: String,
-    /// None = not decided yet (settings saved by an older version): derived from the legacy `auto_create` flag at load time
-    pub provisioning: Option<Provisioning>,
+    pub provisioning: Provisioning,
     /// Email domains allowed for this provider (lowercase, without @); empty = the global list
     pub allowed_domains: Vec<String>,
     /// Permissions and space size of automatically created accounts
@@ -132,9 +132,6 @@ impl ProviderConfig {
     fn ready(&self) -> bool {
         self.enabled && !self.client_id.trim().is_empty() && !self.client_secret.is_empty()
     }
-    pub fn provisioning(&self) -> Provisioning {
-        self.provisioning.unwrap_or(Provisioning::Link)
-    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -148,9 +145,6 @@ pub struct SsoSettings {
     pub allowed_domains: Vec<String>,
     /// Per-domain settings for automatically created accounts (a domain here still has to be allowed to sign in)
     pub domain_rules: Vec<DomainRule>,
-    /// Legacy (settings saved before per-provider policies): replaced by `ProviderConfig::provisioning`
-    #[serde(skip_serializing)]
-    pub auto_create: bool,
 }
 
 impl SsoSettings {
@@ -200,11 +194,8 @@ pub async fn load(db: &sqlx::SqlitePool) -> SsoSettings {
         }),
         _ => SsoSettings::default(),
     };
-    // Settings saved before per-provider policies: the old global flag becomes each provider's policy
-    let legacy = if s.auto_create { Provisioning::Create } else { Provisioning::Link };
     for p in PROVIDERS {
         let c = s.provider_mut(p).unwrap();
-        c.provisioning.get_or_insert(legacy);
         // Client secrets are stored encrypted (secrets.rs)
         match crate::secrets::open(&format!("sso:{p}"), &c.client_secret) {
             Ok(plain) => c.client_secret = plain,
@@ -784,7 +775,7 @@ async fn resolve_user(st: &AppState, provider: &str, ident: &Identity) -> AppRes
         }
         return Ok((id, username, false));
     }
-    if cfg.provisioning() == Provisioning::Off {
+    if cfg.provisioning == Provisioning::Off {
         return Err(AppError::forbidden(
             "This external account isn't linked yet. Sign in with your username and password, then link it in \"My account › Sign-in methods\".",
         ));
@@ -806,7 +797,7 @@ async fn resolve_user(st: &AppState, provider: &str, ident: &Identity) -> AppRes
     let (id, username) = match existing {
         Some((_, _, true)) => return Err(AppError::forbidden("This account is disabled. Contact your administrator.")),
         Some((id, username, false)) => (id, username),
-        None if cfg.provisioning() == Provisioning::Create => {
+        None if cfg.provisioning == Provisioning::Create => {
             created = true;
             create_sso_user(st, provider, &cfg, ident).await?
         }
@@ -1030,7 +1021,7 @@ fn admin_view(st: &AppState, headers: &HeaderMap) -> Value {
             "name": c.name,
             "issuer": c.issuer,
             "redirect_uri": redirect_uri(&base, p),
-            "provisioning": c.provisioning(),
+            "provisioning": c.provisioning,
             "allowed_domains": c.allowed_domains,
             "defaults": c.defaults,
             "groups": c.groups,
@@ -1058,7 +1049,6 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, hea
         check_provider(&st, p, req.provider_mut(p).unwrap(), old.provider(p).unwrap()).await?;
     }
     req.allowed_domains = normalize_domains(&req.allowed_domains)?;
-    req.auto_create = false;
     req.domain_rules = check_domain_rules(&st, std::mem::take(&mut req.domain_rules)).await?;
     let detail = summary(&req);
     {
@@ -1088,7 +1078,6 @@ async fn check_provider(st: &AppState, p: &str, new: &mut ProviderConfig, prev: 
     if new.enabled && (new.client_id.is_empty() || new.client_secret.is_empty()) {
         return Err(AppError::bad_request(format!("Enter a Client ID and Client Secret to enable {} sign-in", label(p))));
     }
-    new.provisioning.get_or_insert(Provisioning::Link);
     new.allowed_domains = normalize_domains(&new.allowed_domains)?;
     if let Some(q) = new.defaults.quota_bytes
         && q < 0
@@ -1181,7 +1170,7 @@ async fn existing_groups(st: &AppState, ids: &[i64]) -> AppResult<Vec<i64>> {
 /// The settings as the activity log records them
 fn summary(req: &SsoSettings) -> String {
     // Every provider appears in the summary, enabled or not, so the log shows the whole policy
-    let policy = |p: &str| match req.provider(p).map(ProviderConfig::provisioning) {
+    let policy = |p: &str| match req.provider(p).map(|c| c.provisioning) {
         Some(Provisioning::Create) => "creates accounts",
         Some(Provisioning::Off) => "linked accounts only",
         _ => "matches by email",
@@ -1464,7 +1453,7 @@ mod tests {
         let r = login(&env, &m, "google", None, |n| google(n, "g-2", "ben@example.com", true)).await;
         assert!(location(&r).starts_with("/login?sso_error="));
         // Automatic creation on: create the account (with the default space size)
-        enable(&env, |s| s.google.provisioning = Some(Provisioning::Create));
+        enable(&env, |s| s.google.provisioning = Provisioning::Create);
         env.st.system.write().unwrap().default_user_quota = 5 << 30;
         let r = login(&env, &m, "google", None, |n| google(n, "g-2", "ben@example.com", true)).await;
         assert_eq!(location(&r), "/files/abc");
@@ -1473,7 +1462,7 @@ mod tests {
 
         // Domain restriction, unverified email
         enable(&env, |s| {
-            s.google.provisioning = Some(Provisioning::Create);
+            s.google.provisioning = Provisioning::Create;
             s.allowed_domains = vec!["example.com".into()];
         });
         let r = login(&env, &m, "google", None, |n| google(n, "g-3", "eve@evil.example", true)).await;
@@ -1538,7 +1527,7 @@ mod tests {
         let env = testutil::env().await;
         let (m, base) = mock_server().await;
         *MOCK_BASE.lock().unwrap() = Some(base);
-        enable(&env, |s| s.google.provisioning = Some(Provisioning::Create));
+        enable(&env, |s| s.google.provisioning = Provisioning::Create);
         let user_of = |subject: &'static str| {
             let db = env.st.db.clone();
             async move {
@@ -1642,11 +1631,11 @@ mod tests {
         // Google creates accounts with its own defaults, domain list and group; GitHub is linked accounts only
         enable(&env, |s| {
             s.allowed_domains = vec!["other.example".into()];
-            s.google.provisioning = Some(Provisioning::Create);
+            s.google.provisioning = Provisioning::Create;
             s.google.allowed_domains = vec!["example.com".into()];
             s.google.defaults = NewUserDefaults { can_write: true, can_delete: false, can_share: false, quota_bytes: Some(1 << 30) };
             s.google.groups = vec![gid, 9999];
-            s.github.provisioning = Some(Provisioning::Off);
+            s.github.provisioning = Provisioning::Off;
         });
         let r = login(&env, &m, "google", None, |n| google(n, "g-10", "dana@example.com", true)).await;
         assert_eq!(location(&r), "/files/abc");
@@ -1709,20 +1698,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn legacy_auto_create_flag_becomes_the_provider_policy() {
-        let env = testutil::env().await;
-        let mut c = env.st.db.acquire().await.unwrap();
-        crate::db::set_setting(&mut c, "sso", r#"{"google":{"enabled":true},"auto_create":true}"#).await.unwrap();
-        let s = load(&env.st.db).await;
-        assert_eq!(s.google.provisioning(), Provisioning::Create);
-        assert_eq!(s.github.provisioning(), Provisioning::Create);
-        crate::db::set_setting(&mut c, "sso", r#"{"google":{"enabled":true,"provisioning":"off"}}"#).await.unwrap();
-        let s = load(&env.st.db).await;
-        assert_eq!(s.google.provisioning(), Provisioning::Off);
-        assert_eq!(s.microsoft.provisioning(), Provisioning::Link);
-    }
-
-    #[tokio::test]
     async fn domain_rules_and_profile_sync() {
         let _g = SERIAL.lock().await;
         let env = testutil::env().await;
@@ -1730,7 +1705,7 @@ mod tests {
         *MOCK_BASE.lock().unwrap() = Some(base);
         let (gid,): (i64,) = sqlx::query_as("INSERT INTO groups (name, description, created_at) VALUES ('partners', '', 0) RETURNING id").fetch_one(&env.st.db).await.unwrap();
         enable(&env, |s| {
-            s.google.provisioning = Some(Provisioning::Create);
+            s.google.provisioning = Provisioning::Create;
             s.google.defaults = NewUserDefaults { can_write: true, can_delete: true, can_share: true, quota_bytes: None };
             s.domain_rules = vec![DomainRule { domain: "partner.example".into(), can_write: true, can_delete: false, can_share: false, quota_bytes: Some(512 << 20), groups: vec![gid] }];
         });

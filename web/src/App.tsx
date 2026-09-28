@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect } from "react";
 import { noteSignedIn } from "@/lib/signOut";
-import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon } from "lucide-react";
 import { api, ApiError } from "@/api";
@@ -108,11 +108,6 @@ function RequireAuth() {
   );
 }
 
-function LegacyShareRedirect() {
-  const { token, nodeId } = useParams();
-  return <Navigate to={`/share/${token}${nodeId ? `/${nodeId}` : ""}`} replace />;
-}
-
 function AdminOnly({ children }: { children: React.ReactNode }) {
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
   return me.data?.role === "admin" ? <Suspense fallback={<Spinner />}>{children}</Suspense> : <Navigate to="/files" replace />;
@@ -130,8 +125,6 @@ export function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/share/:token/:nodeId?" element={<PublicSharePage />} />
-        {/* Old short URL format, so links already shared still open */}
-        <Route path="/s/:token/:nodeId?" element={<LegacyShareRedirect />} />
         <Route element={<RequireAuth />}>
           <Route index element={<Navigate to="/files" replace />} />
           <Route path="/files/:id?" element={<FilesPage />} />

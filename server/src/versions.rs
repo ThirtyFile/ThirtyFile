@@ -1,4 +1,4 @@
-//! Earlier versions of files (see migration 0015): the content a file had before it was saved over in the editor,
+//! Earlier versions of files (the node_versions table in migrations/0001_init.sql): the content a file had before it was saved over in the editor,
 //! replaced by an upload, or restored to another version.
 //!
 //! In the content store the file's reference to its old content moves to the version, so nothing is copied. In folder

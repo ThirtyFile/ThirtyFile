@@ -48,9 +48,9 @@ struct Upload {
     batch: String,
     /// The file this upload became, once finished
     node_id: Option<String>,
-    /// "replace": a file with the same name gets the new content; otherwise both are kept (see migration 0014)
+    /// "replace": a file with the same name gets the new content; otherwise both are kept (the uploads table in migrations/0001_init.sql)
     on_conflict: String,
-    /// The SHA-256 state after the first `hashed` bytes (see migration 0021)
+    /// The SHA-256 state after the first `hashed` bytes (the uploads table in migrations/0001_init.sql)
     hash_state: Option<Vec<u8>>,
     hashed: i64,
 }
@@ -537,8 +537,7 @@ async fn finalize(st: &AppState, up: &Uploader, upload: Upload) -> AppResult<Str
     if parent.in_folder_space() {
         return finalize_in_folder(st, up, &upload, &path, parent).await;
     }
-    // Hashed while it arrived; read again only without a saved state (an upload the server finished after a restart
-    // from before states were saved, say)
+    // Hashed while it arrived; read again only without a saved state that matches the whole file
     let (hash, size) = match saved_hasher(&upload).filter(|_| upload.offset == upload.size) {
         Some(h) => (hex::encode(h.finalize()), tokio::fs::metadata(&path).await?.len()),
         None => hash_file(path.clone()).await?,
@@ -923,7 +922,7 @@ mod tests {
         let node = done.headers()["x-node-id"].to_str().unwrap().to_string();
         assert_eq!(stored_hash(&env, &node).await, crate::util::sha256_hex(b"hello world"));
 
-        // Without a saved state (an upload from before, or one whose state is behind), the received part is read once
+        // Without a saved state, or with one that is behind, the received part is read once
         for stale in ["UPDATE uploads SET hash_state = NULL WHERE id = ?", "UPDATE uploads SET hashed = 0 WHERE id = ?"] {
             let id = begin(&env, &amy, "again.txt", 11).await;
             send(&env, &amy, &id, 0, b"hello").await.unwrap();

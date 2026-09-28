@@ -56,6 +56,15 @@ docker rm -f new >/dev/null
 
 echo "== Upgrading the latest release"
 docker pull -q "$PREVIOUS" >/dev/null
+# Releases up to 0.3 kept the database's whole migration history, which newer versions don't upgrade from (#170)
+previous_version=$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$PREVIOUS")
+case "$previous_version" in
+  0.[0-3].*)
+    echo "The latest release ($previous_version) predates the current database schema: nothing to upgrade from"
+    echo "All good"
+    exit 0
+    ;;
+esac
 start previous "$PREVIOUS" upgrade-data upgrade-storage
 wait_healthy "The latest release"
 sign_in /tmp/old.cookies

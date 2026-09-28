@@ -834,9 +834,7 @@ pub fn check_source(st: &AppState, path: &str) -> AppResult<String> {
     if !real.is_dir() {
         return Err(AppError::bad_request("The folder doesn't exist on the server"));
     }
-    // (new spaces get their folders in the storage folder, which differs from `storage_dir` while 0.1's /data/blobs is
-    // in use)
-    for own in [Some(&st.data_dir), Some(&st.storage_dir), st.space_folders.as_ref()].into_iter().flatten() {
+    for own in [&st.data_dir, &st.storage_dir] {
         if let Ok(own) = std::fs::canonicalize(own)
             && (real.starts_with(&own) || own.starts_with(&real))
         {
@@ -884,7 +882,7 @@ fn overlap(a: &Path, b: &Path) -> bool {
 /// location's folder (with the spaces made in it), and each folder shown as a space from elsewhere. A location with the
 /// id `except` (the one being edited) is left out.
 async fn claimed(st: &AppState, except: Option<&str>) -> AppResult<(Vec<PathBuf>, Vec<PathBuf>)> {
-    let mut locations: Vec<PathBuf> = [Some(&st.storage_dir), st.space_folders.as_ref()].into_iter().flatten().map(|p| real_path(&p.to_string_lossy())).collect();
+    let mut locations = vec![real_path(&st.storage_dir.to_string_lossy())];
     let rows: Vec<(String, String)> = sqlx::query_as("SELECT id, config FROM storage_locations WHERE kind = 'local'").fetch_all(&st.db).await?;
     for (id, config) in rows {
         let path = serde_json::from_str::<serde_json::Value>(&config).ok().and_then(|c| c["path"].as_str().map(str::trim).map(str::to_string));
