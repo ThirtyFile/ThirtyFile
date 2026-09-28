@@ -221,28 +221,7 @@ pub fn schedule_blob_removal(st: &AppState, blobs: Vec<BlobRef>) {
 pub async fn remove_unreferenced(st: &AppState, blobs: Vec<BlobRef>) -> Vec<String> {
     let mut failures: Vec<String> = Vec::new();
     for (hash, location) in blobs {
-        let still_used = {
-            let _w = st.write_lock.lock().await;
-            let current: Option<(String,)> = match sqlx::query_as("SELECT location_id FROM blobs WHERE hash = ?").bind(&hash).fetch_optional(&st.db).await
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::warn!("Failed to check whether physical file {hash} is still referenced: {e}");
-                    continue;
-                }
-            };
-            if current.as_ref().is_some_and(|(loc,)| *loc == location) {
-                // The content is in use again (e.g. the same file was re-uploaded), so it no longer needs deleting
-                let _ = forget_pending(st, &hash, &location).await;
-                continue;
-            }
-            let mut g = st.blob_guard.lock().unwrap();
-            if g.staging.contains_key(&hash) {
-                continue;
-            }
-            *g.deleting.entry(hash.clone()).or_default() += 1;
-            current.is_some()
-        };
+        let Some(still_used) = claim_for_deletion(st, &hash, &location).await else { continue };
         // Released when this iteration ends, also when the task is cancelled while the storage service is being called
         let _deleting = BlobMark { st: st.clone(), hash: hash.clone(), deleting: true };
         // The write lock has been released: S3 may be slow, so don't make every write in the system wait for it
@@ -250,42 +229,10 @@ pub async fn remove_unreferenced(st: &AppState, blobs: Vec<BlobRef>) -> Vec<Stri
             Ok(storage) => storage.delete(&hash).await.err().map(|e| e.to_string()),
             Err(e) => Some(e.message),
         };
-        {
-            let _w = st.write_lock.lock().await;
-            let res = match &failed {
-                // Couldn't delete it (e.g. the storage service is disconnected): record it and retry once the location
-                // is reachable again, to avoid leaving orphaned objects taking up space. Each failure doubles the wait
-                // (created_at is the time of the next attempt), up to a day: a bucket that never allows deleting isn't
-                // asked every 30 seconds.
-                Some(err) => {
-                    tracing::debug!("Failed to delete physical file {hash} ({location}), will retry later: {err}");
-                    failures.push(err.clone());
-                    sqlx::query(
-                        "INSERT INTO pending_blob_deletes (hash, location_id, created_at, attempts, last_error) VALUES (?1, ?2, ?3 + ?5, 1, ?4)
-                         ON CONFLICT (hash, location_id) DO UPDATE SET attempts = attempts + 1, last_error = excluded.last_error,
-                           created_at = ?3 + MIN(?5 << MIN(attempts, 12), ?6)",
-                    )
-                    .bind(&hash)
-                    .bind(&location)
-                    .bind(crate::util::now())
-                    .bind(err.chars().take(300).collect::<String>())
-                    .bind(RETRY_BASE)
-                    .bind(RETRY_MAX)
-                    .execute(&st.db)
-                    .await
-                    .map(|_| ())
-                }
-                None => sqlx::query("DELETE FROM pending_blob_deletes WHERE hash = ? AND location_id = ?")
-                    .bind(&hash)
-                    .bind(&location)
-                    .execute(&st.db)
-                    .await
-                    .map(|_| ()),
-            };
-            if let Err(e) = res {
-                tracing::warn!("Failed to update the pending deletion list: {e}");
-            }
+        if let Some(err) = &failed {
+            failures.push(err.clone());
         }
+        record_deletion(st, &hash, &location, failed.as_deref()).await;
         // Keep the thumbnail when the content is still used in another location (e.g. the old copy after a move)
         if !still_used {
             let _ = tokio::fs::remove_file(st.thumb_path(&hash)).await;
@@ -295,6 +242,68 @@ pub async fn remove_unreferenced(st: &AppState, blobs: Vec<BlobRef>) -> Vec<Stri
         tracing::warn!("Failed to delete {} physical file(s), will retry later: {last}", failures.len());
     }
     failures
+}
+
+/// Under the write lock, checks that (hash, location) may be deleted and counts it in as "being deleted" (the caller
+/// releases that with a `BlobMark`). Returns whether the content is still used in another location, or None when it
+/// must be left alone: it's in use there again, being staged, or the check failed.
+async fn claim_for_deletion(st: &AppState, hash: &str, location: &str) -> Option<bool> {
+    let _w = st.write_lock.lock().await;
+    let current: Option<(String,)> = match sqlx::query_as("SELECT location_id FROM blobs WHERE hash = ?").bind(hash).fetch_optional(&st.db).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("Failed to check whether physical file {hash} is still referenced: {e}");
+            return None;
+        }
+    };
+    if current.as_ref().is_some_and(|(loc,)| *loc == location) {
+        // The content is in use again (e.g. the same file was re-uploaded), so it no longer needs deleting
+        let _ = forget_pending(st, hash, location).await;
+        return None;
+    }
+    let mut g = st.blob_guard.lock().unwrap();
+    if g.staging.contains_key(hash) {
+        return None;
+    }
+    *g.deleting.entry(hash.to_string()).or_default() += 1;
+    Some(current.is_some())
+}
+
+/// Updates the pending deletion list after a deletion attempt (`failed` is the error, if any)
+async fn record_deletion(st: &AppState, hash: &str, location: &str, failed: Option<&str>) {
+    let _w = st.write_lock.lock().await;
+    let res = match failed {
+        // Couldn't delete it (e.g. the storage service is disconnected): record it and retry once the location
+        // is reachable again, to avoid leaving orphaned objects taking up space. Each failure doubles the wait
+        // (created_at is the time of the next attempt), up to a day: a bucket that never allows deleting isn't
+        // asked every 30 seconds.
+        Some(err) => {
+            tracing::debug!("Failed to delete physical file {hash} ({location}), will retry later: {err}");
+            sqlx::query(
+                "INSERT INTO pending_blob_deletes (hash, location_id, created_at, attempts, last_error) VALUES (?1, ?2, ?3 + ?5, 1, ?4)
+                 ON CONFLICT (hash, location_id) DO UPDATE SET attempts = attempts + 1, last_error = excluded.last_error,
+                   created_at = ?3 + MIN(?5 << MIN(attempts, 12), ?6)",
+            )
+            .bind(hash)
+            .bind(location)
+            .bind(crate::util::now())
+            .bind(err.chars().take(300).collect::<String>())
+            .bind(RETRY_BASE)
+            .bind(RETRY_MAX)
+            .execute(&st.db)
+            .await
+            .map(|_| ())
+        }
+        None => sqlx::query("DELETE FROM pending_blob_deletes WHERE hash = ? AND location_id = ?")
+            .bind(hash)
+            .bind(location)
+            .execute(&st.db)
+            .await
+            .map(|_| ()),
+    };
+    if let Err(e) = res {
+        tracing::warn!("Failed to update the pending deletion list: {e}");
+    }
 }
 
 /// Wait before retrying a deletion that failed once; it doubles with every further failure, up to `RETRY_MAX`

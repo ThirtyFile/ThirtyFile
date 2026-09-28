@@ -496,18 +496,10 @@ pub async fn callback(
     user: Result<User, AppError>,
 ) -> Response {
     let ip = client_ip(&st, addr, &headers);
-    // The returned state must match the one this browser recorded when starting the sign-in
-    let same_browser = q.state.as_deref().is_some_and(|s| crate::auth::get_cookie(&headers, STATE_COOKIE) == Some(s));
-    let pending = q.state.as_deref().and_then(|s| st.sso_pending.lock().unwrap().remove(s));
-    let Some(pending) = pending.filter(|p| same_browser && p.provider == provider && p.created.elapsed() < PENDING_TTL) else {
-        return login_error("The sign-in timed out or the link was already used. Sign in again.", None);
+    let pending = match take_pending(&st, &provider, q.state.as_deref(), &headers, &user) {
+        Ok(p) => p,
+        Err(msg) => return login_error(msg, None),
     };
-    // Linking an external account must be completed by the same user who started it
-    if let Some(uid) = pending.link_user
-        && user.as_ref().map(|u| u.id).ok() != Some(uid)
-    {
-        return login_error("Sign in before linking an external account", None);
-    }
     let link_next = pending.link_user.map(|_| pending.next.clone());
     if let Some(err) = q.error {
         // The user clicked cancel on the provider's page
@@ -536,25 +528,47 @@ pub async fn callback(
             Err(e) => login_error(&e.message, link_next.as_deref()),
         };
     }
+    sign_in(&st, &provider, &ident, &pending.next, &ip, &headers).await
+}
 
-    match resolve_user(&st, &provider, &ident).await {
+/// The sign-in (or linking) this browser started with `state`, taken so it can't be used twice; the error to show when
+/// it doesn't match, has expired, or a link was started by someone else
+fn take_pending(st: &AppState, provider: &str, state: Option<&str>, headers: &HeaderMap, user: &Result<User, AppError>) -> Result<Pending, &'static str> {
+    // The returned state must match the one this browser recorded when starting the sign-in
+    let same_browser = state.is_some_and(|s| crate::auth::get_cookie(headers, STATE_COOKIE) == Some(s));
+    let pending = state.and_then(|s| st.sso_pending.lock().unwrap().remove(s));
+    let Some(pending) = pending.filter(|p| same_browser && p.provider == provider && p.created.elapsed() < PENDING_TTL) else {
+        return Err("The sign-in timed out or the link was already used. Sign in again.");
+    };
+    // Linking an external account must be completed by the same user who started it
+    if let Some(uid) = pending.link_user
+        && user.as_ref().map(|u| u.id).ok() != Some(uid)
+    {
+        return Err("Sign in before linking an external account");
+    }
+    Ok(pending)
+}
+
+/// Signs in the account the identity belongs to (created first when the provider's policy allows) and goes on to `next`
+async fn sign_in(st: &AppState, provider: &str, ident: &Identity, next: &str, ip: &str, headers: &HeaderMap) -> Response {
+    match resolve_user(st, provider, ident).await {
         Ok((user_id, username, created)) => {
             if created {
-                record_login_via(&st, Some(user_id), &username, "sso_provisioned", &provider, &ip, &headers);
+                record_login_via(st, Some(user_id), &username, "sso_provisioned", provider, ip, headers);
             }
-            let cookie = match open_session(&st, user_id, &provider, &ip, &headers).await {
+            let cookie = match open_session(st, user_id, provider, ip, headers).await {
                 Ok(c) => c,
                 Err(e) => return login_error(&e.message, None),
             };
-            if let Err(e) = sync_profile(&st, user_id, &provider, &ident).await {
-                tracing::warn!("{} sign-in: couldn't update the profile of {username}: {}", label(&provider), e.message);
+            if let Err(e) = sync_profile(st, user_id, provider, ident).await {
+                tracing::warn!("{} sign-in: couldn't update the profile of {username}: {}", label(provider), e.message);
             }
-            record_login_via(&st, Some(user_id), &username, "login", &provider, &ip, &headers);
-            ([(header::SET_COOKIE, cookie)], Redirect::to(&pending.next)).into_response()
+            record_login_via(st, Some(user_id), &username, "login", provider, ip, headers);
+            ([(header::SET_COOKIE, cookie)], Redirect::to(next)).into_response()
         }
         Err(e) => {
             let who = if ident.email.is_empty() { format!("{}:{}", provider, ident.subject) } else { ident.email.clone() };
-            record_login_via(&st, None, &who, "sso_denied", &provider, &ip, &headers);
+            record_login_via(st, None, &who, "sso_denied", provider, ip, headers);
             login_error(&e.message, None)
         }
     }
@@ -1008,63 +1022,83 @@ pub async fn get_settings(State(st): State<AppState>, _: Admin, headers: HeaderM
 pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, headers: HeaderMap, Json(mut req): Json<SsoSettings>) -> AppResult<Json<Value>> {
     let old = st.sso.read().unwrap().clone();
     for p in PROVIDERS {
-        let (new, prev) = (req.provider_mut(p).unwrap(), old.provider(p).unwrap());
-        new.client_id = new.client_id.trim().to_string();
-        new.tenant = new.tenant.trim().to_string();
-        // The tenant goes into the sign-in URL's path: only accept a tenant ID (GUID) or domain name; the URL's host is always Microsoft's own
-        let valid_tenant = new.tenant.len() <= 100 && new.tenant.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.'));
-        if !valid_tenant {
-            return Err(AppError::bad_request("Invalid tenant: enter a tenant ID (GUID) or domain, e.g. contoso.onmicrosoft.com"));
-        }
-        // A blank secret keeps the existing one
-        if new.client_secret.is_empty() {
-            new.client_secret = prev.client_secret.clone();
-        }
-        if new.enabled && (new.client_id.is_empty() || new.client_secret.is_empty()) {
-            return Err(AppError::bad_request(format!("Enter a Client ID and Client Secret to enable {} sign-in", label(p))));
-        }
-        new.provisioning.get_or_insert(Provisioning::Link);
-        new.allowed_domains = normalize_domains(&new.allowed_domains)?;
-        if let Some(q) = new.defaults.quota_bytes
-            && q < 0
-        {
-            return Err(AppError::bad_request("The space size can't be negative"));
-        }
-        // Only groups that exist (the list comes from the groups page, but it may be stale)
-        let mut groups = Vec::new();
-        for g in &new.groups {
-            let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM groups WHERE id = ?").bind(g).fetch_optional(&st.db).await?;
-            if exists.is_some() && !groups.contains(g) {
-                groups.push(*g);
-            }
-        }
-        new.groups = groups;
+        check_provider(&st, p, req.provider_mut(p).unwrap(), old.provider(p).unwrap()).await?;
     }
     req.allowed_domains = normalize_domains(&req.allowed_domains)?;
     req.auto_create = false;
-    // Domain rules: one per domain, valid domain, non-negative size, existing groups
-    let mut rules: Vec<DomainRule> = Vec::new();
-    for mut r in std::mem::take(&mut req.domain_rules) {
+    req.domain_rules = check_domain_rules(&st, std::mem::take(&mut req.domain_rules)).await?;
+    let detail = summary(&req);
+    {
+        let _w = st.write_lock.lock().await;
+        let mut tx = st.db.begin().await?;
+        store(&mut tx, &req).await?;
+        logs::record_activity(&mut tx, &user, None, "settings", &detail).await?;
+        tx.commit().await?;
+    }
+    *st.sso.write().unwrap() = req;
+    Ok(Json(admin_view(&st, &headers)))
+}
+
+/// Checks and tidies one provider's new settings (`prev`: its current ones)
+async fn check_provider(st: &AppState, p: &str, new: &mut ProviderConfig, prev: &ProviderConfig) -> AppResult<()> {
+    new.client_id = new.client_id.trim().to_string();
+    new.tenant = new.tenant.trim().to_string();
+    // The tenant goes into the sign-in URL's path: only accept a tenant ID (GUID) or domain name; the URL's host is always Microsoft's own
+    let valid_tenant = new.tenant.len() <= 100 && new.tenant.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.'));
+    if !valid_tenant {
+        return Err(AppError::bad_request("Invalid tenant: enter a tenant ID (GUID) or domain, e.g. contoso.onmicrosoft.com"));
+    }
+    // A blank secret keeps the existing one
+    if new.client_secret.is_empty() {
+        new.client_secret = prev.client_secret.clone();
+    }
+    if new.enabled && (new.client_id.is_empty() || new.client_secret.is_empty()) {
+        return Err(AppError::bad_request(format!("Enter a Client ID and Client Secret to enable {} sign-in", label(p))));
+    }
+    new.provisioning.get_or_insert(Provisioning::Link);
+    new.allowed_domains = normalize_domains(&new.allowed_domains)?;
+    if let Some(q) = new.defaults.quota_bytes
+        && q < 0
+    {
+        return Err(AppError::bad_request("The space size can't be negative"));
+    }
+    new.groups = existing_groups(st, &new.groups).await?;
+    Ok(())
+}
+
+/// Domain rules: one per domain, valid domain, non-negative size, existing groups
+async fn check_domain_rules(st: &AppState, rules: Vec<DomainRule>) -> AppResult<Vec<DomainRule>> {
+    let mut checked: Vec<DomainRule> = Vec::new();
+    for mut r in rules {
         let domains = normalize_domains(std::slice::from_ref(&r.domain))?;
         let Some(domain) = domains.into_iter().next() else { continue };
-        if rules.iter().any(|x| x.domain == domain) {
+        if checked.iter().any(|x| x.domain == domain) {
             return Err(AppError::bad_request(format!("There is more than one rule for {domain}")));
         }
         if r.quota_bytes.is_some_and(|q| q < 0) {
             return Err(AppError::bad_request("The space size can't be negative"));
         }
-        let mut groups = Vec::new();
-        for g in &r.groups {
-            let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM groups WHERE id = ?").bind(g).fetch_optional(&st.db).await?;
-            if exists.is_some() && !groups.contains(g) {
-                groups.push(*g);
-            }
-        }
+        r.groups = existing_groups(st, &r.groups).await?;
         r.domain = domain;
-        r.groups = groups;
-        rules.push(r);
+        checked.push(r);
     }
-    req.domain_rules = rules;
+    Ok(checked)
+}
+
+/// Only groups that exist, each once (the list comes from the groups page, but it may be stale)
+async fn existing_groups(st: &AppState, ids: &[i64]) -> AppResult<Vec<i64>> {
+    let mut groups = Vec::new();
+    for g in ids {
+        let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM groups WHERE id = ?").bind(g).fetch_optional(&st.db).await?;
+        if exists.is_some() && !groups.contains(g) {
+            groups.push(*g);
+        }
+    }
+    Ok(groups)
+}
+
+/// The settings as the activity log records them
+fn summary(req: &SsoSettings) -> String {
     // Every provider appears in the summary, enabled or not, so the log shows the whole policy
     let policy = |p: &str| match req.provider(p).map(ProviderConfig::provisioning) {
         Some(Provisioning::Create) => "creates accounts",
@@ -1075,21 +1109,12 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, hea
         .iter()
         .map(|p| format!("{} {} ({})", label(p), if req.provider(p).is_some_and(|c| c.enabled) { "on" } else { "off" }, policy(p)))
         .collect();
-    let detail = format!(
+    format!(
         "Single sign-on settings: {}{}{}",
         providers.join("; "),
         if req.allowed_domains.is_empty() { String::new() } else { format!("; allowed domains: {}", req.allowed_domains.join(", ")) },
         if req.domain_rules.is_empty() { String::new() } else { format!("; domain rules: {}", req.domain_rules.iter().map(|r| r.domain.as_str()).collect::<Vec<_>>().join(", ")) },
-    );
-    {
-        let _w = st.write_lock.lock().await;
-        let mut tx = st.db.begin().await?;
-        store(&mut tx, &req).await?;
-        logs::record_activity(&mut tx, &user, None, "settings", &detail).await?;
-        tx.commit().await?;
-    }
-    *st.sso.write().unwrap() = req;
-    Ok(Json(admin_view(&st, &headers)))
+    )
 }
 
 pub type PendingMap = std::sync::Mutex<HashMap<String, Pending>>;

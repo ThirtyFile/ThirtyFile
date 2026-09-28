@@ -5,13 +5,17 @@ use std::collections::HashMap;
 
 use axum::{
     Json,
-    body::Body,
+    body::{Body, Bytes},
     extract::{Path, Query, State},
     http::{HeaderMap, header},
     response::{IntoResponse, Response},
 };
 use futures_util::StreamExt;
 use serde::Deserialize;
+use tokio::{
+    io::DuplexStream,
+    sync::oneshot::{Receiver, Sender},
+};
 use tokio_util::io::ReaderStream;
 
 use crate::{
@@ -19,6 +23,7 @@ use crate::{
     error::{AppError, AppResult},
     files::{Source, node_blob, serve_blob},
     state::AppState,
+    storage::BoxReader,
     tree::{self, Node},
     util::{content_disposition, now},
     zip::ZipWriter,
@@ -137,59 +142,16 @@ pub async fn zip_response(st: &AppState, roots: Vec<Node>, tz: i64) -> AppResult
     let items = plan.items;
     let total_len = crate::zip::predicted_len(items.iter().map(|it| (it.path.as_str(), it.size, it.blob.is_none())));
     // Open the first file before starting the response: if the storage service (e.g. S3) can't be reached, report the error directly instead of sending an empty ZIP
-    let open = |st: AppState, source: Source, size: u64| async move { source.open(&st, 0, size).await };
     let mut first = None;
     if let Some((i, item)) = items.iter().enumerate().find(|(_, it)| it.blob.is_some()) {
         let source = item.blob.clone().unwrap();
-        first = Some((i, open(st.clone(), source, item.size).await?));
+        first = Some((i, open_source(st.clone(), source, item.size).await?));
     }
     let (writer, reader) = tokio::io::duplex(512 * 1024);
     // If packing fails midway, notify the response stream so the connection ends with an error (the browser shows a failed download) rather than saving a truncated ZIP
     let (done_tx, done_rx) = tokio::sync::oneshot::channel::<bool>();
-    let st = st.clone();
-    tokio::spawn(async move {
-        let mut zip = ZipWriter::new(writer);
-        for (i, item) in items.into_iter().enumerate() {
-            let res = match item.blob {
-                None => zip.add_dir(&item.path, item.mtime).await,
-                Some(source) => {
-                    let opened = match first.take() {
-                        Some((j, r)) if j == i => Ok(r),
-                        other => {
-                            first = other;
-                            open(st.clone(), source, item.size).await
-                        }
-                    };
-                    match opened {
-                        Ok(r) => zip.add_file(&item.path, r, item.size, item.mtime).await,
-                        Err(e) => Err(e),
-                    }
-                }
-            };
-            if let Err(e) = res {
-                // The user canceled the download, or reading a file failed (e.g. the storage service disconnected)
-                tracing::warn!("zip stream aborted: {e}");
-                let _ = done_tx.send(false);
-                return;
-            }
-        }
-        let ok = match zip.finish().await {
-            Ok(_) => true,
-            Err(e) => {
-                tracing::warn!("zip stream aborted: {e}");
-                false
-            }
-        };
-        let _ = done_tx.send(ok);
-    });
-    let tail = futures_util::stream::once(async move {
-        match done_rx.await {
-            Ok(true) => None,
-            _ => Some(Err(std::io::Error::other("The zip download was interrupted"))),
-        }
-    })
-    .filter_map(|x| async move { x });
-    let body = ReaderStream::new(reader).chain(tail);
+    tokio::spawn(pack_zip(st.clone(), items, first, writer, done_tx));
+    let body = ReaderStream::new(reader).chain(failure_tail(done_rx));
     Ok((
         [
             // Compute the total size in advance so the browser can show download progress and time remaining
@@ -201,6 +163,60 @@ pub async fn zip_response(st: &AppState, roots: Vec<Node>, tz: i64) -> AppResult
         Body::from_stream(body),
     )
         .into_response())
+}
+
+/// Opens a file's whole content (an owned future, for the packing task)
+async fn open_source(st: AppState, source: Source, size: u64) -> std::io::Result<BoxReader> {
+    source.open(&st, 0, size).await
+}
+
+/// Writes the ZIP of `items` into `writer`; `first` is the first file, already opened (its index and reader). Sends on
+/// `done` whether the ZIP was finished.
+async fn pack_zip(st: AppState, items: Vec<ZipItem>, mut first: Option<(usize, BoxReader)>, writer: DuplexStream, done: Sender<bool>) {
+    let mut zip = ZipWriter::new(writer);
+    for (i, item) in items.into_iter().enumerate() {
+        let res = match item.blob {
+            None => zip.add_dir(&item.path, item.mtime).await,
+            Some(source) => {
+                let opened = match first.take() {
+                    Some((j, r)) if j == i => Ok(r),
+                    other => {
+                        first = other;
+                        open_source(st.clone(), source, item.size).await
+                    }
+                };
+                match opened {
+                    Ok(r) => zip.add_file(&item.path, r, item.size, item.mtime).await,
+                    Err(e) => Err(e),
+                }
+            }
+        };
+        if let Err(e) = res {
+            // The user canceled the download, or reading a file failed (e.g. the storage service disconnected)
+            tracing::warn!("zip stream aborted: {e}");
+            let _ = done.send(false);
+            return;
+        }
+    }
+    let ok = match zip.finish().await {
+        Ok(_) => true,
+        Err(e) => {
+            tracing::warn!("zip stream aborted: {e}");
+            false
+        }
+    };
+    let _ = done.send(ok);
+}
+
+/// The end of a ZIP download's body: nothing when the ZIP was finished, an error otherwise, so the download fails
+fn failure_tail(done: Receiver<bool>) -> impl futures_util::Stream<Item = std::io::Result<Bytes>> {
+    futures_util::stream::once(async move {
+        match done.await {
+            Ok(true) => None,
+            _ => Some(Err(std::io::Error::other("The zip download was interrupted"))),
+        }
+    })
+    .filter_map(|x| async move { x })
 }
 
 /// Most items one download can hold: a larger selection is refused rather than left out of the ZIP

@@ -658,70 +658,8 @@ async fn run_migration(st: &AppState, drive_id: &str, target: &str) -> AppResult
         let Some((hash, ..)) = rows.last() else { break };
         last = hash.clone();
         for (hash, size, from) in rows {
-            // Held from copying until the reference is switched: a deletion of this content still pending at the
-            // target (from an earlier move away from it) must not remove the copy this move keeps or writes there
-            let _staging = tree::stage_guard(st, &hash).await;
-            let src = st.storage(&from)?;
-            let tmp = st.tmp_dir().join(format!("migrate-{}", new_id()));
-            let copied = async {
-                // Hashed while it is copied, so the content is read once before it is stored at the target
-                let mut reader = src.open(&hash, 0, size as u64).await?;
-                let mut file = tokio::fs::File::create(&tmp).await?;
-                let mut hasher = Sha256::new();
-                let mut len = 0u64;
-                let mut buf = vec![0u8; 256 * 1024];
-                loop {
-                    let n = reader.read(&mut buf).await?;
-                    if n == 0 {
-                        break;
-                    }
-                    hasher.update(&buf[..n]);
-                    file.write_all(&buf[..n]).await?;
-                    len += n as u64;
-                }
-                file.flush().await?;
-                drop(file);
-                if hex::encode(hasher.finalize()) != hash || len != size as u64 {
-                    return Err(std::io::Error::other("Verification of the copied content failed"));
-                }
-                dst.put_file(&hash, &tmp).await
-            }
-            .await;
-            let _ = tokio::fs::remove_file(&tmp).await;
-            if let Err(e) = copied {
-                // Deleted by someone during the move (or moved elsewhere meanwhile): nothing left to move for it
-                let current: Option<(String,)> =
-                    sqlx::query_as("SELECT location_id FROM blobs WHERE hash = ?").bind(&hash).fetch_optional(&st.db).await?;
-                if e.kind() == std::io::ErrorKind::NotFound && current.is_none_or(|(loc,)| loc != from) {
-                    tree::schedule_blob_removal(st, vec![(hash.clone(), target.to_string())]);
-                    update_job(st, drive_id, |j| {
-                        j.done_files += 1;
-                        j.done_bytes += size;
-                    });
-                    continue;
-                }
-                return Err(AppError::new(axum::http::StatusCode::BAD_GATEWAY, format!("Failed to move files: {e}")));
-            }
-
-            let switched = {
-                let _w = st.write_lock.lock().await;
-                sqlx::query("UPDATE blobs SET location_id = ? WHERE hash = ? AND location_id = ?")
-                    .bind(target)
-                    .bind(&hash)
-                    .bind(&from)
-                    .execute(&st.db)
-                    .await?
-                    .rows_affected()
-                    == 1
-            };
-            if switched {
-                // Recorded right away: if a later file fails and the job stops, the copies already moved are still cleaned up
-                tree::defer_blob_removal(st, &[(hash.clone(), from.clone())], 60).await;
-                moved.push((hash.clone(), from));
-            } else {
-                // The blob was released or moved elsewhere while it was being copied: the copy just written to the
-                // target is unreferenced (remove_unreferenced checks again before deleting)
-                tree::schedule_blob_removal(st, vec![(hash.clone(), target.to_string())]);
+            if let Some(old) = move_blob(st, &dst, target, hash, size, from).await? {
+                moved.push(old);
             }
             update_job(st, drive_id, |j| {
                 j.done_files += 1;
@@ -739,6 +677,76 @@ async fn run_migration(st: &AppState, drive_id: &str, target: &str) -> AppResult
         });
     }
     Ok(())
+}
+
+/// Moves one content from `from` to `target` (`dst`); returns the old copy to delete once it was moved, None when
+/// there was nothing left to move
+async fn move_blob(st: &AppState, dst: &Arc<dyn Storage>, target: &str, hash: String, size: i64, from: String) -> AppResult<Option<(String, String)>> {
+    // Held from copying until the reference is switched: a deletion of this content still pending at the
+    // target (from an earlier move away from it) must not remove the copy this move keeps or writes there
+    let _staging = tree::stage_guard(st, &hash).await;
+    let src = st.storage(&from)?;
+    if let Err(e) = copy_verified(st, &src, dst, &hash, size).await {
+        // Deleted by someone during the move (or moved elsewhere meanwhile): nothing left to move for it
+        let current: Option<(String,)> = sqlx::query_as("SELECT location_id FROM blobs WHERE hash = ?").bind(&hash).fetch_optional(&st.db).await?;
+        if e.kind() == std::io::ErrorKind::NotFound && current.is_none_or(|(loc,)| loc != from) {
+            tree::schedule_blob_removal(st, vec![(hash, target.to_string())]);
+            return Ok(None);
+        }
+        return Err(AppError::new(axum::http::StatusCode::BAD_GATEWAY, format!("Failed to move files: {e}")));
+    }
+
+    let switched = {
+        let _w = st.write_lock.lock().await;
+        sqlx::query("UPDATE blobs SET location_id = ? WHERE hash = ? AND location_id = ?")
+            .bind(target)
+            .bind(&hash)
+            .bind(&from)
+            .execute(&st.db)
+            .await?
+            .rows_affected()
+            == 1
+    };
+    if !switched {
+        // The blob was released or moved elsewhere while it was being copied: the copy just written to the
+        // target is unreferenced (remove_unreferenced checks again before deleting)
+        tree::schedule_blob_removal(st, vec![(hash, target.to_string())]);
+        return Ok(None);
+    }
+    // Recorded right away: if a later file fails and the job stops, the copies already moved are still cleaned up
+    tree::defer_blob_removal(st, &[(hash.clone(), from.clone())], 60).await;
+    Ok(Some((hash, from)))
+}
+
+/// Copies one content to `dst` through a temp file, checking its sha256 and size
+async fn copy_verified(st: &AppState, src: &Arc<dyn Storage>, dst: &Arc<dyn Storage>, hash: &str, size: i64) -> std::io::Result<()> {
+    let tmp = st.tmp_dir().join(format!("migrate-{}", new_id()));
+    let copied = async {
+        // Hashed while it is copied, so the content is read once before it is stored at the target
+        let mut reader = src.open(hash, 0, size as u64).await?;
+        let mut file = tokio::fs::File::create(&tmp).await?;
+        let mut hasher = Sha256::new();
+        let mut len = 0u64;
+        let mut buf = vec![0u8; 256 * 1024];
+        loop {
+            let n = reader.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+            file.write_all(&buf[..n]).await?;
+            len += n as u64;
+        }
+        file.flush().await?;
+        drop(file);
+        if hex::encode(hasher.finalize()) != hash || len != size as u64 {
+            return Err(std::io::Error::other("Verification of the copied content failed"));
+        }
+        dst.put_file(hash, &tmp).await
+    }
+    .await;
+    let _ = tokio::fs::remove_file(&tmp).await;
+    copied
 }
 
 #[cfg(test)]
