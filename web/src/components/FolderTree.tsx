@@ -1,24 +1,50 @@
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type Dispatch, type KeyboardEvent, type SetStateAction } from "react";
 import { Link, NavLink } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRightIcon, CloudOffIcon, FolderIcon, FolderOpenIcon, LayersIcon, type LucideIcon } from "lucide-react";
-import { api, type Node } from "@/api";
+import { ChevronRightIcon, ChevronsDownUpIcon, CloudOffIcon, FolderIcon, FolderOpenIcon, LayersIcon, LocateFixedIcon, type LucideIcon } from "lucide-react";
+import { api, type Node, type NodeInfo } from "@/api";
 import { useFolderDrop } from "@/lib/dnd";
 import { NavMenu } from "@/components/NavMenu";
+import { ToolButton } from "@/components/frame/ToolButton";
 import { DRIVE_ICON, useDrives } from "@/lib/drives";
 import { t, tServer } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-// ───────────── Folder tree state (kept across page switches) ─────────────
+// ───────────── Folder tree state (kept across page switches and reloads) ─────────────
 
-let expanded = new Set<string>();
+/** localStorage key of the expanded items, so the tree looks the same after a reload (removed when signing out, lib/signOut.ts) */
+const TREE_STORAGE_KEY = "tf-tree-expanded";
+/** At most this many expanded items are remembered: the most recently expanded ones (ids of deleted folders drop out over time) */
+const TREE_STORED_MAX = 500;
+
+function loadExpanded(): Set<string> {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(TREE_STORAGE_KEY) ?? "[]");
+    if (!Array.isArray(stored)) return new Set();
+    return new Set(stored.filter((id): id is string => typeof id === "string").slice(-TREE_STORED_MAX));
+  } catch {
+    // Storage blocked by the browser, or not ours to read: start with everything collapsed
+    return new Set();
+  }
+}
+
+let expanded = loadExpanded();
 const treeListeners = new Set<() => void>();
+function replaceExpanded(next: Set<string>) {
+  expanded = next;
+  try {
+    localStorage.setItem(TREE_STORAGE_KEY, JSON.stringify([...next].slice(-TREE_STORED_MAX)));
+  } catch {
+    // Storage blocked by the browser: the tree is remembered until the page is closed
+  }
+  treeListeners.forEach((l) => l());
+}
 function setExpanded(id: string, open: boolean) {
   if (expanded.has(id) === open) return;
-  expanded = new Set(expanded);
-  if (open) expanded.add(id);
-  else expanded.delete(id);
-  treeListeners.forEach((l) => l());
+  const next = new Set(expanded);
+  if (open) next.add(id);
+  else next.delete(id);
+  replaceExpanded(next);
 }
 function useExpanded() {
   return useSyncExternalStore(
@@ -35,6 +61,12 @@ function useExpanded() {
 /** When opening a folder, auto-expand its parent folders in the left-hand tree */
 export function expandPath(ids: string[]) {
   ids.forEach((id) => setExpanded(id, true));
+}
+
+/** The tree items to expand for a folder to show: "All spaces", its space, and the folders above it; null when it isn't in the tree (reached through a share) */
+export function treePathOf(info: NodeInfo): string[] | null {
+  if (info.via_share) return null;
+  return [ROOT, info.drive.root_id, ...info.path.slice(0, -1).map((c) => c.id)];
 }
 
 // ───────────── Keyboard (ARIA tree pattern) ─────────────
@@ -293,5 +325,52 @@ export function FolderTree({ activeId }: { activeId?: string }) {
         <ThisPc activeId={activeId} />
       </div>
     </TabStop.Provider>
+  );
+}
+
+// ───────────── Toolbar above the tree ─────────────
+
+/** How long "Show current folder" waits for the folders on the way to load before giving up */
+const REVEAL_TIMEOUT = 5000;
+
+/** Once the row of `id` is drawn (its parents may still be loading), scroll it into view and give it the focus */
+function revealRow(scope: Element, id: string) {
+  const deadline = performance.now() + REVEAL_TIMEOUT;
+  const look = () => {
+    const item = scope.querySelector<HTMLElement>(`[role="tree"] [data-tree-id="${CSS.escape(id)}"]`);
+    if (item) {
+      item.scrollIntoView({ block: "nearest" });
+      item.focus({ preventScroll: true });
+    } else if (performance.now() < deadline) requestAnimationFrame(look);
+  };
+  look();
+}
+
+/**
+ * Buttons for the folder tree, kept outside `role="tree"` (and outside the scrolling list, so they stay in place):
+ * Show current folder, and Collapse all (which leaves "All spaces" open, so the spaces stay listed).
+ * A tree item that disappears when collapsing hands the tree's Tab stop back to "All spaces" (see useTreeItem).
+ */
+export function FolderTreeToolbar({ activeId }: { activeId?: string }) {
+  // Shares the query of the folder page, which usually has it already
+  const info = useQuery({ queryKey: ["node", activeId], queryFn: () => api.node(activeId!), enabled: !!activeId });
+  const path = activeId && info.data?.node.id === activeId ? treePathOf(info.data) : null;
+  const button = "size-7 px-0";
+  return (
+    <div className="flex shrink-0 items-center justify-end gap-0.5 border-b px-1.5 py-1">
+      <ToolButton
+        icon={LocateFixedIcon}
+        label={t("Show current folder")}
+        className={button}
+        disabled={!path}
+        onClick={(e) => {
+          if (!path || !activeId) return;
+          expandPath(path);
+          const nav = e.currentTarget.closest("nav");
+          if (nav) revealRow(nav, activeId);
+        }}
+      />
+      <ToolButton icon={ChevronsDownUpIcon} label={t("Collapse all")} className={button} onClick={() => replaceExpanded(new Set([ROOT]))} />
+    </div>
   );
 }

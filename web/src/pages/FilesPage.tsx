@@ -6,7 +6,7 @@ import { OfflineBanner, ReadOnlyBanner } from "@/components/OfflineNotice";
 import { SORT_KEYS, api, type NodeInfo, type SortKey, type SortOrder } from "@/api";
 import { Explorer } from "@/components/Explorer";
 import { crumbPath, type Crumb } from "@/components/Frame";
-import { expandPath } from "@/components/FolderTree";
+import { expandPath, treePathOf } from "@/components/FolderTree";
 import { DRIVE_ICON } from "@/lib/drives";
 import { useAllPages } from "@/lib/pages";
 import { pathOf } from "@/lib/paths";
@@ -60,8 +60,8 @@ export function FilesPage() {
 
   // Expand the left-hand tree down to the current folder
   const expandHere = useEffectEvent(() => {
-    if (!info.data || info.data.via_share) return;
-    expandPath(["this-pc", info.data.drive.root_id, ...path.slice(0, -1).map((c) => c.id)]);
+    const ids = info.data && treePathOf(info.data);
+    if (ids) expandPath(ids);
   });
   const pathKey = path.map((c) => c.id).join();
   useEffect(() => expandHere(), [pathKey, node?.id]);

@@ -3,7 +3,7 @@ import { NavLink } from "react-router";
 import { ClockIcon, Link2Icon, SettingsIcon, StarIcon, Trash2Icon, UsersRoundIcon, type LucideIcon } from "lucide-react";
 import { NavMenu } from "@/components/NavMenu";
 import { Resizer } from "@/components/Resizer";
-import { FolderTree } from "@/components/FolderTree";
+import { FolderTree, FolderTreeToolbar } from "@/components/FolderTree";
 import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
 import { usePersisted, useMe } from "@/lib/session";
 import { t } from "@/lib/i18n";
@@ -66,6 +66,7 @@ export function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean
         edge="right"
         label={t("Resize navigation pane")}
       />
+      <FolderTreeToolbar activeId={activeFolder} />
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-2.5">
         <NavItem to="/recent" icon={ClockIcon} label={t("Recent")} />
         <NavItem to="/favorites" icon={StarIcon} label={t("Favorites")} />
