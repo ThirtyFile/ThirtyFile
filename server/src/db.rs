@@ -426,7 +426,6 @@ pub async fn create_company_space(db: &SqlitePool, folders: Option<&Path>) -> Ap
     let (drive_id, root_id) = create_drive(&mut tx, "All files", "company", admin_id, 0, &location).await?;
     crate::space_folders::make_folder_space(&mut tx, folders, &drive_id).await?;
     add_grant(&mut tx, &root_id, "everyone", 0, "editor", None, None).await?;
-    set_setting(&mut tx, "shared_root_id", &root_id).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -780,5 +779,24 @@ mod tests {
         }
         let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM settings WHERE key LIKE 'stress-%'").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(n, 6);
+    }
+
+    #[tokio::test]
+    async fn the_schema_has_the_indexes_and_constraints_it_needs_and_nothing_unused() {
+        let env = crate::testutil::env().await;
+        let db = &env.st.db;
+        // Versions in a folder space are found by their path without reading every version
+        let plan: Vec<(i64, i64, i64, String)> =
+            sqlx::query_as("EXPLAIN QUERY PLAN SELECT id FROM node_versions WHERE drive_id = 'd' AND fs_path = 'p'").fetch_all(db).await.unwrap();
+        assert!(plan.iter().any(|p| p.3.contains("USING INDEX node_versions_fs_path (drive_id=? AND fs_path=?)")), "{plan:?}");
+        // nodes_owner_recent covers what nodes_owner did
+        let (owner,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'nodes_owner'").fetch_one(db).await.unwrap();
+        assert_eq!(owner, 0);
+        // Every session has its public id
+        let columns: Vec<(i64, String, String, bool)> = sqlx::query_as("SELECT cid, name, type, \"notnull\" FROM pragma_table_info('sessions')").fetch_all(db).await.unwrap();
+        assert!(columns.iter().any(|c| c.1 == "id" && c.3), "{columns:?}");
+        // The company space's root is read from the space itself, not kept as a setting too
+        assert_eq!(get_setting(db, "shared_root_id").await.unwrap(), None);
+        assert!(env.st.shared_root().is_some());
     }
 }

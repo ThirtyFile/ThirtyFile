@@ -1112,6 +1112,23 @@ fn remove_indexed(root: &Pinned, paths: Vec<(String, bool)>) {
     }
 }
 
+/// Checks, in the transaction that records a move or copy, that the destination is still as the content was put in
+/// place for: there, writable, and in the same space kept the same way (its folder, or the content store). The space
+/// may have been moved to another storage location, or made read-only, while the content was copied.
+async fn still_there(conn: &mut SqliteConnection, dest: &Node) -> AppResult<()> {
+    let now = tree::get_node(conn, &dest.id)
+        .await?
+        .filter(|d| d.trashed_at.is_none())
+        .ok_or_else(|| AppError::not_found("The destination folder no longer exists"))?;
+    if now.space_read_only {
+        return Err(tree::read_only_error(&now));
+    }
+    if now.drive_id != dest.drive_id || now.fs_root != dest.fs_root {
+        return Err(AppError::conflict("The destination was moved to another storage location meanwhile. Try again."));
+    }
+    Ok(())
+}
+
 /// The index side of a move; returns content no longer used and (for items now in the content store) what to remove
 /// from disk (paths below the space's folder)
 async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], placed: &Placed) -> AppResult<(Vec<BlobRef>, Vec<(String, bool)>)> {
@@ -1121,12 +1138,10 @@ async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
     // meanwhile would be left behind
     let changed = || AppError::conflict(format!("\"{}\" changed while it was being moved. Try again.", top.name));
     let current = tree::get_node(&mut tx, &top.id).await?.ok_or_else(changed)?;
-    if current.trashed_at.is_some() || current.parent_id != top.parent_id || current.drive_id != top.drive_id {
+    if current.trashed_at.is_some() || current.parent_id != top.parent_id || current.drive_id != top.drive_id || current.fs_root != top.fs_root {
         return Err(changed());
     }
-    if tree::get_node(&mut tx, &dest.id).await?.is_none_or(|d| d.trashed_at.is_some()) {
-        return Err(AppError::not_found("The destination folder no longer exists"));
-    }
+    still_there(&mut tx, dest).await?;
     let planned: HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
     let now_there: Vec<String> = tree::subtree(&mut tx, &top.id).await?.into_iter().filter(|(n, _)| n.trashed_at.is_none()).map(|(n, _)| n.id).collect();
     if now_there.len() != planned.len() || !now_there.iter().all(|id| planned.contains(id.as_str())) {
@@ -1226,9 +1241,7 @@ pub async fn copy_across(st: &AppState, user: &User, dest: &Node, plans: Vec<Vec
 async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: &[Node], placed: &Placed) -> AppResult<Vec<BlobRef>> {
     let mut tx = crate::db::begin_write(&st.db).await?;
     let top = &nodes[0];
-    if tree::get_node(&mut tx, &dest.id).await?.is_none_or(|d| d.trashed_at.is_some()) {
-        return Err(AppError::not_found("The destination folder no longer exists"));
-    }
+    still_there(&mut tx, dest).await?;
     let mut ids: HashMap<&str, String> = HashMap::new();
     let mut extras = Vec::new();
     let mut bytes = 0i64;

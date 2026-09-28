@@ -27,6 +27,14 @@ const PENDING: &str = "FROM blobs b WHERE b.location_id != ?1 AND b.hash > ?3
      AND (EXISTS (SELECT 1 FROM nodes n WHERE n.blob_hash = b.hash AND n.drive_id = ?2)
           OR EXISTS (SELECT 1 FROM node_versions v JOIN nodes n ON n.id = v.node_id WHERE v.blob_hash = b.hash AND n.drive_id = ?2))
      AND NOT EXISTS (SELECT 1 FROM space_move_items i WHERE i.move_id = ?4 AND i.item_id = b.hash AND i.from_location = b.location_id)";
+/// The same content as `PENDING`, found from the space's files and versions rather than by reading every content in the
+/// system: for counting and for the checks made under the write lock (before the switch, when a move is asked for).
+/// `?3` isn't used.
+pub(super) const PENDING_IN_SPACE: &str = "FROM blobs b
+     WHERE b.hash IN (SELECT blob_hash FROM nodes WHERE drive_id = ?2 AND blob_hash IS NOT NULL
+                      UNION SELECT v.blob_hash FROM node_versions v JOIN nodes n ON n.id = v.node_id WHERE n.drive_id = ?2 AND v.blob_hash IS NOT NULL)
+       AND b.location_id != ?1
+       AND NOT EXISTS (SELECT 1 FROM space_move_items i WHERE i.move_id = ?4 AND i.item_id = b.hash AND i.from_location = b.location_id)";
 /// Content copied per page
 const PAGE: i64 = 50;
 /// Copy rounds before the switch: each copies what the space got during the one before
@@ -36,7 +44,7 @@ const UNRECORDED_GRACE: i64 = 24 * 3600;
 
 /// Whether some content of a space on `location` is kept elsewhere
 pub async fn scattered(conn: &mut SqliteConnection, drive_id: &str, location: &str) -> AppResult<bool> {
-    let sql = format!("SELECT 1 {PENDING} LIMIT 1");
+    let sql = format!("SELECT 1 {PENDING_IN_SPACE} LIMIT 1");
     let row: Option<(i64,)> = sqlx::query_as(sqlx::AssertSqlSafe(sql)).bind(location).bind(drive_id).bind("").bind("").fetch_optional(conn).await?;
     Ok(row.is_some())
 }
@@ -79,7 +87,7 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
 
 /// Content left to copy: how many, and their bytes
 async fn left(st: &AppState, job: &Job) -> AppResult<(i64, i64)> {
-    Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT COUNT(*), COALESCE(SUM(b.size), 0) {PENDING}")))
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT COUNT(*), COALESCE(SUM(b.size), 0) {PENDING_IN_SPACE}")))
         .bind(&job.to_location)
         .bind(&job.drive_id)
         .bind("")
@@ -217,7 +225,7 @@ async fn switch(cx: &Ctx<'_>) -> AppResult<bool> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let res = async {
-        let pending: Option<(String,)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT b.hash {PENDING} LIMIT 1")))
+        let pending: Option<(String,)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT b.hash {PENDING_IN_SPACE} LIMIT 1")))
             .bind(&job.to_location)
             .bind(&job.drive_id)
             .bind("")

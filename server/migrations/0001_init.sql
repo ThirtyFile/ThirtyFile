@@ -83,7 +83,7 @@ CREATE TABLE sessions (
   created_at   INTEGER NOT NULL,
   expires_at   INTEGER NOT NULL,
   -- A public id for each session: the token hash stays on the server
-  id           TEXT,
+  id           TEXT NOT NULL,
   -- The browser that signed in (User-Agent, at most 300 characters)
   user_agent   TEXT NOT NULL DEFAULT '',
   -- The address the device used most recently
@@ -212,6 +212,10 @@ CREATE TABLE space_moves (
   to_mode         TEXT NOT NULL CHECK (to_mode IN ('store', 'folder')),
   -- Into a folder: the space's new folder, chosen (and made) when the move first starts
   to_path         TEXT,
+  -- Folder to folder on the same disk: set before the space's folder is renamed to to_path, cleared once the switch
+  -- is recorded or the folder is back. A move stopped in between (ThirtyFile stopped) records the switch when it runs
+  -- again, or renames the folder back when it is cancelled: to_path then holds the space's files.
+  renamed         INTEGER NOT NULL DEFAULT 0,
   -- queued: waiting for its turn; running; paused and failed: stopped with what was copied kept, until it is resumed or
   -- cancelled; done: the space is on the new location; cancelled: it stayed where it was
   state           TEXT NOT NULL DEFAULT 'queued' CHECK (state IN ('queued', 'running', 'paused', 'failed', 'done', 'cancelled')),
@@ -350,7 +354,6 @@ CREATE TABLE nodes (
 );
 CREATE UNIQUE INDEX nodes_name_uq ON nodes (parent_id, name_key) WHERE trashed_at IS NULL;
 CREATE INDEX nodes_parent ON nodes (parent_id);
-CREATE INDEX nodes_owner ON nodes (owner_id, kind);
 -- Recent lists a person's own files newest first: without this index SQLite sorts all of them on every request, which
 -- for the owner of a large space (scanned files belong to the space root's owner) is every file in it
 CREATE INDEX nodes_owner_recent ON nodes (owner_id, kind, updated_at);
@@ -405,6 +408,8 @@ CREATE TABLE node_versions (
 CREATE INDEX node_versions_node ON node_versions (node_id);
 CREATE INDEX node_versions_created ON node_versions (created_at);
 CREATE INDEX node_versions_blob ON node_versions (blob_hash) WHERE blob_hash IS NOT NULL;
+-- Folder spaces: the versions kept in a space's folder, looked up by their path (scans, moves)
+CREATE INDEX node_versions_fs_path ON node_versions (drive_id, fs_path);
 
 -- Access granted on a drive root or folder to a user, a group or everyone.
 CREATE TABLE grants (

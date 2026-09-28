@@ -196,24 +196,28 @@ impl Ctx<'_> {
         self.ctl.progress.lock().unwrap().failed
     }
 
+    /// The progress as it is written to the database: files and bytes done, in all, failed items and the list of them
+    fn progress(&self) -> (i64, i64, i64, i64, i64, String) {
+        let mut p = self.ctl.progress.lock().unwrap();
+        let now = Instant::now();
+        if let Some((at, bytes)) = p.flushed {
+            let secs = now.duration_since(at).as_secs_f64();
+            if secs > 0.2 {
+                let rate = (p.bytes_done - bytes).max(0) as f64 / secs;
+                p.rate = if p.rate == 0.0 { rate } else { p.rate * 0.7 + rate * 0.3 };
+            }
+        }
+        p.flushed = Some((now, p.bytes_done));
+        (p.files_done, p.bytes_done, p.files_total, p.bytes_total, p.failed, serde_json::to_string(&p.failures).unwrap())
+    }
+
     /// Writes the progress to the database
     pub async fn flush(&self) -> AppResult<()> {
-        let (files_done, bytes_done, files_total, bytes_total, failed, failures) = {
-            let mut p = self.ctl.progress.lock().unwrap();
-            let now = Instant::now();
-            if let Some((at, bytes)) = p.flushed {
-                let secs = now.duration_since(at).as_secs_f64();
-                if secs > 0.2 {
-                    let rate = (p.bytes_done - bytes).max(0) as f64 / secs;
-                    p.rate = if p.rate == 0.0 { rate } else { p.rate * 0.7 + rate * 0.3 };
-                }
-            }
-            p.flushed = Some((now, p.bytes_done));
-            (p.files_done, p.bytes_done, p.files_total, p.bytes_total, p.failed, serde_json::to_string(&p.failures).unwrap())
-        };
+        let (files_done, bytes_done, files_total, bytes_total, failed, failures) = self.progress();
         let _w = self.st.write_lock.lock().await;
         sqlx::query(
-            "UPDATE space_moves SET files_done = ?, bytes_done = ?, files_total = ?, bytes_total = ?, failed_items = ?, failures = ? WHERE id = ?",
+            "UPDATE space_moves SET files_done = ?, bytes_done = ?, files_total = ?, bytes_total = ?, failed_items = ?, failures = ?
+             WHERE id = ? AND state = 'running'",
         )
         .bind(files_done)
         .bind(bytes_done)
@@ -367,14 +371,15 @@ pub fn spawn_runner(st: AppState) {
 }
 
 /// After a restart: moves that were running wait for their turn again (ahead of newer ones, as they are older), and
-/// cleanups that didn't finish are done
+/// cleanups that didn't finish are done (one that fails is tried again at the next start)
 async fn recover(st: &AppState) -> AppResult<()> {
     {
         let _w = st.write_lock.lock().await;
         sqlx::query("UPDATE space_moves SET state = 'queued' WHERE state = 'running'").execute(&st.db).await?;
     }
     let unfinished: Vec<(String, String)> = sqlx::query_as(
-        "SELECT id, state FROM space_moves m WHERE state IN ('cancelled', 'done') AND EXISTS (SELECT 1 FROM space_move_items i WHERE i.move_id = m.id)",
+        "SELECT id, state FROM space_moves m
+         WHERE state IN ('cancelled', 'done') AND (EXISTS (SELECT 1 FROM space_move_items i WHERE i.move_id = m.id) OR renamed = 1)",
     )
     .fetch_all(&st.db)
     .await?;
@@ -382,13 +387,21 @@ async fn recover(st: &AppState) -> AppResult<()> {
         if let Some(job) = job(&mut *st.db.acquire().await?, &id).await? {
             if state == "done" {
                 // Switched over, but the old folder wasn't removed yet
-                to_store::cleanup(st, &job).await?;
-            } else {
-                remove_copies(st, &job).await?;
+                clean_up(st, &job).await;
+            } else if let Err(e) = remove_copies(st, &job).await {
+                tracing::warn!("Couldn't remove what a cancelled move of the space {} copied: {}", job.space_name, e.message);
             }
         }
     }
     Ok(())
+}
+
+/// After the switch: removes the old folder. The move is done whatever happens here; what isn't removed now is tried
+/// again at the next start (`recover`).
+async fn clean_up(st: &AppState, job: &Job) {
+    if let Err(e) = to_store::cleanup(st, job).await {
+        tracing::warn!("Couldn't remove the old folder of the space {} after moving it: {}", job.space_name, e.message);
+    }
 }
 
 /// Starts queued moves while fewer than the setting are running
@@ -485,30 +498,30 @@ async fn run(st: &AppState, job: &Job, ctl: &Control) {
     }
 }
 
-/// Before copying: the target can be reached, and a disk of this server has room for the space
+/// Before copying: the target can be reached, and a disk of this server has room for what is left to copy. A folder
+/// moving to a folder is checked once it is clear that it can't simply be renamed (between_folders.rs).
 async fn prepare(cx: &Ctx<'_>) -> AppResult<()> {
     crate::locations::probe(cx.st, &cx.job.to_location)
         .await
         .map_err(|e| AppError::bad_request(format!("The target storage location can't be reached: {e}")))?;
-    let (used,): (i64,) = sqlx::query_as("SELECT used_bytes FROM drives WHERE id = ?")
-        .bind(&cx.job.drive_id)
-        .fetch_optional(&cx.st.db)
-        .await?
-        .ok_or_else(|| AppError::not_found("Space not found"))?;
-    check_room(cx.st, &cx.job.to_location, used).await?;
+    if !(cx.job.from_mode == "folder" && cx.job.to_mode == "folder") {
+        check_room(cx.st, &cx.job.to_location, left_to_copy(cx.st, cx.job).await?).await?;
+    }
     if cx.job.from_mode == "folder" {
-        // The location holding the folder (a disk that may not be mounted), and the folder itself
+        // The location holding the folder (a disk that may not be mounted)
         if let Some(from) = &cx.job.from_location {
             crate::locations::probe(cx.st, from).await.map_err(|e| AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, e))?;
         }
+    }
+    if cx.job.from_mode == "folder" && cx.job.to_mode == "store" {
+        // The folder itself (into a folder, it may be in its new place already: between_folders.rs looks)
         to_store::source(cx.job)?;
         // Each file goes through a temp file in the data folder: the largest must fit
         let (largest,): (i64,) = sqlx::query_as("SELECT COALESCE(MAX(size), 0) FROM nodes WHERE drive_id = ? AND kind = 'file'")
             .bind(&cx.job.drive_id)
             .fetch_one(&cx.st.db)
             .await?;
-        let tmp = cx.st.tmp_dir();
-        let free = tokio::task::spawn_blocking(move || crate::util::disk_space(&tmp)).await.ok().flatten().map(|(free, _)| free);
+        let free = free_space(cx.st.tmp_dir()).await;
         if let Some(free) = free.filter(|f| (*f as i64) < largest) {
             return Err(AppError::bad_request(format!(
                 "There isn't enough free space in ThirtyFile's data folder for the largest file: {needed} is needed, {free} is free",
@@ -520,17 +533,47 @@ async fn prepare(cx: &Ctx<'_>) -> AppResult<()> {
     Ok(())
 }
 
+/// What a move has left to copy: the space's files and earlier versions, less what it copied already (bytes)
+pub(super) async fn left_to_copy(st: &AppState, job: &Job) -> AppResult<i64> {
+    let (left,): (i64,) = sqlx::query_as(
+        "SELECT d.used_bytes + COALESCE((SELECT SUM(v.size) FROM node_versions v JOIN nodes n ON n.id = v.node_id WHERE n.drive_id = d.id), 0)
+                - COALESCE((SELECT SUM(size) FROM space_move_items WHERE move_id = ?2 AND done = 1 AND kind != 'folder'), 0)
+         FROM drives d WHERE d.id = ?1",
+    )
+    .bind(&job.drive_id)
+    .bind(&job.id)
+    .fetch_optional(&st.db)
+    .await?
+    .ok_or_else(|| AppError::not_found("Space not found"))?;
+    Ok(left.max(0))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: the free space every disk has (None: what the disk says)
+    pub static FREE_SPACE: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+/// Free space on the disk holding `path`, when it can be told
+async fn free_space(path: std::path::PathBuf) -> Option<u64> {
+    #[cfg(test)]
+    if let Some(free) = FREE_SPACE.with(|f| f.get()) {
+        return Some(free);
+    }
+    tokio::task::spawn_blocking(move || crate::util::disk_space(&path)).await.ok().flatten().map(|(free, _)| free)
+}
+
 /// On a disk of this server (the built-in storage, a Local folder location): refuses when the disk has less free space
 /// than `bytes`
-async fn check_room(st: &AppState, location: &str, bytes: i64) -> AppResult<()> {
+pub(super) async fn check_room(st: &AppState, location: &str, bytes: i64) -> AppResult<()> {
     let row: Option<(String, String, String)> =
         sqlx::query_as("SELECT kind, config, name FROM storage_locations WHERE id = ?").bind(location).fetch_optional(&st.db).await?;
     let Some((kind, config, name)) = row else { return Err(AppError::not_found("Storage location not found")) };
-    if kind != "local" {
+    if kind != "local" || bytes <= 0 {
         return Ok(());
     }
     let Ok(root) = crate::storage::local_root(location, &crate::locations::config_json(location, &config), &st.storage_dir) else { return Ok(()) };
-    let free = tokio::task::spawn_blocking(move || crate::util::disk_space(&root)).await.ok().flatten().map(|(free, _)| free);
+    let free = free_space(root).await;
     match free {
         Some(free) if (free as i64) < bytes => Err(AppError::bad_request(format!(
             "There isn't enough free space on {name}: {needed} is needed, {free} is free",
@@ -541,13 +584,34 @@ async fn check_room(st: &AppState, location: &str, bytes: i64) -> AppResult<()> 
     }
 }
 
-/// Records that a run stopped (paused, or failed with `error`), with its progress
+/// Records that a run stopped (paused, or failed with `error`), with its progress. A move that switched the space over
+/// is done, and stays done: resuming or cancelling it would take the files it moved for copies.
 async fn set_state(cx: &Ctx<'_>, state: &str, error: Option<&str>) -> AppResult<()> {
-    cx.flush().await?;
     let _w = cx.st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&cx.st.db).await?;
     let res = async {
-        sqlx::query("UPDATE space_moves SET state = ?, error = ? WHERE id = ?").bind(state).bind(error).bind(&cx.job.id).execute(&mut *tx).await?;
+        let (files_done, bytes_done, files_total, bytes_total, failed, failures) = cx.progress();
+        let stopped = sqlx::query(
+            "UPDATE space_moves SET state = ?, error = ?, files_done = ?, bytes_done = ?, files_total = ?, bytes_total = ?, failed_items = ?,
+                                    failures = ?
+             WHERE id = ? AND state = 'running'",
+        )
+        .bind(state)
+        .bind(error)
+        .bind(files_done)
+        .bind(bytes_done)
+        .bind(files_total)
+        .bind(bytes_total)
+        .bind(failed)
+        .bind(failures)
+        .bind(&cx.job.id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected()
+            == 1;
+        if !stopped {
+            return Ok(());
+        }
         if let Some(error) = error {
             log(&mut tx, cx.job, "move_failed", &format!("{}: {error}", route(cx.job))).await?;
         }

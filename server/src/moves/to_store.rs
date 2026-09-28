@@ -44,6 +44,9 @@ const UNRECORDED_GRACE: i64 = 24 * 3600;
 const PENDING_FILES: &str = "FROM nodes n LEFT JOIN space_move_items i ON i.move_id = ?1 AND i.item_id = n.id
      WHERE n.drive_id = ?2 AND n.kind = 'file' AND n.id > ?3
        AND (i.item_id IS NULL OR i.size IS NOT n.fs_size OR i.src_mtime_ns IS NOT n.fs_mtime_ns OR i.path IS NOT n.fs_path)";
+/// Copies of the move `?1` that found their content at the target `?2` already, and it isn't there any more (each
+/// looked up by its hash, not by reading every content at the target)
+pub(super) const NO_LONGER_THERE: &str = "WHERE move_id = ?1 AND uploaded = 0 AND NOT EXISTS (SELECT 1 FROM blobs b WHERE b.hash = space_move_items.hash AND b.location_id = ?2)";
 /// Earlier versions kept in the folder that aren't copied yet
 const PENDING_VERSIONS: &str = "FROM node_versions v LEFT JOIN space_move_items i ON i.move_id = ?1 AND i.item_id = v.id
      WHERE v.drive_id = ?2 AND v.fs_path IS NOT NULL AND v.id > ?3 AND i.item_id IS NULL";
@@ -96,7 +99,7 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
             return Ok(stop);
         }
         if switch(cx).await? {
-            cleanup(st, job).await?;
+            super::clean_up(st, job).await;
             return Ok(Stop::Done);
         }
         // Files changed within the last seconds wait for a later scan
@@ -245,11 +248,22 @@ async fn copy_one(cx: &Ctx<'_>, dst: &Arc<dyn Storage>, root: &Pinned, item: &It
             return Ok(None);
         }
     };
+    // Held until the copy is recorded, like an upload's: a deletion of the same content at the target (still pending
+    // from an earlier move away from it, say) waits, or is waited for; once recorded, the move protects it
+    // (claim_for_deletion)
+    let _staging = tree::stage_guard(st, &hash).await;
     let uploaded = match store(cx, dst, &hash, &tmp).await {
         Ok(Ok(u)) => u,
         Ok(Err(stop)) => return Ok(Some(stop)),
         Err(e) => return Err(e),
     };
+    #[cfg(test)]
+    {
+        let hook = AFTER_STORE.lock().unwrap().iter().find(|(id, _)| *id == job.id).map(|(_, h)| h.clone());
+        if let Some(hook) = hook {
+            hook(hash.clone()).await;
+        }
+    }
     {
         let _w = st.write_lock.lock().await;
         sqlx::query(
@@ -289,12 +303,18 @@ async fn copy_one(cx: &Ctx<'_>, dst: &Arc<dyn Storage>, root: &Pinned, item: &It
     Ok(None)
 }
 
+/// Tests: something to do after a content is stored, given its hash
+#[cfg(test)]
+pub type Hook = std::sync::Arc<dyn Fn(String) -> futures_util::future::BoxFuture<'static, ()> + Send + Sync>;
+
+/// Tests: called for a move (by its id) between storing a content and recording the copy
+#[cfg(test)]
+pub static AFTER_STORE: std::sync::Mutex<Vec<(String, Hook)>> = std::sync::Mutex::new(Vec::new());
+
 /// Stores a temp file at the target unless it has that content already (the temp file goes either way); returns
-/// whether it was stored now
+/// whether it was stored now. The caller holds the content's staging guard.
 async fn store(cx: &Ctx<'_>, dst: &Arc<dyn Storage>, hash: &str, tmp: &std::path::Path) -> AppResult<Result<bool, Stop>> {
     let (st, job) = (cx.st, cx.job);
-    // Held until the copy is recorded, like an upload's (a deletion of the same content at the target waits)
-    let _staging = tree::stage_guard(st, hash).await;
     let there: Option<(String,)> = sqlx::query_as("SELECT location_id FROM blobs WHERE hash = ?").bind(hash).fetch_optional(&st.db).await?;
     if there.is_some_and(|(loc,)| loc == job.to_location) {
         let _ = tokio::fs::remove_file(tmp).await;
@@ -357,14 +377,12 @@ async fn switch(cx: &Ctx<'_>) -> AppResult<bool> {
             }
         }
         // Content that was at the target when it was copied, and isn't any more: copied again
-        let gone = sqlx::query(
-            "DELETE FROM space_move_items WHERE move_id = ? AND uploaded = 0 AND hash NOT IN (SELECT hash FROM blobs WHERE location_id = ?)",
-        )
-        .bind(&job.id)
-        .bind(&job.to_location)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
+        let gone = sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM space_move_items {NO_LONGER_THERE}")))
+            .bind(&job.id)
+            .bind(&job.to_location)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
         if gone > 0 {
             return Ok(false);
         }
@@ -458,6 +476,12 @@ async fn switch(cx: &Ctx<'_>) -> AppResult<bool> {
     Ok(switched)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Tests: removing the old folder after the switch fails
+    pub static FAIL_CLEANUP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// A file copied from the folder: (item, path, device, inode, size, modification time)
 type Copied = (String, String, Option<i64>, Option<i64>, i64, Option<i64>);
 
@@ -465,6 +489,10 @@ type Copied = (String, String, Option<i64>, Option<i64>, i64, Option<i64>);
 /// when it is still what was copied, then the folders left empty and the space's marker. What stays is noted on the
 /// move. The record of copies goes last.
 pub async fn cleanup(st: &AppState, job: &Job) -> AppResult<()> {
+    #[cfg(test)]
+    if FAIL_CLEANUP.with(|f| f.get()) {
+        return Err(AppError::internal("the old folder couldn't be removed (test)"));
+    }
     let Some(folder) = job.from_path.clone() else { return Ok(()) };
     let mut left = 0usize;
     let mut after = String::new();
