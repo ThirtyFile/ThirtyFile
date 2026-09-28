@@ -34,7 +34,8 @@ use crate::{
     util::{now, random_token},
 };
 
-pub const PROVIDERS: [&str; 3] = ["microsoft", "google", "github"];
+/// `oidc`: any OpenID Connect provider (Keycloak, Authentik, Authelia, Zitadel…), set up with its issuer URL
+pub const PROVIDERS: [&str; 4] = ["microsoft", "google", "github", "oidc"];
 const PENDING_TTL: Duration = Duration::from_secs(600);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -45,6 +46,7 @@ pub fn label(provider: &str) -> &'static str {
     match provider {
         "microsoft" => "Microsoft",
         "google" => "Google",
+        "oidc" => "OpenID Connect",
         _ => "GitHub",
     }
 }
@@ -117,6 +119,13 @@ pub struct ProviderConfig {
     pub defaults: NewUserDefaults,
     /// Groups automatically created accounts are added to
     pub groups: Vec<i64>,
+    /// OpenID Connect: the name on the sign-in button, and the issuer (its discovery document is
+    /// `<issuer>/.well-known/openid-configuration`)
+    pub name: String,
+    pub issuer: String,
+    /// OpenID Connect: the endpoints its discovery document gave when the settings were saved
+    pub authorize_url: String,
+    pub token_url: String,
 }
 
 impl ProviderConfig {
@@ -134,6 +143,7 @@ pub struct SsoSettings {
     pub microsoft: ProviderConfig,
     pub google: ProviderConfig,
     pub github: ProviderConfig,
+    pub oidc: ProviderConfig,
     /// Email domains allowed to sign in (lowercase, without @) unless a provider has its own list; empty = unrestricted
     pub allowed_domains: Vec<String>,
     /// Per-domain settings for automatically created accounts (a domain here still has to be allowed to sign in)
@@ -154,12 +164,13 @@ impl SsoSettings {
             "microsoft" => Some(&self.microsoft),
             "google" => Some(&self.google),
             "github" => Some(&self.github),
+            "oidc" => Some(&self.oidc),
             _ => None,
         }
     }
     /// Removes a deleted group from the groups new accounts join; returns whether anything changed
     pub fn forget_group(&mut self, id: i64) -> bool {
-        let lists = [&mut self.microsoft.groups, &mut self.google.groups, &mut self.github.groups]
+        let lists = [&mut self.microsoft.groups, &mut self.google.groups, &mut self.github.groups, &mut self.oidc.groups]
             .into_iter()
             .chain(self.domain_rules.iter_mut().map(|r| &mut r.groups));
         let mut changed = false;
@@ -175,6 +186,7 @@ impl SsoSettings {
             "microsoft" => Some(&mut self.microsoft),
             "google" => Some(&mut self.google),
             "github" => Some(&mut self.github),
+            "oidc" => Some(&mut self.oidc),
             _ => None,
         }
     }
@@ -281,6 +293,13 @@ fn endpoints(provider: &str, cfg: &ProviderConfig) -> Endpoints {
                 scope: "openid profile email",
             }
         }
+        "oidc" => Endpoints {
+            authorize: cfg.authorize_url.clone(),
+            token: cfg.token_url.clone(),
+            user: String::new(),
+            emails: String::new(),
+            scope: "openid email profile",
+        },
         "google" => Endpoints {
             authorize: "https://accounts.google.com/o/oauth2/v2/auth".into(),
             token: "https://oauth2.googleapis.com/token".into(),
@@ -344,7 +363,7 @@ pub async fn providers(State(st): State<AppState>) -> Json<Value> {
     let list: Vec<Value> = PROVIDERS
         .iter()
         .filter(|p| cfg.provider(p).is_some_and(ProviderConfig::ready))
-        .map(|p| json!({ "id": p, "label": label(p) }))
+        .map(|p| json!({ "id": p, "label": if *p == "oidc" { shown_name(cfg.provider(p).unwrap()) } else { label(p).to_string() } }))
         .collect();
     Json(json!(list))
 }
@@ -661,6 +680,7 @@ fn verify_id_token(provider: &str, cfg: &ProviderConfig, token: &str, nonce: &st
     let iss_ok = cfg!(test)
         || match provider {
             "google" => iss == "https://accounts.google.com" || iss == "accounts.google.com",
+            "oidc" => !cfg.issuer.is_empty() && iss.trim_end_matches('/') == cfg.issuer,
             _ => iss.starts_with("https://login.microsoftonline.com/") && iss.ends_with("/v2.0"),
         };
     if !iss_ok {
@@ -1007,6 +1027,8 @@ fn admin_view(st: &AppState, headers: &HeaderMap) -> Value {
             "client_id": c.client_id,
             "has_secret": !c.client_secret.is_empty(),
             "tenant": c.tenant,
+            "name": c.name,
+            "issuer": c.issuer,
             "redirect_uri": redirect_uri(&base, p),
             "provisioning": c.provisioning(),
             "allowed_domains": c.allowed_domains,
@@ -1018,6 +1040,7 @@ fn admin_view(st: &AppState, headers: &HeaderMap) -> Value {
         "microsoft": provider("microsoft"),
         "google": provider("google"),
         "github": provider("github"),
+        "oidc": provider("oidc"),
         "allowed_domains": cfg.allowed_domains,
         "domain_rules": cfg.domain_rules,
         "max_created_per_hour": MAX_CREATED_PER_HOUR,
@@ -1073,6 +1096,54 @@ async fn check_provider(st: &AppState, p: &str, new: &mut ProviderConfig, prev: 
         return Err(AppError::bad_request("The space size can't be negative"));
     }
     new.groups = existing_groups(st, &new.groups).await?;
+    if p == "oidc" {
+        discover(new, prev).await?;
+    }
+    Ok(())
+}
+
+/// The name on the sign-in button of the OpenID Connect provider
+fn shown_name(c: &ProviderConfig) -> String {
+    if c.name.trim().is_empty() { label("oidc").to_string() } else { c.name.clone() }
+}
+
+/// OpenID Connect: checks the issuer and reads its endpoints from its discovery document (again only when the issuer
+/// changed, or they are missing). The issuer must be an https URL, and the document must name that same issuer.
+async fn discover(new: &mut ProviderConfig, prev: &ProviderConfig) -> AppResult<()> {
+    new.name = clean_name(&new.name).chars().take(40).collect();
+    new.issuer = new.issuer.trim().trim_end_matches('/').to_string();
+    if new.issuer.is_empty() {
+        if new.enabled {
+            return Err(AppError::bad_request("Enter the issuer URL of the OpenID Connect provider"));
+        }
+        return Ok(());
+    }
+    let https = |u: &str| u.starts_with("https://") || (cfg!(test) && u.starts_with("http://127.0.0.1"));
+    if !https(&new.issuer) || new.issuer.contains(['?', '#', ' ']) {
+        return Err(AppError::bad_request("The issuer must be an https URL, e.g. https://auth.example.com/realms/staff"));
+    }
+    if new.issuer == prev.issuer && !prev.authorize_url.is_empty() && !prev.token_url.is_empty() {
+        new.authorize_url = prev.authorize_url.clone();
+        new.token_url = prev.token_url.clone();
+        return Ok(());
+    }
+    let fail = |why: String| AppError::bad_request(format!("The OpenID Connect provider's settings couldn't be read: {why}"));
+    let url = format!("{}/.well-known/openid-configuration", new.issuer);
+    let res = http().map_err(fail)?.get(&url).send().await.map_err(|e| fail(e.to_string()))?;
+    if !res.status().is_success() {
+        return Err(fail(format!("{url} answered {}", res.status())));
+    }
+    let doc: Value = serde_json::from_str(&res.text().await.map_err(|e| fail(e.to_string()))?).map_err(|e| fail(e.to_string()))?;
+    let text = |k: &str| doc[k].as_str().unwrap_or_default().to_string();
+    if text("issuer").trim_end_matches('/') != new.issuer {
+        return Err(fail(format!("it names another issuer ({})", text("issuer"))));
+    }
+    let (authorize, token) = (text("authorization_endpoint"), text("token_endpoint"));
+    if !https(&authorize) || !https(&token) {
+        return Err(fail("its sign-in and token addresses must be https URLs".into()));
+    }
+    new.authorize_url = authorize;
+    new.token_url = token;
     Ok(())
 }
 
@@ -1199,6 +1270,16 @@ mod tests {
             );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
+        // An OpenID Connect provider's discovery document (the issuer is `<base>/realm`)
+        let doc = json!({
+            "issuer": format!("{base}/realm"),
+            "authorization_endpoint": format!("{base}/oidc/authorize"),
+            "token_endpoint": format!("{base}/oidc/token"),
+        });
+        let other = json!({ "issuer": "https://elsewhere.example", "authorization_endpoint": "https://elsewhere.example/a", "token_endpoint": "https://elsewhere.example/t" });
+        let app = app
+            .route("/realm/.well-known/openid-configuration", rget(move || async move { Json(doc) }))
+            .route("/other/.well-known/openid-configuration", rget(move || async move { Json(other) }));
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (m, base)
     }
@@ -1415,6 +1496,39 @@ mod tests {
         sqlx::query("UPDATE users SET disabled = 1 WHERE username = 'amy@example.com'").execute(&env.st.db).await.unwrap();
         let r = login(&env, &m, "google", None, |n| google(n, "g-1", "amy@example.com", true)).await;
         assert!(location(&r).contains("sso_error"));
+        *MOCK_BASE.lock().unwrap() = None;
+    }
+
+    #[tokio::test]
+    async fn any_openid_connect_provider_is_set_up_from_its_issuer() {
+        let _g = SERIAL.lock().await;
+        let env = testutil::env().await;
+        let (m, base) = mock_server().await;
+        let admin = env.admin().await;
+        let save = |oidc: Value| {
+            let req = serde_json::from_value(json!({ "oidc": oidc })).unwrap();
+            update_settings(State(env.st.clone()), Admin(admin.clone()), HeaderMap::new(), Json(req))
+        };
+        let oidc = |issuer: &str| json!({ "enabled": true, "client_id": "oidc-client", "client_secret": testutil::password(), "name": "Company login", "issuer": issuer, "provisioning": "create" });
+        // An issuer that isn't https, or whose document names another issuer: refused
+        assert!(save(oidc("http://auth.example.com")).await.is_err());
+        assert!(save(oidc(&format!("{base}/other"))).await.is_err());
+        // Its endpoints are read from the discovery document
+        let _ = save(oidc(&format!("{base}/realm/"))).await.unwrap();
+        let cfg = env.st.sso.read().unwrap().oidc.clone();
+        assert_eq!((cfg.issuer, cfg.authorize_url, cfg.token_url), (format!("{base}/realm"), format!("{base}/oidc/authorize"), format!("{base}/oidc/token")));
+        let Json(list) = providers(State(env.st.clone())).await;
+        assert!(list.as_array().unwrap().iter().any(|p| p["id"] == "oidc" && p["label"] == "Company login"), "{list}");
+
+        // Signing in works like with the others: an account is created for the verified email
+        *MOCK_BASE.lock().unwrap() = Some(base);
+        let r = login(&env, &m, "oidc", None, |n| {
+            json!({ "iss": "https://auth.example.com/realm", "aud": "oidc-client", "exp": now() + 600, "nonce": n, "sub": "k-1", "email": "kim@example.com", "email_verified": true, "name": "Kim" })
+        })
+        .await;
+        assert_eq!(location(&r), "/files/abc");
+        let (source,): (String,) = sqlx::query_as("SELECT source FROM users WHERE username = 'kim@example.com'").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(source, "oidc");
         *MOCK_BASE.lock().unwrap() = None;
     }
 

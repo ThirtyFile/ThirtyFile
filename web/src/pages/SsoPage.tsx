@@ -13,13 +13,14 @@ import { copyText } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 import { Section, SettingsFrame, Toggle } from "@/pages/SettingsFrame";
 
-const PROVIDERS: SsoProviderId[] = ["microsoft", "google", "github"];
+const PROVIDERS: SsoProviderId[] = ["microsoft", "google", "github", "oidc"];
 
 /** Steps for creating an app with each provider */
 const GUIDE: Record<SsoProviderId, string> = {
   microsoft: t("Microsoft Entra admin center › App registrations › New registration. Select the \"Web\" platform and enter the redirect URI below, then add a client secret under \"Certificates & secrets\". The Application (client) ID and Directory (tenant) ID are on the \"Overview\" page."),
   google: t("Google Cloud Console › APIs & Services › Credentials › Create credentials › OAuth client ID. Choose \"Web application\" as the application type and add the URL below under \"Authorized redirect URIs\". If this is your first time, configure the OAuth consent screen first."),
   github: t("GitHub › Settings › Developer settings › OAuth Apps › New OAuth App. Enter the URL below as the Authorization callback URL, then click Generate a new client secret after the app is created. For company use, create the app under your organization's settings."),
+  oidc: t("Any OpenID Connect provider, such as Keycloak, Authentik, Authelia or Zitadel: create a confidential client (web application) with the redirect URI below, and enter its issuer URL, client ID and secret. The provider must send a verified email address."),
 };
 
 const GB = 1024 ** 3;
@@ -30,12 +31,14 @@ function toReq(s: SsoSettings): SsoSettingsReq {
     client_id: s[id].client_id,
     client_secret: "",
     tenant: s[id].tenant,
+    name: s[id].name,
+    issuer: s[id].issuer,
     provisioning: s[id].provisioning,
     allowed_domains: s[id].allowed_domains,
     defaults: s[id].defaults,
     groups: s[id].groups,
   });
-  return { microsoft: p("microsoft"), google: p("google"), github: p("github"), allowed_domains: s.allowed_domains, domain_rules: s.domain_rules };
+  return { microsoft: p("microsoft"), google: p("google"), github: p("github"), oidc: p("oidc"), allowed_domains: s.allowed_domains, domain_rules: s.domain_rules };
 }
 
 /** A rule as edited: the domain and the size are typed as text */
@@ -111,6 +114,7 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
     microsoft: withPolicy("microsoft"),
     google: withPolicy("google"),
     github: withPolicy("github"),
+    oidc: withPolicy("oidc"),
     allowed_domains: splitDomains(domains),
     domain_rules: rules.filter((r) => r.domain.trim()).map(ruleReq),
   };
@@ -259,12 +263,32 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
                 <ProviderIcon provider={id} className="size-[18px]" />
               </span>
               <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-medium">{t("Sign in with {name}", { name: id === "microsoft" ? "Microsoft Entra ID" : SSO_LABEL[id] })}</div>
+                <div className="text-[13px] font-medium">
+                  {t("Sign in with {name}", { name: id === "microsoft" ? "Microsoft Entra ID" : id === "oidc" ? draft.oidc.name.trim() || SSO_LABEL.oidc : SSO_LABEL[id] })}
+                </div>
                 <p className="text-xs text-muted-foreground">{draft[id].enabled ? t("On: this button appears on the sign-in page") : t("Not enabled")}</p>
               </div>
               <Toggle label={t("Turn on sign-in with {name}", { name: SSO_LABEL[id] })} checked={draft[id].enabled} onChange={(v) => setProvider(id, { enabled: v })} />
             </div>
             <p className="text-xs leading-relaxed text-muted-foreground">{GUIDE[id]}</p>
+            {id === "oidc" && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="sso-oidc-name">{t("Name on the sign-in button")}</Label>
+                  <Input id="sso-oidc-name" value={draft.oidc.name} maxLength={40} placeholder={t("e.g. Company login")} onChange={(e) => setProvider("oidc", { name: e.target.value })} autoComplete="off" />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="sso-oidc-issuer">{t("Issuer URL")}</Label>
+                  <Input
+                    id="sso-oidc-issuer"
+                    value={draft.oidc.issuer}
+                    placeholder="https://auth.example.com/realms/staff"
+                    onChange={(e) => setProvider("oidc", { issuer: e.target.value })}
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+            )}
             <div className="grid gap-1.5">
               <Label>{t("Redirect URI")}</Label>
               <div className="flex gap-2">

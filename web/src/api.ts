@@ -266,7 +266,8 @@ export interface ActivityFilter {
 export type BrandingReq = Omit<Branding, "has_logo" | "has_logo_dark" | "has_login_background" | "version">;
 
 export interface SsoProvider {
-  id: "microsoft" | "google" | "github";
+  id: "microsoft" | "google" | "github" | "oidc";
+  /** The name on the button (for oidc, the one the administrator chose) */
   label: string;
 }
 
@@ -372,6 +373,9 @@ export interface SsoProviderSettings extends SsoProviderPolicy {
   has_secret: boolean;
   /** Microsoft: tenant ID or domain */
   tenant: string;
+  /** OpenID Connect: the name on the sign-in button, and the issuer URL */
+  name: string;
+  issuer: string;
   /** Redirect URI to enter in the provider's app settings */
   redirect_uri: string;
 }
@@ -391,6 +395,7 @@ export interface SsoSettings {
   microsoft: SsoProviderSettings;
   google: SsoProviderSettings;
   github: SsoProviderSettings;
+  oidc: SsoProviderSettings;
   allowed_domains: string[];
   domain_rules: SsoDomainRule[];
   /** Accounts one provider may create per hour */
@@ -399,11 +404,12 @@ export interface SsoSettings {
   public_url_set: boolean;
 }
 
-export type SsoProviderReq = SsoProviderPolicy & { enabled: boolean; client_id: string; client_secret: string; tenant: string };
+export type SsoProviderReq = SsoProviderPolicy & { enabled: boolean; client_id: string; client_secret: string; tenant: string; name: string; issuer: string };
 export interface SsoSettingsReq {
   microsoft: SsoProviderReq;
   google: SsoProviderReq;
   github: SsoProviderReq;
+  oidc: SsoProviderReq;
   allowed_domains: string[];
   domain_rules: SsoDomainRule[];
 }
