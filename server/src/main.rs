@@ -14,6 +14,7 @@ mod mail;
 mod notify;
 mod branding;
 mod check;
+mod convert;
 mod ftp;
 mod sftp;
 mod sso;
@@ -137,6 +138,14 @@ enum Command {
         #[arg(long)]
         verify: bool,
     },
+    /// Turn the spaces kept in the content store on this server's disks (from 0.1 and 0.2) into ordinary folders in
+    /// the storage folder: company, teams/<name> and users/<name>. Stop ThirtyFile first. It can be stopped and run
+    /// again; what is done is skipped. Spaces on S3, SFTP or FTP stay as they are
+    Convert {
+        /// Only list what would be done
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -207,6 +216,22 @@ async fn rotate_secret_key(db: &sqlx::SqlitePool, source: &secrets::KeySource) -
     Ok(())
 }
 
+/// Holds `thirtyfile.lock` in the data folder while the server or `thirtyfile convert` runs, so they never run at the
+/// same time. Where the file system can't lock files, nothing is held.
+fn lock_data(data: &std::path::Path) -> Result<Option<std::fs::File>, Box<dyn std::error::Error>> {
+    let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(data.join("thirtyfile.lock"))?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => {
+            Err("ThirtyFile, or `thirtyfile convert`, is already running with this data folder. Stop it first.".into())
+        }
+        Err(std::fs::TryLockError::Error(e)) => {
+            tracing::warn!("Couldn't lock the data folder ({e}); make sure only one ThirtyFile uses it");
+            Ok(None)
+        }
+    }
+}
+
 /// Where the built-in storage location keeps file contents. Version 0.1.0 always used blobs in the
 /// data directory; when files are still there, they stay in use so that nothing seems to disappear.
 fn storage_dir(data: &std::path::Path, configured: Option<&std::path::Path>) -> PathBuf {
@@ -240,6 +265,19 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         let (storages, _) = locations::load_all(&db, &storage).await?;
         let reports = check::run(&db, &storages, *verify, |id, n| eprintln!("Checking storage location {id} ({n} file(s))…")).await?;
         let problems = check::print(&reports);
+        std::process::exit(if problems == 0 { 0 } else { 1 });
+    }
+
+    if let Some(Command::Convert { dry_run }) = &cfg.command {
+        let _lock = lock_data(&cfg.data)?;
+        let (storages, _) = locations::load_all(&db, &storage).await?;
+        // The built-in location's spaces go to the storage folder set now: for 0.1, whose files are still in /data/blobs,
+        // that is /storage rather than the folder in use
+        let target = std::path::absolute(cfg.storage.as_ref().unwrap_or(&storage))?;
+        let report = convert::run(&db, &storages, &target, &cfg.data, *dry_run, |name| eprintln!("Converting the space \"{name}\"…"))
+            .await
+            .map_err(|e| e.to_string())?;
+        let problems = convert::print(&report, *dry_run);
         std::process::exit(if problems == 0 { 0 } else { 1 });
     }
 
@@ -299,6 +337,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         return Ok(());
     }
 
+    let _lock = lock_data(&cfg.data)?;
     let admin_password = match (&cfg.admin_password, &cfg.admin_password_file) {
         (Some(p), _) => Some(p.clone()),
         (None, Some(file)) => Some(
@@ -320,6 +359,12 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         tracing::warn!("The site URL uses https but THIRTYFILE_SECURE_COOKIE is off: set THIRTYFILE_SECURE_COOKIE=true");
     }
     let (storages, default_location) = locations::load_all(&db, &storage).await?;
+    match convert::pending(&db).await {
+        Ok(n) if n > 0 => tracing::info!(
+            "{n} space(s) keep their files in the content store on this server's disk. `thirtyfile convert` turns them into ordinary folders (see the guide Upgrade and backup)"
+        ),
+        _ => {}
+    }
     let log_settings = logs::load_settings(&db).await;
     let branding = branding::load(&db).await;
     let sso_settings = sso::load(&db).await;

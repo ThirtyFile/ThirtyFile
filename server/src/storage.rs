@@ -46,6 +46,14 @@ pub trait Storage: Send + Sync {
     fn list(&self) -> BoxFuture<'_, io::Result<Vec<String>>> {
         Box::pin(async { Err(io::Error::new(io::ErrorKind::Unsupported, "this storage can't be listed")) })
     }
+    /// A folder on this server: the folder, and where it keeps stored content (`thirtyfile convert`)
+    fn local_root(&self) -> Option<&Path> {
+        None
+    }
+    fn local_file(&self, hash: &str) -> Option<PathBuf> {
+        let _ = hash;
+        None
+    }
 }
 
 /// Whether a file name found in storage is stored content (a sha256 in hex)
@@ -176,6 +184,14 @@ impl Storage for LocalStorage {
             .await
             .map_err(io::Error::other)?
         })
+    }
+
+    fn local_root(&self) -> Option<&Path> {
+        Some(&self.root)
+    }
+
+    fn local_file(&self, hash: &str) -> Option<PathBuf> {
+        self.path(hash).ok()
     }
 
     fn check(&self) -> BoxFuture<'_, io::Result<()>> {

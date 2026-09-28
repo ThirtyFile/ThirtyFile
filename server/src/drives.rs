@@ -165,7 +165,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
         Some(_) if !user.is_admin() => return Err(AppError::forbidden("Only administrators can show a folder on the server as a space")),
         Some(p) => {
             let p = crate::folders::check_source(&st, p)?;
-            let (taken,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drives WHERE mode = 'folder' AND source_path = ?").bind(&p).fetch_one(&st.db).await?;
+            let (taken,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drives WHERE source_path = ?").bind(&p).fetch_one(&st.db).await?;
             if taken > 0 {
                 return Err(AppError::conflict("Another space already shows this folder"));
             }
