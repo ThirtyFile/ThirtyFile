@@ -75,9 +75,12 @@ export function Frame(p: FrameProps) {
       <footer className="flex h-7 shrink-0 items-center gap-3 px-3 text-xs text-muted-foreground">
         {p.footer}
         <span className="flex-1" />
-        <span className="max-sm:hidden">
-          {t("{size} used", { size: me.quota_bytes > 0 ? `${formatBytes(me.used_bytes)} / ${formatBytes(me.quota_bytes)}` : formatBytes(me.used_bytes) })}
-        </span>
+        {/* How much of "My files" is used: nothing for someone without it */}
+        {me.root_id && (
+          <span className="max-sm:hidden">
+            {t("{size} used", { size: me.quota_bytes > 0 ? `${formatBytes(me.used_bytes)} / ${formatBytes(me.quota_bytes)}` : formatBytes(me.used_bytes) })}
+          </span>
+        )}
         {p.footerRight}
       </footer>
       {p.keys && <ShortcutsHost />}

@@ -590,9 +590,12 @@ export function ThisPcPage() {
             <div className="pt-2">{listView}</div>
           ) : (
             <>
-              <Section {...section("personal", t("Personal"), personal.length)}>
-                <div {...tiles(t("Personal"), personal.length)}>{personal.map((d) => driveTile(d))}</div>
-              </Section>
+              {/* Someone without "My files" has no personal section */}
+              {personal.length > 0 && (
+                <Section {...section("personal", t("Personal"), personal.length)}>
+                  <div {...tiles(t("Personal"), personal.length)}>{personal.map((d) => driveTile(d))}</div>
+                </Section>
+              )}
               <Section {...section("common", t("Shared spaces"), common.length)}>
                 <div {...tiles(t("Shared spaces"), common.length)}>
                   {common.map((d) => driveTile(d))}

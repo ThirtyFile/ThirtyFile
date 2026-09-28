@@ -38,8 +38,11 @@ import { useMe } from "@/lib/session";
 import { useTheme, type ThemeMode } from "@/lib/theme";
 import { LANGS, lang, setLang, t, type Lang } from "@/lib/i18n";
 
-/** The signed-in user's menu at the bottom of the locations list: account settings, appearance, language and signing out */
-export function AccountMenu({ usage }: { usage: string }) {
+/**
+ * The signed-in user's menu at the bottom of the locations list: account settings, appearance, language and signing
+ * out. `usage`: how much of "My files" is used; null for someone without it.
+ */
+export function AccountMenu({ usage }: { usage: string | null }) {
   const me = useMe();
   const { dark, mode, canToggle, setMode } = useTheme();
   const [changingPassword, setChangingPassword] = useState(false);
@@ -69,7 +72,13 @@ export function AccountMenu({ usage }: { usage: string }) {
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" className="w-52">
           <div className="px-1.5 py-1 text-xs text-muted-foreground">
-            {me.role === "admin" ? t("Administrator · {size} used", { size: usage }) : t("User · {size} used", { size: usage })}
+            {usage === null
+              ? me.role === "admin"
+                ? t("Administrator")
+                : t("Standard user")
+              : me.role === "admin"
+                ? t("Administrator · {size} used", { size: usage })
+                : t("User · {size} used", { size: usage })}
           </div>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setChangingPassword(true)}>

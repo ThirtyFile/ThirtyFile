@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { LocationSelect } from "@/components/LocationSelect";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
 import { copyText } from "@/lib/utils";
 import { t } from "@/lib/i18n";
@@ -51,15 +52,40 @@ interface RuleDraft {
   can_share: boolean;
   quotaGb: string;
   groups: number[];
+  /** "My files": "" = the system setting, "yes" or "no" */
+  personal: "" | "yes" | "no";
+  /** Its storage location; "" = the system setting's */
+  location: string;
 }
 
 const toGb = (bytes: number | null) => (bytes === null ? "" : String(+(bytes / GB).toFixed(2)));
 const ruleKey = () => Math.random().toString(36).slice(2);
-const ruleDraft = (r: SsoDomainRule): RuleDraft => ({ key: ruleKey(), domain: r.domain, can_write: r.can_write, can_delete: r.can_delete, can_share: r.can_share, quotaGb: toGb(r.quota_bytes), groups: r.groups });
+const newRule = (): RuleDraft => ({ key: ruleKey(), domain: "", can_write: true, can_delete: true, can_share: true, quotaGb: "", groups: [], personal: "", location: "" });
+const ruleDraft = (r: SsoDomainRule): RuleDraft => ({
+  key: ruleKey(),
+  domain: r.domain,
+  can_write: r.can_write,
+  can_delete: r.can_delete,
+  can_share: r.can_share,
+  quotaGb: toGb(r.quota_bytes),
+  groups: r.groups,
+  personal: r.personal_space === null || r.personal_space === undefined ? "" : r.personal_space ? "yes" : "no",
+  location: r.personal_location ?? "",
+});
 const ruleReq = (d: RuleDraft): SsoDomainRule => {
   const q = d.quotaGb.trim();
   const bytes = q === "" ? null : Math.max(0, Math.round(Number(q) * GB));
-  return { domain: d.domain.trim().toLowerCase(), can_write: d.can_write, can_delete: d.can_delete, can_share: d.can_share, quota_bytes: Number.isFinite(bytes ?? 0) ? bytes : null, groups: d.groups };
+  return {
+    domain: d.domain.trim().toLowerCase(),
+    can_write: d.can_write,
+    can_delete: d.can_delete,
+    can_share: d.can_share,
+    quota_bytes: Number.isFinite(bytes ?? 0) ? bytes : null,
+    groups: d.groups,
+    personal_space: d.personal === "" ? null : d.personal === "yes",
+    // A location only matters when the accounts get a personal space
+    personal_location: d.personal === "no" ? null : d.location || null,
+  };
 };
 
 const splitDomains = (text: string) => text.split(/[,\s;]+/).filter(Boolean);
@@ -220,6 +246,27 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
                     <Input id={`rule-${i}-quota`} inputMode="decimal" value={r.quotaGb} onChange={(e) => setRule(i, { quotaGb: e.target.value })} placeholder={t("Blank = the default for new users; 0 = unlimited")} />
                   </div>
                   <div className="grid gap-1.5">
+                    <Label htmlFor={`rule-${i}-personal`}>{t("\"My files\" of new accounts")}</Label>
+                    <select
+                      id={`rule-${i}-personal`}
+                      className="h-9 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      value={r.personal}
+                      onChange={(e) => setRule(i, { personal: e.target.value as RuleDraft["personal"] })}
+                    >
+                      <option value="">{t("As in the system settings")}</option>
+                      <option value="yes">{t("Create")}</option>
+                      <option value="no">{t("Don't create")}</option>
+                    </select>
+                    {r.personal !== "no" && (
+                      <LocationSelect
+                        aria-label={t("Storage location of \"My files\"")}
+                        value={r.location}
+                        onChange={(location) => setRule(i, { location })}
+                        blank={t("Location as in the system settings")}
+                      />
+                    )}
+                  </div>
+                  <div className="grid gap-1.5">
                     <div className="text-[13px] font-medium">{t("Add new accounts to these groups")}</div>
                     {groups.data?.length ? (
                       <div className="flex flex-wrap gap-2">
@@ -247,7 +294,7 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
             </div>
           ))}
           <div>
-            <Button type="button" variant="outline" size="sm" onClick={() => setRules((list) => [...list, { key: ruleKey(), domain: "", can_write: true, can_delete: true, can_share: true, quotaGb: "", groups: [] }])}>
+            <Button type="button" variant="outline" size="sm" onClick={() => setRules((list) => [...list, newRule()])}>
               <PlusIcon />
               {t("Add rule")}
             </Button>

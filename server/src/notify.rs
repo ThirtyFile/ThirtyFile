@@ -662,7 +662,7 @@ mod tests {
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
         let cat = env.user("cat", true).await;
-        let folder = env.folder(&amy, &amy.root_id, "Plans").await;
+        let folder = env.folder(&amy, amy.root(), "Plans").await;
         share(&env, &amy, &folder, json!({ "principal_type": "user", "principal_id": ben.id, "role": "editor" })).await;
         let b = bell(&env, &ben).await;
         assert_eq!(b["unread"], 1);
@@ -681,13 +681,13 @@ mod tests {
         }
         let prefs = json!({ "kinds": { "shared": { "in_app": false, "email": true } } });
         let _ = update_settings(State(env.st.clone()), ben.clone(), Json(serde_json::from_value(prefs).unwrap())).await.unwrap();
-        let other = env.folder(&amy, &amy.root_id, "Budget").await;
+        let other = env.folder(&amy, amy.root(), "Budget").await;
         share(&env, &amy, &other, json!({ "principal_type": "group", "principal_id": 1, "role": "viewer" })).await;
         assert_eq!(bell(&env, &cat).await["unread"], 1);
         assert_eq!(bell(&env, &ben).await["unread"], 1, "turned off in the app");
         assert_eq!(bell(&env, &amy).await["unread"], 0);
         // Everyone: nobody is told
-        let third = env.folder(&amy, &amy.root_id, "Open").await;
+        let third = env.folder(&amy, amy.root(), "Open").await;
         share(&env, &amy, &third, json!({ "principal_type": "everyone", "role": "viewer" })).await;
         assert_eq!(bell(&env, &cat).await["unread"], 1);
 
@@ -710,7 +710,7 @@ mod tests {
         let ben = env.user("ben", true).await;
         sqlx::query("UPDATE users SET quota_bytes = 1000 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
         sqlx::query("UPDATE drives SET used_bytes = 950 WHERE owner_id = ? AND kind = 'personal'").bind(amy.id).execute(&env.st.db).await.unwrap();
-        let folder = env.folder(&amy, &amy.root_id, "Plans").await;
+        let folder = env.folder(&amy, amy.root(), "Plans").await;
         let soon = now() + 86400;
         crate::db::add_grant(&mut env.st.db.acquire().await.unwrap(), &folder, "user", ben.id, "viewer", Some(amy.id), Some(soon)).await.unwrap();
 
@@ -730,7 +730,7 @@ mod tests {
 
         // Shared with a short expiry: the share already says when it ends
         let cat = env.user("cat", true).await;
-        let other = env.folder(&amy, &amy.root_id, "Budget").await;
+        let other = env.folder(&amy, amy.root(), "Budget").await;
         share(&env, &amy, &other, json!({ "principal_type": "user", "principal_id": cat.id, "role": "viewer", "expires_at": soon })).await;
         assert_eq!(check(&env.st).await.unwrap(), 0);
         assert_eq!(bell(&env, &cat).await["items"][0]["data"]["expires_at"].as_i64(), Some(soon));
@@ -754,7 +754,7 @@ mod tests {
         headers.insert(axum::http::header::COOKIE, "tf_lang=zh-TW".parse().unwrap());
         let _ = list(State(env.st.clone()), ben.clone(), headers, Query(ListQuery { tz: Some(-480) })).await.unwrap();
 
-        let folder = env.folder(&amy, &amy.root_id, "Plans").await;
+        let folder = env.folder(&amy, amy.root(), "Plans").await;
         for u in [&ben, &cat] {
             share(&env, &amy, &folder, json!({ "principal_type": "user", "principal_id": u.id, "role": "editor" })).await;
         }

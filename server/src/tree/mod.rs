@@ -144,7 +144,8 @@ pub async fn get_drive(conn: &mut SqliteConnection, id: &str) -> AppResult<Optio
 
 pub fn resolve_alias<'a>(user: &'a User, id: &'a str) -> AppResult<&'a str> {
     Ok(match id {
-        "root" => user.root_id.as_str(),
+        // The personal space, which a user may not have (personal.rs): the web never asks them for it
+        "root" => user.root_id.as_deref().ok_or_else(|| AppError::not_found("You don't have a personal space"))?,
         "shared" => user.shared_root.as_deref().ok_or_else(|| AppError::not_found("The shared space isn't enabled"))?,
         _ => id,
     })
@@ -419,9 +420,9 @@ mod tests {
     async fn files_of_one_uploaded_folder_stay_together_when_a_file_has_its_name() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        env.file(&amy, &amy.root_id, "Photos").await;
+        env.file(&amy, amy.root(), "Photos").await;
         let mut c = env.st.db.acquire().await.unwrap();
-        let mut ensure = async |rel: &str, batch: &str| ensure_folders(&mut c, amy.id, &amy.root_id, rel, batch).await.unwrap();
+        let mut ensure = async |rel: &str, batch: &str| ensure_folders(&mut c, amy.id, amy.root(), rel, batch).await.unwrap();
 
         // Two files of one batch: "Photos (1)" is created once, and both land in it
         let a = ensure("Photos", "b1").await;
@@ -432,8 +433,8 @@ mod tests {
         assert_eq!(get_node(&mut c, &a).await.unwrap().unwrap().name, "Photos (1)");
 
         // Another batch, or a client that sends none, gets a folder of its own as before
-        let other = ensure_folders(&mut c, amy.id, &amy.root_id, "Photos", "b2").await.unwrap();
-        let none = ensure_folders(&mut c, amy.id, &amy.root_id, "Photos", "").await.unwrap();
+        let other = ensure_folders(&mut c, amy.id, amy.root(), "Photos", "b2").await.unwrap();
+        let none = ensure_folders(&mut c, amy.id, amy.root(), "Photos", "").await.unwrap();
         assert!(other != a && none != a && none != other);
     }
 
@@ -442,19 +443,19 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         for name in ["a_b%.txt", "a_b% (1).txt", "A_B% (2).TXT", "a_b% (4).txt", "axb% (3).txt", "Report", "Report (1)"] {
-            env.file(&amy, &amy.root_id, name).await;
+            env.file(&amy, amy.root(), name).await;
         }
         let mut conn = env.st.db.acquire().await.unwrap();
         // Case-insensitive, and the LIKE wildcards in the name itself are escaped (axb% must not count)
-        assert_eq!(unique_name(&mut conn, &amy.root_id, "a_b%.txt", false).await.unwrap(), "a_b% (3).txt");
-        assert_eq!(unique_name(&mut conn, &amy.root_id, "Report", true).await.unwrap(), "Report (2)");
-        assert_eq!(unique_name(&mut conn, &amy.root_id, "new.txt", false).await.unwrap(), "new.txt");
+        assert_eq!(unique_name(&mut conn, amy.root(), "a_b%.txt", false).await.unwrap(), "a_b% (3).txt");
+        assert_eq!(unique_name(&mut conn, amy.root(), "Report", true).await.unwrap(), "Report (2)");
+        assert_eq!(unique_name(&mut conn, amy.root(), "new.txt", false).await.unwrap(), "new.txt");
         // A name that itself looks numbered
         drop(conn);
-        env.file(&amy, &amy.root_id, "file (0).txt").await;
-        env.file(&amy, &amy.root_id, "file (0) (1).txt").await;
+        env.file(&amy, amy.root(), "file (0).txt").await;
+        env.file(&amy, amy.root(), "file (0) (1).txt").await;
         let mut conn = env.st.db.acquire().await.unwrap();
-        assert_eq!(unique_name(&mut conn, &amy.root_id, "file (0).txt", false).await.unwrap(), "file (0) (2).txt");
+        assert_eq!(unique_name(&mut conn, amy.root(), "file (0).txt", false).await.unwrap(), "file (0) (2).txt");
     }
 
 }

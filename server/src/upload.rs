@@ -1053,7 +1053,7 @@ mod tests {
         assert_eq!(replaced.headers()["x-node-name"], "report%2Etxt");
         assert_eq!(read(&env, &amy, &original).await, b"world!");
         assert_eq!(files_named(&env, "report").await, 2);
-        let (used,): (i64,) = sqlx::query_as("SELECT used_bytes FROM drives WHERE root_id = ?").bind(&amy.root_id).fetch_one(&env.st.db).await.unwrap();
+        let (used,): (i64,) = sqlx::query_as("SELECT used_bytes FROM drives WHERE root_id = ?").bind(amy.root()).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(used, 6 + 3);
         // The old content is kept as an earlier version of the file
         let (blobs,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blobs").fetch_one(&env.st.db).await.unwrap();
@@ -1066,7 +1066,7 @@ mod tests {
     async fn an_upload_whose_folder_was_deleted_fails_instead_of_landing_elsewhere() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let folder = env.folder(&amy, &amy.root_id, "Projects").await;
+        let folder = env.folder(&amy, amy.root(), "Projects").await;
         let id = begin_in(&env, &amy, &folder, "plan.txt", 5).await;
         let _ = crate::nodes::trash(State(env.st.clone()), amy.clone(), axum::Json(serde_json::from_value(serde_json::json!({ "ids": [folder] })).unwrap()))
             .await
@@ -1079,7 +1079,7 @@ mod tests {
 
         // Or the permission to write there was taken away
         let ben = env.user("ben", true).await;
-        let shared = env.folder(&amy, &amy.root_id, "Shared").await;
+        let shared = env.folder(&amy, amy.root(), "Shared").await;
         env.grant(&shared, &ben, "editor").await;
         let id = begin_in(&env, &ben, &shared, "notes.txt", 5).await;
         env.revoke(&shared, &ben).await;

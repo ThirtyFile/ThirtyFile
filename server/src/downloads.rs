@@ -355,7 +355,7 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
-        let folder = env.folder(&amy, &amy.root_id, "Docs").await;
+        let folder = env.folder(&amy, amy.root(), "Docs").await;
         let mut ids = Vec::new();
         for i in 0..300 {
             ids.push(env.folder(&amy, &folder, &format!("f{i}")).await);
@@ -429,12 +429,12 @@ mod tests {
     async fn zip_downloads_hold_nested_folders_but_not_the_trash() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let docs = env.folder(&amy, &amy.root_id, "Docs").await;
+        let docs = env.folder(&amy, amy.root(), "Docs").await;
         let sub = env.folder(&amy, &docs, "Sub").await;
         env.folder(&amy, &sub, "Deep").await;
         env.stored_file(&amy, &docs, "a.txt", b"alpha").await;
         env.stored_file(&amy, &sub, "b.txt", b"beta").await;
-        let top = env.stored_file(&amy, &amy.root_id, "top.txt", b"top").await;
+        let top = env.stored_file(&amy, amy.root(), "top.txt", b"top").await;
         let binned = env.stored_file(&amy, &docs, "binned.txt", b"binned").await;
         let old = env.folder(&amy, &sub, "Old").await;
         env.stored_file(&amy, &old, "c.txt", b"gamma").await;
@@ -465,7 +465,7 @@ mod tests {
     async fn a_zip_whose_content_cant_be_read_fails_instead_of_arriving_cut_short() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let docs = env.folder(&amy, &amy.root_id, "Docs").await;
+        let docs = env.folder(&amy, amy.root(), "Docs").await;
         env.stored_file(&amy, &docs, "a.txt", b"alpha").await;
         env.stored_file(&amy, &docs, "b.txt", b"beta").await;
         let node = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &docs).await.unwrap().unwrap();

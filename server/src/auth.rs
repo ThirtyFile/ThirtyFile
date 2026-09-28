@@ -111,7 +111,8 @@ pub struct User {
     pub can_delete: bool,
     pub can_share: bool,
     pub quota_bytes: i64,
-    pub root_id: String,
+    /// Root folder of their personal space ("My files"); None when they have none (personal.rs)
+    pub root_id: Option<String>,
     /// An administrator chose the password (a new account, a reset): the person sets their own before anything else
     pub must_change_password: bool,
     /// Root folder id of the shared space; None when the shared space is disabled
@@ -126,6 +127,12 @@ pub struct User {
 impl User {
     pub fn is_admin(&self) -> bool {
         self.role == "admin"
+    }
+
+    /// Tests: the root folder of the user's personal space, which test users have
+    #[cfg(test)]
+    pub fn root(&self) -> &str {
+        self.root_id.as_deref().expect("the user has a personal space")
     }
 }
 
@@ -223,7 +230,10 @@ impl FromRequestParts<AppState> for Admin {
 pub struct Me {
     #[serde(flatten)]
     pub user: User,
+    /// Used in their personal space (0 without one)
     pub used_bytes: i64,
+    /// Their personal space is waiting for its storage location to be available (personal.rs)
+    pub personal_pending: bool,
     /// Can create team spaces
     pub can_create_drive: bool,
     /// The site's public URL (for building share links); blank = use the browser's current URL
@@ -242,12 +252,14 @@ pub struct Me {
 
 async fn me_of(st: &AppState, user: User) -> AppResult<Me> {
     let used_bytes = tree::used_bytes(&st.db, user.id).await?;
+    let (personal_pending,): (bool,) =
+        sqlx::query_as("SELECT personal_pending IS NOT NULL FROM users WHERE id = ?").bind(user.id).fetch_optional(&st.db).await?.unwrap_or((false,));
     let (can_create_drive, public_url, min_password_length, version_keep) = {
         let s = st.system.read().unwrap();
         (user.is_admin() || s.allow_user_drives, s.public_url.clone(), s.min_password_length, s.version_keep)
     };
     let share_policy = crate::shares::policy(st);
-    Ok(Me { user, used_bytes, can_create_drive, public_url, trash_days: st.trash_days, min_password_length, share_policy, version_keep, max_edit_bytes: crate::files::MAX_EDIT_BYTES })
+    Ok(Me { user, used_bytes, personal_pending, can_create_drive, public_url, trash_days: st.trash_days, min_password_length, share_policy, version_keep, max_edit_bytes: crate::files::MAX_EDIT_BYTES })
 }
 
 #[derive(Deserialize)]
@@ -517,6 +529,8 @@ pub fn user_agent(headers: &HeaderMap) -> String {
 /// Creates a sign-in session and updates "last sign-in", returning the cookie to set (shared by password and third-party
 /// sign-in). `method` (password or the provider), the address and the browser are shown in the list of signed-in devices.
 pub async fn open_session(st: &AppState, user_id: i64, method: &str, ip: &str, headers: &HeaderMap) -> AppResult<String> {
+    // A personal space still waiting for its storage location is tried again first, so it is there when the page opens
+    crate::personal::retry_pending(st, Some(user_id)).await;
     let token = random_token(43);
     let ts = now();
     let _w = st.write_lock.lock().await;

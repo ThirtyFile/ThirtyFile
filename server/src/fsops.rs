@@ -1517,7 +1517,7 @@ mod tests {
         assert_eq!(env.drive_of(&x).await, two.drive);
 
         // Into the content store: stored, then removed from the folder
-        let _ = crate::nodes::move_nodes(st(), admin.clone(), req(json!({ "ids": [sub], "dest_id": admin.root_id }))).await.unwrap();
+        let _ = crate::nodes::move_nodes(st(), admin.clone(), req(json!({ "ids": [sub], "dest_id": admin.root() }))).await.unwrap();
         let n = node(&env, &x).await;
         assert!(n.blob_hash.is_some() && n.fs_path.is_none());
         assert_eq!(content(&env, &admin, &x).await, b"x");
@@ -1533,9 +1533,9 @@ mod tests {
         assert_eq!(blobs, 0);
 
         // A copy from a folder space into the content store
-        let _ = crate::nodes::copy_nodes(st(), admin.clone(), req(json!({ "ids": [x], "dest_id": admin.root_id }))).await.unwrap();
+        let _ = crate::nodes::copy_nodes(st(), admin.clone(), req(json!({ "ids": [x], "dest_id": admin.root() }))).await.unwrap();
         let (copy,): (String,) =
-            sqlx::query_as("SELECT id FROM nodes WHERE parent_id = ? AND name = 'x.txt'").bind(&admin.root_id).fetch_one(&env.st.db).await.unwrap();
+            sqlx::query_as("SELECT id FROM nodes WHERE parent_id = ? AND name = 'x.txt'").bind(admin.root()).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(content(&env, &admin, &copy).await, b"x");
         assert!(one.dir.join("Sub/x.txt").is_file(), "copying leaves the original");
     }

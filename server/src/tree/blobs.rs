@@ -590,7 +590,7 @@ mod tests {
     async fn background_removal_never_deletes_blobs_being_uploaded() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let drive = env.drive_of(&amy.root_id).await;
+        let drive = env.drive_of(amy.root()).await;
         let hash = "ab".repeat(32);
         let blob = env.dir.join("blobs").join("ab").join("ab").join(&hash);
         let tmp = env.dir.join("tmp").join("upload");

@@ -468,6 +468,10 @@ export interface SsoDomainRule {
   /** Bytes (0 = unlimited); null = the system's default for new users */
   quota_bytes: number | null;
   groups: number[];
+  /** Give the account a personal space ("My files"); null = the system setting */
+  personal_space: boolean | null;
+  /** The storage location of its personal space; null = the system setting's */
+  personal_location: string | null;
 }
 
 export interface SsoSettings {
@@ -603,9 +607,13 @@ export interface Me {
   can_delete: boolean;
   can_share: boolean;
   quota_bytes: number;
-  root_id: string;
+  /** Root folder of their personal space ("My files"); null when they don't have one: never ask for "root" then */
+  root_id: string | null;
+  /** Their personal space waits for its storage location to be available */
+  personal_pending: boolean;
   /** Root folder of the "All files" company space; null when disabled */
   shared_root: string | null;
+  /** Used in their personal space (0 without one) */
   used_bytes: number;
   can_create_drive: boolean;
   /** Public site URL (used to build share links); blank = use the browser's current URL */
@@ -760,12 +768,21 @@ export interface UserRow {
   sso_email: string;
   display_name: string;
   used_bytes: number;
+  /** The user has a personal space ("My files") */
+  personal_space: boolean;
+  /** The storage location of their personal space; null without one */
+  personal_location: string | null;
+  /** The storage location their personal space waits for, when it couldn't be created yet (the location wasn't available) */
+  personal_pending: string | null;
 }
 
 export interface SystemSettingsReq {
   shared_enabled?: boolean;
   allow_user_drives?: boolean;
   default_user_quota?: number;
+  personal_spaces?: boolean;
+  /** A storage location's id, or "" for the default location */
+  personal_location?: string;
   public_url?: string;
   default_lang?: DefaultLang;
   scan_minutes?: number;
@@ -787,6 +804,10 @@ export interface SystemInfo {
   allow_user_drives: boolean;
   /** Default personal space quota for new users (bytes, 0 = unlimited) */
   default_user_quota: number;
+  /** New users get a personal space ("My files") */
+  personal_spaces: boolean;
+  /** The storage location of new personal spaces; "" = the default location */
+  personal_location: string;
   /** Public site URL; blank = use the browser's current URL */
   public_url: string;
   default_lang: DefaultLang;
@@ -1097,17 +1118,25 @@ export const api = {
   users: () => get<UserRow[]>("/admin/users"),
   /** A page of accounts, by id */
   usersPage: (after: number, limit: number) => get<UserRow[]>(`/admin/users${qs({ after: String(after), limit: String(limit) })}`),
-  createUser: (req: Partial<UserRow> & { password: string }) => post<UserRow>("/admin/users", req),
+  /** `personal_space` / `personal_location`: "My files" and its storage location; left out, the system settings decide */
+  createUser: (req: Partial<Omit<UserRow, "personal_space" | "personal_location">> & { password: string; personal_space?: boolean; personal_location?: string }) =>
+    post<UserRow>("/admin/users", req),
   updateUser: (id: number, req: Partial<UserRow> & { password?: string }) => request<UserRow>("PATCH", enc`/admin/users/${id}`, req),
   /** Deletes a user: their personal space's files are moved to another space (move_to, a space id) or deleted (delete_files) */
   deleteUser: (id: number, files: { move_to?: string; delete_files?: boolean } = {}) =>
     request("DELETE", enc`/admin/users/${id}` + qs(toParams(files))),
+  /** Gives a user a personal space on a storage location (the system setting's when left out) */
+  addPersonalSpace: (id: number, location_id?: string) => post<UserRow>(enc`/admin/users/${id}/personal-space`, { location_id }),
+  /** Removes a user's personal space: its files are moved to another space (move_to) or deleted (delete_files) */
+  removePersonalSpace: (id: number, files: { move_to?: string; delete_files?: boolean }) =>
+    request<UserRow>("DELETE", enc`/admin/users/${id}/personal-space` + qs(toParams(files))),
   systemSettings: () => get<SystemInfo>("/admin/settings"),
   updateSystemSettings: (req: SystemSettingsReq) => request<SystemInfo>("PATCH", "/admin/settings", req),
 
   drives: () => get<Drive[]>("/drives").then((l) => l.map(localizeDrive)),
-  createDrive: (name: string, quota_bytes?: number, source_path?: string, read_only?: boolean) =>
-    post<Drive>("/drives", { name, quota_bytes, source_path, read_only }),
+  /** `location_id` (administrators): the storage location of the new space; left out, the default location */
+  createDrive: (name: string, quota_bytes?: number, source_path?: string, read_only?: boolean, location_id?: string) =>
+    post<Drive>("/drives", { name, quota_bytes, source_path, read_only, location_id }),
   /** Scans a folder space for changes made on the server's folder */
   scanDrive: (id: string) => post<ScanReport>(enc`/admin/drives/${id}/scan`),
   updateDrive: (id: string, req: { name?: string; quota_bytes?: number; read_only?: boolean }) => request<Drive>("PATCH", enc`/drives/${id}`, req),

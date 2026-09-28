@@ -134,22 +134,25 @@ export function ConfirmDialog(props: {
 export function FolderPickerDialog(props: {
   title: string;
   confirmText: string;
-  startId: string;
+  /** The folder to start in; null: the first of the person's spaces */
+  startId: string | null;
   excludeIds: Set<string>;
   onPick(folderId: string): Promise<void>;
   onClose(): void;
 }) {
   const drives = useDrives();
-  // base: where browsing starts (a space root, or a folder accessed via sharing)
-  const [base, setBase] = useState<Crumb>({ id: "root", name: t("My files") });
+  // base: where browsing starts (a space root, or a folder accessed via sharing); null until it is known
+  const [base, setBase] = useState<Crumb | null>(null);
   const [trail, setTrail] = useState<Crumb[]>([]);
-  const current = trail.length ? trail[trail.length - 1].id : base.id;
+  const current = trail.length ? trail[trail.length - 1].id : (base?.id ?? "");
   const [picked, setPicked] = useState(false);
 
   // Open the current folder by default
-  const start = useQuery({ queryKey: ["node", props.startId], queryFn: () => api.node(props.startId), enabled: !picked });
+  const startId = props.startId;
+  const start = useQuery({ queryKey: ["node", startId], queryFn: () => api.node(startId!), enabled: !picked && !!startId });
   useEffect(() => {
-    if (start.data && !picked) {
+    if (picked) return;
+    if (start.data) {
       const d = start.data;
       if (d.via_share && d.path.length) {
         setBase(d.path[0]);
@@ -159,12 +162,18 @@ export function FolderPickerDialog(props: {
         setTrail(d.path);
       }
       setPicked(true);
+    } else if ((!startId || start.isError) && drives.data?.length) {
+      // No folder to start in (someone without "My files"), or it can't be opened: the first space
+      setBase({ id: drives.data[0].root_id, name: drives.data[0].name });
+      setTrail([]);
+      setPicked(true);
     }
-  }, [start.data, picked]);
+  }, [start.data, start.isError, startId, drives.data, picked]);
 
   const folders = useQuery({
     queryKey: ["children", current, "folders"],
     queryFn: ({ signal }) => api.children(current, "name", "asc", true, signal),
+    enabled: !!current,
   });
   const { busy, error, run } = useSubmit(() => props.onPick(current));
   const qc = useQueryClient();
@@ -195,7 +204,7 @@ export function FolderPickerDialog(props: {
           <select
             className="h-8 flex-1 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={t("Spaces")}
-            value={drives.data?.some((d) => d.root_id === base.id) ? base.id : ""}
+            value={base && drives.data?.some((d) => d.root_id === base.id) ? base.id : ""}
             onChange={(e) => {
               const d = drives.data?.find((x) => x.root_id === e.target.value);
               if (d) {
@@ -204,7 +213,7 @@ export function FolderPickerDialog(props: {
               }
             }}
           >
-            {!drives.data?.some((d) => d.root_id === base.id) && <option value="">{t("Shared with me: {name}", { name: base.name })}</option>}
+            {base && !drives.data?.some((d) => d.root_id === base.id) && <option value="">{t("Shared with me: {name}", { name: base.name })}</option>}
             {drives.data?.map((d) => (
               <option key={d.id} value={d.root_id}>
                 {d.kind === "team" ? t("{name} (team space)", { name: d.name }) : d.kind === "company" ? t("{name} (company-wide)", { name: d.name }) : d.name}
@@ -214,7 +223,7 @@ export function FolderPickerDialog(props: {
         </label>
         <div className="flex flex-wrap items-center gap-0.5 text-sm">
           <button type="button" className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-muted" onClick={() => setTrail([])}>
-            <HomeIcon className="size-3.5" /> {base.name}
+            <HomeIcon className="size-3.5" /> {base?.name ?? "…"}
           </button>
           {trail.map((c, i) => (
             <span key={c.id} className="flex items-center gap-0.5">
@@ -226,7 +235,7 @@ export function FolderPickerDialog(props: {
           ))}
         </div>
         <div className="h-64 overflow-y-auto rounded-lg border">
-          {folders.isLoading ? (
+          {folders.isLoading || !current ? (
             <div className="flex h-full items-center justify-center text-muted-foreground">
               <Loader2Icon className="size-5 animate-spin" />
             </div>
@@ -261,7 +270,7 @@ export function FolderPickerDialog(props: {
           <Button variant="outline" onClick={props.onClose}>
             {t("Cancel")}
           </Button>
-          <Button disabled={busy || props.excludeIds.has(current)} onClick={() => run()}>
+          <Button disabled={busy || !current || props.excludeIds.has(current)} onClick={() => run()}>
             {busy && <Loader2Icon className="animate-spin" />}
             {props.confirmText}
           </Button>

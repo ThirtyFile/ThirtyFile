@@ -236,7 +236,7 @@ mod tests {
     async fn share_access_is_recorded() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let folder = env.folder(&amy, &amy.root_id, "Shared").await;
+        let folder = env.folder(&amy, amy.root(), "Shared").await;
         let req = serde_json::from_value(json!({ "node_id": folder })).unwrap();
         let Json(info) = crate::shares::create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let token = serde_json::to_value(&info).unwrap()["id"].as_str().unwrap().to_string();
@@ -360,11 +360,11 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
-        let top = env.folder(&amy, &amy.root_id, "top").await;
+        let top = env.folder(&amy, amy.root(), "top").await;
         let sub = env.folder(&amy, &top, "sub").await;
         let a = env.file(&amy, &top, "a.txt").await;
         let b = env.file(&amy, &sub, "b.txt").await;
-        let other = env.file(&amy, &amy.root_id, "other.txt").await;
+        let other = env.file(&amy, amy.root(), "other.txt").await;
         let log = |id: String, action: &'static str| {
             let (st, amy) = (env.st.clone(), amy.clone());
             async move {
@@ -387,7 +387,7 @@ mod tests {
         assert_eq!(history(amy.clone(), &top).await.unwrap(), ["grant top", "rename top", "edit b.txt", "upload a.txt"]);
         assert_eq!(history(amy.clone(), &a).await.unwrap(), ["upload a.txt"]);
         // The space's root folder: the whole space
-        assert_eq!(history(amy.clone(), &amy.root_id).await.unwrap().len(), 5);
+        assert_eq!(history(amy.clone(), amy.root()).await.unwrap().len(), 5);
         // A trashed item's entries stay in its folder's history
         let _ = crate::nodes::trash(State(env.st.clone()), amy.clone(), Json(serde_json::from_value(json!({ "ids": [b] })).unwrap())).await.unwrap();
         assert_eq!(history(amy.clone(), &sub).await.unwrap(), ["trash b.txt", "edit b.txt"]);

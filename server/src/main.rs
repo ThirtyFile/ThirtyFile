@@ -22,6 +22,7 @@ mod sftp;
 mod sso;
 mod nodes;
 mod paths;
+mod personal;
 #[cfg(unix)]
 mod privileges;
 mod reset;
@@ -382,6 +383,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     }
     spawn_maintenance(state.clone(), cfg.trash_days);
     locations::spawn_health_monitor(state.clone());
+    personal::spawn_retry(state.clone());
     folders::spawn_scanner(state.clone());
     // Folder spaces on local disks report changes as they happen
     #[cfg(target_os = "linux")]
@@ -739,6 +741,7 @@ fn api() -> Router<AppState> {
         .route("/admin/users/{id}/sessions", get(sessions::admin_list).delete(sessions::admin_sign_out_all))
         .route("/admin/users/{id}/sessions/{session}", delete(sessions::admin_sign_out))
         .route("/admin/users/{id}/2fa", delete(twofactor::admin_reset))
+        .route("/admin/users/{id}/personal-space", post(personal::add).delete(personal::remove))
         .route("/admin/settings", get(admin::get_settings).patch(admin::update_settings))
         .route("/admin/drives", get(drives::admin_list))
         .route("/admin/drives/{id}/scan", post(drives::scan))
@@ -966,11 +969,11 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
         assert!(!res.headers().contains_key(header::SET_COOKIE));
         assert_eq!(call(&app, Method::GET, "/api/drives", &bearer(), None).await.status(), StatusCode::OK);
-        assert_eq!(call(&app, Method::GET, &format!("/api/nodes/{}/children", admin.root_id), &bearer(), None).await.status(), StatusCode::OK);
+        assert_eq!(call(&app, Method::GET, &format!("/api/nodes/{}/children", admin.root()), &bearer(), None).await.status(), StatusCode::OK);
         // Scripts send no Origin; a token request that does isn't a cross-site forgery either
         let mut with_origin = bearer();
         with_origin.push((header::ORIGIN, "https://elsewhere.example".into()));
-        let folder = serde_json::json!({ "parent_id": admin.root_id, "name": "From a script" });
+        let folder = serde_json::json!({ "parent_id": admin.root(), "name": "From a script" });
         assert_eq!(call(&app, Method::POST, "/api/folders", &with_origin, Some(folder)).await.status(), StatusCode::OK);
 
         // The account, sign-in methods, sharing and administration need a browser session
@@ -997,8 +1000,8 @@ mod tests {
         let app = router(env.st.clone());
         let token = app_password(&env, &amy, "read").await;
         let auth = vec![(header::AUTHORIZATION, format!("Basic {}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, format!("amy:{token}"))))];
-        assert_eq!(call(&app, Method::GET, &format!("/api/nodes/{}/children", amy.root_id), &auth, None).await.status(), StatusCode::OK);
-        let folder = serde_json::json!({ "parent_id": amy.root_id, "name": "Nope" });
+        assert_eq!(call(&app, Method::GET, &format!("/api/nodes/{}/children", amy.root()), &auth, None).await.status(), StatusCode::OK);
+        let folder = serde_json::json!({ "parent_id": amy.root(), "name": "Nope" });
         assert_eq!(call(&app, Method::POST, "/api/folders", &auth, Some(folder)).await.status(), StatusCode::FORBIDDEN);
     }
 
@@ -1015,7 +1018,7 @@ mod tests {
             (header::ORIGIN, "https://evil.example".into()),
             (header::HeaderName::from_static("x-forwarded-host"), "evil.example".into()),
         ];
-        let folder = serde_json::json!({ "parent_id": amy.root_id, "name": "Forged" });
+        let folder = serde_json::json!({ "parent_id": amy.root(), "name": "Forged" });
         assert_eq!(call(&app, Method::POST, "/api/folders", &forged, Some(folder)).await.status(), StatusCode::FORBIDDEN);
         assert!(call(&app, Method::GET, "/api/auth/me", &[(header::COOKIE, cookie.clone())], None).await.headers().get(header::STRICT_TRANSPORT_SECURITY).is_none());
 
@@ -1037,18 +1040,18 @@ mod tests {
         let (_, cookie) = env.sign_in(&amy, "Test").await;
         // A cookie together with some token: the browser would add the cookie by itself, so the origin is checked
         let headers = vec![(header::COOKIE, cookie), (header::AUTHORIZATION, format!("Bearer {token}")), (header::ORIGIN, "https://elsewhere.example".into())];
-        let folder = serde_json::json!({ "parent_id": amy.root_id, "name": "Forged" });
+        let folder = serde_json::json!({ "parent_id": amy.root(), "name": "Forged" });
         assert_eq!(call(&app, Method::POST, "/api/folders", &headers, Some(folder)).await.status(), StatusCode::FORBIDDEN);
 
         // Basic credentials a browser remembered from the WebDAV sign-in prompt: checked too, without a cookie
         let basic = format!("Basic {}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, format!("amy:{token}")));
         let headers = vec![(header::AUTHORIZATION, basic.clone()), (header::ORIGIN, "https://elsewhere.example".into())];
-        let folder = serde_json::json!({ "parent_id": amy.root_id, "name": "Forged" });
+        let folder = serde_json::json!({ "parent_id": amy.root(), "name": "Forged" });
         assert_eq!(call(&app, Method::POST, "/api/folders", &headers, Some(folder.clone())).await.status(), StatusCode::FORBIDDEN);
         // A script sends no Origin, or a Bearer token from anywhere: both work
         assert_eq!(call(&app, Method::POST, "/api/folders", &[(header::AUTHORIZATION, basic)], Some(folder)).await.status(), StatusCode::OK);
         let headers = vec![(header::AUTHORIZATION, format!("Bearer {token}")), (header::ORIGIN, "https://elsewhere.example".into())];
-        let folder = serde_json::json!({ "parent_id": amy.root_id, "name": "From a script" });
+        let folder = serde_json::json!({ "parent_id": amy.root(), "name": "From a script" });
         assert_eq!(call(&app, Method::POST, "/api/folders", &headers, Some(folder)).await.status(), StatusCode::OK);
     }
 

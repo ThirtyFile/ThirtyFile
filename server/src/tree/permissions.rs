@@ -268,9 +268,9 @@ mod tests {
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
         let admin = env.admin().await;
-        let project = env.folder(&amy, &amy.root_id, "Projects").await;
+        let project = env.folder(&amy, amy.root(), "Projects").await;
         let sub = env.folder(&amy, &project, "Subfolder").await;
-        let private = env.folder(&amy, &amy.root_id, "Private").await;
+        let private = env.folder(&amy, amy.root(), "Private").await;
 
         // Personal space: only the owner; administrators can't see it either (for privacy)
         assert_eq!(role(&env, &amy, &project).await, Some(Role::Owner));
@@ -281,7 +281,7 @@ mod tests {
         env.grant(&project, &ben, "editor").await;
         assert_eq!(role(&env, &ben, &sub).await, Some(Role::Editor));
         assert_eq!(role(&env, &ben, &private).await, None);
-        assert_eq!(role(&env, &ben, &amy.root_id).await, None);
+        assert_eq!(role(&env, &ben, amy.root()).await, None);
 
         // The higher role wins
         env.grant(&sub, &ben, "manager").await;

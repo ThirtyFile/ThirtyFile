@@ -76,7 +76,7 @@ async fn an_interrupted_upload_resumes_where_it_stopped() {
     let res = send(&env, &amy, &id, 5, b" world").await.unwrap();
     assert_eq!(res.headers()["upload-offset"], "11");
     assert_eq!(file(&env, &res).await.0, b"hello world");
-    assert_eq!(used(&env, &amy.root_id).await, 11);
+    assert_eq!(used(&env, amy.root()).await, 11);
 }
 
 #[tokio::test]
@@ -130,15 +130,15 @@ async fn received_data_of_the_wrong_size_doesnt_become_a_file() {
     assert!(err.message.contains("size mismatch"), "{}", err.message);
     let (files,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE name = 'odd.txt'").fetch_one(&env.st.db).await.unwrap();
     assert_eq!(files, 0);
-    assert_eq!(used(&env, &amy.root_id).await, 0);
+    assert_eq!(used(&env, amy.root()).await, 0);
 }
 
 #[tokio::test]
 async fn an_upload_whose_folder_moved_lands_in_the_folder_where_it_is_now() {
     let env = testutil::env().await;
     let amy = env.user("amy", true).await;
-    let a = env.folder(&amy, &amy.root_id, "A").await;
-    let b = env.folder(&amy, &amy.root_id, "B").await;
+    let a = env.folder(&amy, amy.root(), "A").await;
+    let b = env.folder(&amy, amy.root(), "B").await;
     let id = start(&env, &amy, &a, "", "plan.txt", 5).await.unwrap();
     move_to(&env, &amy, &a, &b).await;
     let res = send(&env, &amy, &id, 0, b"hello").await.unwrap();
@@ -147,20 +147,20 @@ async fn an_upload_whose_folder_moved_lands_in_the_folder_where_it_is_now() {
     // Moved to another space: it follows the folder there, and counts there
     let company = env.st.shared_root().unwrap();
     let id = start(&env, &amy, &a, "", "budget.txt", 6).await.unwrap();
-    let before = used(&env, &amy.root_id).await;
+    let before = used(&env, amy.root()).await;
     move_to(&env, &amy, &a, &company).await;
     let res = send(&env, &amy, &id, 0, b"budget").await.unwrap();
     assert_eq!(file(&env, &res).await, (b"budget".to_vec(), "budget.txt".into(), a.clone()));
     assert_eq!(env.drive_of(res.headers()["x-node-id"].to_str().unwrap()).await, env.drive_of(&company).await);
     assert_eq!(used(&env, &company).await, 5 + 6);
-    assert_eq!(used(&env, &amy.root_id).await, before - 5);
+    assert_eq!(used(&env, amy.root()).await, before - 5);
 }
 
 #[tokio::test]
 async fn an_upload_whose_folder_moved_to_a_full_space_fails() {
     let env = testutil::env().await;
     let amy = env.user("amy", true).await;
-    let folder = env.folder(&amy, &amy.root_id, "Docs").await;
+    let folder = env.folder(&amy, amy.root(), "Docs").await;
     // A team space with room for 8 bytes, 4 of them taken
     let team_root = {
         let mut conn = env.st.db.acquire().await.unwrap();
@@ -189,9 +189,9 @@ async fn an_upload_whose_folder_moved_to_a_full_space_fails() {
 async fn files_of_an_uploaded_folder_go_into_folders_already_there() {
     let env = testutil::env().await;
     let amy = env.user("amy", true).await;
-    let trip = env.folder(&amy, &amy.root_id, "Trip").await;
+    let trip = env.folder(&amy, amy.root(), "Trip").await;
     // A folder with the same name in the trash isn't used
-    let old = env.folder(&amy, &amy.root_id, "Old").await;
+    let old = env.folder(&amy, amy.root(), "Old").await;
     let _ = crate::nodes::trash(State(env.st.clone()), amy.clone(), axum::Json(serde_json::from_value(serde_json::json!({ "ids": [old] })).unwrap()))
         .await
         .unwrap();

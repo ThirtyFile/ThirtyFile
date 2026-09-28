@@ -9,7 +9,9 @@ import { Input } from "@/components/ui/input";
 import { NavMenu } from "@/components/NavMenu";
 import { openShortcuts } from "@/components/ShortcutsDialog";
 import { isTyping } from "@/components/explorer/types";
-import { folderOfPath, useFolderDrop } from "@/lib/dnd";
+import { useFolderDrop } from "@/lib/dnd";
+import { folderOfPath, hasPersonal } from "@/lib/home";
+import { useMe } from "@/lib/session";
 import { appLink, pathAliases, urlOf } from "@/lib/paths";
 import { shortcut } from "@/lib/keys";
 import { t } from "@/lib/i18n";
@@ -92,7 +94,7 @@ export function crumbPath(crumbs: Crumb[]) {
 
 /** A part of the address bar path: a link to that folder, which also takes dropped items and files */
 function CrumbItem({ crumb: c, last, path }: { crumb: Crumb; last: boolean; path: string }) {
-  const folder = folderOfPath(c.to);
+  const folder = folderOfPath(c.to, hasPersonal(useMe()));
   const { dropping, dropProps } = useFolderDrop(folder ? { id: folder, name: c.label } : null);
   const drop = cn(dropping && "bg-brand/15 ring-1 ring-brand ring-inset");
   return (

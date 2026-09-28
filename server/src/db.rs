@@ -245,6 +245,16 @@ pub async fn set_setting(conn: &mut SqliteConnection, key: &str, value: &str) ->
     Ok(())
 }
 
+pub async fn location_exists(conn: &mut SqliteConnection, id: &str) -> Result<bool, sqlx::Error> {
+    let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM storage_locations WHERE id = ?").bind(id).fetch_one(&mut *conn).await?;
+    Ok(n > 0)
+}
+
+/// Checks a storage location an administrator chose for a new space
+pub async fn check_location(conn: &mut SqliteConnection, id: &str) -> AppResult<()> {
+    if location_exists(conn, id).await? { Ok(()) } else { Err(crate::error::AppError::not_found("Storage location not found")) }
+}
+
 /// Creates a space and its root folder on the storage location `location_id`, returning (space id, root folder id).
 /// The space records the location for good (only a move changes it, locations.rs): its files go there, or its folder
 /// once `space_folders::make_folder_space` makes it a folder space. The caller creates the access grants separately.
@@ -338,6 +348,8 @@ pub async fn load_system_settings(db: &SqlitePool) -> Result<SystemSettings, sql
         sqlx::query_as("SELECT root_id, disabled FROM drives WHERE kind = 'company' LIMIT 1").fetch_one(db).await?;
     let allow_user_drives = get_setting(db, "allow_user_drives").await?.as_deref() == Some("1");
     let default_user_quota = get_setting(db, "default_user_quota").await?.and_then(|v| v.parse().ok()).unwrap_or(0).max(0);
+    let personal_spaces = get_setting(db, "personal_spaces").await?.as_deref() != Some("0");
+    let personal_location = get_setting(db, "personal_location").await?.unwrap_or_default();
     let public_url = get_setting(db, "public_url").await?.unwrap_or_default();
     let default_lang = get_setting(db, "default_lang")
         .await?
@@ -368,6 +380,8 @@ pub async fn load_system_settings(db: &SqlitePool) -> Result<SystemSettings, sql
         shared_root_id,
         allow_user_drives,
         default_user_quota,
+        personal_spaces,
+        personal_location,
         public_url,
         default_lang,
         scan_minutes,
@@ -394,6 +408,9 @@ pub struct NewUser<'a> {
     pub source: &'a str,
     /// Automatically created accounts: the provider's identifier of the person
     pub provisioned_by: Option<&'a str>,
+    /// The storage location of their personal space ("My files"), or None for no personal space (see
+    /// `personal::choose`). When the space can't be created there now, it is created later (personal.rs).
+    pub personal_space: Option<&'a str>,
     /// `AppState::space_folders`: their "My files" is a folder space in `users/<user name>` when its location is a
     /// folder of this server
     pub space_folders: Option<&'a Path>,
@@ -426,8 +443,9 @@ pub async fn next_id(conn: &mut SqliteConnection, table: Counted) -> Result<i64,
     Ok(id)
 }
 
-/// Creates a user and their personal space (on the current default storage location), returning the user id. The caller must hold the write lock, and calls
-/// `folders::spaces_changed` after committing (the personal space may be a folder space).
+/// Creates a user, with their personal space when `u.personal_space` names its location, returning the user id. The
+/// caller must hold the write lock, and calls `folders::spaces_changed` after committing (the personal space may be a
+/// folder space).
 pub async fn create_user(conn: &mut SqliteConnection, u: NewUser<'_>) -> AppResult<i64> {
     let id = next_id(conn, Counted::Users).await?;
     sqlx::query(
@@ -447,11 +465,9 @@ pub async fn create_user(conn: &mut SqliteConnection, u: NewUser<'_>) -> AppResu
     .bind(u.provisioned_by)
     .execute(&mut *conn)
     .await?;
-    let location = crate::locations::default_location(conn).await?;
-    let (drive_id, root_id) = create_drive(conn, "My files", "personal", id, 0, &location).await?;
-    crate::space_folders::make_folder_space(conn, u.space_folders, &drive_id).await?;
-    add_grant(conn, &root_id, "user", id, "owner", Some(id), None).await?;
-    sqlx::query("UPDATE users SET root_id = ? WHERE id = ?").bind(&root_id).bind(id).execute(&mut *conn).await?;
+    if let Some(location) = u.personal_space {
+        crate::personal::create_or_wait(conn, u.space_folders, id, u.username, location).await?;
+    }
     Ok(id)
 }
 
@@ -469,6 +485,8 @@ pub async fn bootstrap_admin(db: &SqlitePool, password: Option<&str>, space_fold
     };
     let password_hash = hash_password(password.clone()).await?;
     let mut tx = db.begin().await?;
+    // The first administrator gets "My files" on the built-in storage (there are no settings yet)
+    let location = crate::locations::default_location(&mut tx).await?;
     create_user(
         &mut tx,
         NewUser {
@@ -481,6 +499,7 @@ pub async fn bootstrap_admin(db: &SqlitePool, password: Option<&str>, space_fold
             quota_bytes: 0,
             source: "password",
             provisioned_by: None,
+            personal_space: Some(&location),
             space_folders,
         },
     )

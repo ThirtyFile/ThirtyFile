@@ -150,6 +150,9 @@ pub struct CreateDriveReq {
     /// Folder spaces: browse, download and share only
     #[serde(default)]
     read_only: bool,
+    /// Administrators: the storage location of the new space; None = the default location
+    #[serde(default)]
+    location_id: Option<String>,
 }
 
 /// Team spaces a standard user may create
@@ -173,6 +176,13 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
         }
         None => None,
     };
+    let chosen = req.location_id.as_deref().map(str::trim).filter(|l| !l.is_empty());
+    if chosen.is_some() && !user.is_admin() {
+        return Err(AppError::forbidden("Only administrators can choose the storage location of a space"));
+    }
+    if chosen.is_some() && source.is_some() {
+        return Err(AppError::bad_request("A space that shows a folder on the server isn't on a storage location"));
+    }
     // A space created by a standard user gets that user's own quota (0 = unlimited only when the user is unlimited)
     // rather than being unlimited; administrators adjust it later. Each space has its own quota: whether users may
     // create spaces at all is the administrator's setting
@@ -186,8 +196,14 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
             return Err(AppError::bad_request("You can create at most 20 spaces. Ask an administrator for more."));
         }
     }
-    // On the default location, for good: changing the default later doesn't move it
-    let location = crate::locations::default_location(&mut tx).await?;
+    // On the chosen location, else the default one, for good: changing the default later doesn't move it
+    let location = match chosen {
+        Some(l) => {
+            crate::db::check_location(&mut tx, l).await?;
+            l.to_string()
+        }
+        None => crate::locations::default_location(&mut tx).await?,
+    };
     let (drive_id, root_id) = create_drive(&mut tx, &name, "team", user.id, quota, &location).await?;
     add_grant(&mut tx, &root_id, "user", user.id, "owner", Some(user.id), None).await?;
     // A folder chosen by the administrator (on no location), else a new folder in the storage location's folder when
@@ -756,9 +772,9 @@ mod tests {
         env.st.system.write().unwrap().allow_user_drives = true;
         let amy = env.user("amy", true).await;
         for i in 0..MAX_OWN_SPACES {
-            let _ = create(State(env.st.clone()), amy.clone(), Json(CreateDriveReq { name: format!("Team {i}"), quota_bytes: 0, source_path: None, read_only: false })).await.unwrap();
+            let _ = create(State(env.st.clone()), amy.clone(), Json(CreateDriveReq { name: format!("Team {i}"), quota_bytes: 0, source_path: None, read_only: false, location_id: None })).await.unwrap();
         }
-        let res = create(State(env.st.clone()), amy.clone(), Json(CreateDriveReq { name: "One more".into(), quota_bytes: 0, source_path: None, read_only: false })).await;
+        let res = create(State(env.st.clone()), amy.clone(), Json(CreateDriveReq { name: "One more".into(), quota_bytes: 0, source_path: None, read_only: false, location_id: None })).await;
         assert!(matches!(res, Err(e) if e.status == axum::http::StatusCode::BAD_REQUEST));
     }
 
@@ -768,7 +784,7 @@ mod tests {
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
         let carol = env.user("carol", true).await;
-        let private = env.folder(&amy, &amy.root_id, "Private").await;
+        let private = env.folder(&amy, amy.root(), "Private").await;
         let shared = env.folder(&amy, &private, "Shared").await;
         let inner = env.folder(&amy, &shared, "Inner").await;
         env.grant(&private, &carol, "viewer").await;
@@ -847,11 +863,11 @@ mod tests {
         sqlx::query("UPDATE users SET quota_bytes = 5000 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
         let mut conn = env.st.db.acquire().await.unwrap();
         let amy = crate::auth::user_by_id(&env.st, &mut conn, amy.id).await.unwrap().unwrap();
-        let req = CreateDriveReq { name: "Team".into(), quota_bytes: 0, source_path: None, read_only: false };
+        let req = CreateDriveReq { name: "Team".into(), quota_bytes: 0, source_path: None, read_only: false, location_id: None };
         let Json(info) = create(State(env.st.clone()), amy, Json(req)).await.unwrap();
         assert_eq!(info.quota_bytes, 5000, "not unlimited, whatever the request said");
         let admin = env.admin().await;
-        let Json(info) = create(State(env.st.clone()), admin, Json(CreateDriveReq { name: "Big".into(), quota_bytes: 0, source_path: None, read_only: false })).await.unwrap();
+        let Json(info) = create(State(env.st.clone()), admin, Json(CreateDriveReq { name: "Big".into(), quota_bytes: 0, source_path: None, read_only: false, location_id: None })).await.unwrap();
         assert_eq!(info.quota_bytes, 0, "administrators may create unlimited spaces");
     }
 
@@ -861,7 +877,7 @@ mod tests {
         let amy = env.user("amy", false);
         let ben = env.user("ben", true);
         let (amy, ben) = (amy.await, ben.await);
-        let folder = env.folder(&amy, &amy.root_id, "Mine").await;
+        let folder = env.folder(&amy, amy.root(), "Mine").await;
         let everyone = Json(GrantReq { principal_type: "everyone".into(), principal_id: 0, role: "editor".into(), expires_at: None });
         // Amy owns the folder, but her account may not share: not with Ben, not with everyone
         let err = grant(State(env.st.clone()), amy.clone(), Path(folder.clone()), grant_req(&ben, "viewer", None)).await.unwrap_err();
@@ -874,7 +890,7 @@ mod tests {
         env.grant(&folder, &ben, "viewer").await;
         let ben_grant = grant_id(&env, &folder, &ben).await;
         assert!(revoke(State(env.st.clone()), amy.clone(), Path(ben_grant)).await.is_err());
-        let theirs = env.folder(&ben, &ben.root_id, "Theirs").await;
+        let theirs = env.folder(&ben, ben.root(), "Theirs").await;
         env.grant(&theirs, &amy, "editor").await;
         let _ = revoke(State(env.st.clone()), amy.clone(), Path(grant_id(&env, &theirs, &amy).await)).await.unwrap();
 

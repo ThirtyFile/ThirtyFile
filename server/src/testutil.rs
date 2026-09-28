@@ -98,9 +98,22 @@ impl TestEnv {
     pub async fn user(&self, name: &str, can_share: bool) -> User {
         let mut conn = self.st.db.acquire().await.unwrap();
         let password_hash = auth::hash_password(password().into()).await.unwrap();
+        let location = crate::locations::default_location(&mut conn).await.unwrap();
         let id = db::create_user(
             &mut conn,
-            NewUser { username: name, password_hash: &password_hash, role: "user", can_write: true, can_delete: true, can_share, quota_bytes: 0, source: "password", provisioned_by: None, space_folders: self.st.space_folders.as_deref() },
+            NewUser {
+                username: name,
+                password_hash: &password_hash,
+                role: "user",
+                can_write: true,
+                can_delete: true,
+                can_share,
+                quota_bytes: 0,
+                source: "password",
+                provisioned_by: None,
+                personal_space: Some(&location),
+                space_folders: self.st.space_folders.as_deref(),
+            },
         )
         .await
         .unwrap();

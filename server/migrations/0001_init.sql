@@ -21,8 +21,12 @@ CREATE TABLE users (
   can_share     INTEGER NOT NULL DEFAULT 1,
   -- Personal drive quota in bytes (0 = unlimited)
   quota_bytes   INTEGER NOT NULL DEFAULT 0,
-  -- Root folder of the user's personal drive
-  root_id       TEXT NOT NULL DEFAULT '',
+  -- Root folder of the user's personal space ("My files"); NULL = the user has none (personal.rs)
+  root_id       TEXT,
+  -- The storage location a personal space is waiting for: it couldn't be created there (a folder that wasn't
+  -- available), and is created there at the next sign-in or retry (personal.rs). NULL = nothing waiting. No foreign
+  -- key: a location deleted meanwhile gives way to the default location.
+  personal_pending TEXT,
   disabled      INTEGER NOT NULL DEFAULT 0,
   created_at    INTEGER NOT NULL,
   last_login_at INTEGER,

@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ActivityLog } from "@/components/logs/ActivityLog";
 import { ErrorText } from "@/components/dialogs";
+import { LocationSelect } from "@/components/LocationSelect";
 import { DRIVE_ICON, DRIVE_KIND_LABEL, ROLE_LABEL, atLeast } from "@/lib/drives";
 import { useMe } from "@/lib/session";
 import { formatBytes } from "@/lib/utils";
@@ -19,6 +20,8 @@ export function CreateDriveDialog({ onClose, onCreated }: { onClose(): void; onC
   const me = useMe();
   const [name, setName] = useState("");
   const [quota, setQuota] = useState("");
+  // Administrators choose the storage location ("" = the default location)
+  const [location, setLocation] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
@@ -31,7 +34,7 @@ export function CreateDriveDialog({ onClose, onCreated }: { onClose(): void; onC
             setBusy(true);
             setError(null);
             try {
-              const d = await api.createDrive(name.trim(), quota ? Math.round(Number(quota) * GB) : 0);
+              const d = await api.createDrive(name.trim(), quota ? Math.round(Number(quota) * GB) : 0, undefined, undefined, location || undefined);
               toast.success(t("Space created. You can now invite members"));
               onCreated(d);
               onClose();
@@ -60,6 +63,8 @@ export function CreateDriveDialog({ onClose, onCreated }: { onClose(): void; onC
                   onChange={(e) => setQuota(e.target.value)}
                   placeholder={t("Unlimited")}
                 />
+                <Label htmlFor="drive-location">{t("Storage location")}</Label>
+                <LocationSelect id="drive-location" value={location} onChange={setLocation} blank="default" />
               </>
             )}
             <p className="text-xs text-muted-foreground">{t("You'll be the owner of this space. After creating it, you can invite users or groups.")}</p>

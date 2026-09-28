@@ -992,14 +992,14 @@ mod tests {
         let admin = env.admin().await;
         let amy = env.user("amy", true).await;
         let bob = env.user("bob", true).await;
-        env.folder(&amy, &amy.root_id, "Docs").await;
-        env.file(&amy, &amy.root_id, "notes.txt").await;
+        env.folder(&amy, amy.root(), "Docs").await;
+        env.file(&amy, amy.root(), "notes.txt").await;
         // A team space whose name clashes with "My files", and a folder Bob shares with Amy
         let req = serde_json::from_value(json!({ "name": "My files" })).unwrap();
         let Json(team) = crate::drives::create(State(env.st.clone()), admin, Json(req)).await.unwrap();
         let team = serde_json::to_value(&team).unwrap();
         env.grant(team["root_id"].as_str().unwrap(), &amy, "editor").await;
-        let plans = env.folder(&bob, &bob.root_id, "Plans & ideas").await;
+        let plans = env.folder(&bob, bob.root(), "Plans & ideas").await;
         env.grant(&plans, &amy, "viewer").await;
 
         let dav = Client::new(&env, &amy, "read").await;
@@ -1040,7 +1040,7 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let bob = env.user("bob", true).await;
-        let secret = env.folder(&bob, &bob.root_id, "Secret").await;
+        let secret = env.folder(&bob, bob.root(), "Secret").await;
         let bobs = Client::new(&env, &bob, "write").await;
         assert_eq!(bobs.send("PUT", "/dav/My%20files/Secret/plan.txt", &[], "plan").await.status, StatusCode::CREATED);
         let dav = Client::new(&env, &amy, "write").await;
@@ -1160,7 +1160,7 @@ mod tests {
     async fn read_only_app_passwords_only_read() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        env.file(&amy, &amy.root_id, "a.txt").await;
+        env.file(&amy, amy.root(), "a.txt").await;
         let dav = Client::new(&env, &amy, "read").await;
         assert_eq!(dav.propfind("/dav/My%20files/", "1").await.status, StatusCode::MULTI_STATUS);
         assert_eq!(dav.send("OPTIONS", "/dav/", &[], "").await.status, StatusCode::OK);

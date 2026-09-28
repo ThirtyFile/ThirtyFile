@@ -5,6 +5,7 @@ import { NavMenu } from "@/components/NavMenu";
 import { Resizer } from "@/components/Resizer";
 import { FolderTree, FolderTreeToolbar } from "@/components/FolderTree";
 import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
+import { hasPersonal } from "@/lib/home";
 import { usePersisted, useMe } from "@/lib/session";
 import { t } from "@/lib/i18n";
 import { cn, formatBytes } from "@/lib/utils";
@@ -39,8 +40,10 @@ function NavItem({ to, icon: Icon, label, end }: { to: string; icon: LucideIcon;
 export function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean; activeFolder?: string; onNavigate(): void }) {
   const me = useMe();
   const [width, setWidth] = usePersisted("tf-nav-width", NAV_DEFAULT_WIDTH);
+  // The quota and usage are those of "My files": nothing to show for someone without it
+  const personal = hasPersonal(me);
   const usedPct = me.quota_bytes > 0 ? Math.min(100, (me.used_bytes / me.quota_bytes) * 100) : 0;
-  const usage = me.quota_bytes > 0 ? `${formatBytes(me.used_bytes)} / ${formatBytes(me.quota_bytes)}` : formatBytes(me.used_bytes);
+  const usage = !personal ? null : me.quota_bytes > 0 ? `${formatBytes(me.used_bytes)} / ${formatBytes(me.quota_bytes)}` : formatBytes(me.used_bytes);
   // On phones the pane opens over the page (with a backdrop): keep focus in it until it closes
   const ref = useRef<HTMLElement>(null);
   const phone = useMediaQuery("(max-width: 47.99rem)");
@@ -86,7 +89,7 @@ export function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean
       </div>
 
       <div className="grid gap-2 border-t p-2">
-        {me.quota_bytes > 0 && (
+        {usage !== null && me.quota_bytes > 0 && (
           <div className="grid gap-1 px-1">
             <div
               role="progressbar"

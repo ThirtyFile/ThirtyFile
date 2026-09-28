@@ -93,11 +93,24 @@ pub struct DomainRule {
     /// Bytes (0 = unlimited); None = the system's default for new users
     pub quota_bytes: Option<i64>,
     pub groups: Vec<i64>,
+    /// Give the account a personal space ("My files"); None = the system setting for new users
+    pub personal_space: Option<bool>,
+    /// The storage location of its personal space; None = the system setting's
+    pub personal_location: Option<String>,
 }
 
 impl Default for DomainRule {
     fn default() -> Self {
-        Self { domain: String::new(), can_write: true, can_delete: true, can_share: true, quota_bytes: None, groups: Vec::new() }
+        Self {
+            domain: String::new(),
+            can_write: true,
+            can_delete: true,
+            can_share: true,
+            quota_bytes: None,
+            groups: Vec::new(),
+            personal_space: None,
+            personal_location: None,
+        }
     }
 }
 
@@ -877,6 +890,10 @@ async fn create_sso_user(st: &AppState, provider: &str, cfg: &ProviderConfig, id
         username = format!("{}-{i}", base.chars().take(28).collect::<String>());
     }
     crate::admin::validate_username(&username)?;
+    // "My files" as the domain rule says, else by the system setting; a location that was deleted since gives way to
+    // the setting's
+    let (create, location) = rule.as_ref().map_or((None, None), |r| (r.personal_space, r.personal_location.as_deref()));
+    let personal = crate::personal::choose(st, &mut tx, create, location, false).await?;
     let id = create_user(
         &mut tx,
         NewUser {
@@ -889,6 +906,7 @@ async fn create_sso_user(st: &AppState, provider: &str, cfg: &ProviderConfig, id
             quota_bytes: quota,
             source: provider,
             provisioned_by: Some(&ident.subject),
+            personal_space: personal.as_deref(),
             space_folders: st.space_folders.as_deref(),
         },
     )
@@ -1147,6 +1165,11 @@ async fn check_domain_rules(st: &AppState, rules: Vec<DomainRule>) -> AppResult<
         }
         if r.quota_bytes.is_some_and(|q| q < 0) {
             return Err(AppError::bad_request("The space size can't be negative"));
+        }
+        // A location only matters when the accounts get a personal space
+        r.personal_location = r.personal_location.map(|l| l.trim().to_string()).filter(|l| !l.is_empty() && r.personal_space != Some(false));
+        if let Some(l) = &r.personal_location {
+            crate::db::check_location(&mut *st.db.acquire().await?, l).await?;
         }
         r.groups = existing_groups(st, &r.groups).await?;
         r.domain = domain;
@@ -1684,7 +1707,7 @@ mod tests {
             let mut c = env.st.db.acquire().await.unwrap();
             crate::db::create_user(
                 &mut c,
-                NewUser { username: &format!("bulk{i}@example.com"), password_hash: &hash, role: "user", can_write: true, can_delete: true, can_share: true, quota_bytes: 0, source: "google", provisioned_by: None, space_folders: None },
+                NewUser { username: &format!("bulk{i}@example.com"), password_hash: &hash, role: "user", can_write: true, can_delete: true, can_share: true, quota_bytes: 0, source: "google", provisioned_by: None, personal_space: None, space_folders: None },
             )
             .await
             .unwrap();
@@ -1707,7 +1730,7 @@ mod tests {
         enable(&env, |s| {
             s.google.provisioning = Provisioning::Create;
             s.google.defaults = NewUserDefaults { can_write: true, can_delete: true, can_share: true, quota_bytes: None };
-            s.domain_rules = vec![DomainRule { domain: "partner.example".into(), can_write: true, can_delete: false, can_share: false, quota_bytes: Some(512 << 20), groups: vec![gid] }];
+            s.domain_rules = vec![DomainRule { domain: "partner.example".into(), can_write: true, can_delete: false, can_share: false, quota_bytes: Some(512 << 20), groups: vec![gid], ..Default::default() }];
         });
         let named = |n: &str, sub: &str, email: &str, name: &str| {
             let mut v = google(n, sub, email, true);
@@ -1746,6 +1769,68 @@ mod tests {
         assert_eq!(location(&r), "/files/abc");
         let (name,): (String,) = sqlx::query_as("SELECT display_name FROM users WHERE username = 'pat@partner.example'").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(name, "Patricia");
+        *MOCK_BASE.lock().unwrap() = None;
+    }
+
+    #[tokio::test]
+    async fn domain_rules_choose_the_personal_space_and_a_missing_folder_doesnt_stop_the_sign_in() {
+        let _g = SERIAL.lock().await;
+        let env = testutil::folders_env().await;
+        let (m, base) = mock_server().await;
+        *MOCK_BASE.lock().unwrap() = Some(base);
+        // A Local folder location whose folder isn't there (a share that isn't mounted)
+        let nas = env.dir.join("nas");
+        sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES ('nas', 'NAS', 'local', ?, 0, 0)")
+            .bind(json!({ "path": nas.to_string_lossy() }).to_string())
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        let rules = vec![
+            DomainRule { domain: "guest.example".into(), personal_space: Some(false), ..Default::default() },
+            DomainRule { domain: "nas.example".into(), personal_location: Some("nas".into()), ..Default::default() },
+        ];
+        // A rule's location must exist
+        let bad = vec![DomainRule { domain: "x.example".into(), personal_location: Some("nope".into()), ..Default::default() }];
+        assert!(check_domain_rules(&env.st, bad).await.is_err());
+        let rules = check_domain_rules(&env.st, rules).await.unwrap();
+        enable(&env, |s| {
+            s.google.provisioning = Provisioning::Create;
+            s.domain_rules = rules;
+        });
+        let db = env.st.db.clone();
+        let space = |email: &'static str| {
+            let db = db.clone();
+            async move {
+                sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>)>(
+                    "SELECT u.root_id, (SELECT location_id FROM drives WHERE kind = 'personal' AND owner_id = u.id), u.personal_pending FROM users u WHERE username = ?",
+                )
+                .bind(email)
+                .fetch_one(&db)
+                .await
+                .unwrap()
+            }
+        };
+
+        // No personal space for guests
+        let r = login(&env, &m, "google", None, |n| google(n, "g-30", "gia@guest.example", true)).await;
+        assert_eq!(location(&r), "/files/abc");
+        assert_eq!(space("gia@guest.example").await, (None, None, None));
+        // On the rule's location: its folder is missing, but signing in works and the space waits for it
+        let r = login(&env, &m, "google", None, |n| google(n, "g-31", "ned@nas.example", true)).await;
+        assert_eq!(location(&r), "/files/abc");
+        assert_eq!(space("ned@nas.example").await, (None, None, Some("nas".into())));
+        // Once the folder is back, the next sign-in creates it there
+        std::fs::create_dir_all(&nas).unwrap();
+        let r = login(&env, &m, "google", None, |n| google(n, "g-31", "ned@nas.example", true)).await;
+        assert_eq!(location(&r), "/files/abc");
+        let (root, at, pending) = space("ned@nas.example").await;
+        assert!(root.is_some());
+        assert_eq!((at.as_deref(), pending), (Some("nas"), None));
+        assert!(nas.join("users/ned@nas.example").is_dir());
+        // Other domains follow the system setting
+        let r = login(&env, &m, "google", None, |n| google(n, "g-32", "zoe@example.com", true)).await;
+        assert_eq!(location(&r), "/files/abc");
+        assert_eq!(space("zoe@example.com").await.1.as_deref(), Some(crate::locations::BUILTIN));
         *MOCK_BASE.lock().unwrap() = None;
     }
 }

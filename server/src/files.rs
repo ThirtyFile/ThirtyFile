@@ -384,7 +384,7 @@ mod tests {
     async fn downloads_answer_ranges_and_conditions() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let id = env.stored_file(&amy, &amy.root_id, "abc.txt", b"abcdefghij").await;
+        let id = env.stored_file(&amy, amy.root(), "abc.txt", b"abcdefghij").await;
 
         let (status, h, body) = fetch(&env, &amy, &id, &[]).await;
         assert_eq!((status, body.as_slice()), (StatusCode::OK, &b"abcdefghij"[..]));
@@ -412,7 +412,7 @@ mod tests {
         assert_eq!((status, body.len()), (StatusCode::NOT_MODIFIED, 0));
 
         // An empty file has nothing to give a part of
-        let empty = env.stored_file(&amy, &amy.root_id, "empty.txt", b"").await;
+        let empty = env.stored_file(&amy, amy.root(), "empty.txt", b"").await;
         let (status, h, body) = fetch(&env, &amy, &empty, &[]).await;
         assert_eq!((status, body.len(), &h[header::CONTENT_LENGTH]), (StatusCode::OK, 0, &HeaderValue::from(0)));
         for range in ["bytes=0-", "bytes=-5"] {
@@ -439,7 +439,7 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
-        let id = env.stored_file(&amy, &amy.root_id, "notes.txt", b"first").await;
+        let id = env.stored_file(&amy, amy.root(), "notes.txt", b"first").await;
         let versions = "SELECT COUNT(*) FROM node_versions WHERE node_id = ?";
         let (_, h, _) = fetch(&env, &amy, &id, &[]).await;
         let opened = h["x-version"].to_str().unwrap().to_string();
@@ -466,7 +466,7 @@ mod tests {
         assert_eq!(count(&env, stored, &crate::util::sha256_hex(b"ben was here")).await, 0);
 
         // Only the growth counts against the quota: growing past it is refused, shrinking always works
-        let drive = env.drive_of(&amy.root_id).await;
+        let drive = env.drive_of(amy.root()).await;
         let used = "SELECT used_bytes FROM drives WHERE id = ?";
         sqlx::query("UPDATE users SET quota_bytes = 8 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
         tree::recompute_usage(&env.st).await.unwrap();
