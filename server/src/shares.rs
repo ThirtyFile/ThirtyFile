@@ -1020,6 +1020,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_zip_that_fails_to_open_doesnt_use_up_the_link() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let folder = env.folder(&amy, &amy.root_id, "Reports").await;
+        let doc = stored_file(&env, &amy, &folder, "report.pdf", b"zipped").await;
+        let req = CreateReq { node_id: folder.clone(), password: None, expires_at: None, max_downloads: Some(1), allow_upload: false, drop_only: false, allow_download: true };
+        let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
+        let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
+        // The whole shared folder, and the file inside it together with the folder (two items make a ZIP too)
+        let get = |ids: String| public_download(State(env.st.clone()), Path(info.id.clone()), Query(DownloadQuery { ids, tz: None }), HeaderMap::new(), visitor());
+        let downloads = || async {
+            let (n,): (i64,) = sqlx::query_as("SELECT downloads FROM shares WHERE id = ?").bind(&info.id).fetch_one(&env.st.db).await.unwrap();
+            n
+        };
+        let hash = crate::util::sha256_hex(b"zipped");
+        let blob = env.dir.join("blobs").join(&hash[0..2]).join(&hash[2..4]).join(&hash);
+        let moved = blob.with_extension("away");
+        std::fs::rename(&blob, &moved).unwrap();
+        assert!(get(folder.clone()).await.is_err());
+        assert!(get(format!("{folder},{doc}")).await.is_err());
+        assert_eq!(downloads().await, 0);
+        std::fs::rename(&moved, &blob).unwrap();
+        let res = get(folder.clone()).await.unwrap();
+        assert_eq!(res.headers()[header::CONTENT_TYPE], "application/zip");
+        assert_eq!(downloads().await, 1);
+        assert_eq!(get(folder).await.unwrap_err().status, StatusCode::GONE);
+    }
+
+    #[tokio::test]
     async fn visits_are_counted_on_the_share_and_survive_trimming_the_log() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;

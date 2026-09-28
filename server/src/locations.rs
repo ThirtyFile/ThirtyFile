@@ -777,6 +777,143 @@ mod tests {
         }
     }
 
+    /// A local storage that runs a hook before each read, to change things while a move is copying
+    struct Hooked {
+        inner: crate::storage::LocalStorage,
+        on_open: Box<dyn Fn(String) -> futures_util::future::BoxFuture<'static, ()> + Send + Sync>,
+    }
+
+    impl Storage for Hooked {
+        fn put_file<'a>(&'a self, hash: &'a str, src: &'a FsPath) -> futures_util::future::BoxFuture<'a, std::io::Result<()>> {
+            self.inner.put_file(hash, src)
+        }
+        fn open<'a>(&'a self, hash: &'a str, start: u64, len: u64) -> futures_util::future::BoxFuture<'a, std::io::Result<storage::BoxReader>> {
+            Box::pin(async move {
+                (self.on_open)(hash.to_string()).await;
+                self.inner.open(hash, start, len).await
+            })
+        }
+        fn delete<'a>(&'a self, hash: &'a str) -> futures_util::future::BoxFuture<'a, std::io::Result<()>> {
+            self.inner.delete(hash)
+        }
+        fn check(&self) -> futures_util::future::BoxFuture<'_, std::io::Result<()>> {
+            self.inner.check()
+        }
+    }
+
+    /// A file in Amy's space whose content is stored in `location`; returns the content's hash
+    async fn file_in(env: &testutil::TestEnv, amy: &crate::auth::User, location: &str, content: &str) -> String {
+        let hash = hex::encode(Sha256::digest(content.as_bytes()));
+        let tmp = env.dir.join("tmp").join(&hash);
+        std::fs::write(&tmp, content).unwrap();
+        env.st.storage(location).unwrap().put_file(&hash, &tmp).await.unwrap();
+        let id = env.file(amy, &amy.root_id, &format!("{content}.txt")).await;
+        let mut c = env.st.db.acquire().await.unwrap();
+        tree::add_blob_ref(&mut c, &hash, content.len() as i64, location).await.unwrap();
+        sqlx::query("UPDATE nodes SET blob_hash = ?, size = ? WHERE id = ?").bind(&hash).bind(content.len() as i64).bind(&id).execute(&mut *c).await.unwrap();
+        hash
+    }
+
+    async fn location_of(env: &testutil::TestEnv, hash: &str) -> Option<String> {
+        sqlx::query_as::<_, (String,)>("SELECT location_id FROM blobs WHERE hash = ?").bind(hash).fetch_optional(&env.st.db).await.unwrap().map(|r| r.0)
+    }
+
+    /// When the copy at this location is due to be deleted, if it is
+    async fn deletion_of(env: &testutil::TestEnv, hash: &str, location: &str) -> Option<i64> {
+        sqlx::query_as::<_, (i64,)>("SELECT created_at FROM pending_blob_deletes WHERE hash = ? AND location_id = ?")
+            .bind(hash)
+            .bind(location)
+            .fetch_optional(&env.st.db)
+            .await
+            .unwrap()
+            .map(|r| r.0)
+    }
+
+    #[tokio::test]
+    async fn a_move_stops_at_missing_content_and_continues_where_it_stopped() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", false).await;
+        env.st.storages.write().unwrap().insert("second".into(), Arc::new(crate::storage::LocalStorage::new(env.dir.join("second")).unwrap()));
+        let mut hashes = Vec::new();
+        for name in ["one", "two", "three"] {
+            hashes.push(file_in(&env, &amy, "local", name).await);
+        }
+        hashes.sort();
+        // The last one in the order the move goes is gone from the storage
+        let last = hashes[2].clone();
+        let blob = env.dir.join("blobs").join(&last[0..2]).join(&last[2..4]).join(&last);
+        std::fs::rename(&blob, blob.with_extension("away")).unwrap();
+        let drive = env.drive_of(&amy.root_id).await;
+        let err = run_migration(&env.st, &drive, "second").await.unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::BAD_GATEWAY);
+        // What was copied before stays moved, and its old copy is deleted later, not now
+        for hash in &hashes[..2] {
+            assert_eq!(location_of(&env, hash).await.as_deref(), Some("second"));
+            assert!(deletion_of(&env, hash, "local").await.is_some_and(|at| at > now()), "{hash}");
+            assert!(env.st.storage("local").unwrap().open(hash, 0, 1).await.is_ok(), "the old copy is still there for downloads");
+        }
+        assert_eq!(location_of(&env, &last).await.as_deref(), Some("local"));
+
+        // Back again: the next run moves only what is left
+        std::fs::rename(blob.with_extension("away"), &blob).unwrap();
+        std::fs::remove_dir_all(env.dir.join("second").join(&hashes[0][0..2])).unwrap();
+        run_migration(&env.st, &drive, "second").await.unwrap();
+        assert_eq!(location_of(&env, &last).await.as_deref(), Some("second"));
+        assert!(env.st.storage("second").unwrap().open(&hashes[0], 0, 1).await.is_err(), "copied once, not again");
+    }
+
+    #[tokio::test]
+    async fn content_changed_during_a_move_is_left_as_it_became() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", false).await;
+        let db = env.st.db.clone();
+        let (moved_away, deleted) = (hex::encode(Sha256::digest(b"moved")), hex::encode(Sha256::digest(b"deleted")));
+        let (a, b) = (moved_away.clone(), deleted.clone());
+        let hooked_dir = env.dir.join("hooked");
+        let dir = hooked_dir.clone();
+        let hooked = Hooked {
+            inner: crate::storage::LocalStorage::new(hooked_dir).unwrap(),
+            on_open: Box::new(move |hash| {
+                let (db, a, b, dir) = (db.clone(), a.clone(), b.clone(), dir.clone());
+                Box::pin(async move {
+                    if hash == a {
+                        // Another move took it elsewhere meanwhile
+                        sqlx::query("UPDATE blobs SET location_id = 'third' WHERE hash = ?").bind(&hash).execute(&db).await.unwrap();
+                    } else if hash == b {
+                        // Its file was deleted for good meanwhile
+                        sqlx::query("UPDATE nodes SET blob_hash = NULL WHERE blob_hash = ?").bind(&hash).execute(&db).await.unwrap();
+                        sqlx::query("DELETE FROM blobs WHERE hash = ?").bind(&hash).execute(&db).await.unwrap();
+                        std::fs::remove_file(dir.join(&hash[0..2]).join(&hash[2..4]).join(&hash)).unwrap();
+                    }
+                })
+            }),
+        };
+        env.st.storages.write().unwrap().insert("hooked".into(), Arc::new(hooked));
+        env.st.storages.write().unwrap().insert("second".into(), Arc::new(crate::storage::LocalStorage::new(env.dir.join("second")).unwrap()));
+        file_in(&env, &amy, "hooked", "moved").await;
+        file_in(&env, &amy, "hooked", "deleted").await;
+        let kept = file_in(&env, &amy, "hooked", "kept").await;
+        // Earlier content of a file moves too
+        let id = sqlx::query_as::<_, (String,)>("SELECT id FROM nodes WHERE blob_hash = ?").bind(&kept).fetch_one(&env.st.db).await.unwrap().0;
+        let body = axum::body::Bytes::from_static(b"kept, edited");
+        let _ = crate::files::save_content(State(env.st.clone()), amy.clone(), Path(id), axum::http::HeaderMap::new(), body).await.unwrap();
+
+        let drive = env.drive_of(&amy.root_id).await;
+        run_migration(&env.st, &drive, "second").await.unwrap();
+        assert_eq!(location_of(&env, &kept).await.as_deref(), Some("second"), "the earlier version moved");
+        assert_eq!(location_of(&env, &moved_away).await.as_deref(), Some("third"), "not switched back to this move's copy");
+        assert_eq!(location_of(&env, &deleted).await, None);
+        // The copies this move wrote for those two are no longer used: they are listed for deletion
+        for _ in 0..50 {
+            if deletion_of(&env, &moved_away, "second").await.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(deletion_of(&env, &moved_away, "second").await.is_some());
+        assert!(deletion_of(&env, &kept, "hooked").await.is_some());
+    }
+
     #[tokio::test]
     async fn saved_passwords_are_only_reused_for_the_same_server_and_account() {
         let env = testutil::env().await;

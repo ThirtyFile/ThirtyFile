@@ -906,4 +906,69 @@ mod tests {
         let ben = env.user("ben", true).await;
         let _ = delete_user(&env, ben.id, json!({})).await.unwrap();
     }
+
+    #[tokio::test]
+    async fn what_a_deleted_user_had_elsewhere_stays_and_passes_to_the_administrator() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let amy = env.user("amy", true).await;
+        let company = env.st.shared_root().unwrap();
+        let company_drive = env.drive_of(&company).await;
+        // The same content in her own space and in the company space; a team space she owns; an upload under way
+        env.stored_file(&amy, &amy.root_id, "mine.txt", b"report").await;
+        let theirs = env.stored_file(&amy, &company, "report.txt", b"report").await;
+        let team_root = {
+            let mut conn = env.st.db.acquire().await.unwrap();
+            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0).await.unwrap();
+            crate::db::add_grant(&mut conn, &root, "user", amy.id, "owner", Some(amy.id), None).await.unwrap();
+            root
+        };
+        let team_drive = env.drive_of(&team_root).await;
+        let ts = crate::util::now();
+        sqlx::query("INSERT INTO uploads (id, owner_id, parent_id, rel_path, name, size, offset, created_at, expires_at, drive_id) VALUES ('u1', ?, ?, '', 'big.bin', 900, 0, ?, ?, ?)")
+            .bind(amy.id)
+            .bind(&company)
+            .bind(ts)
+            .bind(ts + crate::upload::UPLOAD_TTL)
+            .bind(&company_drive)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        let part = env.st.tmp_dir().join("upload-u1");
+        std::fs::write(&part, b"partial").unwrap();
+        tree::recompute_usage(&env.st).await.unwrap();
+
+        let _ = delete_user(&env, amy.id, json!({ "delete_files": true })).await.unwrap();
+        // Her file in the company space stays, now the administrator's, and still counts there
+        let (owner,): (i64,) = sqlx::query_as("SELECT owner_id FROM nodes WHERE id = ?").bind(&theirs).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(owner, admin.id);
+        assert_eq!(used(&env, &company_drive).await, 6);
+        // The team space too, with its owner access
+        let (drive_owner,): (i64,) = sqlx::query_as("SELECT owner_id FROM drives WHERE id = ?").bind(&team_drive).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(drive_owner, admin.id);
+        let (grants,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM grants WHERE node_id = ? AND principal_id = ? AND role = 'owner'")
+            .bind(&team_root)
+            .bind(admin.id)
+            .fetch_one(&env.st.db)
+            .await
+            .unwrap();
+        assert_eq!(grants, 1);
+        // The upload is gone with what it had received
+        let (uploads,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM uploads").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(uploads, 0);
+        assert!(!part.exists());
+        // Her own files are deleted in the background; the content they shared with the company file stays
+        let hash = crate::util::sha256_hex(b"report");
+        let mut refs = 0;
+        for _ in 0..200 {
+            (refs,) = sqlx::query_as("SELECT refcount FROM blobs WHERE hash = ?").bind(&hash).fetch_one(&env.st.db).await.unwrap();
+            if refs == 1 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(refs, 1);
+        let (pending,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM pending_blob_deletes WHERE hash = ?").bind(&hash).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(pending, 0);
+    }
 }

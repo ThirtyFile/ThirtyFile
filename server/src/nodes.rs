@@ -2125,4 +2125,55 @@ mod tests {
         assert!(name_of(&env, &old).await.2);
         assert!(!space.dir.join("Sub/a.txt").exists());
     }
+
+    #[tokio::test]
+    async fn old_trash_is_purged_in_batches_with_its_content_references() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let (shared, alone) = ("ab".repeat(32), "cd".repeat(32));
+        // A file with the given content (5 bytes each)
+        let file = async |parent: &str, name: String, hash: &str| {
+            let id = env.file(&amy, parent, &name).await;
+            let mut c = env.st.db.acquire().await.unwrap();
+            tree::add_blob_ref(&mut c, hash, 5, "local").await.unwrap();
+            sqlx::query("UPDATE nodes SET blob_hash = ?, size = 5 WHERE id = ?").bind(hash).bind(&id).execute(&mut *c).await.unwrap();
+            id
+        };
+        // More old items than one batch takes: files, and a folder with files inside
+        let mut old = Vec::new();
+        for i in 0..130 {
+            old.push(file(&amy.root_id, format!("old{i}.txt"), &shared).await);
+        }
+        let folder = env.folder(&amy, &amy.root_id, "Old folder").await;
+        for i in 0..3 {
+            file(&folder, format!("inner{i}.txt"), &alone).await;
+        }
+        old.push(folder);
+        let recent = file(&amy.root_id, "recent.txt".into(), &shared).await;
+        let live = file(&amy.root_id, "live.txt".into(), &shared).await;
+        tree::recompute_usage(&env.st).await.unwrap();
+        let refs: Vec<&str> = old.iter().map(String::as_str).collect();
+        let _ = trash(State(env.st.clone()), amy.clone(), ids(&refs)).await.unwrap();
+        sqlx::query("UPDATE nodes SET trashed_at = trashed_at - 40 * 86400 WHERE trashed_at IS NOT NULL").execute(&env.st.db).await.unwrap();
+        let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&recent])).await.unwrap();
+
+        assert_eq!(purge_expired_trash(&env.st, 30).await.unwrap(), 131);
+        let drive = env.drive_of(&amy.root_id).await;
+        let (left,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id = ? AND parent_id IS NOT NULL").bind(&drive).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(left, 2, "only the recent item in the trash and the live file are left");
+        assert!(name_of(&env, &recent).await.2 && !name_of(&env, &live).await.2);
+        // The content still used keeps its two references; the other one is no longer recorded
+        let refcount = "SELECT refcount FROM blobs WHERE hash = ?";
+        let shared_refs: Option<(i64,)> = sqlx::query_as(refcount).bind(&shared).fetch_optional(&env.st.db).await.unwrap();
+        let alone_refs: Option<(i64,)> = sqlx::query_as(refcount).bind(&alone).fetch_optional(&env.st.db).await.unwrap();
+        assert_eq!((shared_refs, alone_refs), (Some((2,)), None));
+        let (used,): (i64,) = sqlx::query_as("SELECT used_bytes FROM drives WHERE id = ?").bind(&drive).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(used, 10);
+        tree::recompute_usage(&env.st).await.unwrap();
+        let (again,): (i64,) = sqlx::query_as("SELECT used_bytes FROM drives WHERE id = ?").bind(&drive).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(again, used, "the counter agrees with the files");
+        // Nothing more is old enough
+        assert_eq!(purge_expired_trash(&env.st, 30).await.unwrap(), 0);
+    }
 }
