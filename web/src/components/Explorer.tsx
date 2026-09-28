@@ -143,7 +143,8 @@ export function Explorer(p: ExplorerProps) {
           <ContextMenuTrigger
             className="relative min-h-0 flex-1 overflow-auto outline-none"
             onContextMenuCapture={(e) => {
-              if (!(e.target as HTMLElement).closest("[data-node-id]")) setSelected(new Set());
+              // The column headers have their own menu, which leaves the selection alone
+              if (!(e.target as HTMLElement).closest("[data-node-id], thead")) setSelected(new Set());
             }}
             onClick={(e) => {
               if (!(e.target as HTMLElement).closest("[data-node-id]")) setSelected(new Set());
@@ -175,6 +176,10 @@ export function Explorer(p: ExplorerProps) {
                 onOpenInNewTab={(n) => tabs.open(n.kind === "folder" ? `/files/${n.id}` : `/view/${n.id}`, { reuse: n.kind === "file" })}
                 sort={p.sort}
                 onSort={p.onSort}
+                groupBy={s.groupBy}
+                groupReversed={
+                  s.groupBy === "date" ? p.sort?.key === "updated" && p.sort.order === "asc" : s.groupBy === "type" && p.sort?.key === "type" && p.sort.order === "desc"
+                }
                 showLocation={p.showLocation}
                 showOwner={p.showOwner}
                 showCheckboxes={showCheckboxes}

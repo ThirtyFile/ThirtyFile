@@ -1,10 +1,11 @@
-/** File explorer state: selection, view mode, dialogs, clipboard and permissions in the current folder */
+/** File explorer state: selection, view mode and grouping, dialogs, clipboard and permissions in the current folder */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import type { ListNav, ViewMode } from "@/components/FileList";
 import { useClipboard } from "@/lib/clipboard";
 import { capsOf } from "@/lib/drives";
+import type { GroupBy } from "@/lib/listView";
 import { usePersisted, useMe } from "@/lib/session";
 import { useTabActions } from "@/tabs";
 import type { DialogState } from "./types";
@@ -18,6 +19,7 @@ export function useExplorerState(p: ExplorerProps) {
   const navigate = useNavigate();
   const tabs = useTabActions();
   const [view, setView] = usePersisted<ViewMode>("tf-view", "list");
+  const [groupBy, setGroupBy] = usePersisted<GroupBy>("tf-group", "none");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
@@ -62,6 +64,8 @@ export function useExplorerState(p: ExplorerProps) {
     allFavorite,
     view,
     setView,
+    groupBy,
+    setGroupBy,
     selected,
     setSelected,
     anchor,

@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 /**
  * Drag handle on a pane edge (only changes the mouse cursor, no colored bar).
  * `edge` is the side the handle is on: a right-hand pane's handle is on its left edge (drag left to widen), a left-hand pane's on its right edge.
- * Double-click to restore the default width.
+ * Double-click to restore the default width. Also resizes table columns (see FileList).
  */
 export function Resizer(props: {
   width: number;
@@ -14,11 +14,16 @@ export function Resizer(props: {
   defaultWidth: number;
   edge: "left" | "right";
   label: string;
+  /** The width it has now, when `width` isn't it (a column taking the space left) */
+  measure?(handle: HTMLElement): number;
+  /** Double-click: instead of going back to `defaultWidth` */
+  onReset?(): void;
 }) {
   // The drag in progress, if the panel goes away mid-drag (the listeners and the page cursor would otherwise stay)
   const release = useRef<(() => void) | null>(null);
   useEffect(() => () => release.current?.(), []);
   const clamp = (w: number) => Math.round(Math.min(props.max, Math.max(props.min, w)));
+  const current = (handle: HTMLElement) => props.measure?.(handle) ?? props.width;
   return (
     <div
       role="separator"
@@ -32,16 +37,16 @@ export function Resizer(props: {
         "absolute inset-y-0 z-10 w-1.5 cursor-col-resize outline-none max-md:hidden",
         props.edge === "right" ? "-right-[3px]" : "-left-[3px]",
       )}
-      onDoubleClick={() => props.onChange(props.defaultWidth)}
+      onDoubleClick={() => (props.onReset ? props.onReset() : props.onChange(props.defaultWidth))}
       onKeyDown={(e) => {
         const grow = props.edge === "right" ? 1 : -1;
-        if (e.key === "ArrowLeft") props.onChange(clamp(props.width - 16 * grow));
-        if (e.key === "ArrowRight") props.onChange(clamp(props.width + 16 * grow));
+        if (e.key === "ArrowLeft") props.onChange(clamp(current(e.currentTarget) - 16 * grow));
+        if (e.key === "ArrowRight") props.onChange(clamp(current(e.currentTarget) + 16 * grow));
       }}
       onPointerDown={(e) => {
         e.preventDefault();
         const startX = e.clientX;
-        const startW = props.width;
+        const startW = current(e.currentTarget);
         const dir = props.edge === "right" ? 1 : -1;
         // While dragging, keep the resize cursor on the whole page and avoid selecting text
         document.body.style.cursor = "col-resize";

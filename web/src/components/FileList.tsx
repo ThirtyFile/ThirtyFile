@@ -17,17 +17,38 @@ import {
 } from "react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDownIcon, ChevronUpIcon, StarIcon } from "lucide-react";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { Check } from "@/components/explorer/ui";
+import { Resizer } from "@/components/Resizer";
 import type { FileSource, Node, SortKey, SortOrder } from "@/api";
 import { FileIcon, canBrowserThumbnail, canThumbnail, typeLabel, typeTitle } from "@/components/FileIcon";
 import { browserThumb, knownThumb } from "@/lib/thumbs";
 import type { Box, MeasureHits } from "@/components/useMarquee";
 import { cn, formatWinDate, formatWinSize } from "@/lib/utils";
+import { useMediaQuery } from "@/lib/focus";
+import {
+  COLUMN_WIDTH,
+  MAX_COLUMN,
+  MIN_COLUMN,
+  MIN_NAME,
+  columnShown,
+  groupItems,
+  resetColumns,
+  setColumnWidth,
+  showColumn,
+  useColumnPrefs,
+  type ColumnId,
+  type Group,
+  type GroupBy,
+} from "@/lib/listView";
 import { InlineRename } from "@/components/InlineRename";
 import { carriesFiles, carriesItems, dropEffect, droppedIds, startDrag } from "@/lib/dnd";
 import { t, tc } from "@/lib/i18n";
 import { findByPrefix, wantsCopy } from "@/lib/keys";
 
-export type ViewMode = "list" | "grid";
+/** "list" is Details and "grid" Large icons (the names they were saved under); "compact" is File Explorer's List */
+export type ViewMode = "list" | "grid" | "medium" | "compact" | "tiles";
 
 /** What the explorer's keyboard handling asks of the list */
 export interface ListNav {
@@ -62,6 +83,10 @@ export interface FileListProps {
   dateOf?(n: Item): number;
   /** One more text column after the size (list view), e.g. who deleted each item in the trash */
   extraColumn?: { label: string; value(n: Item): string };
+  /** Items in groups, each with a heading (see lib/listView.ts) */
+  groupBy?: GroupBy;
+  /** The groups the other way round (the list is sorted the other way by what it's grouped by) */
+  groupReversed?: boolean;
   /** Allow dragging items into folders to move them (or copy them, with Ctrl) */
   onDropInto?(ids: string[], folder: Node, copy: boolean): void;
   /** Allow dropping files from the computer on folders to upload them there */
@@ -84,14 +109,20 @@ const coarse = typeof window !== "undefined" && window.matchMedia("(pointer: coa
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_SLOP = 10;
 
-/** Details view: height of a row (its cells are h-7) and of the column headers */
+/** Details view: height of a row (its cells are h-7), of the column headers and of a group's heading */
 const ROW = 28;
 const HEAD = 30;
-/** Icon view: tiles of one size (at least TILE_W wide), so rows are placed and hit-tested by their index */
-const TILE_W = 116;
-const TILE_H = 148;
-const GAP = 8;
+const GROUP_ROW = 32;
+/** Icon views: items of one size (at least `w` wide, `h` high, `gap` apart), so rows are placed and hit-tested by their index */
+const TILED: Record<Exclude<ViewMode, "list">, { w: number; h: number; gap: number }> = {
+  grid: { w: 116, h: 148, gap: 8 },
+  medium: { w: 88, h: 112, gap: 6 },
+  tiles: { w: 250, h: 72, gap: 6 },
+  compact: { w: 220, h: 26, gap: 2 },
+};
 const PAD = 12;
+/** Icon views: height of a group's heading, with the space above it */
+const GROUP_H = 36;
 
 export function Thumb({ node, source, className, iconClass }: { node: Node; source: FileSource; className?: string; iconClass?: string }) {
   const [failed, setFailed] = useState(false);
@@ -155,18 +186,24 @@ function Head({
   className,
   sort,
   onSort,
+  width,
+  resize,
 }: {
   k?: SortKey;
   label: string;
   className?: string;
   sort: FileListProps["sort"];
   onSort: FileListProps["onSort"];
+  width?: number;
+  /** The handle that resizes the column */
+  resize?: ReactNode;
 }) {
   const active = !!k && sort?.key === k;
   return (
     <th
       role="columnheader"
       className={cn(th, k && onSort && "hover:bg-muted", className)}
+      style={width === undefined ? undefined : { width }}
       aria-sort={active ? (sort!.order === "asc" ? "ascending" : "descending") : undefined}
     >
       {/* Windows 11 shows the sort direction arrow above the column header */}
@@ -177,12 +214,13 @@ function Head({
           <ChevronDownIcon className="absolute -top-0.5 left-1/2 size-3 -translate-x-1/2" />
         ))}
       {k && onSort ? (
-        <button type="button" onClick={() => onSort(k)} className="flex h-full w-full items-center hover:text-foreground">
-          {label}
+        <button type="button" onClick={() => onSort(k)} className="flex h-full w-full min-w-0 items-center hover:text-foreground">
+          <span className="truncate">{label}</span>
         </button>
       ) : (
-        label
+        <span className="block truncate">{label}</span>
       )}
+      {resize}
     </th>
   );
 }
@@ -283,13 +321,52 @@ function renameBox(r: RowProps, multiline?: boolean) {
 
 const td = "h-7 px-2 truncate";
 
-const ListRow = memo(function ListRow(r: RowProps & { checkboxes: boolean; location: boolean; owner: boolean; extra: boolean }) {
+/** Where each column shows: narrow screens keep the name and size */
+const COLUMN_CLASS: Record<ColumnId, string> = {
+  location: "max-lg:hidden",
+  date: "max-md:hidden",
+  created: "max-md:hidden",
+  type: "max-md:hidden",
+  size: "",
+  owner: "max-md:hidden",
+  extra: "max-md:hidden",
+};
+
+function Cell({ id, item, h }: { id: ColumnId; item: Item; h: HandlersRef }) {
+  const muted = cn(td, "text-muted-foreground", COLUMN_CLASS[id]);
+  switch (id) {
+    case "location":
+      return (
+        <td role="gridcell" className={muted} title={item.location}>
+          {item.location}
+        </td>
+      );
+    case "date":
+      return <td role="gridcell" className={muted}>{formatWinDate(h.current.dateOf(item))}</td>;
+    case "created":
+      return <td role="gridcell" className={muted}>{formatWinDate(item.created_at)}</td>;
+    case "type":
+      return (
+        <td role="gridcell" className={muted} title={typeTitle(item)}>
+          {typeLabel(item)}
+        </td>
+      );
+    case "size":
+      return <td role="gridcell" className={cn(muted, "pr-3 text-right tabular-nums")}>{item.kind === "folder" ? "" : formatWinSize(item.size)}</td>;
+    case "owner":
+      return <td role="gridcell" className={muted}>{item.owner_name}</td>;
+    case "extra":
+      return <td role="gridcell" className={muted}>{h.current.extra?.(item)}</td>;
+  }
+}
+
+const ListRow = memo(function ListRow(r: RowProps & { checkboxes: boolean; columns: ColumnId[]; filler: boolean; ariaRow: number }) {
   const { item } = r;
   return (
     <tr
       {...rowProps(r)}
       role="row"
-      aria-rowindex={r.index + 2}
+      aria-rowindex={r.ariaRow}
       className={cn(
         "cursor-default outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset aria-selected:bg-selection aria-selected:text-accent-foreground aria-selected:shadow-[inset_3px_0_0_var(--color-brand)]",
         r.dropping && "bg-brand/15",
@@ -321,24 +398,71 @@ const ListRow = memo(function ListRow(r: RowProps & { checkboxes: boolean; locat
           )}
         </div>
       </td>
-      {r.location && (
-        <td role="gridcell" className={cn(td, "text-muted-foreground max-lg:hidden")} title={item.location}>
-          {item.location}
-        </td>
-      )}
-      <td role="gridcell" className={cn(td, "text-muted-foreground max-md:hidden")}>{formatWinDate(r.h.current.dateOf(item))}</td>
-      <td role="gridcell" className={cn(td, "text-muted-foreground max-md:hidden")} title={typeTitle(item)}>
-        {typeLabel(item)}
-      </td>
-      <td role="gridcell" className={cn(td, "pr-3 text-right text-muted-foreground tabular-nums")}>{item.kind === "folder" ? "" : formatWinSize(item.size)}</td>
-      {r.owner && <td role="gridcell" className={cn(td, "text-muted-foreground max-md:hidden")}>{item.owner_name}</td>}
-      {r.extra && <td role="gridcell" className={cn(td, "text-muted-foreground max-md:hidden")}>{r.h.current.extra?.(item)}</td>}
+      {r.columns.map((id) => (
+        <Cell key={id} id={id} item={item} h={r.h} />
+      ))}
+      {r.filler && <td aria-hidden />}
     </tr>
   );
 });
 
-const Tile = memo(function Tile(r: RowProps & { source: FileSource; count: number; checkboxes: boolean }) {
-  const { item } = r;
+const Tile = memo(function Tile(r: RowProps & { view: Exclude<ViewMode, "list">; source: FileSource; count: number; checkboxes: boolean }) {
+  const { item, view } = r;
+  const star = item.is_favorite && <StarIcon className="size-3 shrink-0 fill-amber-400 text-amber-400" aria-label={tc("state", "Favorite")} />;
+  // Space selects with the keyboard, so the check box isn't a Tab stop of its own
+  const checkbox = r.checkboxes && (
+    <input
+      type="checkbox"
+      tabIndex={-1}
+      className={cn("size-4 shrink-0 accent-brand", view !== "compact" && "absolute top-1.5 left-1.5")}
+      aria-label={t("Select {name}", { name: item.name })}
+      checked={r.selected}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onChange={() => r.h.current.toggle(r.index)}
+    />
+  );
+  let body: ReactNode;
+  if (view === "compact") {
+    // List: a small icon and the name, the items side by side in columns
+    body = (
+      <>
+        {checkbox}
+        <FileIcon node={item} className="size-4" />
+        {r.renaming ? renameBox(r) : <span className="truncate">{item.name}</span>}
+        {star}
+      </>
+    );
+  } else if (view === "tiles") {
+    // Tiles: a medium picture, with the name, type and size beside it
+    body = (
+      <>
+        <div className="flex size-12 shrink-0 items-center justify-center">
+          <Thumb node={item} source={r.source} className="max-h-12 max-w-12 rounded" iconClass="size-8" />
+        </div>
+        <div className="grid min-w-0 flex-1 text-left leading-[18px]">
+          {r.renaming ? renameBox(r) : <span className="truncate text-[13px]">{item.name}</span>}
+          <span className="truncate text-xs text-muted-foreground">{typeLabel(item)}</span>
+          {item.kind === "file" && <span className="truncate text-xs text-muted-foreground tabular-nums">{formatWinSize(item.size)}</span>}
+        </div>
+        {star && <span className="absolute top-1.5 right-1.5 flex">{star}</span>}
+        {checkbox}
+      </>
+    );
+  } else {
+    // Large and medium icons: the picture above the name
+    const medium = view === "medium";
+    body = (
+      <>
+        <div className={cn("flex items-center justify-center", medium ? "h-14" : "h-[88px]")}>
+          <Thumb node={item} source={r.source} className={cn("w-full rounded", medium ? "max-h-14" : "max-h-[88px]")} iconClass={medium ? "size-8" : "size-[42px]"} />
+        </div>
+        {r.renaming ? renameBox(r, true) : <span className="line-clamp-2 pt-1.5 text-xs leading-[18px] break-all">{item.name}</span>}
+        {star && <span className="absolute top-1.5 right-1.5 flex">{star}</span>}
+        {checkbox}
+      </>
+    );
+  }
   return (
     <div
       {...rowProps(r)}
@@ -348,31 +472,16 @@ const Tile = memo(function Tile(r: RowProps & { source: FileSource; count: numbe
       aria-setsize={r.count}
       title={item.name}
       className={cn(
-        "relative min-w-0 rounded-md border border-transparent p-2 text-center outline-none select-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring aria-selected:border-brand aria-selected:bg-selection",
+        "relative min-w-0 rounded-md border border-transparent outline-none select-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring aria-selected:border-brand aria-selected:bg-selection",
+        view === "compact" ? "flex items-center gap-2 px-1.5 text-xs" : view === "tiles" ? "flex items-center gap-2.5 p-2" : "text-center",
+        view === "grid" ? "p-2" : view === "medium" && "p-1.5",
         r.dropping && "border-brand bg-brand/10",
         r.dimmed && "opacity-50",
         r.renaming && "z-[1]",
       )}
-      style={{ height: TILE_H }}
+      style={{ height: TILED[view].h }}
     >
-      <div className="flex h-[88px] items-center justify-center">
-        <Thumb node={item} source={r.source} className="max-h-[88px] w-full rounded" iconClass="size-[42px]" />
-      </div>
-      {r.renaming ? renameBox(r, true) : <span className="line-clamp-2 pt-1.5 text-xs leading-[18px] break-all">{item.name}</span>}
-      {item.is_favorite && <StarIcon className="absolute top-1.5 right-1.5 size-3 fill-amber-400 text-amber-400" />}
-      {/* Space selects with the keyboard, so the check box isn't a Tab stop of its own */}
-      {r.checkboxes && (
-        <input
-          type="checkbox"
-          tabIndex={-1}
-          className="absolute top-1.5 left-1.5 size-4 accent-brand"
-          aria-label={t("Select {name}", { name: item.name })}
-          checked={r.selected}
-          onClick={(e) => e.stopPropagation()}
-          onDoubleClick={(e) => e.stopPropagation()}
-          onChange={() => r.h.current.toggle(r.index)}
-        />
-      )}
+      {body}
     </div>
   );
 });
@@ -398,6 +507,70 @@ function touching(start: number, size: number, stride: number, count: number, lo
   return [Math.max(0, Math.ceil((lo - start - size) / stride)), Math.min(count - 1, Math.floor((hi - start) / stride))];
 }
 
+export interface ListColumn {
+  id: ColumnId;
+  label: string;
+  /** Clicking the header sorts by it */
+  sort?: SortKey;
+}
+
+/** The Details view's columns a list can show besides the name, in order (shown or not, see lib/listView.ts) */
+export function listColumns(p: Pick<FileListProps, "showLocation" | "showOwner" | "extraColumn" | "dateLabel">): ListColumn[] {
+  const out: ListColumn[] = [];
+  if (p.showLocation) out.push({ id: "location", label: t("Location") });
+  out.push({ id: "date", label: p.dateLabel ?? t("Date modified"), sort: "updated" });
+  out.push({ id: "created", label: t("Date created") });
+  out.push({ id: "type", label: t("Type"), sort: "type" });
+  out.push({ id: "size", label: t("Size"), sort: "size" });
+  if (p.showOwner) out.push({ id: "owner", label: t("Uploaded by") });
+  if (p.extraColumn) out.push({ id: "extra", label: p.extraColumn.label });
+  return out;
+}
+
+/** Menu items choosing the columns (the column headers' context menu, and View › Columns) */
+export function ColumnChoices({ columns }: { columns: ListColumn[] }) {
+  const prefs = useColumnPrefs();
+  return (
+    <>
+      <DropdownMenuItem disabled>
+        <Check on /> {t("Name")}
+      </DropdownMenuItem>
+      {columns.map((c) => (
+        <DropdownMenuItem key={c.id} onClick={() => showColumn(c.id, !columnShown(prefs, c.id))}>
+          <Check on={columnShown(prefs, c.id)} /> {c.label}
+        </DropdownMenuItem>
+      ))}
+      <DropdownMenuSeparator />
+      <DropdownMenuItem onClick={resetColumns}>
+        <Check on={false} /> {t("Restore default columns")}
+      </DropdownMenuItem>
+    </>
+  );
+}
+
+/** A group's heading: its name, how many items it holds, and a line */
+function GroupHeading({ group, className }: { group: Group<Item>; className?: string }) {
+  return (
+    <div className={cn("flex h-full items-center gap-2 text-[13px] whitespace-nowrap", className)}>
+      <span className="font-medium">{group.label}</span>
+      <span className="text-xs text-muted-foreground">({group.items.length})</span>
+      <span className="h-px flex-1 bg-border" />
+    </div>
+  );
+}
+
+/** A row of the layout: a group's heading, or items (one in Details, a row of them in the icon views) */
+interface LayoutRow {
+  /** The items it holds, from `start` up to `end` (in the order shown) */
+  start: number;
+  end: number;
+  /** Height, with the gap below it */
+  size: number;
+  /** Where it starts, from the top of the first row */
+  top: number;
+  group?: Group<Item>;
+}
+
 export function FileList(p: FileListProps) {
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   /** The item with the keyboard focus: always rendered, so the focus isn't lost when it scrolls out of view */
@@ -408,11 +581,27 @@ export function FileList(p: FileListProps) {
   const root = useRef<HTMLElement | null>(null);
   const head = useRef<HTMLTableSectionElement>(null);
   const pendingFocus = useRef<string | null>(null);
-  const grid = p.view === "grid";
-  const n = p.items.length;
+  const view = p.view;
+  // Anything but an icon view (also a view saved by a later version) is Details
+  const tile: (typeof TILED)[keyof typeof TILED] | null = view === "list" ? null : (TILED[view] ?? null);
+  const grid = !!tile;
   const selecting = p.selected.size > 0;
+  const prefs = useColumnPrefs();
+  // Column widths apply from tablet width up; narrower, only the name and size show
+  const wide = useMediaQuery("(min-width: 48rem)");
+  const large = useMediaQuery("(min-width: 64rem)");
 
-  const indexOf = useMemo(() => new Map(p.items.map((x, i) => [x.id, i])), [p.items]);
+  // Grouped, items are shown group by group: that's their order for the keyboard and Shift ranges too
+  const dateOf = p.dateOf ?? ((x: Item) => x.updated_at);
+  const groups = useMemo(
+    () => groupItems<Item>(p.items, p.groupBy ?? "none", { dateOf, typeOf: typeLabel, now: new Date(), reversed: p.groupReversed }),
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the date function is a new one on every render
+    [p.items, p.groupBy, p.groupReversed],
+  );
+  const items = useMemo(() => (groups ? groups.flatMap((g) => g.items) : p.items), [groups, p.items]);
+  const n = items.length;
+
+  const indexOf = useMemo(() => new Map(items.map((x, i) => [x.id, i])), [items]);
   // The first selected item holds the Tab stop: found once per selection, not for every row
   const firstSelected = useMemo(() => {
     let first = -1;
@@ -422,23 +611,45 @@ export function FileList(p: FileListProps) {
     }
     return first;
   }, [p.selected, indexOf]);
-  const allSelected = useMemo(() => n > 0 && p.selected.size >= n && p.items.every((x) => p.selected.has(x.id)), [p.items, p.selected, n]);
+  const allSelected = useMemo(() => n > 0 && p.selected.size >= n && items.every((x) => p.selected.has(x.id)), [items, p.selected, n]);
 
-  const cols = grid ? Math.max(1, Math.floor((geo.width - 2 * PAD + GAP) / (TILE_W + GAP))) : 1;
-  const stride = grid ? TILE_H + GAP : ROW;
-  const rowOf = (i: number) => Math.floor(i / cols);
+  const cols = tile ? Math.max(1, Math.floor((geo.width - 2 * PAD + tile.gap) / (tile.w + tile.gap))) : 1;
+  // The rows: in each group, its heading and then its items, `cols` to a row
+  const layout = useMemo(() => {
+    const rows: LayoutRow[] = [];
+    const rowOf: number[] = new Array(n);
+    let top = 0;
+    const add = (r: Omit<LayoutRow, "top">) => {
+      rows.push({ ...r, top });
+      top += r.size;
+    };
+    let start = 0;
+    for (const group of groups ?? [undefined]) {
+      const end = group ? start + group.items.length : n;
+      if (group) add({ start, end: start, size: tile ? GROUP_H : GROUP_ROW, group });
+      for (let i = start; i < end; i += cols) {
+        const last = Math.min(i + cols, end);
+        for (let k = i; k < last; k++) rowOf[k] = rows.length;
+        add({ start: i, end: last, size: tile ? tile.h + tile.gap : ROW });
+      }
+      start = end;
+    }
+    return { rows, rowOf };
+  }, [groups, n, cols, tile]);
+  const rowOf = (i: number) => layout.rowOf[i];
   const tabStop = firstSelected >= 0 ? firstSelected : 0;
   // Rows rendered even out of view: the Tab stop, the focused item and the one being renamed
   const pinned = [tabStop, focusId === null ? undefined : indexOf.get(focusId), p.renamingId ? indexOf.get(p.renamingId) : undefined]
     .filter((i): i is number => i !== undefined && i < n)
     .map(rowOf);
 
-  // Row sizes are cached per key: new keys when the view changes
-  const rowKey = useCallback((i: number) => (grid ? -1 - i : i), [grid]);
+  // Row sizes are cached per key: new keys whenever the rows change
+  // oxlint-disable-next-line react-hooks/exhaustive-deps -- the layout is what invalidates the keys
+  const rowKey = useCallback((i: number) => i, [layout]);
   const v = useVirtualizer({
-    count: Math.ceil(n / cols),
+    count: layout.rows.length,
     getScrollElement: () => scroller,
-    estimateSize: () => stride,
+    estimateSize: (i) => layout.rows[i].size,
     getItemKey: rowKey,
     overscan: grid ? 2 : 12,
     scrollMargin: geo.top,
@@ -482,12 +693,12 @@ export function FileList(p: FileListProps) {
   const renamingIndex = p.renamingId ? indexOf.get(p.renamingId) : undefined;
   const renamingShown = renamingIndex !== undefined;
   useEffect(() => {
-    if (renamingIndex !== undefined) v.scrollToIndex(Math.floor(renamingIndex / cols));
+    if (renamingIndex !== undefined) v.scrollToIndex(rowOf(renamingIndex));
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- only when renaming starts, not while the list reloads
   }, [p.renamingId, renamingShown]);
 
   const focusItem = (index: number) => {
-    const id = p.items[index].id;
+    const id = items[index].id;
     v.scrollToIndex(rowOf(index));
     setFocusId(id);
     const el = root.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
@@ -499,32 +710,42 @@ export function FileList(p: FileListProps) {
     const anchorIndex = p.anchor === null ? -1 : (indexOf.get(p.anchor) ?? -1);
     if (anchorIndex < 0) return null;
     const next = new Set(keep);
-    for (let i = Math.min(anchorIndex, index); i <= Math.max(anchorIndex, index); i++) next.add(p.items[i].id);
+    for (let i = Math.min(anchorIndex, index); i <= Math.max(anchorIndex, index); i++) next.add(items[i].id);
     return next;
   };
 
   const toggle = (index: number) => {
-    const id = p.items[index].id;
+    const id = items[index].id;
     const next = new Set(p.selected);
     if (next.has(id)) next.delete(id);
     else next.add(id);
     p.onSelect(next, id);
   };
 
+  /** The item below or above: in the same column of the next row of items (group headings are skipped), else the last or first item */
+  const vertical = (index: number, dir: 1 | -1) => {
+    const { rows } = layout;
+    let r = rowOf(index) + dir;
+    while (rows[r]?.group) r += dir;
+    const to = rows[r];
+    if (!to) return dir > 0 ? n - 1 : 0;
+    return Math.min(to.start + index - rows[rowOf(index)].start, to.end - 1);
+  };
+
   /** Keyboard: arrows move the selection (Shift extends it), Space selects (toggles with Ctrl), Home/End jump, Enter opens */
   const keyNav = (e: KeyboardEvent<HTMLElement>, index: number) => {
     // Keys typed in a control inside the row (its checkbox, the rename box) belong to that control
-    if (e.target !== e.currentTarget || p.items[index].id === p.renamingId) return;
+    if (e.target !== e.currentTarget || items[index].id === p.renamingId) return;
     if (e.key === "Enter" && !e.altKey && !e.repeat) {
       e.preventDefault();
-      p.onOpen(p.items[index]);
+      p.onOpen(items[index]);
       return;
     }
     // Alt+arrows move around folders (handled by the address bar)
     if (e.altKey) return;
     let next: number | null = null;
-    if (e.key === "ArrowDown") next = Math.min(n - 1, index + cols);
-    else if (e.key === "ArrowUp") next = Math.max(0, index - cols);
+    if (e.key === "ArrowDown") next = vertical(index, 1);
+    else if (e.key === "ArrowUp") next = vertical(index, -1);
     else if (e.key === "ArrowRight" && grid) next = Math.min(n - 1, index + 1);
     else if (e.key === "ArrowLeft" && grid) next = Math.max(0, index - 1);
     else if (e.key === "Home") next = 0;
@@ -532,12 +753,12 @@ export function FileList(p: FileListProps) {
     else if (e.key === " ") {
       e.preventDefault();
       if (e.ctrlKey || e.metaKey) toggle(index);
-      else p.onSelect(new Set([p.items[index].id]), p.items[index].id);
+      else p.onSelect(new Set([items[index].id]), items[index].id);
       return;
     }
     if (next === null) return;
     e.preventDefault();
-    const item = p.items[next];
+    const item = items[next];
     const range = e.shiftKey ? rangeTo(next) : null;
     if (range) p.onSelect(range, p.anchor!);
     else p.onSelect(new Set([item.id]), item.id);
@@ -555,12 +776,12 @@ export function FileList(p: FileListProps) {
     // The same letter again moves on to the next item starting with it; more letters narrow down from the current item
     const same = [...text].every((c) => c === text[0]);
     const next = findByPrefix(
-      p.items.map((x) => x.name),
+      items.map((x) => x.name),
       same ? text[0] : text,
       same ? at : Math.max(at, 0) - 1,
     );
     if (next < 0) return;
-    p.onSelect(new Set([p.items[next].id]), p.items[next].id);
+    p.onSelect(new Set([items[next].id]), items[next].id);
     focusItem(next);
   };
   if (p.navRef) p.navRef.current = { typeAhead };
@@ -574,7 +795,7 @@ export function FileList(p: FileListProps) {
   };
   /** Long press (on every platform, iOS included): select the item, adding it when items are already selected */
   const longPress = (index: number) => {
-    const id = p.items[index].id;
+    const id = items[index].id;
     if (!p.selected.has(id)) p.onSelect(selecting ? new Set(p.selected).add(id) : new Set([id]), id);
     navigator.vibrate?.(15);
   };
@@ -582,7 +803,7 @@ export function FileList(p: FileListProps) {
   const h = useRef<Handlers>(null!);
   h.current = {
     click: (e, index) => {
-      const item = p.items[index];
+      const item = items[index];
       // Marquee selection prevents the default mousedown, so the row wouldn't get the focus: arrows continue from the clicked row
       (e.currentTarget as HTMLElement).focus({ preventScroll: true });
       if (ignoreClick.current.index === index && Date.now() < ignoreClick.current.until) return;
@@ -608,7 +829,7 @@ export function FileList(p: FileListProps) {
         }
         return;
       }
-      if (!p.selected.has(p.items[index].id)) p.onSelect(new Set([p.items[index].id]), p.items[index].id);
+      if (!p.selected.has(items[index].id)) p.onSelect(new Set([items[index].id]), items[index].id);
     },
     touchStart: (e, index) => {
       cancelPress();
@@ -641,10 +862,10 @@ export function FileList(p: FileListProps) {
       }, 600);
     },
     dragStart: (e, index) => {
-      const id = p.items[index].id;
+      const id = items[index].id;
       const ids = p.selected.has(id) ? [...p.selected] : [id];
       if (!p.selected.has(id)) p.onSelect(new Set([id]), id);
-      startDrag(e, ids, p.items);
+      startDrag(e, ids, items);
     },
     dragOver: (e, id) => {
       const items = carriesItems(e.dataTransfer) && !!p.onDropInto;
@@ -684,27 +905,36 @@ export function FileList(p: FileListProps) {
   // Marquee selection finds the boxed items from the row geometry: most rows aren't in the DOM
   const measure: MeasureHits = (container) => {
     const el = root.current;
-    const items = p.items;
+    const { rows } = layout;
+    const shown = items;
     if (!el) return () => [];
     const at = offsetIn(el, container);
-    const width = el.clientWidth;
-    if (!grid) {
-      const top = at.top + (head.current?.offsetHeight ?? HEAD);
-      return function* (b: Box) {
-        if (b.x > at.left + at.width || b.x + b.w < at.left) return;
-        const [first, last] = touching(top, ROW, ROW, items.length, b.y, b.y + b.h);
-        for (let i = first; i <= last; i++) yield items[i].id;
-      };
-    }
-    const perRow = Math.max(1, Math.floor((width - 2 * PAD + GAP) / (TILE_W + GAP)));
-    const tileW = (width - 2 * PAD - (perRow - 1) * GAP) / perRow;
+    const top = at.top + (grid ? PAD : (head.current?.offsetHeight ?? HEAD));
+    const gap = tile?.gap ?? 0;
+    const tileW = tile ? (el.clientWidth - 2 * PAD - (cols - 1) * gap) / cols : 0;
     return function* (b: Box) {
-      const [r0, r1] = touching(at.top + PAD, TILE_H, TILE_H + GAP, Math.ceil(items.length / perRow), b.y, b.y + b.h);
-      const [c0, c1] = touching(at.left + PAD, tileW, tileW + GAP, perRow, b.x, b.x + b.w);
-      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1 && r * perRow + c < items.length; c++) yield items[r * perRow + c].id;
+      if (!grid && (b.x > at.left + at.width || b.x + b.w < at.left)) return;
+      for (const row of rows) {
+        const y = top + row.top;
+        if (y > b.y + b.h) return;
+        if (row.group || y + row.size - gap < b.y) continue;
+        if (!tile) {
+          yield shown[row.start].id;
+          continue;
+        }
+        const [c0, c1] = touching(at.left + PAD, tileW, tileW + gap, row.end - row.start, b.x, b.x + b.w);
+        for (let c = c0; c <= c1; c++) yield shown[row.start + c].id;
+      }
     };
   };
   if (p.measureRef) p.measureRef.current = measure;
+
+  // Details view: the columns shown (a key, so the rows only re-render when they change), and their widths
+  const shownKey = listColumns(p)
+    .filter((c) => columnShown(prefs, c.id))
+    .map((c) => c.id)
+    .join();
+  const shownIds = useMemo(() => (shownKey ? (shownKey.split(",") as ColumnId[]) : []), [shownKey]);
 
   if (n === 0) return <>{p.empty}</>;
 
@@ -726,7 +956,7 @@ export function FileList(p: FileListProps) {
   const rest = v.getTotalSize() + geo.top - end;
 
   const row = (index: number): RowProps => {
-    const item = p.items[index];
+    const item = items[index];
     return {
       item,
       index,
@@ -742,32 +972,64 @@ export function FileList(p: FileListProps) {
     };
   };
 
-  if (grid) {
+  if (tile) {
     return (
       <>
         {status}
         <div ref={(el) => void (root.current = el)} role="listbox" aria-multiselectable aria-label={label} className="p-3">
-          {rows.map(({ row: r, gap }) => (
-            <Fragment key={r}>
-              {gap > 0 && <div aria-hidden style={{ height: gap }} />}
-              <div role="none" className="grid gap-2" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, marginBottom: GAP }}>
-                {p.items.slice(r * cols, (r + 1) * cols).map((item, k) => (
-                  <Tile key={item.id} {...row(r * cols + k)} source={p.source} count={n} checkboxes={!!p.showCheckboxes} />
-                ))}
-              </div>
-            </Fragment>
-          ))}
+          {rows.map(({ row: r, gap }) => {
+            const at = layout.rows[r];
+            return (
+              <Fragment key={r}>
+                {gap > 0 && <div aria-hidden style={{ height: gap }} />}
+                {at.group ? (
+                  <div role="none" className="flex items-end px-1 pb-1.5" style={{ height: GROUP_H }}>
+                    <GroupHeading group={at.group} className="h-auto" />
+                  </div>
+                ) : (
+                  <div role="none" className="grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: tile.gap, marginBottom: tile.gap }}>
+                    {items.slice(at.start, at.end).map((item, k) => (
+                      <Tile key={item.id} {...row(at.start + k)} view={view as Exclude<ViewMode, "list">} source={p.source} count={n} checkboxes={!!p.showCheckboxes} />
+                    ))}
+                  </div>
+                )}
+              </Fragment>
+            );
+          })}
           {rest > 0 && <div aria-hidden style={{ height: rest }} />}
         </div>
       </>
     );
   }
 
-  const columns = 4 + (p.showCheckboxes ? 1 : 0) + (p.showLocation ? 1 : 0) + (p.showOwner ? 1 : 0) + (p.extraColumn ? 1 : 0);
+  const columns = listColumns(p).filter((c) => shownIds.includes(c.id));
+  const widthOf = (id: ColumnId) => prefs.widths[id] ?? COLUMN_WIDTH[id];
+  // The name takes the space left, until it's resized: then a blank column at the end takes it
+  const nameWidth = wide ? prefs.widths.name : undefined;
+  const filler = nameWidth !== undefined;
+  // ...and the other columns can't squeeze it below its smallest width
+  const minWidth =
+    wide && !filler
+      ? columns.filter((c) => large || c.id !== "location").reduce((sum, c) => sum + widthOf(c.id), MIN_NAME + (p.showCheckboxes ? 30 : 0))
+      : undefined;
+  const cellCount = 1 + columns.length + (p.showCheckboxes ? 1 : 0) + (filler ? 1 : 0);
   const spacer = (height: number) => (
     <tr aria-hidden>
-      <td colSpan={columns} style={{ height, padding: 0 }} />
+      <td colSpan={cellCount} style={{ height, padding: 0 }} />
     </tr>
+  );
+  const resizer = (id: ColumnId | "name", label: string) => (
+    <Resizer
+      width={id === "name" ? (nameWidth ?? MIN_NAME) : widthOf(id)}
+      measure={(handle) => handle.parentElement!.getBoundingClientRect().width}
+      onChange={(w) => setColumnWidth(id, w)}
+      onReset={() => setColumnWidth(id, undefined)}
+      min={id === "name" ? MIN_NAME : MIN_COLUMN}
+      max={MAX_COLUMN}
+      defaultWidth={id === "name" ? MIN_NAME : COLUMN_WIDTH[id]}
+      edge="right"
+      label={t("Resize the \"{name}\" column", { name: label })}
+    />
   );
 
   // role="grid": screen readers only report the selected state of rows in a grid, not in a plain table
@@ -779,41 +1041,66 @@ export function FileList(p: FileListProps) {
         role="grid"
         aria-multiselectable
         aria-label={label}
-        aria-rowcount={n + 1}
+        aria-rowcount={layout.rows.length + 1}
         className="w-full table-fixed border-collapse text-xs whitespace-nowrap select-none"
+        style={minWidth === undefined ? undefined : { minWidth }}
       >
         <thead ref={head}>
-          <tr role="row" aria-rowindex={1}>
-            {p.showCheckboxes && (
-              <th role="columnheader" className={cn(th, "w-[30px] px-[7px]")}>
-                <input
-                  type="checkbox"
-                  className="align-middle accent-brand"
-                  aria-label={t("Select all")}
-                  checked={allSelected}
-                  ref={(el) => {
-                    if (el) el.indeterminate = selecting && !allSelected;
-                  }}
-                  onChange={() => p.onSelect(allSelected ? new Set() : new Set(p.items.map((x) => x.id)))}
+          {/* Right-click the column headers to choose the columns */}
+          <ContextMenu>
+            <ContextMenuTrigger render={<tr role="row" aria-rowindex={1} />}>
+              {p.showCheckboxes && (
+                <th role="columnheader" className={cn(th, "w-[30px] px-[7px]")}>
+                  <input
+                    type="checkbox"
+                    className="align-middle accent-brand"
+                    aria-label={t("Select all")}
+                    checked={allSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = selecting && !allSelected;
+                    }}
+                    onChange={() => p.onSelect(allSelected ? new Set() : new Set(items.map((x) => x.id)))}
+                  />
+                </th>
+              )}
+              <Head sort={p.sort} onSort={p.onSort} k="name" label={t("Name")} className="pl-3" width={nameWidth} resize={resizer("name", t("Name"))} />
+              {columns.map((c) => (
+                <Head
+                  key={c.id}
+                  sort={p.sort}
+                  onSort={p.onSort}
+                  k={c.sort}
+                  label={c.label}
+                  className={COLUMN_CLASS[c.id]}
+                  width={widthOf(c.id)}
+                  resize={resizer(c.id, c.label)}
                 />
-              </th>
-            )}
-            <Head sort={p.sort} onSort={p.onSort} k="name" label={t("Name")} className="pl-3" />
-            {p.showLocation && <Head sort={p.sort} onSort={p.onSort} label={t("Location")} className="w-[220px] max-lg:hidden" />}
-            <Head sort={p.sort} onSort={p.onSort} k="updated" label={p.dateLabel ?? t("Date modified")} className="w-[170px] max-md:hidden" />
-            <Head sort={p.sort} onSort={p.onSort} k="type" label={t("Type")} className="w-[120px] max-md:hidden" />
-            <Head sort={p.sort} onSort={p.onSort} k="size" label={t("Size")} className="w-[100px]" />
-            {p.showOwner && <Head sort={p.sort} onSort={p.onSort} label={t("Uploaded by")} className="w-[110px] max-md:hidden" />}
-            {p.extraColumn && <Head sort={p.sort} onSort={p.onSort} label={p.extraColumn.label} className="w-[110px] max-md:hidden" />}
-          </tr>
+              ))}
+              {filler && <th aria-hidden className={th} />}
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ColumnChoices columns={listColumns(p)} />
+            </ContextMenuContent>
+          </ContextMenu>
         </thead>
         <tbody>
-          {rows.map(({ row: i, gap }) => (
-            <Fragment key={p.items[i].id}>
-              {gap > 0 && spacer(gap)}
-              <ListRow {...row(i)} checkboxes={!!p.showCheckboxes} location={!!p.showLocation} owner={!!p.showOwner} extra={!!p.extraColumn} />
-            </Fragment>
-          ))}
+          {rows.map(({ row: r, gap }) => {
+            const at = layout.rows[r];
+            return (
+              <Fragment key={at.group ? `group:${at.group.key}` : items[at.start].id}>
+                {gap > 0 && spacer(gap)}
+                {at.group ? (
+                  <tr role="row" aria-rowindex={r + 2}>
+                    <td role="gridcell" colSpan={cellCount} className="px-3 pt-2" style={{ height: GROUP_ROW }}>
+                      <GroupHeading group={at.group} />
+                    </td>
+                  </tr>
+                ) : (
+                  <ListRow {...row(at.start)} checkboxes={!!p.showCheckboxes} columns={shownIds} filler={filler} ariaRow={r + 2} />
+                )}
+              </Fragment>
+            );
+          })}
           {rest > 0 && spacer(rest)}
         </tbody>
       </table>

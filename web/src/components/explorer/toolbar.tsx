@@ -6,8 +6,12 @@ import {
   DownloadIcon,
   EllipsisIcon,
   FolderInputIcon,
+  Columns3Icon,
   Grid2X2Icon,
+  Grid3X3Icon,
+  GroupIcon,
   KeyboardIcon,
+  LayoutGridIcon,
   LayoutListIcon,
   ListIcon,
   PanelRightIcon,
@@ -21,10 +25,21 @@ import {
   Trash2Icon,
   UsersRoundIcon,
   XSquareIcon,
+  type LucideIcon,
 } from "lucide-react";
 import type { SortKey } from "@/api";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ColumnChoices, listColumns, type ViewMode } from "@/components/FileList";
 import { ToolButton, ToolSeparator } from "@/components/Frame";
 import { openShortcuts } from "@/components/ShortcutsDialog";
 import { shortcut } from "@/lib/keys";
@@ -33,12 +48,27 @@ import type { ExplorerState } from "./state";
 import type { ExplorerActions } from "./actions";
 import { Check, Kbd } from "./ui";
 import { t } from "@/lib/i18n";
+import type { GroupBy } from "@/lib/listView";
 
 const SORTS: [SortKey, string][] = [
   ["name", t("Name")],
   ["updated", t("Date modified")],
   ["type", t("Type")],
   ["size", t("Size")],
+];
+
+const VIEWS: [ViewMode, LucideIcon, string][] = [
+  ["grid", Grid2X2Icon, t("Large icons")],
+  ["medium", Grid3X3Icon, t("Medium icons")],
+  ["compact", LayoutListIcon, t("List")],
+  ["list", ListIcon, t("Details")],
+  ["tiles", LayoutGridIcon, t("Tiles")],
+];
+
+const GROUPS: [GroupBy, string][] = [
+  ["none", t("(None)")],
+  ["type", t("Type")],
+  ["date", t("Date modified")],
 ];
 
 export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerActions, newItems: React.ReactNode) {
@@ -51,6 +81,8 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
     allFavorite,
     view,
     setView,
+    groupBy,
+    setGroupBy,
     selected,
     setSelected,
     setDialog,
@@ -127,13 +159,33 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
       )}
       <DropdownMenu>
         <DropdownMenuTrigger render={<ToolButton icon={LayoutListIcon} label={t("View")} showLabel className="h-9 px-2.5 text-[13px]" />} />
-        <DropdownMenuContent className="w-44">
-          <DropdownMenuItem onClick={() => setView("grid")}>
-            <Check on={view === "grid"} /> <Grid2X2Icon /> {t("Large icons")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setView("list")}>
-            <Check on={view === "list"} /> <ListIcon /> {t("Details")}
-          </DropdownMenuItem>
+        <DropdownMenuContent className="w-48">
+          {VIEWS.map(([v, Icon, label]) => (
+            <DropdownMenuItem key={v} onClick={() => setView(v)}>
+              <Check on={view === v} /> <Icon /> {label}
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <Check on={groupBy !== "none"} /> <GroupIcon /> {t("Group by")}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-44">
+              {GROUPS.map(([g, label]) => (
+                <DropdownMenuItem key={g} onClick={() => setGroupBy(g)}>
+                  <Check on={groupBy === g} /> {label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger disabled={view !== "list"}>
+              <Check on={false} /> <Columns3Icon /> {t("Columns")}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-48">
+              <ColumnChoices columns={listColumns(p)} />
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setDetailsOpen(!detailsOpen)}>
             <Check on={detailsOpen} /> <PanelRightIcon /> {t("Details pane")}
