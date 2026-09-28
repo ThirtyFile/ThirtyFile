@@ -786,7 +786,7 @@ async fn resolve_user(st: &AppState, provider: &str, ident: &Identity) -> AppRes
     Ok((id, username, created))
 }
 
-/// Creates an account automatically: the username is the email (or the part before @ when too long) with a random password (third-party sign-in only; an administrator can set a password)
+/// Creates an account automatically: the username is the email (or the part before @ when too long) and no password (third-party sign-in only, until an administrator sets one)
 /// Username for automatically created accounts: based on the email, replacing characters usernames don't allow (e.g. `+`), with the same rules as accounts created by administrators
 fn sso_username(email: &str) -> String {
     let clean = |s: &str| -> String { s.chars().map(|c| if c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | '@') { c } else { '_' }).collect() };

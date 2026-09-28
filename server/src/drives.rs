@@ -554,14 +554,14 @@ pub struct DirectoryQuery {
 }
 
 pub async fn directory(State(st): State<AppState>, _: User, Query(q): Query<DirectoryQuery>) -> AppResult<Json<Vec<Principal>>> {
-    let term = format!("%{}%", q.q.trim().replace(['%', '_'], ""));
+    let term = format!("%{}%", crate::util::like_escape(q.q.trim()));
     let rows: Vec<Principal> = sqlx::query_as(
         "SELECT 'group' AS principal_type, g.id AS principal_id, g.name,
                 (SELECT CASE COUNT(*) WHEN 1 THEN '1 member' ELSE COUNT(*) || ' members' END FROM group_members WHERE group_id = g.id) AS detail
-         FROM groups g WHERE g.name LIKE ?1
+         FROM groups g WHERE g.name LIKE ?1 ESCAPE '\\'
          UNION ALL
          SELECT 'user', u.id, u.username, CASE u.role WHEN 'admin' THEN 'Administrator' ELSE 'User' END
-         FROM users u WHERE u.disabled = 0 AND u.username LIKE ?1
+         FROM users u WHERE u.disabled = 0 AND u.username LIKE ?1 ESCAPE '\\'
          ORDER BY 1 DESC, 3 LIMIT 30",
     )
     .bind(term)
@@ -655,7 +655,12 @@ pub async fn update_group(
     let mut tx = st.db.begin().await?;
     if let Some(name) = &req.name {
         let name = validate_name(name)?;
-        sqlx::query("UPDATE groups SET name = ? WHERE id = ?").bind(&name).bind(id).execute(&mut *tx).await?;
+        sqlx::query("UPDATE groups SET name = ? WHERE id = ?")
+            .bind(&name)
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| if matches!(&e, sqlx::Error::Database(d) if d.is_unique_violation()) { AppError::conflict("A group with this name already exists") } else { e.into() })?;
     }
     if let Some(d) = &req.description {
         sqlx::query("UPDATE groups SET description = ? WHERE id = ?").bind(d).bind(id).execute(&mut *tx).await?;

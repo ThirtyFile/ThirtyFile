@@ -519,8 +519,7 @@ pub async fn unique_name(conn: &mut SqliteConnection, parent_id: &str, name: &st
     // One query for every "name (n)" already there, then the lowest free number is picked in memory
     let pattern = {
         let (stem, ext) = crate::util::split_name(name, is_folder);
-        let esc = |s: &str| s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
-        format!("{} (%){}", esc(stem), esc(ext))
+        format!("{} (%){}", crate::util::like_escape(stem), crate::util::like_escape(ext))
     };
     // `LIKE` alone only ignores the case of A–Z; the name key is lower case in every language (exact in folder spaces,
     // where this finds more names than needed, which only skips numbers)

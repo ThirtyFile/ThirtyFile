@@ -830,7 +830,6 @@ async fn locate(st: &AppState, user: &User, mut nodes: Vec<Node>) -> AppResult<V
     Ok(out)
 }
 
-/// Trash: deleted items in spaces I'm a member of
 /// Spaces whose trash the user works with: their own spaces (at least `min_role`), plus every team space for administrators
 async fn trash_drives(conn: &mut SqliteConnection, user: &User, min_role: Role) -> AppResult<Vec<String>> {
     let mut ids: Vec<String> = tree::user_drives(conn, user).await?.into_iter().filter(|(_, r)| *r >= min_role).map(|(d, _)| d.id).collect();
@@ -862,6 +861,7 @@ struct TrashCursor {
     id: String,
 }
 
+/// Trash: deleted items in spaces I'm a member of
 pub async fn list_trash(State(st): State<AppState>, user: User, Query(q): Query<TrashQuery>) -> AppResult<Json<Listing<Located>>> {
     let (limit, after) = page_of::<TrashCursor>(q.limit, q.after.as_deref())?;
     let drive_ids = trash_drives(&mut *st.db.acquire().await?, &user, Role::Viewer).await?;
@@ -1160,7 +1160,7 @@ pub async fn search(State(st): State<AppState>, user: User, Query(q): Query<Sear
         // The trigram index: the term as one phrase (quotes inside it doubled)
         qb.push(" AND n.rowid IN (SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ").push_bind(format!("\"{}\"", term.replace('"', "\"\""))).push(")");
     } else {
-        let escaped = term.to_lowercase().replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        let escaped = crate::util::like_escape(&term.to_lowercase());
         qb.push(" AND unicode_lower(n.name) LIKE ").push_bind(format!("%{escaped}%")).push(" ESCAPE '\\'");
     }
     match q.kind.as_deref() {

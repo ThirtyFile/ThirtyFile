@@ -140,7 +140,6 @@ impl Inner {
         let s = self.system.read().unwrap();
         s.shared_enabled.then(|| s.shared_root_id.clone())
     }
-    /// Gets the backend of a storage location
     /// Returns the reason when a storage location is offline (its settings couldn't be loaded, or the most recent connection check failed)
     pub fn location_offline(&self, location: &str) -> Option<String> {
         if !self.storages.read().unwrap().contains_key(location) {
@@ -150,6 +149,7 @@ impl Inner {
         health.get(location).filter(|h| !h.ok).map(|h| h.error.clone().unwrap_or_else(|| "Can't connect".into()))
     }
 
+    /// Gets the backend of a storage location
     pub fn storage(&self, location: &str) -> crate::error::AppResult<Arc<dyn Storage>> {
         self.storages
             .read()

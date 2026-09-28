@@ -218,7 +218,7 @@ fn enqueue(st: &AppState, event: LogEvent) {
     }
 }
 
-/// Records one access to a share link (queued; downloads aren't slowed down)
+/// Page views of a link from one address closer together than this (seconds) are logged once
 const VIEW_INTERVAL: i64 = 60;
 
 /// Whether a page view of `share_id` from `ip` should be logged: the first one, or the first after a minute of quiet
@@ -241,6 +241,7 @@ pub fn prune_share_views(st: &AppState) {
     st.share_views.lock().unwrap().retain(|_, t| *t > cutoff);
 }
 
+/// Records one access to a share link (queued; downloads aren't slowed down)
 pub fn record_share_access(st: &AppState, share_id: &str, owner_id: i64, node: Option<&Node>, event: &'static str, v: &Visitor) {
     enqueue(
         st,
@@ -292,7 +293,7 @@ pub struct ActivityQuery {
 }
 
 fn like(s: &str) -> String {
-    format!("%{}%", s.trim().replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"))
+    format!("%{}%", crate::util::like_escape(s.trim()))
 }
 
 fn activity_filters(qb: &mut QueryBuilder<Sqlite>, q: &ActivityQuery) {
@@ -568,25 +569,16 @@ fn csv_field(s: &str) -> String {
     if safe.contains([',', '"', '\n', '\r']) { format!("\"{}\"", safe.replace('"', "\"\"")) } else { safe }
 }
 
-/// Unix seconds + time zone offset → YYYY-MM-DD HH:MM:SS
 /// The client's UTC offset in minutes, kept within the real range so the arithmetic on timestamps can't overflow
 fn tz_minutes(tz: Option<i64>) -> i64 {
     tz.unwrap_or(0).clamp(-14 * 60, 14 * 60)
 }
 
+/// Unix seconds + time zone offset → YYYY-MM-DD HH:MM:SS
 pub fn format_time(ts: i64, offset: i64) -> String {
     let t = ts + offset;
     let (days, secs) = (t.div_euclid(DAY), t.rem_euclid(DAY));
-    // Gregorian calendar conversion (Howard Hinnant's civil_from_days)
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + i64::from(m <= 2);
+    let (y, m, d) = crate::util::civil_from_days(days);
     format!("{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}", secs / 3600, secs % 3600 / 60, secs % 60)
 }
 

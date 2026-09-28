@@ -35,16 +35,7 @@ pub struct ZipWriter<W> {
 fn dos_datetime(ts: i64) -> (u16, u16) {
     let days = ts.div_euclid(86400);
     let secs = ts.rem_euclid(86400);
-    // civil_from_days (Howard Hinnant)
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
+    let (y, m, d) = crate::util::civil_from_days(days);
     if y < 1980 {
         return (0, (1 << 5) | 1);
     }

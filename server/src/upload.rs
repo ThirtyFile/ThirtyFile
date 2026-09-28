@@ -663,7 +663,6 @@ pub async fn delete_as(st: &AppState, up: &Uploader, id: &str) -> AppResult<Resp
     Ok(res)
 }
 
-/// Cleans up expired unfinished uploads
 /// Removes files in data/tmp that no upload, save or migration is using any more: upload parts whose row is gone
 /// (the process stopped between deleting the row and the file) and anything else older than a day
 pub async fn clean_tmp(st: &AppState) -> AppResult<usize> {
@@ -696,6 +695,7 @@ pub async fn clean_tmp(st: &AppState) -> AppResult<usize> {
     Ok(removed)
 }
 
+/// Cleans up expired unfinished uploads
 pub async fn purge_expired(st: &AppState) -> AppResult<usize> {
     let ids: Vec<(String,)> = {
         let _w = st.write_lock.lock().await;
