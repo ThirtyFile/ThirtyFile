@@ -29,7 +29,7 @@ use tokio::{
     sync::Mutex,
 };
 
-use crate::storage::{BoxReader, Storage, StorageError, UNAVAILABLE, valid_hash};
+use crate::storage::{BoxReader, Entry, EntryKind, Storage, StorageError, UNAVAILABLE, valid_hash};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Maximum time to wait for a response to a single SFTP request (seconds)
@@ -244,10 +244,55 @@ impl SftpStorage {
     }
 
     async fn put(&self, hash: &str, src: &Path) -> io::Result<()> {
+        self.put_to(&self.blob_dir(hash), &self.blob_path(hash)?, src).await
+    }
+
+    /// A path in the location (checked; "" is its folder)
+    fn path_at(&self, key: &str) -> io::Result<String> {
+        crate::storage::key_parts(key)?;
+        Ok(if key.is_empty() { self.root.clone() } else { format!("{}/{key}", self.root) })
+    }
+
+    async fn open_path(&self, path: String, start: u64, len: u64) -> io::Result<BoxReader> {
+        if len == 0 {
+            return Ok(Box::pin(tokio::io::empty()) as BoxReader);
+        }
         let conn = self.conn().await?;
-        let dir = self.blob_dir(hash);
-        self.ensure_dir(&conn, &dir).await?;
-        let path = self.blob_path(hash)?;
+        let opened = async {
+            let mut f = conn.sftp.open(path.as_str()).await.map_err(sftp_err)?;
+            if start > 0 {
+                f.seek(SeekFrom::Start(start)).await.map_err(unavailable)?;
+            }
+            Ok::<_, io::Error>(f)
+        }
+        .await;
+        match opened {
+            Ok(f) => Ok(Box::pin(Held { _conn: conn, inner: f.take(len) }) as BoxReader),
+            Err(e) => {
+                if e.kind() != io::ErrorKind::NotFound {
+                    self.reset().await;
+                }
+                Err(e)
+            }
+        }
+    }
+
+    async fn delete_path(&self, path: &str) -> io::Result<()> {
+        let conn = self.conn().await?;
+        match conn.sftp.remove_file(path).await {
+            Ok(()) => Ok(()),
+            Err(e) if is_not_found(&e) => Ok(()),
+            Err(e) => {
+                self.reset().await;
+                Err(sftp_err(e))
+            }
+        }
+    }
+
+    /// Writes a temp file to `path` in the folder `dir`, through a temporary name
+    async fn put_to(&self, dir: &str, path: &str, src: &Path) -> io::Result<()> {
+        let conn = self.conn().await?;
+        self.ensure_dir(&conn, dir).await?;
         let tmp = format!("{path}.part-{}", uuid::Uuid::new_v4().simple());
         let mut input = tokio::fs::File::open(src).await?;
         let mut out = conn.sftp.create(tmp.as_str()).await.map_err(sftp_err)?;
@@ -263,8 +308,8 @@ impl SftpStorage {
             return Err(e);
         }
         // SFTP v3 rename doesn't overwrite existing files: if the same content already exists, keep the original
-        if let Err(e) = conn.sftp.rename(tmp.as_str(), path.as_str()).await {
-            let exists = conn.sftp.try_exists(path.as_str()).await.unwrap_or(false);
+        if let Err(e) = conn.sftp.rename(tmp.as_str(), path).await {
+            let exists = conn.sftp.try_exists(path).await.unwrap_or(false);
             let _ = conn.sftp.remove_file(tmp.as_str()).await;
             if !exists {
                 return Err(sftp_err(e));
@@ -272,6 +317,18 @@ impl SftpStorage {
         }
         Ok(())
     }
+}
+
+fn sftp_entry(name: String, m: &russh_sftp::protocol::FileAttributes) -> Entry {
+    let t = m.file_type();
+    let kind = if t.is_symlink() {
+        EntryKind::Link
+    } else if t.is_dir() {
+        EntryKind::Folder
+    } else {
+        EntryKind::File
+    };
+    Entry { name, kind, size: if kind == EntryKind::File { m.len() } else { 0 }, modified: m.mtime.map(i64::from) }
 }
 
 /// Keeps the connection alive while reading (the SSH connection closes when the connection object is dropped)
@@ -337,45 +394,63 @@ impl Storage for SftpStorage {
     }
 
     fn open<'a>(&'a self, hash: &'a str, start: u64, len: u64) -> BoxFuture<'a, io::Result<BoxReader>> {
+        Box::pin(async move { self.open_path(self.blob_path(hash)?, start, len).await })
+    }
+
+    fn delete<'a>(&'a self, hash: &'a str) -> BoxFuture<'a, io::Result<()>> {
+        Box::pin(async move { self.delete_path(&self.blob_path(hash)?).await })
+    }
+
+    fn list_dir<'a>(&'a self, dir: &'a str) -> BoxFuture<'a, io::Result<Vec<Entry>>> {
         Box::pin(async move {
-            if len == 0 {
-                return Ok(Box::pin(tokio::io::empty()) as BoxReader);
-            }
-            let path = self.blob_path(hash)?;
+            let path = self.path_at(dir)?;
             let conn = self.conn().await?;
-            let opened = async {
-                let mut f = conn.sftp.open(path.as_str()).await.map_err(sftp_err)?;
-                if start > 0 {
-                    f.seek(SeekFrom::Start(start)).await.map_err(unavailable)?;
-                }
-                Ok::<_, io::Error>(f)
-            }
-            .await;
-            match opened {
-                Ok(f) => Ok(Box::pin(Held { _conn: conn, inner: f.take(len) }) as BoxReader),
-                Err(e) => {
-                    if e.kind() != io::ErrorKind::NotFound {
-                        self.reset().await;
-                    }
-                    Err(e)
-                }
+            let listed = conn.sftp.read_dir(path.as_str()).await.map_err(sftp_err)?;
+            Ok(listed.filter(|e| e.file_name() != "." && e.file_name() != "..").map(|e| sftp_entry(e.file_name(), &e.metadata())).collect())
+        })
+    }
+
+    fn stat<'a>(&'a self, key: &'a str) -> BoxFuture<'a, io::Result<Option<Entry>>> {
+        Box::pin(async move {
+            let path = self.path_at(key)?;
+            let conn = self.conn().await?;
+            // The item itself: a link isn't followed
+            match conn.sftp.symlink_metadata(path.as_str()).await {
+                Ok(m) => Ok(Some(sftp_entry(key.rsplit('/').next().unwrap_or_default().to_string(), &m))),
+                Err(e) if is_not_found(&e) => Ok(None),
+                Err(e) => Err(sftp_err(e)),
             }
         })
     }
 
-    fn delete<'a>(&'a self, hash: &'a str) -> BoxFuture<'a, io::Result<()>> {
+    fn put_at<'a>(&'a self, key: &'a str, src: &'a Path) -> BoxFuture<'a, io::Result<()>> {
         Box::pin(async move {
-            let path = self.blob_path(hash)?;
-            let conn = self.conn().await?;
-            match conn.sftp.remove_file(path.as_str()).await {
-                Ok(()) => Ok(()),
-                Err(e) if is_not_found(&e) => Ok(()),
-                Err(e) => {
-                    self.reset().await;
-                    Err(sftp_err(e))
-                }
+            let path = self.path_at(key)?;
+            let dir = path.rsplit_once('/').map_or(self.root.as_str(), |(d, _)| d).to_string();
+            let res = self.put_to(&dir, &path, src).await;
+            if res.as_ref().is_err_and(|e| e.kind() != io::ErrorKind::InvalidInput) {
+                self.reset().await;
             }
+            res?;
+            let _ = tokio::fs::remove_file(src).await;
+            Ok(())
         })
+    }
+
+    fn open_at<'a>(&'a self, key: &'a str, start: u64, len: u64) -> BoxFuture<'a, io::Result<BoxReader>> {
+        Box::pin(async move {
+            let path = self.path_at(key)?;
+            let conn = self.conn().await?;
+            // A link may point anywhere on that server: refused
+            if conn.sftp.symlink_metadata(path.as_str()).await.map_err(sftp_err)?.file_type().is_symlink() {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "a symbolic link"));
+            }
+            self.open_path(path, start, len).await
+        })
+    }
+
+    fn delete_at<'a>(&'a self, key: &'a str) -> BoxFuture<'a, io::Result<()>> {
+        Box::pin(async move { self.delete_path(&self.path_at(key)?).await })
     }
 
     fn check(&self) -> BoxFuture<'_, io::Result<()>> {
@@ -395,7 +470,9 @@ impl Storage for SftpStorage {
                 Ok(())
             }
             .await;
-            let _ = conn.sftp.remove_file(probe.as_str()).await;
+            // An account that can write but not delete would pass and fail later, when files are deleted
+            let deleted = conn.sftp.remove_file(probe.as_str()).await.map_err(sftp_err);
+            let result = result.and_then(|()| deleted.map_err(|e| crate::storage::delete_failed(e, crate::storage::CANT_DELETE_ACCOUNT)));
             if result.is_err() {
                 self.reset().await;
             }
@@ -710,6 +787,31 @@ mod tests {
         st.delete(&hash).await.unwrap();
         assert_eq!(st.open(&hash, 0, 15).await.err().unwrap().kind(), io::ErrorKind::NotFound);
         st.ping().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn items_are_listed_by_path_and_the_step_test_passes_over_sftp() {
+        use crate::storage::EntryKind;
+        let s = server(testutil::password()).await;
+        let st = Arc::new(storage(&s, testutil::password(), ""));
+        let hash = put(&st, &s, b"stored content").await;
+        std::fs::write(s.dir.join("files/notes.txt"), b"hello").unwrap();
+
+        let mut top = st.list_dir("").await.unwrap();
+        top.sort_by(|a, b| a.name.cmp(&b.name));
+        let top: Vec<_> = top.iter().map(|e| (e.name.as_str(), e.kind, e.size)).collect();
+        assert_eq!(top, [("blobs", EntryKind::Folder, 0), ("notes.txt", EntryKind::File, 5)]);
+        let notes = st.stat("notes.txt").await.unwrap().unwrap();
+        assert!(notes.modified.is_some());
+        assert!(st.stat("missing.txt").await.unwrap().is_none());
+        assert!(st.list_dir("../outside").await.is_err());
+        let content = st.list_content(&|_| {}).await.unwrap();
+        assert_eq!(content.iter().map(|e| (e.name.as_str(), e.size)).collect::<Vec<_>>(), [(hash.as_str(), 14)]);
+
+        let env = testutil::env().await;
+        let report = crate::location_tools::steps::run(&env.st, st.clone(), "sftp", 1 << 20).await;
+        assert!(report.ok, "{report:?}");
+        assert_eq!(std::fs::read_dir(s.dir.join("files/.thirtyfile-check")).unwrap().count(), 0, "the test files are deleted");
     }
 
     /// The message a storage error shows people

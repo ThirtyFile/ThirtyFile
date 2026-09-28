@@ -10,6 +10,7 @@ mod error;
 mod files;
 mod folders;
 mod fsops;
+mod location_tools;
 mod locations;
 mod logs;
 mod mail;
@@ -478,6 +479,8 @@ fn untimed() -> Router<AppState> {
                 .layer(DefaultBodyLimit::disable()),
         )
         .route("/admin/branding/logo/{variant}", put(branding::upload_logo).delete(branding::delete_logo))
+        // One file of a storage location, as it is stored
+        .route("/admin/storage/{id}/download", get(location_tools::download))
         .route("/admin/branding/background", put(branding::upload_background).delete(branding::delete_background).layer(DefaultBodyLimit::max(branding::MAX_BACKGROUND + 1024)))
 }
 
@@ -748,6 +751,10 @@ fn api() -> Router<AppState> {
         .route("/admin/storage/{id}/test", post(locations::test_existing))
         .route("/admin/storage/{id}/default", post(locations::set_default))
         .route("/admin/storage/{id}/spaces", get(locations::spaces))
+        .route("/admin/storage/{id}/test-steps", post(location_tools::test_steps))
+        .route("/admin/storage/{id}/browse", get(location_tools::browse))
+        .route("/admin/storage/{id}/unused", get(location_tools::unused_status).post(location_tools::find_unused))
+        .route("/admin/storage/{id}/unused/remove", post(location_tools::remove_unused))
         .route("/admin/groups", get(drives::list_groups).post(drives::create_group))
         .route("/admin/groups/{id}", patch(drives::update_group).delete(drives::delete_group))
         .fallback(|| async { error::AppError::not_found("API not found") })

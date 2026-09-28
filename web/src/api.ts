@@ -200,6 +200,68 @@ export interface LocationSpace {
   used_bytes: number;
 }
 
+/** One step of a storage location's step-by-step test */
+export interface LocationTestStep {
+  id: "connect" | "write" | "read" | "write_large" | "read_large" | "delete" | "cleanup";
+  outcome: "ok" | "error" | "skipped";
+  ms: number;
+  bytes: number | null;
+  /** MB (10^6 bytes) per second */
+  speed: number | null;
+  message: string | null;
+}
+
+/** A space as the storage location tools show it; private: someone else's personal space, whose files aren't shown */
+export interface LocationSpace {
+  id: string;
+  name: string;
+  kind: DriveKind;
+  owner: string;
+  private: boolean;
+}
+
+/** One item of a storage location, while browsing it */
+export interface LocationItem {
+  name: string;
+  kind: "folder" | "file" | "link";
+  size: number;
+  modified: number | null;
+  path: string;
+  role: "content" | "internal" | "space" | null;
+  space: LocationSpace | null;
+  usage: {
+    status: "used" | "version" | "trash" | "pending" | "unused";
+    space: LocationSpace | null;
+    file: string | null;
+    uses: number;
+  } | null;
+}
+
+export interface LocationPage {
+  path: string;
+  items: LocationItem[];
+  next: string | null;
+  space: LocationSpace | null;
+}
+
+/** A search for unused content in a storage location, and its removal */
+export interface UnusedJob {
+  scan_id: string;
+  phase: "scanning" | "found" | "removing" | "removed" | "failed";
+  started_at: number;
+  finished_at: number | null;
+  scanned: number;
+  count: number;
+  bytes: number;
+  items: { hash: string; path: string; size: number; modified: number | null }[];
+  recent: number;
+  error: string | null;
+  removed: number;
+  removed_bytes: number;
+  kept: number;
+  failed: number;
+}
+
 export interface Migration {
   drive_id: string;
   target: string;
@@ -1109,6 +1171,12 @@ export const api = {
   testStorage: (req: { id?: string; kind: StorageKind; config: StorageConfig }) =>
     post<{ ok: boolean; region?: string; host_key?: string }>("/admin/storage/test", req),
   testExistingStorage: (id: string) => post(enc`/admin/storage/${id}/test`),
+  testStorageSteps: (id: string) => post<{ ok: boolean; steps: LocationTestStep[] }>(enc`/admin/storage/${id}/test-steps`),
+  browseStorage: (id: string, path: string, after?: string) => get<LocationPage>(enc`/admin/storage/${id}/browse` + qs({ path, after })),
+  storageDownloadUrl: (id: string, path: string) => enc`/api/admin/storage/${id}/download` + qs({ path }),
+  unusedContent: (id: string) => get<UnusedJob | null>(enc`/admin/storage/${id}/unused`),
+  findUnusedContent: (id: string) => post<UnusedJob>(enc`/admin/storage/${id}/unused`),
+  removeUnusedContent: (id: string, scanId: string) => post<UnusedJob>(enc`/admin/storage/${id}/unused/remove`, { scan_id: scanId }),
   setDefaultStorage: (id: string) => post(enc`/admin/storage/${id}/default`),
   storageLocationSpaces: (id: string) =>
     get<LocationSpace[]>(enc`/admin/storage/${id}/spaces`).then((l) => l.map((s) => ({ ...s, name: driveName(s) }))),

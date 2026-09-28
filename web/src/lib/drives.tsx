@@ -90,6 +90,7 @@ const ACTION_LABEL: Record<string, string> = {
   storage_update: t("Modify storage location"),
   storage_delete: t("Delete storage location"),
   storage_default: t("Set default storage location"),
+  storage_cleanup: t("Remove unused content"),
   settings: t("System settings"),
   log_archive: t("Archive logs"),
   log_archive_delete: t("Delete archive"),
@@ -103,7 +104,7 @@ export const ACTION_GROUPS: { label: string; actions: string[] }[] = [
   { label: t("Users and groups"), actions: ["user_create", "user_update", "user_delete", "group_create", "group_update", "group_delete"] },
   {
     label: t("System"),
-    actions: ["settings", "storage_create", "storage_update", "storage_delete", "storage_default", "log_archive", "log_archive_delete"],
+    actions: ["settings", "storage_create", "storage_update", "storage_delete", "storage_default", "storage_cleanup", "log_archive", "log_archive_delete"],
   },
 ];
 

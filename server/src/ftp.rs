@@ -31,7 +31,7 @@ use tokio::{
     sync::Semaphore,
 };
 
-use crate::storage::{BoxReader, Storage, StorageError, UNAVAILABLE, valid_hash};
+use crate::storage::{BoxReader, Entry, EntryKind, Storage, StorageError, UNAVAILABLE, valid_hash};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Maximum time to wait for a response to each command
@@ -275,8 +275,18 @@ impl FtpStorage {
     }
 
     async fn put(&self, c: &mut Conn, hash: &str, src: &Path) -> io::Result<()> {
-        self.ensure_dir(c, &self.blob_dir(hash)).await?;
-        let path = self.blob_path(hash)?;
+        self.put_to(c, &self.blob_dir(hash), &self.blob_path(hash)?, src).await
+    }
+
+    /// A path in the location (checked; "" is its folder, itself "" when that is the folder after signing in)
+    fn path_at(&self, key: &str) -> io::Result<String> {
+        crate::storage::key_parts(key)?;
+        Ok(if key.is_empty() { self.root.clone() } else { self.path(key) })
+    }
+
+    /// Writes a temp file to `path` in the folder `dir`, through a temporary name
+    async fn put_to(&self, c: &mut Conn, dir: &str, path: &str, src: &Path) -> io::Result<()> {
+        self.ensure_dir(c, dir).await?;
         let tmp = format!("{path}.part-{}", uuid::Uuid::new_v4().simple());
         let mut input = tokio::fs::File::open(src).await?;
         let mut out = timed(c.ftp.put_with_stream(tmp.as_str())).await?;
@@ -290,15 +300,98 @@ impl FtpStorage {
             let _ = timed(c.ftp.rm(tmp.as_str())).await;
             return Err(e);
         }
-        if let Err(e) = timed(c.ftp.rename(tmp.as_str(), path.as_str())).await {
+        if let Err(e) = timed(c.ftp.rename(tmp.as_str(), path)).await {
             // Some servers don't allow rename to overwrite: if the same content already exists, keep the original
-            let exists = timed(c.ftp.size(path.as_str())).await.is_ok();
+            let exists = timed(c.ftp.size(path)).await.is_ok();
             let _ = timed(c.ftp.rm(tmp.as_str())).await;
             if !exists {
                 return Err(e);
             }
         }
         Ok(())
+    }
+
+    async fn delete_path(&self, path: &str) -> io::Result<()> {
+        let (mut c, _permit) = self.checkout().await?;
+        match timed(c.ftp.rm(path)).await {
+            Ok(()) => {
+                self.checkin(c);
+                Ok(())
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                self.checkin(c);
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn open_path(&self, path: String, start: u64, len: u64) -> io::Result<BoxReader> {
+        if len == 0 {
+            return Ok(Box::pin(tokio::io::empty()) as BoxReader);
+        }
+        let (mut c, permit) = self.checkout().await?;
+        if start > 0 {
+            timed(c.ftp.resume_transfer(start as usize)).await?;
+        }
+        let mut stream = match timed(c.ftp.retr_as_stream(path.as_str())).await {
+            Ok(s) => s,
+            Err(e) => {
+                if e.kind() == io::ErrorKind::NotFound {
+                    self.checkin(c);
+                }
+                return Err(e);
+            }
+        };
+        // The background task forwards the data to the caller; after reading the whole range it finishes and returns the connection to the pool
+        let (mut tx, rx) = tokio::io::duplex(256 * 1024);
+        let idle = self.idle.clone();
+        tokio::spawn(async move {
+            let _permit = permit;
+            let mut left = len;
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut ok = true;
+            while left > 0 {
+                let want = buf.len().min(left as usize);
+                let n = match tokio::time::timeout(COMMAND_TIMEOUT, stream.read(&mut buf[..want])).await {
+                    Ok(Ok(0)) | Ok(Err(_)) | Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                    Ok(Ok(n)) => n,
+                };
+                // The caller canceled the download, or stopped reading (a paused download or video): give the
+                // connection back instead of holding one of the few there are
+                if !matches!(tokio::time::timeout(STALLED_READER, tx.write_all(&buf[..n])).await, Ok(Ok(()))) {
+                    ok = false;
+                    break;
+                }
+                left -= n as u64;
+            }
+            drop(tx);
+            if !ok {
+                return;
+            }
+            // Range fully read: if it reached the end of the file, finish normally and return the connection to the pool; if only part was read (e.g. video seeking), abort the transfer.
+            // Servers respond inconsistently after an abort (possibly an extra 225/226 line), so the connection state is unreliable: close it instead of reusing it
+            // Many FTPS servers don't send TLS close_notify when closing the data connection: such an ending after reading the expected length also counts as normal
+            let mut probe = [0u8; 1];
+            let at_end = match tokio::time::timeout(Duration::from_secs(5), stream.read(&mut probe)).await {
+                Ok(Ok(0)) => true,
+                Ok(Err(e)) => e.kind() == io::ErrorKind::UnexpectedEof,
+                _ => false,
+            };
+            if at_end {
+                if timed(stream.finish()).await.is_ok() {
+                    c.last_used = Instant::now();
+                    idle.lock().unwrap().push(c);
+                }
+            } else {
+                let _ = timed(c.ftp.abort(stream)).await;
+                let _ = timed(c.ftp.quit()).await;
+            }
+        });
+        Ok(Box::pin(rx) as BoxReader)
     }
 }
 
@@ -356,92 +449,79 @@ impl Storage for FtpStorage {
     }
 
     fn open<'a>(&'a self, hash: &'a str, start: u64, len: u64) -> BoxFuture<'a, io::Result<BoxReader>> {
-        Box::pin(async move {
-            if len == 0 {
-                return Ok(Box::pin(tokio::io::empty()) as BoxReader);
-            }
-            let path = self.blob_path(hash)?;
-            let (mut c, permit) = self.checkout().await?;
-            if start > 0 {
-                timed(c.ftp.resume_transfer(start as usize)).await?;
-            }
-            let mut stream = match timed(c.ftp.retr_as_stream(path.as_str())).await {
-                Ok(s) => s,
-                Err(e) => {
-                    if e.kind() == io::ErrorKind::NotFound {
-                        self.checkin(c);
-                    }
-                    return Err(e);
-                }
-            };
-            // The background task forwards the data to the caller; after reading the whole range it finishes and returns the connection to the pool
-            let (mut tx, rx) = tokio::io::duplex(256 * 1024);
-            let idle = self.idle.clone();
-            tokio::spawn(async move {
-                let _permit = permit;
-                let mut left = len;
-                let mut buf = vec![0u8; 64 * 1024];
-                let mut ok = true;
-                while left > 0 {
-                    let want = buf.len().min(left as usize);
-                    let n = match tokio::time::timeout(COMMAND_TIMEOUT, stream.read(&mut buf[..want])).await {
-                        Ok(Ok(0)) | Ok(Err(_)) | Err(_) => {
-                            ok = false;
-                            break;
-                        }
-                        Ok(Ok(n)) => n,
-                    };
-                    // The caller canceled the download, or stopped reading (a paused download or video): give the
-                    // connection back instead of holding one of the few there are
-                    if !matches!(tokio::time::timeout(STALLED_READER, tx.write_all(&buf[..n])).await, Ok(Ok(()))) {
-                        ok = false;
-                        break;
-                    }
-                    left -= n as u64;
-                }
-                drop(tx);
-                if !ok {
-                    return;
-                }
-                // Range fully read: if it reached the end of the file, finish normally and return the connection to the pool; if only part was read (e.g. video seeking), abort the transfer.
-                // Servers respond inconsistently after an abort (possibly an extra 225/226 line), so the connection state is unreliable: close it instead of reusing it
-                // Many FTPS servers don't send TLS close_notify when closing the data connection: such an ending after reading the expected length also counts as normal
-                let mut probe = [0u8; 1];
-                let at_end = match tokio::time::timeout(Duration::from_secs(5), stream.read(&mut probe)).await {
-                    Ok(Ok(0)) => true,
-                    Ok(Err(e)) => e.kind() == io::ErrorKind::UnexpectedEof,
-                    _ => false,
-                };
-                if at_end {
-                    if timed(stream.finish()).await.is_ok() {
-                        c.last_used = Instant::now();
-                        idle.lock().unwrap().push(c);
-                    }
-                } else {
-                    let _ = timed(c.ftp.abort(stream)).await;
-                    let _ = timed(c.ftp.quit()).await;
-                }
-            });
-            Ok(Box::pin(rx) as BoxReader)
-        })
+        Box::pin(async move { self.open_path(self.blob_path(hash)?, start, len).await })
     }
 
     fn delete<'a>(&'a self, hash: &'a str) -> BoxFuture<'a, io::Result<()>> {
+        Box::pin(async move { self.delete_path(&self.blob_path(hash)?).await })
+    }
+
+    fn list_dir<'a>(&'a self, dir: &'a str) -> BoxFuture<'a, io::Result<Vec<Entry>>> {
         Box::pin(async move {
-            let path = self.blob_path(hash)?;
+            let path = self.path_at(dir)?;
             let (mut c, _permit) = self.checkout().await?;
-            match timed(c.ftp.rm(path.as_str())).await {
-                Ok(()) => {
-                    self.checkin(c);
-                    Ok(())
+            let lines = timed(c.ftp.list(Some(path.as_str()).filter(|p| !p.is_empty()))).await?;
+            self.checkin(c);
+            let mut out = Vec::new();
+            for line in lines {
+                // Unix-style and DOS-style LIST lines; others (a total line, an unknown format) are skipped
+                let Ok(f) = line.parse::<suppaftp::list::File>() else { continue };
+                if f.name() == "." || f.name() == ".." {
+                    continue;
                 }
+                let kind = if f.is_symlink() {
+                    EntryKind::Link
+                } else if f.is_directory() {
+                    EntryKind::Folder
+                } else {
+                    EntryKind::File
+                };
+                let size = if kind == EntryKind::File { f.size() as u64 } else { 0 };
+                let modified = f.modified().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs() as i64).filter(|s| *s > 0);
+                out.push(Entry { name: f.name().to_string(), kind, size, modified });
+            }
+            Ok(out)
+        })
+    }
+
+    fn stat<'a>(&'a self, key: &'a str) -> BoxFuture<'a, io::Result<Option<Entry>>> {
+        Box::pin(async move {
+            let path = self.path_at(key)?;
+            let (mut c, _permit) = self.checkout().await?;
+            // SIZE answers for files only: a folder or a missing file is "not found"
+            let size = match timed(c.ftp.size(path.as_str())).await {
+                Ok(n) => n as u64,
                 Err(e) if e.kind() == io::ErrorKind::NotFound => {
                     self.checkin(c);
-                    Ok(())
+                    return Ok(None);
                 }
-                Err(e) => Err(e),
-            }
+                Err(e) => return Err(e),
+            };
+            let modified = timed(c.ftp.mdtm(path.as_str())).await.ok().map(|t| t.and_utc().timestamp());
+            self.checkin(c);
+            Ok(Some(Entry { name: key.rsplit('/').next().unwrap_or_default().to_string(), kind: EntryKind::File, size, modified }))
         })
+    }
+
+    fn put_at<'a>(&'a self, key: &'a str, src: &'a Path) -> BoxFuture<'a, io::Result<()>> {
+        Box::pin(async move {
+            let path = self.path_at(key)?;
+            let dir = path.rsplit_once('/').map_or(self.root.as_str(), |(d, _)| d).to_string();
+            let (mut c, _permit) = self.checkout().await?;
+            // A failed connection is in an unknown state, so it isn't returned to the pool
+            self.put_to(&mut c, &dir, &path, src).await?;
+            self.checkin(c);
+            let _ = tokio::fs::remove_file(src).await;
+            Ok(())
+        })
+    }
+
+    fn open_at<'a>(&'a self, key: &'a str, start: u64, len: u64) -> BoxFuture<'a, io::Result<BoxReader>> {
+        Box::pin(async move { self.open_path(self.path_at(key)?, start, len).await })
+    }
+
+    fn delete_at<'a>(&'a self, key: &'a str) -> BoxFuture<'a, io::Result<()>> {
+        Box::pin(async move { self.delete_path(&self.path_at(key)?).await })
     }
 
     fn check(&self) -> BoxFuture<'_, io::Result<()>> {
@@ -464,7 +544,9 @@ impl Storage for FtpStorage {
                 Ok(())
             }
             .await;
-            let _ = timed(c.ftp.rm(probe.as_str())).await;
+            // An account that can write but not delete would pass and fail later, when files are deleted
+            let deleted = timed(c.ftp.rm(probe.as_str())).await;
+            let result = result.and_then(|()| deleted.map_err(|e| crate::storage::delete_failed(e, crate::storage::CANT_DELETE_ACCOUNT)));
             if result.is_ok() {
                 self.checkin(c);
             }
@@ -569,7 +651,7 @@ mod tests {
                     passive = Some(l);
                     format!("227 Entering Passive Mode (127,0,0,1,{},{})", p / 256, p % 256)
                 }
-                "RETR" | "STOR" | "NLST" if (cmd == "STOR" || path.exists()) && passive.is_some() => {
+                "RETR" | "STOR" | "NLST" | "LIST" if (cmd == "STOR" || path.exists()) && passive.is_some() => {
                     let (mut data, _) = passive.take().unwrap().accept().await?;
                     w.write_all(b"150 Opening data connection\r\n").await?;
                     // A client that stops reading (or aborts) just ends the transfer
@@ -579,6 +661,18 @@ mod tests {
                             let mut content = Vec::new();
                             data.read_to_end(&mut content).await?;
                             std::fs::write(&path, content)
+                        }
+                        // Unix-style lines, as most servers send
+                        "LIST" => {
+                            let lines: Vec<String> = std::fs::read_dir(&path)?
+                                .flatten()
+                                .map(|e| {
+                                    let m = e.metadata().unwrap();
+                                    let kind = if m.is_dir() { 'd' } else { '-' };
+                                    format!("{kind}rw-r--r-- 1 ftp ftp {} Jan 2 2024 {}\r\n", m.len(), e.file_name().to_string_lossy())
+                                })
+                                .collect();
+                            data.write_all(lines.concat().as_bytes()).await
                         }
                         _ => {
                             let names: Vec<String> =
@@ -667,6 +761,29 @@ mod tests {
             assert_eq!(st.size(&other).await.unwrap(), Some(6));
         }
         assert_eq!(s.connections.load(Ordering::SeqCst), before);
+    }
+
+    #[tokio::test]
+    async fn items_are_listed_by_path_and_the_step_test_passes_over_ftp() {
+        use crate::storage::EntryKind;
+        let s = server(testutil::password()).await;
+        let st = Arc::new(storage(&s, testutil::password()));
+        let hash = put(&st, &s, b"stored content").await;
+        std::fs::write(s.dir.join("files/notes.txt"), b"hello").unwrap();
+
+        let mut top = st.list_dir("").await.unwrap();
+        top.sort_by(|a, b| a.name.cmp(&b.name));
+        let top: Vec<_> = top.iter().map(|e| (e.name.as_str(), e.kind, e.size)).collect();
+        assert_eq!(top, [("blobs", EntryKind::Folder, 0), ("notes.txt", EntryKind::File, 5)]);
+        assert_eq!(st.stat("notes.txt").await.unwrap().unwrap().size, 5);
+        assert!(st.stat("missing.txt").await.unwrap().is_none());
+        let content = st.list_content(&|_| {}).await.unwrap();
+        assert_eq!(content.iter().map(|e| (e.name.as_str(), e.size)).collect::<Vec<_>>(), [(hash.as_str(), 14)]);
+
+        let env = testutil::env().await;
+        let report = crate::location_tools::steps::run(&env.st, st.clone(), "ftp", 1 << 20).await;
+        assert!(report.ok, "{report:?}");
+        assert_eq!(std::fs::read_dir(s.dir.join("files/.thirtyfile-check")).unwrap().count(), 0, "the test files are deleted");
     }
 
     #[tokio::test]

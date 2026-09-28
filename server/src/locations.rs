@@ -35,7 +35,7 @@ struct LocationRow {
 
 /// A location's stored settings, with its passwords and keys decrypted (secrets.rs; each bound to the location and
 /// field it is stored for)
-fn config_json(id: &str, raw: &str) -> Value {
+pub(crate) fn config_json(id: &str, raw: &str) -> Value {
     let mut cfg: Value = serde_json::from_str(raw).unwrap_or_else(|_| json!({}));
     if let Some(obj) = cfg.as_object_mut() {
         for field in SECRET_FIELDS {
@@ -285,7 +285,7 @@ async fn merged_config(st: &AppState, id: Option<&str>, kind: &str, config: Valu
 }
 
 /// Explanation of a storage service error: use SFTP / FTP's specific reason (credentials, host key, TLS…) when there is one; otherwise infer it from the error content
-fn describe(e: &std::io::Error) -> String {
+pub(crate) fn describe(e: &std::io::Error) -> String {
     if let Some(se) = e.get_ref().and_then(|i| i.downcast_ref::<storage::StorageError>())
         && se.message != storage::UNAVAILABLE
         && se.message != storage::DENIED_KEYS

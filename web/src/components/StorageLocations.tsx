@@ -4,12 +4,15 @@ import {
   CheckCircle2Icon,
   CloudIcon,
   EllipsisIcon,
+  FolderOpenIcon,
   HardDriveIcon,
   LayersIcon,
+  ListChecksIcon,
   Loader2Icon,
   PencilIcon,
   PlugZapIcon,
   PlusIcon,
+  SearchXIcon,
   ServerIcon,
   ShieldAlertIcon,
   StarIcon,
@@ -27,6 +30,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog, ErrorText } from "@/components/dialogs";
 import { RowMenuArea } from "@/components/RowMenuArea";
+import { LocationBrowseDialog, LocationTestDialog, UnusedContentDialog } from "@/components/StorageTools";
 import { cn, formatBytes, formatDateTime } from "@/lib/utils";
 import { t, tServer } from "@/lib/i18n";
 
@@ -72,6 +76,7 @@ export function StorageLocations() {
   const [deleting, setDeleting] = useState<StorageLocation | null>(null);
   const [showing, setShowing] = useState<StorageLocation | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
+  const [tool, setTool] = useState<{ kind: "test" | "browse" | "unused"; location: StorageLocation } | null>(null);
   const list = q.data ?? [];
   const selected = list.find((l) => l.id === selectedId) ?? null;
   const refresh = () => {
@@ -111,6 +116,15 @@ export function StorageLocations() {
       </DropdownMenuItem>
       <DropdownMenuItem onClick={() => setShowing(l)}>
         <LayersIcon /> {t("Spaces on this location")}
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => setTool({ kind: "test", location: l })}>
+        <ListChecksIcon /> {t("Test step by step")}
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => setTool({ kind: "browse", location: l })}>
+        <FolderOpenIcon /> {t("Browse")}
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => setTool({ kind: "unused", location: l })}>
+        <SearchXIcon /> {t("Find unused content")}
       </DropdownMenuItem>
       <DropdownMenuItem disabled={l.is_default} onClick={() => makeDefault(l)}>
         <StarIcon /> {t("Set as default location")}
@@ -264,6 +278,9 @@ export function StorageLocations() {
         />
       )}
       {showing && <SpacesDialog location={showing} onClose={() => setShowing(null)} />}
+      {tool?.kind === "test" && <LocationTestDialog location={tool.location} onClose={() => setTool(null)} />}
+      {tool?.kind === "browse" && <LocationBrowseDialog location={tool.location} onClose={() => setTool(null)} />}
+      {tool?.kind === "unused" && <UnusedContentDialog location={tool.location} onClose={() => setTool(null)} />}
       {deleting && (
         <ConfirmDialog
           title={t("Delete storage location \"{name}\"?", { name: deleting.name })}
