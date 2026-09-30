@@ -10,6 +10,8 @@ import { MeContext } from "@/lib/session";
 import { t } from "@/lib/i18n";
 import { useApplyBranding } from "@/lib/branding";
 import { ConfirmHost } from "@/components/confirm";
+import type { ControlPanelKey } from "@/admin/controlPanel";
+import { ADMIN_PAGES, adminPath } from "@/admin/pages";
 
 // Each part loads when it is first needed: the sign-in page and a share link don't load the file explorer, and the
 // administration pages load only when an administrator opens them
@@ -34,21 +36,11 @@ const SharedWithMePage = page(() => import("@/pages/SharedWithMePage"), "SharedW
 const SharesPage = page(() => import("@/pages/SharesPage"), "SharesPage");
 const TrashPage = page(() => import("@/pages/TrashPage"), "TrashPage");
 const ControlPanelPage = page(() => import("@/admin/ControlPanelPage"), "ControlPanelPage");
-const AdminUsersPage = page(() => import("@/admin/users/AdminUsersPage"), "AdminUsersPage");
-const GroupsPage = page(() => import("@/admin/users/GroupsPage"), "GroupsPage");
-const AdminSharesPage = page(() => import("@/admin/users/AdminSharesPage"), "AdminSharesPage");
-const AdminDrivesPage = page(() => import("@/admin/storage/AdminDrivesPage"), "AdminDrivesPage");
-const GeneralSettingsPage = page(() => import("@/admin/system/GeneralSettingsPage"), "GeneralSettingsPage");
-const StorageSettingsPage = page(() => import("@/admin/storage/StorageSettingsPage"), "StorageSettingsPage");
-const MovesPage = page(() => import("@/admin/storage/MovesPage"), "MovesPage");
-const BackupsPage = page(() => import("@/admin/storage/BackupsPage"), "BackupsPage");
-const ReplicasPage = page(() => import("@/admin/storage/ReplicasPage"), "ReplicasPage");
-const UsageSettingsPage = page(() => import("@/admin/storage/UsageSettingsPage"), "UsageSettingsPage");
-const ActivitySettingsPage = page(() => import("@/admin/system/ActivitySettingsPage"), "ActivitySettingsPage");
-const LogSettingsPage = page(() => import("@/admin/system/LogSettingsPage"), "LogSettingsPage");
-const SsoPage = page(() => import("@/admin/users/SsoPage"), "SsoPage");
-const EmailPage = page(() => import("@/admin/system/EmailPage"), "EmailPage");
-const BrandingPage = page(() => import("@/admin/system/BrandingPage"), "BrandingPage");
+/** The administration pages, at their Control panel item's address */
+const ADMIN_ROUTES = (Object.keys(ADMIN_PAGES) as ControlPanelKey[]).map((key) => ({
+  path: adminPath(key),
+  Page: lazy(() => ADMIN_PAGES[key]().then((Page) => ({ default: Page }))),
+}));
 
 function Spinner() {
   return (
@@ -151,126 +143,17 @@ export function App() {
                 </AdminOnly>
               }
             />
-            <Route
-              path="/admin/users"
-              element={
-                <AdminOnly>
-                  <AdminUsersPage />
-                </AdminOnly>
-              }
-            />
-            <Route
-              path="/admin/shares"
-              element={
-                <AdminOnly>
-                  <AdminSharesPage />
-                </AdminOnly>
-              }
-            />
-            <Route
-              path="/admin/groups"
-              element={
-                <AdminOnly>
-                  <GroupsPage />
-                </AdminOnly>
-              }
-            />
-            <Route
-              path="/admin/drives"
-              element={
-                <AdminOnly>
-                  <AdminDrivesPage />
-                </AdminOnly>
-              }
-            />
-            <Route
-              path="/admin/general"
-              element={
-                <AdminOnly>
-                  <GeneralSettingsPage />
-                </AdminOnly>
-              }
-            />
-            <Route
-              path="/admin/storage"
-              element={
-                <AdminOnly>
-                  <StorageSettingsPage />
-                </AdminOnly>
-              }
-            />
-            <Route
-              path="/admin/moves"
-              element={
-                <AdminOnly>
-                  <MovesPage />
-                </AdminOnly>
-              }
-            />
-            <Route
-              path="/admin/backups"
-              element={
-                <AdminOnly>
-                  <BackupsPage />
-                </AdminOnly>
-              }
-            />
-            <Route
-              path="/admin/replicas"
-              element={
-                <AdminOnly>
-                  <ReplicasPage />
-                </AdminOnly>
-              }
-            />
-            <Route
-              path="/admin/usage"
-              element={
-                <AdminOnly>
-                  <UsageSettingsPage />
-                </AdminOnly>
-              }
-            />
-            <Route
-              path="/admin/activity"
-              element={
-                <AdminOnly>
-                  <ActivitySettingsPage />
-                </AdminOnly>
-              }
-            />
-            <Route
-              path="/admin/logs"
-              element={
-                <AdminOnly>
-                  <LogSettingsPage />
-                </AdminOnly>
-              }
-            />
-            <Route
-              path="/admin/sso"
-              element={
-                <AdminOnly>
-                  <SsoPage />
-                </AdminOnly>
-              }
-            />
-            <Route
-              path="/admin/email"
-              element={
-                <AdminOnly>
-                  <EmailPage />
-                </AdminOnly>
-              }
-            />
-            <Route
-              path="/admin/branding"
-              element={
-                <AdminOnly>
-                  <BrandingPage />
-                </AdminOnly>
-              }
-            />
+            {ADMIN_ROUTES.map(({ path, Page }) => (
+              <Route
+                key={path}
+                path={path}
+                element={
+                  <AdminOnly>
+                    <Page />
+                  </AdminOnly>
+                }
+              />
+            ))}
             {/* Old URL: system settings were merged into the control panel */}
             <Route path="/admin/system" element={<Navigate to="/admin" replace />} />
             <Route path="*" element={<Navigate to="/files" replace />} />
