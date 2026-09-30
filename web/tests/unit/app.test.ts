@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import { enc, privateSource, shareSource, type Node } from "@/api";
 import { frameDocument } from "@/components/officeFrame";
 import { filenameFrom } from "@/downloads";
-import { validTabs } from "@/tabs";
+import { keepOnly, validTabs } from "@/tabs";
 
 const response = (disposition?: string) => new Response(null, { headers: disposition ? { "Content-Disposition": disposition } : {} });
 
@@ -37,6 +37,31 @@ describe("saved tabs", () => {
     ["missing title", { tabs: [{ id: "a", entries: ["/files"], index: 0 }], active: "a" }],
     ["too many tabs", { tabs: Array.from({ length: 21 }, (_, i) => tab(`t${i}`)), active: "t0" }],
   ])("%s is rejected", (_, raw) => expect(validTabs(raw)).toBeNull());
+
+  describe("closing other tabs", () => {
+    const files = tab("files", ["/files", "/files/folder-1"], 1);
+    const editor = tab("editor", ["/files", "/view/f1"], 1);
+    const other = tab("other", ["/view/f2"]);
+
+    test("from a tab that isn't shown, that tab's page is shown", () => {
+      const plan = keepOnly({ tabs: [files, editor, other], active: "editor" }, "files", ["f1", "f2"]);
+      expect(plan).toEqual({ next: { tabs: [files], active: "files" }, show: "/files/folder-1", discard: ["f1", "f2"] });
+    });
+
+    test("from the tab shown, the page stays", () => {
+      const plan = keepOnly({ tabs: [files, editor, other], active: "editor" }, "editor", ["f2"]);
+      expect(plan).toEqual({ next: { tabs: [editor], active: "editor" }, show: null, discard: ["f2"] });
+    });
+
+    test("the kept tab's own file keeps its draft", () => {
+      const again = tab("again", ["/view/f1"]);
+      expect(keepOnly({ tabs: [editor, again], active: "again" }, "editor", ["f1"])?.discard).toEqual([]);
+    });
+
+    test("a tab closed meanwhile closes nothing", () => {
+      expect(keepOnly({ tabs: [files], active: "files" }, "editor", ["f1"])).toBeNull();
+    });
+  });
 });
 
 describe("API paths", () => {
