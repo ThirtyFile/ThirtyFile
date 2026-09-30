@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { ErrorText } from "@/components/dialogs";
 import { locationLabel } from "@/components/LocationSelect";
-import { localZone, zones } from "@/components/BackupPolicyDialog";
+import { localZone, zones } from "@/admin/storage/BackupPolicyDialog";
 import { DRIVE_ICON } from "@/lib/drives";
 import { t } from "@/lib/i18n";
 

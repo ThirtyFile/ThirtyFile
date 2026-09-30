@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog, ErrorText, errorProps } from "@/components/dialogs";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
-import { useSettingsSearch } from "@/lib/controlPanel";
+import { useSettingsSearch } from "@/admin/controlPanel";
 import { t, tc } from "@/lib/i18n";
 import { formatDate } from "@/lib/utils";
 

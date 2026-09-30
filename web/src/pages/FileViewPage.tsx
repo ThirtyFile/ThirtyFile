@@ -36,7 +36,8 @@ import { refreshFiles, renamed, saved } from "@/lib/queries";
 import { toastWithUndo } from "@/lib/undo";
 import { categoryOf, isTextLike, typeLabel } from "@/components/FileIcon";
 import { capsOf } from "@/lib/drives";
-import { locationOf, useSort } from "@/pages/FilesPage";
+import { locationOf } from "@/components/frame/location";
+import { useSort } from "@/lib/sort";
 import { pathOf } from "@/lib/paths";
 import { neighbours, useFolderWindows } from "@/lib/windows";
 

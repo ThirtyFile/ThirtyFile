@@ -1,6 +1,6 @@
 /** Control panel › Backups, and "Copy everything to…" on a storage location (backups/) */
 export default {
-  // Copy everything to… (components/CopyEverythingDialog.tsx)
+  // Copy everything to… (admin/storage/CopyEverythingDialog.tsx)
   "Copy everything to…": "全部複製到…",
   "Copy of {name}": "{name} 的副本",
   "\"{name}\" is being made in the background": "正在背景製作「{name}」",
@@ -29,7 +29,7 @@ export default {
   "{name} is on the same disk or storage service as {source}: the copy doesn't survive a failure of it.": "{name} 和 {source} 在同一個磁碟或儲存服務上：它故障時，副本也會一起失去。",
   "{name} is FTP without encryption: the files travel unencrypted.": "{name} 是未加密的 FTP：檔案會以未加密的方式傳送。",
   "Start copying": "開始複製",
-  // Control panel › Backups (pages/BackupsPage.tsx)
+  // Control panel › Backups (admin/storage/BackupsPage.tsx)
   "Copies of storage locations kept on another location; check them, and restore spaces from them": "存放在其他位置的儲存位置副本；可以檢查副本，並從中還原空間",
   "Copying": "複製",
   "Restoring": "還原",
@@ -85,7 +85,7 @@ export default {
   "Everything goes into a new folder, \"{folder}\", at the top of the space: nothing already there is replaced.": "所有內容都會放進空間最上層的新資料夾「{folder}」，不會取代任何已有的項目。",
   "The folder takes the space's permissions. Earlier versions and the access recorded in the copy aren't restored.": "這個資料夾沿用空間的權限。副本中的較早版本和記錄下來的存取權不會還原。",
   "Administrators don't see the files of personal spaces: the whole space is restored, and only its owner sees it.": "管理員看不到個人空間中的檔案：會還原整個空間，只有擁有者看得到內容。",
-  // Backup policies (components/BackupPolicyDialog.tsx)
+  // Backup policies (admin/storage/BackupPolicyDialog.tsx)
   "\"{name}\" was changed": "已變更「{name}」",
   "\"{name}\" was made; its first snapshot is being made in the background": "已建立「{name}」；正在背景製作第一個快照",
   "Backup settings": "備份設定",
@@ -128,7 +128,7 @@ export default {
   "Back up…": "備份…",
   "Back up the spaces of a location to another, on a schedule or soon after changes; one-time copies; restoring from them":
     "把一個位置的空間備份到另一個位置，依排程或在變更後不久；一次性的副本；以及從中還原",
-  // Restoring (components/RestoreDialog.tsx)
+  // Restoring (admin/storage/RestoreDialog.tsx)
   "Files are copied back from the backup and checked against their fingerprints. Nothing already there is replaced unless you choose to.":
     "檔案會從備份複製回來，並以指紋核對。除非你選擇取代，否則不會取代任何已有的項目。",
   "Restore point": "還原點",
@@ -152,7 +152,7 @@ export default {
   "Nothing is in their way.": "沒有任何項目擋住。",
   "Restored items take the permissions of where they go. Earlier versions and the access recorded in the backup aren't restored.":
     "還原的項目沿用所在位置的權限。備份中的較早版本和記錄下來的存取權不會還原。",
-  // Control panel › Backups (pages/BackupsPage.tsx)
+  // Control panel › Backups (admin/storage/BackupsPage.tsx)
   "Protected": "已保護",
   "Changes waiting": "有變更待備份",
   "Backing up": "備份中",

@@ -4,13 +4,13 @@ import { CircleCheckIcon, CircleXIcon, ClockIcon, DownloadIcon, TriangleAlertIco
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { api } from "@/api";
-import { keys } from "@/api/queryKeys";
+import { keys, queries } from "@/api/queryKeys";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pending } from "@/components/ErrorState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
-import { UsageChart } from "@/components/UsageChart";
+import { UsageChart } from "@/admin/storage/UsageChart";
 import { cn, formatBytes, formatDateTime, formatTime } from "@/lib/utils";
 import { locale, t, tServer } from "@/lib/i18n";
 import {
@@ -38,7 +38,7 @@ import {
   type UsageThresholds,
   type UsageWork,
 } from "@/lib/usage";
-import { Section, SettingsFrame, useSystem } from "@/pages/SettingsFrame";
+import { Section, SettingsFrame } from "@/admin/SettingsFrame";
 
 /** The overview is asked for again this often while the page is shown (not while the tab is hidden) */
 const OVERVIEW_MS = 60_000;
@@ -74,7 +74,7 @@ const KIND: Record<LocationUsage["kind"], () => string> = {
 };
 
 export function UsageSettingsPage() {
-  const q = useSystem();
+  const q = useQuery(queries.system);
   const usage = useQuery({ queryKey: keys.usage(), queryFn: ({ signal }) => api.usageOverview(signal), refetchInterval: OVERVIEW_MS });
   const [filter, setFilter] = useState<{ location: string; range: UsageRange; work: UsageWork | "all"; op: UsageOp }>({
     location: "",

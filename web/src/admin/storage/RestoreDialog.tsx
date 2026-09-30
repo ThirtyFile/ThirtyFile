@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { ErrorText } from "@/components/dialogs";
-import { backupSpaceLabel } from "@/lib/backups";
+import { backupSpaceLabel } from "@/admin/storage/backups";
 import { t, tServer } from "@/lib/i18n";
 import { formatBytes, formatDateTime } from "@/lib/utils";
 

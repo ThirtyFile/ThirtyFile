@@ -30,9 +30,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
-import { ReplicaPolicyDialog } from "@/components/ReplicaPolicyDialog";
-import { BACKUP_JOB_STATE_LABEL } from "@/lib/backups";
-import { controlPanelItem, useSettingsSearch } from "@/lib/controlPanel";
+import { ReplicaPolicyDialog } from "@/admin/storage/ReplicaPolicyDialog";
+import { BACKUP_JOB_STATE_LABEL } from "@/admin/storage/backups";
+import { controlPanelItem, useSettingsSearch } from "@/admin/controlPanel";
 import { t, tServer } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
 import {
@@ -44,7 +44,7 @@ import {
   replicaJobActive,
   targetJob,
   useReplicas,
-} from "@/lib/replicas";
+} from "@/admin/storage/replicas";
 import { cn, formatBytes, formatDateTime } from "@/lib/utils";
 
 /** How long ago, roughly */

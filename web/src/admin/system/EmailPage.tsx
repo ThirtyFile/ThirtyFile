@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pending } from "@/components/ErrorState";
 import { ErrorText, errorProps } from "@/components/dialogs";
-import { Section, SettingsFrame, Toggle } from "@/pages/SettingsFrame";
+import { Section, SettingsFrame, Toggle } from "@/admin/SettingsFrame";
 import { t } from "@/lib/i18n";
 import { SMTP_PORT, portForSecurity } from "@/lib/notifications";
 import { useMe } from "@/lib/session";

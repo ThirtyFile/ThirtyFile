@@ -27,8 +27,8 @@ import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { api, moveActive, type SpaceMove, type StorageConfig, type StorageKind, type StorageLocation } from "@/api";
 import { affected, invalidate, keys, queries } from "@/api/queryKeys";
-import { MoveDialog } from "@/components/MoveDialog";
-import { CopyEverythingDialog } from "@/components/CopyEverythingDialog";
+import { MoveDialog } from "@/admin/storage/MoveDialog";
+import { CopyEverythingDialog } from "@/admin/storage/CopyEverythingDialog";
 import { DRIVE_ICON, DRIVE_KIND_LABEL } from "@/lib/drives";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -39,11 +39,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog, ErrorText } from "@/components/dialogs";
 import { ErrorState } from "@/components/ErrorState";
 import { RowMenuArea } from "@/components/RowMenuArea";
-import { LocationBrowseDialog, LocationTestDialog, UnusedContentDialog } from "@/components/StorageTools";
+import { LocationBrowseDialog, LocationTestDialog, UnusedContentDialog } from "@/admin/storage/StorageTools";
 import { cn, formatBytes, formatDateTime } from "@/lib/utils";
 import { t, tServer } from "@/lib/i18n";
 import { useSelectableList } from "@/lib/listSelection";
-import { useMoves } from "@/lib/moves";
+import { useMoves } from "@/admin/storage/moves";
 import { NativeSelect } from "@/components/ui/native-select";
 
 

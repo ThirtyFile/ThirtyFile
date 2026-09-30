@@ -33,22 +33,22 @@ const ThisPcPage = page(() => import("@/pages/ThisPcPage"), "ThisPcPage");
 const SharedWithMePage = page(() => import("@/pages/SharedWithMePage"), "SharedWithMePage");
 const SharesPage = page(() => import("@/pages/SharesPage"), "SharesPage");
 const TrashPage = page(() => import("@/pages/TrashPage"), "TrashPage");
-const ControlPanelPage = page(() => import("@/pages/ControlPanelPage"), "ControlPanelPage");
-const AdminUsersPage = page(() => import("@/pages/AdminUsersPage"), "AdminUsersPage");
-const GroupsPage = page(() => import("@/pages/GroupsPage"), "GroupsPage");
-const AdminSharesPage = page(() => import("@/pages/AdminSharesPage"), "AdminSharesPage");
-const AdminDrivesPage = page(() => import("@/pages/AdminDrivesPage"), "AdminDrivesPage");
-const GeneralSettingsPage = page(() => import("@/pages/GeneralSettingsPage"), "GeneralSettingsPage");
-const StorageSettingsPage = page(() => import("@/pages/StorageSettingsPage"), "StorageSettingsPage");
-const MovesPage = page(() => import("@/pages/MovesPage"), "MovesPage");
-const BackupsPage = page(() => import("@/pages/BackupsPage"), "BackupsPage");
-const ReplicasPage = page(() => import("@/pages/ReplicasPage"), "ReplicasPage");
-const UsageSettingsPage = page(() => import("@/pages/UsageSettingsPage"), "UsageSettingsPage");
-const ActivitySettingsPage = page(() => import("@/pages/ActivitySettingsPage"), "ActivitySettingsPage");
-const LogSettingsPage = page(() => import("@/pages/LogSettingsPage"), "LogSettingsPage");
-const SsoPage = page(() => import("@/pages/SsoPage"), "SsoPage");
-const EmailPage = page(() => import("@/pages/EmailPage"), "EmailPage");
-const BrandingPage = page(() => import("@/pages/BrandingPage"), "BrandingPage");
+const ControlPanelPage = page(() => import("@/admin/ControlPanelPage"), "ControlPanelPage");
+const AdminUsersPage = page(() => import("@/admin/users/AdminUsersPage"), "AdminUsersPage");
+const GroupsPage = page(() => import("@/admin/users/GroupsPage"), "GroupsPage");
+const AdminSharesPage = page(() => import("@/admin/users/AdminSharesPage"), "AdminSharesPage");
+const AdminDrivesPage = page(() => import("@/admin/storage/AdminDrivesPage"), "AdminDrivesPage");
+const GeneralSettingsPage = page(() => import("@/admin/system/GeneralSettingsPage"), "GeneralSettingsPage");
+const StorageSettingsPage = page(() => import("@/admin/storage/StorageSettingsPage"), "StorageSettingsPage");
+const MovesPage = page(() => import("@/admin/storage/MovesPage"), "MovesPage");
+const BackupsPage = page(() => import("@/admin/storage/BackupsPage"), "BackupsPage");
+const ReplicasPage = page(() => import("@/admin/storage/ReplicasPage"), "ReplicasPage");
+const UsageSettingsPage = page(() => import("@/admin/storage/UsageSettingsPage"), "UsageSettingsPage");
+const ActivitySettingsPage = page(() => import("@/admin/system/ActivitySettingsPage"), "ActivitySettingsPage");
+const LogSettingsPage = page(() => import("@/admin/system/LogSettingsPage"), "LogSettingsPage");
+const SsoPage = page(() => import("@/admin/users/SsoPage"), "SsoPage");
+const EmailPage = page(() => import("@/admin/system/EmailPage"), "EmailPage");
+const BrandingPage = page(() => import("@/admin/system/BrandingPage"), "BrandingPage");
 
 function Spinner() {
   return (

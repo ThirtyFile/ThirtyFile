@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/dialogs";
 import { cn, formatBytes, formatDate } from "@/lib/utils";
 import { locale, t, tServer } from "@/lib/i18n";
-import { Toggle, Section, SettingsFrame } from "@/pages/SettingsFrame";
+import { Toggle, Section, SettingsFrame } from "@/admin/SettingsFrame";
 
 const KIND_LABEL: Record<LogArchive["kind"], string> = {
   activity: t("Activity log"),

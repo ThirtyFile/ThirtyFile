@@ -21,7 +21,7 @@ import {
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { CONTROL_PANEL_ITEMS } from "@/lib/controlPanel";
+import { CONTROL_PANEL_ITEMS } from "@/admin/controlPanel";
 import { FileIcon as TypeIcon } from "@/components/FileIcon";
 import { useFolderDrop } from "@/lib/dnd";
 import { folderOfPath, hasPersonal } from "@/lib/home";

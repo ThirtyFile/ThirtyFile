@@ -14,7 +14,7 @@ import {
   controlPanelCategoryLabel,
   type ControlPanelItem,
   type ControlPanelKey,
-} from "@/lib/controlPanel";
+} from "@/admin/controlPanel";
 import { t } from "@/lib/i18n";
 import { useSelectableList } from "@/lib/listSelection";
 import { usePersisted } from "@/lib/session";

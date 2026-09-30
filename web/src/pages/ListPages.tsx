@@ -5,7 +5,7 @@ import { ClockIcon, SearchIcon, SearchXIcon, StarIcon } from "lucide-react";
 import { api, type Located, type SearchFilter, type SortKey, type SortOrder } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { Explorer } from "@/components/Explorer";
-import { useSort } from "@/pages/FilesPage";
+import { useSort } from "@/lib/sort";
 import { t } from "@/lib/i18n";
 import { extOf, nameCollator } from "@/lib/utils";
 import { NativeSelect } from "@/components/ui/native-select";

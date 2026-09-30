@@ -5,9 +5,9 @@ import { driveName } from "@/api";
 import { queries } from "@/api/queryKeys";
 import { EmptyState } from "@/components/DataTable";
 import { ToolSeparator } from "@/components/Frame";
-import { controlPanelItem, useSettingsSearch } from "@/lib/controlPanel";
+import { controlPanelItem, useSettingsSearch } from "@/admin/controlPanel";
 import { t } from "@/lib/i18n";
-import { ShareLinks } from "@/pages/SharesPage";
+import { ShareLinks } from "@/components/ShareLinks";
 import { NativeSelect } from "@/components/ui/native-select";
 
 
