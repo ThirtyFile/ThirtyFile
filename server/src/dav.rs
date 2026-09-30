@@ -878,8 +878,11 @@ async fn store_content(st: &AppState, user: &User, parent: &Node, name: &str, tm
 async fn store_in_folder(st: &AppState, user: &User, parent: &Node, name: &str, tmp: &Path, size: u64) -> AppResult<bool> {
     let staged = fsops::stage_upload(st, parent, tmp, size).await?;
     let _space = fsops::lock_space(parent.drive()).await;
+    // Its folder answers, before the write lock is taken
+    let ready = fsops::ready(st, parent.drive()).await;
     let _w = st.write_lock.lock().await;
     let result = async {
+        ready?;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let folder = tree::folder_for(&mut tx, user, &parent.id, Need::Write).await?;
         if folder.drive() != parent.drive() {

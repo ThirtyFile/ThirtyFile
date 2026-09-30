@@ -103,55 +103,83 @@ pub async fn keep_stored(conn: &mut SqliteConnection, policy: Policy, node: &Nod
     prune_node(conn, &node.id, policy).await
 }
 
+/// A file of a folder space kept as an earlier version on disk (`keep_on_disk`), to record in the index
+#[derive(Debug)]
+pub struct KeptFile {
+    id: String,
+    rel: String,
+    size: i64,
+    at: Pinned,
+    /// Where it was, when it was moved there rather than linked
+    moved_from: Option<Pinned>,
+}
+
 /// Before the file of a folder space at `path` is replaced (renamed over): it is kept as a version, hard-linked into
-/// the space's versions folder (copied where the disk has no hard links). The rename that follows gives the name new
-/// content, so the version is the only name left for the old file, and writing to the file in place later can't change
-/// it. Nothing happens when versions are off.
-pub async fn keep_file(conn: &mut SqliteConnection, policy: Policy, node: &Node, path: &Pinned) -> AppResult<Removed> {
+/// the space's versions folder. Where the disk has no hard links, it is moved there instead (the replacement takes its
+/// name right after): copying it would take long for a large file, while the change holds the write lock. The rename
+/// that follows gives the name new content, so the version is the only name left for the old file, and writing to the
+/// file in place later can't change it. None when versions are off, or there is no file. A blocking disk step.
+pub fn keep_on_disk(policy: Policy, node: &Node, path: &Pinned) -> std::io::Result<Option<KeptFile>> {
     if policy.keep <= 0 {
-        return Ok(Removed::default());
+        return Ok(None);
     }
-    let Some(root) = node.fs_root.as_deref() else { return Ok(Removed::default()) };
-    let Ok(meta) = std::fs::symlink_metadata(path.as_path()) else { return Ok(Removed::default()) };
+    let Some(root) = node.fs_root.as_deref() else { return Ok(None) };
+    let Ok(meta) = std::fs::symlink_metadata(path.as_path()) else { return Ok(None) };
     if !meta.is_file() {
-        return Ok(Removed::default());
+        return Ok(None);
     }
     let id = new_id();
-    let rel = format!("{VERSIONS_DIR}/{}/{id}", node.id);
-    let (root, drive, node_id, version, path) = (PathBuf::from(root), node.drive().to_string(), node.id.clone(), id.clone(), path.clone());
-    // On a blocking thread: where the disk has no hard links, the whole file is copied
-    let to = tokio::task::spawn_blocking(move || {
-        version_file(&root, &drive, &node_id, &version).and_then(|to| {
-            // A hard link never follows a symbolic link (on Linux)
-            match std::fs::hard_link(path.as_path(), to.as_path()) {
-                Ok(()) => Ok(to),
-                Err(_) => crate::beneath::copy_file(&path, to.as_path()).map(|_| to),
+    let at = version_file(Path::new(root), node.drive(), &node.id, &id)?;
+    // A hard link never follows a symbolic link (on Linux)
+    #[cfg(test)]
+    let linked = if fsops::testing::hard_links(node.drive()) { std::fs::hard_link(path.as_path(), at.as_path()) } else { Err(std::io::ErrorKind::Unsupported.into()) };
+    #[cfg(not(test))]
+    let linked = std::fs::hard_link(path.as_path(), at.as_path());
+    let moved_from = match linked {
+        Ok(()) => None,
+        Err(_) => {
+            fsops::rename_new(path.as_path(), at.as_path())?;
+            Some(path.clone())
+        }
+    };
+    Ok(Some(KeptFile { rel: format!("{VERSIONS_DIR}/{}/{id}", node.id), id, size: meta.len() as i64, at, moved_from }))
+}
+
+impl KeptFile {
+    /// The replacement couldn't take the file's place: it is put back as it was
+    pub fn undo(self) {
+        match &self.moved_from {
+            Some(from) => {
+                if let Err(e) = fsops::rename_new(self.at.as_path(), from.as_path()) {
+                    tracing::error!("Couldn't put a file back after it couldn't be replaced: {e}");
+                }
             }
-        })
-    })
-    .await
-    .map_err(AppError::internal)?;
-    let to = to.map_err(fsops::disk_error)?;
+            None => {
+                let _ = std::fs::remove_file(self.at.as_path());
+            }
+        }
+    }
+}
+
+/// Records a file `keep_on_disk` kept, as an earlier version of `node`
+pub async fn record_kept(conn: &mut SqliteConnection, policy: Policy, node: &Node, kept: Option<KeptFile>) -> AppResult<Removed> {
+    let Some(kept) = kept else { return Ok(Removed::default()) };
     let (author_id, author_name) = content_author(conn, node).await?;
-    let inserted = sqlx::query(
+    sqlx::query(
         "INSERT INTO node_versions (id, node_id, drive_id, fs_path, size, author_id, author_name, modified_at, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
-    .bind(&id)
+    .bind(&kept.id)
     .bind(&node.id)
     .bind(node.drive())
-    .bind(&rel)
-    .bind(meta.len() as i64)
+    .bind(&kept.rel)
+    .bind(kept.size)
     .bind(author_id)
     .bind(author_name)
     .bind(node.updated_at)
     .bind(now())
     .execute(&mut *conn)
-    .await;
-    if let Err(e) = inserted {
-        let _ = std::fs::remove_file(to.as_path());
-        return Err(e.into());
-    }
+    .await?;
     prune_node(conn, &node.id, policy).await
 }
 
@@ -483,8 +511,11 @@ async fn restore_in_folder(st: &AppState, user: &User, node: &Node, tmp: &Path, 
     };
     let staged = fsops::stage_upload(st, &parent, tmp, size).await?;
     let _space = fsops::lock_space(node.drive()).await;
+    // Its folder answers, before the write lock is taken
+    let ready = fsops::ready(st, node.drive()).await;
     let _w = st.write_lock.lock().await;
     let result = async {
+        ready?;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let current = tree::node_for(&mut tx, user, &node.id, Need::Write).await?;
         if current.drive() != node.drive() || !current.in_folder_space() {

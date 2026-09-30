@@ -142,8 +142,7 @@ fn public_config(cfg: &Value) -> (Value, bool) {
 /// Free and total bytes of the disk holding `path`; None when the system doesn't tell within a few seconds (a NAS
 /// that stopped answering must not hold the list)
 async fn disk_of(path: std::path::PathBuf) -> Option<(u64, u64)> {
-    let task = tokio::task::spawn_blocking(move || util::disk_space(&path));
-    tokio::time::timeout(Duration::from_secs(3), task).await.ok()?.ok()?
+    util::disk_space_soon(&path).await
 }
 
 pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<LocationInfo>>> {
@@ -529,15 +528,24 @@ fn set_health(st: &AppState, id: &str, error: Option<String>) {
     st.location_health.lock().unwrap().insert(id.to_string(), LocationHealth { ok: error.is_none(), error, checked_at: now() });
 }
 
-/// Checks whether a location can be reached (a lightweight check that writes no data) and updates its health status
-pub async fn probe(st: &AppState, id: &str) -> Result<(), String> {
+/// Whether a location can be reached now (a lightweight check that writes no data), within `PROBE_TIMEOUT`. The check
+/// runs as a task of its own: one that doesn't come back (a mounted share whose server went away blocks a thread) is
+/// never joined by another, so a location that stays unreachable ties up one thread, not one more every check.
+pub async fn ping(st: &AppState, id: &str) -> Result<(), String> {
     let storage = st.storage(id).map_err(|e| e.message)?;
     // Counted apart from what people do (Storage usage)
-    let res = match tokio::time::timeout(PROBE_TIMEOUT, crate::usage::probe(storage.ping())).await {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(e)) => Err(describe(&e)),
-        Err(_) => Err("Connection timed out. Check that the service is running.".to_string()),
-    };
+    let check = async move { crate::usage::probe(storage.ping()).await.map_err(|e| describe(&e)) };
+    // (the data folder tells servers apart, as tests run several at once)
+    match util::within(format!("check of location {id} of {}", st.data_dir.display()), PROBE_TIMEOUT, check).await {
+        Some(res) => res,
+        None => Err("Connection timed out. Check that the service is running.".to_string()),
+    }
+}
+
+/// Checks whether a location can be reached (`ping`) and updates its health status
+pub async fn probe(st: &AppState, id: &str) -> Result<(), String> {
+    let storage = st.storage(id).map_err(|e| e.message)?;
+    let res = ping(st, id).await;
     if res.is_ok() {
         let _ = tokio::time::timeout(PROBE_TIMEOUT, crate::usage::probe(mark_after_check(st, id, storage.as_ref()))).await;
     }
