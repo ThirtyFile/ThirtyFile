@@ -1006,7 +1006,7 @@ mod tests {
         async fn new(env: &TestEnv, user: &User, scope: &str) -> Client {
             let token = app_password(env, user, scope).await;
             let auth = format!("Basic {}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, format!("{}:{token}", user.username)));
-            Client { app: crate::router(env.st.clone()), auth }
+            Client { app: crate::app::routes::router(env.st.clone()), auth }
         }
 
         async fn send(&self, method: &str, path: &str, headers: &[(&str, &str)], body: &str) -> Reply {
@@ -1253,7 +1253,7 @@ mod tests {
     async fn only_app_passwords_sign_in() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let app = crate::router(env.st.clone());
+        let app = crate::app::routes::router(env.st.clone());
         let (_, cookie) = env.sign_in(&amy, "Test").await;
         let send = async |headers: &[(header::HeaderName, String)]| {
             let mut req = axum::http::Request::builder().method("PROPFIND").uri("/dav/").extension(ConnectInfo(std::net::SocketAddr::from(([10, 0, 0, 9], 5000))));

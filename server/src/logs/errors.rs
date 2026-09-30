@@ -854,7 +854,7 @@ mod tests {
         assert_eq!(query_errors(&env.st, &q(|q| q.q = Some("boom".into())), 10).await.unwrap().len(), 1);
 
         // Through the real routes: administrators only
-        let router = crate::router(env.st.clone());
+        let router = crate::app::routes::router(env.st.clone());
         let get = |cookie: String| {
             let req = axum::http::Request::get("/api/admin/errors").header(axum::http::header::COOKIE, cookie).extension(ConnectInfo(SocketAddr::from(([10, 0, 0, 1], 5000)))).body(Body::empty()).unwrap();
             router.clone().oneshot(req)

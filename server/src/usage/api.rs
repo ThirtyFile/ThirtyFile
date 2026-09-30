@@ -584,7 +584,7 @@ mod tests {
             .await
             .unwrap();
         sample::sample_capacity(&env.st, now()).await.unwrap();
-        let app = crate::router(env.st.clone());
+        let app = crate::app::routes::router(env.st.clone());
         let get = |uri: &str, cookie: &str| {
             let req = axum::http::Request::builder().uri(uri).header(axum::http::header::COOKIE, cookie).body(axum::body::Body::empty()).unwrap();
             app.clone().oneshot(req)
