@@ -1,5 +1,5 @@
-import { useSyncExternalStore } from "react";
 import type { FolderSpan } from "@/lib/span";
+import { createStore, useStore } from "@/lib/store";
 
 /** File explorer cut / copy (Ctrl+X / Ctrl+C); the actual move or copy happens on paste */
 export interface FileClipboard {
@@ -13,22 +13,12 @@ export interface FileClipboard {
   origins?: Map<string, string>;
 }
 
-let clip: FileClipboard | null = null;
-const listeners = new Set<() => void>();
+const clip = createStore<FileClipboard | null>(null);
 
 export function setClipboard(next: FileClipboard | null) {
-  clip = next;
-  listeners.forEach((l) => l());
+  clip.set(next);
 }
 
 export function useClipboard() {
-  return useSyncExternalStore(
-    (l) => {
-      listeners.add(l);
-      return () => {
-        listeners.delete(l);
-      };
-    },
-    () => clip,
-  );
+  return useStore(clip);
 }

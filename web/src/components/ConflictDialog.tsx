@@ -2,7 +2,7 @@
  * "Replace or skip": asked before uploading, moving, copying or restoring items whose names the destination already
  * has, one item at a time as in Windows, with "Do this for the next conflicts"
  */
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import { CopyIcon, FileIcon as FileGlyph, FolderIcon, ReplaceIcon, SkipForwardIcon } from "lucide-react";
 import { api, type NameConflict } from "@/api";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { type Answer, type Clash, type Resolution, numberedName, resolveAll } from "@/lib/conflicts";
 import { t } from "@/lib/i18n";
 import { useMe } from "@/lib/session";
+import { createStore, useStore } from "@/lib/store";
 import { formatBytes, formatDateTime } from "@/lib/utils";
 
 /** What is being done: the choices read a little differently for each */
@@ -24,16 +25,11 @@ interface Request {
   resolve(answer: Answer | null): void;
 }
 
-let current: Request | null = null;
-const listeners = new Set<() => void>();
-const emit = () => listeners.forEach((l) => l());
+const current = createStore<Request | null>(null);
 
 function ask(clash: Clash, remaining: number, op: ConflictOp): Promise<Answer | null> {
-  current?.resolve(null);
-  return new Promise((resolve) => {
-    current = { clash, remaining, op, resolve };
-    emit();
-  });
+  current.get()?.resolve(null);
+  return new Promise((resolve) => current.set({ clash, remaining, op, resolve }));
 }
 
 /** Asks about every clash (see `resolveAll`): the answers by key, or null when cancelled */
@@ -158,19 +154,10 @@ function ConflictDialog({ req, onDone }: { req: Request; onDone(answer: Answer |
 
 /** Shows the questions asked with `resolveConflicts`; mounted once for the whole app */
 export function ConflictHost() {
-  const req = useSyncExternalStore(
-    (l) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
-    },
-    () => current,
-  );
+  const req = useStore(current);
   if (!req) return null;
   const done = (answer: Answer | null) => {
-    if (current === req) {
-      current = null;
-      emit();
-    }
+    if (current.get() === req) current.set(null);
     req.resolve(answer);
   };
   // A new key for each question, so "for all" starts unticked
