@@ -456,6 +456,8 @@ async fn restore_file(
 ) -> AppResult<Result<Outcome, Stop>> {
     let st = cx.st;
     let name = crate::util::validate_name(name)?;
+    // A manifest found on a location may have been changed: content is only ever named by a SHA-256
+    crate::storage::valid_hash(hash).map_err(|_| AppError::bad_request("The backup names content that isn't valid"))?;
     // Skipped when its place is taken: nothing to read
     if conflict == "skip" {
         let mut c = st.db.acquire().await?;

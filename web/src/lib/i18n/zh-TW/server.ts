@@ -423,6 +423,7 @@ export default {
   "Administrators don't see into personal spaces: a personal space is restored whole": "管理員看不到個人空間的內容：個人空間只能整個還原",
   "Choose where the items go, and what happens to items already there": "請選擇項目要還原到哪裡，以及已有同名項目時怎麼處理",
   "This folder isn't in the snapshot": "快照中沒有這個資料夾",
+  "The backup names content that isn't valid": "備份中記載的內容名稱無效",
   "The schedule isn't valid": "排程無效",
   "Snapshots can be made every 5 minutes to every 7 days": "快照的間隔可以是 5 分鐘到 7 天",
   "Choose the days of the week": "請選擇星期幾",

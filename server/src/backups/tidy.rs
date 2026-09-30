@@ -134,13 +134,17 @@ async fn rebuild(cx: &Ctx<'_>, set: &super::Set, dst: &dyn Storage) -> AppResult
                             s.files += 1;
                             s.bytes += size;
                         }
-                        objects.insert(hash, size);
+                        if crate::storage::valid_hash(&hash).is_ok() {
+                            objects.insert(hash, size);
+                        }
                     }
                     layout::Line::Version { space, hash, size, .. } => {
                         if let Some(s) = spaces.iter_mut().find(|s| s.id == space) {
                             s.bytes += size;
                         }
-                        objects.insert(hash, size);
+                        if crate::storage::valid_hash(&hash).is_ok() {
+                            objects.insert(hash, size);
+                        }
                     }
                     _ => {}
                 }
