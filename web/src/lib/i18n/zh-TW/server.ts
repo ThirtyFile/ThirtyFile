@@ -278,6 +278,10 @@ export default {
   "Invalid settings: {error}": "設定有誤：{error}",
   "Connection timed out. Check the endpoint and network.": "連線逾時，請確認端點與網路",
   "Storage location unavailable": "儲存位置無法使用",
+  // Storage usage (usage/api.rs)
+  "Enter a percentage from 0 to 100": "請輸入 0 到 100 的百分比",
+  "Unknown time range": "未知的時間範圍",
+  "Unknown kind of work": "未知的工作種類",
   "Can't connect": "無法連線",
   "Storage location \"{location}\" is currently unavailable": "儲存位置「{location}」目前無法使用",
   // Storage locations: deleting in the connection test, the step-by-step test, browsing and unused content (storage.rs, location_tools)
