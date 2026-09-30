@@ -136,7 +136,7 @@ if (!only) {
   );
   for (const f of walk(serverDir, /\.rs$/)) {
     const rel = "server/src/" + relative(serverDir, f).replace(/\\/g, "/");
-    if (rel.endsWith("/dav.rs")) continue;
+    if (rel.endsWith("/dav.rs") || rel.includes("/dav/")) continue;
     const full = readFileSync(f, "utf8");
     // Tests come last in each file
     const src = full.split(/\n#\[cfg\(test\)\]\n/)[0];
