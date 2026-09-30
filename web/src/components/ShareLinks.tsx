@@ -10,7 +10,7 @@ import { keys } from "@/api/queryKeys";
 import { FileIcon } from "@/components/FileIcon";
 import { Frame, ToolButton, ToolSeparator, type FrameProps } from "@/components/Frame";
 import { EditShareDialog, LinksOffNotice, LocalLinkWarning, deleteLinkQuestion, sharePath, shareSpace, useShareLink } from "@/components/ShareDialog";
-import { confirm } from "@/components/confirm";
+import { confirm } from "@/lib/confirm";
 import { copyAndSay, formatDate, formatDateTime } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ShareAccessLog } from "@/components/logs/ShareAccessLog";

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AlertCircleIcon, CheckCircle2Icon, ChevronDownIcon, ChevronUpIcon, FileArchiveIcon, FileDownIcon, RotateCwIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { confirm } from "@/components/confirm";
+import { confirm } from "@/lib/confirm";
 import { cn, formatBytes } from "@/lib/utils";
 import { cancelDownload, clearDownloads, removeDownload, retryDownload, useDownloads, type DownloadTask } from "@/downloads";
 import { t } from "@/lib/i18n";

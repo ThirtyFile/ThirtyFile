@@ -1,4 +1,7 @@
-/** Name clashes before uploading, moving, copying or restoring: which items clash, and applying the answers */
+/** Name clashes before uploading, moving, copying or restoring: which items clash, asking about them, and applying the answers */
+
+import { api, type NameConflict } from "@/api";
+import { createStore } from "@/lib/store";
 
 /** The answer to "the destination already has an item with this name" (the server's `Resolution`) */
 export type Resolution = "replace" | "skip" | "keep";
@@ -74,4 +77,51 @@ export function numberedName(name: string, isFolder: boolean): string {
   const dot = name.lastIndexOf(".");
   if (isFolder || dot <= 0) return `${name} (1)`;
   return `${name.slice(0, dot)} (1)${name.slice(dot)}`;
+}
+
+/** What is being done: the choices read a little differently for each */
+export type ConflictOp = "upload" | "move" | "copy" | "restore";
+
+/** A question about one clash, shown by <ConflictHost /> (components/ConflictDialog.tsx) */
+export interface ConflictRequest {
+  clash: Clash;
+  remaining: number;
+  op: ConflictOp;
+  resolve(answer: Answer | null): void;
+}
+
+/** The question asked now */
+export const conflictRequest = createStore<ConflictRequest | null>(null);
+
+function ask(clash: Clash, remaining: number, op: ConflictOp): Promise<Answer | null> {
+  conflictRequest.get()?.resolve(null);
+  return new Promise((resolve) => conflictRequest.set({ clash, remaining, op, resolve }));
+}
+
+/** Asks about every clash (see `resolveAll`): the answers by key, or null when cancelled */
+export function resolveConflicts(clashes: readonly Clash[], op: ConflictOp) {
+  return resolveAll(clashes, (clash, remaining) => ask(clash, remaining, op));
+}
+
+/** The server's list as clashes keyed by item id */
+export function clashesOf(list: readonly NameConflict[]): Clash[] {
+  return list.map((c) => ({
+    key: c.id ?? c.name,
+    name: c.name,
+    kind: c.kind ?? "file",
+    size: c.kind === "folder" ? undefined : (c.size ?? undefined),
+    modified: c.updated_at ?? undefined,
+    existing: { kind: c.existing.kind, size: c.existing.size, updated_at: c.existing.updated_at },
+  }));
+}
+
+/**
+ * Checks `ids` against the destination (or, without one, against the folders they are restored to) and asks about
+ * clashes: the answers to send with the request, or null when cancelled
+ */
+export async function askBeforeTransfer(op: Exclude<ConflictOp, "upload">, ids: string[], dest?: string): Promise<Record<string, Resolution> | null> {
+  const found = await api.conflicts({ ids, dest_id: dest });
+  if (!found.length) return {};
+  const answers = await resolveConflicts(clashesOf(found), op);
+  return answers && Object.fromEntries(answers);
 }

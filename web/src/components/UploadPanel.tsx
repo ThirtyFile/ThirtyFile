@@ -15,7 +15,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/component
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { FileIcon } from "@/components/FileIcon";
-import { confirm } from "@/components/confirm";
+import { confirm } from "@/lib/confirm";
 import { cn, formatBytes } from "@/lib/utils";
 import { RecoveredUploads } from "@/components/RecoveredUploads";
 import { cancel, cancelAll, clearFinished, pause, resume, retryFailed, useInterrupted, useUploads } from "@/uploads";

@@ -4,61 +4,15 @@
  */
 import { useState } from "react";
 import { CopyIcon, FileIcon as FileGlyph, FolderIcon, ReplaceIcon, SkipForwardIcon } from "lucide-react";
-import { api, type NameConflict } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { type Answer, type Clash, type Resolution, numberedName, resolveAll } from "@/lib/conflicts";
+import { type Answer, type ConflictRequest, type Resolution, conflictRequest, numberedName } from "@/lib/conflicts";
 import { t } from "@/lib/i18n";
 import { useMe } from "@/lib/session";
-import { createStore, useStore } from "@/lib/store";
+import { useStore } from "@/lib/store";
 import { formatBytes, formatDateTime } from "@/lib/utils";
-
-/** What is being done: the choices read a little differently for each */
-export type ConflictOp = "upload" | "move" | "copy" | "restore";
-
-interface Request {
-  clash: Clash;
-  remaining: number;
-  op: ConflictOp;
-  resolve(answer: Answer | null): void;
-}
-
-const current = createStore<Request | null>(null);
-
-function ask(clash: Clash, remaining: number, op: ConflictOp): Promise<Answer | null> {
-  current.get()?.resolve(null);
-  return new Promise((resolve) => current.set({ clash, remaining, op, resolve }));
-}
-
-/** Asks about every clash (see `resolveAll`): the answers by key, or null when cancelled */
-export function resolveConflicts(clashes: readonly Clash[], op: ConflictOp) {
-  return resolveAll(clashes, (clash, remaining) => ask(clash, remaining, op));
-}
-
-/** The server's list as clashes keyed by item id */
-export function clashesOf(list: readonly NameConflict[]): Clash[] {
-  return list.map((c) => ({
-    key: c.id ?? c.name,
-    name: c.name,
-    kind: c.kind ?? "file",
-    size: c.kind === "folder" ? undefined : (c.size ?? undefined),
-    modified: c.updated_at ?? undefined,
-    existing: { kind: c.existing.kind, size: c.existing.size, updated_at: c.existing.updated_at },
-  }));
-}
-
-/**
- * Checks `ids` against the destination (or, without one, against the folders they are restored to) and asks about
- * clashes: the answers to send with the request, or null when cancelled
- */
-export async function askBeforeTransfer(op: Exclude<ConflictOp, "upload">, ids: string[], dest?: string): Promise<Record<string, Resolution> | null> {
-  const found = await api.conflicts({ ids, dest_id: dest });
-  if (!found.length) return {};
-  const answers = await resolveConflicts(clashesOf(found), op);
-  return answers && Object.fromEntries(answers);
-}
 
 function Details({ label, size, modified, folder }: { label: string; size?: number; modified?: number; folder: boolean }) {
   const Icon = folder ? FolderIcon : FileGlyph;
@@ -77,7 +31,7 @@ function Details({ label, size, modified, folder }: { label: string; size?: numb
   );
 }
 
-function ConflictDialog({ req, onDone }: { req: Request; onDone(answer: Answer | null): void }) {
+function ConflictDialog({ req, onDone }: { req: ConflictRequest; onDone(answer: Answer | null): void }) {
   const [forAll, setForAll] = useState(false);
   const versionKeep = useMe().version_keep;
   const { clash, op, remaining } = req;
@@ -154,10 +108,10 @@ function ConflictDialog({ req, onDone }: { req: Request; onDone(answer: Answer |
 
 /** Shows the questions asked with `resolveConflicts`; mounted once for the whole app */
 export function ConflictHost() {
-  const req = useStore(current);
+  const req = useStore(conflictRequest);
   if (!req) return null;
   const done = (answer: Answer | null) => {
-    if (current.get() === req) current.set(null);
+    if (conflictRequest.get() === req) conflictRequest.set(null);
     req.resolve(answer);
   };
   // A new key for each question, so "for all" starts unticked

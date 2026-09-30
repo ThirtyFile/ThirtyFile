@@ -2,7 +2,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/api";
-import { askBeforeTransfer } from "@/components/ConflictDialog";
+import { askBeforeTransfer } from "@/lib/conflicts";
 import { reportShown } from "@/lib/errorReport";
 import { t } from "@/lib/i18n";
 import { waitForJob } from "@/lib/jobs";
