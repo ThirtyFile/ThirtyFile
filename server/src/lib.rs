@@ -23,6 +23,7 @@ mod moves;
 mod notify;
 mod branding;
 mod check;
+mod content;
 pub mod cli;
 mod jobs;
 mod sso;

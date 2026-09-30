@@ -6,7 +6,7 @@
 //! folder, which scans never index; the new content is then renamed over the file as before. How many versions each
 //! file keeps, and for how many days, is a system setting; the maintenance loop removes the ones no longer kept.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use axum::{
     Json,
@@ -21,9 +21,10 @@ use tokio::io::AsyncWriteExt;
 use crate::{
     auth::User,
     beneath::Pinned,
-    folders::Below,
+    content,
     error::{AppError, AppResult},
     files::{Blob, Source, serve_blob},
+    folders::Below,
     fsops,
     logs,
     state::AppState,
@@ -453,97 +454,43 @@ async fn restore_version(st: &AppState, user: &User, id: &str, version: &str) ->
         let _ = tokio::fs::remove_file(&tmp).await;
         return Err(e);
     }
-    if node.in_folder_space() {
-        restore_in_folder(st, user, &node, &tmp, size).await
-    } else {
-        restore_stored(st, user, &node, tmp).await
-    }
-}
-
-const RESTORED: &str = "Restored an earlier version";
-
-async fn restore_stored(st: &AppState, user: &User, node: &Node, tmp: PathBuf) -> AppResult<Node> {
-    let staged = async {
-        let (hash, size) = crate::files::hash_file(tmp.clone()).await?;
-        tree::stage_blob(st, node.drive(), hash, size as i64, tmp.clone()).await
-    }
-    .await;
-    let staged = match staged {
+    // Then in like an upload that replaces the file (content.rs)
+    let staged = match content::stage(st, &node, content::Received { path: tmp.clone(), size, hash: None }).await {
         Ok(s) => s,
         Err(e) => {
             let _ = tokio::fs::remove_file(&tmp).await;
             return Err(e);
         }
     };
+    let mut turn = staged.turn(st).await;
     let _w = st.write_lock.lock().await;
     let result = async {
+        turn.ready()?;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let current = tree::node_for(&mut tx, user, &node.id, Need::Write).await?;
-        if current.in_folder_space() || current.drive() != node.drive() {
-            return Err(AppError::conflict("Something changed at the same time. Try again."));
-        }
-        tree::check_quota(&mut tx, current.drive(), staged.size - current.size).await?;
-        let extra = tree::commit_blob(&mut tx, &staged).await?;
-        let removed = tree::set_content(&mut tx, Policy::of(st), &current, &staged.hash, staged.size, user.id).await?;
+        staged.check(&current)?;
+        // The restored content counts against the space's size limit by how much it grows the file
+        tree::check_quota(&mut tx, current.drive(), size as i64 - current.size).await?;
+        let written = content::replace(&mut tx, st, &staged, &current, user.id).await?;
         logs::record_activity(&mut tx, user, Some(&current), "edit", RESTORED).await?;
         let node = tree::get_node(&mut tx, &current.id).await?.ok_or_else(|| AppError::not_found("File not found"))?;
         tx.commit().await?;
-        Ok((node, extra, removed))
+        Ok((node, written))
     }
     .await;
     match result {
-        Ok((node, extra, removed)) => {
-            tree::finish_staged(st, staged, extra).await;
-            removed.finish(st);
+        Ok((node, written)) => {
+            staged.finish(st, written).await;
             Ok(node)
         }
         Err(e) => {
-            tree::abandon_staged(st, staged).await;
+            staged.abandon(st).await;
             Err(e)
         }
     }
 }
 
-async fn restore_in_folder(st: &AppState, user: &User, node: &Node, tmp: &Path, size: u64) -> AppResult<Node> {
-    let parent = tree::get_node(&mut *st.db.acquire().await?, node.parent_id.as_deref().unwrap_or_default()).await?;
-    let Some(parent) = parent else {
-        let _ = tokio::fs::remove_file(tmp).await;
-        return Err(AppError::not_found("Folder not found"));
-    };
-    let staged = fsops::stage_upload(st, &parent, tmp, size).await?;
-    let _space = fsops::lock_space(node.drive()).await;
-    // Its folder answers, before the write lock is taken
-    let ready = fsops::ready(st, node.drive()).await;
-    let _w = st.write_lock.lock().await;
-    let result = async {
-        ready?;
-        let mut tx = crate::db::begin_write(&st.db).await?;
-        let current = tree::node_for(&mut tx, user, &node.id, Need::Write).await?;
-        if current.drive() != node.drive() || !current.in_folder_space() {
-            return Err(AppError::conflict("Something changed at the same time. Try again."));
-        }
-        // The restored content counts against the space's size limit by how much it grows the file
-        tree::check_quota(&mut tx, current.drive(), size as i64 - current.size).await?;
-        let removed = fsops::replace_file(&mut tx, Policy::of(st), &staged, &current, user.id).await?;
-        let now_size = tree::get_node(&mut tx, &current.id).await?.map_or(0, |n| n.size);
-        tree::adjust_usage(&mut tx, current.drive(), now_size - current.size).await?;
-        logs::record_activity(&mut tx, user, Some(&current), "edit", RESTORED).await?;
-        let node = tree::get_node(&mut tx, &current.id).await?.ok_or_else(|| AppError::not_found("File not found"))?;
-        tx.commit().await?;
-        Ok((node, removed))
-    }
-    .await;
-    match result {
-        Ok((node, removed)) => {
-            removed.finish(st);
-            Ok(node)
-        }
-        Err(e) => {
-            let _ = tokio::fs::remove_file(&staged).await;
-            Err(e)
-        }
-    }
-}
+const RESTORED: &str = "Restored an earlier version";
 
 #[cfg(test)]
 mod tests {

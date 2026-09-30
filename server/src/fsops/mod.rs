@@ -46,7 +46,7 @@ use crate::{
     logs,
     state::AppState,
     tree::{self, BlobRef, Need, Node, StagedBlob, changes},
-    util::{guess_mime, new_id, now, numbered_name, split_name},
+    util::{guess_mime, new_id, now, numbered_name},
     versions,
 };
 

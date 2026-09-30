@@ -17,11 +17,12 @@ use tokio_util::io::ReaderStream;
 
 use crate::{
     auth::User,
+    content,
     error::{AppError, AppResult},
     logs,
     state::AppState,
     tree::{self, Node},
-    util::{content_disposition, new_id},
+    util::{content_disposition, new_id, split_name},
 };
 
 pub const MAX_EDIT_BYTES: usize = 20 * 1024 * 1024;
@@ -304,23 +305,20 @@ pub async fn save_content(
     if base.is_some_and(|b| b != node.updated_at) {
         return Err(edit_conflict());
     }
-    if node.in_folder_space() {
-        // Written in a task of its own too, so a dropped request can't stop it halfway
-        return tokio::spawn(async move { crate::fsops::save(&st, &user, &id, &body, base, edit_conflict).await.map(Json) })
-            .await
-            .map_err(AppError::internal)?;
-    }
-    // Up to 20 MB: hashed on a blocking thread, not on the async worker every other request shares
-    let hash = {
+    // Content of the content store, up to 20 MB: hashed on a blocking thread, not on the async worker every other
+    // request shares (files of folder spaces aren't hashed)
+    let hash = if node.in_folder_space() {
+        None
+    } else {
         let body = body.clone();
-        tokio::task::spawn_blocking(move || hex::encode(Sha256::digest(&body))).await.map_err(AppError::internal)?
+        let hash = tokio::task::spawn_blocking(move || hex::encode(Sha256::digest(&body))).await.map_err(AppError::internal)?;
+        if node.blob_hash.as_deref() == Some(hash.as_str()) {
+            return Ok(Json(node));
+        }
+        Some(hash)
     };
-    if node.blob_hash.as_deref() == Some(hash.as_str()) {
-        return Ok(Json(node));
-    }
     // Store and record in a task of its own, so a dropped request can't stop it between the two
-    let drive = node.drive().to_string();
-    tokio::spawn(store_content(st, user, id, body, hash, base, drive)).await.map_err(AppError::internal)?
+    tokio::spawn(store_content(st, user, node, body, hash, base)).await.map_err(AppError::internal)?
 }
 
 /// Someone else saved the file since it was opened in the editor
@@ -328,45 +326,71 @@ fn edit_conflict() -> AppError {
     AppError::new(StatusCode::CONFLICT, "Someone else changed this file while you were editing it. Reload the latest version and edit again.")
 }
 
-async fn store_content(st: AppState, user: User, id: String, body: Bytes, hash: String, base: Option<i64>, drive: String) -> AppResult<Json<Node>> {
-    let conflict = edit_conflict;
+/// Gives the file `before` the saved content (content.rs). A file of a folder space changed on the server since it was
+/// indexed (or removed there) isn't overwritten: the new content is saved next to it as "name (conflict copy)" and the
+/// save reports a conflict.
+async fn store_content(st: AppState, user: User, before: Node, body: Bytes, hash: Option<String>, base: Option<i64>) -> AppResult<Json<Node>> {
     let tmp = st.tmp_dir().join(new_id());
-    tokio::fs::write(&tmp, &body).await?;
-    // First store it in the space's storage location (without holding the write lock)
-    let staged = match tree::stage_blob(&st, &drive, hash.clone(), body.len() as i64, tmp.clone()).await {
+    let received = async {
+        tokio::fs::write(&tmp, &body).await?;
+        content::stage(&st, &before, content::Received { path: tmp.clone(), size: body.len() as u64, hash }).await
+    }
+    .await;
+    let staged = match received {
         Ok(s) => s,
         Err(e) => {
             let _ = tokio::fs::remove_file(&tmp).await;
             return Err(e);
         }
     };
-
+    let size = body.len() as i64;
+    let mut turn = staged.turn(&st).await;
     let _w = st.write_lock.lock().await;
     let result = async {
+        turn.ready()?;
         let mut tx = crate::db::begin_write(&st.db).await?;
         // Re-read while holding the write lock so concurrent saves don't overwrite each other
-        let node = tree::node_for(&mut tx, &user, &id, tree::Need::Write).await?;
+        let node = tree::node_for(&mut tx, &user, &before.id, tree::Need::Write).await?;
+        staged.check(&node)?;
         if base.is_some_and(|b| b != node.updated_at) {
-            return Err(conflict());
+            return Err(edit_conflict());
         }
-        node.hash()?;
-        tree::check_quota(&mut tx, node.drive(), body.len() as i64 - node.size).await?;
-        let extra = tree::commit_blob(&mut tx, &staged).await?;
-        let removed = tree::set_content(&mut tx, crate::versions::Policy::of(&st), &node, &hash, body.len() as i64, user.id).await?;
+        if !staged.unchanged(&mut tx, &node).await? {
+            // All of it counts against the space's size limit, as a copy
+            tree::check_quota(&mut tx, node.drive(), size).await?;
+            let parent = tree::get_node(&mut tx, node.parent_id.as_deref().unwrap_or_default()).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
+            let (stem, ext) = split_name(&node.name, false);
+            let name = content::free_name(&mut tx, &parent, &format!("{stem} (conflict copy){ext}")).await?;
+            let (copy_id, written) = content::create(&mut tx, &staged, user.id, &parent, &name).await?;
+            let copy = tree::get_node(&mut tx, &copy_id).await?;
+            logs::record_activity(&mut tx, &user, copy.as_ref(), "upload", "").await?;
+            tx.commit().await?;
+            return Ok(Err((name, written)));
+        }
+        // By how much it grows the file
+        tree::check_quota(&mut tx, node.drive(), size - node.size).await?;
+        let written = content::replace(&mut tx, &st, &staged, &node, user.id).await?;
         logs::record_activity(&mut tx, &user, Some(&node), "edit", "").await?;
-        let node = tree::get_node(&mut tx, &node.id).await?.unwrap();
+        let node = tree::get_node(&mut tx, &node.id).await?.ok_or_else(|| AppError::not_found("Item not found"))?;
         tx.commit().await?;
-        Ok((node, extra, removed))
+        Ok(Ok((node, written)))
     }
     .await;
     match result {
-        Ok((node, extra, removed)) => {
-            tree::finish_staged(&st, staged, extra).await;
-            removed.finish(&st);
+        Ok(Ok((node, written))) => {
+            staged.finish(&st, written).await;
             Ok(Json(node))
         }
+        Ok(Err((name, written))) => {
+            staged.finish(&st, written).await;
+            Err(AppError::new(
+                StatusCode::CONFLICT,
+                format!("The file was changed on the server while you were editing it. Your version was saved as \"{name}\"."),
+            )
+            .with_code("conflict_copy"))
+        }
         Err(e) => {
-            tree::abandon_staged(&st, staged).await;
+            staged.abandon(&st).await;
             Err(e)
         }
     }
