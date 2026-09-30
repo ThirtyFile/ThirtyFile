@@ -26,7 +26,7 @@ import { locale, t } from "@/lib/i18n";
 import { followJob } from "@/lib/jobs";
 import { useAllPages } from "@/lib/pages";
 import { refreshFiles, type FileChange } from "@/lib/queries";
-import { trashHint } from "@/lib/utils";
+import { trashHint, errorMessage } from "@/lib/utils";
 
 export function TrashPage() {
   const me = useMe();
@@ -69,7 +69,7 @@ export function TrashPage() {
       toast.success(t("Restored {n} item|Restored {n} items", { n: sent.length }));
       setSelected(new Set());
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Couldn't restore"));
+      toast.error(errorMessage(e, t("Couldn't restore")));
     }
   };
 

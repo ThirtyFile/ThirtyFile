@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { cn, errorMessage } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 import { reportShown } from "@/lib/errorReport";
 
@@ -63,7 +63,7 @@ export function InlineRename({
       finished.current = true;
       onDone(byKey);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Couldn't rename"));
+      toast.error(errorMessage(e, t("Couldn't rename")));
       reportShown("rename", e);
       setBusy(false);
       // Stay in edit mode so the user can fix it

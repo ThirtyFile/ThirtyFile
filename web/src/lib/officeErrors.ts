@@ -3,6 +3,7 @@
 
 import { OoxmlError, type OoxmlErrorCode } from "@/ooxml/core/errors";
 import { t } from "@/lib/i18n";
+import { errorMessage } from "@/lib/utils";
 
 const MESSAGES: Record<OoxmlErrorCode, (detail?: string) => string> = {
   "not-ooxml": () =>
@@ -17,5 +18,5 @@ const MESSAGES: Record<OoxmlErrorCode, (detail?: string) => string> = {
 /** An error's message for the person: the Office code's in words, others' as they are, and `fallback` without one */
 export function officeErrorMessage(e: unknown, fallback: string): string {
   if (e instanceof OoxmlError) return MESSAGES[e.code](e.detail);
-  return e instanceof Error ? e.message : fallback;
+  return errorMessage(e, fallback);
 }

@@ -38,7 +38,8 @@ import { activeJob, BACKUP_JOB_KIND_LABEL, BACKUP_JOB_STATE_LABEL, backupSpaceLa
 import { controlPanelItem, useSettingsSearch } from "@/admin/controlPanel";
 import { t, tServer } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
-import { cn, formatBytes, formatDateTime } from "@/lib/utils";
+import { cn, formatBytes, formatDateTime, errorMessage } from "@/lib/utils";
+import { useSubmit } from "@/lib/useSubmit";
 
 export const HEALTH_LABEL: Record<BackupHealthState, string> = {
   protected: t("Protected"),
@@ -157,7 +158,7 @@ export function BackupsPage() {
       await what();
       toast.success(done);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Operation failed"));
+      toast.error(errorMessage(e, t("Operation failed")));
     } finally {
       refresh();
     }
@@ -434,33 +435,20 @@ export function BackupsPage() {
 function FindBackupsDialog({ onClose, onDone }: { onClose(): void; onDone(): void }) {
   const locations = useQuery(queries.storageLocations);
   const [location, setLocation] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run } = useSubmit(async () => {
+    const r = await api.importBackups(location);
+    toast.success(
+      r.added.length
+        ? t("{n} backup found and listed; it is being checked|{n} backups found and listed; they are being checked", { n: r.added.length })
+        : t("No backups that aren't listed yet were found there"),
+    );
+    onDone();
+    onClose();
+  }, t("Operation failed"));
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
-        <form
-          className="grid gap-4"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            setBusy(true);
-            setError(null);
-            try {
-              const r = await api.importBackups(location);
-              toast.success(
-                r.added.length
-                  ? t("{n} backup found and listed; it is being checked|{n} backups found and listed; they are being checked", { n: r.added.length })
-                  : t("No backups that aren't listed yet were found there"),
-              );
-              onDone();
-              onClose();
-            } catch (err) {
-              setError(err instanceof Error ? err.message : t("Operation failed"));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
+        <form className="grid gap-4" onSubmit={run}>
           <DialogHeader>
             <DialogTitle>{t("Find backups on a location")}</DialogTitle>
             <DialogDescription>

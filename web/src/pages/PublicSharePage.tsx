@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRightIcon, DownloadIcon, EyeIcon, FolderOpenIcon, Grid2X2Icon, InboxIcon, LinkIcon, ListIcon, Loader2Icon, LockIcon, UploadIcon } from "lucide-react";
@@ -21,7 +21,8 @@ import { Logo } from "@/components/Logo";
 import { LanguageSwitch } from "@/components/LanguageSwitch";
 import { UploadPanel } from "@/components/UploadPanel";
 import { enqueue, filesFromDrop, filesFromInput, onUploadsLanded, type PickedFile } from "@/uploads";
-import { cn, formatBytes, formatDate } from "@/lib/utils";
+import { cn, formatBytes, formatDate, errorMessage } from "@/lib/utils";
+import { useSubmit } from "@/lib/useSubmit";
 import { t, tc } from "@/lib/i18n";
 import { refreshFirstPage, useAllPages } from "@/lib/pages";
 
@@ -71,21 +72,10 @@ export function PublicSharePage() {
 function Unlock({ token }: { token: string }) {
   const qc = useQueryClient();
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await api.unlockShare(token, password);
-      await qc.invalidateQueries({ queryKey: keys.publicShare(token) });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("Couldn't unlock"));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { busy, error, run: submit } = useSubmit(async () => {
+    await api.unlockShare(token, password);
+    await qc.invalidateQueries({ queryKey: keys.publicShare(token) });
+  }, t("Couldn't unlock"));
   return (
     <form onSubmit={submit} className="mt-16 grid h-fit w-full max-w-sm gap-4 rounded-2xl border bg-card p-6 shadow-sm">
       <h1 className="flex items-center gap-2 font-medium">
@@ -205,7 +195,7 @@ function useShareDownload(token: string) {
       triggerDownload(await link);
     } catch (e) {
       // The server refused the selection (too many items, the limit reached…)
-      toast.error(e instanceof Error ? e.message : t("Download failed"));
+      toast.error(errorMessage(e, t("Download failed")));
       return;
     }
     // The browser downloads in the background; the server counts it when the download starts

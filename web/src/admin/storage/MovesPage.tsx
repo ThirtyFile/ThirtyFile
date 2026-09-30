@@ -15,7 +15,7 @@ import { controlPanelItem, useSettingsSearch } from "@/admin/controlPanel";
 import { t, tServer } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
 import { useMoves } from "@/admin/storage/moves";
-import { cn, formatBytes, formatDateTime } from "@/lib/utils";
+import { cn, formatBytes, formatDateTime, errorMessage } from "@/lib/utils";
 import { NativeSelect } from "@/components/ui/native-select";
 import { MOVE_STATE_LABEL, moveSpaceLabel, moveRoute, MoveProgress } from "@/admin/storage/MoveProgress";
 
@@ -60,7 +60,7 @@ export function MovesPage() {
       await what();
       toast.success(done);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Operation failed"));
+      toast.error(errorMessage(e, t("Operation failed")));
     } finally {
       refresh();
     }

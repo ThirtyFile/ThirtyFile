@@ -4,7 +4,7 @@ import { ApiError, fetchOffice, type FileSource, type Node } from "@/api";
 import { t } from "@/lib/i18n";
 import { reportShown } from "@/lib/errorReport";
 import { frameDocument, loadFrameScript } from "@/components/officeFrame";
-import { extOf } from "@/lib/utils";
+import { extOf, errorMessage } from "@/lib/utils";
 import SheetPreview from "@/components/sheet/SheetPreview";
 import { TOO_LARGE } from "@/ooxml/core/package";
 import { MAX_OFFICE_PREVIEW_BYTES, MAX_OFFICE_PREVIEW_LABEL } from "@/lib/officeLimits";
@@ -21,7 +21,7 @@ class ViewerError extends Error {}
 
 /** Turn English errors from the preview components (JSZip etc.) into understandable explanations */
 function viewError(e: unknown, fallback: string) {
-  const msg = e instanceof Error ? e.message : "";
+  const msg = errorMessage(e, "");
   if (!msg) return fallback;
   // Show our own messages (and translated server messages) as-is; only convert the preview components' English errors
   if (e instanceof ViewerError || e instanceof ApiError) return msg;

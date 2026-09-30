@@ -10,7 +10,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { t } from "@/lib/i18n";
 import { refreshFiles, saved } from "@/lib/queries";
 import { useMe } from "@/lib/session";
-import { formatBytes, formatWinDate } from "@/lib/utils";
+import { formatBytes, formatWinDate, errorMessage } from "@/lib/utils";
 
 /** `ready`: the selection has stayed on this file for a moment, so its versions are asked for */
 export function VersionsSection({ node, canRestore, ready = true }: { node: Node; canRestore: boolean; ready?: boolean }) {
@@ -39,7 +39,7 @@ export function VersionsSection({ node, canRestore, ready = true }: { node: Node
       // The file's row, its details and history, and the folder it is in (sorted by size or date, it can move)
       await refreshFiles(qc, { ...saved(restored), nodes: [node.id] });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Couldn't restore"));
+      toast.error(errorMessage(e, t("Couldn't restore")));
     }
   };
 

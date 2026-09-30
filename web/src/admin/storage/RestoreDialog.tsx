@@ -12,7 +12,8 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { ErrorText } from "@/components/dialogs";
 import { backupSpaceLabel } from "@/admin/storage/backups";
 import { t, tServer } from "@/lib/i18n";
-import { formatBytes, formatDateTime } from "@/lib/utils";
+import { formatBytes, formatDateTime, errorMessage } from "@/lib/utils";
+import { useSubmit } from "@/lib/useSubmit";
 
 /** "2026-10-01 14.05" in the browser's time zone: a name can't hold "/" or ":", which dates in some languages have */
 function nameDate(t: number) {
@@ -40,8 +41,6 @@ export function RestoreDialog({ set, onClose, onDone }: { set: BackupSet; onClos
   const [onConflict, setOnConflict] = useState<"skip" | "keep" | "replace">("skip");
   const [target, setTarget] = useState<string | null>(null);
   const [trash, setTrash] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const tz = new Date().getTimezoneOffset();
   const folderName = chosen && snapshot?.cutoff ? t("Restored {name} {date}", { name: chosen.name, date: nameDate(snapshot.cutoff) }) : "";
   const browsing = choose && !personal;
@@ -73,28 +72,17 @@ export function RestoreDialog({ set, onClose, onDone }: { set: BackupSet; onClos
     setItems([]);
     setTarget(null);
   };
+  const { busy, error, run } = useSubmit(async () => {
+    if (!p || p.problem) return;
+    await api.restoreBackup(snapshotId, { ...req, target_drive: mode === "original" ? null : p.target_drive });
+    toast.success(t("\"{name}\" is being restored in the background", { name: chosen ? backupSpaceLabel(chosen) : "" }));
+    onDone();
+    onClose();
+  }, t("Couldn't make the change"));
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
-        <form
-          className="grid gap-4"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (!p || p.problem) return;
-            setBusy(true);
-            setError(null);
-            try {
-              await api.restoreBackup(snapshotId, { ...req, target_drive: mode === "original" ? null : p.target_drive });
-              toast.success(t("\"{name}\" is being restored in the background", { name: chosen ? backupSpaceLabel(chosen) : "" }));
-              onDone();
-              onClose();
-            } catch (err) {
-              setError(err instanceof Error ? err.message : t("Couldn't make the change"));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
+        <form className="grid gap-4" onSubmit={run}>
           <DialogHeader>
             <DialogTitle>{t("Restore from \"{name}\"", { name: set.name })}</DialogTitle>
             <DialogDescription>{t("Files are copied back from the backup and checked against their fingerprints. Nothing already there is replaced unless you choose to.")}</DialogDescription>
@@ -256,7 +244,7 @@ export function RestoreDialog({ set, onClose, onDone }: { set: BackupSet; onClos
               <Loader2Icon className="size-3.5 animate-spin" /> {t("Loading…")}
             </div>
           )}
-          {preview.error && <ErrorText>{preview.error instanceof Error ? preview.error.message : t("Operation failed")}</ErrorText>}
+          {preview.error && <ErrorText>{errorMessage(preview.error, t("Operation failed"))}</ErrorText>}
           {p && !p.problem && (
             <div className="grid gap-1 rounded-md bg-muted/60 px-3 py-2 text-xs">
               <p>{t("{n} file to restore, {size}.|{n} files to restore, {size}.", { n: p.files, size: formatBytes(p.bytes) })}</p>

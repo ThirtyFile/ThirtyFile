@@ -14,7 +14,8 @@ import { ErrorText } from "@/components/dialogs";
 import { locationLabel } from "@/components/LocationSelect";
 import { DRIVE_ICON } from "@/lib/drives";
 import { t, tServer } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
+import { cn, errorMessage } from "@/lib/utils";
+import { useSubmit } from "@/lib/useSubmit";
 
 /** The browser's time zone, the default of a new policy */
 export const localZone = () => {
@@ -75,8 +76,6 @@ export function BackupPolicyDialog({ set, source: preset, onClose, onDone }: { s
   const [rate, setRate] = useState(p ? p.rate_limit / 1_000_000 : 0);
   const [alertHours, setAlertHours] = useState(p?.alert_hours ?? 48);
   const [verifyDays, setVerifyDays] = useState(p?.verify_days ?? 7);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const list = locations.data ?? [];
   const sources = list.filter((l) => l.drive_count > 0 || l.id === source);
   const dests = list.filter((l) => l.id !== source);
@@ -94,47 +93,36 @@ export function BackupPolicyDialog({ set, source: preset, onClose, onDone }: { s
   const defaultName = sourceName ? t("Backup of {name}", { name: sourceName }) : "";
   const pv = preview.data;
   const ready = !!source && !!dest && (allSpaces || spaces.length > 0) && (mode === "realtime" || kind !== "weekly" || days.length > 0);
+  const { busy, error, run } = useSubmit(async () => {
+    if (!ready) return;
+    const settings: Partial<BackupPolicySettings> = {
+      mode,
+      schedule,
+      tz,
+      all_spaces: allSpaces,
+      spaces,
+      versions,
+      trash,
+      keep_days: keepDays,
+      keep_min: keepMin,
+      rate_limit: Math.round(rate * 1_000_000),
+      alert_hours: alertHours,
+      verify_days: verifyDays,
+    };
+    if (set) {
+      await api.updateBackupPolicy(set.id, { ...settings, name: name.trim() || undefined });
+      toast.success(t("\"{name}\" was changed", { name: name.trim() || set.name }));
+    } else {
+      await api.createBackupPolicy({ ...settings, name: name.trim() || defaultName, source, dest });
+      toast.success(t("\"{name}\" was made; its first snapshot is being made in the background", { name: name.trim() || defaultName }));
+    }
+    onDone();
+    onClose();
+  }, t("Couldn't make the change"));
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
-        <form
-          className="grid gap-4"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (!ready) return;
-            setBusy(true);
-            setError(null);
-            const settings: Partial<BackupPolicySettings> = {
-              mode,
-              schedule,
-              tz,
-              all_spaces: allSpaces,
-              spaces,
-              versions,
-              trash,
-              keep_days: keepDays,
-              keep_min: keepMin,
-              rate_limit: Math.round(rate * 1_000_000),
-              alert_hours: alertHours,
-              verify_days: verifyDays,
-            };
-            try {
-              if (set) {
-                await api.updateBackupPolicy(set.id, { ...settings, name: name.trim() || undefined });
-                toast.success(t("\"{name}\" was changed", { name: name.trim() || set.name }));
-              } else {
-                await api.createBackupPolicy({ ...settings, name: name.trim() || defaultName, source, dest });
-                toast.success(t("\"{name}\" was made; its first snapshot is being made in the background", { name: name.trim() || defaultName }));
-              }
-              onDone();
-              onClose();
-            } catch (err) {
-              setError(err instanceof Error ? err.message : t("Couldn't make the change"));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
+        <form className="grid gap-4" onSubmit={run}>
           <DialogHeader>
             <DialogTitle>{set ? t("Backup settings") : t("New backup")}</DialogTitle>
             <DialogDescription>
@@ -173,7 +161,7 @@ export function BackupPolicyDialog({ set, source: preset, onClose, onDone }: { s
               </NativeSelect>
             </div>
           </div>
-          {preview.error && <ErrorText>{preview.error instanceof Error ? preview.error.message : t("Operation failed")}</ErrorText>}
+          {preview.error && <ErrorText>{errorMessage(preview.error, t("Operation failed"))}</ErrorText>}
           {pv && (pv.shared || pv.unencrypted || pv.problem) && (
             <div className="grid gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100" role="note">
               {pv.problem && (
@@ -283,7 +271,7 @@ export function BackupPolicyDialog({ set, source: preset, onClose, onDone }: { s
                 {next.data && next.data.length > 0 && (
                   <p className="text-xs text-muted-foreground">{t("Next: {times}", { times: next.data.map((n) => zonedTime(n, tz)).join(" · ") })}</p>
                 )}
-                {next.error && <ErrorText>{next.error instanceof Error ? next.error.message : t("Operation failed")}</ErrorText>}
+                {next.error && <ErrorText>{errorMessage(next.error, t("Operation failed"))}</ErrorText>}
                 <p className="text-xs text-muted-foreground">
                   {t("A time clocks skip when summer time starts isn't run that day; one that happens twice when it ends is run once. After the server was off, one snapshot catches up.")}
                 </p>
