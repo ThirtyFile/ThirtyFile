@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -31,6 +31,7 @@ import { FileIcon } from "@/components/FileIcon";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { CreateDriveDialog, DrivePropsDialog } from "@/components/DriveDialogs";
 import { DRIVE_ICON, DRIVE_KIND_LABEL, ROLE_LABEL, atLeast, useDrives } from "@/lib/drives";
+import { useSelectableList } from "@/lib/listSelection";
 import { usePersisted, useMe } from "@/lib/session";
 import { cn, formatBytes } from "@/lib/utils";
 import { t, tServer, tc } from "@/lib/i18n";
@@ -125,7 +126,6 @@ export function ThisPcPage() {
   const shared = useQuery({ queryKey: ["shared-with-me"], queryFn: api.sharedWithMe });
   const [view, setView] = usePersisted<"tiles" | "list">("tf-drives-view", "tiles");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [anchor, setAnchor] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
   // Collapsed sections of the tiles view
   const [collapsed, setCollapsed] = useState<Set<SectionId>>(new Set());
@@ -143,10 +143,19 @@ export function ThisPcPage() {
   const selItems = ordered.filter((s) => selected.has(keyOf(s)));
   // Single-item actions in the toolbar and context menu are only available when exactly one is selected
   const sel: Selection = selItems.length === 1 ? selItems[0] : null;
-  const selectOnly = (s: Selection) => {
-    setSelected(s ? new Set([keyOf(s)]) : new Set());
-    setAnchor(s ? keyOf(s) : null);
-  };
+  // Selecting with the mouse and the keyboard, like the file list (lib/listSelection.ts): Ctrl and Shift, arrows (across
+  // the rows of tiles and from one section to the next), Home/End, Space, Ctrl+A, Esc, Enter, typing a name
+  const nav = useSelectableList({
+    items: ordered,
+    keyOf,
+    selected,
+    onSelect: setSelected,
+    multi: true,
+    onOpen: (s, newTab) => openSel(s, newTab),
+    nameOf: (s) => (s.t === "drive" ? s.drive.name : s.item.name),
+    hidden: (s) => view !== "list" && collapsed.has(sectionOf(s)),
+  });
+  const selectOnly = (s: Selection) => nav.selectOnly(s ? keyOf(s) : null);
   // Hold the left button and drag on empty space to marquee-select (disabled while renaming)
   const marquee = useMarquee({ selected, onSelect: setSelected, enabled: !drives.isLoading && dialog?.t !== "rename" });
 
@@ -198,117 +207,7 @@ export function ThisPcPage() {
     </>
   );
 
-  // Click: Ctrl toggles, Shift selects a range (like Windows)
-  const clickItem = (e: MouseEvent, s: Item) => {
-    const key = keyOf(s);
-    const a = anchor === null ? -1 : ordered.findIndex((x) => keyOf(x) === anchor);
-    if (e.shiftKey && a >= 0) {
-      const i = ordered.findIndex((x) => keyOf(x) === key);
-      const next = new Set(e.ctrlKey || e.metaKey ? selected : []);
-      for (let j = Math.min(a, i); j <= Math.max(a, i); j++) next.add(keyOf(ordered[j]));
-      setSelected(next);
-    } else if (e.ctrlKey || e.metaKey) {
-      const next = new Set(selected);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      setSelected(next);
-      setAnchor(key);
-    } else {
-      selectOnly(s);
-    }
-  };
-
-  /** Keyboard (like the file list): arrows move the selection (Shift extends it), Space selects (toggles with Ctrl), Home/End jump, Enter opens */
-  const keyNav = (e: KeyboardEvent<HTMLElement>, s: Item) => {
-    // Keys typed in the rename box belong to it
-    if (e.target !== e.currentTarget) return;
-    if (e.key === "Enter" && !e.altKey && !e.repeat) {
-      e.preventDefault();
-      openSel(s);
-      return;
-    }
-    if (e.key === " ") {
-      e.preventDefault();
-      if (e.ctrlKey || e.metaKey) {
-        const next = new Set(selected);
-        if (next.has(keyOf(s))) next.delete(keyOf(s));
-        else next.add(keyOf(s));
-        setSelected(next);
-        setAnchor(keyOf(s));
-      } else selectOnly(s);
-      return;
-    }
-    // Work on the items as laid out (collapsed sections aren't there): each tiles section is its own grid
-    const el = e.currentTarget;
-    const all = Array.from(el.closest("[data-spaces]")?.querySelectorAll<HTMLElement>("[data-node-id]") ?? []);
-    const groups: HTMLElement[][] = [];
-    for (const x of all) {
-      if (groups.at(-1)?.[0].parentElement === x.parentElement) groups.at(-1)!.push(x);
-      else groups.push([x]);
-    }
-    const g = groups.findIndex((group) => group.includes(el));
-    const group = groups[g];
-    const i = group.indexOf(el);
-    const perRow = view === "tiles" ? Math.max(1, getComputedStyle(el.parentElement!).gridTemplateColumns.split(" ").filter(Boolean).length) : 1;
-    const col = i % perRow;
-    let target: HTMLElement | undefined;
-    if (e.key === "ArrowDown") {
-      if (i + perRow < group.length) target = group[i + perRow];
-      // Below is empty but there is a shorter last row: go to its last item
-      else if (Math.floor(i / perRow) < Math.floor((group.length - 1) / perRow)) target = group.at(-1);
-      else if (groups[g + 1]) target = groups[g + 1][Math.min(col, groups[g + 1].length - 1)];
-    } else if (e.key === "ArrowUp") {
-      if (i - perRow >= 0) target = group[i - perRow];
-      else if (groups[g - 1]) {
-        const prev = groups[g - 1];
-        target = prev[Math.min(Math.floor((prev.length - 1) / perRow) * perRow + col, prev.length - 1)];
-      }
-    } else if (e.key === "ArrowRight" && view === "tiles") target = all[all.indexOf(el) + 1];
-    else if (e.key === "ArrowLeft" && view === "tiles") target = all[all.indexOf(el) - 1];
-    else if (e.key === "Home") target = all[0];
-    else if (e.key === "End") target = all.at(-1);
-    else return;
-    e.preventDefault();
-    const next = target && ordered.find((x) => keyOf(x) === target.dataset.nodeId);
-    if (!target || !next) return;
-    const a = anchor === null ? -1 : ordered.findIndex((x) => keyOf(x) === anchor);
-    if (e.shiftKey && a >= 0) {
-      const b = ordered.indexOf(next);
-      const range = new Set<string>();
-      for (let j = Math.min(a, b); j <= Math.max(a, b); j++) range.add(keyOf(ordered[j]));
-      setSelected(range);
-    } else {
-      selectOnly(next);
-    }
-    target.focus();
-  };
-
-  // One item is reachable with Tab (the first selected one shown, else the first one shown); arrows move between the others
-  const shown = view === "list" ? ordered : ordered.filter((s) => !collapsed.has(sectionOf(s)));
-  const tabStop = (shown.find((s) => selected.has(keyOf(s))) ?? shown[0]) as Item | undefined;
-
-  const itemProps = (s: Item) => ({
-    "data-node-id": keyOf(s),
-    "aria-selected": selected.has(keyOf(s)),
-    tabIndex: tabStop && keyOf(tabStop) === keyOf(s) ? 0 : -1,
-    onKeyDown: (e: KeyboardEvent<HTMLElement>) => keyNav(e, s),
-    onClick: (e: MouseEvent) => {
-      e.stopPropagation();
-      // Rows start a marquee on mousedown, which keeps them from getting the focus: arrows continue from the clicked item
-      (e.currentTarget as HTMLElement).focus({ preventScroll: true });
-      clickItem(e, s);
-    },
-    onDoubleClick: () => openSel(s),
-    onAuxClick: (e: MouseEvent) => {
-      if (e.button === 1) {
-        e.preventDefault();
-        openSel(s, true);
-      }
-    },
-    onMouseDown: (e: MouseEvent) => e.button === 1 && e.preventDefault(),
-    // Right-clicking an unselected item selects only that item
-    onContextMenu: () => !selected.has(keyOf(s)) && selectOnly(s),
-  });
+  const itemProps = (s: Item) => ({ "data-node-id": keyOf(s), ...nav.itemProps(s) });
 
   const isSel = (s: Item) => selected.has(keyOf(s));
 
@@ -411,14 +310,12 @@ export function ThisPcPage() {
   // Each section's tiles are a list of options (an empty section only shows its note)
   const tiles = (label: string, count: number) => ({
     className: "grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-1.5",
-    ...(count > 0 ? { role: "listbox", "aria-multiselectable": true, "aria-label": label } : {}),
+    ...(count > 0 ? nav.listProps("listbox", label) : {}),
   });
 
   const listView = (
     <table
-      role="grid"
-      aria-multiselectable
-      aria-label={t("All spaces")}
+      {...nav.listProps("grid", t("All spaces"))}
       aria-rowcount={ordered.length + 1}
       className="w-full table-fixed border-collapse text-xs whitespace-nowrap"
     >
@@ -572,7 +469,7 @@ export function ThisPcPage() {
       <ContextMenu>
         <ContextMenuTrigger
           className="relative min-h-0 flex-1 overflow-auto px-4 pb-6"
-          data-spaces
+          {...nav.scopeProps}
           onClick={() => selectOnly(null)}
           onContextMenuCapture={(e) => !(e.target as HTMLElement).closest("[data-item]") && selectOnly(null)}
           {...marquee.containerProps}

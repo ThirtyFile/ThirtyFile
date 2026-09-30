@@ -36,6 +36,7 @@ import { RowMenuArea } from "@/components/RowMenuArea";
 import { LocationBrowseDialog, LocationTestDialog, UnusedContentDialog } from "@/components/StorageTools";
 import { cn, formatBytes, formatDateTime } from "@/lib/utils";
 import { t, tServer } from "@/lib/i18n";
+import { useSelectableList } from "@/lib/listSelection";
 import { useMoves } from "@/lib/moves";
 
 /** Dropdown (same style as the inputs) */
@@ -87,6 +88,15 @@ export function StorageLocations() {
   const movesFrom = (id: string) => (moves.data?.moves ?? []).filter((m) => m.from_location === id);
   const list = q.data ?? [];
   const selected = list.find((l) => l.id === selectedId) ?? null;
+  // Selected and opened with the keyboard as well as the mouse (lib/listSelection.ts); Enter edits
+  const rows = useSelectableList({
+    items: list,
+    keyOf: (l) => l.id,
+    selected: new Set(selected ? [selected.id] : []),
+    onSelect: (keys) => setSelectedId(keys.values().next().value ?? null),
+    onOpen: (l) => setEditing(l),
+    nameOf: (l) => l.name,
+  });
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["storage-locations"] });
     qc.invalidateQueries({ queryKey: ["admin-drives"] });
@@ -172,6 +182,7 @@ export function StorageLocations() {
       </div>
       <RowMenuArea
         onTarget={setSelectedId}
+        onClick={(e) => !(e.target as HTMLElement).closest("[data-row-id]") && setSelectedId(null)}
         menu={
           selected ? (
             menu(selected)
@@ -189,17 +200,17 @@ export function StorageLocations() {
         ) : q.error && !q.data ? (
           <ErrorState message={q.error.message} onRetry={() => q.refetch()} />
         ) : (
-          <div className="divide-y">
+          <div {...rows.listProps("grid", t("Storage locations"))} className="divide-y">
             {list.map((l) => {
               const Icon = l.kind === "s3" ? CloudIcon : l.kind === "local" ? HardDriveIcon : ServerIcon;
               return (
                 <div
                   key={l.id}
+                  role="row"
                   data-row-id={l.id}
-                  onClick={() => setSelectedId(l.id)}
-                  onDoubleClick={() => setEditing(l)}
+                  {...rows.itemProps(l)}
                   className={cn(
-                    "flex items-center gap-3 px-4 py-3 select-none hover:bg-muted/50",
+                    "flex items-center gap-3 px-4 py-3 outline-none select-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
                     selectedId === l.id && "bg-selection shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection",
                   )}
                 >
@@ -209,7 +220,7 @@ export function StorageLocations() {
                       l.kind === "s3" ? "text-sky-500" : l.kind === "local" ? "text-muted-foreground" : "text-violet-500",
                     )}
                   />
-                  <div className="min-w-0 flex-1">
+                  <div role="gridcell" className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 text-sm">
                       <span className="truncate">{l.name}</span>
                       {l.is_default && <span className="rounded bg-brand/15 px-1.5 py-px text-[11px] text-brand">{t("Default")}</span>}
@@ -236,7 +247,7 @@ export function StorageLocations() {
                       </div>
                     )}
                   </div>
-                  <div className="hidden w-48 shrink-0 text-right text-xs text-muted-foreground sm:block">
+                  <div role="gridcell" className="hidden w-48 shrink-0 text-right text-xs text-muted-foreground sm:block">
                     <div className="tabular-nums" title={l.folder_bytes > 0 ? t("{size} in folder spaces", { size: formatBytes(l.folder_bytes) }) : undefined}>
                       {t("{size} used", { size: formatBytes(l.used_bytes) })}
                     </div>
@@ -258,6 +269,7 @@ export function StorageLocations() {
                     </div>
                   </div>
                   <span
+                    role="gridcell"
                     title={l.checked_at ? t("Last checked: {time} (checked automatically every 30 seconds)", { time: formatDateTime(l.checked_at) }) : undefined}
                     className={cn(
                       "flex w-20 shrink-0 items-center gap-1 text-xs",
@@ -273,16 +285,18 @@ export function StorageLocations() {
                     )}
                     {l.connected ? t("Connected") : t("Unreachable")}
                   </span>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={<Button size="icon-sm" variant="ghost" aria-label={t("More actions")} onClick={(e) => e.stopPropagation()} />}
-                    >
-                      <EllipsisIcon />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-max max-w-(--available-width)">
-                      {menu(l)}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <div role="gridcell">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={<Button size="icon-sm" variant="ghost" aria-label={t("More actions")} onClick={(e) => e.stopPropagation()} />}
+                      >
+                        <EllipsisIcon />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-max max-w-(--available-width)">
+                        {menu(l)}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 </div>
               );
             })}

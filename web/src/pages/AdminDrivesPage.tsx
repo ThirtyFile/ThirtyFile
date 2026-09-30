@@ -262,6 +262,7 @@ export function AdminDrivesPage() {
       }
     >
       <DataTable
+        label={t("Spaces")}
         rows={drives}
         rowKey={(d) => d.id}
         columns={columns}
