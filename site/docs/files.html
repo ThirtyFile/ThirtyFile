@@ -77,7 +77,8 @@
         <p>To keep one file from filling the server, a ZIP file isn't extracted when:</p>
         <ul>
           <li>its contents are larger than the space has room for, or larger than 16 GB;</li>
-          <li>it holds more than 20,000 files and folders;</li>
+          <li>it holds more than 20,000 files and folders, counting the folders its paths lead through;</li>
+          <li>a path inside it goes more than 64 folders deep;</li>
           <li>its contents would grow far more than ordinary files do (more than 250 times their compressed size), as in a "ZIP bomb";</li>
           <li>a name inside it leads outside the new folder (<code>../</code> or a full path), or isn't allowed (for example it contains <code>:</code> or <code>?</code>);</li>
           <li>it is protected with a password, or compressed with a method other than the usual one (deflate).</li>
