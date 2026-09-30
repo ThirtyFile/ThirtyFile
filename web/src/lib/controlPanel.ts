@@ -151,11 +151,11 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     key: "sso",
     to: "/admin/sso",
     title: t("Single sign-on"),
-    desc: t("Sign in with Microsoft Entra ID, Google, or GitHub accounts"),
+    desc: t("Sign in with Microsoft Entra ID, Google, GitHub or any OpenID Connect provider"),
     icon: KeyRoundIcon,
     tone: "bg-amber-500/12 text-amber-600 dark:text-amber-300",
     category: "users",
-    keywords: "sso 單一登入 三方登入 第三方 oauth oidc microsoft entra azure ad office 365 google workspace github 登入 帳號 連結 single sign-on third-party sign in login account link", // i18n-ignore: bilingual search keywords
+    keywords: "sso 單一登入 三方登入 第三方 oauth oidc microsoft entra azure ad office 365 google workspace github openid keycloak authentik 登入 帳號 連結 single sign-on third-party sign in login account link", // i18n-ignore: bilingual search keywords
   },
   {
     key: "email",

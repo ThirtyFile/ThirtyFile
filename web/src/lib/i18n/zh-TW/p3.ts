@@ -72,7 +72,7 @@ export default {
   "Branding": "品牌",
   "Site name, logo, theme colors, light/dark mode, and sign-in page text": "網站名稱、Logo、主題配色、淺色／深色模式、登入頁文字",
   "Single sign-on": "單一登入",
-  "Sign in with Microsoft Entra ID, Google, or GitHub accounts": "使用 Microsoft Entra ID、Google、GitHub 帳號登入",
+  "Sign in with Microsoft Entra ID, Google, GitHub or any OpenID Connect provider": "使用 Microsoft Entra ID、Google、GitHub 或任何 OpenID Connect 服務的帳號登入",
   "Activity log": "活動紀錄",
   "Search user actions, sign-ins, and share link access; filter and export": "查詢使用者的操作、登入，以及分享連結的存取紀錄，可篩選與匯出",
   "Log settings": "紀錄設定",
