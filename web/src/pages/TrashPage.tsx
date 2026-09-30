@@ -22,6 +22,7 @@ import { FileList } from "@/components/FileList";
 import { Frame, ToolButton } from "@/components/Frame";
 import { useMe } from "@/lib/session";
 import { locale, t } from "@/lib/i18n";
+import { followJob } from "@/lib/jobs";
 import { useAllPages } from "@/lib/pages";
 import { FOLDER_CONTENTS, invalidateFiles } from "@/lib/queries";
 import { trashHint } from "@/lib/utils";
@@ -209,10 +210,12 @@ export function TrashPage() {
           irreversible
           onClose={() => setConfirm(null)}
           onConfirm={async () => {
-            if (confirm === "empty") await api.emptyTrash();
-            else await api.deleteForever(ids);
+            const job = confirm === "empty" ? await api.emptyTrash() : await api.deleteForever(ids);
             setConfirm(null);
-            done(t("Permanently deleted"));
+            // The items have left the trash; deleting a large folder goes on, followed by a message at the bottom
+            setSelected(new Set());
+            invalidateFiles(qc, FOLDER_CONTENTS);
+            void followJob(job, t("Permanently deleted"), () => invalidateFiles(qc, FOLDER_CONTENTS));
           }}
         />
       )}

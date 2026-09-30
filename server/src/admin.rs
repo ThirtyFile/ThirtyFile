@@ -305,7 +305,7 @@ pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     let row = get_row(&st, id).await?;
     let pending = crate::jobs::reserve(&st, me.id, "delete_user", crate::jobs::Limit::Changes)?;
     let job = pending
-        .run(crate::jobs::WAIT, move |t| async move { delete_user(&st, &me, id, &row.username, &q, &t).await.map(|()| Default::default()) })
+        .run(crate::jobs::wait(), move |t| async move { delete_user(&st, &me, id, &row.username, &q, &t).await.map(|()| Default::default()) })
         .await?;
     Ok(Json(job))
 }
@@ -1350,6 +1350,7 @@ mod tests {
         assert!(gone, "the user is deleted");
         assert_eq!(env.node_at(&space.drive, "Files of amy/a.txt").await.unwrap().0, a);
         // A long one answers with the job, for the page to follow
+        let _short = crate::jobs::short_wait();
         let ben = env.user("ben", true).await;
         env.stored_file(&ben, ben.root(), "b.txt", b"ben's").await;
         let Json(job) = delete(State(env.st.clone()), Admin(env.admin().await), Path(ben.id), Query(serde_json::from_value(json!({ "move_to": space.drive })).unwrap()))

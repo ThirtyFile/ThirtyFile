@@ -1152,8 +1152,9 @@ export const api = {
   trashPage: (limit: number, after?: string, mine?: boolean, signal?: AbortSignal) =>
     get<CursorPage<Located>>(`/trash${qs({ limit: String(limit), after, mine: mine ? "true" : undefined })}`, signal).then((p) => ({ ...p, items: p.items.map(localizeLocated) })),
   restore: (ids: string[], resolutions?: Record<string, Resolution>) => post("/trash/restore", { ids, resolutions }),
-  deleteForever: (ids: string[]) => post("/trash/delete", { ids }),
-  emptyTrash: () => post("/trash/empty"),
+  /** Deleting for good and emptying the trash answer with a task (see lib/jobs) */
+  deleteForever: (ids: string[]) => post<Job>("/trash/delete", { ids }),
+  emptyTrash: () => post<Job>("/trash/empty"),
   /** What Empty trash would delete: items per space */
   emptyTrashPreview: () => get<{ kind: string; name: string; items: number }[]>("/trash/empty"),
   /** Names containing `q`; at most 300 (`truncated` when there were more) */

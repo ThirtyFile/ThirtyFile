@@ -243,7 +243,7 @@ async fn add_in(st: &AppState, tx: &mut SqliteConnection, me: &crate::auth::User
 pub async fn remove(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<i64>, Query(q): Query<DeleteQuery>) -> AppResult<Json<Job>> {
     let username = crate::admin::get_row(&st, id).await?.username;
     let pending = jobs::reserve(&st, me.id, "remove_personal", Limit::Changes)?;
-    let job = pending.run(jobs::WAIT, move |t| async move { remove_now(&st, &me, id, &username, &q, &t).await.map(|()| Default::default()) }).await?;
+    let job = pending.run(jobs::wait(), move |t| async move { remove_now(&st, &me, id, &username, &q, &t).await.map(|()| Default::default()) }).await?;
     Ok(Json(job))
 }
 

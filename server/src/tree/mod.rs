@@ -2,6 +2,7 @@
 //! content storage (blob reference counting) and quotas are in the submodules, re-exported here.
 
 mod blobs;
+pub mod changes;
 mod permissions;
 mod quota;
 
