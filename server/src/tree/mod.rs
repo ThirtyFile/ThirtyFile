@@ -126,15 +126,14 @@ pub struct Crumb {
 pub struct Drive {
     pub id: String,
     pub name: String,
-    pub kind: String,
+    pub kind: SpaceKind,
     pub root_id: String,
     pub owner_id: Option<i64>,
     pub quota_bytes: i64,
     pub disabled: bool,
     /// Bytes of all file nodes in the space, including the trash (kept up to date by `adjust_usage`)
     pub used_bytes: i64,
-    /// "store" (content store) or "folder" (a folder on the server)
-    pub mode: String,
+    pub mode: SpaceMode,
     /// Folder spaces: the folder
     pub source_path: Option<String>,
     /// Browse, download and share only
@@ -145,8 +144,32 @@ pub struct Drive {
 
 impl Drive {
     pub fn is_folder(&self) -> bool {
-        self.mode == "folder"
+        self.mode == SpaceMode::Folder
     }
+}
+
+/// What a space is (`drives.kind`), in the order spaces are listed
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, sqlx::Type)]
+#[serde(rename_all = "lowercase")]
+#[sqlx(rename_all = "lowercase")]
+pub enum SpaceKind {
+    /// Someone's "My files"
+    Personal,
+    /// "All files", which everyone may use
+    Company,
+    /// A space for a team
+    Team,
+}
+
+/// How a space keeps its files (`drives.mode`)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, sqlx::Type)]
+#[serde(rename_all = "lowercase")]
+#[sqlx(rename_all = "lowercase")]
+pub enum SpaceMode {
+    /// In the content store of its storage location, named by their SHA-256
+    Store,
+    /// As they are, in a folder on the server (a folder space)
+    Folder,
 }
 
 pub const DRIVE_COLS: &str = "d.id, d.name, d.kind, d.root_id, d.owner_id, d.quota_bytes, d.disabled, d.used_bytes, d.mode, d.source_path, d.read_only, d.moving";

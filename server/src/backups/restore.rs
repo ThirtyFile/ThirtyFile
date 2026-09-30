@@ -403,7 +403,7 @@ async fn folder_node(st: &AppState, id: &str) -> AppResult<Node> {
 
 /// Who new items belong to: the owner of a personal space, else whoever asked for the restore
 fn owner_of(cx: &Ctx<'_>, target: &tree::Drive) -> i64 {
-    if target.kind == "personal" { target.owner_id.unwrap_or_default() } else { cx.job.created_by.unwrap_or_default() }
+    if target.kind == tree::SpaceKind::Personal { target.owner_id.unwrap_or_default() } else { cx.job.created_by.unwrap_or_default() }
 }
 
 /// Makes the new folder everything goes into, and records it

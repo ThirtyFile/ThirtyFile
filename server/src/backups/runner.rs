@@ -22,6 +22,24 @@ use crate::{
     util::now,
 };
 
+/// Where a backup or replica job is (`backup_jobs.state`, `replica_jobs.state`)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, sqlx::Type)]
+#[serde(rename_all = "lowercase")]
+#[sqlx(rename_all = "lowercase")]
+pub enum JobState {
+    /// Waiting for its turn
+    Queued,
+    Running,
+    /// Paused by an administrator
+    Paused,
+    /// Waits for a storage location that can't be reached, and runs again once it can
+    Waiting,
+    /// Stopped by an error; it can be resumed
+    Failed,
+    Done,
+    Cancelled,
+}
+
 /// States of a job that isn't over
 pub const ACTIVE: &str = "('queued', 'running', 'paused', 'waiting', 'failed')";
 /// Items listed in a job's failures (all are counted)
@@ -507,11 +525,11 @@ pub(crate) async fn run_in(st: &AppState, engine: &'static dyn Engine, job: &Job
     let res = engine.run(&cx).await;
     let ended = match res {
         Ok(Stop::Done) => Ok(()),
-        Ok(Stop::Paused) => set_state(&cx, "paused", None, engine.failed_action()).await,
+        Ok(Stop::Paused) => set_state(&cx, JobState::Paused, None, engine.failed_action()).await,
         Ok(Stop::Cancelled) => engine.cancelled(st, job).await,
         Err(e) => {
             tracing::warn!("A job of {} ({}) failed: {}", q.table, job.kind, e.message);
-            let state = if engine.waits(st, job, &e).await { "waiting" } else { "failed" };
+            let state = if engine.waits(st, job, &e).await { JobState::Waiting } else { JobState::Failed };
             set_state(&cx, state, Some(&e.message), engine.failed_action()).await
         }
     };
@@ -522,7 +540,7 @@ pub(crate) async fn run_in(st: &AppState, engine: &'static dyn Engine, job: &Job
 }
 
 /// Records that a run stopped (paused, or failed with `error`), with its progress
-async fn set_state(cx: &Ctx<'_>, state: &str, error: Option<&str>, action: &str) -> AppResult<()> {
+async fn set_state(cx: &Ctx<'_>, state: JobState, error: Option<&str>, action: &str) -> AppResult<()> {
     let (files_done, bytes_done, files_total, bytes_total, failed, failures) = cx.progress();
     let _w = cx.st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&cx.st.db).await?;

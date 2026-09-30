@@ -728,9 +728,9 @@ pub async fn run_policy(State(st): State<AppState>, Admin(user): Admin, Path(id)
 
 // ───────────── Jobs ─────────────
 
-async fn job_state(st: &AppState, id: &str) -> AppResult<(runner::Job, String)> {
+async fn job_state(st: &AppState, id: &str) -> AppResult<(runner::Job, runner::JobState)> {
     let job = runner::job(&mut *st.db.acquire().await?, id).await?.ok_or_else(|| AppError::not_found("This job no longer exists"))?;
-    let (state,): (String,) = sqlx::query_as("SELECT state FROM backup_jobs WHERE id = ?").bind(id).fetch_one(&st.db).await?;
+    let (state,): (runner::JobState,) = sqlx::query_as("SELECT state FROM backup_jobs WHERE id = ?").bind(id).fetch_one(&st.db).await?;
     Ok((job, state))
 }
 
@@ -775,7 +775,7 @@ pub async fn cancel(State(st): State<AppState>, _: Admin, Path(id): Path<String>
         ctl.cancel.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
-    if !matches!(state.as_str(), "queued" | "paused" | "failed" | "waiting") {
+    if !matches!(state, runner::JobState::Queued | runner::JobState::Paused | runner::JobState::Failed | runner::JobState::Waiting) {
         return Err(AppError::conflict("This job can't be cancelled now"));
     }
     super::cancelled(&st, &job).await?;

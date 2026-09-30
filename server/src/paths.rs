@@ -49,19 +49,14 @@ fn claim(taken: &mut HashSet<String>, base: &str, numbered: impl Fn(u32) -> Stri
 
 pub async fn tops(conn: &mut SqliteConnection, user: &User) -> AppResult<Tops> {
     let mut drives = tree::user_drives(conn, user).await?;
-    let rank = |k: &str| match k {
-        "personal" => 0,
-        "company" => 1,
-        _ => 2,
-    };
     // A fixed order, so that numbered names stay with the same space
-    drives.sort_by(|a, b| rank(&a.0.kind).cmp(&rank(&b.0.kind)).then_with(|| a.0.name.cmp(&b.0.name)).then_with(|| a.0.id.cmp(&b.0.id)));
+    drives.sort_by(|a, b| a.0.kind.cmp(&b.0.kind).then_with(|| a.0.name.cmp(&b.0.name)).then_with(|| a.0.id.cmp(&b.0.id)));
     let member_of: Vec<String> = drives.iter().map(|(d, _)| d.id.clone()).collect();
     let mut taken = HashSet::from([SHARED.to_lowercase()]);
     let spaces = drives
         .into_iter()
         .map(|(d, _)| {
-            let base = if d.kind == "personal" && d.owner_id == Some(user.id) { MY_FILES.to_string() } else { d.name.clone() };
+            let base = if d.kind == tree::SpaceKind::Personal && d.owner_id == Some(user.id) { MY_FILES.to_string() } else { d.name.clone() };
             (claim(&mut taken, &base, |n| format!("{base} ({n})")), d.root_id)
         })
         .collect();

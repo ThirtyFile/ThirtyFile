@@ -26,7 +26,7 @@ use crate::{
 pub struct DriveInfo {
     id: String,
     name: String,
-    kind: String,
+    kind: tree::SpaceKind,
     root_id: String,
     role: Option<Role>,
     used_bytes: i64,
@@ -40,8 +40,8 @@ pub struct DriveInfo {
     location_name: String,
     /// Reason the storage location is offline (e.g. S3 disconnected); browsing works, but opening, downloading and uploading don't
     offline: Option<String>,
-    /// "store" or "folder" (a folder on the server)
-    mode: String,
+    /// In the content store, or a folder on the server
+    mode: tree::SpaceMode,
     /// Browse, download and share only
     read_only: bool,
     /// Folder spaces, for administrators: the folder, when it was last scanned, and what the scan found
@@ -104,7 +104,7 @@ async fn drive_infos(
         let offline = r.location_id.as_deref().and_then(|location| st.location_offline_for(location, admin));
         let details = scan_details && d.is_folder();
         out.push(DriveInfo {
-            mode: d.mode.clone(),
+            mode: d.mode,
             read_only: d.read_only,
             source_path: d.source_path.clone().filter(|_| details),
             last_scan_at: r.last_scan_at.filter(|_| details),
@@ -268,7 +268,7 @@ pub async fn manageable_drive(conn: &mut SqliteConnection, user: &User, id: &str
     let drive = tree::get_drive(conn, id).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
     let root = tree::get_node(conn, &drive.root_id).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
     let role = tree::role_on(conn, user, &root).await?;
-    let admin_override = user.is_admin() && drive.kind != "personal";
+    let admin_override = user.is_admin() && drive.kind != tree::SpaceKind::Personal;
     if !(admin_override || role.is_some_and(|r| r >= Role::Manager)) {
         return Err(AppError::forbidden("You don't have permission to manage this space"));
     }
@@ -301,7 +301,7 @@ pub async fn update(
         manageable_drive(&mut tx, &user, &id).await?
     };
     if let Some(name) = &req.name {
-        if drive.kind == "personal" {
+        if drive.kind == tree::SpaceKind::Personal {
             return Err(AppError::bad_request("Personal spaces can't be renamed"));
         }
         let name = validate_name(name)?;
@@ -311,7 +311,7 @@ pub async fn update(
         if !user.is_admin() {
             return Err(AppError::forbidden("Only administrators can change quotas"));
         }
-        if drive.kind == "personal" {
+        if drive.kind == tree::SpaceKind::Personal {
             sqlx::query("UPDATE users SET quota_bytes = ? WHERE id = ?").bind(q.max(0)).bind(drive.owner_id).execute(&mut *tx).await?;
         } else {
             sqlx::query("UPDATE drives SET quota_bytes = ? WHERE id = ?").bind(q.max(0)).bind(&drive.id).execute(&mut *tx).await?;
@@ -341,7 +341,7 @@ pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<Strin
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let (drive, role) = manageable_drive(&mut tx, &user, &id).await?;
-    if drive.kind != "team" {
+    if drive.kind != tree::SpaceKind::Team {
         return Err(AppError::bad_request("Only team spaces can be deleted"));
     }
     if !(user.is_admin() || role == Some(Role::Owner)) {
@@ -440,7 +440,7 @@ async fn require_other_owner(conn: &mut SqliteConnection, node_id: &str, princip
 /// whose account may share. Giving people access is sharing, like a share link; leaving is always possible.
 async fn can_manage_node(conn: &mut SqliteConnection, user: &User, node: &Node, drive: &Drive) -> AppResult<(bool, Option<Role>)> {
     let role = tree::role_on(conn, user, node).await?;
-    let admin_override = user.is_admin() && drive.kind != "personal";
+    let admin_override = user.is_admin() && drive.kind != tree::SpaceKind::Personal;
     let may_share = user.can_share || user.is_admin();
     Ok(((admin_override || role.is_some_and(|r| r >= Role::Manager)) && may_share, role))
 }
@@ -515,10 +515,10 @@ pub async fn grant(
         return Err(AppError::forbidden("You don't have permission to manage access"));
     }
     let is_root = node.parent_id.is_none();
-    if drive.kind == "personal" && is_root {
+    if drive.kind == tree::SpaceKind::Personal && is_root {
         return Err(AppError::bad_request("A personal space can't be shared as a whole. Share a folder in it instead."));
     }
-    if role == Role::Owner && !(is_root && drive.kind == "team") {
+    if role == Role::Owner && !(is_root && drive.kind == tree::SpaceKind::Team) {
         return Err(AppError::bad_request("The \"Owner\" role can only be assigned on team spaces"));
     }
     // Can't grant a role higher than your own (except administrators managing company / team spaces)
@@ -594,7 +594,7 @@ pub async fn revoke(State(st): State<AppState>, user: User, Path(grant_id): Path
             return Err(AppError::forbidden("You can't change the access of someone whose role is higher than yours"));
         }
     }
-    if drive.kind == "personal" && node.parent_id.is_none() {
+    if drive.kind == tree::SpaceKind::Personal && node.parent_id.is_none() {
         return Err(AppError::bad_request("The owner of a personal space can't be removed"));
     }
     if role == "owner" {
