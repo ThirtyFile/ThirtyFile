@@ -1,6 +1,7 @@
 /** File explorer dialogs: move / copy, delete, share and access (creating and renaming are edited inline in the list) */
 import { AccessDialog } from "@/components/AccessDialog";
-import { ConfirmDialog, FolderPickerDialog } from "@/components/dialogs";
+import { ConfirmDialog } from "@/components/dialogs";
+import { FolderPickerDialog } from "@/components/FolderPickerDialog";
 import { ShareDialog } from "@/components/ShareDialog";
 import { t } from "@/lib/i18n";
 import { homeFolder } from "@/lib/home";
