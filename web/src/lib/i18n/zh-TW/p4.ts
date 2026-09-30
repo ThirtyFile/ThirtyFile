@@ -124,7 +124,6 @@ export default {
   "Discard unsaved changes?": "捨棄未儲存的修改？",
   "\"{name}\" has unsaved changes. If you close the tab, your changes will be lost.": "「{name}」有尚未儲存的修改，關閉分頁後修改會遺失。",
   "Discard and close": "捨棄並關閉",
-  "Close {name}": "關閉 {name}",
   "Unsaved changes": "尚未儲存",
   "Close tab": "關閉分頁",
   "Duplicate tab": "複製分頁",

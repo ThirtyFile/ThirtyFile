@@ -11,6 +11,7 @@ import { ErrorText } from "@/components/dialogs";
 import { locationLabel } from "@/components/LocationSelect";
 import { t } from "@/lib/i18n";
 import { formatBytes } from "@/lib/utils";
+import { NativeSelect } from "@/components/ui/native-select";
 
 /** A space as moving it needs it */
 export interface MovableSpace {
@@ -99,9 +100,9 @@ export function MoveDialog({
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="move-target">{t("Move to")}</Label>
-            <select
+            <NativeSelect
               id="move-target"
-              className="h-9 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              size="lg"
               value={value}
               onChange={(e) => setValue(e.target.value)}
             >
@@ -113,7 +114,7 @@ export function MoveDialog({
                   {l.disk_free_bytes != null && l.connected ? t("{location} · {free} free", { location: locationLabel(l), free: formatBytes(l.disk_free_bytes) }) : locationLabel(l)}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
             {spaces.length > 1 && target && (
               <p className="text-xs">{t("{n} space to move · {size}|{n} spaces to move · {size}", { n: movable.length, size: formatBytes(bytes) })}</p>
             )}

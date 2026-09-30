@@ -33,6 +33,7 @@ import type { CellStyle } from "@/lib/sheet/model";
 import { t, tc } from "@/lib/i18n";
 import { shortcut } from "@/lib/keys";
 import { cn } from "@/lib/utils";
+import { NativeSelect } from "@/components/ui/native-select";
 
 export type BorderKind = "all" | "outside" | "bottom" | "top" | "left" | "right" | "thickOutside" | "none";
 
@@ -152,10 +153,11 @@ export function SheetToolbar({
   const fmt = NUMBER_FORMATS.find((f) => (f.code ?? undefined) === (style.numFmt ?? undefined));
   return (
     <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-0.5 border-b px-2 py-1">
-      <select
+      <NativeSelect
         aria-label={t("Font size")}
         title={t("Font size")}
-        className="h-7 w-14 shrink-0 rounded border bg-background px-1 text-xs outline-none"
+        size="xs"
+        className="w-14 shrink-0 rounded px-1"
         value={style.size ?? 11}
         onChange={(e) => actions.style((s) => ({ ...s, size: Number(e.target.value) }))}
       >
@@ -166,7 +168,7 @@ export function SheetToolbar({
               {n}
             </option>
           ))}
-      </select>
+      </NativeSelect>
       <Tool label={t("{action} ({keys})", { action: t("Bold"), keys: shortcut("Ctrl+B") })} active={style.bold} onClick={() => toggle("bold")}>
         <BoldIcon />
       </Tool>

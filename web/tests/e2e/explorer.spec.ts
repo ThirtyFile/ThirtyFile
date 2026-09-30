@@ -1,22 +1,12 @@
 // File explorer against the real server: name conflicts when uploading, keyboard browsing, and search typed through an
 // input method. Each test works in a folder of its own inside My files.
 import { expect, test, type Page } from "@playwright/test";
-
-const PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? "e2e-admin-password";
+import { signIn } from "./helpers";
 
 interface Item {
   id: string;
   name: string;
   kind: string;
-}
-
-async function signIn(page: Page) {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Click or press any key to sign in" }).click();
-  await page.getByLabel("Username").fill("admin");
-  await page.getByLabel("Password").fill(PASSWORD);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.waitForURL(/\/files/);
 }
 
 /**

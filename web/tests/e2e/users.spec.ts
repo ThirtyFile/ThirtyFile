@@ -1,16 +1,6 @@
 // Searching the users list, and pages that load only what they need.
-import { expect, test, type Page } from "@playwright/test";
-
-const PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? "e2e-admin-password";
-
-async function signIn(page: Page) {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Click or press any key to sign in" }).click();
-  await page.getByLabel("Username").fill("admin");
-  await page.getByLabel("Password").fill(PASSWORD);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.waitForURL(/\/files/);
-}
+import { expect, test } from "@playwright/test";
+import { signIn } from "./helpers";
 
 test("the users list finds accounts on the server by name", async ({ page }) => {
   await signIn(page);

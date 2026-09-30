@@ -7,6 +7,7 @@ import { Explorer } from "@/components/Explorer";
 import { useSort } from "@/pages/FilesPage";
 import { t } from "@/lib/i18n";
 import { extOf, nameCollator } from "@/lib/utils";
+import { NativeSelect } from "@/components/ui/native-select";
 
 function Empty({ icon: Icon, text, hint }: { icon: typeof ClockIcon; text: string; hint?: string }) {
   return (
@@ -107,7 +108,6 @@ const SEARCH_SIZES: { id: string; label: () => string; filter: SearchFilter }[] 
   { id: "medium", label: () => t("1 to 100 MB"), filter: { min_size: MB, max_size: 100 * MB } },
   { id: "large", label: () => t("Larger than 100 MB"), filter: { min_size: 100 * MB + 1 } },
 ];
-const filterCls = "h-7 rounded-md border bg-background px-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 export function SearchPage() {
   const [params, setParams] = useSearchParams();
@@ -141,43 +141,43 @@ export function SearchPage() {
     <div className="flex flex-wrap items-center gap-2 border-b px-3 py-1.5 text-xs text-muted-foreground" role="group" aria-label={t("Search filters")}>
       <label className="flex items-center gap-1.5">
         {t("Look in")}
-        <select className={filterCls} value={within ?? ""} onChange={(e) => set("in", e.target.value)}>
+        <NativeSelect size="xs" value={within ?? ""} onChange={(e) => set("in", e.target.value)}>
           {within && <option value={within}>{t("{name} and its subfolders", { name: folderName || "…" })}</option>}
           <option value="">{t("Everywhere I have access")}</option>
-        </select>
+        </NativeSelect>
       </label>
       <label className="flex items-center gap-1.5">
         {t("Type")}
-        <select className={filterCls} value={type} onChange={(e) => set("type", e.target.value)}>
+        <NativeSelect size="xs" value={type} onChange={(e) => set("type", e.target.value)}>
           <option value="">{t("Any")}</option>
           {SEARCH_TYPES.map((x) => (
             <option key={x.id} value={x.id}>
               {x.label()}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </label>
       <label className="flex items-center gap-1.5">
         {t("Date modified")}
-        <select className={filterCls} value={date} onChange={(e) => set("date", e.target.value)}>
+        <NativeSelect size="xs" value={date} onChange={(e) => set("date", e.target.value)}>
           <option value="">{t("Any")}</option>
           {SEARCH_DATES.map((x) => (
             <option key={x.id} value={x.id}>
               {x.label()}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </label>
       <label className="flex items-center gap-1.5">
         {t("Size")}
-        <select className={filterCls} value={size} onChange={(e) => set("size", e.target.value)}>
+        <NativeSelect size="xs" value={size} onChange={(e) => set("size", e.target.value)}>
           <option value="">{t("Any")}</option>
           {SEARCH_SIZES.map((x) => (
             <option key={x.id} value={x.id}>
               {x.label()}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </label>
       {q.data?.truncated && <span role="status">{t("Showing the first {n} results. Add words or filters to find the rest.", { n: q.data.items.length })}</span>}
     </div>

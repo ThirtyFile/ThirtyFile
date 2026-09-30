@@ -14,6 +14,7 @@ import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/Provid
 import { copyAndSay } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 import { Section, SettingsFrame, Toggle } from "@/pages/SettingsFrame";
+import { NativeSelect } from "@/components/ui/native-select";
 
 const PROVIDERS: SsoProviderId[] = ["microsoft", "google", "github", "oidc"];
 
@@ -248,16 +249,16 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
                   </div>
                   <div className="grid gap-1.5">
                     <Label htmlFor={`rule-${i}-personal`}>{t("\"My files\" of new accounts")}</Label>
-                    <select
+                    <NativeSelect
                       id={`rule-${i}-personal`}
-                      className="h-9 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      size="lg"
                       value={r.personal}
                       onChange={(e) => setRule(i, { personal: e.target.value as RuleDraft["personal"] })}
                     >
                       <option value="">{t("As in the system settings")}</option>
                       <option value="yes">{t("Create")}</option>
                       <option value="no">{t("Don't create")}</option>
-                    </select>
+                    </NativeSelect>
                     {r.personal !== "no" && (
                       <LocationSelect
                         aria-label={t("Storage location of \"My files\"")}
@@ -374,18 +375,19 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
             <div className="grid gap-3 border-t pt-4">
               <div className="grid gap-1.5">
                 <Label htmlFor={`sso-${id}-provisioning`}>{t("Accounts that aren't linked yet")}</Label>
-                <select
+                <NativeSelect
                   id={`sso-${id}-provisioning`}
                   value={draft[id].provisioning}
                   onChange={(e) => setProvider(id, { provisioning: e.target.value as SsoProvisioning })}
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring"
+                  size="lg"
+                  className="px-3"
                 >
                   {PROVISIONING.map((o) => (
                     <option key={o.value} value={o.value}>
                       {o.label}
                     </option>
                   ))}
-                </select>
+                </NativeSelect>
                 <p className="text-xs text-muted-foreground">{PROVISIONING.find((o) => o.value === draft[id].provisioning)?.help}</p>
                 {draft[id].provisioning === "create" && splitDomains(providerDomains[id]).length === 0 && splitDomains(domains).length === 0 && (
                   <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300">

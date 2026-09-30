@@ -29,6 +29,7 @@ import { useMe } from "@/lib/session";
 import { hasDraft, useDraftsVersion } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 import { currentEntry, useTabActions, useTabsState, viewedFile, type Tab } from "@/tabs";
+import { MAIN_ID } from "@/components/Frame";
 
 const TAB_MIME = "application/x-thirtyfile-tab";
 
@@ -77,6 +78,8 @@ function TabItem({ tab, active, onlyOne }: { tab: Tab; active: boolean; onlyOne:
           render={<div />}
           role="tab"
           aria-selected={active}
+          aria-keyshortcuts="Delete"
+          aria-controls={MAIN_ID}
           tabIndex={active ? 0 : -1}
           title={title}
           draggable
@@ -124,9 +127,12 @@ function TabItem({ tab, active, onlyOne }: { tab: Tab; active: boolean; onlyOne:
             <Icon className={cn("size-3.5 shrink-0", Icon === FolderIcon || Icon === FolderOpenIcon ? "text-[#d8b66c]" : "")} />
           )}
           <span className="min-w-0 flex-1 truncate">{title}</span>
+          {/* For the mouse: the keyboard closes the focused tab with Delete, so the button isn't a Tab stop (hidden on
+              other tabs until pointed at, it would be an invisible one) and isn't read out inside the tab's name */}
           <button
             type="button"
-            aria-label={t("Close {name}", { name: title })}
+            tabIndex={-1}
+            aria-hidden
             title={unsaved ? t("Unsaved changes") : t("Close tab")}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => {
@@ -170,11 +176,21 @@ function TabItem({ tab, active, onlyOne }: { tab: Tab; active: boolean; onlyOne:
 
 export function TabBar() {
   const { tabs, active } = useTabsState();
-  const { open, activate } = useTabActions();
-  // Keyboard: Tab reaches the active tab, Left/Right (Home/End) switch to the others
+  const { open, activate, close } = useTabActions();
+  // Keyboard: Tab reaches the active tab, Left/Right (Home/End) switch to the others, Delete closes it
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).getAttribute("role") !== "tab" || e.altKey) return;
     const i = tabs.findIndex((t) => t.id === active);
+    if (e.key === "Delete") {
+      e.preventDefault();
+      const bar = e.currentTarget;
+      close(active);
+      // The tab that takes its place gets the focus (not when closing waits for an answer about unsaved changes)
+      requestAnimationFrame(() => {
+        if (!document.querySelector("[role=dialog], [role=alertdialog]")) bar.querySelector<HTMLElement>("[role=tab][aria-selected=true]")?.focus();
+      });
+      return;
+    }
     let next: number | null = null;
     if (e.key === "ArrowRight") next = (i + 1) % tabs.length;
     else if (e.key === "ArrowLeft") next = (i - 1 + tabs.length) % tabs.length;

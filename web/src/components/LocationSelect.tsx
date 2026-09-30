@@ -2,7 +2,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type StorageKind, type StorageLocation } from "@/api";
 import { t } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
+import { NativeSelect } from "@/components/ui/native-select";
 
 export const useStorageLocations = (enabled = true) => useQuery({ queryKey: ["storage-locations"], queryFn: api.storageLocations, enabled });
 
@@ -54,10 +54,11 @@ export function LocationSelect({
   const current = locations.data?.find((l) => l.is_default);
   const blankLabel = blank === "default" ? (current ? t("Default location ({name})", { name: current.name }) : t("Default location")) : blank;
   return (
-    <select
+    <NativeSelect
       id={id}
       aria-label={ariaLabel}
-      className={cn("h-9 min-w-0 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50", className)}
+      size="lg"
+      className={className}
       value={value}
       disabled={disabled || !locations.data}
       onChange={(e) => onChange(e.target.value)}
@@ -70,6 +71,6 @@ export function LocationSelect({
           {locationLabel(l)}
         </option>
       ))}
-    </select>
+    </NativeSelect>
   );
 }

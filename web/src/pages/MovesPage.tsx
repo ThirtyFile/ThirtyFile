@@ -15,6 +15,7 @@ import { t, tServer } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
 import { useMoves } from "@/lib/moves";
 import { cn, formatBytes, formatDateTime } from "@/lib/utils";
+import { NativeSelect } from "@/components/ui/native-select";
 
 export const MOVE_STATE_LABEL: Record<MoveState, string> = {
   queued: t("Waiting"),
@@ -129,8 +130,8 @@ export function MovesPage() {
       <div className="flex-1" />
       <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <span className="max-sm:hidden">{t("At the same time")}</span>
-        <select
-          className="h-7 rounded-md border bg-background px-1.5 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        <NativeSelect
+          size="xs"
           aria-label={t("Moves at the same time")}
           value={q.data?.concurrency ?? 1}
           disabled={!q.data}
@@ -141,7 +142,7 @@ export function MovesPage() {
               {n}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </label>
     </>
   );

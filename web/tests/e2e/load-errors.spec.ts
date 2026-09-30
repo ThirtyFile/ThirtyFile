@@ -1,17 +1,7 @@
 // Lists and settings pages whose data can't be loaded say so, with a way to try again, rather than showing an empty
 // list or loading for ever.
 import { expect, test, type Page } from "@playwright/test";
-
-const PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? "e2e-admin-password";
-
-async function signIn(page: Page) {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Click or press any key to sign in" }).click();
-  await page.getByLabel("Username").fill("admin");
-  await page.getByLabel("Password").fill(PASSWORD);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.waitForURL(/\/files/);
-}
+import { signIn } from "./helpers";
 
 /** Answers requests to `path` with an error until the returned function is called */
 async function failing(page: Page, path: string) {

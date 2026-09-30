@@ -12,6 +12,7 @@ import { useMe } from "@/lib/session";
 import { t } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
 import { cn } from "@/lib/utils";
+import { NativeSelect } from "@/components/ui/native-select";
 
 function useSubmit(fn: () => Promise<void>) {
   const [busy, setBusy] = useState(false);
@@ -204,8 +205,8 @@ export function FolderPickerDialog(props: {
         </DialogHeader>
         <label className="flex items-center gap-2 text-sm">
           <HardDriveIcon className="size-4 text-muted-foreground" />
-          <select
-            className="h-8 flex-1 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          <NativeSelect
+            className="flex-1"
             aria-label={t("Spaces")}
             value={base && drives.data?.some((d) => d.root_id === base.id) ? base.id : ""}
             onChange={(e) => {
@@ -222,7 +223,7 @@ export function FolderPickerDialog(props: {
                 {d.kind === "team" ? t("{name} (team space)", { name: d.name }) : d.kind === "company" ? t("{name} (company-wide)", { name: d.name }) : d.name}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         <div className="flex flex-wrap items-center gap-0.5 text-sm">
           <button type="button" className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-muted" onClick={() => setTrail([])}>

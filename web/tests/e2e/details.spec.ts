@@ -1,16 +1,6 @@
 // The details pane while moving through a folder, share links put on the clipboard, and restoring skipped items.
 import { expect, test, type Page } from "@playwright/test";
-
-const PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? "e2e-admin-password";
-
-async function signIn(page: Page) {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Click or press any key to sign in" }).click();
-  await page.getByLabel("Username").fill("admin");
-  await page.getByLabel("Password").fill(PASSWORD);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.waitForURL(/\/files/);
-}
+import { signIn } from "./helpers";
 
 /** A new folder in My files, with a unique name */
 async function folder(page: Page, name: string): Promise<string> {

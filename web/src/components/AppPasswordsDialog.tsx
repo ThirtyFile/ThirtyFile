@@ -8,12 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ErrorText } from "@/components/dialogs";
+import { ErrorText, errorProps } from "@/components/dialogs";
 import { useMe } from "@/lib/session";
 import { copyAndSay, formatDate, formatDateTime } from "@/lib/utils";
 import { t } from "@/lib/i18n";
+import { NativeSelect } from "@/components/ui/native-select";
 
-const selectCls = "h-9 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
 
 /** Expiry choices, in days (0 = never) */
 const EXPIRY = [30, 90, 365, 0];
@@ -134,7 +134,14 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
               <div className="flex flex-wrap gap-2">
                 <div className="grid min-w-40 flex-1 gap-1.5">
                   <Label htmlFor="ap-password">{t("Your current password")}</Label>
-                  <Input id="ap-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+                  <Input
+                    id="ap-password"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                    {...errorProps(create.error, "ap-error")}
+                  />
                 </div>
                 {needsCode && (
                   <div className="grid w-40 gap-1.5">
@@ -149,27 +156,27 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
             <div className="flex flex-wrap items-end gap-2">
               <div className="grid gap-1.5">
                 <Label htmlFor="ap-scope">{t("Access")}</Label>
-                <select id="ap-scope" className={selectCls} value={scope} onChange={(e) => setScope(e.target.value as "read" | "write")}>
+                <NativeSelect id="ap-scope" size="lg" value={scope} onChange={(e) => setScope(e.target.value as "read" | "write")}>
                   <option value="read">{t("Read files only")}</option>
                   <option value="write">{t("Read and change files")}</option>
-                </select>
+                </NativeSelect>
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="ap-expiry">{t("Expires")}</Label>
-                <select id="ap-expiry" className={selectCls} value={days} onChange={(e) => setDays(Number(e.target.value))}>
+                <NativeSelect id="ap-expiry" size="lg" value={days} onChange={(e) => setDays(Number(e.target.value))}>
                   {EXPIRY.map((d) => (
                     <option key={d} value={d}>
                       {d === 0 ? t("Never") : t("In {n} day|In {n} days", { n: d })}
                     </option>
                   ))}
-                </select>
+                </NativeSelect>
               </div>
               <Button type="submit" className="ml-auto" disabled={!ready || create.isPending}>
                 {create.isPending ? <Loader2Icon className="animate-spin" /> : <PlusIcon />}
                 {t("Create")}
               </Button>
             </div>
-            <ErrorText>{create.error?.message}</ErrorText>
+            <ErrorText id="ap-error">{create.error?.message}</ErrorText>
           </form>
         )}
 

@@ -38,10 +38,8 @@ import { cn, formatBytes, formatDateTime } from "@/lib/utils";
 import { t, tServer } from "@/lib/i18n";
 import { useSelectableList } from "@/lib/listSelection";
 import { useMoves } from "@/lib/moves";
+import { NativeSelect } from "@/components/ui/native-select";
 
-/** Dropdown (same style as the inputs) */
-const SELECT_CLASS =
-  "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring dark:bg-input/30 [&>option]:bg-popover [&>option]:text-popover-foreground";
 
 export const STORAGE_KIND_LABEL: Record<StorageKind, string> = {
   s3: t("S3-compatible"),
@@ -585,9 +583,9 @@ function StorageDialog({ location, onClose, onSaved }: { location: StorageLocati
                 {!location && (
                   <div className="grid gap-1.5">
                     <Label htmlFor="st-kind">{t("Type")}</Label>
-                    <select
+                    <NativeSelect
                       id="st-kind"
-                      className={SELECT_CLASS}
+                      className="w-full"
                       value={kind}
                       onChange={(e) => {
                         const k = e.target.value as StorageKind;
@@ -603,7 +601,7 @@ function StorageDialog({ location, onClose, onSaved }: { location: StorageLocati
                           {STORAGE_KIND_LABEL[k]}
                         </option>
                       ))}
-                    </select>
+                    </NativeSelect>
                   </div>
                 )}
                 {kind === "local" ? (
@@ -628,9 +626,9 @@ function StorageDialog({ location, onClose, onSaved }: { location: StorageLocati
                     {!location && (
                       <div className="grid gap-1.5">
                         <Label htmlFor="st-preset">{t("Service")}</Label>
-                        <select
+                        <NativeSelect
                           id="st-preset"
-                          className={SELECT_CLASS}
+                          className="w-full"
                           value={preset}
                           onChange={(e) => {
                             const p = PRESETS.find((x) => x.key === e.target.value);
@@ -645,7 +643,7 @@ function StorageDialog({ location, onClose, onSaved }: { location: StorageLocati
                               {p.label}
                             </option>
                           ))}
-                        </select>
+                        </NativeSelect>
                         {presetHint && <p className="text-xs text-muted-foreground">{presetHint}</p>}
                       </div>
                     )}
@@ -752,10 +750,10 @@ function RemoteFields({
       {kind === "sftp" && (
         <div className="grid gap-1.5">
           <Label htmlFor="st-auth">{t("Sign-in methods")}</Label>
-          <select id="st-auth" className={SELECT_CLASS} value={auth} onChange={(e) => setAuth(e.target.value as "password" | "key")}>
+          <NativeSelect id="st-auth" className="w-full" value={auth} onChange={(e) => setAuth(e.target.value as "password" | "key")}>
             <option value="password">{t("Password")}</option>
             <option value="key">{t("Private key (recommended)")}</option>
-          </select>
+          </NativeSelect>
         </div>
       )}
       {kind === "sftp" && auth === "key" ? (
