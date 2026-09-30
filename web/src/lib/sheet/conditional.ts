@@ -7,7 +7,7 @@
  */
 
 import { sheetColor, rgbaHex, type Theme } from "@/lib/office/theme";
-import { evaluateAt, isErr, type Value } from "./formula";
+import { WORK_LIMIT, evaluateAt, isErr, type Budget, type Value } from "./formula";
 import { MAX_COLS, key, parseCellName, type Range, type Scalar, type Workbook } from "./model";
 
 /** Differential format (dxf in styles.xml) */
@@ -88,6 +88,11 @@ function parseSqref(sqref: string, maxRow: number, maxCol: number): Range[] {
 const MAX_RULE_CELLS = 200_000;
 /** Time budget (ms) for evaluating a whole sheet's conditional formats: files may contain huge ranges or very slow formulas */
 const TIME_BUDGET = 1500;
+/**
+ * Cell positions all of a sheet's rule formulas may visit together: a single slow formula call can't be interrupted
+ * by the time budget, so the formulas stop themselves (#CALC!) once this is spent
+ */
+const WORK_BUDGET = 2 * WORK_LIMIT;
 
 function area(ranges: Range[]) {
   return ranges.reduce((n, g) => n + (g.r2 - g.r1 + 1) * (g.c2 - g.c1 + 1), 0);
@@ -201,6 +206,8 @@ export function computeConditional(input: ConditionalInput): Map<number, CellDec
   const out = new Map<number, CellDecoration>();
   const stopped = new Set<number>();
   const deadline = performance.now() + TIME_BUDGET;
+  const budget: Budget = { left: WORK_BUDGET };
+  const outOfTime = () => performance.now() > deadline || budget.left <= 0;
   const color = (el: Element | null) => {
     const c = sheetColor(el, theme, input.palette);
     return c ? rgbaHex(c) : null;
@@ -241,7 +248,7 @@ export function computeConditional(input: ConditionalInput): Map<number, CellDec
     const formulas = children(rule, "formula").map((f) => f.textContent ?? "");
     const base: [number, number] = [ranges[0].r1, ranges[0].c1];
     // Time budget exceeded: skip the remaining rules (the preview still renders normally)
-    if (performance.now() > deadline) break;
+    if (outOfTime()) break;
     const range = cellsIn(ranges, sheet.cells);
     const all = range.filter(([r, c]) => !stopped.has(key(r, c)));
     const nums = () =>
@@ -253,16 +260,18 @@ export function computeConditional(input: ConditionalInput): Map<number, CellDec
       const hits: number[] = [];
       for (let i = 0; i < all.length; i++) {
         // Formulas may be slow: check the time every 256 cells; if over budget the whole rule is not applied
-        if ((i & 255) === 0 && performance.now() > deadline) return;
+        if (((i & 255) === 0 && performance.now() > deadline) || budget.left <= 0) return;
         const [r, c] = all[i];
         if (test(value(r, c), r, c)) hits.push(key(r, c));
       }
+      // The formulas ran out of work: some cells weren't really checked
+      if (budget.left <= 0) return;
       for (const k of hits) {
         applyDxf(k, dxf);
         if (stop) stopped.add(k);
       }
     };
-    const evalF = (f: string, r: number, c: number) => evaluateAt(book, f, sheetIndex, base, [r, c], get, sortedKeys);
+    const evalF = (f: string, r: number, c: number) => evaluateAt(book, f, sheetIndex, base, [r, c], get, sortedKeys, budget);
 
     switch (type) {
       case "cellIs": {
