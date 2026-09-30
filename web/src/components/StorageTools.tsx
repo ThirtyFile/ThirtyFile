@@ -152,6 +152,7 @@ const STATUS_LABEL: Record<NonNullable<LocationItem["usage"]>["status"], string>
   used: t("In use"),
   version: t("Earlier version"),
   trash: t("In the trash"),
+  replica: t("Replica"),
   pending: t("Waiting to be deleted"),
   unused: t("Unused"),
 };

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArchiveRestoreIcon, BellIcon, CalendarClockIcon, CheckCheckIcon, HardDriveIcon, InboxIcon, KeySquareIcon, Link2Icon, SettingsIcon, Trash2Icon, UsersRoundIcon } from "lucide-react";
+import { ArchiveRestoreIcon, BellIcon, CalendarClockIcon, CheckCheckIcon, CopyCheckIcon, HardDriveIcon, InboxIcon, KeySquareIcon, Link2Icon, SettingsIcon, Trash2Icon, UsersRoundIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type AppNotification } from "@/api";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -18,6 +18,7 @@ const ICON = {
   sign_in_method: Link2Icon,
   link_upload: InboxIcon,
   backup: ArchiveRestoreIcon,
+  replica: CopyCheckIcon,
 };
 
 /** How often the bell asks for new notifications */
@@ -28,7 +29,7 @@ function Item({ n, onOpen }: { n: AppNotification; onOpen(n: AppNotification): v
   const Icon = ICON[n.kind] ?? BellIcon;
   return (
     <DropdownMenuItem onClick={() => onOpen(n)} className="items-start gap-2.5 py-2">
-      <Icon className={cn("mt-0.5", (n.kind === "space_full" || (n.kind === "backup" && n.data.state !== "recovered")) && "text-destructive")} />
+      <Icon className={cn("mt-0.5", (n.kind === "space_full" || ((n.kind === "backup" || n.kind === "replica") && n.data.state !== "recovered")) && "text-destructive")} />
       <span className="grid min-w-0 flex-1 gap-0.5">
         <span className={cn("text-[13px] leading-snug whitespace-normal", !n.read && "font-medium")}>{title}</span>
         {detail && <span className="text-xs whitespace-normal text-muted-foreground">{detail}</span>}

@@ -13,10 +13,11 @@ export const NOTIFICATION_KINDS: { kind: NotificationKind; label: string; desc: 
   { kind: "app_password", label: t("New app password"), desc: t("An app password is created for your account") },
   { kind: "sign_in_method", label: t("New sign-in method"), desc: t("A Microsoft, Google, GitHub or other account is linked to yours") },
   { kind: "backup", label: t("Backups"), desc: t("Administrators: a backup fails, can't reach its location or is overdue, and when it works again") },
+  { kind: "replica", label: t("Replicas"), desc: t("Administrators: replicas aren't kept as wanted (a location not working, damaged copies, or behind too long), and when they are again") },
 ];
 
 /** Kinds only administrators get */
-export const ADMIN_NOTIFICATION_KINDS: NotificationKind[] = ["backup"];
+export const ADMIN_NOTIFICATION_KINDS: NotificationKind[] = ["backup", "replica"];
 
 /** The name as the app shows it elsewhere: spaces the system named itself are translated */
 function shownName(n: AppNotification) {
@@ -77,6 +78,12 @@ export function notificationText(n: AppNotification): { title: string; detail: s
           return { title: t("The backup “{name}” works again", { name }), detail: since };
       }
     }
+    case "replica": {
+      const copies = t("{current} of {wanted} copies current", { current: d.current ?? 0, wanted: d.wanted ?? 0 });
+      return d.state === "degraded"
+        ? { title: t("The replicas “{name}” need attention", { name }), detail: d.error ? tServer(d.error) : copies }
+        : { title: t("The replicas “{name}” are kept again", { name }), detail: copies };
+    }
     default:
       return { title: name, detail: "" };
   }
@@ -85,6 +92,7 @@ export function notificationText(n: AppNotification): { title: string; detail: s
 /** Where opening a notification goes: the folder or space, or the file's viewer */
 export function notificationLink(n: AppNotification): string | null {
   if (n.kind === "backup") return "/admin/backups";
+  if (n.kind === "replica") return "/admin/replicas";
   if (!n.node_id) return null;
   return n.data.item === "file" ? `/view/${encodeURIComponent(n.node_id)}` : `/files/${encodeURIComponent(n.node_id)}`;
 }

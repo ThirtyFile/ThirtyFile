@@ -16,7 +16,7 @@ import { t, tServer } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 /** The browser's time zone, the default of a new policy */
-const localZone = () => {
+export const localZone = () => {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   } catch {
@@ -25,7 +25,7 @@ const localZone = () => {
 };
 
 /** Every time zone the browser knows */
-const zones = (): string[] => {
+export const zones = (): string[] => {
   try {
     return (Intl as unknown as { supportedValuesOf(k: string): string[] }).supportedValuesOf("timeZone");
   } catch {

@@ -94,6 +94,14 @@ const ACTION_LABEL: Record<string, string> = {
   backup_run: t("Back up now"),
   backup_alert: t("Backup needs attention"),
   backup_import: t("Found backups on a location"),
+  replica_create: t("Create replica policy"),
+  replica_update: t("Change replica policy"),
+  replica_delete: t("Delete replica policy"),
+  replica_failed: t("Replica sync failed"),
+  replica_alert: t("Replicas need attention"),
+  replica_read: t("Read from a replica"),
+  replica_promote: t("Promote a replica"),
+  replica_purge: t("Remove copies no policy wants"),
   group_create: t("Create group"),
   group_update: t("Update group"),
   group_delete: t("Delete group"),
@@ -141,6 +149,10 @@ export const ACTION_GROUPS: { label: string; actions: string[] }[] = [
       "backup_delete_start",
       "backup_delete",
     ],
+  },
+  {
+    label: t("Replicas"),
+    actions: ["replica_create", "replica_update", "replica_delete", "replica_failed", "replica_alert", "replica_read", "replica_promote", "replica_purge"],
   },
 ];
 
