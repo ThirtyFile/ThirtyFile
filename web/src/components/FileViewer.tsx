@@ -1,8 +1,8 @@
-import { Suspense, lazy, useEffect, useEffectEvent, useState } from "react";
-import { DownloadIcon, Loader2Icon } from "lucide-react";
+import { Suspense, lazy, useEffect, useEffectEvent, useState, type ReactNode } from "react";
+import { ArrowLeftIcon, DownloadIcon, FileTextIcon, Loader2Icon } from "lucide-react";
 import { triggerDownload, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
-import { FileIcon, categoryOf, isBrowserMedia, isTextLike } from "@/components/FileIcon";
+import { FileIcon, MAX_TEXT_BYTES, categoryOf, isBrowserMedia, isTextLike, mayOpenAsText } from "@/components/FileIcon";
 import { hasDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 import { reportShown } from "@/lib/errorReport";
@@ -63,7 +63,63 @@ export function FileViewer(props: {
         />
       </Suspense>
     );
-  return <NoPreview node={node} source={props.source} allowDownload={props.allowDownload} reason={t("Preview isn't available for this file type")} />;
+  return <OtherFile key={node.id} {...props} />;
+}
+
+/**
+ * A file without a preview: its name, size and Download, and for a file that may be text (no extension, one ThirtyFile
+ * doesn't know, text too large to open by itself), a way to open it in the text editor. That doesn't change the file:
+ * it is read as text, and saved only by Save, with the same checks as any text file (write permission, a newer version
+ * saved meanwhile, an encoding the editor can't write). A link that only allows viewing isn't offered more than it
+ * offered before. Keyed by file, so each file opens in its usual view; unsaved edits reopen in the editor.
+ */
+function OtherFile(props: Parameters<typeof FileViewer>[0]) {
+  const { node, embedded } = props;
+  const [asText, setAsText] = useState(() => hasDraft(node.id));
+  // The editor reports its own unsaved changes; the plain view has none
+  const reportClean = useEffectEvent(() => props.onDirtyChange?.(false));
+  useEffect(() => {
+    if (!asText) reportClean();
+  }, [asText]);
+  const offered = mayOpenAsText(node) && props.allowDownload !== false;
+  const tooLarge = node.size > MAX_TEXT_BYTES;
+  if (asText && offered && !tooLarge) {
+    const back = (
+      <Button variant="ghost" size="sm" className="-ml-2 h-7 px-2 text-xs" onClick={() => setAsText(false)} title={t("Back to the file's usual view")}>
+        <ArrowLeftIcon /> {t("Default view")}
+      </Button>
+    );
+    return (
+      // The editor's own right-click menu (copy, paste) rather than the page's
+      <div className="flex size-full min-h-0 items-center justify-center" onContextMenu={(e) => e.stopPropagation()}>
+        <Suspense fallback={<Loader2Icon className={cn("size-6 animate-spin", embedded ? "text-muted-foreground" : "text-white/70")} />}>
+          <TextEditor
+            node={node}
+            source={props.source}
+            editable={props.editable}
+            embedded={embedded}
+            asText
+            toolbar={back}
+            onSaved={props.onSaved}
+            onDirtyChange={props.onDirtyChange}
+          />
+        </Suspense>
+      </div>
+    );
+  }
+  let extra = null;
+  if (offered && tooLarge)
+    extra = <p className="max-w-sm text-xs text-muted-foreground">{t("This file is too large to open in the text editor (over {size}). Download it to open it.", { size: formatBytes(MAX_TEXT_BYTES) })}</p>;
+  else if (offered)
+    extra = (
+      <>
+        {hasDraft(node.id) && <p className="text-xs text-muted-foreground">{t("Your unsaved changes are kept in the text editor.")}</p>}
+        <Button variant="outline" onClick={() => setAsText(true)}>
+          <FileTextIcon /> {t("Open in text editor")}
+        </Button>
+      </>
+    );
+  return <NoPreview node={node} source={props.source} allowDownload={props.allowDownload} reason={t("Preview isn't available for this file type")} extra={extra} />;
 }
 
 /**
@@ -133,7 +189,7 @@ function Media({ node, url, source, allowDownload }: { node: Node; url: string; 
   return <video src={url} controls autoPlay onError={fail} className="max-h-full max-w-full rounded-lg bg-black" />;
 }
 
-function NoPreview({ node, source, allowDownload, reason }: { node: Node; source: FileSource; allowDownload?: boolean; reason: string }) {
+function NoPreview({ node, source, allowDownload, reason, extra }: { node: Node; source: FileSource; allowDownload?: boolean; reason: string; extra?: ReactNode }) {
   return (
     <div className="flex flex-col items-center gap-4 rounded-2xl border bg-background px-10 py-8 text-center text-foreground">
       <FileIcon node={node} className="size-16" />
@@ -141,11 +197,14 @@ function NoPreview({ node, source, allowDownload, reason }: { node: Node; source
         <div className="font-medium break-all">{node.name}</div>
         <div className="text-sm text-muted-foreground">{formatBytes(node.size)} · {reason}</div>
       </div>
-      {allowDownload !== false && (
-        <Button onClick={() => triggerDownload(source.contentUrl(node, true))}>
-          <DownloadIcon /> {t("Download")}
-        </Button>
-      )}
+      <div className="flex flex-wrap justify-center gap-2">
+        {allowDownload !== false && (
+          <Button onClick={() => triggerDownload(source.contentUrl(node, true))}>
+            <DownloadIcon /> {t("Download")}
+          </Button>
+        )}
+      </div>
+      {extra}
     </div>
   );
 }

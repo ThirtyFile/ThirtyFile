@@ -11,7 +11,7 @@ import { getDraft, setDraft, textSaved } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 import { reportShown } from "@/lib/errorReport";
 import { shortcut } from "@/lib/keys";
-import { decodeText, encodeText, lineEnding, normalizeLines, type TextEncodingName } from "@/lib/textEncoding";
+import { decodeText, encodeText, lineEnding, looksBinary, normalizeLines, type TextEncodingName } from "@/lib/textEncoding";
 import { useTheme } from "@/lib/theme";
 
 export default function TextEditor(props: {
@@ -24,11 +24,15 @@ export default function TextEditor(props: {
   embedded?: boolean;
   /** Shown first in the bar above the text (the Markdown view's Preview / Edit switch) */
   toolbar?: ReactNode;
+  /** Opened as text by choice (a file of an unknown kind): content that doesn't look like text is read-only */
+  asText?: boolean;
 }) {
   const { dark } = useTheme();
   const [original, setOriginal] = useState<string | null>(null);
   /** null: the encoding wasn't recognised, so the file is read-only to avoid damaging it */
   const [encoding, setEncoding] = useState<TextEncodingName | null>("UTF-8");
+  /** Opened as text by choice, and the content doesn't look like text: read-only */
+  const [binary, setBinary] = useState(false);
   /** Line ending of the file, restored when saving */
   const eol = useRef<"\r\n" | "\n">("\n");
   const [text, setText] = useState("");
@@ -67,8 +71,10 @@ export default function TextEditor(props: {
         base.current = version;
         loaded.current = { id: props.node.id, reload };
         const decoded = decodeText(buf);
+        const notText = !!props.asText && looksBinary(decoded.text);
         eol.current = lineEnding(decoded.text);
-        const d = { ...decoded, text: normalizeLines(decoded.text) };
+        const d = { ...decoded, encoding: notText ? null : decoded.encoding, text: normalizeLines(decoded.text) };
+        setBinary(notText);
         // Restore unsaved content when switching back to the tab
         const draft = props.editable && d.encoding !== null ? getDraft(props.node.id, "text") : undefined;
         if (draft && draft.base !== d.text) {
@@ -170,7 +176,9 @@ export default function TextEditor(props: {
     >
       <div className="flex h-10 items-center gap-2 border-b px-3 text-xs text-muted-foreground">
         {props.toolbar}
-        {encoding === null ? (
+        {binary ? (
+          <span>{t("This file doesn't look like text: opened read-only so it isn't damaged")}</span>
+        ) : encoding === null ? (
           <span>{t("Unknown encoding: opened read-only so the file isn't damaged")}</span>
         ) : (
           <span>{encoding}</span>
