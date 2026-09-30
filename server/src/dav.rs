@@ -583,8 +583,11 @@ async fn mkcol(st: &AppState, user: &User, segs: &[String], body: Body) -> AppRe
 /// How long MOVE and COPY wait for the change before answering 202 Accepted. Clients expect them to be done when they
 /// answer, and most do, well within this; a large copy to or from a folder on the server may not be: it goes on in the
 /// background, and the client sees the result when it looks again. (Any 2xx is success to clients, and none of them
-/// keeps waiting for minutes.)
-const TRANSFER_WAIT: std::time::Duration = std::time::Duration::from_millis(if cfg!(test) { 300 } else { 60_000 });
+/// keeps waiting for minutes.) Tests wait as for any job (`jobs::wait`: long enough for a busy machine, unless they ask
+/// for `jobs::short_wait`).
+fn transfer_wait() -> std::time::Duration {
+    if cfg!(test) { jobs::wait() } else { std::time::Duration::from_secs(60) }
+}
 
 /// MOVE and COPY, with Destination and Overwrite (an item already at the destination goes to the trash)
 async fn transfer(st: &AppState, user: &User, segs: &[String], headers: &HeaderMap, moving: bool) -> AppResult<Response> {
@@ -618,7 +621,7 @@ async fn transfer(st: &AppState, user: &User, segs: &[String], headers: &HeaderM
     // The change runs as a job, so a client that gives up waiting (or loses its connection) doesn't cut it off halfway
     let done = if replaced.is_some() { StatusCode::NO_CONTENT } else { StatusCode::CREATED };
     let (st, user) = (st.clone(), user.clone());
-    let job = jobs::run(&st.clone(), &user.clone(), "webdav", Limit::None, TRANSFER_WAIT, move |_| async move {
+    let job = jobs::run(&st.clone(), &user.clone(), "webdav", Limit::None, transfer_wait(), move |_| async move {
         if let Some(existing) = replaced {
             trash(&st, &user, &existing).await?;
         }
@@ -1321,6 +1324,7 @@ mod tests {
         crate::folders::scan(&env.st, &space.drive).await.unwrap();
         let dav = Client::new(&env, &admin, "write").await;
         // Copying takes longer than the client is kept waiting: accepted, and done meanwhile
+        let short = crate::jobs::short_wait();
         let go = std::sync::Arc::new(tokio::sync::Notify::new());
         let hook = fsops::hook_after_place(fsops::wait_for(&go));
         let h = [("destination", "/dav/Server/Copied")];
@@ -1337,7 +1341,7 @@ mod tests {
         assert!(done, "the copy got its name");
         assert_eq!(std::fs::read(space.dir.join("Copied/a.txt")).unwrap(), b"a");
         // Quick ones answer as always
-        drop(hook);
+        drop((hook, short));
         let h = [("destination", "/dav/My%20files/Photos")];
         assert_eq!(dav.send("MOVE", "/dav/Server/Photos", &h, "").await.status, StatusCode::CREATED);
         assert!(env.node_at(&space.drive, "Photos").await.is_none());
