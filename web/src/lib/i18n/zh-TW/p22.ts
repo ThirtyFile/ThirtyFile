@@ -35,6 +35,7 @@ export default {
   "name@example.com": "name@example.com",
   "Emails are sent to this address. Leave it blank to get no emails.": "郵件會寄到這個地址。留白則不寄送任何郵件。",
   "Emails aren't sent yet: an administrator hasn't set up an email server. You can still enter your address now.": "目前還不會寄送郵件：管理員尚未設定郵件伺服器。你仍可以先填寫地址。",
+  "Password reset links go to this address too, so changing it asks who you are. The previous address is told about the change.": "重設密碼的連結也會寄到這個地址，所以變更時需要確認你的身分。原本的地址會收到變更通知。",
   "Notify me when": "通知我的情況",
   "In the app": "在網站中",
   "By email": "寄電子郵件",

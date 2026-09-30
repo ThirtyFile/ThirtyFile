@@ -10,6 +10,7 @@ export const NOTIFICATION_KINDS: { kind: NotificationKind; label: string; desc: 
   { kind: "access_expiring", label: t("Access ending"), desc: t("Your access to something shared with you ends within 3 days") },
   { kind: "link_upload", label: t("Files received through a link"), desc: t("Someone uploads files through a link you made that accepts files") },
   { kind: "app_password", label: t("New app password"), desc: t("An app password is created for your account") },
+  { kind: "sign_in_method", label: t("New sign-in method"), desc: t("A Microsoft, Google, GitHub or other account is linked to yours") },
 ];
 
 /** The name as the app shows it elsewhere: spaces the system named itself are translated */
@@ -50,6 +51,13 @@ export function notificationText(n: AppNotification): { title: string; detail: s
       return {
         title: t("An app password “{name}” was created for your account", { name }),
         detail: t("From {ip}. If you didn't create it, remove it under App passwords and change your password.", { ip: d.ip || "—" }),
+      };
+    case "sign_in_method":
+      return {
+        title: t("A {provider} account was linked to your account", { provider: d.label ?? "" }),
+        detail: d.account
+          ? t("{account}, from {ip}. If you didn't link it, unlink it under Sign-in methods and change your password.", { account: d.account, ip: d.ip || "—" })
+          : t("From {ip}. If you didn't link it, unlink it under Sign-in methods and change your password.", { ip: d.ip || "—" }),
       };
     default:
       return { title: name, detail: "" };

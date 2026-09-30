@@ -31,7 +31,7 @@
           <li>Enter the code the app shows to confirm, and two-factor sign-in is on.</li>
           <li>Save the ten <strong>recovery codes</strong> shown next, for example in a password manager or on paper. Each one signs you in once instead of a code, if you lose your phone. They are shown only this once.</li>
         </ol>
-        <p>From the same dialog you can create new recovery codes (the old ones stop working), move to another phone or app with <strong>Change app</strong>, or turn two-factor sign-in off. Each asks for your password.</p>
+        <p>From the same dialog you can create new recovery codes (the old ones stop working), move to another phone or app with <strong>Change app</strong>, or turn two-factor sign-in off. Each asks for your password and a code from your current app (or a recovery code).</p>
         <ul>
           <li>After five wrong codes you have to enter your password again. After ten wrong codes for one account, further codes are refused for up to 15 minutes.</li>
           <li><a href="sign-in.html">Single sign-on</a> (Microsoft, Google, GitHub or an OpenID Connect provider) doesn't ask for a code: the provider has its own two-step verification. <a href="#app-passwords">App passwords</a> don't ask for one either.</li>
@@ -74,9 +74,10 @@ curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;fil
           <li><strong>Access ending</strong>: access someone gave you ends within 3 days. When it was given with a shorter time to begin with, the share itself already said so.</li>
           <li><strong>Files received through a link</strong>: someone uploaded files through a link you made that accepts files. Files that keep coming through the same link within an hour are counted in the same notification, which sends one email.</li>
           <li><strong>New app password</strong>: an app password was created for your account, with the address it was created from.</li>
+          <li><strong>New sign-in method</strong>: a single sign-on account (Microsoft, Google, GitHub or OpenID Connect) was linked to yours (<a href="sign-in.html#link">Linking an account yourself</a>).</li>
         </ul>
         <p>A number on the bell counts the ones you haven't read. Click one to open what it is about. <strong>Mark all as read</strong> and <strong>Clear all</strong> are at the bottom of the list. Notifications are kept for 90 days.</p>
-        <p><strong>Notification settings</strong>, at the bottom of the bell's list or in the account menu, turns each kind on or off, in the app and by email separately. Emails go to the <strong>email address</strong> you enter there. If you sign in with single sign-on, the address that account gives is filled in the first time, and you can change it. Leave it blank to get no emails.</p>
+        <p><strong>Notification settings</strong>, at the bottom of the bell's list or in the account menu, turns each kind on or off, in the app and by email separately. Emails go to the <strong>email address</strong> you enter there. If you sign in with single sign-on, the address that account gives is filled in the first time, and you can change it. Leave it blank to get no emails. Password reset links go to this address too, so changing it asks for your current password (and with two-factor sign-in a code; accounts without a password change it within 10 minutes of signing in), and the previous address gets an email about the change.</p>
         <div class="note">Emails are only sent once an administrator has set up an email server (<a href="users.html#email">Notification emails</a>). They are written in the language you last used ThirtyFile in, with times in your time zone.</div>
       </main>
     </div>

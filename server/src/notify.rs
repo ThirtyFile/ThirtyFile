@@ -8,6 +8,7 @@
 //! - `access_expiring`: access given to them ends within three days. Not told when the access was given with that
 //!   short an expiry in the first place: the `shared` notification already said when it ends
 //! - `app_password`: an app password was made for their account (so one made by someone else doesn't go unnoticed)
+//! - `sign_in_method`: a Microsoft, Google, GitHub or other account was linked to theirs, and can now sign in to it
 //! - `link_upload`: files arrived through a share link they made that accepts files. Files through the same link
 //!   within an hour count up the unread notification instead of adding one (and send no further email)
 //!
@@ -32,7 +33,7 @@ use crate::{
     util::{format_bytes, now},
 };
 
-pub const KINDS: [&str; 5] = ["shared", "space_full", "access_expiring", "app_password", "link_upload"];
+pub const KINDS: [&str; 6] = ["shared", "space_full", "access_expiring", "app_password", "sign_in_method", "link_upload"];
 /// Files through one link within this long are told in one notification
 const LINK_UPLOAD_BATCH: i64 = 3600;
 /// A space is almost full from this share of its size (percent)…
@@ -460,6 +461,24 @@ pub fn render(n: &Notice, zh: bool, tz_offset: i64, site: &str, base_url: &str) 
                 )
             }
         }
+        ("sign_in_method", _) => {
+            let ip = d["ip"].as_str().unwrap_or_default();
+            let provider = d["label"].as_str().unwrap_or_default();
+            let account = d["account"].as_str().filter(|a| !a.is_empty());
+            if zh {
+                let account = account.map(|a| format!("（{a}）")).unwrap_or_default();
+                (
+                    format!("你的帳號連結了 {provider} 帳號"),
+                    format!("你的帳號剛連結了 {provider} 帳號{account}，來源位址 {ip}。之後可以用它登入你的帳號，不需要密碼。\n\n如果不是你連結的，請在帳號選單的「登入方式」中取消連結，並變更你的密碼。\n"),
+                )
+            } else {
+                let account = account.map(|a| format!(" ({a})")).unwrap_or_default();
+                (
+                    format!("A {provider} account was linked to your account"),
+                    format!("A {provider} account{account} was just linked to your account, from {ip}. It can now sign in to your account without the password.\n\nIf you didn't link it, unlink it under Sign-in methods in the account menu and change your password.\n"),
+                )
+            }
+        }
         (_, false) => {
             let ends = ends.unwrap_or_default();
             (
@@ -605,6 +624,11 @@ pub struct SettingsReq {
     email: Option<String>,
     #[serde(default)]
     kinds: std::collections::HashMap<String, KindPrefs>,
+    /// The current password (and a two-factor code), needed to change the email address
+    #[serde(default)]
+    password: Option<String>,
+    #[serde(default)]
+    code: Option<String>,
 }
 
 pub async fn update_settings(State(st): State<AppState>, user: User, Json(req): Json<SettingsReq>) -> AppResult<Json<Value>> {
@@ -617,6 +641,14 @@ pub async fn update_settings(State(st): State<AppState>, user: User, Json(req): 
     }
     if req.kinds.keys().any(|k| !KINDS.contains(&k.as_str())) {
         return Err(AppError::bad_request("Unknown kind of notification"));
+    }
+    let (old, username, lang): (String, String, String) =
+        sqlx::query_as("SELECT email, username, lang FROM users WHERE id = ?").bind(user.id).fetch_one(&st.db).await?;
+    let email = email.filter(|e| *e != old);
+    // Password reset links and every notice go to this address, so changing it asks who it is again, like the
+    // password itself
+    if email.is_some() {
+        crate::tokens::confirm_identity(&st, &user, req.password, req.code.as_deref(), "Sign out and sign in again, then change your email address within 10 minutes").await?;
     }
     {
         let _w = st.write_lock.lock().await;
@@ -638,7 +670,48 @@ pub async fn update_settings(State(st): State<AppState>, user: User, Json(req): 
         }
         tx.commit().await?;
     }
+    if let Some(new) = email.filter(|_| !old.is_empty()) {
+        tell_old_address(&st, old, &username, &lang, &new);
+    }
     Ok(Json(settings_of(&st, user.id).await?))
+}
+
+/// Tells the address an account used to have that it was replaced (whatever the notification settings say), so a
+/// change the owner didn't make doesn't go unnoticed
+fn tell_old_address(st: &AppState, old: String, username: &str, lang: &str, new: &str) {
+    let st = st.clone();
+    let (username, lang, new) = (username.to_string(), lang.to_string(), new.to_string());
+    tokio::spawn(async move {
+        let cfg = crate::mail::load(&st.db).await;
+        if !cfg.ready() {
+            return;
+        }
+        let site = st.branding.read().unwrap().site_name.clone();
+        let zh = match lang.as_str() {
+            "zh-TW" => true,
+            "en" => false,
+            _ => st.system.read().unwrap().default_lang == "zh-TW",
+        };
+        let (subject, body) = email_changed(zh, &site, &username, &new);
+        if let Err(e) = crate::mail::send(&cfg, &site, &crate::mail::Message { to: &old, subject: &subject, body: &body }).await {
+            tracing::warn!("Couldn't tell {old} that the email address of {username} changed: {e}");
+        }
+    });
+}
+
+fn email_changed(zh: bool, site: &str, username: &str, new: &str) -> (String, String) {
+    let new = if new.is_empty() { if zh { "（空白）" } else { "(none)" } } else { new };
+    if zh {
+        (
+            format!("你在 {site} 的電子郵件地址已變更"),
+            format!("{site} 帳號「{username}」的電子郵件地址已改為 {new}，之後的通知與重設密碼連結都會寄到那裡。\n\n如果不是你變更的，請立即變更密碼，或聯絡管理員。\n"),
+        )
+    } else {
+        (
+            format!("Your email address on {site} was changed"),
+            format!("The email address of the account \"{username}\" on {site} was changed to {new}. Notifications and password reset links go there from now on.\n\nIf you didn't change it, change your password now or contact your administrator.\n"),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -746,7 +819,7 @@ mod tests {
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
         let cat = env.user("cat", true).await;
-        let prefs = |email: &str, by_email: bool| serde_json::from_value(json!({ "email": email, "kinds": { "shared": { "in_app": true, "email": by_email } } })).unwrap();
+        let prefs = |email: &str, by_email: bool| serde_json::from_value(json!({ "email": email, "password": testutil::password(), "kinds": { "shared": { "in_app": true, "email": by_email } } })).unwrap();
         let _ = update_settings(State(env.st.clone()), ben.clone(), Json(prefs("ben@example.com", true))).await.unwrap();
         let _ = update_settings(State(env.st.clone()), cat.clone(), Json(prefs("cat@example.com", false))).await.unwrap();
         assert!(update_settings(State(env.st.clone()), cat.clone(), Json(prefs("not an address", true))).await.is_err());
@@ -782,5 +855,35 @@ mod tests {
         let (subject, body) = render(&file, false, 0, "Drive", "https://d.example");
         assert_eq!(subject, "Amy shared “a.txt” with you");
         assert!(body.contains("https://d.example/view/f1"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn changing_the_email_address_asks_for_the_password_and_tells_the_old_one() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let (port, mut mails) = crate::mail::tests::fake_server(true).await;
+        {
+            let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+            crate::mail::store(&mut tx, &crate::mail::tests::settings(port)).await.unwrap();
+            tx.commit().await.unwrap();
+        }
+        let set = |v: Value| update_settings(State(env.st.clone()), amy.clone(), Json(serde_json::from_value(v).unwrap()));
+        let email = || async { sqlx::query_as::<_, (String,)>("SELECT email FROM users WHERE id = ?").bind(amy.id).fetch_one(&env.st.db).await.unwrap().0 };
+
+        // A session alone can't point the account's emails (and password resets) elsewhere
+        assert!(set(json!({ "email": "amy@example.com" })).await.is_err());
+        assert!(set(json!({ "email": "amy@example.com", "password": testutil::wrong_password() })).await.is_err());
+        assert_eq!(email().await, "");
+        assert!(set(json!({ "email": "amy@example.com", "password": testutil::password() })).await.is_ok());
+        assert_eq!(email().await, "amy@example.com");
+        // What she is told about, and the same address again, need nothing more
+        assert!(set(json!({ "email": " amy@example.com ", "kinds": { "shared": { "in_app": true, "email": false } } })).await.is_ok());
+
+        // Changed: the old address is told
+        assert!(set(json!({ "email": "amy@elsewhere.example", "password": testutil::password() })).await.is_ok());
+        assert_eq!(email().await, "amy@elsewhere.example");
+        let (to, text) = tokio::time::timeout(std::time::Duration::from_secs(10), mails.recv()).await.unwrap().unwrap();
+        assert_eq!(to, "amy@example.com");
+        assert!(text.contains("amy@elsewhere.example"), "{text}");
     }
 }

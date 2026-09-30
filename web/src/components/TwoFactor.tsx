@@ -78,12 +78,15 @@ export function TwoFactorDialog({ onClose }: { onClose(): void }) {
   /** Waiting for the password before this */
   const [action, setAction] = useState<Action | null>(null);
   const [password, setPassword] = useState("");
+  /** Once it is on, a code from the current app (or a recovery code) comes with the password */
+  const [currentCode, setCurrentCode] = useState("");
   const [setup, setSetup] = useState<TwoFactorSetup | null>(null);
   const [code, setCode] = useState("");
   const [codes, setCodes] = useState<string[] | null>(null);
   const reset = () => {
     setAction(null);
     setPassword("");
+    setCurrentCode("");
     setSetup(null);
     setCode("");
     setCodes(null);
@@ -92,14 +95,16 @@ export function TwoFactorDialog({ onClose }: { onClose(): void }) {
 
   const confirm = useMutation({
     mutationFn: async (a: Action) => {
-      if (a === "setup") setSetup(await api.startTwoFactor(password));
-      else if (a === "codes") setCodes((await api.newRecoveryCodes(password)).recovery_codes);
+      const current = q.data?.enabled ? currentCode.trim() : undefined;
+      if (a === "setup") setSetup(await api.startTwoFactor(password, current));
+      else if (a === "codes") setCodes((await api.newRecoveryCodes(password, current)).recovery_codes);
       else {
-        await api.disableTwoFactor(password);
+        await api.disableTwoFactor(password, current);
         toast.success(t("Two-factor sign-in turned off"));
         reset();
       }
       setPassword("");
+      setCurrentCode("");
     },
   });
   const enable = useMutation({
@@ -111,10 +116,11 @@ export function TwoFactorDialog({ onClose }: { onClose(): void }) {
     },
   });
   const s = q.data;
+  const confirmReady = !!password && (!s?.enabled || !!currentCode.trim());
 
   const passwordForm = (a: Action) => (e: FormEvent) => {
     e.preventDefault();
-    if (password && !confirm.isPending) confirm.mutate(a);
+    if (confirmReady && !confirm.isPending) confirm.mutate(a);
   };
 
   let body;
@@ -165,12 +171,18 @@ export function TwoFactorDialog({ onClose }: { onClose(): void }) {
           <Label htmlFor="tf-pw">{t("Current password")}</Label>
           <Input id="tf-pw" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />
         </div>
+        {s.enabled && (
+          <div className="grid gap-1.5">
+            <Label htmlFor="tf-current-code">{t("Code from your app, or a recovery code")}</Label>
+            <Input id="tf-current-code" autoComplete="one-time-code" value={currentCode} onChange={(e) => setCurrentCode(e.target.value)} />
+          </div>
+        )}
         <ErrorText>{confirm.error?.message}</ErrorText>
         <div className="flex justify-end gap-2">
           <Button type="button" variant="outline" onClick={reset}>
             {t("Cancel")}
           </Button>
-          <Button type="submit" variant={action === "disable" ? "destructive" : "default"} disabled={!password || confirm.isPending}>
+          <Button type="submit" variant={action === "disable" ? "destructive" : "default"} disabled={!confirmReady || confirm.isPending}>
             {confirm.isPending && <Loader2Icon className="animate-spin" />}
             {action === "disable" ? t("Turn off") : action === "codes" ? t("Create new codes") : t("Continue")}
           </Button>

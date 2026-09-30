@@ -975,6 +975,9 @@ export default {
   "Enter a code from your authenticator app": "請輸入驗證器 App 上的驗證碼",
   "Enter your current password": "請輸入目前的密碼",
   "Sign out and sign in again, then create the app password within 10 minutes": "請登出後重新登入，並在 10 分鐘內建立應用程式密碼",
+  "Sign out and sign in again, then change your email address within 10 minutes": "請登出後重新登入，並在 10 分鐘內變更電子郵件地址",
+  "Sign out and sign in again, then link the account within 10 minutes": "請登出後重新登入，並在 10 分鐘內連結帳號",
+  "Only an account with a verified email address in a domain allowed on this site can be linked": "只能連結電子郵件地址已驗證、且屬於本網站允許網域的帳號",
   // Share-link passwords (shares.rs)
   "Too many wrong passwords for this link. Try again in {n} seconds.": "此連結的密碼錯誤次數過多，請 {n} 秒後再試",
   // Email settings (mail.rs)

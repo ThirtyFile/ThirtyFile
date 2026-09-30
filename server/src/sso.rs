@@ -389,15 +389,23 @@ const LINK_TICKET_TTL: Duration = Duration::from_secs(60);
 #[derive(Deserialize)]
 pub struct LinkReq {
     next: Option<String>,
+    /// The current password (and a two-factor code when the account has one)
+    #[serde(default)]
+    password: Option<String>,
+    #[serde(default)]
+    code: Option<String>,
 }
 
 /// Starts linking a sign-in method to the signed-in account. A POST, which other websites can't send on the user's
 /// behalf (origin check), hands out a short-lived ticket for the page to navigate to `start` with; `start` accepts
 /// linking only with such a ticket, so another website can't make a user link an account signed in in their browser.
+/// A linked account signs in without the password, and keeps working after the password changes, so linking asks
+/// for the password (and a two-factor code) first, as creating an app password does.
 pub async fn start_link(State(st): State<AppState>, user: User, Path(provider): Path<String>, Json(req): Json<LinkReq>) -> AppResult<Json<Value>> {
     if st.sso.read().unwrap().provider(&provider).filter(|c| c.ready()).is_none() {
         return Err(AppError::bad_request("This sign-in method isn't enabled"));
     }
+    crate::tokens::confirm_identity(&st, &user, req.password, req.code.as_deref(), "Sign out and sign in again, then link the account within 10 minutes").await?;
     let ticket = random_token(32);
     {
         let mut tickets = link_tickets().lock().unwrap();
@@ -510,6 +518,13 @@ struct Identity {
     name: String,
 }
 
+impl Identity {
+    /// The email as it may be stored with the linked account: blank unless the provider verified it
+    fn verified_email(&self) -> &str {
+        if self.email_verified { &self.email } else { "" }
+    }
+}
+
 pub async fn callback(
     State(st): State<AppState>,
     Path(provider): Path<String>,
@@ -542,7 +557,7 @@ pub async fn callback(
     };
 
     if let Some(user_id) = pending.link_user {
-        return match link(&st, &provider, &ident, user_id).await {
+        return match link(&st, &provider, &ident, user_id, &ip).await {
             Ok(username) => {
                 record_login_via(&st, Some(user_id), &username, "sso_link", &provider, &ip, &headers);
                 let next = &pending.next;
@@ -733,10 +748,11 @@ async fn sync_profile(st: &AppState, user_id: i64, provider: &str, ident: &Ident
     let follow = !name.is_empty() && name != current && (current.is_empty() || previous.as_deref() == Some(current.as_str()));
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    // A later sign-in without a verified email (e.g. a multi-tenant Microsoft app) keeps the email recorded earlier
+    // A later sign-in without a verified email (e.g. a multi-tenant Microsoft app) keeps the email recorded earlier:
+    // only a verified one is kept, as it can match an account by its email (`MATCHING_USER`)
     sqlx::query("UPDATE user_identities SET last_login_at = ?, email = COALESCE(NULLIF(?, ''), email), name = ? WHERE provider = ? AND subject = ?")
         .bind(now())
-        .bind(&ident.email)
+        .bind(ident.verified_email())
         .bind(&ident.name)
         .bind(provider)
         .bind(&ident.subject)
@@ -941,7 +957,18 @@ async fn create_sso_user(st: &AppState, provider: &str, cfg: &ProviderConfig, id
     Ok((id, username))
 }
 
-async fn link(st: &AppState, provider: &str, ident: &Identity, user_id: i64) -> AppResult<String> {
+async fn link(st: &AppState, provider: &str, ident: &Identity, user_id: i64, ip: &str) -> AppResult<String> {
+    // The allowed domains apply to linked accounts too: with a list, only a verified email in it
+    let (settings, shown) = {
+        let s = st.sso.read().unwrap().clone();
+        let shown = if provider == "oidc" { s.provider(provider).map(shown_name).unwrap_or_default() } else { label(provider).to_string() };
+        (s, shown)
+    };
+    let cfg = settings.provider(provider).cloned().unwrap_or_default();
+    let restricted = !settings.allowed_domains.is_empty() || !cfg.allowed_domains.is_empty();
+    if restricted && !(ident.email_verified && domain_allowed(&settings, &cfg, &ident.email)) {
+        return Err(AppError::forbidden("Only an account with a verified email address in a domain allowed on this site can be linked"));
+    }
     let other: Option<(i64,)> =
         sqlx::query_as("SELECT user_id FROM user_identities WHERE provider = ? AND subject = ?").bind(provider).bind(&ident.subject).fetch_optional(&st.db).await?;
     if other.is_some_and(|(id,)| id != user_id) {
@@ -956,7 +983,7 @@ async fn link(st: &AppState, provider: &str, ident: &Identity, user_id: i64) -> 
         .bind(provider)
         .bind(&ident.subject)
         .bind(user_id)
-        .bind(&ident.email)
+        .bind(ident.verified_email())
         .bind(&ident.name)
         .bind(now())
         .execute(&mut *tx)
@@ -966,7 +993,16 @@ async fn link(st: &AppState, provider: &str, ident: &Identity, user_id: i64) -> 
             sqlx::Error::Database(d) if d.is_unique_violation() => AppError::conflict(format!("This {} account is already linked to another user", label(provider))),
             _ => AppError::from(e),
         })?;
+    // Told in the app and by email, so an account linked by someone else doesn't go unnoticed
+    let account = if ident.email.is_empty() { ident.name.as_str() } else { ident.email.as_str() };
+    let notice = crate::notify::Notice {
+        kind: "sign_in_method",
+        node_id: None,
+        data: json!({ "provider": provider, "label": shown, "account": account, "ip": ip }),
+    };
+    let emails = crate::notify::add(&mut tx, &[user_id], &notice).await?;
     tx.commit().await?;
+    crate::notify::send_later(st, emails);
     Ok(username)
 }
 
@@ -1320,8 +1356,82 @@ mod tests {
 
     /// A linking ticket, as the account menu gets it before navigating to `start`
     async fn ticket(env: &testutil::TestEnv, user: &User, provider: &str) -> String {
-        let Json(v) = start_link(State(env.st.clone()), user.clone(), Path(provider.into()), Json(LinkReq { next: None })).await.unwrap();
+        let req = LinkReq { next: None, password: Some(testutil::password().into()), code: None };
+        let Json(v) = start_link(State(env.st.clone()), user.clone(), Path(provider.into()), Json(req)).await.unwrap();
         query_param(v["url"].as_str().unwrap(), "link")
+    }
+
+    #[tokio::test]
+    async fn linking_asks_for_the_password_and_tells_the_owner() {
+        let _g = SERIAL.lock().await;
+        let env = testutil::env().await;
+        let (m, base) = mock_server().await;
+        *MOCK_BASE.lock().unwrap() = Some(base);
+        enable(&env, |_| {});
+        let amy = env.user("amy", true).await;
+        let start_with = |password: Option<String>| {
+            start_link(State(env.st.clone()), amy.clone(), Path("google".into()), Json(LinkReq { next: None, password, code: None }))
+        };
+        // A session alone doesn't link an account that then signs in without the password
+        assert!(start_with(None).await.is_err());
+        assert!(start_with(Some(testutil::wrong_password())).await.is_err());
+        assert!(start_with(Some(testutil::password().into())).await.is_ok());
+        // With two-factor sign-in, a code too
+        let codes = crate::twofactor::tests::set_up_for(&env, &amy).await;
+        assert!(start_with(Some(testutil::password().into())).await.is_err());
+        let req = LinkReq { next: None, password: Some(testutil::password().into()), code: Some(codes[0].clone()) };
+        assert!(start_link(State(env.st.clone()), amy.clone(), Path("google".into()), Json(req)).await.is_ok());
+
+        // Once linked, the owner is told in the app (and by email when set up)
+        let ben = env.user("ben", true).await;
+        let r = login(&env, &m, "google", Some(ben.clone()), |n| google(n, "g-7", "ben@example.com", true)).await;
+        assert_eq!(location(&r), "/files/abc?sso_linked=google");
+        let (kind, data): (String, String) = sqlx::query_as("SELECT kind, data FROM notifications WHERE user_id = ?").bind(ben.id).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(kind, "sign_in_method");
+        let data: Value = serde_json::from_str(&data).unwrap();
+        assert_eq!((data["provider"].as_str(), data["account"].as_str()), (Some("google"), Some("ben@example.com")));
+        *MOCK_BASE.lock().unwrap() = None;
+    }
+
+    #[tokio::test]
+    async fn linking_follows_the_allowed_domains_and_keeps_only_verified_emails() {
+        let _g = SERIAL.lock().await;
+        let env = testutil::env().await;
+        let (m, base) = mock_server().await;
+        *MOCK_BASE.lock().unwrap() = Some(base);
+        let amy = env.user("amy", true).await;
+        let linked = || async { sqlx::query_as::<_, (String,)>("SELECT email FROM user_identities WHERE user_id = ?").bind(amy.id).fetch_optional(&env.st.db).await.unwrap() };
+
+        // Without a domain list any account can be linked, but an address the provider hasn't verified isn't kept
+        // (it could later match an account by its email)
+        enable(&env, |_| {});
+        let r = login(&env, &m, "google", Some(amy.clone()), |n| google(n, "g-1", "amy_files@example.com", false)).await;
+        assert_eq!(location(&r), "/files/abc?sso_linked=google");
+        assert_eq!(linked().await, Some((String::new(),)));
+        sqlx::query("DELETE FROM user_identities").execute(&env.st.db).await.unwrap();
+
+        // With a domain list, only a verified address in it
+        enable(&env, |s| s.allowed_domains = vec!["example.com".into()]);
+        let r = login(&env, &m, "google", Some(amy.clone()), |n| google(n, "g-2", "amy@elsewhere.example", true)).await;
+        assert!(location(&r).contains("sso_error="), "{}", location(&r));
+        let r = login(&env, &m, "google", Some(amy.clone()), |n| google(n, "g-3", "amy@example.com", false)).await;
+        assert!(location(&r).contains("sso_error="), "{}", location(&r));
+        assert_eq!(linked().await, None);
+        let r = login(&env, &m, "google", Some(amy.clone()), |n| google(n, "g-4", "amy@example.com", true)).await;
+        assert_eq!(location(&r), "/files/abc?sso_linked=google");
+        assert_eq!(linked().await, Some(("amy@example.com".into(),)));
+
+        // A later sign-in without a verified address doesn't replace the one kept
+        let r = login(&env, &m, "google", None, |n| google(n, "g-4", "someone@example.com", false)).await;
+        assert_eq!(location(&r), "/files/abc");
+        assert_eq!(linked().await, Some(("amy@example.com".into(),)));
+
+        // An administrator resetting the password removes the linked sign-in methods
+        let admin = env.admin().await;
+        let req = serde_json::from_value(json!({ "password": crate::util::random_token(20) })).unwrap();
+        let _ = crate::admin::update(State(env.st.clone()), Admin(admin), Path(amy.id), Json(req)).await.unwrap();
+        assert_eq!(linked().await, None);
+        *MOCK_BASE.lock().unwrap() = None;
     }
 
     /// Runs the whole flow: start sign-in → (provider) → callback; claims are generated from the nonce

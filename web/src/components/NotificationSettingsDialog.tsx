@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ErrorText } from "@/components/dialogs";
+import { useConfirmIdentity } from "@/components/ConfirmIdentity";
 import { NOTIFICATION_KINDS } from "@/lib/notifications";
 import { t } from "@/lib/i18n";
 
@@ -25,8 +26,11 @@ export function NotificationSettingsDialog({ onClose }: { onClose(): void }) {
     }
   }, [q.data, kinds]);
 
+  // Reset links and every notice go to the address, so changing it asks for the password again
+  const identity = useConfirmIdentity("notify");
+  const emailChanged = !!q.data && email.trim() !== q.data.email;
   const save = useMutation({
-    mutationFn: () => api.updateNotificationSettings({ email: email.trim(), kinds: kinds ?? undefined }),
+    mutationFn: () => api.updateNotificationSettings({ email: email.trim(), kinds: kinds ?? undefined, ...(emailChanged ? identity.values : {}) }),
     onSuccess: (data) => {
       qc.setQueryData(["notification-settings"], data);
       toast.success(t("Notification settings saved"));
@@ -36,7 +40,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose(): void }) {
   const set = (kind: NotificationKind, change: Partial<NotificationPrefs>) => setKinds((k) => k && { ...k, [kind]: { ...k[kind], ...change } });
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!save.isPending) save.mutate();
+    if (!save.isPending && (!emailChanged || identity.ready)) save.mutate();
   };
   const emailReady = !!q.data?.email_ready;
 
@@ -67,6 +71,14 @@ export function NotificationSettingsDialog({ onClose }: { onClose(): void }) {
                     ? t("Emails are sent to this address. Leave it blank to get no emails.")
                     : t("Emails aren't sent yet: an administrator hasn't set up an email server. You can still enter your address now.")}
                 </p>
+                {emailChanged && (
+                  <div className="mt-1 grid gap-1.5 rounded-lg border p-3">
+                    <p className="text-xs text-muted-foreground">
+                      {t("Password reset links go to this address too, so changing it asks who you are. The previous address is told about the change.")}
+                    </p>
+                    {identity.fields(t("For your security, your email address can only be changed within 10 minutes of signing in."))}
+                  </div>
+                )}
               </div>
               <div className="overflow-hidden rounded-lg border">
                 <div className="grid grid-cols-[1fr_4rem_4rem] items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
@@ -104,7 +116,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose(): void }) {
             <Button type="button" variant="outline" onClick={onClose}>
               {t("Cancel")}
             </Button>
-            <Button type="submit" disabled={!kinds || save.isPending}>
+            <Button type="submit" disabled={!kinds || save.isPending || (emailChanged && !identity.ready)}>
               {save.isPending && <Loader2Icon className="animate-spin" />}
               {t("Save")}
             </Button>

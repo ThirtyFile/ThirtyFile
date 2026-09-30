@@ -159,7 +159,6 @@ export default {
   "Couldn't find the workbook contents. This may not be an Excel file.": "找不到活頁簿內容，這可能不是 Excel 檔案",
   "The workbook has no editable sheets": "活頁簿沒有可編輯的工作表",
   "The sheet format isn't recognized": "工作表格式無法辨識",
-  "Couldn't start linking": "無法開始連結",
   "Couldn't check the folder": "無法檢查資料夾",
   "New folder space": "新增資料夾空間",
   "Check for changes": "檢查變更",

@@ -1,3 +1,4 @@
+import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link2Icon, Loader2Icon, UnlinkIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -6,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
 import { useConfirm } from "@/components/confirm";
+import { useConfirmIdentity } from "@/components/ConfirmIdentity";
+import { ErrorText } from "@/components/dialogs";
 import { formatDateTime } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 
@@ -32,6 +35,17 @@ export function LinkedAccountsDialog({ onClose }: { onClose(): void }) {
     if (ok) unlink.mutate(p);
   };
   const here = window.location.pathname + window.location.search;
+  // A linked account signs in without the password, so linking asks for it (and a code) first
+  const [linking, setLinking] = useState<SsoProviderId | null>(null);
+  const identity = useConfirmIdentity("link");
+  const startLink = useMutation({
+    mutationFn: (p: SsoProviderId) => api.ssoLink(p, here, identity.values.password, identity.values.code),
+    onSuccess: ({ url }) => window.location.assign(url),
+  });
+  const submitLink = (e: FormEvent) => {
+    e.preventDefault();
+    if (linking && identity.ready && !startLink.isPending) startLink.mutate(linking);
+  };
   const providers = [...new Set([...(q.data?.available ?? []), ...(q.data?.linked.map((l) => l.provider) ?? [])])] as SsoProviderId[];
 
   return (
@@ -42,6 +56,35 @@ export function LinkedAccountsDialog({ onClose }: { onClose(): void }) {
           <DialogTitle>{t("Sign-in methods")}</DialogTitle>
           <DialogDescription>{t("Link a work or personal external account to sign in with it directly from the sign-in page.")}</DialogDescription>
         </DialogHeader>
+        {linking && (
+          <form onSubmit={submitLink} className="grid gap-2 rounded-lg border p-3">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <ProviderIcon provider={linking} className="size-4" />
+              {t("Link your {provider} account", { provider: SSO_LABEL[linking] ?? linking })}
+            </div>
+            <p className="text-xs text-muted-foreground">{t("The linked account can sign in to yours without the password, so confirm it's you first.")}</p>
+            {identity.fields(t("For your security, accounts can only be linked within 10 minutes of signing in."))}
+            <ErrorText>{startLink.error?.message}</ErrorText>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setLinking(null);
+                  identity.clear();
+                  startLink.reset();
+                }}
+              >
+                {t("Cancel")}
+              </Button>
+              <Button type="submit" size="sm" disabled={!identity.ready || startLink.isPending}>
+                {startLink.isPending ? <Loader2Icon className="animate-spin" /> : <Link2Icon />}
+                {t("Continue")}
+              </Button>
+            </div>
+          </form>
+        )}
         {q.isLoading ? (
           <Loader2Icon className="mx-auto size-5 animate-spin text-muted-foreground" />
         ) : providers.length === 0 ? (
@@ -70,12 +113,11 @@ export function LinkedAccountsDialog({ onClose }: { onClose(): void }) {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() =>
-                        api
-                          .ssoLink(p, here)
-                          .then(({ url }) => window.location.assign(url))
-                          .catch((e) => toast.error(e instanceof Error ? e.message : t("Couldn't start linking")))
-                      }
+                      disabled={linking === p}
+                      onClick={() => {
+                        startLink.reset();
+                        setLinking(p);
+                      }}
                     >
                       <Link2Icon /> {t("Link")}
                     </Button>
