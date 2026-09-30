@@ -2,6 +2,7 @@ import { download, nativeDownload, type DownloadSource } from "@/downloads";
 import { t, tServer } from "@/lib/i18n";
 import type { Branding } from "@/lib/branding";
 import type { Resolution } from "@/lib/conflicts";
+import type { UsageHistory, UsageOverview, UsageRange, UsageThresholds, UsageWork } from "@/lib/usage";
 export interface Node {
   id: string;
   parent_id: string | null;
@@ -1289,6 +1290,13 @@ export const api = {
   logArchiveUrl: (id: number) => enc`/api/admin/logs/archives/${id}`,
   deleteLogArchive: (id: number) => request("DELETE", enc`/admin/logs/archives/${id}`),
   storageLocations: () => get<StorageLocation[]>("/admin/storage").then((l) => l.map((x) => ({ ...x, name: locationName(x.id, x.name) }))),
+  /** Control panel › Storage usage: the latest samples, the last hour's operations and alerts */
+  usageOverview: (signal?: AbortSignal) =>
+    get<UsageOverview>("/admin/usage", signal).then((o) => ({ ...o, locations: o.locations.map((l) => ({ ...l, name: locationName(l.id, l.name) })) })),
+  /** A location's history ('' for all of them together) over a range, for one kind of work or all */
+  usageHistory: (q: { location: string; range: UsageRange; work: UsageWork | "all" }, signal?: AbortSignal) =>
+    get<UsageHistory>("/admin/usage/history" + qs({ location: q.location, range: q.range, work: q.work }), signal),
+  setUsageThresholds: (t: UsageThresholds) => request<UsageThresholds>("PUT", "/admin/usage/thresholds", t),
   createStorage: (req: { name: string; kind: StorageKind; config: StorageConfig }) => post<{ id: string }>("/admin/storage", req),
   updateStorage: (id: string, req: { name?: string; config?: StorageConfig }) => request("PATCH", enc`/admin/storage/${id}`, req),
   deleteStorage: (id: string) => request("DELETE", enc`/admin/storage/${id}`),

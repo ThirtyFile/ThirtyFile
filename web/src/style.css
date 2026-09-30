@@ -61,6 +61,10 @@
   --brand: #2563eb;
   --brand-foreground: #ffffff;
   --selection: #e3ecfd;
+  /* Chart series (Storage usage): told apart by line pattern and marker too, and each chart has a table */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
 }
 
 .dark {
@@ -86,6 +90,9 @@
   --brand: #4f8bff;
   --brand-foreground: #111111;
   --selection: #203252;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
 }
 
 @layer base {
