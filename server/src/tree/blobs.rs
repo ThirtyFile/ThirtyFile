@@ -286,6 +286,24 @@ async fn claim_for_deletion(st: &AppState, hash: &str, location: &str) -> Option
             return None;
         }
     }
+    // Recorded by a snapshot that is being made and hasn't copied it yet (backups/): kept until it has, or has ended.
+    // Looked at again in an hour.
+    match crate::backups::pinned(&st.db, hash).await {
+        Ok(false) => {}
+        Ok(true) => {
+            let _ = sqlx::query("UPDATE pending_blob_deletes SET created_at = ? WHERE hash = ? AND location_id = ?")
+                .bind(now() + 3600)
+                .bind(hash)
+                .bind(location)
+                .execute(&st.db)
+                .await;
+            return None;
+        }
+        Err(e) => {
+            tracing::warn!("Failed to check whether physical file {hash} is being copied: {e}");
+            return None;
+        }
+    }
     let mut g = st.blob_guard.lock().unwrap();
     if g.staging.contains_key(hash) {
         return None;

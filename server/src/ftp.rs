@@ -598,7 +598,7 @@ impl Storage for FtpStorage {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::{
         path::PathBuf,
         sync::atomic::{AtomicUsize, Ordering},
@@ -614,8 +614,8 @@ mod tests {
 
     /// A small FTP server over a temporary folder: passive mode, plain connections, and only the commands the storage
     /// uses. It counts the connections it was given.
-    struct Server {
-        dir: PathBuf,
+    pub(crate) struct Server {
+        pub dir: PathBuf,
         port: u16,
         connections: Arc<AtomicUsize>,
         task: tokio::task::JoinHandle<()>,
@@ -628,7 +628,7 @@ mod tests {
         }
     }
 
-    async fn server(password: &'static str) -> Server {
+    pub(crate) async fn server(password: &'static str) -> Server {
         let dir = std::env::temp_dir().join(format!("thirtyfile-ftp-{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(dir.join("files")).unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -730,7 +730,7 @@ mod tests {
         Ok(())
     }
 
-    fn storage(s: &Server, password: &str) -> FtpStorage {
+    pub(crate) fn storage(s: &Server, password: &str) -> FtpStorage {
         let cfg = FtpConfig { host: "127.0.0.1".into(), port: s.port, username: "backup".into(), password: password.into(), path: "/files".into(), ..Default::default() };
         FtpStorage::new(&cfg).unwrap()
     }
