@@ -257,8 +257,17 @@ enum Step {
 struct Pending {
     user_id: i64,
     step: Step,
+    /// The password the ticket was given for (`credential`): once it changes or is reset, the ticket stops working
+    credential: String,
     created: Instant,
     tries: u32,
+}
+
+/// What a ticket is bound to: a digest of the account's stored password hash, which every password change and reset
+/// replaces. None for an account that is gone or disabled.
+async fn credential(st: &AppState, user_id: i64) -> AppResult<Option<String>> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT password_hash FROM users WHERE id = ? AND disabled = 0").bind(user_id).fetch_optional(&st.db).await?;
+    Ok(row.map(|(h,)| sha256_hex(h.as_bytes())))
 }
 
 /// Sign-ins in progress, by the SHA-256 of their ticket (the ticket itself is only known to the browser)
@@ -277,6 +286,7 @@ pub async fn after_password(st: &AppState, user_id: i64) -> AppResult<Option<Val
         None => return Ok(None),
     };
     let kind = if matches!(step, Step::Code) { "code" } else { "setup" };
+    let Some(credential) = credential(st, user_id).await? else { return Err(expired()) };
     let ticket = random_token(43);
     {
         let mut map = pending().lock().unwrap();
@@ -285,7 +295,7 @@ pub async fn after_password(st: &AppState, user_id: i64) -> AppResult<Option<Val
             let Some(oldest) = map.iter().min_by_key(|(_, p)| p.created).map(|(k, _)| k.clone()) else { break };
             map.remove(&oldest);
         }
-        map.insert(sha256_hex(ticket.as_bytes()), Pending { user_id, step, created: Instant::now(), tries: 0 });
+        map.insert(sha256_hex(ticket.as_bytes()), Pending { user_id, step, credential, created: Instant::now(), tries: 0 });
     }
     Ok(Some(json!({ "two_factor": kind, "ticket": ticket })))
 }
@@ -294,16 +304,30 @@ fn expired() -> AppError {
     AppError::new(StatusCode::UNAUTHORIZED, "The sign-in has expired. Enter your password again.").with_code("two_factor_expired")
 }
 
-/// The account and step of a ticket that is still valid
-fn ticket(hash: &str) -> AppResult<(i64, Step)> {
-    let mut map = pending().lock().unwrap();
-    match map.get(hash) {
-        Some(p) if p.created.elapsed() < TICKET_TTL => Ok((p.user_id, p.step.clone())),
-        _ => {
-            map.remove(hash);
-            Err(expired())
+/// The account, step and credential of a ticket that is still valid: not too old, and given for the account's current
+/// password (a password changed or reset since, e.g. to lock someone out, ends the sign-ins it started)
+async fn ticket(st: &AppState, hash: &str) -> AppResult<(i64, Step, String)> {
+    let found = {
+        let mut map = pending().lock().unwrap();
+        match map.get(hash) {
+            Some(p) if p.created.elapsed() < TICKET_TTL => Some((p.user_id, p.step.clone(), p.credential.clone())),
+            _ => {
+                map.remove(hash);
+                None
+            }
         }
+    };
+    let Some((user_id, step, cred)) = found else { return Err(expired()) };
+    if !still_valid(st, user_id, &cred).await? {
+        pending().lock().unwrap().remove(hash);
+        return Err(expired());
     }
+    Ok((user_id, step, cred))
+}
+
+/// Whether the account still has the password a ticket was given for
+async fn still_valid(st: &AppState, user_id: i64, cred: &str) -> AppResult<bool> {
+    Ok(credential(st, user_id).await?.is_some_and(|c| c.as_bytes().ct_eq(cred.as_bytes()).into()))
 }
 
 #[derive(Deserialize)]
@@ -314,7 +338,7 @@ pub struct TicketReq {
 /// Sign-in of an account that must set up two-factor sign-in: the secret to add to the authenticator app
 pub async fn login_setup(State(st): State<AppState>, Json(req): Json<TicketReq>) -> AppResult<Json<Value>> {
     let hash = sha256_hex(req.ticket.as_bytes());
-    let (user_id, step) = ticket(&hash)?;
+    let (user_id, step, _) = ticket(&st, &hash).await?;
     let Step::Setup(existing) = step else { return Err(AppError::bad_request("Two-factor sign-in is already set up for this account")) };
     let secret = match existing {
         Some(s) => s,
@@ -346,8 +370,8 @@ pub async fn login_code(
 ) -> AppResult<Response> {
     let ip = client_ip(&st, addr, &headers);
     let hash = sha256_hex(req.ticket.as_bytes());
-    let (user_id, step) = ticket(&hash)?;
-    let row: Option<(String, bool)> = sqlx::query_as("SELECT username, disabled FROM users WHERE id = ?").bind(user_id).fetch_optional(&st.db).await?;
+    let (user_id, step, cred) = ticket(&st, &hash).await?;
+    let row: Option<(String, bool)> =sqlx::query_as("SELECT username, disabled FROM users WHERE id = ?").bind(user_id).fetch_optional(&st.db).await?;
     let Some((username, false)) = row else {
         pending().lock().unwrap().remove(&hash);
         return Err(expired());
@@ -393,6 +417,10 @@ pub async fn login_code(
     auth::attempt_succeeded(&st, &key);
     // A ticket signs in once
     if pending().lock().unwrap().remove(&hash).is_none() {
+        return Err(expired());
+    }
+    // The password may have changed while the code was checked
+    if !still_valid(&st, user_id, &cred).await? {
         return Err(expired());
     }
     let codes = match setup {

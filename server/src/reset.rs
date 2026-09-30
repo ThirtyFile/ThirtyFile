@@ -34,9 +34,15 @@ const PER_ACCOUNT: usize = 3;
 /// Wrong links per address in the same window
 const WRONG_LINKS: usize = 20;
 
+/// Where reset links point: the "Site URL" setting. Never the address a request came with, which whoever sends the
+/// request chooses; without the setting, resetting by email isn't offered.
+fn link_base(st: &AppState) -> Option<String> {
+    Some(st.system.read().unwrap().public_url.clone()).filter(|u| !u.is_empty())
+}
+
 /// What the sign-in page offers
 pub async fn options(State(st): State<AppState>) -> AppResult<Json<Value>> {
-    Ok(Json(json!({ "password_reset": crate::mail::load(&st.db).await.enabled })))
+    Ok(Json(json!({ "password_reset": crate::mail::load(&st.db).await.enabled && link_base(&st).is_some() })))
 }
 
 #[derive(Deserialize)]
@@ -47,9 +53,9 @@ pub struct ForgotReq {
 
 pub async fn forgot(State(st): State<AppState>, ConnectInfo(addr): ConnectInfo<SocketAddr>, headers: HeaderMap, Json(req): Json<ForgotReq>) -> AppResult<Json<Value>> {
     let smtp = crate::mail::load(&st.db).await;
-    if !smtp.enabled {
+    let Some(base) = link_base(&st).filter(|_| smtp.enabled) else {
         return Err(AppError::bad_request("Ask your administrator to reset your password"));
-    }
+    };
     let ip = client_ip(&st, addr, &headers);
     if !auth::begin_attempt(&st, &format!("forgot-ip:{}", auth::limit_key_ip(&ip)), PER_ADDRESS) {
         return Err(AppError::new(axum::http::StatusCode::TOO_MANY_REQUESTS, "Too many requests. Try again in 15 minutes."));
@@ -86,7 +92,7 @@ pub async fn forgot(State(st): State<AppState>, ConnectInfo(addr): ConnectInfo<S
         }
         logs::record_login(&st, Some(id), &username, "password_reset_requested", &ip, &headers);
         let site = st.branding.read().unwrap().site_name.clone();
-        let link = format!("{}/reset-password?token={token}", crate::sso::base_url(&st, &headers));
+        let link = format!("{base}/reset-password?token={token}");
         let (subject, body) = message(lang == "zh-TW", &site, &username, &link);
         // Sent after answering: how long the email server takes mustn't tell whether the account exists
         tokio::spawn(async move {
@@ -140,8 +146,23 @@ pub async fn reset(State(st): State<AppState>, ConnectInfo(addr): ConnectInfo<So
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        // The link is used up in the transaction that sets the password, and checked again there (the check above ran
+        // before hashing and without the lock): of two requests with the same link, the second finds it gone
+        let used = sqlx::query(
+            "DELETE FROM password_resets WHERE token_hash = ? AND user_id = ? AND expires_at > ?
+               AND EXISTS (SELECT 1 FROM users WHERE id = password_resets.user_id AND disabled = 0)",
+        )
+        .bind(sha256_hex(req.token.trim().as_bytes()))
+        .bind(id)
+        .bind(now())
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if used != 1 {
+            return Err(AppError::bad_request("This link has expired or was already used. Ask for a new one."));
+        }
         sqlx::query("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?").bind(hash).bind(id).execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM password_resets WHERE user_id = ?").bind(id).execute(&mut *tx).await?;
+        // The account's other links go too (`sign_out_everywhere`)
         auth::sign_out_everywhere(&mut tx, id, None).await?;
         tx.commit().await?;
     }
@@ -170,13 +191,8 @@ mod tests {
         let Json(o) = options(State(env.st.clone())).await.unwrap();
         assert_eq!(o["password_reset"], false);
         assert!(forgot_req("amy").await.is_err());
-        let mut smtp = crate::mail::tests::settings(1);
-        smtp.enabled = true;
-        {
-            let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
-            crate::mail::store(&mut tx, &smtp).await.unwrap();
-            tx.commit().await.unwrap();
-        }
+        env.st.system.write().unwrap().public_url = "https://files.example.com".into();
+        email_on(&env, 1).await;
         let Json(o) = options(State(env.st.clone())).await.unwrap();
         assert_eq!(o["password_reset"], true);
 
@@ -199,6 +215,126 @@ mod tests {
         let (sessions,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE user_id = ?").bind(amy.id).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(sessions, 0);
         assert!(auth::confirm_password(&env.st, amy.id, new).await.is_ok());
+    }
+
+    /// Turns on an email server at `port` (1: nothing listens, so emails fail quietly)
+    async fn email_on(env: &testutil::TestEnv, port: u16) {
+        let mut smtp = crate::mail::tests::settings(port);
+        smtp.enabled = true;
+        let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+        crate::mail::store(&mut tx, &smtp).await.unwrap();
+        tx.commit().await.unwrap();
+    }
+
+    /// Amy, with an email address, and a reset link whose token the test knows
+    async fn amy_with_link(env: &testutil::TestEnv) -> (auth::User, String) {
+        let amy = env.user("amy", true).await;
+        sqlx::query("UPDATE users SET email = 'amy@example.com' WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+        let token = add_link(env, amy.id).await;
+        (amy, token)
+    }
+
+    /// A reset link for the user, as if asked for by email; returns its token
+    async fn add_link(env: &testutil::TestEnv, user_id: i64) -> String {
+        let token = random_token(43);
+        sqlx::query("INSERT INTO password_resets (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)")
+            .bind(sha256_hex(token.as_bytes()))
+            .bind(user_id)
+            .bind(now())
+            .bind(now() + LINK_TTL)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        token
+    }
+
+    fn reset_req(env: &testutil::TestEnv, token: &str, new: &str) -> impl std::future::Future<Output = AppResult<Json<Value>>> {
+        reset(State(env.st.clone()), addr(), HeaderMap::new(), Json(ResetReq { token: token.into(), new: new.into() }))
+    }
+
+    #[tokio::test]
+    async fn reset_links_use_the_site_url_and_never_the_request_host() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        sqlx::query("UPDATE users SET email = 'amy@example.com' WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+        let (port, mut mails) = crate::mail::tests::fake_server(true).await;
+        email_on(&env, port).await;
+        let mut headers = HeaderMap::new();
+        headers.insert(axum::http::header::HOST, "untrusted.example.com".parse().unwrap());
+        let forgot_req = || forgot(State(env.st.clone()), addr(), headers.clone(), Json(ForgotReq { account: "amy".into() }));
+
+        // Without a site URL there is nothing trusted to build the link from: not offered
+        let Json(o) = options(State(env.st.clone())).await.unwrap();
+        assert_eq!(o["password_reset"], false);
+        assert!(forgot_req().await.is_err());
+        let (links,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM password_resets").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(links, 0);
+
+        env.st.system.write().unwrap().public_url = "https://files.example.com".into();
+        let Json(o) = options(State(env.st.clone())).await.unwrap();
+        assert_eq!(o["password_reset"], true);
+        assert!(forgot_req().await.is_ok());
+        let (to, text) = tokio::time::timeout(std::time::Duration::from_secs(10), mails.recv()).await.unwrap().unwrap();
+        assert_eq!(to, "amy@example.com");
+        assert!(text.contains("https://files.example.com/reset-password?token="), "{text}");
+        assert!(!text.contains("untrusted.example.com"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn a_reset_link_used_twice_at_once_works_once() {
+        let env = testutil::env().await;
+        let (amy, token) = amy_with_link(&env).await;
+        let (first, second) = (random_token(20), random_token(20));
+        let (a, b) = tokio::join!(reset_req(&env, &token, &first), reset_req(&env, &token, &second));
+        assert_eq!(a.is_ok() as u8 + b.is_ok() as u8, 1, "exactly one of them sets the password");
+        let kept = if a.is_ok() { first } else { second };
+        assert!(auth::confirm_password(&env.st, amy.id, kept).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn changing_the_password_ends_reset_links() {
+        let env = testutil::env().await;
+        let (amy, token) = amy_with_link(&env).await;
+        let (_, cookie) = env.sign_in(&amy, "Browser").await;
+        let mut headers = HeaderMap::new();
+        headers.insert(axum::http::header::COOKIE, cookie.parse().unwrap());
+        let req = serde_json::from_value(json!({ "current": testutil::password(), "new": random_token(20) })).unwrap();
+        let _ = auth::change_password(State(env.st.clone()), addr(), headers, amy.clone(), Json(req)).await.unwrap();
+        assert!(reset_req(&env, &token, &random_token(20)).await.is_err(), "a link asked for before the change");
+
+        // The same when an administrator resets the password
+        let token = add_link(&env, amy.id).await;
+        let admin = env.admin().await;
+        let req = serde_json::from_value(json!({ "password": random_token(20) })).unwrap();
+        let _ = crate::admin::update(State(env.st.clone()), auth::Admin(admin), axum::extract::Path(amy.id), Json(req)).await.unwrap();
+        assert!(reset_req(&env, &token, &random_token(20)).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_new_password_ends_sign_ins_waiting_for_their_second_step() {
+        let env = testutil::env().await;
+        let (amy, token) = amy_with_link(&env).await;
+        env.st.system.write().unwrap().require_two_factor = true;
+        let login = |password: &str| {
+            let req = auth::LoginReq { username: "amy".into(), password: password.into() };
+            auth::login(State(env.st.clone()), addr(), HeaderMap::new(), Json(req))
+        };
+        let body = |res: axum::response::Response| async move {
+            let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+            serde_json::from_slice::<Value>(&bytes).unwrap()
+        };
+        // A ticket from the old password, not used before the password is reset by email
+        let v = body(login(testutil::password()).await.unwrap()).await;
+        assert_eq!(v["two_factor"], "setup");
+        let ticket = v["ticket"].as_str().unwrap().to_string();
+        let new = random_token(20);
+        assert!(reset_req(&env, &token, &new).await.is_ok());
+        let setup = |ticket: &str| crate::twofactor::login_setup(State(env.st.clone()), Json(serde_json::from_value(json!({ "ticket": ticket })).unwrap()));
+        assert_eq!(setup(&ticket).await.map(|_| ()).unwrap_err().code, Some("two_factor_expired"));
+        // A ticket from the new password works
+        let v = body(login(&new).await.unwrap()).await;
+        assert!(setup(v["ticket"].as_str().unwrap()).await.is_ok());
+        let _ = amy;
     }
 
     #[tokio::test]

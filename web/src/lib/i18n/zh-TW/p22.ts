@@ -64,5 +64,5 @@ export default {
   "Sends an email with the settings above, saved or not, and shows what went wrong if it can't.": "以上方的設定（不論是否已儲存）寄出一封郵件；寄不出去時會顯示原因。",
   "Send the test to": "測試郵件的收件地址",
   "Send test email": "寄出測試郵件",
-  "Set the site URL under General, so emails can link to what they are about.": "請在「一般」中設定網站網址，郵件才能附上相關項目的連結。",
+  "Set the site URL under General, so emails can link to what they are about. Until then, the sign-in page doesn't offer to reset a forgotten password by email.": "請在「一般」中設定網站網址，郵件才能附上相關項目的連結。設定之前，登入頁面不會提供以電子郵件重設密碼。",
 } satisfies Record<string, string>;
