@@ -33,6 +33,9 @@ function apply() {
 }
 
 media.addEventListener("change", apply);
+// The inline script in index.html applies the theme before the page is drawn; when it didn't run (blocked by the
+// browser, say), "Follow system" or a chosen appearance would otherwise not show until something changed
+apply();
 
 /** Called when branding settings change */
 export function setThemePolicy(mode: ThemeMode, allowToggle: boolean) {

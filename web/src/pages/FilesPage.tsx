@@ -125,6 +125,7 @@ function FolderPage({ id }: { id: string }) {
       loadingMore={children.loadingMore}
       error={info.error ?? children.error}
       folderId={folderId}
+      spaceId={info.data && !info.data.via_share ? info.data.drive.id : undefined}
       role={info.data?.role}
       sort={sort}
       onSort={onSort}

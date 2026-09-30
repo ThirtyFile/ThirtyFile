@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { FolderIcon, PanelLeftIcon, type LucideIcon } from "lucide-react";
 import { ShortcutsHost } from "@/components/ShortcutsDialog";
-import { useMe } from "@/lib/session";
+import { useDrives } from "@/lib/drives";
 import { useBranding } from "@/lib/branding";
 import { t } from "@/lib/i18n";
 import { formatBytes } from "@/lib/utils";
@@ -28,6 +28,8 @@ export interface FrameProps {
   /** When provided, the search box only filters the current page */
   onSearch?: (q: string) => void;
   activeFolder?: string;
+  /** The space being browsed: the status bar shows how much of it is used */
+  space?: string;
   footer?: ReactNode;
   /** Right side of the status bar (e.g. view switcher) */
   footerRight?: ReactNode;
@@ -39,7 +41,8 @@ export interface FrameProps {
 export const MAIN_ID = "tf-main";
 
 export function Frame(p: FrameProps) {
-  const me = useMe();
+  const drives = useDrives();
+  const space = p.space ? drives.data?.find((d) => d.id === p.space) : undefined;
   const [navOpen, setNavOpen] = useState(false);
   const title = p.crumbs[p.crumbs.length - 1]?.label ?? "";
   const siteName = useBranding().site_name;
@@ -75,10 +78,10 @@ export function Frame(p: FrameProps) {
       <footer className="flex h-7 shrink-0 items-center gap-3 px-3 text-xs text-muted-foreground">
         {p.footer}
         <span className="flex-1" />
-        {/* How much of "My files" is used: nothing for someone without it */}
-        {me.root_id && (
-          <span className="max-sm:hidden">
-            {t("{size} used", { size: me.quota_bytes > 0 ? `${formatBytes(me.used_bytes)} / ${formatBytes(me.quota_bytes)}` : formatBytes(me.used_bytes) })}
+        {/* How much of the space being browsed is used ("My files" shows its own in the navigation pane) */}
+        {space && (
+          <span className="max-sm:hidden" title={space.name}>
+            {t("{size} used", { size: space.quota_bytes > 0 ? `${formatBytes(space.used_bytes)} / ${formatBytes(space.quota_bytes)}` : formatBytes(space.used_bytes) })}
           </span>
         )}
         {p.footerRight}
