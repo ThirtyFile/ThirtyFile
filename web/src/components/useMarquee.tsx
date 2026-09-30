@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
+import { createStore, useStore, type Store } from "@/lib/store";
 
 export interface Box {
   x: number;
@@ -19,24 +20,8 @@ const EDGE = 28;
 const SPEED = 14;
 
 /** The box being drawn; only the small MarqueeBox component re-renders as it changes, not the page around it */
-function boxStore() {
-  let box: Box | null = null;
-  const listeners = new Set<() => void>();
-  return {
-    get: () => box,
-    set(next: Box | null) {
-      box = next;
-      listeners.forEach((l) => l());
-    },
-    subscribe(l: () => void) {
-      listeners.add(l);
-      return () => {
-        listeners.delete(l);
-      };
-    },
-  };
-}
-export type MarqueeStore = ReturnType<typeof boxStore>;
+const boxStore = () => createStore<Box | null>(null);
+export type MarqueeStore = Store<Box | null>;
 
 /** Item boxes from the DOM (every item rendered), for lists without their own geometry */
 function domHits(container: HTMLElement): HitTest {
@@ -210,7 +195,7 @@ export function useMarquee({
 
 /** The marquee selection box, drawn in the scrollable container */
 export function MarqueeBox({ store }: { store: MarqueeStore }) {
-  const box = useSyncExternalStore(store.subscribe, store.get);
+  const box = useStore(store);
   if (!box) return null;
   return <div className="pointer-events-none absolute z-10 border border-brand bg-brand/15" style={{ left: box.x, top: box.y, width: box.w, height: box.h }} />;
 }

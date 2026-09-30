@@ -1,5 +1,5 @@
 /** How the file list is laid out: its columns (which are shown, and how wide) and how items are grouped */
-import { useSyncExternalStore } from "react";
+import { createStore, useStore } from "@/lib/store";
 import { t } from "@/lib/i18n";
 
 // ───────────── Columns ─────────────
@@ -46,8 +46,7 @@ export interface ColumnPrefs {
 }
 
 const KEY = "tf-columns";
-let prefs: ColumnPrefs = load();
-const listeners = new Set<() => void>();
+const prefs = createStore<ColumnPrefs>(load());
 
 function load(): ColumnPrefs {
   try {
@@ -59,25 +58,21 @@ function load(): ColumnPrefs {
 }
 
 function save(next: ColumnPrefs) {
-  prefs = next;
   try {
     localStorage.setItem(KEY, JSON.stringify(next));
   } catch {
     // Ignore
   }
-  listeners.forEach((l) => l());
+  prefs.set(next);
 }
 
 export function columnPrefs() {
-  return prefs;
+  return prefs.get();
 }
 
 /** The column settings, shared by every list (and kept for the next visit) */
 export function useColumnPrefs() {
-  return useSyncExternalStore((cb) => {
-    listeners.add(cb);
-    return () => listeners.delete(cb);
-  }, columnPrefs);
+  return useStore(prefs);
 }
 
 export function columnShown(p: ColumnPrefs, id: ColumnId) {
@@ -85,15 +80,15 @@ export function columnShown(p: ColumnPrefs, id: ColumnId) {
 }
 
 export function showColumn(id: ColumnId, on: boolean) {
-  save({ ...prefs, visible: { ...prefs.visible, [id]: on } });
+  save({ ...prefs.get(), visible: { ...prefs.get().visible, [id]: on } });
 }
 
 /** A column's width; undefined goes back to the default */
 export function setColumnWidth(id: ColumnId | "name", width: number | undefined) {
-  const widths = { ...prefs.widths };
+  const widths = { ...prefs.get().widths };
   if (width === undefined) delete widths[id];
   else widths[id] = Math.round(Math.min(MAX_COLUMN, Math.max(id === "name" ? MIN_NAME : MIN_COLUMN, width)));
-  save({ ...prefs, widths });
+  save({ ...prefs.get(), widths });
 }
 
 /** Every column shown as it is at first, at its default width */

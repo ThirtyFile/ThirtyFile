@@ -1,6 +1,7 @@
 /** Asking before an action that can't be taken back, as a promise: `if (!(await confirm({ … }))) return;` */
-import { useCallback, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { ConfirmDialog } from "@/components/dialogs";
+import { createStore, useStore } from "@/lib/store";
 
 export interface ConfirmOptions {
   title: string;
@@ -28,34 +29,20 @@ function RequestDialog({ req, onDone }: { req: Request; onDone(ok: boolean): voi
   );
 }
 
-let current: Request | null = null;
-const listeners = new Set<() => void>();
-const emit = () => listeners.forEach((l) => l());
+const current = createStore<Request | null>(null);
 
 /** For code outside components (tabs, transfer lists): shown by <ConfirmHost />. A new question answers an open one with "no". */
 export function confirm(options: ConfirmOptions): Promise<boolean> {
-  current?.resolve(false);
-  return new Promise((resolve) => {
-    current = { ...options, resolve };
-    emit();
-  });
+  current.get()?.resolve(false);
+  return new Promise((resolve) => current.set({ ...options, resolve }));
 }
 
 /** Shows the questions asked with confirm(); mounted once for the whole app */
 export function ConfirmHost() {
-  const req = useSyncExternalStore(
-    (l) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
-    },
-    () => current,
-  );
+  const req = useStore(current);
   if (!req) return null;
   const done = (ok: boolean) => {
-    if (current === req) {
-      current = null;
-      emit();
-    }
+    if (current.get() === req) current.set(null);
     req.resolve(ok);
   };
   return <RequestDialog req={req} onDone={done} />;

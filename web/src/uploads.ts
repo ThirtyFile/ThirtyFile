@@ -6,6 +6,7 @@ import { resolveConflicts } from "@/components/ConflictDialog";
 import { applyToUpload, topLevel } from "@/lib/conflicts";
 import { reportShown } from "@/lib/errorReport";
 import { t } from "@/lib/i18n";
+import { createStore, useStore } from "@/lib/store";
 import {
   BEAT_MS,
   TAB,
@@ -96,11 +97,10 @@ let tasks: UploadTask[] = [];
 const byId = new Map<string, UploadTask>();
 const emptyTotals = (): UploadTotals => ({ size: 0, sent: 0, queued: 0, uploading: 0, paused: 0, done: 0, error: 0 });
 let totals = emptyTotals();
-let snapshot: UploadsSnapshot = { tasks, totals: { ...totals } };
+const snapshot = createStore<UploadsSnapshot>({ tasks, totals: { ...totals } });
 /** Tasks waiting to start, in order; entries no longer queued (cancelled, already started) are skipped */
 let queue: UploadTask[] = [];
 let queueHead = 0;
-const listeners = new Set<() => void>();
 /** Where the files of the uploads that ended went (told with the final refresh) */
 export interface LandedBatch {
   /** Folders files were uploaded to */
@@ -120,8 +120,7 @@ let seq = 0;
 function flush() {
   clearTimeout(emitTimer);
   emitTimer = undefined;
-  snapshot = { tasks: [...tasks], totals: { ...totals } };
-  listeners.forEach((l) => l());
+  snapshot.set({ tasks: [...tasks], totals: { ...totals } });
   schedulePersist();
 }
 
@@ -298,13 +297,7 @@ function forget(task: UploadTask) {
 }
 
 export function useUploads() {
-  return useSyncExternalStore(
-    (l) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
-    },
-    () => snapshot,
-  );
+  return useStore(snapshot);
 }
 
 /** True while files are waiting or being sent (leaving the page would stop them) */

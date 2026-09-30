@@ -1,9 +1,11 @@
 import { useSyncExternalStore } from "react";
+import { createStore } from "@/lib/store";
 
 /** Appearance: follow system, light, dark */
 export type ThemeMode = "system" | "light" | "dark";
 
-const listeners = new Set<() => void>();
+/** Tells the components showing the appearance that it changed (it is read from the page and the settings) */
+const changes = createStore(undefined);
 const media = matchMedia("(prefers-color-scheme: dark)");
 
 // Default appearance set by the admin in branding settings, and whether users may switch it themselves (injected by the home page HTML first)
@@ -29,7 +31,7 @@ function currentMode(): ThemeMode {
 function apply() {
   const mode = currentMode();
   document.documentElement.classList.toggle("dark", mode === "dark" || (mode === "system" && media.matches));
-  listeners.forEach((l) => l());
+  changes.emit();
 }
 
 media.addEventListener("change", apply);
@@ -55,14 +57,9 @@ export function setThemeMode(mode: ThemeMode) {
   apply();
 }
 
-function subscribe(l: () => void) {
-  listeners.add(l);
-  return () => listeners.delete(l);
-}
-
 export function useTheme() {
-  const dark = useSyncExternalStore(subscribe, () => document.documentElement.classList.contains("dark"));
-  const mode = useSyncExternalStore(subscribe, currentMode);
-  const canToggle = useSyncExternalStore(subscribe, () => policy.allowToggle);
+  const dark = useSyncExternalStore(changes.subscribe, () => document.documentElement.classList.contains("dark"));
+  const mode = useSyncExternalStore(changes.subscribe, currentMode);
+  const canToggle = useSyncExternalStore(changes.subscribe, () => policy.allowToggle);
   return { dark, mode, canToggle, setMode: setThemeMode };
 }

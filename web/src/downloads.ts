@@ -2,10 +2,10 @@
 //! Multi-item downloads are zipped by the server while streaming, with the total size announced up front, so progress can be shown too.
 //! Files larger than IN_APP_LIMIT aren't buffered in the page (to avoid using lots of memory); the browser downloads them directly instead.
 
-import { useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { responseError } from "@/api";
 import { t } from "@/lib/i18n";
+import { createStore, useStore } from "@/lib/store";
 
 export type DownloadStatus = "downloading" | "done" | "error" | "canceled";
 
@@ -57,28 +57,15 @@ function statusError(status: number): string {
   }
 }
 
-let tasks: DownloadTask[] = [];
-const listeners = new Set<() => void>();
+const tasks = createStore<DownloadTask[]>([]);
 let seq = 0;
 
-function emit() {
-  tasks = [...tasks];
-  listeners.forEach((l) => l());
-}
-
 function update(id: string, patch: Partial<DownloadTask>) {
-  tasks = tasks.map((x) => (x.id === id ? { ...x, ...patch } : x));
-  listeners.forEach((l) => l());
+  tasks.set(tasks.get().map((x) => (x.id === id ? { ...x, ...patch } : x)));
 }
 
 export function useDownloads() {
-  return useSyncExternalStore(
-    (l) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
-    },
-    () => tasks,
-  );
+  return useStore(tasks);
 }
 
 /** Download directly through the browser (large files, public share links) */
@@ -131,15 +118,11 @@ export async function download(source: DownloadSource, opts: { zip?: boolean; na
   const id = `d${++seq}`;
   const controller = new AbortController();
   const zip = !!opts.zip;
-  tasks = [
+  tasks.set([
     { id, name: opts.name ?? (zip ? t("Download.zip") : t("Downloading…")), zip, total: null, received: 0, rate: 0, status: "downloading", source, controller },
-    ...tasks,
-  ];
-  emit();
-  const drop = () => {
-    tasks = tasks.filter((x) => x.id !== id);
-    emit();
-  };
+    ...tasks.get(),
+  ]);
+  const drop = () => tasks.set(tasks.get().filter((x) => x.id !== id));
   // Too large to keep in the page: stop reading and let the browser download it itself (to disk, with its own
   // progress). A short-lived link may have expired while the first part was read: a new one is asked for first.
   const handOver = async (fresh: boolean) => {
@@ -220,26 +203,23 @@ export async function download(source: DownloadSource, opts: { zip?: boolean; na
 }
 
 export function cancelDownload(id: string) {
-  tasks.find((x) => x.id === id)?.controller.abort();
+  tasks.get().find((x) => x.id === id)?.controller.abort();
 }
 
 export function retryDownload(id: string) {
-  const t = tasks.find((x) => x.id === id);
+  const t = tasks.get().find((x) => x.id === id);
   if (!t) return;
-  tasks = tasks.filter((x) => x.id !== id);
-  emit();
+  tasks.set(tasks.get().filter((x) => x.id !== id));
   void download(t.source, { zip: t.zip, name: t.name });
 }
 
 export function clearDownloads() {
-  tasks.forEach((x) => x.status === "downloading" && x.controller.abort());
-  tasks = [];
-  emit();
+  tasks.get().forEach((x) => x.status === "downloading" && x.controller.abort());
+  tasks.set([]);
 }
 
 export function removeDownload(id: string) {
-  tasks = tasks.filter((x) => x.id !== id);
-  emit();
+  tasks.set(tasks.get().filter((x) => x.id !== id));
 }
 
 /** Trigger a browser download (without leaving the page) */

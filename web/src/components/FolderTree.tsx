@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useSyncExternalStore, type Dispatch, type KeyboardEvent, type SetStateAction } from "react";
+import { createContext, useContext, useEffect, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react";
 import { Link, NavLink } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRightIcon, ChevronsDownUpIcon, CloudOffIcon, FolderIcon, FolderOpenIcon, LayersIcon, LocateFixedIcon, type LucideIcon } from "lucide-react";
@@ -10,6 +10,7 @@ import { ToolButton } from "@/components/frame/ToolButton";
 import { DRIVE_ICON, useDrives } from "@/lib/drives";
 import { t, tServer } from "@/lib/i18n";
 import { treeStorageKey } from "@/lib/signOut";
+import { createStore, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 // ───────────── Folder tree state (kept across page switches and reloads) ─────────────
@@ -33,44 +34,34 @@ function loadExpanded(key: string): string[] {
  * same after a reload; null until the user is known (items expanded before are kept when their tree is loaded)
  */
 let treeKey: string | null = null;
-let expanded = new Set<string>();
-const treeListeners = new Set<() => void>();
+const expanded = createStore(new Set<string>());
 
 /** Loads the tree of the signed-in user, as they left it */
 export function loadTree(userId: number) {
   const key = treeStorageKey(userId);
   if (key === treeKey) return;
-  const early = treeKey === null ? [...expanded] : [];
+  const early = treeKey === null ? [...expanded.get()] : [];
   treeKey = key;
   replaceExpanded(new Set([...loadExpanded(key), ...early]));
 }
 
 function replaceExpanded(next: Set<string>) {
-  expanded = next;
   try {
     if (treeKey) localStorage.setItem(treeKey, JSON.stringify([...next].slice(-TREE_STORED_MAX)));
   } catch {
     // Storage blocked by the browser: the tree is remembered until the page is closed
   }
-  treeListeners.forEach((l) => l());
+  expanded.set(next);
 }
 function setExpanded(id: string, open: boolean) {
-  if (expanded.has(id) === open) return;
-  const next = new Set(expanded);
+  if (expanded.get().has(id) === open) return;
+  const next = new Set(expanded.get());
   if (open) next.add(id);
   else next.delete(id);
   replaceExpanded(next);
 }
 function useExpanded() {
-  return useSyncExternalStore(
-    (l) => {
-      treeListeners.add(l);
-      return () => {
-        treeListeners.delete(l);
-      };
-    },
-    () => expanded,
-  );
+  return useStore(expanded);
 }
 
 /** When opening a folder, auto-expand its parent folders in the left-hand tree */
