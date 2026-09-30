@@ -103,6 +103,18 @@ fn space_root(n: &Node) -> AppResult<Pinned> {
     }
 }
 
+/// Refuses, for an item of a folder space, a name scans skip (`folders::ignored`): ThirtyFile's own files there
+/// (`.thirtyfile-…`) and temporary files of other programs. An item with such a name would never show, wouldn't count
+/// against the space's size limit, and could be taken for something ThirtyFile left behind and removed.
+pub fn check_name(name: &str) -> AppResult<()> {
+    if crate::folders::ignored(name) {
+        return Err(AppError::bad_request(format!(
+            "\"{name}\" can't be used in a folder on the server: names like this are kept for ThirtyFile's own files and for temporary files of other programs"
+        )));
+    }
+    Ok(())
+}
+
 /// A disk error as people see it
 pub fn disk_error(e: io::Error) -> AppError {
     match e.kind() {
@@ -442,6 +454,7 @@ async fn repath(conn: &mut SqliteConnection, drive_id: &str, old: &str, new: &st
 
 /// Makes a folder on disk; one that was made on the server meanwhile is used as it is
 pub fn make_dir(parent: &Node, name: &str) -> AppResult<(String, Stat)> {
+    check_name(name)?;
     let path = abs(parent)?.join(name).map_err(gone_or_disk_error)?;
     ensure_dir(&path).map_err(disk_error)?;
     Ok((child_rel(rel_of(parent), name), stat(path.as_path()).map_err(disk_error)?))
@@ -450,6 +463,7 @@ pub fn make_dir(parent: &Node, name: &str) -> AppResult<(String, Stat)> {
 /// Renames an item, or moves it to another folder of its space: on disk, then in the index (the caller records its
 /// new name and folder)
 pub async fn rename(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node, dest: &Node, name: &str) -> AppResult<()> {
+    check_name(name)?;
     let (from, to) = (abs(node)?, abs(dest)?.join(name).map_err(gone_or_disk_error)?);
     rename_new(from.as_path(), to.as_path()).map_err(disk_error)?;
     locks.note(to, from, None);
@@ -499,7 +513,7 @@ pub fn trash_folder(n: &Node) -> Option<crate::beneath::Below> {
 pub const TRASH_GRACE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
 
 /// Removes trash folders the index doesn't know (deleted for good while removing them from disk failed, say). Recent
-/// ones stay: something that went wrong halfway may still need them.
+/// ones stay: something that went wrong halfway may still need them. Only folders named by a trash id are ThirtyFile's.
 pub async fn clean_trash(st: &AppState, drive_id: &str, root: &Path) -> AppResult<()> {
     let top = root.to_path_buf();
     let names = tokio::task::spawn_blocking(move || -> Vec<String> {
@@ -507,7 +521,7 @@ pub async fn clean_trash(st: &AppState, drive_id: &str, root: &Path) -> AppResul
         let Ok(read) = std::fs::read_dir(dir.as_path()) else { return Vec::new() };
         read.flatten()
             .filter_map(|e| e.file_name().into_string().ok())
-            .filter(|n| dir.join(n).is_ok_and(|p| older_than(&p, TRASH_GRACE)))
+            .filter(|n| crate::util::is_new_id(n) && dir.join(n).is_ok_and(|p| older_than(&p, TRASH_GRACE)))
             .collect()
     })
     .await?;
@@ -525,9 +539,10 @@ pub async fn clean_trash(st: &AppState, drive_id: &str, root: &Path) -> AppResul
     Ok(())
 }
 
-/// Whether a name scans ignore is something a change left behind when it stopped halfway (a restart, say)
+/// Whether a name scans ignore is something a change left behind when it stopped halfway (a restart, say): one of
+/// ThirtyFile's prefixes and a new id, exactly as it names them. An item people named alike is never taken for one.
 pub fn is_leftover(name: &str) -> bool {
-    [MOVE_PREFIX, COPY_PREFIX, UPLOAD_PREFIX, SAVE_PREFIX].iter().any(|p| name.starts_with(p))
+    [MOVE_PREFIX, COPY_PREFIX, UPLOAD_PREFIX, SAVE_PREFIX].iter().any(|p| name.strip_prefix(p).is_some_and(crate::util::is_new_id))
 }
 
 /// Deals with what changes left behind (`is_leftover`, paths found by a scan) once they are old enough that no change
@@ -610,6 +625,7 @@ pub async fn stage_upload(folder: &Node, tmp: &Path, size: u64) -> AppResult<Pin
 
 /// Renames content staged in the space's folder into `folder` as `name` and indexes it; returns the new item's id
 pub async fn place_file(conn: &mut SqliteConnection, staged: &Pinned, owner: i64, folder: &Node, name: &str) -> AppResult<String> {
+    check_name(name)?;
     let to = abs(folder)?.join(name).map_err(gone_or_disk_error)?;
     rename_new(staged.as_path(), to.as_path()).map_err(disk_error)?;
     let s = stat(to.as_path()).map_err(disk_error)?;
@@ -856,6 +872,9 @@ async fn place(st: &AppState, nodes: &[Node], dest: &Node, moving: bool) -> AppR
     if !dest.in_folder_space() {
         return ingest(st, nodes, dest.drive(), moving).await;
     }
+    for n in nodes {
+        check_name(&n.name)?;
+    }
     let wrap = abs(dest)?.join(&format!("{}{}", if moving { MOVE_PREFIX } else { COPY_PREFIX }, new_id())).map_err(gone_or_disk_error)?;
     tokio::fs::create_dir(wrap.as_path()).await.map_err(disk_error)?;
     let tmp = wrap.join(&top.name).map_err(disk_error)?;
@@ -992,6 +1011,7 @@ pub async fn place_folder(st: &AppState, user: &User, staged: Staging, dest_id: 
     let dest = tree::folder_for(&mut tx, user, dest_id, Need::Write).await?;
     locks.check(&dest)?;
     tree::check_quota(&mut tx, dest.drive(), bytes).await?;
+    check_name(name)?;
     let name = free_name(&mut tx, &dest, name, true).await?;
     let final_path = abs(&dest)?.join(&name).map_err(gone_or_disk_error)?;
     rename_new(staged.top.as_path(), final_path.as_path()).map_err(disk_error)?;
@@ -1775,19 +1795,108 @@ mod tests {
     #[test]
     fn what_a_stopped_change_left_behind_is_put_back_or_removed() {
         let dir = std::env::temp_dir().join(format!("thirtyfile-leftovers-{}", new_id()));
-        write_old(&dir.join(format!("{MOVE_PREFIX}1/Report/a.txt")), b"moving");
+        let (moving, upload) = (format!("{MOVE_PREFIX}{}", new_id()), format!("{UPLOAD_PREFIX}{}", new_id()));
+        write_old(&dir.join(&moving).join("Report/a.txt"), b"moving");
         write_old(&dir.join("Report"), b"already taken");
-        write_old(&dir.join(format!("{UPLOAD_PREFIX}2")), b"half an upload");
-        assert!(is_leftover(&format!("{MOVE_PREFIX}1")) && is_leftover(&format!("{SAVE_PREFIX}3")) && !is_leftover(TRASH_DIR));
-        let found = [dir.join(format!("{MOVE_PREFIX}1")), dir.join(format!("{UPLOAD_PREFIX}2"))];
+        write_old(&dir.join(&upload), b"half an upload");
+        assert!(is_leftover(&moving) && is_leftover(&format!("{SAVE_PREFIX}{}", new_id())) && !is_leftover(TRASH_DIR));
+        let found = [dir.join(&moving), dir.join(&upload)];
         let root = Pinned::root(&dir).unwrap();
-        let pinned = || vec![root.join(&format!("{MOVE_PREFIX}1")).unwrap(), root.join(&format!("{UPLOAD_PREFIX}2")).unwrap()];
+        let pinned = || vec![root.join(&moving).unwrap(), root.join(&upload).unwrap()];
         clean_leftovers(pinned(), TRASH_GRACE);
         assert!(found.iter().all(|p| p.exists()), "recent ones may still be in use");
         clean_leftovers(pinned(), std::time::Duration::ZERO);
         assert_eq!(std::fs::read(dir.join("Report (1)/a.txt")).unwrap(), b"moving");
         assert!(found.iter().all(|p| !p.exists()));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn names_scans_skip_are_refused_in_folder_spaces() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        let st = || State(env.st.clone());
+        write_old(&space.dir.join("app.py"), b"print()");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (app, _) = env.node_at(&space.drive, "app.py").await.unwrap();
+        for name in [
+            ".thirtyfile-save-x",
+            ".thirtyfile-upload-x",
+            ".thirtyfile-trash",
+            ".THIRTYFILE-versions",
+            ".thirtyfile-space",
+            "~$Budget.xlsx",
+            ".~lock.Budget.xlsx#",
+            "movie.mp4.part",
+            "setup.crdownload",
+            "Thumbs.db",
+            "desktop.ini",
+            ".DS_Store",
+            ".smbdelete0001",
+        ] {
+            let err = crate::nodes::create_folder(st(), admin.clone(), req(json!({ "parent_id": space.root, "name": name }))).await.unwrap_err();
+            assert_eq!(err.status, StatusCode::BAD_REQUEST, "{name}: {}", err.message);
+            let err = crate::nodes::rename(st(), admin.clone(), UrlPath(app.clone()), req(json!({ "name": name }))).await.unwrap_err();
+            assert_eq!(err.status, StatusCode::BAD_REQUEST, "{name}: {}", err.message);
+            let name: &'static str = name.to_string().leak();
+            assert!(env.try_upload(&admin, &space.root, name, b"x").await.is_err(), "{name}");
+        }
+        let names: Vec<String> = std::fs::read_dir(&space.dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        let mut names = names;
+        names.sort();
+        assert_eq!(names, [crate::folders::MARKER, "app.py"]);
+        assert_eq!(node(&env, &app).await.name, "app.py");
+
+        // Nor can they come in from the content store, where they are ordinary names
+        let docs = env.folder(&admin, admin.root(), "Docs").await;
+        env.upload(&admin, &docs, "desktop.ini", b"[.ShellClassInfo]").await;
+        let err = crate::nodes::copy_nodes(st(), admin.clone(), req(json!({ "ids": [docs], "dest_id": space.root }))).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST, "{}", err.message);
+        let err = crate::nodes::move_nodes(st(), admin.clone(), req(json!({ "ids": [docs], "dest_id": space.root }))).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST, "{}", err.message);
+        assert_eq!(env.drive_of(&docs).await, env.drive_of(admin.root()).await);
+        assert!(!space.dir.join("Docs").exists());
+        // Names that only look alike are fine
+        env.upload(&admin, &space.root, "part.txt", b"x").await;
+        env.upload(&admin, &space.root, "thirtyfile-notes.txt", b"x").await;
+    }
+
+    #[tokio::test]
+    async fn only_what_thirtyfile_left_behind_is_cleaned_up() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let dir = &space.dir;
+        let old = |path: &Path| {
+            let two_days = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 24 * 3600);
+            std::fs::File::options().write(true).open(path).unwrap().set_modified(two_days).unwrap();
+        };
+        // Named by people (over SMB, say) like ThirtyFile's own files, and old
+        let people = [
+            ".thirtyfile-save-x".to_string(),
+            format!("{UPLOAD_PREFIX}notes.txt"),
+            format!("{MOVE_PREFIX}{}", "A".repeat(32)),
+            format!("{TRASH_DIR}/Notes/a.txt"),
+            format!("{}/Diary/2026.txt", versions::VERSIONS_DIR),
+        ];
+        for p in &people {
+            write_old(&dir.join(p), b"kept");
+            old(&dir.join(p));
+        }
+        for p in [format!("{TRASH_DIR}/Notes"), format!("{}/Diary", versions::VERSIONS_DIR)] {
+            let two_days = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 24 * 3600);
+            let _ = std::fs::File::open(dir.join(p)).and_then(|f| f.set_modified(two_days));
+        }
+        // Left by ThirtyFile
+        let upload = format!("{UPLOAD_PREFIX}{}", new_id());
+        write_old(&dir.join(&upload), b"half an upload");
+        old(&dir.join(&upload));
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        assert!(eventually_gone(&dir.join(&upload)).await);
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        for p in &people {
+            assert_eq!(std::fs::read(dir.join(p)).unwrap(), b"kept", "{p}");
+        }
     }
 
     /// Clears the hook of `hook_after_place` when dropped

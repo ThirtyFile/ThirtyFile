@@ -260,7 +260,8 @@ pub async fn prune(st: &AppState) -> AppResult<usize> {
 }
 
 /// Removes files in a folder space's versions folder that no version refers to any more (the file was deleted for
-/// good, or removing it failed earlier). Run with each scan of the space.
+/// good, or removing it failed earlier). Run with each scan of the space. Only what ThirtyFile named there is looked
+/// at: folders named by a file's id, holding files named by a version's id.
 pub async fn clean_folder(st: &AppState, drive_id: &str, root: &Path) -> AppResult<()> {
     let top = root.to_path_buf();
     let found = tokio::task::spawn_blocking(move || -> Vec<String> {
@@ -269,13 +270,17 @@ pub async fn clean_folder(st: &AppState, drive_id: &str, root: &Path) -> AppResu
         let mut found = Vec::new();
         for node_dir in read.flatten() {
             let Ok(node) = node_dir.file_name().into_string() else { continue };
+            if !crate::util::is_new_id(&node) {
+                continue;
+            }
             let Ok(node_dir) = dir.join(&node) else { continue };
             let Ok(inside) = node_dir.dir() else { continue };
             let Ok(files) = std::fs::read_dir(inside.as_path()) else { continue };
-            let names: Vec<String> = files.flatten().filter_map(|f| f.file_name().into_string().ok()).collect();
-            if names.is_empty() {
+            let all: Vec<String> = files.flatten().filter_map(|f| f.file_name().into_string().ok()).collect();
+            if all.is_empty() {
                 let _ = std::fs::remove_dir(node_dir.as_path());
             }
+            let names: Vec<String> = all.into_iter().filter(|n| crate::util::is_new_id(n)).collect();
             found.extend(names.into_iter().map(|n| format!("{VERSIONS_DIR}/{node}/{n}")));
         }
         found

@@ -186,6 +186,10 @@ async fn parent_of(conn: &mut SqliteConnection, user: &User, segs: &[String]) ->
     if name != *last {
         return Err(AppError::bad_request("Name can't start or end with a space"));
     }
+    // Refused as a client expects for its temporary and system files (.DS_Store, Thumbs.db…) where it can't write them
+    if folder.in_folder_space() {
+        crate::fsops::check_name(&name).map_err(|e| AppError::forbidden(e.message))?;
+    }
     Ok((folder, name))
 }
 
@@ -1265,6 +1269,13 @@ mod tests {
         assert!(space.dir.join("Photos/c.txt").exists() && !space.dir.join("Photos/b.txt").exists());
         assert_eq!(dav.send("DELETE", "/dav/Server/Photos/c.txt", &[], "").await.status, StatusCode::NO_CONTENT);
         assert!(!space.dir.join("Photos/c.txt").exists());
+        // Names the folder can't show are refused as a client expects for its system files
+        assert_eq!(dav.send("PUT", "/dav/Server/Photos/.DS_Store", &[], "finder").await.status, StatusCode::FORBIDDEN);
+        assert_eq!(dav.send("MKCOL", "/dav/Server/.thirtyfile-trash", &[], "").await.status, StatusCode::FORBIDDEN);
+        let h = [("destination", "/dav/Server/Photos/.thirtyfile-save-x")];
+        assert_eq!(dav.send("MOVE", "/dav/Server/Photos/a.txt", &h, "").await.status, StatusCode::FORBIDDEN);
+        assert!(!space.dir.join("Photos/.DS_Store").exists() && env.node_at(&space.drive, ".thirtyfile-trash").await.is_none());
+        assert!(space.dir.join("Photos/a.txt").exists());
 
         sqlx::query("UPDATE drives SET read_only = 1 WHERE id = ?").bind(&space.drive).execute(&env.st.db).await.unwrap();
         assert_eq!(dav.send("PUT", "/dav/Server/Photos/a.txt", &[], "no").await.status, StatusCode::FORBIDDEN);

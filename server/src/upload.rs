@@ -188,6 +188,12 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let parent = tree::folder_for(&mut tx, user, &parent_id, tree::Need::Write).await?;
+        // Refused before anything is sent, rather than when the upload is put in place
+        if parent.in_folder_space() {
+            for n in rel_parts.iter().chain(std::iter::once(&name)) {
+                crate::fsops::check_name(n)?;
+            }
+        }
         if let Some(s) = &up.share {
             check_in_share(&mut tx, s, &parent.id).await?;
             let (pending,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM uploads WHERE share_id = ? AND node_id IS NULL AND expires_at > ?")
