@@ -1,7 +1,8 @@
-import type { KeyboardEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { ErrorState } from "@/components/ErrorState";
 import { RowMenuArea } from "@/components/RowMenuArea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useSelectableList } from "@/lib/listSelection";
 import { cn } from "@/lib/utils";
 
 export interface Column<T> {
@@ -20,8 +21,11 @@ const TD = "border-b border-border/40 px-2.5";
 
 /**
  * Table shared by the admin pages: click a row to select, double-click to open, the context menu depends on the selected row, clicking empty space clears the selection.
+ * With the keyboard it works like the file list (lib/listSelection.ts), and screen readers hear it as a grid with the selected row.
  */
 export function DataTable<T>(p: {
+  /** What the table lists, for screen readers */
+  label: string;
   rows: T[];
   rowKey(row: T): string;
   columns: Column<T>[];
@@ -44,6 +48,13 @@ export function DataTable<T>(p: {
   rowClassName?(row: T): string | false | undefined;
 }) {
   const selected = p.selectedKey === null ? null : (p.rows.find((r) => p.rowKey(r) === p.selectedKey) ?? null);
+  const list = useSelectableList({
+    items: p.rows,
+    keyOf: p.rowKey,
+    selected: new Set(selected ? [p.selectedKey!] : []),
+    onSelect: (keys) => p.onSelect(keys.values().next().value ?? null),
+    onOpen: p.onOpen && ((row) => p.onOpen!(row)),
+  });
   return (
     <RowMenuArea
       className="min-h-0 flex-1 overflow-auto"
@@ -58,53 +69,32 @@ export function DataTable<T>(p: {
       ) : p.rows.length === 0 && p.empty ? (
         p.empty
       ) : (
-        <table className={cn("w-full min-w-[560px] border-collapse text-xs", p.fixed ? "table-fixed" : "whitespace-nowrap")}>
+        // role="grid": screen readers only report which row is selected in a grid, not in a plain table
+        <table {...list.listProps("grid", p.label)} className={cn("w-full min-w-[560px] border-collapse text-xs", p.fixed ? "table-fixed" : "whitespace-nowrap")}>
           <thead>
-            <tr>
+            <tr role="row">
               {p.columns.map((c, i) => (
-                <th key={i} className={cn(TH, i === 0 && "pl-3", c.className)}>
+                <th key={i} role="columnheader" className={cn(TH, i === 0 && "pl-3", c.className)}>
                   {c.header}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {p.rows.map((row, index) => {
+            {p.rows.map((row) => {
               const k = p.rowKey(row);
-              // Keyboard: Tab reaches the selected row (or the first), arrows move the selection, Enter opens
-              const onKeyDown = (e: KeyboardEvent<HTMLTableRowElement>) => {
-                // Keys typed in a control inside the row belong to that control; a held key doesn't open repeatedly
-                if (e.target !== e.currentTarget || (e.key === "Enter" && e.repeat)) return;
-                let next: number | null = null;
-                if (e.key === "ArrowDown") next = Math.min(p.rows.length - 1, index + 1);
-                else if (e.key === "ArrowUp") next = Math.max(0, index - 1);
-                else if (e.key === "Home") next = 0;
-                else if (e.key === "End") next = p.rows.length - 1;
-                else if (e.key === "Enter" && p.onOpen) p.onOpen(row);
-                else if (e.key === " ") {
-                  e.preventDefault();
-                  p.onSelect(k);
-                }
-                if (next === null) return;
-                e.preventDefault();
-                const target = p.rowKey(p.rows[next]);
-                p.onSelect(target);
-                e.currentTarget.parentElement?.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(target)}"]`)?.focus();
-              };
               return (
                 <tr
                   key={k}
+                  role="row"
                   data-row-id={k}
-                  aria-selected={k === p.selectedKey}
-                  tabIndex={k === p.selectedKey || (p.selectedKey === null && index === 0) ? 0 : -1}
-                  onKeyDown={onKeyDown}
-                  onClick={() => p.onSelect(k)}
-                  onDoubleClick={p.onOpen && (() => p.onOpen!(row))}
+                  {...list.itemProps(row)}
                   className={cn("cursor-default outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset aria-selected:bg-selection aria-selected:shadow-[inset_3px_0_0_var(--color-brand)]", p.rowClassName?.(row))}
                 >
                   {p.columns.map((c, i) => (
                     <td
                       key={i}
+                      role="gridcell"
                       title={c.title?.(row)}
                       className={cn(TD, p.compact ? "h-[30px]" : "h-[34px]", i === 0 && "pl-3", p.fixed && "truncate", c.className, c.cellClassName)}
                     >

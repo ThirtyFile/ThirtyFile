@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from "react";
+import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDownIcon, FolderOpenIcon, Grid2X2Icon, ListIcon, PanelTopIcon, RefreshCwIcon, SettingsIcon } from "lucide-react";
@@ -15,6 +15,7 @@ import {
   type ControlPanelKey,
 } from "@/lib/controlPanel";
 import { t } from "@/lib/i18n";
+import { useSelectableList } from "@/lib/listSelection";
 import { usePersisted } from "@/lib/session";
 import { cn, formatBytes } from "@/lib/utils";
 import { useTabActions } from "@/tabs";
@@ -69,24 +70,19 @@ export function ControlPanelPage() {
     else navigate(item.to);
   };
 
-  const itemProps = (item: ControlPanelItem) => ({
-    "data-item": true,
-    onClick: (e: MouseEvent) => {
-      e.stopPropagation();
-      setSel(item.key);
-    },
-    onDoubleClick: () => open(item),
-    onKeyDown: (e: React.KeyboardEvent) => e.key === "Enter" && open(item),
-    onAuxClick: (e: MouseEvent) => {
-      if (e.button === 1) {
-        e.preventDefault();
-        open(item, true);
-      }
-    },
-    onMouseDown: (e: MouseEvent) => e.button === 1 && e.preventDefault(),
-    onContextMenu: () => setSel(item.key),
-    tabIndex: 0,
+  // In the order shown: by category as tiles, as listed in Details
+  const shown = view === "list" ? items : CONTROL_PANEL_CATEGORIES.flatMap(({ id }) => items.filter((i) => i.category === id));
+  // One Tab stop, arrows move between the items (lib/listSelection.ts)
+  const list = useSelectableList({
+    items: shown,
+    keyOf: (i) => i.key,
+    selected: new Set(selected ? [selected.key] : []),
+    onSelect: (keys) => setSel((keys.values().next().value as ControlPanelKey | undefined) ?? null),
+    onOpen: (i, newTab) => open(i, newTab),
+    nameOf: (i) => i.title,
+    hidden: (i) => view !== "list" && collapsed.includes(i.category),
   });
+  const itemProps = (item: ControlPanelItem) => ({ "data-item": true, ...list.itemProps(item) });
 
   const toolbar = (
     <>
@@ -122,6 +118,7 @@ export function ControlPanelPage() {
   const tile = (item: ControlPanelItem) => (
     <div
       key={item.key}
+      role="option"
       {...itemProps(item)}
       className={cn(
         "flex cursor-default gap-3 rounded-md border border-transparent p-3 outline-none select-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
@@ -140,23 +137,27 @@ export function ControlPanelPage() {
   );
 
   const listView = (
-    <table className="w-full table-fixed border-collapse text-xs whitespace-nowrap">
+    <table {...list.listProps("grid", t("Control panel"))} className="w-full table-fixed border-collapse text-xs whitespace-nowrap">
       <thead>
-        <tr className="border-b text-left text-muted-foreground">
-          <th className="h-[30px] w-[180px] px-2 pl-3 font-normal">{t("Name")}</th>
-          <th className="h-[30px] px-2 font-normal">{t("Description")}</th>
-          <th className="h-[30px] w-[110px] px-2 font-normal max-md:hidden">{t("Category")}</th>
-          <th className="h-[30px] w-[200px] px-2 font-normal max-lg:hidden">{t("Status")}</th>
+        <tr role="row" className="border-b text-left text-muted-foreground">
+          <th role="columnheader" className="h-[30px] w-[180px] px-2 pl-3 font-normal">{t("Name")}</th>
+          <th role="columnheader" className="h-[30px] px-2 font-normal">{t("Description")}</th>
+          <th role="columnheader" className="h-[30px] w-[110px] px-2 font-normal max-md:hidden">{t("Category")}</th>
+          <th role="columnheader" className="h-[30px] w-[200px] px-2 font-normal max-lg:hidden">{t("Status")}</th>
         </tr>
       </thead>
       <tbody>
         {items.map((item) => (
           <tr
             key={item.key}
+            role="row"
             {...itemProps(item)}
-            className={cn("h-8 cursor-default outline-none hover:bg-muted/70", sel === item.key && "bg-selection shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection")}
+            className={cn(
+              "h-8 cursor-default outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+              sel === item.key && "bg-selection shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection",
+            )}
           >
-            <td className="truncate px-2 pl-3">
+            <td role="gridcell" className="truncate px-2 pl-3">
               <span className="flex items-center gap-2">
                 <span className={cn("flex size-5 shrink-0 items-center justify-center rounded", item.tone)}>
                   <item.icon className="size-3.5" />
@@ -164,9 +165,9 @@ export function ControlPanelPage() {
                 {item.title}
               </span>
             </td>
-            <td className="truncate px-2 text-muted-foreground">{item.desc}</td>
-            <td className="truncate px-2 text-muted-foreground max-md:hidden">{controlPanelCategoryLabel(item.category)}</td>
-            <td className="truncate px-2 text-muted-foreground max-lg:hidden">{summary[item.key] ?? ""}</td>
+            <td role="gridcell" className="truncate px-2 text-muted-foreground">{item.desc}</td>
+            <td role="gridcell" className="truncate px-2 text-muted-foreground max-md:hidden">{controlPanelCategoryLabel(item.category)}</td>
+            <td role="gridcell" className="truncate px-2 text-muted-foreground max-lg:hidden">{summary[item.key] ?? ""}</td>
           </tr>
         ))}
       </tbody>
@@ -187,6 +188,7 @@ export function ControlPanelPage() {
     >
       <ContextMenu>
         <ContextMenuTrigger
+          {...list.scopeProps}
           className="min-h-0 flex-1 overflow-auto px-4 pb-6"
           onClick={() => setSel(null)}
           onContextMenuCapture={(e) => !(e.target as HTMLElement).closest("[data-item]") && setSel(null)}
@@ -204,6 +206,7 @@ export function ControlPanelPage() {
                 <section key={cat}>
                   <button
                     type="button"
+                    aria-expanded={isOpen}
                     onClick={(e) => {
                       e.stopPropagation();
                       setCollapsed(isOpen ? [...collapsed, cat] : collapsed.filter((c) => c !== cat));
@@ -213,7 +216,11 @@ export function ControlPanelPage() {
                     <ChevronDownIcon className={cn("size-3.5 transition-transform", !isOpen && "-rotate-90")} />
                     {t("{label} ({n})", { label, n: inCat.length })}
                   </button>
-                  {isOpen && <div className={grid}>{inCat.map(tile)}</div>}
+                  {isOpen && (
+                    <div {...list.listProps("listbox", label)} className={grid}>
+                      {inCat.map(tile)}
+                    </div>
+                  )}
                 </section>
               );
             })

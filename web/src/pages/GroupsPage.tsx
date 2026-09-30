@@ -83,6 +83,7 @@ export function GroupsPage() {
       footer={<span>{t("{n} group|{n} groups", { n: groups.length })}</span>}
     >
       <DataTable
+        label={t("Groups")}
         rows={groups}
         rowKey={(g) => String(g.id)}
         columns={columns}

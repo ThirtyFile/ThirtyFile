@@ -176,6 +176,7 @@ export function AdminUsersPage() {
       }
     >
       <DataTable
+        label={t("Users")}
         rows={users}
         rowKey={(u) => String(u.id)}
         columns={columns}

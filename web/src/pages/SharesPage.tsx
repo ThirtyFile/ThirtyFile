@@ -187,6 +187,7 @@ export function ShareLinks({
         </div>
       )}
       <DataTable
+        label={t("Share links")}
         rows={items}
         rowKey={(s) => s.id}
         columns={columns}

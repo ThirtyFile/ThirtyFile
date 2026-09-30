@@ -251,6 +251,7 @@ export function MovesPage() {
       footer={<span>{t("{n} move not finished|{n} moves not finished", { n: active })}</span>}
     >
       <DataTable
+        label={title}
         rows={moves}
         rowKey={(m) => m.id}
         columns={columns}
