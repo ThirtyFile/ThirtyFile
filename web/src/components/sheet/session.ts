@@ -5,11 +5,11 @@
 import JSZip from "jszip";
 import { fetchOffice, type FileSource, type Node } from "@/api";
 import { getDraft, onDraftRemoved } from "@/lib/drafts";
-import { dateToSerial, parseNumber, serialToDate, Calculator } from "@/lib/sheet/formula";
-import { isDatePattern } from "@/lib/sheet/format";
-import type { Cell, CellStyle, Range, Scalar, Sheet, Workbook } from "@/lib/sheet/model";
-import { cloneState, type SheetState, type StructOp } from "@/lib/sheet/ops";
-import { readXlsx, type Snapshot } from "@/lib/sheet/xlsx";
+import { dateToSerial, parseNumber, serialToDate, Calculator } from "@/ooxml/xlsx/formula";
+import { isDatePattern } from "@/ooxml/core/numfmt";
+import type { Cell, CellStyle, Range, Scalar, Sheet, Workbook } from "@/ooxml/xlsx/model";
+import { cloneState, type SheetState, type StructOp } from "@/ooxml/xlsx/ops";
+import { readXlsx, type Snapshot } from "@/ooxml/xlsx/workbook";
 
 // ───────────── Editing session (unsaved changes survive switching tabs and coming back) ─────────────
 

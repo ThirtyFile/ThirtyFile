@@ -5,10 +5,10 @@
  * There is no scene graph or render cache: the whole visible area is redrawn each time;
  * a typical sheet shows only a few hundred cells at once, so a full redraw takes 1–2 ms.
  */
-import { Axis, colName, inRange, key, mergeAt, type CellStyle, type Range, type Sheet } from "@/lib/sheet/model";
-import { isErr, type Calculator, type Value } from "@/lib/sheet/formula";
-import { formatCell } from "@/lib/sheet/format";
-import type { CellDecoration, IconKind } from "@/lib/sheet/conditional";
+import { Axis, colName, inRange, key, mergeAt, type CellStyle, type Range, type Sheet } from "@/ooxml/xlsx/model";
+import { isErr, type Calculator, type Value } from "@/ooxml/xlsx/formula";
+import { formatCell } from "@/ooxml/core/numfmt";
+import type { CellDecoration, IconKind } from "@/ooxml/xlsx/conditional";
 
 export const HEADER_W = 46;
 export const HEADER_H = 24;

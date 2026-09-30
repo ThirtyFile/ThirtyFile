@@ -3,8 +3,8 @@
  */
 import { toast } from "sonner";
 import { t } from "@/lib/i18n";
-import { key, type Borders, type CellStyle, type Range } from "@/lib/sheet/model";
-import { applyStructOp, cloneState, deriveStyle, adjustRange, type StructOp } from "@/lib/sheet/ops";
+import { key, type Borders, type CellStyle, type Range } from "@/ooxml/xlsx/model";
+import { applyStructOp, cloneState, deriveStyle, adjustRange, type StructOp } from "@/ooxml/xlsx/ops";
 import { changeDecimals, type BorderKind, type ToolbarActions } from "./SheetToolbar";
 import { cloneLayout, type Change } from "./session";
 import type { WorkspaceCtx } from "./workspace";

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { Calculator, checkFormula, dateToSerial, evaluateAt, parseNumber, serialToDate, shiftFormula, toScalar } from "@/lib/sheet/formula";
-import { key, parseCellName } from "@/lib/sheet/model";
+import { Calculator, checkFormula, dateToSerial, evaluateAt, parseNumber, serialToDate, shiftFormula, toScalar } from "@/ooxml/xlsx/formula";
+import { key, parseCellName } from "@/ooxml/xlsx/model";
 import { sheet, workbook } from "./sheet";
 
 const DATA = {

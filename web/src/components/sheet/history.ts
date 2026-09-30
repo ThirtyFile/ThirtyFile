@@ -2,8 +2,8 @@
  * Change history: applying cell changes, layout changes, row/column inserts/deletes, and undo/redo.
  * Only data is handled here; which sheet to switch to and what to select is decided by the caller from the returned entry.
  */
-import { colOf, key, rowOf, type Cell, type Scalar, type Workbook } from "@/lib/sheet/model";
-import { applyStructOp, inverseOp } from "@/lib/sheet/ops";
+import { colOf, key, rowOf, type Cell, type Scalar, type Workbook } from "@/ooxml/xlsx/model";
+import { applyStructOp, inverseOp } from "@/ooxml/xlsx/ops";
 import { restoreStates, type Change, type Entry, type Layout, type Session } from "./session";
 
 const MAX_UNDO = 200;

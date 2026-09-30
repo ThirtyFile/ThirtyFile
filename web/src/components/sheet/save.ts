@@ -8,10 +8,10 @@
  */
 import JSZip from "jszip";
 import { api, type Node } from "@/api";
-import { Calculator, isErr, toScalar } from "@/lib/sheet/formula";
-import { colOf, rowOf, type Workbook } from "@/lib/sheet/model";
-import { applyStructOp, cloneState } from "@/lib/sheet/ops";
-import { buildXlsx, type Snapshot } from "@/lib/sheet/xlsx";
+import { Calculator, isErr, toScalar } from "@/ooxml/xlsx/formula";
+import { colOf, rowOf, type Workbook } from "@/ooxml/xlsx/model";
+import { applyStructOp, cloneState } from "@/ooxml/xlsx/ops";
+import { buildXlsx, type Snapshot } from "@/ooxml/xlsx/workbook";
 import type { Session } from "./session";
 
 export async function saveSession(session: Session, nodeId: string): Promise<{ node: Node; cells: number }> {

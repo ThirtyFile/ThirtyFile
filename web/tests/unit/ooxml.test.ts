@@ -2,7 +2,7 @@
 // If a JSZip update renames or drops that field, every size reads as 0 and the pre-check passes silently: these tests fail instead.
 import JSZip from "jszip";
 import { describe, expect, test } from "vitest";
-import { checkZipSizes, MAX_XML_PART, TOO_LARGE } from "@/lib/office/ooxml";
+import { checkZipSizes, MAX_XML_PART, TOO_LARGE } from "@/ooxml/core/package";
 
 const CONTENT = "<root>" + "x".repeat(1000) + "</root>";
 

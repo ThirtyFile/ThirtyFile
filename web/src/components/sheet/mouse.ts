@@ -2,7 +2,7 @@
  * Mouse: selecting cells/whole rows/whole columns, click-to-insert references while typing formulas, drag-resizing columns and rows, auto-fitting column width.
  */
 import { type MouseEvent, useEffect } from "react";
-import { MAX_COLS, MAX_ROWS, cellName, key, mergeAt, normRange, rangeName } from "@/lib/sheet/model";
+import { MAX_COLS, MAX_ROWS, cellName, key, mergeAt, normRange, rangeName } from "@/ooxml/xlsx/model";
 import { HEADER_H, HEADER_W, displayText, fontOf, hitTest } from "./renderer";
 import { cloneLayout, editText } from "./session";
 import type { WorkspaceCtx } from "./workspace";

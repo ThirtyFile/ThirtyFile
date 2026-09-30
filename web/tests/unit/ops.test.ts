@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { key } from "@/lib/sheet/model";
-import { adjustFormula, adjustRange, adjustSqref, applyStructOp, cloneState, deriveStyle, inverseOp, type StructOp } from "@/lib/sheet/ops";
+import { key } from "@/ooxml/xlsx/model";
+import { adjustFormula, adjustRange, adjustSqref, applyStructOp, cloneState, deriveStyle, inverseOp, type StructOp } from "@/ooxml/xlsx/ops";
 import { sheet, workbook } from "./sheet";
 
 const op = (kind: StructOp["kind"], at: number, count = 1, target = "S"): StructOp => ({ kind, sheet: target, at, count });

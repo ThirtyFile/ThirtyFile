@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // (jsdom: happy-dom's getElementsByTagNameNS doesn't take "*" for any namespace, which the sheet code uses)
 import { describe, expect, test } from "vitest";
-import { computeConditional } from "@/lib/sheet/conditional";
-import { key } from "@/lib/sheet/model";
+import { computeConditional } from "@/ooxml/xlsx/conditional";
+import { key } from "@/ooxml/xlsx/model";
 import { sheet, workbook } from "./sheet";
 
 /** Decorated cells of a sheet with one "expression" rule over A1:A10 */
