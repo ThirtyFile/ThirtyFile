@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
-use crate::{VERSION, auth, check, db, locations, secrets};
+use crate::{VERSION, auth, check, db, locations, secrets, twofactor};
 
 #[derive(Parser)]
 #[command(name = "thirtyfile", version = VERSION, about = "ThirtyFile — lightweight cloud file management system")]
@@ -107,11 +107,10 @@ pub async fn run(cfg: &Config, db: &sqlx::SqlitePool, storage: &Path, key_source
     }
 
     if let Some(Command::ResetTwoFactor { username }) = &cfg.command {
-        let res = sqlx::query("UPDATE users SET totp_secret = NULL, totp_last_step = 0 WHERE username = ?").bind(username).execute(db).await?;
-        if res.rows_affected() == 0 {
-            return Err(format!("User not found: {username}").into());
-        }
-        sqlx::query("DELETE FROM recovery_codes WHERE user_id = (SELECT id FROM users WHERE username = ?)").bind(username).execute(db).await?;
+        let id = user_id(db, username).await?;
+        let mut tx = db::begin_write(db).await?;
+        twofactor::turn_off_in(&mut tx, id).await.map_err(|e| e.message)?;
+        tx.commit().await?;
         println!("Two-factor sign-in is turned off for this account");
         return Ok(true);
     }
@@ -128,25 +127,22 @@ pub async fn run(cfg: &Config, db: &sqlx::SqlitePool, storage: &Path, key_source
         let password = &password;
         auth::validate_password(password, auth::MIN_PASSWORD).map_err(|e| e.message)?;
         let hash = auth::hash_password(password.clone()).await.map_err(|e| e.message)?;
-        let res = sqlx::query("UPDATE users SET password_hash = ?, disabled = 0 WHERE username = ?")
-            .bind(hash)
-            .bind(username)
-            .execute(db)
-            .await?;
-        if res.rows_affected() == 0 {
-            return Err(format!("User not found: {username}").into());
-        }
-        sqlx::query("UPDATE users SET must_change_password = 1 WHERE username = ?").bind(username).execute(db).await?;
-        for table in ["sessions", "app_passwords"] {
-            sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table} WHERE user_id = (SELECT id FROM users WHERE username = ?)")))
-                .bind(username)
-                .execute(db)
-                .await?;
-        }
+        let id = user_id(db, username).await?;
+        let mut tx = db::begin_write(db).await?;
+        sqlx::query("UPDATE users SET password_hash = ?, disabled = 0, must_change_password = 1 WHERE id = ?").bind(hash).bind(id).execute(&mut *tx).await?;
+        // Signed out everywhere, as when an administrator sets the password
+        auth::sign_out_everywhere(&mut tx, id, None).await.map_err(|e| e.message)?;
+        tx.commit().await?;
         println!("Password reset");
         return Ok(true);
     }
     Ok(false)
+}
+
+/// The id of the account with this username
+async fn user_id(db: &sqlx::SqlitePool, username: &str) -> Result<i64, Box<dyn std::error::Error>> {
+    let id: Option<i64> = sqlx::query_scalar("SELECT id FROM users WHERE username = ?").bind(username).fetch_optional(db).await?;
+    id.ok_or_else(|| format!("User not found: {username}").into())
 }
 
 /// `thirtyfile rotate-secret-key`: re-encrypts the saved secrets with a new key. The new key file is written first
@@ -201,5 +197,41 @@ mod tests {
         let cmd = Config::command();
         let arg = cmd.get_arguments().find(|a| a.get_id() == "admin_password").unwrap();
         assert!(arg.is_hide_env_values_set());
+    }
+
+    #[tokio::test]
+    async fn reset_two_factor_and_reset_password_sign_the_account_out() {
+        let env = crate::testutil::env().await;
+        let amy = env.user("amy", true).await;
+        env.sign_in(&amy, "Test").await;
+        sqlx::query("UPDATE users SET totp_secret = 'sealed' WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+        sqlx::query("INSERT INTO recovery_codes (user_id, code_hash, created_at) VALUES (?, 'hash', 0)").bind(amy.id).execute(&env.st.db).await.unwrap();
+        let key = secrets::KeySource::Env(String::new());
+        let run = |args: Vec<&str>| {
+            let cfg = Config::try_parse_from(std::iter::once("thirtyfile").chain(args)).unwrap();
+            let (db, storage, key) = (env.st.db.clone(), env.st.storage_dir.clone(), &key);
+            async move { run(&cfg, &db, &storage, key).await.map_err(|e| e.to_string()) }
+        };
+        let db = env.st.db.clone();
+        let count = |sql: &'static str| {
+            let db = db.clone();
+            async move { sqlx::query_scalar::<_, i64>(sql).bind(amy.id).fetch_one(&db).await.unwrap() }
+        };
+
+        assert_eq!(run(vec!["reset-two-factor", "amy"]).await, Ok(true));
+        assert_eq!(count("SELECT COUNT(*) FROM users WHERE id = ? AND totp_secret IS NOT NULL").await, 0);
+        assert_eq!(count("SELECT COUNT(*) FROM recovery_codes WHERE user_id = ?").await, 0);
+
+        let new_password = format!("new-{}", crate::util::new_id());
+        assert_eq!(count("SELECT COUNT(*) FROM sessions WHERE user_id = ?").await, 1);
+        assert_eq!(run(vec!["reset-password", "amy", &new_password]).await, Ok(true));
+        assert_eq!(count("SELECT COUNT(*) FROM sessions WHERE user_id = ?").await, 0);
+        assert_eq!(count("SELECT must_change_password FROM users WHERE id = ?").await, 1);
+        let (hash,): (String,) = sqlx::query_as("SELECT password_hash FROM users WHERE id = ?").bind(amy.id).fetch_one(&env.st.db).await.unwrap();
+        assert!(auth::verify_password(new_password.clone(), hash).await.unwrap());
+
+        assert_eq!(run(vec!["reset-two-factor", "nobody"]).await, Err("User not found: nobody".into()));
+        assert_eq!(run(vec!["reset-password", "nobody", &new_password]).await, Err("User not found: nobody".into()));
+        assert_eq!(run(vec![]).await, Ok(false), "no subcommand: the server starts");
     }
 }
