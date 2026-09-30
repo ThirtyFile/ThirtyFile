@@ -47,7 +47,7 @@ fn dos_datetime(ts: i64) -> (u16, u16) {
 }
 
 impl<W: AsyncWrite + Unpin> ZipWriter<W> {
-    /// Files are stored as they are (the length of the ZIP can be computed in advance, see `predicted_len`)
+    /// Files are stored as they are (the length of the ZIP can be computed in advance, see `Length`)
     pub fn new(w: W) -> Self {
         Self { w, offset: 0, entries: Vec::new(), deflate: false, raw_names: false }
     }
@@ -265,7 +265,7 @@ impl<W: AsyncWrite + Unpin> ZipWriter<W> {
 /// A path as a ZIP entry name that every extractor keeps inside the folder it extracts to: in each part (between the
 /// '/'), characters Windows treats as separators or can't store (`\ : * ? " < > |`, ASCII control characters) become '_', and
 /// "." or ".." becomes "_" or "__". Names from a folder on the server may hold any of them (Linux allows all but '/').
-/// The length in bytes stays the same, so `predicted_len` still holds.
+/// The length in bytes stays the same, so `Length` still holds.
 fn entry_name(path: &str) -> String {
     path.split('/')
         .map(|part| match part {
@@ -276,30 +276,47 @@ fn entry_name(path: &str) -> String {
         .join("/")
 }
 
+#[cfg(test)]
 pub fn predicted_len<'a>(items: impl IntoIterator<Item = (&'a str, u64, bool)>) -> u64 {
-    let mut offset = 0u64;
-    let mut central = 0u64;
-    let mut count = 0u64;
+    let mut len = Length::default();
     for (path, size, is_dir) in items {
-        count += 1;
-        let entry_offset = offset;
+        len.add(path, size, is_dir);
+    }
+    len.total()
+}
+
+/// The length of a stored ZIP, added up an entry at a time (in the order they are written)
+#[derive(Default)]
+pub struct Length {
+    offset: u64,
+    central: u64,
+    count: u64,
+}
+
+impl Length {
+    pub fn add(&mut self, path: &str, size: u64, is_dir: bool) {
+        self.count += 1;
+        let entry_offset = self.offset;
         let (name_len, size64) = if is_dir {
             let name_len = path.trim_end_matches('/').len() as u64 + 1;
-            offset += 30 + name_len;
+            self.offset += 30 + name_len;
             (name_len, false)
         } else {
             let name_len = path.len() as u64;
-            let zip64 = size >= U32_MAX || offset >= U32_MAX;
+            let zip64 = size >= U32_MAX || self.offset >= U32_MAX;
             // Local header (20 more for ZIP64) + content + data descriptor (24 for ZIP64, otherwise 16)
-            offset += 30 + name_len + if zip64 { 20 } else { 0 } + size + if zip64 { 24 } else { 16 };
+            self.offset += 30 + name_len + if zip64 { 20 } else { 0 } + size + if zip64 { 24 } else { 16 };
             (name_len, zip64)
         };
         let extra = if size64 { 16 } else { 0 } + if entry_offset >= U32_MAX { 8 } else { 0 };
-        central += 46 + name_len + if extra > 0 { extra + 4 } else { 0 };
+        self.central += 46 + name_len + if extra > 0 { extra + 4 } else { 0 };
     }
-    let cd_start = offset;
-    let zip64_end = count >= 0xFFFF || cd_start >= U32_MAX || central >= U32_MAX;
-    cd_start + central + if zip64_end { 76 } else { 0 } + 22
+
+    pub fn total(&self) -> u64 {
+        let cd_start = self.offset;
+        let zip64_end = self.count >= 0xFFFF || cd_start >= U32_MAX || self.central >= U32_MAX;
+        cd_start + self.central + if zip64_end { 76 } else { 0 } + 22
+    }
 }
 
 // ───────────── Reading ─────────────

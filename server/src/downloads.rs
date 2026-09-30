@@ -1,8 +1,6 @@
 //! Downloads of several items: packed into a streamed ZIP, and the short-lived download links a large selection goes
 //! through
 
-use std::collections::HashMap;
-
 use axum::{
     Json,
     body::{Body, Bytes},
@@ -37,13 +35,19 @@ pub struct ZipItem {
     pub mtime: i64,
 }
 
-/// What a ZIP of some items holds: every file and folder in them, with its path in the ZIP
+/// What a ZIP of some items holds: every file and folder in them, with its path in the ZIP. Only the selected items
+/// are kept: what is in them is gone through a folder at a time (`ZipWalk`), once to add up the ZIP's length and again
+/// to pack it, so a ZIP of a million files doesn't hold a million rows (nor a million open folders) in memory.
 pub struct ZipPlan {
-    pub items: Vec<ZipItem>,
+    roots: Vec<(Node, String)>,
+    offset: i64,
     /// The name each selected item has in the ZIP
     pub root_names: Vec<String>,
     /// The folder the items are in, when they are all in the same one
     pub parent_name: Option<String>,
+    /// The ZIP's length (stored, as downloads are) and what its files hold
+    pub len: u64,
+    pub bytes: u64,
 }
 
 impl ZipPlan {
@@ -55,6 +59,104 @@ impl ZipPlan {
             _ => format!("{fallback}.zip"),
         }
     }
+
+    /// What goes into the ZIP, one item at a time
+    pub fn walk(&self) -> ZipWalk {
+        let todo = self.roots.iter().rev().map(|(n, name)| Todo::Item(name.clone(), Box::new(n.clone()))).collect();
+        ZipWalk { offset: self.offset, todo }
+    }
+}
+
+/// Items of a folder listed at once while going through it
+const ZIP_PAGE: i64 = 500;
+
+enum Todo {
+    /// An item and its path in the ZIP
+    Item(String, Box<Node>),
+    /// The items of a folder after `after` (by id) still to list: the folder, its path in the ZIP
+    Folder(Box<Node>, String, Option<String>),
+}
+
+/// Goes through what a ZIP holds, depth first, listing a folder's items a page at a time
+pub struct ZipWalk {
+    offset: i64,
+    todo: Vec<Todo>,
+}
+
+impl ZipWalk {
+    /// The next item, None at the end. A folder space's file is measured as it is now.
+    pub async fn next(&mut self, st: &AppState) -> AppResult<Option<ZipItem>> {
+        while let Some(todo) = self.todo.pop() {
+            match todo {
+                Todo::Folder(folder, path, after) => {
+                    let page = children_page(st, &folder, after.as_deref()).await?;
+                    if page.len() as i64 == ZIP_PAGE {
+                        self.todo.push(Todo::Folder(folder, path.clone(), page.last().map(|n| n.id.clone())));
+                    }
+                    for n in page.into_iter().rev() {
+                        self.todo.push(Todo::Item(format!("{path}/{}", n.name), Box::new(n)));
+                    }
+                }
+                Todo::Item(path, n) => {
+                    let mtime = n.updated_at + self.offset;
+                    if n.is_folder() {
+                        self.todo.push(Todo::Folder(n, path.clone(), None));
+                        return Ok(Some(ZipItem { path, blob: None, size: 0, mtime }));
+                    }
+                    let Ok(blob) = Source::of(&n) else { continue };
+                    // The length of the ZIP is announced up front: a folder space's file is measured as it is now
+                    let size = match &blob {
+                        Source::File(_) => blob.describe(n.size as u64).await.map(|(size, _)| size).unwrap_or(0),
+                        Source::Stored { .. } => n.size as u64,
+                    };
+                    return Ok(Some(ZipItem { path, blob: Some(blob), size, mtime }));
+                }
+            }
+        }
+        Ok(None)
+    }
+}
+
+/// A page of the items of `folder` (not in the trash), by id: as `Node`s of the folder's space, with only what a ZIP
+/// needs read from the index
+async fn children_page(st: &AppState, folder: &Node, after: Option<&str>) -> AppResult<Vec<Node>> {
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        id: String,
+        kind: String,
+        name: String,
+        size: i64,
+        blob_hash: Option<String>,
+        blob_location: Option<String>,
+        fs_path: Option<String>,
+        updated_at: i64,
+    }
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT n.id, n.kind, n.name, n.size, n.blob_hash, (SELECT location_id FROM blobs WHERE hash = n.blob_hash) AS blob_location,
+                n.fs_path, n.updated_at
+         FROM nodes n WHERE n.parent_id = ?1 AND n.trashed_at IS NULL AND n.id > COALESCE(?2, '') ORDER BY n.id LIMIT ?3",
+    )
+    .bind(&folder.id)
+    .bind(after)
+    .bind(ZIP_PAGE)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| Node {
+            id: r.id,
+            parent_id: Some(folder.id.clone()),
+            kind: r.kind,
+            name: r.name,
+            blob_hash: r.blob_hash,
+            blob_location: r.blob_location,
+            size: r.size,
+            fs_path: r.fs_path,
+            updated_at: r.updated_at,
+            created_at: r.updated_at,
+            ..folder.clone()
+        })
+        .collect())
 }
 
 /// The contents of a ZIP of `roots` (including folder contents), with times shifted by `offset` seconds (ZIP times are
@@ -68,8 +170,8 @@ pub async fn zip_plan(st: &AppState, roots: Vec<Node>, offset: i64) -> AppResult
         let mut seen = std::collections::HashSet::new();
         roots.into_iter().filter(|n| keep.contains(&n.id) && seen.insert(n.id.clone())).collect::<Vec<_>>()
     };
-    let mut items = Vec::new();
     let mut root_names: Vec<String> = Vec::new();
+    let mut named = Vec::with_capacity(roots.len());
     // Multi-select download: the ZIP is named after the containing folder (the space name for a space's root folder)
     let mut parent_name = None;
     {
@@ -85,7 +187,10 @@ pub async fn zip_plan(st: &AppState, roots: Vec<Node>, offset: i64) -> AppResult
             })
             .filter(|n| !n.is_empty());
         }
-        for root in &roots {
+        for root in roots {
+            if root.trashed_at.is_some() {
+                continue;
+            }
             // A space's root folder has no name: use the space name, otherwise paths in the ZIP would become "/filename"
             let mut root_name = if root.name.is_empty() {
                 tree::get_drive(&mut c, root.drive()).await?.map(|d| d.name).unwrap_or_else(|| "download".into())
@@ -100,37 +205,22 @@ pub async fn zip_plan(st: &AppState, roots: Vec<Node>, offset: i64) -> AppResult
                 n += 1;
             }
             root_names.push(root_name.clone());
-            let mut paths: HashMap<String, String> = HashMap::new();
-            for (n, depth) in tree::subtree(&mut c, &root.id).await? {
-                if n.trashed_at.is_some() {
-                    continue;
-                }
-                let path = if depth == 0 {
-                    root_name.clone()
-                } else {
-                    match n.parent_id.as_ref().and_then(|p| paths.get(p)) {
-                        Some(parent) => format!("{parent}/{}", n.name),
-                        None => continue,
-                    }
-                };
-                paths.insert(n.id.clone(), path.clone());
-                let blob = if n.is_folder() { None } else { Source::of(&n).ok() };
-                // The length of the ZIP is announced up front: a folder space's file is measured as it is now
-                let size = match &blob {
-                    Some(s @ Source::File(_)) => s.describe(n.size as u64).await.map(|(size, _)| size).unwrap_or(0),
-                    _ => n.size as u64,
-                };
-                if !n.is_folder() && blob.is_none() {
-                    continue;
-                }
-                items.push(ZipItem { path, blob, size, mtime: n.updated_at + offset });
-            }
+            named.push((root, root_name));
         }
     }
-    if items.iter().any(|it| it.path.len() + 1 > u16::MAX as usize) {
-        return Err(AppError::bad_request("A folder path is too long to put in a ZIP file"));
+    let mut plan = ZipPlan { roots: named, offset, root_names, parent_name, len: 0, bytes: 0 };
+    // Its length, going through it once
+    let mut len = crate::zip::Length::default();
+    let mut walk = plan.walk();
+    while let Some(item) = walk.next(st).await? {
+        if item.path.len() + 1 > u16::MAX as usize {
+            return Err(AppError::bad_request("A folder path is too long to put in a ZIP file"));
+        }
+        len.add(&item.path, item.size, item.blob.is_none());
+        plan.bytes += item.size;
     }
-    Ok(ZipPlan { items, root_names, parent_name })
+    plan.len = len.total();
+    Ok(plan)
 }
 
 /// Packs multiple nodes (including folder contents) into a streamed ZIP. `tz` is the browser's time zone as JavaScript
@@ -139,18 +229,24 @@ pub async fn zip_response(st: &AppState, roots: Vec<Node>, tz: i64) -> AppResult
     let offset = -tz.clamp(-14 * 60, 14 * 60) * 60;
     let plan = zip_plan(st, roots, offset).await?;
     let filename = plan.file_name("download");
-    let items = plan.items;
-    let total_len = crate::zip::predicted_len(items.iter().map(|it| (it.path.as_str(), it.size, it.blob.is_none())));
-    // Open the first file before starting the response: if the storage service (e.g. S3) can't be reached, report the error directly instead of sending an empty ZIP
+    let total_len = plan.len;
+    // Open the first file before starting the response: if the storage service (e.g. S3) can't be reached, report the
+    // error directly instead of sending an empty ZIP
+    let mut walk = plan.walk();
+    let mut before = Vec::new();
     let mut first = None;
-    if let Some((i, item)) = items.iter().enumerate().find(|(_, it)| it.blob.is_some()) {
-        let source = item.blob.clone().unwrap();
-        first = Some((i, open_source(st.clone(), source, item.size).await?));
+    while let Some(item) = walk.next(st).await? {
+        if let Some(source) = item.blob.clone() {
+            let reader = open_source(st.clone(), source, item.size).await?;
+            first = Some((item, reader));
+            break;
+        }
+        before.push(item);
     }
     let (writer, reader) = tokio::io::duplex(512 * 1024);
     // If packing fails midway, notify the response stream so the connection ends with an error (the browser shows a failed download) rather than saving a truncated ZIP
     let (done_tx, done_rx) = tokio::sync::oneshot::channel::<bool>();
-    tokio::spawn(pack_zip(st.clone(), items, first, writer, done_tx));
+    tokio::spawn(pack_zip(st.clone(), before, first, walk, writer, done_tx));
     let body = ReaderStream::new(reader).chain(failure_tail(done_rx));
     Ok((
         [
@@ -170,33 +266,34 @@ async fn open_source(st: AppState, source: Source, size: u64) -> std::io::Result
     source.open(&st, 0, size).await
 }
 
-/// Writes the ZIP of `items` into `writer`; `first` is the first file, already opened (its index and reader). Sends on
-/// `done` whether the ZIP was finished.
-async fn pack_zip(st: AppState, items: Vec<ZipItem>, mut first: Option<(usize, BoxReader)>, writer: DuplexStream, done: Sender<bool>) {
+/// Writes the ZIP into `writer`: the folders `before` the first file, the first file (already opened), then the rest
+/// of `walk`. Sends on `done` whether the ZIP was finished.
+async fn pack_zip(st: AppState, before: Vec<ZipItem>, first: Option<(ZipItem, BoxReader)>, mut walk: ZipWalk, writer: DuplexStream, done: Sender<bool>) {
     let mut zip = ZipWriter::new(writer);
-    for (i, item) in items.into_iter().enumerate() {
-        let res = match item.blob {
-            None => zip.add_dir(&item.path, item.mtime).await,
-            Some(source) => {
-                let opened = match first.take() {
-                    Some((j, r)) if j == i => Ok(r),
-                    other => {
-                        first = other;
-                        open_source(st.clone(), source, item.size).await
-                    }
-                };
-                match opened {
-                    Ok(r) => zip.add_file(&item.path, r, item.size, item.mtime).await,
-                    Err(e) => Err(e),
+    let res = async {
+        for item in before {
+            zip.add_dir(&item.path, item.mtime).await?;
+        }
+        if let Some((item, reader)) = first {
+            zip.add_file(&item.path, reader, item.size, item.mtime).await?;
+        }
+        while let Some(item) = walk.next(&st).await.map_err(|e| std::io::Error::other(e.message))? {
+            match item.blob {
+                None => zip.add_dir(&item.path, item.mtime).await?,
+                Some(source) => {
+                    let reader = open_source(st.clone(), source, item.size).await?;
+                    zip.add_file(&item.path, reader, item.size, item.mtime).await?;
                 }
             }
-        };
-        if let Err(e) = res {
-            // The user canceled the download, or reading a file failed (e.g. the storage service disconnected)
-            tracing::warn!("zip stream aborted: {e}");
-            let _ = done.send(false);
-            return;
         }
+        std::io::Result::Ok(())
+    }
+    .await;
+    if let Err(e) = res {
+        // The user canceled the download, or reading a file failed (e.g. the storage service disconnected)
+        tracing::warn!("zip stream aborted: {e}");
+        let _ = done.send(false);
+        return;
     }
     let ok = match zip.finish().await {
         Ok(_) => true,
@@ -461,6 +558,88 @@ mod tests {
         );
     }
 
+    /// The process's own memory (Linux's RssAnon), in MB
+    fn anon_mb() -> u64 {
+        let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+        status.lines().find(|l| l.starts_with("RssAnon:")).and_then(|l| l.split_whitespace().nth(1)?.parse::<u64>().ok()).unwrap_or(0) / 1024
+    }
+
+    /// Working out a ZIP of a large folder (its length, and what goes in it), measured on Linux: the most memory the
+    /// process held meanwhile. `ITEMS=200000 cargo test --release -- --ignored --nocapture measure_zip`
+    #[tokio::test]
+    #[ignore]
+    async fn measure_zip_of_a_large_folder() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let n: usize = std::env::var("ITEMS").ok().and_then(|v| v.parse().ok()).unwrap_or(200_000);
+        let top = env.folder(&amy, amy.root(), "Big").await;
+        let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+        // One content for all of them
+        sqlx::query("INSERT INTO blobs (hash, size, refcount, created_at, location_id) VALUES ('h', 1, 1, 0, 'local')").execute(&mut *tx).await.unwrap();
+        for f in 0..n / 100 {
+            let d = tree::create_folder(&mut tx, amy.id, &top, &format!("d{f}")).await.unwrap();
+            let rows: Vec<serde_json::Value> = (0..99).map(|i| serde_json::json!([crate::util::new_id(), format!("file-with-a-longer-name-{i}.txt")])).collect();
+            sqlx::query(
+                "INSERT INTO nodes (id, owner_id, parent_id, kind, name, size, blob_hash, drive_id, created_at, updated_at)
+                 SELECT json_extract(value, '$[0]'), ?2, ?3, 'file', json_extract(value, '$[1]'), 1, 'h',
+                        (SELECT drive_id FROM nodes WHERE id = ?3), 0, 0
+                 FROM json_each(?1)",
+            )
+            .bind(serde_json::to_string(&rows).unwrap())
+            .bind(amy.id)
+            .bind(&d)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        }
+        tx.commit().await.unwrap();
+        let node = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &top).await.unwrap().unwrap();
+        let before = anon_mb();
+        let peak = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(before));
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (p, s) = (peak.clone(), stop.clone());
+        let sampler = std::thread::spawn(move || {
+            while !s.load(std::sync::atomic::Ordering::SeqCst) {
+                p.fetch_max(anon_mb(), std::sync::atomic::Ordering::SeqCst);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        });
+        let started = std::time::Instant::now();
+        let plan = zip_plan(&env.st, vec![node], 0).await.unwrap();
+        let took = started.elapsed();
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        sampler.join().unwrap();
+        println!(
+            "{n} files: ZIP of {} worked out in {:.1} s, memory {before} MB before, at most {} MB meanwhile",
+            plan.file_name("x"),
+            took.as_secs_f64(),
+            peak.load(std::sync::atomic::Ordering::SeqCst)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_zip_of_thousands_of_files_in_a_folder_space_is_made_a_folder_at_a_time() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let space = env.folder_space("Scans").await;
+        // More files than a process may usually hold open: each one of them used to keep its folder open until the
+        // ZIP was done
+        for i in 0..3000 {
+            testutil::write_old(&space.dir.join(format!("Big/d{:02}/f{i:04}.txt", i / 100)), b"x");
+        }
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (big, _) = env.node_at(&space.drive, "Big").await.unwrap();
+        let node = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &big).await.unwrap().unwrap();
+        let res = zip_response(&env.st, vec![node], 0).await.unwrap();
+        let announced: usize = res.headers()[header::CONTENT_LENGTH].to_str().unwrap().parse().unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(bytes.len(), announced);
+        let mut cursor = std::io::Cursor::new(bytes.to_vec());
+        let entries = crate::zip::read_entries(&mut cursor, 10_000, 1 << 22).unwrap();
+        assert_eq!(entries.len(), 3000 + 30 + 1);
+        let _ = admin;
+    }
+
     #[tokio::test]
     async fn a_zip_whose_content_cant_be_read_fails_instead_of_arriving_cut_short() {
         let env = testutil::env().await;
@@ -471,7 +650,13 @@ mod tests {
         let node = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &docs).await.unwrap().unwrap();
         let plan = zip_plan(&env.st, vec![node.clone()], 0).await.unwrap();
         let content = |path: &str| if path.ends_with("a.txt") { &b"alpha"[..] } else { &b"beta"[..] };
-        let files: Vec<&[u8]> = plan.items.iter().filter(|it| it.blob.is_some()).map(|it| content(&it.path)).collect();
+        let mut walk = plan.walk();
+        let mut files: Vec<&[u8]> = Vec::new();
+        while let Some(it) = walk.next(&env.st).await.unwrap() {
+            if it.blob.is_some() {
+                files.push(content(&it.path));
+            }
+        }
         let (first, second) = (files[0], files[1]);
 
         // A later file is missing: the answer has started, so the download ends with an error

@@ -307,29 +307,10 @@ fn seen(meta: &std::fs::Metadata) -> Seen {
 /// Copies the folder: what isn't copied yet, or changed since. After the scan before the switch (`last`), copies of
 /// what is no longer there go too. When the new folder doesn't tell letter case apart (`ignores_case`), items whose
 /// names differ only in letter case would become one there: they aren't copied, and are listed as failed after the
-/// scan, so the move stops until they are renamed.
+/// scan, so the move stops until they are renamed. It goes a folder at a time, reading what was copied of that folder
+/// only, so what it holds doesn't grow with the space.
 async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, ignores_case: bool, last: bool) -> AppResult<Option<Stop>> {
     let (st, job) = (cx.st, cx.job);
-    let copied: std::collections::HashMap<String, (Option<i64>, i64, Option<i64>)> = sqlx::query_as::<_, (String, Option<i64>, i64, Option<i64>)>(
-        "SELECT item_id, src_ino, size, src_mtime_ns FROM space_move_items WHERE move_id = ? AND kind = 'path'",
-    )
-    .bind(&job.id)
-    .fetch_all(&st.db)
-    .await?
-    .into_iter()
-    .map(|(p, ino, size, mtime)| (p, (ino, size, mtime)))
-    .collect();
-    // Folders made in the new folder (`FOLDER`)
-    let made: HashSet<String> = sqlx::query_as::<_, (String,)>("SELECT item_id FROM space_move_items WHERE move_id = ? AND kind = ?")
-        .bind(&job.id)
-        .bind(FOLDER)
-        .fetch_all(&st.db)
-        .await?
-        .into_iter()
-        .map(|(p,)| p)
-        .collect();
-    let mut found: HashSet<String> = HashSet::new();
-    let mut found_dirs: HashSet<String> = HashSet::new();
     let mut queue = vec![String::new()];
     while let Some(dir) = queue.pop() {
         let entries = {
@@ -348,6 +329,14 @@ async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, ignores_case: bo
             .map_err(AppError::internal)?
             .map_err(disk_error)?
         };
+        // What was copied of this folder: its files, and the folders made in it (`FOLDER`)
+        let copied: std::collections::HashMap<String, (Option<i64>, i64, Option<i64>)> = in_folder(st, job, &dir, "path")
+            .await?
+            .into_iter()
+            .map(|(p, ino, size, mtime)| (p, (ino, size, mtime)))
+            .collect();
+        let made: HashSet<String> = in_folder(st, job, &dir, FOLDER).await?.into_iter().map(|(p, ..)| p).collect();
+        let mut found: HashSet<String> = HashSet::new();
         let clashing = if ignores_case { case_clashes(entries.iter().map(|(name, _)| name.as_str())) } else { HashSet::new() };
         for (name, meta) in entries {
             let rel = crate::fsops::child_rel(&dir, &name);
@@ -376,7 +365,7 @@ async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, ignores_case: bo
                         .execute(&st.db)
                         .await?;
                 }
-                found_dirs.insert(rel.clone());
+                found.insert(rel.clone());
                 queue.push(rel);
                 continue;
             }
@@ -409,37 +398,76 @@ async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, ignores_case: bo
                 Err(Err(e)) => cx.failed(Some(rel.clone()), disk_error(e).message),
             }
         }
-    }
-    if last {
-        // Copies of what is no longer in the folder (removed, or renamed: copied under its new name): files, then the
-        // folders made for what went, deepest first, when nothing else is in them
-        let gone: Vec<&String> = copied.keys().filter(|p| !found.contains(*p)).collect();
-        for rel in gone {
-            if let Ok(p) = dest.join(rel) {
-                let _ = std::fs::remove_file(p.as_path());
+        if last {
+            // Copies of what is no longer in this folder (removed, or renamed: copied under its new name)
+            for rel in copied.keys().filter(|p| !found.contains(*p)) {
+                forget_copy(st, job, dest, rel).await?;
             }
-            let _w = st.write_lock.lock().await;
-            sqlx::query("DELETE FROM space_move_items WHERE move_id = ? AND item_id = ?").bind(&job.id).bind(rel).execute(&st.db).await?;
-        }
-        let mut gone_dirs: Vec<&String> = made.iter().filter(|p| !found_dirs.contains(*p)).collect();
-        gone_dirs.sort_by_key(|p| std::cmp::Reverse(p.len()));
-        for rel in gone_dirs {
-            let removed = match dest.join(rel) {
-                Ok(p) => std::fs::remove_dir(p.as_path()),
-                Err(e) => Err(e),
-            };
-            if removed.is_ok() || matches!(removed, Err(ref e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory)) {
-                let _w = st.write_lock.lock().await;
-                sqlx::query("DELETE FROM space_move_items WHERE move_id = ? AND item_id = ? AND kind = ?")
-                    .bind(&job.id)
-                    .bind(rel)
-                    .bind(FOLDER)
-                    .execute(&st.db)
-                    .await?;
+            // Folders made for what went, with the copies in them, deepest first
+            for rel in made.iter().filter(|p| !found.contains(*p)) {
+                forget_folder(st, job, dest, rel).await?;
             }
         }
     }
     Ok(None)
+}
+
+/// What was recorded of the folder `dir` (a path below the space's folder; "" for itself) of this kind: its items
+/// directly in it, (path, inode, size, modification time)
+async fn in_folder(st: &crate::state::AppState, job: &super::Job, dir: &str, kind: &str) -> AppResult<Vec<(String, Option<i64>, i64, Option<i64>)>> {
+    // A range of paths (by the index on the move's items), then only those without a '/' after it
+    let (from, to) = if dir.is_empty() { (String::new(), String::from("\u{10FFFF}")) } else { (format!("{dir}/"), format!("{dir}0")) };
+    Ok(sqlx::query_as(
+        "SELECT item_id, src_ino, COALESCE(size, 0), src_mtime_ns FROM space_move_items
+         WHERE move_id = ?1 AND kind = ?2 AND item_id >= ?3 AND item_id < ?4 AND instr(substr(item_id, length(?3) + 1), '/') = 0",
+    )
+    .bind(&job.id)
+    .bind(kind)
+    .bind(&from)
+    .bind(&to)
+    .fetch_all(&st.db)
+    .await?)
+}
+
+/// Removes the copy of a file that is no longer in the folder, and forgets it
+async fn forget_copy(st: &crate::state::AppState, job: &super::Job, dest: &Pinned, rel: &str) -> AppResult<()> {
+    if let Ok(p) = dest.join(rel) {
+        let _ = std::fs::remove_file(p.as_path());
+    }
+    let _w = st.write_lock.lock().await;
+    sqlx::query("DELETE FROM space_move_items WHERE move_id = ? AND item_id = ?").bind(&job.id).bind(rel).execute(&st.db).await?;
+    Ok(())
+}
+
+/// Removes a folder made in the new folder for one that is no longer there: the copies in it, the folders made in it
+/// (deepest first), then itself, when nothing else is in it
+async fn forget_folder(st: &crate::state::AppState, job: &super::Job, dest: &Pinned, rel: &str) -> AppResult<()> {
+    let below: Vec<(String, String)> = sqlx::query_as(
+        "SELECT item_id, kind FROM space_move_items WHERE move_id = ?1 AND item_id >= ?2 AND item_id < ?3 AND kind IN ('path', ?4)",
+    )
+    .bind(&job.id)
+    .bind(format!("{rel}/"))
+    .bind(format!("{rel}0"))
+    .bind(FOLDER)
+    .fetch_all(&st.db)
+    .await?;
+    for (p, _) in below.iter().filter(|(_, k)| k == "path") {
+        forget_copy(st, job, dest, p).await?;
+    }
+    let mut dirs: Vec<&String> = below.iter().filter(|(_, k)| k == FOLDER).map(|(p, _)| p).collect();
+    dirs.sort_by_key(|p| std::cmp::Reverse(p.len()));
+    let rel = rel.to_string();
+    for p in dirs.into_iter().chain(std::iter::once(&rel)) {
+        let removed = match dest.join(p) {
+            Ok(d) => std::fs::remove_dir(d.as_path()),
+            Err(e) => Err(e),
+        };
+        if removed.is_ok() || matches!(removed, Err(ref e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory)) {
+            let _w = st.write_lock.lock().await;
+            sqlx::query("DELETE FROM space_move_items WHERE move_id = ? AND item_id = ? AND kind = ?").bind(&job.id).bind(p).bind(FOLDER).execute(&st.db).await?;
+        }
+    }
+    Ok(())
 }
 
 /// `space_move_items.kind` of a folder made in the new folder, by its path below it (files are 'path')

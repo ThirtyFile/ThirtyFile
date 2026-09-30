@@ -752,18 +752,19 @@ pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
                     node.name
                 )));
             }
-            // Cross-space move: move the whole subtree to the target space and check the target space's quota
-            let subtree: Vec<Node> = tree::subtree(&mut tx, &node.id).await?.into_iter().map(|(n, _)| n).collect();
-            let bytes: i64 = subtree.iter().filter(|n| !n.is_folder()).map(|n| n.size).sum();
+            // Cross-space move: move the whole subtree to the target space and check the target space's quota (added up
+            // in the database: this holds the write lock, and the subtree may be large)
+            let (bytes, live) = tree::subtree_totals(&mut tx, &node.id).await?;
             tree::check_quota(&mut tx, dest.drive(), bytes).await?;
             if node.in_folder_space() || dest.in_folder_space() {
-                let mut nodes: Vec<Node> = subtree.into_iter().filter(|n| n.trashed_at.is_none()).collect();
-                // The first one is the item itself: it goes in under its name in the destination
-                nodes[0].name = name;
-                across_items += nodes.len();
+                across_items += live as usize;
                 if across_items > MAX_COPY_ITEMS {
                     return Err(AppError::bad_request("Move at most 20,000 items at once to or from a folder on the server"));
                 }
+                let subtree = tree::subtree(&mut tx, &node.id).await?;
+                let mut nodes: Vec<Node> = subtree.into_iter().map(|(n, _)| n).filter(|n| n.trashed_at.is_none()).collect();
+                // The first one is the item itself: it goes in under its name in the destination
+                nodes[0].name = name;
                 across.push(nodes);
                 continue;
             }
@@ -826,14 +827,15 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
                 Some(Resolution::Keep) | None => {}
             }
         }
-        let nodes: Vec<Node> =
-            tree::subtree(&mut tx, &node.id).await?.into_iter().map(|(n, _)| n).filter(|n| n.trashed_at.is_none()).collect();
-        total += nodes.iter().map(|n| n.size).sum::<i64>();
-        items += nodes.len();
-        // Copies run in one transaction while every other change waits: keep each one to a bounded size
+        // Copies run in one transaction while every other change waits: keep each one to a bounded size (counted before
+        // the items are read, so a very large folder isn't read to be refused)
+        items += tree::subtree_totals(&mut tx, &node.id).await?.1 as usize;
         if items > MAX_COPY_ITEMS {
             return Err(AppError::bad_request("Copy at most 20,000 items at once"));
         }
+        let nodes: Vec<Node> =
+            tree::subtree(&mut tx, &node.id).await?.into_iter().map(|(n, _)| n).filter(|n| n.trashed_at.is_none()).collect();
+        total += nodes.iter().map(|n| n.size).sum::<i64>();
         plans.push(nodes);
     }
     tree::check_quota(&mut tx, dest.drive(), total).await?;

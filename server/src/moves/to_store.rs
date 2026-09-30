@@ -388,8 +388,16 @@ async fn switch(cx: &Ctx<'_>) -> AppResult<bool> {
         }
         let now = now();
         // Items named apart where only letter case tells them apart (the trash keeps its names: it has no such rule)
-        let nodes: Vec<Named> =
-            sqlx::query_as("SELECT id, parent_id, name, kind FROM nodes WHERE drive_id = ? AND trashed_at IS NULL").bind(&job.drive_id).fetch_all(&mut *tx).await?;
+        // Only the items of folders that have such names, found by the database (this holds the write lock, and the
+        // space may be large)
+        let nodes: Vec<Named> = sqlx::query_as(
+            "SELECT id, parent_id, name, kind FROM nodes WHERE drive_id = ?1 AND trashed_at IS NULL AND parent_id IN (
+               SELECT parent_id FROM nodes WHERE drive_id = ?1 AND trashed_at IS NULL GROUP BY parent_id, unicode_lower(name) HAVING COUNT(*) > 1
+             )",
+        )
+        .bind(&job.drive_id)
+        .fetch_all(&mut *tx)
+        .await?;
         let renamed = case_apart(&nodes);
         for (id, _) in &renamed {
             sqlx::query("UPDATE nodes SET name = char(1) || id WHERE id = ?").bind(id).execute(&mut *tx).await?;

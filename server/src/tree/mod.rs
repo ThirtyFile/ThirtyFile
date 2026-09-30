@@ -263,6 +263,30 @@ pub async fn subtree(conn: &mut SqliteConnection, id: &str) -> AppResult<Vec<(No
     Ok(rows.into_iter().map(|r| (r.node, r.depth)).collect())
 }
 
+/// What `id` and everything in it hold, added up without reading the items themselves: (the size of its files, the
+/// items not in the trash)
+pub async fn subtree_totals(conn: &mut SqliteConnection, id: &str) -> AppResult<(i64, i64)> {
+    Ok(sqlx::query_as(
+        "WITH RECURSIVE sub(id) AS (SELECT ?1 UNION ALL SELECT c.id FROM nodes c JOIN sub ON c.parent_id = sub.id)
+         SELECT COALESCE(SUM(CASE WHEN n.kind = 'file' THEN n.size ELSE 0 END), 0), COUNT(*) - COUNT(n.trashed_at) FROM sub JOIN nodes n ON n.id = sub.id",
+    )
+    .bind(id)
+    .fetch_one(conn)
+    .await?)
+}
+
+/// The ids of `id` and everything in it that isn't in the trash
+pub async fn live_subtree_ids(conn: &mut SqliteConnection, id: &str) -> AppResult<Vec<String>> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "WITH RECURSIVE sub(id) AS (SELECT ?1 UNION ALL SELECT c.id FROM nodes c JOIN sub ON c.parent_id = sub.id)
+         SELECT n.id FROM sub JOIN nodes n ON n.id = sub.id WHERE n.trashed_at IS NULL",
+    )
+    .bind(id)
+    .fetch_all(conn)
+    .await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
 /// Whether the folder has an item with this name: regardless of letter case in the content store, exactly in folder
 /// spaces (a folder on disk can hold both "A.txt" and "a.txt")
 pub async fn name_taken(conn: &mut SqliteConnection, parent_id: &str, name: &str) -> AppResult<bool> {
