@@ -212,8 +212,51 @@ pub fn format_bytes(bytes: i64) -> String {
     if (v - v.round()).abs() < 0.05 { format!("{} {}", v.round() as i64, UNITS[i]) } else { format!("{v:.1} {}", UNITS[i]) }
 }
 
+/// Whether a folder (with links resolved) is one of the operating system's own, is inside one, or holds one (the root
+/// of the disk): the system's settings, secrets such as `/run/secrets`, and programs are no folder to show as a space
+pub fn system_folder(real: &std::path::Path) -> bool {
+    #[cfg(unix)]
+    let system: Vec<std::path::PathBuf> =
+        ["/etc", "/run", "/var/run", "/var/lib", "/proc", "/sys", "/dev", "/boot", "/root", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/usr"]
+            .iter()
+            .map(std::path::PathBuf::from)
+            .collect();
+    #[cfg(not(unix))]
+    let system: Vec<std::path::PathBuf> = ["SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"]
+        .iter()
+        .filter_map(std::env::var_os)
+        .map(std::path::PathBuf::from)
+        .collect();
+    let real = real.to_string_lossy();
+    // Windows: compared without the `\\?\` form and letter case
+    let real = std::path::PathBuf::from(real.strip_prefix(r"\\?\").unwrap_or(&real).to_lowercase());
+    system.iter().map(|s| std::path::PathBuf::from(s.to_string_lossy().to_lowercase())).any(|s| real.starts_with(&s) || s.starts_with(&real))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn system_folders_are_told_apart() {
+        use std::path::Path;
+        #[cfg(unix)]
+        {
+            for system in ["/etc", "/run/secrets", "/", "/var", "/usr/share"] {
+                assert!(super::system_folder(Path::new(system)), "{system}");
+            }
+            for other in ["/mnt/nas", "/srv/files", "/home/amy/shared", "/tmp/x", "/var/www"] {
+                assert!(!super::system_folder(Path::new(other)), "{other}");
+            }
+        }
+        #[cfg(windows)]
+        {
+            let root = std::env::var("SystemRoot").unwrap();
+            assert!(super::system_folder(Path::new(&root)));
+            assert!(super::system_folder(Path::new(&format!(r"\\?\{root}\System32"))));
+            assert!(super::system_folder(Path::new(&root[..3])), "the drive holding the system");
+            assert!(!super::system_folder(Path::new(r"D:\Shared")));
+        }
+    }
+
     #[test]
     fn dates_and_like_patterns() {
         assert_eq!(super::civil_from_days(0), (1970, 1, 1));

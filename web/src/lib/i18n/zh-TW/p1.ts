@@ -221,7 +221,7 @@ export default {
   "Not encrypted: usernames, passwords, and file contents are sent in plain text. Use only on a trusted internal network.": "未加密：帳號密碼與檔案內容會以明文傳送，只建議在可信任的內網使用。",
   "The connection is still encrypted, but the server's identity can't be verified. Use only on an internal network.": "連線仍會加密，但無法確認對方就是這台伺服器；只建議在內網使用。",
   "Host key": "主機金鑰",
-  "Use after the server is reinstalled or its key changes: the current key is recorded again when you save": "伺服器重灌或更換金鑰後使用：儲存時重新記錄目前的金鑰",
+  "Use after the server is reinstalled or its key changes: enter the password or key again, and the current key is recorded when you save": "伺服器重灌或更換金鑰後使用：請重新輸入密碼或金鑰，儲存時會記錄目前的金鑰",
   "Reset": "重設",
   "Every future connection is checked against this key and refused if it doesn't match, protecting against impostor servers.": "之後每次連線都會核對，不符就拒絕連線，避免連到冒充的伺服器。",
   "First connection: verify this fingerprint with the server administrator (ssh-keygen -lf). It will be recorded once you add the location.": "第一次連線：請與伺服器管理員核對這個指紋（ssh-keygen -lf），新增後會記錄下來。",

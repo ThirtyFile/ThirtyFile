@@ -438,6 +438,20 @@ async fn in_private_space(c: &mut SqliteConnection, me: i64, hash: &str) -> AppR
     Ok(found)
 }
 
+/// A key where a content is stored (`<content_dir>/ab/cd/<hash>`: true) or where a copy of it is being written
+/// (`<hash>.part-…` or another name after the hash: false), with the hash; `key` in lower case
+fn content_or_copy<'a>(key: &'a str, content_dir: &str) -> Option<(&'a str, bool)> {
+    if let Some(hash) = storage::content_hash(key, content_dir) {
+        return Some((hash, true));
+    }
+    let (dir, name) = key.rsplit_once('/')?;
+    let hash = name.get(..64)?;
+    let rest = &name[64..];
+    let hex = hash.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'));
+    let expected = if content_dir.is_empty() { format!("{}/{}", &hash[0..2], &hash[2..4]) } else { format!("{content_dir}/{}/{}", &hash[0..2], &hash[2..4]) };
+    (hex && rest.starts_with('.') && dir == expected).then_some((hash, false))
+}
+
 #[derive(Deserialize)]
 pub struct DownloadQuery {
     path: String,
@@ -463,6 +477,18 @@ pub async fn download(State(st): State<AppState>, Admin(me): Admin, Path(id): Pa
         && in_private_space(&mut c, me.id, hash).await?
     {
         return Err(AppError::forbidden("This content belongs to someone's personal space. Administrators can't download it."));
+    }
+    // Content waiting to be deleted no longer records whose it was (it may have been in a personal space), and a copy
+    // still being written beside where content goes (`<hash>.part-…`) is someone's upload: neither is served
+    if let Some((hash, whole)) = content_or_copy(&lower, backend.content_dir()) {
+        let (pending,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM pending_blob_deletes WHERE hash = ? AND location_id = ?)")
+            .bind(hash)
+            .bind(&id)
+            .fetch_one(&mut *c)
+            .await?;
+        if pending || !whole {
+            return Err(AppError::forbidden("This content is being written or deleted, so it can't be downloaded"));
+        }
     }
     drop(c);
     let entry = backend.stat(key).await.map_err(|e| read_error(&e))?.ok_or_else(|| AppError::not_found("File not found"))?;
@@ -593,6 +619,32 @@ mod tests {
         assert_eq!(axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap().as_ref(), b"admin's report");
         assert!(get(key(b"orphan")).await.is_ok());
         assert_eq!(get(key(b"amy's diary")).await.unwrap_err().status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn content_waiting_to_be_deleted_and_copies_being_written_stay_closed() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let local = env.st.storage("local").unwrap();
+        let put = |content: &'static [u8]| {
+            let (local, tmp) = (local.clone(), env.dir.join("tmp").join(crate::util::new_id()));
+            async move {
+                let h = crate::util::sha256_hex(content);
+                std::fs::write(&tmp, content).unwrap();
+                local.put_file(&h, &tmp).await.unwrap();
+                h
+            }
+        };
+        // Deleted from someone's files (whose, nothing records any more), and waiting for the background deletion
+        let gone = put(b"deleted diary").await;
+        sqlx::query("INSERT INTO pending_blob_deletes (hash, location_id, created_at) VALUES (?, 'local', 0)").bind(&gone).execute(&env.st.db).await.unwrap();
+        assert_eq!(get(&env, &admin, &format!("{}/{}/{gone}", &gone[0..2], &gone[2..4])).await.unwrap_err().status, StatusCode::FORBIDDEN);
+        // A copy still being written next to where the content goes
+        let h = crate::util::sha256_hex(b"being uploaded");
+        let part = format!("{}/{}/{h}.part-{}", &h[0..2], &h[2..4], crate::util::new_id());
+        testutil::write_old(&env.dir.join("blobs").join(&part), b"being uploaded");
+        assert_eq!(get(&env, &admin, &part).await.unwrap_err().status, StatusCode::FORBIDDEN);
+        assert_eq!(get(&env, &admin, &part.to_uppercase()).await.unwrap_err().status, StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

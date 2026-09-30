@@ -805,7 +805,7 @@ function RemoteFields({
                 size="sm"
                 variant="ghost"
                 className="ml-auto h-6 px-2 text-xs"
-                title={t("Use after the server is reinstalled or its key changes: the current key is recorded again when you save")}
+                title={t("Use after the server is reinstalled or its key changes: enter the password or key again, and the current key is recorded when you save")}
                 onClick={() => set({ host_key: "" })}
               >
                 {t("Reset")}
