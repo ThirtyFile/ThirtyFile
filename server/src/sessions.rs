@@ -216,7 +216,8 @@ mod tests {
         // Ten minutes ago: the time and the address are updated
         sqlx::query("UPDATE sessions SET last_used_at = last_used_at - 600 WHERE id = ?").bind(&id).execute(&env.st.db).await.unwrap();
         assert!(env.request_user(req()).await.is_some());
-        for _ in 0..50 {
+        // Written in the background, after the write lock: on a busy machine that can take more than a moment
+        for _ in 0..500 {
             if last_used().await.0 >= now() - 5 {
                 break;
             }
