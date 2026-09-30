@@ -78,37 +78,41 @@ test("uploading a name the folder already has asks what to do, and each choice d
   await expect(page.getByText(/Something went wrong|useMe must be used/)).toHaveCount(0);
 });
 
-test("after Enter opens a folder, the arrow keys go on in it", async ({ page }) => {
-  await signIn(page);
-  const top = await folder(page, "Keyboard");
-  const level1 = await folder(page, "Level 1 a", top);
-  await folder(page, "Level 1 b", top);
-  await folder(page, "Level 2 a", level1);
-  await folder(page, "Level 2 b", level1);
-  await page.goto(`/files/${top}`);
-  const row = (name: string) => page.locator("[data-node-id]").filter({ hasText: name });
-  const focused = () => page.evaluate(() => document.activeElement?.closest("[data-node-id]")?.textContent ?? null);
+// Details, and Large icons
+for (const view of ["list", "grid"]) {
+  test(`after Enter opens a folder, the arrow keys go on in it (${view} view)`, async ({ page }) => {
+    await signIn(page);
+    await page.evaluate((v) => localStorage.setItem("tf-view", JSON.stringify(v)), view);
+    const top = await folder(page, "Keyboard");
+    const level1 = await folder(page, "Level 1 a", top);
+    await folder(page, "Level 1 b", top);
+    await folder(page, "Level 2 a", level1);
+    await folder(page, "Level 2 b", level1);
+    await page.goto(`/files/${top}`);
+    const row = (name: string) => page.locator("[data-node-id]").filter({ hasText: name });
+    const focused = () => page.evaluate(() => document.activeElement?.closest("[data-node-id]")?.textContent ?? null);
 
-  await row("Level 1 a").click();
-  await page.keyboard.press("Enter");
-  await page.waitForURL(`**/files/${level1}`);
-  // The first item has the focus, and nothing is selected yet
-  await expect.poll(focused).toContain("Level 2 a");
-  await expect(page.locator('[data-node-id][aria-selected="true"]')).toHaveCount(0);
-  await page.keyboard.press("ArrowDown");
-  await expect(row("Level 2 b")).toHaveAttribute("aria-selected", "true");
-  await page.keyboard.press("ArrowUp");
-  await expect(row("Level 2 a")).toHaveAttribute("aria-selected", "true");
-  expect(await focused()).toContain("Level 2 a");
+    await row("Level 1 a").click();
+    await page.keyboard.press("Enter");
+    await page.waitForURL(`**/files/${level1}`);
+    // The first item has the focus, and nothing is selected yet
+    await expect.poll(focused).toContain("Level 2 a");
+    await expect(page.locator('[data-node-id][aria-selected="true"]')).toHaveCount(0);
+    await page.keyboard.press("ArrowDown");
+    await expect(row("Level 2 b")).toHaveAttribute("aria-selected", "true");
+    await page.keyboard.press("ArrowUp");
+    await expect(row("Level 2 a")).toHaveAttribute("aria-selected", "true");
+    expect(await focused()).toContain("Level 2 a");
 
-  // Back up, then in again: still no mouse
-  await page.keyboard.press("Backspace");
-  await page.waitForURL(`**/files/${top}`);
-  await expect.poll(focused).toContain("Level 1 a");
-  await page.keyboard.press("Enter");
-  await page.waitForURL(`**/files/${level1}`);
-  await expect.poll(focused).toContain("Level 2 a");
-});
+    // Back up, then in again: still no mouse
+    await page.keyboard.press("Backspace");
+    await page.waitForURL(`**/files/${top}`);
+    await expect.poll(focused).toContain("Level 1 a");
+    await page.keyboard.press("Enter");
+    await page.waitForURL(`**/files/${level1}`);
+    await expect.poll(focused).toContain("Level 2 a");
+  });
+}
 
 test("search waits for an input method to finish composing", async ({ page }) => {
   await signIn(page);
