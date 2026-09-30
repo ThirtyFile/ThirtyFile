@@ -74,9 +74,12 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
   };
 
   // Folders and files both open in the current tab, so "Back" returns to the original location; a file already open in another tab switches there
-  const open = (n: Item) => {
-    if (n.kind === "folder") navigate(`/files/${n.id}`);
-    else tabs.openFile(`/view/${n.id}`);
+  // A folder opened with Enter gets the focus in its list once it's shown (see state), so the keyboard carries on there
+  const open = (n: Item, byKey = false) => {
+    if (n.kind === "folder") {
+      s.enteredByKey.current = byKey ? n.id : null;
+      navigate(`/files/${n.id}`);
+    } else tabs.openFile(`/view/${n.id}`);
   };
 
   // Multiple items or folders are zipped by the server while streaming; progress shows in the download panel at the bottom right
@@ -214,7 +217,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         e.preventDefault();
         setDialog({ t: "rename", node: single });
       } else if (e.key === "Enter" && single) {
-        open(single);
+        open(single, true);
       } else if (e.key === "Escape") {
         setSelected(new Set());
       } else if (e.key.length === 1 && e.key !== " " && e.key !== "?" && !mod && !e.altKey) {

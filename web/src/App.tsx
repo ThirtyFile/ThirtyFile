@@ -105,6 +105,8 @@ function RequireAuth() {
   return (
     <MeContext.Provider value={me.data}>
       <AppShell />
+      {/* "Replace or skip" questions before uploading, moving, copying or restoring: they read the signed-in user's settings */}
+      <ConflictHost />
     </MeContext.Provider>
   );
 }
@@ -120,8 +122,6 @@ export function App() {
     <>
       {/* Questions asked with confirm() from outside components */}
       <ConfirmHost />
-      {/* "Replace or skip" questions before uploading, moving, copying or restoring */}
-      <ConflictHost />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />

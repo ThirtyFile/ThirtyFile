@@ -57,6 +57,8 @@ export interface ListNav {
   typeAhead(key: string): void;
   /** Scroll an item into view, and focus it */
   show(id: string, focus: boolean): void;
+  /** Focus the item Tab reaches (the first selected, else the first item); false when there are no items */
+  focusStart(): boolean;
 }
 
 type Item = Node & { location?: string };
@@ -69,7 +71,8 @@ export interface FileListProps {
   onSelect(selected: Set<string>, anchor?: string): void;
   /** Anchor of a range selection (Shift); stored by item id so it stays correct when the list changes */
   anchor: string | null;
-  onOpen(n: Item): void;
+  /** `byKey`: opened with Enter, so the keyboard carries on in what opens */
+  onOpen(n: Item, byKey?: boolean): void;
   /** Middle click: open in a new tab */
   onOpenInNewTab?(n: Item): void;
   sort?: { key: SortKey; order: SortOrder };
@@ -784,7 +787,7 @@ export function FileList(p: FileListProps) {
     if (e.target !== e.currentTarget || items[index].id === p.renamingId) return;
     if (e.key === "Enter" && !e.altKey && !e.repeat) {
       e.preventDefault();
-      p.onOpen(items[index]);
+      p.onOpen(items[index], true);
       return;
     }
     if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey)) {
@@ -848,7 +851,12 @@ export function FileList(p: FileListProps) {
     if (focus) focusItem(index);
     else v.scrollToIndex(rowOf(index));
   };
-  if (p.navRef) p.navRef.current = { typeAhead, show };
+  const focusStart = () => {
+    if (n === 0) return false;
+    focusItem(tabStop);
+    return true;
+  };
+  if (p.navRef) p.navRef.current = { typeAhead, show, focusStart };
 
   /** A finger resting on an item: selected once it has stayed long enough */
   const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number; done: boolean } | null>(null);
