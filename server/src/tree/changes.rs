@@ -19,7 +19,6 @@ use tokio::sync::OwnedMutexGuard;
 
 use super::{BlobRef, adjust_usage, release_blobs, schedule_blob_removal};
 use crate::{
-    beneath::Below,
     error::{AppError, AppResult},
     jobs::Tracker,
     state::AppState,
@@ -83,7 +82,7 @@ pub struct Unfinished {
 #[derive(Default)]
 struct Leftovers {
     blobs: Vec<BlobRef>,
-    on_disk: Vec<Below>,
+    on_disk: Vec<crate::folders::Below>,
 }
 
 async fn record(conn: &mut SqliteConnection, c: &Change) -> AppResult<()> {

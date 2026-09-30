@@ -224,26 +224,6 @@ impl AsRef<Path> for Pinned {
     }
 }
 
-/// A path below the folder of the space `drive`, looked up (`pin`) only when it is used: long lists of them keep no
-/// folder open
-#[derive(Clone, Debug)]
-pub struct Below {
-    pub root: PathBuf,
-    pub drive: String,
-    pub rel: String,
-}
-
-impl Below {
-    pub fn new(root: impl Into<PathBuf>, drive: impl Into<String>, rel: impl Into<String>) -> Below {
-        Below { root: root.into(), drive: drive.into(), rel: rel.into() }
-    }
-
-    /// In the space's own folder, which must hold its marker (`folders::open_space`)
-    pub fn pin(&self) -> io::Result<Pinned> {
-        crate::folders::open_space(&self.root, &self.drive, false)?.join(&self.rel)
-    }
-}
-
 /// Gives the file `to` the permissions `from` has, through the open file (never following a link)
 pub fn copy_permissions(from: &Pinned, to: &Pinned) -> io::Result<()> {
     let meta = std::fs::symlink_metadata(from.as_path())?;

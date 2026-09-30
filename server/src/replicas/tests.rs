@@ -110,7 +110,7 @@ async fn health(env: &TestEnv, id: &str) -> policy::Health {
 /// The built-in location stops answering: its folder is gone (a disk that failed)
 fn fail_builtin(env: &TestEnv) {
     std::fs::rename(env.dir.join("blobs"), env.dir.join("failed-disk")).unwrap();
-    crate::locations::request_recheck();
+    crate::storage::request_recheck();
 }
 
 fn repair_builtin(env: &TestEnv) {
@@ -338,10 +338,10 @@ async fn replicas_on_sftp_and_ftp_are_checked_and_read_when_the_primary_fails() 
     let amy = env.user("amy", true).await;
     let big: &'static [u8] = vec![3u8; 200_000].leak();
     let a = env.upload(&amy, amy.root(), "big.bin", big).await;
-    let sftp = crate::sftp::tests::server(testutil::password()).await;
-    let ftp = crate::ftp::tests::server(testutil::password()).await;
-    add_location(&env, "sftp", "sftp", json!({ "host": "127.0.0.1", "path": "/files" }), Arc::new(crate::sftp::tests::storage(&sftp, testutil::password(), &sftp.fingerprint))).await;
-    add_location(&env, "ftp", "ftp", json!({ "host": "127.0.0.2", "path": "/files" }), Arc::new(crate::ftp::tests::storage(&ftp, testutil::password()))).await;
+    let sftp = crate::storage::sftp::tests::server(testutil::password()).await;
+    let ftp = crate::storage::ftp::tests::server(testutil::password()).await;
+    add_location(&env, "sftp", "sftp", json!({ "host": "127.0.0.1", "path": "/files" }), Arc::new(crate::storage::sftp::tests::storage(&sftp, testutil::password(), &sftp.fingerprint))).await;
+    add_location(&env, "ftp", "ftp", json!({ "host": "127.0.0.2", "path": "/files" }), Arc::new(crate::storage::ftp::tests::storage(&ftp, testutil::password()))).await;
     let id = make(&env, json!({ "source": "local", "copies": 2, "targets": [{ "location": "sftp" }, { "location": "ftp" }] })).await;
     assert_eq!(settle(&env, &id).await, ["done", "done"]);
     let Json(_) = api::verify(State(env.st.clone()), Admin(env.admin().await), Path(id.clone()), Json(serde_json::from_value(json!({})).unwrap())).await.unwrap();

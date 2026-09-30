@@ -57,6 +57,26 @@ pub fn space_marker(root: &crate::beneath::Pinned) -> std::io::Result<Option<Str
 /// Bytes of a space's marker read at most (it holds a space id)
 const MAX_MARKER: u64 = 4096;
 
+/// A path below the folder of the space `drive`, looked up (`pin`) only when it is used: long lists of them keep no
+/// folder open
+#[derive(Clone, Debug)]
+pub struct Below {
+    pub root: std::path::PathBuf,
+    pub drive: String,
+    pub rel: String,
+}
+
+impl Below {
+    pub fn new(root: impl Into<std::path::PathBuf>, drive: impl Into<String>, rel: impl Into<String>) -> Below {
+        Below { root: root.into(), drive: drive.into(), rel: rel.into() }
+    }
+
+    /// In the space's own folder, which must hold its marker (`open_space`)
+    pub fn pin(&self) -> std::io::Result<crate::beneath::Pinned> {
+        open_space(&self.root, &self.drive, false)?.join(&self.rel)
+    }
+}
+
 /// The folder of the space `drive_id` at `root`, opened, for reading what is in it. Someone who can write where the
 /// folder is could put another folder, or a link to one, in its place; what is read through the result is in the
 /// folder whose marker was checked. It must hold the space's marker; a read-only space's folder may have none (the

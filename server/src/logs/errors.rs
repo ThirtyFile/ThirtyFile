@@ -23,7 +23,7 @@ use std::{
 
 use axum::{
     Json,
-    extract::{ConnectInfo, FromRequestParts, MatchedPath, Query, Request, State},
+    extract::{ConnectInfo, FromRequestParts, Query, Request, State},
     http::{HeaderValue, Method, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
@@ -34,7 +34,8 @@ use serde_json::{Value, json};
 use super::{LogEvent, enqueue};
 use crate::{
     auth::{Admin, User},
-    error::{AppError, AppResult},
+    error::{AppResult, ErrorInfo, REQUEST, RequestCtx},
+    redact::{clip, page_route, redact},
     state::AppState,
     util::now,
 };
@@ -54,47 +55,6 @@ const REMEMBERED_REQUESTS: usize = 5000;
 
 const MAX_MESSAGE: usize = 500;
 const MAX_DETAIL: usize = 4000;
-
-// ───────────── The request being answered ─────────────
-
-tokio::task_local! {
-    static REQUEST: Arc<RequestCtx>;
-}
-
-/// What is known about the request being answered: its id, and who sent it once that is known
-pub struct RequestCtx {
-    id: String,
-    user: Mutex<Option<(i64, String)>>,
-    route: Mutex<Option<String>>,
-}
-
-/// The id of the request being answered (none outside a request, e.g. in a background task)
-pub fn request_id() -> Option<String> {
-    REQUEST.try_with(|c| c.id.clone()).ok()
-}
-
-/// Notes who sent the request being answered (called when the session is recognised)
-pub fn note_user(id: i64, username: &str) {
-    let _ = REQUEST.try_with(|c| *c.user.lock().unwrap() = Some((id, username.to_string())));
-}
-
-/// Notes the route template that answers the request (a `route_layer`: routing is done by then)
-pub async fn note_route(req: Request, next: Next) -> Response {
-    if let Some(p) = req.extensions().get::<MatchedPath>() {
-        let p = p.as_str().to_string();
-        let _ = REQUEST.try_with(|c| *c.route.lock().unwrap() = Some(p));
-    }
-    next.run(req).await
-}
-
-/// What an error response says, for the error log (a response extension added by `AppError`)
-#[derive(Clone, Debug)]
-pub struct ErrorInfo {
-    pub message: String,
-    pub code: Option<&'static str>,
-    /// For server failures: what kind of failure (never names, paths or contents)
-    pub diag: Option<String>,
-}
 
 /// Around every request: gives it an id, and records the error when it is answered with one worth recording
 pub async fn track(State(st): State<AppState>, req: Request, next: Next) -> Response {
@@ -481,100 +441,6 @@ fn word(s: &str, max: usize) -> String {
     if s.len() <= max && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')) { s.to_string() } else { String::new() }
 }
 
-/// The page's path without its query, and without a share link's token
-fn page_route(route: &str) -> String {
-    let path = route.split(['?', '#']).next().unwrap_or_default();
-    let mut out = Vec::new();
-    let mut hide_next = false;
-    for seg in path.split('/') {
-        if hide_next && !seg.is_empty() {
-            out.push("…");
-            hide_next = false;
-            continue;
-        }
-        hide_next = seg == "share" || seg == "shares";
-        out.push(seg);
-    }
-    clip(&out.join("/"), 200)
-}
-
-// ───────────── Redaction ─────────────
-
-/// Keys whose values are secrets wherever they appear as `key=value`
-const SECRET_KEYS: [&str; 10] = ["token", "password", "passwd", "secret", "key", "code", "ticket", "sig", "session", "auth"];
-
-/// Leaves out of a message what could name something in a space or let someone in: text in double or curly quotes
-/// ("…"), the values of secret-looking `key=value` pairs, share link tokens and `Bearer` credentials
-pub fn redact(s: &str) -> String {
-    let quoted = redact_quotes(s);
-    let mut out = String::with_capacity(quoted.len());
-    let mut hide_next = false;
-    for part in quoted.split_inclusive(|c: char| c.is_whitespace() || matches!(c, '&' | '?' | ';' | ',' | '(' | ')')) {
-        let (word, sep) = match part.char_indices().last() {
-            Some((at, c)) if c.is_whitespace() || matches!(c, '&' | '?' | ';' | ',' | '(' | ')') => (&part[..at], &part[at..]),
-            _ => (part, ""),
-        };
-        if hide_next && !word.is_empty() {
-            out.push('…');
-            out.push_str(sep);
-            hide_next = false;
-            continue;
-        }
-        hide_next = word.eq_ignore_ascii_case("bearer") || word.eq_ignore_ascii_case("basic");
-        out.push_str(&redact_word(word));
-        out.push_str(sep);
-    }
-    out
-}
-
-/// A `key=value` whose key looks secret keeps its key only; a path's share token is left out
-fn redact_word(word: &str) -> String {
-    if let Some((key, _)) = word.split_once('=') {
-        let k = key.rsplit(['/', '.', ':']).next().unwrap_or(key).to_ascii_lowercase();
-        if SECRET_KEYS.iter().any(|s| k.contains(s)) {
-            return format!("{key}=…");
-        }
-    }
-    if word.contains("/share/") || word.contains("/shares/") {
-        return page_route(word);
-    }
-    word.to_string()
-}
-
-fn redact_quotes(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        let close = match c {
-            '"' => '"',
-            '“' => '”',
-            _ => {
-                out.push(c);
-                continue;
-            }
-        };
-        let rest = chars.as_str();
-        match rest.find(close) {
-            Some(end) => {
-                out.push(c);
-                out.push('…');
-                out.push(close);
-                chars = rest[end + close.len_utf8()..].chars();
-            }
-            None => out.push(c),
-        }
-    }
-    out
-}
-
-/// At most `max` characters
-fn clip(s: &str, max: usize) -> String {
-    match s.char_indices().nth(max) {
-        Some((at, _)) => format!("{}…", &s[..at]),
-        None => s.to_string(),
-    }
-}
-
 // ───────────── Viewing ─────────────
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -636,36 +502,12 @@ pub async fn error_log(State(st): State<AppState>, _: Admin, Query(q): Query<Err
     Ok(super::query::page(query_errors(&st, &q, limit).await?, limit, |r| r.id))
 }
 
-impl AppError {
-    /// What this error response tells the error log
-    pub(crate) fn info(&self) -> ErrorInfo {
-        ErrorInfo { message: self.message.clone(), code: self.code, diag: self.diag.clone() }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil;
+    use crate::{error::AppError, testutil};
     use axum::{Router, body::Body, routing::post};
     use tower::ServiceExt;
-
-    #[test]
-    fn names_tokens_and_secrets_are_left_out() {
-        assert_eq!(redact(r#"An item named "Salaries 2026.xlsx" already exists"#), r#"An item named "…" already exists"#);
-        assert_eq!(redact("“Budget” changed while it was being moved"), "“…” changed while it was being moved");
-        assert_eq!(redact("GET /api/x?token=abc123&page=2 failed"), "GET /api/x?token=…&page=2 failed");
-        assert_eq!(redact("password=hunter2, reset_key=xyz"), "password=…, reset_key=…");
-        assert_eq!(redact("Authorization: Bearer abc.def"), "Authorization: Bearer …");
-        assert_eq!(redact("at https://drive.example.com/share/AbCdEf/node"), "at https://drive.example.com/share/…/node");
-        assert_eq!(redact("Cannot read properties of undefined (reading 'x')"), "Cannot read properties of undefined (reading 'x')");
-        // An unclosed quote is left as it is
-        assert_eq!(redact(r#"a "b"#), r#"a "b"#);
-        assert_eq!(page_route("/share/secret-token/abc?x=1#y"), "/share/…/abc");
-        assert_eq!(page_route("/files/abc?q=salaries"), "/files/abc");
-        assert_eq!(clip("abcdef", 3), "abc…");
-        assert_eq!(clip("數位檔案", 10), "數位檔案");
-    }
 
     #[test]
     fn only_errors_worth_recording_are_recorded() {
@@ -741,7 +583,7 @@ mod tests {
             .route("/api/items/{id}/fail", post(handler))
             .route("/api/items/{id}/refuse", post(refuse))
             .route("/api/client-errors", post(client_report))
-            .route_layer(axum::middleware::from_fn(note_route));
+            .route_layer(axum::middleware::from_fn(crate::error::note_route));
         api.layer(axum::middleware::from_fn_with_state(st.clone(), track)).with_state(st)
     }
 

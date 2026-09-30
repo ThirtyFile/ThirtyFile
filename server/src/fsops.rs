@@ -459,7 +459,7 @@ pub fn ensure_dir(p: &Pinned) -> io::Result<()> {
 }
 
 /// Removes items below a space's folder from disk in the background (the index no longer has them)
-pub fn remove_below_later(paths: Vec<crate::beneath::Below>) {
+pub fn remove_below_later(paths: Vec<crate::folders::Below>) {
     if paths.is_empty() {
         return;
     }
@@ -646,13 +646,13 @@ pub async fn restore(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Nod
 }
 
 /// The folder holding a trashed item of a folder space, removed from disk when the item is deleted for good
-pub fn trash_folder(n: &Node) -> Option<crate::beneath::Below> {
+pub fn trash_folder(n: &Node) -> Option<crate::folders::Below> {
     let mut parts = n.fs_path.as_deref()?.split('/');
     if parts.next()? != TRASH_DIR {
         return None;
     }
     let id = parts.next()?;
-    Some(crate::beneath::Below::new(n.fs_root.as_deref()?, n.drive(), format!("{TRASH_DIR}/{id}")))
+    Some(crate::folders::Below::new(n.fs_root.as_deref()?, n.drive(), format!("{TRASH_DIR}/{id}")))
 }
 
 /// Trash folders younger than this are never removed by `clean_trash`, known or not
@@ -681,7 +681,7 @@ pub async fn clean_trash(st: &AppState, drive_id: &str, root: &Path) -> AppResul
         .into_iter()
         .map(|(t,)| t)
         .collect();
-    remove_below_later(names.into_iter().filter(|n| !known.contains(n)).map(|n| crate::beneath::Below::new(root, drive_id, format!("{TRASH_DIR}/{n}"))).collect());
+    remove_below_later(names.into_iter().filter(|n| !known.contains(n)).map(|n| crate::folders::Below::new(root, drive_id, format!("{TRASH_DIR}/{n}"))).collect());
     Ok(())
 }
 

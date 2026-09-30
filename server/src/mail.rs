@@ -283,7 +283,7 @@ fn check_peer(cfg: &SmtpSettings, peer: std::net::IpAddr) -> Result<(), String> 
 }
 
 async fn tls(cfg: &SmtpSettings, tcp: TcpStream) -> Result<tokio_rustls::client::TlsStream<TcpStream>, String> {
-    let config = crate::ftp::client_tls(cfg.insecure).map_err(|e| e.to_string())?;
+    let config = crate::tls::client_tls(cfg.insecure).map_err(|e| e.to_string())?;
     let host = cfg.host.trim_start_matches('[').trim_end_matches(']').to_string();
     let name = rustls::pki_types::ServerName::try_from(host).map_err(|_| "the email server's name isn't valid".to_string())?;
     tokio_rustls::TlsConnector::from(config).connect(name, tcp).await.map_err(|e| format!("secure connection failed ({e})"))

@@ -24,15 +24,14 @@ mod notify;
 mod branding;
 mod check;
 pub mod cli;
-mod ftp;
 mod jobs;
-mod sftp;
 mod sso;
 mod nodes;
 mod paths;
 mod personal;
 #[cfg(unix)]
 mod privileges;
+mod redact;
 mod replicas;
 mod reset;
 mod secrets;
@@ -44,6 +43,7 @@ mod storage;
 #[cfg(test)]
 mod testutil;
 mod thumbnails;
+mod tls;
 mod tokens;
 mod tree;
 mod twofactor;

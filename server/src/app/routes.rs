@@ -31,7 +31,7 @@ pub fn router(state: AppState) -> Router {
                 .layer(TimeoutLayer::with_status_code(StatusCode::GATEWAY_TIMEOUT, Duration::from_secs(120)))
                 .merge(untimed())
                 // The error log records the route that answered, not the path asked for (logs/errors.rs)
-                .route_layer(middleware::from_fn(logs::note_route)),
+                .route_layer(middleware::from_fn(error::note_route)),
         )
         // WebDAV (dav.rs): outside the request timeout too, as it receives and sends whole files
         .route(dav::PREFIX, any(dav::handle))
