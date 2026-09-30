@@ -6,9 +6,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{ActivityQuery, DAY, LoginQuery, authorize_activity, query_activity, query_logins, scope_logins};
+use super::{ActivityQuery, DAY, ErrorQuery, LoginQuery, authorize_activity, query_activity, query_errors, query_logins, scope_logins};
 use crate::{
-    auth::User,
+    auth::{Admin, User},
     error::AppResult,
     state::AppState,
     util::{content_disposition, now},
@@ -37,10 +37,28 @@ const ZH_TW: &[(&str, &str)] = &[
     ("Event", "事件"),
     ("Method", "方式"),
     ("Browser", "瀏覽器"),
+    ("Source", "來源"),
+    ("Severity", "嚴重程度"),
+    ("Kind", "類型"),
+    ("Operation", "操作"),
+    ("Status", "狀態碼"),
+    ("Message", "訊息"),
+    ("Page report", "網頁回報"),
+    ("Request ID", "要求 ID"),
+    ("Count", "次數"),
+    ("First seen", "首次發生"),
+    ("Version", "版本"),
+    // Error log values
+    ("Server", "伺服器"),
+    ("Web page", "網頁"),
+    ("Error", "錯誤"),
+    ("Warning", "警告"),
+    ("Not signed in", "未登入"),
     // File names
     ("activity-log", "活動紀錄"),
     ("share-access-log", "分享訪問紀錄"),
     ("login-log", "登入紀錄"),
+    ("error-log", "錯誤紀錄"),
     // Activity actions
     ("Upload", "上傳"),
     ("Create folder", "建立資料夾"),
@@ -202,6 +220,35 @@ pub fn format_time(ts: i64, offset: i64) -> String {
     let (days, secs) = (t.div_euclid(DAY), t.rem_euclid(DAY));
     let (y, m, d) = crate::util::civil_from_days(days);
     format!("{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}", secs / 3600, secs % 3600 / 60, secs % 60)
+}
+
+/// Exports matching error log entries, for administrators
+pub async fn export_errors(State(st): State<AppState>, _: Admin, headers: HeaderMap, Query(q): Query<ErrorQuery>) -> AppResult<Response> {
+    let en = english(&headers);
+    let rows = query_errors(&st, &q, EXPORT_LIMIT).await?;
+    let columns =
+        ["Time", "First seen", "Count", "User", "Source", "Severity", "Kind", "Operation", "Status", "Message", "Details", "Page report", "Request ID", "Version"];
+    Ok(csv_file(en, q.tz, "error-log", &columns, rows, |r, offset| {
+        let source = localize(if r.source == "backend" { "Server" } else { "Web page" }, en);
+        let severity = localize(if r.severity == "error" { "Error" } else { "Warning" }, en);
+        let user = if r.user_id.is_none() && r.username.is_empty() { localize("Not signed in", en).to_string() } else { r.username };
+        vec![
+            format_time(r.at, offset),
+            format_time(r.first_at, offset),
+            r.count.to_string(),
+            user,
+            source.to_string(),
+            severity.to_string(),
+            r.kind,
+            r.operation,
+            r.status.map(|s| s.to_string()).unwrap_or_default(),
+            r.message,
+            r.detail,
+            r.client,
+            r.request_id.unwrap_or_default(),
+            r.version,
+        ]
+    }))
 }
 
 pub async fn export_login_log(State(st): State<AppState>, user: User, headers: HeaderMap, Query(mut q): Query<LoginQuery>) -> AppResult<Response> {

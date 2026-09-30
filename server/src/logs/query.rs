@@ -19,18 +19,18 @@ use crate::{
 // ───────────── Filters and paging ─────────────
 
 /// A log query's conditions; a filter whose value is missing or blank is left out
-struct Filters(QueryBuilder<Sqlite>);
+pub(super) struct Filters(QueryBuilder<Sqlite>);
 
 impl Filters {
     /// `sql` selects from the log, up to (not including) its WHERE clause
-    fn new(sql: &str) -> Self {
+    pub(super) fn new(sql: &str) -> Self {
         let mut qb = QueryBuilder::new(sql);
         qb.push(" WHERE 1 = 1");
         Filters(qb)
     }
 
     /// The column equals the value
-    fn eq<'t, T: sqlx::Encode<'t, Sqlite> + sqlx::Type<Sqlite>>(&mut self, col: &str, value: Option<T>) -> &mut Self {
+    pub(super) fn eq<'t, T: sqlx::Encode<'t, Sqlite> + sqlx::Type<Sqlite>>(&mut self, col: &str, value: Option<T>) -> &mut Self {
         if let Some(v) = value {
             self.0.push(format_args!(" AND {col} = ")).push_bind(v);
         }
@@ -38,7 +38,7 @@ impl Filters {
     }
 
     /// One of the columns contains the text (partial match; `%` and `_` in it are literal characters, not wildcards)
-    fn contains(&mut self, cols: &[&str], text: Option<&str>) -> &mut Self {
+    pub(super) fn contains(&mut self, cols: &[&str], text: Option<&str>) -> &mut Self {
         if let Some(t) = text.filter(|t| !t.trim().is_empty()) {
             let pat = format!("%{}%", crate::util::like_escape(t.trim()));
             self.0.push(" AND (");
@@ -54,7 +54,7 @@ impl Filters {
     }
 
     /// The column is one of the comma-separated values
-    fn one_of(&mut self, col: &str, list: Option<&str>) -> &mut Self {
+    pub(super) fn one_of(&mut self, col: &str, list: Option<&str>) -> &mut Self {
         let values: Vec<&str> = list.unwrap_or_default().split(',').map(str::trim).filter(|v| !v.is_empty()).collect();
         if !values.is_empty() {
             self.0.push(format_args!(" AND {col} IN ("));
@@ -68,7 +68,7 @@ impl Filters {
     }
 
     /// Time range (Unix seconds, start inclusive, end exclusive) on the `at` column
-    fn between(&mut self, at: &str, from: Option<i64>, to: Option<i64>) -> &mut Self {
+    pub(super) fn between(&mut self, at: &str, from: Option<i64>, to: Option<i64>) -> &mut Self {
         if let Some(f) = from {
             self.0.push(format_args!(" AND {at} >= ")).push_bind(f);
         }
@@ -79,7 +79,7 @@ impl Filters {
     }
 
     /// One page, newest first: at most `limit` records, only those with an id below `before`
-    async fn fetch<T>(mut self, db: &SqlitePool, id: &str, before: Option<i64>, limit: i64) -> AppResult<Vec<T>>
+    pub(super) async fn fetch<T>(mut self, db: &SqlitePool, id: &str, before: Option<i64>, limit: i64) -> AppResult<Vec<T>>
     where
         T: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow>,
     {
@@ -92,12 +92,12 @@ impl Filters {
 }
 
 /// Records per page in the log viewers
-fn page_size(limit: Option<i64>) -> i64 {
+pub(super) fn page_size(limit: Option<i64>) -> i64 {
     limit.unwrap_or(100).clamp(1, 1000)
 }
 
 /// A page of records, and in `next` the `before` value that loads the following page (none after the last page)
-fn page<T: Serialize>(items: Vec<T>, limit: i64, id: fn(&T) -> i64) -> Json<Value> {
+pub(super) fn page<T: Serialize>(items: Vec<T>, limit: i64, id: fn(&T) -> i64) -> Json<Value> {
     let next = (items.len() as i64 == limit).then(|| items.last().map(id)).flatten();
     Json(json!({ "items": items, "next": next }))
 }

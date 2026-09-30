@@ -1,9 +1,10 @@
 import { useSyncExternalStore } from "react";
 import * as tus from "tus-js-client";
 import { toast } from "sonner";
-import { api, errorFromBody } from "@/api";
+import { ApiError, api, errorFromBody } from "@/api";
 import { resolveConflicts } from "@/components/ConflictDialog";
 import { applyToUpload, topLevel } from "@/lib/conflicts";
+import { reportShown } from "@/lib/errorReport";
 import { t } from "@/lib/i18n";
 
 export type UploadStatus = "queued" | "uploading" | "paused" | "done" | "error";
@@ -154,11 +155,18 @@ function landed(task: UploadTask) {
   else landedTimer ??= setTimeout(flushLanded, LANDED_MS);
 }
 
-function errorMessage(err: Error): string {
+function uploadError(err: Error): ApiError {
   const res = (err as tus.DetailedError).originalResponse;
   // Handled like api.request: the server's message translated, and an expired session sends the user to sign in
-  if (res) return errorFromBody(res.getStatus(), res.getBody() ?? "", "/api/uploads", t("Upload failed ({status})", { status: res.getStatus() })).message;
-  return t("Network connection lost");
+  if (res)
+    return errorFromBody(
+      res.getStatus(),
+      res.getBody() ?? "",
+      "/api/uploads",
+      t("Upload failed ({status})", { status: res.getStatus() }),
+      res.getHeader("x-request-id") || undefined,
+    );
+  return new ApiError(t("Network connection lost"), 0);
 }
 
 /** The name the server reports (percent-encoded), when it differs from the one uploaded */
@@ -207,7 +215,9 @@ function start(task: UploadTask) {
     onError: (err) => {
       if (task.upload !== upload || task.status !== "uploading") return;
       setStatus(task, "error");
-      task.error = errorMessage(err);
+      const e = uploadError(err);
+      task.error = e.message;
+      reportShown("upload", e, task.parentId);
       pump();
       emit();
       if (!hasActiveUploads()) flushLanded();
@@ -287,6 +297,7 @@ export async function uploadFiles(files: PickedFile[], parentId: string) {
     found = await api.conflicts({ dest_id: parentId, names: tops.map((x) => x.name) });
   } catch (e) {
     toast.error(e instanceof Error ? e.message : t("Couldn't upload"));
+    reportShown("upload", e, parentId);
     return;
   }
   const byName = new Map(tops.map((x) => [x.name, x]));

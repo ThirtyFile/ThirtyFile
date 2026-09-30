@@ -41,6 +41,7 @@ async fn status(st: &AppState) -> AppResult<Value> {
     let (activity_rows, activity_oldest): (i64, Option<i64>) = sqlx::query_as("SELECT COUNT(*), MIN(at) FROM activity").fetch_one(&st.db).await?;
     let (share_rows, share_oldest): (i64, Option<i64>) = sqlx::query_as("SELECT COUNT(*), MIN(at) FROM share_access").fetch_one(&st.db).await?;
     let (login_rows, login_oldest): (i64, Option<i64>) = sqlx::query_as("SELECT COUNT(*), MIN(at) FROM login_log").fetch_one(&st.db).await?;
+    let (error_rows, error_oldest): (i64, Option<i64>) = sqlx::query_as("SELECT COUNT(*), MIN(at) FROM error_log").fetch_one(&st.db).await?;
     let archives: Vec<ArchiveRow> = sqlx::query_as(
         "SELECT id, kind, from_at, to_at, rows, bytes, created_at FROM log_archives ORDER BY to_at DESC, id DESC",
     )
@@ -52,6 +53,7 @@ async fn status(st: &AppState) -> AppResult<Value> {
         "activity": { "rows": activity_rows, "oldest": activity_oldest },
         "share_access": { "rows": share_rows, "oldest": share_oldest },
         "login_log": { "rows": login_rows, "oldest": login_oldest },
+        "error_log": { "rows": error_rows, "oldest": error_oldest },
         "archives": archives,
         "archive_bytes": archives.iter().map(|a| a.bytes).sum::<i64>(),
         "last_run": last_run,
@@ -116,6 +118,7 @@ pub async fn download_archive(State(st): State<AppState>, _: Admin, headers: Hea
     let slug = match kind.as_str() {
         "activity" => "activity-log",
         "share_access" => "share-access-log",
+        "error_log" => "error-log",
         _ => "login-log",
     };
     let label = localize(slug, english(&headers));
@@ -141,11 +144,16 @@ pub async fn delete_archive(State(st): State<AppState>, Admin(user): Admin, Path
     Ok(Json(json!({ "ok": true })))
 }
 
-const KINDS: [&str; 3] = ["activity", "share_access", "login_log"];
+/// The error log is kept as long as the activity log (it has no retention setting of its own)
+const KINDS: [&str; 4] = ["activity", "share_access", "login_log", "error_log"];
 
 /// Singular and plural nouns for each kind of log, in the same order as `KINDS`
-const KIND_NOUNS: [(&str, &str); 3] =
-    [("activity log entry", "activity log entries"), ("share visit log entry", "share visit log entries"), ("sign-in log entry", "sign-in log entries")];
+const KIND_NOUNS: [(&str, &str); 4] = [
+    ("activity log entry", "activity log entries"),
+    ("share visit log entry", "share visit log entries"),
+    ("sign-in log entry", "sign-in log entries"),
+    ("error log entry", "error log entries"),
+];
 
 /// "1 day" / "2 days"
 fn plural(n: i64, one: &str, many: &str) -> String {
@@ -158,8 +166,8 @@ fn archive_dir(st: &AppState) -> PathBuf {
 
 #[derive(Default, Debug)]
 pub struct ArchiveSummary {
-    pub(super) archived: [i64; 3],
-    pub(super) deleted: [i64; 3],
+    pub(super) archived: [i64; 4],
+    pub(super) deleted: [i64; 4],
     pub(super) files: i64,
     pub(super) pruned_files: i64,
 }
@@ -241,7 +249,7 @@ pub async fn run_archive(st: &AppState) -> AppResult<ArchiveSummary> {
     let cfg = st.logs.read().unwrap().clone();
     let mut sum = ArchiveSummary::default();
     tokio::fs::create_dir_all(archive_dir(st)).await?;
-    for (i, (kind, days)) in KINDS.into_iter().zip([cfg.activity_days, cfg.share_days, cfg.login_days]).enumerate() {
+    for (i, (kind, days)) in KINDS.into_iter().zip([cfg.activity_days, cfg.share_days, cfg.login_days, cfg.activity_days]).enumerate() {
         if days == 0 {
             continue;
         }
@@ -295,6 +303,17 @@ async fn archive_batch(st: &AppState, kind: &str, cutoff: i64) -> AppResult<i64>
             fetch_batch::<AccessArchive>(
                 st,
                 "SELECT id, at, share_id, owner_id, node_id, node_name, event, ip, user_agent FROM share_access WHERE at < ? ORDER BY id LIMIT ?",
+                cutoff,
+                |r| r.id,
+                |r| r.at,
+            )
+            .await?
+        }
+        "error_log" => {
+            fetch_batch::<super::ErrorRow>(
+                st,
+                "SELECT id, at, first_at, count, source, severity, kind, user_id, username, operation, route, resource, status, code, message,
+                   detail, request_id, client, version FROM error_log WHERE at < ? ORDER BY id LIMIT ?",
                 cutoff,
                 |r| r.id,
                 |r| r.at,

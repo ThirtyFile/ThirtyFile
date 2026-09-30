@@ -151,38 +151,46 @@ impl FromRequestParts<AppState> for User {
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, st: &AppState) -> Result<Self, Self::Rejection> {
-        // App passwords only count on the routes that allow them (file operations); elsewhere the header is ignored
-        if parts.extensions.get::<crate::tokens::AllowAppPasswords>().is_some()
-            && let Some(credential) = crate::tokens::credential(&parts.headers)
-        {
-            return crate::tokens::authenticate(parts, st, credential).await;
-        }
-        let token = get_cookie(&parts.headers, SESSION_COOKIE).ok_or_else(AppError::unauthorized)?;
-        let sql = format!(
-            "SELECT {USER_COLS}, s.id AS session_id, s.last_used_at FROM sessions s JOIN users u ON u.id = s.user_id
-             WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled = 0"
-        );
-        let ts = now();
-        let row = sqlx::query_as::<_, SessionRow>(sqlx::AssertSqlSafe(sql.as_str()))
-            .bind(sha256_hex(token.as_bytes()))
-            .bind(ts)
-            .fetch_optional(&st.db)
-            .await?
-            .ok_or_else(AppError::unauthorized)?;
-        if row.last_used_at.is_none_or(|t| ts - t >= SESSION_TOUCH) {
-            let ip = parts.extensions.get::<ConnectInfo<std::net::SocketAddr>>().map(|c| client_ip(st, c.0, &parts.headers));
-            touch_session(st.clone(), row.session_id.clone(), ip);
-        }
-        let mut user = row.user;
-        // A password an administrator chose must be changed first: until then only that (and what the page needs for
-        // it) is reachable
-        if user.must_change_password && !["/auth/me", "/auth/password", "/auth/logout"].iter().any(|p| parts.uri.path().ends_with(p)) {
-            return Err(AppError::forbidden("Choose a new password first").with_code("password_change_required"));
-        }
-        user.shared_root = st.shared_root();
-        user.session_id = Some(row.session_id);
+        let user = session_user(parts, st).await?;
+        // The error log records who a failed request came from
+        crate::logs::note_user(user.id, &user.username);
         Ok(user)
     }
+}
+
+/// The person a request is signed in as: by app password on the routes that allow one, else by session cookie
+async fn session_user(parts: &mut Parts, st: &AppState) -> Result<User, AppError> {
+    // App passwords only count on the routes that allow them (file operations); elsewhere the header is ignored
+    if parts.extensions.get::<crate::tokens::AllowAppPasswords>().is_some()
+        && let Some(credential) = crate::tokens::credential(&parts.headers)
+    {
+        return crate::tokens::authenticate(parts, st, credential).await;
+    }
+    let token = get_cookie(&parts.headers, SESSION_COOKIE).ok_or_else(AppError::unauthorized)?;
+    let sql = format!(
+        "SELECT {USER_COLS}, s.id AS session_id, s.last_used_at FROM sessions s JOIN users u ON u.id = s.user_id
+         WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled = 0"
+    );
+    let ts = now();
+    let row = sqlx::query_as::<_, SessionRow>(sqlx::AssertSqlSafe(sql.as_str()))
+        .bind(sha256_hex(token.as_bytes()))
+        .bind(ts)
+        .fetch_optional(&st.db)
+        .await?
+        .ok_or_else(AppError::unauthorized)?;
+    if row.last_used_at.is_none_or(|t| ts - t >= SESSION_TOUCH) {
+        let ip = parts.extensions.get::<ConnectInfo<std::net::SocketAddr>>().map(|c| client_ip(st, c.0, &parts.headers));
+        touch_session(st.clone(), row.session_id.clone(), ip);
+    }
+    let mut user = row.user;
+    // A password an administrator chose must be changed first: until then only that (and what the page needs for
+    // it) is reachable
+    if user.must_change_password && !["/auth/me", "/auth/password", "/auth/logout"].iter().any(|p| parts.uri.path().ends_with(p)) {
+        return Err(AppError::forbidden("Choose a new password first").with_code("password_change_required"));
+    }
+    user.shared_root = st.shared_root();
+    user.session_id = Some(row.session_id);
+    Ok(user)
 }
 
 /// Records that a session was used (in the background, so the request doesn't wait for the write)

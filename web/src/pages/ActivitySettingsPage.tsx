@@ -1,17 +1,18 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ActivityIcon, Link2Icon, LogInIcon, RefreshCwIcon, SettingsIcon, type LucideIcon } from "lucide-react";
+import { ActivityIcon, CircleAlertIcon, Link2Icon, LogInIcon, RefreshCwIcon, SettingsIcon, type LucideIcon } from "lucide-react";
 import { Link } from "react-router";
 import { Tabs } from "@base-ui/react/tabs";
 import { ActivityLog } from "@/components/logs/ActivityLog";
 import { ShareAccessLog } from "@/components/logs/ShareAccessLog";
 import { LoginLog } from "@/components/logs/LoginLog";
+import { ErrorLog } from "@/components/logs/ErrorLog";
 import { Frame, ToolButton } from "@/components/Frame";
 import { controlPanelItem, useSettingsSearch } from "@/lib/controlPanel";
 import { cn } from "@/lib/utils";
 import { usePersisted } from "@/lib/session";
 import { t } from "@/lib/i18n";
 
-type LogTab = "activity" | "login" | "share";
+type LogTab = "activity" | "login" | "share" | "errors";
 const LOG_TABS: Record<LogTab, { query: string; footer: string }> = {
   activity: { query: "activity", footer: t("Actions users performed in the system") },
   login: { query: "login-log", footer: t("Records of successful and failed sign-ins, sign-outs, and password changes") },
@@ -19,6 +20,7 @@ const LOG_TABS: Record<LogTab, { query: string; footer: string }> = {
     query: "share-access",
     footer: t("Records of public share links being opened, previewed, and downloaded"),
   },
+  errors: { query: "errors", footer: t("Errors people ran into, reported by the server and by the web page") },
 };
 
 export function ActivitySettingsPage() {
@@ -65,6 +67,7 @@ export function ActivitySettingsPage() {
           {tabBtn("activity", t("Activity log"), ActivityIcon)}
           {tabBtn("login", t("Sign-in log"), LogInIcon)}
           {tabBtn("share", t("Share link access"), Link2Icon)}
+          {tabBtn("errors", t("Errors"), CircleAlertIcon)}
         </Tabs.List>
         <Tabs.Panel value="activity" className={panel}>
           <ActivityLog className="min-h-0 flex-1" />
@@ -74,6 +77,9 @@ export function ActivitySettingsPage() {
         </Tabs.Panel>
         <Tabs.Panel value="share" className={panel}>
           <ShareAccessLog admin className="min-h-0 flex-1" />
+        </Tabs.Panel>
+        <Tabs.Panel value="errors" className={panel}>
+          <ErrorLog className="min-h-0 flex-1" />
         </Tabs.Panel>
       </Tabs.Root>
     </Frame>

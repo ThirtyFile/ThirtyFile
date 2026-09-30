@@ -46,6 +46,9 @@ export default {
   "Records of public share links being opened, previewed, and downloaded": "公開分享連結被開啟、預覽與下載的紀錄",
   "Share link access": "分享連結存取",
   "Share link access log": "分享連結存取紀錄",
+  "Errors": "錯誤",
+  "Error log": "錯誤紀錄",
+  "Errors people ran into, reported by the server and by the web page": "使用者遇到的錯誤，由伺服器與網頁回報",
   // Log settings
   "no cleanup": "不清理",
   "{n} day|{n} days": "{n} 天",
@@ -64,7 +67,7 @@ export default {
   "Runs automatically every day": "每天自動執行",
   "Retention and archiving": "保留與封存",
   "Activity log retention (days)": "活動紀錄保留天數",
-  "Days to keep in the database; older entries are cleaned up once a day. 0 = no cleanup": "資料庫中保留的天數，更舊的每天整理一次；0 = 不清理",
+  "Days to keep activity and error log entries in the database; older entries are cleaned up once a day. 0 = no cleanup": "活動紀錄與錯誤紀錄在資料庫中保留的天數，更舊的每天整理一次；0 = 不清理",
   "Share link access log retention (days)": "分享連結存取紀錄保留天數",
   "Same as above, for access records of public share links": "同上，適用於公開分享連結的存取紀錄",
   "Sign-in log retention (days)": "登入紀錄保留天數",

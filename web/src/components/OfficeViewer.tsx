@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2Icon } from "lucide-react";
 import { ApiError, fetchOffice, type FileSource, type Node } from "@/api";
 import { t } from "@/lib/i18n";
+import { reportShown } from "@/lib/errorReport";
 import { frameDocument, loadFrameScript } from "@/components/officeFrame";
 import { extOf } from "@/lib/utils";
 import SheetPreview from "@/components/sheet/SheetPreview";
@@ -127,6 +128,7 @@ function FramePreview({ node, source, kind }: { node: Node; source: FileSource; 
         window.clearTimeout(readyTimer);
         setError(viewError(e, kind === "docx" ? t("Couldn't open this document") : t("Couldn't open this presentation")));
         setLoading(false);
+        reportShown("preview", e, node.id);
       });
     return () => {
       cancelled = true;
@@ -167,7 +169,11 @@ function XlsxPreview({ node, source }: { node: Node; source: FileSource }) {
     const abort = new AbortController();
     fetchOffice(source.contentUrl(node), abort.signal)
       .then((buf) => !cancelled && setBuffer(buf))
-      .catch((e) => !cancelled && setError(viewError(e, t("Couldn't open this spreadsheet"))));
+      .catch((e) => {
+        if (cancelled) return;
+        setError(viewError(e, t("Couldn't open this spreadsheet")));
+        reportShown("preview", e, node.id);
+      });
     return () => {
       cancelled = true;
       abort.abort();

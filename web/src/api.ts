@@ -382,6 +382,46 @@ export interface ActivityFilter {
   to?: number;
 }
 
+/** An entry of the error log (Control panel > Activity > Errors): one incident, counted when it happens again */
+export interface ErrorEntry {
+  id: number;
+  /** Last and first time it happened, and how often */
+  at: number;
+  first_at: number;
+  count: number;
+  /** backend: the server answered a request with an error; frontend: the page reported it */
+  source: "backend" | "frontend";
+  /** error: an unexpected failure; warning: an expected refusal (validation, permission, conflict) */
+  severity: "error" | "warning";
+  kind: string;
+  /** Null when nobody was signed in */
+  user_id: number | null;
+  username: string;
+  operation: string;
+  route: string;
+  resource: string;
+  status: number | null;
+  code: string;
+  message: string;
+  detail: string;
+  request_id: string | null;
+  /** What the page reported about a failed request the server recorded too */
+  client: string;
+  version: string;
+}
+
+/** Error log filters (times are Unix seconds, start inclusive, end exclusive) */
+export interface ErrorFilter {
+  /** backend, frontend (comma-separated) */
+  source?: string;
+  /** error, warning (comma-separated) */
+  severity?: string;
+  user?: string;
+  q?: string;
+  from?: number;
+  to?: number;
+}
+
 /** Editable part of the branding settings (the logo is uploaded separately) */
 export type BrandingReq = Omit<Branding, "has_logo" | "has_logo_dark" | "has_login_background" | "version">;
 
@@ -615,7 +655,7 @@ export interface LogSettings {
 
 export interface LogArchive {
   id: number;
-  kind: "activity" | "share_access" | "login_log";
+  kind: "activity" | "share_access" | "login_log" | "error_log";
   from_at: number;
   to_at: number;
   rows: number;
@@ -628,6 +668,7 @@ export interface LogStatus {
   activity: { rows: number; oldest: number | null };
   share_access: { rows: number; oldest: number | null };
   login_log: { rows: number; oldest: number | null };
+  error_log: { rows: number; oldest: number | null };
   archives: LogArchive[];
   archive_bytes: number;
   last_run: number | null;
@@ -960,6 +1001,8 @@ export class ApiError extends Error {
     message: string,
     public status: number,
     public code?: string,
+    /** The server's id of the failed request (X-Request-Id), which ties an error report to the server's record of it */
+    public requestId?: string,
   ) {
     super(message);
   }
@@ -991,7 +1034,7 @@ async function request<T>(
  * The error for a failed response: the server's message translated to the UI language, or `fallback`.
  * A 401 without a code means the session expired: the user is sent to sign in (except for sign-in attempts and public share links).
  */
-export function errorFromBody(status: number, body: string, url: string, fallback: string): ApiError {
+export function errorFromBody(status: number, body: string, url: string, fallback: string, requestId?: string): ApiError {
   let message = fallback;
   let code: string | undefined;
   try {
@@ -1005,11 +1048,11 @@ export function errorFromBody(status: number, body: string, url: string, fallbac
   if (status === 401 && code === undefined && !url.startsWith("/api/auth/login") && !url.startsWith("/api/public/")) {
     window.dispatchEvent(new Event("tf:unauthorized"));
   }
-  return new ApiError(message, status, code);
+  return new ApiError(message, status, code, requestId);
 }
 
 export async function responseError(res: Response, url: string, fallback: string): Promise<ApiError> {
-  return errorFromBody(res.status, await res.text().catch(() => ""), url, fallback);
+  return errorFromBody(res.status, await res.text().catch(() => ""), url, fallback, res.headers.get("x-request-id") ?? undefined);
 }
 
 /** `fetch` for file content and other requests made outside `api`, with the same error handling: throws an ApiError when the response isn't OK */
@@ -1207,6 +1250,8 @@ export const api = {
   activityExportUrl: (f: ActivityFilter) => `/api/activity/export${qs(toParams({ ...f, tz: new Date().getTimezoneOffset() }))}`,
   shareAccess: (f: ShareAccessFilter & { before?: number; limit?: number }) => get<Page<ShareAccess>>(`/share-access${qs(toParams(f))}`),
   loginLog: (f: LoginFilter & { before?: number; limit?: number }) => get<Page<LoginRecord>>(`/login-log${qs(toParams(f))}`),
+  errorLog: (f: ErrorFilter & { before?: number; limit?: number }) => get<Page<ErrorEntry>>(`/admin/errors${qs(toParams(f))}`),
+  errorLogExportUrl: (f: ErrorFilter) => `/api/admin/errors/export${qs(toParams({ ...f, tz: new Date().getTimezoneOffset() }))}`,
   loginLogExportUrl: (f: LoginFilter) => `/api/login-log/export${qs(toParams({ ...f, tz: new Date().getTimezoneOffset() }))}`,
   branding: () => get<Branding>("/branding"),
   updateBranding: (b: BrandingReq) => request<Branding>("PUT", "/admin/branding", b),

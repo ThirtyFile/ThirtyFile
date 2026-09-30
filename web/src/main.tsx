@@ -8,6 +8,10 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import "./style.css";
 import { loadDictionary } from "@/lib/i18n";
 import { reloadForNewVersion } from "@/lib/reload";
+import { describe, installErrorReporting, report } from "@/lib/errorReport";
+
+// Uncaught errors and rejected promises are reported to the error log (Control panel > Activity > Errors)
+installErrorReporting();
 
 // After a site update (redeploy), the code chunks an old page wants to load no longer exist: reload to get the new version
 window.addEventListener("vite:preloadError", (e) => {
@@ -53,6 +57,7 @@ loadDictionary()
   .catch((e: unknown) => {
     // Chunks missing after a redeploy are handled by vite:preloadError above; anything else (offline, blocked script) ends here
     console.error(e);
+    void report(describe("uncaught", e, "load"));
     const el = document.getElementById("root");
     if (el) el.textContent = "The app couldn't be loaded. Reload the page to try again.";
   });
