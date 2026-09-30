@@ -1,48 +1,62 @@
 #!/usr/bin/env bash
-# Starts the image built for a release the way people run it, on data made by the latest release: the release writes
-# a file, then the new image starts on the same folders, upgrades them and must still serve that file
+# Starts an image the way people run it: with the compose.yaml that is shipped (read-only, few capabilities), on
+# folders bind-mounted from the host, which Docker creates as root so the server has to take them over for user 1000.
+# The latest release starts first and writes a file; the new image then starts on the same folders, upgrades them and
+# must still serve that file, and again after a restart.
 #   smoke-test.sh <image> [<previous image>]
+# SMOKE_PLATFORM=linux/arm64 starts another platform's images (under QEMU). SMOKE_PORT and SMOKE_NAME (the Compose
+# project and container) let it run beside other instances.
 set -euo pipefail
 IMAGE="$1"
 PREVIOUS="${2:-ghcr.io/thirtyfile/thirtyfile:latest}"
-PASSWORD="smoke-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-# Overridable for running it beside other instances: SMOKE_PORT, SMOKE_NAME (containers and volumes), and SMOKE_BASE
-# for running the script inside a container (http://host.docker.internal:18080)
+PLATFORM="${SMOKE_PLATFORM:-}"
 PORT="${SMOKE_PORT:-18080}"
 NAME="${SMOKE_NAME:-smoke}"
-BASE="${SMOKE_BASE:-http://127.0.0.1:$PORT}"
-TMP=$(mktemp -d)
+BASE="http://127.0.0.1:$PORT"
+PASSWORD="smoke-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+SHIPPED="$(cd "$(dirname "$0")/../.." && pwd)/compose.yaml"
+# The Compose project: compose.yaml as shipped, an override for the image, name and port, and the data and storage
+# folders next to them
+DIR=$(mktemp -d)
 
 fail() {
   echo "::error::$1"
-  docker ps -a --filter "name=^$NAME-"
-  for c in $(docker ps -aq --filter "name=^$NAME-"); do docker logs "$c" 2>&1 | tail -30; done
+  docker ps -a --filter "name=^$NAME\$"
+  docker logs "$NAME" 2>&1 | tail -40 || true
   exit 1
 }
 
-cleanup() {
-  docker rm -f "$NAME-old" "$NAME-new" >/dev/null 2>&1 || true
-  docker volume rm "$NAME-data" "$NAME-storage" >/dev/null 2>&1 || true
-  rm -rf "$TMP"
+compose() { # image, docker compose arguments…
+  SMOKE_IMAGE="$1" THIRTYFILE_ADMIN_PASSWORD="$PASSWORD" docker compose --project-directory "$DIR" -p "$NAME" "${@:2}"
 }
-cleanup
-mkdir -p "$TMP"
+
+cleanup() {
+  compose "$IMAGE" down --timeout 30 >/dev/null 2>&1 || true
+  # The folders belong to user 1000 now
+  rm -rf "$DIR" 2>/dev/null || sudo -n rm -rf "$DIR" 2>/dev/null || true
+}
 trap cleanup EXIT
 
-# Runs the image with as few privileges as it needs: read-only root, only the capabilities for taking over the folders
-start() { # name image data storage
-  docker run -d --name "$NAME-$1" -p "$PORT:8080" --read-only \
-    --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID \
-    --security-opt no-new-privileges \
-    -e THIRTYFILE_ADMIN_PASSWORD="$PASSWORD" -v "$3:/data" -v "$4:/storage" "$2" >/dev/null
-}
+cp "$SHIPPED" "$DIR/compose.yaml"
+{
+  echo "services:"
+  echo "  thirtyfile:"
+  echo "    image: \${SMOKE_IMAGE:?}"
+  echo "    container_name: $NAME"
+  echo "    ports: !override"
+  echo "      - \"127.0.0.1:$PORT:8080\""
+  if [ -n "$PLATFORM" ]; then echo "    platform: $PLATFORM"; fi
+} > "$DIR/compose.override.yaml"
 
+# Waits for the server, and for Docker's health check (thirtyfile health) to say so too
 wait_healthy() {
-  for _ in $(seq 1 60); do
-    curl -fsS "$BASE/api/health" >/dev/null 2>&1 && return 0
+  for _ in $(seq 1 180); do
+    if curl -fsS "$BASE/api/health" >/dev/null 2>&1 && [ "$(docker inspect -f '{{.State.Health.Status}}' "$NAME" 2>/dev/null)" = healthy ]; then
+      return 0
+    fi
     sleep 1
   done
-  fail "$1 didn't answer on /api/health"
+  fail "$1 didn't become healthy"
 }
 
 sign_in() { # cookie file
@@ -64,31 +78,47 @@ new_file() { # cookie file, name, content
   FILE_ID="$id"
 }
 
-echo "== The latest release ($PREVIOUS), writing some data"
-docker pull -q "$PREVIOUS" >/dev/null
-start old "$PREVIOUS" "$NAME-data" "$NAME-storage"
-wait_healthy "The latest release"
-sign_in "$TMP/old.cookies"
-new_file "$TMP/old.cookies" before-upgrade.txt 'written by the latest release'
-kept="$FILE_ID"
-docker stop -t 30 "$NAME-old" >/dev/null
-docker rm "$NAME-old" >/dev/null
+expect_file() { # cookie file, id, content
+  local content
+  content=$(curl -fsS -b "$1" "$BASE/api/files/$2/content") || fail "file $2 is gone"
+  [ "$content" = "$3" ] || fail "file $2 reads \"$content\" instead of \"$3\""
+}
 
-echo "== The new image, locked down, on that data"
-start new "$IMAGE" "$NAME-data" "$NAME-storage"
+owner() { stat -c %u "$1"; }
+
+echo "== The latest release ($PREVIOUS${PLATFORM:+, $PLATFORM}), writing some data"
+docker pull -q ${PLATFORM:+--platform "$PLATFORM"} "$PREVIOUS" >/dev/null
+compose "$PREVIOUS" up -d
+wait_healthy "The latest release"
+sign_in "$DIR/old.cookies"
+new_file "$DIR/old.cookies" before-upgrade.txt 'written by the latest release'
+kept="$FILE_ID"
+compose "$PREVIOUS" down --timeout 30
+
+echo "== The new image ($IMAGE) on that data"
+compose "$IMAGE" up -d
 wait_healthy "The new image"
 curl -fsS "$BASE/" | grep -q '<div id="root"' || fail "the web pages aren't served"
-sign_in "$TMP/new.cookies"
-content=$(curl -fsS -b "$TMP/new.cookies" "$BASE/api/files/$kept/content") || fail "the file written by the latest release is gone"
-[ "$content" = "written by the latest release" ] || fail "the file written by the latest release reads \"$content\""
+sign_in "$DIR/new.cookies"
+expect_file "$DIR/new.cookies" "$kept" 'written by the latest release'
 # The image has no shell or ps: the host lists the container's processes
-uids=$(docker top "$NAME-new" -o pid,uid | awk 'NR > 1 { print $2 }' | sort -u)
+uids=$(docker top "$NAME" -o pid,uid | awk 'NR > 1 { print $2 }' | sort -u)
 [ "$uids" = "1000" ] || fail "the server doesn't run as user 1000 (but as: $uids)"
-docker exec "$NAME-new" thirtyfile health >/dev/null || fail "the health check command fails"
-# Files are kept as ordinary files: My files of admin is /storage/users/admin
-new_file "$TMP/new.cookies" hello.txt 'a plain file'
-on_disk=$(docker cp "$NAME-new":/storage/users/admin/hello.txt - | tar -xO) || fail "My files isn't the folder /storage/users/admin"
-[ "$on_disk" = "a plain file" ] || fail "/storage/users/admin/hello.txt reads \"$on_disk\""
-docker rm -f "$NAME-new" >/dev/null
+# Docker created the bind-mounted folders as root: the server gave them to user 1000
+for folder in data storage; do
+  [ "$(owner "$DIR/$folder")" = 1000 ] || fail "$folder belongs to user $(owner "$DIR/$folder"), not 1000"
+done
+# Files are kept as ordinary files: My files of admin is storage/users/admin
+new_file "$DIR/new.cookies" hello.txt 'a plain file'
+added="$FILE_ID"
+on_disk=$(docker cp "$NAME:/storage/users/admin/hello.txt" - | tar -xO) || fail "My files isn't the folder storage/users/admin"
+[ "$on_disk" = "a plain file" ] || fail "storage/users/admin/hello.txt reads \"$on_disk\""
+
+echo "== The new image, restarted"
+compose "$IMAGE" restart --timeout 30
+wait_healthy "The restarted image"
+sign_in "$DIR/again.cookies"
+expect_file "$DIR/again.cookies" "$kept" 'written by the latest release'
+expect_file "$DIR/again.cookies" "$added" 'a plain file'
 
 echo "All good"

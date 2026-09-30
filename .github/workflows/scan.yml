@@ -1,6 +1,9 @@
-# Scans the published image every week for known problems in its packages and libraries, so problems found after a
-# release (in the base image or a dependency) show up under Security › Code scanning without waiting for a change.
-name: Scan images
+# Checks what the latest release contains every week, for known problems found after it was released, without waiting
+# for a change: the dependencies in its lock files (the Rust crates with cargo deny, the npm packages with pnpm audit),
+# and the published image with Trivy. The image is a single static program: Trivy reads the list of crates built into
+# it (cargo auditable, see the Dockerfile), from the first release built that way. A problem fails the run, and
+# Trivy's findings also show under Security › Code scanning.
+name: Scan the latest release
 
 on:
   schedule:
@@ -11,8 +14,46 @@ permissions:
   contents: read
 
 jobs:
-  scan:
-    name: Scan latest
+  release:
+    name: Find the latest release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.latest.outputs.tag }}
+    steps:
+      - id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)" >> "$GITHUB_OUTPUT"
+
+  dependencies:
+    name: Dependencies of ${{ needs.release.outputs.tag }}
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+          persist-credentials: false
+      # Known security problems of the crates (server/deny.toml says which are accepted and why)
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: server/Cargo.toml
+          command: check advisories
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26
+      # Reads the lock file only, nothing is installed
+      - name: npm packages
+        working-directory: web
+        run: pnpm audit --prod
+
+  image:
+    name: Image latest
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -30,3 +71,12 @@ jobs:
         with:
           sarif_file: trivy.sarif
           category: image-latest
+      # The same findings in the log, failing the run when there is one
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/thirtyfile/thirtyfile:latest
+          format: table
+          severity: CRITICAL,HIGH,MEDIUM
+          ignore-unfixed: true
+          exit-code: "1"
+          skip-setup-trivy: true

@@ -1,14 +1,26 @@
-# Checks every pull request: runs the tests. Merging into main runs nothing here.
-# The Docker image is only built by the Release workflow (release.yml), which calls this workflow with a version
-# number: the tests run and the image is built for both platforms side by side, started once, and pushed by its digest
-# without a tag. release.yml gives it its tags (1.2.3, 1.2, 1, latest) only once the tests have passed as well, so the
-# published image is exactly the one that was built and started here.
-# Pull requests that only touch the website or the documentation skip the tests. The required check is "Checks passed"
-# at the end: it passes when every job passed or was skipped, and fails when any failed or was cancelled.
+# Checks every pull request, and main after every merge (the ruleset doesn't require branches to be up to date, so
+# two pull requests that pass on their own can still fail together): the tests, and that released migrations are
+# unchanged. Changes that only touch the website or the documentation skip the tests.
+#
+# Changes to how the image is built or started (Dockerfile, .dockerignore, the lock files, cargo about's settings,
+# compose.yaml, the smoke test, this file) also build the image for both platforms, once the tests have passed, without
+# pushing it. Each platform's image is started with the shipped compose.yaml on bind-mounted folders, first the latest
+# release and then the new image on its data, and restarted (.github/scripts/smoke-test.sh): amd64 natively, arm64
+# under QEMU.
+#
+# The Release workflow (release.yml) calls this workflow with a version number: the same happens, and only then is the
+# image pushed for both platforms, by its digest and without a tag, from the same build (a step checks that the pushed
+# images are the ones that were started). release.yml gives it its tags. So a release whose tests or image fail leaves
+# nothing behind in the registry.
+#
+# The required check is "Checks passed" at the end: it passes when every job passed or was skipped, and fails when any
+# failed or was cancelled.
 name: Build
 
 on:
   pull_request:
+  push:
+    branches: [main]
   workflow_call:
     inputs:
       release_version:
@@ -20,9 +32,10 @@ on:
         description: Digest of the pushed image (sha256:…), for releases
         value: ${{ jobs.image.outputs.digest }}
 
+# A newer push to a pull request replaces its run; every merge into main is tested to the end
 concurrency:
-  group: build-${{ github.ref }}-${{ inputs.release_version || 'check' }}
-  cancel-in-progress: ${{ !inputs.release_version }}
+  group: build-${{ github.ref }}-${{ inputs.release_version || (github.event_name == 'push' && github.sha) || 'check' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -37,27 +50,37 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.diff.outputs.code }}
+      image: ${{ steps.diff.outputs.image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - id: diff
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+          # A pull request's base, or the commit main was at before the push
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           RELEASE: ${{ inputs.release_version }}
         run: |
           # Releases always build; so does anything whose starting point is unknown
           if [ -n "$RELEASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "image=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           changed=$(git diff --name-only "$BASE" HEAD)
           echo "$changed"
           # Everything except the website, the documentation, the community files and the issue / pull request forms is code
-          if echo "$changed" | grep -qvE '^(site/|README\.md$|LICENSE$|\.github/(ISSUE_TEMPLATE/|pull_request_template\.md$|CONTRIBUTING\.md$|CODE_OF_CONDUCT\.md$|SECURITY\.md$|release\.yml$|dependabot\.yml$|workflows/pages\.yml$))'; then
+          if echo "$changed" | grep -qvE '^(site/|README\.md$|LICENSE$|\.github/(ISSUE_TEMPLATE/|pull_request_template\.md$|CONTRIBUTING\.md$|CODE_OF_CONDUCT\.md$|SECURITY\.md$|release\.yml$|dependabot\.yml$|workflows/(pages|codeql|scan)\.yml$))'; then
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
             echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+          # What decides how the image is built and started
+          if echo "$changed" | grep -qE '^(Dockerfile|\.dockerignore|compose\.yaml|server/(Cargo\.(toml|lock)|about\.(toml|hbs)|rust-toolchain\.toml)|web/(package\.json|pnpm-lock\.yaml|scripts/third-party-notices\.mjs)|\.github/(scripts/smoke-test\.sh|workflows/build\.yml))$'; then
+            echo "image=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=false" >> "$GITHUB_OUTPUT"
           fi
 
   # The database structure is frozen at v0.4.0: data folders made by a release must keep starting, and the server
@@ -71,6 +94,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - run: |
           # v0.4.0 and the newest release: every migration file in them is still here, byte for byte
           latest=$(git tag -l 'v*' --sort=-v:refname | grep -v -- - | head -n 1)
@@ -93,6 +117,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: web/package.json
@@ -102,8 +128,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      # Only type-checked and linted (oxlint, web/.oxlintrc.json) here: the Docker image job builds the frontend. The backend tests don't need it (without
-      # web/dist, the server is compiled without pages)
+      # Type-checked and linted (oxlint, web/.oxlintrc.json); the frontend is built below, for the backend and the
+      # end-to-end test
       - name: Frontend
         working-directory: web
         run: |
@@ -139,8 +165,10 @@ jobs:
           cd server
           rustup component add llvm-tools-preview
           (
-            source <(cargo llvm-cov show-env --export-prefix)
-            cargo llvm-cov clean --workspace
+            source <(cargo llvm-cov show-env --sh)
+            # Coverage data left in a restored cache would count twice (cargo llvm-cov clean refuses the cached
+            # target folder, which has no CACHEDIR.TAG)
+            find "$CARGO_LLVM_COV_TARGET_DIR" -maxdepth 1 -name '*.profraw' -delete 2>/dev/null || true
             cargo test --locked
             cargo build --locked
             (cd ../web && THIRTYFILE_BIN="$CARGO_LLVM_COV_TARGET_DIR/debug/thirtyfile" pnpm test:e2e)
@@ -161,20 +189,31 @@ jobs:
         working-directory: web
         run: pnpm audit --prod
 
-  # Releases only: runs beside the tests rather than after them, and release.yml waits for both
+  # After the tests, when the image may have changed, and for releases: builds, starts and (releases only) pushes it
   image:
     name: Docker image
-    timeout-minutes: 45
-    needs: changes
-    if: inputs.release_version && needs.changes.outputs.code == 'true'
+    timeout-minutes: 90
+    needs: [changes, check]
+    if: needs.changes.outputs.image == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     outputs:
-      digest: ${{ steps.build.outputs.digest }}
+      digest: ${{ steps.push.outputs.digest }}
+    env:
+      VERSION: ${{ inputs.release_version || 'dev' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The commit's time instead of the build's: the builds below then write the same image configuration, so the
+      # pushed images can be compared with the ones that were started
+      - run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+      # Starting the arm64 image on this amd64 machine needs QEMU (building it doesn't: the Dockerfile cross-compiles)
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         id: buildx
 
@@ -204,22 +243,56 @@ jobs:
             }
           skip-extraction: ${{ steps.mounts.outputs.cache-hit }}
 
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Standard image labels (source, revision, creation time…) with the version set above
+      # Standard image labels (source, revision, creation time…) with the version
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE }}
-          labels: org.opencontainers.image.version=${{ inputs.release_version }}
+          labels: org.opencontainers.image.version=${{ env.VERSION }}
 
-      # The backend is cross-compiled in the Dockerfile, so arm64 needs no emulation. Pushed by digest only
-      # (release.yml adds the tags), with an SBOM and the full build provenance; release.yml also signs the provenance
-      - id: build
+      # Each platform's image, loaded into Docker to be started. The backend is cross-compiled in the Dockerfile, so
+      # building for arm64 needs no emulation
+      - name: Build for amd64
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: thirtyfile:amd64
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ env.VERSION }}
+          sbom: false
+          provenance: false
+      - name: Start the amd64 image
+        run: bash .github/scripts/smoke-test.sh thirtyfile:amd64
+      - name: Build for arm64
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          tags: thirtyfile:arm64
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ env.VERSION }}
+          sbom: false
+          provenance: false
+      - name: Start the arm64 image (QEMU)
+        env:
+          SMOKE_PLATFORM: linux/arm64
+        run: bash .github/scripts/smoke-test.sh thirtyfile:arm64
+
+      # Releases only, once everything above has passed: both platforms from the same builder (so from its cache: the
+      # same images), pushed by digest only (release.yml adds the tags), with an SBOM and the full build provenance;
+      # release.yml also signs the provenance
+      - if: inputs.release_version
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: push
+        name: Push both platforms
+        if: inputs.release_version
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -227,16 +300,27 @@ jobs:
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
           tags: ${{ env.IMAGE }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=${{ inputs.release_version }}
+          build-args: VERSION=${{ env.VERSION }}
           sbom: true
           provenance: mode=max
-
-      # Starts the pushed image itself (its amd64 half) locked down (read-only, minimal capabilities), and upgrades
-      # the latest release to it
-      - name: Start the image
+      # Each platform's image in the pushed index is the one started above: its image id is the pushed manifest's
+      # digest (containerd image store) or its configuration's (Docker's classic store)
+      - name: Check the pushed images are the ones started
+        if: inputs.release_version
         env:
-          REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
-        run: bash .github/scripts/smoke-test.sh "$REF"
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          index=$(docker buildx imagetools inspect --raw "$IMAGE@$DIGEST")
+          for arch in amd64 arm64; do
+            manifest=$(jq -r --arg arch "$arch" '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest' <<<"$index")
+            config=$(docker buildx imagetools inspect --raw "$IMAGE@$manifest" | jq -r .config.digest)
+            started=$(docker image inspect -f '{{.Id}}' "thirtyfile:$arch")
+            echo "$arch: pushed $manifest (configuration $config), started $started"
+            if [ "$started" != "$manifest" ] && [ "$started" != "$config" ]; then
+              echo "::error::The pushed $arch image isn't the one that was started."
+              exit 1
+            fi
+          done
 
   # The one check the ruleset requires. Skipped jobs count as passed on GitHub, so when "Changes" itself fails, the
   # tests and the image are skipped and would let the pull request through; this job fails in that case.
