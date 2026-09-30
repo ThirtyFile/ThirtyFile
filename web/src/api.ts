@@ -1080,7 +1080,7 @@ export const api = {
     post<{ token: string; app_password: AppPassword }>("/auth/app-passwords", req),
   deleteAppPassword: (id: string) => request("DELETE", `/auth/app-passwords/${encodeURIComponent(id)}`),
 
-  node: (id: string) => get<NodeInfo>(enc`/nodes/${id}`).then((n) => ({ ...n, drive: { ...n.drive, name: driveName(n.drive) } })),
+  node: (id: string, signal?: AbortSignal) => get<NodeInfo>(enc`/nodes/${id}`, signal).then((n) => ({ ...n, drive: { ...n.drive, name: driveName(n.drive) } })),
   children: (id: string, sort?: SortKey, order?: SortOrder, foldersOnly?: boolean, signal?: AbortSignal) =>
     get<Node[]>(enc`/nodes/${id}/children` + qs({ sort, order, folders_only: foldersOnly ? "true" : undefined }), signal),
   childrenPage: (id: string, sort: SortKey, order: SortOrder, limit: number, after?: string, signal?: AbortSignal) =>
@@ -1096,9 +1096,9 @@ export const api = {
   conflicts: (req: { dest_id?: string; names?: string[]; ids?: string[] }) => post<NameConflict[]>("/nodes/conflicts", req),
   trash: (ids: string[]) => post("/nodes/trash", { ids }),
   /** The most recent entries about an item (and, for a folder, what's inside it) */
-  history: (id: string) => get<HistoryEntry[]>(enc`/nodes/${id}/activity`),
+  history: (id: string, signal?: AbortSignal) => get<HistoryEntry[]>(enc`/nodes/${id}/activity`, signal),
   /** Size and number of items inside these folders (files among the ids hold nothing) */
-  contents: (ids: string[]) => post<FolderContents>("/nodes/contents", { ids }),
+  contents: (ids: string[], signal?: AbortSignal) => request<FolderContents>("POST", "/nodes/contents", { ids }, undefined, undefined, signal),
   /** With mine, only the items the person deleted */
   trashPage: (limit: number, after?: string, mine?: boolean, signal?: AbortSignal) =>
     get<CursorPage<Located>>(`/trash${qs({ limit: String(limit), after, mine: mine ? "true" : undefined })}`, signal).then((p) => ({ ...p, items: p.items.map(localizeLocated) })),
@@ -1128,7 +1128,7 @@ export const api = {
       baseVersion !== undefined ? { "X-Base-Version": String(baseVersion) } : undefined,
     ),
   /** A file's earlier versions, newest first */
-  versions: (id: string) => get<FileVersion[]>(enc`/files/${id}/versions`),
+  versions: (id: string, signal?: AbortSignal) => get<FileVersion[]>(enc`/files/${id}/versions`, signal),
   /** Where to open (preview) or download an earlier version */
   versionUrl: (id: string, version: string, download?: boolean) => enc`/api/files/${id}/versions/${version}/content` + (download ? "?download=1" : ""),
   /** Make an earlier version the file's content again (the current content becomes a version too) */
@@ -1149,7 +1149,7 @@ export const api = {
   },
 
   /** With a node: every link on it the caller may manage; otherwise the caller's own links, or those matching the filter */
-  shares: (nodeId?: string, filter: ShareFilter = {}) => get<ShareInfo[]>(`/shares${qs(toParams({ ...filter, node_id: nodeId }))}`),
+  shares: (nodeId?: string, filter: ShareFilter = {}, signal?: AbortSignal) => get<ShareInfo[]>(`/shares${qs(toParams({ ...filter, node_id: nodeId }))}`, signal),
   updateShare: (id: string, req: ShareUpdate) => request<ShareInfo>("PATCH", enc`/shares/${id}`, req),
   createShare: (req: { node_id: string; password?: string; expires_at?: number; max_downloads?: number } & Partial<ShareAccessOptions>) =>
     post<ShareInfo>("/shares", req),

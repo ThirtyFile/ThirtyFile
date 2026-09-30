@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LocationSelect } from "@/components/LocationSelect";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
-import { copyText } from "@/lib/utils";
+import { copyAndSay } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 import { Section, SettingsFrame, Toggle } from "@/pages/SettingsFrame";
 
@@ -346,8 +346,7 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
                   size="icon"
                   title={t("Copy")}
                   onClick={async () => {
-                    await copyText(saved[id].redirect_uri);
-                    toast.success(t("Redirect URI copied"));
+                    await copyAndSay(saved[id].redirect_uri, t("Redirect URI copied"));
                   }}
                 >
                   <CopyIcon />

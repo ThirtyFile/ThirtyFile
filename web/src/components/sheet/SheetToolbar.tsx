@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import type { CellStyle } from "@/lib/sheet/model";
 import { t, tc } from "@/lib/i18n";
+import { shortcut } from "@/lib/keys";
 import { cn } from "@/lib/utils";
 
 export type BorderKind = "all" | "outside" | "bottom" | "top" | "left" | "right" | "thickOutside" | "none";
@@ -166,16 +167,16 @@ export function SheetToolbar({
             </option>
           ))}
       </select>
-      <Tool label={t("Bold (Ctrl+B)")} active={style.bold} onClick={() => toggle("bold")}>
+      <Tool label={t("{action} ({keys})", { action: t("Bold"), keys: shortcut("Ctrl+B") })} active={style.bold} onClick={() => toggle("bold")}>
         <BoldIcon />
       </Tool>
-      <Tool label={t("Italic (Ctrl+I)")} active={style.italic} onClick={() => toggle("italic")}>
+      <Tool label={t("{action} ({keys})", { action: t("Italic"), keys: shortcut("Ctrl+I") })} active={style.italic} onClick={() => toggle("italic")}>
         <ItalicIcon />
       </Tool>
-      <Tool label={t("Underline (Ctrl+U)")} active={style.underline} onClick={() => toggle("underline")}>
+      <Tool label={t("{action} ({keys})", { action: t("Underline"), keys: shortcut("Ctrl+U") })} active={style.underline} onClick={() => toggle("underline")}>
         <UnderlineIcon />
       </Tool>
-      <Tool label={t("Strikethrough (Ctrl+5)")} active={style.strike} onClick={() => toggle("strike")}>
+      <Tool label={t("{action} ({keys})", { action: t("Strikethrough"), keys: shortcut("Ctrl+5") })} active={style.strike} onClick={() => toggle("strike")}>
         <StrikethroughIcon />
       </Tool>
       <ColorMenu

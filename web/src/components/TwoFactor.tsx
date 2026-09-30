@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ErrorText } from "@/components/dialogs";
-import { cn, copyText } from "@/lib/utils";
+import { cn, copyAndSay } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 
 /** The QR code to scan and the secret to type in instead (grouped by four characters) */
@@ -28,7 +28,7 @@ export function SetupCode({ setup, className }: { setup: TwoFactorSetup; classNa
         type="button"
         className="rounded px-1.5 font-mono text-sm tracking-wide select-all hover:bg-black/10"
         title={t("Copy")}
-        onClick={() => copyText(setup.secret).then(() => toast.success(t("Copied")))}
+        onClick={() => copyAndSay(setup.secret)}
       >
         {grouped}
       </button>
@@ -58,7 +58,7 @@ export function RecoveryCodes({ codes, className }: { codes: string[]; className
         ))}
       </ul>
       <div className="flex gap-2">
-        <Button type="button" size="sm" variant="outline" className="text-foreground" onClick={() => copyText(text).then(() => toast.success(t("Copied")))}>
+        <Button type="button" size="sm" variant="outline" className="text-foreground" onClick={() => copyAndSay(text)}>
           <CopyIcon /> {t("Copy")}
         </Button>
         <Button type="button" size="sm" variant="outline" className="text-foreground" onClick={download}>

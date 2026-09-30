@@ -1,4 +1,5 @@
 export { cn } from "cn";
+import { toast } from "sonner";
 import { locale, t } from "@/lib/i18n";
 
 export function formatBytes(n: number): string {
@@ -73,18 +74,52 @@ export function extOf(name: string): string {
   return i > 0 ? name.slice(i + 1).toLowerCase() : "";
 }
 
-export async function copyText(text: string) {
+/**
+ * Puts text on the clipboard; false when the browser refused. Text that is still coming (a link the server is making)
+ * is passed as a promise, and this is called right in the click: browsers such as Safari only allow writing to the
+ * clipboard during the click itself, not once an answer has come back.
+ */
+export async function copyText(text: string | Promise<string>): Promise<boolean> {
+  if (typeof text !== "string") {
+    // A clipboard item can wait for its text, and keeps the right to write it that the click gave
+    if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ "text/plain": text.then((s) => new Blob([s], { type: "text/plain" })) })]);
+        return true;
+      } catch {
+        // Refused, or the text couldn't be made: try again below with the text itself
+      }
+    }
+    try {
+      text = await text;
+    } catch {
+      return false;
+    }
+  }
   try {
     await navigator.clipboard.writeText(text);
+    return true;
   } catch {
     // Fallback when the clipboard API isn't available over http
     const ta = document.createElement("textarea");
     ta.value = text;
     document.body.appendChild(ta);
     ta.select();
-    document.execCommand("copy");
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      // Not allowed either
+    }
     ta.remove();
+    return ok;
   }
+}
+
+/** Copies text, then says it was copied (`done`), or that the browser refused */
+export async function copyAndSay(text: string, done = t("Copied")) {
+  if (await copyText(text)) toast.success(done);
+  else toast.error(t("Couldn't copy"));
 }
 
 /** How long removed items stay in the trash, for the texts that explain it */

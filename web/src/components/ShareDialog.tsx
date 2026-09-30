@@ -12,7 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { ErrorText } from "@/components/dialogs";
 import { ErrorState } from "@/components/ErrorState";
 import { useConfirm, type ConfirmOptions } from "@/components/confirm";
-import { copyText, formatDate } from "@/lib/utils";
+import { copyAndSay, copyText, formatDate } from "@/lib/utils";
 import { useMe } from "@/lib/session";
 import { t, tc } from "@/lib/i18n";
 
@@ -162,13 +162,26 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
         expires_at: expiresIn(days) ?? undefined,
         max_downloads: maxDownloads ? Number(maxDownloads) : undefined,
       }),
-    onSuccess: async (s) => {
-      await copyText(shareLink(s.id));
-      toast.success(t("Share link created and copied to clipboard"));
+    onSuccess: () => {
       setPassword("");
       qc.invalidateQueries({ queryKey: ["shares"] });
     },
   });
+  // The link is put on the clipboard from within the click (as it is being made): some browsers allow writing to the
+  // clipboard only then. Only a link that got there is said to be copied
+  const createAndCopy = async () => {
+    const made = create.mutateAsync();
+    const copied = copyText(made.then((s) => shareLink(s.id)));
+    let link: string;
+    try {
+      link = shareLink((await made).id);
+    } catch {
+      // Shown under the form
+      return;
+    }
+    if (await copied) toast.success(t("Share link created and copied to clipboard"));
+    else toast.success(t("Share link created"), { action: { label: t("Copy link"), onClick: () => void copyAndSay(link, t("Link copied")) } });
+  };
 
   const [ask, question] = useConfirm();
   const remove = useMutation({
@@ -215,10 +228,7 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
                   variant="ghost"
                   aria-label={t("Copy link")}
                   title={t("Copy link")}
-                  onClick={async () => {
-                    await copyText(shareLink(s.id));
-                    toast.success(t("Link copied"));
-                  }}
+                  onClick={() => copyAndSay(shareLink(s.id), t("Link copied"))}
                 >
                   <CopyIcon />
                 </Button>
@@ -247,7 +257,7 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
             className="grid gap-3"
             onSubmit={(e) => {
               e.preventDefault();
-              create.mutate();
+              void createAndCopy();
             }}
           >
             <div className="grid gap-1.5">

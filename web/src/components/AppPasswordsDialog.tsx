@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ErrorText } from "@/components/dialogs";
 import { useMe } from "@/lib/session";
-import { copyText, formatDate, formatDateTime } from "@/lib/utils";
+import { copyAndSay, formatDate, formatDateTime } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 
 const selectCls = "h-9 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
@@ -105,7 +105,7 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => copyText(created.token).then(() => toast.success(t("Copied")))}
+                onClick={() => copyAndSay(created.token)}
                 title={t("Copy")}
                 aria-label={t("Copy")}
               >

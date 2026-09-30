@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { t } from "@/lib/i18n";
+import { shortcut } from "@/lib/keys";
 
 export type MenuTarget = "cell" | "row" | "col";
 
@@ -42,7 +43,7 @@ export interface SheetMenuProps {
   onRedo(): void;
 }
 
-const Shortcut = ({ children }: { children: string }) => <span className="ml-auto text-xs text-muted-foreground">{children}</span>;
+const Shortcut = ({ children }: { children: string }) => <span className="ml-auto text-xs text-muted-foreground">{shortcut(children)}</span>;
 
 /** Spreadsheet context menu: shows items matching where it was clicked (cell, row header, column header) */
 export function SheetMenu(p: SheetMenuProps) {

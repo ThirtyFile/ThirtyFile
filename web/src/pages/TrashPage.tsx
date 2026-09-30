@@ -55,7 +55,9 @@ export function TrashPage() {
       const resolutions = await askBeforeTransfer("restore", ids);
       if (!resolutions) return;
       const sent = ids.filter((id) => resolutions[id] !== "skip");
-      if (sent.length) await api.restore(sent, resolutions);
+      // Every item skipped: nothing was restored, and the selection stays
+      if (!sent.length) return void toast.info(t("Nothing was restored: every item was skipped"));
+      await api.restore(sent, resolutions);
       done(t("Restored {n} item|Restored {n} items", { n: sent.length }));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Couldn't restore"));
