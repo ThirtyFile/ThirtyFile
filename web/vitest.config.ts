@@ -1,8 +1,8 @@
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 
-// Unit tests (pnpm test): plain logic, run in happy-dom for DOMParser, XMLSerializer and localStorage.
-// The end-to-end test in tests/e2e runs with Playwright instead (pnpm test:e2e).
+// Unit tests (pnpm test): plain logic and components, run in happy-dom for DOMParser, XMLSerializer and localStorage.
+// The end-to-end tests in tests/e2e run with Playwright instead (pnpm test:e2e).
 export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   test: {
@@ -13,6 +13,9 @@ export default defineConfig({
       include: ["src/**/*.{ts,tsx}"],
       exclude: ["src/lib/i18n/zh-TW/**"],
       reporter: ["text-summary", "json-summary"],
+      // A floor under what the unit tests cover (pnpm test --coverage, as CI runs them fails below it): raised as tests
+      // are added, never lowered to let a change through
+      thresholds: { statements: 30, branches: 21, functions: 23, lines: 31 },
     },
   },
 });
