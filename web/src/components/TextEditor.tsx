@@ -7,7 +7,7 @@ import { Loader2Icon, SaveIcon } from "lucide-react";
 import { toast } from "sonner";
 import { ApiError, api, fetchOk, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
-import { getDraft, setDraft } from "@/lib/drafts";
+import { getDraft, setDraft, textSaved } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 import { decodeText, encodeText, lineEnding, normalizeLines, type TextEncodingName } from "@/lib/textEncoding";
 import { useTheme } from "@/lib/theme";
@@ -30,6 +30,8 @@ export default function TextEditor(props: {
   /** Line ending of the file, restored when saving */
   const eol = useRef<"\r\n" | "\n">("\n");
   const [text, setText] = useState("");
+  /** The text in the editor right now, for a save that finishes after more was typed */
+  const current = useRef("");
   const [error, setError] = useState<string | null>(null);
   const [lang, setLang] = useState<LanguageSupport | null>(null);
   const [saving, setSaving] = useState(false);
@@ -72,11 +74,11 @@ export default function TextEditor(props: {
           // based on, so saving is refused (409, with a reload option) instead of overwriting the other person's work
           if (draft.version !== undefined) base.current = draft.version;
           setOriginal(draft.base);
-          setText(draft.text);
+          setText((current.current = draft.text));
           toast.warning(t("This file was changed by someone else since you opened it. Your unsaved changes are kept; reload to see the new version."), { duration: 10000 });
         } else {
           setOriginal(d.text);
-          setText(draft ? draft.text : d.text);
+          setText((current.current = draft ? draft.text : d.text));
         }
         setEncoding(d.encoding);
       })
@@ -95,6 +97,7 @@ export default function TextEditor(props: {
   useEffect(() => reportDirty(dirty), [dirty]);
 
   const change = (value: string) => {
+    current.current = value;
     setText(value);
     if (original !== null && editable) setDraft(props.node.id, value === original ? null : { kind: "text", text: value, base: original, version: base.current });
   };
@@ -102,12 +105,15 @@ export default function TextEditor(props: {
   saveRef.current = async () => {
     if (!editable || !dirty || saving || encoding === null) return;
     setSaving(true);
+    // What is sent: typing goes on while the save is on its way
+    const saved = text;
     try {
-      const out = encodeText(eol.current === "\n" ? text : text.replace(/\n/g, eol.current), encoding);
+      const out = encodeText(eol.current === "\n" ? saved : saved.replace(/\n/g, eol.current), encoding);
       const n = await api.saveContent(props.node.id, out.body, base.current);
       base.current = n.updated_at;
-      setDraft(props.node.id, null);
-      setOriginal(text);
+      // Edits typed meanwhile stay unsaved (tab marker, warning before closing), now based on this version
+      textSaved(props.node.id, saved, current.current, n.updated_at);
+      setOriginal(saved);
       setEncoding(out.encoding);
       toast.success(t("Saved"));
       props.onSaved?.(n);

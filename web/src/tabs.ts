@@ -128,6 +128,22 @@ export function validTabs(raw: unknown): TabsState | null {
   return { tabs, active };
 }
 
+/**
+ * Closing every tab but `id`: the tabs left, the page to show (null when that tab is already shown), and which of the
+ * `unsaved` files (confirmed for discarding) to discard. A file the kept tab shows keeps its draft.
+ */
+export function keepOnly(s: TabsState, id: string, unsaved: string[]): { next: TabsState; show: string | null; discard: string[] } | null {
+  const tab = s.tabs.find((x) => x.id === id);
+  if (!tab) return null;
+  const kept = viewedFile(tab);
+  return {
+    next: { tabs: [tab], active: tab.id },
+    // Compared with the tab shown before closing: once closed, the kept tab is always the active one
+    show: id === s.active ? null : currentEntry(tab),
+    discard: unsaved.filter((f) => f !== kept),
+  };
+}
+
 export function useTabsState() {
   return useSyncExternalStore(
     (l) => {
@@ -261,11 +277,11 @@ export function useTabActions() {
     )
       return;
     // Tabs may have changed while the question was open
-    const tab = state.tabs.find((x) => x.id === id);
-    if (!tab) return;
-    unsaved.forEach((f) => setDraft(f, null));
-    set({ tabs: [tab], active: tab.id });
-    if (id !== state.active) go(currentEntry(tab));
+    const plan = keepOnly(state, id, unsaved);
+    if (!plan) return;
+    plan.discard.forEach((f) => setDraft(f, null));
+    set(plan.next);
+    if (plan.show !== null) go(plan.show);
   }, [go]);
 
   const step = useCallback(

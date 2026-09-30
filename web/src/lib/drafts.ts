@@ -46,6 +46,15 @@ export function setDraft(nodeId: string, draft: Draft | null) {
   if (had && !draft) discardListeners.forEach((l) => l(nodeId));
 }
 
+/**
+ * A text save finished: `saved` is the text that was sent, now stored as `version`. Edits typed while the save was on
+ * its way (`current` differs) stay a draft, based on the saved text and version, so the next save doesn't conflict
+ * with this one; with no such edits the draft is gone.
+ */
+export function textSaved(nodeId: string, saved: string, current: string, version: number) {
+  setDraft(nodeId, current === saved ? null : { kind: "text", text: current, base: saved, version });
+}
+
 /** Notify when a draft is removed (saved or discarded; the spreadsheet uses this to release discarded sessions) */
 export function onDraftRemoved(listener: (nodeId: string) => void) {
   discardListeners.add(listener);
