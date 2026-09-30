@@ -123,7 +123,6 @@ pub fn prepare_builtin(root: &Path, recorded: bool) -> Result<(), String> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -279,7 +279,6 @@ impl Storage for LocalStorage {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -204,7 +204,6 @@ pub fn build(id: &str, kind: &str, config: &serde_json::Value, default_root: &Pa
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

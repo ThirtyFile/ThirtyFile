@@ -1,0 +1,155 @@
+//! Changes within a space: folders, renaming, moving, the trash
+
+use super::*;
+
+/// Makes a folder on disk; one that was made on the server meanwhile is used as it is
+pub async fn make_dir(parent: &Node, name: &str) -> AppResult<(String, Stat)> {
+    check_name(name)?;
+    let (dir, name) = (parent.clone(), name.to_string());
+    on_disk(parent.drive(), disk_wait(), move || {
+        let path = abs(&dir)?.join(&name).map_err(gone_or_disk_error)?;
+        ensure_dir(&path).map_err(disk_error)?;
+        Ok((child_rel(rel_of(&dir), &name), stat(path.as_path()).map_err(disk_error)?))
+    })
+    .await
+}
+
+/// Renames `node` to `name` in the folder `dest` on disk; returns where it is now and where it was
+pub(super) async fn rename_on_disk(node: &Node, dest: &Node, name: &str) -> AppResult<(Pinned, Pinned)> {
+    let (drive, node, dest, name) = (node.drive().to_string(), node.clone(), dest.clone(), name.to_string());
+    on_disk(&drive, disk_wait(), move || {
+        let (from, to) = (abs(&node)?, abs(&dest)?.join(&name).map_err(gone_or_disk_error)?);
+        rename_new(from.as_path(), to.as_path()).map_err(disk_error)?;
+        Ok((to, from))
+    })
+    .await
+}
+
+/// Renames an item, or moves it to another folder of its space: on disk, then in the index (the caller records its
+/// new name and folder)
+pub async fn rename(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node, dest: &Node, name: &str) -> AppResult<()> {
+    check_name(name)?;
+    let (to, from) = rename_on_disk(node, dest, name).await?;
+    locks.note(to, from, None);
+    locks.later(changes::repath(conn, &node.id, node.drive(), rel_of(node), &child_rel(rel_of(dest), name)).await?);
+    Ok(())
+}
+
+/// Moves an item to the space's trash folder, where it can be restored from
+pub async fn trash(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node, trash_id: &str) -> AppResult<()> {
+    let (n, id) = (node.clone(), trash_id.to_string());
+    let moved = on_disk(node.drive(), disk_wait(), move || {
+        let root = space_root(&n)?;
+        let from = abs(&n)?;
+        ensure_dir(&root.join(TRASH_DIR).map_err(disk_error)?).map_err(disk_error)?;
+        let dir = root.join(&format!("{TRASH_DIR}/{id}")).map_err(disk_error)?;
+        std::fs::create_dir(dir.as_path()).map_err(disk_error)?;
+        let to = dir.join(&n.name).map_err(disk_error)?;
+        match rename_new(from.as_path(), to.as_path()) {
+            Ok(()) => Ok(Some((to, from, dir))),
+            // Already gone from the server: only the index still had it
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => {
+                let _ = std::fs::remove_dir(dir.as_path());
+                Err(disk_error(e))
+            }
+        }
+    })
+    .await?;
+    if let Some((to, from, dir)) = moved {
+        locks.note(to, from, Some(dir));
+    }
+    locks.later(changes::repath(conn, &node.id, node.drive(), rel_of(node), &format!("{TRASH_DIR}/{trash_id}/{}", node.name)).await?);
+    Ok(())
+}
+
+/// Moves a trashed item back into `dest` as `name`
+pub async fn restore(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node, dest: &Node, name: &str) -> AppResult<()> {
+    let (to, from) = rename_on_disk(node, dest, name).await?;
+    // Its emptied trash folder stays until `clean_trash` (should the change fail, the item goes back into it)
+    locks.note(to, from, None);
+    locks.later(changes::repath(conn, &node.id, node.drive(), rel_of(node), &child_rel(rel_of(dest), name)).await?);
+    Ok(())
+}
+
+/// The folder holding a trashed item of a folder space, removed from disk when the item is deleted for good
+pub fn trash_folder(n: &Node) -> Option<crate::folders::Below> {
+    let mut parts = n.fs_path.as_deref()?.split('/');
+    if parts.next()? != TRASH_DIR {
+        return None;
+    }
+    let id = parts.next()?;
+    Some(crate::folders::Below::new(n.fs_root.as_deref()?, n.drive(), format!("{TRASH_DIR}/{id}")))
+}
+
+/// Trash folders younger than this are never removed by `clean_trash`, known or not
+pub const TRASH_GRACE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
+/// Removes trash folders the index doesn't know (deleted for good while removing them from disk failed, say). Recent
+/// ones stay: something that went wrong halfway may still need them. Only folders named by a trash id are ThirtyFile's.
+pub async fn clean_trash(st: &AppState, drive_id: &str, root: &Path) -> AppResult<()> {
+    let top = root.to_path_buf();
+    let names = tokio::task::spawn_blocking(move || -> Vec<String> {
+        let Ok(dir) = Pinned::root(&top).and_then(|r| r.join(TRASH_DIR)).and_then(|t| t.dir()) else { return Vec::new() };
+        let Ok(read) = std::fs::read_dir(dir.as_path()) else { return Vec::new() };
+        read.flatten()
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|n| crate::util::is_new_id(n) && dir.join(n).is_ok_and(|p| older_than(&p, TRASH_GRACE)))
+            .collect()
+    })
+    .await?;
+    if names.is_empty() {
+        return Ok(());
+    }
+    let known: HashSet<String> = sqlx::query_as::<_, (String,)>("SELECT DISTINCT trash_id FROM nodes WHERE drive_id = ? AND trash_id IS NOT NULL")
+        .bind(drive_id)
+        .fetch_all(&st.db)
+        .await?
+        .into_iter()
+        .map(|(t,)| t)
+        .collect();
+    remove_below_later(names.into_iter().filter(|n| !known.contains(n)).map(|n| crate::folders::Below::new(root, drive_id, format!("{TRASH_DIR}/{n}"))).collect());
+    Ok(())
+}
+
+/// Whether a name scans ignore is something a change left behind when it stopped halfway (a restart, say): one of
+/// ThirtyFile's prefixes and a new id, exactly as it names them. An item people named alike is never taken for one.
+pub fn is_leftover(name: &str) -> bool {
+    [MOVE_PREFIX, COPY_PREFIX, UPLOAD_PREFIX, SAVE_PREFIX].iter().any(|p| name.strip_prefix(p).is_some_and(crate::util::is_new_id))
+}
+
+/// Deals with what changes left behind (`is_leftover`, paths found by a scan) once they are old enough that no change
+/// can still be using them: an item that was being moved in is put back under its own name, where the next scan
+/// shows it; half-made copies, uploads and saves are removed. `age`: how old they must be.
+pub fn clean_leftovers(paths: Vec<Pinned>, age: std::time::Duration) {
+    for p in paths.into_iter().filter(|p| older_than(p, age)) {
+        let name = p.name().unwrap_or_default();
+        let (Some(dir), true) = (p.parent(), name.starts_with(MOVE_PREFIX)) else {
+            if let Err(e) = remove_all(&p)
+                && e.kind() != io::ErrorKind::NotFound
+            {
+                tracing::warn!("Couldn't remove {name:?} from disk: {e}");
+            }
+            continue;
+        };
+        let Ok(inside) = p.dir() else { continue };
+        for item in std::fs::read_dir(inside.as_path()).into_iter().flatten().flatten() {
+            let Ok(item_name) = item.file_name().into_string() else { continue };
+            let Ok(from) = inside.join(&item_name) else { continue };
+            let is_dir = item.file_type().is_ok_and(|t| t.is_dir());
+            let back = (0..10_000u32).map(|n| if n == 0 { item_name.clone() } else { numbered_name(&item_name, n, is_dir) }).find_map(|candidate| {
+                match dir.join(&candidate).and_then(|to| rename_new(from.as_path(), to.as_path())) {
+                    Ok(()) => Some(Ok(candidate)),
+                    Err(e) if e.kind() == io::ErrorKind::AlreadyExists => None,
+                    Err(e) => Some(Err(e)),
+                }
+            });
+            match back {
+                Some(Ok(n)) => tracing::warn!("Put back {n:?}: it was being moved when ThirtyFile stopped"),
+                Some(Err(e)) => tracing::warn!("Couldn't put back {item_name:?}: {e}"),
+                None => {}
+            }
+        }
+        let _ = std::fs::remove_dir(p.as_path());
+    }
+}
