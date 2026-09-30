@@ -1,5 +1,6 @@
 # cargo about: the licence notices of every crate built into ThirtyFile, written to THIRD-PARTY-NOTICES in the Docker
-# image (template: about.hbs; see the Dockerfile). Accepts the same licences as deny.toml: keep both lists equal.
+# image (template: about.hbs; see the Dockerfile). Accepts the same licences as deny.toml and web/scripts/third-party-notices.mjs:
+# keep the lists equal.
 accepted = [
   "0BSD",
   "Apache-2.0",

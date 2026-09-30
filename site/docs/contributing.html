@@ -50,11 +50,19 @@
         </ol>
 
         <h2 id="checks">Checks</h2>
-        <p>Run these before opening a pull request. The same checks run on GitHub.</p>
-        <pre><code>cd server && cargo test && cargo clippy --all-targets
-cd ../web && pnpm typecheck && pnpm lint && node scripts/check-i18n.mjs && pnpm test</code></pre>
-        <p>The end-to-end test signs in, uploads and previews files in a real browser (Playwright), against a server built from the repository:</p>
-        <pre><code>cd web && pnpm build && (cd ../server && cargo build --release) && pnpm test:e2e</code></pre>
+        <p>Run them before opening a pull request, with one script. The tests on GitHub run the same script.</p>
+        <pre><code>scripts/check.sh</code></pre>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Part</th><th>Checks</th></tr></thead>
+            <tbody>
+              <tr><td><code>scripts/check.sh web</code></td><td>The interface: dependencies as locked, translations (<code>node scripts/check-i18n.mjs</code>), types, lint and unit tests</td></tr>
+              <tr><td><code>scripts/check.sh server</code></td><td>The server: <code>cargo test</code>, and <code>cargo clippy</code> with warnings as errors</td></tr>
+              <tr><td><code>scripts/check.sh e2e</code></td><td>The end-to-end test: signs in, uploads and previews files in a real browser (Playwright), against a server built from the repository. The first time, get the browser with <code>cd web &amp;&amp; pnpm exec playwright install chromium</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>On Windows, run it in Git Bash. On GitHub, the known security problems of the dependencies are checked too (<code>cargo deny</code> and <code>pnpm audit</code>).</p>
         <ul>
           <li>Code, comments and guides are written in English.</li>
           <li>Text in the interface is written in English in the code, with its Traditional Chinese translation in <code>web/src/lib/i18n/zh-TW/</code>.</li>
@@ -98,7 +106,7 @@ cd ../web && pnpm typecheck && pnpm lint && node scripts/check-i18n.mjs && pnpm 
 
         <h2 id="licence">Licence</h2>
         <p>ThirtyFile is licensed under the <a href="https://github.com/ThirtyFile/ThirtyFile/blob/main/LICENSE">Apache License 2.0</a>. What you contribute is licensed under the same terms.</p>
-        <p>Dependencies must have a permissive licence: the Rust ones are checked against the list in <code>server/deny.toml</code>, which <code>server/about.toml</code> repeats. The image build collects the licence notices of every crate and npm package into <code>THIRD-PARTY-NOTICES</code>, and fails when a crate's licence isn't on that list.</p>
+        <p>Dependencies must have a permissive licence: the Rust ones are checked against the list in <code>server/deny.toml</code>, which <code>server/about.toml</code> repeats, and the npm packages against the same list (plus the font licence OFL-1.1) in <code>web/scripts/third-party-notices.mjs</code>. The tests check both. The image build collects the licence notices of every crate and npm package, and of musl, the certificate authorities and the time zone database, into <code>THIRD-PARTY-NOTICES</code>, and fails when a licence isn't on the list.</p>
       </main>
     </div>
     <script src="../assets/site.js"></script>

@@ -12,7 +12,8 @@ ignore = [
 
 [licenses]
 # Permissive licences only: ThirtyFile is Apache-2.0 and ships as one binary with its dependencies.
-# about.toml (the licence notices in the Docker image) accepts the same list: keep both equal.
+# about.toml (the licence notices in the Docker image) accepts the same list, and so does web/scripts/third-party-notices.mjs
+# for npm packages (with OFL-1.1 for the font): keep them equal.
 allow = [
   "0BSD",
   "Apache-2.0",

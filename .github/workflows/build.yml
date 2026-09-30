@@ -128,22 +128,13 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      # Type-checked and linted (oxlint, web/.oxlintrc.json); the frontend is built below, for the backend and the
-      # end-to-end test
+      # The checks are the ones in scripts/check.sh, which contributors run too.
+      # The interface: translations, types, lint (oxlint, web/.oxlintrc.json) and the unit tests (Vitest), with the
+      # coverage in the job summary
       - name: Frontend
-        working-directory: web
         run: |
-          pnpm install --frozen-lockfile
-          node scripts/check-i18n.mjs
-          pnpm typecheck
-          pnpm lint
-
-      # Unit tests (Vitest), with the coverage in the job summary
-      - name: Frontend tests
-        working-directory: web
-        run: |
-          pnpm test --coverage
-          node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY"
+          bash scripts/check.sh web --coverage
+          (cd web && node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY")
 
       # rustup installs the version and clippy named in server/rust-toolchain.toml on first use
       - run: rustup toolchain install
@@ -152,42 +143,43 @@ jobs:
         with:
           workspaces: server
 
-      # The backend tests (cargo test) and the end-to-end test in a real browser (sign in, upload, preview, download)
-      # run against one build instrumented for coverage (cargo llvm-cov show-env): the dependencies are compiled once
-      # for both, and the coverage in the job summary counts what the browser test reaches too. The frontend is built
-      # first, so the server embeds it (build.rs) and the tests and the server compile alike.
+      # The backend tests (cargo test), clippy, and the end-to-end test in a real browser (sign in, upload, preview,
+      # download) run against one build instrumented for coverage (cargo llvm-cov show-env): the dependencies are
+      # compiled once for both, and the coverage in the job summary counts what the browser test reaches too.
       - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: cargo-llvm-cov
       - name: Backend and end-to-end test
         run: |
-          (cd web && pnpm build && pnpm exec playwright install --with-deps chromium)
+          (cd web && pnpm exec playwright install --with-deps chromium)
           cd server
           rustup component add llvm-tools-preview
-          (
-            source <(cargo llvm-cov show-env --sh)
-            # Coverage data left in a restored cache would count twice (cargo llvm-cov clean refuses the cached
-            # target folder, which has no CACHEDIR.TAG)
-            find "$CARGO_LLVM_COV_TARGET_DIR" -maxdepth 1 -name '*.profraw' -delete 2>/dev/null || true
-            cargo test --locked
-            cargo build --locked
-            (cd ../web && THIRTYFILE_BIN="$CARGO_LLVM_COV_TARGET_DIR/debug/thirtyfile" pnpm test:e2e)
-            {
-              echo "### Backend coverage (tests and the browser test)"
-              echo '```'
-              cargo llvm-cov report --summary-only
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          )
-          cargo clippy --locked --all-targets -- -D warnings
+          source <(cargo llvm-cov show-env --sh)
+          # Coverage data left in a restored cache would count twice (cargo llvm-cov clean refuses the cached target
+          # folder, which has no CACHEDIR.TAG)
+          find "$CARGO_LLVM_COV_TARGET_DIR" -maxdepth 1 -name '*.profraw' -delete 2>/dev/null || true
+          bash ../scripts/check.sh server
+          bash ../scripts/check.sh e2e
+          {
+            echo "### Backend coverage (tests and the browser test)"
+            echo '```'
+            cargo llvm-cov report --summary-only
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # Known security problems in dependencies, their licences and where they come from (server/deny.toml)
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           manifest-path: server/Cargo.toml
+      # And of the npm packages; their licences are checked against the list in web/scripts/third-party-notices.mjs,
+      # which also writes their notices into the image
       - name: Frontend dependencies
         working-directory: web
-        run: pnpm audit --prod
+        run: |
+          pnpm audit --prod
+          pnpm licenses list --prod --json > "$RUNNER_TEMP/licences-prod.json"
+          pnpm licenses list --dev --json > "$RUNNER_TEMP/licences-dev.json"
+          node scripts/third-party-notices.mjs "$RUNNER_TEMP/licences-prod.json" "$RUNNER_TEMP/licences-dev.json" > /dev/null
 
   # After the tests, when the image may have changed, and for releases: builds, starts and (releases only) pushes it
   image:

@@ -62,9 +62,6 @@ importers:
       react-router:
         specifier: ^8.4.0
         version: 8.4.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      shadcn:
-        specifier: ^4.21.0
-        version: 4.21.0(typescript@7.0.2)
       sonner:
         specifier: ^2.0.8
         version: 2.0.8(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -105,6 +102,9 @@ importers:
       oxlint:
         specifier: ^1.85.0
         version: 1.85.0
+      shadcn:
+        specifier: ^4.21.0
+        version: 4.21.0(typescript@7.0.2)
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3

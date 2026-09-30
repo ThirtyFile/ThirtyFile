@@ -1,4 +1,13 @@
+# Text files are stored and checked out with LF on every system: Windows checkouts with core.autocrlf would otherwise
+# get CRLF, which breaks shell scripts, migration checksums and scripts inlined into the website (see #203)
+* text=auto eol=lf
 # Migrations are checksummed by sqlx when applied: keep their bytes identical on every system
 /server/migrations/*.sql text eol=lf
 # Shell scripts run on Linux runners
 *.sh text eol=lf
+# Binary files, never converted
+*.webp binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary

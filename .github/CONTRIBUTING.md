@@ -12,10 +12,9 @@ Security problems are reported privately: see the [security policy](SECURITY.md)
 
 1. For anything larger than a small fix, agree on the idea in an issue first.
 2. Create a branch from `main`: `feat/…`, `fix/…`, `docs/…` or `chore/…`.
-3. Run the checks:
+3. Run the checks, the same ones that run on GitHub:
    ```bash
-   cd server && cargo test && cargo clippy --all-targets
-   cd ../web && pnpm typecheck && pnpm lint && node scripts/check-i18n.mjs && pnpm test
+   scripts/check.sh
    ```
 4. Open a pull request with a title that says what changes, one label (`enhancement`, `bug`, `performance`, `accessibility`, `documentation`, `dependencies` or `maintenance`), and `Closes #123` in the description.
 
