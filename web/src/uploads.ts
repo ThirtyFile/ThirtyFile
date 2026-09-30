@@ -25,6 +25,7 @@ import {
   type RecoveredBatch,
   type UploadRecord,
 } from "@/lib/uploadRecovery";
+import { errorMessage } from "@/lib/utils";
 
 export type UploadStatus = "queued" | "uploading" | "paused" | "done" | "error";
 
@@ -566,7 +567,7 @@ export async function uploadFiles(files: PickedFile[], parentId: string) {
   try {
     found = await api.conflicts({ dest_id: parentId, names: tops.map((x) => x.name) });
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : t("Couldn't upload"));
+    toast.error(errorMessage(e, t("Couldn't upload")));
     reportShown("upload", e, parentId);
     return;
   }

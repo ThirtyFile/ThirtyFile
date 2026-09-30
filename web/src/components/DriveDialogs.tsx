@@ -11,6 +11,7 @@ import { LocationSelect } from "@/components/LocationSelect";
 import { DRIVE_ICON, DRIVE_KIND_LABEL, ROLE_LABEL, atLeast } from "@/lib/drives";
 import { useMe } from "@/lib/session";
 import { formatBytes } from "@/lib/utils";
+import { useSubmit } from "@/lib/useSubmit";
 import { t, tc } from "@/lib/i18n";
 
 const GB = 1024 ** 3;
@@ -22,29 +23,16 @@ export function CreateDriveDialog({ onClose, onCreated }: { onClose(): void; onC
   const [quota, setQuota] = useState("");
   // Administrators choose the storage location ("" = the default location)
   const [location, setLocation] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run } = useSubmit(async () => {
+    const d = await api.createDrive(name.trim(), quota ? Math.round(Number(quota) * GB) : 0, undefined, undefined, location || undefined);
+    toast.success(t("Space created. You can now invite members"));
+    onCreated(d);
+    onClose();
+  }, t("Couldn't create"));
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
-        <form
-          className="grid gap-4"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            setBusy(true);
-            setError(null);
-            try {
-              const d = await api.createDrive(name.trim(), quota ? Math.round(Number(quota) * GB) : 0, undefined, undefined, location || undefined);
-              toast.success(t("Space created. You can now invite members"));
-              onCreated(d);
-              onClose();
-            } catch (err) {
-              setError(err instanceof Error ? err.message : t("Couldn't create"));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
+        <form className="grid gap-4" onSubmit={run}>
           <DialogHeader>
             <DialogTitle>{t("New team space")}</DialogTitle>
           </DialogHeader>

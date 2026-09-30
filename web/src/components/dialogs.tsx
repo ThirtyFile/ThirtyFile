@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRightIcon, FolderIcon, FolderPlusIcon, HardDriveIcon, HomeIcon, Loader2Icon } from "lucide-react";
 import { api, type Crumb } from "@/api";
@@ -13,25 +13,8 @@ import { useMe } from "@/lib/session";
 import { t } from "@/lib/i18n";
 import { refreshFiles } from "@/lib/queries";
 import { cn } from "@/lib/utils";
+import { useSubmit } from "@/lib/useSubmit";
 import { NativeSelect } from "@/components/ui/native-select";
-
-function useSubmit(fn: () => Promise<void>) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const run = async (e?: FormEvent) => {
-    e?.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await fn();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return { busy, error, run };
-}
 
 /** An error under a form, read out when it appears; give it an `id` and point the field at it with `errorProps` */
 export function ErrorText({ children, id }: { children: ReactNode; id?: string }) {

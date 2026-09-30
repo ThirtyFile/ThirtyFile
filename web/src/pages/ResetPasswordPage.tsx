@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Loader2Icon } from "lucide-react";
 import { api } from "@/api";
@@ -9,6 +9,7 @@ import { ErrorText, errorProps } from "@/components/dialogs";
 import { SiteName } from "@/components/SiteName";
 import { useBranding } from "@/lib/branding";
 import { t } from "@/lib/i18n";
+import { useSubmit } from "@/lib/useSubmit";
 
 /** "Forgot password" (/reset-password): asks for a link by email; with the link's token, sets a new password */
 export function ResetPasswordPage() {
@@ -32,22 +33,11 @@ export function ResetPasswordPage() {
 
 function AskForLink() {
   const [account, setAccount] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await api.forgotPassword(account.trim());
-      setSent(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { busy, error, run: submit } = useSubmit(async () => {
+    await api.forgotPassword(account.trim());
+    setSent(true);
+  });
   if (sent) {
     return (
       <p className="text-sm" role="status">
@@ -74,26 +64,12 @@ function AskForLink() {
 function NewPassword({ token }: { token: string }) {
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (next !== confirm) {
-      setError(t("The new passwords don't match"));
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      await api.resetPassword(token, next);
-      setDone(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { busy, error, run: submit } = useSubmit(async () => {
+    if (next !== confirm) throw new Error(t("The new passwords don't match"));
+    await api.resetPassword(token, next);
+    setDone(true);
+  });
   if (done) {
     return (
       <p className="text-sm" role="status">

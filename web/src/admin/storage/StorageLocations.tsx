@@ -40,7 +40,7 @@ import { ConfirmDialog, ErrorText } from "@/components/dialogs";
 import { ErrorState } from "@/components/ErrorState";
 import { RowMenuArea } from "@/components/RowMenuArea";
 import { LocationBrowseDialog, LocationTestDialog, UnusedContentDialog } from "@/admin/storage/StorageTools";
-import { cn, formatBytes, formatDateTime } from "@/lib/utils";
+import { cn, formatBytes, formatDateTime, errorMessage } from "@/lib/utils";
 import { t, tServer } from "@/lib/i18n";
 import { useSelectableList } from "@/lib/listSelection";
 import { useMoves } from "@/admin/storage/moves";
@@ -113,7 +113,7 @@ export function StorageLocations() {
       await api.testExistingStorage(l.id);
       toast.success(t("Connected to \"{name}\" successfully", { name: l.name }));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Connection failed"));
+      toast.error(errorMessage(e, t("Connection failed")));
     } finally {
       setTesting(null);
       refresh();
@@ -125,7 +125,7 @@ export function StorageLocations() {
       toast.success(t("New spaces will be stored in \"{name}\"", { name: l.name }));
       refresh();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Operation failed"));
+      toast.error(errorMessage(e, t("Operation failed")));
     }
   };
 
@@ -367,7 +367,7 @@ function MoveEverythingDialog({ location, onClose, onDone }: { location: Storage
           <DialogHeader>
             <DialogTitle>{t("Move everything on \"{name}\"", { name: location.name })}</DialogTitle>
           </DialogHeader>
-          <ErrorText>{q.error instanceof Error ? q.error.message : t("Operation failed")}</ErrorText>
+          <ErrorText>{errorMessage(q.error, t("Operation failed"))}</ErrorText>
         </DialogContent>
       </Dialog>
     ) : null;
@@ -463,7 +463,7 @@ function SpacesDialog({ location, onClose }: { location: StorageLocation; onClos
             <Loader2Icon className="size-5 animate-spin" />
           </div>
         ) : q.error ? (
-          <ErrorText>{q.error instanceof Error ? q.error.message : t("Operation failed")}</ErrorText>
+          <ErrorText>{errorMessage(q.error, t("Operation failed"))}</ErrorText>
         ) : spaces.length === 0 ? (
           <p className="py-4 text-center text-sm text-muted-foreground">{t("No spaces are on this location.")}</p>
         ) : (

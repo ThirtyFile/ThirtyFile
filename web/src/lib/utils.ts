@@ -2,6 +2,11 @@ export { cn } from "cn";
 import { toast } from "sonner";
 import { locale, t } from "@/lib/i18n";
 
+/** What went wrong, to show: an error's message, or `fallback` for anything else thrown */
+export function errorMessage(e: unknown, fallback: string): string {
+  return e instanceof Error ? e.message : fallback;
+}
+
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   const units = ["KB", "MB", "GB", "TB"];

@@ -9,7 +9,7 @@ import { SiteName } from "@/components/SiteName";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { LanguageSwitch } from "@/components/LanguageSwitch";
 import { RecoveryCodes, SetupCode } from "@/components/TwoFactor";
-import { cn } from "@/lib/utils";
+import { cn, errorMessage } from "@/lib/utils";
 import { t, tServer } from "@/lib/i18n";
 import { safeNext, takeSsoError } from "@/lib/signInReturn";
 import { formatClock, formatDate, LoginWallpaper, LoginAvatar } from "@/components/LoginScreen";
@@ -223,7 +223,7 @@ export function LoginPage() {
       }
       await enter(r);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("Sign-in failed"));
+      setError(errorMessage(err, t("Sign-in failed")));
       setBusy(false);
     }
   };
@@ -246,7 +246,7 @@ export function LoginPage() {
     } catch (err) {
       // The ticket expired or took too many wrong codes: start again from the password
       if (err instanceof ApiError && err.code === "two_factor_expired") backToPassword();
-      setError(err instanceof Error ? err.message : t("Sign-in failed"));
+      setError(errorMessage(err, t("Sign-in failed")));
       setBusy(false);
     }
   };

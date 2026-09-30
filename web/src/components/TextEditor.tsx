@@ -13,6 +13,7 @@ import { reportShown } from "@/lib/errorReport";
 import { shortcut } from "@/lib/keys";
 import { decodeText, encodeText, lineEnding, looksBinary, normalizeLines, type TextEncodingName } from "@/lib/textEncoding";
 import { useTheme } from "@/lib/theme";
+import { errorMessage } from "@/lib/utils";
 
 export default function TextEditor(props: {
   node: Node;
@@ -141,7 +142,7 @@ export default function TextEditor(props: {
             },
           },
         });
-      } else toast.error(e instanceof Error ? e.message : t("Couldn't save"));
+      } else toast.error(errorMessage(e, t("Couldn't save")));
       reportShown("save", e, props.node.id);
     } finally {
       setSaving(false);

@@ -18,6 +18,7 @@ import { reportShown } from "@/lib/errorReport";
 import { type Item, isTyping } from "./types";
 import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
+import { errorMessage } from "@/lib/utils";
 
 /** The most items a download or a ZIP file takes at once (the server's limit, which it words when there are more) */
 const MAX_AT_ONCE = 10_000;
@@ -85,7 +86,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       setAnchor(id);
       setDialog({ t: "rename", node: { id, name } });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Couldn't create"));
+      toast.error(errorMessage(e, t("Couldn't create")));
       reportShown("create", e, p.folderId ?? undefined);
     }
   };
@@ -123,7 +124,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       // whose items were selected without being loaded)
       void changed({ updated: selectedNodes.map((n) => ({ id: n.id, is_favorite: !allFavorite })), favorites: true, folders: [picked.span?.folder] });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Operation failed"));
+      toast.error(errorMessage(e, t("Operation failed")));
       reportShown("favorite", e);
       if (picked.span) void changed({ folders: [picked.span.folder], favorites: true });
     }
@@ -192,7 +193,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       });
       toast.success(t("Permanently deleted"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Operation failed"));
+      toast.error(errorMessage(e, t("Operation failed")));
       reportShown("delete", e);
       // Some may have gone to the trash, or been deleted, before it failed
       void changed({ folders: [...parents, picked.span?.folder], trash: true, contents: true, usage: true });
@@ -205,7 +206,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     try {
       await eachBatch(picked, t("Moving to the trash…"), (ids) => api.trash(ids));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Operation failed"));
+      toast.error(errorMessage(e, t("Operation failed")));
       reportShown("trash", e);
       void changed({ folders: [...parents, picked.span?.folder], trash: true, contents: true, usage: true });
       return;

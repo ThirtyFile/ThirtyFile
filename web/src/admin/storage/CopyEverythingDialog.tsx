@@ -13,7 +13,8 @@ import { ErrorText } from "@/components/dialogs";
 import { locationLabel } from "@/components/LocationSelect";
 import { DRIVE_ICON } from "@/lib/drives";
 import { t, tServer } from "@/lib/i18n";
-import { formatBytes } from "@/lib/utils";
+import { formatBytes, errorMessage } from "@/lib/utils";
+import { useSubmit } from "@/lib/useSubmit";
 import { NativeSelect } from "@/components/ui/native-select";
 
 /**
@@ -26,8 +27,6 @@ export function CopyEverythingDialog({ location, onClose }: { location: StorageL
   const targets = (locations.data ?? []).filter((l) => l.id !== location.id);
   const [dest, setDest] = useState("");
   const [name, setName] = useState(() => t("Copy of {name}", { name: location.name }));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const preview = useQuery({
     queryKey: keys.copyPreview(location.id, dest),
     queryFn: () => api.copyPreview(location.id, dest),
@@ -37,29 +36,18 @@ export function CopyEverythingDialog({ location, onClose }: { location: StorageL
   const p = preview.data;
   const tooSmall = p?.free_bytes != null && p.free_bytes < p.content_bytes;
   const destName = targets.find((l) => l.id === dest)?.name ?? "";
+  const { busy, error, run } = useSubmit(async () => {
+    if (!dest) return;
+    await api.startCopy(location.id, dest, name.trim());
+    toast.success(t("\"{name}\" is being made in the background", { name: name.trim() }), {
+      action: { label: t("Show copies"), onClick: () => navigate("/admin/backups") },
+    });
+    onClose();
+  }, t("Couldn't make the change"));
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
-        <form
-          className="grid gap-4"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (!dest) return;
-            setBusy(true);
-            setError(null);
-            try {
-              await api.startCopy(location.id, dest, name.trim());
-              toast.success(t("\"{name}\" is being made in the background", { name: name.trim() }), {
-                action: { label: t("Show copies"), onClick: () => navigate("/admin/backups") },
-              });
-              onClose();
-            } catch (err) {
-              setError(err instanceof Error ? err.message : t("Couldn't make the change"));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
+        <form className="grid gap-4" onSubmit={run}>
           <DialogHeader>
             <DialogTitle>{t("Copy everything on \"{name}\"", { name: location.name })}</DialogTitle>
             <DialogDescription>
@@ -90,7 +78,7 @@ export function CopyEverythingDialog({ location, onClose }: { location: StorageL
               <Loader2Icon className="size-3.5 animate-spin" /> {t("Counting what there is to copy…")}
             </div>
           )}
-          {preview.error && <ErrorText>{preview.error instanceof Error ? preview.error.message : t("Operation failed")}</ErrorText>}
+          {preview.error && <ErrorText>{errorMessage(preview.error, t("Operation failed"))}</ErrorText>}
           {p && (
             <div className="grid gap-3 text-xs">
               <div className="grid gap-1">

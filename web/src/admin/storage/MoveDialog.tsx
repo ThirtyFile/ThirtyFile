@@ -12,6 +12,7 @@ import { ErrorText } from "@/components/dialogs";
 import { locationLabel } from "@/components/LocationSelect";
 import { t } from "@/lib/i18n";
 import { formatBytes } from "@/lib/utils";
+import { useSubmit } from "@/lib/useSubmit";
 import { NativeSelect } from "@/components/ui/native-select";
 
 /** A space as moving it needs it */
@@ -53,8 +54,6 @@ export function MoveDialog({
   const moves = useQuery(queries.moves);
   const targets = (locations.data ?? []).filter((l) => l.id !== from);
   const [value, setValue] = useState<string>("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const target = targets.find((l) => l.id === value);
   // Spaces already being moved, and those already where they would go, are left out
   const moving = new Set((moves.data?.moves ?? []).filter(moveActive).map((m) => m.drive_id));
@@ -66,35 +65,24 @@ export function MoveDialog({
   const fromFolder = movable.filter((s) => s.mode === "folder");
   // Files copied from or into a folder must stay as they are meanwhile
   const readOnly = fromFolder.length > 0 || target?.kind === "local";
+  const { busy, error, run } = useSubmit(async () => {
+    if (!target) return;
+    await api.startMoves(
+      movable.map((s) => s.id),
+      target.id,
+    );
+    toast.success(
+      movable.length === 1
+        ? t("\"{name}\" is being moved in the background", { name: movable[0].label })
+        : t("{n} spaces are being moved in the background, one after the other", { n: movable.length }),
+      { action: { label: t("Show moves"), onClick: () => navigate("/admin/moves") } },
+    );
+    onDone(target, movable.length);
+  }, t("Couldn't make the change"));
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
-        <form
-          className="grid gap-4"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (!target) return;
-            setBusy(true);
-            setError(null);
-            try {
-              await api.startMoves(
-                movable.map((s) => s.id),
-                target.id,
-              );
-              toast.success(
-                movable.length === 1
-                  ? t("\"{name}\" is being moved in the background", { name: movable[0].label })
-                  : t("{n} spaces are being moved in the background, one after the other", { n: movable.length }),
-                { action: { label: t("Show moves"), onClick: () => navigate("/admin/moves") } },
-              );
-              onDone(target, movable.length);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : t("Couldn't make the change"));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
+        <form className="grid gap-4" onSubmit={run}>
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
             <DialogDescription>{description}</DialogDescription>

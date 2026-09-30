@@ -9,6 +9,7 @@ import { waitForJob } from "@/lib/jobs";
 import { refreshFiles } from "@/lib/queries";
 import { eachBatch, type Picked } from "@/lib/span";
 import { type Origins, moveBack, movedBack, originsOf, toastWithUndo } from "@/lib/undo";
+import { errorMessage } from "@/lib/utils";
 
 const CANCELLED = new Error("cancelled");
 
@@ -45,7 +46,7 @@ export async function transferItems(
     });
   } catch (e) {
     if (e !== CANCELLED) {
-      toast.error(e instanceof Error ? e.message : o.fallback);
+      toast.error(errorMessage(e, o.fallback));
       reportShown(mode, e, dest);
       void refreshFiles(qc, { folders: [dest, ...from], contents: true, usage: true });
       return false;
