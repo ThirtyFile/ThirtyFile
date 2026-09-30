@@ -45,6 +45,16 @@ export function decodeText(buf: ArrayBuffer): DecodedText {
   return { text: new TextDecoder("utf-8").decode(b), encoding: null };
 }
 
+/**
+ * Whether decoded text looks like the content of a binary file rather than text: control characters other than tabs,
+ * line and page breaks and escape (as in terminal logs), or characters that couldn't be decoded. A file opened as text
+ * by choice is read-only then, so saving can't replace its bytes with what the editor made of them.
+ */
+export function looksBinary(text: string): boolean {
+  // oxlint-disable-next-line no-control-regex -- control characters are what this looks for
+  return /[\u0000-\u0008\u000e-\u001a\u001c-\u001f\u007f\ufffd]/.test(text);
+}
+
 function utf16(text: string, littleEndian: boolean): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(2 + text.length * 2);
   const view = new DataView(out.buffer);

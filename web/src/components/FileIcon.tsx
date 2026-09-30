@@ -195,9 +195,23 @@ export function isZip(n: NodeLike) {
   return n.kind === "file" && (extOf(n.name) === "zip" || n.mime === "application/zip" || n.mime === "application/x-zip-compressed");
 }
 
-/** Can be opened in the text editor */
+/** The largest file the text editor opens (the server takes saves of up to 20 MB, files.rs MAX_EDIT_BYTES) */
+export const MAX_TEXT_BYTES = 5 * 1024 * 1024;
+
+/** Opens in the text editor by itself */
 export function isTextLike(n: Node) {
   const c = categoryOf(n);
   const textual = c === "code" || c === "text" || c === "markdown" || n.mime === "image/svg+xml" || /^(csv|tsv)$/.test(extOf(n.name));
-  return (textual || n.size === 0) && n.size <= 5 * 1024 * 1024;
+  return (textual || n.size === 0) && n.size <= MAX_TEXT_BYTES;
+}
+
+/**
+ * Whether the preview screen offers to open the file as text anyway: files of an unknown kind (no extension, one
+ * ThirtyFile doesn't know, "Dockerfile", "README"), and text too large to open by itself (which then says so). Known
+ * binary kinds (pictures, video, Office, archives, PDF) aren't offered. Whether a file looks like text is only known
+ * once it is read: the editor then opens it read-only if it doesn't (lib/textEncoding.ts, looksBinary).
+ */
+export function mayOpenAsText(n: Node) {
+  const c = categoryOf(n);
+  return n.kind === "file" && (c === "other" || c === "code" || c === "text" || c === "markdown") && !isTextLike(n);
 }

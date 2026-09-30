@@ -99,6 +99,12 @@
 
         <h2 id="text">Editing text files</h2>
         <p>Text and code files open in an editor with colours for most programming languages. Press <kbd>Ctrl</kbd> + <kbd>S</kbd> to save.</p>
+        <p>A file ThirtyFile doesn't recognise, such as <code>Dockerfile</code>, <code>README</code> or a file with an unusual extension, shows <strong>Preview isn't available for this file type</strong>. If it holds text, click <strong>Open in text editor</strong> to read and edit it there. This doesn't rename the file or change its type: it is only saved when you save it. <strong>Default view</strong> goes back; unsaved changes are kept and come back when you open the editor again.</p>
+        <ul>
+          <li>You can only save when you may change the file. On a share link, the button shows only when the link allows downloading, and the text is read-only.</li>
+          <li>A file that doesn't look like text (a program, a picture with a strange extension) opens read-only, so saving can't damage it. So does text in an encoding the editor can't write back. UTF-8, UTF-16 and Big5 files are kept as they are, and so are Windows line endings; Big5 is converted to UTF-8 when saved, as the editor says.</li>
+          <li>Files larger than 5 MB don't open in the editor: download them instead.</li>
+        </ul>
 
         <h2 id="markdown">Markdown</h2>
         <p>Markdown files open as a formatted page: headings, lists, tables, task lists and code. Switch to <strong>Edit</strong> above the page to change the text (<strong>Source</strong> when you may only view the file), and back to <strong>Preview</strong> to see the result, unsaved changes included.</p>
