@@ -52,7 +52,9 @@ export function renderMarkdown(text: string): string {
   const html = marked.parse(text) as string;
   return sanitiser().sanitize(html, {
     USE_PROFILES: { html: true },
-    FORBID_TAGS: ["style", "form", "button", "textarea", "select", "iframe", "object", "embed", "video", "audio", "source", "base", "meta", "link"],
-    FORBID_ATTR: ["style", "srcset"],
+    // Image maps would lay links over an embedded picture; classes and ids would give the file the app's own styles
+    // (a box that looks like the app's dialogs, over the whole page)
+    FORBID_TAGS: ["style", "form", "button", "textarea", "select", "iframe", "object", "embed", "video", "audio", "source", "base", "meta", "link", "map", "area"],
+    FORBID_ATTR: ["style", "srcset", "class", "id", "name", "usemap"],
   }) as string;
 }

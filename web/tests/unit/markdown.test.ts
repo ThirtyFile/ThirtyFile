@@ -27,6 +27,15 @@ describe("markdown", () => {
     expect(html).not.toMatch(/<script|onerror|onclick|javascript:|<iframe|style=/i);
   });
 
+  test("raw HTML can't take on the look of the app or lay links over a picture", () => {
+    const d = dom(
+      '<div class="fixed inset-0 z-50 bg-background" id="root" name="x">Your session ended</div>\n\n<img src="data:image/png;base64,iVBORw0KGgo=" usemap="#m"><map name="m"><area shape="rect" coords="0,0,9,9" href="https://elsewhere.example/"></map>',
+    );
+    expect(d.querySelector("[class], [id], [name]")).toBeNull();
+    expect(d.querySelector("map, area")).toBeNull();
+    expect(d.textContent).toContain("Your session ended");
+  });
+
   test("web links open in a new tab without access to this page; other links keep only their text", () => {
     const d = dom("[web](https://example.com) [mail](mailto:a@b.c) [here](#part) [file](other.md) [bad](javascript:alert(1)) [data](data:text/html,x)");
     const links = [...d.querySelectorAll("a")];
