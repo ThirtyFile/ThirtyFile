@@ -62,6 +62,21 @@ async fn state(env: &TestEnv, id: &str) -> String {
     sqlx::query_as::<_, (String,)>("SELECT state FROM space_moves WHERE id = ?").bind(id).fetch_one(&env.st.db).await.unwrap().0
 }
 
+/// Waits until a move has ended (neither queued nor running), with a deadline generous enough for a busy machine;
+/// returns its state and error
+async fn wait_ended(env: &TestEnv, id: &str) -> (String, Option<String>) {
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        let (state, error): (String, Option<String>) =
+            sqlx::query_as("SELECT state, error FROM space_moves WHERE id = ?").bind(id).fetch_one(&env.st.db).await.unwrap();
+        if !matches!(state.as_str(), "queued" | "running") {
+            return (state, error);
+        }
+        assert!(Instant::now() < deadline, "move {id} is still {state} after 120 s");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 async fn location_of_space(env: &TestEnv, drive: &str) -> Option<String> {
     sqlx::query_as::<_, (Option<String>,)>("SELECT location_id FROM drives WHERE id = ?").bind(drive).fetch_one(&env.st.db).await.unwrap().0
 }
@@ -514,14 +529,17 @@ async fn moves_run_one_at_a_time_unless_set_otherwise() {
     assert_eq!(running().await, 2);
     assert!(update_settings(State(env.st.clone()), Admin(env.admin().await), Json(SettingsReq { concurrency: 0 })).await.is_err());
     gate.add_permits(100);
-    for _ in 0..500 {
-        if state(&env, &first).await == "done" && state(&env, &second).await == "done" {
-            break;
-        }
+    // Both end, however busy the machine is; a move that stopped shows why
+    for id in [&first, &second] {
+        let (state, error) = wait_ended(&env, id).await;
+        assert_eq!(state, "done", "move {id} ended {state}: {error:?}");
+    }
+    // A task leaves the running list just after it records how its move ended
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !env.st.moves.running.lock().unwrap().is_empty() {
+        assert!(Instant::now() < deadline, "a move that ended is still on the running list");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert_eq!((state(&env, &first).await, state(&env, &second).await), ("done".into(), "done".into()));
-    assert!(env.st.moves.running.lock().unwrap().is_empty());
 }
 
 // ───────────── Folder spaces into a content store ─────────────
