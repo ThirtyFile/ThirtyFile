@@ -146,12 +146,112 @@ describe("calculator", () => {
     expect(new Calculator(workbook(s)).value(0, 0, 0)).toBe(42);
   });
 
+  test.each([
+    ["MAX", 999999],
+    ["MIN", -5],
+  ])("%s over a range too large to spread into one call recalculates after an edit", (fn, want) => {
+    const s = sheet("S", {});
+    for (let r = 0; r < 160000; r++) s.cells.set(key(r, 0), { v: r + 1 });
+    s.maxRow = 159999;
+    // The cached result stored in the file, as Excel wrote it before the edit
+    s.cells.set(key(0, 1), { v: fn === "MAX" ? 160000 : 1, f: `=${fn}(A1:A160000)` });
+    const c = new Calculator(workbook(s));
+    expect(c.value(0, 0, 1)).toBe(fn === "MAX" ? 160000 : 1);
+    s.cells.set(key(159999, 0), { v: want });
+    c.invalidate();
+    expect(c.value(0, 0, 1)).toBe(want);
+  });
+
+  test("MIN and MAX of an empty range are zero", () => {
+    expect(calc("=MIN(H1:H9)")).toBe(0);
+    expect(calc("=MAX(H1:H9)")).toBe(0);
+  });
+
+  test("a supported formula that can't be calculated shows an error, not the stale stored value", () => {
+    const s = sheet("S", { A1: 1 });
+    // Nested deeply enough to run out of stack while it is evaluated
+    const deep = "=" + "(".repeat(20000) + "A1" + ")".repeat(20000);
+    s.cells.set(key(0, 1), { v: 7, f: deep });
+    expect(toScalar(new Calculator(workbook(s)).value(0, 0, 1))).toBe("#CALC!");
+  });
+
   test("evaluateAt shifts relative references to the cell being checked", () => {
     const book = workbook(sheet("S", { A1: 1, A2: 5, B1: 3 }));
     const c = new Calculator(book);
     const get = (si: number, r: number, col: number) => c.value(si, r, col);
     expect(evaluateAt(book, "=A1>2", 0, [0, 0], [1, 0], get)).toBe(true);
     expect(evaluateAt(book, "=$A$1>2", 0, [0, 0], [1, 0], get)).toBe(false);
+  });
+});
+
+describe("large ranges in sparse sheets", () => {
+  /** evaluateAt on a sheet holding `data`, counting the cells it reads */
+  function counted(data: Record<string, string | number | null>, formula: string) {
+    const book = workbook(sheet("S", data));
+    let reads = 0;
+    const get = (si: number, r: number, c: number) => {
+      reads++;
+      return book.sheets[si].cells.get(key(r, c))?.v ?? null;
+    };
+    const v = evaluateAt(book, formula, 0, [0, 0], [0, 0], get);
+    return { v: toScalar(v), reads };
+  }
+
+  test.each([500, 1000, 2000])("a lookup reads only the populated cells of its lookup column (%i rows × 128 columns)", (rows) => {
+    const { v, reads } = counted({ A1: 42, B1: "x", [`DX${rows}`]: 1 }, `=VLOOKUP(42,A1:DX${rows},2,FALSE)`);
+    expect(v).toBe("x");
+    expect(reads).toBeLessThan(5);
+  });
+
+  test.each([
+      ["=VLOOKUP(5,A1:XFD1048576,2,FALSE)", "five"],
+      ["=VLOOKUP(4,A1:XFD1048576,2)", null],
+      ["=VLOOKUP(7,A1:XFD1048576,2)", "five"],
+      ["=VLOOKUP(0,A1:XFD1048576,2)", "#N/A"],
+      ['=HLOOKUP("c",A1:XFD1048576,5,FALSE)', null],
+      ["=MATCH(5,A1:A1048576,0)", 5],
+      ["=MATCH(9,A1:A1048576)", 5],
+      ['=MATCH("c",A1:XFD1,0)', 7],
+      ['=XLOOKUP("c",A1:XFD1,A5:XFD5)', null],
+      ['=XLOOKUP(5,A1:A1048576,B1:B1048576)', "five"],
+  ])("lookups over a range reaching the last cell of the sheet stay cheap: %s", (f, want) => {
+    const { v, reads } = counted({ A1: 1, A5: 5, B5: "five", E1: "b", G1: "c", XFD1048576: 9 }, f);
+    expect(v).toBe(want);
+    expect(reads).toBeLessThan(10);
+  });
+
+  test("an exact lookup of a blank finds the first blank position", () => {
+    expect(counted({ A1: "a", A2: "b", A4: "d", A6: "f" }, '=MATCH("",A1:A6,0)').v).toBe(3);
+    expect(counted({ A1: "a", A2: "", A4: "d" }, '=MATCH("",A1:A4,0)').v).toBe(2);
+    expect(counted({ A1: "a", A2: "b" }, '=MATCH("",A1:A2,0)').v).toBe("#N/A");
+  });
+
+  const data = { A1: 1, A2: 2, XFD1048576: 9 };
+
+  test.each(["=COUNTIF(A2:XFD1048576,1)", '=TEXTJOIN(",",FALSE,A1:XFD1048576)', "=SUMPRODUCT(A1:XFD1048576,A1:XFD1048576)"])(
+    "a formula that must visit every position of a huge range stops at the limit instead: %s",
+    (f) => {
+      const { v, reads } = counted(data, f);
+      expect(v).toBe("#CALC!");
+      expect(reads).toBe(0);
+    },
+  );
+
+  test("the same formulas over ordinary ranges still work", () => {
+    expect(counted(data, "=COUNTIF(A1:A9,1)").v).toBe(1);
+    expect(counted(data, '=TEXTJOIN(",",FALSE,A1:A3)').v).toBe("1,2,");
+    expect(counted(data, '=TEXTJOIN(",",TRUE,A1:XFD1048576)').v).toBe("1,2,9");
+    expect(counted(data, "=CONCAT(A1:XFD1048576)").v).toBe("129");
+    expect(counted(data, "=SUMPRODUCT(A1:A3,A1:A3)").v).toBe(5);
+  });
+
+  test("the limit is shared by the evaluations that use the same budget", () => {
+    const book = workbook(sheet("S", { A1: 1, J100000: 1 }));
+    const get = (si: number, r: number, c: number) => book.sheets[si].cells.get(key(r, c))?.v ?? null;
+    const budget = { left: 1_500_000 };
+    // 1,000,000 positions each: the first fits, the second doesn't
+    expect(evaluateAt(book, "=COUNTIF(A1:J100000,1)", 0, [0, 0], [0, 0], get, undefined, budget)).toBe(2);
+    expect(toScalar(evaluateAt(book, "=COUNTIF(A1:J100000,1)", 0, [0, 0], [0, 0], get, undefined, budget))).toBe("#CALC!");
   });
 });
 

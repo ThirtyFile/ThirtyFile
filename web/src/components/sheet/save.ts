@@ -28,8 +28,9 @@ export async function saveSession(session: Session, nodeId: string): Promise<{ n
   const calc = new Calculator(book);
   const valueOf = (si: number, r: number, c: number) => {
     const v = calc.value(si, r, c);
-    // Keep Excel's original result for anything we can't compute (unsupported functions etc.)
-    return isErr(v) && (v.code === "#NAME?" || v.code === "#CYCLE!") ? undefined : toScalar(v);
+    // Keep Excel's original result for anything we can't compute (unsupported functions, too much work etc.); a
+    // saved edit makes Excel recalculate the whole file when it opens it
+    return isErr(v) && (v.code === "#NAME?" || v.code === "#CYCLE!" || v.code === "#CALC!") ? undefined : toScalar(v);
   };
 
   const work = cloneZip(session.zip);

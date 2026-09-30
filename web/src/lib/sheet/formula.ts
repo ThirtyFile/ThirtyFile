@@ -31,6 +31,8 @@ const ERR = {
   num: new FormulaError("#NUM!"),
   na: new FormulaError("#N/A"),
   cycle: new FormulaError("#CYCLE!"),
+  /** A supported formula that couldn't be calculated: too much work, or nested too deeply */
+  calc: new FormulaError("#CALC!"),
 };
 const ERROR_CODES = new Map(Object.values(ERR).map((e) => [e.code, e]));
 ERROR_CODES.set("#NULL!", new FormulaError("#NULL!"));
@@ -372,6 +374,30 @@ export interface EvalContext {
   get(sheet: number, r: number, c: number): Value;
   /** Keys of all cells in the sheet (ascending); cached by the calculator and rebuilt only when data changes */
   sortedKeys?(sheet: number): number[];
+  /** Cell positions this evaluation may still visit one by one (see WORK_LIMIT) */
+  budget?: Budget;
+}
+
+export interface Budget {
+  left: number;
+}
+
+/**
+ * Cell positions one formula may visit one by one. A few populated cells far apart give a sparse sheet huge bounds,
+ * so functions that need every position of a range (COUNTIF, SUMPRODUCT, TEXTJOIN...) are charged for it before
+ * they start, and give #CALC! instead of freezing the page. Functions that only visit populated cells aren't charged.
+ */
+export const WORK_LIMIT = 2_000_000;
+
+/** Charge `n` positions to the evaluation's budget; throws #CALC! when it would run out */
+function spend(ctx: EvalContext, n: number) {
+  const b = ctx.budget;
+  if (!b) return;
+  if (n > b.left) {
+    b.left = 0;
+    throw ERR.calc;
+  }
+  b.left -= n;
 }
 
 /** Index of the first element >= target in a sorted array */
@@ -492,11 +518,12 @@ function eachInRange(ctx: EvalContext, g: RangeRef, fn: (v: Value, r: number, c:
   for (let r = g.r1; r <= r2; r++) for (let c = g.c1; c <= c2; c++) if (sheet.cells.has(key(r, c))) fn(ctx.get(g.sheet, r, c), r, c);
 }
 
-/** Range to a 2D array (lookup functions need positions) */
+/** Range to a 2D array, for functions that need every position (blanks included) */
 function matrix(ctx: EvalContext, g: RangeRef): Value[][] {
   const { r2, c2 } = bounded(ctx, g);
   const rows = Math.max(0, Math.min(g.r2, Math.max(r2, g.r1)) - g.r1 + 1);
   const cols = Math.max(0, Math.min(g.c2, Math.max(c2, g.c1)) - g.c1 + 1);
+  spend(ctx, rows * cols);
   const out: Value[][] = [];
   for (let r = 0; r < rows; r++) {
     const row: Value[] = [];
@@ -504,6 +531,23 @@ function matrix(ctx: EvalContext, g: RangeRef): Value[][] {
     out.push(row);
   }
   return out;
+}
+
+/** The populated cells of a lookup range's first column (or first row), in order, with their positions */
+interface LookupList {
+  /** Positions in the list, blanks included; the list stops at the sheet's data */
+  length: number;
+  items: [number, Value][];
+}
+
+/** Only the lookup column/row is read, and only its populated cells, so a huge range in a sparse sheet stays cheap */
+function lookupList(ctx: EvalContext, g: RangeRef, vertical: boolean): LookupList {
+  const line: RangeRef = vertical ? { ...g, c2: g.c1 } : { ...g, r2: g.r1 };
+  const { r2, c2 } = bounded(ctx, line);
+  const length = vertical ? Math.max(0, Math.min(g.r2, Math.max(r2, g.r1)) - g.r1 + 1) : Math.max(0, Math.min(g.c2, Math.max(c2, g.c1)) - g.c1 + 1);
+  const items: [number, Value][] = [];
+  eachInRange(ctx, line, (v, r, c) => items.push([vertical ? r - g.r1 : c - g.c1, v]));
+  return { length, items };
 }
 
 // ───────────── Functions ─────────────
@@ -662,6 +706,7 @@ function matchAll(
   }
   const rows = Math.max(0, Math.min(height, maxDr + 1));
   const cols = Math.max(0, Math.min(width, maxDc + 1));
+  spend(ctx, rows * cols * pairs.length);
   const hits: [number, number][] = [];
   for (let dr = 0; dr < rows; dr++)
     for (let dc = 0; dc < cols; dc++) {
@@ -685,15 +730,22 @@ function sumAt(ctx: EvalContext, g: RangeRef, hits: [number, number][]) {
   return { err: null, s, n };
 }
 
-function lookupIndex(list: Value[], target: Value, mode: number): number {
+function lookupIndex(list: LookupList, target: Value, mode: number): number {
   if (mode === 0) {
     const test = typeof target === "string" ? criteria(target) : (v: Value) => compare(v, target) === 0 && v !== null;
-    return list.findIndex(test);
+    // Criteria like "" also match blanks: the first gap between populated cells is then a candidate
+    const blank = test(null);
+    let next = 0;
+    for (const [i, v] of list.items) {
+      if (blank && i > next) return next;
+      if (test(v)) return i;
+      next = i + 1;
+    }
+    return blank && next < list.length ? next : -1;
   }
   // Approximate match: in a sorted list, find the last <= target (mode 1) or >= target (mode -1)
   let found = -1;
-  for (let i = 0; i < list.length; i++) {
-    const v = list[i];
+  for (const [i, v] of list.items) {
     if (v === null || isErr(v)) continue;
     const c = compare(v, target);
     if (mode === 1 ? c <= 0 : c >= 0) found = i;
@@ -712,8 +764,9 @@ const FUNCTIONS: Record<string, Fn> = {
   SUM: numbersFn((xs) => xs.reduce((a, b) => a + b, 0)),
   PRODUCT: numbersFn((xs) => (xs.length ? xs.reduce((a, b) => a * b, 1) : 0)),
   AVERAGE: numbersFn((xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : ERR.div0)),
-  MIN: numbersFn((xs) => (xs.length ? Math.min(...xs) : 0)),
-  MAX: numbersFn((xs) => (xs.length ? Math.max(...xs) : 0)),
+  // A loop, not Math.min(...xs): a large range has more values than one call can take as arguments
+  MIN: numbersFn((xs) => xs.reduce((a, b) => (b < a ? b : a), xs.length ? Infinity : 0)),
+  MAX: numbersFn((xs) => xs.reduce((a, b) => (b > a ? b : a), xs.length ? -Infinity : 0)),
   MEDIAN: numbersFn((xs) => {
     if (!xs.length) return ERR.num;
     const s = [...xs].sort((a, b) => a - b);
@@ -814,6 +867,7 @@ const FUNCTIONS: Record<string, Fn> = {
     const cols = first.c2 - first.c1;
     if ((ms as RangeRef[]).some((m) => m.r2 - m.r1 !== rows || m.c2 - m.c1 !== cols)) return ERR.value;
     const { r2, c2 } = bounded(ctx, first);
+    spend(ctx, Math.max(0, Math.min(rows, r2 - first.r1) + 1) * Math.max(0, Math.min(cols, c2 - first.c1) + 1) * ms.length);
     let total = 0;
     for (let r = 0; r <= Math.min(rows, r2 - first.r1); r++)
       for (let c = 0; c <= Math.min(cols, c2 - first.c1); c++) {
@@ -947,12 +1001,14 @@ const FUNCTIONS: Record<string, Fn> = {
     for (const a of args) {
       const v = evalNode(a, ctx);
       if (isRange(v)) {
-        for (const row of matrix(ctx, v))
-          for (const x of row) {
-            const t = toText(x);
-            if (isErr(t)) return t;
-            s += t;
-          }
+        // Blanks add nothing: only the populated cells are visited
+        let err: FormulaError | null = null;
+        eachInRange(ctx, v, (x) => {
+          const t = toText(x);
+          if (isErr(t)) err ??= t;
+          else s += t;
+        });
+        if (err) return err;
       } else {
         const t = toText(v);
         if (isErr(t)) return t;
@@ -978,7 +1034,14 @@ const FUNCTIONS: Record<string, Fn> = {
     const parts: string[] = [];
     for (const a of args.slice(2)) {
       const v = evalNode(a, ctx);
-      const list = isRange(v) ? matrix(ctx, v).flat() : [v];
+      // Skipped blanks don't need their positions; kept ones do (each adds a separator)
+      let list: Value[] = [v as Value];
+      if (isRange(v)) {
+        if (skip) {
+          list = [];
+          eachInRange(ctx, v, (x) => list.push(x));
+        } else list = matrix(ctx, v).flat();
+      }
       for (const x of list) {
         const t = toText(x);
         if (isErr(t)) return t;
@@ -1164,9 +1227,7 @@ const FUNCTIONS: Record<string, Fn> = {
     if (isErr(target)) return target;
     if (!isRange(g)) return ERR.na;
     if (isErr(mode)) return mode;
-    const m = matrix(ctx, g);
-    const list = g.r1 === g.r2 ? (m[0] ?? []) : m.map((r) => r[0]);
-    const i = lookupIndex(list, target, Math.sign(mode));
+    const i = lookupIndex(lookupList(ctx, g, g.r1 !== g.r2), target, Math.sign(mode));
     return i < 0 ? ERR.na : i + 1;
   },
   INDEX: (args, ctx) => {
@@ -1192,9 +1253,7 @@ const FUNCTIONS: Record<string, Fn> = {
     if (isErr(target)) return target;
     if (!isRange(look) || !isRange(ret)) return ERR.value;
     const vertical = look.c1 === look.c2;
-    const m = matrix(ctx, look);
-    const list = vertical ? m.map((r) => r[0]) : (m[0] ?? []);
-    const i = lookupIndex(list, target, 0);
+    const i = lookupIndex(lookupList(ctx, look, vertical), target, 0);
     if (i < 0) return args[3] ? val(args[3], ctx) : ERR.na;
     return vertical ? ctx.get(ret.sheet, ret.r1 + i, ret.c1) : ctx.get(ret.sheet, ret.r1, ret.c1 + i);
   },
@@ -1246,9 +1305,7 @@ function lookup(args: Node[], ctx: EvalContext, dir: "v" | "h"): Result {
   const span = dir === "v" ? g.c2 - g.c1 + 1 : g.r2 - g.r1 + 1;
   if (idx < 1) return ERR.value;
   if (idx > span) return ERR.ref;
-  const m = matrix(ctx, g);
-  const list = dir === "v" ? m.map((r) => r[0]) : (m[0] ?? []);
-  const i = lookupIndex(list, target, approx ? 1 : 0);
+  const i = lookupIndex(lookupList(ctx, g, dir === "v"), target, approx ? 1 : 0);
   if (i < 0) return ERR.na;
   return dir === "v" ? ctx.get(g.sheet, g.r1 + i, g.c1 + idx - 1) : ctx.get(g.sheet, g.r1 + idx - 1, g.c1 + i);
 }
@@ -1361,6 +1418,7 @@ export class Calculator {
           col: c,
           get: (si, rr, cc) => this.value(si, rr, cc),
           sortedKeys: (si) => (this.keys[si] ??= Array.from(this.book.sheets[si].cells.keys()).sort((a, b) => a - b)),
+          budget: { left: WORK_LIMIT },
         };
         const res = evalNode(n, ctx);
         v = scalar(res, ctx);
@@ -1372,9 +1430,9 @@ export class Calculator {
         e.path.push([sheet, r, c]);
         throw e;
       }
-      // Should the stack overflow anyway (deeply nested expressions), keep the value Excel stored in the file
-      // rather than turning the whole chain into #VALUE!
-      if (e instanceof RangeError) v = cell.v !== null && cell.v !== undefined ? cell.v : ERR.value;
+      // Should the stack overflow anyway (deeply nested expressions), say the formula couldn't be calculated: the
+      // value stored in the file may be out of date once an input changes
+      if (e instanceof RangeError) v = ERR.calc;
       else v = isErr(e) ? e : ERR.value;
     } finally {
       // Whatever happened, this cell is no longer being evaluated
@@ -1400,15 +1458,17 @@ export function evaluateAt(
   at: [number, number],
   get: EvalContext["get"],
   sortedKeys?: EvalContext["sortedKeys"],
+  /** Shared by many evaluations (a conditional-formatting pass) to limit their work together; one formula's limit by default */
+  budget: Budget = { left: WORK_LIMIT },
 ): Value {
   const n = parsed(shiftFormula(formula, at[0] - base[0], at[1] - base[1]));
   if (isErr(n)) return n;
-  const ctx: EvalContext = { book, sheet, row: at[0], col: at[1], get, sortedKeys };
+  const ctx: EvalContext = { book, sheet, row: at[0], col: at[1], get, sortedKeys, budget };
   try {
     const v = scalar(evalNode(n, ctx), ctx);
     return typeof v === "number" && !Number.isFinite(v) ? ERR.num : v;
   } catch (e) {
-    return isErr(e) ? e : ERR.value;
+    return isErr(e) ? e : e instanceof RangeError ? ERR.calc : ERR.value;
   }
 }
 
