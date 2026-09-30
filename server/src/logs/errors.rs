@@ -565,8 +565,17 @@ mod tests {
         panic!("the error log didn't reach {n} rows");
     }
 
-    async fn settle() {
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    /// The error log once `done` holds for it: records are written in the background, which can take a while on a busy
+    /// machine
+    async fn rows_when(st: &AppState, done: impl Fn(&[ErrorRow]) -> bool) -> Vec<ErrorRow> {
+        for _ in 0..500 {
+            let rows = query_errors(st, &ErrorQuery::default(), 100).await.unwrap();
+            if done(&rows) {
+                return rows;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("the error log never got there");
     }
 
     /// A router with the error log's layers around a route that writes, then fails (so its transaction rolls back)
@@ -621,16 +630,13 @@ mod tests {
         // The page reports the same failure with the request id: added to the server's record, not a second incident
         let res = send(&app, "/api/client-errors", &cookie, Some(json!({ "kind": "handled", "operation": "rename", "message": "A server error occurred", "request_id": request, "status": 500 }))).await;
         assert_eq!(res.status(), StatusCode::ACCEPTED);
-        settle().await;
-        let all = rows(&env.st, 1).await;
-        assert_eq!(all.len(), 1);
+        let all = rows_when(&env.st, |r| r.len() == 1 && !r[0].client.is_empty()).await;
         assert_eq!(all[0].client, "rename: A server error occurred");
 
         // The same failure again: counted on the record, which now carries the latest request id
         let res = send(&app, "/api/items/0123abcd/fail", &cookie, None).await;
         let again = res.headers()["x-request-id"].to_str().unwrap().to_string();
-        settle().await;
-        let all = rows(&env.st, 1).await;
+        let all = rows_when(&env.st, |r| r.len() == 1 && r[0].count >= 2).await;
         assert_eq!((all.len(), all[0].count), (1, 2));
         assert_eq!(all[0].request_id.as_deref(), Some(again.as_str()));
 
@@ -666,8 +672,7 @@ mod tests {
         }
         // (a new minute may start in between, letting a few more through)
         assert!((CLIENT_PER_MINUTE..=CLIENT_PER_MINUTE * 2).contains(&accepted), "{accepted}");
-        settle().await;
-        let all = rows(&env.st, 1).await;
+        let all = rows_when(&env.st, |r| r.len() > 1 || r.first().is_some_and(|r| r.count >= accepted as i64)).await;
         assert_eq!(all.len(), 1, "repeats are one record");
         assert_eq!(all[0].count, accepted as i64);
 
