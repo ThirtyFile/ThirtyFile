@@ -1,6 +1,6 @@
 [package]
 name = "thirtyfile"
-# Not the release number: releases set it when they are built (THIRTYFILE_VERSION, see main.rs), so builds that aren't
+# Not the release number: releases set it when they are built (THIRTYFILE_VERSION, see lib.rs), so builds that aren't
 # a release call themselves "dev"
 version = "0.0.0"
 edition = "2024"
