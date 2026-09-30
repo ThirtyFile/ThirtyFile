@@ -1,4 +1,5 @@
 import type { KeyboardEvent, ReactNode } from "react";
+import { ErrorState } from "@/components/ErrorState";
 import { RowMenuArea } from "@/components/RowMenuArea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -31,6 +32,9 @@ export function DataTable<T>(p: {
   /** Context menu; selected is null when clicking empty space */
   menu(selected: T | null): ReactNode;
   loading?: boolean;
+  /** The rows couldn't be loaded: shown with a way to try again instead of an empty list (rows already shown stay) */
+  error?: Error | null;
+  onRetry?(): unknown;
   /** Shown when there's no data */
   empty?: ReactNode;
   /** Fixed column widths (together with the columns' w-[…]); overlong content is truncated */
@@ -49,6 +53,8 @@ export function DataTable<T>(p: {
     >
       {p.loading ? (
         <Skeleton className="m-3 h-40" />
+      ) : p.error && p.rows.length === 0 ? (
+        <ErrorState message={p.error.message} onRetry={() => p.onRetry?.()} />
       ) : p.rows.length === 0 && p.empty ? (
         p.empty
       ) : (

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ErrorText } from "@/components/dialogs";
+import { Pending } from "@/components/ErrorState";
 import { useConfirm } from "@/components/confirm";
 import { ROLE_HINT, ROLE_LABEL, atLeast } from "@/lib/drives";
 import { useMe } from "@/lib/session";
@@ -208,9 +209,15 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
         </DialogHeader>
 
         {!info ? (
-          <div className="flex h-32 items-center justify-center text-muted-foreground">
-            <Loader2Icon className="size-5 animate-spin" />
-          </div>
+          <Pending
+            query={q}
+            compact
+            loading={
+              <div className="flex h-32 items-center justify-center text-muted-foreground">
+                <Loader2Icon className="size-5 animate-spin" />
+              </div>
+            }
+          />
         ) : personalRoot ? (
           <p className="rounded-md bg-muted/60 p-3 text-sm text-muted-foreground">{t("A personal space can't be shared as a whole. Right-click a folder in it and choose Share with….")}</p>
         ) : (

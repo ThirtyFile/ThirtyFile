@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Pending } from "@/components/ErrorState";
 import { ErrorText } from "@/components/dialogs";
 import { Section, SettingsFrame, Toggle } from "@/pages/SettingsFrame";
 import { t } from "@/lib/i18n";
@@ -61,7 +62,7 @@ export function EmailPage() {
       }}
     >
       {!form || !q.data ? (
-        <Skeleton className="h-40" />
+        <Pending query={q} loading={<Skeleton className="h-40" />} />
       ) : (
         <form onSubmit={submit} className="grid gap-8">
           <Section title={t("Notification emails")}>

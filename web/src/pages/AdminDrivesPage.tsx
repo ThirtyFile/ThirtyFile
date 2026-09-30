@@ -267,6 +267,8 @@ export function AdminDrivesPage() {
         columns={columns}
         fixed
         loading={q.isLoading}
+        error={q.error}
+        onRetry={() => q.refetch()}
         selectedKey={selectedId}
         onSelect={setSelectedId}
         rowClassName={(d) => d.disabled && "text-muted-foreground"}

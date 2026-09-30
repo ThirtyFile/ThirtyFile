@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorText } from "@/components/dialogs";
+import { ErrorState } from "@/components/ErrorState";
 import { FileList, Thumb, type ViewMode } from "@/components/FileList";
 import { canPreview } from "@/components/FileViewer";
 import { Preview } from "@/components/Preview";
@@ -381,6 +382,9 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
             <Skeleton key={i} className="h-9" />
           ))}
         </div>
+      ) : children.error && items.length === 0 ? (
+        // The listing failed: not "This folder is empty"
+        <ErrorState message={children.error.message} onRetry={() => children.refetch()} />
       ) : (
         <ContextMenu>
           <ContextMenuTrigger

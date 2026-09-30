@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Pending } from "@/components/ErrorState";
 import { LocationSelect } from "@/components/LocationSelect";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
 import { copyText } from "@/lib/utils";
@@ -100,7 +101,7 @@ export function SsoPage() {
   const q = useQuery({ queryKey: ["sso-settings"], queryFn: api.ssoSettings });
   return (
     <SettingsFrame item="sso" onRefresh={() => q.refetch()}>
-      {q.data ? <SsoForm saved={q.data} /> : <Skeleton className="h-60" />}
+      {q.data ? <SsoForm saved={q.data} /> : <Pending query={q} loading={<Skeleton className="h-60" />} />}
     </SettingsFrame>
   );
 }

@@ -193,6 +193,8 @@ export function ShareLinks({
         columns={columns}
         compact
         loading={q.isLoading}
+        error={q.error}
+        onRetry={() => q.refetch()}
         selectedKey={selected}
         onSelect={setSelected}
         onOpen={(s) => copy(s.id)}

@@ -180,6 +180,8 @@ export function AdminUsersPage() {
         rowKey={(u) => String(u.id)}
         columns={columns}
         loading={q.isLoading}
+        error={q.error}
+        onRetry={() => q.refetch()}
         selectedKey={selectedId === null ? null : String(selectedId)}
         onSelect={(k) => setSelectedId(k ? Number(k) : null)}
         onOpen={(u) => setEditing(u)}

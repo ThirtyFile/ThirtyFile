@@ -88,6 +88,8 @@ export function GroupsPage() {
         columns={columns}
         fixed
         loading={q.isLoading}
+        error={q.error}
+        onRetry={() => q.refetch()}
         selectedKey={selectedId === null ? null : String(selectedId)}
         onSelect={(k) => setSelectedId(k ? Number(k) : null)}
         onOpen={(g) => setEditing(g)}

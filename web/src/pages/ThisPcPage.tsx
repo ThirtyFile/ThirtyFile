@@ -24,6 +24,7 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdow
 import { Skeleton } from "@/components/ui/skeleton";
 import { AccessDialog } from "@/components/AccessDialog";
 import { ConfirmDialog } from "@/components/dialogs";
+import { ErrorState } from "@/components/ErrorState";
 import { InlineRename } from "@/components/InlineRename";
 import { MarqueeBox, useMarquee } from "@/components/useMarquee";
 import { FileIcon } from "@/components/FileIcon";
@@ -586,6 +587,8 @@ export function ThisPcPage() {
                 <Skeleton key={i} className="h-16" />
               ))}
             </div>
+          ) : drives.error && !drives.data ? (
+            <ErrorState message={drives.error.message} onRetry={() => drives.refetch()} />
           ) : view === "list" ? (
             <div className="pt-2">{listView}</div>
           ) : (
@@ -608,6 +611,10 @@ export function ThisPcPage() {
                 </Section>
               )}
             </>
+          )}
+          {/* The spaces showed, but what was shared with me couldn't be loaded */}
+          {drives.data && shared.error && !shared.data && (
+            <ErrorState compact className="mt-4" message={shared.error.message} onRetry={() => shared.refetch()} />
           )}
         </ContextMenuTrigger>
         <ContextMenuContent>
