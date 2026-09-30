@@ -7,7 +7,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, type Job } from "@/api";
 import { t, tServer } from "@/lib/i18n";
-import { FOLDER_CONTENTS, invalidateFiles } from "@/lib/queries";
+import { refreshFiles, type FileChange } from "@/lib/queries";
 import { reportShown } from "@/lib/errorReport";
 
 /** How often a running task is asked for its progress */
@@ -102,8 +102,8 @@ export async function followJob(job: Job, done: string, after: () => void) {
   }
 }
 
-/** Starts a compress or extract task and follows it to the end; the file list is refreshed when it is done */
-export async function runJob(qc: QueryClient, start: () => Promise<Job>) {
+/** Starts a compress or extract task and follows it to the end; what it changed (`change`) is refreshed when it is done */
+export async function runJob(qc: QueryClient, start: () => Promise<Job>, change: FileChange) {
   let kind: Job["kind"] | null = null;
   try {
     const started = await start();
@@ -111,7 +111,7 @@ export async function runJob(qc: QueryClient, start: () => Promise<Job>) {
     const job = await waitForJob(started);
     const name = job.name ?? "";
     toast.success(job.kind === "compress" ? t("Created \"{name}\"", { name }) : t("Extracted to \"{name}\"", { name }), { duration: 5000 });
-    void invalidateFiles(qc, FOLDER_CONTENTS);
+    void refreshFiles(qc, change);
   } catch (e) {
     const message = e instanceof Error ? e.message : t("Operation failed");
     if (!kind) toast.error(message);

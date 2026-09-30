@@ -35,7 +35,7 @@ import { useSelectableList } from "@/lib/listSelection";
 import { usePersisted, useMe } from "@/lib/session";
 import { cn, formatBytes } from "@/lib/utils";
 import { t, tServer, tc } from "@/lib/i18n";
-import { invalidateFiles } from "@/lib/queries";
+import { refreshFiles } from "@/lib/queries";
 import { useTabActions } from "@/tabs";
 
 type Item = { t: "drive"; drive: Drive } | { t: "shared"; item: SharedItem };
@@ -591,7 +591,8 @@ export function ThisPcPage() {
             toast.success(t("Space deleted"));
             setDialog(null);
             selectOnly(null);
-            invalidateFiles(qc, "admin-drives");
+            void refreshFiles(qc, { spaces: [dialog.drive.id] });
+            void qc.invalidateQueries({ queryKey: ["admin-drives"] });
           }}
         />
       )}

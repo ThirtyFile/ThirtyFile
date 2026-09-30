@@ -16,7 +16,7 @@ import { loadTree } from "@/components/FolderTree";
 import { onUploadsLanded } from "@/uploads";
 import { api, type SortKey, type SortOrder } from "@/api";
 import { refreshFirstPage } from "@/lib/pages";
-import { FOLDER_CONTENTS } from "@/lib/queries";
+import { refreshFiles } from "@/lib/queries";
 import { t, tServer } from "@/lib/i18n";
 import { takeSsoError } from "@/lib/signInReturn";
 
@@ -50,13 +50,14 @@ export function AppShell() {
   }, [location.pathname, location.search]);
 
   // As uploaded files land, refresh the first page of the folders they went to (not every open folder, nor the rest of
-  // a big folder), at most every 1.5 s; when the uploads end, once more every list (uploaded folders add subfolders)
-  // and the used space. A refresh under way then starts again, so it can't miss the last files.
+  // a big folder), at most every 1.5 s; when the uploads end, once more the lists of the folders they went to (and,
+  // for uploaded folders, the lists already loaded below them), and the used space. A refresh under way then starts
+  // again, so it can't miss the last files.
   useEffect(
     () =>
-      onUploadsLanded((parentIds, final) => {
+      onUploadsLanded((parentIds, final, batch) => {
         if (final) {
-          for (const queryKey of [["children"], ["recent"], ["me"], [FOLDER_CONTENTS]]) void qc.invalidateQueries({ queryKey });
+          void refreshFiles(qc, { folders: batch.folders, trees: batch.trees, contents: true, usage: true, recent: true, trash: true });
           return;
         }
         // Folder lists are ["children", id, sort, order]; the folder tree's (not in pages) waits for the end

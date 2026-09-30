@@ -14,7 +14,7 @@ import type { ExplorerActions } from "./actions";
 
 export function ExplorerDialogs({ p, s, a }: { p: ExplorerProps; s: ExplorerState; a: ExplorerActions }) {
   const { setSelected, dialog, setDialog } = s;
-  const { refreshContents, transfer } = a;
+  const { changed, parentsOf, transfer } = a;
   const me = useMe();
   return (
     <>
@@ -41,12 +41,19 @@ export function ExplorerDialogs({ p, s, a }: { p: ExplorerProps; s: ExplorerStat
           destructive
           onClose={() => setDialog(null)}
           onConfirm={async () => {
-            await api.trash(dialog.ids);
+            const ids = dialog.ids;
+            const parents = parentsOf(ids);
+            await api.trash(ids);
             // Restoring can fail, e.g. the original folder was deleted, a name conflict, or the space is full
-            toastWithUndo(t("Moved to trash"), { undo: () => api.restore(dialog.ids), undoneText: t("Restored"), after: refreshContents });
+            toastWithUndo(t("Moved to trash"), {
+              undo: () => api.restore(ids),
+              undoneText: t("Restored"),
+              after: () => changed({ folders: parents, trash: true, contents: true, usage: true }),
+            });
             setDialog(null);
             setSelected(new Set());
-            refreshContents();
+            // The rows go at once; the lists aren't loaded again for it
+            void changed({ removed: ids, usage: true });
           }}
         />
       )}

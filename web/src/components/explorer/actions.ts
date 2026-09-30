@@ -6,8 +6,8 @@ import { api, privateSource, triggerDownload, type CursorPage, type Node } from 
 import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
 import { allItems } from "@/lib/pages";
-import { FOLDER_CONTENTS, invalidateFiles } from "@/lib/queries";
-import { type Origins, moveBack, originsOf, toastWithUndo, undoLast } from "@/lib/undo";
+import { type FileChange, invalidateFiles, refreshFiles } from "@/lib/queries";
+import { type Origins, moveBack, movedBack, originsOf, toastWithUndo, undoLast } from "@/lib/undo";
 import { confirm } from "@/components/confirm";
 import { askBeforeTransfer } from "@/components/ConflictDialog";
 import { carriesFiles, dropFiles, dropItems } from "@/lib/dnd";
@@ -38,9 +38,18 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     setDragging,
     setDetailsOpen,
   } = s;
+  /** Refresh (the menu, or Retry after an error): everything shown loads again */
   const refresh = () => invalidateFiles(qc);
-  /** After adding, moving or removing items: what folders hold changes too */
-  const refreshContents = () => invalidateFiles(qc, FOLDER_CONTENTS);
+  /** After a change: what it touched loads again (lib/queries) */
+  const changed = (change: FileChange) => refreshFiles(qc, change);
+  /** Items moved or copied into `dest`: that folder, the folders they left (a move) and the space used */
+  const transferred = (mode: "move" | "copy", ids: string[], dest: string): FileChange =>
+    mode === "move" ? { moved: [{ ids, to: dest }], usage: true } : { folders: [dest], contents: true, usage: true };
+  /** The folders items are in (the folder shown, or each item's own in lists of several places) */
+  const parentsOf = (ids: readonly string[]) => {
+    const wanted = new Set(ids);
+    return [p.folderId, ...p.items.filter((n) => wanted.has(n.id)).map((n) => n.parent_id)];
+  };
 
   /** Like Windows: when the name exists, try "Name (2)", "Name (3)"… in turn */
   const uniqueName = (base: string, ext = "") => {
@@ -60,7 +69,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       const id = kind === "folder" ? (await api.createFolder(p.folderId, name)).id : await api.createEmptyFile(p.folderId, name);
       // Only after the list reloads does the new item have a place to edit its name; if it didn't reload, don't start
       // renaming a row that isn't there (that would leave the shortcuts turned off)
-      await refreshContents();
+      await changed({ folders: [p.folderId], contents: true, recent: kind === "file" });
       // The folder's pages, and the folder tree's list of subfolders
       const listed = qc
         .getQueriesData<Node[] | InfiniteData<CursorPage<Node>>>({ queryKey: ["children", p.folderId] })
@@ -90,15 +99,17 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
   // A new ZIP file in this folder, or a new folder with a ZIP file's contents: made on the server, followed in a message
   const compress = (ids: string[]) => {
     const folder = p.folderId;
-    if (folder && ids.length) void runJob(qc, () => api.compress(ids, folder));
+    if (folder && ids.length) void runJob(qc, () => api.compress(ids, folder), { folders: [folder], contents: true, usage: true });
   };
-  const extract = (n: Item) => void runJob(qc, () => api.extract(n.id));
+  const extract = (n: Item) => void runJob(qc, () => api.extract(n.id), { folders: [n.parent_id], contents: true, usage: true });
 
   const toggleFavorite = async () => {
     try {
-      await api.setFavorite(selectedIds, !allFavorite);
+      const ids = selectedIds;
+      await api.setFavorite(ids, !allFavorite);
       toast.success(allFavorite ? t("Removed from favorites") : t("Added to favorites"));
-      refresh();
+      // The star shows at once in every list; only the list of favorites loads again
+      void changed({ updated: ids.map((id) => ({ id, is_favorite: !allFavorite })), favorites: true });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Operation failed"));
       reportShown("favorite", e);
@@ -125,7 +136,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         if (mode === "move") {
           const origins = new Map([...(known ?? originsOf(p.items, sent, dest))].filter(([id, parent]) => sent.includes(id) && parent !== dest));
           await waitForJob(await api.move(sent, dest, resolutions));
-          if (origins.size) toastWithUndo(done(sent.length), { undo: () => moveBack(origins), undoneText: t("Moved back"), after: refreshContents });
+          if (origins.size) toastWithUndo(done(sent.length), { undo: () => moveBack(origins), undoneText: t("Moved back"), after: () => changed(movedBack(origins)) });
           else toast.success(done(sent.length));
         } else {
           await waitForJob(await api.copy(sent, dest, resolutions));
@@ -133,13 +144,13 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         }
       }
       setSelected(new Set());
-      refreshContents();
+      void changed(transferred(mode, sent, dest));
       return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : fallback);
       reportShown(mode, e, dest);
-      // What was done before it failed shows
-      refreshContents();
+      // What was done before it failed shows: the destination, and the folders the items were in
+      void changed({ ...transferred("copy", ids, dest), folders: [dest, ...parentsOf(ids)] });
       return false;
     }
   };
@@ -176,19 +187,22 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       irreversible: true,
     });
     if (!ok) return;
+    const gone: FileChange = { removed: ids, usage: true };
     try {
       // Only items in the trash can be deleted for good: put them there first
       await api.trash(ids);
       const job = await api.deleteForever(ids);
       setSelected(new Set());
-      refreshContents();
+      void changed(gone);
       await waitForJob(job);
       toast.success(t("Permanently deleted"));
+      void changed(gone);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Operation failed"));
       reportShown("delete", e);
+      // Some may have gone to the trash, or been deleted, before it failed
+      void changed({ folders: parentsOf(ids), trash: true, contents: true, usage: true });
     }
-    refreshContents();
   };
 
   // Keyboard shortcuts (moving around, search and refresh are the address bar's: see Frame)
@@ -277,7 +291,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         }
       : {};
 
-  return { refresh, refreshContents, open, download, compress, extract, toggleFavorite, dropInto, uploadInto, transfer, cut, copy, canPaste, paste, dragProps, createNew };
+  return { refresh, changed, parentsOf, open, download, compress, extract, toggleFavorite, dropInto, uploadInto, transfer, cut, copy, canPaste, paste, dragProps, createNew };
 }
 
 export type ExplorerActions = ReturnType<typeof useExplorerActions>;

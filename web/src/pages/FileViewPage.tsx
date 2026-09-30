@@ -30,7 +30,7 @@ import { usePersisted, useMe } from "@/lib/session";
 import { extOf, formatBytes, formatWinDate } from "@/lib/utils";
 import { hasDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
-import { invalidateFiles } from "@/lib/queries";
+import { refreshFiles, renamed, saved } from "@/lib/queries";
 import { toastWithUndo } from "@/lib/undo";
 import { categoryOf, isTextLike, typeLabel } from "@/components/FileIcon";
 import { capsOf } from "@/lib/drives";
@@ -108,8 +108,7 @@ export function FileViewPage() {
   // loaded again while the file stays open: they're only marked out of date, for the list to reload when it shows
   const onSaved = (n: Node) => {
     qc.setQueryData(["node", id], (old: typeof info.data) => (old ? { ...old, node: { ...old.node, ...n } } : old));
-    qc.invalidateQueries({ queryKey: ["children"], refetchType: "none" });
-    qc.invalidateQueries({ queryKey: ["recent"] });
+    void refreshFiles(qc, saved(n, "later"));
   };
   const canEditSheet = !!node && extOf(node.name) === "xlsx" && caps.write && node.size <= me.max_edit_bytes;
   const sheetEditing = !!node && editingId === node.id && canEditSheet;
@@ -268,11 +267,14 @@ export function FileViewPage() {
           onClose={() => setDialog(null)}
           onSubmit={async (name) => {
             const before = node.name;
-            await api.rename(node.id, name);
+            const after = await api.rename(node.id, name);
             setDialog(null);
-            invalidateFiles(qc);
+            void refreshFiles(qc, renamed(after));
             if (name !== before)
-              toastWithUndo(t("Renamed to \"{name}\"", { name }), { undo: () => api.rename(node.id, before), undoneText: t("Renamed back"), after: () => invalidateFiles(qc) });
+              toastWithUndo(t("Renamed to \"{name}\"", { name }), {
+                undo: async () => void refreshFiles(qc, renamed(await api.rename(node.id, before))),
+                undoneText: t("Renamed back"),
+              });
           }}
         />
       )}

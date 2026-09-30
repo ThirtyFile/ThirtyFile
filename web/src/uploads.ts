@@ -101,10 +101,18 @@ let snapshot: UploadsSnapshot = { tasks, totals: { ...totals } };
 let queue: UploadTask[] = [];
 let queueHead = 0;
 const listeners = new Set<() => void>();
-const landedListeners = new Set<(parentIds: string[], final: boolean) => void>();
+/** Where the files of the uploads that ended went (told with the final refresh) */
+export interface LandedBatch {
+  /** Folders files were uploaded to */
+  folders: string[];
+  /** Folders whole folders were uploaded to (their files are in subfolders made on the way) */
+  trees: string[];
+}
+const landedListeners = new Set<(parentIds: string[], final: boolean, batch: LandedBatch) => void>();
 const landedParents = new Set<string>();
 /** Files landed since the last final refresh */
 let landedAny = false;
+const batch = { folders: new Set<string>(), trees: new Set<string>() };
 let landedTimer: ReturnType<typeof setTimeout> | undefined;
 let emitTimer: ReturnType<typeof setTimeout> | undefined;
 let seq = 0;
@@ -307,9 +315,9 @@ export function hasActiveUploads() {
 /**
  * Notify when uploaded files have landed, to refresh the lists: with the folders they were uploaded to (not for the
  * files of an uploaded folder), at most every LANDED_MS while uploads run, and once with final = true when nothing is
- * left to send
+ * left to send, with every folder the uploads since the last final call went to (`batch`)
  */
-export function onUploadsLanded(fn: (parentIds: string[], final: boolean) => void) {
+export function onUploadsLanded(fn: (parentIds: string[], final: boolean, batch: LandedBatch) => void) {
   landedListeners.add(fn);
   return () => {
     landedListeners.delete(fn);
@@ -323,13 +331,19 @@ function flushLanded() {
   if (landedParents.size === 0 && !(final && landedAny)) return;
   const ids = [...landedParents];
   landedParents.clear();
-  if (final) landedAny = false;
-  landedListeners.forEach((l) => l(ids, final));
+  const ended: LandedBatch = { folders: [...batch.folders], trees: [...batch.trees] };
+  if (final) {
+    landedAny = false;
+    batch.folders.clear();
+    batch.trees.clear();
+  }
+  landedListeners.forEach((l) => l(ids, final, ended));
 }
 
 function landed(task: UploadTask) {
   // A file of an uploaded folder lands in a subfolder, which the refresh when the uploads end shows
   if (!task.relativePath) landedParents.add(task.parentId);
+  (task.relativePath ? batch.trees : batch.folders).add(task.parentId);
   landedAny = true;
   if (!hasActiveUploads()) flushLanded();
   else landedTimer ??= setTimeout(flushLanded, LANDED_MS);

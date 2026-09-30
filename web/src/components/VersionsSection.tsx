@@ -7,7 +7,7 @@ import { confirm } from "@/components/confirm";
 import { ErrorState } from "@/components/ErrorState";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { t } from "@/lib/i18n";
-import { invalidateFiles } from "@/lib/queries";
+import { refreshFiles, saved } from "@/lib/queries";
 import { useMe } from "@/lib/session";
 import { formatBytes, formatWinDate } from "@/lib/utils";
 
@@ -33,9 +33,10 @@ export function VersionsSection({ node, canRestore, ready = true }: { node: Node
     });
     if (!ok) return;
     try {
-      await api.restoreVersion(node.id, v.id);
+      const restored = await api.restoreVersion(node.id, v.id);
       toast.success(t("Version restored"));
-      await invalidateFiles(qc, "versions", "node");
+      // The file's row, its details and history, and the folder it is in (sorted by size or date, it can move)
+      await refreshFiles(qc, { ...saved(restored), nodes: [node.id] });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Couldn't restore"));
     }
