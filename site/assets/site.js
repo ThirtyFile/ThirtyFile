@@ -1,5 +1,7 @@
 // ThirtyFile website: the shared header, guide menu and footer, plus the theme switch, copy buttons and tabs.
 // Pages say where the site root is with <html data-root="…"> ("." for the home page, ".." for the guides).
+// Each page also has the header, the guide menu and the footer in its HTML, for browsers without JavaScript; the
+// guide menu is made again here from GUIDES, so a new guide only needs adding below to appear in every menu.
 
 (() => {
   const root = document.documentElement.dataset.root || ".";
@@ -53,23 +55,34 @@
   if (stored === "light" || stored === "dark") document.documentElement.dataset.theme = stored;
   const isDark = () => (document.documentElement.dataset.theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
 
-  // ── Header ──
-  const header = el(`
-    <header class="site-header">
-      <div class="wrap">
-        <a class="brand" href="${root}/index.html"><img src="${root}/assets/logo.svg" alt="" />ThirtyFile</a>
-        <nav class="site-nav" aria-label="Site">
-          <a href="${root}/index.html#features" class="hide-small">Features</a>
-          <a href="${guideUrl("install")}" ${page ? 'aria-current="page"' : ""}>Guides</a>
-          <a href="${REPO}">GitHub</a>
-          <button class="theme-toggle" type="button" aria-label="Switch between light and dark">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
-          </button>
-        </nav>
-      </div>
-    </header>`);
-  document.body.prepend(header);
-  header.querySelector(".theme-toggle").addEventListener("click", () => {
+  // ── Header, and the link past it to the content ──
+  let header = document.querySelector(".site-header");
+  if (!header) {
+    header = el(`
+      <header class="site-header">
+        <div class="wrap">
+          <a class="brand" href="${root}/index.html"><img src="${root}/assets/logo.svg" alt="" />ThirtyFile</a>
+          <nav class="site-nav" aria-label="Site">
+            <a href="${root}/index.html#features" class="hide-small">Features</a>
+            <a href="${guideUrl("install")}" ${page ? 'aria-current="page"' : ""}>Guides</a>
+            <a href="${REPO}">GitHub</a>
+          </nav>
+        </div>
+      </header>`);
+    document.body.prepend(header);
+  }
+  const main = document.querySelector("main");
+  if (main && !document.querySelector(".skip-link")) {
+    main.id ||= "content";
+    document.body.prepend(el(`<a class="skip-link" href="#${main.id}">Skip to content</a>`));
+  }
+  // The theme switch needs JavaScript, so only this adds it
+  const toggle = el(`
+    <button class="theme-toggle" type="button" aria-label="Switch between light and dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+    </button>`);
+  header.querySelector(".site-nav").append(toggle);
+  toggle.addEventListener("click", () => {
     const next = isDark() ? "light" : "dark";
     document.documentElement.dataset.theme = next;
     try {
@@ -108,18 +121,20 @@
   }
 
   // ── Footer ──
-  document.body.append(
-    el(`
-    <footer class="site-footer">
-      <div class="wrap">
-        <span>ThirtyFile</span>
-        <a href="${guideUrl("install")}">Guides</a>
-        <a href="${REPO}">Source code</a>
-        <a href="${REPO}/issues">Report a problem</a>
-        <a class="push" href="${REPO}/pkgs/container/thirtyfile">Docker image</a>
-      </div>
-    </footer>`),
-  );
+  if (!document.querySelector(".site-footer")) {
+    document.body.append(
+      el(`
+      <footer class="site-footer">
+        <div class="wrap">
+          <span>ThirtyFile</span>
+          <a href="${guideUrl("install")}">Guides</a>
+          <a href="${REPO}">Source code</a>
+          <a href="${REPO}/issues">Report a problem</a>
+          <a class="push" href="${REPO}/pkgs/container/thirtyfile">Docker image</a>
+        </div>
+      </footer>`),
+    );
+  }
 
   // ── Copy buttons on code blocks ──
   for (const block of document.querySelectorAll("pre")) {
@@ -143,6 +158,12 @@
   // ── Tabs (install options on the home page) ──
   for (const tabs of document.querySelectorAll(".tabs")) {
     const buttons = [...tabs.querySelectorAll("button")];
+    // Each tab names the panel it shows, and the panel is named by its tab
+    for (const b of buttons) {
+      b.id ||= `${b.dataset.tab}-tab`;
+      b.setAttribute("aria-controls", b.dataset.tab);
+      document.getElementById(b.dataset.tab).setAttribute("aria-labelledby", b.id);
+    }
     const show = (id) => {
       for (const b of buttons) {
         const on = b.dataset.tab === id;

@@ -13,10 +13,28 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
     <link rel="stylesheet" href="assets/site.css" />
   </head>
   <body>
-    <main>
+    <a class="skip-link" href="#content">Skip to content</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="./index.html"><img src="./assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="Site">
+          <a href="./index.html#features" class="hide-small">Features</a>
+          <a href="./docs/index.html">Guides</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+        </nav>
+      </div>
+    </header>
+    <main id="content">
       <section class="hero">
         <div class="wrap">
           <div class="hero-text">
@@ -135,10 +153,10 @@
           </div>
           <div>
             <div class="tabs" role="tablist" aria-label="Ways to install">
-              <button type="button" role="tab" data-tab="tab-run">docker run</button>
-              <button type="button" role="tab" data-tab="tab-compose">Docker Compose</button>
+              <button type="button" role="tab" id="tab-run-tab" aria-controls="tab-run" data-tab="tab-run">docker run</button>
+              <button type="button" role="tab" id="tab-compose-tab" aria-controls="tab-compose" data-tab="tab-compose">Docker Compose</button>
             </div>
-            <div id="tab-run" role="tabpanel">
+            <div id="tab-run" role="tabpanel" aria-labelledby="tab-run-tab">
               <pre><code>docker run -d --name thirtyfile --restart unless-stopped \
   -p 8080:8080 \
   -v /srv/thirtyfile/data:/data \
@@ -146,7 +164,7 @@
   -e THIRTYFILE_ADMIN_PASSWORD='choose-a-password' \
   ghcr.io/thirtyfile/thirtyfile:latest</code></pre>
             </div>
-            <div id="tab-compose" role="tabpanel">
+            <div id="tab-compose" role="tabpanel" aria-labelledby="tab-compose-tab">
               <pre><code>curl -fLO https://github.com/ThirtyFile/ThirtyFile/releases/latest/download/compose.yaml
 docker compose up -d</code></pre>
             </div>
@@ -167,6 +185,15 @@ docker compose up -d</code></pre>
         </div>
       </section>
     </main>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="./docs/index.html">Guides</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">Source code</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">Report a problem</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker image</a>
+      </div>
+    </footer>
     <script src="assets/site.js"></script>
   </body>
 </html>

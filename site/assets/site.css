@@ -137,6 +137,25 @@ a:hover {
   margin-inline: auto;
 }
 
+/* ── Link past the header and menu, shown when it has the focus ── */
+
+.skip-link {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 30;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 0 0 2px var(--brand);
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
 /* ── Header ── */
 
 .site-header {
