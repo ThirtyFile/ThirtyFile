@@ -29,7 +29,7 @@ use crate::{
 };
 
 const TUS_VERSION: &str = "1.0.0";
-pub const UPLOAD_TTL: i64 = 7 * 86400;
+pub use crate::tree::UPLOAD_TTL;
 const MAX_UPLOAD_LENGTH: u64 = 1 << 50;
 /// Folder depth an uploaded folder tree may create below the target (each level costs queries under the write lock)
 const MAX_REL_DEPTH: usize = 64;
