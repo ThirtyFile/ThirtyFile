@@ -4,6 +4,8 @@
 //  3. no Chinese text is left outside the zh-TW dictionary values, in code AND in comments
 //     (src/**/*.{ts,tsx,css} and scripts/*.mjs). Lines marked `// i18n-ignore: <reason>` are allowed,
 //     but the reason itself must be English. The only Chinese allowed in zh-TW dictionary files is the values.
+//  4. every message the server sends has an entry (see below)
+//  5. no entry outside server.ts is left over: its English text still appears in web/src or server/src
 // Usage: node scripts/check-i18n.mjs [--files path,path] [--lenient]
 //   --files    only check the given files
 //   --lenient  skip comments (only report Chinese in code); the default is strict
@@ -49,6 +51,8 @@ function literal(raw) {
 const entry = new RegExp(String.raw`^\s*(${STR})\s*:\s*(${STR}|\x60[^\x60]*\x60)\s*,?\s*$`, "gm");
 const dict = new Map(); // key -> { zh, file }
 const conflicts = [];
+/** Every entry and its file (a key can be in several files) */
+const entries = [];
 for (const f of walk(dictDir, /\.ts$/)) {
   if (f.endsWith("index.ts")) continue;
   const file = relative(root, f).replace(/\\/g, "/");
@@ -59,6 +63,7 @@ for (const f of walk(dictDir, /\.ts$/)) {
     const prev = dict.get(key);
     if (prev && prev.zh !== zh) conflicts.push(`${key}  →  ${prev.file}: ${prev.zh}  /  ${file}: ${zh}`);
     dict.set(key, { zh, file });
+    entries.push({ key, file });
   }
 }
 
@@ -71,6 +76,8 @@ const stripComments = (s) =>
 
 const missing = [];
 const bare = [];
+/** The code outside the dictionaries, where their entries are used */
+const corpus = [];
 const files = [
   ...walk(root, /\.(ts|tsx|css)$/).map((f) => [f, relative(root, f)]),
   ...walk(toPath("./"), /\.mjs$/).map((f) => [f, relative(web, f)]),
@@ -81,6 +88,7 @@ for (const [f, r] of files) {
   const src = readFileSync(f, "utf8");
   const isDict = rel.startsWith("lib/i18n/zh-TW/");
   if (!isDict && /\.(ts|tsx)$/.test(rel)) {
+    corpus.push(src);
     const lineOf = (i) => src.slice(0, i).split("\n").length;
     // tc("context", "…"): either the context key or the plain key must exist
     for (const m of src.matchAll(new RegExp(String.raw`(?<![\w.])tc\(\s*"([^"]*)"\s*,\s*(${STR}|\x60[^\x60$]*\x60)`, "g"))) {
@@ -138,6 +146,7 @@ if (!only) {
     const rel = "server/src/" + relative(serverDir, f).replace(/\\/g, "/");
     if (rel.endsWith("/dav.rs")) continue;
     const full = readFileSync(f, "utf8");
+    corpus.push(full);
     // Tests come last in each file
     const src = full.split(/\n#\[cfg\(test\)\]\n/)[0];
     const lineOf = (i) => src.slice(0, i).split("\n").length;
@@ -148,6 +157,24 @@ if (!only) {
   }
 }
 
+// 5. Entries left over (outside server.ts, whose messages are also built from parts): the English text, or a form of
+//    a plural, or the text of a tc() key, is written somewhere in the code, as it is or with other placeholder names
+const unused = [];
+if (!only) {
+  const code = corpus.join("\n");
+  const escaped = (s) => JSON.stringify(s).slice(1, -1);
+  const written = (s) =>
+    code.includes(s) ||
+    code.includes(escaped(s)) ||
+    new RegExp(escaped(s).split(/\{[^{}]*\}/).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\{[^{}]*\\}")).test(code);
+  for (const { key, file } of entries) {
+    if (file.endsWith("/server.ts")) continue;
+    const text = key.includes("::") ? key.slice(key.indexOf("::") + 2) : key;
+    if (![text, ...text.split("|")].some(written)) unused.push(`${file}: ${key}`);
+  }
+}
+
+
 console.log(`Dictionary: ${dict.size} entries`);
 console.log(`Conflicting entries across dictionary files: ${conflicts.length}`);
 for (const c of conflicts) console.log("  ✗ " + c);
@@ -157,4 +184,6 @@ console.log(
   `Chinese text outside the dictionary (not marked i18n-ignore${strict ? ", comments included" : ", comments skipped"}): ${bare.length}`,
 );
 for (const b of bare) console.log("  · " + b);
-process.exitCode = missing.length || bare.length || conflicts.length ? 1 : 0;
+console.log(`Dictionary entries no longer used: ${unused.length}`);
+for (const u of unused) console.log("  ✗ " + u);
+process.exitCode = missing.length || bare.length || conflicts.length || unused.length ? 1 : 0;

@@ -111,7 +111,6 @@ export default {
   "Read-only": "唯讀",
   "Unsaved changes": "尚未儲存",
   "Save": "儲存",
-  "This file has unsaved changes. Leave anyway?": "檔案尚未儲存，確定要離開嗎？",
   "Close (Esc)": "關閉 (Esc)",
   "Previous (←)": "上一個 (←)",
   "Next (→)": "下一個 (→)",

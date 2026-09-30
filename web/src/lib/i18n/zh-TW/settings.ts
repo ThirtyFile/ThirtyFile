@@ -334,8 +334,6 @@ export default {
   "The site URL isn't set, so the redirect URIs below are based on your browser's current address. Before going live, set the site URL in {link}, then enter the URI in the provider's app settings.": "尚未設定網站網址，下方的重新導向 URI 是依目前瀏覽器的網址產生的。正式使用前請先到{link}填寫網站網址，再把 URI 填到服務商的應用程式設定中。",
   "General settings": "一般設定",
   "Sign-in policy": "登入政策",
-  "Create accounts automatically on first sign-in": "第一次登入時自動建立帳號",
-  "When on, people without an account are given one automatically when they sign in with a third-party provider (regular user permissions, the default space size for new users, and their email as the username). When off, only existing users whose username is their email can sign in directly; others must first sign in with their username and password, then link the account under \"Sign-in methods\".": "開啟後，系統中還沒有帳號的人用三方登入時會自動建立帳號（一般使用者權限、新使用者的預設空間大小，帳號名稱為 email）。關閉時只有「帳號名稱就是 email」的既有使用者能直接登入；其他人需先用帳號密碼登入，再到「登入方式」連結。",
   "Allow only these email domains": "只允許這些 email 網域",
   "e.g. example.com (separate multiple domains with commas; leave blank for no restriction)": "例如 example.com（多個以逗號分隔，留空代表不限制）",
   "Enter your company domain to prevent personal Google or GitHub accounts from signing in or being created automatically. Already linked accounts aren't affected.": "建議填寫公司網域，避免個人的 Google、GitHub 帳號登入或被自動建立帳號。已連結的帳號不受影響。",

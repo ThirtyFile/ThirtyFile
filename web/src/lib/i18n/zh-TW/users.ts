@@ -1,6 +1,6 @@
 /** Traditional Chinese translations: space roles and action names, control panel, user and group management, sign-in log */
 export default {
-  // lib/drives.tsx
+  // Spaces and roles (lib/drives.tsx)
   "Viewer": "檢視者",
   "Editor": "編輯者",
   "Manager": "管理者",
@@ -13,6 +13,7 @@ export default {
   "Company shared space": "公司共用空間",
   "Team space": "團隊空間",
   "{name}'s files": "{name} 的檔案",
+  // Activity log (components/logs/actions.ts)
   "Upload": "上傳",
   "Create folder": "建立資料夾",
   "Rename": "重新命名",

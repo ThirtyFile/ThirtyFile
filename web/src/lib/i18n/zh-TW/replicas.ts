@@ -111,7 +111,7 @@ export default {
     "管理員：複本未依設定保存（位置無法運作、複本損毀或落後太久），以及恢復正常時",
   "The replicas “{name}” need attention": "複本「{name}」需要處理",
   "The replicas “{name}” are kept again": "複本「{name}」恢復正常",
-  // Activity log (lib/drives.tsx)
+  // Activity log (components/logs/actions.ts)
   "Create replica policy": "建立複本規則",
   "Change replica policy": "變更複本規則",
   "Replica sync failed": "複本同步失敗",

@@ -104,7 +104,6 @@ export default {
   "Move to another location…": "搬到其他位置…",
   "Delete space": "刪除空間",
   "Refresh": "重新整理",
-  "Name (after creating it, add users or groups under \"Manage members\")": "名稱（建立後可在「管理成員」中加入使用者或群組）",
   "Create": "建立",
   "Space created": "已建立空間",
   "Change quota for \"{name}\"": "調整「{name}」的容量",
