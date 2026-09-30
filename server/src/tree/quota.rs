@@ -8,6 +8,9 @@ use crate::{
     state::AppState,
 };
 
+/// How long an unfinished upload is kept (upload.rs); until then it holds its room in the space
+pub const UPLOAD_TTL: i64 = 7 * 86400;
+
 /// Adds `delta` bytes to a space's usage counter (call inside the transaction that adds, replaces or removes file nodes)
 pub async fn adjust_usage(conn: &mut SqliteConnection, drive_id: &str, delta: i64) -> AppResult<()> {
     if delta == 0 || drive_id.is_empty() {
@@ -86,7 +89,7 @@ pub async fn room_left(conn: &mut SqliteConnection, drive_id: &str, upload: Opti
     if quota <= 0 {
         return Ok(None);
     }
-    let active_since = crate::util::now() + crate::upload::UPLOAD_TTL - 86400;
+    let active_since = crate::util::now() + UPLOAD_TTL - 86400;
     let (pending,): (i64,) = sqlx::query_as(
         "SELECT COALESCE(SUM(size), 0) FROM uploads WHERE drive_id = ? AND node_id IS NULL AND expires_at > ? AND id IS NOT ?",
     )
@@ -119,14 +122,14 @@ mod tests {
             .bind(amy.id)
             .bind(amy.root())
             .bind(ts)
-            .bind(ts + crate::upload::UPLOAD_TTL)
+            .bind(ts + UPLOAD_TTL)
             .bind(&drive)
             .execute(&env.st.db)
             .await
             .unwrap();
         let mut c = env.st.db.acquire().await.unwrap();
         assert!(check_quota(&mut c, &drive, 200).await.is_err(), "a fresh upload reserves its size");
-        sqlx::query("UPDATE uploads SET expires_at = ? WHERE id = 'u1'").bind(ts + crate::upload::UPLOAD_TTL - 2 * 86400).execute(&mut *c).await.unwrap();
+        sqlx::query("UPDATE uploads SET expires_at = ? WHERE id = 'u1'").bind(ts + UPLOAD_TTL - 2 * 86400).execute(&mut *c).await.unwrap();
         assert!(check_quota(&mut c, &drive, 200).await.is_ok(), "an upload idle for two days no longer does");
     }
 

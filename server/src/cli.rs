@@ -193,7 +193,7 @@ async fn rotate_secret_key(db: &sqlx::SqlitePool, source: &secrets::KeySource) -
         }
         secrets::KeySource::Env(_) => None,
     };
-    db::reseal_secrets(db, &new_key).await?;
+    crate::settings::reseal_secrets(db, &new_key).await?;
     if let Some((staged, path)) = staged {
         std::fs::rename(&staged, &path)?;
         println!("The saved passwords and keys are encrypted with a new key, saved in {}. Back it up again.", path.display());

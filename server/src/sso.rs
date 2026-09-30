@@ -26,8 +26,9 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::{
+    admin::{NewUser, create_user},
     auth::{Admin, User, client_ip, open_session},
-    db::{NewUser, create_user, get_setting, set_setting},
+    db::{get_setting, set_setting},
     error::{AppError, AppResult},
     logs::{self, record_login_via},
     state::AppState,
@@ -1833,7 +1834,7 @@ mod tests {
         for i in 0..(MAX_CREATED_PER_HOUR - 1) {
             let hash = crate::auth::hash_password("x".into()).await.unwrap();
             let mut c = env.st.db.acquire().await.unwrap();
-            crate::db::create_user(
+            crate::admin::create_user(
                 &mut c,
                 NewUser { username: &format!("bulk{i}@example.com"), password_hash: &hash, role: "user", can_write: true, can_delete: true, can_share: true, quota_bytes: 0, source: "google", provisioned_by: None, personal_space: None, space_folders: None },
             )

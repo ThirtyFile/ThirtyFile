@@ -119,10 +119,10 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
     };
     // New spaces of the built-in location get their folders in the storage folder
     let space_folders = std::path::absolute(&storage)?;
-    db::bootstrap_admin(&db, admin_password.as_deref(), Some(&space_folders)).await.map_err(|e| e.message)?;
-    db::create_company_space(&db, Some(&space_folders)).await.map_err(|e| e.message)?;
-    let secret = db::load_secret(&db).await?;
-    let system = db::load_system_settings(&db).await?;
+    crate::settings::bootstrap_admin(&db, admin_password.as_deref(), Some(&space_folders)).await.map_err(|e| e.message)?;
+    crate::settings::create_company_space(&db, Some(&space_folders)).await.map_err(|e| e.message)?;
+    let secret = crate::settings::load_secret(&db).await?;
+    let system = crate::settings::load_system_settings(&db).await?;
     // Settings that are probably wrong together: said once at startup
     if !cfg.secure_cookie && cfg.trust_proxy.enabled() {
         tracing::warn!("THIRTYFILE_TRUST_PROXY is on but THIRTYFILE_SECURE_COOKIE is off: if the proxy serves HTTPS, set THIRTYFILE_SECURE_COOKIE=true");

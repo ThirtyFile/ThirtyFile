@@ -1631,7 +1631,7 @@ mod tests {
         assert!(change(&env, &amy, &ok.id, json!({ "expires_at": now() + 3 * 86400 })).await.is_ok());
         // A link made before the rule keeps working as it is
         assert!(find_share(&env.st, &old.id).await.is_ok());
-        assert!(crate::db::load_system_settings(&env.st.db).await.unwrap().share_password_required);
+        assert!(crate::settings::load_system_settings(&env.st.db).await.unwrap().share_password_required);
 
         // Public links turned off: none can be made, and existing ones stop working until they're allowed again,
         // while their creators and administrators still find them to delete them
@@ -1639,7 +1639,7 @@ mod tests {
         assert_eq!(make(CreateReq { password: pw(), expires_at: Some(now() + 86400), ..link(&doc) }).await.unwrap_err().status, StatusCode::FORBIDDEN);
         assert_eq!(find_share(&env.st, &ok.id).await.err().map(|e| e.status), Some(StatusCode::NOT_FOUND));
         assert_eq!(links(&env, &amy, ListQuery::default()).await.len(), 2);
-        assert!(!crate::db::load_system_settings(&env.st.db).await.unwrap().public_links);
+        assert!(!crate::settings::load_system_settings(&env.st.db).await.unwrap().public_links);
         set_policy(&env, json!({ "public_links": true })).await;
         assert!(find_share(&env.st, &ok.id).await.is_ok());
     }
