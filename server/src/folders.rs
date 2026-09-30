@@ -488,28 +488,75 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     Ok(report)
 }
 
-/// Brings one folder of a folder space up to date when it is opened: new and changed items right away. Anything
-/// that disappeared may have moved elsewhere, which only a scan of the whole space can tell, so that runs in the
-/// background.
-pub async fn sync_folder(st: &AppState, folder: &Node) {
-    if let Err(e) = try_sync_folder(st, folder).await {
+/// A folder opened again within this long isn't read again: what changed on the server shows at the next opening
+/// after that (or the next scan)
+const REREAD_AFTER: std::time::Duration = std::time::Duration::from_secs(5);
+/// How long opening a folder waits for its disk before showing the index as it is
+const OPEN_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+/// How long bringing a folder up to date otherwise (the watcher, a WebDAV name check) waits for its disk
+const SYNC_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// When each folder was last read from disk (by id), to leave out reading it again right away
+fn last_reads() -> &'static Mutex<HashMap<String, std::time::Instant>> {
+    static READS: OnceLock<Mutex<HashMap<String, std::time::Instant>>> = OnceLock::new();
+    READS.get_or_init(Default::default)
+}
+
+/// Tests: every folder counts as not read for a while
+#[cfg(test)]
+pub fn forget_reads() {
+    last_reads().lock().unwrap().clear();
+}
+
+/// A folder of a folder space is opened (listed on the web, or over WebDAV): new and changed items on the server show
+/// right away, unless finding them would keep whoever opened it waiting. It isn't read when its space is watched for
+/// changes (they are in the index already), when it was read a moment ago, while a change or scan holds its space (a
+/// copy of a large folder into it, say), or when its disk doesn't answer within a few seconds: the listing then shows
+/// the index as it is.
+pub async fn sync_opened(st: &AppState, folder: &Node) {
+    if watched(folder.drive()) || last_reads().lock().unwrap().get(&folder.id).is_some_and(|t| t.elapsed() < REREAD_AFTER) {
+        return;
+    }
+    if let Err(e) = try_sync_folder(st, folder, false).await {
         tracing::warn!("Couldn't check the folder \"{}\" for changes: {}", folder.name, e.message);
     }
 }
 
-async fn try_sync_folder(st: &AppState, folder: &Node) -> AppResult<()> {
+/// Brings one folder of a folder space up to date (a change was seen in it): new and changed items right away.
+/// Anything that disappeared may have moved elsewhere, which only a scan of the whole space can tell, so that runs in
+/// the background.
+pub async fn sync_folder(st: &AppState, folder: &Node) {
+    if let Err(e) = try_sync_folder(st, folder, true).await {
+        tracing::warn!("Couldn't check the folder \"{}\" for changes: {}", folder.name, e.message);
+    }
+}
+
+/// `wait`: for the space's lock and its disk; else the folder is left as the index has it when either is busy
+async fn try_sync_folder(st: &AppState, folder: &Node, wait: bool) -> AppResult<()> {
     let (Some(rel), true) = (folder.fs_path.clone(), folder.is_folder()) else { return Ok(()) };
     let drive = folder_drive(st, folder.drive()).await?;
     // Takes turns with changes from the web and with scans updating the index (both hold the lock only briefly: a
     // scan reads the folder without it), so a change seen here is never skipped
     let lock = drive_lock(&drive.id);
-    let _scanning = lock.lock().await;
+    let _scanning = if wait {
+        lock.lock_owned().await
+    } else {
+        match lock.try_lock_owned() {
+            Ok(l) => l,
+            Err(_) => return Ok(()),
+        }
+    };
     let root = PathBuf::from(drive.source_path.clone().unwrap_or_default());
     let mut report = ScanReport::default();
+    let read_at = std::time::Instant::now();
     let entries = {
         let rel = rel.clone();
         let mut r = ScanReport::default();
-        let res = tokio::task::spawn_blocking(move || walk(&root, Some(&rel), &mut r, None)).await.map_err(AppError::internal)?;
+        // On a blocking thread, within a time limit: a disk that doesn't answer leaves the index as it is
+        let key = format!("read of a folder in {}", drive.id);
+        let Some(res) = crate::util::blocking_within(key, if wait { SYNC_WAIT } else { OPEN_WAIT }, move || walk(&root, Some(&rel), &mut r, None)).await else {
+            return Ok(());
+        };
         match res {
             // Only the space's own folder (a scan looks at one without its marker)
             Ok(w) if w.marker.as_deref() == Some(drive.id.as_str()) => w.entries,
@@ -567,6 +614,11 @@ async fn try_sync_folder(st: &AppState, folder: &Node) -> AppResult<()> {
         refresh_usage(st, &drive).await?;
     }
     drop(_scanning);
+    {
+        let mut reads = last_reads().lock().unwrap();
+        reads.retain(|_, t| t.elapsed() < REREAD_AFTER);
+        reads.insert(folder.id.clone(), read_at);
+    }
     if gone {
         scan_later(st, &drive.id);
     }
@@ -1143,6 +1195,66 @@ mod tests {
     use super::*;
     use crate::testutil::{self, write_old};
     use axum::extract::{Path as UrlPath, Query, State};
+
+    #[tokio::test]
+    async fn opening_a_folder_doesnt_wait_for_a_change_in_its_space_nor_read_it_again_right_away() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        write_old(&space.dir.join("a.txt"), b"a");
+        let list = || {
+            let (st, admin, root) = (env.st.clone(), admin.clone(), space.root.clone());
+            async move {
+                let axum::Json(l) = crate::nodes::children(State(st), admin, UrlPath(root), Query(Default::default())).await.unwrap();
+                l.into_items().into_iter().map(|n| n.name).collect::<Vec<_>>()
+            }
+        };
+        // A long change holds the space (copying a large folder into it, say): the listing answers meanwhile, from the
+        // index as it is
+        let held = crate::fsops::lock_space(&space.drive).await;
+        let started = std::time::Instant::now();
+        let names = tokio::time::timeout(std::time::Duration::from_secs(3), list()).await.expect("the listing answers");
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        assert!(names.is_empty());
+        drop(held);
+        // Opened again: what was added on the server shows
+        assert_eq!(list().await, ["a.txt"]);
+        // Opened again right away: not read again
+        write_old(&space.dir.join("b.txt"), b"b");
+        assert_eq!(list().await, ["a.txt"]);
+        // A while later it is (and a scan shows it anyway)
+        forget_reads();
+        assert_eq!(list().await, ["a.txt", "b.txt"]);
+    }
+
+    /// Opening a large folder of a folder space again and again (the web asks for its first page each time it is opened
+    /// or refreshed): `ITEMS=20000 cargo test --release -- --ignored --nocapture measure_opening`
+    #[tokio::test]
+    #[ignore]
+    async fn measure_opening_a_large_folder() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        let n: usize = std::env::var("ITEMS").ok().and_then(|v| v.parse().ok()).unwrap_or(20_000);
+        for i in 0..n {
+            write_old(&space.dir.join(format!("Big/f{i:06}.txt")), b"x");
+        }
+        scan(&env.st, &space.drive).await.unwrap();
+        let (big, _) = env.node_at(&space.drive, "Big").await.unwrap();
+        let open = || {
+            let (st, admin, big) = (env.st.clone(), admin.clone(), big.clone());
+            async move {
+                let started = std::time::Instant::now();
+                let q = Query(serde_json::from_value(serde_json::json!({ "limit": 100 })).unwrap());
+                let _ = crate::nodes::children(State(st), admin, UrlPath(big), q).await.unwrap();
+                started.elapsed()
+            }
+        };
+        forget_reads();
+        let first = open().await;
+        let again = open().await;
+        println!("{n} items: opened {} ms (reads the folder), opened again right away {} ms", first.as_millis(), again.as_millis());
+    }
 
     #[tokio::test]
     async fn a_folder_space_follows_changes_made_on_the_server() {
