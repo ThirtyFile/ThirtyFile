@@ -1,0 +1,129 @@
+// File explorer against the real server: name conflicts when uploading, keyboard browsing, and search typed through an
+// input method. Each test works in a folder of its own inside My files.
+import { expect, test, type Page } from "@playwright/test";
+
+const PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? "e2e-admin-password";
+
+interface Item {
+  id: string;
+  name: string;
+  kind: string;
+}
+
+async function signIn(page: Page) {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Click or press any key to sign in" }).click();
+  await page.getByLabel("Username").fill("admin");
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.waitForURL(/\/files/);
+}
+
+/** A new folder, made through the API with the page's session (inside My files when no parent is given) */
+async function folder(page: Page, name: string, parent?: string): Promise<string> {
+  const parentId = parent ?? (await (await page.request.get("/api/auth/me")).json()).root_id;
+  const res = await page.request.post("/api/folders", { data: { parent_id: parentId, name } });
+  expect(res.ok()).toBe(true);
+  return (await res.json()).id;
+}
+
+async function children(page: Page, id: string): Promise<Item[]> {
+  return (await page.request.get(`/api/nodes/${id}/children`)).json();
+}
+
+async function content(page: Page, id: string) {
+  return (await page.request.get(`/api/files/${id}/content`)).text();
+}
+
+test("uploading a name the folder already has asks what to do, and each choice does it", async ({ page }) => {
+  await signIn(page);
+  const dir = await folder(page, "Conflicts");
+  await page.goto(`/files/${dir}`);
+  const upload = (text: string) => page.locator('input[type="file"][multiple]').setInputFiles([{ name: "note.txt", mimeType: "text/plain", buffer: Buffer.from(text) }]);
+  const row = (name: string) => page.locator("[data-node-id]").filter({ hasText: name });
+  const dialog = page.getByRole("dialog");
+
+  await upload("first");
+  await expect(row("note.txt")).toBeVisible();
+  const [original] = await children(page, dir);
+
+  // Keep both: the new file gets a numbered name, the original stays as it was
+  await upload("second");
+  await expect(dialog.getByText('The destination already has a file named "note.txt"')).toBeVisible();
+  await dialog.getByRole("button", { name: /Keep both/ }).click();
+  await expect(row("note (1).txt")).toBeVisible();
+  let items = await children(page, dir);
+  expect(items.map((n) => n.name).sort()).toEqual(["note (1).txt", "note.txt"]);
+  expect(await content(page, original.id)).toBe("first");
+  expect(await content(page, items.find((n) => n.name === "note (1).txt")!.id)).toBe("second");
+
+  // Skip, and Cancel: nothing is uploaded
+  for (const choice of [/Skip this file/, /^Cancel$/]) {
+    await upload("not uploaded");
+    await dialog.getByRole("button", { name: choice }).click();
+    await expect(dialog).toHaveCount(0);
+  }
+  items = await children(page, dir);
+  expect(items).toHaveLength(2);
+  expect(await content(page, original.id)).toBe("first");
+
+  // Replace: the original file gets the new content
+  await upload("third");
+  await dialog.getByRole("button", { name: /Replace the file in the destination/ }).click();
+  await expect.poll(() => content(page, original.id)).toBe("third");
+  expect(await children(page, dir)).toHaveLength(2);
+  await expect(page.getByText(/Something went wrong|useMe must be used/)).toHaveCount(0);
+});
+
+test("after Enter opens a folder, the arrow keys go on in it", async ({ page }) => {
+  await signIn(page);
+  const top = await folder(page, "Keyboard");
+  const level1 = await folder(page, "Level 1 a", top);
+  await folder(page, "Level 1 b", top);
+  await folder(page, "Level 2 a", level1);
+  await folder(page, "Level 2 b", level1);
+  await page.goto(`/files/${top}`);
+  const row = (name: string) => page.locator("[data-node-id]").filter({ hasText: name });
+  const focused = () => page.evaluate(() => document.activeElement?.closest("[data-node-id]")?.textContent ?? null);
+
+  await row("Level 1 a").click();
+  await page.keyboard.press("Enter");
+  await page.waitForURL(`**/files/${level1}`);
+  // The first item has the focus, and nothing is selected yet
+  await expect.poll(focused).toContain("Level 2 a");
+  await expect(page.locator('[data-node-id][aria-selected="true"]')).toHaveCount(0);
+  await page.keyboard.press("ArrowDown");
+  await expect(row("Level 2 b")).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("ArrowUp");
+  await expect(row("Level 2 a")).toHaveAttribute("aria-selected", "true");
+  expect(await focused()).toContain("Level 2 a");
+
+  // Back up, then in again: still no mouse
+  await page.keyboard.press("Backspace");
+  await page.waitForURL(`**/files/${top}`);
+  await expect.poll(focused).toContain("Level 1 a");
+  await page.keyboard.press("Enter");
+  await page.waitForURL(`**/files/${level1}`);
+  await expect.poll(focused).toContain("Level 2 a");
+});
+
+test("search waits for an input method to finish composing", async ({ page }) => {
+  await signIn(page);
+  await folder(page, "IME");
+  await page.goto("/files");
+  const box = page.getByRole("textbox", { name: /Search/ }).first();
+  await box.click();
+  const cdp = await page.context().newCDPSession(page);
+
+  // Composing Zhuyin: the box shows it, but nothing is searched however long the pause
+  await cdp.send("Input.imeSetComposition", { text: "ㄓ", selectionStart: 1, selectionEnd: 1 });
+  await cdp.send("Input.imeSetComposition", { text: "ㄓㄨ", selectionStart: 2, selectionEnd: 2 });
+  await expect(box).toHaveValue("ㄓㄨ");
+  await page.waitForTimeout(1000);
+  expect(new URL(page.url()).pathname).toBe("/files");
+
+  // Choosing the candidate commits the text, which is searched
+  await cdp.send("Input.insertText", { text: "中" });
+  await page.waitForURL(/\/search\?q=/);
+  expect(new URL(page.url()).searchParams.get("q")).toBe("中");
+});

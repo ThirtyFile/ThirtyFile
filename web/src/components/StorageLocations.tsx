@@ -276,7 +276,9 @@ export function StorageLocations() {
                     >
                       <EllipsisIcon />
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">{menu(l)}</DropdownMenuContent>
+                    <DropdownMenuContent align="end" className="w-max max-w-(--available-width)">
+                      {menu(l)}
+                    </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
               );
@@ -551,7 +553,8 @@ function StorageDialog({ location, onClose, onSaved }: { location: StorageLocati
             <DialogTitle>{location ? t("Edit \"{name}\"", { name: location.name }) : t("Add storage location")}</DialogTitle>
             <DialogDescription>{t("A connection test (writing, reading back, and deleting a small file) runs before saving.")}</DialogDescription>
           </DialogHeader>
-          <div className="grid max-h-[60vh] gap-3 overflow-y-auto pr-1">
+          {/* Room around the fields inside the scrolling area, so their focus rings aren't cut off at its edges */}
+          <div className="-m-1 grid max-h-[60vh] gap-3 overflow-y-auto p-1">
             <div className="grid gap-1.5">
               <Label htmlFor="st-name">{t("Name")}</Label>
               <Input id="st-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("For example: Company RustFS")} autoFocus={!location} />

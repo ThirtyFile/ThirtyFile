@@ -11,6 +11,7 @@ import { openShortcuts } from "@/components/ShortcutsDialog";
 import { isTyping } from "@/components/explorer/types";
 import { useFolderDrop } from "@/lib/dnd";
 import { folderOfPath, hasPersonal } from "@/lib/home";
+import { liveSearch, type LiveSearch } from "@/lib/liveSearch";
 import { useMe } from "@/lib/session";
 import { appLink, pathAliases, urlOf } from "@/lib/paths";
 import { shortcut } from "@/lib/keys";
@@ -47,25 +48,34 @@ function SearchInput({
   // When the page filters itself (control panel), the search string lives in the URL's ?q=, so typing can continue after jumping over from a settings page
   const initial = onSearchPage || onSearch ? (params.get("q") ?? "") : "";
   const [q, setQ] = useState(initial);
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  // Cancel a pending search when leaving the page, so we don't jump to the search page after unmounting
-  useEffect(() => () => clearTimeout(timer.current), []);
 
   useEffect(() => {
     if (!onSearchPage && !onSearch) setQ("");
   }, [onSearchPage, onSearch]);
 
-  const change = (v: string) => {
-    setQ(v);
+  const search = (v: string) => {
     // The page filters itself (e.g. control panel): don't jump to file search
     if (onSearch) return onSearch(v);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      if (v.trim())
-        navigate(`/search?q=${encodeURIComponent(v.trim())}${scope ? `&in=${encodeURIComponent(scope)}` : ""}`, {
-          replace: onSearchPage,
-        });
-    }, 350);
+    if (v.trim())
+      navigate(`/search?q=${encodeURIComponent(v.trim())}${scope ? `&in=${encodeURIComponent(scope)}` : ""}`, {
+        replace: onSearchPage,
+      });
+  };
+  const latest = useRef({ search, filters: !!onSearch });
+  latest.current = { search, filters: !!onSearch };
+  // A page filtering itself does so at once; file search waits for a pause in typing. Neither runs on text an input
+  // method is still composing
+  const live = useRef<LiveSearch>(null);
+  live.current ??= liveSearch(
+    (v) => latest.current.search(v),
+    () => (latest.current.filters ? 0 : 350),
+  );
+  // Cancel a pending search when leaving the page, so we don't jump to the search page after unmounting
+  useEffect(() => () => live.current?.cancel(), []);
+
+  const change = (v: string, composing = false) => {
+    setQ(v);
+    live.current!.input(v, composing);
   };
 
   return (
@@ -74,8 +84,12 @@ function SearchInput({
       <Input
         ref={inputRef}
         value={q}
-        onChange={(e) => change(e.target.value)}
+        onChange={(e) => change(e.target.value, (e.nativeEvent as InputEvent).isComposing)}
+        onCompositionStart={() => live.current!.compositionStart()}
+        onCompositionEnd={(e) => live.current!.compositionEnd(e.currentTarget.value)}
         onKeyDown={(e) => {
+          // Enter and Escape choose or drop an input method's candidate while it is composing
+          if (e.nativeEvent.isComposing || e.keyCode === 229 || live.current!.composing()) return;
           if (e.key === "Escape") change("");
         }}
         placeholder={placeholder}

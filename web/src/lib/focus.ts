@@ -17,6 +17,14 @@ export function useMediaQuery(query: string) {
 }
 
 /**
+ * Whether the focus may be moved into a list that has just loaded: when it was lost with the rows it was on, or is
+ * still on a row; not when the person has put it on something else (the address bar, a button) meanwhile
+ */
+export function focusIsFree(active: Element | null) {
+  return !active || active === active.ownerDocument.body || !active.isConnected || !!active.closest("[data-node-id]");
+}
+
+/**
  * Keyboard handling for something shown over the page (preview, phone menu, details overlay) while `active`:
  * focus moves into the container, Esc calls `onClose` (when given), and focus goes back to where it was afterwards.
  * `modal` also keeps focus inside: Tab wraps around, and focus that lands on the page behind is brought back.

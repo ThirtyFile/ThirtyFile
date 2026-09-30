@@ -5,6 +5,7 @@ import { useNavigate } from "react-router";
 import type { ListNav, ViewMode } from "@/components/FileList";
 import { useClipboard } from "@/lib/clipboard";
 import { capsOf } from "@/lib/drives";
+import { focusIsFree } from "@/lib/focus";
 import type { GroupBy } from "@/lib/listView";
 import { usePersisted, useMe } from "@/lib/session";
 import { useTabActions } from "@/tabs";
@@ -64,6 +65,15 @@ export function useExplorerState(p: ExplorerProps) {
     const focus = !document.activeElement || document.activeElement === document.body;
     setTimeout(() => listNav.current?.show(id, focus));
   }, [p.items]);
+  /** A folder opened with Enter: once its items are shown, the focus goes to the first so the arrows carry on there */
+  const enteredByKey = useRef<string | null>(null);
+  useEffect(() => {
+    const id = enteredByKey.current;
+    if (!id || p.loading || p.folderId !== id) return;
+    enteredByKey.current = null;
+    // An empty folder has nothing to focus: Backspace and Alt+Up still work from the page
+    setTimeout(() => focusIsFree(document.activeElement) && listNav.current?.focusStart());
+  }, [p.items, p.loading, p.folderId]);
 
   return {
     me,
@@ -75,6 +85,7 @@ export function useExplorerState(p: ExplorerProps) {
     fileInput,
     dirInput,
     listNav,
+    enteredByKey,
     canCreate,
     canUpload,
     selectedNodes,
