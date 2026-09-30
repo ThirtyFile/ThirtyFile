@@ -273,7 +273,15 @@ async fn merged_config(st: &AppState, id: Option<&str>, kind: &str, config: Valu
         return Ok(config);
     }
     let normalized = storage::normalize(kind, config.clone()).await;
-    if old_kind != kind || TARGET_FIELDS.iter().any(|f| normalized.get(*f) != old.get(*f)) {
+    // Trusting another SFTP host key (or none yet, to record whatever answers) or no longer checking a certificate
+    // would hand the secrets to whoever sits in between, like another server would
+    let host_key = |c: &Value| c.get("host_key").and_then(Value::as_str).map(str::trim).unwrap_or_default().to_string();
+    let insecure = |c: &Value| c.get("tls_insecure").and_then(Value::as_bool).unwrap_or(false);
+    if old_kind != kind
+        || TARGET_FIELDS.iter().any(|f| normalized.get(*f) != old.get(*f))
+        || host_key(&normalized) != host_key(&old)
+        || insecure(&normalized) != insecure(&old)
+    {
         return Err(AppError::bad_request("Enter the password or key again: the server or account changed"));
     }
     if let Some(obj) = config.as_object_mut() {
@@ -1429,6 +1437,17 @@ mod tests {
             let err = merged_config(&env.st, Some("nas"), kind, cfg).await.unwrap_err();
             assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
         }
+        // Trusting another host key (or any, to record it again), or no longer checking the certificate: the same
+        let cleared = json!({ "host": "files.example.com", "port": 22, "username": "backup", "password": "", "host_key": "" });
+        assert!(merged_config(&env.st, Some("nas"), "sftp", cleared).await.is_err());
+        let other_key = json!({ "host": "files.example.com", "port": 22, "username": "backup", "password": "", "host_key": "k2" });
+        assert!(merged_config(&env.st, Some("nas"), "sftp", other_key).await.is_err());
+        let ftps = json!({ "host": "files.example.com", "port": 21, "username": "backup", "password": testutil::password(), "tls": true });
+        sqlx::query("UPDATE storage_locations SET kind = 'ftp', config = ? WHERE id = 'nas'").bind(sealed_config("nas", &ftps)).execute(&env.st.db).await.unwrap();
+        let unchecked = json!({ "host": "files.example.com", "port": 21, "username": "backup", "password": "", "tls": true, "tls_insecure": true });
+        assert!(merged_config(&env.st, Some("nas"), "ftp", unchecked).await.is_err());
+        let checked = json!({ "host": "files.example.com", "port": 21, "username": "backup", "password": "", "tls": true, "tls_insecure": false });
+        assert_eq!(merged_config(&env.st, Some("nas"), "ftp", checked).await.unwrap()["password"], testutil::password());
         // A password entered anew is used as it is
         let fresh = json!({ "host": "elsewhere.example.com", "port": 22, "username": "backup", "password": testutil::wrong_password() });
         assert!(merged_config(&env.st, Some("nas"), "sftp", fresh).await.is_ok());

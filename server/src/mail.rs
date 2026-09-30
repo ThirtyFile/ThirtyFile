@@ -239,6 +239,8 @@ async fn send_inner(cfg: &SmtpSettings, sender_name: &str, msg: &Message<'_>) ->
         Ok(Err(e)) => return Err(format!("can't connect to {}:{} ({e})", cfg.host, cfg.port)),
         Err(_) => return Err(format!("can't connect to {}:{} (no answer)", cfg.host, cfg.port)),
     };
+    // Checked on the address actually connected to, whatever the name resolved to
+    check_peer(cfg, tcp.peer_addr().map_err(|e| format!("connection lost ({e})"))?.ip())?;
     let data = message_text(cfg, sender_name, msg);
     match cfg.security {
         Security::None => {
@@ -266,6 +268,18 @@ async fn send_inner(cfg: &SmtpSettings, sender_name: &str, msg: &Message<'_>) ->
             s.deliver(cfg, &caps, msg.to, &data).await
         }
     }
+}
+
+/// Messages sent without encryption, or to a server whose certificate isn't checked, can be read (and a sign-in
+/// taken) on the way: that is for a relay or a server with a self-signed certificate on the local network only
+fn check_peer(cfg: &SmtpSettings, peer: std::net::IpAddr) -> Result<(), String> {
+    if (cfg.security == Security::None || cfg.insecure) && !crate::storage::is_private_ip(&peer) {
+        return Err(format!(
+            "without encryption, or without checking the certificate, the email server must be on the local network ({} is {peer})",
+            cfg.host
+        ));
+    }
+    Ok(())
 }
 
 async fn tls(cfg: &SmtpSettings, tcp: TcpStream) -> Result<tokio_rustls::client::TlsStream<TcpStream>, String> {
@@ -304,7 +318,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Session<S> {
                 return Err("the email server's reply is too long".into());
             }
             let line = line.trim_end_matches(['\r', '\n']);
-            let code = line.get(..3).and_then(|c| c.parse::<u16>().ok()).ok_or_else(|| format!("unexpected reply: {}", clip(line)))?;
+            // Something else answering (another kind of server) isn't quoted: its greeting says nothing about email
+            let code = line.get(..3).and_then(|c| c.parse::<u16>().ok()).ok_or_else(|| "the server didn't answer like an email server".to_string())?;
             lines.push(line.get(4..).unwrap_or_default().to_string());
             if line.as_bytes().get(3) != Some(&b'-') {
                 return Ok((code, lines));
@@ -515,6 +530,36 @@ pub mod tests {
         assert!(err.contains("username or password"), "{err}");
         let closed = SmtpSettings { port: 1, ..settings(port) };
         assert!(send(&closed, "Drive", &msg).await.unwrap_err().contains("can't connect"));
+    }
+
+    #[test]
+    fn unencrypted_or_unchecked_connections_stay_on_the_local_network() {
+        let ip = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
+        let plain = settings(25);
+        let unchecked = SmtpSettings { security: Security::Tls, insecure: true, ..settings(465) };
+        let checked = SmtpSettings { security: Security::Starttls, insecure: false, ..settings(587) };
+        for local in ["127.0.0.1", "10.1.2.3", "192.168.0.9", "::1", "fd00::5"] {
+            assert!(check_peer(&plain, ip(local)).is_ok() && check_peer(&unchecked, ip(local)).is_ok(), "{local}");
+        }
+        for public in ["203.0.113.5", "2001:db8::1", "::ffff:198.51.100.2"] {
+            assert!(check_peer(&plain, ip(public)).unwrap_err().contains("local network"), "{public}");
+            assert!(check_peer(&unchecked, ip(public)).is_err(), "{public}");
+            assert!(check_peer(&checked, ip(public)).is_ok(), "{public}");
+        }
+    }
+
+    #[tokio::test]
+    async fn something_other_than_an_email_server_isnt_quoted() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            sock.write_all(b"SSH-2.0-OpenSSH_9.6 internal-host\r\n").await.unwrap();
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        });
+        let msg = Message { to: "amy@example.com", subject: "Test", body: "Test" };
+        let err = send(&settings(port), "Drive", &msg).await.unwrap_err();
+        assert!(!err.contains("SSH") && !err.contains("internal-host"), "{err}");
     }
 
     #[test]

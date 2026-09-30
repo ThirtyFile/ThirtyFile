@@ -994,6 +994,9 @@ pub fn check_source(st: &AppState, path: &str) -> AppResult<String> {
             return Err(AppError::bad_request("Choose a folder outside ThirtyFile's own data and storage folders"));
         }
     }
+    if crate::util::system_folder(&real) {
+        return Err(AppError::bad_request("Choose a folder outside the system's own folders"));
+    }
     let real = real.to_string_lossy().into_owned();
     // Windows: show C:\folder rather than the \\?\C:\folder form canonicalize returns
     Ok(match real.strip_prefix(r"\\?\") {
@@ -1070,6 +1073,9 @@ pub async fn check_location_folder(st: &AppState, id: Option<&str>, kind: &str, 
     let p = real_path(path);
     if overlap(&p, &real_path(&st.data_dir.to_string_lossy())) {
         return Err(AppError::bad_request("Choose a folder outside ThirtyFile's data folder"));
+    }
+    if crate::util::system_folder(&p) {
+        return Err(AppError::bad_request("Choose a folder outside the system's own folders"));
     }
     let (locations, shown) = claimed(st, id).await?;
     if locations.iter().chain(&shown).any(|c| overlap(&p, c)) {

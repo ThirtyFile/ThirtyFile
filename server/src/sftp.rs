@@ -123,6 +123,9 @@ pub struct SftpStorage {
     conn: Mutex<Option<Arc<Conn>>>,
     /// Host key fingerprint the server presented on the most recent connection
     seen_key: Arc<StdMutex<Option<String>>>,
+    /// Without a recorded key (a location just added), the key of the first connection that signed in: every later
+    /// connection of this storage must show it too, as it will once the recorded key is read at the next start
+    first_key: StdMutex<Option<String>>,
     /// Folders confirmed to exist
     dirs: StdMutex<HashSet<String>>,
 }
@@ -140,7 +143,7 @@ impl SftpStorage {
         }
         let root = cfg.path.trim().trim_end_matches('/');
         let root = if root.is_empty() { ".".to_string() } else { root.to_string() };
-        Ok(Self { cfg: cfg.clone(), root, conn: Mutex::new(None), seen_key: Default::default(), dirs: Default::default() })
+        Ok(Self { cfg: cfg.clone(), root, conn: Mutex::new(None), seen_key: Default::default(), first_key: Default::default(), dirs: Default::default() })
     }
 
     /// Host key fingerprint seen on the most recent connection (recorded when a location is added)
@@ -168,7 +171,7 @@ impl SftpStorage {
 
     async fn connect(&self) -> io::Result<Conn> {
         let cfg = &self.cfg;
-        let expected = Some(cfg.host_key.trim().to_string()).filter(|k| !k.is_empty());
+        let expected = Some(cfg.host_key.trim().to_string()).filter(|k| !k.is_empty()).or_else(|| self.first_key.lock().unwrap().clone());
         let handler = Handler { expected: expected.clone(), seen: self.seen_key.clone() };
         let config = client::Config {
             inactivity_timeout: Some(Duration::from_secs(600)),
@@ -204,6 +207,9 @@ impl SftpStorage {
         .map_err(unavailable)?;
         if !authed.success() {
             return Err(denied("Incorrect username, password, or private key. Couldn't sign in to SFTP.", "authentication failed"));
+        }
+        if expected.is_none() {
+            *self.first_key.lock().unwrap() = self.host_key();
         }
         let channel = handle.channel_open_session().await.map_err(unavailable)?;
         channel.request_subsystem(true, "sftp").await.map_err(unavailable)?;
@@ -718,6 +724,11 @@ mod tests {
     }
 
     async fn server(password: &'static str) -> Server {
+        server_on(password, 0).await
+    }
+
+    /// `server` on a given port (0: any free one)
+    async fn server_on(password: &'static str, port: u16) -> Server {
         let dir = std::env::temp_dir().join(format!("thirtyfile-sftp-{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(dir.join("files")).unwrap();
         let key = keys::PrivateKey::from(keys::ssh_key::private::Ed25519Keypair::from_seed(&rand::random()));
@@ -728,7 +739,18 @@ mod tests {
             auth_rejection_time_initial: Some(Duration::ZERO),
             ..Default::default()
         });
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut tries = 0;
+        let listener = loop {
+            // A port just given up may take a moment to be free again
+            match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
+                Ok(l) => break l,
+                Err(_) if tries < 100 => {
+                    tries += 1;
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                Err(e) => panic!("{e}"),
+            }
+        };
         let port = listener.local_addr().unwrap().port();
         let root = dir.clone();
         let task = tokio::spawn(async move {
@@ -882,5 +904,23 @@ mod tests {
         let cfg = SftpConfig { host: "127.0.0.1".into(), port, username: "backup".into(), password: testutil::wrong_password(), ..Default::default() };
         let err = SftpStorage::new(&cfg).unwrap().ping().await.unwrap_err();
         assert_eq!(message(&err), UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn the_key_seen_first_is_the_one_every_reconnection_must_show() {
+        let s = server(testutil::password()).await;
+        // A new location: no key recorded yet, so the first connection records the one it sees
+        let st = storage(&s, testutil::password(), "");
+        st.check().await.unwrap();
+        assert_eq!(st.host_key(), Some(s.fingerprint.clone()));
+        // Another server (or someone in between) answers at the same address: the same storage, without a restart,
+        // refuses it
+        let port = s.port;
+        drop(s);
+        let other = server_on(testutil::password(), port).await;
+        st.reset().await;
+        let err = st.ping().await.unwrap_err();
+        assert!(message(&err).starts_with("The host key doesn't match"), "{}", message(&err));
+        drop(other);
     }
 }

@@ -342,7 +342,8 @@ pub async fn upload_logo(State(st): State<AppState>, Admin(user): Admin, Path(v)
     let dir = logo_dir(&st);
     tokio::fs::create_dir_all(&dir).await?;
     let ts = now();
-    let file = format!("logo-{}-{ts}.{ext}", if dark { "dark" } else { "light" });
+    // A name of its own each time: two uploads within a second must not share one (the older file is removed after)
+    let file = format!("logo-{}-{ts}-{}.{ext}", if dark { "dark" } else { "light" }, crate::util::new_id());
     tokio::fs::write(dir.join(&file), &body).await?;
 
     let mut b = st.branding.read().unwrap().clone();
@@ -381,7 +382,7 @@ pub async fn upload_background(State(st): State<AppState>, Admin(user): Admin, b
     let dir = logo_dir(&st);
     tokio::fs::create_dir_all(&dir).await?;
     let ts = now();
-    let file = format!("login-bg-{ts}.{ext}");
+    let file = format!("login-bg-{ts}-{}.{ext}", crate::util::new_id());
     tokio::fs::write(dir.join(&file), &body).await?;
 
     let mut b = st.branding.read().unwrap().clone();
@@ -517,6 +518,23 @@ mod tests {
         let _ = delete_logo(State(env.st.clone()), Admin(admin), Path("light".into())).await.unwrap();
         assert!(logo(State(env.st.clone()), Query(LogoQuery { dark: false })).await.is_err());
         assert_eq!(std::fs::read_dir(env.dir.join("branding")).unwrap().count(), 1, "the old file was removed");
+    }
+
+    #[tokio::test]
+    async fn a_picture_changed_twice_in_a_row_keeps_the_new_one() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        for body in [&b"\x89PNG\r\n\x1a\nfirst"[..], &b"\x89PNG\r\n\x1a\nsecond"[..]] {
+            let _ = upload_logo(State(env.st.clone()), Admin(admin.clone()), Path("light".into()), Bytes::from_static(body)).await.unwrap();
+        }
+        let res = logo(State(env.st.clone()), Query(LogoQuery { dark: false })).await.unwrap();
+        assert_eq!(axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap().as_ref(), b"\x89PNG\r\n\x1a\nsecond");
+        for body in [&b"\xff\xd8\xff\xe0first"[..], &b"\xff\xd8\xff\xe0second"[..]] {
+            let _ = upload_background(State(env.st.clone()), Admin(admin.clone()), Bytes::from_static(body)).await.unwrap();
+        }
+        let res = background(State(env.st.clone())).await.unwrap();
+        assert_eq!(axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap().as_ref(), b"\xff\xd8\xff\xe0second");
+        assert_eq!(std::fs::read_dir(env.dir.join("branding")).unwrap().count(), 2, "the replaced files were removed");
     }
 
     #[tokio::test]
