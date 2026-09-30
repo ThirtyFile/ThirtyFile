@@ -333,7 +333,7 @@ mod tests {
     async fn with_the_policy_off_new_users_get_no_personal_space() {
         let env = testutil::folders_env().await;
         set_policy(&env, json!({ "personal_spaces": false })).await;
-        assert!(!crate::db::load_system_settings(&env.st.db).await.unwrap().personal_spaces, "the setting is saved");
+        assert!(!crate::settings::load_system_settings(&env.st.db).await.unwrap().personal_spaces, "the setting is saved");
         let amy = new_user(&env, "amy", json!({})).await.unwrap();
         assert!(!amy.personal_space);
         assert_eq!(personal(&env, amy.id).await, (None, None, None));

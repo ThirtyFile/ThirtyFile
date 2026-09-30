@@ -3,8 +3,9 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use crate::{
+    admin::NewUser,
     auth::{self, User},
-    db::{self, NewUser},
+    db,
     state::{AppState, Setup},
     storage::{LocalStorage, Storage},
     util::{new_id, now},
@@ -52,9 +53,9 @@ async fn make_env(space_folders: bool) -> TestEnv {
     crate::storage::prepare_builtin(&dir.join("blobs"), false).unwrap();
     let space_folders = space_folders.then(|| dir.join("blobs"));
     let db = db::connect(&dir.join("drive.db"), 16).await.unwrap();
-    db::bootstrap_admin(&db, Some(password()), space_folders.as_deref()).await.unwrap();
-    db::create_company_space(&db, space_folders.as_deref()).await.unwrap();
-    let system = db::load_system_settings(&db).await.unwrap();
+    crate::settings::bootstrap_admin(&db, Some(password()), space_folders.as_deref()).await.unwrap();
+    crate::settings::create_company_space(&db, space_folders.as_deref()).await.unwrap();
+    let system = crate::settings::load_system_settings(&db).await.unwrap();
     let mut storages: HashMap<String, Arc<dyn Storage>> = HashMap::new();
     storages.insert("local".into(), Arc::new(LocalStorage::new(dir.join("blobs"), "local")));
     let (log_tx, log_rx) = crate::logs::channel();
@@ -87,7 +88,7 @@ impl TestEnv {
         let mut conn = self.st.db.acquire().await.unwrap();
         let password_hash = auth::hash_password(password().into()).await.unwrap();
         let location = crate::locations::default_location(&mut conn).await.unwrap();
-        let id = db::create_user(
+        let id = crate::admin::create_user(
             &mut conn,
             NewUser {
                 username: name,

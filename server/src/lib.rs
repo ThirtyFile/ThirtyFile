@@ -36,6 +36,7 @@ mod replicas;
 mod reset;
 mod secrets;
 mod sessions;
+mod settings;
 mod shares;
 mod space_folders;
 mod state;

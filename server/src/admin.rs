@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     auth::{Admin, hash_password, min_password, validate_password},
-    db::{NewUser, add_grant, create_user, set_setting},
+    db::{add_grant, set_setting},
     error::{AppError, AppResult},
     logs,
     state::AppState,
@@ -987,6 +987,55 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
     Ok(Json(system_info(&st).await?))
 }
 
+pub struct NewUser<'a> {
+    pub username: &'a str,
+    /// Argon2 hash (see `auth::hash_password`); hashed by the caller before taking the write lock, as it takes ~100 ms
+    pub password_hash: &'a str,
+    pub role: &'a str,
+    pub can_write: bool,
+    pub can_delete: bool,
+    pub can_share: bool,
+    pub quota_bytes: i64,
+    /// 'password' for accounts created by an administrator, otherwise the sign-in provider that created the account
+    pub source: &'a str,
+    /// Automatically created accounts: the provider's identifier of the person
+    pub provisioned_by: Option<&'a str>,
+    /// The storage location of their personal space ("My files"), or None for no personal space (see
+    /// `personal::choose`). When the space can't be created there now, it is created later (personal.rs).
+    pub personal_space: Option<&'a str>,
+    /// `AppState::space_folders`: their "My files" is a folder space in `users/<user name>` when its location is a
+    /// folder of this server
+    pub space_folders: Option<&'a std::path::Path>,
+}
+
+/// Creates a user, with their personal space when `u.personal_space` names its location, returning the user id. The
+/// caller must hold the write lock, and calls `folders::spaces_changed` after committing (the personal space may be a
+/// folder space).
+pub async fn create_user(conn: &mut sqlx::SqliteConnection, u: NewUser<'_>) -> AppResult<i64> {
+    let id = crate::db::next_id(conn, crate::db::Counted::Users).await?;
+    sqlx::query(
+        "INSERT INTO users (id, username, password_hash, role, can_write, can_delete, can_share, quota_bytes, created_at, source, provisioned_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(id)
+    .bind(u.username)
+    .bind(u.password_hash)
+    .bind(u.role)
+    .bind(u.can_write)
+    .bind(u.can_delete)
+    .bind(u.can_share)
+    .bind(u.quota_bytes)
+    .bind(crate::util::now())
+    .bind(u.source)
+    .bind(u.provisioned_by)
+    .execute(&mut *conn)
+    .await?;
+    if let Some(location) = u.personal_space {
+        crate::personal::create_or_wait(conn, u.space_folders, id, u.username, location).await?;
+    }
+    Ok(id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1116,7 +1165,7 @@ mod tests {
         assert_eq!(c.quota_bytes, 0);
 
         // The setting is saved and survives restarts
-        assert_eq!(crate::db::load_system_settings(&env.st.db).await.unwrap().default_user_quota, 10 * gb);
+        assert_eq!(crate::settings::load_system_settings(&env.st.db).await.unwrap().default_user_quota, 10 * gb);
         let bad = SettingsReq { default_user_quota: Some(-1), ..Default::default() };
         assert!(update_settings(State(env.st.clone()), Admin(admin), Json(bad)).await.is_err());
     }
@@ -1129,7 +1178,7 @@ mod tests {
         let settings = SettingsReq { default_lang: Some("zh-TW".into()), ..Default::default() };
         let Json(info) = update_settings(State(env.st.clone()), Admin(admin.clone()), Json(settings)).await.unwrap();
         assert_eq!(info.default_lang, "zh-TW");
-        assert_eq!(crate::db::load_system_settings(&env.st.db).await.unwrap().default_lang, "zh-TW");
+        assert_eq!(crate::settings::load_system_settings(&env.st.db).await.unwrap().default_lang, "zh-TW");
         let bad = SettingsReq { default_lang: Some("fr".into()), ..Default::default() };
         assert!(update_settings(State(env.st.clone()), Admin(admin), Json(bad)).await.is_err());
         assert_eq!(env.st.system.read().unwrap().default_lang, "zh-TW");
@@ -1146,7 +1195,7 @@ mod tests {
         let settings = SettingsReq { min_password_length: Some(12), require_two_factor: Some(true), ..Default::default() };
         let Json(info) = update_settings(State(env.st.clone()), Admin(admin.clone()), Json(settings)).await.unwrap();
         assert!(info.min_password_length == 12 && info.require_two_factor);
-        let saved = crate::db::load_system_settings(&env.st.db).await.unwrap();
+        let saved = crate::settings::load_system_settings(&env.st.db).await.unwrap();
         assert!(saved.min_password_length == 12 && saved.require_two_factor);
 
         let mut short = req("carol", None);
@@ -1177,7 +1226,7 @@ mod tests {
         let settings = SettingsReq { public_url: Some("https://drive.example.com/".into()), ..Default::default() };
         let Json(info) = update_settings(State(env.st.clone()), Admin(admin), Json(settings)).await.unwrap();
         assert_eq!(info.public_url, "https://drive.example.com");
-        assert_eq!(crate::db::load_system_settings(&env.st.db).await.unwrap().public_url, "https://drive.example.com");
+        assert_eq!(crate::settings::load_system_settings(&env.st.db).await.unwrap().public_url, "https://drive.example.com");
         let amy = env.user("amy", true).await;
         let Json(me) = crate::auth::me(State(env.st.clone()), amy).await.unwrap();
         assert_eq!(me.public_url, "https://drive.example.com");
