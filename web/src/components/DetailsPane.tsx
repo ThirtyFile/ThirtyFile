@@ -6,7 +6,7 @@ import { keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
 import { FileIcon, canBrowserThumbnail, canThumbnail, typeLabel } from "@/components/FileIcon";
-import { Thumb } from "@/components/FileList";
+import { Thumb } from "@/components/fileList/thumbs";
 import { Resizer } from "@/components/Resizer";
 import { VersionsSection } from "@/components/VersionsSection";
 import { ROLE_LABEL } from "@/lib/drives";

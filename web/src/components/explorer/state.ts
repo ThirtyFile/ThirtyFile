@@ -2,7 +2,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
-import type { ListNav, ViewMode } from "@/components/FileList";
+import type { ListNav } from "@/components/FileList";
+import type { ViewMode } from "@/components/fileList/layout";
 import { useClipboard } from "@/lib/clipboard";
 import { capsOf } from "@/lib/drives";
 import { focusIsFree } from "@/lib/focus";
