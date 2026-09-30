@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The checks of a pull request, the same ones the tests on GitHub run (.github/workflows/build.yml calls this script):
 #   scripts/check.sh           everything below, in this order
-#   scripts/check.sh web       the interface: dependencies as locked, translations, types, lint, unit tests
+#   scripts/check.sh web       the interface: dependencies as locked, translations, the Office code's boundary,
+#                              types, lint, unit tests
 #   scripts/check.sh server    the server: tests, and clippy with warnings as errors
 #   scripts/check.sh e2e       the end-to-end test in a real browser (sign in, upload, preview, download), against a
 #                              server built from here (the first time, get the browser: cd web && pnpm exec
@@ -14,6 +15,7 @@ web() {
   cd "$ROOT/web"
   pnpm install --frozen-lockfile
   node scripts/check-i18n.mjs
+  node scripts/check-boundaries.mjs
   pnpm typecheck
   pnpm lint
   pnpm test "$@"
