@@ -1,11 +1,10 @@
 import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { CopyIcon, FolderOpenIcon, LinkIcon, PanelTopIcon, UsersRoundIcon } from "lucide-react";
-import { toast } from "sonner";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { AccessDialog } from "@/components/AccessDialog";
-import { copyText } from "@/lib/utils";
+import { copyAndSay } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 import { useTabActions } from "@/tabs";
 
@@ -48,8 +47,7 @@ export function NavMenu(props: {
           {props.path && (
             <DropdownMenuItem
               onClick={async () => {
-                await copyText(props.path!);
-                toast.success(t("Path copied"));
+                await copyAndSay(props.path!, t("Path copied"));
               }}
             >
               <CopyIcon /> {t("Copy path")}
@@ -57,8 +55,7 @@ export function NavMenu(props: {
           )}
           <DropdownMenuItem
             onClick={async () => {
-              await copyText(location.origin + props.to);
-              toast.success(t("Link copied (people need to sign in and have access to open it)"));
+              await copyAndSay(location.origin + props.to, t("Link copied (people need to sign in and have access to open it)"));
             }}
           >
             <LinkIcon /> {t("Copy link")}

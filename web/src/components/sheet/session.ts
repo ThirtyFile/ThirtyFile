@@ -178,9 +178,12 @@ export function reusableSession(node: Node): Session | undefined {
   return undefined;
 }
 
-/** Load a workbook into a new session. It isn't kept for reuse until `keepSession` (the editor may be closed while loading) */
-export async function openSession(node: Node, source: FileSource): Promise<Session> {
-  const { zip, book, snapshot } = await readXlsx(await fetchOffice(source.contentUrl(node)));
+/**
+ * Load a workbook into a new session. It isn't kept for reuse until `keepSession` (the editor may be closed while
+ * loading); `signal` stops the download then
+ */
+export async function openSession(node: Node, source: FileSource, signal?: AbortSignal): Promise<Session> {
+  const { zip, book, snapshot } = await readXlsx(await fetchOffice(source.contentUrl(node), signal));
   return {
     zip,
     book,

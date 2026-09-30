@@ -27,6 +27,7 @@ export default {
   "Downloaded {n} time|Downloaded {n} times": "已下載 {n} 次",
   "{n} day|{n} days": "{n} 天",
   "Share link created and copied to clipboard": "已建立分享連結並複製到剪貼簿",
+  "Share link created": "已建立分享連結",
   "Share link for “{name}”": "分享「{name}」",
   "Anyone with the link can browse and download the folder's contents.": "任何取得連結的人都可以瀏覽並下載資料夾內容。",
   "Anyone with the link can view and download this file.": "任何取得連結的人都可以檢視並下載這個檔案。",

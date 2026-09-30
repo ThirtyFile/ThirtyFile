@@ -7,6 +7,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/component
 import { ConfirmDialog } from "@/components/dialogs";
 import { setDraft } from "@/lib/drafts";
 import { t, tc } from "@/lib/i18n";
+import { shortcut } from "@/lib/keys";
 import { cn } from "@/lib/utils";
 import {
   Axis,
@@ -65,9 +66,11 @@ export default function SheetEditor(props: { node: Node; source: FileSource; onS
       return;
     }
     let cancelled = false;
+    // Closing the editor (or moving to another file) while the workbook downloads stops the download
+    const abort = new AbortController();
     setSession(null);
     setError(null);
-    openSession(node, props.source)
+    openSession(node, props.source, abort.signal)
       .then((s) => {
         // Closed (or moved to another file) while loading: don't keep the workbook in memory
         if (cancelled) return;
@@ -77,6 +80,7 @@ export default function SheetEditor(props: { node: Node; source: FileSource; onS
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : t("Couldn't open this spreadsheet")));
     return () => {
       cancelled = true;
+      abort.abort();
     };
     // Load only when the file changes or a reload is requested; updated_at changing after a save doesn't require reloading
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every save
@@ -547,16 +551,16 @@ function Workspace({
           }}
         />
         <div className="flex shrink-0 items-center gap-1">
-          <Button variant="ghost" size="icon-sm" title={t("Undo (Ctrl+Z)")} aria-label={t("Undo")} disabled={!session.undo.length} onClick={undo}>
+          <Button variant="ghost" size="icon-sm" title={t("{action} ({keys})", { action: t("Undo"), keys: shortcut("Ctrl+Z") })} aria-label={t("Undo")} disabled={!session.undo.length} onClick={undo}>
             <Undo2Icon />
           </Button>
-          <Button variant="ghost" size="icon-sm" title={t("Redo (Ctrl+Y)")} aria-label={t("Redo")} disabled={!session.redo.length} onClick={redo}>
+          <Button variant="ghost" size="icon-sm" title={t("{action} ({keys})", { action: t("Redo"), keys: shortcut("Ctrl+Y") })} aria-label={t("Redo")} disabled={!session.redo.length} onClick={redo}>
             <Redo2Icon />
           </Button>
           <Button size="sm" disabled={!dirty || saving} onClick={() => void save()}>
             {saving ? <Loader2Icon className="animate-spin" /> : <SaveIcon />}
             {t("Save")}
-            <kbd className="ml-1 text-[10px] opacity-60 max-md:hidden">Ctrl+S</kbd>
+            <kbd className="ml-1 text-[10px] opacity-60 max-md:hidden">{shortcut("Ctrl+S")}</kbd>
           </Button>
           <Button variant="outline" size="sm" onClick={exit}>
             <XIcon /> {t("Done editing")}
@@ -648,7 +652,7 @@ function Workspace({
               try {
                 pasteText(await navigator.clipboard.readText());
               } catch {
-                toast.info(t("Your browser doesn't allow reading the clipboard from the menu. Use Ctrl+V instead."));
+                toast.info(t("Your browser doesn't allow reading the clipboard from the menu. Use {keys} instead.", { keys: shortcut("Ctrl+V") }));
               }
             }}
             onInsertRows={actions.insertRows}

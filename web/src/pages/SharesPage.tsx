@@ -10,7 +10,7 @@ import { FileIcon } from "@/components/FileIcon";
 import { Frame, ToolButton, ToolSeparator, type FrameProps } from "@/components/Frame";
 import { EditShareDialog, LinksOffNotice, LocalLinkWarning, deleteLinkQuestion, sharePath, shareSpace, useShareLink } from "@/components/ShareDialog";
 import { confirm } from "@/components/confirm";
-import { copyText, formatDate, formatDateTime } from "@/lib/utils";
+import { copyAndSay, formatDate, formatDateTime } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ShareAccessLog } from "@/components/logs/ShareAccessLog";
 import { useMe } from "@/lib/session";
@@ -93,8 +93,7 @@ export function ShareLinks({
   };
 
   const copy = async (id: string) => {
-    await copyText(shareLink(id));
-    toast.success(t("Link copied"));
+    await copyAndSay(shareLink(id), t("Link copied"));
   };
 
   const toolbar = (

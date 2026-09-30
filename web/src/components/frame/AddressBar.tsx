@@ -331,7 +331,7 @@ export function AddressBar({
           title={copied ? t("Path copied") : t("Copy path")}
           onMouseDown={(e) => e.preventDefault()}
           onClick={async () => {
-            await copyText(path);
+            if (!(await copyText(path))) return void toast.error(t("Couldn't copy"));
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);
           }}

@@ -9,6 +9,7 @@ import { ApiError, api, fetchOk, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
 import { getDraft, setDraft, textSaved } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
+import { shortcut } from "@/lib/keys";
 import { decodeText, encodeText, lineEnding, normalizeLines, type TextEncodingName } from "@/lib/textEncoding";
 import { useTheme } from "@/lib/theme";
 
@@ -175,7 +176,7 @@ export default function TextEditor(props: {
           <Button size="sm" disabled={!dirty || saving} onClick={() => saveRef.current()}>
             {saving ? <Loader2Icon className="animate-spin" /> : <SaveIcon />}
             {t("Save")}
-            <kbd className="ml-1 text-[10px] opacity-60">Ctrl+S</kbd>
+            <kbd className="ml-1 text-[10px] opacity-60">{shortcut("Ctrl+S")}</kbd>
           </Button>
         )}
       </div>

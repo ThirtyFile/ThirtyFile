@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { XIcon } from "lucide-react";
 import { api, privateSource, type FolderContents, type HistoryEntry, type Node } from "@/api";
@@ -24,6 +24,22 @@ function containsText(c: Pick<FolderContents, "files" | "folders">) {
 }
 
 const add = (a: FolderContents, b: FolderContents): FolderContents => ({ size: a.size + b.size, files: a.files + b.files, folders: a.folders + b.folders });
+
+/** How long the selection has to stay the same before its details are asked for */
+const SETTLE_MS = 250;
+
+/**
+ * `value` once it has stayed the same for `ms`: moving through a list with the arrow keys doesn't ask the server about
+ * every item passed (a held key would send hundreds of requests). The first value is there at once.
+ */
+function useSettled<T>(value: T, ms: number): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(timer);
+  }, [value, ms]);
+  return settled;
+}
 
 /** The server sends at most this many entries */
 const HISTORY_LIMIT = 50;
@@ -65,16 +81,24 @@ function History({ node, query }: { node: Node; query: { data?: HistoryEntry[]; 
 export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; folder?: Node; onClose(): void }) {
   const [width, setWidth] = usePersisted("tf-details-width", PANE_DEFAULT_WIDTH);
   const node = selected.length === 1 ? selected[0] : selected.length === 0 ? folder : undefined;
-  const info = useQuery({ queryKey: ["node", node?.id], queryFn: () => api.node(node!.id), enabled: !!node });
   // What folders hold is summed on the server (every level, not the trash): one folder, or the folders of a selection
   const folderIds = node ? (node.kind === "folder" ? [node.id] : []) : selected.filter((n) => n.kind === "folder").map((n) => n.id);
+  // Details are asked for once the selection stays put (what is known already shows at once), and a request for an
+  // item left meanwhile is cancelled: React Query aborts its signal when nothing shows its answer any more
+  const shownKey = `${node?.id ?? ""}|${folderIds.join()}`;
+  const ready = useSettled(shownKey, SETTLE_MS) === shownKey;
+  const info = useQuery({ queryKey: ["node", node?.id], queryFn: ({ signal }) => api.node(node!.id, signal), enabled: ready && !!node });
   const contents = useQuery({
     queryKey: [FOLDER_CONTENTS, ...folderIds],
-    queryFn: () => api.contents(folderIds),
-    enabled: folderIds.length > 0,
+    queryFn: ({ signal }) => api.contents(folderIds, signal),
+    enabled: ready && folderIds.length > 0,
   });
-  const history = useQuery({ queryKey: ["node", node?.id, "history"], queryFn: () => api.history(node!.id), enabled: !!node });
-  const shares = useQuery({ queryKey: ["shares", node?.id], queryFn: () => api.shares(node!.id), enabled: !!node && !!node.parent_id });
+  const history = useQuery({ queryKey: ["node", node?.id, "history"], queryFn: ({ signal }) => api.history(node!.id, signal), enabled: ready && !!node });
+  const shares = useQuery({
+    queryKey: ["shares", node?.id],
+    queryFn: ({ signal }) => api.shares(node!.id, {}, signal),
+    enabled: ready && !!node && !!node.parent_id,
+  });
   // On narrow windows the pane covers the file list: focus moves into it, Esc closes it and focus goes back.
   // The list stays usable beside it, so focus isn't kept inside
   const ref = useRef<HTMLElement>(null);
@@ -161,7 +185,7 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
             />
           )}
           {node.kind === "file" && !node.trashed_at && (
-            <VersionsSection node={node} canRestore={!!info.data && info.data.role !== "viewer" && !info.data.read_only} />
+            <VersionsSection node={node} ready={ready} canRestore={!!info.data && info.data.role !== "viewer" && !info.data.read_only} />
           )}
         </div>
       </>

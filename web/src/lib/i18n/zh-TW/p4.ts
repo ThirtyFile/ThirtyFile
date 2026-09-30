@@ -172,6 +172,7 @@ export default {
   "Search results for \"{term}\"": "搜尋「{term}」",
   "No matching files found": "找不到符合的檔案",
   "Restored {n} item|Restored {n} items": "已還原 {n} 個項目",
+  "Nothing was restored: every item was skipped": "所有項目都已略過，沒有還原任何項目",
   "Couldn't restore": "還原失敗",
   "Restore": "還原",
   "Delete permanently": "永久刪除",

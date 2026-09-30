@@ -11,11 +11,16 @@ import { invalidateFiles } from "@/lib/queries";
 import { useMe } from "@/lib/session";
 import { formatBytes, formatWinDate } from "@/lib/utils";
 
-export function VersionsSection({ node, canRestore }: { node: Node; canRestore: boolean }) {
+/** `ready`: the selection has stayed on this file for a moment, so its versions are asked for */
+export function VersionsSection({ node, canRestore, ready = true }: { node: Node; canRestore: boolean; ready?: boolean }) {
   const me = useMe();
   const qc = useQueryClient();
   // Keyed by the file's version too, so saving or restoring lists the new one
-  const versions = useQuery({ queryKey: ["versions", node.id, node.updated_at], queryFn: () => api.versions(node.id) });
+  const versions = useQuery({
+    queryKey: ["versions", node.id, node.updated_at],
+    queryFn: ({ signal }) => api.versions(node.id, signal),
+    enabled: ready,
+  });
 
   const restore = async (v: FileVersion) => {
     const ok = await confirm({
