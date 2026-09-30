@@ -146,7 +146,7 @@ export default {
   "S3-compatible": "S3 相容",
   "Local folder": "本機資料夾",
   "Files with identical content are stored only once across the system. If other spaces have the same files, they'll be moved too.": "內容相同的檔案全系統只存一份；若其他空間也有同樣的檔案，搬移時會一起移動。",
-  // pages/MovesPage.tsx
+  // admin/storage/MovesPage.tsx
   "Moving": "搬移中",
   "Paused": "已暫停",
   "Stopped by an error": "因錯誤停止",

@@ -28,7 +28,7 @@ import { CreateDriveDialog } from "@/components/DriveDialogs";
 import { ConfirmDialog, ErrorText, NameDialog } from "@/components/dialogs";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { DRIVE_ICON, DRIVE_KIND_LABEL, ROLE_LABEL, driveLabel } from "@/lib/drives";
-import { useSettingsSearch } from "@/lib/controlPanel";
+import { useSettingsSearch } from "@/admin/controlPanel";
 import { cn, formatBytes, formatDateTime } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -36,9 +36,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { t, tServer, tc } from "@/lib/i18n";
 import { waitForJob } from "@/lib/jobs";
 import { refreshFiles } from "@/lib/queries";
-import { useMoves } from "@/lib/moves";
-import { MoveProgress, moveRoute } from "@/pages/MovesPage";
-import { MoveDialog } from "@/components/MoveDialog";
+import { useMoves } from "@/admin/storage/moves";
+import { MoveProgress, moveRoute } from "@/admin/storage/MoveProgress";
+import { MoveDialog } from "@/admin/storage/MoveDialog";
 
 const GB = 1024 ** 3;
 

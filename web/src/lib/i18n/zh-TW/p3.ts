@@ -52,7 +52,7 @@ export default {
   "Spaces": "空間",
   "Users and groups": "使用者與群組",
   "System": "系統",
-  // lib/controlPanel.ts
+  // admin/controlPanel.ts
   "Users and permissions": "使用者與權限",
   "Spaces and storage": "空間與儲存",
   "Users": "使用者",
@@ -77,7 +77,7 @@ export default {
   "Search user actions, sign-ins, and share link access; filter and export": "查詢使用者的操作、登入，以及分享連結的存取紀錄，可篩選與匯出",
   "Log settings": "紀錄設定",
   "How long logs are kept, whether older logs are archived or deleted, and whether visitor IPs are recorded": "紀錄保留多久、超過後壓縮封存或刪除、是否記錄訪客 IP",
-  // pages/ControlPanelPage.tsx
+  // admin/ControlPanelPage.tsx
   "{n} user|{n} users": "{n} 位使用者",
   "{n} user found|{n} users found": "找到 {n} 位使用者",
   "Search users": "搜尋使用者",
@@ -100,7 +100,7 @@ export default {
   "\"{name}\" selected": "已選取「{name}」",
   "{n} item|{n} items": "{n} 個項目",
   "No settings match \"{query}\".": "找不到符合「{query}」的設定。",
-  // pages/AdminUsersPage.tsx
+  // admin/users/AdminUsersPage.tsx
   "Delete": "刪除",
   "Sign-in log": "登入紀錄",
   "Account": "帳號",
@@ -147,7 +147,7 @@ export default {
   "Cancel": "取消",
   "Save": "儲存",
   "Create": "建立",
-  // pages/GroupsPage.tsx
+  // admin/users/GroupsPage.tsx
   "New group": "新增群組",
   "Members": "成員",
   "{n} member: {names}|{n} members: {names}": "{n} 位：{names}",

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRightIcon, InfoIcon, PauseIcon, PlayIcon, RefreshCwIcon, TruckIcon, XIcon, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
-import { api, moveActive, type MoveState, type SpaceMove } from "@/api";
+import { api, moveActive, type SpaceMove } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { DataTable, EmptyState, type Column } from "@/components/DataTable";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
@@ -11,28 +11,13 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdow
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DRIVE_ICON } from "@/lib/drives";
-import { controlPanelItem, useSettingsSearch } from "@/lib/controlPanel";
+import { controlPanelItem, useSettingsSearch } from "@/admin/controlPanel";
 import { t, tServer } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
-import { useMoves } from "@/lib/moves";
+import { useMoves } from "@/admin/storage/moves";
 import { cn, formatBytes, formatDateTime } from "@/lib/utils";
 import { NativeSelect } from "@/components/ui/native-select";
-
-export const MOVE_STATE_LABEL: Record<MoveState, string> = {
-  queued: t("Waiting"),
-  running: t("Moving"),
-  paused: t("Paused"),
-  failed: t("Stopped by an error"),
-  done: t("Done"),
-  cancelled: t("Cancelled"),
-};
-
-/** How a moved space is named: personal spaces by their owner, as they are all called "My files" */
-export const moveSpaceLabel = (m: Pick<SpaceMove, "space_kind" | "space_name" | "owner_name">) =>
-  m.space_kind === "personal" && m.owner_name ? `${m.space_name} · ${m.owner_name}` : m.space_name;
-
-/** "Local disk → S3" */
-export const moveRoute = (m: SpaceMove) => `${m.from_name || t("A folder on the server")} → ${m.to_name}`;
+import { MOVE_STATE_LABEL, moveSpaceLabel, moveRoute, MoveProgress } from "@/admin/storage/MoveProgress";
 
 /** Time left at the current speed */
 function timeLeft(m: SpaceMove) {
@@ -41,32 +26,6 @@ function timeLeft(m: SpaceMove) {
   if (s < 60) return t("{s} s left", { s });
   if (s < 3600) return t("{m} min {s} s left", { m: Math.floor(s / 60), s: s % 60 });
   return t("{h} h {m} min left", { h: Math.floor(s / 3600), m: Math.floor((s % 3600) / 60) });
-}
-
-/** A move's progress: a bar with what is copied, in files and bytes */
-export function MoveProgress({ m, compact }: { m: SpaceMove; compact?: boolean }) {
-  const pct = m.bytes_total > 0 ? Math.min(100, (m.bytes_done / m.bytes_total) * 100) : m.state === "done" ? 100 : 0;
-  const label = t("{done} of {total} files · {bytes} of {size}", {
-    done: m.files_done,
-    total: m.files_total,
-    bytes: formatBytes(m.bytes_done),
-    size: formatBytes(m.bytes_total),
-  });
-  return (
-    <span className="grid min-w-0 gap-0.5">
-      <span
-        role="progressbar"
-        aria-label={label}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(pct)}
-        className="h-1.5 overflow-hidden rounded bg-muted"
-      >
-        <span className={cn("block h-full transition-[width]", m.state === "failed" ? "bg-destructive" : "bg-brand")} style={{ width: `${pct}%` }} />
-      </span>
-      {!compact && <span className="truncate text-[11px] text-muted-foreground tabular-nums">{label}</span>}
-    </span>
-  );
 }
 
 /** Control panel › Moves: spaces being moved to another storage location, those waiting, and the history */

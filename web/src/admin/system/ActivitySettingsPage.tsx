@@ -8,7 +8,7 @@ import { ShareAccessLog } from "@/components/logs/ShareAccessLog";
 import { LoginLog } from "@/components/logs/LoginLog";
 import { ErrorLog } from "@/components/logs/ErrorLog";
 import { Frame, ToolButton } from "@/components/Frame";
-import { controlPanelItem, useSettingsSearch } from "@/lib/controlPanel";
+import { controlPanelItem, useSettingsSearch } from "@/admin/controlPanel";
 import { cn } from "@/lib/utils";
 import { usePersisted } from "@/lib/session";
 import { t } from "@/lib/i18n";

@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { StorageLocations } from "@/components/StorageLocations";
+import { StorageLocations } from "@/admin/storage/StorageLocations";
 import { t } from "@/lib/i18n";
-import { Section, SettingsFrame } from "@/pages/SettingsFrame";
+import { Section, SettingsFrame } from "@/admin/SettingsFrame";
 import { keys } from "@/api/queryKeys";
 
 export function StorageSettingsPage() {

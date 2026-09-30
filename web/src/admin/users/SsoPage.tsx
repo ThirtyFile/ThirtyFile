@@ -14,7 +14,7 @@ import { LocationSelect } from "@/components/LocationSelect";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
 import { copyAndSay } from "@/lib/utils";
 import { t } from "@/lib/i18n";
-import { Section, SettingsFrame, Toggle } from "@/pages/SettingsFrame";
+import { Section, SettingsFrame, Toggle } from "@/admin/SettingsFrame";
 import { NativeSelect } from "@/components/ui/native-select";
 
 const PROVIDERS: SsoProviderId[] = ["microsoft", "google", "github", "oidc"];

@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArchiveIcon, CalendarClockIcon, DatabaseIcon, KeyRoundIcon, ShieldCheckIcon, FilesIcon, FolderOpenIcon, FolderSyncIcon, GlobeIcon, HardDriveIcon, HistoryIcon, LanguagesIcon, Link2Icon } from "lucide-react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { api, type DefaultLang, type SystemSettingsReq } from "@/api";
-import { keys } from "@/api/queryKeys";
+import { keys, queries } from "@/api/queryKeys";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pending } from "@/components/ErrorState";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import { LocationSelect } from "@/components/LocationSelect";
 import { cn, formatBytes } from "@/lib/utils";
 import { LANGS, t } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
-import { Toggle, Section, SettingsFrame, useSystem } from "@/pages/SettingsFrame";
+import { Toggle, Section, SettingsFrame } from "@/admin/SettingsFrame";
 
 const GB = 1024 ** 3;
 
@@ -204,7 +204,7 @@ function PublicUrlInput({ value, saving, onSave }: { value: string; saving: bool
 
 export function GeneralSettingsPage() {
   const qc = useQueryClient();
-  const q = useSystem();
+  const q = useQuery(queries.system);
   const [confirmDisable, setConfirmDisable] = useState(false);
   const [confirmLinksOff, setConfirmLinksOff] = useState(false);
 

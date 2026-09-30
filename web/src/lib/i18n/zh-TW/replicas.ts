@@ -1,9 +1,9 @@
 /** Replicas: Control panel › Replicas, the replica settings, promoting a location, notifications and the activity log */
 export default {
-  // Control panel (lib/controlPanel.ts) and storage locations (components/StorageLocations.tsx)
+  // Control panel (admin/controlPanel.ts) and storage locations (admin/storage/StorageLocations.tsx)
   "Keep the files of a location on other locations too, read from them when it fails, and promote one": "把位置上的檔案也存放到其他位置，在它故障時從那裡讀取，並可提升其中一個",
   "Replicate…": "製作複本…",
-  // States (lib/replicas.ts)
+  // States (admin/storage/replicas.ts)
   "Current": "最新",
   "Syncing": "同步中",
   "First copy": "首次複製",
@@ -11,7 +11,7 @@ export default {
   "Damaged copies": "複本損毀",
   "Old primary, being checked": "舊的主要位置，檢查中",
   "Needs attention": "需要處理",
-  // Control panel › Replicas (pages/ReplicasPage.tsx)
+  // Control panel › Replicas (admin/storage/ReplicasPage.tsx)
   "{current} of {wanted} copies current": "{wanted} 個複本中有 {current} 個是最新的",
   "\"{name}\": copies are being brought up to date": "「{name}」：正在更新複本",
   "\"{name}\": copies are being read back and checked": "「{name}」：正在讀回並檢查複本",
@@ -63,7 +63,7 @@ export default {
   "Not synced yet": "尚未同步",
   "Pauses after the item it is copying": "會在目前複製的項目完成後暫停",
   "Continues": "繼續進行",
-  // Promoting a location (pages/ReplicasPage.tsx)
+  // Promoting a location (admin/storage/ReplicasPage.tsx)
   "Promote a location": "提升位置",
   "The spaces of {source} then read and write the copies on the location you choose. Do this when {source} has failed or is being retired. Nothing is deleted: {source} keeps what it has, and becomes a location with copies once it is checked.":
     "之後 {source} 的空間會讀寫你所選位置上的複本。請在 {source} 故障或即將停用時這麼做。不會刪除任何東西：{source} 會保留它現有的內容，並在檢查後成為存放複本的位置。",
@@ -79,7 +79,7 @@ export default {
   "Running copies stop. {source} isn't written to by this server any more, and files are never moved back on their own: to go back, promote {source} later, once it is current again.":
     "進行中的複製會停止。這台伺服器不會再寫入 {source}，檔案也不會自動移回：若要改回，請在 {source} 再次成為最新後提升它。",
   "{name} holds the spaces now ({n} contents)": "{name} 現在存放這些空間（{n} 個內容）",
-  // Replica settings (components/ReplicaPolicyDialog.tsx)
+  // Replica settings (admin/storage/ReplicaPolicyDialog.tsx)
   "\"{name}\" was made; the first copies are being made in the background": "已建立「{name}」；正在背景製作第一批複本",
   "New replicas": "新增複本",
   "The files of the spaces of a location are kept on other locations too, checked, and read from there when the location fails. A replica holds the files as they are now, not earlier states: for those, make a backup.":
