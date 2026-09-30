@@ -35,6 +35,8 @@ export interface ExplorerProps {
   error?: Error | null;
   /** Current folder; when set, uploading and creating are possible */
   folderId?: string;
+  /** The space the folder is in (not when it was reached through a share) */
+  spaceId?: string;
   /** A folder space: nothing can be changed from the web yet */
   readOnly?: boolean;
   crumbs: Crumb[];
@@ -134,6 +136,7 @@ export function Explorer(p: ExplorerProps) {
       path={p.path}
       upTo={p.upTo}
       activeFolder={p.folderId}
+      space={p.spaceId}
       footer={footer}
       footerRight={footerRight}
       keys

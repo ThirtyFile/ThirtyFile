@@ -679,7 +679,8 @@ pub struct SystemStats {
     trash_bytes: i64,
     /// Earlier versions of files (not counted toward the spaces' quotas)
     version_bytes: i64,
-    /// Storage actually used (duplicate files are stored only once)
+    /// Storage actually used: the content store (duplicate files are stored only once), plus the files of folder
+    /// spaces and their earlier versions, which are ordinary files on the disk
     stored_bytes: i64,
     share_links: i64,
 }
@@ -699,7 +700,9 @@ async fn system_info(st: &AppState) -> AppResult<SystemInfo> {
            (SELECT COUNT(*) FROM f WHERE kind = 'team') AS team_files,
            (SELECT COALESCE(SUM(size), 0) FROM nodes WHERE kind = 'file' AND trashed_at IS NOT NULL) AS trash_bytes,
            (SELECT COALESCE(SUM(size), 0) FROM node_versions) AS version_bytes,
-           (SELECT COALESCE(SUM(size), 0) FROM blobs) AS stored_bytes,
+           (SELECT COALESCE(SUM(size), 0) FROM blobs)
+             + (SELECT COALESCE(SUM(used_bytes), 0) FROM drives WHERE mode = 'folder')
+             + (SELECT COALESCE(SUM(size), 0) FROM node_versions WHERE blob_hash IS NULL) AS stored_bytes,
            (SELECT COUNT(*) FROM shares) AS share_links",
     )
     .fetch_one(&st.db)
@@ -972,6 +975,25 @@ mod tests {
         let first = page(None, Some(2)).await;
         assert_eq!(first, all[..2]);
         assert_eq!(page(Some(first[1]), Some(2)).await, all[2..]);
+    }
+
+    #[tokio::test]
+    async fn storage_used_counts_folder_spaces_and_the_content_store() {
+        let env = testutil::folders_env().await;
+        let admin = env.admin().await;
+        let stored = || async { system_info(&env.st).await.unwrap().stats.stored_bytes };
+        assert_eq!(stored().await, 0);
+        // A folder space (the default of a new installation): its files are on the disk as they are
+        let (company,): (String,) = sqlx::query_as("SELECT root_id FROM drives WHERE kind = 'company'").fetch_one(&env.st.db).await.unwrap();
+        env.upload(&admin, &company, "a.txt", b"12345").await;
+        assert_eq!(stored().await, 5);
+        // Content store: identical content is stored once
+        let store = testutil::env().await;
+        let admin = store.admin().await;
+        let root = admin.root_id.clone().unwrap();
+        store.stored_file(&admin, &root, "b.txt", b"abc").await;
+        store.stored_file(&admin, &root, "c.txt", b"abc").await;
+        assert_eq!(system_info(&store.st).await.unwrap().stats.stored_bytes, 3);
     }
 
     fn req(name: &str, quota: Option<i64>) -> Json<CreateReq> {

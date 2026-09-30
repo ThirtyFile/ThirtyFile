@@ -14,7 +14,7 @@ export function UsageSettingsPage() {
         [t("Team space"), formatBytes(s.team_bytes), `${t("{n} space|{n} spaces", { n: s.team_drives })} · ${t("{n} file|{n} files", { n: s.team_files })}`],
         [t("Trash"), formatBytes(s.trash_bytes)],
         [t("Earlier versions of files"), formatBytes(s.version_bytes), t("Not counted toward the spaces' sizes")],
-        [t("Actual storage used"), formatBytes(s.stored_bytes), `${t("Identical content stored once")} · ${t("{n} share link|{n} share links", { n: s.share_links })}`],
+        [t("Actual storage used"), formatBytes(s.stored_bytes), `${t("Folder spaces count their files; the content store keeps identical content once")} · ${t("{n} share link|{n} share links", { n: s.share_links })}`],
       ]
     : [];
   return (

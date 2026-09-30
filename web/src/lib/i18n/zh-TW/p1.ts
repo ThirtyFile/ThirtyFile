@@ -37,7 +37,7 @@ export default {
   // Usage
   "All files (company)": "全部檔案（公司）",
   "Actual storage used": "實際佔用空間",
-  "Identical content stored once": "相同內容只存一份",
+  "Folder spaces count their files; the content store keeps identical content once": "資料夾空間計入其檔案；內容儲存區的相同內容只存一份",
   "{n} share link|{n} share links": "{n} 個分享連結",
   "Includes all spaces and the trash": "統計所有空間與垃圾桶",
   // Activity log
