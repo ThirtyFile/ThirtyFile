@@ -692,12 +692,16 @@ const UNLOCK_ATTEMPTS: usize = 10;
 
 async fn count_download(st: &AppState, share: &Share) -> AppResult<()> {
     let _w = st.write_lock.lock().await;
+    // A write transaction (`db::begin_write`), so the link's details kept for a moment (`seen`), with the downloads
+    // counted before this one, are read again
+    let mut tx = crate::db::begin_write(&st.db).await?;
     let res = sqlx::query(
         "UPDATE shares SET downloads = downloads + 1 WHERE id = ? AND (max_downloads IS NULL OR downloads < max_downloads)",
     )
     .bind(&share.id)
-    .execute(&st.db)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     if res.rows_affected() == 0 {
         return Err(AppError::new(StatusCode::GONE, "The download limit has been reached"));
     }
