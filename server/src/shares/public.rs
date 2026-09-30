@@ -116,7 +116,7 @@ pub(super) async fn find_share(st: &AppState, token: &str) -> AppResult<(Share, 
 /// share it, and the items found within it. A folder of 200 pictures asks for 200 thumbnails at once, and each took
 /// about seven queries to check. Kept for two seconds at most, and forgotten as soon as anything changes (a write
 /// transaction begins: `db::writes`).
-pub(super) struct Seen {
+pub struct Seen {
     pub(super) at: std::time::Instant,
     pub(super) writes: u64,
     pub(super) share: Share,
@@ -124,7 +124,8 @@ pub(super) struct Seen {
     pub(super) within: std::collections::HashMap<String, Node>,
 }
 
-pub(super) static SEEN: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Seen>>> = std::sync::LazyLock::new(Default::default);
+/// `Inner::share_links`, by link token
+pub type SeenLinks = std::sync::Mutex<std::collections::HashMap<String, Seen>>;
 pub(super) const SEEN_FOR: std::time::Duration = std::time::Duration::from_secs(2);
 /// Links, and items per link, kept at most
 pub(super) const SEEN_LINKS: usize = 1000;
@@ -132,7 +133,7 @@ pub(super) const SEEN_ITEMS: usize = 5000;
 
 /// The link `token` as it was seen a moment ago, when nothing changed since and it still works
 pub(super) fn seen(st: &AppState, token: &str) -> Option<(Share, Node)> {
-    let links = SEEN.lock().unwrap();
+    let links = st.share_links.lock().unwrap();
     let s = links.get(token).filter(|s| s.at.elapsed() < SEEN_FOR && s.writes == crate::db::writes())?;
     if !policy(st).public_links || s.share.expires_at.is_some_and(|t| t <= now()) {
         return None;
@@ -141,8 +142,8 @@ pub(super) fn seen(st: &AppState, token: &str) -> Option<(Share, Node)> {
 }
 
 /// Keeps what was found of the link `token`, read after `writes` write transactions had begun
-pub(super) fn keep_seen(token: &str, share: &Share, root: &Node, writes: u64) {
-    let mut links = SEEN.lock().unwrap();
+pub(super) fn keep_seen(st: &AppState, token: &str, share: &Share, root: &Node, writes: u64) {
+    let mut links = st.share_links.lock().unwrap();
     if links.len() >= SEEN_LINKS {
         links.retain(|_, s| s.at.elapsed() < SEEN_FOR);
         if links.len() >= SEEN_LINKS {
@@ -159,7 +160,7 @@ pub(super) async fn open_share(st: &AppState, token: &str, headers: &HeaderMap) 
         None => {
             let writes = crate::db::writes();
             let (share, node) = find_share(st, token).await?;
-            keep_seen(token, &share, &node, writes);
+            keep_seen(st, token, &share, &node, writes);
             (share, node)
         }
     };
@@ -178,13 +179,13 @@ pub(super) async fn shared_node(st: &AppState, share: &Share, root: &Node, id: &
         return Err(AppError::not_found("Item not found"));
     }
     let writes = crate::db::writes();
-    if let Some(n) = SEEN.lock().unwrap().get(&share.id).filter(|s| s.writes == writes && s.at.elapsed() < SEEN_FOR).and_then(|s| s.within.get(id)) {
+    if let Some(n) = st.share_links.lock().unwrap().get(&share.id).filter(|s| s.writes == writes && s.at.elapsed() < SEEN_FOR).and_then(|s| s.within.get(id)) {
         return Ok(n.clone());
     }
     let mut c = st.db.acquire().await?;
     match tree::get_node(&mut c, id).await? {
         Some(n) if n.trashed_at.is_none() && tree::is_within(&mut c, &n.id, &share.node_id).await? => {
-            if let Some(s) = SEEN.lock().unwrap().get_mut(&share.id).filter(|s| s.writes == writes && s.within.len() < SEEN_ITEMS) {
+            if let Some(s) = st.share_links.lock().unwrap().get_mut(&share.id).filter(|s| s.writes == writes && s.within.len() < SEEN_ITEMS) {
                 s.within.insert(n.id.clone(), n.clone());
             }
             Ok(n)

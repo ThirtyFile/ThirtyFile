@@ -91,6 +91,35 @@ pub struct Inner {
     pub usage: Arc<crate::usage::Meters>,
     /// The error log's rate limits and recently failed requests (logs/errors.rs)
     pub error_log: crate::logs::ErrorLogState,
+    /// Asks the connection check of the storage locations to run now: a storage call failed with an error of the
+    /// storage service (`usage::Metered`, `locations::spawn_health_monitor`)
+    pub recheck: Arc<tokio::sync::Notify>,
+    /// Sign-ins waiting for their second factor (twofactor.rs)
+    pub twofactor_logins: crate::twofactor::Logins,
+    /// One-time tickets for linking a sign-in method to an account: ticket → (user, created) (sso/)
+    pub sso_link_tickets: Mutex<HashMap<String, (i64, std::time::Instant)>>,
+    /// Storage locations whose marker was found or written since the server started (locations/markers.rs)
+    pub location_marked: Mutex<std::collections::BTreeSet<String>>,
+    /// Storage locations whose failed deletions are being retried now (locations/health.rs)
+    pub location_retries: Mutex<std::collections::BTreeSet<String>>,
+    /// Scans of folder spaces running now, by space (folders.rs)
+    pub scans: Mutex<HashMap<String, crate::folders::ScanProgress>>,
+    /// When each folder of a folder space was last read from disk, by id (folders.rs)
+    pub folder_reads: Mutex<HashMap<String, std::time::Instant>>,
+    /// Searches for unused content, by storage location (location_tools/unused.rs)
+    pub unused_searches: Mutex<HashMap<String, crate::location_tools::UnusedSearch>>,
+    /// When reads last fell back to a replica, by location (replicas/)
+    pub replica_fallbacks: Mutex<HashMap<String, i64>>,
+    /// Share links opened a moment ago (shares/public.rs)
+    pub share_links: crate::shares::SeenLinks,
+    /// Per folder space: the lock a change to it and the index update of a scan take turns with, and the lock scans
+    /// of it take one at a time (folders.rs)
+    pub space_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    pub scan_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Folder spaces were added, changed or removed: file system watching follows (watch.rs)
+    pub spaces_changed: tokio::sync::Notify,
+    /// The folder spaces whose every folder is watched for changes now (watch.rs)
+    pub watched_spaces: Arc<Mutex<HashSet<String>>>,
 }
 
 /// What a server starts with: its settings and what startup loaded from the database. Everything else in `Inner`
@@ -153,6 +182,20 @@ impl AppState {
             log_tx: s.log_tx,
             usage: Default::default(),
             error_log: Default::default(),
+            recheck: Default::default(),
+            twofactor_logins: Default::default(),
+            sso_link_tickets: Default::default(),
+            location_marked: Default::default(),
+            location_retries: Default::default(),
+            scans: Default::default(),
+            folder_reads: Default::default(),
+            unused_searches: Default::default(),
+            replica_fallbacks: Default::default(),
+            share_links: Default::default(),
+            space_locks: Default::default(),
+            scan_locks: Default::default(),
+            spaces_changed: Default::default(),
+            watched_spaces: Default::default(),
         }))
     }
 }
@@ -228,7 +271,7 @@ impl Inner {
         let backend = self.storages.read().unwrap().get(location).cloned().ok_or_else(|| {
             crate::error::AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("Storage location \"{location}\" is currently unavailable"))
         })?;
-        Ok(crate::usage::Metered::wrap(backend, self.usage.clone(), location))
+        Ok(crate::usage::Metered::wrap(backend, self.usage.clone(), self.recheck.clone(), location))
     }
     /// Whether the site is served over HTTPS: THIRTYFILE_SECURE_COOKIE, or a Site URL that starts with https. Cookies are
     /// then marked Secure and browsers are told to use HTTPS only (HSTS).

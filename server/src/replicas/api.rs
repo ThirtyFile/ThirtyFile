@@ -752,7 +752,7 @@ pub async fn promote(State(st): State<AppState>, Admin(user): Admin, Path(id): P
     let folder_spaces = super::folder_scope(&mut *st.db.acquire().await?, &id).await?;
     let mut _held = Vec::new();
     for space in &folder_spaces {
-        _held.push(crate::folders::hold(space).await);
+        _held.push(crate::folders::hold(&st, space).await);
     }
     let (moved, missing, converted) = {
         let _w = st.write_lock.lock().await;
@@ -847,7 +847,7 @@ pub async fn promote(State(st): State<AppState>, Admin(user): Admin, Path(id): P
     };
     drop(_held);
     if converted > 0 {
-        crate::folders::spaces_changed();
+        crate::folders::spaces_changed(&st);
     }
     // A job of the policy running now was asked for before: it stops, and its results are refused anyway
     let running: Vec<(String, std::sync::Arc<crate::backups::runner::Control>)> =

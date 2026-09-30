@@ -271,14 +271,12 @@ pub async fn readable_elsewhere(st: &AppState, conn: &mut SqliteConnection, hash
     Ok(copies.iter().any(|(l,)| st.location_offline(l).is_none()))
 }
 
-/// When reads last fell back from a location, per location: the activity log says so at most every ten minutes
-static FALLBACKS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, i64>>> = std::sync::LazyLock::new(Default::default);
-
 pub(super) async fn note_fallback(st: &AppState, primary: &str, replica: &str) {
     tracing::warn!("A file of the storage location {primary} was read from its replica on {replica}: {primary} couldn't be read");
     let due = {
-        let key = format!("{}\n{primary}", st.data_dir.display());
-        let mut seen = FALLBACKS.lock().unwrap();
+        // When reads last fell back from each location: the activity log says so at most every ten minutes
+        let key = primary.to_string();
+        let mut seen = st.replica_fallbacks.lock().unwrap();
         let last = seen.get(&key).copied().unwrap_or(0);
         let due = now() - last >= 600;
         if due {

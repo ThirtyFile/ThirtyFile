@@ -143,7 +143,7 @@ pub async fn retry_pending(st: &AppState, user: Option<i64>) -> usize {
         }
     }
     if created > 0 {
-        crate::folders::spaces_changed();
+        crate::folders::spaces_changed(st);
     }
     created
 }
@@ -213,7 +213,7 @@ pub async fn add(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<i6
         // Creating the space can fail after writing (a folder that isn't available): rolled back before the lock goes
         crate::db::settle(tx, res).await?;
     }
-    crate::folders::spaces_changed();
+    crate::folders::spaces_changed(&st);
     Ok(Json(crate::admin::get_row(&st, id).await?))
 }
 

@@ -97,7 +97,7 @@ impl Staged {
         match self.kind {
             Kind::Store(_) => Turn { _space: None, ready: Ok(()) },
             Kind::Folder(_) => {
-                let space = fsops::lock_space(&self.drive).await;
+                let space = fsops::lock_space(st, &self.drive).await;
                 let ready = fsops::ready(st, &self.drive).await;
                 Turn { _space: Some(space), ready }
             }

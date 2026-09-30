@@ -19,11 +19,6 @@ pub struct StartQuery {
     pub(super) link: Option<String>,
 }
 
-/// One-time tickets for linking a sign-in method: ticket → (user, created)
-pub(super) fn link_tickets() -> &'static std::sync::Mutex<std::collections::HashMap<String, (i64, Instant)>> {
-    static T: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, (i64, Instant)>>> = std::sync::OnceLock::new();
-    T.get_or_init(Default::default)
-}
 pub(super) const LINK_TICKET_TTL: Duration = Duration::from_secs(60);
 
 #[derive(Deserialize)]
@@ -48,7 +43,7 @@ pub async fn start_link(State(st): State<AppState>, user: User, Path(provider): 
     crate::tokens::confirm_identity(&st, &user, req.password, req.code.as_deref(), "Sign out and sign in again, then link the account within 10 minutes").await?;
     let ticket = random_token(32);
     {
-        let mut tickets = link_tickets().lock().unwrap();
+        let mut tickets = st.sso_link_tickets.lock().unwrap();
         tickets.retain(|_, (_, created)| created.elapsed() < LINK_TICKET_TTL);
         tickets.insert(ticket.clone(), (user.id, Instant::now()));
     }
@@ -93,7 +88,7 @@ pub async fn start(
     let link_user = match q.link.as_deref() {
         Some(ticket) => {
             let Ok(u) = user else { return login_error(&st, "Sign in before linking an external account", None) };
-            let issued = link_tickets().lock().unwrap().remove(ticket);
+            let issued = st.sso_link_tickets.lock().unwrap().remove(ticket);
             match issued {
                 Some((id, created)) if id == u.id && created.elapsed() < LINK_TICKET_TTL => Some(u.id),
                 _ => return login_error(&st, "The link request has expired. Try again.", Some(&next)),

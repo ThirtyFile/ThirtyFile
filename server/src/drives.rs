@@ -109,7 +109,7 @@ async fn drive_infos(
             source_path: d.source_path.clone().filter(|_| details),
             last_scan_at: r.last_scan_at.filter(|_| details),
             scan_report: r.scan_report.filter(|_| details).and_then(|r| serde_json::from_str(&r).ok()),
-            scanning: if details { crate::folders::progress(&d.id) } else { None },
+            scanning: if details { crate::folders::progress(st, &d.id) } else { None },
             used_bytes: d.used_bytes,
             id: d.id,
             name: d.name,
@@ -235,7 +235,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
         crate::folders::scan_later(&st, &drive_id);
     }
     if folder_space {
-        crate::folders::spaces_changed();
+        crate::folders::spaces_changed(&st);
     }
     Ok(Json(info))
 }
@@ -251,7 +251,7 @@ pub async fn scan(State(st): State<AppState>, Admin(user): Admin, Path(id): Path
                 r = &mut scan => break r?,
                 // The scan's own progress: what was found while reading, then the changes made to the index
                 _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {
-                    if let Some(p) = crate::folders::progress(&id) {
+                    if let Some(p) = crate::folders::progress(&st, &id) {
                         t.set(p.done as u64, p.total as u64);
                     }
                 }
@@ -332,7 +332,7 @@ pub async fn update(
     let drive = tree::get_drive(&mut tx, &drive.id).await?.unwrap();
     let info = drive_info(&st, &mut tx, drive, role, user.is_admin()).await?;
     tx.commit().await?;
-    crate::folders::spaces_changed();
+    crate::folders::spaces_changed(&st);
     Ok(Json(info))
 }
 
@@ -361,7 +361,7 @@ pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<Strin
     };
     logs::record_activity(&mut tx, &user, None, "drive_delete", &detail).await?;
     tx.commit().await?;
-    crate::folders::spaces_changed();
+    crate::folders::spaces_changed(&st);
     tree::purge_detached_later(&st);
     Ok(Json(json!({ "ok": true })))
 }
@@ -798,7 +798,7 @@ mod tests {
         assert_eq!(job.result.unwrap()["added"], 1);
         // One that takes longer (it waits for the space's lock here) answers with the running job
         let _short = crate::jobs::short_wait();
-        let held = crate::fsops::lock_space(&space.drive).await;
+        let held = crate::fsops::lock_space(&env.st, &space.drive).await;
         testutil::write_old(&space.dir.join("b.txt"), b"b");
         let Json(job) = scan(State(env.st.clone()), Admin(admin), Path(space.drive.clone())).await.unwrap();
         assert_eq!(job.state, "running");

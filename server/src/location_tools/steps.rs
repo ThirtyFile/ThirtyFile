@@ -86,7 +86,7 @@ pub async fn test_steps(State(st): State<AppState>, _: Admin, Path(id): Path<Str
         }
     };
     // Counted as a test, apart from what people do (Storage usage)
-    let metered = crate::usage::Metered::wrap(backend.clone(), st.usage.clone(), &loc.id);
+    let metered = crate::usage::Metered::wrap(backend.clone(), st.usage.clone(), st.recheck.clone(), &loc.id);
     let report = crate::usage::probe(run(&st, metered, &loc.kind, LARGE)).await;
     if report.ok {
         st.storages.write().unwrap().entry(id.clone()).or_insert(backend);

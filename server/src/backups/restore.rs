@@ -419,7 +419,7 @@ async fn make_top(cx: &Ctx<'_>, p: &Params, target: &tree::Drive) -> AppResult<S
 async fn make_folder(cx: &Ctx<'_>, target: &tree::Drive, parent: &str, name: &str, source: &str, reuse: bool) -> AppResult<(String, bool)> {
     let st = cx.st;
     let name = crate::util::validate_name(name)?;
-    let _space = if target.is_folder() { Some(crate::fsops::lock_space(&target.id).await) } else { None };
+    let _space = if target.is_folder() { Some(crate::fsops::lock_space(st, &target.id).await) } else { None };
     let parent = folder_node(st, parent).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;

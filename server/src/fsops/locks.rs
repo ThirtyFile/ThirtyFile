@@ -97,7 +97,7 @@ pub async fn lock(st: &AppState, user: &User, ids: &[&str]) -> AppResult<SpaceLo
     .await?;
     let mut held = Vec::with_capacity(drives.len());
     for (d,) in drives {
-        let guard = lock_space(&d).await;
+        let guard = lock_space(st, &d).await;
         held.push((d, guard));
     }
     // Their folders answer, before the change takes the write lock
@@ -107,6 +107,6 @@ pub async fn lock(st: &AppState, user: &User, ids: &[&str]) -> AppResult<SpaceLo
     Ok(SpaceLocks { st: st.clone(), held, renamed: Default::default(), unfinished: Default::default(), committed: Default::default() })
 }
 
-pub async fn lock_space(drive_id: &str) -> OwnedMutexGuard<()> {
-    crate::folders::drive_lock(drive_id).lock_owned().await
+pub async fn lock_space(st: &AppState, drive_id: &str) -> OwnedMutexGuard<()> {
+    crate::folders::drive_lock(st, drive_id).lock_owned().await
 }

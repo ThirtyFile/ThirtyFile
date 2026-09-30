@@ -179,7 +179,7 @@ pub async fn create(State(st): State<AppState>, Admin(me): Admin, Json(req): Jso
         sqlx::query("UPDATE users SET must_change_password = 1 WHERE id = ?").bind(id).execute(&mut *tx).await?;
         logs::record_activity(&mut tx, &me, None, "user_create", &format!("{username} ({})", if req.role == "admin" { "administrator" } else { "standard user" })).await?;
         tx.commit().await?;
-        crate::folders::spaces_changed();
+        crate::folders::spaces_changed(&st);
         id
     };
     Ok(Json(get_row(&st, id).await?))
@@ -397,7 +397,7 @@ impl Removed {
     pub async fn finish(self, st: &AppState) {
         tree::purge_detached_later(st);
         if self.folder {
-            crate::folders::spaces_changed();
+            crate::folders::spaces_changed(st);
         }
         for u in self.uploads {
             let _ = tokio::fs::remove_file(st.tmp_dir().join(format!("upload-{u}"))).await;
@@ -596,7 +596,7 @@ async fn move_personal_across(st: &AppState, me: &crate::auth::User, username: &
     spaces.sort_unstable();
     let mut _scans = Vec::new();
     for d in spaces {
-        _scans.push(crate::fsops::lock_space(d).await);
+        _scans.push(crate::fsops::lock_space(st, d).await);
         crate::fsops::ready(st, d).await?;
     }
     let (dest, items, label) = {
