@@ -123,14 +123,21 @@ impl Drop for Watcher {
 }
 
 impl Watcher {
-    /// Watches `rel` of a space and every folder below it
-    fn add_tree(&mut self, drive: &str, rel: &str) {
-        let Some(root) = self.roots.get(drive).cloned() else { return };
-        let Ok(pinned) = crate::beneath::Pinned::root(&root) else { return };
+    /// Watches `rel` of a space and every folder below it; false when `rel` itself couldn't be watched (it isn't there)
+    fn add_tree(&mut self, drive: &str, rel: &str) -> bool {
+        let Some(root) = self.roots.get(drive).cloned() else { return false };
+        let Ok(pinned) = crate::beneath::Pinned::root(&root) else { return false };
         let mut queue = vec![rel.to_string()];
+        let mut first = true;
         while let Some(rel) = queue.pop() {
+            let asked_for = std::mem::take(&mut first);
             // Reached without following a symbolic link on the way, so a folder swapped for a link isn't watched
-            let Ok(dir) = (if rel.is_empty() { Ok(pinned.clone()) } else { pinned.join(&rel).and_then(|d| d.dir()) }) else { continue };
+            let Ok(dir) = (if rel.is_empty() { Ok(pinned.clone()) } else { pinned.join(&rel).and_then(|d| d.dir()) }) else {
+                if asked_for {
+                    return false;
+                }
+                continue;
+            };
             let path = dir.as_path();
             let Ok(c) = CString::new(path.as_os_str().as_bytes()) else { continue };
             // SAFETY: an open inotify descriptor and a valid path. The path is `/proc/self/fd/…` of the folder opened just
@@ -144,6 +151,9 @@ impl Watcher {
                         "Can't watch every folder of the folder spaces (the limit fs.inotify.max_user_watches is reached, at {}): changes there are found by the regular scan",
                         root.join(&rel).display()
                     );
+                }
+                if asked_for {
+                    return false;
                 }
                 continue;
             }
@@ -164,6 +174,7 @@ impl Watcher {
                 queue.push(if rel.is_empty() { name } else { format!("{rel}/{name}") });
             }
         }
+        true
     }
 
     /// Starts and stops watching spaces so the watched ones are `wanted`
@@ -188,8 +199,16 @@ impl Watcher {
                 self.skipped.insert(id);
                 continue;
             }
+            // A folder that isn't there, or isn't the space's (a disk not mounted yet: its empty mount point), isn't
+            // watched: it is scanned as often as any space, and tried again at the next update
+            let marked = crate::beneath::Pinned::root(&path).ok().and_then(|r| crate::folders::space_marker(&r).ok().flatten());
+            if marked.as_deref() != Some(id.as_str()) {
+                continue;
+            }
             self.roots.insert(id.clone(), path);
-            self.add_tree(&id, "");
+            if !self.add_tree(&id, "") {
+                self.roots.remove(&id);
+            }
         }
         self.publish();
     }
@@ -198,7 +217,20 @@ impl Watcher {
     /// contents changed (space, path below its folder)
     fn event(&mut self, wd: libc::c_int, mask: u32, name: &str) -> Option<(String, String)> {
         if mask & libc::IN_IGNORED != 0 {
-            self.dirs.remove(&wd);
+            // A space's folder itself no longer watched (removed, or its disk unmounted): the space isn't watched any
+            // more, until the next update finds the folder again
+            if let Some((drive, rel)) = self.dirs.remove(&wd)
+                && rel.is_empty()
+                && self.roots.remove(&drive).is_some()
+            {
+                let wds: Vec<libc::c_int> = self.dirs.iter().filter(|(_, (d, _))| *d == drive).map(|(wd, _)| *wd).collect();
+                for wd in wds {
+                    self.dirs.remove(&wd);
+                    // SAFETY: a watch descriptor of this instance
+                    unsafe { libc::inotify_rm_watch(self.fd, wd) };
+                }
+                self.publish();
+            }
             return None;
         }
         let (drive, dir) = self.dirs.get(&wd).cloned()?;
@@ -368,6 +400,7 @@ mod tests {
     fn folders_that_move_are_watched_at_their_new_path() {
         let dir = std::env::temp_dir().join(format!("thirtyfile-watch-{}", crate::util::new_id()));
         std::fs::create_dir_all(dir.join("Sub/Inner")).unwrap();
+        std::fs::write(dir.join(crate::folders::MARKER), "d1").unwrap();
         let mut w = watcher();
         w.update(HashMap::from([("d1".to_string(), dir.clone())]));
         assert_eq!(paths(&w), ["", "Sub", "Sub/Inner"]);
@@ -394,6 +427,34 @@ mod tests {
         // Spaces that go stop being watched
         w.update(HashMap::new());
         assert!(w.dirs.is_empty() && !is_watched("d1"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_space_whose_folder_isnt_there_isnt_taken_for_watched() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-watch-{}", crate::util::new_id()));
+        let spaces = || HashMap::from([("d2".to_string(), dir.clone())]);
+        let mut w = watcher();
+        // Not there when watching starts (a disk that isn't mounted yet): scanned as often as any other space
+        w.update(spaces());
+        assert!(!w.roots.contains_key("d2") && w.dirs.is_empty());
+        // Only its empty mount point: the same
+        std::fs::create_dir_all(dir.join("Sub")).unwrap();
+        w.update(spaces());
+        assert!(!w.roots.contains_key("d2") && w.dirs.is_empty());
+        // Its folder there at the next look: watched from then on
+        std::fs::write(dir.join(crate::folders::MARKER), "d2").unwrap();
+        w.update(spaces());
+        assert!(w.roots.contains_key("d2"));
+        assert_eq!(paths(&w), ["", "Sub"]);
+        // Gone again (unmounted): no longer watched, and watched again once it is back
+        std::fs::remove_dir_all(&dir).unwrap();
+        settle(&mut w);
+        assert!(!w.roots.contains_key("d2") && w.dirs.is_empty());
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(crate::folders::MARKER), "d2").unwrap();
+        w.update(spaces());
+        assert!(w.roots.contains_key("d2"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -43,6 +43,8 @@ pub struct Stat {
     pub ino: i64,
     pub size: i64,
     pub mtime_ns: i64,
+    /// When it was created, where the file system tells (`folders::birth_ns`)
+    pub birth_ns: Option<i64>,
 }
 
 pub fn stat(path: &Path) -> io::Result<Stat> {
@@ -54,6 +56,7 @@ pub fn stat(path: &Path) -> io::Result<Stat> {
         ino,
         size: if meta.is_dir() { 0 } else { meta.len() as i64 },
         mtime_ns: crate::folders::mtime_ns(&meta),
+        birth_ns: crate::folders::birth_ns(&meta),
     })
 }
 
@@ -371,8 +374,8 @@ async fn insert_at(conn: &mut SqliteConnection, id: &str, owner: i64, parent_id:
     let ts = now();
     sqlx::query(
         "INSERT INTO nodes (id, owner_id, parent_id, kind, name, size, mime, drive_id, created_at, updated_at,
-                            fs_path, fs_dev, fs_ino, fs_size, fs_mtime_ns)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            fs_path, fs_dev, fs_ino, fs_size, fs_mtime_ns, fs_birth_ns)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(id)
     .bind(owner)
@@ -389,6 +392,7 @@ async fn insert_at(conn: &mut SqliteConnection, id: &str, owner: i64, parent_id:
     .bind(s.ino)
     .bind(s.size)
     .bind(s.mtime_ns)
+    .bind(s.birth_ns)
     .execute(conn)
     .await?;
     Ok(())
@@ -401,7 +405,7 @@ pub async fn insert(conn: &mut SqliteConnection, id: &str, owner: i64, parent: &
 /// Records where an item is on disk now
 async fn record(conn: &mut SqliteConnection, id: &str, drive_id: &str, rel: &str, s: &Stat) -> AppResult<()> {
     sqlx::query(
-        "UPDATE nodes SET drive_id = ?, fs_path = ?, fs_dev = ?, fs_ino = ?, fs_size = ?, fs_mtime_ns = ?,
+        "UPDATE nodes SET drive_id = ?, fs_path = ?, fs_dev = ?, fs_ino = ?, fs_size = ?, fs_mtime_ns = ?, fs_birth_ns = ?,
                           size = CASE WHEN kind = 'file' THEN ? ELSE size END
          WHERE id = ?",
     )
@@ -411,6 +415,7 @@ async fn record(conn: &mut SqliteConnection, id: &str, drive_id: &str, rel: &str
     .bind(s.ino)
     .bind(s.size)
     .bind(s.mtime_ns)
+    .bind(s.birth_ns)
     .bind(s.size)
     .bind(id)
     .execute(conn)
@@ -734,8 +739,9 @@ enum Placed {
     /// was renamed there (same disk), so undoing renames it back; `copied`: the originals of a move that copied them
     /// (another disk), removed once the index follows
     Disk { wrap: Pinned, tmp: Pinned, renamed_from: Option<Pinned>, copied: Option<CopiedTree> },
-    /// In the destination's content store: one staged content per file (by node id)
-    Store(HashMap<String, StagedBlob>),
+    /// In the destination's content store: one staged content per file, and the file's size and modification time as
+    /// it was stored (by node id)
+    Store(HashMap<String, StagedBlob>, HashMap<String, (u64, i64)>),
 }
 
 /// Each item's path relative to the first one (the item being moved or copied); the list is ordered by depth
@@ -789,21 +795,48 @@ async fn write_tree(st: &AppState, nodes: &[Node], top: &Pinned) -> AppResult<()
     Ok(())
 }
 
-/// Stores the files of a folder space in the content store of the space `drive`
-async fn ingest(st: &AppState, nodes: &[Node], drive: &str) -> AppResult<HashMap<String, StagedBlob>> {
-    let mut staged = HashMap::new();
+const CHANGED_WHILE_COPIED: &str = "the file changed while it was being copied";
+
+/// Copies a file of a folder space to `to`; returns its size and modification time as it was copied (it mustn't change
+/// meanwhile)
+fn copy_checked(from: &Pinned, to: &Path) -> io::Result<(u64, i64)> {
+    let mut src = from.open_file()?;
+    let before = src.metadata()?;
+    let mut dst = std::fs::File::create_new(to)?;
+    let n = io::copy(&mut src, &mut dst)?;
+    dst.sync_all()?;
+    let after = std::fs::symlink_metadata(from.as_path())?;
+    let mtime = crate::folders::mtime_ns(&before);
+    if n != before.len() || after.len() != before.len() || crate::folders::mtime_ns(&after) != mtime {
+        return Err(io::Error::other(CHANGED_WHILE_COPIED));
+    }
+    Ok((n, mtime))
+}
+
+/// Stores the files of a folder space in the content store of the space `drive`, for a move (`moving`) or a copy
+async fn ingest(st: &AppState, nodes: &[Node], drive: &str, moving: bool) -> AppResult<Placed> {
+    let (mut staged, mut seen) = (HashMap::new(), HashMap::new());
     for n in nodes.iter().filter(|n| !n.is_folder()) {
         let tmp = st.tmp_dir().join(new_id());
         let stored = async {
             let (from, to) = (abs(n)?, tmp.clone());
-            tokio::task::spawn_blocking(move || crate::beneath::copy_file(&from, &to)).await?.map_err(disk_error)?;
+            let copied = tokio::task::spawn_blocking(move || copy_checked(&from, &to)).await?.map_err(|e| {
+                if e.to_string() != CHANGED_WHILE_COPIED {
+                    disk_error(e)
+                } else if moving {
+                    AppError::conflict(format!("\"{}\" changed while it was being moved. Try again.", n.name))
+                } else {
+                    AppError::conflict(format!("\"{}\" changed while it was being copied. Try again.", n.name))
+                }
+            })?;
             let (hash, size) = crate::files::hash_file(tmp.clone()).await?;
-            tree::stage_blob(st, drive, hash, size as i64, tmp.clone()).await
+            Ok::<_, AppError>((tree::stage_blob(st, drive, hash, size as i64, tmp.clone()).await?, copied))
         }
         .await;
         match stored {
-            Ok(s) => {
+            Ok((s, copied)) => {
                 staged.insert(n.id.clone(), s);
+                seen.insert(n.id.clone(), copied);
             }
             Err(e) => {
                 let _ = tokio::fs::remove_file(&tmp).await;
@@ -814,14 +847,14 @@ async fn ingest(st: &AppState, nodes: &[Node], drive: &str) -> AppResult<HashMap
             }
         }
     }
-    Ok(staged)
+    Ok(Placed::Store(staged, seen))
 }
 
 /// Puts the content of `nodes` (an item and everything in it) into place for `dest`
 async fn place(st: &AppState, nodes: &[Node], dest: &Node, moving: bool) -> AppResult<Placed> {
     let top = &nodes[0];
     if !dest.in_folder_space() {
-        return Ok(Placed::Store(ingest(st, nodes, dest.drive()).await?));
+        return ingest(st, nodes, dest.drive(), moving).await;
     }
     let wrap = abs(dest)?.join(&format!("{}{}", if moving { MOVE_PREFIX } else { COPY_PREFIX }, new_id())).map_err(gone_or_disk_error)?;
     tokio::fs::create_dir(wrap.as_path()).await.map_err(disk_error)?;
@@ -1000,6 +1033,23 @@ fn other_disk() -> bool {
     OTHER_DISK.with(|d| d.get())
 }
 
+#[cfg(test)]
+type Hook = Box<dyn Fn() -> futures_util::future::BoxFuture<'static, ()>>;
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: runs once the content of items moved to another space is in place, before the index follows
+    static AFTER_PLACE: std::cell::RefCell<Option<Hook>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+async fn after_place() {
+    let run = AFTER_PLACE.with(|h| h.borrow().as_ref().map(|f| f()));
+    if let Some(run) = run {
+        run.await;
+    }
+}
+
 #[cfg(not(test))]
 fn other_disk() -> bool {
     false
@@ -1016,7 +1066,7 @@ async fn undo(st: &AppState, placed: Placed) {
             }
         }
         Placed::Disk { wrap, renamed_from: None, .. } => remove_later(vec![wrap]),
-        Placed::Store(staged) => {
+        Placed::Store(staged, _) => {
             for (_, s) in staged {
                 tree::abandon_staged(st, s).await;
             }
@@ -1026,7 +1076,7 @@ async fn undo(st: &AppState, placed: Placed) {
 
 /// After the index changed: staged content is kept, content no longer used goes
 async fn finish(st: &AppState, placed: Placed, extras: Vec<BlobRef>) {
-    if let Placed::Store(staged) = placed {
+    if let Placed::Store(staged, _) = placed {
         for (_, s) in staged {
             tree::finish_staged(st, s, None).await;
         }
@@ -1068,6 +1118,8 @@ fn id_list<'a>(ids: impl Iterator<Item = &'a str>) -> String {
 pub async fn move_across(st: &AppState, user: &User, dest: &Node, items: Vec<Vec<Node>>) -> AppResult<()> {
     for nodes in items {
         let mut placed = place(st, &nodes, dest, true).await?;
+        #[cfg(test)]
+        after_place().await;
         let result = {
             let _w = st.write_lock.lock().await;
             commit_move(st, user, dest, &nodes, &placed).await
@@ -1076,16 +1128,17 @@ pub async fn move_across(st: &AppState, user: &User, dest: &Node, items: Vec<Vec
             Ok((extras, remove)) => {
                 let copied = match &mut placed {
                     Placed::Disk { copied, .. } => copied.take(),
-                    Placed::Store(_) => None,
+                    Placed::Store(..) => None,
                 };
                 finish(st, placed, extras).await;
                 if let Some(copied) = copied {
                     tokio::task::spawn_blocking(move || remove_copied(copied));
                 }
+                // Stored in the content store: the originals go, each file only if it is still what was stored
                 if !remove.is_empty()
-                    && let Ok(root) = space_root(&nodes[0])
+                    && let Ok(top) = space_root(&nodes[0])
                 {
-                    tokio::task::spawn_blocking(move || remove_indexed(&root, remove));
+                    tokio::task::spawn_blocking(move || remove_copied(CopiedTree { top, items: remove }));
                 }
             }
             Err(e) => {
@@ -1095,24 +1148,6 @@ pub async fn move_across(st: &AppState, user: &User, dest: &Node, items: Vec<Vec
         }
     }
     Ok(())
-}
-
-/// Removes the files that were stored elsewhere, then their folders if nothing else is left in them (an item the
-/// index didn't have yet stays, and the next scan shows it)
-fn remove_indexed(root: &Pinned, paths: Vec<(String, bool)>) {
-    for (rel, _) in paths.iter().filter(|(_, d)| !d) {
-        let Ok(p) = root.join(rel) else { continue };
-        if let Err(e) = std::fs::remove_file(p.as_path())
-            && e.kind() != io::ErrorKind::NotFound
-        {
-            tracing::warn!("Couldn't remove {rel:?} from disk: {e}");
-        }
-    }
-    for (rel, _) in paths.iter().rev().filter(|(_, d)| *d) {
-        if let Ok(p) = root.join(rel) {
-            let _ = std::fs::remove_dir(p.as_path());
-        }
-    }
 }
 
 /// Checks, in the transaction that records a move or copy, that the destination is still as the content was put in
@@ -1133,8 +1168,8 @@ async fn still_there(conn: &mut SqliteConnection, dest: &Node) -> AppResult<()> 
 }
 
 /// The index side of a move; returns content no longer used and (for items now in the content store) what to remove
-/// from disk (paths below the space's folder)
-async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], placed: &Placed) -> AppResult<(Vec<BlobRef>, Vec<(String, bool)>)> {
+/// from disk (paths below the space's folder, folders before what is in them)
+async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], placed: &Placed) -> AppResult<(Vec<BlobRef>, Vec<Copied>)> {
     let mut tx = crate::db::begin_write(&st.db).await?;
     let top = &nodes[0];
     // Everything must still be as it was when the content was copied: items added to a folder of the content store
@@ -1143,6 +1178,12 @@ async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
     let current = tree::get_node(&mut tx, &top.id).await?.ok_or_else(changed)?;
     if current.trashed_at.is_some() || current.parent_id != top.parent_id || current.drive_id != top.drive_id || current.fs_root != top.fs_root {
         return Err(changed());
+    }
+    // The space it leaves may have started moving to another storage location while the content was copied: that move
+    // has its items as they are, and switches them over itself. (A personal space being removed is read-only too, while
+    // its files are moved out this way.)
+    if current.space_moving && crate::moves::drive_busy(&mut tx, current.drive()).await? {
+        return Err(tree::read_only_error(&current));
     }
     still_there(&mut tx, dest).await?;
     let planned: HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
@@ -1173,10 +1214,9 @@ async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
                 let full = if rel.is_empty() { dest_rel.clone() } else { format!("{dest_rel}/{rel}") };
                 match below(&final_path, &rel).and_then(|p| stat(p.as_path())) {
                     Ok(s) => record(&mut tx, &n.id, dest.drive(), &full, &s).await?,
-                    // Gone from the server before it could be moved: gone from the index too
-                    Err(_) => {
-                        tree::purge_subtree(&mut tx, &n.id).await?;
-                    }
+                    // Gone from the server before it could be moved: gone from the index too, with the earlier versions
+                    // it may still have in the content store
+                    Err(_) => extras.extend(tree::purge_subtree(&mut tx, &n.id).await?),
                 }
             }
             // Content that was in the content store is in the folder now
@@ -1184,12 +1224,12 @@ async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
             sqlx::query("UPDATE nodes SET blob_hash = NULL WHERE id IN (SELECT value FROM json_each(?))").bind(&ids).execute(&mut *tx).await?;
             extras.extend(tree::release_blobs(&mut tx, &hashes).await?);
         }
-        Placed::Store(staged) => {
+        Placed::Store(staged, seen) => {
             let names = store_names(nodes, &top.name);
             // Leave the names the folder gave them first, so renamed items can't run into each other on the way
             sqlx::query("UPDATE nodes SET name = char(1) || id WHERE id IN (SELECT value FROM json_each(?))").bind(&ids).execute(&mut *tx).await?;
             sqlx::query(
-                "UPDATE nodes SET drive_id = ?, fs_path = NULL, fs_dev = NULL, fs_ino = NULL, fs_size = NULL, fs_mtime_ns = NULL
+                "UPDATE nodes SET drive_id = ?, fs_path = NULL, fs_dev = NULL, fs_ino = NULL, fs_size = NULL, fs_mtime_ns = NULL, fs_birth_ns = NULL
                  WHERE id IN (SELECT value FROM json_each(?))",
             )
             .bind(dest.drive())
@@ -1203,7 +1243,7 @@ async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
                     sqlx::query("UPDATE nodes SET blob_hash = ?, size = ? WHERE id = ?").bind(&s.hash).bind(s.size).bind(&n.id).execute(&mut *tx).await?;
                 }
                 if let Some(rel) = n.fs_path.clone().filter(|r| !r.is_empty()) {
-                    remove.push((rel, n.is_folder()));
+                    remove.push(Copied { rel, is_dir: n.is_folder(), seen: seen.get(&n.id).copied() });
                 }
             }
         }
@@ -1269,7 +1309,7 @@ async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
                 ids.insert(n.id.as_str(), id);
             }
         }
-        Placed::Store(staged) => {
+        Placed::Store(staged, _) => {
             let name = tree::unique_name(&mut tx, &dest.id, &top.name, top.is_folder()).await?;
             let names = store_names(nodes, &name);
             let ts = now();
@@ -1748,5 +1788,134 @@ mod tests {
         assert_eq!(std::fs::read(dir.join("Report (1)/a.txt")).unwrap(), b"moving");
         assert!(found.iter().all(|p| !p.exists()));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Clears the hook of `hook_after_place` when dropped
+    struct HookGuard;
+
+    impl Drop for HookGuard {
+        fn drop(&mut self) {
+            AFTER_PLACE.with(|h| *h.borrow_mut() = None);
+        }
+    }
+
+    /// Runs `hook` each time the content of a move to another space is in place, before the index follows
+    fn hook_after_place(hook: impl Fn() -> futures_util::future::BoxFuture<'static, ()> + 'static) -> HookGuard {
+        AFTER_PLACE.with(|h| *h.borrow_mut() = Some(Box::new(hook)));
+        HookGuard
+    }
+
+    /// Waits until the removal of this content from the built-in location is scheduled
+    async fn removal_scheduled(env: &testutil::TestEnv, content: &[u8]) -> bool {
+        let hash = crate::util::sha256_hex(content);
+        for _ in 0..100 {
+            let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM pending_blob_deletes WHERE hash = ? AND location_id = 'local'")
+                .bind(&hash)
+                .fetch_one(&env.st.db)
+                .await
+                .unwrap();
+            if n > 0 {
+                return true;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        false
+    }
+
+    #[tokio::test]
+    async fn a_file_changed_while_it_was_being_stored_stays_in_the_folder() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        write_old(&space.dir.join("Sub/same.txt"), b"same");
+        write_old(&space.dir.join("Sub/edited.txt"), b"before");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (sub, _) = env.node_at(&space.drive, "Sub").await.unwrap();
+        let (edited, _) = env.node_at(&space.drive, "Sub/edited.txt").await.unwrap();
+        // Saved over SMB after it was stored in the content store, before the originals are removed
+        let path = space.dir.join("Sub/edited.txt");
+        let _hook = hook_after_place(move || {
+            let path = path.clone();
+            Box::pin(async move { std::fs::write(&path, b"after, and longer").unwrap() })
+        });
+        let _ = crate::nodes::move_nodes(State(env.st.clone()), admin.clone(), req(json!({ "ids": [sub], "dest_id": admin.root() }))).await.unwrap();
+        assert!(eventually_gone(&space.dir.join("Sub/same.txt")).await);
+        assert_eq!(std::fs::read(space.dir.join("Sub/edited.txt")).unwrap(), b"after, and longer");
+        assert_eq!(content(&env, &admin, &edited).await, b"before");
+    }
+
+    #[tokio::test]
+    async fn items_stay_in_a_space_that_started_moving_to_another_location_meanwhile() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        write_old(&space.dir.join("a.txt"), b"a");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (a, _) = env.node_at(&space.drive, "a.txt").await.unwrap();
+        // The space starts moving to another storage location while the item's content is being copied
+        let (st, drive) = (env.st.clone(), space.drive.clone());
+        let _hook = hook_after_place(move || {
+            let (st, drive) = (st.clone(), drive.clone());
+            Box::pin(async move {
+                sqlx::query(
+                    "INSERT INTO space_moves (id, drive_id, space_name, space_kind, from_mode, to_location, to_mode, state, created_at)
+                     VALUES ('m', ?, 'Shared', 'team', 'folder', 'local', 'store', 'running', 0)",
+                )
+                .bind(&drive)
+                .execute(&st.db)
+                .await
+                .unwrap();
+                sqlx::query("UPDATE drives SET moving = 1 WHERE id = ?").bind(drive).execute(&st.db).await.unwrap();
+            })
+        });
+        let res = crate::nodes::move_nodes(State(env.st.clone()), admin.clone(), req(json!({ "ids": [a], "dest_id": admin.root() }))).await;
+        assert!(res.is_err());
+        assert_eq!(env.drive_of(&a).await, space.drive);
+        assert_eq!(node(&env, &a).await.fs_path.as_deref(), Some("a.txt"));
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(space.dir.join("a.txt").is_file());
+    }
+
+    #[tokio::test]
+    async fn earlier_versions_in_the_content_store_go_with_a_file_deleted_on_the_server() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        // A file of the content store, with an earlier version there, moved into the folder space
+        let notes = env.upload(&admin, admin.root(), "notes.txt", b"version one").await;
+        let _ = crate::files::save_content(State(env.st.clone()), admin.clone(), UrlPath(notes.clone()), HeaderMap::new(), Bytes::from_static(b"two"))
+            .await
+            .unwrap();
+        let _ = crate::nodes::move_nodes(State(env.st.clone()), admin.clone(), req(json!({ "ids": [notes], "dest_id": space.root }))).await.unwrap();
+        let (kept,): (Option<String>,) = sqlx::query_as("SELECT blob_hash FROM node_versions WHERE node_id = ?").bind(&notes).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(kept, Some(crate::util::sha256_hex(b"version one")));
+        // Deleted on the server
+        std::fs::remove_file(space.dir.join("notes.txt")).unwrap();
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        assert!(removal_scheduled(&env, b"version one").await);
+
+        // The same when the file is gone from the server while its folder is moved to another folder space
+        let two = env.folder_space("Two").await;
+        let docs = env.folder(&admin, admin.root(), "Docs").await;
+        let other = env.upload(&admin, &docs, "other.txt", b"other, one").await;
+        let _ = crate::files::save_content(State(env.st.clone()), admin.clone(), UrlPath(other.clone()), HeaderMap::new(), Bytes::from_static(b"two"))
+            .await
+            .unwrap();
+        let _ = crate::nodes::move_nodes(State(env.st.clone()), admin.clone(), req(json!({ "ids": [docs], "dest_id": space.root }))).await.unwrap();
+        let dir = two.dir.clone();
+        let _hook = hook_after_place(move || {
+            let dir = dir.clone();
+            Box::pin(async move {
+                for e in std::fs::read_dir(&dir).unwrap().flatten() {
+                    if e.file_name().to_string_lossy().starts_with(MOVE_PREFIX) {
+                        std::fs::remove_file(e.path().join("Docs/other.txt")).unwrap();
+                    }
+                }
+            })
+        });
+        let _ = crate::nodes::move_nodes(State(env.st.clone()), admin.clone(), req(json!({ "ids": [docs], "dest_id": two.root }))).await.unwrap();
+        assert!(two.dir.join("Docs").is_dir());
+        assert!(tree::get_node(&mut env.st.db.acquire().await.unwrap(), &other).await.unwrap().is_none());
+        assert!(removal_scheduled(&env, b"other, one").await);
     }
 }

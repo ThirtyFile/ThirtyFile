@@ -224,7 +224,7 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
     // Create the temp file only after the database record succeeds; if creation fails, undo the record, leaving neither uploads without a file nor unrecorded temp files
     if let Err(e) = tokio::fs::File::create(upload_path(st, &id)).await {
         let _w = st.write_lock.lock().await;
-        let _ = sqlx::query("DELETE FROM uploads WHERE id = ?").bind(&id).execute(&st.db).await;
+        forget_upload(st, &id).await;
         return Err(e.into());
     }
 
@@ -524,13 +524,34 @@ async fn hash_so_far(st: &AppState, upload: &Upload) -> AppResult<Sha256> {
     }
 }
 
+/// Drops the row of an upload that can't go on (its temp file is gone), so it no longer counts against the space's size
+/// limit. The caller holds the write lock. When that fails (the disk is full, say), it is tried again in the background
+/// for a while, rather than the row reserving the space until the upload expires.
+async fn forget_upload(st: &AppState, id: &str) {
+    let delete = |st: AppState, id: String| async move { sqlx::query("DELETE FROM uploads WHERE id = ?").bind(id).execute(&st.db).await };
+    let Err(e) = delete(st.clone(), id.to_string()).await else { return };
+    tracing::warn!("Couldn't remove an upload that stopped: {e}");
+    let (st, id) = (st.clone(), id.to_string());
+    tokio::spawn(async move {
+        let wait = std::time::Duration::from_millis(if cfg!(test) { 50 } else { 30_000 });
+        for _ in 0..20 {
+            tokio::time::sleep(wait).await;
+            let _w = st.write_lock.lock().await;
+            if delete(st.clone(), id.clone()).await.is_ok() {
+                return;
+            }
+        }
+        tracing::warn!("Gave up removing an upload that stopped: it counts against its space's size limit until it expires");
+    });
+}
+
 /// Upload finished: compute the hash, put it in storage, create the file node (or give an existing one the new content)
 async fn finalize(st: &AppState, up: &Uploader, upload: Upload) -> AppResult<String> {
     let path = upload_path(st, &upload.id);
     let parent = tree::get_node(&mut *st.db.acquire().await?, &upload.parent_id).await?;
     let Some(parent) = parent.filter(|p| p.is_folder() && p.trashed_at.is_none()) else {
         let _w = st.write_lock.lock().await;
-        let _ = sqlx::query("DELETE FROM uploads WHERE id = ?").bind(&upload.id).execute(&st.db).await;
+        forget_upload(st, &upload.id).await;
         let _ = tokio::fs::remove_file(&path).await;
         return Err(discarded(folder_gone()));
     };
@@ -558,7 +579,7 @@ async fn finalize(st: &AppState, up: &Uploader, upload: Upload) -> AppResult<Str
             // Transaction failed: discard the staging; the content just uploaded to the storage location is left for background cleanup so no unreferenced files remain.
             // The temporary file is gone by now, so the upload can't be resumed: drop its row (it would otherwise count against the quota for 7 days)
             tree::abandon_staged(st, staged).await;
-            let _ = sqlx::query("DELETE FROM uploads WHERE id = ?").bind(&upload.id).execute(&st.db).await;
+            forget_upload(st, &upload.id).await;
             Err(discarded(e))
         }
     }
@@ -588,7 +609,7 @@ async fn finalize_in_folder(st: &AppState, up: &Uploader, upload: &Upload, path:
         Ok(s) => s,
         Err(e) => {
             let _w = st.write_lock.lock().await;
-            let _ = sqlx::query("DELETE FROM uploads WHERE id = ?").bind(&upload.id).execute(&st.db).await;
+            forget_upload(st, &upload.id).await;
             return Err(discarded(e));
         }
     };
@@ -644,7 +665,7 @@ async fn finalize_in_folder(st: &AppState, up: &Uploader, upload: &Upload, path:
         Err(e) => {
             // Renamed into place already when only the index failed: the next scan shows it
             let _ = tokio::fs::remove_file(&staged).await;
-            let _ = sqlx::query("DELETE FROM uploads WHERE id = ?").bind(&upload.id).execute(&st.db).await;
+            forget_upload(st, &upload.id).await;
             Err(discarded(e))
         }
     }
@@ -847,6 +868,25 @@ mod tests {
         h.insert(header::CONTENT_TYPE, "application/offset+octet-stream".parse().unwrap());
         h.insert("upload-offset", offset.to_string().parse().unwrap());
         patch(State(env.st.clone()), user.clone(), Path(id.to_string()), h, Body::from(data)).await
+    }
+
+    #[tokio::test]
+    async fn an_upload_row_that_couldnt_be_removed_at_first_is_removed_later() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let id = begin(&env, &amy, "a.txt", 10).await;
+        let exists = || async { sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM uploads WHERE id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap().0 == 1 };
+        sqlx::query("CREATE TRIGGER keep_uploads BEFORE DELETE ON uploads BEGIN SELECT RAISE(ABORT, 'the disk is full'); END").execute(&env.st.db).await.unwrap();
+        forget_upload(&env.st, &id).await;
+        assert!(exists().await);
+        sqlx::query("DROP TRIGGER keep_uploads").execute(&env.st.db).await.unwrap();
+        for _ in 0..100 {
+            if !exists().await {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(!exists().await, "it no longer counts against the space's size limit");
     }
 
     async fn files_named(env: &testutil::TestEnv, name: &str) -> i64 {

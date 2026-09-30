@@ -394,18 +394,20 @@ async fn switch(cx: &Ctx<'_>) -> AppResult<bool> {
         for (id, _) in &renamed {
             sqlx::query("UPDATE nodes SET name = char(1) || id WHERE id = ?").bind(id).execute(&mut *tx).await?;
         }
-        // The content of each file and version: a reference each, recorded at the target when it is new there
+        // The content of each file and version still in the space: a reference each, recorded at the target when it is
+        // new there. Only items of the space: one moved to another space meanwhile keeps what it has there.
         sqlx::query(
             "INSERT INTO blobs (hash, size, refcount, created_at, location_id)
              SELECT i.hash, MAX(i.size), COUNT(*), ?3, ?2 FROM space_move_items i
-             WHERE i.move_id = ?1 AND (EXISTS (SELECT 1 FROM nodes n WHERE n.id = i.item_id AND i.kind = 'file')
-                                       OR EXISTS (SELECT 1 FROM node_versions v WHERE v.id = i.item_id AND i.kind = 'version'))
+             WHERE i.move_id = ?1 AND (EXISTS (SELECT 1 FROM nodes n WHERE n.id = i.item_id AND n.drive_id = ?4 AND i.kind = 'file')
+                                       OR EXISTS (SELECT 1 FROM node_versions v WHERE v.id = i.item_id AND v.drive_id = ?4 AND i.kind = 'version'))
              GROUP BY i.hash
              ON CONFLICT (hash) DO UPDATE SET refcount = refcount + excluded.refcount",
         )
         .bind(&job.id)
         .bind(&job.to_location)
         .bind(now)
+        .bind(&job.drive_id)
         .execute(&mut *tx)
         .await?;
         // Copies stored now that nothing uses at the target: the content was elsewhere already, or its file went
@@ -430,23 +432,26 @@ async fn switch(cx: &Ctx<'_>) -> AppResult<bool> {
         .execute(&mut *tx)
         .await?;
         sqlx::query(
-            "UPDATE nodes SET blob_hash = i.hash, size = i.size FROM space_move_items i WHERE i.move_id = ? AND i.kind = 'file' AND nodes.id = i.item_id",
+            "UPDATE nodes SET blob_hash = i.hash, size = i.size FROM space_move_items i
+             WHERE i.move_id = ?1 AND i.kind = 'file' AND nodes.id = i.item_id AND nodes.drive_id = ?2",
         )
         .bind(&job.id)
+        .bind(&job.drive_id)
         .execute(&mut *tx)
         .await?;
         for (id, name) in &renamed {
             sqlx::query("UPDATE nodes SET name = ? WHERE id = ?").bind(name).bind(id).execute(&mut *tx).await?;
         }
-        sqlx::query("UPDATE nodes SET fs_path = NULL, fs_dev = NULL, fs_ino = NULL, fs_size = NULL, fs_mtime_ns = NULL WHERE drive_id = ?")
+        sqlx::query("UPDATE nodes SET fs_path = NULL, fs_dev = NULL, fs_ino = NULL, fs_size = NULL, fs_mtime_ns = NULL, fs_birth_ns = NULL WHERE drive_id = ?")
             .bind(&job.drive_id)
             .execute(&mut *tx)
             .await?;
         sqlx::query(
             "UPDATE node_versions SET blob_hash = i.hash, drive_id = NULL, fs_path = NULL
-             FROM space_move_items i WHERE i.move_id = ? AND i.kind = 'version' AND node_versions.id = i.item_id",
+             FROM space_move_items i WHERE i.move_id = ?1 AND i.kind = 'version' AND node_versions.id = i.item_id AND node_versions.drive_id = ?2",
         )
         .bind(&job.id)
+        .bind(&job.drive_id)
         .execute(&mut *tx)
         .await?;
         sqlx::query(

@@ -5,8 +5,10 @@
 //! so no scan or change runs meanwhile). Otherwise:
 //!
 //! 1. Copy: the whole folder is copied, the trash, versions and the space's marker included, each file with its date,
-//!    and checked by its size. Each copy records the original's identity, size and date.
-//! 2. Before the switch the folder is scanned and copied again where anything changed; copies of what was removed go.
+//!    and checked by its size. Each copy records the original's identity, size and date, and each folder made in the
+//!    new folder is recorded too.
+//! 2. Before the switch the folder is scanned and copied again where anything changed; copies of what was removed or
+//!    renamed go, folders included.
 //! 3. Switch, in one transaction: the space points at its new folder, and its items at the copies (their paths below
 //!    it stay the same). Then the old folder is removed, each file only when it is still what was copied.
 
@@ -69,10 +71,11 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
     super::check_room(st, &job.to_location, super::left_to_copy(st, job).await?).await?;
     let dest = Pinned::root(&target).map_err(|_| not_mounted())?;
     let ignores_case = ignores_case(&dest).await?;
-    let (files_done, bytes_done): (i64, i64) = sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM space_move_items WHERE move_id = ?")
-        .bind(&job.id)
-        .fetch_one(&st.db)
-        .await?;
+    let (files_done, bytes_done): (i64, i64) =
+        sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM space_move_items WHERE move_id = ? AND kind = 'path'")
+            .bind(&job.id)
+            .fetch_one(&st.db)
+            .await?;
     // What the index has: files of the space (the trash included) and their versions
     let (files, bytes): (i64, i64) = sqlx::query_as(
         "SELECT (SELECT COUNT(*) FROM nodes WHERE drive_id = ?1 AND kind = 'file') + (SELECT COUNT(*) FROM node_versions WHERE drive_id = ?1),
@@ -307,15 +310,26 @@ fn seen(meta: &std::fs::Metadata) -> Seen {
 /// scan, so the move stops until they are renamed.
 async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, ignores_case: bool, last: bool) -> AppResult<Option<Stop>> {
     let (st, job) = (cx.st, cx.job);
-    let copied: std::collections::HashMap<String, (Option<i64>, i64, Option<i64>)> =
-        sqlx::query_as::<_, (String, Option<i64>, i64, Option<i64>)>("SELECT item_id, src_ino, size, src_mtime_ns FROM space_move_items WHERE move_id = ?")
-            .bind(&job.id)
-            .fetch_all(&st.db)
-            .await?
-            .into_iter()
-            .map(|(p, ino, size, mtime)| (p, (ino, size, mtime)))
-            .collect();
+    let copied: std::collections::HashMap<String, (Option<i64>, i64, Option<i64>)> = sqlx::query_as::<_, (String, Option<i64>, i64, Option<i64>)>(
+        "SELECT item_id, src_ino, size, src_mtime_ns FROM space_move_items WHERE move_id = ? AND kind = 'path'",
+    )
+    .bind(&job.id)
+    .fetch_all(&st.db)
+    .await?
+    .into_iter()
+    .map(|(p, ino, size, mtime)| (p, (ino, size, mtime)))
+    .collect();
+    // Folders made in the new folder (`FOLDER`)
+    let made: HashSet<String> = sqlx::query_as::<_, (String,)>("SELECT item_id FROM space_move_items WHERE move_id = ? AND kind = ?")
+        .bind(&job.id)
+        .bind(FOLDER)
+        .fetch_all(&st.db)
+        .await?
+        .into_iter()
+        .map(|(p,)| p)
+        .collect();
     let mut found: HashSet<String> = HashSet::new();
+    let mut found_dirs: HashSet<String> = HashSet::new();
     let mut queue = vec![String::new()];
     while let Some(dir) = queue.pop() {
         let entries = {
@@ -353,6 +367,16 @@ async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, ignores_case: bo
                     .await
                     .map_err(AppError::internal)?
                     .map_err(disk_error)?;
+                if !made.contains(&rel) {
+                    let _w = st.write_lock.lock().await;
+                    sqlx::query("INSERT OR REPLACE INTO space_move_items (move_id, item_id, kind, path) VALUES (?, ?, ?, NULL)")
+                        .bind(&job.id)
+                        .bind(&rel)
+                        .bind(FOLDER)
+                        .execute(&st.db)
+                        .await?;
+                }
+                found_dirs.insert(rel.clone());
                 queue.push(rel);
                 continue;
             }
@@ -387,7 +411,8 @@ async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, ignores_case: bo
         }
     }
     if last {
-        // Copies of what is no longer in the folder
+        // Copies of what is no longer in the folder (removed, or renamed: copied under its new name): files, then the
+        // folders made for what went, deepest first, when nothing else is in them
         let gone: Vec<&String> = copied.keys().filter(|p| !found.contains(*p)).collect();
         for rel in gone {
             if let Ok(p) = dest.join(rel) {
@@ -396,9 +421,29 @@ async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, ignores_case: bo
             let _w = st.write_lock.lock().await;
             sqlx::query("DELETE FROM space_move_items WHERE move_id = ? AND item_id = ?").bind(&job.id).bind(rel).execute(&st.db).await?;
         }
+        let mut gone_dirs: Vec<&String> = made.iter().filter(|p| !found_dirs.contains(*p)).collect();
+        gone_dirs.sort_by_key(|p| std::cmp::Reverse(p.len()));
+        for rel in gone_dirs {
+            let removed = match dest.join(rel) {
+                Ok(p) => std::fs::remove_dir(p.as_path()),
+                Err(e) => Err(e),
+            };
+            if removed.is_ok() || matches!(removed, Err(ref e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory)) {
+                let _w = st.write_lock.lock().await;
+                sqlx::query("DELETE FROM space_move_items WHERE move_id = ? AND item_id = ? AND kind = ?")
+                    .bind(&job.id)
+                    .bind(rel)
+                    .bind(FOLDER)
+                    .execute(&st.db)
+                    .await?;
+            }
+        }
     }
     Ok(None)
 }
+
+/// `space_move_items.kind` of a folder made in the new folder, by its path below it (files are 'path')
+const FOLDER: &str = "folder";
 
 const CHANGED: &str = "The file changed while it was being copied";
 const CASE_CLASH: &str =
@@ -489,10 +534,13 @@ async fn switch(cx: &Ctx<'_>, target: &Path) -> AppResult<bool> {
     let mut tx = crate::db::begin_write(&st.db).await?;
     let res = async {
         let pending: Option<(i64,)> = sqlx::query_as(
-            "SELECT 1 FROM nodes n LEFT JOIN space_move_items i ON i.move_id = ?1 AND i.item_id = n.fs_path
+            "SELECT 1 FROM nodes n LEFT JOIN space_move_items i ON i.move_id = ?1 AND i.item_id = n.fs_path AND i.kind = 'path'
              WHERE n.drive_id = ?2 AND n.kind = 'file' AND (i.item_id IS NULL OR i.size IS NOT n.fs_size OR i.src_mtime_ns IS NOT n.fs_mtime_ns)
              UNION ALL
-             SELECT 1 FROM node_versions v LEFT JOIN space_move_items i ON i.move_id = ?1 AND i.item_id = v.fs_path
+             SELECT 1 FROM nodes n LEFT JOIN space_move_items i ON i.move_id = ?1 AND i.item_id = n.fs_path AND i.kind = 'folder'
+             WHERE n.drive_id = ?2 AND n.kind = 'folder' AND n.fs_path != '' AND i.item_id IS NULL
+             UNION ALL
+             SELECT 1 FROM node_versions v LEFT JOIN space_move_items i ON i.move_id = ?1 AND i.item_id = v.fs_path AND i.kind = 'path'
              WHERE v.drive_id = ?2 AND v.fs_path IS NOT NULL AND i.item_id IS NULL
              LIMIT 1",
         )
@@ -504,8 +552,8 @@ async fn switch(cx: &Ctx<'_>, target: &Path) -> AppResult<bool> {
             return Ok(false);
         }
         sqlx::query(
-            "UPDATE nodes SET fs_dev = i.dst_dev, fs_ino = i.dst_ino, fs_mtime_ns = i.dst_mtime_ns
-             FROM space_move_items i WHERE i.move_id = ?1 AND nodes.drive_id = ?2 AND nodes.fs_path = i.item_id",
+            "UPDATE nodes SET fs_dev = i.dst_dev, fs_ino = i.dst_ino, fs_mtime_ns = i.dst_mtime_ns, fs_birth_ns = NULL
+             FROM space_move_items i WHERE i.move_id = ?1 AND i.kind = 'path' AND nodes.drive_id = ?2 AND nodes.fs_path = i.item_id",
         )
         .bind(&job.id)
         .bind(&job.drive_id)

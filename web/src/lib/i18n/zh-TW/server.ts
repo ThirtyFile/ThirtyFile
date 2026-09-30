@@ -866,6 +866,7 @@ export default {
   "Something changed at the same time. Try again.": "同時有其他變更，請再試一次。",
   "The file was changed on the server while you were editing it. Your version was saved as \"{name}\".": "編輯期間伺服器上的檔案被修改了，你的版本已另存為「{name}」。",
   "\"{name}\" changed while it was being moved. Try again.": "搬移期間「{name}」有變更，請再試一次。",
+  "\"{name}\" changed while it was being copied. Try again.": "複製期間「{name}」有變更，請再試一次。",
   "The destination folder no longer exists": "目的資料夾已經不存在",
   "The destination was moved to another storage location meanwhile. Try again.": "目的地在這期間被搬到其他儲存位置了，請再試一次。",
   "Couldn't read \"{name}\": {error}": "無法讀取「{name}」：{error}",
