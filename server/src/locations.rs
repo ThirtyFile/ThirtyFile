@@ -1033,7 +1033,7 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
     let sets = crate::backups::sets_on(&mut tx, &id).await?;
     if sets > 0 {
         return Err(AppError::bad_request(if sets == 1 {
-            "This location holds a copy. Delete it in Control panel › Backups first.".to_string()
+            "This location holds 1 copy. Delete it in Control panel › Backups first.".to_string()
         } else {
             format!("This location holds {sets} copies. Delete them in Control panel › Backups first.")
         }));

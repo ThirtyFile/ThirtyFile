@@ -345,7 +345,7 @@ async fn into_store(
         Err(_) if tokio::fs::metadata(tmp).await.is_err() => {
             match fetch(cx, set, dst, hash, size, tmp).await? {
                 Ok(()) => {}
-                Err(_) => return Err(AppError::conflict("Stopped")),
+                Err(_) => return Err(AppError::internal("stopped while fetching")),
             }
             tree::stage_blob(st, &target.id, hash.to_string(), size, tmp.to_path_buf()).await?
         }

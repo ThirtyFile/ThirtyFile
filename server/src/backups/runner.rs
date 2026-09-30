@@ -371,7 +371,7 @@ pub(super) async fn run(st: &AppState, job: &Job, ctl: &Control) {
         "restore" => super::restore::run(&cx).await,
         "verify" => super::tidy::verify(&cx).await,
         "remove" => super::tidy::remove(&cx).await,
-        _ => Err(AppError::bad_request("Unknown job")),
+        _ => Err(AppError::internal("unknown job")),
     };
     let ended = match res {
         Ok(Stop::Done) => Ok(()),

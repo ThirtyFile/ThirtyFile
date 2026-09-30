@@ -561,7 +561,7 @@ async fn cleaning_up_a_location_never_touches_the_copies_it_holds() {
     assert_eq!(e.status, axum::http::StatusCode::FORBIDDEN);
     // The location can't be deleted while it holds the copy
     let e = crate::locations::delete(State(env.st.clone()), Admin(env.admin().await), Path("nas".to_string())).await.unwrap_err();
-    assert!(e.message.contains("holds a copy"), "{}", e.message);
+    assert!(e.message.contains("holds 1 copy"), "{}", e.message);
 }
 
 #[tokio::test]

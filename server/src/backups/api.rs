@@ -529,6 +529,9 @@ pub struct RestoreReq {
     /// The browser's time zone offset (minutes, as `Date.getTimezoneOffset`), for the new folder's name
     #[serde(default)]
     tz: i64,
+    /// The new folder's name, in the administrator's language (default: "Restored <space> <date>")
+    #[serde(default)]
+    folder_name: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -633,13 +636,17 @@ pub async fn restore(State(st): State<AppState>, Admin(user): Admin, Path(id): P
         return Err(AppError::bad_request(problem));
     }
     let target = plan.target_drive.clone().ok_or_else(|| AppError::bad_request("Choose a space to restore into"))?;
+    let folder_name = match req.folder_name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+        Some(n) => crate::util::validate_name(n)?,
+        None => plan.folder_name.clone(),
+    };
     let params = super::restore::Params {
         space: plan.space.id.clone(),
         space_kind: plan.space.kind.clone(),
         folder: None,
         target_drive: target,
         target_parent: None,
-        folder_name: plan.folder_name.clone(),
+        folder_name,
         trash: req.trash,
     };
     let label = space_label(&plan.space.name, &plan.space.kind, &plan.space.owner);
