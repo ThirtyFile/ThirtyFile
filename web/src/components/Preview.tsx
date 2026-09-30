@@ -5,7 +5,7 @@ import { triggerDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { FileIcon } from "@/components/FileIcon";
 import { FileViewer } from "@/components/FileViewer";
-import { confirm } from "@/components/confirm";
+import { confirm } from "@/lib/confirm";
 import { t } from "@/lib/i18n";
 import { useOverlayFocus } from "@/lib/focus";
 import { formatBytes } from "@/lib/utils";

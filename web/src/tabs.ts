@@ -3,7 +3,7 @@
 
 import { useCallback } from "react";
 import { useNavigate } from "react-router";
-import { confirm } from "@/components/confirm";
+import { confirm } from "@/lib/confirm";
 import { hasDraft, setDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 import { createStore, useStore } from "@/lib/store";

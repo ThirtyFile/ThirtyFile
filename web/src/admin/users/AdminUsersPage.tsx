@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog, ErrorText, errorProps } from "@/components/dialogs";
 import { LocationSelect, useDefaultLocationId, useLocationName } from "@/components/LocationSelect";
-import { confirm } from "@/components/confirm";
+import { confirm } from "@/lib/confirm";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { followJob } from "@/lib/jobs";
 import { useMe } from "@/lib/session";

@@ -10,7 +10,7 @@ import { type FileChange, invalidateFiles, refreshFiles, rowsOf } from "@/lib/qu
 import { eachBatch, idsOf, type Picked } from "@/lib/span";
 import { transferItems } from "@/lib/transfer";
 import { type Origins, originsOf, toastWithUndo, undoLast } from "@/lib/undo";
-import { confirm } from "@/components/confirm";
+import { confirm } from "@/lib/confirm";
 import { carriesFiles, dropFiles, dropItems } from "@/lib/dnd";
 import { filesFromDrop, uploadFiles } from "@/uploads";
 import { runJob, waitForJob } from "@/lib/jobs";

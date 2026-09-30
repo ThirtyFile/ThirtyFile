@@ -4,7 +4,7 @@ import { DownloadIcon, ExternalLinkIcon, HistoryIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type FileVersion, type Node } from "@/api";
 import { keys } from "@/api/queryKeys";
-import { confirm } from "@/components/confirm";
+import { confirm } from "@/lib/confirm";
 import { ErrorState } from "@/components/ErrorState";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { t } from "@/lib/i18n";

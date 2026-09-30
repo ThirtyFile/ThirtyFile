@@ -1,21 +1,10 @@
-/** Asking before an action that can't be taken back, as a promise: `if (!(await confirm({ … }))) return;` */
+/** The questions asked with confirm() (lib/confirm.ts), and the same asked from inside another dialog */
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import { ConfirmDialog } from "@/components/dialogs";
-import { createStore, useStore } from "@/lib/store";
+import { confirmRequest, type ConfirmOptions, type ConfirmRequest } from "@/lib/confirm";
+import { useStore } from "@/lib/store";
 
-export interface ConfirmOptions {
-  title: string;
-  description?: ReactNode;
-  confirmText?: string;
-  destructive?: boolean;
-  irreversible?: boolean;
-}
-
-interface Request extends ConfirmOptions {
-  resolve(ok: boolean): void;
-}
-
-function RequestDialog({ req, onDone }: { req: Request; onDone(ok: boolean): void }) {
+function RequestDialog({ req, onDone }: { req: ConfirmRequest; onDone(ok: boolean): void }) {
   return (
     <ConfirmDialog
       title={req.title}
@@ -29,20 +18,12 @@ function RequestDialog({ req, onDone }: { req: Request; onDone(ok: boolean): voi
   );
 }
 
-const current = createStore<Request | null>(null);
-
-/** For code outside components (tabs, transfer lists): shown by <ConfirmHost />. A new question answers an open one with "no". */
-export function confirm(options: ConfirmOptions): Promise<boolean> {
-  current.get()?.resolve(false);
-  return new Promise((resolve) => current.set({ ...options, resolve }));
-}
-
 /** Shows the questions asked with confirm(); mounted once for the whole app */
 export function ConfirmHost() {
-  const req = useStore(current);
+  const req = useStore(confirmRequest);
   if (!req) return null;
   const done = (ok: boolean) => {
-    if (current.get() === req) current.set(null);
+    if (confirmRequest.get() === req) confirmRequest.set(null);
     req.resolve(ok);
   };
   return <RequestDialog req={req} onDone={done} />;
@@ -53,8 +34,8 @@ export function ConfirmHost() {
  * content, so the question opens as a nested dialog above it (and answering doesn't close the dialog underneath)
  */
 export function useConfirm(): [(options: ConfirmOptions) => Promise<boolean>, ReactNode] {
-  const [req, setReq] = useState<Request | null>(null);
-  const open = useRef<Request | null>(null);
+  const [req, setReq] = useState<ConfirmRequest | null>(null);
+  const open = useRef<ConfirmRequest | null>(null);
   const ask = useCallback((options: ConfirmOptions) => {
     open.current?.resolve(false);
     return new Promise<boolean>((resolve) => {
