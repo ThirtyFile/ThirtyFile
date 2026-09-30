@@ -559,26 +559,48 @@ pub async fn cleanup(st: &AppState, job: &Job) -> AppResult<()> {
     crate::db::settle(tx, res).await
 }
 
+#[cfg(test)]
+type DescentHook = Box<dyn Fn(&str)>;
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: called with a folder's path below the old folder before `remove_empty` goes into it
+    static BEFORE_DESCENT: std::cell::RefCell<Option<DescentHook>> = const { std::cell::RefCell::new(None) };
+}
+
 /// Removes the folders of the old folder that are empty now, bottom up, and its marker, then itself when nothing else
 /// is left; returns what is left (paths below it)
 fn remove_empty(folder: &std::path::Path) -> Vec<String> {
-    fn walk(dir: &std::path::Path, rel: &str, left: &mut Vec<String>) {
-        let Ok(read) = std::fs::read_dir(dir) else { return };
+    /// `dir` is an open folder: each folder in it is opened in turn without following a link, so one swapped for a
+    /// link elsewhere meanwhile is never gone into or emptied
+    fn walk(dir: &Pinned, rel: &str, left: &mut Vec<String>) {
+        let Ok(read) = std::fs::read_dir(dir.as_path()) else { return };
         for e in read.flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
             let child = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
             let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
             if is_dir {
+                #[cfg(test)]
+                BEFORE_DESCENT.with(|h| {
+                    if let Some(f) = h.borrow().as_ref() {
+                        f(&child)
+                    }
+                });
                 // Emptied first; one that isn't empty keeps what is listed below
-                walk(&e.path(), &child, left);
-                let _ = std::fs::remove_dir(e.path());
+                let Some(inside) = e.file_name().to_str().and_then(|n| dir.join(n).ok()) else { continue };
+                if let Ok(open) = inside.dir() {
+                    walk(&open, &child, left);
+                }
+                let _ = std::fs::remove_dir(inside.as_path());
             } else if !(rel.is_empty() && name == MARKER) && left.len() < 1000 {
                 left.push(child);
             }
         }
     }
     let mut left = Vec::new();
-    walk(folder, "", &mut left);
+    if let Ok(root) = Pinned::root(folder) {
+        walk(&root, "", &mut left);
+    }
     // It is no space's folder any more
     let _ = std::fs::remove_file(folder.join(MARKER));
     if left.is_empty() {
@@ -612,6 +634,31 @@ mod tests {
         let job = super::super::job(&mut env.st.db.acquire().await.unwrap(), &id).await.unwrap().unwrap();
         cleanup(&env.st, &job).await.unwrap();
         sqlx::query_as::<_, (String,)>("SELECT note FROM space_moves WHERE id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap().0
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn removing_the_old_folder_never_follows_a_folder_swapped_for_a_link() {
+        let top = std::env::temp_dir().join(format!("thirtyfile-old-{}", new_id()));
+        let (old, outside) = (top.join("old"), top.join("outside"));
+        std::fs::create_dir_all(old.join("Sub/Empty")).unwrap();
+        std::fs::create_dir_all(outside.join("Empty")).unwrap();
+        std::fs::write(outside.join("secret.txt"), b"secret").unwrap();
+        // Someone replaces a folder with a link elsewhere right as it is gone into
+        let (o, out) = (old.clone(), outside.clone());
+        BEFORE_DESCENT.with(|h| {
+            *h.borrow_mut() = Some(Box::new(move |rel: &str| {
+                if rel == "Sub" {
+                    std::fs::rename(o.join("Sub"), o.with_extension("was-sub")).unwrap();
+                    std::os::unix::fs::symlink(&out, o.join("Sub")).unwrap();
+                }
+            }))
+        });
+        let left = remove_empty(&old);
+        BEFORE_DESCENT.with(|h| *h.borrow_mut() = None);
+        assert!(outside.join("Empty").is_dir(), "nothing outside is removed");
+        assert!(!left.iter().any(|p| p.contains("secret")), "nor named: {left:?}");
+        let _ = std::fs::remove_dir_all(&top);
     }
 
     #[tokio::test]

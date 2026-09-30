@@ -506,7 +506,7 @@ pub fn trash_folder(n: &Node) -> Option<crate::beneath::Below> {
         return None;
     }
     let id = parts.next()?;
-    Some(crate::beneath::Below::new(n.fs_root.as_deref()?, format!("{TRASH_DIR}/{id}")))
+    Some(crate::beneath::Below::new(n.fs_root.as_deref()?, n.drive(), format!("{TRASH_DIR}/{id}")))
 }
 
 /// Trash folders younger than this are never removed by `clean_trash`, known or not
@@ -535,7 +535,7 @@ pub async fn clean_trash(st: &AppState, drive_id: &str, root: &Path) -> AppResul
         .into_iter()
         .map(|(t,)| t)
         .collect();
-    remove_below_later(names.into_iter().filter(|n| !known.contains(n)).map(|n| crate::beneath::Below::new(root, format!("{TRASH_DIR}/{n}"))).collect());
+    remove_below_later(names.into_iter().filter(|n| !known.contains(n)).map(|n| crate::beneath::Below::new(root, drive_id, format!("{TRASH_DIR}/{n}"))).collect());
     Ok(())
 }
 
@@ -1544,6 +1544,45 @@ mod tests {
         assert!(r.skipped.iter().any(|s| s.contains("symbolic link")), "{r:?}");
         let _ = std::fs::remove_dir_all(&outside);
         let _ = std::fs::remove_dir_all(dir.with_extension("was-sub"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_space_folder_swapped_for_a_link_leads_nowhere() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        let (dir, drive) = (&space.dir, &space.drive);
+        write_old(&dir.join("drive.db"), b"indexed");
+        crate::folders::scan(&env.st, drive).await.unwrap();
+        let (file, _) = env.node_at(drive, "drive.db").await.unwrap();
+
+        // Someone who can write where the space's folder is (over SMB, say) replaces it with a link to another folder
+        let (outside, was) = (dir.with_extension("outside"), dir.with_extension("was"));
+        write_old(&outside.join("drive.db"), b"SECRET");
+        write_old(&outside.join("secret.key"), b"KEY");
+        std::fs::rename(dir, &was).unwrap();
+        std::os::unix::fs::symlink(&outside, dir).unwrap();
+        let q = Query(serde_json::from_value(json!({})).unwrap());
+        let read = crate::files::content(State(env.st.clone()), admin.clone(), UrlPath(file.clone()), q, HeaderMap::new()).await;
+        assert!(read.is_err(), "read through the link");
+        // Neither a scan nor opening the folder indexes what the link leads to
+        let r = crate::folders::scan(&env.st, drive).await.unwrap();
+        assert!(r.error.is_some(), "{r:?}");
+        crate::folders::sync_folder(&env.st, &node(&env, &space.root).await).await;
+        assert!(env.node_at(drive, "secret.key").await.is_none());
+        assert_eq!(env.node_at(drive, "drive.db").await.unwrap().0, file);
+        assert!(!outside.join(crate::folders::MARKER).exists(), "nothing is written there");
+
+        // The folder back, but its marker gone (deleted over SMB, say): the scan recognises the folder and marks it again
+        std::fs::remove_file(dir).unwrap();
+        std::fs::rename(&was, dir).unwrap();
+        std::fs::remove_file(dir.join(crate::folders::MARKER)).unwrap();
+        let r = crate::folders::scan(&env.st, drive).await.unwrap();
+        assert!(r.error.is_none(), "{r:?}");
+        assert_eq!(std::fs::read_to_string(dir.join(crate::folders::MARKER)).unwrap(), *drive);
+        assert_eq!(content(&env, &admin, &file).await, b"indexed");
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[tokio::test]

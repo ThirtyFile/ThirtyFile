@@ -118,10 +118,10 @@ pub async fn keep_file(conn: &mut SqliteConnection, policy: Policy, node: &Node,
     }
     let id = new_id();
     let rel = format!("{VERSIONS_DIR}/{}/{id}", node.id);
-    let (root, node_id, version, path) = (PathBuf::from(root), node.id.clone(), id.clone(), path.clone());
+    let (root, drive, node_id, version, path) = (PathBuf::from(root), node.drive().to_string(), node.id.clone(), id.clone(), path.clone());
     // On a blocking thread: where the disk has no hard links, the whole file is copied
     let to = tokio::task::spawn_blocking(move || {
-        version_file(&root, &node_id, &version).and_then(|to| {
+        version_file(&root, &drive, &node_id, &version).and_then(|to| {
             // A hard link never follows a symbolic link (on Linux)
             match std::fs::hard_link(path.as_path(), to.as_path()) {
                 Ok(()) => Ok(to),
@@ -171,7 +171,7 @@ async fn released(conn: &mut SqliteConnection, rows: Vec<(Option<String>, Option
                     sqlx::query_as("SELECT source_path FROM drives WHERE id = ? AND mode = 'folder'").bind(&drive).fetch_optional(&mut *conn).await?;
                 roots.insert(drive.clone(), root.map(|r| r.0));
             }
-            if let Some(b) = version_path(roots[&drive].as_deref(), Some(&rel)) {
+            if let Some(b) = version_path(roots[&drive].as_deref(), &drive, Some(&rel)) {
                 files.push(b);
             }
         }
@@ -179,19 +179,20 @@ async fn released(conn: &mut SqliteConnection, rows: Vec<(Option<String>, Option
     Ok(Removed { blobs: tree::release_blobs(conn, &hashes).await?, files })
 }
 
-/// A folder-space version's file, only ever inside the space's versions folder
-fn version_path(root: Option<&str>, rel: Option<&str>) -> Option<Below> {
+/// A folder-space version's file, only ever inside the versions folder of the space `drive`
+fn version_path(root: Option<&str>, drive: &str, rel: Option<&str>) -> Option<Below> {
     let (root, rel) = (root?, rel?);
     let mut parts = rel.split('/');
     if parts.next()? != VERSIONS_DIR || rel.split('/').any(|p| p.is_empty() || p == "." || p == "..") {
         return None;
     }
-    Some(Below::new(root, rel))
+    Some(Below::new(root, drive, rel))
 }
 
-/// Where a new version of the file `node_id` goes: `.thirtyfile-versions/<node id>/<id>`, making the folders
-fn version_file(root: &Path, node_id: &str, id: &str) -> std::io::Result<Pinned> {
-    let folder = Pinned::root(root)?.join(VERSIONS_DIR)?;
+/// Where a new version of the file `node_id` goes: `.thirtyfile-versions/<node id>/<id>` in the folder of the space
+/// `drive`, making the folders
+fn version_file(root: &Path, drive: &str, node_id: &str, id: &str) -> std::io::Result<Pinned> {
+    let folder = crate::folders::open_space(root, drive, false)?.join(VERSIONS_DIR)?;
     fsops::ensure_dir(&folder)?;
     let folder = folder.join(node_id)?;
     fsops::ensure_dir(&folder)?;
@@ -298,7 +299,7 @@ pub async fn clean_folder(st: &AppState, drive_id: &str, root: &Path) -> AppResu
             .into_iter()
             .map(|(p,)| p)
             .collect();
-    fsops::remove_below_later(found.into_iter().filter(|rel| !known.contains(rel)).map(|rel| Below::new(root, rel)).collect());
+    fsops::remove_below_later(found.into_iter().filter(|rel| !known.contains(rel)).map(|rel| Below::new(root, drive_id, rel)).collect());
     Ok(())
 }
 
@@ -344,13 +345,14 @@ struct Version {
     location: Option<String>,
     fs_path: Option<String>,
     fs_root: Option<String>,
+    drive_id: Option<String>,
 }
 
 /// Where a version's content is
 async fn version_source(conn: &mut SqliteConnection, node: &Node, version: &str) -> AppResult<(Source, u64)> {
     let v: Version = sqlx::query_as(
         "SELECT v.size, v.blob_hash, (SELECT location_id FROM blobs WHERE hash = v.blob_hash) AS location, v.fs_path,
-                (SELECT source_path FROM drives WHERE id = v.drive_id AND mode = 'folder') AS fs_root
+                (SELECT source_path FROM drives WHERE id = v.drive_id AND mode = 'folder') AS fs_root, v.drive_id
          FROM node_versions v WHERE v.id = ? AND v.node_id = ?",
     )
     .bind(version)
@@ -358,7 +360,7 @@ async fn version_source(conn: &mut SqliteConnection, node: &Node, version: &str)
     .fetch_optional(conn)
     .await?
     .ok_or_else(|| AppError::not_found("This version no longer exists"))?;
-    let source = match (&v.blob_hash, version_path(v.fs_root.as_deref(), v.fs_path.as_deref())) {
+    let source = match (&v.blob_hash, version_path(v.fs_root.as_deref(), v.drive_id.as_deref().unwrap_or_default(), v.fs_path.as_deref())) {
         (Some(hash), _) => Source::Stored { hash: hash.clone(), location: v.location.unwrap_or_else(|| "local".into()) },
         (None, Some(b)) => Source::File(b.pin().map_err(|_| AppError::not_found("This version no longer exists"))?),
         (None, None) => return Err(AppError::not_found("This version no longer exists")),

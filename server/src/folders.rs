@@ -38,12 +38,35 @@ const MAX_REPORTED: usize = 200;
 /// another disk mounted at the same place, with a folder of the same name, is left alone.
 pub const MARKER: &str = ".thirtyfile-space";
 
-/// The space id in the marker of the space folder `root`; None when there is none
+/// The space id in the marker of the space folder `root`; None when there is none. Only an ordinary file is read, and
+/// only its start: a link, a named pipe or a device put there instead is no marker.
 pub fn space_marker(root: &crate::beneath::Pinned) -> std::io::Result<Option<String>> {
-    match std::fs::read(root.join(MARKER)?.as_path()) {
-        Ok(b) => Ok(Some(String::from_utf8_lossy(&b).trim().to_string())),
-        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => Ok(None),
-        Err(e) => Err(e),
+    use std::io::Read;
+    let file = match root.join(MARKER)?.open_file() {
+        Ok(f) => f,
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => return Ok(None),
+        #[cfg(unix)]
+        Err(e) if e.raw_os_error() == Some(libc::ELOOP) => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let mut b = Vec::new();
+    file.take(MAX_MARKER).read_to_end(&mut b)?;
+    Ok(Some(String::from_utf8_lossy(&b).trim().to_string()))
+}
+
+/// Bytes of a space's marker read at most (it holds a space id)
+const MAX_MARKER: u64 = 4096;
+
+/// The folder of the space `drive_id` at `root`, opened, for reading what is in it. Someone who can write where the
+/// folder is could put another folder, or a link to one, in its place; what is read through the result is in the
+/// folder whose marker was checked. It must hold the space's marker; a read-only space's folder may have none (the
+/// marker can't always be written there), but never another space's.
+pub fn open_space(root: &Path, drive_id: &str, read_only: bool) -> std::io::Result<crate::beneath::Pinned> {
+    let pinned = crate::beneath::Pinned::root(root)?;
+    match space_marker(&pinned)? {
+        Some(id) if id == drive_id => Ok(pinned),
+        None if read_only => Ok(pinned),
+        _ => Err(std::io::Error::new(std::io::ErrorKind::NotFound, "not the space's folder")),
     }
 }
 
@@ -185,16 +208,25 @@ pub(crate) fn identity(_: &std::fs::Metadata) -> (i64, i64) {
     (0, 0)
 }
 
+/// What `walk` read: the folder (open), its marker and its items
+struct Walked {
+    root: crate::beneath::Pinned,
+    marker: Option<String>,
+    entries: Vec<Entry>,
+}
+
 /// Reads the folder: every item below `root` (or only the items directly in `only`, a path below it), parents
-/// before their contents. Runs on a blocking thread.
-fn walk(root: &Path, only: Option<&str>, report: &mut ScanReport, found: Option<&dyn Fn(usize)>) -> std::io::Result<Vec<Entry>> {
-    let root_meta = std::fs::metadata(root)?;
+/// before their contents, and the space's marker. Everything is read through the folder opened once, so the marker
+/// and the items are those of the same folder, whatever is put in its place meanwhile. Runs on a blocking thread.
+fn walk(root: &Path, only: Option<&str>, report: &mut ScanReport, found: Option<&dyn Fn(usize)>) -> std::io::Result<Walked> {
+    // Each folder is reached without following a symbolic link on the way (one could replace a folder meanwhile)
+    let pinned = crate::beneath::Pinned::root(root)?;
+    let root_meta = std::fs::metadata(pinned.as_path())?;
     if !root_meta.is_dir() {
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "The folder doesn't exist"));
     }
     let (root_dev, _) = identity(&root_meta);
-    // Each folder is reached without following a symbolic link on the way (one could replace a folder meanwhile)
-    let pinned = crate::beneath::Pinned::root(root)?;
+    let marker = space_marker(&pinned)?;
     let settle_after = (now() - SETTLE_SECONDS) as i128 * 1_000_000_000;
     let mut out = Vec::new();
     let mut queue = std::collections::VecDeque::from([only.unwrap_or("").to_string()]);
@@ -268,7 +300,17 @@ fn walk(root: &Path, only: Option<&str>, report: &mut ScanReport, found: Option<
             found(out.len());
         }
     }
-    Ok(out)
+    Ok(Walked { root: pinned, marker, entries: out })
+}
+
+/// Whether the folder read is the one the index has, told by the identity of an item at its indexed path (a folder
+/// put in its place can't have one of its inodes). Without inode numbers (not Unix) it can't be told: taken as it is.
+fn same_folder(indexed: &[Indexed], entries: &[Entry]) -> bool {
+    if entries.iter().all(|e| e.ino == 0) {
+        return true;
+    }
+    let by_path: HashMap<&str, &Indexed> = indexed.iter().filter_map(|n| n.fs_path.as_deref().map(|p| (p, n))).collect();
+    entries.iter().any(|e| e.ino != 0 && by_path.get(e.rel.as_str()).is_some_and(|n| n.fs_dev == Some(e.dev) && n.fs_ino == Some(e.ino)))
 }
 
 fn show(dir_rel: &str, name: &str) -> String {
@@ -344,7 +386,7 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
             let mut r = ScanReport::default();
             let res = tokio::task::spawn_blocking(move || {
                 let found = |n: usize| set_progress(&id, |p| p.found = n);
-                walk(&root, None, &mut r, Some(&found)).map(|e| (e, r))
+                walk(&root, None, &mut r, Some(&found)).map(|w| (w, r))
             })
             .await
             .map_err(AppError::internal)?;
@@ -364,8 +406,8 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
         }
         reads += 1;
     };
-    let entries = match walked {
-        Ok(e) => e,
+    let walked = match walked {
+        Ok(w) => w,
         Err(e) => {
             // The folder is gone (an unmounted disk, say): keep the index rather than removing everything
             report.error = Some(format!("Can't read {}: {e}", root.display()));
@@ -380,10 +422,10 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     .fetch_all(&st.db)
     .await?;
     report.read_ms = started.elapsed().as_millis() as u64;
+    let (entries, found) = (walked.entries, walked.marker);
     // An empty folder where the index has items is what a disk or share that isn't mounted looks like (its mount
     // point is an empty folder): only a folder that has the marker is really empty
-    let marker = crate::beneath::Pinned::root(&root).and_then(|r| r.join(MARKER));
-    let found = crate::beneath::Pinned::root(&root).and_then(|r| space_marker(&r)).ok().flatten();
+    let marker = walked.root.join(MARKER);
     if found.as_ref().is_some_and(|id| *id != drive.id) {
         // Another space's folder: a different disk mounted at the same place, say
         report.error = Some(format!(
@@ -403,6 +445,16 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
         save_report(st, &drive, &report).await?;
         return Ok(report);
     }
+    // Without its marker, the folder is taken for the space's only when it holds an item the index knows by its
+    // identity (the marker was deleted, say): another folder put in its place (a link elsewhere) is never indexed
+    if has_items && !marked && !same_folder(&indexed, &entries) {
+        report.error = Some(format!(
+            "{} doesn't hold this space's .thirtyfile-space file, nor the items the space has: if another folder or disk is there now, put the right one back and check again.",
+            root.display()
+        ));
+        save_report(st, &drive, &report).await?;
+        return Ok(report);
+    }
     if !marked
         && let Err(e) = marker.and_then(|m| crate::beneath::write_new(&m, drive.id.as_bytes()))
     {
@@ -416,8 +468,8 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     });
     apply(st, &drive, ops).await?;
     crate::fsops::clean_trash(st, &drive.id, &root).await?;
-    let leftovers: Vec<crate::beneath::Pinned> =
-        crate::beneath::Pinned::root(&root).map(|r| report.leftovers.iter().filter_map(|rel| r.join(rel).ok()).collect()).unwrap_or_default();
+    // In the folder read (whose marker was checked)
+    let leftovers: Vec<crate::beneath::Pinned> = report.leftovers.iter().filter_map(|rel| walked.root.join(rel).ok()).collect();
     if !leftovers.is_empty() {
         tokio::task::spawn_blocking(move || crate::fsops::clean_leftovers(leftovers, crate::fsops::TRASH_GRACE)).await.map_err(AppError::internal)?;
     }
@@ -459,7 +511,13 @@ async fn try_sync_folder(st: &AppState, folder: &Node) -> AppResult<()> {
         let mut r = ScanReport::default();
         let res = tokio::task::spawn_blocking(move || walk(&root, Some(&rel), &mut r, None)).await.map_err(AppError::internal)?;
         match res {
-            Ok(e) => e,
+            // Only the space's own folder (a scan looks at one without its marker)
+            Ok(w) if w.marker.as_deref() == Some(drive.id.as_str()) => w.entries,
+            Ok(_) => {
+                drop(_scanning);
+                scan_later(st, &drive.id);
+                return Ok(());
+            }
             Err(_) => return Ok(()),
         }
     };
@@ -1196,6 +1254,36 @@ mod tests {
         if cfg!(unix) {
             assert_eq!(env.node_at(&space.drive, "Moved/a.txt").await.unwrap().0, a);
         }
+    }
+
+    #[test]
+    fn only_a_small_file_is_read_as_the_spaces_marker() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-marker-{}", new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let root = crate::beneath::Pinned::root(&dir).unwrap();
+        std::fs::write(dir.join(MARKER), "space-1\n").unwrap();
+        assert_eq!(space_marker(&root).unwrap().as_deref(), Some("space-1"));
+        // A large file isn't read whole
+        std::fs::write(dir.join(MARKER), vec![b'x'; 8 << 20]).unwrap();
+        assert!(space_marker(&root).unwrap().is_some_and(|m| m.len() <= 4096));
+        // Something else than a file is no marker, and isn't waited on
+        std::fs::remove_file(dir.join(MARKER)).unwrap();
+        #[cfg(target_os = "linux")]
+        {
+            let fifo = std::ffi::CString::new(dir.join(MARKER).to_string_lossy().as_bytes()).unwrap();
+            // SAFETY: a valid path
+            assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+            let (tx, rx) = std::sync::mpsc::channel();
+            let r = root.clone();
+            std::thread::spawn(move || tx.send(space_marker(&r).ok().flatten()).unwrap());
+            assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(5)), Ok(None));
+            std::fs::remove_file(dir.join(MARKER)).unwrap();
+            std::os::unix::fs::symlink(dir.with_extension("elsewhere"), dir.join(MARKER)).unwrap();
+            std::fs::write(dir.with_extension("elsewhere"), "space-1").unwrap();
+            assert_eq!(space_marker(&root).unwrap(), None);
+            let _ = std::fs::remove_file(dir.with_extension("elsewhere"));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

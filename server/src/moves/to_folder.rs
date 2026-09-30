@@ -620,7 +620,7 @@ async fn switch(cx: &Ctx<'_>, folder: &Path) -> AppResult<bool> {
     };
     let _ = renamed;
     if switched {
-        crate::fsops::remove_below_later(gone.into_iter().map(|(p,)| crate::beneath::Below::new(folder, p)).collect());
+        crate::fsops::remove_below_later(gone.into_iter().map(|(p,)| crate::beneath::Below::new(folder, &job.drive_id, p)).collect());
         crate::folders::spaces_changed();
         crate::folders::scan_later(st, &job.drive_id);
     }
