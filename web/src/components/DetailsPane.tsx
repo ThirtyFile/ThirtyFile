@@ -9,7 +9,8 @@ import { FileIcon, canBrowserThumbnail, canThumbnail, typeLabel } from "@/compon
 import { Thumb } from "@/components/FileList";
 import { Resizer } from "@/components/Resizer";
 import { VersionsSection } from "@/components/VersionsSection";
-import { ROLE_LABEL, actionLabel } from "@/lib/drives";
+import { ROLE_LABEL } from "@/lib/drives";
+import { actionLabel } from "@/components/logs/actions";
 import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
 import { t, tServer } from "@/lib/i18n";
 import { FOLDER_CONTENTS } from "@/lib/queries";

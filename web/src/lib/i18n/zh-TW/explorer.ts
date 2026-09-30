@@ -130,8 +130,6 @@ export default {
   "Close other tabs": "關閉其他分頁",
   "Tabs": "分頁",
   "New tab": "新增分頁",
-  "\"{name}\" has unsaved changes. Close it anyway?": "「{name}」尚未儲存，確定要關閉嗎？",
-  "{n} tab has unsaved changes. Close it anyway?|{n} tabs have unsaved changes. Close them anyway?": "{n} 個分頁有未儲存的變更，仍要關閉嗎？",
   // components/dialogs.tsx, NavMenu.tsx, InlineRename.tsx, ErrorBoundary.tsx
   "Cancel": "取消",
   "OK": "確定",

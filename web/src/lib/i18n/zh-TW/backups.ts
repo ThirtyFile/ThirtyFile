@@ -30,7 +30,6 @@ export default {
   "{name} is FTP without encryption: the files travel unencrypted.": "{name} 是未加密的 FTP：檔案會以未加密的方式傳送。",
   "Start copying": "開始複製",
   // Control panel › Backups (admin/storage/BackupsPage.tsx)
-  "Copies of storage locations kept on another location; check them, and restore spaces from them": "存放在其他位置的儲存位置副本；可以檢查副本，並從中還原空間",
   "Copying": "複製",
   "Restoring": "還原",
   "Checking": "檢查",
@@ -52,8 +51,6 @@ export default {
   "Made": "建立時間",
   "{n} copy|{n} copies": "{n} 份副本",
   "{n} job not finished|{n} jobs not finished": "{n} 個工作尚未完成",
-  "No copies yet": "還沒有副本",
-  "Copy a location from Control panel › Storage locations › Copy everything to….": "可以在「控制台 › 儲存位置 › 全部複製到…」複製一個位置。",
   "Delete the copy \"{name}\"?": "要刪除副本「{name}」嗎？",
   "Its folder on {dest} is deleted, with everything in it; it can't be restored from any more. Nothing on {source} changes.":
     "它在 {dest} 上的資料夾會連同裡面的一切被刪除，之後就不能再從它還原。{source} 上的一切都不會改變。",
@@ -82,8 +79,6 @@ export default {
   "the same space": "同一個空間",
   "It goes back into {name}'s personal space.": "會還原到 {name} 的個人空間。",
   "Also restore what was in the trash": "也還原當時在垃圾桶中的項目",
-  "Everything goes into a new folder, \"{folder}\", at the top of the space: nothing already there is replaced.": "所有內容都會放進空間最上層的新資料夾「{folder}」，不會取代任何已有的項目。",
-  "The folder takes the space's permissions. Earlier versions and the access recorded in the copy aren't restored.": "這個資料夾沿用空間的權限。副本中的較早版本和記錄下來的存取權不會還原。",
   "Administrators don't see the files of personal spaces: the whole space is restored, and only its owner sees it.": "管理員看不到個人空間中的檔案：會還原整個空間，只有擁有者看得到內容。",
   // Backup policies (admin/storage/BackupPolicyDialog.tsx)
   "\"{name}\" was changed": "已變更「{name}」",
@@ -189,7 +184,7 @@ export default {
   "{days} days, and always the newest {n}": "{days} 天，且一定保留最新的 {n} 個",
   "Last checked": "上次檢查",
   "Restore points": "還原點",
-  // Activity log (lib/drives.tsx)
+  // Activity log (components/logs/actions.ts)
   "Start copying a location": "開始複製位置",
   "Copy made": "副本已完成",
   "Backup job failed": "備份工作失敗",

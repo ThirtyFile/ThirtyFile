@@ -6,7 +6,7 @@ import { keys } from "@/api/queryKeys";
 import { nativeDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
-import { ACTION_GROUPS, actionLabel } from "@/lib/drives";
+import { ACTION_GROUPS, actionLabel } from "@/components/logs/actions";
 import { cn, formatWinDate } from "@/lib/utils";
 import { t, tServer } from "@/lib/i18n";
 import { shownCount } from "@/components/logs/shown";
