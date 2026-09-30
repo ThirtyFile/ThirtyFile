@@ -565,6 +565,10 @@ pub async fn create_user(conn: &mut SqliteConnection, u: NewUser<'_>) -> AppResu
     Ok(id)
 }
 
+/// The password the guides' examples show for the first administrator. Whoever read the same guide knows it, so it
+/// counts as not set: the account gets a random password, written to the log.
+pub const EXAMPLE_ADMIN_PASSWORD: &str = "choose-a-password";
+
 /// Creates the default administrator when there are no users. `space_folders`: see `NewUser`.
 pub async fn bootstrap_admin(db: &SqlitePool, password: Option<&str>, space_folders: Option<&Path>) -> AppResult<()> {
     let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users").fetch_one(db).await?;
@@ -573,7 +577,10 @@ pub async fn bootstrap_admin(db: &SqlitePool, password: Option<&str>, space_fold
     }
     // Any password is accepted here: the administrator is asked to change it after signing in.
     // An empty one counts as not set, so `THIRTYFILE_ADMIN_PASSWORD=` in a compose file gets a random password.
-    let (password, generated) = match password.filter(|p| !p.is_empty()) {
+    if password == Some(EXAMPLE_ADMIN_PASSWORD) {
+        tracing::warn!("THIRTYFILE_ADMIN_PASSWORD is the example from the guide, which anyone can read: a random password is used instead");
+    }
+    let (password, generated) = match password.filter(|p| !p.is_empty() && *p != EXAMPLE_ADMIN_PASSWORD) {
         Some(p) => (p.to_string(), false),
         None => (random_token(16), true),
     };
@@ -811,6 +818,12 @@ mod tests {
         let short: String = crate::util::new_id().chars().take(5).collect();
         let hash = admin_hash(Some(&short)).await;
         assert!(crate::auth::verify_password(short, hash).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn the_example_password_of_the_guides_counts_as_not_set() {
+        let hash = admin_hash(Some(EXAMPLE_ADMIN_PASSWORD)).await;
+        assert!(!crate::auth::verify_password(EXAMPLE_ADMIN_PASSWORD.into(), hash).await.unwrap());
     }
 
     #[tokio::test]

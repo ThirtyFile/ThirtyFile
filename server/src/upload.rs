@@ -165,7 +165,10 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
         None => meta.get("parentId").cloned().unwrap_or_else(|| "root".into()),
     };
     let mut rel_parts = Vec::new();
-    for part in meta.get("relativePath").map(String::as_str).unwrap_or_default().split('/').filter(|p| !p.is_empty()) {
+    // A link that only accepts files puts every file into the shared folder itself: a folder path would reach
+    // folders there that its visitors can't see
+    let rel_path = if up.share.as_ref().is_some_and(|s| s.drop_only) { "" } else { meta.get("relativePath").map(String::as_str).unwrap_or_default() };
+    for part in rel_path.split('/').filter(|p| !p.is_empty()) {
         if rel_parts.len() >= MAX_REL_DEPTH {
             return Err(AppError::bad_request("The folder path is too deep"));
         }
@@ -239,7 +242,7 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
         let upload = load(st, up, &id).await?;
         let guard = ActiveGuard::claim(st, &id).ok_or_else(|| AppError::new(StatusCode::LOCKED, "This file is already being uploaded"))?;
         let node_id = finish(st, up, upload, guard).await?;
-        finished_headers(st, res.headers_mut(), &node_id).await?;
+        finished_headers(st, up, res.headers_mut(), &node_id).await?;
     }
     tus(&mut res);
     res.headers_mut().insert(header::LOCATION, HeaderValue::from_str(&up.location(&id)).unwrap());
@@ -291,7 +294,7 @@ pub async fn head_as(st: &AppState, up: &Uploader, id: &str) -> AppResult<Respon
     let mut res = StatusCode::OK.into_response();
     tus(&mut res);
     if let Some(n) = &node_id {
-        finished_headers(&st, res.headers_mut(), n).await?;
+        finished_headers(&st, up, res.headers_mut(), n).await?;
     }
     let h = res.headers_mut();
     // A finished upload reports everything as received, whatever the row said before finishing
@@ -302,10 +305,14 @@ pub async fn head_as(st: &AppState, up: &Uploader, id: &str) -> AppResult<Respon
 }
 
 /// Tells the client which file the upload became: its id, and its name (percent-encoded), which differs from the
-/// uploaded one when both files were kept ("Report (1).docx")
-async fn finished_headers(st: &AppState, h: &mut HeaderMap, node_id: &str) -> AppResult<()> {
-    let name: Option<(String,)> = sqlx::query_as("SELECT name FROM nodes WHERE id = ?").bind(node_id).fetch_optional(&st.db).await?;
+/// uploaded one when both files were kept ("Report (1).docx"). Visitors of a link that only accepts files aren't told
+/// the name: a changed one would say which names are taken in a folder they can't see.
+async fn finished_headers(st: &AppState, up: &Uploader, h: &mut HeaderMap, node_id: &str) -> AppResult<()> {
     h.insert("x-node-id", HeaderValue::from_str(node_id).map_err(AppError::internal)?);
+    if up.share.as_ref().is_some_and(|s| s.drop_only) {
+        return Ok(());
+    }
+    let name: Option<(String,)> = sqlx::query_as("SELECT name FROM nodes WHERE id = ?").bind(node_id).fetch_optional(&st.db).await?;
     if let Some((name,)) = name {
         let encoded = percent_encoding::utf8_percent_encode(&name, percent_encoding::NON_ALPHANUMERIC).to_string();
         h.insert("x-node-name", HeaderValue::from_str(&encoded).map_err(AppError::internal)?);
@@ -357,7 +364,7 @@ pub async fn patch_as(st: &AppState, up: &Uploader, id: &str, headers: &HeaderMa
         let mut res = StatusCode::NO_CONTENT.into_response();
         tus(&mut res);
         res.headers_mut().insert("upload-offset", upload.size.into());
-        finished_headers(&st, res.headers_mut(), node_id).await?;
+        finished_headers(&st, up, res.headers_mut(), node_id).await?;
         return Ok(res);
     }
     // The deadline moves when data starts arriving, so the hourly cleanup can't remove an upload that is being received
@@ -439,7 +446,7 @@ pub async fn patch_as(st: &AppState, up: &Uploader, id: &str, headers: &HeaderMa
     if offset == size {
         let upload = load(&st, up, &id).await?;
         let node_id = finish(&st, up, upload, guard).await?;
-        finished_headers(&st, res.headers_mut(), &node_id).await?;
+        finished_headers(&st, up, res.headers_mut(), &node_id).await?;
     }
     tus(&mut res);
     res.headers_mut().insert("upload-offset", offset.into());

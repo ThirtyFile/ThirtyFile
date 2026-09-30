@@ -27,12 +27,19 @@ const MAX_COPY_ITEMS: usize = 20_000;
 /// First segment of the location text for items accessed through a folder share (the browser uses its own text)
 const SHARED_WITH_ME: &str = "Shared with me";
 
+/// What people who can open a space are told about it
 #[derive(Serialize)]
 pub struct DriveBrief {
     id: String,
     name: String,
     kind: String,
     root_id: String,
+}
+
+impl From<tree::Drive> for DriveBrief {
+    fn from(d: tree::Drive) -> Self {
+        DriveBrief { id: d.id, name: d.name, kind: d.kind, root_id: d.root_id }
+    }
 }
 
 #[derive(Serialize)]
@@ -80,20 +87,20 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
     // is on no location
     let offline = if drive.is_folder() {
         let (location,): (Option<String>,) = sqlx::query_as("SELECT location_id FROM drives WHERE id = ?").bind(&drive.id).fetch_one(&mut *c).await?;
-        location.and_then(|l| st.location_offline(&l))
+        location.and_then(|l| st.location_offline_for(&l, user.is_admin()))
     } else {
         let location = match node.blob() {
             Ok((_, loc)) => loc.to_string(),
             Err(_) => tree::drive_location(&mut c, node.drive()).await?,
         };
-        st.location_offline(&location)
+        st.location_offline_for(&location, user.is_admin())
     };
     let (read_only, moving) = (drive.read_only || drive.moving, drive.moving);
     Ok(Json(NodeInfo {
         node,
         path,
         is_root,
-        drive: DriveBrief { id: drive.id, name: drive.name, kind: drive.kind, root_id: drive.root_id },
+        drive: drive.into(),
         role,
         via_share,
         location,

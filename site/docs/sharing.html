@@ -18,7 +18,7 @@
         <h1>Sharing</h1>
         <p class="lead">There are two ways to share: with people who have an account, and with anyone through a link.</p>
         <h2 id="people">Share with colleagues</h2>
-        <p>Right-click a folder or file and choose <strong>Share with…</strong>. Type a username or group, choose what they may do, and optionally a date when the access ends, then click <strong>Add</strong>.</p>
+        <p>Right-click a folder or file and choose <strong>Share with…</strong>. Type a username or group, choose what they may do, and optionally a date when the access ends, then click <strong>Add</strong>. Someone whose own access here ends on a date can't give themselves (or a group of theirs, or everyone) access that lasts longer.</p>
         <p>The item appears under <strong>Shared with me</strong> in their menu, and they are told under the bell (and by email, if it is set up): see <a href="account.html#notifications">Notifications</a>.</p>
 
         <h3>Roles</h3>
@@ -29,7 +29,7 @@
               <tr><td><strong>Viewer</strong></td><td>Browse, preview and download</td></tr>
               <tr><td><strong>Editor</strong></td><td>Also upload, edit, delete and create share links, each only if their account is allowed to (<strong>Control panel › Users</strong>)</td></tr>
               <tr><td><strong>Manager</strong></td><td>Also manage members and sharing, if their account is allowed to share</td></tr>
-              <tr><td><strong>Owner</strong></td><td>Also delete the space</td></tr>
+              <tr><td><strong>Owner</strong></td><td>Also delete the space, if their account is allowed to delete</td></tr>
             </tbody>
           </table>
         </div>
@@ -40,7 +40,7 @@
         <ul>
           <li><strong>Expiration</strong>: the link stops working after 1, 7, 30 or 90 days, or never.</li>
           <li><strong>Password</strong>: visitors must enter it before they see anything, and again after a day. It must be as long as account passwords (<strong>Control panel › General</strong>). After ten wrong passwords for a link, each further try has to wait longer, from any address. Send the password separately from the link.</li>
-          <li><strong>Download limit</strong>: the link stops working after this many downloads.</li>
+          <li><strong>Download limit</strong>: the link stops working after this many downloads. A download that is resumed, or a video that is skipped through, counts once; each file of a folder counts on its own.</li>
           <li><strong>Visitors can</strong>: whether they may download, and for a folder, whether they may upload files. See below.</li>
         </ul>
         <p>To change a link's password, expiry, download limit or what visitors can do, click <strong>Edit link</strong> next to it. The address stays the same. After a new password, people who opened the link before must enter the new one.</p>
@@ -48,7 +48,7 @@
         <h3 id="receive">Receive files with a link</h3>
         <p>To collect files, for example from customers, create a link to a folder and tick <strong>Upload files</strong>. Visitors then get an <strong>Upload</strong> button and can drag files onto the folder.</p>
         <ul>
-          <li>Tick <strong>Only upload</strong> as well, and visitors see nothing of what is in the folder and can't download anything; they only get a box to send files into the folder itself.</li>
+          <li>Tick <strong>Only upload</strong> as well, and visitors see nothing of what is in the folder and can't download anything; they only get a box to send files into the folder itself. A dropped folder arrives as its files, and when a name is taken the file is kept under a new one without telling the visitor.</li>
           <li>Uploaded files belong to you, count toward the space's size, and follow the usual rules for names and the upload size limit. A file whose name is taken gets a number, like <code>report (1).pdf</code>.</li>
           <li>Each upload is recorded in the activity log, under your name with <em>Through share link</em>, and in the link's access log. You get a notification when files arrive (<a href="account.html#notifications">Notifications</a>).</li>
           <li>Uploads only work while you can still change the folder. When you lose that permission, or the folder is moved out of the shared folder, uploads through the link stop.</li>
