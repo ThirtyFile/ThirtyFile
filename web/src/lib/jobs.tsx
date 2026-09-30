@@ -9,6 +9,7 @@ import { api, type Job } from "@/api";
 import { t, tServer } from "@/lib/i18n";
 import { refreshFiles, type FileChange } from "@/lib/queries";
 import { reportShown } from "@/lib/errorReport";
+import { errorMessage } from "@/lib/utils";
 
 /** How often a running task is asked for its progress */
 const POLL_MS = 700;
@@ -95,7 +96,7 @@ export async function followJob(job: Job, done: string, after: () => void) {
     await waitForJob(job);
     toast.success(done);
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : t("Operation failed"));
+    toast.error(errorMessage(e, t("Operation failed")));
     reportShown(job.kind, e, job.id);
   } finally {
     after();
@@ -113,7 +114,7 @@ export async function runJob(qc: QueryClient, start: () => Promise<Job>, change:
     toast.success(job.kind === "compress" ? t("Created \"{name}\"", { name }) : t("Extracted to \"{name}\"", { name }), { duration: 5000 });
     void refreshFiles(qc, change);
   } catch (e) {
-    const message = e instanceof Error ? e.message : t("Operation failed");
+    const message = errorMessage(e, t("Operation failed"));
     if (!kind) toast.error(message);
     else toast.error(kind === "compress" ? t("Couldn't compress to ZIP") : t("Couldn't extract"), { description: message, duration: 10000 });
     reportShown(kind ?? "job", e);

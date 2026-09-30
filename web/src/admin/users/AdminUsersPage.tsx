@@ -19,7 +19,7 @@ import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { followJob } from "@/lib/jobs";
 import { useMe } from "@/lib/session";
 import { t, tc } from "@/lib/i18n";
-import { formatBytes, formatDate, formatDateTime } from "@/lib/utils";
+import { formatBytes, formatDate, formatDateTime, errorMessage } from "@/lib/utils";
 import { LoginLogDialog } from "@/components/logs/LoginLog";
 import { DevicesDialog } from "@/components/DevicesDialog";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
@@ -242,7 +242,7 @@ export function AdminUsersPage() {
                       toast.success(selected.disabled ? t("Account enabled") : t("Account disabled"));
                       qc.invalidateQueries({ queryKey: keys.adminUsers() });
                     } catch (e) {
-                      toast.error(e instanceof Error ? e.message : t("Operation failed"));
+                      toast.error(errorMessage(e, t("Operation failed")));
                     }
                   }}
                 >

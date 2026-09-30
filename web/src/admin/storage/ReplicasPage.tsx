@@ -45,7 +45,7 @@ import {
   targetJob,
   useReplicas,
 } from "@/admin/storage/replicas";
-import { cn, formatBytes, formatDateTime } from "@/lib/utils";
+import { cn, formatBytes, formatDateTime, errorMessage } from "@/lib/utils";
 
 /** How long ago, roughly */
 function ago(at: number) {
@@ -119,7 +119,7 @@ export function ReplicasPage() {
       await what();
       toast.success(done);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Operation failed"));
+      toast.error(errorMessage(e, t("Operation failed")));
     } finally {
       refresh();
     }
@@ -373,7 +373,7 @@ function PolicyDetails({
       await what();
       toast.success(done);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Operation failed"));
+      toast.error(errorMessage(e, t("Operation failed")));
     } finally {
       onChanged();
     }
@@ -567,7 +567,7 @@ function PromoteDialog({ p, target: preset, onClose, onDone }: { p: ReplicaPolic
             <Loader2Icon className="size-4 animate-spin" /> {t("Checking both locations…")}
           </p>
         )}
-        {pre.error && <ErrorText>{pre.error instanceof Error ? pre.error.message : t("Operation failed")}</ErrorText>}
+        {pre.error && <ErrorText>{errorMessage(pre.error, t("Operation failed"))}</ErrorText>}
         {pf && (
           <div className="grid gap-2 text-sm">
             <ul className="grid gap-1">
@@ -639,7 +639,7 @@ function PromoteDialog({ p, target: preset, onClose, onDone }: { p: ReplicaPolic
                 onDone();
                 onClose();
               } catch (e) {
-                setError(e instanceof Error ? e.message : t("Operation failed"));
+                setError(errorMessage(e, t("Operation failed")));
                 void pre.refetch();
               } finally {
                 setBusy(false);

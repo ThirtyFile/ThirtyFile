@@ -15,6 +15,7 @@ import { locationLabel } from "@/components/LocationSelect";
 import { localZone, zones } from "@/admin/storage/BackupPolicyDialog";
 import { DRIVE_ICON } from "@/lib/drives";
 import { t } from "@/lib/i18n";
+import { useSubmit } from "@/lib/useSubmit";
 
 /** When a target is brought up to date: soon after changes, every few hours, or once a day */
 type When = "realtime" | "every" | "daily";
@@ -51,8 +52,6 @@ export function ReplicaPolicyDialog({ policy: p, source: preset, onClose, onDone
   const [verifyDays, setVerifyDays] = useState(p?.verify_days ?? 1);
   const [alertHours, setAlertHours] = useState(p?.alert_hours ?? 24);
   const [rate, setRate] = useState(p ? p.rate_limit / 1_000_000 : 0);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const list = locations.data ?? [];
   const sources = list.filter((l) => l.drive_count > 0 || l.id === source);
   const sourceName = list.find((l) => l.id === source)?.name ?? p?.source_name ?? "";
@@ -64,50 +63,39 @@ export function ReplicaPolicyDialog({ policy: p, source: preset, onClose, onDone
   const ready = !!source && rows.length > 0 && rows.every((r) => r.location) && new Set(chosen).size === chosen.length && (allSpaces || spaces.length > 0);
   const scheduled = rows.some((r) => r.when !== "realtime");
   const setRow = (i: number, change: Partial<Row>) => setRows((cur) => cur.map((r, j) => (j === i ? { ...r, ...change } : r)));
+  const { busy, error, run } = useSubmit(async () => {
+    if (!ready) return;
+    const settings: ReplicaPolicyRequest = {
+      // An old primary being checked stays a target, after the others
+      targets: [
+        ...rows.map((r) => {
+          const schedule: BackupSchedule = r.when === "every" ? { every: r.every } : { daily: r.daily };
+          return { location: r.location, mode: r.when === "realtime" ? ("realtime" as const) : ("scheduled" as const), schedule, tz };
+        }),
+        ...stale.map((x) => ({ location: x.location_id, mode: x.mode, schedule: x.schedule, tz: x.tz })),
+      ],
+      copies: Math.min(Math.max(1, copies), 16),
+      all_spaces: allSpaces,
+      spaces,
+      read_fallback: fallback,
+      verify_days: verifyDays,
+      alert_hours: alertHours,
+      rate_limit: Math.round(rate * 1_000_000),
+    };
+    if (p) {
+      await api.updateReplicaPolicy(p.id, { ...settings, name: name.trim() || undefined });
+      toast.success(t("\"{name}\" was changed", { name: name.trim() || p.name }));
+    } else {
+      await api.createReplicaPolicy({ ...settings, name: name.trim() || defaultName, source });
+      toast.success(t("\"{name}\" was made; the first copies are being made in the background", { name: name.trim() || defaultName }));
+    }
+    onDone();
+    onClose();
+  }, t("Couldn't make the change"));
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
-        <form
-          className="grid gap-4"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (!ready) return;
-            setBusy(true);
-            setError(null);
-            const settings: ReplicaPolicyRequest = {
-              // An old primary being checked stays a target, after the others
-              targets: [
-                ...rows.map((r) => {
-                  const schedule: BackupSchedule = r.when === "every" ? { every: r.every } : { daily: r.daily };
-                  return { location: r.location, mode: r.when === "realtime" ? ("realtime" as const) : ("scheduled" as const), schedule, tz };
-                }),
-                ...stale.map((x) => ({ location: x.location_id, mode: x.mode, schedule: x.schedule, tz: x.tz })),
-              ],
-              copies: Math.min(Math.max(1, copies), 16),
-              all_spaces: allSpaces,
-              spaces,
-              read_fallback: fallback,
-              verify_days: verifyDays,
-              alert_hours: alertHours,
-              rate_limit: Math.round(rate * 1_000_000),
-            };
-            try {
-              if (p) {
-                await api.updateReplicaPolicy(p.id, { ...settings, name: name.trim() || undefined });
-                toast.success(t("\"{name}\" was changed", { name: name.trim() || p.name }));
-              } else {
-                await api.createReplicaPolicy({ ...settings, name: name.trim() || defaultName, source });
-                toast.success(t("\"{name}\" was made; the first copies are being made in the background", { name: name.trim() || defaultName }));
-              }
-              onDone();
-              onClose();
-            } catch (err) {
-              setError(err instanceof Error ? err.message : t("Couldn't make the change"));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
+        <form className="grid gap-4" onSubmit={run}>
           <DialogHeader>
             <DialogTitle>{p ? t("Replica settings") : t("New replicas")}</DialogTitle>
             <DialogDescription>

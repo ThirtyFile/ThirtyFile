@@ -18,144 +18,62 @@ import { Toggle, Section, SettingsFrame } from "@/admin/SettingsFrame";
 
 const GB = 1024 ** 3;
 
-/** Capacity input in GB (decimals allowed); blank means unlimited */
-function QuotaInput({ value, saving, onSave }: { value: number; saving: boolean; onSave(bytes: number): void }) {
-  const [text, setText] = useState(value ? String(+(value / GB).toFixed(2)) : "");
-  const bytes = text.trim() ? Math.round(Number(text) * GB) : 0;
-  const invalid = text.trim() !== "" && (!Number.isFinite(Number(text)) || Number(text) < 0);
+/**
+ * A number saved on its own with its Save button (module level, so it doesn't lose focus on re-render): a whole number
+ * from `min` to `max`, or with `decimal` any number from 0 (a size in GB); `blank` lets it be left empty for 0
+ */
+function NumberInput(props: {
+  value: number;
+  saving: boolean;
+  onSave(n: number): void;
+  label: string;
+  /** Shown inside the box, after the number */
+  unit?: string;
+  /** The box's width, and room on the right for the unit */
+  width: string;
+  min?: number;
+  max?: number;
+  decimal?: boolean;
+  /** Empty stands for 0, and says this */
+  blank?: string;
+  /** The number typed is this many of what is saved (GB: 1024³ bytes) */
+  scale?: number;
+}) {
+  const { value, blank, scale } = props;
+  const [text, setText] = useState(blank !== undefined && !value ? "" : String(scale ? +(value / scale).toFixed(2) : value));
+  const empty = blank !== undefined && !text.trim();
+  const n = empty ? 0 : scale ? Math.round(Number(text) * scale) : Number(text);
+  const invalid = empty
+    ? false
+    : props.decimal
+      ? !Number.isFinite(Number(text)) || Number(text) < 0
+      : !/^\d+$/.test(text.trim()) || n < (props.min ?? 0) || n > (props.max ?? Infinity);
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!invalid && bytes !== value) onSave(bytes);
+    if (!invalid && n !== value) props.onSave(n);
   };
-  return (
-    <form className="flex shrink-0 items-center gap-2" onSubmit={submit}>
-      <div className="relative">
-        <Input
-          aria-label={t("Personal space size for new users (GB)")}
-          inputMode="decimal"
-          className="h-8 w-28 pr-9 text-right tabular-nums"
-          placeholder={t("Unlimited")}
-          value={text}
-          aria-invalid={invalid}
-          onChange={(e) => setText(e.target.value)}
-        />
-        <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-muted-foreground">GB</span>
-      </div>
-      <Button type="submit" size="sm" disabled={saving || invalid || bytes === value}>
-        {t("Save")}
-      </Button>
-    </form>
+  const input = (
+    <Input
+      aria-label={props.label}
+      inputMode={props.decimal ? "decimal" : "numeric"}
+      className={cn("h-8 text-right tabular-nums", props.width)}
+      placeholder={blank}
+      value={text}
+      aria-invalid={invalid}
+      onChange={(e) => setText(e.target.value)}
+    />
   );
-}
-
-/** Minimum password length (6 to 64 characters) */
-function MinPasswordInput({ value, saving, onSave }: { value: number; saving: boolean; onSave(n: number): void }) {
-  const [text, setText] = useState(String(value));
-  const n = Number(text);
-  const invalid = !/^\d+$/.test(text.trim()) || n < 6 || n > 64;
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!invalid && n !== value) onSave(n);
-  };
   return (
     <form className="flex shrink-0 items-center gap-2" onSubmit={submit}>
-      <Input
-        aria-label={t("Minimum password length")}
-        inputMode="numeric"
-        className="h-8 w-20 text-right tabular-nums"
-        value={text}
-        aria-invalid={invalid}
-        onChange={(e) => setText(e.target.value)}
-      />
-      <Button type="submit" size="sm" disabled={saving || invalid || n === value}>
-        {t("Save")}
-      </Button>
-    </form>
-  );
-}
-
-/** How often folder spaces are checked for changes (minutes, 0 = only by hand) */
-function ScanIntervalInput({ value, saving, onSave }: { value: number; saving: boolean; onSave(minutes: number): void }) {
-  const [text, setText] = useState(String(value));
-  const minutes = Number(text);
-  const invalid = !/^\d+$/.test(text.trim()) || minutes > 1440;
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!invalid && minutes !== value) onSave(minutes);
-  };
-  return (
-    <form className="flex shrink-0 items-center gap-2" onSubmit={submit}>
-      <div className="relative">
-        <Input
-          aria-label={t("Check folder spaces every (minutes)")}
-          inputMode="numeric"
-          className="h-8 w-28 pr-12 text-right tabular-nums"
-          value={text}
-          aria-invalid={invalid}
-          onChange={(e) => setText(e.target.value)}
-        />
-        <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-muted-foreground">{t("min")}</span>
-      </div>
-      <Button type="submit" size="sm" disabled={saving || invalid || minutes === value}>
-        {t("Save")}
-      </Button>
-    </form>
-  );
-}
-
-/** A whole number from 0 to `max` with its unit, saved on its own (module level, so it doesn't lose focus on re-render) */
-function CountInput(props: { value: number; max: number; unit: string; label: string; saving: boolean; onSave(n: number): void }) {
-  const [text, setText] = useState(String(props.value));
-  const n = Number(text);
-  const invalid = !/^\d+$/.test(text.trim()) || n > props.max;
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!invalid && n !== props.value) props.onSave(n);
-  };
-  return (
-    <form className="flex shrink-0 items-center gap-2" onSubmit={submit}>
-      <div className="relative">
-        <Input
-          aria-label={props.label}
-          inputMode="numeric"
-          className="h-8 w-32 pr-16 text-right tabular-nums"
-          value={text}
-          aria-invalid={invalid}
-          onChange={(e) => setText(e.target.value)}
-        />
-        <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-muted-foreground">{props.unit}</span>
-      </div>
-      <Button type="submit" size="sm" disabled={props.saving || invalid || n === props.value}>
-        {t("Save")}
-      </Button>
-    </form>
-  );
-}
-
-/** Longest expiry allowed for share links (days, 0 = no limit) */
-function MaxDaysInput({ value, saving, onSave }: { value: number; saving: boolean; onSave(days: number): void }) {
-  const [text, setText] = useState(value ? String(value) : "");
-  const days = text.trim() ? Number(text) : 0;
-  const invalid = text.trim() !== "" && (!/^\d+$/.test(text.trim()) || days > 3650);
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!invalid && days !== value) onSave(days);
-  };
-  return (
-    <form className="flex shrink-0 items-center gap-2" onSubmit={submit}>
-      <div className="relative">
-        <Input
-          aria-label={t("Share links must expire within (days)")}
-          inputMode="numeric"
-          className="h-8 w-28 pr-12 text-right tabular-nums"
-          placeholder={t("No limit")}
-          value={text}
-          aria-invalid={invalid}
-          onChange={(e) => setText(e.target.value)}
-        />
-        <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-muted-foreground">{t("days")}</span>
-      </div>
-      <Button type="submit" size="sm" disabled={saving || invalid || days === value}>
+      {props.unit ? (
+        <div className="relative">
+          {input}
+          <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-muted-foreground">{props.unit}</span>
+        </div>
+      ) : (
+        input
+      )}
+      <Button type="submit" size="sm" disabled={props.saving || invalid || n === value}>
         {t("Save")}
       </Button>
     </form>
@@ -370,9 +288,15 @@ export function GeneralSettingsPage() {
                 {t("Current setting: {value}", { value: q.data.default_user_quota ? formatBytes(q.data.default_user_quota) : t("Unlimited") })}
               </p>
             </div>
-            <QuotaInput
+            <NumberInput
               key={q.data.default_user_quota}
               value={q.data.default_user_quota}
+              label={t("Personal space size for new users (GB)")}
+              unit="GB"
+              width="w-28 pr-9"
+              decimal
+              scale={GB}
+              blank={t("Unlimited")}
               saving={save.isPending}
               onSave={(bytes) => save.mutate({ default_user_quota: bytes })}
             />
@@ -404,9 +328,13 @@ export function GeneralSettingsPage() {
                 {t("The shortest password people can choose, from 6 to 64 characters. It applies to new and changed passwords; existing passwords keep working.")}
               </p>
             </div>
-            <MinPasswordInput
+            <NumberInput
               key={q.data.min_password_length}
               value={q.data.min_password_length}
+              label={t("Minimum password length")}
+              width="w-20"
+              min={6}
+              max={64}
               saving={save.isPending}
               onSave={(n) => save.mutate({ min_password_length: n })}
             />
@@ -425,9 +353,13 @@ export function GeneralSettingsPage() {
                 {t("Folder spaces show folders on the server. Changes made there (for example over SMB) appear when someone opens the folder, and all folders are checked this often. 0 = only when someone opens a folder or clicks \"Check for changes\".")}
               </p>
             </div>
-            <ScanIntervalInput
+            <NumberInput
               key={q.data.scan_minutes}
               value={q.data.scan_minutes}
+              label={t("Check folder spaces every (minutes)")}
+              unit={t("min")}
+              width="w-28 pr-12"
+              max={1440}
               saving={save.isPending}
               onSave={(minutes) => save.mutate({ scan_minutes: minutes })}
             />
@@ -483,9 +415,14 @@ export function GeneralSettingsPage() {
                 {t("New and changed links must expire within this many days. Leave blank to allow links that never expire. Links created earlier keep their expiry.")}
               </p>
             </div>
-            <MaxDaysInput
+            <NumberInput
               key={q.data.share_max_days}
               value={q.data.share_max_days}
+              label={t("Share links must expire within (days)")}
+              unit={t("days")}
+              width="w-28 pr-12"
+              max={3650}
+              blank={t("No limit")}
               saving={save.isPending}
               onSave={(days) => save.mutate({ share_max_days: days })}
             />
@@ -504,11 +441,12 @@ export function GeneralSettingsPage() {
                 {t("When a file is saved over in the editor, replaced by an upload or restored, the content it had is kept as an earlier version, which people can open, download or restore from the details pane. 0 = don't keep versions (those already kept are removed within the hour). Earlier versions don't count toward the spaces' sizes.")}
               </p>
             </div>
-            <CountInput
+            <NumberInput
               key={q.data.version_keep}
               value={q.data.version_keep}
               max={1000}
               unit={t("versions")}
+              width="w-32 pr-16"
               label={t("Versions kept per file")}
               saving={save.isPending}
               onSave={(n) => save.mutate({ version_keep: n })}
@@ -522,11 +460,12 @@ export function GeneralSettingsPage() {
                 {t("Days a version is kept after it was replaced. 0 = no time limit (only the number of versions counts).")}
               </p>
             </div>
-            <CountInput
+            <NumberInput
               key={q.data.version_days}
               value={q.data.version_days}
               max={3650}
               unit={t("days")}
+              width="w-32 pr-16"
               label={t("Keep versions for (days)")}
               saving={save.isPending}
               onSave={(n) => save.mutate({ version_days: n })}

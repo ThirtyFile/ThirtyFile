@@ -29,7 +29,8 @@ import { ConfirmDialog, ErrorText, NameDialog } from "@/components/dialogs";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { DRIVE_ICON, DRIVE_KIND_LABEL, ROLE_LABEL, driveLabel } from "@/lib/drives";
 import { useSettingsSearch } from "@/admin/controlPanel";
-import { cn, formatBytes, formatDateTime } from "@/lib/utils";
+import { cn, formatBytes, formatDateTime, errorMessage } from "@/lib/utils";
+import { useSubmit } from "@/lib/useSubmit";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -67,7 +68,7 @@ export function AdminDrivesPage() {
       refresh();
       void refreshFiles(qc, { spaces: [d.id] });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Couldn't save"));
+      toast.error(errorMessage(e, t("Couldn't save")));
     }
   };
   /** Checks a folder space for changes made on the server's folder now */
@@ -82,7 +83,7 @@ export function AdminDrivesPage() {
       if (r.error) toast.error(tServer(r.error));
       else toast.success(scanSummary(r));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Couldn't check the folder"));
+      toast.error(errorMessage(e, t("Couldn't check the folder")));
     } finally {
       clearTimeout(started);
       setScanning(false);
@@ -494,19 +495,7 @@ function FolderSpaceDialog({ onClose, onCreated }: { onClose(): void; onCreated(
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
   const [readOnly, setReadOnly] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const submit = async () => {
-    setBusy(true);
-    setError("");
-    try {
-      onCreated(await api.createDrive(name.trim(), 0, path.trim(), readOnly));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t("Couldn't create"));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { busy, error, run } = useSubmit(async () => onCreated(await api.createDrive(name.trim(), 0, path.trim(), readOnly)), t("Couldn't create"));
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
@@ -516,13 +505,7 @@ function FolderSpaceDialog({ onClose, onCreated }: { onClose(): void; onCreated(
             {t("Shows a folder on the server as a space. Its files stay where they are: changes made here are made in the folder, and changes made there (for example over SMB) appear here automatically.")}
           </DialogDescription>
         </DialogHeader>
-        <form
-          className="grid gap-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit();
-          }}
-        >
+        <form className="grid gap-3" onSubmit={run}>
           <div className="grid gap-1.5">
             <Label htmlFor="fs-name">{t("Name")}</Label>
             <Input id="fs-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />

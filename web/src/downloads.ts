@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { responseError } from "@/api";
 import { t } from "@/lib/i18n";
 import { createStore, useStore } from "@/lib/store";
+import { errorMessage } from "@/lib/utils";
 
 export type DownloadStatus = "downloading" | "done" | "error" | "canceled";
 
@@ -110,7 +111,7 @@ export async function download(source: DownloadSource, opts: { zip?: boolean; na
     url = typeof source === "string" ? source : await source();
   } catch (e) {
     // The server refused the selection (e.g. too many items); the message is already translated
-    toast.error(e instanceof Error ? e.message : t("Download failed"));
+    toast.error(errorMessage(e, t("Download failed")));
     return;
   }
   if (typeof ReadableStream === "undefined") return nativeDownload(url);
@@ -131,7 +132,7 @@ export async function download(source: DownloadSource, opts: { zip?: boolean; na
     try {
       nativeDownload(fresh && typeof source !== "string" ? await source() : url);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("Download failed"));
+      toast.error(errorMessage(e, t("Download failed")));
       return;
     }
     toast.info(t("Large file: downloading directly in your browser. Check the browser's download list for progress."));
@@ -196,7 +197,7 @@ export async function download(source: DownloadSource, opts: { zip?: boolean; na
       update(id, { status: "canceled" });
     } else {
       // If zipping fails midway, the server just drops the connection
-      const msg = e instanceof TypeError ? t("Download interrupted (network or storage connection lost)") : e instanceof Error ? e.message : t("Download failed");
+      const msg = e instanceof TypeError ? t("Download interrupted (network or storage connection lost)") : errorMessage(e, t("Download failed"));
       update(id, { status: "error", error: msg });
     }
   }
