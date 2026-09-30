@@ -126,24 +126,20 @@ COPY --from=web /src/notices-web.txt /tmp/
 RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     cargo fetch --locked \
  && cargo about generate --offline --locked --fail -o /tmp/notices-rust.txt about.hbs
-# What is neither a crate nor an npm package: musl, the C library linked into the program (its COPYRIGHT file, from
-# its release, checked against the checksum published with it; keep the version equal to Alpine's musl-dev, which
-# the build links), and, in the image only, Alpine's certificate authorities (Mozilla's list, MPL-2.0) and time zone
-# database (public domain)
-ADD --checksum=sha256:d585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a \
-    https://musl.libc.org/releases/musl-1.2.6.tar.gz /tmp/musl.tar.gz
-ADD --checksum=sha256:3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04 \
-    https://www.mozilla.org/media/MPL/2.0/index.txt /tmp/MPL-2.0.txt
+# What is neither a crate nor an npm package: musl, the C library linked into the program, and, in the image only,
+# Alpine's certificate authorities (Mozilla's list, MPL-2.0) and time zone database (public domain). Their licence
+# texts are kept in server/licenses (musl's COPYRIGHT from its 1.2.6 release: keep it equal to the musl-dev version
+# the build links), so the build doesn't depend on those websites
+COPY server/licenses/ /tmp/licenses/
 COPY --from=rootfs /packages.txt /tmp/
-RUN tar -xzf /tmp/musl.tar.gz -C /tmp musl-1.2.6/COPYRIGHT \
- && rule="$(printf '=%.0s' $(seq 80))" && line="$(printf -- '-%.0s' $(seq 80))" \
+RUN rule="$(printf '=%.0s' $(seq 80))" && line="$(printf -- '-%.0s' $(seq 80))" \
  && { echo "OTHER PARTS"; \
       echo; echo "$rule"; echo "musl 1.2.6: the C standard library, built into the server program"; \
-      echo "Licence: MIT"; echo "Homepage: https://musl.libc.org/"; echo "$line"; cat /tmp/musl-1.2.6/COPYRIGHT; \
+      echo "Licence: MIT"; echo "Homepage: https://musl.libc.org/"; echo "$line"; cat /tmp/licenses/musl-COPYRIGHT; \
       echo; echo "$rule"; echo "$(grep '^ca-certificates-bundle-' /tmp/packages.txt): the certificate authorities in"; \
       echo "/etc/ssl/certs/ca-certificates.crt (Docker image only), Mozilla's list as packaged by Alpine Linux"; \
       echo "Licence: MPL-2.0"; echo "Source: https://hg.mozilla.org/projects/nss/ (lib/ckfw/builtins/certdata.txt)"; \
-      echo "Homepage: https://gitlab.alpinelinux.org/alpine/ca-certificates"; echo "$line"; cat /tmp/MPL-2.0.txt; \
+      echo "Homepage: https://gitlab.alpinelinux.org/alpine/ca-certificates"; echo "$line"; cat /tmp/licenses/MPL-2.0.txt; \
       echo; echo "$rule"; echo "$(grep '^tzdata-' /tmp/packages.txt): the time zone database in /usr/share/zoneinfo (Docker image only)"; \
       echo "Licence: public domain"; echo "Homepage: https://www.iana.org/time-zones"; \
     } > /tmp/notices-other.txt \
