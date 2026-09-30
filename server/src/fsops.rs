@@ -601,8 +601,17 @@ const UPLOAD_PREFIX: &str = ".thirtyfile-upload-";
 const SAVE_PREFIX: &str = ".thirtyfile-save-";
 
 /// Puts a finished upload into the space's folder under a name scans ignore, ready to be renamed into place: a
-/// rename when the folder is on the same disk as ThirtyFile's data, else a copy
-pub async fn stage_upload(folder: &Node, tmp: &Path, size: u64) -> AppResult<Pinned> {
+/// rename when the folder is on the same disk as ThirtyFile's data, else a copy. Counted as storing content on the
+/// space's location (Storage usage).
+pub async fn stage_upload(st: &AppState, folder: &Node, tmp: &Path, size: u64) -> AppResult<Pinned> {
+    let location = crate::usage::sample::folder_location(st, Path::new(folder.fs_root.as_deref().unwrap_or_default())).await;
+    let started = std::time::Instant::now();
+    let staged = stage(folder, tmp, size).await;
+    crate::usage::sample::record_folder(st, &location, crate::usage::Op::Write, started, staged.is_ok(), size);
+    staged
+}
+
+async fn stage(folder: &Node, tmp: &Path, size: u64) -> AppResult<Pinned> {
     let staged = space_root(folder)?.join(&format!("{UPLOAD_PREFIX}{}", new_id())).map_err(disk_error)?;
     if tokio::fs::rename(tmp, staged.as_path()).await.is_err() {
         let (from, to) = (tmp.to_path_buf(), staged.clone());

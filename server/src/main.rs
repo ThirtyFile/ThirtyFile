@@ -41,6 +41,7 @@ mod tokens;
 mod tree;
 mod twofactor;
 mod upload;
+mod usage;
 mod util;
 #[cfg(target_os = "linux")]
 mod watch;
@@ -389,6 +390,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         download_links: Default::default(),
         jobs: Default::default(),
         log_tx,
+        usage: Default::default(),
     }));
 
     let log_writer = logs::spawn_writer(state.clone(), log_rx);
@@ -402,6 +404,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     }
     spawn_maintenance(state.clone(), cfg.trash_days);
     locations::spawn_health_monitor(state.clone());
+    usage::sample::spawn(state.clone());
     moves::spawn_runner(state.clone());
     personal::spawn_retry(state.clone());
     folders::spawn_scanner(state.clone());

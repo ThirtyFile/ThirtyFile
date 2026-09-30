@@ -221,6 +221,11 @@ pub fn schedule_blob_removal(st: &AppState, blobs: Vec<BlobRef>) {
 
 /// Deletes one by one: skipped when (hash, location) is still some blob's current location or is being staged
 pub async fn remove_unreferenced(st: &AppState, blobs: Vec<BlobRef>) -> Vec<String> {
+    // Counted as background work, whatever asked for it (Storage usage)
+    crate::usage::background(remove_each(st, blobs)).await
+}
+
+async fn remove_each(st: &AppState, blobs: Vec<BlobRef>) -> Vec<String> {
     let mut failures: Vec<String> = Vec::new();
     for (hash, location) in blobs {
         let Some(still_used) = claim_for_deletion(st, &hash, &location).await else { continue };

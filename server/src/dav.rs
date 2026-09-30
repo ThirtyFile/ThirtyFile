@@ -876,7 +876,7 @@ async fn store_content(st: &AppState, user: &User, parent: &Node, name: &str, tm
 }
 
 async fn store_in_folder(st: &AppState, user: &User, parent: &Node, name: &str, tmp: &Path, size: u64) -> AppResult<bool> {
-    let staged = fsops::stage_upload(parent, tmp, size).await?;
+    let staged = fsops::stage_upload(st, parent, tmp, size).await?;
     let _space = fsops::lock_space(parent.drive()).await;
     let _w = st.write_lock.lock().await;
     let result = async {

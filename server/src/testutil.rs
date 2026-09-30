@@ -89,6 +89,7 @@ async fn make_env(space_folders: bool) -> TestEnv {
         download_links: Default::default(),
         jobs: Default::default(),
         log_tx,
+        usage: Default::default(),
     }));
     let _writer = crate::logs::spawn_writer(st.clone(), log_rx);
     TestEnv { st, dir }

@@ -244,7 +244,8 @@ where
     let (st, id, kind) = (st.clone(), job.id.clone(), job.kind);
     tokio::spawn(async move {
         let _unfinished = Unfinished(st.clone(), id.clone());
-        let result = work.await;
+        // Counted as background work, apart from what people wait for (Storage usage)
+        let result = crate::usage::background(work).await;
         if let Err(e) = &result {
             tracing::info!("Task {id} ({kind}) failed: {}", e.message);
         }

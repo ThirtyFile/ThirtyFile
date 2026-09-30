@@ -623,7 +623,7 @@ async fn finalize_in_folder(st: &AppState, up: &Uploader, upload: &Upload, path:
     if size != upload.size as u64 {
         return Err(AppError::bad_request("File size mismatch"));
     }
-    let staged = match crate::fsops::stage_upload(&parent, path, size).await {
+    let staged = match crate::fsops::stage_upload(st, &parent, path, size).await {
         Ok(s) => s,
         Err(e) => {
             let _w = st.write_lock.lock().await;

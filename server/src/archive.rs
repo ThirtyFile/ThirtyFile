@@ -160,7 +160,7 @@ async fn store_new_file(st: &AppState, user: &User, folder_id: &str, name: &str,
         // Checked first, so a file that can't fit isn't copied into the folder at all
         tree::check_quota(&mut *st.db.acquire().await?, folder.drive(), size as i64).await?;
         // A folder space: the file goes into the folder on the disk under a name scans ignore, then renamed into place
-        let staged = crate::fsops::stage_upload(&folder, tmp, size).await?;
+        let staged = crate::fsops::stage_upload(st, &folder, tmp, size).await?;
         let _space = crate::fsops::lock_space(folder.drive()).await;
         let _w = st.write_lock.lock().await;
         let result = async {
