@@ -158,7 +158,7 @@
         <p>A space being moved can't be deleted, and neither can the user whose "My files" it is, until the move is finished or cancelled.</p>
 
         <h2 id="copy">Copying everything to another location</h2>
-        <p><strong>Copy everything to…</strong>, in the <strong>…</strong> menu of a location under <strong>Control panel › Storage locations</strong>, copies all the spaces on that location to another location, and leaves the source as it is: no file is removed, the spaces stay where they are, and the default location doesn't change. Use it for an extra copy on a NAS, an off-site bucket or a disk you take away. For a copy made again every night, see <a href="backup.html#copies">Backing up</a>.</p>
+        <p><strong>Copy everything to…</strong>, in the <strong>…</strong> menu of a location under <strong>Control panel › Storage locations</strong>, copies all the spaces on that location to another location, and leaves the source as it is: no file is removed, the spaces stay where they are, and the default location doesn't change. Use it for an extra copy on a NAS, an off-site bucket or a disk you take away. For snapshots made again and again, and kept for a time, see <a href="backup.html#file-backups">Backups of files to another location</a>; they are kept the same way, and restored the same way.</p>
         <h3 id="copy-what">What is copied</h3>
         <ul>
           <li><strong>Every space on the location</strong>, personal ones included: its folders (empty ones too), files, the trash and earlier versions. The dialog lists the spaces and says how many files there are, how much of it is in the trash, and how much will be written to the other location.</li>
@@ -263,7 +263,7 @@
               <tr><td><strong>Stored by ThirtyFile</strong></td><td>What ThirtyFile actually keeps there: the content store, where identical content is kept once, plus the files of folder spaces (with their trash) and the earlier versions kept in their folders. It can be smaller than <em>Files</em> because of that sharing, and larger because of the trash and versions.</td></tr>
               <tr><td><strong>Disk</strong></td><td>The whole disk, as the system reports it, whatever else is on it. For the storage folder and <em>Local folder</em> locations only. Two locations on the same disk say so, and the disk is counted once.</td></tr>
               <tr><td><strong>Capacity unknown</strong></td><td>S3, SFTP and FTP don't report how much room is left, and a disk that doesn't answer within 3 seconds isn't measured. No percentage or time to full is shown then: unknown is not zero.</td></tr>
-              <tr><td><strong>Backups</strong></td><td>The <a href="#copy">copies</a> kept on the location: each content once per copy. Only locations holding copies show it.</td></tr>
+              <tr><td><strong>Backups</strong></td><td>The <a href="#copy">copies</a> and <a href="backup.html#file-backups">backups</a> kept on the location: each content once per copy or backup. Only locations holding some show it.</td></tr>
               <tr><td><strong>Waiting to be deleted</strong></td><td>Contents whose deletion failed (a location that was offline, say) or old copies after a move, which are retried in the background. Their size isn't known any more.</td></tr>
               <tr><td><strong>Data folder</strong></td><td>The database, thumbnails and uploads in progress, and the disk they are on. It also lists moves, running tasks and deletions that are waiting.</td></tr>
             </tbody>

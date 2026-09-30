@@ -123,11 +123,11 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     key: "backups",
     to: "/admin/backups",
     title: t("Backups"),
-    desc: t("Copies of storage locations kept on another location; check them, and restore spaces from them"),
+    desc: t("Back up the spaces of a location to another, on a schedule or soon after changes; one-time copies; restoring from them"),
     icon: ArchiveRestoreIcon,
     tone: "bg-lime-500/12 text-lime-700 dark:text-lime-300",
     category: "storage",
-    keywords: "備份 複製 副本 還原 復原 儲存位置 檢查 backup copy restore recover storage location check verify", // i18n-ignore: bilingual search keywords
+    keywords: "備份 複製 副本 還原 復原 快照 排程 儲存位置 檢查 backup copy restore recover snapshot schedule storage location check verify", // i18n-ignore: bilingual search keywords
   },
   {
     key: "usage",
