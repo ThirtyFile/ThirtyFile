@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { createStore, useStore } from "@/lib/store";
 
 /** Unsaved text editor content; kept when switching tabs and coming back */
 export interface TextDraft {
@@ -23,14 +23,9 @@ export interface SheetDraft {
 export type Draft = TextDraft | SheetDraft;
 
 const drafts = new Map<string, Draft>();
-const listeners = new Set<() => void>();
 const discardListeners = new Set<(nodeId: string) => void>();
-let version = 0;
-
-function emit() {
-  version++;
-  listeners.forEach((l) => l());
-}
+/** Counts the times a file got or lost its draft */
+const version = createStore(0);
 
 /** The draft of the given kind; a draft of another kind (e.g. a workbook's marker for a text editor) is never returned */
 export function getDraft<K extends Draft["kind"]>(nodeId: string, kind: K): Extract<Draft, { kind: K }> | undefined {
@@ -42,7 +37,7 @@ export function setDraft(nodeId: string, draft: Draft | null) {
   const had = drafts.has(nodeId);
   if (draft) drafts.set(nodeId, draft);
   else drafts.delete(nodeId);
-  if (had !== !!draft) emit();
+  if (had !== !!draft) version.set(version.get() + 1);
   if (had && !draft) discardListeners.forEach((l) => l(nodeId));
 }
 
@@ -67,15 +62,7 @@ export function hasDraft(nodeId: string) {
 
 /** Redraw the unsaved-content markers on tabs */
 export function useDraftsVersion() {
-  return useSyncExternalStore(
-    (l) => {
-      listeners.add(l);
-      return () => {
-        listeners.delete(l);
-      };
-    },
-    () => version,
-  );
+  return useStore(version);
 }
 
 // While there's unsaved content, warn before closing or reloading the browser

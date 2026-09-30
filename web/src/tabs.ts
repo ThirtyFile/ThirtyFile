@@ -1,11 +1,12 @@
 //! Browser-style tabs. Each tab has its own history (back/forward only move within the tab);
 //! switching tabs navigates with replace, so the browser history doesn't get mixed together.
 
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback } from "react";
 import { useNavigate } from "react-router";
 import { confirm } from "@/components/confirm";
 import { hasDraft, setDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
+import { createStore, useStore } from "@/lib/store";
 
 export interface Tab {
   id: string;
@@ -26,10 +27,9 @@ const MAX_ENTRIES = 50;
 
 let seq = 0;
 let storageKey = "tf-tabs";
-let state: TabsState = fresh(HOME);
+const store = createStore<TabsState>(fresh(HOME));
 /** The next navigation, triggered by a tab operation, that shouldn't be written to the history */
 let pending: string | null = null;
-const listeners = new Set<() => void>();
 
 function newTab(path: string): Tab {
   return { id: `t${Date.now().toString(36)}${seq++}`, entries: [path], index: 0, title: "" };
@@ -45,23 +45,22 @@ function fresh(path: string): TabsState {
  * each other's; the most recent tabs of any window (localStorage) are what a new window starts with
  */
 function set(next: TabsState) {
-  state = next;
   try {
-    const json = JSON.stringify(state);
+    const json = JSON.stringify(next);
     sessionStorage.setItem(storageKey, json);
     localStorage.setItem(storageKey, json);
   } catch {
     // Ignore when storage isn't available
   }
-  listeners.forEach((l) => l());
+  store.set(next);
 }
 
 function updateTab(id: string, patch: Partial<Tab>) {
-  set({ ...state, tabs: state.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)) });
+  set({ ...store.get(), tabs: store.get().tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)) });
 }
 
 export function activeTab(): Tab {
-  return state.tabs.find((t) => t.id === state.active) ?? state.tabs[0];
+  return store.get().tabs.find((t) => t.id === store.get().active) ?? store.get().tabs[0];
 }
 
 export function currentEntry(t: Tab) {
@@ -96,11 +95,10 @@ export function loadTabs(userId: number) {
   try {
     const raw = sessionStorage.getItem(key) ?? localStorage.getItem(key);
     const saved = raw ? validTabs(JSON.parse(raw)) : null;
-    state = saved ?? fresh(HOME);
+    store.set(saved ?? fresh(HOME));
   } catch {
-    state = fresh(HOME);
+    store.set(fresh(HOME));
   }
-  listeners.forEach((l) => l());
 }
 
 /** The saved state, if it has the expected shape (an older format or an edited value would otherwise crash the tab bar on every load) */
@@ -145,15 +143,7 @@ export function keepOnly(s: TabsState, id: string, unsaved: string[]): { next: T
 }
 
 export function useTabsState() {
-  return useSyncExternalStore(
-    (l) => {
-      listeners.add(l);
-      return () => {
-        listeners.delete(l);
-      };
-    },
-    () => state,
-  );
+  return useStore(store);
 }
 
 /** Called on every URL change: record it in the current tab's history */
@@ -189,19 +179,19 @@ export function useTabActions() {
     (path: string = HOME, opts?: { reuse?: boolean }) => {
       // When the file is already open in some tab, switch to it directly
       if (opts?.reuse) {
-        const existing = state.tabs.find((t) => currentEntry(t) === path);
+        const existing = store.get().tabs.find((t) => currentEntry(t) === path);
         if (existing) {
-          if (existing.id !== state.active) {
-            set({ ...state, active: existing.id });
+          if (existing.id !== store.get().active) {
+            set({ ...store.get(), active: existing.id });
             go(path);
           }
           return;
         }
       }
-      if (state.tabs.length >= MAX_TABS) return;
+      if (store.get().tabs.length >= MAX_TABS) return;
       const t = newTab(path);
-      const i = state.tabs.findIndex((x) => x.id === state.active);
-      const tabs = [...state.tabs];
+      const i = store.get().tabs.findIndex((x) => x.id === store.get().active);
+      const tabs = [...store.get().tabs];
       tabs.splice(i + 1, 0, t);
       set({ tabs, active: t.id });
       go(path);
@@ -215,9 +205,9 @@ export function useTabActions() {
    */
   const openFile = useCallback(
     (path: string) => {
-      const existing = state.tabs.find((t) => t.id !== state.active && currentEntry(t) === path);
+      const existing = store.get().tabs.find((t) => t.id !== store.get().active && currentEntry(t) === path);
       if (existing) {
-        set({ ...state, active: existing.id });
+        set({ ...store.get(), active: existing.id });
         go(path);
       } else {
         navigate(path);
@@ -228,9 +218,9 @@ export function useTabActions() {
 
   const activate = useCallback(
     (id: string) => {
-      const t = state.tabs.find((x) => x.id === id);
-      if (!t || id === state.active) return;
-      set({ ...state, active: id });
+      const t = store.get().tabs.find((x) => x.id === id);
+      if (!t || id === store.get().active) return;
+      set({ ...store.get(), active: id });
       go(currentEntry(t));
     },
     [go],
@@ -238,21 +228,21 @@ export function useTabActions() {
 
   const close = useCallback(
     async (id: string) => {
-      const tab = state.tabs.find((x) => x.id === id);
+      const tab = store.get().tabs.find((x) => x.id === id);
       if (!tab || !(await confirmClose(tab))) return;
       // Tabs may have changed while the question was open
-      const i = state.tabs.findIndex((x) => x.id === id);
+      const i = store.get().tabs.findIndex((x) => x.id === id);
       if (i < 0) return;
-      if (state.tabs.length === 1) {
+      if (store.get().tabs.length === 1) {
         // Last tab: go back to the home page instead of closing
         const t = newTab(HOME);
         set({ tabs: [t], active: t.id });
         go(HOME);
         return;
       }
-      const tabs = state.tabs.filter((x) => x.id !== id);
-      if (id !== state.active) {
-        set({ ...state, tabs });
+      const tabs = store.get().tabs.filter((x) => x.id !== id);
+      if (id !== store.get().active) {
+        set({ ...store.get(), tabs });
         return;
       }
       const next = tabs[Math.min(i, tabs.length - 1)];
@@ -263,9 +253,9 @@ export function useTabActions() {
   );
 
   const closeOthers = useCallback(async (id: string) => {
-    if (!state.tabs.some((x) => x.id === id)) return;
+    if (!store.get().tabs.some((x) => x.id === id)) return;
     // Ask once for all of them, so cancelling can't leave some drafts already discarded
-    const unsaved = state.tabs.filter((x) => x.id !== id).map(viewedFile).filter((f): f is string => !!f && hasDraft(f));
+    const unsaved = store.get().tabs.filter((x) => x.id !== id).map(viewedFile).filter((f): f is string => !!f && hasDraft(f));
     if (
       unsaved.length &&
       !(await confirm({
@@ -277,7 +267,7 @@ export function useTabActions() {
     )
       return;
     // Tabs may have changed while the question was open
-    const plan = keepOnly(state, id, unsaved);
+    const plan = keepOnly(store.get(), id, unsaved);
     if (!plan) return;
     plan.discard.forEach((f) => setDraft(f, null));
     set(plan.next);
@@ -296,13 +286,13 @@ export function useTabActions() {
   );
 
   const move = useCallback((from: string, to: string) => {
-    const tabs = [...state.tabs];
+    const tabs = [...store.get().tabs];
     const a = tabs.findIndex((t) => t.id === from);
     const b = tabs.findIndex((t) => t.id === to);
     if (a < 0 || b < 0 || a === b) return;
     const [t] = tabs.splice(a, 1);
     tabs.splice(b, 0, t);
-    set({ ...state, tabs });
+    set({ ...store.get(), tabs });
   }, []);
 
   return { open, openFile, activate, close, closeOthers, back: () => step(-1), forward: () => step(1), move };

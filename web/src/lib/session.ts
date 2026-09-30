@@ -1,5 +1,6 @@
-import { createContext, useContext, useSyncExternalStore } from "react";
+import { createContext, useContext } from "react";
 import type { Me } from "@/api";
+import { createStore, useStore, type Store } from "@/lib/store";
 
 export const MeContext = createContext<Me | null>(null);
 
@@ -18,12 +19,12 @@ export function sameShape(value: unknown, like: unknown): boolean {
 }
 
 /** One store per key, so every component showing a preference sees a change at once, also one made in another window */
-const stores = new Map<string, { value: unknown; listeners: Set<() => void> }>();
+const stores = new Map<string, Store<unknown>>();
 
 function storeOf(key: string, initial: unknown, valid: (v: never) => boolean) {
   let store = stores.get(key);
   if (!store) {
-    store = { value: read(key, initial, valid), listeners: new Set() };
+    store = createStore(read(key, initial, valid));
     stores.set(key, store);
   }
   return store;
@@ -47,9 +48,8 @@ if (typeof window !== "undefined") {
     // The default is only known to the hooks: compare with the value this window had
     try {
       const value: unknown = e.newValue === null ? undefined : JSON.parse(e.newValue);
-      if (value === undefined || !sameShape(value, store.value)) return;
-      store.value = value;
-      store.listeners.forEach((l) => l());
+      if (value === undefined || !sameShape(value, store.get())) return;
+      store.set(value);
     } catch {
       // Not ours to read
     }
@@ -59,21 +59,14 @@ if (typeof window !== "undefined") {
 /** Preferences stored in localStorage (view mode, sort, pane widths); `valid` checks more than the shape */
 export function usePersisted<T>(key: string, initial: T, valid: (v: T) => boolean = () => true): [T, (v: T) => void] {
   const store = storeOf(key, initial, valid);
-  const value = useSyncExternalStore(
-    (l) => {
-      store.listeners.add(l);
-      return () => store.listeners.delete(l);
-    },
-    () => store.value as T,
-  );
+  const value = useStore(store) as T;
   const set = (v: T) => {
-    store.value = v;
     try {
       localStorage.setItem(key, JSON.stringify(v));
     } catch {
       // Storage blocked by the browser: the value lasts until the page is closed
     }
-    store.listeners.forEach((l) => l());
+    store.set(v);
   };
   return [value, set];
 }

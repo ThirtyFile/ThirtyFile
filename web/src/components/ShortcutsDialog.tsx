@@ -1,18 +1,14 @@
 /** The keyboard shortcuts of the file explorer, opened with "?" (Shift+/) or from the "See more" menu */
-import { Fragment, useSyncExternalStore } from "react";
+import { Fragment } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { t } from "@/lib/i18n";
 import { shortcut } from "@/lib/keys";
+import { createStore, useStore } from "@/lib/store";
 
-let open = false;
-const listeners = new Set<() => void>();
-function setOpen(next: boolean) {
-  open = next;
-  listeners.forEach((l) => l());
-}
+const open = createStore(false);
 
 export function openShortcuts() {
-  setOpen(true);
+  open.set(true);
 }
 
 /** Keys joined by "+" are pressed together; "/" separates alternatives */
@@ -73,16 +69,10 @@ const groups = (): [string, [string, string][]][] => [
 
 /** Mounted once in the page frame */
 export function ShortcutsHost() {
-  const shown = useSyncExternalStore(
-    (l) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
-    },
-    () => open,
-  );
+  const shown = useStore(open);
   if (!shown) return null;
   return (
-    <Dialog open onOpenChange={(o) => !o && setOpen(false)}>
+    <Dialog open onOpenChange={(o) => !o && open.set(false)}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("Keyboard shortcuts")}</DialogTitle>
