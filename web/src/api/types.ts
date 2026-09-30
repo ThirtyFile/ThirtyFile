@@ -222,7 +222,7 @@ export interface LocationTestStep {
 }
 
 /** A space as the storage location tools show it; private: someone else's personal space, whose files aren't shown */
-export interface LocationSpace {
+export interface LocationItemSpace {
   id: string;
   name: string;
   kind: DriveKind;
@@ -238,10 +238,10 @@ export interface LocationItem {
   modified: number | null;
   path: string;
   role: "content" | "internal" | "space" | null;
-  space: LocationSpace | null;
+  space: LocationItemSpace | null;
   usage: {
     status: "used" | "version" | "trash" | "replica" | "pending" | "unused";
-    space: LocationSpace | null;
+    space: LocationItemSpace | null;
     file: string | null;
     uses: number;
   } | null;
@@ -251,7 +251,7 @@ export interface LocationPage {
   path: string;
   items: LocationItem[];
   next: string | null;
-  space: LocationSpace | null;
+  space: LocationItemSpace | null;
 }
 
 /** A search for unused content in a storage location, and its removal */
