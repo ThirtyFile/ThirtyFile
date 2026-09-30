@@ -43,13 +43,24 @@ pub struct UnusedItem {
     pub modified: Option<i64>,
 }
 
+/// Where a search for unused content is
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Phase {
+    Scanning,
+    /// Found what is unused: waits for the removal to be confirmed
+    Found,
+    Removing,
+    Removed,
+    Failed,
+}
+
 /// A search for unused content, and its removal once confirmed
 #[derive(Debug, Clone, Serialize)]
 pub struct Job {
     /// Identifies this search: removal is confirmed for it, not for a later one
     pub scan_id: String,
-    /// scanning, found, removing, removed, failed
-    pub phase: &'static str,
+    pub phase: Phase,
     pub started_at: i64,
     pub finished_at: Option<i64>,
     /// Content seen in the location so far
@@ -116,7 +127,7 @@ pub async fn find_unused(State(st): State<AppState>, _: Admin, Path(id): Path<St
     locations::require_own_place(&st, &id, &loc.kind, backend.as_ref()).await?;
     let job = Job {
         scan_id: new_id(),
-        phase: "scanning",
+        phase: Phase::Scanning,
         started_at: now(),
         finished_at: None,
         scanned: 0,
@@ -133,7 +144,7 @@ pub async fn find_unused(State(st): State<AppState>, _: Admin, Path(id): Path<St
     };
     {
         let mut jobs = JOBS.lock().unwrap();
-        if jobs.get(&id).is_some_and(|j| matches!(j.phase, "scanning" | "removing")) {
+        if jobs.get(&id).is_some_and(|j| matches!(j.phase, Phase::Scanning | Phase::Removing)) {
             return Err(AppError::conflict("This location is already being checked or cleaned up"));
         }
         jobs.insert(id.clone(), job.clone());
@@ -146,7 +157,7 @@ pub async fn find_unused(State(st): State<AppState>, _: Admin, Path(id): Path<St
             j.finished_at = Some(now());
             match found {
                 Ok((items, recent)) => {
-                    j.phase = "found";
+                    j.phase = Phase::Found;
                     j.count = items.len() as u64;
                     j.bytes = items.iter().map(|i| i.size).sum();
                     j.items = items.iter().take(SHOWN).cloned().collect();
@@ -155,7 +166,7 @@ pub async fn find_unused(State(st): State<AppState>, _: Admin, Path(id): Path<St
                 }
                 Err(e) => {
                     tracing::warn!("Finding unused content in storage location {id} failed: {}", e.message);
-                    j.phase = "failed";
+                    j.phase = Phase::Failed;
                     j.error = Some(e.message);
                 }
             }
@@ -213,13 +224,13 @@ pub async fn remove_unused(State(st): State<AppState>, Admin(user): Admin, Path(
     locations::require_own_place(&st, &id, &loc.kind, st.storage(&id)?.as_ref()).await?;
     let (job, items) = {
         let mut jobs = JOBS.lock().unwrap();
-        let job = jobs.get_mut(&id).filter(|j| j.scan_id == req.scan_id && j.phase == "found").ok_or_else(|| {
+        let job = jobs.get_mut(&id).filter(|j| j.scan_id == req.scan_id && j.phase == Phase::Found).ok_or_else(|| {
             AppError::conflict("This list is out of date. Find unused content again.")
         })?;
         if job.count == 0 {
             return Err(AppError::bad_request("There is no unused content to remove"));
         }
-        job.phase = "removing";
+        job.phase = Phase::Removing;
         job.finished_at = None;
         (job.view(), std::mem::take(&mut job.all))
     };
@@ -233,7 +244,7 @@ pub async fn remove_unused(State(st): State<AppState>, Admin(user): Admin, Path(
         let done = crate::usage::background(remove(&st, &id, &items, now() - MARGIN, &progress)).await;
         let logged = log_removal(&st, &user, &loc.name, done.removed).await;
         update(&id, &scan_id, |j| {
-            j.phase = "removed";
+            j.phase = Phase::Removed;
             j.finished_at = Some(now());
             if let Err(e) = logged {
                 j.error = Some(e.message);
@@ -407,7 +418,7 @@ mod tests {
         let admin = env.admin().await;
         let (_, file) = orphan(&env, b"left behind", 2 * 86400).await;
         let Json(job) = find_unused(State(env.st.clone()), Admin(admin.clone()), Path("local".into())).await.unwrap();
-        let wait = |phase: &'static str| {
+        let wait = |phase: Phase| {
             let admin = admin.clone();
             async move {
             for _ in 0..200 {
@@ -418,10 +429,10 @@ mod tests {
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             }
-            panic!("never reached {phase}");
+            panic!("never reached {phase:?}");
             }
         };
-        let found = wait("found").await;
+        let found = wait(Phase::Found).await;
         assert_eq!((found.count, found.bytes, found.items.len()), (1, 11, 1));
 
         // Another search's list can't be confirmed
@@ -432,7 +443,7 @@ mod tests {
 
         let req = RemoveReq { scan_id: job.scan_id.clone() };
         let _ = remove_unused(State(env.st.clone()), Admin(admin.clone()), Path("local".into()), Json(req)).await.unwrap();
-        let done = wait("removed").await;
+        let done = wait(Phase::Removed).await;
         assert_eq!((done.removed, done.removed_bytes), (1, 11));
         assert!(!file.exists());
         let (detail,): (String,) = sqlx::query_as("SELECT detail FROM activity WHERE action = 'storage_cleanup'").fetch_one(&env.st.db).await.unwrap();

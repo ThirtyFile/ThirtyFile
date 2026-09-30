@@ -143,11 +143,20 @@ pub struct ScanReport {
     leftovers: Vec<String>,
 }
 
+/// What a scan is doing
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScanPhase {
+    /// Reading the folder
+    Reading,
+    /// Making the changes it found in the index
+    Indexing,
+}
+
 /// A scan in progress, shown in the Control panel
 #[derive(Debug, Clone, Serialize)]
 pub struct ScanProgress {
-    /// "reading" the folder, then "indexing" the changes
-    pub phase: &'static str,
+    pub phase: ScanPhase,
     /// Items read so far
     pub found: usize,
     /// Index changes made so far, and in all
@@ -170,7 +179,7 @@ fn set_progress(drive_id: &str, f: impl FnOnce(&mut ScanProgress)) {
     let mut map = progress_map().lock().unwrap();
     let p = map
         .entry(drive_id.to_string())
-        .or_insert_with(|| ScanProgress { phase: "reading", found: 0, done: 0, total: 0, started_at: now() });
+        .or_insert_with(|| ScanProgress { phase: ScanPhase::Reading, found: 0, done: 0, total: 0, started_at: now() });
     f(p);
 }
 
@@ -623,7 +632,7 @@ fn differs(children: Option<&[Indexed]>, items: &[Entry], matched: &mut bool) ->
 /// for elsewhere in the index, which saves a query per item when a large folder is scanned the first time.
 async fn update_index(st: &AppState, drive: &Drive, root: &Path, differing: Vec<String>, may_move: bool, report: &mut ScanReport) -> AppResult<()> {
     set_progress(&drive.id, |p| {
-        p.phase = "indexing";
+        p.phase = ScanPhase::Indexing;
         p.total = differing.len();
     });
     let mut gone: Vec<(String, String)> = Vec::new();

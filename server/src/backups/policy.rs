@@ -24,7 +24,7 @@ use sqlx::SqliteConnection;
 use super::{
     Set,
     layout::{self, Line},
-    runner::{ACTIVE, Job},
+    runner::{ACTIVE, Job, JobState},
 };
 use crate::{
     error::{AppError, AppResult},
@@ -214,7 +214,7 @@ pub async fn trigger(st: &AppState, set: &str, trigger: &str, by: Option<(i64, S
         if removing {
             return Ok(None);
         }
-        let active: Option<(String, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        let active: Option<(String, JobState)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT id, state FROM backup_jobs WHERE set_id = ? AND kind = 'snapshot' AND state IN {ACTIVE} ORDER BY created_at DESC LIMIT 1"
         )))
         .bind(set)
@@ -222,9 +222,9 @@ pub async fn trigger(st: &AppState, set: &str, trigger: &str, by: Option<(i64, S
         .await?;
         let t = now();
         match active {
-            Some((_, state)) if state == "queued" => Ok(None),
-            Some((id, state)) if state == "failed" || state == "waiting" => {
-                let wait = if state == "failed" { RETRY_FAILED } else { RETRY_WAITING };
+            Some((_, JobState::Queued)) => Ok(None),
+            Some((id, state @ (JobState::Failed | JobState::Waiting))) => {
+                let wait = if state == JobState::Failed { RETRY_FAILED } else { RETRY_WAITING };
                 if trigger == "manual" || p.last_run_at.is_none_or(|l| t - l >= wait) {
                     sqlx::query("UPDATE backup_jobs SET state = 'queued', error = NULL WHERE id = ? AND state IN ('failed', 'waiting')").bind(&id).execute(&mut *tx).await?;
                     sqlx::query("UPDATE backup_policies SET last_run_at = ? WHERE set_id = ?").bind(t).bind(set).execute(&mut *tx).await?;

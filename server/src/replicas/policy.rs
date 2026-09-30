@@ -9,7 +9,7 @@ use super::{Policy, Target};
 use crate::{
     backups::{
         policy::{Schedule, next_after, time_zone},
-        runner::ACTIVE,
+        runner::{ACTIVE, JobState},
     },
     error::AppResult,
     state::AppState,
@@ -147,7 +147,7 @@ pub async fn trigger(st: &AppState, policy: &str, location: &str, why: &str, by:
     let mut tx = crate::db::begin_write(&st.db).await?;
     let res = async {
         let Some(p) = super::load(&mut tx, policy).await? else { return Ok(None) };
-        let active: Option<(String, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        let active: Option<(String, JobState)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT id, state FROM replica_jobs WHERE policy_id = ? AND location_id = ? AND kind = 'sync' AND state IN {ACTIVE} ORDER BY created_at DESC LIMIT 1"
         )))
         .bind(policy)
@@ -158,11 +158,11 @@ pub async fn trigger(st: &AppState, policy: &str, location: &str, why: &str, by:
             sqlx::query_as("SELECT last_run_at FROM replica_targets WHERE policy_id = ? AND location_id = ?").bind(policy).bind(location).fetch_one(&mut *tx).await?;
         let t = now();
         match active {
-            Some((_, state)) if state == "queued" => Ok(None),
-            Some((id, state)) if state == "failed" || state == "waiting" => {
-                let wait = if state == "failed" { RETRY_FAILED } else { RETRY_WAITING };
+            Some((_, JobState::Queued)) => Ok(None),
+            Some((id, state @ (JobState::Failed | JobState::Waiting))) => {
+                let wait = if state == JobState::Failed { RETRY_FAILED } else { RETRY_WAITING };
                 // A location that works again, as checked since the job last ran, is tried again at once
-                let back = state == "waiting"
+                let back = state == JobState::Waiting
                     && st.location_health.lock().unwrap().get(location).is_some_and(|h| h.ok && last_run.is_some_and(|l| h.checked_at > l));
                 if why == "manual" || back || last_run.is_none_or(|l| t - l >= wait) {
                     sqlx::query("UPDATE replica_jobs SET state = 'queued', error = NULL, params = json_set(params, '$.epoch', ?) WHERE id = ?")

@@ -40,8 +40,8 @@ pub struct DriveInfo {
     location_name: String,
     /// Reason the storage location is offline (e.g. S3 disconnected); browsing works, but opening, downloading and uploading don't
     offline: Option<String>,
-    /// "store" or "folder" (a folder on the server)
-    mode: String,
+    /// In the content store, or a folder on the server
+    mode: tree::SpaceMode,
     /// Browse, download and share only
     read_only: bool,
     /// Folder spaces, for administrators: the folder, when it was last scanned, and what the scan found
@@ -104,7 +104,7 @@ async fn drive_infos(
         let offline = r.location_id.as_deref().and_then(|location| st.location_offline_for(location, admin));
         let details = scan_details && d.is_folder();
         out.push(DriveInfo {
-            mode: d.mode.clone(),
+            mode: d.mode,
             read_only: d.read_only,
             source_path: d.source_path.clone().filter(|_| details),
             last_scan_at: r.last_scan_at.filter(|_| details),

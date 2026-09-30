@@ -46,6 +46,7 @@ use crate::{
     auth::Admin,
     error::{AppError, AppResult},
     state::AppState,
+    tree::SpaceMode,
     util::{new_id, now},
 };
 
@@ -98,6 +99,23 @@ struct Failure {
     error: String,
 }
 
+/// Where a move is (`space_moves.state`)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, sqlx::Type)]
+#[serde(rename_all = "lowercase")]
+#[sqlx(rename_all = "lowercase")]
+pub enum MoveState {
+    /// Waiting for its turn
+    Queued,
+    Running,
+    /// Paused by an administrator
+    Paused,
+    /// Stopped by an error; it can be resumed
+    Failed,
+    /// The space is on its new location
+    Done,
+    Cancelled,
+}
+
 /// Why a job's run ended without an error
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stop {
@@ -116,11 +134,11 @@ pub struct Job {
     pub space_kind: String,
     pub from_location: Option<String>,
     pub from_name: String,
-    pub from_mode: String,
+    pub from_mode: SpaceMode,
     pub from_path: Option<String>,
     pub to_location: String,
     pub to_name: String,
-    pub to_mode: String,
+    pub to_mode: SpaceMode,
     pub created_by: Option<i64>,
     pub created_by_name: String,
 }
@@ -284,7 +302,7 @@ pub async fn copied_for_move(db: &SqlitePool, hash: &str, location: &str) -> Res
 impl Job {
     /// Whether the space must stay as it is while its files are copied: a folder is copied, or written
     fn locks_space(&self) -> bool {
-        self.from_mode == "folder" || self.to_mode == "folder"
+        self.from_mode == SpaceMode::Folder || self.to_mode == SpaceMode::Folder
     }
 }
 
@@ -319,13 +337,13 @@ pub async fn location_busy(conn: &mut SqliteConnection, location: &str) -> Resul
 
 /// How a space keeps its files once it is on `location`, as a space created there would: a folder on the built-in
 /// storage and on Local folder locations, else the content store
-async fn mode_on(st: &AppState, conn: &mut SqliteConnection, location: &str) -> AppResult<&'static str> {
+async fn mode_on(st: &AppState, conn: &mut SqliteConnection, location: &str) -> AppResult<SpaceMode> {
     let (kind,): (String,) = sqlx::query_as("SELECT kind FROM storage_locations WHERE id = ?")
         .bind(location)
         .fetch_optional(conn)
         .await?
         .ok_or_else(|| AppError::not_found("Storage location not found"))?;
-    Ok(if kind == "local" && st.space_folders.is_some() { "folder" } else { "store" })
+    Ok(if kind == "local" && st.space_folders.is_some() { SpaceMode::Folder } else { SpaceMode::Store })
 }
 
 /// Writes an activity log entry about a move, as done by whoever asked for it
@@ -377,7 +395,7 @@ async fn recover(st: &AppState) -> AppResult<()> {
         let _w = st.write_lock.lock().await;
         sqlx::query("UPDATE space_moves SET state = 'queued' WHERE state = 'running'").execute(&st.db).await?;
     }
-    let unfinished: Vec<(String, String)> = sqlx::query_as(
+    let unfinished: Vec<(String, MoveState)> = sqlx::query_as(
         "SELECT id, state FROM space_moves m
          WHERE state IN ('cancelled', 'done') AND (EXISTS (SELECT 1 FROM space_move_items i WHERE i.move_id = m.id) OR renamed = 1)",
     )
@@ -385,7 +403,7 @@ async fn recover(st: &AppState) -> AppResult<()> {
     .await?;
     for (id, state) in unfinished {
         if let Some(job) = job(&mut *st.db.acquire().await?, &id).await? {
-            if state == "done" {
+            if state == MoveState::Done {
                 // Switched over, but the old folder wasn't removed yet
                 clean_up(st, &job).await;
             } else if let Err(e) = remove_copies(st, &job).await {
@@ -496,22 +514,21 @@ async fn run(st: &AppState, job: &Job, ctl: &Control) {
     let _running = Running(st, job.id.clone());
     let cx = Ctx { st, job, ctl };
     let res = match prepare(&cx).await {
-        Ok(()) => match (job.from_mode.as_str(), job.to_mode.as_str()) {
-            ("store", "store") => store::run(&cx).await,
-            ("folder", "store") => to_store::run(&cx).await,
-            ("store", "folder") => to_folder::run(&cx).await,
-            ("folder", "folder") => between_folders::run(&cx).await,
-            _ => Err(AppError::bad_request("This move isn't possible")),
+        Ok(()) => match (job.from_mode, job.to_mode) {
+            (SpaceMode::Store, SpaceMode::Store) => store::run(&cx).await,
+            (SpaceMode::Folder, SpaceMode::Store) => to_store::run(&cx).await,
+            (SpaceMode::Store, SpaceMode::Folder) => to_folder::run(&cx).await,
+            (SpaceMode::Folder, SpaceMode::Folder) => between_folders::run(&cx).await,
         },
         Err(e) => Err(e),
     };
     let ended = match res {
         Ok(Stop::Done) => Ok(()),
-        Ok(Stop::Paused) => set_state(&cx, "paused", None).await,
+        Ok(Stop::Paused) => set_state(&cx, MoveState::Paused, None).await,
         Ok(Stop::Cancelled) => cancelled(st, job).await,
         Err(e) => {
             tracing::warn!("Moving the space {} failed: {}", job.space_name, e.message);
-            set_state(&cx, "failed", Some(&e.message)).await
+            set_state(&cx, MoveState::Failed, Some(&e.message)).await
         }
     };
     if let Err(e) = ended {
@@ -525,16 +542,16 @@ async fn prepare(cx: &Ctx<'_>) -> AppResult<()> {
     crate::locations::probe(cx.st, &cx.job.to_location)
         .await
         .map_err(|e| AppError::bad_request(format!("The target storage location can't be reached: {e}")))?;
-    if !(cx.job.from_mode == "folder" && cx.job.to_mode == "folder") {
+    if !(cx.job.from_mode == SpaceMode::Folder && cx.job.to_mode == SpaceMode::Folder) {
         check_room(cx.st, &cx.job.to_location, left_to_copy(cx.st, cx.job).await?).await?;
     }
-    if cx.job.from_mode == "folder" {
+    if cx.job.from_mode == SpaceMode::Folder {
         // The location holding the folder (a disk that may not be mounted)
         if let Some(from) = &cx.job.from_location {
             crate::locations::probe(cx.st, from).await.map_err(|e| AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, e))?;
         }
     }
-    if cx.job.from_mode == "folder" && cx.job.to_mode == "store" {
+    if cx.job.from_mode == SpaceMode::Folder && cx.job.to_mode == SpaceMode::Store {
         // The folder itself (into a folder, it may be in its new place already: between_folders.rs looks)
         to_store::source(cx.job)?;
         // Each file goes through a temp file in the data folder: the largest must fit
@@ -607,7 +624,7 @@ pub(super) async fn check_room(st: &AppState, location: &str, bytes: i64) -> App
 
 /// Records that a run stopped (paused, or failed with `error`), with its progress. A move that switched the space over
 /// is done, and stays done: resuming or cancelling it would take the files it moved for copies.
-async fn set_state(cx: &Ctx<'_>, state: &str, error: Option<&str>) -> AppResult<()> {
+async fn set_state(cx: &Ctx<'_>, state: MoveState, error: Option<&str>) -> AppResult<()> {
     let _w = cx.st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&cx.st.db).await?;
     let res = async {
@@ -690,9 +707,9 @@ async fn finish(conn: &mut SqliteConnection, cx: &Ctx<'_>, cleanup: bool, note: 
 
 /// Removes what a cancelled job copied (its state is already `cancelled`, so nothing protects the copies any more)
 async fn remove_copies(st: &AppState, job: &Job) -> AppResult<()> {
-    match job.to_mode.as_str() {
-        "store" => store::remove_copies(st, job).await,
-        _ => to_folder::remove_copies(st, job).await,
+    match job.to_mode {
+        SpaceMode::Store => store::remove_copies(st, job).await,
+        SpaceMode::Folder => to_folder::remove_copies(st, job).await,
     }
 }
 
@@ -707,11 +724,11 @@ pub struct MoveInfo {
     owner_name: String,
     from_location: Option<String>,
     from_name: String,
-    from_mode: String,
+    from_mode: SpaceMode,
     to_location: String,
     to_name: String,
-    to_mode: String,
-    state: String,
+    to_mode: SpaceMode,
+    state: MoveState,
     files_total: i64,
     bytes_total: i64,
     files_done: i64,
@@ -821,7 +838,7 @@ async fn queue(
     drive_id: &str,
     target: &str,
     to_name: &str,
-    to_mode: &str,
+    to_mode: SpaceMode,
 ) -> AppResult<String> {
     #[derive(sqlx::FromRow)]
     struct Space {
@@ -830,7 +847,7 @@ async fn queue(
         owner_name: String,
         location_id: Option<String>,
         location_name: String,
-        mode: String,
+        mode: SpaceMode,
         source_path: Option<String>,
     }
     let space: Space = sqlx::query_as(
@@ -847,7 +864,7 @@ async fn queue(
     if drive_busy(conn, drive_id).await? {
         return Err(AppError::conflict(format!("\"{shown}\" is already being moved")));
     }
-    let from_path = space.source_path.clone().filter(|_| space.mode == "folder");
+    let from_path = space.source_path.clone().filter(|_| space.mode == SpaceMode::Folder);
     if let Some(path) = &from_path {
         // Its folder must be there: a disk that isn't mounted mustn't look like an empty space
         let root = crate::beneath::Pinned::root(std::path::Path::new(path));
@@ -873,7 +890,7 @@ async fn queue(
     .bind(&space.owner_name)
     .bind(&space.location_id)
     .bind(&space.location_name)
-    .bind(&space.mode)
+    .bind(space.mode)
     .bind(&from_path)
     .bind(target)
     .bind(to_name)
@@ -938,8 +955,8 @@ pub async fn cancel(State(st): State<AppState>, _: Admin, Path(id): Path<String>
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let res = async {
-            let (state,): (String,) = sqlx::query_as("SELECT state FROM space_moves WHERE id = ?").bind(&id).fetch_one(&mut *tx).await?;
-            if !matches!(state.as_str(), "queued" | "paused" | "failed") {
+            let (state,): (MoveState,) = sqlx::query_as("SELECT state FROM space_moves WHERE id = ?").bind(&id).fetch_one(&mut *tx).await?;
+            if !matches!(state, MoveState::Queued | MoveState::Paused | MoveState::Failed) {
                 return Err(AppError::conflict("This move can't be cancelled now"));
             }
             mark_cancelled(&mut tx, &job).await
