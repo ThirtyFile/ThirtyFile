@@ -17,8 +17,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 
 use super::{
     Ctx, Job, Stop,
@@ -450,7 +449,7 @@ async fn copy_one(cx: &Ctx<'_>, root: &Pinned, id: &str, rel: &str, hash: Option
     let seen = match written {
         Ok(seen) => seen,
         Err(Ok(stop)) => return Ok(Some(stop)),
-        Err(Err(e)) if e.kind() == std::io::ErrorKind::NotFound || e.to_string() == VERIFY_FAILED => {
+        Err(Err(e)) if e.kind() == std::io::ErrorKind::NotFound || crate::hashing::unusable_kind(&e) == Some(crate::hashing::Unusable::Damaged) => {
             // Gone meanwhile (deleted for good, say): nothing to copy for it any more
             drop_gone_items(st, job, Some(id)).await?;
             let (planned,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM space_move_items WHERE move_id = ? AND item_id = ?")
@@ -492,20 +491,9 @@ async fn write_one(st: &AppState, dir: &Pinned, name: &str, hash: Option<&str>, 
             let location = location.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "the content isn't recorded"))?;
             let storage = st.storage(location).map_err(|e| std::io::Error::other(e.message))?;
             let mut reader = storage.open(hash, 0, size as u64).await?;
-            let mut hasher = Sha256::new();
-            let mut buf = vec![0u8; 256 * 1024];
-            let mut len = 0i64;
-            loop {
-                let n = reader.read(&mut buf).await?;
-                if n == 0 {
-                    break;
-                }
-                hasher.update(&buf[..n]);
-                out.write_all(&buf[..n]).await?;
-                len += n as i64;
-            }
-            if hex::encode(hasher.finalize()) != hash || len != size {
-                return Err(std::io::Error::other(VERIFY_FAILED));
+            let (got, len) = crate::hashing::copy_async(&mut reader, &mut out).await?;
+            if got != hash || len != size as u64 {
+                return Err(crate::hashing::unusable(crate::hashing::Unusable::Damaged, VERIFY_FAILED));
             }
         }
         out.flush().await?;

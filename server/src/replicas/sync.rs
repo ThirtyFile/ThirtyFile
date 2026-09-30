@@ -14,9 +14,6 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use sha2::{Digest, Sha256};
-use tokio::io::AsyncReadExt;
-
 use super::{SCOPE_HASHES, Target};
 use crate::{
     backups::runner::{Ctx, Stop},
@@ -83,7 +80,7 @@ pub(super) async fn put_verified(cx: &Ctx<'_>, dst: &Arc<dyn Storage>, location:
                 dst.put_file(hash, tmp).await?;
                 match read_back(dst.as_ref(), hash, size).await? {
                     (h, n) if h == hash && n == size as u64 => Ok(()),
-                    _ => Err(std::io::Error::other(crate::backups::capture::DAMAGED)),
+                    _ => Err(crate::hashing::unusable(crate::hashing::Unusable::Damaged, crate::backups::capture::DAMAGED)),
                 }
             },
         )
@@ -106,18 +103,7 @@ async fn read_back(s: &dyn Storage, hash: &str, size: i64) -> std::io::Result<(S
         return Ok((String::new(), e.size));
     }
     let mut reader = s.open(hash, 0, size as u64).await?;
-    let mut h = Sha256::new();
-    let mut len = 0u64;
-    let mut buf = vec![0u8; 256 * 1024];
-    loop {
-        let n = reader.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        h.update(&buf[..n]);
-        len += n as u64;
-    }
-    Ok((hex::encode(h.finalize()), len))
+    crate::hashing::read_async(&mut reader).await
 }
 
 pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
@@ -323,7 +309,7 @@ async fn copy_one(cx: &Ctx<'_>, policy: &super::Policy, dst: &Arc<dyn Storage>, 
     let mut last_err = String::new();
     for source in &sources {
         let Ok(src) = st.storage(source) else { continue };
-        match cx.tries(|e: &std::io::Error| e.kind() != std::io::ErrorKind::NotFound && e.to_string() != crate::backups::capture::DAMAGED, || crate::backups::capture::fetch_verified(&src, hash, size, &tmp)).await {
+        match cx.tries(|e: &std::io::Error| e.kind() != std::io::ErrorKind::NotFound && !(crate::hashing::unusable_kind(e) == Some(crate::hashing::Unusable::Damaged)), || crate::backups::capture::fetch_verified(&src, hash, size, &tmp)).await {
             Ok(()) => {
                 fetched = Some(source.clone());
                 break;

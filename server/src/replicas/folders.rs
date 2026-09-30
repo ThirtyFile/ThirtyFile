@@ -22,7 +22,6 @@ use sqlx::SqliteConnection;
 use super::{Policy, Target, sync::put_verified};
 use crate::{
     backups::{
-        capture::{CHANGED, read_file},
         runner::{Ctx, Stop},
     },
     beneath::Pinned,
@@ -181,15 +180,15 @@ async fn read_unread(cx: &Ctx<'_>, policy: &Policy, dst: &Arc<dyn Storage>, loca
 
 /// Reads a file of the folder into a temp file: its SHA-256 and what it was when read. Ok(None) when it isn't there
 /// (moved or deleted since the check for changes: the next one finds it) or can't be read (listed as failed).
-async fn read_to(cx: &Ctx<'_>, root: &Pinned, space: &str, rel: &str, shown: &str, tmp: &Path) -> AppResult<Result<Option<(String, crate::backups::capture::Seen)>, Stop>> {
+async fn read_to(cx: &Ctx<'_>, root: &Pinned, space: &str, rel: &str, shown: &str, tmp: &Path) -> AppResult<Result<Option<(String, crate::folders::Seen)>, Stop>> {
     let read = cx
         .tries(
-            |e: &std::io::Error| e.to_string() == CHANGED,
+            |e: &std::io::Error| crate::hashing::unusable_kind(e) == Some(crate::hashing::Unusable::Changed),
             || {
                 let (root, rel, tmp) = (root.clone(), rel.to_string(), tmp.to_path_buf());
                 async move {
                     let _ = std::fs::remove_file(&tmp);
-                    tokio::task::spawn_blocking(move || read_file(&root, &rel, &tmp)).await.map_err(std::io::Error::other)?
+                    tokio::task::spawn_blocking(move || crate::folders::read_file(&root, &rel, &tmp)).await.map_err(std::io::Error::other)?
                 }
             },
         )

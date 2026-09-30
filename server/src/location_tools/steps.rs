@@ -15,7 +15,6 @@ use axum::{
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncReadExt;
 
 use super::{CHECK_DIR, location};
 use crate::{
@@ -292,18 +291,7 @@ async fn put_detached(s: Arc<dyn Storage>, key: &str, src: &FsPath, limit: Durat
 /// SHA-256 and length of the first `len` bytes of the file at `key`
 async fn read_hash(s: &dyn Storage, key: &str, len: u64) -> io::Result<(String, u64)> {
     let mut reader = s.open_at(key, 0, len).await?;
-    let mut hasher = Sha256::new();
-    let mut n = 0u64;
-    let mut buf = vec![0u8; 256 * 1024];
-    loop {
-        let got = reader.read(&mut buf).await?;
-        if got == 0 {
-            break;
-        }
-        hasher.update(&buf[..got]);
-        n += got as u64;
-    }
-    Ok((hex::encode(hasher.finalize()), n))
+    crate::hashing::read_async(&mut reader).await
 }
 
 fn compare(read: Result<io::Result<(String, u64)>, tokio::time::error::Elapsed>, hash: &str, len: u64) -> Result<(), String> {

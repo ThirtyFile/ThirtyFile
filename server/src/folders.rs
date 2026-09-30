@@ -228,6 +228,39 @@ pub(crate) fn identity(_: &std::fs::Metadata) -> (i64, i64) {
     (0, 0)
 }
 
+/// A file as it was read: its identity, size and modification time
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Seen {
+    pub dev: i64,
+    pub ino: i64,
+    pub size: i64,
+    pub mtime_ns: i64,
+}
+
+pub fn seen(meta: &std::fs::Metadata) -> Seen {
+    let (dev, ino) = identity(meta);
+    Seen { dev, ino, size: meta.len() as i64, mtime_ns: mtime_ns(meta) }
+}
+
+/// What people are told when a file changed while it was copied
+pub const CHANGED: &str = "The file changed while it was being copied";
+
+/// Reads a file of a folder into a temp file, hashing it on the way; fails (`Unusable::Changed`) when it changes while
+/// it is read
+pub fn read_file(root: &crate::beneath::Pinned, rel: &str, tmp: &std::path::Path) -> std::io::Result<(String, Seen)> {
+    let file = root.join(rel)?;
+    let mut src = file.open_file()?;
+    let before = seen(&src.metadata()?);
+    let mut out = std::fs::File::create_new(tmp)?;
+    let (hash, len) = crate::hashing::copy(&mut src, &mut out)?;
+    out.sync_all()?;
+    let after = seen(&std::fs::symlink_metadata(file.as_path())?);
+    if after != before || len as i64 != before.size {
+        return Err(crate::hashing::unusable(crate::hashing::Unusable::Changed, CHANGED));
+    }
+    Ok((hash, before))
+}
+
 /// What `walk` read: the folder's marker and its items
 struct Walked {
     marker: Option<String>,

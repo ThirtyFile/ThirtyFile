@@ -492,7 +492,7 @@ async fn fetch(cx: &Ctx<'_>, set: &str, dst: &dyn Storage, hash: &str, size: i64
     let key = layout::object_key(set, hash);
     let fetched = cx
         .tries(
-            |e: &std::io::Error| e.kind() != std::io::ErrorKind::NotFound && e.to_string() != super::capture::DAMAGED,
+            |e: &std::io::Error| e.kind() != std::io::ErrorKind::NotFound && !(crate::hashing::unusable_kind(e) == Some(crate::hashing::Unusable::Damaged)),
             || async {
                 let _ = tokio::fs::remove_file(tmp).await;
                 let mut reader = dst.open_at(&key, 0, size as u64).await?;
@@ -504,7 +504,7 @@ async fn fetch(cx: &Ctx<'_>, set: &str, dst: &dyn Storage, hash: &str, size: i64
         Ok(()) => Ok(Ok(())),
         Err(Ok(stop)) => Ok(Err(stop)),
         Err(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => Err(AppError::conflict("The copy doesn't hold this file's content any more")),
-        Err(Err(e)) if e.to_string() == super::capture::DAMAGED => Err(AppError::conflict("The copy of this file's content is damaged")),
+        Err(Err(e)) if crate::hashing::unusable_kind(&e) == Some(crate::hashing::Unusable::Damaged) => Err(AppError::conflict("The copy of this file's content is damaged")),
         Err(Err(e)) => Err(AppError::new(axum::http::StatusCode::BAD_GATEWAY, format!("Couldn't read from the copy's location: {}", crate::locations::describe(&e)))),
     }
 }
