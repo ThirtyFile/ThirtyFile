@@ -17,7 +17,7 @@ import {
   api,
   driveName,
   type LocationItem,
-  type LocationSpace,
+  type LocationItemSpace,
   type LocationTestStep,
   type StorageLocation,
   type UnusedJob,
@@ -144,7 +144,7 @@ export function LocationTestDialog({ location, onClose }: { location: StorageLoc
 }
 
 /** A space's name as the tools show it: personal spaces by their owner */
-function spaceLabel(s: LocationSpace) {
+function spaceLabel(s: LocationItemSpace) {
   return s.kind === "personal" ? t("Personal space of {user}", { user: s.owner }) : driveName(s);
 }
 

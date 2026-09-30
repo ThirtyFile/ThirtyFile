@@ -1,8 +1,8 @@
-import { download, nativeDownload, type DownloadSource } from "@/downloads";
-import { t, tServer } from "@/lib/i18n";
+//! What the server's API sends and takes
+
 import type { Branding } from "@/lib/branding";
-import type { Resolution } from "@/lib/conflicts";
-import type { UsageHistory, UsageOverview, UsageRange, UsageThresholds, UsageWork } from "@/lib/usage";
+import type { SORT_KEYS } from "@/api/files";
+
 export interface Node {
   id: string;
   parent_id: string | null;
@@ -222,7 +222,7 @@ export interface LocationTestStep {
 }
 
 /** A space as the storage location tools show it; private: someone else's personal space, whose files aren't shown */
-export interface LocationSpace {
+export interface LocationItemSpace {
   id: string;
   name: string;
   kind: DriveKind;
@@ -238,10 +238,10 @@ export interface LocationItem {
   modified: number | null;
   path: string;
   role: "content" | "internal" | "space" | null;
-  space: LocationSpace | null;
+  space: LocationItemSpace | null;
   usage: {
     status: "used" | "version" | "trash" | "replica" | "pending" | "unused";
-    space: LocationSpace | null;
+    space: LocationItemSpace | null;
     file: string | null;
     uses: number;
   } | null;
@@ -251,7 +251,7 @@ export interface LocationPage {
   path: string;
   items: LocationItem[];
   next: string | null;
-  space: LocationSpace | null;
+  space: LocationItemSpace | null;
 }
 
 /** A search for unused content in a storage location, and its removal */
@@ -313,9 +313,6 @@ export interface MovesList {
   /** Moves that run at the same time */
   concurrency: number;
 }
-
-/** Whether a move isn't over: the space is being moved, or waits to be */
-export const moveActive = (m: SpaceMove) => m.state === "queued" || m.state === "running" || m.state === "paused" || m.state === "failed";
 
 export type BackupJobState = "queued" | "running" | "paused" | "waiting" | "failed" | "done" | "cancelled";
 export type BackupJobKind = "snapshot" | "restore" | "verify" | "remove";
@@ -440,9 +437,6 @@ export interface BackupsOverview {
   sets: BackupSet[];
   jobs: BackupJob[];
 }
-
-/** Whether a backup job isn't over */
-export const backupJobActive = (j: BackupJob) => j.state === "queued" || j.state === "running" || j.state === "paused" || j.state === "waiting" || j.state === "failed";
 
 /** What "Copy everything to…" would copy, and whether the destination can take it */
 export interface CopyPreview {
@@ -1282,7 +1276,6 @@ export interface PublicShare {
   node?: Node;
 }
 
-export const SORT_KEYS = ["name", "updated", "created", "size", "type"] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
 
 /** An earlier version of a file */
@@ -1309,485 +1302,3 @@ export interface NameConflict {
   existing: Node;
 }
 export type SortOrder = "asc" | "desc";
-
-/**
- * Default space names created by the system (stored in English in the database) are shown in the UI language; spaces named by users are unchanged
- */
-export function driveName(d: { kind: string; name: string }) {
-  if (d.kind === "personal" && d.name === "My files") return t("My files");
-  if (d.kind === "company" && d.name === "All files") return t("All files");
-  return d.name;
-}
-
-/** Default name of the built-in storage location (stored in English in the database) */
-export function locationName(id: string, name: string) {
-  return id === "local" && name === "Local disk" ? t("Local disk") : name;
-}
-
-/** The server sends the location in English; it is rebuilt from its parts with translated space names */
-const localizeLocated = <T extends Located>(n: T): T => ({
-  ...n,
-  location: [n.location_space ? driveName(n.location_space) : t("Shared with me"), ...(n.location_path ?? [])].join("/"),
-});
-
-const localizeDrive = (d: Drive): Drive => ({ ...d, name: driveName(d), location_name: locationName(d.location_id ?? "", d.location_name) });
-
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    public status: number,
-    public code?: string,
-    /** The server's id of the failed request (X-Request-Id), which ties an error report to the server's record of it */
-    public requestId?: string,
-  ) {
-    super(message);
-  }
-}
-
-async function request<T>(
-  method: string,
-  path: string,
-  body?: unknown,
-  raw?: BodyInit,
-  extraHeaders?: Record<string, string>,
-  signal?: AbortSignal,
-): Promise<T> {
-  const res = await fetch(`/api${path}`, {
-    method,
-    signal,
-    credentials: "same-origin",
-    headers: {
-      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-      ...extraHeaders,
-    },
-    body: body !== undefined ? JSON.stringify(body) : raw,
-  });
-  if (!res.ok) throw await responseError(res, `/api${path}`, t("Request failed ({status})", { status: res.status }));
-  return res.json() as Promise<T>;
-}
-
-/**
- * The error for a failed response: the server's message translated to the UI language, or `fallback`.
- * A 401 without a code means the session expired: the user is sent to sign in (except for sign-in attempts and public share links).
- */
-export function errorFromBody(status: number, body: string, url: string, fallback: string, requestId?: string): ApiError {
-  let message = fallback;
-  let code: string | undefined;
-  try {
-    const data = JSON.parse(body);
-    // Server messages are English: translate them to the UI language
-    if (data.error) message = tServer(data.error);
-    code = data.code;
-  } catch {
-    // Non-JSON error
-  }
-  if (status === 401 && code === undefined && !url.startsWith("/api/auth/login") && !url.startsWith("/api/public/")) {
-    window.dispatchEvent(new Event("tf:unauthorized"));
-  }
-  return new ApiError(message, status, code, requestId);
-}
-
-export async function responseError(res: Response, url: string, fallback: string): Promise<ApiError> {
-  return errorFromBody(res.status, await res.text().catch(() => ""), url, fallback, res.headers.get("x-request-id") ?? undefined);
-}
-
-/** `fetch` for file content and other requests made outside `api`, with the same error handling: throws an ApiError when the response isn't OK */
-export async function fetchOk(url: string, init?: RequestInit): Promise<Response> {
-  const res = await fetch(url, { credentials: "same-origin", ...init });
-  if (!res.ok) throw await responseError(res, url, t("Couldn't read the file ({status})", { status: res.status }));
-  return res;
-}
-
-/** An Office file's content (.docx / .xlsx / .pptx), checked to be an Office Open XML package */
-export async function fetchOffice(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
-  return checkOoxml(await (await fetchOk(url, { signal })).arrayBuffer());
-}
-
-/** .docx / .xlsx / .pptx are really ZIP archives; check the header first so the preview and editor don't throw a cryptic error or show a blank page */
-function checkOoxml(buf: ArrayBuffer) {
-  const b = new Uint8Array(buf.slice(0, 4));
-  if (b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04) return buf;
-  if (b[0] === 0xd0 && b[1] === 0xcf && b[2] === 0x11 && b[3] === 0xe0)
-    throw new ApiError(t("This is a legacy Office file (.doc / .xls / .ppt) with a newer file extension, so it can't be opened online. Download it and open it in Office."), 0);
-  if (buf.byteLength === 0) throw new ApiError(t("This file is empty."), 0);
-  throw new ApiError(t("This file isn't a valid Office document (it may be damaged, or wasn't created by Office), so it can't be opened online. Download it to check."), 0);
-}
-
-/** `signal` stops the request when its answer isn't wanted any more (React Query passes one to each query) */
-const get = <T>(p: string, signal?: AbortSignal) => request<T>("GET", p, undefined, undefined, undefined, signal);
-/** Convert filters to query parameters (skipping empty values) */
-const toParams = (o: object) =>
-  Object.fromEntries(Object.entries(o).flatMap(([k, v]) => (v === undefined || v === null || v === "" ? [] : [[k, String(v)]]))) as Record<
-    string,
-    string
-  >;
-const post = <T>(p: string, body?: unknown) => request<T>("POST", p, body ?? {});
-/**
- * API path with every interpolated part encoded as one path segment (or query value): ids and share tokens can come from
- * the address bar, and `/share/abc%3Fx=1` must not turn into `/public/shares/abc?x=1/unlock`. Query strings built with qs()
- * are added after it, unencoded.
- */
-export const enc = (strings: TemplateStringsArray, ...parts: (string | number)[]) =>
-  strings.reduce((out, s, i) => out + s + (i < parts.length ? encodeURIComponent(String(parts[i])) : ""), "");
-const qs = (params: Record<string, string | undefined>) => {
-  const s = new URLSearchParams(Object.entries(params).filter((e): e is [string, string] => e[1] !== undefined));
-  const str = s.toString();
-  return str ? `?${str}` : "";
-};
-
-export const api = {
-  me: () => get<Me>("/auth/me"),
-  login: (username: string, password: string) => post<Me | TwoFactorPending>("/auth/login", { username, password }),
-  /** The second step of signing in; after setting it up, the answer carries the recovery codes */
-  loginCode: (ticket: string, code: string) => post<Me & { recovery_codes?: string[] }>("/auth/login/2fa", { ticket, code }),
-  loginSetup: (ticket: string) => post<TwoFactorSetup>("/auth/login/2fa/setup", { ticket }),
-  twoFactor: () => get<TwoFactorStatus>("/auth/2fa"),
-  /** Once two-factor sign-in is on, changing it also takes a code from the app or a recovery code */
-  startTwoFactor: (password: string, code?: string) => post<TwoFactorSetup>("/auth/2fa/setup", { password, code }),
-  enableTwoFactor: (code: string) => post<{ recovery_codes: string[] }>("/auth/2fa/enable", { code }),
-  disableTwoFactor: (password: string, code?: string) => post("/auth/2fa/disable", { password, code }),
-  newRecoveryCodes: (password: string, code?: string) => post<{ recovery_codes: string[] }>("/auth/2fa/recovery-codes", { password, code }),
-  resetTwoFactor: (userId: number) => request("DELETE", `/admin/users/${userId}/2fa`),
-  logout: () => post("/auth/logout"),
-  changePassword: (current: string, next: string) => request("PUT", "/auth/password", { current, new: next }),
-  authOptions: () => get<{ password_reset: boolean }>("/auth/options"),
-  forgotPassword: (account: string) => post("/auth/forgot", { account }),
-  resetPassword: (token: string, next: string) => post("/auth/reset", { token, new: next }),
-  devices: () => get<Device[]>("/auth/sessions"),
-  signOutDevice: (id: string) => request("DELETE", `/auth/sessions/${encodeURIComponent(id)}`),
-  signOutOtherDevices: () => post<{ removed: number }>("/auth/sessions/others"),
-  userDevices: (userId: number) => get<Device[]>(`/admin/users/${userId}/sessions`),
-  signOutUserDevice: (userId: number, id: string) => request("DELETE", `/admin/users/${userId}/sessions/${encodeURIComponent(id)}`),
-  signOutUserDevices: (userId: number) => request<{ removed: number }>("DELETE", `/admin/users/${userId}/sessions`),
-  appPasswords: () => get<AppPassword[]>("/auth/app-passwords"),
-  createAppPassword: (req: { name: string; scope: "read" | "write"; expires_days?: number; password?: string; code?: string }) =>
-    post<{ token: string; app_password: AppPassword }>("/auth/app-passwords", req),
-  deleteAppPassword: (id: string) => request("DELETE", `/auth/app-passwords/${encodeURIComponent(id)}`),
-
-  node: (id: string, signal?: AbortSignal) => get<NodeInfo>(enc`/nodes/${id}`, signal).then((n) => ({ ...n, drive: { ...n.drive, name: driveName(n.drive) } })),
-  children: (id: string, sort?: SortKey, order?: SortOrder, foldersOnly?: boolean, signal?: AbortSignal) =>
-    get<Node[]>(enc`/nodes/${id}/children` + qs({ sort, order, folders_only: foldersOnly ? "true" : undefined }), signal),
-  childrenPage: (id: string, sort: SortKey, order: SortOrder, limit: number, after?: string, signal?: AbortSignal) =>
-    get<CursorPage<Node>>(enc`/nodes/${id}/children` + qs({ sort, order, limit: String(limit), after }), signal),
-  /** The part of a folder from `offset` on (a large folder is shown a part at a time), with how many items it has */
-  childrenAt: (id: string, sort: SortKey, order: SortOrder, offset: number, limit: number, signal?: AbortSignal) =>
-    get<PositionedPage<Node>>(enc`/nodes/${id}/children` + qs({ sort, order, limit: String(limit), offset: String(offset) }), signal),
-  /** Where an item is in a folder's listing (null: not in it) */
-  position: (id: string, item: string, sort: SortKey, order: SortOrder) =>
-    get<{ position: number | null; total: number }>(enc`/nodes/${id}/position` + qs({ item, sort, order })),
-  /** The ids of items selected in a folder (all of them, or from one to another, less some), a batch at a time */
-  selection: (id: string, req: { sort: SortKey; order: SortOrder; from?: string; to?: string; except: string[]; after?: string }) =>
-    post<{ ids: string[]; next: string | null }>(enc`/nodes/${id}/select`, req),
-  /** What a typed path names; `aliases` maps names as the UI language shows them to the ones paths use */
-  findPath: (path: string, aliases: Record<string, string>) => post<FoundPath>("/nodes/find", { path, aliases }),
-  createFolder: (parent_id: string, name: string) => post<Node>("/folders", { parent_id, name }),
-  rename: (id: string, name: string) => request<Node>("PATCH", enc`/nodes/${id}`, { name }),
-  /** `resolutions`: what to do with each item (by id) whose name the destination already has */
-  /** Moving or copying to or from a folder on the server can take a while: follow the task (`waitForJob`) */
-  move: (ids: string[], dest_id: string, resolutions?: Record<string, Resolution>) => post<Job>("/nodes/move", { ids, dest_id, resolutions }),
-  copy: (ids: string[], dest_id: string, resolutions?: Record<string, Resolution>) => post<Job>("/nodes/copy", { ids, dest_id, resolutions }),
-  /** Which names would clash: of `names` about to be uploaded to `dest_id`, of `ids` moved or copied there, or of `ids` restored from the trash (no `dest_id`) */
-  conflicts: (req: { dest_id?: string; names?: string[]; ids?: string[] }) => post<NameConflict[]>("/nodes/conflicts", req),
-  trash: (ids: string[]) => post("/nodes/trash", { ids }),
-  /** The most recent entries about an item (and, for a folder, what's inside it) */
-  history: (id: string, signal?: AbortSignal) => get<HistoryEntry[]>(enc`/nodes/${id}/activity`, signal),
-  /** Size and number of items inside these folders (files among the ids hold nothing) */
-  contents: (ids: string[], signal?: AbortSignal) => request<FolderContents>("POST", "/nodes/contents", { ids }, undefined, undefined, signal),
-  /** With mine, only the items the person deleted */
-  trashPage: (limit: number, after?: string, mine?: boolean, signal?: AbortSignal) =>
-    get<CursorPage<Located>>(`/trash${qs({ limit: String(limit), after, mine: mine ? "true" : undefined })}`, signal).then((p) => ({ ...p, items: p.items.map(localizeLocated) })),
-  restore: (ids: string[], resolutions?: Record<string, Resolution>) => post("/trash/restore", { ids, resolutions }),
-  /** Deleting for good and emptying the trash answer with a task (see lib/jobs) */
-  deleteForever: (ids: string[]) => post<Job>("/trash/delete", { ids }),
-  emptyTrash: () => post<Job>("/trash/empty"),
-  /** What Empty trash would delete: items per space */
-  emptyTrashPreview: () => get<{ kind: string; name: string; items: number }[]>("/trash/empty"),
-  /** Names containing `q`; at most 300 (`truncated` when there were more) */
-  search: (q: string, f: SearchFilter = {}) =>
-    get<{ items: Located[]; truncated: boolean }>(`/search${qs(toParams({ q, ...f }))}`).then((r) => ({ ...r, items: r.items.map(localizeLocated) })),
-  recent: () => get<Located[]>("/recent").then((l) => l.map(localizeLocated)),
-  favorites: (sort?: SortKey, order?: SortOrder) => get<Located[]>(`/favorites${qs({ sort, order })}`).then((l) => l.map(localizeLocated)),
-  setFavorite: (ids: string[], favorite: boolean) => post("/nodes/favorite", { ids, favorite }),
-  /** Packs items into a new ZIP file in `parentId`, on the server */
-  compress: (ids: string[], parentId: string) => post<Job>("/archive/compress", { ids, parent_id: parentId, tz: new Date().getTimezoneOffset() }),
-  /** Extracts a ZIP file into a new folder next to it, on the server */
-  extract: (id: string) => post<Job>("/archive/extract", { id }),
-  job: (id: string) => get<Job>(enc`/jobs/${id}`),
-  /** Save from the online editor; with baseVersion (updated_at when the file was opened), returns 409 if someone else changed the file */
-  saveContent: (id: string, content: BodyInit, baseVersion?: number) =>
-    request<Node>(
-      "PUT",
-      enc`/files/${id}/content`,
-      undefined,
-      content,
-      baseVersion !== undefined ? { "X-Base-Version": String(baseVersion) } : undefined,
-    ),
-  /** A file's earlier versions, newest first */
-  versions: (id: string, signal?: AbortSignal) => get<FileVersion[]>(enc`/files/${id}/versions`, signal),
-  /** Where to open (preview) or download an earlier version */
-  versionUrl: (id: string, version: string, download?: boolean) => enc`/api/files/${id}/versions/${version}/content` + (download ? "?download=1" : ""),
-  /** Make an earlier version the file's content again (the current content becomes a version too) */
-  restoreVersion: (id: string, version: string) => post<Node>(enc`/files/${id}/versions/${version}/restore`),
-  /** Create an empty file (a zero-length tus upload completes immediately); returns the new node id */
-  createEmptyFile: async (parentId: string, name: string) => {
-    const b64 = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
-    const res = await fetch("/api/uploads", {
-      method: "POST",
-      headers: {
-        "Tus-Resumable": "1.0.0",
-        "Upload-Length": "0",
-        "Upload-Metadata": `filename ${b64(name)},parentId ${b64(parentId)}`,
-      },
-    });
-    if (!res.ok) throw await responseError(res, "/api/uploads", t("Couldn't create ({status})", { status: res.status }));
-    return res.headers.get("X-Node-Id")!;
-  },
-
-  /** With a node: every link on it the caller may manage; otherwise the caller's own links, or those matching the filter */
-  shares: (nodeId?: string, filter: ShareFilter = {}, signal?: AbortSignal) => get<ShareInfo[]>(`/shares${qs(toParams({ ...filter, node_id: nodeId }))}`, signal),
-  updateShare: (id: string, req: ShareUpdate) => request<ShareInfo>("PATCH", enc`/shares/${id}`, req),
-  createShare: (req: { node_id: string; password?: string; expires_at?: number; max_downloads?: number } & Partial<ShareAccessOptions>) =>
-    post<ShareInfo>("/shares", req),
-  deleteShare: (id: string) => request("DELETE", enc`/shares/${id}`),
-
-  users: () => get<UserRow[]>("/admin/users"),
-  /** A page of accounts, by id */
-  usersPage: (after: number, limit: number, q = "", signal?: AbortSignal) =>
-    get<UserRow[]>(`/admin/users${qs({ after: String(after), limit: String(limit), q: q.trim() || undefined })}`, signal),
-  /** `personal_space` / `personal_location`: "My files" and its storage location; left out, the system settings decide */
-  createUser: (req: Partial<Omit<UserRow, "personal_space" | "personal_location">> & { password: string; personal_space?: boolean; personal_location?: string }) =>
-    post<UserRow>("/admin/users", req),
-  updateUser: (id: number, req: Partial<UserRow> & { password?: string }) => request<UserRow>("PATCH", enc`/admin/users/${id}`, req),
-  /** Deletes a user: their personal space's files are moved to another space (move_to, a space id) or deleted (delete_files) */
-  deleteUser: (id: number, files: { move_to?: string; delete_files?: boolean } = {}) =>
-    request<Job>("DELETE", enc`/admin/users/${id}` + qs(toParams(files))),
-  /** Gives a user a personal space on a storage location (the system setting's when left out) */
-  addPersonalSpace: (id: number, location_id?: string) => post<UserRow>(enc`/admin/users/${id}/personal-space`, { location_id }),
-  /** Removes a user's personal space: its files are moved to another space (move_to) or deleted (delete_files) */
-  removePersonalSpace: (id: number, files: { move_to?: string; delete_files?: boolean }) =>
-    request<Job>("DELETE", enc`/admin/users/${id}/personal-space` + qs(toParams(files))),
-  systemSettings: () => get<SystemInfo>("/admin/settings"),
-  updateSystemSettings: (req: SystemSettingsReq) => request<SystemInfo>("PATCH", "/admin/settings", req),
-
-  drives: () => get<Drive[]>("/drives").then((l) => l.map(localizeDrive)),
-  /** `location_id` (administrators): the storage location of the new space; left out, the default location */
-  createDrive: (name: string, quota_bytes?: number, source_path?: string, read_only?: boolean, location_id?: string) =>
-    post<Drive>("/drives", { name, quota_bytes, source_path, read_only, location_id }),
-  /** Scans a folder space for changes made on the server's folder; the finished task's result is a `ScanReport` */
-  scanDrive: (id: string) => post<Job>(enc`/admin/drives/${id}/scan`),
-  updateDrive: (id: string, req: { name?: string; quota_bytes?: number; read_only?: boolean }) => request<Drive>("PATCH", enc`/drives/${id}`, req),
-  deleteDrive: (id: string) => request("DELETE", enc`/drives/${id}`),
-  adminDrives: () => get<Drive[]>("/admin/drives").then((l) => l.map(localizeDrive)),
-  access: (nodeId: string) => get<AccessInfo>(enc`/nodes/${nodeId}/access`),
-  grant: (
-    nodeId: string,
-    req: {
-      principal_type: PrincipalType;
-      principal_id: number;
-      role: Role;
-      expires_at?: number | null;
-    },
-  ) => post(enc`/nodes/${nodeId}/access`, req),
-  revoke: (grantId: number) => request("DELETE", enc`/grants/${grantId}`),
-  directory: (q: string) => get<Principal[]>(`/directory${qs({ q })}`),
-  sharedWithMe: () => get<SharedItem[]>("/shared-with-me").then((l) => l.map(localizeLocated)),
-  activity: (f: ActivityFilter & { before?: number; limit?: number }) => get<Page<Activity>>(`/activity${qs(toParams(f))}`),
-  /** CSV export URL (tz: browser time zone; exported times are shown in local time) */
-  activityExportUrl: (f: ActivityFilter) => `/api/activity/export${qs(toParams({ ...f, tz: new Date().getTimezoneOffset() }))}`,
-  shareAccess: (f: ShareAccessFilter & { before?: number; limit?: number }) => get<Page<ShareAccess>>(`/share-access${qs(toParams(f))}`),
-  loginLog: (f: LoginFilter & { before?: number; limit?: number }) => get<Page<LoginRecord>>(`/login-log${qs(toParams(f))}`),
-  errorLog: (f: ErrorFilter & { before?: number; limit?: number }) => get<Page<ErrorEntry>>(`/admin/errors${qs(toParams(f))}`),
-  errorLogExportUrl: (f: ErrorFilter) => `/api/admin/errors/export${qs(toParams({ ...f, tz: new Date().getTimezoneOffset() }))}`,
-  loginLogExportUrl: (f: LoginFilter) => `/api/login-log/export${qs(toParams({ ...f, tz: new Date().getTimezoneOffset() }))}`,
-  branding: () => get<Branding>("/branding"),
-  updateBranding: (b: BrandingReq) => request<Branding>("PUT", "/admin/branding", b),
-  uploadLogo: (variant: "light" | "dark", file: File) => request<Branding>("PUT", enc`/admin/branding/logo/${variant}`, undefined, file),
-  deleteLogo: (variant: "light" | "dark") => request<Branding>("DELETE", enc`/admin/branding/logo/${variant}`),
-  uploadLoginBackground: (file: File) => request<Branding>("PUT", "/admin/branding/background", undefined, file),
-  deleteLoginBackground: () => request<Branding>("DELETE", "/admin/branding/background"),
-  ssoProviders: () => get<SsoProvider[]>("/auth/sso/providers"),
-  /** Start a third-party login (full-page redirect); link = link to the currently signed-in account */
-  ssoStartUrl: (provider: string, next: string) => enc`/api/auth/sso/${provider}/start` + qs({ next }),
-  /** Linking starts with a request from this page, which returns where to go next */
-  /** Linking takes the current password (and a two-factor code); accounts without a password, a recent sign-in */
-  ssoLink: (provider: string, next: string, password?: string, code?: string) => post<{ url: string }>(enc`/auth/sso/${provider}/link`, { next, password, code }),
-  myIdentities: () => get<{ linked: LinkedIdentity[]; available: string[] }>("/auth/identities"),
-  unlinkIdentity: (provider: string) => request("DELETE", enc`/auth/identities/${provider}`),
-  /** Also tells the server the time zone, for the times in emails */
-  notifications: () => get<{ items: AppNotification[]; unread: number }>(`/notifications${qs({ tz: String(new Date().getTimezoneOffset()) })}`),
-  /** Without ids: all of them */
-  markNotificationsRead: (ids?: number[]) => post("/notifications/read", { ids }),
-  deleteNotification: (id: number) => request("DELETE", enc`/notifications/${id}`),
-  clearNotifications: () => request("DELETE", "/notifications"),
-  notificationSettings: () => get<NotificationSettings>("/notifications/settings"),
-  /** Changing the email address takes the current password (and a two-factor code when it is on) */
-  updateNotificationSettings: (req: { email?: string; kinds?: Partial<Record<NotificationKind, NotificationPrefs>>; password?: string; code?: string }) =>
-    request<NotificationSettings>("PUT", "/notifications/settings", req),
-  emailSettings: () => get<EmailSettings>("/admin/email"),
-  updateEmailSettings: (req: EmailSettingsReq) => request<EmailSettings>("PUT", "/admin/email", req),
-  testEmail: (req: EmailSettingsReq & { to: string }) => post("/admin/email/test", req),
-  ssoSettings: () => get<SsoSettings>("/admin/sso"),
-  updateSsoSettings: (s: SsoSettingsReq) => request<SsoSettings>("PUT", "/admin/sso", s),
-  logStatus: () => get<LogStatus>("/admin/logs"),
-  updateLogSettings: (s: LogSettings) => request<LogStatus>("PUT", "/admin/logs", s),
-  archiveLogsNow: () => post<LogStatus>("/admin/logs/archive"),
-  logArchiveUrl: (id: number) => enc`/api/admin/logs/archives/${id}`,
-  deleteLogArchive: (id: number) => request("DELETE", enc`/admin/logs/archives/${id}`),
-  storageLocations: () => get<StorageLocation[]>("/admin/storage").then((l) => l.map((x) => ({ ...x, name: locationName(x.id, x.name) }))),
-  /** Control panel › Storage usage: the latest samples, the last hour's operations and alerts */
-  usageOverview: (signal?: AbortSignal) =>
-    get<UsageOverview>("/admin/usage", signal).then((o) => ({ ...o, locations: o.locations.map((l) => ({ ...l, name: locationName(l.id, l.name) })) })),
-  /** A location's history ('' for all of them together) over a range, for one kind of work or all */
-  usageHistory: (q: { location: string; range: UsageRange; work: UsageWork | "all" }, signal?: AbortSignal) =>
-    get<UsageHistory>("/admin/usage/history" + qs({ location: q.location, range: q.range, work: q.work }), signal),
-  setUsageThresholds: (t: UsageThresholds) => request<UsageThresholds>("PUT", "/admin/usage/thresholds", t),
-  createStorage: (req: { name: string; kind: StorageKind; config: StorageConfig }) => post<{ id: string }>("/admin/storage", req),
-  updateStorage: (id: string, req: { name?: string; config?: StorageConfig }) => request("PATCH", enc`/admin/storage/${id}`, req),
-  deleteStorage: (id: string) => request("DELETE", enc`/admin/storage/${id}`),
-  testStorage: (req: { id?: string; kind: StorageKind; config: StorageConfig }) =>
-    post<{ ok: boolean; region?: string; host_key?: string }>("/admin/storage/test", req),
-  testExistingStorage: (id: string) => post(enc`/admin/storage/${id}/test`),
-  testStorageSteps: (id: string) => post<{ ok: boolean; steps: LocationTestStep[] }>(enc`/admin/storage/${id}/test-steps`),
-  browseStorage: (id: string, path: string, after?: string) => get<LocationPage>(enc`/admin/storage/${id}/browse` + qs({ path, after })),
-  storageDownloadUrl: (id: string, path: string) => enc`/api/admin/storage/${id}/download` + qs({ path }),
-  unusedContent: (id: string) => get<UnusedJob | null>(enc`/admin/storage/${id}/unused`),
-  findUnusedContent: (id: string) => post<UnusedJob>(enc`/admin/storage/${id}/unused`),
-  removeUnusedContent: (id: string, scanId: string) => post<UnusedJob>(enc`/admin/storage/${id}/unused/remove`, { scan_id: scanId }),
-  setDefaultStorage: (id: string) => post(enc`/admin/storage/${id}/default`),
-  storageLocationSpaces: (id: string) =>
-    get<LocationSpace[]>(enc`/admin/storage/${id}/spaces`).then((l) => l.map((s) => ({ ...s, name: driveName(s) }))),
-  moves: () =>
-    get<MovesList>("/admin/moves").then((l) => ({
-      ...l,
-      moves: l.moves.map((m) => ({
-        ...m,
-        space_name: driveName({ kind: m.space_kind, name: m.space_name }),
-        from_name: m.from_location ? locationName(m.from_location, m.from_name) : m.from_name,
-        to_name: locationName(m.to_location, m.to_name),
-      })),
-    })),
-  startMoves: (drive_ids: string[], location_id: string) => post<{ ids: string[] }>("/admin/moves", { drive_ids, location_id }),
-  pauseMove: (id: string) => post(enc`/admin/moves/${id}/pause`),
-  resumeMove: (id: string) => post(enc`/admin/moves/${id}/resume`),
-  cancelMove: (id: string) => post(enc`/admin/moves/${id}/cancel`),
-  setMoveConcurrency: (concurrency: number) => request("PUT", "/admin/moves/settings", { concurrency }),
-  backups: () =>
-    get<BackupsOverview>("/admin/backups").then((o) => ({
-      ...o,
-      sets: o.sets.map((s) => ({
-        ...s,
-        source_name: s.source_location ? locationName(s.source_location, s.source_name) : s.source_name,
-        dest_name: locationName(s.dest_location, s.dest_name),
-        snapshots: s.snapshots.map((n) => ({ ...n, spaces: n.spaces.map((sp) => ({ ...sp, name: driveName(sp) })) })),
-      })),
-    })),
-  copyPreview: (source: string, dest: string) =>
-    post<CopyPreview>("/admin/backups/copies/preview", { source, dest }).then((p) => ({
-      ...p,
-      spaces: p.spaces.map((s) => ({ ...s, name: driveName(s) })),
-    })),
-  startCopy: (source: string, dest: string, name: string) => post<{ set_id: string; job_id: string }>("/admin/backups/copies", { source, dest, name }),
-  pauseBackupJob: (id: string) => post(enc`/admin/backups/jobs/${id}/pause`),
-  resumeBackupJob: (id: string) => post(enc`/admin/backups/jobs/${id}/resume`),
-  cancelBackupJob: (id: string) => post(enc`/admin/backups/jobs/${id}/cancel`),
-  verifyBackup: (id: string) => post<{ job_id: string }>(enc`/admin/backups/sets/${id}/verify`),
-  deleteBackup: (id: string) => request("DELETE", enc`/admin/backups/sets/${id}`),
-  restorePreview: (snapshot: string, req: RestoreRequest) =>
-    post<RestorePreview>(enc`/admin/backups/snapshots/${snapshot}/restore/preview`, req).then((p) => ({
-      ...p,
-      space: { ...p.space, name: driveName(p.space) },
-      targets: p.targets.map((t) => ({ ...t, name: driveName(t) })),
-    })),
-  restoreBackup: (snapshot: string, req: RestoreRequest) => post<{ job_id: string }>(enc`/admin/backups/snapshots/${snapshot}/restore`, req),
-  browseSnapshot: (snapshot: string, space: string, folder?: string | null) =>
-    get<{ path: [string, string][]; items: SnapshotItem[] }>(enc`/admin/backups/snapshots/${snapshot}/browse` + qs({ space, folder: folder ?? undefined })),
-  createBackupPolicy: (req: Partial<BackupPolicySettings> & { name: string; source: string; dest: string }) =>
-    post<{ set_id: string }>("/admin/backups/policies", req),
-  updateBackupPolicy: (id: string, req: Partial<BackupPolicySettings> & { name?: string }) => request("PATCH", enc`/admin/backups/policies/${id}`, req),
-  runBackupPolicy: (id: string) => post<{ job_id: string | null }>(enc`/admin/backups/policies/${id}/run`),
-  backupNextRuns: (schedule: BackupSchedule, tz: string) => post<number[]>("/admin/backups/policies/next-runs", { schedule, tz }),
-  importBackups: (location: string) => post<{ found: number; added: string[] }>("/admin/backups/import", { location }),
-  replicas: () =>
-    get<ReplicasOverview>("/admin/replicas").then((o) => ({
-      ...o,
-      policies: o.policies.map((p) => ({
-        ...p,
-        source_name: locationName(p.source_location, p.source_name),
-        targets: p.targets.map((t) => ({ ...t, name: locationName(t.location_id, t.name) })),
-      })),
-      unneeded: o.unneeded.map(([id, name, n, bytes]) => [id, locationName(id, name), n, bytes] as [string, string, number, number]),
-    })),
-  createReplicaPolicy: (req: ReplicaPolicyRequest) => post<{ id: string }>("/admin/replicas", req),
-  updateReplicaPolicy: (id: string, req: ReplicaPolicyRequest) => request("PATCH", enc`/admin/replicas/${id}`, req),
-  deleteReplicaPolicy: (id: string) => request("DELETE", enc`/admin/replicas/${id}`),
-  syncReplicas: (id: string, location?: string) => post<{ jobs: string[] }>(enc`/admin/replicas/${id}/sync`, { location }),
-  verifyReplicas: (id: string, location?: string) => post<{ jobs: string[] }>(enc`/admin/replicas/${id}/verify`, { location }),
-  promotePreflight: (id: string, target: string) => get<PromotePreflight>(enc`/admin/replicas/${id}/promote` + qs({ target })),
-  promoteReplica: (id: string, target: string, accept_missing: boolean) =>
-    post<{ moved: number; missing: number }>(enc`/admin/replicas/${id}/promote`, { target, accept_missing }),
-  purgeReplicas: (location: string) => post<{ removed: number }>("/admin/replicas/purge", { location }),
-  pauseReplicaJob: (id: string) => post(enc`/admin/replicas/jobs/${id}/pause`),
-  resumeReplicaJob: (id: string) => post(enc`/admin/replicas/jobs/${id}/resume`),
-  cancelReplicaJob: (id: string) => post(enc`/admin/replicas/jobs/${id}/cancel`),
-  groups: () => get<Group[]>("/admin/groups"),
-  createGroup: (req: { name: string; description?: string; members?: number[] }) => post<{ id: number }>("/admin/groups", req),
-  updateGroup: (id: number, req: { name?: string; description?: string; members?: number[] }) => request("PATCH", enc`/admin/groups/${id}`, req),
-  deleteGroup: (id: number) => request("DELETE", enc`/admin/groups/${id}`),
-
-  publicShare: (token: string) => get<PublicShare>(enc`/public/shares/${token}`),
-  unlockShare: (token: string, password: string) => post(enc`/public/shares/${token}/unlock`, { password }),
-  publicNode: (token: string, id: string) => get<{ node: Node; path: Crumb[] }>(enc`/public/shares/${token}/nodes/${id}`),
-  publicChildrenPage: (token: string, id: string, limit: number, after?: string, signal?: AbortSignal) =>
-    get<CursorPage<Node>>(enc`/public/shares/${token}/nodes/${id}/children` + qs({ limit: String(limit), after }), signal),
-};
-
-/** Source of file content URLs; signed-in files and public shares use the same components */
-export interface FileSource {
-  contentUrl(n: Node, download?: boolean): string;
-  thumbUrl(n: Node): string;
-  /** Keeps a thumbnail made in the browser (PDFs, videos) on the server; missing where that isn't possible (share links) */
-  saveThumb?(n: Node, image: Blob): Promise<void>;
-  /**
-   * Link to download the given items from: one item goes in the URL; several are sent to the server, which answers
-   * with a short-lived link (a URL holding hundreds of ids is too long for many reverse proxies)
-   */
-  downloadLink(ids: string[]): Promise<string>;
-}
-
-/** Download link for items at `base` (`/download` of the signed-in API or of a share) */
-function downloadLink(base: string, ids: string[]): Promise<string> {
-  const tz = new Date().getTimezoneOffset();
-  if (ids.length === 1) return Promise.resolve(`/api${base}?ids=${encodeURIComponent(ids[0])}&tz=${tz}`);
-  return post<{ url: string }>(base, { ids, tz }).then((r) => r.url);
-}
-
-export const privateSource: FileSource = {
-  contentUrl: (n, download) => enc`/api/files/${n.id}/content` + (download ? "?download=1" : ""),
-  thumbUrl: (n) => enc`/api/files/${n.id}/thumbnail?v=${n.updated_at}`,
-  saveThumb: async (n, image) => void (await fetchOk(enc`/api/files/${n.id}/thumbnail`, { method: "PUT", body: image, headers: { "Content-Type": image.type } })),
-  downloadLink: (ids) => downloadLink("/download", ids),
-};
-
-/** Where visitors of a share link that accepts files upload them */
-export const shareUploadEndpoint = (token: string) => enc`/api/public/shares/${token}/uploads`;
-
-export function shareSource(token: string): FileSource {
-  const base = enc`/api/public/shares/${token}`;
-  return {
-    contentUrl: (n, download) => base + enc`/nodes/${n.id}/content` + (download ? "?download=1" : ""),
-    thumbUrl: (n) => base + enc`/nodes/${n.id}/thumbnail?v=${n.updated_at}`,
-    downloadLink: (ids) => downloadLink(enc`/public/shares/${token}/download`, ids),
-  };
-}
-
-/** Trigger a browser download (without leaving the page) */
-/**
- * Downloads: signed-in downloads show progress in the page (bottom right) and are saved when done;
- * public share links are handed to the browser to download directly (handing a large file over to the browser after starting it in the page would count
- * the download twice).
- * A function is called for the URL when the download starts (and again when it is retried)
- */
-export function triggerDownload(source: DownloadSource) {
-  if (typeof source === "string" && source.startsWith("/api/public/")) return nativeDownload(source);
-  return download(source);
-}

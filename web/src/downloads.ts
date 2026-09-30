@@ -241,3 +241,15 @@ export function removeDownload(id: string) {
   tasks = tasks.filter((x) => x.id !== id);
   emit();
 }
+
+/** Trigger a browser download (without leaving the page) */
+/**
+ * Downloads: signed-in downloads show progress in the page (bottom right) and are saved when done;
+ * public share links are handed to the browser to download directly (handing a large file over to the browser after starting it in the page would count
+ * the download twice).
+ * A function is called for the URL when the download starts (and again when it is retried)
+ */
+export function triggerDownload(source: DownloadSource) {
+  if (typeof source === "string" && source.startsWith("/api/public/")) return nativeDownload(source);
+  return download(source);
+}
