@@ -388,7 +388,10 @@ async fn a_sync_waits_for_its_target_continues_after_a_restart_and_is_refused_af
     assert!(ran.iter().any(|r| r.starts_with("waiting")), "{ran:?}");
     assert_eq!(health(&env, &id).await.state, "degraded");
     std::fs::rename(env.dir.join("unplugged"), &nas).unwrap();
-    sqlx::query("UPDATE replica_targets SET last_run_at = last_run_at - 600").execute(&env.st.db).await.unwrap();
+    // Not before its time, unless the location was seen working again since
+    assert!(settle(&env, &id).await.is_empty());
+    let back = crate::state::LocationHealth { ok: true, error: None, checked_at: crate::util::now() + 1 };
+    env.st.location_health.lock().unwrap().insert("nas".into(), back);
     assert_eq!(settle(&env, &id).await, ["done"]);
     // ThirtyFile stopped during a sync: it waits for its turn again
     env.upload(&amy, amy.root(), "b.txt", b"b").await;

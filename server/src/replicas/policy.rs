@@ -161,7 +161,10 @@ pub async fn trigger(st: &AppState, policy: &str, location: &str, why: &str, by:
             Some((_, state)) if state == "queued" => Ok(None),
             Some((id, state)) if state == "failed" || state == "waiting" => {
                 let wait = if state == "failed" { RETRY_FAILED } else { RETRY_WAITING };
-                if why == "manual" || last_run.is_none_or(|l| t - l >= wait) {
+                // A location that works again, as checked since the job last ran, is tried again at once
+                let back = state == "waiting"
+                    && st.location_health.lock().unwrap().get(location).is_some_and(|h| h.ok && last_run.is_some_and(|l| h.checked_at > l));
+                if why == "manual" || back || last_run.is_none_or(|l| t - l >= wait) {
                     sqlx::query("UPDATE replica_jobs SET state = 'queued', error = NULL, params = json_set(params, '$.epoch', ?) WHERE id = ?")
                         .bind(p.epoch)
                         .bind(&id)
