@@ -9,9 +9,7 @@ use std::{
     sync::Arc,
 };
 
-use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
-use tokio::io::AsyncReadExt;
 
 use crate::storage::Storage;
 
@@ -102,16 +100,7 @@ pub async fn run(
 
 async fn matches_hash(storage: &dyn Storage, hash: &str, size: u64) -> std::io::Result<bool> {
     let mut reader = storage.open(hash, 0, size).await?;
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 256 * 1024];
-    loop {
-        let n = reader.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(hex::encode(hasher.finalize()) == hash)
+    Ok(crate::hashing::read_async(&mut reader).await?.0 == hash)
 }
 
 /// The report as text for the terminal; returns the number of problems
@@ -155,7 +144,7 @@ mod tests {
         let put = |content: &'static str| {
             let (local, dir) = (local.clone(), env.dir.clone());
             async move {
-                let hash = hex::encode(Sha256::digest(content.as_bytes()));
+                let hash = crate::util::sha256_hex(content.as_bytes());
                 let tmp = dir.join("tmp").join(&hash);
                 std::fs::write(&tmp, content).unwrap();
                 local.put_file(&hash, &tmp).await.unwrap();
@@ -165,7 +154,7 @@ mod tests {
         let good = put("good content").await;
         let changed = put("will be changed").await;
         let stray = put("nobody knows me").await;
-        let gone = hex::encode(Sha256::digest(b"never stored"));
+        let gone = crate::util::sha256_hex(b"never stored");
         for (hash, size) in [(&good, 12), (&changed, 15), (&gone, 12)] {
             sqlx::query("INSERT INTO blobs (hash, size, refcount, created_at, location_id) VALUES (?, ?, 1, 0, 'local')")
                 .bind(hash)

@@ -8,9 +8,7 @@
 
 use std::sync::Arc;
 
-use sha2::{Digest, Sha256};
 use sqlx::SqliteConnection;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::{Ctx, Job, Stop};
 use crate::{
@@ -142,7 +140,7 @@ async fn copy_one(cx: &Ctx<'_>, dst: &Arc<dyn Storage>, hash: &str, size: i64, f
                 cx.done(1, 0).await?;
                 return Ok(None);
             }
-            if e.kind() == std::io::ErrorKind::NotFound || e.to_string().contains(VERIFY_FAILED) {
+            if e.kind() == std::io::ErrorKind::NotFound || crate::hashing::unusable_kind(&e) == Some(crate::hashing::Unusable::Damaged) {
                 // The content itself is missing or damaged where it is: listed, and the other files are still copied
                 let name: Option<(String,)> = sqlx::query_as("SELECT name FROM nodes WHERE blob_hash = ? AND drive_id = ? LIMIT 1")
                     .bind(hash)
@@ -193,24 +191,7 @@ async fn copy_verified(st: &AppState, src: &Arc<dyn Storage>, dst: &Arc<dyn Stor
     let copied = async {
         // Hashed while it is copied, so the content is read once before it is stored at the target
         let mut reader = src.open(hash, 0, size as u64).await?;
-        let mut file = tokio::fs::File::create(&tmp).await?;
-        let mut hasher = Sha256::new();
-        let mut len = 0u64;
-        let mut buf = vec![0u8; 256 * 1024];
-        loop {
-            let n = reader.read(&mut buf).await?;
-            if n == 0 {
-                break;
-            }
-            hasher.update(&buf[..n]);
-            file.write_all(&buf[..n]).await?;
-            len += n as u64;
-        }
-        file.flush().await?;
-        drop(file);
-        if hex::encode(hasher.finalize()) != hash || len != size as u64 {
-            return Err(std::io::Error::other(VERIFY_FAILED));
-        }
+        crate::hashing::copy_checked(&mut reader, hash, size as u64, &tmp, VERIFY_FAILED).await?;
         dst.put_file(hash, &tmp).await
     }
     .await;

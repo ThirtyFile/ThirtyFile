@@ -14,6 +14,7 @@ mod drives;
 mod error;
 mod files;
 mod folders;
+mod hashing;
 mod fsops;
 mod location_tools;
 mod locations;

@@ -1,8 +1,5 @@
 //! Checking a set on its destination, and deleting it from there.
 
-use sha2::{Digest, Sha256};
-use tokio::io::AsyncReadExt;
-
 use super::{
     layout,
     runner::{Ctx, Stop},
@@ -182,18 +179,7 @@ async fn read_hash(dst: &dyn Storage, key: &str, size: u64) -> std::io::Result<(
         Some(_) => {}
     }
     let mut reader = dst.open_at(key, 0, size).await?;
-    let mut h = Sha256::new();
-    let mut len = 0u64;
-    let mut buf = vec![0u8; 256 * 1024];
-    loop {
-        let n = reader.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        h.update(&buf[..n]);
-        len += n as u64;
-    }
-    Ok((hex::encode(h.finalize()), len))
+    crate::hashing::read_async(&mut reader).await
 }
 
 /// Deletes a set from its destination: its content, its snapshots, anything else in its folder, then set.json; then

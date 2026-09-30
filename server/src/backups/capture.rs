@@ -16,11 +16,11 @@
 //! unchanged, but files written by other programs at different times aren't one instant together. Items that can't be
 //! read are listed, and the run fails: an incomplete snapshot is never a restore point.
 
-use std::{collections::HashMap, io::Write as _, path::Path, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 
 use super::{
     Set, SpaceInfo,
@@ -41,7 +41,6 @@ const ROUNDS: usize = 10;
 const PAGE: i64 = 200;
 /// Pins written per transaction
 const PIN_BATCH: usize = 500;
-pub(crate) const CHANGED: &str = "The file changed while it was being copied";
 pub(crate) const DAMAGED: &str = "The content read didn't match its SHA-256";
 /// What a snapshot can promise, as its manifest says
 const CONSISTENCY: &str = "Content-store spaces: as recorded at the cutoff, each file with the content it had then. Folder spaces: each file as read and checked unchanged while it was copied, as indexed at the cutoff; files changed by other programs at different times are not one instant together.";
@@ -260,47 +259,6 @@ async fn read_folder_spaces(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, p: 
     Ok(None)
 }
 
-/// A file as it was read: its identity, size and modification time
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Seen {
-    pub dev: i64,
-    pub ino: i64,
-    pub size: i64,
-    pub mtime_ns: i64,
-}
-
-pub(crate) fn seen(meta: &std::fs::Metadata) -> Seen {
-    let (dev, ino) = crate::folders::identity(meta);
-    Seen { dev, ino, size: meta.len() as i64, mtime_ns: crate::folders::mtime_ns(meta) }
-}
-
-/// Reads a file of a folder into a temp file, hashing it on the way; fails when it changes while it is read
-pub(crate) fn read_file(root: &Pinned, rel: &str, tmp: &Path) -> std::io::Result<(String, Seen)> {
-    use std::io::Read;
-    let file = root.join(rel)?;
-    let mut src = file.open_file()?;
-    let before = seen(&src.metadata()?);
-    let mut out = std::fs::File::create_new(tmp)?;
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 1024 * 1024];
-    let mut len = 0i64;
-    loop {
-        let n = src.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-        out.write_all(&buf[..n])?;
-        len += n as i64;
-    }
-    out.sync_all()?;
-    let after = seen(&std::fs::symlink_metadata(file.as_path())?);
-    if after != before || len != before.size {
-        return Err(std::io::Error::other(CHANGED));
-    }
-    Ok((hex::encode(hasher.finalize()), before))
-}
-
 /// Reads one file or version of a folder space and records it
 #[allow(clippy::too_many_arguments)]
 async fn read_one(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, root: &Pinned, space: &str, item: &str, rel: &str, shown: &str) -> AppResult<Option<Stop>> {
@@ -308,12 +266,12 @@ async fn read_one(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, root: &Pinned
     let tmp = st.tmp_dir().join(format!("backup-{}", new_id()));
     let read = cx
         .tries(
-            |e: &std::io::Error| e.to_string() == CHANGED,
+            |e: &std::io::Error| crate::hashing::unusable_kind(e) == Some(crate::hashing::Unusable::Changed),
             || {
                 let (root, rel, tmp) = (root.clone(), rel.to_string(), tmp.clone());
                 async move {
                     let _ = std::fs::remove_file(&tmp);
-                    tokio::task::spawn_blocking(move || read_file(&root, &rel, &tmp)).await.map_err(std::io::Error::other)?
+                    tokio::task::spawn_blocking(move || crate::folders::read_file(&root, &rel, &tmp)).await.map_err(std::io::Error::other)?
                 }
             },
         )
@@ -870,7 +828,7 @@ async fn copy_content(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, hash: &st
                 continue;
             }
         };
-        let fetched = cx.tries(|e: &std::io::Error| e.kind() != std::io::ErrorKind::NotFound && e.to_string() != DAMAGED, || fetch_verified(&src, hash, size, &tmp)).await;
+        let fetched = cx.tries(|e: &std::io::Error| e.kind() != std::io::ErrorKind::NotFound && !(crate::hashing::unusable_kind(e) == Some(crate::hashing::Unusable::Damaged)), || fetch_verified(&src, hash, size, &tmp)).await;
         match fetched {
             Ok(()) => {
                 let stored = put_object(cx, set, dst, hash, size, &tmp).await;
@@ -898,7 +856,7 @@ async fn copy_content(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, hash: &st
         sqlx::query("DELETE FROM backup_pending WHERE job_id = ? AND hash = ?").bind(&cx.job.id).bind(hash).execute(&st.db).await?;
         return Ok(Copied::Vanished);
     }
-    if e.kind() == std::io::ErrorKind::NotFound || e.to_string() == DAMAGED || sources.is_empty() {
+    if e.kind() == std::io::ErrorKind::NotFound || crate::hashing::unusable_kind(&e) == Some(crate::hashing::Unusable::Damaged) || sources.is_empty() {
         // The content itself is missing or damaged: listed (the snapshot can't be complete without it)
         let named: Option<(String, Option<String>)> = sqlx::query_as(
             "SELECT n.name, n.drive_id FROM nodes n WHERE n.blob_hash = ?1 AND n.drive_id IN (SELECT value FROM json_each(?2))
@@ -910,7 +868,7 @@ async fn copy_content(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, hash: &st
         .fetch_optional(&st.db)
         .await?;
         let (name, space) = named.map_or((None, String::new()), |(n, d)| (Some(n), d.unwrap_or_default()));
-        let why = if e.to_string() == DAMAGED { "The content is damaged where it is kept" } else { "The content isn't where it is kept" };
+        let why = if crate::hashing::unusable_kind(&e) == Some(crate::hashing::Unusable::Damaged) { "The content is damaged where it is kept" } else { "The content isn't where it is kept" };
         cx.failed(&space, name, why.to_string());
         return Ok(Copied::Done);
     }
@@ -926,26 +884,7 @@ pub(crate) async fn fetch_verified(src: &Arc<dyn Storage>, hash: &str, size: i64
 
 /// Copies a reader into a temp file, checking that it is `size` bytes with the SHA-256 `hash`
 pub(crate) async fn copy_checked(reader: &mut crate::storage::BoxReader, hash: &str, size: i64, tmp: &Path) -> std::io::Result<()> {
-    let mut file = tokio::fs::File::create(tmp).await?;
-    let mut hasher = Sha256::new();
-    let mut len = 0u64;
-    let mut buf = vec![0u8; 256 * 1024];
-    loop {
-        let n = reader.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-        file.write_all(&buf[..n]).await?;
-        len += n as u64;
-    }
-    file.flush().await?;
-    file.sync_all().await?;
-    drop(file);
-    if hex::encode(hasher.finalize()) != hash || len != size as u64 {
-        return Err(std::io::Error::other(DAMAGED));
-    }
-    Ok(())
+    crate::hashing::copy_checked(reader, hash, size as u64, tmp, DAMAGED).await
 }
 
 // ───────────── Publishing ─────────────

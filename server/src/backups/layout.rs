@@ -13,7 +13,6 @@
 use std::{io::BufRead, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 
 use crate::{
@@ -157,24 +156,7 @@ pub fn cached_manifest(st: &AppState, snapshot: &str) -> PathBuf {
 
 /// SHA-256 and size of a file on this server
 pub async fn file_sha256(path: PathBuf) -> std::io::Result<(String, u64)> {
-    tokio::task::spawn_blocking(move || {
-        use std::io::Read;
-        let mut f = std::fs::File::open(&path)?;
-        let mut h = Sha256::new();
-        let mut buf = vec![0u8; 256 * 1024];
-        let mut len = 0u64;
-        loop {
-            let n = f.read(&mut buf)?;
-            if n == 0 {
-                break;
-            }
-            h.update(&buf[..n]);
-            len += n as u64;
-        }
-        Ok((hex::encode(h.finalize()), len))
-    })
-    .await
-    .map_err(std::io::Error::other)?
+    crate::hashing::file(path).await
 }
 
 /// The manifest of a complete snapshot on this server, checked against its SHA-256: read from the cache, or fetched

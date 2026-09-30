@@ -1,7 +1,7 @@
 //! File content: downloads (with Range support) and saving from the online editor. Thumbnails are in thumbnails.rs,
 //! ZIP downloads of several items in downloads.rs.
 
-use std::{io::Read, path::PathBuf};
+use std::path::PathBuf;
 
 use axum::{
     Json,
@@ -269,22 +269,7 @@ pub async fn content(
 
 /// Computes a file's sha256 and size
 pub async fn hash_file(path: PathBuf) -> AppResult<(String, u64)> {
-    Ok(tokio::task::spawn_blocking(move || -> std::io::Result<(String, u64)> {
-        let mut f = std::fs::File::open(path)?;
-        let mut hasher = Sha256::new();
-        let mut buf = vec![0u8; 1024 * 1024];
-        let mut total = 0u64;
-        loop {
-            let n = f.read(&mut buf)?;
-            if n == 0 {
-                break;
-            }
-            hasher.update(&buf[..n]);
-            total += n as u64;
-        }
-        Ok((hex::encode(hasher.finalize()), total))
-    })
-    .await??)
+    Ok(crate::hashing::file(path).await?)
 }
 
 /// Save from the online editor: replaces the file with new content.

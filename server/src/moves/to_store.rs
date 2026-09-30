@@ -14,12 +14,9 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    io::{Read, Write},
     path::PathBuf,
     sync::Arc,
 };
-
-use sha2::{Digest, Sha256};
 
 use super::{Ctx, Job, Stop};
 use crate::{
@@ -170,48 +167,6 @@ async fn copy_left(cx: &Ctx<'_>, dst: &Arc<dyn Storage>, root: &Pinned, scanned:
     Ok(None)
 }
 
-/// A file as it was read: its identity, size and modification time
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Seen {
-    dev: i64,
-    ino: i64,
-    size: i64,
-    mtime_ns: i64,
-}
-
-fn seen(meta: &std::fs::Metadata) -> Seen {
-    let (dev, ino) = crate::folders::identity(meta);
-    Seen { dev, ino, size: meta.len() as i64, mtime_ns: crate::folders::mtime_ns(meta) }
-}
-
-/// Reads a file of the folder into a temp file, hashing it on the way; fails when it changes while it is read
-fn read_file(root: &Pinned, rel: &str, tmp: &std::path::Path) -> std::io::Result<(String, Seen)> {
-    let file = root.join(rel)?;
-    let mut src = file.open_file()?;
-    let before = seen(&src.metadata()?);
-    let mut out = std::fs::File::create_new(tmp)?;
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 1024 * 1024];
-    let mut len = 0i64;
-    loop {
-        let n = src.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-        out.write_all(&buf[..n])?;
-        len += n as i64;
-    }
-    out.sync_all()?;
-    let after = seen(&std::fs::symlink_metadata(file.as_path())?);
-    if after != before || len != before.size {
-        return Err(std::io::Error::other(CHANGED));
-    }
-    Ok((hex::encode(hasher.finalize()), before))
-}
-
-const CHANGED: &str = "The file changed while it was being copied";
-
 /// Copies one file or version and records it
 async fn copy_one(cx: &Ctx<'_>, dst: &Arc<dyn Storage>, root: &Pinned, item: &Item, scanned: bool) -> AppResult<Option<Stop>> {
     let (st, job) = (cx.st, cx.job);
@@ -219,12 +174,12 @@ async fn copy_one(cx: &Ctx<'_>, dst: &Arc<dyn Storage>, root: &Pinned, item: &It
     let read = {
         let (root, rel, tmp) = (root.clone(), item.path.clone(), tmp.clone());
         cx.tries(
-            |e: &std::io::Error| e.to_string() == CHANGED,
+            |e: &std::io::Error| crate::hashing::unusable_kind(e) == Some(crate::hashing::Unusable::Changed),
             || {
                 let (root, rel, tmp) = (root.clone(), rel.clone(), tmp.clone());
                 async move {
                     let _ = std::fs::remove_file(&tmp);
-                    tokio::task::spawn_blocking(move || read_file(&root, &rel, &tmp)).await.map_err(std::io::Error::other)?
+                    tokio::task::spawn_blocking(move || crate::folders::read_file(&root, &rel, &tmp)).await.map_err(std::io::Error::other)?
                 }
             },
         )
@@ -527,7 +482,7 @@ pub async fn cleanup(st: &AppState, job: &Job) -> AppResult<()> {
             for (_, rel, dev, ino, size, mtime) in rows {
                 let Ok(p) = root.join(&rel) else { continue };
                 let Ok(meta) = std::fs::symlink_metadata(p.as_path()) else { continue };
-                let now = seen(&meta);
+                let now = crate::folders::seen(&meta);
                 let same = now.size == size && Some(now.mtime_ns) == mtime && (now.ino == 0 || (Some(now.dev), Some(now.ino)) == (dev, ino));
                 if !same || std::fs::remove_file(p.as_path()).is_err() {
                     kept += 1;

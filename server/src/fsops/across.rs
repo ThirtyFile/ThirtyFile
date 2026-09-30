@@ -80,7 +80,7 @@ pub(super) fn copy_checked(from: &Pinned, to: &Path) -> io::Result<(u64, i64)> {
     let after = std::fs::symlink_metadata(from.as_path())?;
     let mtime = crate::folders::mtime_ns(&before);
     if n != before.len() || after.len() != before.len() || crate::folders::mtime_ns(&after) != mtime {
-        return Err(io::Error::other(CHANGED_WHILE_COPIED));
+        return Err(crate::hashing::unusable(crate::hashing::Unusable::Changed, CHANGED_WHILE_COPIED));
     }
     Ok((n, mtime))
 }
@@ -93,7 +93,7 @@ pub(super) async fn ingest(st: &AppState, nodes: &[Node], drive: &str, moving: b
         let stored = async {
             let (from, to) = (abs(n)?, tmp.clone());
             let copied = tokio::task::spawn_blocking(move || copy_checked(&from, &to)).await?.map_err(|e| {
-                if e.to_string() != CHANGED_WHILE_COPIED {
+                if crate::hashing::unusable_kind(&e) != Some(crate::hashing::Unusable::Changed) {
                     disk_error(e)
                 } else if moving {
                     AppError::conflict(format!("\"{}\" changed while it was being moved. Try again.", n.name))

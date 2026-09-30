@@ -290,20 +290,6 @@ async fn ignores_case(dest: &Pinned) -> AppResult<bool> {
     .map_err(disk_error)
 }
 
-/// An item of the folder as it was copied: identity, size and date
-#[derive(Clone, Copy, PartialEq)]
-struct Seen {
-    dev: i64,
-    ino: i64,
-    size: i64,
-    mtime_ns: i64,
-}
-
-fn seen(meta: &std::fs::Metadata) -> Seen {
-    let (dev, ino) = crate::folders::identity(meta);
-    Seen { dev, ino, size: meta.len() as i64, mtime_ns: crate::folders::mtime_ns(meta) }
-}
-
 /// Copies the folder: what isn't copied yet, or changed since. After the scan before the switch (`last`), copies of
 /// what is no longer there go too. When the new folder doesn't tell letter case apart (`ignores_case`), items whose
 /// names differ only in letter case would become one there: they aren't copied, and are listed as failed after the
@@ -373,7 +359,7 @@ async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, ignores_case: bo
                 continue;
             }
             found.insert(rel.clone());
-            let now = seen(&meta);
+            let now = crate::folders::seen(&meta);
             if copied.get(&rel).is_some_and(|(ino, size, mtime)| (*ino == Some(now.ino) || now.ino == 0) && *size == now.size && *mtime == Some(now.mtime_ns)) {
                 continue;
             }
@@ -383,7 +369,7 @@ async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, ignores_case: bo
             let res = {
                 let (source, dest, rel2) = (source.clone(), dest.clone(), rel.clone());
                 cx.tries(
-                    |e: &std::io::Error| e.to_string() == CHANGED,
+                    |e: &std::io::Error| crate::hashing::unusable_kind(e) == Some(crate::hashing::Unusable::Changed),
                     || {
                         let (source, dest, rel2) = (source.clone(), dest.clone(), rel2.clone());
                         async move { tokio::task::spawn_blocking(move || copy_file(&source, &dest, &rel2)).await.map_err(std::io::Error::other)? }
@@ -473,7 +459,6 @@ async fn forget_folder(st: &crate::state::AppState, job: &super::Job, dest: &Pin
 /// `space_move_items.kind` of a folder made in the new folder, by its path below it (files are 'path')
 const FOLDER: &str = "folder";
 
-const CHANGED: &str = "The file changed while it was being copied";
 const CASE_CLASH: &str =
     "Another item in its folder has the same name in other letter case, which the new folder can't tell apart. Rename one of them, then resume the move.";
 
@@ -488,10 +473,10 @@ fn case_clashes<'a>(names: impl Iterator<Item = &'a str>) -> HashSet<String> {
 
 /// Copies a file to the same path in the new folder (under a temporary name, then renamed over an older copy), with its
 /// date; returns what the original and the copy were
-fn copy_file(source: &Pinned, dest: &Pinned, rel: &str) -> std::io::Result<(Seen, Seen)> {
+fn copy_file(source: &Pinned, dest: &Pinned, rel: &str) -> std::io::Result<(crate::folders::Seen, crate::folders::Seen)> {
     let from = source.join(rel)?;
     let mut src = from.open_file()?;
-    let before = seen(&src.metadata()?);
+    let before = crate::folders::seen(&src.metadata()?);
     let to = dest.join(rel)?;
     let dir = to.parent().ok_or_else(|| std::io::Error::other("no folder"))?;
     let tmp = dir.join(&format!("{}{}", crate::fsops::COPY_PREFIX, new_id()))?;
@@ -502,12 +487,12 @@ fn copy_file(source: &Pinned, dest: &Pinned, rel: &str) -> std::io::Result<(Seen
         out.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_nanos(before.mtime_ns.max(0) as u64))?;
         out.sync_all()?;
         drop(out);
-        let after = seen(&std::fs::symlink_metadata(from.as_path())?);
+        let after = crate::folders::seen(&std::fs::symlink_metadata(from.as_path())?);
         if after != before || n as i64 != before.size {
-            return Err(std::io::Error::other(CHANGED));
+            return Err(crate::hashing::unusable(crate::hashing::Unusable::Changed, crate::folders::CHANGED));
         }
         std::fs::rename(tmp.as_path(), to.as_path())?;
-        Ok(seen(&std::fs::symlink_metadata(to.as_path())?))
+        Ok(crate::folders::seen(&std::fs::symlink_metadata(to.as_path())?))
     })();
     if copied.is_err() {
         let _ = std::fs::remove_file(tmp.as_path());
@@ -517,7 +502,7 @@ fn copy_file(source: &Pinned, dest: &Pinned, rel: &str) -> std::io::Result<(Seen
 
 /// Records a copy; the index follows what was read, when it differs (a scan leaves files changed in the last seconds
 /// for later)
-async fn record(cx: &Ctx<'_>, rel: &str, src: Seen, dst: Seen) -> AppResult<()> {
+async fn record(cx: &Ctx<'_>, rel: &str, src: crate::folders::Seen, dst: crate::folders::Seen) -> AppResult<()> {
     let (st, job) = (cx.st, cx.job);
     {
         let _w = st.write_lock.lock().await;
