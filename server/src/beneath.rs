@@ -224,20 +224,23 @@ impl AsRef<Path> for Pinned {
     }
 }
 
-/// A path below a space's folder, looked up (`pin`) only when it is used: long lists of them keep no folder open
+/// A path below the folder of the space `drive`, looked up (`pin`) only when it is used: long lists of them keep no
+/// folder open
 #[derive(Clone, Debug)]
 pub struct Below {
     pub root: PathBuf,
+    pub drive: String,
     pub rel: String,
 }
 
 impl Below {
-    pub fn new(root: impl Into<PathBuf>, rel: impl Into<String>) -> Below {
-        Below { root: root.into(), rel: rel.into() }
+    pub fn new(root: impl Into<PathBuf>, drive: impl Into<String>, rel: impl Into<String>) -> Below {
+        Below { root: root.into(), drive: drive.into(), rel: rel.into() }
     }
 
+    /// In the space's own folder, which must hold its marker (`folders::open_space`)
     pub fn pin(&self) -> io::Result<Pinned> {
-        Pinned::root(&self.root)?.join(&self.rel)
+        crate::folders::open_space(&self.root, &self.drive, false)?.join(&self.rel)
     }
 }
 

@@ -96,12 +96,13 @@ impl Node {
         }
         Some(if rel.is_empty() { std::path::PathBuf::from(root) } else { std::path::Path::new(root).join(rel) })
     }
-    /// The file on the server, for items of a folder space, reached without following a symbolic link on the way
+    /// The file on the server, for items of a folder space, reached without following a symbolic link on the way, in
+    /// the space's own folder (`folders::open_space`)
     pub fn fs_pinned(&self) -> std::io::Result<crate::beneath::Pinned> {
         let (Some(root), Some(rel)) = (self.fs_root.as_deref(), self.fs_path.as_deref()) else {
             return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "not in a folder space"));
         };
-        crate::beneath::Pinned::root(std::path::Path::new(root))?.join(rel)
+        crate::folders::open_space(std::path::Path::new(root), self.drive(), self.space_read_only)?.join(rel)
     }
     /// Whether it belongs to a folder space (changed on the server's folder, not through the content store)
     pub fn in_folder_space(&self) -> bool {
