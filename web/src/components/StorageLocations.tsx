@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2Icon,
   CloudIcon,
+  CopyIcon,
   EllipsisIcon,
   FolderOpenIcon,
   HardDriveIcon,
@@ -23,6 +24,7 @@ import {
 import { toast } from "sonner";
 import { api, moveActive, type SpaceMove, type StorageConfig, type StorageKind, type StorageLocation } from "@/api";
 import { MoveDialog } from "@/components/MoveDialog";
+import { CopyEverythingDialog } from "@/components/CopyEverythingDialog";
 import { DRIVE_ICON, DRIVE_KIND_LABEL } from "@/lib/drives";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -81,6 +83,7 @@ export function StorageLocations() {
   const [testing, setTesting] = useState<string | null>(null);
   const [tool, setTool] = useState<{ kind: "test" | "browse" | "unused"; location: StorageLocation } | null>(null);
   const [emptying, setEmptying] = useState<StorageLocation | null>(null);
+  const [copying, setCopying] = useState<StorageLocation | null>(null);
   // Moves off each location: how far they are, and where the spaces went
   const moves = useMoves(3000);
   const movesFrom = (id: string) => (moves.data?.moves ?? []).filter((m) => m.from_location === id);
@@ -135,6 +138,9 @@ export function StorageLocations() {
       </DropdownMenuItem>
       <DropdownMenuItem disabled={l.drive_count === 0} onClick={() => setEmptying(l)}>
         <TruckIcon /> {t("Move everything to…")}
+      </DropdownMenuItem>
+      <DropdownMenuItem disabled={l.drive_count === 0 || list.length < 2} onClick={() => setCopying(l)}>
+        <CopyIcon /> {t("Copy everything to…")}
       </DropdownMenuItem>
       <DropdownMenuItem onClick={() => setTool({ kind: "test", location: l })}>
         <ListChecksIcon /> {t("Test step by step")}
@@ -317,6 +323,7 @@ export function StorageLocations() {
         refresh();
         qc.invalidateQueries({ queryKey: ["moves"] });
       }} />}
+      {copying && <CopyEverythingDialog location={copying} onClose={() => setCopying(null)} />}
       {tool?.kind === "test" && <LocationTestDialog location={tool.location} onClose={() => setTool(null)} />}
       {tool?.kind === "browse" && <LocationBrowseDialog location={tool.location} onClose={() => setTool(null)} />}
       {tool?.kind === "unused" && <UnusedContentDialog location={tool.location} onClose={() => setTool(null)} />}

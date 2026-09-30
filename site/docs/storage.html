@@ -157,6 +157,47 @@
         </ul>
         <p>A space being moved can't be deleted, and neither can the user whose "My files" it is, until the move is finished or cancelled.</p>
 
+        <h2 id="copy">Copying everything to another location</h2>
+        <p><strong>Copy everything to…</strong>, in the <strong>…</strong> menu of a location under <strong>Control panel › Storage locations</strong>, copies all the spaces on that location to another location, and leaves the source as it is: no file is removed, the spaces stay where they are, and the default location doesn't change. Use it for an extra copy on a NAS, an off-site bucket or a disk you take away. For a copy made again every night, see <a href="backup.html#copies">Backing up</a>.</p>
+        <h3 id="copy-what">What is copied</h3>
+        <ul>
+          <li><strong>Every space on the location</strong>, personal ones included: its folders (empty ones too), files, the trash and earlier versions. The dialog lists the spaces and says how many files there are, how much of it is in the trash, and how much will be written to the other location.</li>
+          <li><strong>Each content once.</strong> Files with identical content are stored once, also across spaces. A space's content is copied wherever it is kept (identical content is stored once in the whole system, so a file of a space can be kept on another location).</li>
+          <li><strong>Who had access</strong> to each folder is recorded in the copy, for reference. Share links, favorites and uploads in progress aren't copied.</li>
+          <li>Content on the location that only spaces elsewhere use isn't part of it: it belongs to those spaces.</li>
+        </ul>
+        <h3 id="copy-where">Where the copy goes</h3>
+        <p>Each copy gets a folder of its own on the other location, <code>.thirtyfile-backups/&lt;id&gt;</code>, which nothing else in ThirtyFile writes to. Nothing already there is replaced, and copies never mix. In it:</p>
+        <ul>
+          <li><code>objects/ab/cd/&lt;sha256&gt;</code>: each content, named by its SHA-256;</li>
+          <li><code>snapshots/&lt;id&gt;/manifest.jsonl</code>: one line per space, folder, file and earlier version, with its path and the SHA-256 of its content;</li>
+          <li><code>snapshots/&lt;id&gt;/complete.json</code>: written last, with the manifest's SHA-256. A copy without it isn't complete, and is never offered for restoring;</li>
+          <li><code>set.json</code>: the copy's name, where it was copied from, and which ThirtyFile made it.</li>
+        </ul>
+        <p>So the files can also be found without ThirtyFile: each line of the manifest names a file's path and the object holding its content.</p>
+        <p>The other location may be on the same disk or storage service as the source; the dialog then says that the copy doesn't survive a failure of it. Locations in the same place, or one inside the other, are refused. For FTP without encryption, the dialog says that the files travel unencrypted. On a disk of this server, the copy is refused when there isn't enough free space for it; for S3, SFTP and FTP, room left can't be told.</p>
+        <h3 id="copy-changes">Files that change during the copy</h3>
+        <p>The spaces stay usable while they are copied. The copy shows them as they were when their list of files was made (<em>As of</em>): files changed or deleted after that are copied as they were, since their content is kept from deletion until it is copied. Files of folder spaces are read one at a time and checked not to have changed while they were read; one that changed is read again. The folder is checked for changes made by other programs first. Each file of a folder space is whole and as the index had it, but files other programs changed at different times aren't one instant together.</p>
+        <h3 id="copy-follow">Following, pausing and errors</h3>
+        <p><strong>Control panel › Backups</strong> lists the copies, what each is doing, and how far it got. Copies run in the background, one job at a time, and go on when the page is closed.</p>
+        <ul>
+          <li><strong>Pause and resume.</strong> A paused copy stops after the item it is working on and keeps what it copied; resumed, or after ThirtyFile restarts, it continues where it stopped.</li>
+          <li><strong>Errors.</strong> A file that can't be read is tried three times. When some still can't be copied, the copy stops as <em>Stopped by an error</em> and isn't complete. <strong>Details</strong> lists them (for a personal space, without their names) and why. Fix the cause and <strong>Resume</strong> to try again. A location that can't be reached stops it the same way.</li>
+          <li><strong>Cancel.</strong> A copy that never completed is removed from the other location. The source isn't touched.</li>
+          <li><strong>Check the copy</strong> reads everything back from the other location and checks each content against its SHA-256, and each manifest against its <code>complete.json</code>. What is missing or damaged is listed.</li>
+          <li><strong>Delete copy</strong> removes its folder from the other location, after you confirm. It can be paused, not cancelled: a copy half deleted can't be restored from.</li>
+        </ul>
+        <p>A location holding a copy can't be deleted, nor its folder changed, until the copy is deleted. Removing unused content and deleting files for good never look in <code>.thirtyfile-backups</code>, so they never remove a copy, and <strong>Browse</strong> doesn't open it (its manifests name the files of personal spaces). The activity log records when copies are made, restored from, checked and deleted.</p>
+        <h3 id="copy-restore">Restoring from a copy</h3>
+        <p>Select a copy and choose <strong>Restore…</strong>, then the space to restore. It goes into a new folder, <em>Restored &lt;space&gt; &lt;date&gt;</em>, at the top of the space itself, or of another company or team space you choose; nothing already there is replaced. Content the space's location still holds isn't copied again.</p>
+        <ul>
+          <li>A personal space only goes back into its owner's personal space, whole: administrators never see its files.</li>
+          <li>What was in the trash is left out, unless you tick <strong>Also restore what was in the trash</strong>.</li>
+          <li>The new folder takes the space's permissions. Earlier versions and the access recorded in the copy stay in the copy: restoring never gives anyone more access than the space gives.</li>
+          <li>Names a folder can't hold are refused and listed; a name that is taken in its folder (<em>A.txt</em> and <em>a.txt</em> from a folder space, restored into a content store) gets a number, and the job says so.</li>
+          <li>A restore that stops continues where it stopped, without making anything twice.</li>
+        </ul>
+
         <h2 id="folder-spaces">Folder spaces: a folder on the server as a space</h2>
         <p>Every space on the storage folder or a <em>Local folder</em> location is a folder space (see <a href="#layout">Where the files are</a>). You can also show an existing folder on the server, such as a NAS share, as a space. Its files stay where they are, as ordinary files, and can also be changed there, for example over SMB or by a scanner.</p>
         <ol>
@@ -201,6 +242,7 @@
           <li><strong>Folder spaces</strong> on the storage folder and <em>Local folder</em> locations are marked with their space.</li>
           <li><strong>Personal spaces stay private.</strong> Other people's personal spaces are named ("Personal space of anna"), but their files aren't listed, their folder can't be opened here, and their content can't be downloaded. This holds however the folder's name is written (<code>USERS/Anna</code> for <code>users/anna</code>), and while the space is being moved: the folder it is being copied into, the content already copied, and its old folder until everything there is removed.</li>
           <li>Symbolic links are listed but never followed, also on SFTP and FTP, and also in the middle of a path.</li>
+          <li>The <code>.thirtyfile-backups</code> folder, which holds <a href="#copy">copies</a>, can't be opened here: its lists of files name the files of personal spaces. Copies are managed under <strong>Control panel › Backups</strong>.</li>
         </ul>
         <h3 id="unused">Find unused content</h3>
         <p>Looks through the content store of the location for content that no file, earlier version or item in the trash uses, for example content left behind when a server stopped halfway through an upload. It runs in the background and lists what it found, with the total size. Content written in the last 24 hours is left alone, since uploads store their content before recording it, and so is content already waiting to be deleted.</p>
@@ -221,12 +263,13 @@
               <tr><td><strong>Stored by ThirtyFile</strong></td><td>What ThirtyFile actually keeps there: the content store, where identical content is kept once, plus the files of folder spaces (with their trash) and the earlier versions kept in their folders. It can be smaller than <em>Files</em> because of that sharing, and larger because of the trash and versions.</td></tr>
               <tr><td><strong>Disk</strong></td><td>The whole disk, as the system reports it, whatever else is on it. For the storage folder and <em>Local folder</em> locations only. Two locations on the same disk say so, and the disk is counted once.</td></tr>
               <tr><td><strong>Capacity unknown</strong></td><td>S3, SFTP and FTP don't report how much room is left, and a disk that doesn't answer within 3 seconds isn't measured. No percentage or time to full is shown then: unknown is not zero.</td></tr>
+              <tr><td><strong>Backups</strong></td><td>The <a href="#copy">copies</a> kept on the location: each content once per copy. Only locations holding copies show it.</td></tr>
               <tr><td><strong>Waiting to be deleted</strong></td><td>Contents whose deletion failed (a location that was offline, say) or old copies after a move, which are retried in the background. Their size isn't known any more.</td></tr>
               <tr><td><strong>Data folder</strong></td><td>The database, thumbnails and uploads in progress, and the disk they are on. It also lists moves, running tasks and deletions that are waiting.</td></tr>
             </tbody>
           </table>
         </div>
-        <p>Files changed in a folder space by other programs are counted after the next check for changes. Backups and replicas will get their own figures when ThirtyFile makes them.</p>
+        <p>Files changed in a folder space by other programs are counted after the next check for changes. Replicas will get their own figure when ThirtyFile makes them.</p>
         <h3 id="usage-operations">Operations</h3>
         <p>Every read, write, delete, listing and connection check on a location is timed and counted, and so are the files of folder spaces that are read or uploaded. Renaming, deleting and scanning inside folder spaces aren't measured. The counting happens in memory and is written once every five minutes, so it doesn't slow down file operations. Up to five minutes of counts are lost when the server stops.</p>
         <ul>

@@ -40,6 +40,7 @@ const AdminDrivesPage = page(() => import("@/pages/AdminDrivesPage"), "AdminDriv
 const GeneralSettingsPage = page(() => import("@/pages/GeneralSettingsPage"), "GeneralSettingsPage");
 const StorageSettingsPage = page(() => import("@/pages/StorageSettingsPage"), "StorageSettingsPage");
 const MovesPage = page(() => import("@/pages/MovesPage"), "MovesPage");
+const BackupsPage = page(() => import("@/pages/BackupsPage"), "BackupsPage");
 const UsageSettingsPage = page(() => import("@/pages/UsageSettingsPage"), "UsageSettingsPage");
 const ActivitySettingsPage = page(() => import("@/pages/ActivitySettingsPage"), "ActivitySettingsPage");
 const LogSettingsPage = page(() => import("@/pages/LogSettingsPage"), "LogSettingsPage");
@@ -206,6 +207,14 @@ export function App() {
               element={
                 <AdminOnly>
                   <MovesPage />
+                </AdminOnly>
+              }
+            />
+            <Route
+              path="/admin/backups"
+              element={
+                <AdminOnly>
+                  <BackupsPage />
                 </AdminOnly>
               }
             />

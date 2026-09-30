@@ -80,6 +80,15 @@ const ACTION_LABEL: Record<string, string> = {
   move_done: t("Moved to another location"),
   move_failed: t("Moving to another location failed"),
   move_cancel: t("Cancel moving to another location"),
+  backup_copy: t("Start copying a location"),
+  backup_done: t("Copy made"),
+  backup_failed: t("Backup job failed"),
+  backup_cancel: t("Cancel backup job"),
+  backup_restore: t("Start restoring from a copy"),
+  backup_restored: t("Restored from a copy"),
+  backup_verified: t("Copy checked"),
+  backup_delete_start: t("Start deleting a copy"),
+  backup_delete: t("Copy deleted"),
   group_create: t("Create group"),
   group_update: t("Update group"),
   group_delete: t("Delete group"),
@@ -108,6 +117,10 @@ export const ACTION_GROUPS: { label: string; actions: string[] }[] = [
   {
     label: t("System"),
     actions: ["settings", "storage_create", "storage_update", "storage_delete", "storage_default", "storage_cleanup", "log_archive", "log_archive_delete"],
+  },
+  {
+    label: t("Backups"),
+    actions: ["backup_copy", "backup_done", "backup_failed", "backup_cancel", "backup_restore", "backup_restored", "backup_verified", "backup_delete_start", "backup_delete"],
   },
 ];
 

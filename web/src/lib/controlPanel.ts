@@ -2,6 +2,7 @@ import { useNavigate } from "react-router";
 import {
   ActivityIcon,
   ArchiveIcon,
+  ArchiveRestoreIcon,
   DatabaseIcon,
   HardDriveIcon,
   KeyRoundIcon,
@@ -24,6 +25,7 @@ export type ControlPanelKey =
   | "drives"
   | "storage"
   | "moves"
+  | "backups"
   | "usage"
   | "general"
   | "branding"
@@ -116,6 +118,16 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     tone: "bg-orange-500/12 text-orange-700 dark:text-orange-300",
     category: "storage",
     keywords: "搬移 移動 儲存位置 進度 暫停 繼續 取消 move migrate storage location progress pause resume cancel", // i18n-ignore: bilingual search keywords
+  },
+  {
+    key: "backups",
+    to: "/admin/backups",
+    title: t("Backups"),
+    desc: t("Copies of storage locations kept on another location; check them, and restore spaces from them"),
+    icon: ArchiveRestoreIcon,
+    tone: "bg-lime-500/12 text-lime-700 dark:text-lime-300",
+    category: "storage",
+    keywords: "備份 複製 副本 還原 復原 儲存位置 檢查 backup copy restore recover storage location check verify", // i18n-ignore: bilingual search keywords
   },
   {
     key: "usage",
