@@ -442,7 +442,8 @@ async fn start_due(st: &AppState) -> AppResult<()> {
         let Some(job) = next else { return Ok(()) };
         let Some(ctl) = take(st, &job).await? else { continue };
         let st = st.clone();
-        tokio::spawn(async move { run(&st, &job, &ctl).await });
+        // Counted apart from what people do (Storage usage)
+        tokio::spawn(crate::usage::background(async move { run(&st, &job, &ctl).await }));
     }
 }
 

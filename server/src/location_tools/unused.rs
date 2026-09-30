@@ -117,7 +117,7 @@ pub async fn find_unused(State(st): State<AppState>, _: Admin, Path(id): Path<St
     let scan_id = job.scan_id.clone();
     tokio::spawn(async move {
         let seen = |n: u64| update(&id, &scan_id, |j| j.scanned = n);
-        let found = scan(&st, &id, backend.as_ref(), now() - MARGIN, &seen).await;
+        let found = crate::usage::background(scan(&st, &id, backend.as_ref(), now() - MARGIN, &seen)).await;
         update(&id, &scan_id, |j| {
             j.finished_at = Some(now());
             match found {
@@ -205,7 +205,7 @@ pub async fn remove_unused(State(st): State<AppState>, Admin(user): Admin, Path(
                 (j.removed, j.removed_bytes, j.kept, j.failed) = (r.removed, r.bytes, r.kept, r.failed);
             })
         };
-        let done = remove(&st, &id, &items, now() - MARGIN, &progress).await;
+        let done = crate::usage::background(remove(&st, &id, &items, now() - MARGIN, &progress)).await;
         let logged = log_removal(&st, &user, &loc.name, done.removed).await;
         update(&id, &scan_id, |j| {
             j.phase = "removed";

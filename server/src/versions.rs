@@ -481,7 +481,7 @@ async fn restore_in_folder(st: &AppState, user: &User, node: &Node, tmp: &Path, 
         let _ = tokio::fs::remove_file(tmp).await;
         return Err(AppError::not_found("Folder not found"));
     };
-    let staged = fsops::stage_upload(&parent, tmp, size).await?;
+    let staged = fsops::stage_upload(st, &parent, tmp, size).await?;
     let _space = fsops::lock_space(node.drive()).await;
     let _w = st.write_lock.lock().await;
     let result = async {

@@ -532,13 +532,14 @@ fn set_health(st: &AppState, id: &str, error: Option<String>) {
 /// Checks whether a location can be reached (a lightweight check that writes no data) and updates its health status
 pub async fn probe(st: &AppState, id: &str) -> Result<(), String> {
     let storage = st.storage(id).map_err(|e| e.message)?;
-    let res = match tokio::time::timeout(PROBE_TIMEOUT, storage.ping()).await {
+    // Counted apart from what people do (Storage usage)
+    let res = match tokio::time::timeout(PROBE_TIMEOUT, crate::usage::probe(storage.ping())).await {
         Ok(Ok(())) => Ok(()),
         Ok(Err(e)) => Err(describe(&e)),
         Err(_) => Err("Connection timed out. Check that the service is running.".to_string()),
     };
     if res.is_ok() {
-        let _ = tokio::time::timeout(PROBE_TIMEOUT, mark_after_check(st, id, storage.as_ref())).await;
+        let _ = tokio::time::timeout(PROBE_TIMEOUT, crate::usage::probe(mark_after_check(st, id, storage.as_ref()))).await;
     }
     let was_ok = st.location_health.lock().unwrap().get(id).is_none_or(|h| h.ok);
     set_health(st, id, res.clone().err());

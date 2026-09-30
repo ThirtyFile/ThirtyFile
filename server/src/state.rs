@@ -83,6 +83,8 @@ pub struct Inner {
     pub twofactor_setups: crate::twofactor::SetupMap,
     /// Sign-in and share-access events, written to the database in batches by one background task (see `logs::spawn_writer`)
     pub log_tx: tokio::sync::mpsc::Sender<crate::logs::LogEvent>,
+    /// Storage operations counted since the last sample (usage/)
+    pub usage: Arc<crate::usage::Meters>,
 }
 
 #[derive(Debug, Clone)]
@@ -151,14 +153,12 @@ impl Inner {
         Some(if admin || reason == "Storage location unavailable" { reason } else { "Can't connect".into() })
     }
 
-    /// Gets the backend of a storage location
+    /// Gets the backend of a storage location; its calls are counted for Storage usage (usage/)
     pub fn storage(&self, location: &str) -> crate::error::AppResult<Arc<dyn Storage>> {
-        self.storages
-            .read()
-            .unwrap()
-            .get(location)
-            .cloned()
-            .ok_or_else(|| crate::error::AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("Storage location \"{location}\" is currently unavailable")))
+        let backend = self.storages.read().unwrap().get(location).cloned().ok_or_else(|| {
+            crate::error::AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("Storage location \"{location}\" is currently unavailable"))
+        })?;
+        Ok(crate::usage::Metered::wrap(backend, self.usage.clone(), location))
     }
     /// Whether the site is served over HTTPS: THIRTYFILE_SECURE_COOKIE, or a Site URL that starts with https. Cookies are
     /// then marked Secure and browsers are told to use HTTPS only (HSTS).

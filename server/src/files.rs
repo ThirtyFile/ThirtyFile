@@ -104,11 +104,14 @@ impl Source {
             Source::File(path) => {
                 use tokio::io::AsyncSeekExt;
                 let f = path.clone();
-                let mut f = tokio::fs::File::from_std(tokio::task::spawn_blocking(move || f.open_file()).await.map_err(std::io::Error::other)??);
-                if start > 0 {
-                    f.seek(std::io::SeekFrom::Start(start)).await?;
-                }
-                Ok(Box::pin(f.take(len)))
+                let open = async move {
+                    let mut f = tokio::fs::File::from_std(tokio::task::spawn_blocking(move || f.open_file()).await.map_err(std::io::Error::other)??);
+                    if start > 0 {
+                        f.seek(std::io::SeekFrom::Start(start)).await?;
+                    }
+                    Ok(Box::pin(f.take(len)) as crate::storage::BoxReader)
+                };
+                crate::usage::sample::folder_read(st, path.as_path(), open).await
             }
         }
     }

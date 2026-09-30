@@ -680,7 +680,7 @@ async fn location_unavailable(st: &AppState, drive_id: &str) -> AppResult<Option
     let (location,): (Option<String>,) = sqlx::query_as("SELECT location_id FROM drives WHERE id = ?").bind(drive_id).fetch_one(&st.db).await?;
     let Some(location) = location else { return Ok(None) };
     Ok(match st.storage(&location) {
-        Ok(s) => s.ping().await.err().map(|e| crate::locations::describe(&e)),
+        Ok(s) => crate::usage::probe(s.ping()).await.err().map(|e| crate::locations::describe(&e)),
         Err(e) => Some(e.message),
     })
 }
