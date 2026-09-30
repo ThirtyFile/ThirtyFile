@@ -20,12 +20,12 @@ use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 use crate::{
     auth::User,
+    content,
     error::{AppError, AppResult},
-    files::hash_file,
     logs,
     state::AppState,
     tree,
-    util::{guess_mime, new_id, now, validate_name},
+    util::{new_id, now, validate_name},
 };
 
 const TUS_VERSION: &str = "1.0.0";
@@ -563,7 +563,8 @@ async fn forget_upload(st: &AppState, id: &str) {
     });
 }
 
-/// Upload finished: compute the hash, put it in storage, create the file node (or give an existing one the new content)
+/// Upload finished: store the content where the space keeps it, then create the file (or give an existing one the new
+/// content) through content.rs
 async fn finalize(st: &AppState, up: &Uploader, upload: Upload) -> AppResult<String> {
     let path = upload_path(st, &upload.id);
     let parent = tree::get_node(&mut *st.db.acquire().await?, &upload.parent_id).await?;
@@ -573,30 +574,32 @@ async fn finalize(st: &AppState, up: &Uploader, upload: Upload) -> AppResult<Str
         let _ = tokio::fs::remove_file(&path).await;
         return Err(discarded(folder_gone()));
     };
-    if parent.in_folder_space() {
-        return finalize_in_folder(st, up, &upload, &path, parent).await;
-    }
-    // Hashed while it arrived; read again only without a saved state that matches the whole file
-    let (hash, size) = match saved_hasher(&upload).filter(|_| upload.offset == upload.size) {
-        Some(h) => (hex::encode(h.finalize()), tokio::fs::metadata(&path).await?.len()),
-        None => hash_file(path.clone()).await?,
-    };
+    let size = tokio::fs::metadata(&path).await?.len();
     if size != upload.size as u64 {
         return Err(AppError::bad_request("File size mismatch"));
     }
-    // First store it in the space's storage location (S3 may take a while, so don't hold the write lock)
-    let staged = tree::stage_blob(st, upload.drive_id.as_deref().unwrap_or_default(), hash.clone(), size as i64, path.clone()).await?;
+    // Content for the content store was hashed while it arrived; it is read again only without a saved state that
+    // matches the whole file
+    let hash = saved_hasher(&upload).filter(|_| upload.offset == upload.size).map(|h| hex::encode(h.finalize()));
+    // Stored first, without holding the write lock (S3 may take a while). Should that fail, the temporary file is
+    // still there and finishing is tried again (`head_as`)
+    let staged = content::stage(st, &parent, content::Received { path, size, hash }).await?;
+    let mut turn = staged.turn(st).await;
     let _w = st.write_lock.lock().await;
-    match commit_upload(st, up, &upload, &staged, &hash, size).await {
-        Ok((id, extra, removed)) => {
-            tree::finish_staged(st, staged, extra).await;
-            removed.finish(st);
+    let result = async {
+        turn.ready()?;
+        commit_upload(st, up, &upload, &staged, size as i64).await
+    }
+    .await;
+    match result {
+        Ok((id, written)) => {
+            staged.finish(st, written).await;
             Ok(id)
         }
         Err(e) => {
-            // Transaction failed: discard the staging; the content just uploaded to the storage location is left for background cleanup so no unreferenced files remain.
-            // The temporary file is gone by now, so the upload can't be resumed: drop its row (it would otherwise count against the quota for 7 days)
-            tree::abandon_staged(st, staged).await;
+            // The staged content goes, so the upload can't be resumed: drop its row (it would otherwise count against
+            // the quota for 7 days)
+            staged.abandon(st).await;
             forget_upload(st, &upload.id).await;
             Err(discarded(e))
         }
@@ -615,98 +618,9 @@ async fn replaced_file(conn: &mut sqlx::SqliteConnection, user: &User, upload: &
     }
 }
 
-/// Upload into a folder space: the file goes into the folder (under a name scans ignore, then renamed into place) and
-/// is indexed; its content isn't hashed
-async fn finalize_in_folder(st: &AppState, up: &Uploader, upload: &Upload, path: &std::path::Path, parent: tree::Node) -> AppResult<String> {
-    let user = &up.user;
-    let size = tokio::fs::metadata(path).await?.len();
-    if size != upload.size as u64 {
-        return Err(AppError::bad_request("File size mismatch"));
-    }
-    let staged = match crate::fsops::stage_upload(st, &parent, path, size).await {
-        Ok(s) => s,
-        Err(e) => {
-            let _w = st.write_lock.lock().await;
-            forget_upload(st, &upload.id).await;
-            return Err(discarded(e));
-        }
-    };
-    let _space = crate::fsops::lock_space(parent.drive()).await;
-    // Its folder answers, before the write lock is taken
-    let ready = crate::fsops::ready(st, parent.drive()).await;
-    let _w = st.write_lock.lock().await;
-    let result = async {
-        ready?;
-        let mut tx = crate::db::begin_write(&st.db).await?;
-        // The account's upload permission, or the folder, may have changed while the upload was running
-        if !user.can_write && !user.is_admin() {
-            return Err(AppError::forbidden("You no longer have permission to upload files"));
-        }
-        let target = tree::folder_for(&mut tx, user, &upload.parent_id, tree::Need::Write).await?;
-        if let Some(s) = &up.share {
-            check_in_share(&mut tx, s, &target.id).await?;
-        }
-        if target.drive() != parent.drive() {
-            return Err(AppError::conflict("Something changed at the same time. Try again."));
-        }
-        let folder_id = tree::ensure_folders(&mut tx, upload.owner_id, &target.id, &upload.rel_path, &upload.batch).await?;
-        let folder = tree::get_node(&mut tx, &folder_id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
-        let existing = replaced_file(&mut tx, user, upload, &folder.id).await?;
-        // Checked again now, as for the content store (`commit_upload`)
-        let grows = size as i64 - existing.as_ref().map_or(0, |r| r.size);
-        tree::check_quota_except(&mut tx, folder.drive(), grows, Some(&upload.id)).await?;
-        let (id, replaced) = match existing {
-            Some(existing) => {
-                let removed = crate::fsops::replace_file(&mut tx, crate::versions::Policy::of(st), &staged, &existing, user.id).await?;
-                (existing.id.clone(), Some((existing, removed)))
-            }
-            None => {
-                let name = crate::fsops::free_name(&mut tx, &folder, &upload.name, false).await?;
-                (crate::fsops::place_file(&mut tx, &staged, upload.owner_id, &folder, &name).await?, None)
-            }
-        };
-        let ts = now();
-        sqlx::query("UPDATE uploads SET node_id = ?, offset = size, expires_at = ? WHERE id = ?")
-            .bind(&id)
-            .bind(ts + FINISHED_TTL)
-            .bind(&upload.id)
-            .execute(&mut *tx)
-            .await?;
-        tree::touch(&mut tx, &folder.id).await?;
-        if let Some(n) = tree::get_node(&mut tx, &id).await? {
-            let before = replaced.as_ref().map_or(0, |(r, _)| r.size);
-            tree::adjust_usage(&mut tx, n.drive(), n.size - before).await?;
-            logs::record_activity(&mut tx, user, Some(&n), "upload", &if replaced.is_some() { "Replaced the existing file".to_string() } else { up.log_detail() }).await?;
-        }
-        tx.commit().await?;
-        if let Some((_, removed)) = replaced {
-            removed.finish(st);
-        }
-        Ok(id)
-    }
-    .await;
-    match result {
-        Ok(id) => Ok(id),
-        Err(e) => {
-            // Renamed into place already when only the index failed: the next scan shows it
-            let _ = tokio::fs::remove_file(&staged).await;
-            forget_upload(st, &upload.id).await;
-            Err(discarded(e))
-        }
-    }
-}
-
-/// Creates the node (or gives the file it replaces the new content) and records the content reference while holding
-/// the write lock; returns the file's id, a redundant copy of the content and what the replaced content's earlier
-/// versions no longer use
-async fn commit_upload(
-    st: &AppState,
-    up: &Uploader,
-    upload: &Upload,
-    staged: &tree::StagedBlob,
-    hash: &str,
-    size: u64,
-) -> AppResult<(String, Option<tree::BlobRef>, crate::versions::Removed)> {
+/// Creates the file (or gives the file it replaces the new content) while holding the write lock; returns the file's
+/// id and what to finish after the commit
+async fn commit_upload(st: &AppState, up: &Uploader, upload: &Upload, staged: &content::Staged, size: i64) -> AppResult<(String, content::Written)> {
     let user = &up.user;
     let mut tx = crate::db::begin_write(&st.db).await?;
     // The account's upload permission may have been removed while the upload was running
@@ -725,61 +639,40 @@ async fn commit_upload(
     if role.is_none_or(|r| tree::allows(user, r, tree::Need::Write).is_err()) {
         return Err(AppError::forbidden("You no longer have permission to upload to this folder"));
     }
-    if parent.in_folder_space() || parent.space_read_only {
-        return Err(AppError::conflict("Something changed at the same time. Try again."));
-    }
-    let folder = tree::ensure_folders(&mut tx, upload.owner_id, &parent.id, &upload.rel_path, &upload.batch).await?;
-    let replaced = replaced_file(&mut tx, user, upload, &folder).await?;
+    staged.check(&parent)?;
+    let folder_id = tree::ensure_folders(&mut tx, upload.owner_id, &parent.id, &upload.rel_path, &upload.batch).await?;
+    let folder = tree::get_node(&mut tx, &folder_id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
+    let replaced = replaced_file(&mut tx, user, upload, &folder.id).await?;
     // Checked again now: an upload idle for a day stopped holding its space (it may be taken by now), and a folder
     // moved to another space meanwhile must have room there. Its own reservation isn't counted twice.
-    let grows = size as i64 - replaced.as_ref().map_or(0, |r| r.size);
-    tree::check_quota_except(&mut tx, parent.drive(), grows, Some(&upload.id)).await?;
-    let ts = now();
-    let (id, extra, removed) = match replaced {
+    let grows = size - replaced.as_ref().map_or(0, |r| r.size);
+    tree::check_quota_except(&mut tx, folder.drive(), grows, Some(&upload.id)).await?;
+    let (id, written) = match replaced {
         Some(existing) => {
-            // Only the difference counts
-            let extra = tree::commit_blob(&mut tx, staged).await?;
-            let removed = tree::set_content(&mut tx, crate::versions::Policy::of(st), &existing, hash, size as i64, user.id).await?;
+            let written = content::replace(&mut tx, st, staged, &existing, user.id).await?;
             logs::record_activity(&mut tx, user, Some(&existing), "upload", "Replaced the existing file").await?;
-            (existing.id.clone(), extra, removed)
+            (existing.id.clone(), written)
         }
         None => {
-            let name = tree::unique_name(&mut tx, &folder, &upload.name, false).await?;
-            let extra = tree::commit_blob(&mut tx, staged).await?;
-            let id = new_id();
-            sqlx::query(
-                "INSERT INTO nodes (id, owner_id, parent_id, kind, name, blob_hash, size, mime, drive_id, created_at, updated_at)
-                 SELECT ?1, ?2, ?3, 'file', ?4, ?5, ?6, ?7, drive_id, ?8, ?8 FROM nodes WHERE id = ?3",
-            )
-            .bind(&id)
-            .bind(upload.owner_id)
-            .bind(&folder)
-            .bind(&name)
-            .bind(hash)
-            .bind(size as i64)
-            .bind(guess_mime(&name))
-            .bind(ts)
-            .execute(&mut *tx)
-            .await?;
+            let name = content::free_name(&mut tx, &folder, &upload.name).await?;
+            let (id, written) = content::create(&mut tx, staged, upload.owner_id, &folder, &name, None).await?;
             if let Some(n) = tree::get_node(&mut tx, &id).await? {
-                tree::adjust_usage(&mut tx, n.drive(), size as i64).await?;
                 logs::record_activity(&mut tx, user, Some(&n), "upload", &up.log_detail()).await?;
             }
-            (id, extra, crate::versions::Removed::default())
+            (id, written)
         }
     };
     // Kept for a day with the file, for clients that lost the response
     sqlx::query("UPDATE uploads SET node_id = ?, offset = size, expires_at = ? WHERE id = ?")
         .bind(&id)
-        .bind(ts + FINISHED_TTL)
+        .bind(now() + FINISHED_TTL)
         .bind(&upload.id)
         .execute(&mut *tx)
         .await?;
-    tree::touch(&mut tx, &folder).await?;
+    tree::touch(&mut tx, &folder.id).await?;
     tx.commit().await?;
-    Ok((id, extra, removed))
+    Ok((id, written))
 }
-
 
 pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Response> {
     delete_as(&st, &Uploader::signed_in(user), &id).await

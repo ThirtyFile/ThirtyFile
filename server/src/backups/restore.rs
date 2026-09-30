@@ -23,11 +23,12 @@ use super::{
     runner::{Ctx, Stop},
 };
 use crate::{
+    content,
     error::{AppError, AppResult},
     state::AppState,
     storage::Storage,
     tree::{self, Node},
-    util::{new_id, now},
+    util::new_id,
 };
 
 /// What a restore brings back, and where
@@ -481,11 +482,7 @@ async fn restore_file(
             Err(stop) => return Ok(Err(stop)),
         }
     }
-    let result = if target.is_folder() {
-        into_folder(cx, target, parent, &name, source, &tmp, size, conflict).await
-    } else {
-        into_store(cx, set, dst, target, parent, &name, source, hash, size, modified, &tmp, conflict).await
-    };
+    let result = restore_into(cx, set, dst, target, parent, &name, source, hash, size, modified, &tmp, conflict).await;
     let _ = tokio::fs::remove_file(&tmp).await;
     result.map(Ok)
 }
@@ -512,10 +509,10 @@ async fn fetch(cx: &Ctx<'_>, set: &str, dst: &dyn Storage, hash: &str, size: i64
     }
 }
 
-/// Into a content-store space: the content is stored on the space's location unless it is kept already, then the file
-/// is recorded (or, told to replace, the file there gets it)
+/// Into the space: through content.rs, like an upload. A content store that holds the content already needs no copy of
+/// it; the file is recorded, or (told to replace) the file there gets it
 #[allow(clippy::too_many_arguments)]
-async fn into_store(
+async fn restore_into(
     cx: &Ctx<'_>,
     set: &str,
     dst: &dyn Storage,
@@ -530,117 +527,54 @@ async fn into_store(
     conflict: &str,
 ) -> AppResult<Outcome> {
     let st = cx.st;
-    let staged = match tree::stage_blob(st, &target.id, hash.to_string(), size, tmp.to_path_buf()).await {
+    let folder = folder_node(st, parent).await?;
+    let received = || content::Received { path: tmp.to_path_buf(), size: size as u64, hash: Some(hash.to_string()) };
+    let staged = match content::stage(st, &folder, received()).await {
         Ok(s) => s,
         // Deleted meanwhile, and not fetched: fetch it and try again
-        Err(_) if tokio::fs::metadata(tmp).await.is_err() => {
+        Err(_) if !target.is_folder() && tokio::fs::metadata(tmp).await.is_err() => {
             match fetch(cx, set, dst, hash, size, tmp).await? {
                 Ok(()) => {}
                 Err(_) => return Err(AppError::internal("stopped while fetching")),
             }
-            tree::stage_blob(st, &target.id, hash.to_string(), size, tmp.to_path_buf()).await?
+            content::stage(st, &folder, received()).await?
         }
         Err(e) => return Err(e),
     };
     let by = cx.job.created_by.unwrap_or_default();
-    let _w = st.write_lock.lock().await;
-    let mut tx = crate::db::begin_write(&st.db).await?;
-    let res = async {
-        let parent = tree::get_node(&mut tx, parent).await?.filter(|n| n.is_folder() && n.trashed_at.is_none()).ok_or_else(|| AppError::conflict("The folder being restored into was deleted"))?;
-        let existing = tree::find_child(&mut tx, &parent.id, name).await?.filter(|n| !n.is_folder());
-        if let (Some(existing), "replace") = (&existing, conflict) {
-            tree::check_quota(&mut tx, &target.id, size - existing.size).await?;
-            let extra = tree::commit_blob(&mut tx, &staged).await?;
-            let removed = tree::set_content(&mut tx, crate::versions::Policy::of(st), existing, hash, size, by).await?;
-            sqlx::query("INSERT INTO backup_restored (job_id, source_id, node_id) VALUES (?, ?, ?)").bind(&cx.job.id).bind(source).bind(&existing.id).execute(&mut *tx).await?;
-            return AppResult::Ok((extra, Some(removed), Outcome::Replaced));
-        }
-        tree::check_quota(&mut tx, &target.id, size).await?;
-        let free = tree::unique_name(&mut tx, &parent.id, name, false).await?;
-        let extra = tree::commit_blob(&mut tx, &staged).await?;
-        let id = new_id();
-        sqlx::query(
-            "INSERT INTO nodes (id, owner_id, parent_id, kind, name, blob_hash, size, mime, drive_id, created_at, updated_at)
-             VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&id)
-        .bind(owner_of(cx, target))
-        .bind(&parent.id)
-        .bind(&free)
-        .bind(hash)
-        .bind(size)
-        .bind(crate::util::guess_mime(&free))
-        .bind(&target.id)
-        .bind(now())
-        .bind(modified)
-        .execute(&mut *tx)
-        .await?;
-        tree::adjust_usage(&mut tx, &target.id, size).await?;
-        sqlx::query("INSERT INTO backup_restored (job_id, source_id, node_id) VALUES (?, ?, ?)").bind(&cx.job.id).bind(source).bind(&id).execute(&mut *tx).await?;
-        AppResult::Ok((extra, None, Outcome::Restored { renamed: free != name }))
-    }
-    .await;
-    match crate::db::settle(tx, res).await {
-        Ok((extra, removed, outcome)) => {
-            tree::finish_staged(st, staged, extra).await;
-            if let Some(removed) = removed {
-                removed.finish(st);
-            }
-            Ok(outcome)
-        }
-        Err(e) => {
-            tree::abandon_staged(st, staged).await;
-            Err(e)
-        }
-    }
-}
-
-/// Into a folder space: the file is written into the folder under a name scans ignore, then renamed into place (or
-/// over the file there, told to replace) and indexed
-#[allow(clippy::too_many_arguments)]
-async fn into_folder(cx: &Ctx<'_>, target: &tree::Drive, parent: &str, name: &str, source: &str, tmp: &std::path::Path, size: i64, conflict: &str) -> AppResult<Outcome> {
-    let st = cx.st;
-    let folder = folder_node(st, parent).await?;
-    let staged = crate::fsops::stage_upload(st, &folder, tmp, size as u64).await?;
-    let _space = crate::fsops::lock_space(&target.id).await;
-    let ready = crate::fsops::ready(st, &target.id).await;
-    let by = cx.job.created_by.unwrap_or_default();
+    let mut turn = staged.turn(st).await;
     let _w = st.write_lock.lock().await;
     let result = async {
-        ready?;
+        turn.ready()?;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let res = async {
-            let folder = tree::get_node(&mut tx, &folder.id).await?.filter(|n| n.trashed_at.is_none()).ok_or_else(|| AppError::conflict("The folder being restored into was deleted"))?;
+            let folder = tree::get_node(&mut tx, parent).await?.filter(|n| n.is_folder() && n.trashed_at.is_none()).ok_or_else(|| AppError::conflict("The folder being restored into was deleted"))?;
+            staged.check(&folder)?;
             let existing = tree::find_child(&mut tx, &folder.id, name).await?.filter(|n| !n.is_folder());
             if let (Some(existing), "replace") = (&existing, conflict) {
                 tree::check_quota(&mut tx, &target.id, size - existing.size).await?;
-                let removed = crate::fsops::replace_file(&mut tx, crate::versions::Policy::of(st), &staged, existing, by).await?;
-                if let Some(n) = tree::get_node(&mut tx, &existing.id).await? {
-                    tree::adjust_usage(&mut tx, &target.id, n.size - existing.size).await?;
-                }
+                let written = content::replace(&mut tx, st, &staged, existing, by).await?;
                 sqlx::query("INSERT INTO backup_restored (job_id, source_id, node_id) VALUES (?, ?, ?)").bind(&cx.job.id).bind(source).bind(&existing.id).execute(&mut *tx).await?;
-                return AppResult::Ok((Some(removed), Outcome::Replaced));
+                return AppResult::Ok((written, Outcome::Replaced));
             }
             tree::check_quota(&mut tx, &target.id, size).await?;
-            let free = crate::fsops::free_name(&mut tx, &folder, name, false).await?;
-            let id = crate::fsops::place_file(&mut tx, &staged, owner_of(cx, target), &folder, &free).await?;
-            tree::adjust_usage(&mut tx, &target.id, size).await?;
+            let free = content::free_name(&mut tx, &folder, name).await?;
+            // A file of the content store keeps the date it had
+            let (id, written) = content::create(&mut tx, &staged, owner_of(cx, target), &folder, &free, Some(modified)).await?;
             sqlx::query("INSERT INTO backup_restored (job_id, source_id, node_id) VALUES (?, ?, ?)").bind(&cx.job.id).bind(source).bind(&id).execute(&mut *tx).await?;
-            AppResult::Ok((None, Outcome::Restored { renamed: free != name }))
+            AppResult::Ok((written, Outcome::Restored { renamed: free != name }))
         }
         .await;
         crate::db::settle(tx, res).await
     }
     .await;
     match result {
-        Ok((removed, outcome)) => {
-            if let Some(removed) = removed {
-                removed.finish(st);
-            }
+        Ok((written, outcome)) => {
+            staged.finish(st, written).await;
             Ok(outcome)
         }
         Err(e) => {
-            let _ = tokio::fs::remove_file(staged.as_path()).await;
+            staged.abandon(st).await;
             Err(e)
         }
     }

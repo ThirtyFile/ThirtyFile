@@ -97,140 +97,60 @@ pub(super) async fn receive(st: &AppState, body: Body, path: &Path, hash: bool, 
 /// Stores a received file as `name` in `parent`, replacing a file of that name; true when it was created. `hash`: the
 /// content's SHA-256 when it was computed while receiving it
 pub(super) async fn store(st: AppState, user: User, parent: Node, name: String, tmp: PathBuf, size: u64, hash: Option<String>) -> AppResult<bool> {
-    let result = if parent.in_folder_space() {
-        store_in_folder(&st, &user, &parent, &name, &tmp, size).await
-    } else {
-        store_content(&st, &user, &parent, &name, &tmp, size, hash).await
-    };
+    let result = store_file(&st, &user, &parent, &name, &tmp, size, hash).await;
     let _ = tokio::fs::remove_file(&tmp).await;
     result
 }
 
-pub(super) async fn store_content(st: &AppState, user: &User, parent: &Node, name: &str, tmp: &Path, size: u64, hash: Option<String>) -> AppResult<bool> {
-    let hash = match hash {
-        Some(h) => h,
-        None => {
-            let (hash, hashed) = files::hash_file(tmp.to_path_buf()).await?;
-            if hashed != size {
-                return Err(AppError::bad_request("File size mismatch"));
-            }
-            hash
-        }
-    };
+/// Makes the received file `name` in `parent` (content.rs), or gives the file of that name its content; true when
+/// it was created
+pub(super) async fn store_file(st: &AppState, user: &User, parent: &Node, name: &str, tmp: &Path, size: u64, hash: Option<String>) -> AppResult<bool> {
+    let staged = content::stage(st, parent, content::Received { path: tmp.to_path_buf(), size, hash }).await?;
     let size = size as i64;
-    // First into the space's storage location, without holding the write lock (S3 may take a while)
-    let staged = tree::stage_blob(st, parent.drive(), hash.clone(), size, tmp.to_path_buf()).await?;
+    let mut turn = staged.turn(st).await;
     let _w = st.write_lock.lock().await;
     let result = async {
+        turn.ready()?;
         let mut tx = crate::db::begin_write(&st.db).await?;
         // Looked at again under the write lock: the folder or the file may have changed meanwhile
         let folder = tree::folder_for(&mut tx, user, &parent.id, Need::Write).await?;
-        if folder.in_folder_space() || folder.drive() != parent.drive() {
-            return Err(AppError::conflict("Something changed at the same time. Try again."));
-        }
-        let (created, extra, removed) = match child_named(&mut tx, &folder.id, name).await? {
+        staged.check(&folder)?;
+        let (created, written) = match child_named(&mut tx, &folder.id, name).await? {
             Some(n) if n.is_folder() => return Err(AppError::new(StatusCode::METHOD_NOT_ALLOWED, "A folder has this name")),
             Some(n) => {
                 let n = tree::node_for(&mut tx, user, &n.id, Need::Write).await?;
                 // The same content again (clients often save a file twice): nothing changes
-                if n.blob_hash.as_deref() == Some(hash.as_str()) {
-                    return Ok((false, None, crate::versions::Removed::default()));
+                if staged.hash().is_some() && n.blob_hash.as_deref() == staged.hash() {
+                    return Ok((false, content::Written::default()));
                 }
                 tree::check_quota(&mut tx, n.drive(), size - n.size).await?;
-                let extra = tree::commit_blob(&mut tx, &staged).await?;
                 // The content it had is kept as an earlier version
-                let removed = tree::set_content(&mut tx, crate::versions::Policy::of(st), &n, &hash, size, user.id).await?;
+                let written = content::replace(&mut tx, st, &staged, &n, user.id).await?;
                 tree::touch(&mut tx, &folder.id).await?;
                 logs::record_activity(&mut tx, user, Some(&n), "edit", "").await?;
-                (false, extra, removed)
+                (false, written)
             }
             None => {
                 tree::check_quota(&mut tx, folder.drive(), size).await?;
-                let extra = tree::commit_blob(&mut tx, &staged).await?;
-                let id = new_id();
-                sqlx::query(
-                    "INSERT INTO nodes (id, owner_id, parent_id, kind, name, blob_hash, size, mime, drive_id, created_at, updated_at)
-                     SELECT ?1, ?2, ?3, 'file', ?4, ?5, ?6, ?7, drive_id, ?8, ?8 FROM nodes WHERE id = ?3",
-                )
-                .bind(&id)
-                .bind(user.id)
-                .bind(&folder.id)
-                .bind(name)
-                .bind(&hash)
-                .bind(size)
-                .bind(guess_mime(name))
-                .bind(now())
-                .execute(&mut *tx)
-                .await?;
+                let (id, written) = content::create(&mut tx, &staged, user.id, &folder, name, None).await?;
                 tree::touch(&mut tx, &folder.id).await?;
-                tree::adjust_usage(&mut tx, folder.drive(), size).await?;
                 let node = tree::get_node(&mut tx, &id).await?;
                 logs::record_activity(&mut tx, user, node.as_ref(), "upload", "").await?;
-                (true, extra, crate::versions::Removed::default())
+                (true, written)
             }
         };
         tx.commit().await?;
-        Ok((created, extra, removed))
+        Ok((created, written))
     }
     .await;
     match result {
-        Ok((created, extra, removed)) => {
-            tree::finish_staged(st, staged, extra).await;
-            removed.finish(st);
+        Ok((created, written)) => {
+            staged.finish(st, written).await;
             Ok(created)
         }
         Err(e) => {
-            tree::abandon_staged(st, staged).await;
+            staged.abandon(st).await;
             Err(e)
         }
     }
-}
-
-pub(super) async fn store_in_folder(st: &AppState, user: &User, parent: &Node, name: &str, tmp: &Path, size: u64) -> AppResult<bool> {
-    let staged = fsops::stage_upload(st, parent, tmp, size).await?;
-    let _space = fsops::lock_space(parent.drive()).await;
-    // Its folder answers, before the write lock is taken
-    let ready = fsops::ready(st, parent.drive()).await;
-    let _w = st.write_lock.lock().await;
-    let result = async {
-        ready?;
-        let mut tx = crate::db::begin_write(&st.db).await?;
-        let folder = tree::folder_for(&mut tx, user, &parent.id, Need::Write).await?;
-        if folder.drive() != parent.drive() {
-            return Err(AppError::conflict("Something changed at the same time. Try again."));
-        }
-        let mut removed = crate::versions::Removed::default();
-        let created = match child_named(&mut tx, &folder.id, name).await? {
-            Some(n) if n.is_folder() => return Err(AppError::new(StatusCode::METHOD_NOT_ALLOWED, "A folder has this name")),
-            Some(n) => {
-                let n = tree::node_for(&mut tx, user, &n.id, Need::Write).await?;
-                tree::check_quota(&mut tx, n.drive(), size as i64 - n.size).await?;
-                // The content it had is kept as an earlier version
-                removed = fsops::replace_file(&mut tx, crate::versions::Policy::of(st), &staged, &n, user.id).await?;
-                let new_size = tree::get_node(&mut tx, &n.id).await?.map_or(n.size, |x| x.size);
-                tree::adjust_usage(&mut tx, n.drive(), new_size - n.size).await?;
-                logs::record_activity(&mut tx, user, Some(&n), "edit", "").await?;
-                false
-            }
-            None => {
-                tree::check_quota(&mut tx, folder.drive(), size as i64).await?;
-                let id = fsops::place_file(&mut tx, &staged, user.id, &folder, name).await?;
-                tree::touch(&mut tx, &folder.id).await?;
-                if let Some(n) = tree::get_node(&mut tx, &id).await? {
-                    tree::adjust_usage(&mut tx, n.drive(), n.size).await?;
-                    logs::record_activity(&mut tx, user, Some(&n), "upload", "").await?;
-                }
-                true
-            }
-        };
-        tx.commit().await?;
-        removed.finish(st);
-        Ok(created)
-    }
-    .await;
-    if result.is_err() {
-        // Still under its temporary name unless it was put in place and only the index failed (the next scan shows it then)
-        let _ = tokio::fs::remove_file(&staged).await;
-    }
-    result
 }

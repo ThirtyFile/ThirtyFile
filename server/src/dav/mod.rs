@@ -46,8 +46,9 @@ use tokio::io::AsyncWriteExt;
 
 use crate::{
     auth::User,
+    content,
     error::{AppError, AppResult},
-    files, fsops,
+    files,
     jobs::{self, Limit, Outcome},
     nodes,
     logs,
@@ -55,7 +56,7 @@ use crate::{
     state::AppState,
     tokens,
     tree::{self, Need, Node},
-    util::{guess_mime, new_id, now, numbered_name, validate_name},
+    util::{new_id, now, numbered_name, validate_name},
 };
 
 /// Where WebDAV is served
@@ -540,7 +541,7 @@ mod tests {
         // Copying takes longer than the client is kept waiting: accepted, and done meanwhile
         let short = crate::jobs::short_wait();
         let go = std::sync::Arc::new(tokio::sync::Notify::new());
-        let hook = fsops::hook_after_place(fsops::wait_for(&go));
+        let hook = crate::fsops::hook_after_place(crate::fsops::wait_for(&go));
         let h = [("destination", "/dav/Server/Copied")];
         assert_eq!(dav.send("COPY", "/dav/Server/Photos", &h, "").await.status, StatusCode::ACCEPTED);
         go.notify_one();

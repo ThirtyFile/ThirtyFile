@@ -27,13 +27,14 @@ use tokio::io::{AsyncRead, AsyncWriteExt, ReadBuf};
 
 use crate::{
     auth::User,
+    content,
     error::{AppError, AppResult},
     files::Source,
     fsops,
     logs,
     state::AppState,
     tree::{self, Need, Node},
-    util::{format_bytes_u64, guess_mime, new_id, now, split_name, validate_name},
+    util::{format_bytes_u64, new_id, split_name, validate_name},
     zip::{ReadEntry, ZipWriter},
     jobs::{self, Job, Limit, Outcome, Tracker},
 };
@@ -151,92 +152,42 @@ async fn run_compress(st: AppState, user: User, progress: Tracker, roots: Vec<No
     result.map(|(id, name)| Outcome::node(id, name))
 }
 
-/// Stores a finished temporary file as a new file in `folder_id` (numbered if the name is taken), like an upload:
-/// staged in the space's storage location first, then recorded under the write lock. Returns its id and name
+/// Stores a finished temporary file as a new file in `folder_id` (numbered if the name is taken), like an upload
+/// (content.rs). Returns its id and name
 async fn store_new_file(st: &AppState, user: &User, folder_id: &str, name: &str, tmp: &std::path::Path, action: &str) -> AppResult<(String, String)> {
     let folder = tree::folder_for(&mut *st.db.acquire().await?, user, folder_id, Need::Write).await?;
     let size = tokio::fs::metadata(tmp).await?.len();
-    if folder.in_folder_space() {
-        // Checked first, so a file that can't fit isn't copied into the folder at all
-        tree::check_quota(&mut *st.db.acquire().await?, folder.drive(), size as i64).await?;
-        // A folder space: the file goes into the folder on the disk under a name scans ignore, then renamed into place
-        let staged = crate::fsops::stage_upload(st, &folder, tmp, size).await?;
-        let _space = crate::fsops::lock_space(folder.drive()).await;
-        // Its folder answers, before the write lock is taken
-        let ready = crate::fsops::ready(st, folder.drive()).await;
-        let _w = st.write_lock.lock().await;
-        let result = async {
-            ready?;
-            let mut tx = crate::db::begin_write(&st.db).await?;
-            let folder = tree::folder_for(&mut tx, user, folder_id, Need::Write).await?;
-            tree::check_quota(&mut tx, folder.drive(), size as i64).await?;
-            let name = crate::fsops::free_name(&mut tx, &folder, name, false).await?;
-            let id = crate::fsops::place_file(&mut tx, &staged, user.id, &folder, &name).await?;
-            tree::touch(&mut tx, &folder.id).await?;
-            if let Some(n) = tree::get_node(&mut tx, &id).await? {
-                tree::adjust_usage(&mut tx, n.drive(), n.size).await?;
-                logs::record_activity(&mut tx, user, Some(&n), action, "").await?;
-            }
-            tx.commit().await?;
-            Ok((id, name))
-        }
-        .await;
-        if result.is_err() {
-            let _ = tokio::fs::remove_file(&staged).await;
-        }
-        return result;
-    }
-    let (hash, size) = crate::files::hash_file(tmp.to_path_buf()).await?;
-    // Takes the temporary file over (and removes it once stored or given up)
-    let staged = tree::stage_blob(st, folder.drive(), hash.clone(), size as i64, tmp.to_path_buf()).await?;
+    // Checked first, so a file that can't fit isn't stored at all
+    tree::check_quota(&mut *st.db.acquire().await?, folder.drive(), size as i64).await?;
+    // Takes the temporary file over (the caller removes it when it is left)
+    let staged = content::stage(st, &folder, content::Received { path: tmp.to_path_buf(), size, hash: None }).await?;
+    let mut turn = staged.turn(st).await;
     let _w = st.write_lock.lock().await;
     let result = async {
+        turn.ready()?;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let folder = tree::folder_for(&mut tx, user, folder_id, Need::Write).await?;
-        if folder.in_folder_space() {
-            return Err(AppError::conflict("Something changed at the same time. Try again."));
-        }
+        staged.check(&folder)?;
         tree::check_quota(&mut tx, folder.drive(), size as i64).await?;
-        let name = tree::unique_name(&mut tx, &folder.id, name, false).await?;
-        let extra = tree::commit_blob(&mut tx, &staged).await?;
-        let id = insert_file(&mut tx, user, &folder.id, &name, &hash, size as i64).await?;
+        let name = content::free_name(&mut tx, &folder, name).await?;
+        let (id, written) = content::create(&mut tx, &staged, user.id, &folder, &name, None).await?;
         tree::touch(&mut tx, &folder.id).await?;
-        tree::adjust_usage(&mut tx, folder.drive(), size as i64).await?;
         let node = tree::get_node(&mut tx, &id).await?;
         logs::record_activity(&mut tx, user, node.as_ref(), action, "").await?;
         tx.commit().await?;
-        Ok((id, name, extra))
+        Ok((id, name, written))
     }
     .await;
     match result {
-        Ok((id, name, extra)) => {
-            tree::finish_staged(st, staged, extra).await;
+        Ok((id, name, written)) => {
+            staged.finish(st, written).await;
             Ok((id, name))
         }
         Err(e) => {
-            tree::abandon_staged(st, staged).await;
+            staged.abandon(st).await;
             Err(e)
         }
     }
-}
-
-async fn insert_file(conn: &mut sqlx::SqliteConnection, user: &User, parent: &str, name: &str, hash: &str, size: i64) -> AppResult<String> {
-    let id = new_id();
-    sqlx::query(
-        "INSERT INTO nodes (id, owner_id, parent_id, kind, name, blob_hash, size, mime, drive_id, created_at, updated_at)
-         SELECT ?1, ?2, ?3, 'file', ?4, ?5, ?6, ?7, drive_id, ?8, ?8 FROM nodes WHERE id = ?3",
-    )
-    .bind(&id)
-    .bind(user.id)
-    .bind(parent)
-    .bind(name)
-    .bind(hash)
-    .bind(size)
-    .bind(guess_mime(name))
-    .bind(now())
-    .execute(conn)
-    .await?;
-    Ok(id)
 }
 
 // ───────────── Extract all ─────────────
@@ -459,8 +410,10 @@ async fn extract_into(st: &AppState, user: &User, progress: &Tracker, zip: &Node
         return extract_into_folder(st, user, progress, zip, &parent, archive, plan).await;
     }
 
-    let mut staged: Vec<(usize, tree::StagedBlob)> = Vec::new();
+    let mut staged: Vec<(usize, content::Staged)> = Vec::new();
+    let mut written: HashMap<usize, content::Written> = HashMap::new();
     let result = async {
+        let mut actual = 0i64;
         for (i, p) in plan.iter().enumerate() {
             if p.file.is_none() {
                 continue;
@@ -468,60 +421,63 @@ async fn extract_into(st: &AppState, user: &User, progress: &Tracker, zip: &Node
             let (archive, entry, tmp) = (archive.to_path_buf(), p.entry.clone(), st.tmp_dir().join(format!("unzip-{}", new_id())));
             let p = progress.clone();
             let x = tokio::task::spawn_blocking(move || extract_entry(&archive, &entry, tmp, &|n| p.add(n))).await??;
-            staged.push((i, tree::stage_blob(st, &drive, x.hash, x.size as i64, x.tmp).await?));
+            actual += x.size as i64;
+            let received = content::Received { path: x.tmp, size: x.size, hash: Some(x.hash) };
+            staged.push((i, content::stage(st, &parent, received).await?));
         }
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let parent = tree::folder_for(&mut tx, user, parent_id, Need::Write).await?;
-        let actual: i64 = staged.iter().map(|(_, s)| s.size).sum();
+        for (_, s) in &staged {
+            s.check(&parent)?;
+        }
         tree::check_quota(&mut tx, parent.drive(), actual).await?;
         // The new folder is named after the archive
         let stem = validate_name(split_name(&zip.name, false).0).unwrap_or_else(|_| "Extracted".into());
         let name = tree::unique_name(&mut tx, &parent.id, &stem, true).await?;
         let root = tree::create_folder(&mut tx, user.id, &parent.id, &name).await?;
-        let mut folders: HashMap<Vec<String>, String> = HashMap::new();
-        folders.insert(Vec::new(), root.clone());
-        let mut extras = Vec::new();
-        let mut blobs = staged.iter().map(|(i, s)| (*i, s)).collect::<HashMap<_, _>>();
+        let root_node = tree::get_node(&mut tx, &root).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
+        let mut folders: HashMap<Vec<String>, Node> = HashMap::new();
+        folders.insert(Vec::new(), root_node.clone());
+        let blobs = staged.iter().map(|(i, s)| (*i, s)).collect::<HashMap<_, _>>();
         for (i, p) in plan.iter().enumerate() {
             // Folders on the way, created once each (a name taken by a file gets a number)
             let mut key = Vec::new();
-            let mut folder = root.clone();
+            let mut folder = root_node.clone();
             for d in &p.dirs {
                 key.push(d.clone());
                 folder = match folders.get(&key) {
-                    Some(id) => id.clone(),
+                    Some(n) => n.clone(),
                     None => {
-                        let id = tree::ensure_folders(&mut tx, user.id, &folder, d, "").await?;
-                        folders.insert(key.clone(), id.clone());
-                        id
+                        let id = tree::ensure_folders(&mut tx, user.id, &folder.id, d, "").await?;
+                        let n = tree::get_node(&mut tx, &id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
+                        folders.insert(key.clone(), n.clone());
+                        n
                     }
                 };
             }
-            let (Some(file), Some(blob)) = (&p.file, blobs.remove(&i)) else { continue };
-            let name = tree::unique_name(&mut tx, &folder, file, false).await?;
-            extras.extend(tree::commit_blob(&mut tx, blob).await?);
-            insert_file(&mut tx, user, &folder, &name, &blob.hash, blob.size).await?;
+            let (Some(file), Some(s)) = (&p.file, blobs.get(&i)) else { continue };
+            let name = content::free_name(&mut tx, &folder, file).await?;
+            let (_, w) = content::create(&mut tx, s, user.id, &folder, &name, None).await?;
+            written.insert(i, w);
         }
-        tree::adjust_usage(&mut tx, parent.drive(), actual).await?;
         let node = tree::get_node(&mut tx, &root).await?;
         logs::record_activity(&mut tx, user, node.as_ref(), "extract", &zip.name).await?;
         tx.commit().await?;
-        Ok((root, name, extras))
+        Ok((root, name))
     }
     .await;
     match result {
-        Ok((root, name, extras)) => {
-            for (_, s) in staged {
-                tree::finish_staged(st, s, None).await;
+        Ok(done) => {
+            // (copies stored twice, the same content in another location, are removed in the background)
+            for (i, s) in staged {
+                s.finish(st, written.remove(&i).unwrap_or_default()).await;
             }
-            // Copies stored twice (the same content in another location) are removed in the background
-            tree::schedule_blob_removal(st, extras);
-            Ok((root, name))
+            Ok(done)
         }
         Err(e) => {
             for (_, s) in staged {
-                tree::abandon_staged(st, s).await;
+                s.abandon(st).await;
             }
             Err(e)
         }

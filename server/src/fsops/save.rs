@@ -2,21 +2,8 @@
 
 use super::*;
 
-/// Removes a file staged for a change when the change stops before using it (once renamed into place, the name is gone)
-pub(super) struct Discard(Option<Pinned>);
-
-impl Drop for Discard {
-    fn drop(&mut self) {
-        if let Some(p) = self.0.take() {
-            // On a blocking thread: the disk may be the one that doesn't answer
-            tokio::task::spawn_blocking(move || {
-                let _ = std::fs::remove_file(p.as_path());
-            });
-        }
-    }
-}
-
 pub(super) const UPLOAD_PREFIX: &str = ".thirtyfile-upload-";
+/// What saves from the editor were written as before they went through content.rs: still recognised as leftovers
 pub(super) const SAVE_PREFIX: &str = ".thirtyfile-save-";
 
 /// Puts a finished upload into the space's folder under a name scans ignore, ready to be renamed into place: a
@@ -105,86 +92,15 @@ pub(super) async fn replace_on_disk(policy: versions::Policy, existing: &Node, s
     .await
 }
 
-/// Saves from the online editor into a folder space. A file changed on the server since it was indexed (or removed
-/// there) isn't overwritten: the new content is saved next to it as "name (conflict copy)" and the save reports a
-/// conflict.
-pub async fn save(st: &AppState, user: &User, id: &str, body: &[u8], base: Option<i64>, conflict: fn() -> AppError) -> AppResult<Node> {
-    let before = tree::node_for(&mut *st.db.acquire().await?, user, id, Need::Write).await?;
-    let drive = before.drive().to_string();
-    // The new content is written next to the file before taking the locks, so a large save doesn't hold up every
-    // other change meanwhile; it is removed again unless it is put in place
-    let tmp = {
-        let (before, body) = (before.clone(), body.to_vec());
-        on_disk(&drive, disk_wake(), move || {
-            let tmp = abs(&before)?.parent().ok_or_else(|| AppError::not_found("Item not found"))?.join(&format!("{SAVE_PREFIX}{}", new_id())).map_err(disk_error)?;
-            crate::beneath::write_new(&tmp, &body).map_err(disk_error)?;
-            Ok(tmp)
-        })
-        .await?
-    };
-    let _discard = Discard(Some(tmp.clone()));
-    let _space = lock_space(&drive).await;
-    ready(st, &drive).await?;
-    let _w = st.write_lock.lock().await;
-    let mut tx = crate::db::begin_write(&st.db).await?;
-    let node = tree::node_for(&mut tx, user, id, Need::Write).await?;
-    if node.drive() != drive {
-        return Err(AppError::conflict("Something changed at the same time. Try again."));
-    }
-    if base.is_some_and(|b| b != node.updated_at) {
-        return Err(conflict());
-    }
+/// Whether `file` is on disk as it was indexed (its size, time of change and inode): it may have been changed or
+/// replaced there since
+pub async fn unchanged_on_disk(conn: &mut SqliteConnection, file: &Node) -> AppResult<bool> {
     let (fs_size, fs_mtime, fs_ino): (Option<i64>, Option<i64>, Option<i64>) =
-        sqlx::query_as("SELECT fs_size, fs_mtime_ns, fs_ino FROM nodes WHERE id = ?").bind(&node.id).fetch_one(&mut *tx).await?;
-    let unchanged = {
-        let n = node.clone();
-        on_disk(&drive, disk_wait(), move || {
-            let path = abs(&n)?;
-            Ok(stat(path.as_path()).is_ok_and(|s| Some(s.size) == fs_size && Some(s.mtime_ns) == fs_mtime && Some(s.ino) == fs_ino))
-        })
-        .await?
-    };
-    // The new content counts against the space's size limit: by how much it grows the file, or all of it as a copy
-    tree::check_quota(&mut tx, node.drive(), body.len() as i64 - if unchanged { node.size } else { 0 }).await?;
-
-    if !unchanged {
-        let parent = tree::get_node(&mut tx, node.parent_id.as_deref().unwrap_or_default()).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
-        let (stem, ext) = split_name(&node.name, false);
-        let placed = async {
-            let name = free_name(&mut tx, &parent, &format!("{stem} (conflict copy){ext}"), false).await?;
-            let copy_id = place_file(&mut tx, &tmp, user.id, &parent, &name).await?;
-            Ok::<_, AppError>((name, copy_id))
-        }
-        .await;
-        // (should it fail, `Discard` removes the new content)
-        let (name, copy_id) = placed?;
-        if let Some(copy) = tree::get_node(&mut tx, &copy_id).await? {
-            tree::adjust_usage(&mut tx, copy.drive(), copy.size).await?;
-            logs::record_activity(&mut tx, user, Some(&copy), "upload", "").await?;
-        }
-        tx.commit().await?;
-        return Err(AppError::new(
-            StatusCode::CONFLICT,
-            format!("The file was changed on the server while you were editing it. Your version was saved as \"{name}\"."),
-        )
-        .with_code("conflict_copy"));
-    }
-
-    // The new content takes the file's place (and its permissions); the content it had is kept as an earlier version
-    let policy = versions::Policy::of(st);
-    let (s, kept) = replace_on_disk(policy, &node, &tmp).await?;
-    let removed = versions::record_kept(&mut tx, policy, &node, kept).await?;
-    record(&mut tx, &node.id, node.drive(), rel_of(&node), &s).await?;
-    sqlx::query("UPDATE nodes SET updated_at = ?, content_by = ? WHERE id = ?")
-        .bind(now().max(node.updated_at + 1))
-        .bind(user.id)
-        .bind(&node.id)
-        .execute(&mut *tx)
-        .await?;
-    tree::adjust_usage(&mut tx, node.drive(), s.size - node.size).await?;
-    logs::record_activity(&mut tx, user, Some(&node), "edit", "").await?;
-    let node = tree::get_node(&mut tx, &node.id).await?.ok_or_else(|| AppError::not_found("Item not found"))?;
-    tx.commit().await?;
-    removed.finish(st);
-    Ok(node)
+        sqlx::query_as("SELECT fs_size, fs_mtime_ns, fs_ino FROM nodes WHERE id = ?").bind(&file.id).fetch_one(&mut *conn).await?;
+    let n = file.clone();
+    on_disk(file.drive(), disk_wait(), move || {
+        let path = abs(&n)?;
+        Ok(stat(path.as_path()).is_ok_and(|s| Some(s.size) == fs_size && Some(s.mtime_ns) == fs_mtime && Some(s.ino) == fs_ino))
+    })
+    .await
 }
