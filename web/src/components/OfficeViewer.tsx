@@ -3,6 +3,7 @@ import { Loader2Icon } from "lucide-react";
 import { ApiError, fetchOffice, type FileSource, type Node } from "@/api";
 import { t } from "@/lib/i18n";
 import { reportShown } from "@/lib/errorReport";
+import { cancellable } from "@/lib/cancellable";
 import { frameDocument, loadFrameScript } from "@/components/officeFrame";
 import { extOf, errorMessage } from "@/lib/utils";
 import SheetPreview from "@/components/sheet/SheetPreview";
@@ -117,22 +118,22 @@ function FramePreview({ node, source, kind }: { node: Node; source: FileSource; 
     };
     window.addEventListener("message", onMessage);
     // Moving on to another file stops this download
-    const abort = new AbortController();
-    fetchOffice(source.contentUrl(node), abort.signal)
-      .then((buf) => {
+    const stop = cancellable(
+      (signal) => fetchOffice(source.contentUrl(node), signal),
+      (buf) => {
         buffer = buf;
         send();
-      })
-      .catch((e) => {
-        if (cancelled) return;
+      },
+      (e) => {
         window.clearTimeout(readyTimer);
         setError(viewError(e, kind === "docx" ? t("Couldn't open this document") : t("Couldn't open this presentation")));
         setLoading(false);
         reportShown("preview", e, node.id);
-      });
+      },
+    );
     return () => {
       cancelled = true;
-      abort.abort();
+      stop();
       window.clearTimeout(timer);
       window.clearTimeout(readyTimer);
       window.removeEventListener("message", onMessage);
@@ -163,21 +164,16 @@ function XlsxPreview({ node, source }: { node: Node; source: FileSource }) {
   const [buffer, setBuffer] = useState<ArrayBuffer | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    let cancelled = false;
     setBuffer(null);
     setError(null);
-    const abort = new AbortController();
-    fetchOffice(source.contentUrl(node), abort.signal)
-      .then((buf) => !cancelled && setBuffer(buf))
-      .catch((e) => {
-        if (cancelled) return;
+    return cancellable(
+      (signal) => fetchOffice(source.contentUrl(node), signal),
+      setBuffer,
+      (e) => {
         setError(viewError(e, t("Couldn't open this spreadsheet")));
         reportShown("preview", e, node.id);
-      });
-    return () => {
-      cancelled = true;
-      abort.abort();
-    };
+      },
+    );
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every refresh of the list: its id and date say when the file changed
   }, [node.id, node.updated_at, source]);
   return (

@@ -50,6 +50,7 @@ import {
   type Sel,
   type Session,
 } from "./session";
+import { cancellable } from "@/lib/cancellable";
 import { officeErrorMessage } from "@/lib/officeErrors";
 
 // ───────────── Component ─────────────
@@ -66,23 +67,18 @@ export default function SheetEditor(props: { node: Node; source: FileSource; onS
       setSession(existing);
       return;
     }
-    let cancelled = false;
-    // Closing the editor (or moving to another file) while the workbook downloads stops the download
-    const abort = new AbortController();
     setSession(null);
     setError(null);
-    openSession(node, props.source, abort.signal)
-      .then((s) => {
-        // Closed (or moved to another file) while loading: don't keep the workbook in memory
-        if (cancelled) return;
+    // Closing the editor (or moving to another file) while the workbook downloads stops the download, and a workbook
+    // that arrives after that isn't kept in memory
+    return cancellable(
+      (signal) => openSession(node, props.source, signal),
+      (s) => {
         keepSession(node.id, s);
         setSession(s);
-      })
-      .catch((e) => !cancelled && setError(officeErrorMessage(e, t("Couldn't open this spreadsheet"))));
-    return () => {
-      cancelled = true;
-      abort.abort();
-    };
+      },
+      (e) => setError(officeErrorMessage(e, t("Couldn't open this spreadsheet"))),
+    );
     // Load only when the file changes or a reload is requested; updated_at changing after a save doesn't require reloading
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every save
   }, [node.id, reload]);
