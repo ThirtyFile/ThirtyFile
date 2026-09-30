@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import * as tus from "tus-js-client";
 import { toast } from "sonner";
 import { ApiError, api, errorFromBody } from "@/api";
@@ -6,6 +6,25 @@ import { resolveConflicts } from "@/components/ConflictDialog";
 import { applyToUpload, topLevel } from "@/lib/conflicts";
 import { reportShown } from "@/lib/errorReport";
 import { t } from "@/lib/i18n";
+import {
+  BEAT_MS,
+  TAB,
+  fingerprintOf,
+  forgetSessions,
+  groupByBatch,
+  interrupted,
+  pathOf,
+  recordId,
+  recordsVersion,
+  removeRecords,
+  sampleOf,
+  saveLive,
+  scopeOf,
+  sessionState,
+  subscribeRecords,
+  type RecoveredBatch,
+  type UploadRecord,
+} from "@/lib/uploadRecovery";
 
 export type UploadStatus = "queued" | "uploading" | "paused" | "done" | "error";
 
@@ -28,6 +47,18 @@ export interface UploadTask {
   onConflict: "replace" | "keep";
   /** The name the server gave the file, when it isn't the uploaded one ("Report (1).docx") */
   savedAs?: string;
+  /** Its record in the browser's storage, to recover it after a reload (lib/uploadRecovery.ts); none without a scope */
+  recordId: string;
+  scope: string | null;
+  created: number;
+  /** A sample of the content, taken when it starts */
+  sample?: string;
+  /** Continued after a reload: how far it had got, and whether it must start again (the file changed, or "Start over") */
+  recovered?: { sent: number; fresh: boolean };
+  /** Start a new upload rather than continue one the server may have */
+  fresh?: boolean;
+  /** Lets go of this upload for other tabs (a Web Lock held while it is sent) */
+  release?: () => void;
 }
 
 export interface PickedFile {
@@ -83,6 +114,155 @@ function flush() {
   emitTimer = undefined;
   snapshot = { tasks: [...tasks], totals: { ...totals } };
   listeners.forEach((l) => l());
+  schedulePersist();
+}
+
+// ───────────── Records for recovery after a reload (lib/uploadRecovery.ts) ─────────────
+
+let persistTimer: ReturnType<typeof setTimeout> | undefined;
+let beatTimer: ReturnType<typeof setInterval> | undefined;
+/** Scopes this tab wrote records for, so a scope whose last upload ended gets its records removed */
+let persisted = new Set<string>();
+
+function schedulePersist() {
+  persistTimer ??= setTimeout(persist, 1000);
+}
+
+const STATE: Record<Exclude<UploadStatus, "done">, UploadRecord["state"]> = { queued: "waiting", uploading: "sending", paused: "paused", error: "failed" };
+
+/** Writes this tab's unfinished uploads to the browser's storage; while there are any, again every few seconds, so other tabs know they aren't interrupted */
+function persist() {
+  clearTimeout(persistTimer);
+  persistTimer = undefined;
+  const now = Date.now();
+  const byScope = new Map<string, UploadRecord[]>();
+  for (const task of tasks) {
+    if (!task.scope || task.status === "done") continue;
+    const list = byScope.get(task.scope) ?? [];
+    list.push({
+      id: task.recordId,
+      name: task.name,
+      relativePath: task.relativePath,
+      parentId: task.parentId,
+      batch: task.batch,
+      size: task.size,
+      lastModified: task.file.lastModified,
+      onConflict: task.onConflict,
+      sample: task.sample,
+      sent: task.sent,
+      state: STATE[task.status],
+      error: task.error,
+      created: task.created,
+      updated: now,
+      tab: TAB,
+      beat: now,
+    });
+    byScope.set(task.scope, list);
+  }
+  for (const scope of new Set([...persisted, ...byScope.keys()])) saveLive(scope, byScope.get(scope) ?? []);
+  persisted = new Set(byScope.keys());
+  if (byScope.size && !beatTimer) beatTimer = setInterval(persist, BEAT_MS);
+  else if (!byScope.size && beatTimer) {
+    clearInterval(beatTimer);
+    beatTimer = undefined;
+  }
+}
+
+// Closing or reloading the page: the latest progress is kept
+window.addEventListener("pagehide", () => {
+  if (persisted.size || tasks.length) persist();
+});
+
+/** Holds a Web Lock on an upload while it is sent, so two tabs never send the same file; null when another tab has it */
+function acquire(name: string): Promise<(() => void) | null> {
+  const locks = (navigator as Navigator & { locks?: LockManager }).locks;
+  if (!locks) return Promise.resolve(() => {});
+  return new Promise((resolve) => {
+    locks
+      .request(name, { ifAvailable: true }, (lock) => {
+        if (!lock) {
+          resolve(null);
+          return;
+        }
+        return new Promise<void>((release) => resolve(release));
+      })
+      .catch(() => resolve(() => {}));
+  });
+}
+
+function releaseLock(task: UploadTask) {
+  task.release?.();
+  task.release = undefined;
+}
+
+/** The ids of the records of this tab's unfinished uploads */
+function liveRecordIds() {
+  return new Set(tasks.filter((x) => x.status !== "done").map((x) => x.recordId));
+}
+
+/**
+ * Uploads to `endpoint` that were interrupted (a reload, a closed tab or browser), grouped as they were added; they
+ * continue once their files are chosen again (`resumeRecovered`)
+ */
+export function useInterrupted(endpoint: string): RecoveredBatch[] {
+  const version = useSyncExternalStore(subscribeRecords, recordsVersion);
+  const { tasks: current } = useUploads();
+  return useMemo(() => {
+    const scope = scopeOf(endpoint);
+    return scope ? groupByBatch(interrupted(scope, liveRecordIds())) : [];
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- recomputed when the records or the tasks change
+  }, [endpoint, version, current]);
+}
+
+export interface ResumeResult {
+  /** Files that continue where they stopped */
+  continuing: number;
+  /** Files that changed since, and start again */
+  changed: number;
+  /** Files that start again because that was asked for */
+  restarted: number;
+  /** Interrupted files that weren't among the chosen ones (they stay interrupted) */
+  missing: number;
+  /** Chosen files that weren't part of the interrupted upload (left out) */
+  extra: number;
+}
+
+/**
+ * Continues interrupted uploads with the files chosen again. A file is matched by its folder path and name, then must
+ * have the same size, date and content sample; one that doesn't starts a new upload, and the part sent before is
+ * dropped. The destination, batch and answer to a name clash stay as they were. `restart` starts them all again.
+ */
+export async function resumeRecovered(endpoint: string, records: UploadRecord[], picked: PickedFile[], restart = false): Promise<ResumeResult> {
+  const byPath = new Map(picked.map((p) => [pathOf(p.relativePath, p.file.name), p]));
+  const used = new Set<PickedFile>();
+  const result: ResumeResult = { continuing: 0, changed: 0, restarted: 0, missing: 0, extra: 0 };
+  const inits: TaskInit[] = [];
+  for (const r of records) {
+    const p = byPath.get(pathOf(r.relativePath, r.name));
+    if (!p || used.has(p)) {
+      result.missing++;
+      continue;
+    }
+    used.add(p);
+    const same = p.file.size === r.size && p.file.lastModified === r.lastModified && (!r.sample || (await sampleOf(p.file).catch(() => "")) === r.sample);
+    const fresh = restart || !same;
+    // The old upload can't be continued with this file: let the server drop what it received
+    if (fresh) await forgetSessions(fingerprintOf(endpoint, r));
+    if (!same) result.changed++;
+    else if (restart) result.restarted++;
+    else result.continuing++;
+    inits.push({ file: p.file, relativePath: r.relativePath, parentId: r.parentId, batch: r.batch, onConflict: r.onConflict, recordId: r.id, recovered: { sent: fresh ? 0 : r.sent, fresh } });
+  }
+  result.extra = picked.length - used.size;
+  addTasks(inits, endpoint);
+  return result;
+}
+
+/** Drops interrupted uploads: their records, and what the server received of them */
+export async function discardRecovered(endpoint: string, records: UploadRecord[]) {
+  const scope = scopeOf(endpoint);
+  if (scope) removeRecords(scope, records.map((r) => r.id));
+  for (const r of records) await forgetSessions(fingerprintOf(endpoint, r));
 }
 
 /** Show changes: right away after something the user did, otherwise at most every EMIT_MS */
@@ -181,6 +361,7 @@ export function savedName(header: string | undefined, uploaded: string): string 
 }
 
 function start(task: UploadTask) {
+  const fingerprint = fingerprintOf(task.endpoint, { ...task, lastModified: task.file.lastModified });
   const upload = new tus.Upload(task.file, {
     endpoint: task.endpoint,
     chunkSize: 32 * 1024 * 1024,
@@ -195,8 +376,7 @@ function start(task: UploadTask) {
       onConflict: task.onConflict,
     },
     // Uploads of the same file to different locations, or with a different answer to a name clash, must not resume each other
-    fingerprint: async (file) =>
-      ["sd", task.endpoint, task.parentId, task.relativePath, task.onConflict, (file as File).name, (file as File).size, (file as File).lastModified].join("|"),
+    fingerprint: async () => fingerprint,
     onProgress: (sent) => {
       if (task.upload !== upload || task.status !== "uploading") return;
       setSent(task, sent);
@@ -208,19 +388,16 @@ function start(task: UploadTask) {
       setSent(task, task.size);
       setStatus(task, "done");
       task.upload = undefined;
+      releaseLock(task);
       pump();
       emit();
       landed(task);
     },
     onError: (err) => {
       if (task.upload !== upload || task.status !== "uploading") return;
-      setStatus(task, "error");
       const e = uploadError(err);
-      task.error = e.message;
       reportShown("upload", e, task.parentId);
-      pump();
-      emit();
-      if (!hasActiveUploads()) flushLanded();
+      fail(task, e.message);
     },
     onShouldRetry: (err) => {
       const status = (err as tus.DetailedError).originalResponse?.getStatus() ?? 0;
@@ -231,12 +408,72 @@ function start(task: UploadTask) {
   setStatus(task, "uploading");
   task.upload = upload;
   task.error = undefined;
-  upload.findPreviousUploads().then((previous) => {
-    // The user may have paused or cancelled during the lookup: abort() has no effect yet, so check here before starting
-    if (byId.get(task.id) !== task || task.status !== "uploading" || task.upload !== upload) return;
-    if (previous.length > 0) upload.resumeFromPreviousUpload(previous[0]);
-    upload.start();
-  });
+  void begin(task, upload, fingerprint);
+}
+
+/** A task failed: it says why, and lets go of its file for other tabs */
+function fail(task: UploadTask, message: string) {
+  setStatus(task, "error");
+  task.error = message;
+  task.upload = undefined;
+  releaseLock(task);
+  pump();
+  emit();
+  if (!hasActiveUploads()) flushLanded();
+}
+
+/**
+ * Starts sending: takes the file's lock (another tab may be sending it), notes a sample of its content, and continues
+ * the upload the server has, if any. An upload continued after a reload asks the server first: one it finished (the
+ * answer was lost) is done, and one it no longer has starts again, unless everything had been sent, which is then
+ * reported rather than sent a second time.
+ */
+async function begin(task: UploadTask, upload: tus.Upload, fingerprint: string) {
+  // The user may pause or cancel meanwhile: abort() has no effect before start(), so check after each step
+  const current = () => byId.get(task.id) === task && task.status === "uploading" && task.upload === upload;
+  const release = await acquire(`tf-upload:${task.recordId}`);
+  if (!release) {
+    if (current()) fail(task, t("This file is being uploaded in another tab"));
+    return;
+  }
+  releaseLock(task);
+  task.release = release;
+  if (!current()) return releaseLock(task);
+  task.sample ??= await sampleOf(task.file).catch(() => undefined);
+  let previous = await upload.findPreviousUploads().catch(() => []);
+  if (!current()) return releaseLock(task);
+  const recovered = task.recovered;
+  task.recovered = undefined;
+  if (recovered && !recovered.fresh) {
+    const state = previous.length ? await sessionState(previous[0].uploadUrl ?? "") : null;
+    if (!current()) return releaseLock(task);
+    if (state?.kind === "finished") {
+      await forgetSessions(fingerprint);
+      task.savedAs = savedName(state.savedAs ?? undefined, task.name);
+      setSent(task, task.size);
+      setStatus(task, "done");
+      task.upload = undefined;
+      releaseLock(task);
+      pump();
+      emit();
+      landed(task);
+      return;
+    }
+    if ((state === null || state.kind === "gone") && task.size > 0 && recovered.sent >= task.size) {
+      // Everything had been sent and the server no longer knows it: it may have made the file already
+      task.fresh = true;
+      return fail(task, t("This file may already have been uploaded: check the folder, then retry to upload it again"));
+    }
+    if (state?.kind === "gone") previous = [];
+  }
+  if (task.fresh || recovered?.fresh) {
+    await forgetSessions(fingerprint);
+    task.fresh = false;
+    previous = [];
+    if (!current()) return releaseLock(task);
+  }
+  if (previous.length > 0) upload.resumeFromPreviousUpload(previous[0]);
+  upload.start();
 }
 
 function pump() {
@@ -257,11 +494,32 @@ function requeue(task: UploadTask) {
   queue.push(task);
 }
 
+/** What a new task needs */
+interface TaskInit {
+  file: File;
+  relativePath: string;
+  parentId: string;
+  batch: string;
+  onConflict: "replace" | "keep";
+  recordId?: string;
+  recovered?: { sent: number; fresh: boolean };
+}
+
 /** Queues files for upload into a folder; `endpoint` is a share link's upload address for visitors of the link */
 export function enqueue(files: PickedFile[], parentId: string, endpoint = "/api/uploads") {
   // getRandomValues works on plain http too (randomUUID needs HTTPS)
   const batch = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join("");
-  for (const { file, relativePath, onConflict } of files) {
+  addTasks(
+    files.map(({ file, relativePath, onConflict }) => ({ file, relativePath, parentId, batch, onConflict: onConflict ?? "keep" })),
+    endpoint,
+  );
+}
+
+function addTasks(inits: TaskInit[], endpoint: string) {
+  if (!inits.length) return;
+  const scope = scopeOf(endpoint);
+  const now = Date.now();
+  for (const { file, relativePath, parentId, batch, onConflict, recordId: id, recovered } of inits) {
     const task: UploadTask = {
       id: `u${++seq}`,
       name: file.name,
@@ -273,7 +531,11 @@ export function enqueue(files: PickedFile[], parentId: string, endpoint = "/api/
       sent: 0,
       status: "queued",
       file,
-      onConflict: onConflict ?? "keep",
+      onConflict,
+      recordId: id ?? recordId(),
+      scope,
+      created: now,
+      recovered,
     };
     tasks.push(task);
     byId.set(task.id, task);
@@ -283,6 +545,8 @@ export function enqueue(files: PickedFile[], parentId: string, endpoint = "/api/
   }
   pump();
   emit(true);
+  // Recorded right away, so a reload in the next second still finds them
+  persist();
 }
 
 /**
@@ -323,6 +587,7 @@ export function pause(id: string) {
   const t = byId.get(id);
   if (t?.status === "uploading") {
     t.upload?.abort();
+    releaseLock(t);
     setStatus(t, "paused");
     pump();
     emit(true);
@@ -351,6 +616,9 @@ export function cancel(id: string) {
   // abort(true) also tells the server to delete the temporary data
   if (t.upload && t.status !== "done") t.upload.abort(true).catch(() => {});
   t.upload = undefined;
+  releaseLock(t);
+  // Not started yet, or failed: what the server may have of it goes too
+  if (t.status === "queued" || t.status === "error" || t.status === "paused") void forgetSessions(fingerprintOf(t.endpoint, { ...t, lastModified: t.file.lastModified }));
   forget(t);
   tasks = tasks.filter((x) => x !== t);
   pump();
@@ -368,13 +636,17 @@ export function clearFinished() {
 }
 
 export function cancelAll() {
-  for (const t of tasks) if (t.upload && t.status !== "done") t.upload.abort(true).catch(() => {});
+  for (const t of tasks) {
+    if (t.upload && t.status !== "done") t.upload.abort(true).catch(() => {});
+    releaseLock(t);
+  }
   tasks = [];
   byId.clear();
   totals = emptyTotals();
   queue = [];
   queueHead = 0;
   emit(true);
+  persist();
   flushLanded();
 }
 

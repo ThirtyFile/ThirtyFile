@@ -60,7 +60,7 @@ export function PublicSharePage() {
         {body}
       </main>
       <div className="fixed right-4 bottom-4 z-40 w-[min(380px,calc(100vw-2rem))]">
-        <UploadPanel visitor />
+        <UploadPanel visitor endpoint={shareUploadEndpoint(token)} />
       </div>
     </div>
   );
