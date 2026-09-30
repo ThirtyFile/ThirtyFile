@@ -17,6 +17,7 @@ import {
   UsersRoundIcon,
   type LucideIcon,
 } from "lucide-react";
+import { adminPath } from "@/admin/pages";
 import { t, tc } from "@/lib/i18n";
 
 export type ControlPanelKey =
@@ -63,7 +64,7 @@ export const controlPanelCategoryLabel = (id: ControlPanelCategory) => CONTROL_P
 export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
   {
     key: "users",
-    to: "/admin/users",
+    to: adminPath("users"),
     title: t("Users"),
     desc: t("Add or disable accounts; set permissions, quotas, and administrators"),
     icon: UsersIcon,
@@ -73,7 +74,7 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
   },
   {
     key: "groups",
-    to: "/admin/groups",
+    to: adminPath("groups"),
     title: t("Groups"),
     desc: t("Organize users into groups and grant a whole group access to spaces at once"),
     icon: UsersRoundIcon,
@@ -83,7 +84,7 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
   },
   {
     key: "shares",
-    to: "/admin/shares",
+    to: adminPath("shares"),
     title: t("All share links"),
     desc: t("Find and revoke public links to any file, filtered by space, creator and whether they still work"),
     icon: Link2Icon,
@@ -93,7 +94,7 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
   },
   {
     key: "drives",
-    to: "/admin/drives",
+    to: adminPath("drives"),
     title: tc("admin", "Spaces"),
     desc: t("Team space members, quotas, and storage locations"),
     icon: HardDriveIcon,
@@ -103,7 +104,7 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
   },
   {
     key: "storage",
-    to: "/admin/storage",
+    to: adminPath("storage"),
     title: t("Storage locations"),
     desc: t("Local folders, NAS, or S3-compatible object storage (AWS, R2, RustFS)"),
     icon: DatabaseIcon,
@@ -113,7 +114,7 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
   },
   {
     key: "moves",
-    to: "/admin/moves",
+    to: adminPath("moves"),
     title: t("Moves"),
     desc: t("Spaces being moved to another storage location, with their progress; pause, resume or cancel them"),
     icon: TruckIcon,
@@ -123,7 +124,7 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
   },
   {
     key: "backups",
-    to: "/admin/backups",
+    to: adminPath("backups"),
     title: t("Backups"),
     desc: t("Back up the spaces of a location to another, on a schedule or soon after changes; one-time copies; restoring from them"),
     icon: ArchiveRestoreIcon,
@@ -133,7 +134,7 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
   },
   {
     key: "replicas",
-    to: "/admin/replicas",
+    to: adminPath("replicas"),
     title: t("Replicas"),
     desc: t("Keep the files of a location on other locations too, read from them when it fails, and promote one"),
     icon: CopyCheckIcon,
@@ -143,7 +144,7 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
   },
   {
     key: "usage",
-    to: "/admin/usage",
+    to: adminPath("usage"),
     title: t("Storage usage"),
     desc: t("Usage by space type, trash, and actual disk usage"),
     icon: PieChartIcon,
@@ -153,7 +154,7 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
   },
   {
     key: "general",
-    to: "/admin/general",
+    to: adminPath("general"),
     title: t("General"),
     desc: t("Site URL, default language, the \"All files\" company space, who can create team spaces, and new users' \"My files\""),
     icon: SlidersHorizontalIcon,
@@ -163,7 +164,7 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
   },
   {
     key: "branding",
-    to: "/admin/branding",
+    to: adminPath("branding"),
     title: t("Branding"),
     desc: t("Site name, logo, theme colors, light/dark mode, and sign-in page text"),
     icon: PaletteIcon,
@@ -173,7 +174,7 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
   },
   {
     key: "sso",
-    to: "/admin/sso",
+    to: adminPath("sso"),
     title: t("Single sign-on"),
     desc: t("Sign in with Microsoft Entra ID, Google, GitHub or any OpenID Connect provider"),
     icon: KeyRoundIcon,
@@ -183,7 +184,7 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
   },
   {
     key: "email",
-    to: "/admin/email",
+    to: adminPath("email"),
     title: t("Email"),
     desc: t("The email server that sends notifications about shares, full spaces and access that ends soon"),
     icon: MailIcon,
@@ -193,7 +194,7 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
   },
   {
     key: "activity",
-    to: "/admin/activity",
+    to: adminPath("activity"),
     title: t("Activity log"),
     desc: t("Search user actions, sign-ins, and share link access; filter and export"),
     icon: ActivityIcon,
@@ -203,7 +204,7 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
   },
   {
     key: "logs",
-    to: "/admin/logs",
+    to: adminPath("logs"),
     title: t("Log settings"),
     desc: t("How long logs are kept, whether older logs are archived or deleted, and whether visitor IPs are recorded"),
     icon: ArchiveIcon,
