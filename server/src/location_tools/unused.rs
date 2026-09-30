@@ -71,6 +71,30 @@ pub struct Job {
     all: Vec<UnusedItem>,
 }
 
+impl Job {
+    /// The job as the page sees it: without the whole list of what was found (the page polls it, and the list can hold
+    /// hundreds of thousands of items)
+    fn view(&self) -> Job {
+        Job {
+            scan_id: self.scan_id.clone(),
+            phase: self.phase,
+            started_at: self.started_at,
+            finished_at: self.finished_at,
+            scanned: self.scanned,
+            count: self.count,
+            bytes: self.bytes,
+            items: self.items.clone(),
+            recent: self.recent,
+            error: self.error.clone(),
+            removed: self.removed,
+            removed_bytes: self.removed_bytes,
+            kept: self.kept,
+            failed: self.failed,
+            all: Vec::new(),
+        }
+    }
+}
+
 /// Searches by location id (one per location, the latest)
 static JOBS: LazyLock<Mutex<HashMap<String, Job>>> = LazyLock::new(Default::default);
 
@@ -81,7 +105,7 @@ fn update(id: &str, scan_id: &str, f: impl FnOnce(&mut Job)) {
 }
 
 pub async fn unused_status(_: Admin, Path(id): Path<String>) -> Json<Option<Job>> {
-    Json(JOBS.lock().unwrap().get(&id).cloned())
+    Json(JOBS.lock().unwrap().get(&id).map(Job::view))
 }
 
 /// Starts a search in the background; its progress is read with `unused_status`
@@ -196,7 +220,7 @@ pub async fn remove_unused(State(st): State<AppState>, Admin(user): Admin, Path(
         }
         job.phase = "removing";
         job.finished_at = None;
-        (job.clone(), job.all.clone())
+        (job.view(), std::mem::take(&mut job.all))
     };
     let scan_id = job.scan_id.clone();
     tokio::spawn(async move {

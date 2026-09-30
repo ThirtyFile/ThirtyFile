@@ -407,6 +407,8 @@ pub async fn run(st: &AppState, rows: Vec<Unfinished>, progress: &Tracker) -> Ap
         }
         schedule_blob_removal(st, out.blobs);
         crate::fsops::remove_below_later(out.on_disk);
+        // Whatever waits for the write lock, or for the one worker a small server has, gets its turn in between
+        tokio::task::yield_now().await;
     }
     Ok(())
 }
@@ -444,6 +446,7 @@ pub async fn purge_now(st: &AppState, id: &str) -> AppResult<usize> {
         if done {
             return Ok(deleted);
         }
+        tokio::task::yield_now().await;
     }
 }
 
@@ -461,6 +464,8 @@ pub async fn repath_now(st: &AppState, drive_id: &str, old: &str, new: &str) -> 
         if done {
             return Ok(());
         }
+        drop(_w);
+        tokio::task::yield_now().await;
     }
 }
 
