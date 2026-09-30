@@ -50,6 +50,7 @@ import {
   type Sel,
   type Session,
 } from "./session";
+import { officeErrorMessage } from "@/lib/officeErrors";
 
 // ───────────── Component ─────────────
 
@@ -77,7 +78,7 @@ export default function SheetEditor(props: { node: Node; source: FileSource; onS
         keepSession(node.id, s);
         setSession(s);
       })
-      .catch((e) => !cancelled && setError(e instanceof Error ? e.message : t("Couldn't open this spreadsheet")));
+      .catch((e) => !cancelled && setError(officeErrorMessage(e, t("Couldn't open this spreadsheet"))));
     return () => {
       cancelled = true;
       abort.abort();
@@ -432,7 +433,7 @@ function Workspace({
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
         toast.error(e.message, { duration: 10000, action: { label: t("Reload (discard changes)"), onClick: onReload } });
-      } else toast.error(e instanceof Error ? e.message : t("Couldn't save"));
+      } else toast.error(officeErrorMessage(e, t("Couldn't save")));
     } finally {
       savingRef.current = false;
       setSaving(false);

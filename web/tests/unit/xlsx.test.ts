@@ -67,7 +67,7 @@ describe("reading", () => {
   test("a file that isn't a workbook is refused", async () => {
     const zip = new JSZip();
     zip.file("hello.txt", "hi");
-    await expect(readXlsx(await zip.generateAsync({ type: "arraybuffer" }))).rejects.toThrow("Couldn't find the workbook contents");
+    await expect(readXlsx(await zip.generateAsync({ type: "arraybuffer" }))).rejects.toMatchObject({ code: "no-workbook" });
   });
 });
 
