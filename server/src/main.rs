@@ -66,10 +66,11 @@ use crate::{
     state::{AppState, Inner},
 };
 
-/// The version: the release number the image was built for (THIRTYFILE_VERSION at build time), else Cargo.toml's
+/// The version: the release number the image was built for (THIRTYFILE_VERSION at build time), else "dev" (Cargo.toml
+/// doesn't carry the release number)
 pub const VERSION: &str = match option_env!("THIRTYFILE_VERSION") {
     Some(v) => v,
-    None => env!("CARGO_PKG_VERSION"),
+    None => "dev",
 };
 
 #[derive(Parser)]

@@ -24,8 +24,9 @@
 FROM --platform=$BUILDPLATFORM node:26.10.0-alpine3.24@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80 AS web
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-# Node no longer includes corepack (since version 25), which installs the pnpm version named in package.json
-RUN npm install --global corepack && corepack enable
+# Node no longer includes corepack (since version 25), which installs the pnpm version named in package.json and checks
+# it against the hash given there. Its version is pinned here (Dependabot doesn't see it: update it by hand)
+RUN npm install --global corepack@0.36.0 && corepack enable
 WORKDIR /src/web
 COPY web/package.json web/pnpm-lock.yaml ./
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
@@ -33,10 +34,11 @@ RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
 COPY web/ ./
 RUN pnpm build
 # Licence notices of the npm packages the interface is built from, with the licence files they ship (pnpm looks the
-# packages up in its store)
+# packages up in its store). Stops on a licence that isn't allowed
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
-    pnpm licenses list --prod --json > /tmp/licences.json \
- && node scripts/third-party-notices.mjs < /tmp/licences.json > /src/notices-web.txt
+    pnpm licenses list --prod --json > /tmp/licences-prod.json \
+ && pnpm licenses list --dev --json > /tmp/licences-dev.json \
+ && node scripts/third-party-notices.mjs /tmp/licences-prod.json /tmp/licences-dev.json > /src/notices-web.txt
 
 # ───────────── 2) Backend (with the frontend embedded) ─────────────
 # Runs on the build machine's platform and cross-compiles for the target platform with xx,
@@ -79,7 +81,24 @@ RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry,sharin
  && install -m 755 "target/$(xx-cargo --print-target-triple)/release/thirtyfile" /thirtyfile \
  && xx-verify --static /thirtyfile
 
-# ───────────── 3) Third-party notices ─────────────
+# ───────────── 3) Runtime files ─────────────
+# Everything the runtime image contains besides the server, prepared on the build machine's platform: the runtime
+# stage is empty (scratch) and runs no commands, so building it for another architecture needs no emulation
+FROM --platform=$BUILDPLATFORM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS rootfs
+# ca-certificates: certificate validation for S3, single sign-on and FTPS (without it every https connection fails)
+# tzdata: allows setting the time zone with TZ (log exports, archive file names)
+# passwd/group: names for user 1000 and root (the server switches user by number and doesn't read them itself)
+# tmp: the usual temporary folder, for anything that expects one (ThirtyFile's own temporary files are in /data/tmp)
+RUN apk add --no-cache ca-certificates tzdata \
+ && apk list -I ca-certificates-bundle tzdata | cut -d' ' -f1 > /packages.txt \
+ && mkdir -p /rootfs/etc/ssl/certs /rootfs/usr/share /rootfs/tmp /data /storage \
+ && chmod 1777 /rootfs/tmp \
+ && cp /etc/ssl/certs/ca-certificates.crt /rootfs/etc/ssl/certs/ \
+ && cp -r /usr/share/zoneinfo /rootfs/usr/share/ \
+ && printf '%s\n' "root:x:0:0:root:/root:/sbin/nologin" "drive:x:1000:1000::/data:/sbin/nologin" > /rootfs/etc/passwd \
+ && printf '%s\n' "root:x:0:" "drive:x:1000:" > /rootfs/etc/group
+
+# ───────────── 4) Third-party notices ─────────────
 # The licences of the crates and npm packages built into ThirtyFile require passing on their notices. cargo about
 # collects those of the crates (settings: server/about.toml, which accepts the licences deny.toml allows). The same for
 # every platform, so built once, on the build machine's platform, beside the backend.
@@ -106,26 +125,31 @@ COPY --from=web /src/notices-web.txt /tmp/
 # after it, cargo about only reads the downloaded crates (--offline), so the result depends on nothing else
 RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     cargo fetch --locked \
- && cargo about generate --offline --locked --fail -o /tmp/notices-rust.txt about.hbs \
+ && cargo about generate --offline --locked --fail -o /tmp/notices-rust.txt about.hbs
+# What is neither a crate nor an npm package: musl, the C library linked into the program (its COPYRIGHT file, from
+# its release, checked against the checksum published with it; keep the version equal to Alpine's musl-dev, which
+# the build links), and, in the image only, Alpine's certificate authorities (Mozilla's list, MPL-2.0) and time zone
+# database (public domain)
+ADD --checksum=sha256:d585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a \
+    https://musl.libc.org/releases/musl-1.2.6.tar.gz /tmp/musl.tar.gz
+ADD --checksum=sha256:3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04 \
+    https://www.mozilla.org/media/MPL/2.0/index.txt /tmp/MPL-2.0.txt
+COPY --from=rootfs /packages.txt /tmp/
+RUN tar -xzf /tmp/musl.tar.gz -C /tmp musl-1.2.6/COPYRIGHT \
+ && rule="$(printf '=%.0s' $(seq 80))" && line="$(printf -- '-%.0s' $(seq 80))" \
+ && { echo "OTHER PARTS"; \
+      echo; echo "$rule"; echo "musl 1.2.6: the C standard library, built into the server program"; \
+      echo "Licence: MIT"; echo "Homepage: https://musl.libc.org/"; echo "$line"; cat /tmp/musl-1.2.6/COPYRIGHT; \
+      echo; echo "$rule"; echo "$(grep '^ca-certificates-bundle-' /tmp/packages.txt): the certificate authorities in"; \
+      echo "/etc/ssl/certs/ca-certificates.crt (Docker image only), Mozilla's list as packaged by Alpine Linux"; \
+      echo "Licence: MPL-2.0"; echo "Source: https://hg.mozilla.org/projects/nss/ (lib/ckfw/builtins/certdata.txt)"; \
+      echo "Homepage: https://gitlab.alpinelinux.org/alpine/ca-certificates"; echo "$line"; cat /tmp/MPL-2.0.txt; \
+      echo; echo "$rule"; echo "$(grep '^tzdata-' /tmp/packages.txt): the time zone database in /usr/share/zoneinfo (Docker image only)"; \
+      echo "Licence: public domain"; echo "Homepage: https://www.iana.org/time-zones"; \
+    } > /tmp/notices-other.txt \
  && { echo "ThirtyFile includes the following third-party software, under the licences reproduced below."; \
       echo "ThirtyFile itself is licensed under the Apache License 2.0 (LICENSE, next to this file)."; \
-      echo; cat /tmp/notices-rust.txt; echo; echo; cat /tmp/notices-web.txt; } > /THIRD-PARTY-NOTICES
-
-# ───────────── 4) Runtime files ─────────────
-# Everything the runtime image contains besides the server, prepared on the build machine's platform: the runtime
-# stage is empty (scratch) and runs no commands, so building it for another architecture needs no emulation
-FROM --platform=$BUILDPLATFORM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS rootfs
-# ca-certificates: certificate validation for S3, single sign-on and FTPS (without it every https connection fails)
-# tzdata: allows setting the time zone with TZ (log exports, archive file names)
-# passwd/group: names for user 1000 and root (the server switches user by number and doesn't read them itself)
-# tmp: the usual temporary folder, for anything that expects one (ThirtyFile's own temporary files are in /data/tmp)
-RUN apk add --no-cache ca-certificates tzdata \
- && mkdir -p /rootfs/etc/ssl/certs /rootfs/usr/share /rootfs/tmp /data /storage \
- && chmod 1777 /rootfs/tmp \
- && cp /etc/ssl/certs/ca-certificates.crt /rootfs/etc/ssl/certs/ \
- && cp -r /usr/share/zoneinfo /rootfs/usr/share/ \
- && printf '%s\n' "root:x:0:0:root:/root:/sbin/nologin" "drive:x:1000:1000::/data:/sbin/nologin" > /rootfs/etc/passwd \
- && printf '%s\n' "root:x:0:" "drive:x:1000:" > /rootfs/etc/group
+      echo; cat /tmp/notices-rust.txt; echo; echo; cat /tmp/notices-web.txt; echo; echo; cat /tmp/notices-other.txt; } > /THIRD-PARTY-NOTICES
 
 # ───────────── 5) Runtime ─────────────
 # The runtime image starts empty: the backend is a statically linked musl binary and needs nothing else (no shell, no

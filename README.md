@@ -74,17 +74,11 @@ pnpm install
 pnpm dev
 ```
 
-Checks before committing:
+Checks before committing, the same ones that run on GitHub: the interface, the server, and an end-to-end test that signs in, uploads and previews files in a real browser (the first time, get the browser with `cd web && pnpm exec playwright install chromium`):
 
 ```bash
-cd server && cargo test && cargo clippy --all-targets
-cd ../web && pnpm typecheck && pnpm lint && node scripts/check-i18n.mjs && pnpm test
-```
-
-The end-to-end test signs in, uploads and previews files in a real browser, against a server built from the repository (the first time, get the browser with `pnpm exec playwright install chromium`):
-
-```bash
-cd web && pnpm build && (cd ../server && cargo build --release) && pnpm test:e2e
+scripts/check.sh            # everything
+scripts/check.sh web        # or one part: web, server or e2e
 ```
 
 | Folder | Contents |

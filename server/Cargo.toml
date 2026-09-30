@@ -1,6 +1,8 @@
 [package]
 name = "thirtyfile"
-version = "0.1.0"
+# Not the release number: releases set it when they are built (THIRTYFILE_VERSION, see main.rs), so builds that aren't
+# a release call themselves "dev"
+version = "0.0.0"
 edition = "2024"
 # Dependencies (russh etc.) require 1.89
 rust-version = "1.89"
