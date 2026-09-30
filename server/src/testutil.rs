@@ -5,7 +5,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use crate::{
     auth::{self, User},
     db::{self, NewUser},
-    state::{AppState, Inner},
+    state::{AppState, Setup},
     storage::{LocalStorage, Storage},
     util::{new_id, now},
 };
@@ -58,12 +58,9 @@ async fn make_env(space_folders: bool) -> TestEnv {
     let mut storages: HashMap<String, Arc<dyn Storage>> = HashMap::new();
     storages.insert("local".into(), Arc::new(LocalStorage::new(dir.join("blobs"), "local")));
     let (log_tx, log_rx) = crate::logs::channel();
-    let st = AppState(Arc::new(Inner {
+    let st = AppState::new(Setup {
         db,
-        storages: std::sync::RwLock::new(storages),
-        moves: Default::default(),
-        backups: crate::backups::Queue::backups(),
-        replicas: crate::backups::Queue::replicas(),
+        storages,
         data_dir: dir.clone(),
         storage_dir: dir.join("blobs"),
         space_folders,
@@ -72,28 +69,14 @@ async fn make_env(space_folders: bool) -> TestEnv {
         trash_days: 30,
         trust_proxy: Default::default(),
         max_upload: 0,
-        write_lock: tokio::sync::Mutex::new(()),
-        active_uploads: Default::default(),
-        login_failures: Default::default(),
-        detached_purge: Default::default(),
-        thumb_permits: tokio::sync::Semaphore::new(2),
+        thumb_jobs: 2,
         thumb_decode_bytes: crate::thumbnails::MAX_THUMB_DECODE_BYTES,
-        system: std::sync::RwLock::new(system),
-        blob_guard: Default::default(),
-        logs: std::sync::RwLock::new(Default::default()),
-        branding: std::sync::RwLock::new(Default::default()),
-        location_health: Default::default(),
+        system,
+        logs: Default::default(),
+        branding: Default::default(),
         sso: Default::default(),
-        sso_pending: Default::default(),
-        twofactor_setups: Default::default(),
-        archive_lock: Default::default(),
-        share_views: Default::default(),
-        download_links: Default::default(),
-        jobs: Default::default(),
         log_tx,
-        usage: Default::default(),
-        error_log: Default::default(),
-    }));
+    });
     let _writer = crate::logs::spawn_writer(st.clone(), log_rx);
     TestEnv { st, dir }
 }

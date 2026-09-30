@@ -1,13 +1,13 @@
 //! Starting the server: the data folder, the database, the settings and the background tasks, then serving until
 //! a stop signal.
 
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
 use crate::{
     backups, branding,
     cli::{self, Config},
     db, folders, locations, logs, moves, personal, replicas, secrets, sso,
-    state::{AppState, Inner},
+    state::{AppState, Setup},
     thumbnails, tree, upload, usage, util,
 };
 #[cfg(target_os = "linux")]
@@ -88,12 +88,9 @@ pub async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error
         memory.map_or("unknown".to_string(), util::format_bytes_u64),
         cfg.db_cache_mb
     );
-    let state = AppState(Arc::new(Inner {
+    let state = AppState::new(Setup {
         db,
-        storages: std::sync::RwLock::new(storages),
-        moves: Default::default(),
-        backups: crate::backups::Queue::backups(),
-        replicas: crate::backups::Queue::replicas(),
+        storages,
         data_dir: cfg.data.clone(),
         storage_dir: storage,
         space_folders: Some(space_folders),
@@ -102,28 +99,14 @@ pub async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error
         trash_days: cfg.trash_days,
         trust_proxy: cfg.trust_proxy,
         max_upload: cfg.max_upload_mb.checked_mul(1024 * 1024).ok_or("THIRTYFILE_MAX_UPLOAD_MB is too large")?,
-        write_lock: tokio::sync::Mutex::new(()),
-        active_uploads: Default::default(),
-        login_failures: Default::default(),
-        detached_purge: Default::default(),
-        thumb_permits: tokio::sync::Semaphore::new(thumb_jobs as usize),
+        thumb_jobs: thumb_jobs as usize,
         thumb_decode_bytes,
-        system: std::sync::RwLock::new(system),
-        blob_guard: Default::default(),
-        logs: std::sync::RwLock::new(log_settings),
-        branding: std::sync::RwLock::new(branding),
-        location_health: Default::default(),
-        sso: std::sync::RwLock::new(sso_settings),
-        sso_pending: Default::default(),
-        twofactor_setups: Default::default(),
-        archive_lock: Default::default(),
-        share_views: Default::default(),
-        download_links: Default::default(),
-        jobs: Default::default(),
+        system,
+        logs: log_settings,
+        branding,
+        sso: sso_settings,
         log_tx,
-        usage: Default::default(),
-        error_log: Default::default(),
-    }));
+    });
 
     let log_writer = logs::spawn_writer(state.clone(), log_rx);
     if let Err(e) = tree::recompute_usage(&state).await {

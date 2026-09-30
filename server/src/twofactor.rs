@@ -233,9 +233,16 @@ async fn turn_on(st: &AppState, user_id: i64, secret: &str, step: i64) -> AppRes
 async fn turn_off(st: &AppState, user_id: i64) -> AppResult<bool> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    let res = sqlx::query("UPDATE users SET totp_secret = NULL, totp_last_step = 0 WHERE id = ? AND totp_secret IS NOT NULL").bind(user_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM recovery_codes WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
+    let off = turn_off_in(&mut tx, user_id).await?;
     tx.commit().await?;
+    Ok(off)
+}
+
+/// Turns two-factor sign-in off for an account and removes its recovery codes (also `thirtyfile reset-two-factor`):
+/// whether it was on
+pub async fn turn_off_in(conn: &mut sqlx::SqliteConnection, user_id: i64) -> AppResult<bool> {
+    let res = sqlx::query("UPDATE users SET totp_secret = NULL, totp_last_step = 0 WHERE id = ? AND totp_secret IS NOT NULL").bind(user_id).execute(&mut *conn).await?;
+    sqlx::query("DELETE FROM recovery_codes WHERE user_id = ?").bind(user_id).execute(&mut *conn).await?;
     Ok(res.rows_affected() > 0)
 }
 

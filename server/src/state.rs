@@ -93,6 +93,70 @@ pub struct Inner {
     pub error_log: crate::logs::ErrorLogState,
 }
 
+/// What a server starts with: its settings and what startup loaded from the database. Everything else in `Inner`
+/// starts empty.
+pub struct Setup {
+    pub db: SqlitePool,
+    pub storages: HashMap<String, Arc<dyn Storage>>,
+    pub data_dir: PathBuf,
+    pub storage_dir: PathBuf,
+    pub space_folders: Option<PathBuf>,
+    pub secret: Vec<u8>,
+    pub secure_cookie: bool,
+    pub trash_days: i64,
+    pub trust_proxy: crate::auth::TrustProxy,
+    pub max_upload: u64,
+    /// Thumbnails made at the same time
+    pub thumb_jobs: usize,
+    pub thumb_decode_bytes: u64,
+    pub system: SystemSettings,
+    pub logs: crate::logs::LogSettings,
+    pub branding: crate::branding::Branding,
+    pub sso: crate::sso::SsoSettings,
+    pub log_tx: tokio::sync::mpsc::Sender<crate::logs::LogEvent>,
+}
+
+impl AppState {
+    pub fn new(s: Setup) -> AppState {
+        AppState(Arc::new(Inner {
+            db: s.db,
+            storages: RwLock::new(s.storages),
+            moves: Default::default(),
+            backups: crate::backups::Queue::backups(),
+            replicas: crate::backups::Queue::replicas(),
+            data_dir: s.data_dir,
+            storage_dir: s.storage_dir,
+            space_folders: s.space_folders,
+            secret: s.secret,
+            secure_cookie: s.secure_cookie,
+            trash_days: s.trash_days,
+            trust_proxy: s.trust_proxy,
+            max_upload: s.max_upload,
+            write_lock: tokio::sync::Mutex::new(()),
+            active_uploads: Default::default(),
+            login_failures: Default::default(),
+            detached_purge: Default::default(),
+            thumb_permits: Semaphore::new(s.thumb_jobs),
+            thumb_decode_bytes: s.thumb_decode_bytes,
+            system: RwLock::new(s.system),
+            blob_guard: Default::default(),
+            logs: RwLock::new(s.logs),
+            branding: RwLock::new(s.branding),
+            location_health: Default::default(),
+            sso: RwLock::new(s.sso),
+            sso_pending: Default::default(),
+            twofactor_setups: Default::default(),
+            archive_lock: Default::default(),
+            share_views: Default::default(),
+            download_links: Default::default(),
+            jobs: Default::default(),
+            log_tx: s.log_tx,
+            usage: Default::default(),
+            error_log: Default::default(),
+        }))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SystemSettings {
     /// Whether the "All files" shared space is enabled
