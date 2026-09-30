@@ -1,5 +1,5 @@
 //! ThirtyFile's server. The program (main.rs) only calls `cli::main`; tests in `tests/` start a server with
-//! `app::startup::start`. The other modules stay private, so the compiler still reports code nothing uses.
+//! `app::startup`. The other modules stay private, so the compiler still reports code nothing uses.
 
 mod admin;
 pub mod app;

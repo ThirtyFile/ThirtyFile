@@ -14,7 +14,12 @@ async fn a_new_server_starts_lets_the_administrator_sign_in_and_keeps_its_data_f
     let dir = std::env::temp_dir().join(format!("thirtyfile-startup-{}", uuid::Uuid::new_v4()));
     let password = format!("pw-{}", uuid::Uuid::new_v4());
     let config = || Config::try_parse_from(["thirtyfile", "--data", dir.to_str().unwrap(), "--admin-password", &password]).unwrap();
-    let server = startup::start(config(), dir.join("blobs")).await.unwrap().expect("no subcommand was given");
+    let start = || async {
+        let cfg = config();
+        let (db, _) = startup::open(&cfg.server).await?;
+        startup::start(cfg.server, dir.join("blobs"), db).await
+    };
+    let server = start().await.unwrap();
     let app = server.router();
 
     let res = app.clone().oneshot(Request::get("/api/health").body(Body::empty()).unwrap()).await.unwrap();
@@ -30,7 +35,7 @@ async fn a_new_server_starts_lets_the_administrator_sign_in_and_keeps_its_data_f
     assert!(res.headers().contains_key(header::SET_COOKIE));
 
     // A second server on the same data folder doesn't start while this one runs
-    let second = startup::start(config(), dir.join("blobs")).await.err().expect("the data folder is in use");
+    let second = start().await.err().expect("the data folder is in use");
     assert_eq!(second.to_string(), "ThirtyFile is already running with this data folder. Stop it first.");
 
     server.state.db.close().await;
