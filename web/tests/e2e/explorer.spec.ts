@@ -19,10 +19,13 @@ async function signIn(page: Page) {
   await page.waitForURL(/\/files/);
 }
 
-/** A new folder, made through the API with the page's session (inside My files when no parent is given) */
+/**
+ * A new folder, made through the API with the page's session. In My files (when no parent is given) its name gets a
+ * unique ending, so a test run again on the same server (a retry) starts afresh.
+ */
 async function folder(page: Page, name: string, parent?: string): Promise<string> {
   const parentId = parent ?? (await (await page.request.get("/api/auth/me")).json()).root_id;
-  const res = await page.request.post("/api/folders", { data: { parent_id: parentId, name } });
+  const res = await page.request.post("/api/folders", { data: { parent_id: parentId, name: parent ? name : `${name} ${Date.now().toString(36)}` } });
   expect(res.ok()).toBe(true);
   return (await res.json()).id;
 }
@@ -109,7 +112,6 @@ test("after Enter opens a folder, the arrow keys go on in it", async ({ page }) 
 
 test("search waits for an input method to finish composing", async ({ page }) => {
   await signIn(page);
-  await folder(page, "IME");
   await page.goto("/files");
   const box = page.getByRole("textbox", { name: /Search/ }).first();
   await box.click();
