@@ -108,7 +108,51 @@ docker start thirtyfile</code></pre>
         <p>With Docker Compose, use <code>docker compose stop</code> and <code>docker compose start</code> in the folder of <code>compose.yaml</code>, and <code>data storage</code> relative to it.</p>
         <div class="note"><strong>Also back up:</strong> storage locations mounted besides <code>/storage</code> (a NAS folder added as a <em>Local folder</em> location, folder spaces), and files on S3, SFTP or FTP with the storage's own tools. The backup contains the list of those files and who may see them, not their content.</div>
         <h3 id="copies">Copies of a location's files</h3>
-        <p>ThirtyFile can also copy the files of a storage location to another location itself: <strong>Copy everything to…</strong> under <strong>Control panel › Storage locations</strong> (see <a href="storage.html#copy">Copying everything to another location</a>). Such a copy holds the spaces' folders, files, trash and earlier versions, checked against their SHA-256, and a space can be restored from it into a new folder. It is a copy of files, not of the whole server: accounts, settings, share links and logs aren't in it, so keep backing up the <code>data</code> folder as above.</p>
+        <p>ThirtyFile can also copy the files of a storage location to another location itself, once with <strong>Copy everything to…</strong> under <strong>Control panel › Storage locations</strong> (see <a href="storage.html#copy">Copying everything to another location</a>), or again and again with a <a href="#file-backups">backup of files</a>. It is a copy of files, not of the whole server: accounts, settings, share links and logs aren't in it, so keep backing up the <code>data</code> folder as above.</p>
+
+        <h2 id="file-backups">Backups of files to another location</h2>
+        <p>A backup keeps snapshots of the spaces of one storage location on another: a NAS, another disk, an S3 bucket, an SFTP or FTP server. Each snapshot is a restore point: the spaces as they were at one moment, with their folders, files, trash and earlier versions. Older snapshots are kept as long as you choose, so a file deleted or changed by mistake can be brought back as it was. Only administrators see and manage backups.</p>
+        <h3 id="backup-make">Making a backup</h3>
+        <p>Under <strong>Control panel › Backups</strong>, choose <strong>New backup…</strong> (or <strong>Back up…</strong> in the menu of a storage location), then:</p>
+        <ul>
+          <li><strong>Back up</strong> and <strong>To</strong>: the location whose spaces are backed up, and where the backup goes. Locations in the same place, or one inside the other, are refused. One on the same disk or storage service is allowed, and the dialog says it doesn't survive a failure of that disk or service. A location can be backed up to several others, each with a backup of its own.</li>
+          <li><strong>Spaces</strong>: every space on the location, including spaces added to it later (the default), or the spaces you tick. Earlier versions and the trash are included unless you untick them.</li>
+          <li><strong>When</strong>:
+            <ul>
+              <li><em>Soon after changes</em>: every change to a space (an upload, an edit, a rename, a move, a deletion, a change of access) is counted the moment it is saved. After a few seconds without more, a snapshot is made. One snapshot is made at a time; changes during it make one more after it. Files are protected a little after they change, not at the same moment: the Backups page shows how far behind a backup is.</li>
+              <li><em>On a schedule</em>: every so many minutes or hours, every day at a time, or on some days of the week at a time, in a time zone you choose (the next three times are shown). A time that doesn't exist on the day summer time starts isn't run that day; a time that happens twice when it ends is run once. After the server was off, one snapshot catches up, not one for every time missed.</li>
+              <li><em>Both</em> (the default): soon after changes, and on the schedule as well.</li>
+            </ul>
+          </li>
+          <li><strong>Keeping and checking</strong>: how many days snapshots are kept (30 by default), how many of the newest are always kept (at least 1), after how many hours without a new snapshot administrators are told (48), how often the backup is read back and checked (every 7 days), and a speed limit for copying (none).</li>
+        </ul>
+        <p>The first snapshot is made right away and copies everything; later ones copy only content the backup doesn't hold yet (each content is stored once, whichever snapshots hold it). Snapshots run in the background, one job at a time with copies and restores, and go on when the page is closed or the server restarts.</p>
+        <h3 id="backup-consistency">What a snapshot holds</h3>
+        <ul>
+          <li><strong>Content-store spaces</strong> (S3, SFTP, FTP): exactly what the spaces held when their list of files was made. Content deleted after that is kept from deletion until the snapshot has copied it.</li>
+          <li><strong>Folder spaces</strong> (the storage folder, <em>Local folder</em> locations): the folder is checked for changes other programs made (over SMB, say) first, then each file is read and checked not to have changed while it was read; one that changed is read again. Each file is whole, but files other programs change at different moments aren't one instant together. Changes other programs make are seen by the next check for changes, not the moment they are made.</li>
+          <li>Only a complete snapshot counts: its manifest and then its completion marker are written last, after all its content is copied and checked. A snapshot that can't copy everything stops, lists what it couldn't copy (never naming files of personal spaces), and deletes nothing.</li>
+        </ul>
+        <h3 id="backup-health">Following a backup</h3>
+        <p>Each backup shows how it is doing: <em>Protected</em> (the newest snapshot holds every change), <em>Changes waiting</em> (and for how long), <em>Backing up</em>, <em>Waiting for the location</em> (it can't be reached; tried again every few minutes), <em>Failing</em> (the last snapshot stopped by an error; tried again every hour, or at once with <strong>Back up now</strong>), <em>Overdue</em> (no new snapshot for longer than the policy allows), <em>Paused</em>, and the time the spaces are protected as of. Administrators get a notification (and an email, when set up) once when a backup starts failing, waits for its location or is overdue, and once when it works again. <strong>Details</strong> lists the restore points and the jobs, with their errors.</p>
+        <p><strong>Pause backing up</strong> stops making snapshots and keeps the ones made. <strong>Delete copy</strong> stops the backup and deletes its folder, with every snapshot in it, after you confirm; it can be paused, not cancelled. A location holding a backup can't be deleted until the backup is.</p>
+        <h3 id="backup-size">How much room it takes</h3>
+        <p>Content several snapshots hold is stored once, so a backup takes about the size of the spaces, plus what changed or was deleted during the days snapshots are kept. After each new snapshot, the ones older than the policy keeps are deleted (never the newest ones), then content none of the others holds. <strong>Control panel › Storage usage</strong> shows what backups take on each location.</p>
+        <h3 id="backup-restore">Restoring from a backup</h3>
+        <p>Select the backup and choose <strong>Restore…</strong>, then a restore point and a space. For company and team spaces you can pick a folder, or some of its items; a personal space is restored whole, only into its owner's personal space, since administrators don't see its files.</p>
+        <ul>
+          <li><strong>Into a new folder</strong> (the default): everything goes into a folder of its own, <em>Restored &lt;space&gt; &lt;date&gt;</em>, in the space or another one you choose. Nothing there is replaced.</li>
+          <li><strong>Back where it was</strong>: into the space itself. Folders still there are used, missing ones are made again. Before it starts, the dialog says how many files have something where they go; choose to skip them, keep both (the restored one gets a number), or replace their content (what they have now is kept as an earlier version).</li>
+          <li>Each file is checked against its SHA-256 as it comes back. Restored items take the permissions of where they go: the access the backup recorded isn't given again. Earlier versions stay in the backup. Files that can't be restored are listed, with why.</li>
+        </ul>
+        <h3 id="backup-drill">When the server itself is lost</h3>
+        <p>A backup of files doesn't depend on the server that made it: each snapshot's manifest, on the backup's location, lists the spaces, folders and files and the content they had (<code>.thirtyfile-backups/&lt;id&gt;/</code>, see <a href="storage.html#copy-where">the layout</a>). To restore on a new server after the old one and its database are gone:</p>
+        <ol>
+          <li>Install ThirtyFile, and create the accounts whose personal spaces you want back, with the same user names.</li>
+          <li>Add the backup's location as a storage location with the same settings. Its <code>.thirtyfile-location</code> file names the old server's location, so a new one is refused: delete that file (in the folder, or at the top of the bucket or server folder) first, since the server it named is gone.</li>
+          <li>Under <strong>Control panel › Backups</strong>, choose <strong>Find backups on a location…</strong> and that location. The backups found are listed and checked in the background; their complete snapshots can then be restored from.</li>
+        </ol>
+        <p>This brings files back, not the server: accounts, groups, access, share links, settings and logs come from a backup of the <code>data</code> folder (see <a href="#backup">Backing up</a>), and the passwords saved for storage locations and single sign-on need <code>secret.key</code> (see <a href="#key">below</a>) or entering again. Keep the settings of the backup's location (keys, passwords) somewhere safe outside ThirtyFile, so you can add it again. Practise it now and then: restore a folder into a new folder, and check a few files.</p>
 
         <h2 id="restore">Restoring</h2>
         <ol>

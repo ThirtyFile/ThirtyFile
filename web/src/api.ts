@@ -364,6 +364,49 @@ export interface BackupSet {
   objects: number;
   bytes: number;
   snapshots: BackupSnapshot[];
+  /** Backups made by a policy: its settings and how it is doing */
+  policy: BackupPolicy | null;
+}
+
+/** When a policy makes snapshots on a schedule: every N minutes, daily at a time, or on some days of the week */
+export type BackupSchedule = { every: number } | { daily: string } | { weekly: string; days: number[] };
+
+export type BackupHealthState = "protected" | "catching_up" | "running" | "waiting" | "failing" | "overdue" | "paused" | "never";
+
+/** A backup policy's settings */
+export interface BackupPolicySettings {
+  enabled: boolean;
+  mode: "realtime" | "scheduled" | "both";
+  schedule: BackupSchedule;
+  tz: string;
+  /** Every space on the location, those added later too; else `spaces` */
+  all_spaces: boolean;
+  spaces: string[];
+  versions: boolean;
+  trash: boolean;
+  keep_days: number;
+  keep_min: number;
+  /** Bytes per second, 0: no limit */
+  rate_limit: number;
+  alert_hours: number;
+  verify_days: number;
+}
+
+export interface BackupPolicy extends BackupPolicySettings {
+  next_run_at: number | null;
+  last_run_at: number | null;
+  last_verify_at: number | null;
+  created_at: number;
+  updated_at: number;
+  health: {
+    state: BackupHealthState;
+    /** When the newest complete snapshot read the spaces */
+    protected_through: number | null;
+    /** Since when changes wait for a snapshot */
+    behind_since: number | null;
+    changed_spaces: number;
+    error: string | null;
+  };
 }
 
 /** Work on a copy: making it, restoring from it, checking it, deleting it */
@@ -424,14 +467,44 @@ export interface CopyPreview {
   problem: string | null;
 }
 
-/** What restoring a space of a copy would do */
+/** What restoring from a copy or backup would do */
 export interface RestorePreview {
   space: BackupSpace;
   target_drive: string | null;
   target_name: string | null;
   folder_name: string;
   targets: { id: string; name: string; kind: DriveKind }[];
+  /** It can go back into its original place: the space is still there */
+  original: boolean;
+  files: number;
+  bytes: number;
+  /** Into the original place: files with an item where they go, of the first `checked` */
+  conflicts: number | null;
+  checked: number;
   problem: string | null;
+}
+
+/** What to restore, and how */
+export interface RestoreRequest {
+  space: string;
+  folder?: string | null;
+  items?: string[] | null;
+  target_drive?: string | null;
+  mode?: "new_folder" | "original";
+  on_conflict?: "skip" | "keep" | "replace";
+  trash?: boolean;
+  tz?: number;
+  folder_name?: string;
+}
+
+/** An item of a snapshot, while choosing what to restore */
+export interface SnapshotItem {
+  id: string;
+  name: string;
+  kind: "folder" | "file";
+  size: number;
+  modified: number;
+  trashed: number | null;
 }
 
 export type PrincipalType = "user" | "group" | "everyone";
@@ -1484,14 +1557,21 @@ export const api = {
   cancelBackupJob: (id: string) => post(enc`/admin/backups/jobs/${id}/cancel`),
   verifyBackup: (id: string) => post<{ job_id: string }>(enc`/admin/backups/sets/${id}/verify`),
   deleteBackup: (id: string) => request("DELETE", enc`/admin/backups/sets/${id}`),
-  restorePreview: (snapshot: string, req: { space: string; target_drive?: string | null; trash?: boolean; tz?: number }) =>
+  restorePreview: (snapshot: string, req: RestoreRequest) =>
     post<RestorePreview>(enc`/admin/backups/snapshots/${snapshot}/restore/preview`, req).then((p) => ({
       ...p,
       space: { ...p.space, name: driveName(p.space) },
       targets: p.targets.map((t) => ({ ...t, name: driveName(t) })),
     })),
-  restoreBackup: (snapshot: string, req: { space: string; target_drive?: string | null; trash?: boolean; tz?: number; folder_name?: string }) =>
-    post<{ job_id: string }>(enc`/admin/backups/snapshots/${snapshot}/restore`, req),
+  restoreBackup: (snapshot: string, req: RestoreRequest) => post<{ job_id: string }>(enc`/admin/backups/snapshots/${snapshot}/restore`, req),
+  browseSnapshot: (snapshot: string, space: string, folder?: string | null) =>
+    get<{ path: [string, string][]; items: SnapshotItem[] }>(enc`/admin/backups/snapshots/${snapshot}/browse` + qs({ space, folder: folder ?? undefined })),
+  createBackupPolicy: (req: Partial<BackupPolicySettings> & { name: string; source: string; dest: string }) =>
+    post<{ set_id: string }>("/admin/backups/policies", req),
+  updateBackupPolicy: (id: string, req: Partial<BackupPolicySettings> & { name?: string }) => request("PATCH", enc`/admin/backups/policies/${id}`, req),
+  runBackupPolicy: (id: string) => post<{ job_id: string | null }>(enc`/admin/backups/policies/${id}/run`),
+  backupNextRuns: (schedule: BackupSchedule, tz: string) => post<number[]>("/admin/backups/policies/next-runs", { schedule, tz }),
+  importBackups: (location: string) => post<{ found: number; added: string[] }>("/admin/backups/import", { location }),
   groups: () => get<Group[]>("/admin/groups"),
   createGroup: (req: { name: string; description?: string; members?: number[] }) => post<{ id: number }>("/admin/groups", req),
   updateGroup: (id: number, req: { name?: string; description?: string; members?: number[] }) => request("PATCH", enc`/admin/groups/${id}`, req),

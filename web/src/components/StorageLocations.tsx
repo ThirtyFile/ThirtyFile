@@ -4,6 +4,7 @@ import {
   CheckCircle2Icon,
   CloudIcon,
   CopyIcon,
+  DatabaseBackupIcon,
   EllipsisIcon,
   FolderOpenIcon,
   HardDriveIcon,
@@ -21,6 +22,7 @@ import {
   TruckIcon,
   XCircleIcon,
 } from "lucide-react";
+import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { api, moveActive, type SpaceMove, type StorageConfig, type StorageKind, type StorageLocation } from "@/api";
 import { MoveDialog } from "@/components/MoveDialog";
@@ -74,6 +76,7 @@ function describe(l: StorageLocation) {
 /** System settings › Storage locations */
 export function StorageLocations() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   // The server checks connection status every 30 seconds; the view refreshes every 30 seconds
   const q = useQuery({ queryKey: ["storage-locations"], queryFn: api.storageLocations, refetchInterval: 30_000 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -141,6 +144,9 @@ export function StorageLocations() {
       </DropdownMenuItem>
       <DropdownMenuItem disabled={l.drive_count === 0 || list.length < 2} onClick={() => setCopying(l)}>
         <CopyIcon /> {t("Copy everything to…")}
+      </DropdownMenuItem>
+      <DropdownMenuItem disabled={l.drive_count === 0 || list.length < 2} onClick={() => navigate(`/admin/backups?new=${encodeURIComponent(l.id)}`)}>
+        <DatabaseBackupIcon /> {t("Back up…")}
       </DropdownMenuItem>
       <DropdownMenuItem onClick={() => setTool({ kind: "test", location: l })}>
         <ListChecksIcon /> {t("Test step by step")}
