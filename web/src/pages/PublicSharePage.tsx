@@ -5,7 +5,8 @@ import { ChevronRightIcon, DownloadIcon, EyeIcon, FolderOpenIcon, Grid2X2Icon, I
 import { toast } from "sonner";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
-import { api, shareSource, shareUploadEndpoint, triggerDownload, type Node, type PublicShare } from "@/api";
+import { api, shareSource, shareUploadEndpoint, type Node, type PublicShare } from "@/api";
+import { triggerDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

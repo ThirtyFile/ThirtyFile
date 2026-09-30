@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useEffectEvent, useState, type ReactNode } from "react";
 import { ArrowLeftIcon, DownloadIcon, FileTextIcon, Loader2Icon } from "lucide-react";
-import { triggerDownload, type FileSource, type Node } from "@/api";
+import type { FileSource, Node } from "@/api";
+import { triggerDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { FileIcon, MAX_TEXT_BYTES, categoryOf, isBrowserMedia, isTextLike, mayOpenAsText } from "@/components/FileIcon";
 import { hasDraft } from "@/lib/drafts";

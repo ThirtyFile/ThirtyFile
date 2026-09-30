@@ -18,7 +18,8 @@ import {
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { AccessDialog } from "@/components/AccessDialog";
-import { api, privateSource, triggerDownload, type Node } from "@/api";
+import { api, privateSource, type Node } from "@/api";
+import { triggerDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { DetailsPane } from "@/components/DetailsPane";
 import { NameDialog } from "@/components/dialogs";

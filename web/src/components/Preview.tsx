@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, DownloadIcon, XIcon } from "lucide-react";
-import { triggerDownload, type FileSource, type Node } from "@/api";
+import type { FileSource, Node } from "@/api";
+import { triggerDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { FileIcon } from "@/components/FileIcon";
 import { FileViewer } from "@/components/FileViewer";

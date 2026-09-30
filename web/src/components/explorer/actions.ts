@@ -1,7 +1,8 @@
 /** File explorer actions: open, download, favorite, cut / copy / paste, new folder / text file, delete for good, keyboard shortcuts and drag-and-drop upload */
 import { useEffect, type DragEvent } from "react";
 import { toast } from "sonner";
-import { api, privateSource, triggerDownload, type Node } from "@/api";
+import { api, privateSource, type Node } from "@/api";
+import { triggerDownload } from "@/downloads";
 import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
 import { type FileChange, invalidateFiles, refreshFiles, rowsOf } from "@/lib/queries";
