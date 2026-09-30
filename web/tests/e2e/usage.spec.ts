@@ -56,7 +56,10 @@ test("Storage usage shows each location, its history as charts and tables, and s
   await content.getByText("Show as a table").click();
   await expect(content.getByRole("table")).toBeVisible();
   await expect(content.getByRole("columnheader", { name: "Stored by ThirtyFile" })).toBeVisible();
-  await expect(page.getByText("No reads or writes in this range")).toBeVisible();
+  // Operations are written at every five-minute mark of the clock: before the first, their chart says there are none
+  // rather than showing 0, after it the chart shows them
+  const throughput = page.getByRole("figure").filter({ hasText: "Throughput" });
+  await expect(throughput.getByText("No reads or writes in this range").or(throughput.getByRole("img"))).toBeVisible();
   // Moving along a chart with the keyboard shows the values of a period
   await content.getByRole("img").focus();
   await page.keyboard.press("ArrowRight");
