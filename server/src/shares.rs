@@ -864,7 +864,7 @@ pub async fn public_content(
         ensure_quota_left(&share)?;
     }
     // Opened first: a download that fails because the storage can't be reached doesn't use up the link
-    let mut res = serve_blob(&st, &headers, node_blob(&node)?, download).await?;
+    let mut res = serve_blob(&st, &headers, node_blob(&st, &node).await?, download).await?;
     if counted && limited {
         // Checked against the limit before it is served
         count_download(&st, &share).await?;
@@ -981,7 +981,7 @@ async fn serve_public_download(
     // Opened first (a ZIP opens its first file before answering): a download that fails because the storage can't be
     // reached doesn't use up the link
     let mut res = match roots.as_slice() {
-        [one] if !one.is_folder() => serve_blob(st, headers, node_blob(one)?, true).await?,
+        [one] if !one.is_folder() => serve_blob(st, headers, node_blob(st, one).await?, true).await?,
         _ => downloads::zip_response(st, roots.clone(), tz).await?,
     };
     if !continuation {

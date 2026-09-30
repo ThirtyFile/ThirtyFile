@@ -91,13 +91,23 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
     // is on no location
     let offline = if drive.is_folder() {
         let (location,): (Option<String>,) = sqlx::query_as("SELECT location_id FROM drives WHERE id = ?").bind(&drive.id).fetch_one(&mut *c).await?;
-        location.and_then(|l| st.location_offline_for(&l, user.is_admin()))
+        match location.and_then(|l| st.location_offline_for(&l, user.is_admin())) {
+            // A file with a checked replica elsewhere still opens (replicas/)
+            Some(_) if node.kind == "file" && crate::replicas::folders::copy_of(&st, &mut c, &node.id).await?.is_some() => None,
+            offline => offline,
+        }
     } else {
-        let location = match node.blob() {
-            Ok((_, loc)) => loc.to_string(),
-            Err(_) => tree::drive_location(&mut c, node.drive()).await?,
-        };
-        st.location_offline_for(&location, user.is_admin())
+        match node.blob() {
+            // A file whose content has a checked replica elsewhere still opens (replicas/)
+            Ok((hash, loc)) => match st.location_offline_for(loc, user.is_admin()) {
+                Some(_) if crate::replicas::readable_elsewhere(&st, &mut c, hash, loc).await? => None,
+                offline => offline,
+            },
+            Err(_) => {
+                let location = tree::drive_location(&mut c, node.drive()).await?;
+                st.location_offline_for(&location, user.is_admin())
+            }
+        }
     };
     let (read_only, moving) = (drive.read_only || drive.moving, drive.moving);
     Ok(Json(NodeInfo {

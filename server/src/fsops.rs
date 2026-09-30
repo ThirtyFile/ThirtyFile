@@ -954,7 +954,7 @@ async fn write_tree(st: &AppState, nodes: &[Node], top: &Pinned, progress: &Trac
             progress.add(ITEM_WORK);
             continue;
         }
-        match Source::of(n)? {
+        match Source::resolve(st, n).await? {
             Source::File(from) => {
                 let copied = tokio::task::spawn_blocking(move || {
                     let want = std::fs::symlink_metadata(from.as_path())?.len();

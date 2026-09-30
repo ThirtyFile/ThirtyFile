@@ -23,7 +23,7 @@
 mod between_folders;
 mod store;
 mod to_folder;
-mod to_store;
+pub(crate) mod to_store;
 
 use std::{
     collections::HashMap,

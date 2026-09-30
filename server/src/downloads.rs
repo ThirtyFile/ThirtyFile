@@ -103,7 +103,7 @@ impl ZipWalk {
                         self.todo.push(Todo::Folder(n, path.clone(), None));
                         return Ok(Some(ZipItem { path, blob: None, size: 0, mtime }));
                     }
-                    let Ok(blob) = Source::of(&n) else { continue };
+                    let Ok(blob) = Source::resolve(st, &n).await else { continue };
                     // The length of the ZIP is announced up front: a folder space's file is measured as it is now
                     let size = match &blob {
                         Source::File(_) => blob.describe(n.size as u64).await.map(|(size, _)| size).unwrap_or(0),
@@ -407,7 +407,7 @@ async fn owned_nodes(st: &AppState, user: &User, ids: &[String]) -> AppResult<Ve
 async fn serve_download(st: &AppState, headers: &HeaderMap, roots: Vec<Node>, tz: i64) -> AppResult<Response> {
     if let [one] = roots.as_slice()
         && !one.is_folder() {
-            return serve_blob(st, headers, node_blob(one)?, true).await;
+            return serve_blob(st, headers, node_blob(st, one).await?, true).await;
         }
     zip_response(st, roots, tz).await
 }

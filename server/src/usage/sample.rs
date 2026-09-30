@@ -230,6 +230,10 @@ async fn totals(st: &AppState) -> AppResult<HashMap<String, Capacity>> {
     for (id, bytes) in crate::backups::bytes_by_location(db).await? {
         by.entry(id).or_default().backup_bytes = Some(bytes);
     }
+    // Replicas kept on a location (replicas/)
+    for (id, bytes) in crate::replicas::bytes_by_location(db).await? {
+        by.entry(id).or_default().replica_bytes = Some(bytes);
+    }
     Ok(by)
 }
 
@@ -292,6 +296,9 @@ pub async fn sample_capacity(st: &AppState, at: i64) -> AppResult<Vec<Capacity>>
         all.pending_deletes += c.pending_deletes;
         if let Some(b) = c.backup_bytes {
             all.backup_bytes = Some(all.backup_bytes.unwrap_or_default() + b);
+        }
+        if let Some(b) = c.replica_bytes {
+            all.replica_bytes = Some(all.replica_bytes.unwrap_or_default() + b);
         }
     }
     for ((id, _, _), disk) in locations.iter().zip(&disks) {

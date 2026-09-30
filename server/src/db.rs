@@ -801,6 +801,28 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[tokio::test]
+    async fn a_database_from_0_4_0_gets_empty_lists_of_replicas() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-040-replicas-{}", crate::util::new_id()));
+        let path = dir.join("drive.db");
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO storage_locations (id, name, kind, config, created_at) VALUES ('nas', 'NAS', 'local', '{}', 0)").execute(&db).await.unwrap();
+        db.close().await;
+
+        let db = connect(&path, 16).await.unwrap();
+        sqlx::query("INSERT INTO replica_policies (id, name, source_location, created_at, updated_at) VALUES ('p', 'Mirror', 'local', 0, 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO replica_targets (policy_id, location_id, priority) VALUES ('p', 'nas', 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO replica_copies (hash, location_id, size, created_at) VALUES ('h', 'nas', 1, 0)").execute(&db).await.unwrap();
+        let (copies, fallback, state): (i64, bool, String) =
+            sqlx::query_as("SELECT copies, read_fallback, (SELECT state FROM replica_copies) FROM replica_policies").fetch_one(&db).await.unwrap();
+        assert_eq!((copies, fallback, state.as_str()), (1, true, "verified"));
+        // Its targets must be locations
+        assert!(sqlx::query("INSERT INTO replica_targets (policy_id, location_id, priority) VALUES ('p', 'nowhere', 1)").execute(&db).await.is_err());
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     async fn admin_hash(password: Option<&str>) -> String {
         let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));
         std::fs::create_dir_all(&dir).unwrap();

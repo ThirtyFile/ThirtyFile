@@ -36,7 +36,9 @@ pub struct Inner {
     /// Moves of spaces to other storage locations that are running now (moves/)
     pub moves: crate::moves::Moves,
     /// Backup jobs running now (backups/)
-    pub backups: crate::backups::Backups,
+    pub backups: crate::backups::Queue,
+    /// Replica jobs running now (replicas/)
+    pub replicas: crate::backups::Queue,
     pub data_dir: PathBuf,
     /// Folder of the built-in `local` storage location
     pub storage_dir: PathBuf,

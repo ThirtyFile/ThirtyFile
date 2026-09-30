@@ -41,8 +41,8 @@ const ROUNDS: usize = 10;
 const PAGE: i64 = 200;
 /// Pins written per transaction
 const PIN_BATCH: usize = 500;
-pub(super) const CHANGED: &str = "The file changed while it was being copied";
-pub(super) const DAMAGED: &str = "The content read didn't match its SHA-256";
+pub(crate) const CHANGED: &str = "The file changed while it was being copied";
+pub(crate) const DAMAGED: &str = "The content read didn't match its SHA-256";
 /// What a snapshot can promise, as its manifest says
 const CONSISTENCY: &str = "Content-store spaces: as recorded at the cutoff, each file with the content it had then. Folder spaces: each file as read and checked unchanged while it was copied, as indexed at the cutoff; files changed by other programs at different times are not one instant together.";
 
@@ -262,20 +262,20 @@ async fn read_folder_spaces(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, p: 
 
 /// A file as it was read: its identity, size and modification time
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Seen {
-    dev: i64,
-    ino: i64,
-    size: i64,
-    mtime_ns: i64,
+pub(crate) struct Seen {
+    pub dev: i64,
+    pub ino: i64,
+    pub size: i64,
+    pub mtime_ns: i64,
 }
 
-fn seen(meta: &std::fs::Metadata) -> Seen {
+pub(crate) fn seen(meta: &std::fs::Metadata) -> Seen {
     let (dev, ino) = crate::folders::identity(meta);
     Seen { dev, ino, size: meta.len() as i64, mtime_ns: crate::folders::mtime_ns(meta) }
 }
 
 /// Reads a file of a folder into a temp file, hashing it on the way; fails when it changes while it is read
-fn read_file(root: &Pinned, rel: &str, tmp: &Path) -> std::io::Result<(String, Seen)> {
+pub(crate) fn read_file(root: &Pinned, rel: &str, tmp: &Path) -> std::io::Result<(String, Seen)> {
     use std::io::Read;
     let file = root.join(rel)?;
     let mut src = file.open_file()?;
@@ -918,14 +918,14 @@ async fn copy_content(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, hash: &st
 }
 
 /// Reads one content of a content store into a temp file, checking its SHA-256 and size
-pub(super) async fn fetch_verified(src: &Arc<dyn Storage>, hash: &str, size: i64, tmp: &Path) -> std::io::Result<()> {
+pub(crate) async fn fetch_verified(src: &Arc<dyn Storage>, hash: &str, size: i64, tmp: &Path) -> std::io::Result<()> {
     let _ = tokio::fs::remove_file(tmp).await;
     let mut reader = src.open(hash, 0, size as u64).await?;
     copy_checked(&mut reader, hash, size, tmp).await
 }
 
 /// Copies a reader into a temp file, checking that it is `size` bytes with the SHA-256 `hash`
-pub(super) async fn copy_checked(reader: &mut crate::storage::BoxReader, hash: &str, size: i64, tmp: &Path) -> std::io::Result<()> {
+pub(crate) async fn copy_checked(reader: &mut crate::storage::BoxReader, hash: &str, size: i64, tmp: &Path) -> std::io::Result<()> {
     let mut file = tokio::fs::File::create(tmp).await?;
     let mut hasher = Sha256::new();
     let mut len = 0u64;
