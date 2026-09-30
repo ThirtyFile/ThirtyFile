@@ -5,7 +5,6 @@ use axum::{
     extract::{Path, Query, State},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 
 use crate::{
     auth::{Admin, hash_password, min_password, validate_password},
@@ -296,27 +295,38 @@ pub struct DeleteQuery {
 /// performing the deletion; their share links are deleted. A personal space that is a folder space leaves its folder
 /// on the disk (space_folders.rs): after a move it holds only its trash and earlier versions; "deleted" files are
 /// removed from ThirtyFile but stay in the folder, for the administrator to remove or keep.
-pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<i64>, Query(q): Query<DeleteQuery>) -> AppResult<Json<Value>> {
+///
+/// Moving the files to or from a folder space copies them, which can take long: the removal runs as a job (jobs.rs),
+/// which the page follows.
+pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<i64>, Query(q): Query<DeleteQuery>) -> AppResult<Json<crate::jobs::Job>> {
     if id == me.id {
         return Err(AppError::bad_request("You can't delete your own account"));
     }
     let row = get_row(&st, id).await?;
-    let moved = move_personal_first(&st, &me, id, &row.username, &q).await?;
+    let pending = crate::jobs::reserve(&st, me.id, "delete_user", crate::jobs::Limit::Changes)?;
+    let job = pending
+        .run(crate::jobs::WAIT, move |t| async move { delete_user(&st, &me, id, &row.username, &q, &t).await.map(|()| Default::default()) })
+        .await?;
+    Ok(Json(job))
+}
+
+async fn delete_user(st: &AppState, me: &crate::auth::User, id: i64, username: &str, q: &DeleteQuery, progress: &crate::jobs::Tracker) -> AppResult<()> {
+    let moved = move_personal_first(st, me, id, username, q, progress).await?;
     let res = {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
-        let res = delete_in(&mut tx, &me, id, &row.username, &q, moved.as_ref()).await;
+        let res = delete_in(&mut tx, me, id, username, q, moved.as_ref()).await;
         // Moving the files can fail after writing (the target space is full): rolled back before the lock goes
         crate::db::settle(tx, res).await
     };
-    let (removed, uploads) = Moved::kept_on_error(moved.as_ref(), &st, res).await?;
+    let (removed, uploads) = Moved::kept_on_error(moved.as_ref(), st, res).await?;
     if let Some(removed) = removed {
-        removed.finish(&st).await;
+        removed.finish(st).await;
     }
     for (u,) in uploads {
         let _ = tokio::fs::remove_file(st.tmp_dir().join(format!("upload-{u}"))).await;
     }
-    Ok(Json(json!({ "ok": true })))
+    Ok(())
 }
 
 /// Refuses unless the account making a change is still an enabled administrator, read inside the change's transaction.
@@ -445,7 +455,7 @@ pub async fn release_interrupted(st: &AppState) {
 /// by item (the removal can't happen halfway: should a move fail, the space stays, with what wasn't moved yet). The
 /// space is read-only from the moment its items are listed until it is removed, so nothing added meanwhile is lost
 /// with it. Returns where they went; None when nothing had to move this way.
-pub async fn move_personal_first(st: &AppState, me: &crate::auth::User, user_id: i64, username: &str, q: &DeleteQuery) -> AppResult<Option<Moved>> {
+pub async fn move_personal_first(st: &AppState, me: &crate::auth::User, user_id: i64, username: &str, q: &DeleteQuery, progress: &crate::jobs::Tracker) -> AppResult<Option<Moved>> {
     if q.move_to.is_some() && q.delete_files {
         return Err(AppError::bad_request("Choose either to move the user's files or to delete them"));
     }
@@ -466,7 +476,7 @@ pub async fn move_personal_first(st: &AppState, me: &crate::auth::User, user_id:
     if !(own.is_folder() || target.is_folder()) {
         return Ok(None);
     }
-    let place = move_personal_across(st, me, username, &own, &target).await?;
+    let place = move_personal_across(st, me, username, &own, &target, progress).await?;
     Ok(Some(Moved { place, drive_id: own.id }))
 }
 
@@ -575,7 +585,7 @@ const LIVE: &str = "WITH RECURSIVE sub(id) AS (
 /// Moves everything in a personal space into a new folder "Files of <username>" at the top of another space when one
 /// of the two is a folder space: item by item, the way the web moves items between spaces (renamed on the same disk,
 /// else copied; items keep their ids). The trash stays behind. Returns where they went (for the log).
-async fn move_personal_across(st: &AppState, me: &crate::auth::User, username: &str, own: &tree::Drive, target: &tree::Drive) -> AppResult<String> {
+async fn move_personal_across(st: &AppState, me: &crate::auth::User, username: &str, own: &tree::Drive, target: &tree::Drive, progress: &crate::jobs::Tracker) -> AppResult<String> {
     check_target(target, &own.id)?;
     // Scans of the two spaces wait meanwhile (always locked in the same order)
     let mut spaces: Vec<&str> = [own, target].iter().filter(|d| d.is_folder()).map(|d| d.id.as_str()).collect();
@@ -626,7 +636,9 @@ async fn move_personal_across(st: &AppState, me: &crate::auth::User, username: &
         tx.commit().await?;
         (dest, items, label)
     };
-    if let Err(e) = crate::fsops::move_across(st, me, &dest, items).await {
+    if let Some(across) = crate::fsops::Across::new(dest, items, true)
+        && let Err(e) = across.run(st, me, progress).await
+    {
         release(st, &own.id).await;
         return Err(e);
     }
@@ -978,6 +990,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
 mod tests {
     use super::*;
     use crate::{auth::Admin, testutil};
+    use serde_json::json;
 
     #[tokio::test]
     async fn the_user_list_comes_in_pages() {
@@ -1177,9 +1190,10 @@ mod tests {
         id
     }
 
-    async fn delete_user(env: &testutil::TestEnv, id: i64, q: serde_json::Value) -> AppResult<Json<Value>> {
+    async fn delete_user(env: &testutil::TestEnv, id: i64, q: serde_json::Value) -> AppResult<crate::jobs::Job> {
         let admin = env.admin().await;
-        delete(State(env.st.clone()), Admin(admin), Path(id), Query(serde_json::from_value(q).unwrap())).await
+        let Json(job) = delete(State(env.st.clone()), Admin(admin), Path(id), Query(serde_json::from_value(q).unwrap())).await?;
+        Ok(crate::jobs::wait_for(&env.st, &job.id).await)
     }
 
     async fn drive_row(env: &testutil::TestEnv, node: &str) -> (String, String) {
@@ -1283,7 +1297,7 @@ mod tests {
         };
 
         // Deleting Amy moves her files on the disk first; until her space is gone, nothing can be added to it
-        let moved = move_personal_first(&env.st, &admin, amy.id, "amy", &q).await.unwrap();
+        let moved = move_personal_first(&env.st, &admin, amy.id, "amy", &q, &Default::default()).await.unwrap();
         assert!(moved.is_some());
         assert_eq!(env.drive_of(&a).await, space.drive);
         assert!(moving().await, "read-only while it is removed");
@@ -1310,6 +1324,41 @@ mod tests {
         assert!(get_row(&env.st, amy.id).await.is_err());
         assert_eq!(env.drive_of(&late).await, space.drive);
         assert_eq!(std::fs::read(space.dir.join("Files of amy (1)/late.txt")).unwrap(), b"late");
+    }
+
+    #[tokio::test]
+    async fn deleting_a_user_whose_files_take_long_to_move_goes_on_when_the_page_gives_up() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let a = env.stored_file(&amy, amy.root(), "a.txt", b"amy's").await;
+        let space = env.folder_space("Scans").await;
+        let go = std::sync::Arc::new(tokio::sync::Notify::new());
+        let _hook = crate::fsops::hook_after_place(crate::fsops::wait_for(&go));
+        let asked = delete(State(env.st.clone()), Admin(env.admin().await), Path(amy.id), Query(serde_json::from_value(json!({ "move_to": space.drive })).unwrap()));
+        // The page (or a proxy) stops waiting while the files are copied: the removal isn't cut off in the middle, which
+        // left the space read-only until a restart
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(300), asked).await;
+        go.notify_one();
+        let mut gone = false;
+        for _ in 0..200 {
+            if get_row(&env.st, amy.id).await.is_err() {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(gone, "the user is deleted");
+        assert_eq!(env.node_at(&space.drive, "Files of amy/a.txt").await.unwrap().0, a);
+        // A long one answers with the job, for the page to follow
+        let ben = env.user("ben", true).await;
+        env.stored_file(&ben, ben.root(), "b.txt", b"ben's").await;
+        let Json(job) = delete(State(env.st.clone()), Admin(env.admin().await), Path(ben.id), Query(serde_json::from_value(json!({ "move_to": space.drive })).unwrap()))
+            .await
+            .unwrap();
+        assert_eq!((job.kind, job.state), ("delete_user", "running"));
+        go.notify_one();
+        assert_eq!(crate::jobs::wait_for(&env.st, &job.id).await.state, "done");
+        assert!(get_row(&env.st, ben.id).await.is_err());
     }
 
     #[tokio::test]

@@ -1259,9 +1259,9 @@ async fn a_copy_or_move_into_a_space_moved_meanwhile_is_refused() {
     let id = move_to(&env, &[&mine], "local").await.unwrap();
     assert_eq!(run_move(&env, &id).await, "done");
     let node = crate::tree::get_node(&mut env.st.db.acquire().await.unwrap(), &f).await.unwrap().unwrap();
-    let err = crate::fsops::copy_across(&env.st, &amy, &stale, vec![vec![node.clone()]]).await.unwrap_err();
+    let err = crate::fsops::copy_across(&env.st, &amy, &stale, vec![vec![node.clone()]], &Default::default()).await.unwrap_err();
     assert_eq!(err.status, axum::http::StatusCode::CONFLICT, "{}", err.message);
-    let err = crate::fsops::move_across(&env.st, &amy, &stale, vec![vec![node]]).await.unwrap_err();
+    let err = crate::fsops::move_across(&env.st, &amy, &stale, vec![vec![node]], &Default::default()).await.unwrap_err();
     assert_eq!(err.status, axum::http::StatusCode::CONFLICT, "{}", err.message);
     let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id = ? AND kind = 'file'").bind(&mine).fetch_one(&env.st.db).await.unwrap();
     assert_eq!(n, 0, "nothing was added to the folder space");
@@ -1275,7 +1275,7 @@ async fn a_copy_or_move_into_a_space_moved_meanwhile_is_refused() {
     ctl.pause.store(true, SeqCst);
     run(&env.st, &job, &ctl).await;
     let node = crate::tree::get_node(&mut env.st.db.acquire().await.unwrap(), &f).await.unwrap().unwrap();
-    let err = crate::fsops::copy_across(&env.st, &bob, &dest, vec![vec![node]]).await.unwrap_err();
+    let err = crate::fsops::copy_across(&env.st, &bob, &dest, vec![vec![node]], &Default::default()).await.unwrap_err();
     assert_eq!(err.status, axum::http::StatusCode::FORBIDDEN, "{}", err.message);
 }
 

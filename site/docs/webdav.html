@@ -118,6 +118,7 @@ rclone mount thirtyfile: ~/ThirtyFile --vfs-cache-mode writes</code></pre>
           <li>Names follow the same rules as in the browser: characters Windows doesn't allow in names (<code>\ / : * ? " &lt; &gt; |</code>) are refused.</li>
           <li>Office and other programs lock files while they are open. ThirtyFile answers these locks so that saving works, but doesn't enforce them: when two people save the same file at the same time, the last one wins. Use the browser's online editor for working on a file together.</li>
           <li>Folders on the server (folder spaces) work too: changes are made in the folder itself, and files added on the server show up when the folder is opened.</li>
+          <li>Moving or copying a large folder to or from a folder on the server copies its files. ThirtyFile answers when that is done; when it takes more than a minute, it answers that the change was accepted and finishes it in the background, even if the program gives up waiting or loses its connection. Look again a little later to see the result.</li>
           <li>Moving an item that was shared with you to one of your own spaces isn't allowed, as in the browser; copy it instead.</li>
           <li>Each folder is listed one level at a time; a client that asks for a whole tree at once is told to ask folder by folder, which all common clients do.</li>
         </ul>

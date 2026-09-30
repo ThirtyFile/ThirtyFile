@@ -12,7 +12,7 @@ import { confirm } from "@/components/confirm";
 import { askBeforeTransfer } from "@/components/ConflictDialog";
 import { carriesFiles, dropFiles, dropItems } from "@/lib/dnd";
 import { filesFromDrop, uploadFiles } from "@/uploads";
-import { runJob } from "@/lib/jobs";
+import { runJob, waitForJob } from "@/lib/jobs";
 import { type Item, isTyping } from "./types";
 import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
@@ -121,11 +121,11 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       if (sent.length) {
         if (mode === "move") {
           const origins = new Map([...(known ?? originsOf(p.items, sent, dest))].filter(([id, parent]) => sent.includes(id) && parent !== dest));
-          await api.move(sent, dest, resolutions);
+          await waitForJob(await api.move(sent, dest, resolutions));
           if (origins.size) toastWithUndo(done(sent.length), { undo: () => moveBack(origins), undoneText: t("Moved back"), after: refreshContents });
           else toast.success(done(sent.length));
         } else {
-          await api.copy(sent, dest, resolutions);
+          await waitForJob(await api.copy(sent, dest, resolutions));
           toast.success(done(sent.length));
         }
       }
@@ -134,6 +134,8 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : fallback);
+      // What was done before it failed shows
+      refreshContents();
       return false;
     }
   };

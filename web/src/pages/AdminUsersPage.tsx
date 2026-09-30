@@ -15,6 +15,7 @@ import { ConfirmDialog, ErrorText, errorProps } from "@/components/dialogs";
 import { LocationSelect, useDefaultLocationId, useLocationName } from "@/components/LocationSelect";
 import { confirm } from "@/components/confirm";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
+import { followJob } from "@/lib/jobs";
 import { useMe } from "@/lib/session";
 import { t, tc } from "@/lib/i18n";
 import { formatBytes, formatDate, formatDateTime } from "@/lib/utils";
@@ -461,10 +462,10 @@ function RemovePersonalDialog({ user, onClose }: { user: UserRow; onClose(): voi
   const locationName = useLocationName();
   const remove = useMutation({
     mutationFn: () => api.removePersonalSpace(user.id, user.personal_space ? c.files : {}),
-    onSuccess: () => {
-      toast.success(user.personal_space ? t("\"My files\" removed") : t("Stopped waiting to create \"My files\""));
-      invalidatePersonal(qc);
+    // Moving the files to or from a folder on the server can take a while: the dialog closes, and a message follows it
+    onSuccess: (job) => {
       onClose();
+      void followJob(job, user.personal_space ? t("\"My files\" removed") : t("Stopped waiting to create \"My files\""), () => invalidatePersonal(qc));
     },
   });
   return (
@@ -509,11 +510,13 @@ function DeleteUserDialog({ user, onClose, onDeleted }: { user: UserRow; onClose
 
   const remove = useMutation({
     mutationFn: () => api.deleteUser(user.id, user.personal_space ? c.files : {}),
-    onSuccess: () => {
-      toast.success(t("User deleted"));
-      qc.invalidateQueries({ queryKey: ["admin-users"] });
-      qc.invalidateQueries({ queryKey: ["admin-drives"] });
+    // Moving the files to or from a folder on the server can take a while: the dialog closes, and a message follows it
+    onSuccess: (job) => {
       onDeleted();
+      void followJob(job, t("User deleted"), () => {
+        qc.invalidateQueries({ queryKey: ["admin-users"] });
+        qc.invalidateQueries({ queryKey: ["admin-drives"] });
+      });
     },
   });
   const disable = useMutation({

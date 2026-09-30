@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { api } from "@/api";
 import { t } from "@/lib/i18n";
 import { wantsCopy } from "@/lib/keys";
+import { waitForJob } from "@/lib/jobs";
 import { FOLDER_CONTENTS, invalidateFiles } from "@/lib/queries";
 import { moveBack, originsOf, toastWithUndo } from "@/lib/undo";
 import { askBeforeTransfer } from "@/components/ConflictDialog";
@@ -60,11 +61,11 @@ export async function dropItems(qc: QueryClient, ids: string[], folder: DropFold
     ids = ids.filter((id) => resolutions[id] !== "skip");
     if (!ids.length) return;
     if (copy) {
-      await api.copy(ids, folder.id, resolutions);
+      await waitForJob(await api.copy(ids, folder.id, resolutions));
       toast.success(t("Copied {n} item to \"{name}\"|Copied {n} items to \"{name}\"", { n: ids.length, name: folder.name }));
     } else {
       const origins = dragged ? originsOf(dragged.items, ids, folder.id) : new Map<string, string>();
-      await api.move(ids, folder.id, resolutions);
+      await waitForJob(await api.move(ids, folder.id, resolutions));
       const moved = t("Moved {n} item to \"{name}\"|Moved {n} items to \"{name}\"", { n: ids.length, name: folder.name });
       if (origins.size) toastWithUndo(moved, { undo: () => moveBack(origins), undoneText: t("Moved back"), after: refresh });
       else toast.success(moved);
@@ -72,6 +73,7 @@ export async function dropItems(qc: QueryClient, ids: string[], folder: DropFold
     refresh();
   } catch (e) {
     toast.error(e instanceof Error ? e.message : copy ? t("Couldn't copy") : t("Couldn't move"));
+    refresh();
   }
 }
 

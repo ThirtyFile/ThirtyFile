@@ -1,6 +1,7 @@
 import { toast } from "sonner";
 import { api } from "@/api";
 import { t } from "@/lib/i18n";
+import { waitForJob } from "@/lib/jobs";
 
 /** How long a message with an Undo button stays: long enough to read it and reach the button */
 export const UNDO_MS = 8000;
@@ -52,5 +53,5 @@ export function originsOf(items: readonly { id: string; parent_id: string | null
 export async function moveBack(origins: Origins) {
   const byParent = new Map<string, string[]>();
   for (const [id, parent] of origins) byParent.set(parent, [...(byParent.get(parent) ?? []), id]);
-  for (const [parent, ids] of byParent) await api.move(ids, parent);
+  for (const [parent, ids] of byParent) await waitForJob(await api.move(ids, parent));
 }

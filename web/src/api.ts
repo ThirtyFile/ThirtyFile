@@ -21,12 +21,13 @@ export interface Node {
   has_folders?: boolean;
 }
 
-/** A compress or extract task running on the server (`GET /jobs/:id`) */
+/** A task running on the server (`GET /jobs/:id`): a change that takes a while (see lib/jobs) */
 export interface Job {
+  /** Empty for a change that was done at once */
   id: string;
-  kind: "compress" | "extract";
+  kind: "compress" | "extract" | "move" | "copy" | "delete" | "empty_trash" | "scan" | "delete_user" | "remove_personal" | "webdav";
   state: "running" | "done" | "failed";
-  /** Bytes handled so far, of `total` */
+  /** Work done so far, of `total` (bytes, or items) */
   done: number;
   total: number;
   /** Why it failed (English, from the server) */
@@ -34,6 +35,8 @@ export interface Job {
   /** The new ZIP file or folder, and its name */
   node_id: string | null;
   name: string | null;
+  /** What a finished task reports besides (checking a folder: its report) */
+  result?: unknown;
 }
 
 export interface SearchFilter {
@@ -1092,8 +1095,9 @@ export const api = {
   createFolder: (parent_id: string, name: string) => post<Node>("/folders", { parent_id, name }),
   rename: (id: string, name: string) => request<Node>("PATCH", enc`/nodes/${id}`, { name }),
   /** `resolutions`: what to do with each item (by id) whose name the destination already has */
-  move: (ids: string[], dest_id: string, resolutions?: Record<string, Resolution>) => post("/nodes/move", { ids, dest_id, resolutions }),
-  copy: (ids: string[], dest_id: string, resolutions?: Record<string, Resolution>) => post("/nodes/copy", { ids, dest_id, resolutions }),
+  /** Moving or copying to or from a folder on the server can take a while: follow the task (`waitForJob`) */
+  move: (ids: string[], dest_id: string, resolutions?: Record<string, Resolution>) => post<Job>("/nodes/move", { ids, dest_id, resolutions }),
+  copy: (ids: string[], dest_id: string, resolutions?: Record<string, Resolution>) => post<Job>("/nodes/copy", { ids, dest_id, resolutions }),
   /** Which names would clash: of `names` about to be uploaded to `dest_id`, of `ids` moved or copied there, or of `ids` restored from the trash (no `dest_id`) */
   conflicts: (req: { dest_id?: string; names?: string[]; ids?: string[] }) => post<NameConflict[]>("/nodes/conflicts", req),
   trash: (ids: string[]) => post("/nodes/trash", { ids }),
@@ -1167,12 +1171,12 @@ export const api = {
   updateUser: (id: number, req: Partial<UserRow> & { password?: string }) => request<UserRow>("PATCH", enc`/admin/users/${id}`, req),
   /** Deletes a user: their personal space's files are moved to another space (move_to, a space id) or deleted (delete_files) */
   deleteUser: (id: number, files: { move_to?: string; delete_files?: boolean } = {}) =>
-    request("DELETE", enc`/admin/users/${id}` + qs(toParams(files))),
+    request<Job>("DELETE", enc`/admin/users/${id}` + qs(toParams(files))),
   /** Gives a user a personal space on a storage location (the system setting's when left out) */
   addPersonalSpace: (id: number, location_id?: string) => post<UserRow>(enc`/admin/users/${id}/personal-space`, { location_id }),
   /** Removes a user's personal space: its files are moved to another space (move_to) or deleted (delete_files) */
   removePersonalSpace: (id: number, files: { move_to?: string; delete_files?: boolean }) =>
-    request<UserRow>("DELETE", enc`/admin/users/${id}/personal-space` + qs(toParams(files))),
+    request<Job>("DELETE", enc`/admin/users/${id}/personal-space` + qs(toParams(files))),
   systemSettings: () => get<SystemInfo>("/admin/settings"),
   updateSystemSettings: (req: SystemSettingsReq) => request<SystemInfo>("PATCH", "/admin/settings", req),
 
@@ -1180,8 +1184,8 @@ export const api = {
   /** `location_id` (administrators): the storage location of the new space; left out, the default location */
   createDrive: (name: string, quota_bytes?: number, source_path?: string, read_only?: boolean, location_id?: string) =>
     post<Drive>("/drives", { name, quota_bytes, source_path, read_only, location_id }),
-  /** Scans a folder space for changes made on the server's folder */
-  scanDrive: (id: string) => post<ScanReport>(enc`/admin/drives/${id}/scan`),
+  /** Scans a folder space for changes made on the server's folder; the finished task's result is a `ScanReport` */
+  scanDrive: (id: string) => post<Job>(enc`/admin/drives/${id}/scan`),
   updateDrive: (id: string, req: { name?: string; quota_bytes?: number; read_only?: boolean }) => request<Drive>("PATCH", enc`/drives/${id}`, req),
   deleteDrive: (id: string) => request("DELETE", enc`/drives/${id}`),
   adminDrives: () => get<Drive[]>("/admin/drives").then((l) => l.map(localizeDrive)),

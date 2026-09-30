@@ -6,8 +6,8 @@
 //! temporary file (counting what actually comes out, whatever the archive says), stores them, and creates the new
 //! folder and everything in it in one transaction, so a failure leaves nothing half made.
 //!
-//! Jobs are kept in memory: a restart forgets them (and a job still running then leaves nothing behind but temporary
-//! files, which the daily cleanup removes).
+//! Both run as jobs (jobs.rs). A restart forgets them, and a job still running then leaves nothing behind but temporary
+//! files, which the daily cleanup removes.
 
 use std::{
     collections::HashMap,
@@ -19,10 +19,9 @@ use std::{
 
 use axum::{
     Json,
-    extract::{Path, State},
-    http::StatusCode,
+    extract::State,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncWriteExt, ReadBuf};
 
@@ -36,6 +35,7 @@ use crate::{
     tree::{self, Need, Node},
     util::{format_bytes_u64, guess_mime, new_id, now, split_name, validate_name},
     zip::{ReadEntry, ZipWriter},
+    jobs::{self, Job, Limit, Outcome, Tracker},
 };
 
 /// Most an archive may hold once extracted, whatever the space's quota
@@ -51,96 +51,10 @@ pub const MAX_RATIO: u64 = 250;
 const RATIO_EXEMPT_BYTES: u64 = 1024 * 1024;
 /// Largest list of entries read into memory
 const MAX_DIRECTORY_BYTES: u64 = 64 * 1024 * 1024;
-/// Jobs one person may run at the same time
-const MAX_RUNNING_PER_USER: usize = 4;
-/// How long a finished job can still be looked up
-const KEEP_FINISHED_SECS: i64 = 3600;
-
-#[derive(Debug, Clone, Serialize)]
-pub struct Job {
-    pub id: String,
-    /// "compress" or "extract"
-    pub kind: &'static str,
-    /// "running", "done" or "failed"
-    pub state: &'static str,
-    /// Bytes handled so far, of `total` (compressing: the items' contents read; extracting: the contents written)
-    pub done: u64,
-    pub total: u64,
-    pub error: Option<String>,
-    /// The new ZIP file, or the new folder
-    pub node_id: Option<String>,
-    pub name: Option<String>,
-    #[serde(skip)]
-    owner: i64,
-    #[serde(skip)]
-    finished_at: Option<i64>,
-}
-
-/// Registers a new job for `user`; refused while they already have several running
-fn start(st: &AppState, user: &User, kind: &'static str) -> AppResult<Job> {
-    let mut jobs = st.jobs.lock().unwrap();
-    let t = now();
-    jobs.retain(|_, j| j.finished_at.is_none_or(|f| f > t - KEEP_FINISHED_SECS));
-    if jobs.values().filter(|j| j.owner == user.id && j.finished_at.is_none()).count() >= MAX_RUNNING_PER_USER {
-        return Err(AppError::new(StatusCode::TOO_MANY_REQUESTS, "Several ZIP files are being made or extracted already. Wait for one to finish."));
-    }
-    let job = Job { id: new_id(), kind, state: "running", done: 0, total: 0, error: None, node_id: None, name: None, owner: user.id, finished_at: None };
-    jobs.insert(job.id.clone(), job.clone());
-    Ok(job)
-}
-
-fn update(st: &AppState, id: &str, f: impl FnOnce(&mut Job)) {
-    if let Some(j) = st.jobs.lock().unwrap().get_mut(id) {
-        f(j);
-    }
-}
-
-fn finish(st: &AppState, id: &str, result: AppResult<(String, String)>) {
-    update(st, id, |j| {
-        j.finished_at = Some(now());
-        match result {
-            Ok((node, name)) => {
-                j.state = "done";
-                j.done = j.total;
-                j.node_id = Some(node);
-                j.name = Some(name);
-            }
-            Err(e) => {
-                j.state = "failed";
-                j.error = Some(e.message);
-            }
-        }
-    });
-}
-
-/// Runs a job in the background and records how it ended
-fn spawn<F>(st: &AppState, id: &str, work: F)
-where
-    F: Future<Output = AppResult<(String, String)>> + Send + 'static,
-{
-    let (st, id) = (st.clone(), id.to_string());
-    tokio::spawn(async move {
-        let result = work.await;
-        if let Err(e) = &result {
-            tracing::info!("Compress or extract task {id} failed: {}", e.message);
-        }
-        finish(&st, &id, result);
-    });
-}
-
-/// A job's progress; only its owner can see it
-pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Json<Job>> {
-    match st.jobs.lock().unwrap().get(&id) {
-        Some(j) if j.owner == user.id => Ok(Json(j.clone())),
-        _ => Err(AppError::not_found("This task has finished or doesn't exist")),
-    }
-}
-
 /// Counts what is read through it into the job's progress
 struct Counting<R> {
     inner: R,
-    st: AppState,
-    job: String,
+    progress: Tracker,
 }
 
 impl<R: AsyncRead + Unpin> AsyncRead for Counting<R> {
@@ -149,7 +63,7 @@ impl<R: AsyncRead + Unpin> AsyncRead for Counting<R> {
         let res = Pin::new(&mut self.inner).poll_read(cx, buf);
         let n = (buf.filled().len() - before) as u64;
         if n > 0 {
-            update(&self.st, &self.job, |j| j.done += n);
+            self.progress.add(n);
         }
         res
     }
@@ -188,9 +102,9 @@ pub async fn compress(State(st): State<AppState>, user: User, Json(req): Json<Co
         }
         (roots, dest)
     };
-    let job = start(&st, &user, "compress")?;
+    let job = jobs::start(&st, user.id, "compress", Limit::Archive)?;
     let offset = -req.tz.unwrap_or(0).clamp(-14 * 60, 14 * 60) * 60;
-    spawn(&st, &job.id, run_compress(st.clone(), user, job.id.clone(), roots, dest.id, offset));
+    jobs::spawn(&st, &job, run_compress(st.clone(), user, Tracker::of(&st, &job), roots, dest.id, offset));
     Ok(Json(job))
 }
 
@@ -203,11 +117,11 @@ fn zip_name(plan: &crate::downloads::ZipPlan, roots: &[Node]) -> String {
     validate_name(&name).unwrap_or_else(|_| "Archive.zip".into())
 }
 
-async fn run_compress(st: AppState, user: User, job: String, roots: Vec<Node>, dest_id: String, offset: i64) -> AppResult<(String, String)> {
+async fn run_compress(st: AppState, user: User, progress: Tracker, roots: Vec<Node>, dest_id: String, offset: i64) -> AppResult<Outcome> {
     let plan = crate::downloads::zip_plan(&st, roots.clone(), offset).await?;
     let name = zip_name(&plan, &roots);
     let total: u64 = plan.items.iter().map(|it| it.size).sum();
-    update(&st, &job, |j| j.total = total);
+    progress.set_total(total);
 
     let tmp = st.tmp_dir().join(format!("zip-{}", new_id()));
     let written = async {
@@ -218,7 +132,7 @@ async fn run_compress(st: AppState, user: User, job: String, roots: Vec<Node>, d
                 None => zip.add_dir(&item.path, item.mtime).await?,
                 Some(source) => {
                     let reader = source.open(&st, 0, item.size).await?;
-                    zip.add_file(&item.path, Counting { inner: reader, st: st.clone(), job: job.clone() }, item.size, item.mtime).await?;
+                    zip.add_file(&item.path, Counting { inner: reader, progress: progress.clone() }, item.size, item.mtime).await?;
                 }
             }
         }
@@ -234,7 +148,7 @@ async fn run_compress(st: AppState, user: User, job: String, roots: Vec<Node>, d
     }
     let result = store_new_file(&st, &user, &dest_id, &name, &tmp, "compress").await;
     let _ = tokio::fs::remove_file(&tmp).await;
-    result
+    result.map(|(id, name)| Outcome::node(id, name))
 }
 
 /// Stores a finished temporary file as a new file in `folder_id` (numbered if the name is taken), like an upload:
@@ -345,8 +259,8 @@ pub async fn extract(State(st): State<AppState>, user: User, Json(req): Json<Ext
         let parent = tree::folder_for(&mut c, &user, &parent_id, Need::Write).await?;
         (zip, parent)
     };
-    let job = start(&st, &user, "extract")?;
-    spawn(&st, &job.id, run_extract(st.clone(), user, job.id.clone(), zip, parent.id));
+    let job = jobs::start(&st, user.id, "extract", Limit::Archive)?;
+    jobs::spawn(&st, &job, run_extract(st.clone(), user, Tracker::of(&st, &job), zip, parent.id));
     Ok(Json(job))
 }
 
@@ -482,7 +396,7 @@ fn extract_entry(archive: &std::path::Path, entry: &ReadEntry, tmp: PathBuf, pro
     Ok(Extracted { tmp, hash: hex::encode(sha.finalize()), size })
 }
 
-async fn run_extract(st: AppState, user: User, job: String, zip: Node, parent_id: String) -> AppResult<(String, String)> {
+async fn run_extract(st: AppState, user: User, progress: Tracker, zip: Node, parent_id: String) -> AppResult<Outcome> {
     // The archive is read in any order, so it is copied to a temporary file first (a folder space's file is read in place)
     let source = Source::of(&zip)?;
     // A folder space's file stays open meanwhile, so the path keeps leading to it
@@ -511,14 +425,14 @@ async fn run_extract(st: AppState, user: User, job: String, zip: Node, parent_id
             (tmp, true)
         }
     };
-    let result = extract_into(&st, &user, &job, &zip, &parent_id, &archive).await;
+    let result = extract_into(&st, &user, &progress, &zip, &parent_id, &archive).await;
     if copied {
         let _ = tokio::fs::remove_file(&archive).await;
     }
-    result
+    result.map(|(id, name)| Outcome::node(id, name))
 }
 
-async fn extract_into(st: &AppState, user: &User, job: &str, zip: &Node, parent_id: &str, archive: &std::path::Path) -> AppResult<(String, String)> {
+async fn extract_into(st: &AppState, user: &User, progress: &Tracker, zip: &Node, parent_id: &str, archive: &std::path::Path) -> AppResult<(String, String)> {
     let path = archive.to_path_buf();
     let (plan, total) = tokio::task::spawn_blocking(move || -> AppResult<_> {
         let mut file = std::io::BufReader::new(std::fs::File::open(&path)?);
@@ -533,13 +447,13 @@ async fn extract_into(st: &AppState, user: &User, job: &str, zip: &Node, parent_
         plan_entries(entries, size)
     })
     .await??;
-    update(st, job, |j| j.total = total);
+    progress.set_total(total);
     let parent = tree::folder_for(&mut *st.db.acquire().await?, user, parent_id, Need::Write).await?;
     let drive = parent.drive().to_string();
     // What the archive states is checked against the quota before anything is extracted
     tree::check_quota(&mut *st.db.acquire().await?, &drive, total as i64).await?;
     if parent.in_folder_space() {
-        return extract_into_folder(st, user, job, zip, &parent, archive, plan).await;
+        return extract_into_folder(st, user, progress, zip, &parent, archive, plan).await;
     }
 
     let mut staged: Vec<(usize, tree::StagedBlob)> = Vec::new();
@@ -549,8 +463,8 @@ async fn extract_into(st: &AppState, user: &User, job: &str, zip: &Node, parent_
                 continue;
             }
             let (archive, entry, tmp) = (archive.to_path_buf(), p.entry.clone(), st.tmp_dir().join(format!("unzip-{}", new_id())));
-            let (st2, job2) = (st.clone(), job.to_string());
-            let x = tokio::task::spawn_blocking(move || extract_entry(&archive, &entry, tmp, &|n| update(&st2, &job2, |j| j.done += n))).await??;
+            let p = progress.clone();
+            let x = tokio::task::spawn_blocking(move || extract_entry(&archive, &entry, tmp, &|n| p.add(n))).await??;
             staged.push((i, tree::stage_blob(st, &drive, x.hash, x.size as i64, x.tmp).await?));
         }
         let _w = st.write_lock.lock().await;
@@ -616,7 +530,7 @@ async fn extract_into(st: &AppState, user: &User, job: &str, zip: &Node, parent_
 async fn extract_into_folder(
     st: &AppState,
     user: &User,
-    job: &str,
+    progress: &Tracker,
     zip: &Node,
     parent: &Node,
     archive: &std::path::Path,
@@ -631,9 +545,9 @@ async fn extract_into_folder(
         let dir = fsops::make_dirs(&staged.top, &p.dirs).map_err(fsops::disk_error)?;
         let Some(file) = &p.file else { continue };
         let (archive, entry, tmp) = (archive.to_path_buf(), p.entry.clone(), st.tmp_dir().join(format!("unzip-{}", new_id())));
-        let (st2, job2, file) = (st.clone(), job.to_string(), file.clone());
+        let (p, file) = (progress.clone(), file.clone());
         tokio::task::spawn_blocking(move || -> AppResult<()> {
-            let x = extract_entry(&archive, &entry, tmp, &|n| update(&st2, &job2, |j| j.done += n))?;
+            let x = extract_entry(&archive, &entry, tmp, &|n| p.add(n))?;
             let moved = fsops::move_in(&x.tmp, &dir, &file);
             if moved.is_err() {
                 let _ = std::fs::remove_file(&x.tmp);
@@ -651,17 +565,10 @@ async fn extract_into_folder(
 mod tests {
     use super::*;
     use crate::testutil;
+    use axum::{extract::Path, http::StatusCode};
 
-    /// Waits for a job to finish
     async fn wait(env: &testutil::TestEnv, id: &str) -> Job {
-        for _ in 0..1000 {
-            let job = env.st.jobs.lock().unwrap().get(id).cloned().expect("the job is known");
-            if job.state != "running" {
-                return job;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        panic!("the job didn't finish");
+        jobs::wait_for(&env.st, id).await
     }
 
     /// The items in a folder: (name, kind, content)
@@ -732,7 +639,7 @@ mod tests {
         assert_eq!(used, node.size, "the new file is counted in the space's usage");
 
         // Someone else can't follow the job, or compress items they can't open
-        assert_eq!(get(State(env.st.clone()), ben.clone(), Path(job.id.clone())).await.unwrap_err().status, StatusCode::NOT_FOUND);
+        assert_eq!(jobs::get(State(env.st.clone()), ben.clone(), Path(job.id.clone())).await.unwrap_err().status, StatusCode::NOT_FOUND);
         assert!(compress_now(&env, &ben, &[&a], ben.root()).await.is_err());
         assert!(extract_now(&env, &ben, &zip).await.is_err());
 

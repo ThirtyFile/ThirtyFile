@@ -14,8 +14,9 @@ use sqlx::SqliteConnection;
 use crate::{
     auth::User,
     error::{AppError, AppResult},
-    fsops, paths,
-    logs,
+    fsops,
+    jobs::{self, Job, Limit, Outcome},
+    logs, paths,
     state::AppState,
     tree::{self, Crumb, NODE_COLS, Need, Node, Role},
     util::{new_id, now, validate_name},
@@ -515,7 +516,30 @@ fn not_root(n: &Node) -> AppResult<()> {
     if n.parent_id.is_none() { Err(AppError::bad_request("This can't be done on the root folder of a space")) } else { Ok(()) }
 }
 
-pub async fn move_nodes(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Value>> {
+/// Moves items. Moving to or from a folder space copies (or renames) content, which can take long: that part runs as a
+/// job the page follows (jobs.rs)
+pub async fn move_nodes(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Job>> {
+    let pending = jobs::reserve(&st, user.id, "move", Limit::Changes)?;
+    let across = move_items(&st, &user, &req).await?;
+    Ok(Json(run_across(&st, &user, pending, across).await?))
+}
+
+/// Copies items; as for moves, copies to or from a folder space run as a job
+pub async fn copy_nodes(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Job>> {
+    let pending = jobs::reserve(&st, user.id, "copy", Limit::Changes)?;
+    let across = copy_items(&st, &user, &req).await?;
+    Ok(Json(run_across(&st, &user, pending, across).await?))
+}
+
+async fn run_across(st: &AppState, user: &User, pending: jobs::Pending, across: Option<fsops::Across>) -> AppResult<Job> {
+    let Some(across) = across else { return Ok(Job::done(pending.kind())) };
+    let (st, user) = (st.clone(), user.clone());
+    pending.run(jobs::WAIT, move |t| async move { across.run(&st, &user, &t).await.map(|()| Outcome::default()) }).await
+}
+
+/// Moves items in the index; what goes to or from a folder space is returned, for its content to be moved next
+pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult<Option<fsops::Across>> {
+    let (st, user) = (st.clone(), user.clone());
     let ids = req.ids()?;
     let locks = fsops::lock(&st, &user, &locked_ids(req.dest()?, &ids)).await?;
     let _w = st.write_lock.lock().await;
@@ -594,9 +618,7 @@ pub async fn move_nodes(State(st): State<AppState>, user: User, Json(req): Json<
     tree::touch(&mut tx, &dest.id).await?;
     tx.commit().await?;
     locks.committed();
-    drop(_w);
-    fsops::move_across(&st, &user, &dest, across).await?;
-    Ok(Json(json!({ "ok": true })))
+    Ok(fsops::Across::new(dest, across, true))
 }
 
 /// The items a move or copy touches, for locking their folder spaces
@@ -604,7 +626,9 @@ fn locked_ids<'a>(dest: &'a str, ids: &'a [String]) -> Vec<&'a str> {
     std::iter::once(dest).chain(ids.iter().map(String::as_str)).collect()
 }
 
-pub async fn copy_nodes(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Value>> {
+/// Copies items in the index; what goes to or from a folder space is returned, for its content to be copied next
+pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult<Option<fsops::Across>> {
+    let (st, user) = (st.clone(), user.clone());
     let ids = req.ids()?;
     let locks = fsops::lock(&st, &user, &locked_ids(req.dest()?, &ids)).await?;
     let _w = st.write_lock.lock().await;
@@ -686,9 +710,7 @@ pub async fn copy_nodes(State(st): State<AppState>, user: User, Json(req): Json<
     tree::touch(&mut tx, &dest.id).await?;
     tx.commit().await?;
     locks.committed();
-    drop(_w);
-    fsops::copy_across(&st, &user, &dest, across).await?;
-    Ok(Json(json!({ "ok": true })))
+    Ok(fsops::Across::new(dest, across, false))
 }
 
 pub async fn trash(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Value>> {

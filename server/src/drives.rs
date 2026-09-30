@@ -240,9 +240,27 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     Ok(Json(info))
 }
 
-/// Scans a folder space now (Control panel › Spaces › Scan now)
-pub async fn scan(State(st): State<AppState>, Admin(_): Admin, Path(id): Path<String>) -> AppResult<Json<crate::folders::ScanReport>> {
-    Ok(Json(crate::folders::scan(&st, &id).await?))
+/// Scans a folder space now (Control panel › Spaces › Check for changes). A large folder takes a while: the scan runs
+/// as a job (jobs.rs), whose result is the scan's report
+pub async fn scan(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>) -> AppResult<Json<crate::jobs::Job>> {
+    let job = crate::jobs::run(&st.clone(), &user, "scan", crate::jobs::Limit::Changes, crate::jobs::WAIT, move |t| async move {
+        let scan = crate::folders::scan(&st, &id);
+        tokio::pin!(scan);
+        let report = loop {
+            tokio::select! {
+                r = &mut scan => break r?,
+                // The scan's own progress: what was found while reading, then the changes made to the index
+                _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {
+                    if let Some(p) = crate::folders::progress(&id) {
+                        t.set(p.done as u64, p.total as u64);
+                    }
+                }
+            }
+        };
+        Ok(crate::jobs::Outcome { result: Some(serde_json::to_value(&report).map_err(AppError::internal)?), ..Default::default() })
+    })
+    .await?;
+    Ok(Json(job))
 }
 
 /// Space management rights: manager or above; administrators can manage all non-personal spaces
@@ -768,6 +786,25 @@ pub async fn delete_group(State(st): State<AppState>, Admin(user): Admin, Path(i
 mod tests {
     use super::*;
     use crate::testutil;
+
+    #[tokio::test]
+    async fn checking_a_folder_space_answers_with_its_report_or_runs_on_as_a_job() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let space = env.folder_space("Scans").await;
+        testutil::write_old(&space.dir.join("a.txt"), b"a");
+        let Json(job) = scan(State(env.st.clone()), Admin(admin.clone()), Path(space.drive.clone())).await.unwrap();
+        assert_eq!((job.kind, job.state), ("scan", "done"));
+        assert_eq!(job.result.unwrap()["added"], 1);
+        // One that takes longer (it waits for the space's lock here) answers with the running job
+        let held = crate::fsops::lock_space(&space.drive).await;
+        testutil::write_old(&space.dir.join("b.txt"), b"b");
+        let Json(job) = scan(State(env.st.clone()), Admin(admin), Path(space.drive.clone())).await.unwrap();
+        assert_eq!(job.state, "running");
+        drop(held);
+        let job = crate::jobs::wait_for(&env.st, &job.id).await;
+        assert_eq!(job.result.unwrap()["added"], 1);
+    }
 
     #[tokio::test]
     async fn a_deleted_group_leaves_the_sign_in_settings_and_its_id_isnt_reused() {

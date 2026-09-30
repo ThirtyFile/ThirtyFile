@@ -19,6 +19,7 @@ mod notify;
 mod branding;
 mod check;
 mod ftp;
+mod jobs;
 mod sftp;
 mod sso;
 mod nodes;
@@ -535,7 +536,7 @@ fn file_api() -> Router<AppState> {
         .route("/download/{link}", get(downloads::download_by_link))
         .route("/archive/compress", post(archive::compress))
         .route("/archive/extract", post(archive::extract))
-        .route("/jobs/{id}", get(archive::get))
+        .route("/jobs/{id}", get(jobs::get))
         .route_layer(middleware::from_fn(tokens::allow))
 }
 
