@@ -224,7 +224,7 @@ mod tests {
     use crate::testutil::{self, TestEnv};
 
     async fn node(env: &TestEnv, id: &str) -> Node {
-        tree::get_node(&mut *env.st.db.acquire().await.unwrap(), id).await.unwrap().unwrap()
+        tree::get_node(&mut env.st.db.acquire().await.unwrap(), id).await.unwrap().unwrap()
     }
 
     /// A file received into the data folder's tmp/
