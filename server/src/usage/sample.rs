@@ -226,6 +226,10 @@ async fn totals(st: &AppState) -> AppResult<HashMap<String, Capacity>> {
     for (id, n) in rows {
         by.entry(id).or_default().pending_deletes = n;
     }
+    // Copies kept on a location (backups/): each content once per copy. Locations holding none have none (NULL).
+    for (id, bytes) in crate::backups::bytes_by_location(db).await? {
+        by.entry(id).or_default().backup_bytes = Some(bytes);
+    }
     Ok(by)
 }
 
@@ -237,6 +241,11 @@ async fn disk(path: PathBuf) -> Option<(i64, i64, Option<String>)> {
         Some((clamp(free), clamp(total), disk_id(&path)))
     });
     tokio::time::timeout(Duration::from_secs(3), task).await.ok()?.ok()?
+}
+
+/// Which disk holds `path`, as `disk_id` names it; None when the system doesn't tell within a few seconds
+pub async fn disk_of_path(path: &Path) -> Option<String> {
+    disk(path.to_path_buf()).await.and_then(|(_, _, id)| id)
 }
 
 /// The disk holding `path`: its device number (Windows: its drive)
@@ -281,6 +290,9 @@ pub async fn sample_capacity(st: &AppState, at: i64) -> AppResult<Vec<Capacity>>
         all.folder_bytes += c.folder_bytes;
         all.folder_version_bytes += c.folder_version_bytes;
         all.pending_deletes += c.pending_deletes;
+        if let Some(b) = c.backup_bytes {
+            all.backup_bytes = Some(all.backup_bytes.unwrap_or_default() + b);
+        }
     }
     for ((id, _, _), disk) in locations.iter().zip(&disks) {
         let mut c = by.get(id).cloned().unwrap_or_default();
@@ -514,7 +526,7 @@ mod tests {
         assert_eq!((local.live_bytes, local.trash_bytes, local.version_bytes), (6, 5, 3), "as people see them: each file counts");
         assert_eq!(local.store_bytes, 8, "stored: identical content once, the trash's too");
         assert_eq!((local.folder_bytes, local.folder_version_bytes, local.pending_deletes), (0, 0, 0));
-        assert_eq!((local.backup_bytes, local.replica_bytes), (None, None), "reserved");
+        assert_eq!((local.backup_bytes, local.replica_bytes), (None, None), "no copies are kept there");
         assert!(local.online);
         let all = row(&rows, "");
         assert_eq!((all.live_bytes, all.trash_bytes, all.version_bytes, all.store_bytes), (6, 5, 3, 8));

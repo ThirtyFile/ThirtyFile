@@ -62,6 +62,7 @@ async fn make_env(space_folders: bool) -> TestEnv {
         db,
         storages: std::sync::RwLock::new(storages),
         moves: Default::default(),
+        backups: Default::default(),
         data_dir: dir.clone(),
         storage_dir: dir.join("blobs"),
         space_folders,

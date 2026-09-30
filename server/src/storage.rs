@@ -624,6 +624,14 @@ pub struct S3Storage {
     prefix: String,
 }
 
+#[cfg(test)]
+impl S3Storage {
+    /// A bucket kept in memory, reached through the same code as a real one (tests)
+    pub fn in_memory(prefix: &str) -> Self {
+        Self { store: Arc::new(object_store::memory::InMemory::new()), prefix: prefix.to_string() }
+    }
+}
+
 /// Connect timeout: report quickly when the service can't be reached at all
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// Read timeout: a connection counts as stuck only after receiving no data for this long (the total transfer time isn't limited, so large files and slow downloads aren't interrupted)

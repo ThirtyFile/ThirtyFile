@@ -35,6 +35,8 @@ pub struct Inner {
     pub storages: RwLock<HashMap<String, Arc<dyn Storage>>>,
     /// Moves of spaces to other storage locations that are running now (moves/)
     pub moves: crate::moves::Moves,
+    /// Backup jobs running now (backups/)
+    pub backups: crate::backups::Backups,
     pub data_dir: PathBuf,
     /// Folder of the built-in `local` storage location
     pub storage_dir: PathBuf,

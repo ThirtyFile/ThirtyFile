@@ -509,6 +509,66 @@ async fn check_place_free(conn: &mut SqliteConnection, id: Option<&str>, kind: &
     Ok(())
 }
 
+/// How the places of two locations relate, for copies, backups and replicas between them
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Relation {
+    /// Apart: another disk or another service
+    Apart,
+    /// On the same disk of this server, or the same server or bucket of a storage service: a copy on one doesn't
+    /// survive a failure of the other
+    Shared,
+    /// The same place, or one inside the other: refused
+    Nested,
+}
+
+/// Where a location keeps its files: what it is on (a disk of this server, or a server, bucket or account of a
+/// storage service) and its folder or prefix there, as parts
+async fn physical(st: &AppState, id: &str) -> AppResult<(String, Vec<String>)> {
+    let (kind, raw): (String, String) = sqlx::query_as("SELECT kind, config FROM storage_locations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&st.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Storage location not found"))?;
+    let cfg = config_json(id, &raw);
+    let parts = |path: &str| path.split(['/', '\\']).filter(|p| !p.is_empty() && *p != ".").map(str::to_string).collect::<Vec<_>>();
+    if kind == "local" {
+        let root = storage::local_root(id, &cfg, &st.storage_dir).map_err(|e| AppError::bad_request(e.to_string()))?;
+        let abs = std::path::absolute(&root).unwrap_or(root);
+        let text = abs.to_string_lossy().to_string();
+        // Windows doesn't tell letter case apart in paths
+        let text = if cfg!(windows) { text.to_lowercase() } else { text };
+        let disk = crate::usage::sample::disk_of_path(&abs).await.unwrap_or_default();
+        return Ok((format!("disk {disk}"), parts(&text)));
+    }
+    let place = place_of(&kind, &cfg).unwrap_or_default();
+    // "s3 <endpoint> <bucket> <prefix>" and "<kind> <host> <port> <account> <path>": the service, then the folder
+    let fields: Vec<&str> = place.splitn(if kind == "s3" { 4 } else { 5 }, ' ').collect();
+    let (service, folder) = fields.split_at(fields.len().saturating_sub(1));
+    Ok((service.join(" "), parts(folder.first().copied().unwrap_or_default())))
+}
+
+/// How the places of the locations `a` and `b` relate (`Relation`)
+pub async fn relation(st: &AppState, a: &str, b: &str) -> AppResult<Relation> {
+    if a == b {
+        return Ok(Relation::Nested);
+    }
+    let ((sa, pa), (sb, pb)) = (physical(st, a).await?, physical(st, b).await?);
+    let local = |s: &str| s.starts_with("disk ");
+    if local(&sa) && local(&sb) {
+        // Folders of this server: nested whatever the disks say
+        if pa.starts_with(&pb) || pb.starts_with(&pa) {
+            return Ok(Relation::Nested);
+        }
+        return Ok(if sa == sb && sa != "disk " { Relation::Shared } else { Relation::Apart });
+    }
+    if sa != sb {
+        // The same server under another account or bucket still fails with it
+        let server = |s: &str| s.split(' ').take(2).collect::<Vec<_>>().join(" ");
+        return Ok(if !local(&sa) && server(&sa) == server(&sb) { Relation::Shared } else { Relation::Apart });
+    }
+    Ok(if pa.starts_with(&pb) || pb.starts_with(&pa) { Relation::Nested } else { Relation::Shared })
+}
+
 // ───────────── Connection health monitoring ─────────────
 
 /// Sends just one HEAD request every 30 seconds (about US$0.03 per month on AWS); a disconnect shows as offline in the UI within half a minute
@@ -892,7 +952,7 @@ async fn in_use(conn: &mut SqliteConnection, id: &str) -> AppResult<bool> {
     .bind(id)
     .fetch_one(&mut *conn)
     .await?;
-    Ok(n > 0 || crate::moves::location_busy(conn, id).await?)
+    Ok(n > 0 || crate::moves::location_busy(conn, id).await? || crate::backups::sets_on(conn, id).await? > 0)
 }
 
 /// The folder spaces of the location `id` follow its folder from `from` to `to`
@@ -968,6 +1028,18 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
             "This location still stores {blobs} {}. Move the spaces that use it to another location first.",
             if blobs == 1 { "file" } else { "files" }
         )));
+    }
+    // Copies kept there would be lost, and jobs reading from it would fail
+    let sets = crate::backups::sets_on(&mut tx, &id).await?;
+    if sets > 0 {
+        return Err(AppError::bad_request(if sets == 1 {
+            "This location holds a copy. Delete it in Control panel › Backups first.".to_string()
+        } else {
+            format!("This location holds {sets} copies. Delete them in Control panel › Backups first.")
+        }));
+    }
+    if crate::backups::location_busy(&mut tx, &id).await? {
+        return Err(AppError::bad_request("A copy is being made from or to this location. Wait until it finishes, or cancel it."));
     }
     sqlx::query("DELETE FROM storage_locations WHERE id = ?").bind(&id).execute(&mut *tx).await?;
     // Content that couldn't be deleted there stays in that storage: ThirtyFile no longer connects to it

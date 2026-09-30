@@ -523,7 +523,7 @@ impl Storage for SftpStorage {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::{
         collections::HashMap,
         io::{Read, Seek, Write},
@@ -709,10 +709,10 @@ mod tests {
     }
 
     /// An SSH server over a temporary folder, with a new host key
-    struct Server {
-        dir: PathBuf,
+    pub(crate) struct Server {
+        pub dir: PathBuf,
         port: u16,
-        fingerprint: String,
+        pub fingerprint: String,
         task: tokio::task::JoinHandle<()>,
     }
 
@@ -723,7 +723,7 @@ mod tests {
         }
     }
 
-    async fn server(password: &'static str) -> Server {
+    pub(crate) async fn server(password: &'static str) -> Server {
         server_on(password, 0).await
     }
 
@@ -767,7 +767,7 @@ mod tests {
         Server { dir, port, fingerprint, task }
     }
 
-    fn storage(s: &Server, password: &str, host_key: &str) -> SftpStorage {
+    pub(crate) fn storage(s: &Server, password: &str, host_key: &str) -> SftpStorage {
         let cfg = SftpConfig {
             host: "127.0.0.1".into(),
             port: s.port,

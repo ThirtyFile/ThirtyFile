@@ -1,6 +1,7 @@
 mod admin;
 mod archive;
 mod auth;
+mod backups;
 mod beneath;
 mod dav;
 mod db;
@@ -363,6 +364,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         db,
         storages: std::sync::RwLock::new(storages),
         moves: Default::default(),
+        backups: Default::default(),
         data_dir: cfg.data.clone(),
         storage_dir: storage,
         space_folders: Some(space_folders),
@@ -411,6 +413,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     locations::spawn_health_monitor(state.clone());
     usage::sample::spawn(state.clone());
     moves::spawn_runner(state.clone());
+    backups::spawn_runner(state.clone());
     personal::spawn_retry(state.clone());
     folders::spawn_scanner(state.clone());
     // Folder spaces on local disks report changes as they happen
@@ -798,6 +801,16 @@ fn api() -> Router<AppState> {
         .route("/admin/moves/{id}/pause", post(moves::pause))
         .route("/admin/moves/{id}/resume", post(moves::resume))
         .route("/admin/moves/{id}/cancel", post(moves::cancel))
+        .route("/admin/backups", get(backups::api::list))
+        .route("/admin/backups/copies", post(backups::api::copy))
+        .route("/admin/backups/copies/preview", post(backups::api::copy_preview))
+        .route("/admin/backups/jobs/{id}/pause", post(backups::api::pause))
+        .route("/admin/backups/jobs/{id}/resume", post(backups::api::resume))
+        .route("/admin/backups/jobs/{id}/cancel", post(backups::api::cancel))
+        .route("/admin/backups/sets/{id}", delete(backups::api::delete))
+        .route("/admin/backups/sets/{id}/verify", post(backups::api::verify))
+        .route("/admin/backups/snapshots/{id}/restore", post(backups::api::restore))
+        .route("/admin/backups/snapshots/{id}/restore/preview", post(backups::api::restore_preview))
         .route("/admin/storage", get(locations::list).post(locations::create))
         .route("/admin/storage/test", post(locations::test))
         .route("/admin/storage/{id}", patch(locations::update).delete(locations::delete))

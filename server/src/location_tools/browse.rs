@@ -98,6 +98,9 @@ pub async fn browse(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     let loc = location(&st, &id).await?;
     let path = q.path.trim_matches('/').to_string();
     storage::key_parts(&path).map_err(|_| AppError::bad_request("Invalid path"))?;
+    if in_copies(&path) {
+        return Err(copies_closed());
+    }
     let mut c = st.db.acquire().await?;
     let folder = loc.folder(&st);
     let spaces = match &folder {
@@ -150,6 +153,16 @@ pub async fn browse(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
         }
     }
     Ok(Json(Page { path, items, next, space: within }))
+}
+
+/// Whether a path is in the folder of copies ThirtyFile keeps on a location (backups/). Their lists of files name the
+/// files of every space copied, personal spaces' too: nothing in it is listed or served here.
+fn in_copies(key: &str) -> bool {
+    key.split('/').next().is_some_and(|first| first.eq_ignore_ascii_case(crate::backups::layout::ROOT))
+}
+
+fn copies_closed() -> AppError {
+    AppError::forbidden("This folder holds copies ThirtyFile keeps. They are managed in Control panel › Backups.")
 }
 
 fn private_space(s: &SpaceRef) -> AppError {
@@ -463,6 +476,9 @@ pub async fn download(State(st): State<AppState>, Admin(me): Admin, Path(id): Pa
     let key = q.path.trim_matches('/');
     if key.is_empty() || storage::key_parts(key).is_err() {
         return Err(AppError::bad_request("Invalid path"));
+    }
+    if in_copies(key) {
+        return Err(copies_closed());
     }
     let mut c = st.db.acquire().await?;
     if let Some(folder) = loc.folder(&st)

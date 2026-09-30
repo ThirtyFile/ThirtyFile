@@ -746,6 +746,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[tokio::test]
+    async fn a_database_from_0_4_0_gets_empty_lists_of_copies_and_keeps_its_locations() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-040-copies-{}", crate::util::new_id()));
+        let path = dir.join("drive.db");
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO storage_locations (id, name, kind, config, created_at) VALUES ('nas', 'NAS', 'local', '{}', 0)").execute(&db).await.unwrap();
+        assert!(sqlx::query("SELECT id FROM backup_sets").fetch_all(&db).await.is_err(), "0.4.0 has no copies");
+        db.close().await;
+
+        let db = connect(&path, 16).await.unwrap();
+        let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM storage_locations").fetch_one(&db).await.unwrap();
+        assert_eq!(n, 2);
+        sqlx::query("INSERT INTO backup_sets (id, kind, name, dest_location, created_at) VALUES ('s', 'copy', 'Copy', 'nas', 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO backup_jobs (id, kind, set_id, created_at) VALUES ('j', 'snapshot', 's', 0)").execute(&db).await.unwrap();
+        let (state,): (String,) = sqlx::query_as("SELECT state FROM backup_jobs WHERE id = 'j'").fetch_one(&db).await.unwrap();
+        assert_eq!(state, "queued");
+        // A location holding a copy can't go
+        assert!(sqlx::query("DELETE FROM storage_locations WHERE id = 'nas'").execute(&db).await.is_err());
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     async fn admin_hash(password: Option<&str>) -> String {
         let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));
         std::fs::create_dir_all(&dir).unwrap();
