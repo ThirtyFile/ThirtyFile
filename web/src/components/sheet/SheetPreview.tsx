@@ -13,6 +13,7 @@ import { computeConditional, readDxfs, type CellDecoration, type Dxf } from "@/o
 import { t, tc } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { HEADER_H, HEADER_W, cellText, draw, visibleCells, type View } from "./renderer";
+import { officeErrorMessage } from "@/lib/officeErrors";
 
 interface Loaded {
   book: Workbook;
@@ -67,7 +68,7 @@ export default function SheetPreview({ buffer, onError }: { buffer: ArrayBuffer;
       if (cancelled) return pkg.dispose();
       setSheetIdx(book.active ?? 0);
       setData({ book, pkg, theme, dxfs: readDxfs(styles, theme, palette), palette, drawingParts: parts });
-    })().catch((e) => !cancelled && fail(e instanceof Error ? e.message : t("Couldn't open this spreadsheet")));
+    })().catch((e) => !cancelled && fail(officeErrorMessage(e, t("Couldn't open this spreadsheet"))));
     return () => {
       cancelled = true;
       pkg?.dispose();

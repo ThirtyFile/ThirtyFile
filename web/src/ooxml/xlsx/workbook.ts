@@ -10,7 +10,6 @@
  *   Everything else (charts, images, pivot tables, all content besides macros) is left untouched
  */
 import JSZip from "jszip";
-import { t } from "@/lib/i18n";
 import {
   MAX_COLS,
   cellName,
@@ -30,6 +29,7 @@ import { shiftFormula } from "./formula";
 import { parseTheme, rgbaHex, sheetColor, INDEXED_COLORS, type Theme } from "../core/theme";
 import { checkZipSizes, readEntry } from "../core/package";
 import { breathe } from "../core/yield";
+import { OoxmlError } from "../core/errors";
 import { adjustFormula, adjustSqref, adjustCell, cloneState, type SheetState, type StructOp } from "./ops";
 
 const NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
@@ -45,7 +45,7 @@ const serialize = (doc: Document) => new XMLSerializer().serializeToString(doc);
 
 function ref(r: string): [number, number] {
   const p = parseCellName(r);
-  if (!p) throw new Error(t("Invalid cell reference: {ref}", { ref: r }));
+  if (!p) throw new OoxmlError("bad-cell-reference", r);
   return p;
 }
 
@@ -243,16 +243,16 @@ export type Snapshot = Map<string, SheetState>;
 export async function readXlsx(buf: ArrayBuffer): Promise<{ zip: JSZip; book: Workbook; snapshot: Snapshot }> {
   // JSZip's own errors ("Corrupted zip…") are English and cryptic
   const zip = await JSZip.loadAsync(buf).catch(() => {
-    throw new Error(t("This file isn't a valid Office document (it may be damaged, or wasn't created by Office), so it can't be opened online. Download it to check."));
+    throw new OoxmlError("not-ooxml");
   });
   try {
     checkZipSizes(zip);
   } catch {
-    throw new Error(t("The file's content is too large to open. Download it and open it in Excel."));
+    throw new OoxmlError("too-large");
   }
   const text = async (path: string) => (await readEntry(zip, path, "string")) ?? null;
   const workbookXml = await text("xl/workbook.xml");
-  if (!workbookXml) throw new Error(t("Couldn't find the workbook contents. This may not be an Excel file."));
+  if (!workbookXml) throw new OoxmlError("no-workbook");
   const workbook = parseXml(workbookXml);
   const rels = parseXml((await text("xl/_rels/workbook.xml.rels")) ?? "<Relationships/>");
   const targets = new Map(Array.from(rels.getElementsByTagName("Relationship")).map((r) => [r.getAttribute("Id"), r.getAttribute("Target") ?? ""]));
@@ -402,7 +402,7 @@ export async function readXlsx(buf: ArrayBuffer): Promise<{ zip: JSZip; book: Wo
     sheets.push(sheet);
     snapshot.set(id, cloneState(sheet));
   }
-  if (sheets.length === 0) throw new Error(t("The workbook has no editable sheets"));
+  if (sheets.length === 0) throw new OoxmlError("no-sheets");
   // Sheet shown on open (activeTab indexes all sheets, including skipped chart sheets)
   const activeTab = Number(byTag(workbook, "workbookView")[0]?.getAttribute("activeTab") ?? 0);
   const activeName = byTag(workbook, "sheet")[activeTab]?.getAttribute("name");
@@ -442,7 +442,7 @@ const ERRORS = new Set(["#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM
 
 function sheetDataOf(doc: Document) {
   const sd = byTag(doc, "sheetData")[0];
-  if (!sd) throw new Error(t("The sheet format isn't recognized"));
+  if (!sd) throw new OoxmlError("unknown-sheet");
   return sd;
 }
 
