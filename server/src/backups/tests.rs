@@ -140,13 +140,37 @@ async fn trash(env: &TestEnv, user: &User, id: &str) {
 
 /// Deletes a file for good, and its content once nothing uses it
 async fn purge(env: &TestEnv, user: &User, id: &str) {
+    let (hash,): (Option<String>,) = sqlx::query_as("SELECT blob_hash FROM nodes WHERE id = ?").bind(id).fetch_one(&env.st.db).await.unwrap();
+    let location = match &hash {
+        Some(h) => sqlx::query_as::<_, (String,)>("SELECT location_id FROM blobs WHERE hash = ?").bind(h).fetch_one(&env.st.db).await.unwrap().0,
+        None => "local".to_string(),
+    };
     trash(env, user, id).await;
     let req = serde_json::from_value(json!({ "ids": [id] })).unwrap();
     let Json(job) = crate::nodes::delete_forever(State(env.st.clone()), user.clone(), Json(req)).await.unwrap();
     if job.state == "running" {
         crate::jobs::wait_for(&env.st, &job.id).await;
     }
-    delete_due(env, "local").await;
+    // Content nothing uses is listed for deletion by a task of its own: deleted once it is listed
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        delete_due(env, &location).await;
+        let Some(h) = &hash else { break };
+        let (used, pending): (i64, i64) = sqlx::query_as(
+            "SELECT (SELECT COUNT(*) FROM blobs WHERE hash = ?1), (SELECT COUNT(*) FROM pending_blob_deletes WHERE hash = ?1)",
+        )
+        .bind(h)
+        .fetch_one(&env.st.db)
+        .await
+        .unwrap();
+        let s = env.st.storage(&location).unwrap();
+        let gone = s.stat(&storage::join_key(&[s.content_dir(), &h[0..2], &h[2..4], h])).await.unwrap().is_none();
+        if used > 0 || (pending == 0 && gone) {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "the content wasn't deleted");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
 }
 
 /// Deletions that are waiting are made due, and done
@@ -375,9 +399,8 @@ async fn content_deleted_while_a_copy_is_being_made_is_kept_until_it_is_copied()
     let (st, amy2, ids2) = (env.st.clone(), amy.clone(), ids.clone());
     let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let once = done.clone();
-    let env_dir = env.dir.clone();
     on_object_put(&env, "nas", move |n| {
-        let (st, amy, ids, once, _dir) = (st.clone(), amy2.clone(), ids2.clone(), once.clone(), env_dir.clone());
+        let (st, amy, ids, once) = (st.clone(), amy2.clone(), ids2.clone(), once.clone());
         Box::pin(async move {
             if n != 1 || once.swap(true, SeqCst) {
                 return;
@@ -390,6 +413,12 @@ async fn content_deleted_while_a_copy_is_being_made_is_kept_until_it_is_copied()
                 if job.state == "running" {
                     crate::jobs::wait_for(&st, &job.id).await;
                 }
+            }
+            // Listed for deletion by a task of their own: once all are, their deletion is tried now
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            while sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM pending_blob_deletes WHERE location_id = 'local'").fetch_one(&st.db).await.unwrap().0 < ids.len() as i64 {
+                assert!(std::time::Instant::now() < deadline, "the content wasn't listed for deletion");
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             }
             sqlx::query("UPDATE pending_blob_deletes SET created_at = 0").execute(&st.db).await.unwrap();
             crate::tree::retry_pending_deletes(&st, "local").await;
@@ -410,6 +439,8 @@ async fn content_deleted_while_a_copy_is_being_made_is_kept_until_it_is_copied()
     for (_, body) in &ids {
         assert!(!testutil::blob_file(&env, body).exists(), "deleted once copied");
     }
+    let (pending,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM backup_pending").fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(pending, 0);
     // And they come back from the copy
     let mine = env.drive_of(amy.root()).await;
     let job = restore(&env, &snapshot, &mine, None, false).await.unwrap();
