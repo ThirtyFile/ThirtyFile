@@ -1,5 +1,5 @@
 // Workbooks for the formula and structure tests, written as { "A1": value or "=formula" }
-import { key, parseCellName, type Cell, type Scalar, type Sheet, type Workbook } from "@/lib/sheet/model";
+import { key, parseCellName, type Cell, type Scalar, type Sheet, type Workbook } from "@/ooxml/xlsx/model";
 
 export function sheet(name: string, data: Record<string, Scalar>, id = name): Sheet {
   const cells = new Map<number, Cell>();

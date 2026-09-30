@@ -6,8 +6,8 @@ import { reportShown } from "@/lib/errorReport";
 import { frameDocument, loadFrameScript } from "@/components/officeFrame";
 import { extOf } from "@/lib/utils";
 import SheetPreview from "@/components/sheet/SheetPreview";
-import { TOO_LARGE } from "@/lib/office/ooxml";
-import { MAX_OFFICE_PREVIEW_BYTES, MAX_OFFICE_PREVIEW_LABEL } from "@/lib/office/limits";
+import { TOO_LARGE } from "@/ooxml/core/package";
+import { MAX_OFFICE_PREVIEW_BYTES, MAX_OFFICE_PREVIEW_LABEL } from "@/lib/officeLimits";
 
 /** Time limit for Word / PowerPoint layout */
 const RENDER_TIMEOUT = 60_000;

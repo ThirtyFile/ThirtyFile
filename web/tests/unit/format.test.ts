@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { formatCell, formatGeneral, formatValue, isDatePattern } from "@/lib/sheet/format";
-import { dateToSerial } from "@/lib/sheet/formula";
-import { estimateWidthEm, formatNumber } from "@/lib/office/docx/numfmt";
+import { formatCell, formatGeneral, formatValue, isDatePattern } from "@/ooxml/core/numfmt";
+import { dateToSerial } from "@/ooxml/xlsx/formula";
+import { estimateWidthEm, formatNumber } from "@/ooxml/docx/numfmt";
 
 describe("Excel number formats", () => {
   test.each([

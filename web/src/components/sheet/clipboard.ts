@@ -2,9 +2,9 @@
  * Clipboard: copy, cut, paste (formulas shift automatically, formats included, Excel content can be pasted) and clearing content.
  */
 import { type ClipboardEvent } from "react";
-import { key, type Cell, type Range } from "@/lib/sheet/model";
-import { shiftFormula } from "@/lib/sheet/formula";
-import { deriveStyle } from "@/lib/sheet/ops";
+import { key, type Cell, type Range } from "@/ooxml/xlsx/model";
+import { shiftFormula } from "@/ooxml/xlsx/formula";
+import { deriveStyle } from "@/ooxml/xlsx/ops";
 import { displayText } from "./renderer";
 import { parseInput, parseTsv, tsvField, type Change } from "./session";
 import type { WorkspaceCtx } from "./workspace";

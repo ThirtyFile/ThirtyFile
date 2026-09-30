@@ -22,10 +22,10 @@ import {
   type Range,
   type Scalar,
   type Sheet,
-} from "@/lib/sheet/model";
-import { checkFormula } from "@/lib/sheet/formula";
-import { formatGeneral } from "@/lib/sheet/format";
-import { deriveStyle } from "@/lib/sheet/ops";
+} from "@/ooxml/xlsx/model";
+import { checkFormula } from "@/ooxml/xlsx/formula";
+import { formatGeneral } from "@/ooxml/core/numfmt";
+import { deriveStyle } from "@/ooxml/xlsx/ops";
 import { HEADER_H, HEADER_W, cellRect, cellText, draw, fontOf, type View } from "./renderer";
 import { SheetToolbar } from "./SheetToolbar";
 import { SheetMenu, type MenuTarget } from "./SheetMenu";

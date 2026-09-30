@@ -4,8 +4,8 @@
  */
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { Node } from "@/api";
-import type { Calculator } from "@/lib/sheet/formula";
-import type { Axis, CellStyle, Range, Scalar, Sheet, Workbook } from "@/lib/sheet/model";
+import type { Calculator } from "@/ooxml/xlsx/formula";
+import type { Axis, CellStyle, Range, Scalar, Sheet, Workbook } from "@/ooxml/xlsx/model";
 import type { View } from "./renderer";
 import type { MenuTarget } from "./SheetMenu";
 import type { Change, Entry, Layout, Sel, Session } from "./session";

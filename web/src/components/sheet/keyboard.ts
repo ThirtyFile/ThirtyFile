@@ -2,7 +2,7 @@
  * Keyboard: arrow and Ctrl+arrow navigation, direct typing, F2 to edit, shortcuts (undo, save, bold…) and CJK input methods (IME).
  */
 import { type KeyboardEvent } from "react";
-import { key, mergeAt, type CellStyle, type Range } from "@/lib/sheet/model";
+import { key, mergeAt, type CellStyle, type Range } from "@/ooxml/xlsx/model";
 import { HEADER_H } from "./renderer";
 import { editText } from "./session";
 import type { WorkspaceCtx } from "./workspace";

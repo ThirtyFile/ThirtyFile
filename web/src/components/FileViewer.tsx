@@ -8,7 +8,7 @@ import { hasDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 import { reportShown } from "@/lib/errorReport";
 import { cn, extOf, formatBytes } from "@/lib/utils";
-import { MAX_OFFICE_PREVIEW_BYTES } from "@/lib/office/limits";
+import { MAX_OFFICE_PREVIEW_BYTES } from "@/lib/officeLimits";
 
 const TextEditor = lazy(() => import("@/components/TextEditor"));
 const OfficeViewer = lazy(() => import("@/components/OfficeViewer"));

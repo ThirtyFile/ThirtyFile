@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import type { CellStyle } from "@/lib/sheet/model";
+import type { CellStyle } from "@/ooxml/xlsx/model";
 import { t, tc } from "@/lib/i18n";
 import { shortcut } from "@/lib/keys";
 import { cn } from "@/lib/utils";

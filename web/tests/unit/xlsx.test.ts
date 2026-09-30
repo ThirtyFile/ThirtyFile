@@ -1,10 +1,10 @@
 // Open, edit and save round trips: saving must change only what was edited and keep everything else in the file.
 import JSZip from "jszip";
 import { describe, expect, test } from "vitest";
-import { Calculator, isErr, toScalar } from "@/lib/sheet/formula";
-import { key, type Workbook } from "@/lib/sheet/model";
-import { applyStructOp, deriveStyle, type StructOp } from "@/lib/sheet/ops";
-import { buildXlsx, readXlsx, type Snapshot } from "@/lib/sheet/xlsx";
+import { Calculator, isErr, toScalar } from "@/ooxml/xlsx/formula";
+import { key, type Workbook } from "@/ooxml/xlsx/model";
+import { applyStructOp, deriveStyle, type StructOp } from "@/ooxml/xlsx/ops";
+import { buildXlsx, readXlsx, type Snapshot } from "@/ooxml/xlsx/workbook";
 import { buildWorkbook, UNKNOWN_CONTENT, UNKNOWN_PART } from "../fixtures";
 
 const SAMPLE = {

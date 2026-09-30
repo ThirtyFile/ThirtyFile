@@ -1,7 +1,7 @@
 /**
  * Sandbox page for Word / PowerPoint previews.
  *
- * Documents are turned into DOM by our own renderers (lib/office/docx, lib/office/pptx), building the view only with textContent / setAttribute;
+ * Documents are turned into DOM by our own renderers (ooxml/docx, ooxml/pptx), building the view only with textContent / setAttribute;
  * as an extra layer of protection, rendering still happens in an iframe without same-origin rights: even if a renderer has a bug, it can't get this site's cookies or call the API.
  *
  * This code is embedded by the parent page into the iframe's srcdoc (the iframe neither needs nor is allowed any network access).
@@ -9,11 +9,11 @@
  * and replies { type: "link", href } when a link in the document is clicked; the parent opens it after checking it's http(s) / mailto.
  */
 
-import { renderDocx } from "@/lib/office/docx/index";
-import { renderPptx } from "@/lib/office/pptx/index";
-import { OoxmlPackage, h } from "@/lib/office/ooxml";
-import { parseTheme, type Theme } from "@/lib/office/theme";
-import { anchorBox, readDrawings, renderItem } from "@/lib/office/xlsx/drawings";
+import { renderDocx } from "@/ooxml/docx";
+import { renderPptx } from "@/ooxml/pptx";
+import { OoxmlPackage, h } from "@/ooxml/core/package";
+import { parseTheme, type Theme } from "@/ooxml/core/theme";
+import { anchorBox, readDrawings, renderItem } from "@/ooxml/xlsx/drawings";
 
 type RenderMessage = { type: "render"; kind: "docx" | "pptx"; buffer: ArrayBuffer };
 /** Excel: the workbook is loaded once, then each worksheet's drawing objects are rendered on request at the given column/row positions */
