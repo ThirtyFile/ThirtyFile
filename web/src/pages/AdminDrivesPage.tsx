@@ -20,6 +20,7 @@ import { DataTable, type Column } from "@/components/DataTable";
 import { useTabActions } from "@/tabs";
 import { toast } from "sonner";
 import { api, moveActive, type Drive, type ScanReport, type SpaceMove } from "@/api";
+import { affected, invalidate, keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AccessDialog } from "@/components/AccessDialog";
@@ -50,7 +51,7 @@ export function AdminDrivesPage() {
   const [scanning, setScanning] = useState(false);
   // Refreshed every few seconds while a folder space is being scanned, to show its progress
   const q = useQuery({
-    queryKey: ["admin-drives"],
+    queryKey: keys.adminDrives(),
     queryFn: api.adminDrives,
     refetchInterval: (query) => (scanning || query.state.data?.some((d) => d.scanning) ? 3000 : false),
   });
@@ -102,8 +103,7 @@ export function AdminDrivesPage() {
   const toMove = ticked.length ? ticked : selected ? [selected] : [];
   const toggle = (id: string, on: boolean) => setChecked((c) => (on ? [...c.filter((x) => x !== id), id] : c.filter((x) => x !== id)));
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: ["admin-drives"] });
-    qc.invalidateQueries({ queryKey: ["drives"] });
+    void invalidate(qc, ...affected.space());
   };
 
   const toolbar = (
@@ -389,7 +389,7 @@ export function AdminDrivesPage() {
             setDialog(null);
             setChecked([]);
             refresh();
-            qc.invalidateQueries({ queryKey: ["moves"] });
+            qc.invalidateQueries({ queryKey: keys.moves() });
           }}
         />
       )}
@@ -423,7 +423,7 @@ export function AdminDrivesPage() {
             setDialog(null);
             setSelectedId(null);
             void refreshFiles(qc, { spaces: [dialog.drive!.id] });
-            for (const key of ["admin-drives", "storage-locations"]) void qc.invalidateQueries({ queryKey: [key] });
+            void invalidate(qc, ...affected.storage());
           }}
         />
       )}

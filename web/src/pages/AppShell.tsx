@@ -15,6 +15,7 @@ import { loadTabs, syncLocation } from "@/tabs";
 import { loadTree } from "@/components/FolderTree";
 import { onUploadsLanded } from "@/uploads";
 import { api, type SortKey, type SortOrder } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { refreshFirstPage } from "@/lib/pages";
 import { refreshFiles } from "@/lib/queries";
 import { t, tServer } from "@/lib/i18n";
@@ -63,8 +64,8 @@ export function AppShell() {
         // Folder lists loaded page by page are ["children", id, sort, order]; a folder loaded a part at a time
         // (lib/windows) loads the parts in view again (the others once they show). The folder tree's waits for the end.
         for (const id of parentIds) {
-          void refreshFirstPage(qc, ["children", id], ([, , sort, order], limit) => api.childrenPage(id, sort as SortKey, order as SortOrder, limit));
-          void qc.invalidateQueries({ queryKey: ["children", id], predicate: (q) => q.queryKey[4] === "at" });
+          void refreshFirstPage(qc, keys.children(id), ([, , sort, order], limit) => api.childrenPage(id, sort as SortKey, order as SortOrder, limit));
+          void qc.invalidateQueries({ queryKey: keys.children(id), predicate: (q) => q.queryKey[4] === "at" });
         }
       }),
     [qc],

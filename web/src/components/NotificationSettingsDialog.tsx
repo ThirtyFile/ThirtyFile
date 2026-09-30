@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type NotificationKind, type NotificationPrefs, type NotificationSettings } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -17,7 +18,7 @@ import { t } from "@/lib/i18n";
 /** Account menu (or the bell) › Notification settings: the email address, and each kind on or off in the app and by email */
 export function NotificationSettingsDialog({ onClose }: { onClose(): void }) {
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["notification-settings"], queryFn: api.notificationSettings });
+  const q = useQuery({ queryKey: keys.notificationSettings(), queryFn: api.notificationSettings });
   const admin = useMe().role === "admin";
   const [email, setEmail] = useState("");
   const [kinds, setKinds] = useState<NotificationSettings["kinds"] | null>(null);
@@ -34,7 +35,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose(): void }) {
   const save = useMutation({
     mutationFn: () => api.updateNotificationSettings({ email: email.trim(), kinds: kinds ?? undefined, ...(emailChanged ? identity.values : {}) }),
     onSuccess: (data) => {
-      qc.setQueryData(["notification-settings"], data);
+      qc.setQueryData(keys.notificationSettings(), data);
       toast.success(t("Notification settings saved"));
       onClose();
     },

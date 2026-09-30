@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CopyIcon, DownloadIcon, Loader2Icon, ShieldCheckIcon, ShieldIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type TwoFactorSetup } from "@/api";
+import { keys, queries } from "@/api/queryKeys";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -74,7 +75,7 @@ type Action = "setup" | "disable" | "codes";
 /** Account menu › Two-factor sign-in: set it up with an authenticator app, new recovery codes, turn it off */
 export function TwoFactorDialog({ onClose }: { onClose(): void }) {
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["two-factor"], queryFn: api.twoFactor });
+  const q = useQuery(queries.twoFactor);
   /** Waiting for the password before this */
   const [action, setAction] = useState<Action | null>(null);
   const [password, setPassword] = useState("");
@@ -90,7 +91,7 @@ export function TwoFactorDialog({ onClose }: { onClose(): void }) {
     setSetup(null);
     setCode("");
     setCodes(null);
-    qc.invalidateQueries({ queryKey: ["two-factor"] });
+    qc.invalidateQueries({ queryKey: keys.twoFactor() });
   };
 
   const confirm = useMutation({

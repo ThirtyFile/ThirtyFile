@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Loader2Icon } from "lucide-react";
 import { api, type ShareAccessFilter } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
 import { cn, formatWinDate } from "@/lib/utils";
@@ -66,7 +67,7 @@ export function ShareAccessLog({ shareId, admin, className }: { shareId?: string
   const filter: ShareAccessFilter = { share_id: shareId, q, owner, ip, event: events.join(","), ...rangeToUnix(range) };
 
   const list = useInfiniteQuery({
-    queryKey: ["share-access", filter],
+    queryKey: keys.shareAccess(filter),
     queryFn: ({ pageParam }) => api.shareAccess({ ...filter, before: pageParam, limit: PAGE }),
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (last) => last.next ?? undefined,

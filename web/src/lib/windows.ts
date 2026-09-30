@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQueries, useQueryClient, type Query, type QueryKey } from "@tanstack/react-query";
 import { api, type Node, type PositionedPage, type SortKey, type SortOrder } from "@/api";
+import { keys } from "@/api/queryKeys";
 
 /** Items per part */
 export const WINDOW = 500;
@@ -101,7 +102,7 @@ export function toKeep(starts: readonly number[], shown: [number, number], keep 
 }
 
 /** The cache key of a folder's parts; the part's start follows it */
-export const windowsKey = (folder: string | undefined, sort: SortKey, order: SortOrder): QueryKey => ["children", folder, sort, order, "at"];
+export const windowsKey = (folder: string | undefined, sort: SortKey, order: SortOrder): QueryKey => keys.childrenAt(folder, sort, order);
 
 const startOf = (q: Query) => q.queryKey[5] as number;
 

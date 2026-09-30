@@ -4,6 +4,7 @@ import { ArchiveRestoreIcon, FilterIcon, FolderOpenIcon, RefreshCwIcon, SquareCh
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { api, driveName, privateSource, type Located } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import {
@@ -34,9 +35,9 @@ export function TrashPage() {
   // Deleted by me, or by everyone (the items of every space whose trash the person sees)
   const [deletedBy, setDeletedBy] = useState<"everyone" | "me">("everyone");
   const mine = deletedBy === "me";
-  const q = useAllPages(["trash", "pages", deletedBy], (limit, after, signal) => api.trashPage(limit, after, mine, signal));
+  const q = useAllPages(keys.trashPages(deletedBy), (limit, after, signal) => api.trashPage(limit, after, mine, signal));
   // Empty trash deletes only the spaces the person manages; the trash also lists items of spaces they can only view
-  const emptyable = useQuery({ queryKey: ["trash", "empty"], queryFn: api.emptyTrashPreview, enabled: me.can_delete });
+  const emptyable = useQuery({ queryKey: keys.trashEmpty(), queryFn: api.emptyTrashPreview, enabled: me.can_delete });
   const emptyCount = (emptyable.data ?? []).reduce((sum, s) => sum + s.items, 0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
@@ -183,7 +184,7 @@ export function TrashPage() {
               <DropdownMenuItem onClick={() => setSelected(new Set(items.map((i) => i.id)))} disabled={!items.length}>
                 <SquareCheckIcon /> {t("Select all")}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => qc.invalidateQueries({ queryKey: ["trash"] })}>
+              <DropdownMenuItem onClick={() => qc.invalidateQueries({ queryKey: keys.trash() })}>
                 <RefreshCwIcon /> {t("Refresh")}
               </DropdownMenuItem>
               {me.can_delete && (

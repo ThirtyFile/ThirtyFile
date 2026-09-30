@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DownloadIcon, Loader2Icon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type LogArchive, type LogSettings } from "@/api";
+import { affected, invalidate, keys } from "@/api/queryKeys";
 import { triggerDownload } from "@/downloads";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pending } from "@/components/ErrorState";
@@ -48,7 +49,7 @@ function DayInput({ label, hint, value, onChange }: { label: string; hint: strin
 /** Log settings: retention days, archive or delete, archive retention, whether to record guest info; plus the archive list */
 export function LogSettingsPage() {
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["log-status"], queryFn: api.logStatus });
+  const q = useQuery({ queryKey: keys.logStatus(), queryFn: api.logStatus });
   const [draft, setDraft] = useState<LogSettings | null>(null);
   const [deleting, setDeleting] = useState<LogArchive | null>(null);
   const cur = draft ?? q.data?.settings;
@@ -57,7 +58,7 @@ export function LogSettingsPage() {
   const save = useMutation({
     mutationFn: (s: LogSettings) => api.updateLogSettings(s),
     onSuccess: (data) => {
-      qc.setQueryData(["log-status"], data);
+      qc.setQueryData(keys.logStatus(), data);
       setDraft(null);
       toast.success(t("Log settings updated"));
     },
@@ -66,9 +67,8 @@ export function LogSettingsPage() {
   const archive = useMutation({
     mutationFn: api.archiveLogsNow,
     onSuccess: (data) => {
-      qc.setQueryData(["log-status"], data);
-      qc.invalidateQueries({ queryKey: ["activity"] });
-      qc.invalidateQueries({ queryKey: ["share-access"] });
+      qc.setQueryData(keys.logStatus(), data);
+      void invalidate(qc, ...affected.logsArchived());
       toast.success(data.summary ? tServer(data.summary) : t("Archiving complete"));
     },
     onError: (e) => toast.error(e.message),

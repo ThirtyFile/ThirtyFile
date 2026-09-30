@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { XIcon } from "lucide-react";
 import { api, privateSource, type FolderContents, type HistoryEntry, type Node } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
 import { FileIcon, canBrowserThumbnail, canThumbnail, typeLabel } from "@/components/FileIcon";
@@ -101,15 +102,15 @@ export function DetailsPane({ selected, folder, onClose, count, whole }: { selec
   // item left meanwhile is cancelled: React Query aborts its signal when nothing shows its answer any more
   const shownKey = `${node?.id ?? ""}|${folderIds.join()}`;
   const ready = useSettled(shownKey, SETTLE_MS) === shownKey;
-  const info = useQuery({ queryKey: ["node", node?.id], queryFn: ({ signal }) => api.node(node!.id, signal), enabled: ready && !!node });
+  const info = useQuery({ queryKey: keys.node(node?.id), queryFn: ({ signal }) => api.node(node!.id, signal), enabled: ready && !!node });
   const contents = useQuery({
     queryKey: [FOLDER_CONTENTS, ...folderIds],
     queryFn: ({ signal }) => api.contents(folderIds, signal),
     enabled: ready && folderIds.length > 0,
   });
-  const history = useQuery({ queryKey: ["node", node?.id, "history"], queryFn: ({ signal }) => api.history(node!.id, signal), enabled: ready && !!node });
+  const history = useQuery({ queryKey: keys.history(node?.id), queryFn: ({ signal }) => api.history(node!.id, signal), enabled: ready && !!node });
   const shares = useQuery({
-    queryKey: ["shares", node?.id],
+    queryKey: keys.sharesOf(node?.id),
     queryFn: ({ signal }) => api.shares(node!.id, {}, signal),
     enabled: ready && !!node && !!node.parent_id,
   });

@@ -1,10 +1,11 @@
 /** Choosing the storage location of a new space: a team space, or someone's personal space ("My files") */
 import { useQuery } from "@tanstack/react-query";
-import { api, type StorageKind, type StorageLocation } from "@/api";
+import type { StorageKind, StorageLocation } from "@/api";
+import { queries } from "@/api/queryKeys";
 import { t } from "@/lib/i18n";
 import { NativeSelect } from "@/components/ui/native-select";
 
-export const useStorageLocations = (enabled = true) => useQuery({ queryKey: ["storage-locations"], queryFn: api.storageLocations, enabled });
+export const useStorageLocations = (enabled = true) => useQuery({ ...queries.storageLocations, enabled });
 
 /** The kinds as the storage settings name them (not imported from there: that page is loaded only when opened) */
 const kindLabel = (k: StorageKind) => ({ s3: t("S3-compatible"), sftp: "SFTP", ftp: t("FTP/FTPS"), local: t("Local folder") })[k];

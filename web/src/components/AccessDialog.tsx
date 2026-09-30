@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { GlobeIcon, Loader2Icon, UserIcon, UsersIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Grant, type Principal, type PrincipalType, type Role } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -39,7 +40,7 @@ function PrincipalPicker(props: { value: Principal | null; onChange(p: Principal
     const timer = setTimeout(() => setDebounced(q), 200);
     return () => clearTimeout(timer);
   }, [q]);
-  const results = useQuery({ queryKey: ["directory", debounced], queryFn: () => api.directory(debounced), enabled: open });
+  const results = useQuery({ queryKey: keys.directory(debounced), queryFn: () => api.directory(debounced), enabled: open });
   const options: Principal[] = [
     ...(props.allowEveryone && t("Everyone").toLowerCase().includes(q.trim().toLowerCase())
       ? [{ principal_type: "everyone" as const, principal_id: 0, name: t("Everyone"), detail: t("All users") }]
@@ -142,7 +143,7 @@ function GrantRow(props: { g: Grant; editable: boolean; roles: Role[]; onRole?(r
 export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): void }) {
   const me = useMe();
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["access", nodeId], queryFn: () => api.access(nodeId) });
+  const q = useQuery({ queryKey: keys.access(nodeId), queryFn: () => api.access(nodeId) });
   const [principal, setPrincipal] = useState<Principal | null>(null);
   const [role, setRole] = useState<Role>("viewer");
   const [days, setDays] = useState(0);

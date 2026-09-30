@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckIcon, FolderIcon, ImageUpIcon, Loader2Icon, MonitorIcon, MoonIcon, SunIcon, Trash2Icon, TriangleAlertIcon, UndoIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type BrandingReq } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -66,7 +67,7 @@ export function BrandingPage() {
   const qc = useQueryClient();
   const b = useBranding();
   return (
-    <SettingsFrame item="branding" onRefresh={() => qc.invalidateQueries({ queryKey: ["branding"] })}>
+    <SettingsFrame item="branding" onRefresh={() => qc.invalidateQueries({ queryKey: keys.branding() })}>
       {/* Uploading a logo doesn't clear unsaved text and colors */}
       <BrandingForm saved={b} />
     </SettingsFrame>
@@ -85,7 +86,7 @@ function BrandingForm({ saved }: { saved: Branding }) {
   const save = useMutation({
     mutationFn: () => api.updateBranding(draft),
     onSuccess: (data) => {
-      qc.setQueryData(["branding"], data);
+      qc.setQueryData(keys.branding(), data);
       toast.success(t("Branding updated"));
     },
     onError: (e) => toast.error(e.message),
@@ -323,7 +324,7 @@ function LogoSlot({ variant, saved }: { variant: "light" | "dark"; saved: Brandi
   const upload = useMutation({
     mutationFn: (f: File) => api.uploadLogo(variant, f),
     onSuccess: (data) => {
-      qc.setQueryData(["branding"], data);
+      qc.setQueryData(keys.branding(), data);
       toast.success(t("Logo updated"));
     },
     onError: (e) => toast.error(e.message),
@@ -331,7 +332,7 @@ function LogoSlot({ variant, saved }: { variant: "light" | "dark"; saved: Brandi
   const remove = useMutation({
     mutationFn: () => api.deleteLogo(variant),
     onSuccess: (data) => {
-      qc.setQueryData(["branding"], data);
+      qc.setQueryData(keys.branding(), data);
       toast.success(t("Logo removed"));
     },
     onError: (e) => toast.error(e.message),
@@ -446,7 +447,7 @@ function BackgroundSlot({ saved }: { saved: Branding }) {
   const qc = useQueryClient();
   const input = useRef<HTMLInputElement>(null);
   const done = (msg: string) => (data: Branding) => {
-    qc.setQueryData(["branding"], data);
+    qc.setQueryData(keys.branding(), data);
     toast.success(msg);
   };
   const upload = useMutation({

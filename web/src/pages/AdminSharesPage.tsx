@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link2OffIcon, type LucideIcon } from "lucide-react";
-import { api, driveName } from "@/api";
+import { driveName } from "@/api";
+import { queries } from "@/api/queryKeys";
 import { EmptyState } from "@/components/DataTable";
 import { ToolSeparator } from "@/components/Frame";
 import { controlPanelItem, useSettingsSearch } from "@/lib/controlPanel";
@@ -14,8 +15,8 @@ import { NativeSelect } from "@/components/ui/native-select";
 export function AdminSharesPage() {
   const { title, icon } = controlPanelItem("shares");
   const searchSettings = useSettingsSearch();
-  const drives = useQuery({ queryKey: ["admin-drives"], queryFn: api.adminDrives });
-  const users = useQuery({ queryKey: ["admin-users"], queryFn: api.users });
+  const drives = useQuery(queries.adminDrives);
+  const users = useQuery(queries.adminUsers);
   const [driveId, setDriveId] = useState("");
   const [ownerId, setOwnerId] = useState("");
   const [state, setState] = useState<"" | "active" | "expired">("");

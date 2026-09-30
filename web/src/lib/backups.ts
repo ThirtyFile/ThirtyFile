@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, backupJobActive, type BackupJob, type BackupJobState, type BackupSet, type BackupsOverview } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { invalidateFiles } from "@/lib/queries";
 import { t } from "@/lib/i18n";
 
@@ -20,7 +21,7 @@ const busy = (s: BackupJobState) => s === "running" || s === "queued";
 export function useBackups(interval: number, paused: number | false = false, onChange?: (changes: BackupJobChange[]) => void) {
   const qc = useQueryClient();
   const q = useQuery({
-    queryKey: ["backups"],
+    queryKey: keys.backups(),
     queryFn: api.backups,
     refetchInterval: (query) => {
       const jobs = query.state.data?.jobs ?? [];

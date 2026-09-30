@@ -5,6 +5,7 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdow
 import { DataTable, EmptyState, type Column } from "@/components/DataTable";
 import { toast } from "sonner";
 import { api, type Drive, type UserRow } from "@/api";
+import { affected, invalidate, keys, queries } from "@/api/queryKeys";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -38,7 +39,7 @@ export function AdminUsersPage() {
   }, [typed]);
   // Loaded a page at a time: there is one account per person, so the list can be long
   const q = useInfiniteQuery({
-    queryKey: ["admin-users", "pages", search],
+    queryKey: keys.adminUserPages(search),
     queryFn: ({ pageParam, signal }) => api.usersPage(pageParam, USERS_PAGE, search, signal),
     initialPageParam: 0,
     getNextPageParam: (last) => (last.length < USERS_PAGE ? undefined : last[last.length - 1].id),
@@ -239,7 +240,7 @@ export function AdminUsersPage() {
                     try {
                       await api.updateUser(selected.id, { disabled: !selected.disabled });
                       toast.success(selected.disabled ? t("Account enabled") : t("Account disabled"));
-                      qc.invalidateQueries({ queryKey: ["admin-users"] });
+                      qc.invalidateQueries({ queryKey: keys.adminUsers() });
                     } catch (e) {
                       toast.error(e instanceof Error ? e.message : t("Operation failed"));
                     }
@@ -262,7 +263,7 @@ export function AdminUsersPage() {
               <DropdownMenuItem onClick={() => setEditing("new")}>
                 <UserPlusIcon /> {t("Add user")}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => qc.invalidateQueries({ queryKey: ["admin-users"] })}>
+              <DropdownMenuItem onClick={() => qc.invalidateQueries({ queryKey: keys.adminUsers() })}>
                 <RefreshCwIcon /> {t("Refresh")}
               </DropdownMenuItem>
             </>
@@ -293,7 +294,7 @@ export function AdminUsersPage() {
             await api.resetTwoFactor(resetting.id);
             toast.success(t("Two-factor sign-in reset"));
             setResetting(null);
-            qc.invalidateQueries({ queryKey: ["admin-users"] });
+            qc.invalidateQueries({ queryKey: keys.adminUsers() });
           }}
         />
       )}
@@ -318,7 +319,7 @@ export function AdminUsersPage() {
  */
 function usePersonalFiles(user: UserRow) {
   const me = useMe();
-  const drives = useQuery({ queryKey: ["admin-drives"], queryFn: api.adminDrives });
+  const drives = useQuery(queries.adminDrives);
   // Their own space ("My files": a folder on the server in new installs, whose folder is kept when it is removed)
   const own = drives.data?.find((d) => d.kind === "personal" && d.owner_name === user.username);
   // Spaces that can take the files: not the user's own, not turned off
@@ -395,13 +396,13 @@ function PersonalFilesChoice({ c }: { c: ReturnType<typeof usePersonalFiles> }) 
  * navigation pane), in case it was theirs
  */
 function invalidatePersonal(qc: QueryClient) {
-  for (const key of ["admin-users", "admin-drives", "me", "drives"]) qc.invalidateQueries({ queryKey: [key] });
+  void invalidate(qc, ...affected.personalSpace());
 }
 
 /** Creating someone's "My files" later, on a storage location */
 function AddPersonalDialog({ user, onClose }: { user: UserRow; onClose(): void }) {
   const qc = useQueryClient();
-  const system = useQuery({ queryKey: ["system"], queryFn: api.systemSettings });
+  const system = useQuery(queries.system);
   const locationName = useLocationName();
   // Preset from the system setting (Control panel › General); "" = the default location
   const [location, setLocation] = useState<string | null>(null);
@@ -514,8 +515,7 @@ function DeleteUserDialog({ user, onClose, onDeleted }: { user: UserRow; onClose
     onSuccess: (job) => {
       onDeleted();
       void followJob(job, t("User deleted"), () => {
-        qc.invalidateQueries({ queryKey: ["admin-users"] });
-        qc.invalidateQueries({ queryKey: ["admin-drives"] });
+        void invalidate(qc, ...affected.accountDeleted());
       });
     },
   });
@@ -523,7 +523,7 @@ function DeleteUserDialog({ user, onClose, onDeleted }: { user: UserRow; onClose
     mutationFn: () => api.updateUser(user.id, { disabled: true }),
     onSuccess: () => {
       toast.success(t("Account disabled"));
-      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      qc.invalidateQueries({ queryKey: keys.adminUsers() });
       onClose();
     },
   });
@@ -588,7 +588,7 @@ function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow | null;
   const [canDelete, setCanDelete] = useState(user?.can_delete ?? true);
   const [canShare, setCanShare] = useState(user?.can_share ?? true);
   // When adding a user, prefill the default space size from system settings (Control panel › General)
-  const system = useQuery({ queryKey: ["system"], queryFn: api.systemSettings, enabled: !user });
+  const system = useQuery({ ...queries.system, enabled: !user });
   const defaultQuota = !user ? system.data?.default_user_quota : undefined;
   const [quotaGb, setQuotaGb] = useState(user?.quota_bytes ? String(+(user.quota_bytes / GB).toFixed(2)) : "");
   const [quotaTouched, setQuotaTouched] = useState(false);
@@ -620,8 +620,7 @@ function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow | null;
     onSuccess: (row) => {
       if (row.personal_pending) toast.warning(t("User created. Their \"My files\" is created once its storage location is available."));
       else toast.success(user ? t("User updated") : t("User created"));
-      qc.invalidateQueries({ queryKey: ["admin-users"] });
-      qc.invalidateQueries({ queryKey: ["me"] });
+      void invalidate(qc, ...affected.account());
       onClose();
     },
   });

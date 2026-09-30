@@ -4,6 +4,7 @@ import { AlertTriangleIcon, Loader2Icon } from "lucide-react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { api, type StorageLocation } from "@/api";
+import { keys, queries } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -21,14 +22,14 @@ import { NativeSelect } from "@/components/ui/native-select";
  */
 export function CopyEverythingDialog({ location, onClose }: { location: StorageLocation; onClose(): void }) {
   const navigate = useNavigate();
-  const locations = useQuery({ queryKey: ["storage-locations"], queryFn: api.storageLocations });
+  const locations = useQuery(queries.storageLocations);
   const targets = (locations.data ?? []).filter((l) => l.id !== location.id);
   const [dest, setDest] = useState("");
   const [name, setName] = useState(() => t("Copy of {name}", { name: location.name }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const preview = useQuery({
-    queryKey: ["copy-preview", location.id, dest],
+    queryKey: keys.copyPreview(location.id, dest),
     queryFn: () => api.copyPreview(location.id, dest),
     enabled: !!dest,
     retry: false,

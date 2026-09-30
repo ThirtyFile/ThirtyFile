@@ -3,7 +3,8 @@ import { noteSignedIn } from "@/lib/signOut";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon } from "lucide-react";
-import { api, ApiError } from "@/api";
+import { ApiError } from "@/api";
+import { keys, queries } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { MeContext } from "@/lib/session";
 import { t } from "@/lib/i18n";
@@ -58,12 +59,7 @@ function Spinner() {
 }
 
 function RequireAuth() {
-  const me = useQuery({
-    queryKey: ["me"],
-    queryFn: api.me,
-    retry: false,
-    staleTime: 30_000,
-  });
+  const me = useQuery(queries.me);
   const location = useLocation();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -106,7 +102,7 @@ function RequireAuth() {
   if (me.data.must_change_password)
     return (
       <MeContext.Provider value={me.data}>
-        <ChangePasswordDialog required onClose={() => void qc.invalidateQueries({ queryKey: ["me"] })} />
+        <ChangePasswordDialog required onClose={() => void qc.invalidateQueries({ queryKey: keys.me() })} />
       </MeContext.Provider>
     );
 
@@ -120,7 +116,7 @@ function RequireAuth() {
 }
 
 function AdminOnly({ children }: { children: React.ReactNode }) {
-  const me = useQuery({ queryKey: ["me"], queryFn: api.me });
+  const me = useQuery(queries.me);
   return me.data?.role === "admin" ? <Suspense fallback={<Spinner />}>{children}</Suspense> : <Navigate to="/files" replace />;
 }
 

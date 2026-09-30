@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type BackupJobState, type ReplicaJob, type ReplicaPolicy, type ReplicaTargetState } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { t } from "@/lib/i18n";
 
 /** A job of replicas that isn't over: it may still run, or be resumed */
@@ -13,7 +14,7 @@ const busy = (s: BackupJobState) => s === "running" || s === "queued";
  */
 export function useReplicas(interval: number) {
   return useQuery({
-    queryKey: ["replicas"],
+    queryKey: keys.replicas(),
     queryFn: api.replicas,
     refetchInterval: (query) => ((query.state.data?.jobs ?? []).some((j) => busy(j.state)) ? interval : 15_000),
   });

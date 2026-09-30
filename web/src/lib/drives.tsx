@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { BuildingIcon, DatabaseIcon, UserIcon, type LucideIcon } from "lucide-react";
 import { api, type Drive, type DriveKind, type Me, type Role } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { t } from "@/lib/i18n";
 
 export const ROLE_RANK: Record<Role, number> = { viewer: 0, editor: 1, manager: 2, owner: 3 };
@@ -50,7 +51,7 @@ export const DRIVE_KIND_LABEL: Record<DriveKind, string> = {
 /** Spaces I can access (cached, shared by the left-hand menu, the folder picker dialog, etc.) */
 export function useDrives() {
   // Refresh periodically: the view follows when a storage service goes offline / recovers
-  return useQuery({ queryKey: ["drives"], queryFn: api.drives, staleTime: 30_000, refetchInterval: 30_000 });
+  return useQuery({ queryKey: keys.drives(), queryFn: api.drives, staleTime: 30_000, refetchInterval: 30_000 });
 }
 
 export function driveLabel(d: Pick<Drive, "kind" | "name" | "owner_name">, forAdmin = false) {

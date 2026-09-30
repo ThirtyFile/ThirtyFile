@@ -6,6 +6,7 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdow
 import { DataTable, EmptyState, type Column } from "@/components/DataTable";
 import { toast } from "sonner";
 import { api, type ShareFilter, type ShareInfo } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { FileIcon } from "@/components/FileIcon";
 import { Frame, ToolButton, ToolSeparator, type FrameProps } from "@/components/Frame";
 import { EditShareDialog, LinksOffNotice, LocalLinkWarning, deleteLinkQuestion, sharePath, shareSpace, useShareLink } from "@/components/ShareDialog";
@@ -68,7 +69,7 @@ export function ShareLinks({
   const qc = useQueryClient();
   const navigate = useNavigate();
   const me = useMe();
-  const q = useQuery({ queryKey: ["shares", "list", filter], queryFn: () => api.shares(undefined, filter) });
+  const q = useQuery({ queryKey: keys.shareList(filter), queryFn: () => api.shares(undefined, filter) });
   const [selected, setSelected] = useState<string | null>(null);
   const [editing, setEditing] = useState<ShareInfo | null>(null);
   const { link: shareLink, local, admin } = useShareLink();
@@ -84,7 +85,7 @@ export function ShareLinks({
     onSuccess: () => {
       toast.success(t("Share link deleted"));
       setSelected(null);
-      qc.invalidateQueries({ queryKey: ["shares"] });
+      qc.invalidateQueries({ queryKey: keys.shares() });
     },
     onError: (e) => toast.error(e.message),
   });
@@ -232,7 +233,7 @@ export function ShareLinks({
                   <HistoryIcon /> {t("All access logs")}
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem onClick={() => qc.invalidateQueries({ queryKey: ["shares"] })}>
+              <DropdownMenuItem onClick={() => qc.invalidateQueries({ queryKey: keys.shares() })}>
                 <RefreshCwIcon /> {t("Refresh")}
               </DropdownMenuItem>
             </>

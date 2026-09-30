@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router";
 import { ClockIcon, SearchIcon, SearchXIcon, StarIcon } from "lucide-react";
 import { api, type Located, type SearchFilter, type SortKey, type SortOrder } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { Explorer } from "@/components/Explorer";
 import { useSort } from "@/pages/FilesPage";
 import { t } from "@/lib/i18n";
@@ -47,7 +48,7 @@ function useClientSort(items: Located[] | undefined, sort: { key: SortKey; order
 export function RecentPage() {
   // Ordered by time used by default; column sorting applies only after clicking a column header
   const [sort, setSort] = useState<{ key: SortKey; order: SortOrder } | null>(null);
-  const q = useQuery({ queryKey: ["recent"], queryFn: api.recent });
+  const q = useQuery({ queryKey: keys.recent(), queryFn: api.recent });
   const items = useClientSort(q.data, sort ?? { key: "updated", order: "desc" }, !!sort);
   return (
     <Explorer
@@ -67,7 +68,7 @@ export function RecentPage() {
 
 export function FavoritesPage() {
   const [sort, onSort, setSort] = useSort();
-  const q = useQuery({ queryKey: ["favorites", sort.key, sort.order], queryFn: () => api.favorites(sort.key, sort.order) });
+  const q = useQuery({ queryKey: keys.favorites(sort.key, sort.order), queryFn: () => api.favorites(sort.key, sort.order) });
   return (
     <Explorer
       items={q.data ?? []}
@@ -124,7 +125,7 @@ export function SearchPage() {
       },
       { replace: true },
     );
-  const folder = useQuery({ queryKey: ["node", within], queryFn: () => api.node(within!), enabled: !!within });
+  const folder = useQuery({ queryKey: keys.node(within), queryFn: () => api.node(within!), enabled: !!within });
   const filter: SearchFilter = {
     in: within,
     ...SEARCH_TYPES.find((x) => x.id === type)?.filter,
@@ -134,7 +135,7 @@ export function SearchPage() {
   // Rounded to the hour, so the query key stays the same while the page is open
   if (days) filter.from = Math.floor(Date.now() / 3_600_000) * 3600 - days * DAY;
   const [sort, onSort, setSort] = useSort();
-  const q = useQuery({ queryKey: ["search", term, filter], queryFn: () => api.search(term, filter), enabled: !!term });
+  const q = useQuery({ queryKey: keys.search(term, filter), queryFn: () => api.search(term, filter), enabled: !!term });
   const items = useClientSort(q.data?.items, sort, true);
   const folderName = (folder.data?.is_root ? folder.data.drive.name : folder.data?.node.name) ?? "";
   const filters = (

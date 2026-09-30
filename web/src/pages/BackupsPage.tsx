@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, backupJobActive, type BackupHealthState, type BackupJob, type BackupSet } from "@/api";
+import { keys, queries } from "@/api/queryKeys";
 import { DataTable, EmptyState, type Column } from "@/components/DataTable";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { ConfirmDialog, ErrorText } from "@/components/dialogs";
@@ -148,7 +149,7 @@ export function BackupsPage() {
   const [making, setMaking] = useState<string | null>(null);
   const [finding, setFinding] = useState(false);
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: ["backups"] });
+    qc.invalidateQueries({ queryKey: keys.backups() });
     invalidateFiles(qc, "admin-drives", "storage-locations");
   };
   const act = async (what: () => Promise<unknown>, done: string) => {
@@ -431,7 +432,7 @@ export function BackupsPage() {
 /** "Find backups on a location…": copies and backups kept there that this server doesn't list, made before its
  * database was lost or by another installation */
 function FindBackupsDialog({ onClose, onDone }: { onClose(): void; onDone(): void }) {
-  const locations = useQuery({ queryKey: ["storage-locations"], queryFn: api.storageLocations });
+  const locations = useQuery(queries.storageLocations);
   const [location, setLocation] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

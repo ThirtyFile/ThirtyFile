@@ -4,6 +4,7 @@ import { CircleCheckIcon, CircleXIcon, ClockIcon, DownloadIcon, TriangleAlertIco
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { api } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pending } from "@/components/ErrorState";
 import { Button } from "@/components/ui/button";
@@ -74,7 +75,7 @@ const KIND: Record<LocationUsage["kind"], () => string> = {
 
 export function UsageSettingsPage() {
   const q = useSystem();
-  const usage = useQuery({ queryKey: ["usage"], queryFn: ({ signal }) => api.usageOverview(signal), refetchInterval: OVERVIEW_MS });
+  const usage = useQuery({ queryKey: keys.usage(), queryFn: ({ signal }) => api.usageOverview(signal), refetchInterval: OVERVIEW_MS });
   const [filter, setFilter] = useState<{ location: string; range: UsageRange; work: UsageWork | "all"; op: UsageOp }>({
     location: "",
     range: "2d",
@@ -82,7 +83,7 @@ export function UsageSettingsPage() {
     op: "read",
   });
   const history = useQuery({
-    queryKey: ["usage-history", filter.location, filter.range, filter.work],
+    queryKey: keys.usageHistory(filter.location, filter.range, filter.work),
     queryFn: ({ signal }) => api.usageHistory(filter, signal),
     refetchInterval: HISTORY_MS,
     placeholderData: keepPreviousData,
@@ -635,7 +636,7 @@ function Thresholds({ value }: { value: UsageThresholds }) {
   const save = useMutation({
     mutationFn: () => api.setUsageThresholds({ disk_percent: Number(disk), error_percent: Number(errors) }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["usage"] });
+      qc.invalidateQueries({ queryKey: keys.usage() });
       toast.success(t("Alert thresholds saved"));
     },
     onError: (e) => toast.error(e.message),

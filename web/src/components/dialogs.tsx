@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } fr
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRightIcon, FolderIcon, FolderPlusIcon, HardDriveIcon, HomeIcon, Loader2Icon } from "lucide-react";
 import { api, type Crumb } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { ErrorState } from "@/components/ErrorState";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -150,7 +151,7 @@ export function FolderPickerDialog(props: {
 
   // Open the current folder by default
   const startId = props.startId;
-  const start = useQuery({ queryKey: ["node", startId], queryFn: () => api.node(startId!), enabled: !picked && !!startId });
+  const start = useQuery({ queryKey: keys.node(startId), queryFn: () => api.node(startId!), enabled: !picked && !!startId });
   useEffect(() => {
     if (picked) return;
     if (start.data) {
@@ -175,7 +176,7 @@ export function FolderPickerDialog(props: {
   const nowhere = !current && drives.data?.length === 0 && (!startId || start.isError);
 
   const folders = useQuery({
-    queryKey: ["children", current, "folders"],
+    queryKey: keys.folders(current),
     queryFn: ({ signal }) => api.children(current, "name", "asc", true, signal),
     enabled: !!current,
   });

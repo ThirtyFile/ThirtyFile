@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDownIcon, FolderOpenIcon, Grid2X2Icon, ListIcon, PanelTopIcon, RefreshCwIcon, SettingsIcon } from "lucide-react";
-import { api, moveActive } from "@/api";
+import { moveActive } from "@/api";
+import { queries } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -33,10 +34,10 @@ export function ControlPanelPage() {
     setParams(v ? { q: v } : {}, { replace: true });
   };
   const [collapsed, setCollapsed] = useState<string[]>([]);
-  const system = useQuery({ queryKey: ["system"], queryFn: api.systemSettings });
-  const locations = useQuery({ queryKey: ["storage-locations"], queryFn: api.storageLocations });
-  const drives = useQuery({ queryKey: ["admin-drives"], queryFn: api.adminDrives });
-  const moves = useQuery({ queryKey: ["moves"], queryFn: api.moves });
+  const system = useQuery(queries.system);
+  const locations = useQuery(queries.storageLocations);
+  const drives = useQuery(queries.adminDrives);
+  const moves = useQuery(queries.moves);
   const unfinished = moves.data?.moves.filter(moveActive).length;
   // The company space can be renamed, so the summary uses its current name
   const company = drives.data?.find((d) => d.kind === "company")?.name ?? t("All files");

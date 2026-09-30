@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, moveActive, type MoveState, type MovesList, type SpaceMove } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { invalidateFiles } from "@/lib/queries";
 
 /** A move changing state between two refreshes of the list */
@@ -21,7 +22,7 @@ const busy = (s: MoveState) => s === "running" || s === "queued";
 export function useMoves(interval: number, paused: number | false = false, onChange?: (changes: MoveChange[]) => void) {
   const qc = useQueryClient();
   const q = useQuery({
-    queryKey: ["moves"],
+    queryKey: keys.moves(),
     queryFn: api.moves,
     refetchInterval: (query) => {
       const moves = query.state.data?.moves ?? [];

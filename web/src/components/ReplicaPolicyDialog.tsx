@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowUpIcon, Loader2Icon, PlusIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type BackupSchedule, type ReplicaPolicy, type ReplicaPolicyRequest } from "@/api";
+import { queries } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -37,7 +38,7 @@ const rowOf = (x: ReplicaPolicy["targets"][number]): Row => ({
  * checked by reading them back, and read from when the location fails. Made new (`source` may be given), or changed.
  */
 export function ReplicaPolicyDialog({ policy: p, source: preset, onClose, onDone }: { policy?: ReplicaPolicy; source?: string; onClose(): void; onDone(): void }) {
-  const locations = useQuery({ queryKey: ["storage-locations"], queryFn: api.storageLocations });
+  const locations = useQuery(queries.storageLocations);
   const [name, setName] = useState(p?.name ?? "");
   const [source, setSource] = useState(p?.source_location ?? preset ?? "");
   const [rows, setRows] = useState<Row[]>(p ? p.targets.filter((x) => x.state === "active").map(rowOf) : [{ location: "", when: "realtime", every: 60, daily: "03:00" }]);
@@ -55,7 +56,7 @@ export function ReplicaPolicyDialog({ policy: p, source: preset, onClose, onDone
   const list = locations.data ?? [];
   const sources = list.filter((l) => l.drive_count > 0 || l.id === source);
   const sourceName = list.find((l) => l.id === source)?.name ?? p?.source_name ?? "";
-  const on = useQuery({ queryKey: ["storage-location-spaces", source], queryFn: () => api.storageLocationSpaces(source), enabled: !!source });
+  const on = useQuery({ ...queries.storageLocationSpaces(source), enabled: !!source });
   const folders = (on.data ?? []).filter((s) => s.mode === "folder");
   const allZones = useMemo(() => zones(), []);
   const defaultName = sourceName ? t("Replicas of {name}", { name: sourceName }) : "";

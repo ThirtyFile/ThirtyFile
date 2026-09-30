@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { UsersRoundIcon } from "lucide-react";
-import { api } from "@/api";
+import { queries } from "@/api/queryKeys";
 import { Explorer } from "@/components/Explorer";
 import { t } from "@/lib/i18n";
 
 /** Shared with me: folders and files others have shared with me */
 export function SharedWithMePage() {
-  const q = useQuery({ queryKey: ["shared-with-me"], queryFn: api.sharedWithMe });
+  const q = useQuery(queries.sharedWithMe);
   return (
     <Explorer
       items={q.data ?? []}

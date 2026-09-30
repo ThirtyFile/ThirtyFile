@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type ReplicaJob, type ReplicaPolicy } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { DataTable, EmptyState, type Column } from "@/components/DataTable";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { ConfirmDialog, ErrorText } from "@/components/dialogs";
@@ -110,7 +111,7 @@ export function ReplicasPage() {
   const newFor = params.get("new");
   const [making, setMaking] = useState<string | null>(null);
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: ["replicas"] });
+    qc.invalidateQueries({ queryKey: keys.replicas() });
     invalidateFiles(qc, "admin-drives", "storage-locations");
   };
   const act = async (what: () => Promise<unknown>, done: string) => {
@@ -529,7 +530,7 @@ function PromoteDialog({ p, target: preset, onClose, onDone }: { p: ReplicaPolic
   const [accept, setAccept] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pre = useQuery({ queryKey: ["promote-preflight", p.id, target], queryFn: () => api.promotePreflight(p.id, target), enabled: !!target, retry: false });
+  const pre = useQuery({ queryKey: keys.promotePreflight(p.id, target), queryFn: () => api.promotePreflight(p.id, target), enabled: !!target, retry: false });
   const pf = pre.data;
   const allowed = !!pf && !pf.problem && (!pf.needs_accept || accept);
   return (

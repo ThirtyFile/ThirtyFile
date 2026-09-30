@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { DownloadIcon, Loader2Icon } from "lucide-react";
 import { api, type LoginFilter } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { nativeDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
@@ -75,7 +76,7 @@ export function LoginLog({ userId, admin, className }: { userId?: number; admin?
   const filter: LoginFilter = { user_id: userId, user: showUser ? user : "", ip, event: events.join(","), ...rangeToUnix(range) };
 
   const list = useInfiniteQuery({
-    queryKey: ["login-log", filter],
+    queryKey: keys.loginLog(filter),
     queryFn: ({ pageParam }) => api.loginLog({ ...filter, before: pageParam, limit: PAGE }),
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (last) => last.next ?? undefined,

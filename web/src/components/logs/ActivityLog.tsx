@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { DownloadIcon, Loader2Icon } from "lucide-react";
 import { api, type ActivityFilter } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { nativeDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
@@ -29,7 +30,7 @@ export function ActivityLog({ driveId, className, compact }: { driveId?: string;
   const filter: ActivityFilter = { drive_id: driveId, q, user, action: actions.join(","), ...rangeToUnix(range) };
 
   const list = useInfiniteQuery({
-    queryKey: ["activity", filter],
+    queryKey: keys.activity(filter),
     queryFn: ({ pageParam }) => api.activity({ ...filter, before: pageParam, limit: PAGE }),
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (last) => last.next ?? undefined,

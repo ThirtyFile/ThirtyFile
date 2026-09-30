@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRightIcon, InfoIcon, PauseIcon, PlayIcon, RefreshCwIcon, TruckIcon, XIcon, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, moveActive, type MoveState, type SpaceMove } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { DataTable, EmptyState, type Column } from "@/components/DataTable";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { ConfirmDialog } from "@/components/dialogs";
@@ -92,7 +93,7 @@ export function MovesPage() {
   const selected = moves.find((m) => m.id === selectedId) ?? null;
   const [dialog, setDialog] = useState<{ t: "details" | "cancel"; move: SpaceMove } | null>(null);
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: ["moves"] });
+    qc.invalidateQueries({ queryKey: keys.moves() });
     invalidateFiles(qc, "admin-drives", "storage-locations");
   };
   const act = async (what: () => Promise<unknown>, done: string) => {

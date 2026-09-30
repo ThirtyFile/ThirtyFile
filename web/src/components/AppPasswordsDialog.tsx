@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CopyIcon, KeySquareIcon, Loader2Icon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type AppPassword } from "@/api";
+import { keys, queries } from "@/api/queryKeys";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -40,10 +41,10 @@ function davAddress(publicUrl: string) {
 export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
   const me = useMe();
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["app-passwords"], queryFn: api.appPasswords });
+  const q = useQuery({ queryKey: keys.appPasswords(), queryFn: api.appPasswords });
   // Making one asks for the password again (and a code with two-factor sign-in); accounts without a password must
   // have signed in recently instead
-  const tf = useQuery({ queryKey: ["two-factor"], queryFn: api.twoFactor });
+  const tf = useQuery(queries.twoFactor);
   const hasPassword = tf.data?.has_password ?? true;
   const needsCode = !!tf.data?.enabled;
   const [password, setPassword] = useState("");
@@ -68,14 +69,14 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
       setName("");
       setPassword("");
       setCode("");
-      qc.invalidateQueries({ queryKey: ["notifications"] });
-      qc.invalidateQueries({ queryKey: ["app-passwords"] });
+      qc.invalidateQueries({ queryKey: keys.notifications() });
+      qc.invalidateQueries({ queryKey: keys.appPasswords() });
     },
   });
   const remove = useMutation({
     mutationFn: (p: AppPassword) => api.deleteAppPassword(p.id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["app-passwords"] });
+      qc.invalidateQueries({ queryKey: keys.appPasswords() });
       toast.success(t("App password removed"));
     },
     onError: (e) => toast.error(e.message),

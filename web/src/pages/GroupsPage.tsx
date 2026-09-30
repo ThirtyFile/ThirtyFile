@@ -5,6 +5,7 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdow
 import { DataTable, EmptyState, type Column } from "@/components/DataTable";
 import { toast } from "sonner";
 import { api, type Group } from "@/api";
+import { keys, queries } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -17,7 +18,7 @@ import { formatDate } from "@/lib/utils";
 
 /** Group management (admins): groups can be space members or targets of folder sharing */
 export function GroupsPage() {
-  const q = useQuery({ queryKey: ["groups"], queryFn: api.groups });
+  const q = useQuery(queries.groups);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [editing, setEditing] = useState<Group | "new" | null>(null);
   const [deleting, setDeleting] = useState<Group | null>(null);
@@ -111,7 +112,7 @@ export function GroupsPage() {
               <DropdownMenuItem onClick={() => setEditing("new")}>
                 <UsersRoundIcon /> {t("New group")}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => qc.invalidateQueries({ queryKey: ["groups"] })}>
+              <DropdownMenuItem onClick={() => qc.invalidateQueries({ queryKey: keys.groups() })}>
                 <RefreshCwIcon /> {t("Refresh")}
               </DropdownMenuItem>
             </>
@@ -131,7 +132,7 @@ export function GroupsPage() {
             toast.success(t("Group deleted"));
             setDeleting(null);
             setSelectedId(null);
-            qc.invalidateQueries({ queryKey: ["groups"] });
+            qc.invalidateQueries({ queryKey: keys.groups() });
           }}
         />
       )}
@@ -141,7 +142,7 @@ export function GroupsPage() {
 
 function GroupDialog({ group, onClose }: { group: Group | null; onClose(): void }) {
   const qc = useQueryClient();
-  const users = useQuery({ queryKey: ["admin-users"], queryFn: api.users });
+  const users = useQuery(queries.adminUsers);
   const [name, setName] = useState(group?.name ?? "");
   const [description, setDescription] = useState(group?.description ?? "");
   const [members, setMembers] = useState<Set<number>>(new Set(group?.members.map((m) => m.id)));
@@ -154,7 +155,7 @@ function GroupDialog({ group, onClose }: { group: Group | null; onClose(): void 
     },
     onSuccess: () => {
       toast.success(group ? t("Group updated") : t("Group created"));
-      qc.invalidateQueries({ queryKey: ["groups"] });
+      qc.invalidateQueries({ queryKey: keys.groups() });
       onClose();
     },
   });

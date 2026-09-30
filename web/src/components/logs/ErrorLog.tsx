@@ -2,6 +2,7 @@ import { Fragment, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { ChevronRightIcon, CircleAlertIcon, DownloadIcon, Loader2Icon, TriangleAlertIcon } from "lucide-react";
 import { api, type ErrorEntry, type ErrorFilter } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { nativeDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
@@ -66,7 +67,7 @@ export function ErrorLog({ className }: { className?: string }) {
   const filter: ErrorFilter = { q, user, source: sources.join(","), severity: severities.join(","), ...rangeToUnix(range) };
 
   const list = useInfiniteQuery({
-    queryKey: ["errors", filter],
+    queryKey: keys.errors(filter),
     queryFn: ({ pageParam }) => api.errorLog({ ...filter, before: pageParam, limit: PAGE }),
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (last) => last.next ?? undefined,

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { setThemePolicy, type ThemeMode } from "@/lib/theme";
 
 /** Branding settings (public; also used by the login and share pages) */
@@ -48,7 +49,7 @@ export const DEFAULT_BRANDING: Branding = {
 
 export function useBranding(): Branding {
   const q = useQuery({
-    queryKey: ["branding"],
+    queryKey: keys.branding(),
     queryFn: api.branding,
     initialData: window.__TF_BRANDING__,
     staleTime: 5 * 60_000,
