@@ -99,7 +99,7 @@ export function UploadPanel({ visitor = false }: { visitor?: boolean }) {
                   className="flex items-center gap-2.5 border-b border-border/50 px-3 py-2 last:border-0"
                   onContextMenu={() => setMenuId(task.id)}
                 >
-                  <FileIcon node={{ kind: "file", name: task.name, mime: task.file.type }} className="size-5" />
+                  <FileIcon node={{ kind: "file", name: task.relativePath ? `${task.relativePath}/${task.name}` : task.name, mime: task.file.type, size: task.size }} className="size-5" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm" title={task.relativePath ? `${task.relativePath}/${task.name}` : task.name}>
                       {task.name}

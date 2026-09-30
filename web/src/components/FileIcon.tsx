@@ -14,6 +14,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { Node } from "@/api";
+import { fileTypeOf, isScriptNotVideo, type FileType } from "@/lib/fileTypes";
 import { t } from "@/lib/i18n";
 import { cn, extOf } from "@/lib/utils";
 
@@ -32,24 +33,35 @@ export type FileCategory =
   | "archive"
   | "other";
 
-type NodeLike = Pick<Node, "kind" | "mime" | "name">;
+/** A file or folder as far as its type goes; the size, when known, tells TypeScript from video (`.ts`, `.mts`) */
+type NodeLike = Pick<Node, "kind" | "mime" | "name"> & { size?: number };
 
+/**
+ * The general kind of a file, which decides what can be done with it: previews, the text editor, thumbnails. Its icon
+ * can be more specific (lib/fileTypes.ts), without changing this.
+ */
 export function categoryOf(n: NodeLike): FileCategory {
   if (n.kind === "folder") return "folder";
   const ext = extOf(n.name);
   const mime = n.mime.toLowerCase();
   if (/^(md|markdown|mdx)$/.test(ext) || mime === "text/markdown") return "markdown";
   if (ext === "pdf" || mime === "application/pdf") return "pdf";
-  if (/^(doc|docx|odt|rtf)$/.test(ext)) return "word";
-  if (/^(csv|tsv|xls|xlsx|xlsm|xlsb|ods)$/.test(ext)) return "sheet";
-  if (/^(ppt|pptx|pptm|odp|key)$/.test(ext)) return "slides";
+  // Templates and macro-enabled files are Office files too (their MIME types contain "xml"; they aren't text)
+  if (/^(doc|docx|docm|dot|dotx|dotm|odt|ott|rtf)$/.test(ext)) return "word";
+  if (/^(csv|tsv|xls|xlsx|xlsm|xlsb|xlt|xltx|xltm|xla|xlam|ods|ots)$/.test(ext)) return "sheet";
+  if (/^(ppt|pptx|pptm|pot|potx|potm|pps|ppsx|ppsm|odp|otp|key)$/.test(ext)) return "slides";
+  // Names whose extension other formats use: Go's module files aren't video (".mod"), packages aren't sound (".rpm")
+  if (/(^|\/)go\.(mod|sum|work)$/i.test(n.name)) return "other";
+  if (ext === "rpm") return "archive";
+  // A small .ts / .mts file is TypeScript, not an MPEG transport stream (both get the video MIME type)
+  if (isScriptNotVideo(n)) return "code";
   if (mime.startsWith("image/") || /^(png|jpe?g|gif|webp|svg|bmp|ico|tiff?|avif|heic)$/.test(ext)) return "image";
-  if (mime.startsWith("audio/") || /^(mp3|wav|ogg|flac|aac|m4a)$/.test(ext)) return "audio";
+  if (mime.startsWith("audio/") || /^(mp3|wav|ogg|opus|flac|aac|m4a|wma|aiff?|ape|amr)$/.test(ext)) return "audio";
   if (mime.startsWith("video/") || /^(mp4|webm|mov|avi|mkv)$/.test(ext)) return "video";
   if (/^(zip|rar|7z|tar|gz|tgz|bz2|xz)$/.test(ext)) return "archive";
   if (
     /^(json|html?|xml|ya?ml|js|jsx|ts|tsx|css|scss|py|sh|ps1|bat|sql|toml|rs|go|java|c|h|cpp|cs|php|rb|kt|swift|vue|svelte|ini|conf|env)$/.test(ext) ||
-    /json|xml|javascript/.test(mime)
+    (/json|xml|javascript/.test(mime) && !/openxmlformats|vnd\.ms-|vnd\.oasis/.test(mime))
   )
     return "code";
   if (mime.startsWith("text/") || /^(txt|log)$/.test(ext)) return "text";
@@ -79,18 +91,80 @@ export function typeLabel(n: NodeLike) {
   return ext ? t("{ext} File", { ext }) : t("File");
 }
 
+/** The specific kind of a file, when it has one (a format, a language, a tool's file) */
+function specificType(n: NodeLike): FileType | "archive" | null {
+  return n.kind === "folder" ? null : fileTypeOf(n);
+}
+
+/** What kind of file it is, in words ("Rust source file", "Spreadsheet") */
 export function typeTitle(n: NodeLike) {
-  return STYLE[categoryOf(n)].title;
+  const type = specificType(n);
+  if (type && type !== "archive") return type.title;
+  return STYLE[type === "archive" ? "archive" : categoryOf(n)].title;
 }
 
 export function FileIcon({ node, className }: { node: NodeLike; className?: string }) {
-  const c = categoryOf(node);
+  const type = specificType(node);
+  if (type && type !== "archive") return <TypeMark type={type} className={className} />;
+  const c = type === "archive" ? "archive" : categoryOf(node);
   const { Icon, color } = c === "sheet" && /^(csv|tsv)$/.test(extOf(node.name)) ? { ...STYLE.sheet, Icon: Table2Icon } : STYLE[c];
   return <Icon className={cn("shrink-0", color, className)} strokeWidth={1.7} aria-hidden="true" />;
 }
 
+/** Whether white or black text reads better on a colour */
+function textOn(hex: string) {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55 ? "#1a1a1a" : "#ffffff";
+}
+
+/**
+ * A specific type's icon: its symbol, or a page with its label ("RS", "GO"), cut out from the page so it reads on light
+ * and dark backgrounds alike. The page is lucide's file outline (ISC licence), like the other file icons.
+ */
+function TypeMark({ type, className }: { type: FileType; className?: string }) {
+  const m = type.mark;
+  if ("icon" in m) {
+    const Icon = m.icon;
+    return <Icon className={cn("shrink-0", m.color, className)} strokeWidth={1.7} aria-hidden="true" data-type={type.id} />;
+  }
+  const n = m.label.length;
+  const width = Math.min(22, 7 + n * 4.6);
+  const size = n <= 2 ? 7.4 : n === 3 ? 6.4 : 5.4;
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.7}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={cn("shrink-0 text-muted-foreground", className)}
+      aria-hidden="true"
+      data-type={type.id}
+    >
+      <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" />
+      <path d="M14 2v5a1 1 0 0 0 1 1h5" />
+      <rect x={12 - width / 2} y={11.5} width={width} height={9} rx={2} fill={m.bg} stroke="var(--background)" strokeWidth={1.2} />
+      <text
+        x={12}
+        y={16.1}
+        textAnchor="middle"
+        dominantBaseline="central"
+        fill={textOn(m.bg)}
+        stroke="none"
+        fontSize={size}
+        fontWeight={700}
+        fontFamily="ui-sans-serif, system-ui, sans-serif"
+        letterSpacing={-0.2}
+      >
+        {m.label}
+      </text>
+    </svg>
+  );
+}
+
 /** Pictures and videos most browsers can't show (HEIC, TIFF, AVI, MKV…): offered for download instead of a broken preview */
-const NOT_IN_BROWSER_EXT = /^(heic|heif|tiff?|psd|avi|mkv|wmv|flv|wma|aiff?|ape)$/;
+const NOT_IN_BROWSER_EXT = /^(heic|heif|tiff?|psd|avi|mkv|wmv|flv|wma|aiff?|ape|amr)$/;
 const NOT_IN_BROWSER_MIME = /^(image\/(heic|heif|tiff|vnd\.adobe\.photoshop)|video\/(x-msvideo|x-matroska|x-ms-wmv|x-flv)|audio\/(x-ms-wma|x-aiff|aiff))$/;
 
 /** A picture, video or sound the browser can show */
