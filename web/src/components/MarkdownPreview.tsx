@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Loader2Icon } from "lucide-react";
 import { fetchOk, type FileSource, type Node } from "@/api";
+import { cancellable } from "@/lib/cancellable";
 import { getDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 import { reportShown } from "@/lib/errorReport";
@@ -13,27 +14,20 @@ export default function MarkdownPreview(props: { node: Node; source: FileSource;
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
     setText(null);
     setError(null);
     // Moving on to another file stops this download
-    const abort = new AbortController();
-    fetchOk(props.source.contentUrl(props.node), { signal: abort.signal })
-      .then((r) => r.arrayBuffer())
-      .then((buf) => {
-        if (cancelled) return;
+    return cancellable(
+      (signal) => fetchOk(props.source.contentUrl(props.node), { signal }).then((r) => r.arrayBuffer()),
+      (buf) => {
         const draft = getDraft(props.node.id, "text");
         setText(draft ? draft.text : normalizeLines(decodeText(buf).text));
-      })
-      .catch((e) => {
-        if (cancelled) return;
+      },
+      (e) => {
         setError(e.message);
         reportShown("preview", e, props.node.id);
-      });
-    return () => {
-      cancelled = true;
-      abort.abort();
-    };
+      },
+    );
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every refresh of the list: its id and date say when the file changed
   }, [props.node.id, props.node.updated_at, props.source]);
 

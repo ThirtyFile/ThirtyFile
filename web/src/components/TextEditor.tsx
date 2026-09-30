@@ -7,6 +7,7 @@ import { Loader2Icon, SaveIcon } from "lucide-react";
 import { toast } from "sonner";
 import { ApiError, api, fetchOk, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
+import { cancellable } from "@/lib/cancellable";
 import { getDraft, setDraft, textSaved } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 import { reportShown } from "@/lib/errorReport";
@@ -60,15 +61,14 @@ export default function TextEditor(props: {
     // The editor stays mounted when moving to another file: forget the previous file's language
     setLang(null);
     // Moving on to another file stops this download
-    const abort = new AbortController();
-    fetchOk(props.source.contentUrl(props.node), { signal: abort.signal })
-      .then((r) => {
-        // The version of the content just received (the node the parent holds may be older, e.g. after a conflict)
-        const version = Number(r.headers.get("x-version")) || props.node.updated_at;
-        return r.arrayBuffer().then((buf) => ({ buf, version }));
-      })
-      .then(({ buf, version }) => {
-        if (cancelled) return;
+    const stop = cancellable(
+      (signal) =>
+        fetchOk(props.source.contentUrl(props.node), { signal }).then((r) => {
+          // The version of the content just received (the node the parent holds may be older, e.g. after a conflict)
+          const version = Number(r.headers.get("x-version")) || props.node.updated_at;
+          return r.arrayBuffer().then((buf) => ({ buf, version }));
+        }),
+      ({ buf, version }) => {
         base.current = version;
         loaded.current = { id: props.node.id, reload };
         const decoded = decodeText(buf);
@@ -90,17 +90,17 @@ export default function TextEditor(props: {
           setText((current.current = draft ? draft.text : d.text));
         }
         setEncoding(d.encoding);
-      })
-      .catch((e) => {
-        if (cancelled) return;
+      },
+      (e) => {
         setError(e.message);
         reportShown("preview", e, props.node.id);
-      });
+      },
+    );
     const desc = LanguageDescription.matchFilename(languages, props.node.name);
     desc?.load().then((l) => !cancelled && setLang(l));
     return () => {
       cancelled = true;
-      abort.abort();
+      stop();
     };
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every refresh of the list: its id and date say when the file changed
   }, [props.node.id, props.node.updated_at, props.source, reload]);
