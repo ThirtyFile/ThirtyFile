@@ -143,7 +143,7 @@ function Subfolders({ parentId, folders, depth, activeId }: { parentId: string; 
   return (
     <>
       {folders.slice(0, count).map((f, i) => (
-        <TreeFolder key={f.id} id={f.id} name={f.name} depth={depth + 1} pos={i + 1} size={folders.length} activeId={activeId} />
+        <TreeFolder key={f.id} id={f.id} name={f.name} depth={depth + 1} pos={i + 1} size={folders.length} activeId={activeId} hasFolders={f.has_folders} />
       ))}
       {count < folders.length && (
         <button
@@ -160,14 +160,32 @@ function Subfolders({ parentId, folders, depth, activeId }: { parentId: string; 
   );
 }
 
-function TreeFolder({ id, name, depth, pos, size, activeId }: { id: string; name: string; depth: number; pos: number; size: number; activeId?: string }) {
+function TreeFolder({
+  id,
+  name,
+  depth,
+  pos,
+  size,
+  activeId,
+  hasFolders,
+}: {
+  id: string;
+  name: string;
+  depth: number;
+  pos: number;
+  size: number;
+  activeId?: string;
+  /** From the parent's listing: whether it has folders in it (unknown: an arrow until it is expanded) */
+  hasFolders?: boolean;
+}) {
   const open = useExpanded().has(id);
   const children = useQuery({
     queryKey: ["children", id, "folders"],
     queryFn: ({ signal }) => api.children(id, "name", "asc", true, signal),
     enabled: open,
   });
-  const empty = children.data?.length === 0;
+  // No folders in it: no arrow to expand (its listing, once loaded, is what counts)
+  const empty = children.data ? children.data.length === 0 : hasFolders === false;
   const item = useTreeItem(id, depth + 1, pos, size);
   const { dropping, dropProps } = useFolderDrop({ id, name });
   useExpandOnHover(id, dropping, open);

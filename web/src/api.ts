@@ -17,6 +17,8 @@ export interface Node {
   /** Uploader / creator */
   owner_name: string;
   is_favorite: boolean;
+  /** Listings of folders only (the navigation pane): whether it has folders in it */
+  has_folders?: boolean;
 }
 
 /** A compress or extract task running on the server (`GET /jobs/:id`) */

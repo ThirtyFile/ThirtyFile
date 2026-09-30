@@ -127,6 +127,8 @@ const TILED: Record<Exclude<ViewMode, "list">, { w: number; h: number; gap: numb
   compact: { w: 220, h: 26, gap: 2 },
 };
 const PAD = 12;
+/** Large icons on phones: the smallest width of an item */
+const PHONE_GRID_W = 100;
 /** Icon views: height of a group's heading, with the space above it */
 const GROUP_H = 36;
 
@@ -619,7 +621,9 @@ export function FileList(p: FileListProps) {
   }, [p.selected, indexOf]);
   const allSelected = useMemo(() => n > 0 && p.selected.size >= n && items.every((x) => p.selected.has(x.id)), [items, p.selected, n]);
 
-  const cols = tile ? Math.max(1, Math.floor((geo.width - 2 * PAD + tile.gap) / (tile.w + tile.gap))) : 1;
+  // Phones: large icons a little narrower, three to a row rather than two with wide gaps
+  const minTileW = tile && view === "grid" && !wide ? PHONE_GRID_W : tile?.w;
+  const cols = tile ? Math.max(1, Math.floor((geo.width - 2 * PAD + tile.gap) / (minTileW! + tile.gap))) : 1;
   // The rows: in each group, its heading and then its items, `cols` to a row
   const layout = useMemo(() => {
     const rows: LayoutRow[] = [];
