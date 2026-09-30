@@ -28,13 +28,32 @@ export function leaveAfterSignOut(userId: number) {
   window.location.assign("/login");
 }
 
-/** Removes the expanded folders of the tree kept for anyone but `userId` (someone else signed in after them) */
-function forgetOtherTrees(userId: number) {
+/** Who last signed in in this browser (to tell whether what is kept below belongs to someone else) */
+const LAST_USER_KEY = "tf-signed-in-user";
+
+/** Keys of `storage` that start with `prefix` */
+function keysOf(storage: Storage, prefix: string) {
+  return Object.keys(storage).filter((k) => k.startsWith(prefix));
+}
+
+/**
+ * Removes what is kept in this browser for anyone but `userId`: their saved tabs (whose titles are file and folder
+ * names) and the folders they expanded in the tree, and, when someone else signed in here last, the upload resume
+ * records (which name files and folders too). Needed when a session ended without signing out (it expired, or the
+ * browser was closed), since only signing out clears them (`leaveAfterSignOut`).
+ */
+function forgetOtherUsers(userId: number) {
   try {
-    const own = treeStorageKey(userId);
-    for (const key of Object.keys(localStorage)) {
-      if (key.startsWith(TREE_STORAGE_PREFIX) && key !== own) localStorage.removeItem(key);
+    const ownTabs = `tf-tabs-${userId}`;
+    const ownTree = treeStorageKey(userId);
+    for (const storage of [localStorage, sessionStorage]) {
+      for (const key of keysOf(storage, "tf-tabs-")) if (key !== ownTabs) storage.removeItem(key);
     }
+    for (const key of keysOf(localStorage, TREE_STORAGE_PREFIX)) if (key !== ownTree) localStorage.removeItem(key);
+    if (localStorage.getItem(LAST_USER_KEY) !== String(userId)) {
+      for (const key of keysOf(localStorage, "tus::")) localStorage.removeItem(key);
+    }
+    localStorage.setItem(LAST_USER_KEY, String(userId));
   } catch {
     // Storage blocked by the browser: nothing was kept there either
   }
@@ -44,14 +63,15 @@ let signedInAs: number | null = null;
 
 /**
  * Called with the signed-in user whenever it is known. After a session expired, someone else may sign in in the same
- * tab: then the page is loaded afresh, so the previous user's drafts and lists in memory don't reach them. The folders
- * another user expanded in the tree are forgotten, so the next person doesn't see where they have been.
+ * tab: then the page is loaded afresh, so the previous user's drafts and lists in memory don't reach them. What other
+ * users left in the browser's storage (tabs, expanded folders, unfinished uploads) is removed, so the next person
+ * doesn't see where they have been.
  */
 export function noteSignedIn(userId: number) {
   if (signedInAs !== null && signedInAs !== userId) {
     window.location.reload();
     return;
   }
-  if (signedInAs === null) forgetOtherTrees(userId);
+  if (signedInAs === null) forgetOtherUsers(userId);
   signedInAs = userId;
 }
