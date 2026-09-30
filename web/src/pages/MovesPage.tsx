@@ -256,6 +256,8 @@ export function MovesPage() {
         columns={columns}
         fixed
         loading={q.isLoading}
+        error={q.error}
+        onRetry={() => q.refetch()}
         selectedKey={selectedId}
         onSelect={setSelectedId}
         onOpen={(m) => setDialog({ t: "details", move: m })}

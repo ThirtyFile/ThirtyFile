@@ -4,6 +4,7 @@ import { DownloadIcon, Loader2Icon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { api, triggerDownload, type LogArchive, type LogSettings } from "@/api";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Pending } from "@/components/ErrorState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/dialogs";
@@ -80,7 +81,7 @@ export function LogSettingsPage() {
   return (
     <SettingsFrame item="logs" onRefresh={() => q.refetch()}>
       {!d || !cur ? (
-        <Skeleton className="h-40" />
+        <Pending query={q} loading={<Skeleton className="h-40" />} />
       ) : (
         <>
           <Section title={t("Current status")}>

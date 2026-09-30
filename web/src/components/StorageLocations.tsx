@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog, ErrorText } from "@/components/dialogs";
+import { ErrorState } from "@/components/ErrorState";
 import { RowMenuArea } from "@/components/RowMenuArea";
 import { LocationBrowseDialog, LocationTestDialog, UnusedContentDialog } from "@/components/StorageTools";
 import { cn, formatBytes, formatDateTime } from "@/lib/utils";
@@ -185,6 +186,8 @@ export function StorageLocations() {
           <div className="flex h-20 items-center justify-center text-muted-foreground">
             <Loader2Icon className="size-5 animate-spin" />
           </div>
+        ) : q.error && !q.data ? (
+          <ErrorState message={q.error.message} onRetry={() => q.refetch()} />
         ) : (
           <div className="divide-y">
             {list.map((l) => {

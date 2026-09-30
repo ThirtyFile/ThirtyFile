@@ -5,6 +5,7 @@ import { Link } from "react-router";
 import { toast } from "sonner";
 import { api, type DefaultLang, type SystemSettingsReq } from "@/api";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Pending } from "@/components/ErrorState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/dialogs";
@@ -220,7 +221,7 @@ export function GeneralSettingsPage() {
   return (
     <SettingsFrame item="general" onRefresh={() => q.refetch()}>
       {!q.data ? (
-        <Skeleton className="h-40" />
+        <Pending query={q} loading={<Skeleton className="h-40" />} />
       ) : (
         <>
           <Section title={t("Website")}>

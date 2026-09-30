@@ -1,4 +1,5 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import { Pending } from "@/components/ErrorState";
 import { formatBytes } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 import { Section, SettingsFrame, useSystem } from "@/pages/SettingsFrame";
@@ -20,7 +21,7 @@ export function UsageSettingsPage() {
   return (
     <SettingsFrame item="usage" onRefresh={() => q.refetch()} footer={<span>{t("Includes all spaces and the trash")}</span>}>
       {!q.data ? (
-        <Skeleton className="h-40" />
+        <Pending query={q} loading={<Skeleton className="h-40" />} />
       ) : (
         <Section title={t("Storage usage")}>
           <dl className="grid grid-cols-2 sm:grid-cols-3">
