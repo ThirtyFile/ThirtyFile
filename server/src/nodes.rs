@@ -378,7 +378,7 @@ pub async fn children(
         // Changes made on the server's folder show up when the folder is opened (not again for each further page).
         // No connection is held meanwhile: syncing takes its own, and many folders opened at once would otherwise
         // use up the pool while each waits for a second one
-        crate::folders::sync_folder(&st, &folder).await;
+        crate::folders::sync_opened(&st, &folder).await;
     }
     let mut c = st.db.acquire().await?;
     let mut list = list_children(&mut c, &folder.id, &q).await?;

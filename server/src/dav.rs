@@ -520,7 +520,7 @@ async fn propfind(st: &AppState, user: &User, segs: &[String], headers: &HeaderM
                     // Changes made on the server's folder show up when it is opened, as on the web (without holding
                     // a connection meanwhile: syncing takes its own)
                     drop(c);
-                    crate::folders::sync_folder(st, &node).await;
+                    crate::folders::sync_opened(st, &node).await;
                     c = st.db.acquire().await?;
                 }
                 let mut list = nodes::list_children(&mut c, &node.id, &nodes::ListQuery::default()).await?;
@@ -715,8 +715,11 @@ async fn put(st: &AppState, user: &User, segs: &[String], headers: &HeaderMap, b
     // Only when the index and the folder on the server disagree about this name is the folder looked at again:
     // copying thousands of files into one folder mustn't re-read it for each
     if parent.in_folder_space() {
-        let on_disk = parent.fs_pinned().and_then(|p| p.join(&name)).is_ok_and(|p| std::fs::symlink_metadata(p.as_path()).is_ok());
-        if on_disk != existing.is_some() {
+        // (on a blocking thread, within a few seconds: when the disk doesn't answer, the index is taken as it is)
+        let (p, n) = (parent.clone(), name.clone());
+        let look = move || p.fs_pinned().and_then(|p| p.join(&n)).is_ok_and(|p| std::fs::symlink_metadata(p.as_path()).is_ok());
+        let on_disk = crate::util::blocking_within(format!("check of {name} in {}", parent.id), std::time::Duration::from_secs(5), look).await;
+        if on_disk.is_some_and(|on_disk| on_disk != existing.is_some()) {
             drop(c);
             crate::folders::sync_folder(st, &parent).await;
             c = st.db.acquire().await?;

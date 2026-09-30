@@ -161,28 +161,45 @@ impl Drop for Waiting {
     }
 }
 
-/// Runs a blocking step on a blocking thread and waits up to `wait` for it; None when it didn't answer by then, or
-/// when a step for the same `key` still hasn't answered: a disk that hangs ties up one thread, not one more per call
+/// Waits for `key` until `deadline`: a call already waiting for the same thing (another request checking the same
+/// disk) goes first, and its thread isn't joined by another while it hasn't answered
+async fn claim_by(key: String, deadline: tokio::time::Instant) -> Option<Waiting> {
+    loop {
+        if let Some(claimed) = Waiting::claim(key.clone()) {
+            return Some(claimed);
+        }
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return None;
+        }
+        tokio::time::sleep((deadline - now).min(std::time::Duration::from_millis(20))).await;
+    }
+}
+
+/// Runs a blocking step on a blocking thread and waits up to `wait` for it; None when it didn't answer by then. Calls
+/// for the same `key` take turns, so a disk that hangs ties up one thread, not one more per call.
 pub async fn blocking_within<T: Send + 'static>(key: String, wait: std::time::Duration, step: impl FnOnce() -> T + Send + 'static) -> Option<T> {
-    let claimed = Waiting::claim(key)?;
+    let deadline = tokio::time::Instant::now() + wait;
+    let claimed = claim_by(key, deadline).await?;
     let task = tokio::task::spawn_blocking(move || {
         let r = step();
         drop(claimed);
         r
     });
-    tokio::time::timeout(wait, task).await.ok()?.ok()
+    tokio::time::timeout_at(deadline, task).await.ok()?.ok()
 }
 
 /// `blocking_within` for work that is a future (a check of a storage service): it runs as a task of its own, so it
 /// finishes (and lets `key` go) whether or not anyone still waits for it
 pub async fn within<T: Send + 'static>(key: String, wait: std::time::Duration, work: impl Future<Output = T> + Send + 'static) -> Option<T> {
-    let claimed = Waiting::claim(key)?;
+    let deadline = tokio::time::Instant::now() + wait;
+    let claimed = claim_by(key, deadline).await?;
     let task = tokio::spawn(async move {
         let r = work.await;
         drop(claimed);
         r
     });
-    tokio::time::timeout(wait, task).await.ok()?.ok()
+    tokio::time::timeout_at(deadline, task).await.ok()?.ok()
 }
 
 /// `disk_space`, on a blocking thread and within a few seconds (None when the disk doesn't answer)
@@ -294,12 +311,12 @@ mod tests {
         // It doesn't answer: given up after the wait
         assert_eq!(super::blocking_within(key(), Duration::from_millis(100), move || wait.recv().is_ok()).await, None);
         assert!(started.elapsed() < Duration::from_secs(1));
-        // Asked again meanwhile: not asked at all (no second thread waits for it)
+        // Asked again meanwhile: it waits its turn, and gives up without asking (no second thread waits for the disk)
         let asked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let a = asked.clone();
         let again = Instant::now();
-        assert_eq!(super::blocking_within(key(), Duration::from_secs(5), move || a.store(true, std::sync::atomic::Ordering::SeqCst)).await, None);
-        assert!(again.elapsed() < Duration::from_millis(100) && !asked.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(super::blocking_within(key(), Duration::from_millis(200), move || a.store(true, std::sync::atomic::Ordering::SeqCst)).await, None);
+        assert!(again.elapsed() < Duration::from_secs(1) && !asked.load(std::sync::atomic::Ordering::SeqCst));
         // Once it has answered, it is asked again
         go.send(()).unwrap();
         let mut answered = None;
@@ -315,8 +332,21 @@ mod tests {
         let key = format!("test service {:?}", std::thread::current().id());
         assert_eq!(super::within(key.clone(), Duration::from_millis(50), std::future::pending::<()>()).await, None);
         let again = Instant::now();
-        assert_eq!(super::within(key, Duration::from_secs(5), async { 1 }).await, None);
-        assert!(again.elapsed() < Duration::from_millis(100));
+        assert_eq!(super::within(key, Duration::from_millis(200), async { 1 }).await, None);
+        assert!(again.elapsed() < Duration::from_secs(1));
+        // Checks of the same thing at the same time that do answer take turns, and both get their answer
+        let key = format!("test turns {:?}", std::thread::current().id());
+        let slow = |n: u32| {
+            let key = key.clone();
+            async move {
+                super::within(key, Duration::from_secs(5), async move {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    n
+                })
+                .await
+            }
+        };
+        assert_eq!(tokio::join!(slow(1), slow(2)), (Some(1), Some(2)));
     }
 
     #[test]
