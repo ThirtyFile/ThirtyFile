@@ -1,5 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
-import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Resizer } from "@/components/Resizer";
 import type { FileSource, Node, SortKey, SortOrder } from "@/api";
@@ -7,14 +6,16 @@ import { typeLabel } from "@/components/FileIcon";
 import type { Box, MeasureHits } from "@/components/useMarquee";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/lib/focus";
-import { COLUMN_WIDTH, MAX_COLUMN, MIN_COLUMN, MIN_NAME, columnShown, groupItems, columnsToHide, pageRows, setColumnWidth, useColumnPrefs, type ColumnId, type GroupBy } from "@/lib/listView";
+import { COLUMN_WIDTH, MAX_COLUMN, MIN_COLUMN, MIN_NAME, columnShown, groupItems, columnsToHide, setColumnWidth, useColumnPrefs, type ColumnId, type GroupBy } from "@/lib/listView";
 import { carriesFiles, carriesItems, dropEffect, droppedIds, startDrag } from "@/lib/dnd";
 import { t } from "@/lib/i18n";
-import { findByPrefix, wantsCopy } from "@/lib/keys";
+import { wantsCopy } from "@/lib/keys";
 import { inSpan, spanCount, type ListSpan } from "@/lib/span";
-import { type ViewMode, type Item, ROW, HEAD, GROUP_ROW, TILED, PAD, PHONE_GRID_W, GROUP_H, scrollParent, offsetIn, touching, evenLayout, groupedLayout } from "@/components/fileList/layout";
+import { type ViewMode, type Item, HEAD, GROUP_ROW, PAD, GROUP_H, offsetIn, touching } from "@/components/fileList/layout";
+import { useListLayout } from "@/components/fileList/useListLayout";
 import { th, Head, type Handlers, type RowProps, COLUMN_CLASS, ListRow, Tile, GroupHeading, PlaceholderRow } from "@/components/fileList/rows";
 import { listColumns, ColumnChoices } from "@/components/fileList/columns";
+import { useListKeyboard } from "@/components/fileList/useListKeyboard";
 
 /** What the explorer's keyboard handling asks of the list */
 export interface ListNav {
@@ -92,16 +93,7 @@ export function FileList(p: FileListProps) {
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   /** The item with the keyboard focus: always rendered, so the focus isn't lost when it scrolls out of view */
   const [focusId, setFocusId] = useState<string | null>(null);
-  const [scroller, setScroller] = useState<HTMLElement | null>(null);
-  /** Where the first row starts in the scroll container's content, the list's width, and the width it has in view */
-  const [geo, setGeo] = useState({ top: 0, width: 0, room: 0 });
-  const root = useRef<HTMLElement | null>(null);
-  const head = useRef<HTMLTableSectionElement>(null);
-  const pendingFocus = useRef<string | null>(null);
   const view = p.view;
-  // Anything but an icon view (also a view saved by a later version) is Details
-  const tile: (typeof TILED)[keyof typeof TILED] | null = view === "list" ? null : (TILED[view] ?? null);
-  const grid = !!tile;
   const span = p.span ?? null;
   const selecting = p.selected.size > 0 || !!span;
   const prefs = useColumnPrefs();
@@ -148,75 +140,14 @@ export function FileList(p: FileListProps) {
     [items, p.selected, n, span, complete],
   );
 
-  // Phones: large icons a little narrower, three to a row rather than two with wide gaps
-  const minTileW = tile && view === "grid" && !wide ? PHONE_GRID_W : tile?.w;
-  const cols = tile ? Math.max(1, Math.floor((geo.width - 2 * PAD + tile.gap) / (minTileW! + tile.gap))) : 1;
-  // The rows: in each group, its heading and then its items, `cols` to a row
-  const layout = useMemo(
-    () => (groups ? groupedLayout(groups, cols, tile ? tile.h + tile.gap : ROW, tile ? GROUP_H : GROUP_ROW) : evenLayout(n, cols, tile ? tile.h + tile.gap : ROW)),
-    [groups, n, cols, tile],
-  );
-  const rowOf = (i: number) => layout.rowOf(i);
   const tabStop = firstSelected >= 0 ? firstSelected : 0;
   // Rows rendered even out of view: the Tab stop, the focused item and the one being renamed
-  const pinned = [tabStop, focusId === null ? undefined : indexOf.get(focusId), p.renamingId ? indexOf.get(p.renamingId) : undefined]
-    .filter((i): i is number => i !== undefined && i < n)
-    .map(rowOf);
-
-  // Row sizes are cached per key: new keys whenever the rows change
-  // oxlint-disable-next-line react-hooks/exhaustive-deps -- the layout is what invalidates the keys
-  const rowKey = useCallback((i: number) => i, [layout]);
-  const v = useVirtualizer({
-    count: layout.count,
-    getScrollElement: () => scroller,
-    estimateSize: (i) => layout.row(i).size,
-    getItemKey: rowKey,
-    overscan: grid ? 2 : 12,
-    scrollMargin: geo.top,
-    // Keep rows scrolled to by the keyboard clear of the sticky column headers
-    scrollPaddingStart: grid ? PAD : HEAD,
-    rangeExtractor: (range) => [...new Set([...defaultRangeExtractor(range), ...pinned])].sort((a, b) => a - b),
-    initialRect: { width: 0, height: typeof window === "undefined" ? 800 : window.innerHeight },
-  });
-
-  // Find the scroll container, and where the rows start in it: measured before the first paint of a view, then when the
-  // list changes size (not after every render: that reads the layout on every frame of a marquee drag)
-  const measureGeo = useCallback(() => {
-    const el = root.current;
-    if (!el) return;
-    const s = scrollParent(el);
-    setScroller((cur) => (cur === s ? cur : s));
-    const top = offsetIn(el, s).top + (head.current ? head.current.offsetHeight : PAD);
-    const width = el.clientWidth;
-    const room = s === document.documentElement ? window.innerWidth : s.clientWidth;
-    setGeo((g) => (g.top === top && g.width === width && g.room === room ? g : { top, width, room }));
-  }, []);
-  const empty = n === 0;
-  useLayoutEffect(measureGeo, [measureGeo, grid, empty]);
-  useEffect(() => {
-    const el = root.current;
-    if (!el) return;
-    const ro = new ResizeObserver(measureGeo);
-    ro.observe(el);
-    // The list can be wider than the space it has (Details view scrolling sideways): that space is watched too
-    const s = scrollParent(el);
-    if (s !== document.documentElement) ro.observe(s);
-    return () => ro.disconnect();
-  }, [measureGeo, grid, empty]);
-
-  // Keyboard moves: focus the item once its row is rendered; a move to an item not loaded yet is made once it loads
-  useLayoutEffect(() => {
-    const nav = pendingNav.current;
-    if (nav && items[nav.index]) {
-      pendingNav.current = null;
-      moveTo(nav.index, nav.mode);
-    }
-    const id = pendingFocus.current;
-    const el = id && root.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
-    if (el) {
-      pendingFocus.current = null;
-      el.focus({ preventScroll: true });
-    }
+  const { root, head, scroller, geo, tile, grid, cols, layout, rowOf, v } = useListLayout({
+    view,
+    wide,
+    groups,
+    n,
+    keep: [tabStop, focusId === null ? undefined : indexOf.get(focusId), p.renamingId ? indexOf.get(p.renamingId) : undefined],
   });
 
   // The positions in view (without the rows rendered around them), for a large folder to load them
@@ -234,187 +165,23 @@ export function FileList(p: FileListProps) {
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- only when renaming starts, not while the list reloads
   }, [p.renamingId, renamingShown]);
 
-  const focusItem = (index: number) => {
-    const item = items[index];
-    v.scrollToIndex(rowOf(index));
-    if (!item) return;
-    setFocusId(item.id);
-    const el = root.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(item.id)}"]`);
-    if (el) el.focus({ preventScroll: true });
-    else pendingFocus.current = item.id;
-  };
-
-  /**
-   * The selection from the anchor to an item (Shift), with the items in `keep` (Ctrl+Shift). With items between them
-   * not loaded, it is a span from one to the other (the server knows what is between them).
-   */
-  const rangeTo = (index: number, keep?: Set<string>): { selected: Set<string>; span: ListSpan | null } | null => {
-    const anchorIndex = p.anchor === null ? -1 : (indexOf.get(p.anchor) ?? -1);
-    if (anchorIndex < 0 || !items[index]) return null;
-    const [lo, hi] = [Math.min(anchorIndex, index), Math.max(anchorIndex, index)];
-    const next = new Set(keep);
-    for (let i = lo; i <= hi; i++) {
-      const item = items[i];
-      if (!item) return { selected: new Set(keep), span: { from: { id: items[lo]!.id, index: lo }, to: { id: items[hi]!.id, index: hi }, except: new Set() } };
-      next.add(item.id);
-    }
-    return { selected: next, span: null };
-  };
-
-  /** Ctrl+click or Ctrl+Space: the item in or out of the selection (in a span, it is left out of it, or back in) */
-  const toggle = (index: number) => {
-    const item = items[index];
-    if (!item) return;
-    const id = item.id;
-    if (span && index >= (span.from?.index ?? 0) && index <= (span.to?.index ?? Infinity) && !p.selected.has(id)) {
-      const except = new Set(span.except);
-      if (except.has(id)) except.delete(id);
-      else except.add(id);
-      p.onSelect(p.selected, id, { ...span, except });
-      return;
-    }
-    const next = new Set(p.selected);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    p.onSelect(next, id, span);
-  };
-
-  /** A keyboard move to an item: select it (or up to it, or only focus it); one not loaded yet is scrolled to, and waited for */
-  const pendingNav = useRef<{ index: number; mode: "only" | "range" | "focus" } | null>(null);
-  const moveTo = (index: number, mode: "only" | "range" | "focus") => {
-    const item = items[index];
-    if (!item) {
-      pendingNav.current = { index, mode };
-      v.scrollToIndex(rowOf(index));
-      return;
-    }
-    if (mode !== "focus") {
-      const range = mode === "range" ? rangeTo(index) : null;
-      if (range) p.onSelect(range.selected, p.anchor!, range.span);
-      else p.onSelect(new Set([item.id]), item.id, null);
-    }
-    focusItem(index);
-  };
-
-  /** The item below or above: in the same column of the next row of items (group headings are skipped), else the last or first item */
-  const vertical = (index: number, dir: 1 | -1) => {
-    const at = (r: number) => (r >= 0 && r < layout.count ? layout.row(r) : undefined);
-    let r = rowOf(index) + dir;
-    while (at(r)?.group) r += dir;
-    const to = at(r);
-    if (!to) return dir > 0 ? n - 1 : 0;
-    return Math.min(to.start + index - layout.row(rowOf(index)).start, to.end - 1);
-  };
-
-  /** The item a page further down or up (PageDown, PageUp): as many rows as fit in view, less one */
-  const page = (index: number, dir: 1 | -1) => {
-    const view = scroller === document.documentElement || !scroller ? window.innerHeight : scroller.clientHeight;
-    const rowHeight = tile ? tile.h + tile.gap : ROW;
-    let at = index;
-    for (let k = pageRows(view - (grid ? PAD : HEAD), rowHeight); k > 0; k--) {
-      const next = vertical(at, dir);
-      if (next === at) break;
-      at = next;
-    }
-    return at;
-  };
-
-  /** Shift+F10 or the Menu key: open the context menu at the item, as right-clicking it does (browsers don't all do it for a focused row) */
-  const keyMenu = useRef(0);
-  const openMenu = (el: HTMLElement) => {
-    const r = (el.querySelector("[data-drag-handle]") ?? el).getBoundingClientRect();
-    keyMenu.current = Date.now() + 500;
-    el.dispatchEvent(new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: r.left + Math.min(r.width / 2, 100), clientY: r.top + r.height / 2 }));
-    // A menu opened like a right-click leaves the focus on the row: move it into the menu, so the arrow keys go through its items
-    setTimeout(() => {
-      const menu = document.querySelector<HTMLElement>("[role=menu][data-open]");
-      if (!menu) return;
-      menu.focus();
-      // Closed without doing anything that takes the focus (a dialog, the rename box): it goes back to the row, not the list around it
-      const back = new MutationObserver(() => {
-        if (menu.isConnected) return;
-        back.disconnect();
-        const at = document.activeElement;
-        if (el.isConnected && (!at || at === document.body || !at.closest("[role=menu], [role=dialog], input, textarea"))) el.focus({ preventScroll: true });
-      });
-      back.observe(document.body, { childList: true, subtree: true });
-    }, 30);
-  };
-
-  /**
-   * Keyboard: arrows move the selection (Shift extends it, Ctrl moves only the focus), Space selects (toggles with Ctrl),
-   * Home/End and PageUp/PageDown jump, Enter opens, Shift+F10 or the Menu key opens the context menu
-   */
-  const keyNav = (e: KeyboardEvent<HTMLElement>, index: number) => {
-    // Keys typed in a control inside the row (its checkbox, the rename box) belong to that control
-    const current = items[index];
-    if (e.target !== e.currentTarget || !current || current.id === p.renamingId) return;
-    if (e.key === "Enter" && !e.altKey && !e.repeat) {
-      e.preventDefault();
-      p.onOpen(current, true);
-      return;
-    }
-    if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey)) {
-      e.preventDefault();
-      openMenu(e.currentTarget);
-      return;
-    }
-    // Alt+arrows move around folders (handled by the address bar)
-    if (e.altKey) return;
-    let next: number | null = null;
-    if (e.key === "ArrowDown") next = vertical(index, 1);
-    else if (e.key === "ArrowUp") next = vertical(index, -1);
-    else if (e.key === "ArrowRight" && grid) next = Math.min(n - 1, index + 1);
-    else if (e.key === "ArrowLeft" && grid) next = Math.max(0, index - 1);
-    else if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = n - 1;
-    else if (e.key === "PageDown") next = page(index, 1);
-    else if (e.key === "PageUp") next = page(index, -1);
-    else if (e.key === " ") {
-      e.preventDefault();
-      if (e.ctrlKey || e.metaKey) toggle(index);
-      else p.onSelect(new Set([current.id]), current.id, null);
-      return;
-    }
-    if (next === null) return;
-    e.preventDefault();
-    // Ctrl moves the focus and leaves the selection alone, like File Explorer: Ctrl+Space then adds or removes the item.
-    // An item not loaded yet (End in a large folder) is selected once its part has loaded.
-    moveTo(next, (e.ctrlKey || e.metaKey) && !e.shiftKey ? "focus" : e.shiftKey ? "range" : "only");
-  };
-
-  /** Letters typed to find an item, and when the last one was typed */
-  const typed = useRef({ text: "", at: 0 });
-  const typeAhead = (key: string) => {
-    const now = Date.now();
-    const text = (now - typed.current.at < 1000 ? typed.current.text : "") + key.toLocaleLowerCase();
-    typed.current = { text, at: now };
-    const current = focusId ?? p.anchor;
-    const at = current === null ? -1 : (indexOf.get(current) ?? -1);
-    // The same letter again moves on to the next item starting with it; more letters narrow down from the current item
-    const same = [...text].every((c) => c === text[0]);
-    // In a large folder, among the items loaded
-    const next = findByPrefix(
-      Array.from({ length: n }, (_, i) => items[i]?.name ?? ""),
-      same ? text[0] : text,
-      same ? at : Math.max(at, 0) - 1,
-    );
-    if (next < 0) return;
-    moveTo(next, "only");
-  };
-  const show = (id: string, focus: boolean) => {
-    const index = indexOf.get(id);
-    if (index === undefined) return;
-    if (focus) focusItem(index);
-    else v.scrollToIndex(rowOf(index));
-  };
-  const focusStart = () => {
-    if (n === 0) return false;
-    moveTo(tabStop, "focus");
-    return true;
-  };
-  const scrollTo = (index: number) => index >= 0 && index < n && v.scrollToIndex(rowOf(index), { align: "center" });
-  if (p.navRef) p.navRef.current = { typeAhead, show, focusStart, scrollTo };
+  const { focusItem, rangeTo, toggle, keyNav, keyMenu } = useListKeyboard({
+    p,
+    items,
+    n,
+    indexOf,
+    span,
+    layout,
+    rowOf,
+    v,
+    root,
+    grid,
+    tile,
+    scroller,
+    focusId,
+    setFocusId,
+    tabStop,
+  });
 
   /** A finger resting on an item: selected once it has stayed long enough */
   const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number; done: boolean } | null>(null);
