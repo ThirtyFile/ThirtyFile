@@ -198,6 +198,46 @@
           <li>A restore that stops continues where it stopped, without making anything twice.</li>
         </ul>
 
+        <h2 id="replicas">Replicas: the same files on several locations</h2>
+        <p>A replica policy keeps the files of the spaces on one location on other locations too, checks them there, and reads them from there when the location fails. When the location is lost for good, one of the others can be <em>promoted</em>: the spaces then read and write there. Only administrators see and manage replicas, under <strong>Control panel › Replicas</strong>.</p>
+        <div class="note"><strong>Replicas aren't backups.</strong> A replica holds the files as they are now: a file deleted or overwritten is deleted or overwritten on the replicas too, shortly after. To bring back what was deleted or changed by mistake, keep a <a href="backup.html#file-backups">backup</a> as well. Replicas keep files readable when a disk, NAS or bucket fails; backups keep earlier states.</div>
+        <h3 id="replica-make">Making replicas</h3>
+        <p>Choose <strong>New replicas…</strong> (or <strong>Replicate…</strong> in the <strong>…</strong> menu of a storage location), then:</p>
+        <ul>
+          <li><strong>Replicate</strong>: the location whose spaces are copied, the <em>primary</em>.</li>
+          <li><strong>Keep copies on</strong>: one or more other locations, in order of priority. Each is brought up to date <strong>soon after changes</strong> (changes are gathered for a few seconds, then copied in the background), or on a schedule (every few minutes or hours, or daily at a time, in a time zone you choose). Locations in the same place, or one inside the other, are refused.</li>
+          <li><strong>Copies</strong>: how many copies to keep besides the original, 1 at first. They go on the first locations of the list that work; the others are spares. With fewer locations than copies, the policy says so and counts as needing attention.</li>
+          <li><strong>Spaces</strong>: every space on the location, also spaces added later, or the spaces you tick.</li>
+          <li><strong>Reading from copies</strong>, checking every few days (1 at first), when to tell administrators that changes have waited too long (24 hours at first), and a speed limit.</li>
+        </ul>
+        <p>Each content is copied once per location, also when several files or spaces share it. Files, earlier versions and the trash are copied. On the other location the copies are kept where it keeps content (<code>ab/cd/&lt;sha256&gt;</code>), whatever kind of space they come from.</p>
+        <h3 id="replica-folders">Folder spaces</h3>
+        <p><a href="#folder-spaces">Folder spaces</a> (every space on the storage folder and on <em>Local folder</em> locations) are replicated too. Their files are read from the folder and checked while they are read: a file that changes meanwhile is read again, and one the folder has differently than the index waits for the next check for changes. Changes made on the web are copied a few seconds later. Changes other programs make in the folder (over SMB, a scanner) are copied once ThirtyFile has seen them: about 12 seconds later on a disk of the server, and at the next regular check for changes on NFS or SMB mounts (every 15 minutes unless set otherwise). Each sync checks the folder for changes first.</p>
+        <h3 id="replica-copies">How copies are kept</h3>
+        <ul>
+          <li><strong>Checked when written.</strong> Every copy is read back and compared with its SHA-256 before it counts. A copy already there that is damaged or has the wrong length is replaced.</li>
+          <li><strong>Checked again</strong> every few days, or with <strong>Check the copies</strong>: each copy is read back. A damaged or missing one is marked, and the next sync replaces it from the original or another good copy.</li>
+          <li><strong>Behind for a while.</strong> Copies are made a little after files change, not at the same moment. A file changed just before the location fails may not be on the others yet. <strong>Control panel › Replicas</strong> shows, for each location, whether it is current, how long changes have waited, and how many contents it holds of those it should.</li>
+          <li><strong>A location that can't be reached</strong> waits, is tried again every 5 minutes, and catches up once it is back. A sync that fails is tried again after an hour, or at once with <strong>Sync now</strong>. Syncs can be paused, resumed and cancelled; they continue where they stopped, also after ThirtyFile restarts.</li>
+          <li><strong>Never deleted by mistake.</strong> Emptying the trash, deleting files for good, removing unused content and deletions waiting to be retried never delete a replica. A copy is only let go once nothing uses its content any more, and only by the policy that made it.</li>
+          <li><strong>Administrators are told</strong> (in the app and by email, notification kind <em>Replicas</em>) once when a policy needs attention (the spaces' own location or a location with copies can't be reached, a sync fails, copies are damaged, there are too few locations, or changes waited longer than allowed), and once when it is fine again.</li>
+        </ul>
+        <h3 id="replica-read">When the primary fails</h3>
+        <p>When the content of a file can't be read from the primary (the location is offline, the content is missing there, or a folder space's folder isn't there), it is read from a checked copy on another location instead, if the policy allows reading from copies. The copy is the same content, named by its SHA-256, so it is never an older version of the file than ThirtyFile knows. For a folder space, that is the file as the index last had it: a change another program made in the last seconds before the disk failed, which ThirtyFile hadn't seen, isn't in the copy. Each time is noted in the server log, and in the activity log at most every 10 minutes per location (<em>Read from a replica</em>).</p>
+        <p>Only reading falls back. While the primary is offline, uploads and changes to its spaces wait, as described under <a href="#offline">When a location is offline</a>: a change is never written only to a replica.</p>
+        <h3 id="replica-promote">Promoting a location</h3>
+        <p>When the primary is lost for good, or is being retired, choose <strong>Promote…</strong> and the location to promote. Promotion is never done by itself. Before anything happens, the dialog says whether both locations can be reached, how far the chosen one is behind, how many contents move and which spaces, and how many contents aren't there.</p>
+        <ul>
+          <li>A location that is current is promoted at once.</li>
+          <li>A location that is behind is refused while the primary can still be reached: sync it first. While the primary can't be reached, it can be promoted when you tick that files whose content isn't there can't be read until the old primary is back.</li>
+          <li>Promoting changes no file. The spaces then read and write on the promoted location, which becomes the primary. Running syncs stop, and a change that was being saved to the old primary at that moment is refused and can be tried again.</li>
+          <li>A folder space whose files and earlier versions all have a checked copy on the promoted location becomes a space of its content store there, as a <a href="#move-folder">move into S3, SFTP or FTP</a> would make it: its files are no longer in a folder that other programs can change. Its folder on the old primary stays as it was, untouched; delete it by hand once you no longer need it. To have it in a folder again, <a href="#move-into-folder">move the space into a folder</a> later. A folder space not wholly on the promoted location stays where it is, as it is, and the dialog names it.</li>
+          <li>The old primary keeps everything it had and is never written to as a primary again. It becomes a location with copies, marked <em>Old primary, being checked</em>: when it is back, its copies are read and checked, damaged ones are replaced, and it counts as a copy once it is current. Nothing moves back on its own. To go back, promote it again once it is current.</li>
+        </ul>
+        <p>After a promotion, check the policy's list of locations: the promoted one is no longer in it, so add another location if you want as many copies as before.</p>
+        <h3 id="replica-remove">Removing a location or a policy</h3>
+        <p>Removing a location from the list, keeping fewer copies, or deleting a policy stops new copies, but the copies already made stay, and are kept from deletion. <strong>Control panel › Replicas</strong> then shows how many copies on each location no policy wants, with <strong>Remove them…</strong>. Each is checked again right before it is deleted: a copy a policy still wants, content that is the original there, and copies of the files of a folder space whose location can't be reached now stay. A location that holds replicas, or that a policy copies from or to, can't be deleted until then.</p>
+
         <h2 id="folder-spaces">Folder spaces: a folder on the server as a space</h2>
         <p>Every space on the storage folder or a <em>Local folder</em> location is a folder space (see <a href="#layout">Where the files are</a>). You can also show an existing folder on the server, such as a NAS share, as a space. Its files stay where they are, as ordinary files, and can also be changed there, for example over SMB or by a scanner.</p>
         <ol>
@@ -238,7 +278,7 @@
         <h3 id="browse">Browse</h3>
         <p>Shows what the location holds, one folder at a time and 200 items per page, with sizes and dates. Nothing can be changed here. Single files can be downloaded as they are stored, except content waiting to be deleted and copies still being written.</p>
         <ul>
-          <li><strong>Content store</strong> (<code>ab/cd/…</code>, under <code>blobs</code> on S3, SFTP and FTP): each item says whether a file uses it, an earlier version, a file in the trash, whether it is waiting to be deleted, or whether nothing uses it. Where a file uses it, the space and the file's path are shown.</li>
+          <li><strong>Content store</strong> (<code>ab/cd/…</code>, under <code>blobs</code> on S3, SFTP and FTP): each item says whether a file uses it, an earlier version, a file in the trash, whether it is a <a href="#replicas">replica</a> of content kept on another location, whether it is waiting to be deleted, or whether nothing uses it. Where a file uses it, the space and the file's path are shown.</li>
           <li><strong>Folder spaces</strong> on the storage folder and <em>Local folder</em> locations are marked with their space.</li>
           <li><strong>Personal spaces stay private.</strong> Other people's personal spaces are named ("Personal space of anna"), but their files aren't listed, their folder can't be opened here, and their content can't be downloaded. This holds however the folder's name is written (<code>USERS/Anna</code> for <code>users/anna</code>), and while the space is being moved: the folder it is being copied into, the content already copied, and its old folder until everything there is removed.</li>
           <li>Symbolic links are listed but never followed, also on SFTP and FTP, and also in the middle of a path.</li>
@@ -264,12 +304,13 @@
               <tr><td><strong>Disk</strong></td><td>The whole disk, as the system reports it, whatever else is on it. For the storage folder and <em>Local folder</em> locations only. Two locations on the same disk say so, and the disk is counted once.</td></tr>
               <tr><td><strong>Capacity unknown</strong></td><td>S3, SFTP and FTP don't report how much room is left, and a disk that doesn't answer within 3 seconds isn't measured. No percentage or time to full is shown then: unknown is not zero.</td></tr>
               <tr><td><strong>Backups</strong></td><td>The <a href="#copy">copies</a> and <a href="backup.html#file-backups">backups</a> kept on the location: each content once per copy or backup. Only locations holding some show it.</td></tr>
+              <tr><td><strong>Replicas</strong></td><td>The <a href="#replicas">replicas</a> kept on the location of content whose original is on another location. Only locations holding some show it.</td></tr>
               <tr><td><strong>Waiting to be deleted</strong></td><td>Contents whose deletion failed (a location that was offline, say) or old copies after a move, which are retried in the background. Their size isn't known any more.</td></tr>
               <tr><td><strong>Data folder</strong></td><td>The database, thumbnails and uploads in progress, and the disk they are on. It also lists moves, running tasks and deletions that are waiting.</td></tr>
             </tbody>
           </table>
         </div>
-        <p>Files changed in a folder space by other programs are counted after the next check for changes. Replicas will get their own figure when ThirtyFile makes them.</p>
+        <p>Files changed in a folder space by other programs are counted after the next check for changes.</p>
         <h3 id="usage-operations">Operations</h3>
         <p>Every read, write, delete, listing and connection check on a location is timed and counted, and so are the files of folder spaces that are read or uploaded. Renaming, deleting and scanning inside folder spaces aren't measured. The counting happens in memory and is written once every five minutes, so it doesn't slow down file operations. Up to five minutes of counts are lost when the server stops.</p>
         <ul>
@@ -297,7 +338,7 @@
         <p>Under <strong>Alert thresholds</strong>, choose when the page raises an alert: when a disk is fuller than a percentage (90% at first), or when more than a percentage of a location's operations failed or timed out in the last hour (5% at first). The failure alert needs at least 20 operations in that hour. Enter 0 to turn one off. Offline locations and measurements that are out of date raise an alert too. Alerts are shown at the top of the page, and they aren't sent by email.</p>
 
         <h2 id="offline">When a location is offline</h2>
-        <p>Browsing, searching and organising folders keep working. Opening, downloading and uploading are paused, and resume by themselves when the location is back. The space is marked as offline in the meantime. In a folder space, whose folders are on the disk, organising folders is paused too.</p>
+        <p>Browsing, searching and organising folders keep working. Opening, downloading and uploading are paused, and resume by themselves when the location is back. Files with a checked <a href="#replica-read">replica</a> can still be opened and downloaded. The space is marked as offline in the meantime. In a folder space, whose folders are on the disk, organising folders is paused too.</p>
 
         <h3 id="not-mounted">Disks and shares that aren't mounted</h3>
         <p>A <em>Local folder</em> location is often a disk or a network share mounted on the server, such as <code>/mnt/nas/thirtyfile</code>. When it isn't mounted, its folder is missing or is an empty folder on the server's own disk. ThirtyFile never writes there: files would land on the wrong disk and be hidden once the share is mounted again.</p>

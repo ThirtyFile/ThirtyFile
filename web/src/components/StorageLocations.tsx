@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2Icon,
   CloudIcon,
+  CopyCheckIcon,
   CopyIcon,
   DatabaseBackupIcon,
   EllipsisIcon,
@@ -147,6 +148,9 @@ export function StorageLocations() {
       </DropdownMenuItem>
       <DropdownMenuItem disabled={l.drive_count === 0 || list.length < 2} onClick={() => navigate(`/admin/backups?new=${encodeURIComponent(l.id)}`)}>
         <DatabaseBackupIcon /> {t("Back up…")}
+      </DropdownMenuItem>
+      <DropdownMenuItem disabled={l.drive_count === 0 || list.length < 2} onClick={() => navigate(`/admin/replicas?new=${encodeURIComponent(l.id)}`)}>
+        <CopyCheckIcon /> {t("Replicate…")}
       </DropdownMenuItem>
       <DropdownMenuItem onClick={() => setTool({ kind: "test", location: l })}>
         <ListChecksIcon /> {t("Test step by step")}

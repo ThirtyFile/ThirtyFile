@@ -41,6 +41,7 @@ const GeneralSettingsPage = page(() => import("@/pages/GeneralSettingsPage"), "G
 const StorageSettingsPage = page(() => import("@/pages/StorageSettingsPage"), "StorageSettingsPage");
 const MovesPage = page(() => import("@/pages/MovesPage"), "MovesPage");
 const BackupsPage = page(() => import("@/pages/BackupsPage"), "BackupsPage");
+const ReplicasPage = page(() => import("@/pages/ReplicasPage"), "ReplicasPage");
 const UsageSettingsPage = page(() => import("@/pages/UsageSettingsPage"), "UsageSettingsPage");
 const ActivitySettingsPage = page(() => import("@/pages/ActivitySettingsPage"), "ActivitySettingsPage");
 const LogSettingsPage = page(() => import("@/pages/LogSettingsPage"), "LogSettingsPage");
@@ -215,6 +216,14 @@ export function App() {
               element={
                 <AdminOnly>
                   <BackupsPage />
+                </AdminOnly>
+              }
+            />
+            <Route
+              path="/admin/replicas"
+              element={
+                <AdminOnly>
+                  <ReplicasPage />
                 </AdminOnly>
               }
             />

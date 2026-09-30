@@ -3,6 +3,7 @@ import {
   ActivityIcon,
   ArchiveIcon,
   ArchiveRestoreIcon,
+  CopyCheckIcon,
   DatabaseIcon,
   HardDriveIcon,
   KeyRoundIcon,
@@ -26,6 +27,7 @@ export type ControlPanelKey =
   | "storage"
   | "moves"
   | "backups"
+  | "replicas"
   | "usage"
   | "general"
   | "branding"
@@ -128,6 +130,16 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     tone: "bg-lime-500/12 text-lime-700 dark:text-lime-300",
     category: "storage",
     keywords: "備份 複製 副本 還原 復原 快照 排程 儲存位置 檢查 backup copy restore recover snapshot schedule storage location check verify", // i18n-ignore: bilingual search keywords
+  },
+  {
+    key: "replicas",
+    to: "/admin/replicas",
+    title: t("Replicas"),
+    desc: t("Keep the files of a location on other locations too, read from them when it fails, and promote one"),
+    icon: CopyCheckIcon,
+    tone: "bg-teal-500/12 text-teal-700 dark:text-teal-300",
+    category: "storage",
+    keywords: "複本 鏡像 同步 備援 容錯 故障 切換 提升 儲存位置 replica mirror sync redundancy failover promote storage location", // i18n-ignore: bilingual search keywords
   },
   {
     key: "usage",

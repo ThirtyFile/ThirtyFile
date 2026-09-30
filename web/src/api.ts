@@ -240,7 +240,7 @@ export interface LocationItem {
   role: "content" | "internal" | "space" | null;
   space: LocationSpace | null;
   usage: {
-    status: "used" | "version" | "trash" | "pending" | "unused";
+    status: "used" | "version" | "trash" | "replica" | "pending" | "unused";
     space: LocationSpace | null;
     file: string | null;
     uses: number;
@@ -507,6 +507,139 @@ export interface SnapshotItem {
   trashed: number | null;
 }
 
+export type ReplicaTargetState = "current" | "behind" | "syncing" | "initializing" | "offline" | "failed" | "corrupt" | "stale" | "paused";
+
+/** A location a replica policy keeps copies on */
+export interface ReplicaTarget {
+  location_id: string;
+  name: string;
+  priority: number;
+  mode: "realtime" | "scheduled";
+  schedule: BackupSchedule;
+  tz: string;
+  next_run_at: number | null;
+  /** active, or stale: the old primary after a promotion, checked before it counts again */
+  state: "active" | "stale";
+  synced_at: number | null;
+  last_run_at: number | null;
+  last_verify_at: number | null;
+}
+
+/** A replica policy: the spaces of a location, copied to other locations */
+export interface ReplicaPolicy {
+  id: string;
+  name: string;
+  source_location: string;
+  source_name: string;
+  enabled: boolean;
+  all_spaces: boolean;
+  spaces: string[];
+  /** Copies wanted besides the primary */
+  copies: number;
+  read_fallback: boolean;
+  verify_days: number;
+  alert_hours: number;
+  rate_limit: number;
+  epoch: number;
+  created_by_name: string;
+  created_at: number;
+  updated_at: number;
+  targets: ReplicaTarget[];
+  /** Spaces replicated now */
+  replicated: number;
+  health: {
+    targets: {
+      location_id: string;
+      state: ReplicaTargetState;
+      behind_since: number | null;
+      synced_at: number | null;
+      last_verify_at: number | null;
+      held: number;
+      wanted: number;
+      damaged: number;
+      error: string | null;
+    }[];
+    wanted: number;
+    current: number;
+    shortfall: boolean;
+    /** The spaces' own location can't be reached now (a server message) */
+    source_offline: string | null;
+    state: "ok" | "behind" | "degraded" | "paused";
+  };
+}
+
+/** A job of replicas: a sync or a check of a target */
+export interface ReplicaJob {
+  id: string;
+  kind: "sync" | "verify";
+  policy_id: string;
+  location_id: string | null;
+  state: BackupJobState;
+  label: string;
+  files_total: number;
+  bytes_total: number;
+  files_done: number;
+  bytes_done: number;
+  failed_items: number;
+  failures: { item: string | null; error: string }[];
+  error: string | null;
+  note: string | null;
+  created_by_name: string;
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  speed?: number | null;
+}
+
+export interface ReplicasOverview {
+  policies: ReplicaPolicy[];
+  jobs: ReplicaJob[];
+  /** Copies no policy wants any more: location, its name, how many, bytes */
+  unneeded: [string, string, number, number][];
+}
+
+/** A target as the settings of a replica policy send it */
+export interface ReplicaTargetRequest {
+  location: string;
+  mode: "realtime" | "scheduled";
+  schedule?: BackupSchedule;
+  tz?: string;
+}
+
+export interface ReplicaPolicyRequest {
+  name?: string;
+  source?: string;
+  targets?: ReplicaTargetRequest[];
+  copies?: number;
+  enabled?: boolean;
+  all_spaces?: boolean;
+  spaces?: string[];
+  read_fallback?: boolean;
+  verify_days?: number;
+  alert_hours?: number;
+  rate_limit?: number;
+}
+
+/** What promoting a target would do */
+export interface PromotePreflight {
+  source: string;
+  source_name: string;
+  target_name: string;
+  source_reachable: boolean;
+  target_reachable: boolean;
+  target_state: ReplicaTargetState | "unknown";
+  behind_since: number | null;
+  spaces: string[];
+  moved: number;
+  moved_bytes: number;
+  missing: number;
+  missing_bytes: number;
+  /** Folder spaces not wholly on the target: they stay where they are */
+  folder_spaces: string[];
+  needs_accept: boolean;
+  problem: string | null;
+}
+
 export type PrincipalType = "user" | "group" | "everyone";
 
 export interface Grant {
@@ -622,7 +755,7 @@ export interface SsoProvider {
   label: string;
 }
 
-export type NotificationKind = "shared" | "space_full" | "access_expiring" | "app_password" | "sign_in_method" | "link_upload" | "backup";
+export type NotificationKind = "shared" | "space_full" | "access_expiring" | "app_password" | "sign_in_method" | "link_upload" | "backup" | "replica";
 
 /** What a notification shows; names are copied when it was made */
 export interface NotificationData {
@@ -649,9 +782,11 @@ export interface NotificationData {
   /** Linked sign-in methods: the provider's name, and the linked account's email (or name) */
   label?: string;
   account?: string;
-  /** Backups (administrators): what happened (failing, waiting, overdue, recovered), the error, and when the newest
-   * complete snapshot read the spaces */
-  state?: "failing" | "waiting" | "overdue" | "recovered";
+  /** Backups and replicas (administrators): what happened (failing, waiting, overdue, degraded, recovered), the error,
+   * when the newest complete snapshot read the spaces, and how many replicas are current of those wanted */
+  state?: "failing" | "waiting" | "overdue" | "degraded" | "recovered";
+  current?: number;
+  wanted?: number;
   error?: string | null;
   since?: number | null;
 }
@@ -1572,6 +1707,28 @@ export const api = {
   runBackupPolicy: (id: string) => post<{ job_id: string | null }>(enc`/admin/backups/policies/${id}/run`),
   backupNextRuns: (schedule: BackupSchedule, tz: string) => post<number[]>("/admin/backups/policies/next-runs", { schedule, tz }),
   importBackups: (location: string) => post<{ found: number; added: string[] }>("/admin/backups/import", { location }),
+  replicas: () =>
+    get<ReplicasOverview>("/admin/replicas").then((o) => ({
+      ...o,
+      policies: o.policies.map((p) => ({
+        ...p,
+        source_name: locationName(p.source_location, p.source_name),
+        targets: p.targets.map((t) => ({ ...t, name: locationName(t.location_id, t.name) })),
+      })),
+      unneeded: o.unneeded.map(([id, name, n, bytes]) => [id, locationName(id, name), n, bytes] as [string, string, number, number]),
+    })),
+  createReplicaPolicy: (req: ReplicaPolicyRequest) => post<{ id: string }>("/admin/replicas", req),
+  updateReplicaPolicy: (id: string, req: ReplicaPolicyRequest) => request("PATCH", enc`/admin/replicas/${id}`, req),
+  deleteReplicaPolicy: (id: string) => request("DELETE", enc`/admin/replicas/${id}`),
+  syncReplicas: (id: string, location?: string) => post<{ jobs: string[] }>(enc`/admin/replicas/${id}/sync`, { location }),
+  verifyReplicas: (id: string, location?: string) => post<{ jobs: string[] }>(enc`/admin/replicas/${id}/verify`, { location }),
+  promotePreflight: (id: string, target: string) => get<PromotePreflight>(enc`/admin/replicas/${id}/promote` + qs({ target })),
+  promoteReplica: (id: string, target: string, accept_missing: boolean) =>
+    post<{ moved: number; missing: number }>(enc`/admin/replicas/${id}/promote`, { target, accept_missing }),
+  purgeReplicas: (location: string) => post<{ removed: number }>("/admin/replicas/purge", { location }),
+  pauseReplicaJob: (id: string) => post(enc`/admin/replicas/jobs/${id}/pause`),
+  resumeReplicaJob: (id: string) => post(enc`/admin/replicas/jobs/${id}/resume`),
+  cancelReplicaJob: (id: string) => post(enc`/admin/replicas/jobs/${id}/cancel`),
   groups: () => get<Group[]>("/admin/groups"),
   createGroup: (req: { name: string; description?: string; members?: number[] }) => post<{ id: number }>("/admin/groups", req),
   updateGroup: (id: number, req: { name?: string; description?: string; members?: number[] }) => request("PATCH", enc`/admin/groups/${id}`, req),

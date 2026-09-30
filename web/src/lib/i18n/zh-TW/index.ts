@@ -26,5 +26,6 @@ import p21 from "./p21";
 import p22 from "./p22";
 import p24 from "./p24";
 import backups from "./backups";
+import replicas from "./replicas";
 
-export const ZH: Record<string, string> = { ...server, ...p1, ...p2, ...p3, ...p4, ...p5, ...p6, ...login, ...p7, ...core, ...sso, ...p8, ...p9, ...p10, ...p12, ...p13, ...p14, ...p15, ...p16, ...p17, ...p18, ...p19, ...p20, ...p21, ...p22, ...p24, ...backups };
+export const ZH: Record<string, string> = { ...server, ...p1, ...p2, ...p3, ...p4, ...p5, ...p6, ...login, ...p7, ...core, ...sso, ...p8, ...p9, ...p10, ...p12, ...p13, ...p14, ...p15, ...p16, ...p17, ...p18, ...p19, ...p20, ...p21, ...p22, ...p24, ...backups, ...replicas };
