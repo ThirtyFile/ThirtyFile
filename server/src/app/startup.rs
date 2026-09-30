@@ -31,7 +31,24 @@ fn lock_data(data: &std::path::Path) -> Result<Option<std::fs::File>, Box<dyn st
     }
 }
 
+/// A server that has started: its data folder is locked, its background tasks run, and it is ready to serve
+pub struct Server {
+    pub state: AppState,
+    addr: String,
+    log_writer: logs::LogWriter,
+    _lock: Option<std::fs::File>,
+}
+
+/// Starts the server and serves until a stop signal, or runs the subcommand given instead
 pub async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    match start(cfg, storage).await? {
+        Some(server) => server.serve().await,
+        None => Ok(()),
+    }
+}
+
+/// Opens the data folder and the database and starts the background tasks: None when a subcommand ran instead
+pub async fn start(cfg: Config, storage: PathBuf) -> Result<Option<Server>, Box<dyn std::error::Error>> {
     for dir in ["tmp", "thumbs"] {
         std::fs::create_dir_all(cfg.data.join(dir))?;
     }
@@ -41,10 +58,10 @@ pub async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error
     let db = db::connect(&cfg.data.join("drive.db"), cfg.db_cache_mb).await?;
 
     if cli::run(&cfg, &db, &storage, &key_source).await? {
-        return Ok(());
+        return Ok(None);
     }
 
-    let _lock = lock_data(&cfg.data)?;
+    let lock = lock_data(&cfg.data)?;
     // The storage folder: made with its marker on a new install. When the database records files or spaces there, a
     // missing or empty folder (a volume that isn't mounted) or one without the marker stops the start.
     let (recorded,): (bool,) = sqlx::query_as(
@@ -133,20 +150,32 @@ pub async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error
     #[cfg(target_os = "linux")]
     watch::spawn_watchers(state.clone());
 
-    // JSON requests that take longer than this are cut off (a stuck storage service, a slow provider). Requests that
-    // carry a body to store, and thumbnails (which queue), are outside the limit (`untimed`); downloads stream after
-    // the handler returned, so the limit doesn't apply to them either
-    let db_pool = state.db.clone();
-    let app = router(state);
+    Ok(Some(Server { state, addr: cfg.addr, log_writer, _lock: lock }))
+}
 
-    let listener = tokio::net::TcpListener::bind(&cfg.addr).await?;
-    tracing::info!("ThirtyFile started: http://{}", cfg.addr);
-    serve(listener, app).await?;
-    // Sign-in and share access events still queued are written before exiting
-    log_writer.finish().await;
-    // Let SQLite update its statistics and fold the write-ahead log into the database file
-    let _ = sqlx::query("PRAGMA optimize").execute(&db_pool).await;
-    db_pool.close().await;
-    tracing::info!("Stopped");
-    Ok(())
+impl Server {
+    /// The routes, answering with this server's state
+    pub fn router(&self) -> axum::Router {
+        router(self.state.clone())
+    }
+
+    /// Serves on the listen address until a stop signal
+    pub async fn serve(self) -> Result<(), Box<dyn std::error::Error>> {
+        // JSON requests that take longer than this are cut off (a stuck storage service, a slow provider). Requests that
+        // carry a body to store, and thumbnails (which queue), are outside the limit (`untimed`); downloads stream after
+        // the handler returned, so the limit doesn't apply to them either
+        let db_pool = self.state.db.clone();
+        let app = self.router();
+
+        let listener = tokio::net::TcpListener::bind(&self.addr).await?;
+        tracing::info!("ThirtyFile started: http://{}", self.addr);
+        serve(listener, app).await?;
+        // Sign-in and share access events still queued are written before exiting
+        self.log_writer.finish().await;
+        // Let SQLite update its statistics and fold the write-ahead log into the database file
+        let _ = sqlx::query("PRAGMA optimize").execute(&db_pool).await;
+        db_pool.close().await;
+        tracing::info!("Stopped");
+        Ok(())
+    }
 }
