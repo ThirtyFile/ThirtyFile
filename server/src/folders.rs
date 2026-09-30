@@ -38,14 +38,24 @@ const MAX_REPORTED: usize = 200;
 /// another disk mounted at the same place, with a folder of the same name, is left alone.
 pub const MARKER: &str = ".thirtyfile-space";
 
-/// The space id in the marker of the space folder `root`; None when there is none
+/// The space id in the marker of the space folder `root`; None when there is none. Only an ordinary file is read, and
+/// only its start: a link, a named pipe or a device put there instead is no marker.
 pub fn space_marker(root: &crate::beneath::Pinned) -> std::io::Result<Option<String>> {
-    match std::fs::read(root.join(MARKER)?.as_path()) {
-        Ok(b) => Ok(Some(String::from_utf8_lossy(&b).trim().to_string())),
-        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => Ok(None),
-        Err(e) => Err(e),
-    }
+    use std::io::Read;
+    let file = match root.join(MARKER)?.open_file() {
+        Ok(f) => f,
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => return Ok(None),
+        #[cfg(unix)]
+        Err(e) if e.raw_os_error() == Some(libc::ELOOP) => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let mut b = Vec::new();
+    file.take(MAX_MARKER).read_to_end(&mut b)?;
+    Ok(Some(String::from_utf8_lossy(&b).trim().to_string()))
 }
+
+/// Bytes of a space's marker read at most (it holds a space id)
+const MAX_MARKER: u64 = 4096;
 
 /// Gives the folder `source` of a new space `drive_id` the space's marker, replacing one left by a deleted space (a
 /// folder another space uses can't be chosen: `check_new_source`)
@@ -1196,6 +1206,36 @@ mod tests {
         if cfg!(unix) {
             assert_eq!(env.node_at(&space.drive, "Moved/a.txt").await.unwrap().0, a);
         }
+    }
+
+    #[test]
+    fn only_a_small_file_is_read_as_the_spaces_marker() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-marker-{}", new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let root = crate::beneath::Pinned::root(&dir).unwrap();
+        std::fs::write(dir.join(MARKER), "space-1\n").unwrap();
+        assert_eq!(space_marker(&root).unwrap().as_deref(), Some("space-1"));
+        // A large file isn't read whole
+        std::fs::write(dir.join(MARKER), vec![b'x'; 8 << 20]).unwrap();
+        assert!(space_marker(&root).unwrap().is_some_and(|m| m.len() <= 4096));
+        // Something else than a file is no marker, and isn't waited on
+        std::fs::remove_file(dir.join(MARKER)).unwrap();
+        #[cfg(target_os = "linux")]
+        {
+            let fifo = std::ffi::CString::new(dir.join(MARKER).to_string_lossy().as_bytes()).unwrap();
+            // SAFETY: a valid path
+            assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+            let (tx, rx) = std::sync::mpsc::channel();
+            let r = root.clone();
+            std::thread::spawn(move || tx.send(space_marker(&r).ok().flatten()).unwrap());
+            assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(5)), Ok(None));
+            std::fs::remove_file(dir.join(MARKER)).unwrap();
+            std::os::unix::fs::symlink(dir.with_extension("elsewhere"), dir.join(MARKER)).unwrap();
+            std::fs::write(dir.with_extension("elsewhere"), "space-1").unwrap();
+            assert_eq!(space_marker(&root).unwrap(), None);
+            let _ = std::fs::remove_file(dir.with_extension("elsewhere"));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

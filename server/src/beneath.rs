@@ -33,6 +33,11 @@ fn invalid(what: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, format!("not a path inside the folder: {what}"))
 }
 
+/// Something else than an ordinary file where one is read (a folder, a named pipe, a device)
+fn not_a_file() -> io::Error {
+    io::Error::new(io::ErrorKind::NotFound, "not a file")
+}
+
 /// The parts of a path below a folder ('/' between them), refusing anything that could step out of it
 pub fn parts(rel: &str) -> io::Result<Vec<&str>> {
     if rel.is_empty() {
@@ -77,10 +82,16 @@ mod sys {
         open_at(Some(dir), name.as_bytes(), libc::O_PATH | libc::O_DIRECTORY | libc::O_NOFOLLOW)
     }
 
-    /// Opens the file `name` inside `dir` for reading, refusing a symbolic link
+    /// Opens the file `name` inside `dir` for reading, refusing a symbolic link and anything but an ordinary file (a
+    /// named pipe or a device put in a file's place isn't waited on or read). Not waiting to open changes nothing for
+    /// an ordinary file.
     pub fn open_file(dir: &OwnedFd, name: &str) -> io::Result<std::fs::File> {
-        let fd = open_at(Some(dir), name.as_bytes(), libc::O_RDONLY | libc::O_NOFOLLOW)?;
-        Ok(std::fs::File::from(fd))
+        let fd = open_at(Some(dir), name.as_bytes(), libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK)?;
+        let file = std::fs::File::from(fd);
+        if !file.metadata()?.is_file() {
+            return Err(super::not_a_file());
+        }
+        Ok(file)
     }
 
     pub fn proc_path(dir: &OwnedFd) -> std::path::PathBuf {
@@ -168,7 +179,7 @@ impl Pinned {
         self.name.as_deref()
     }
 
-    /// Opens the file for reading, refusing a symbolic link
+    /// Opens the file for reading, refusing a symbolic link and anything but an ordinary file
     pub fn open_file(&self) -> io::Result<std::fs::File> {
         #[cfg(target_os = "linux")]
         {
@@ -179,8 +190,12 @@ impl Pinned {
         }
         #[cfg(not(target_os = "linux"))]
         {
-            if std::fs::symlink_metadata(&self.path)?.file_type().is_symlink() {
+            let meta = std::fs::symlink_metadata(&self.path)?;
+            if meta.file_type().is_symlink() {
                 return Err(io::Error::new(io::ErrorKind::NotFound, "a symbolic link"));
+            }
+            if !meta.is_file() {
+                return Err(not_a_file());
             }
             std::fs::File::open(&self.path)
         }
@@ -290,6 +305,26 @@ mod tests {
         // A link as the last part isn't read
         std::os::unix::fs::symlink(outside.join("a.txt"), space.join("link.txt")).unwrap();
         assert!(root.join("link.txt").unwrap().open_file().is_err());
+        let _ = std::fs::remove_dir_all(&top);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn only_files_are_opened_as_files() {
+        let top = std::env::temp_dir().join(format!("thirtyfile-beneath-{}", crate::util::new_id()));
+        std::fs::create_dir_all(top.join("Sub")).unwrap();
+        // A named pipe put where a file was: opening it to read would wait for a writer forever
+        let fifo = std::ffi::CString::new(top.join("pipe.txt").to_string_lossy().as_bytes()).unwrap();
+        // SAFETY: a valid path
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        let root = Pinned::root(&top).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let pipe = root.join("pipe.txt").unwrap();
+        std::thread::spawn(move || tx.send(pipe.open_file().is_err()).unwrap());
+        assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(5)), Ok(true), "refused at once");
+        assert!(root.join("Sub").unwrap().open_file().is_err());
+        std::fs::write(top.join("a.txt"), b"a").unwrap();
+        assert!(root.join("a.txt").unwrap().open_file().is_ok());
         let _ = std::fs::remove_dir_all(&top);
     }
 }
