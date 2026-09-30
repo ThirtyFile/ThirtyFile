@@ -594,6 +594,10 @@ async fn extract_into_folder(
 ) -> AppResult<(String, String)> {
     let staged = fsops::staging(parent)?;
     for p in &plan {
+        // Names a folder space can't show (.DS_Store, Thumbs.db, ThirtyFile's own…) are left out
+        if p.dirs.iter().chain(&p.file).any(|n| crate::folders::ignored(n)) {
+            continue;
+        }
         let dir = fsops::make_dirs(&staged.top, &p.dirs).map_err(fsops::disk_error)?;
         let Some(file) = &p.file else { continue };
         let (archive, entry, tmp) = (archive.to_path_buf(), p.entry.clone(), st.tmp_dir().join(format!("unzip-{}", new_id())));
@@ -609,7 +613,7 @@ async fn extract_into_folder(
         .await??;
     }
     // The new folder is named after the archive
-    let stem = validate_name(split_name(&zip.name, false).0).unwrap_or_else(|_| "Extracted".into());
+    let stem = validate_name(split_name(&zip.name, false).0).ok().filter(|s| !crate::folders::ignored(s)).unwrap_or_else(|| "Extracted".into());
     fsops::place_folder(st, user, staged, &parent.id, &stem, "extract", &zip.name).await
 }
 
@@ -809,6 +813,19 @@ mod tests {
         assert!(!names.iter().any(|n| n.starts_with(".thirtyfile-copy-")), "{names:?}");
         let r = crate::folders::scan(&env.st, &space.drive).await.unwrap();
         assert_eq!((r.added, r.removed), (0, 0), "{r:?}");
+
+        // Names a folder space doesn't show are left out: a Mac's .DS_Store, ThirtyFile's own names
+        let mac = zip_of(&[("photos/.DS_Store", b"finder"), ("photos/a.jpg", b"jpeg"), (".thirtyfile-trash/x/b.txt", b"b"), ("Thumbs.db", b"t")], false).await;
+        testutil::write_old(&space.dir.join("mac.zip"), &mac);
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (mac_id, _) = env.node_at(&space.drive, "mac.zip").await.unwrap();
+        let job = extract_now(&env, &admin, &mac_id).await.unwrap();
+        assert_eq!((job.state, job.name.as_deref()), ("done", Some("mac")), "{:?}", job.error);
+        let mut names: Vec<String> = std::fs::read_dir(space.dir.join("mac")).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        assert_eq!(names, ["photos"]);
+        let names: Vec<String> = std::fs::read_dir(space.dir.join("mac/photos")).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["a.jpg"]);
 
         // A damaged archive leaves nothing behind
         let bad = space.dir.join("bad.zip");

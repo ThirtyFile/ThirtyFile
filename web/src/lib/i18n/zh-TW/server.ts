@@ -11,6 +11,8 @@ export default {
   "Name can't contain {char}": "名稱不可包含 {char}",
   "Name can't end with a period": "名稱結尾不可以是句點",
   "This name is reserved by Windows": "這個名稱是 Windows 保留的名稱",
+  "\"{name}\" can't be used in a folder on the server: names like this are kept for ThirtyFile's own files and for temporary files of other programs":
+    "伺服器的資料夾裡不能使用「{name}」：這類名稱保留給 ThirtyFile 自己的檔案和其他程式的暫存檔",
   "You don't have permission on the folder this item belongs to": "你沒有這個項目所在資料夾的權限",
   "You no longer have permission to upload files": "你已經沒有上傳檔案的權限",
   "This is the only way to sign in to this account. Ask an administrator to set a password first.": "這是這個帳號唯一的登入方式。請先請管理員設定密碼。",

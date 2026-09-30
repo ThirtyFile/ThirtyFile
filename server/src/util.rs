@@ -14,6 +14,11 @@ pub fn new_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 
+/// Whether `s` is an id as `new_id` makes them: 32 lowercase hexadecimal digits
+pub fn is_new_id(s: &str) -> bool {
+    s.len() == 32 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 pub fn random_token(len: usize) -> String {
     rand::rng().sample_iter(Alphanumeric).take(len).map(char::from).collect()
 }
