@@ -14,9 +14,10 @@
 # Base images are pinned to a version and digest, so two builds of one commit use the same images. Dependabot proposes
 # updates every week. The Rust version matches server/rust-toolchain.toml.
 #
-# The runtime image is a single static program, which an SBOM scanner can't look into, so with `--sbom=true` the build
-# stages of the frontend and the backend are scanned as well (BUILDKIT_SBOM_SCAN_STAGE): their SBOMs list the npm
-# packages and the build tools. The crates are listed in THIRD-PARTY-NOTICES (image scanners don't read Cargo.lock).
+# The runtime image is a single static program, so with `--sbom=true` the build stages of the frontend and the backend
+# are scanned as well (BUILDKIT_SBOM_SCAN_STAGE): their SBOMs list the npm packages and the build tools. The program
+# carries the list of crates built into it (cargo auditable), which image scanners such as Trivy read; the crates are
+# also listed in THIRD-PARTY-NOTICES.
 
 # ───────────── 1) Frontend ─────────────
 # The output is platform-independent, so multi-platform builds only build it once on the build machine's platform
@@ -41,11 +42,26 @@ RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
 # Runs on the build machine's platform and cross-compiles for the target platform with xx,
 # so arm64 images are built at native speed on amd64 machines (and vice versa) without emulation
 FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.9.0@sha256:c64defb9ed5a91eacb37f96ccc3d4cd72521c4bd18d5442905b95e2226b0e707 AS xx
+# cargo auditable 0.7.6 writes the list of crates into the program, for scanners. Taken from its release for the build
+# machine, checked against the checksum published with it (Dependabot doesn't see it: update the version and both
+# checksums by hand)
+FROM scratch AS cargo-auditable-amd64
+ADD --checksum=sha256:42b66c852fbb9074a9ca356279a92eb753f48dde16017b8c82f48dcd05d6c856 \
+    https://github.com/rust-secure-code/cargo-auditable/releases/download/v0.7.6/cargo-auditable-x86_64-unknown-linux-musl.tar.xz /cargo-auditable.tar.xz
+FROM scratch AS cargo-auditable-arm64
+ADD --checksum=sha256:57265fbd87e9277fbd850c74177d17e5a6f51f15e2803643db65c187b0d4feda \
+    https://github.com/rust-secure-code/cargo-auditable/releases/download/v0.7.6/cargo-auditable-aarch64-unknown-linux-musl.tar.xz /cargo-auditable.tar.xz
+FROM cargo-auditable-${BUILDARCH} AS cargo-auditable
+
 FROM --platform=$BUILDPLATFORM rust:1.98.1-alpine3.24@sha256:7cc1c22d77d9432f7fe012a70e6d3e555af54c2a6832700ed7d553f1769ae89f AS server
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 COPY --from=xx / /
 # clang/lld cross-compile the C code of aws-lc (TLS crypto) and SQLite; cmake/perl are used by aws-lc's build script
 RUN apk add --no-cache clang lld cmake make perl
+RUN --mount=from=cargo-auditable,target=/tmp/cargo-auditable \
+    tar -xJf /tmp/cargo-auditable/cargo-auditable.tar.xz -C /tmp \
+ && mv /tmp/cargo-auditable-*/cargo-auditable /usr/local/bin/ \
+ && rm -r /tmp/cargo-auditable-*
 ARG TARGETPLATFORM
 ARG TARGETARCH
 # C runtime of the target platform (musl libc, libgcc) for linking
@@ -59,7 +75,7 @@ ENV THIRTYFILE_VERSION=$VERSION
 # Dependencies and build output are cached, so rebuilds after code changes only recompile what changed
 RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=thirtyfile-target-${TARGETARCH},target=/src/server/target \
-    xx-cargo build --release --locked \
+    xx-cargo auditable build --release --locked \
  && install -m 755 "target/$(xx-cargo --print-target-triple)/release/thirtyfile" /thirtyfile \
  && xx-verify --static /thirtyfile
 

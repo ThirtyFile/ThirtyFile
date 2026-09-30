@@ -62,7 +62,7 @@ cd ../web && pnpm typecheck && pnpm lint && node scripts/check-i18n.mjs && pnpm 
           <li>The database structure of 0.4.0 is fixed, so that data made by a release keeps working. A change to the structure goes into a new migration file, <code>server/migrations/0002_&lt;name&gt;.sql</code> and up, that upgrades a 0.4.0 database; <code>0001_init.sql</code> and the files of earlier releases are never edited, and the checks fail when they are.</li>
           <li>Logic that changes people's files (formulas, saving workbooks, text encodings) gets unit tests in <code>web/tests/unit/</code>.</li>
         </ul>
-        <p>Every pull request runs the tests. A change that only touches the website or the guides skips them. The Docker image and the CodeQL code scan run only when a release is made. Merging into <code>main</code> publishes nothing except the website.</p>
+        <p>Every pull request runs the tests, and so does every merge into <code>main</code>. A change that only touches the website or the guides skips them. A change to how the image is built or started (the <code>Dockerfile</code>, the lock files, <code>compose.yaml</code>…) also builds the image for amd64 and arm64, without publishing it, and starts each with <code>compose.yaml</code> on data made by the latest release. CodeQL scans <code>main</code> every week and before each release. Merging into <code>main</code> publishes nothing except the website.</p>
 
         <h2 id="labels">Labels</h2>
         <div class="table-scroll">
