@@ -9,12 +9,55 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
     <link rel="stylesheet" href="../assets/site.css" />
   </head>
   <body>
+    <a class="skip-link" href="#content">Skip to content</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="Site">
+          <a href="../index.html#features" class="hide-small">Features</a>
+          <a href="../docs/index.html" aria-current="page">Guides</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+        </nav>
+      </div>
+    </header>
     <div class="wrap docs">
-      <nav class="docs-nav" aria-label="Guides"><noscript><a href="index.html">Install</a></noscript></nav>
-      <main class="article">
+      <nav class="docs-nav" aria-label="Guides">
+        <details open>
+          <summary>All guides</summary>
+          <p>Get started</p>
+          <a href="../docs/index.html">Install</a>
+          <a href="../docs/first-steps.html">First steps</a>
+          <p>Everyday use</p>
+          <a href="../docs/files.html">Working with files</a>
+          <a href="../docs/preview.html">Preview and editing</a>
+          <a href="../docs/sharing.html">Sharing</a>
+          <a href="../docs/account.html" aria-current="page">Your account</a>
+          <a href="../docs/webdav.html">Mapping it as a drive</a>
+          <p>Administration</p>
+          <a href="../docs/users.html">Users and spaces</a>
+          <a href="../docs/sign-in.html">Single sign-on</a>
+          <a href="../docs/storage.html">Storage locations</a>
+          <a href="../docs/logs.html">Logs and branding</a>
+          <p>Running it</p>
+          <a href="../docs/settings.html">Settings</a>
+          <a href="../docs/internet.html">Putting it on the internet</a>
+          <a href="../docs/backup.html">Upgrade and backup</a>
+          <a href="../docs/help.html">Troubleshooting</a>
+          <p>The project</p>
+          <a href="../docs/contributing.html">Contributing</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
         <h1>Your account</h1>
         <p class="lead">Your password, two-factor sign-in, the devices you're signed in on, app passwords for scripts, your sign-in history, and notifications.</p>
         <p>Everything on this page is in the <strong>account menu</strong>: click your name at the bottom of the list on the left.</p>
@@ -81,6 +124,15 @@ curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;fil
         <div class="note">Emails are only sent once an administrator has set up an email server (<a href="users.html#email">Notification emails</a>). They are written in the language you last used ThirtyFile in, with times in your time zone.</div>
       </main>
     </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="../docs/index.html">Guides</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">Source code</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">Report a problem</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker image</a>
+      </div>
+    </footer>
     <script src="../assets/site.js"></script>
   </body>
 </html>
