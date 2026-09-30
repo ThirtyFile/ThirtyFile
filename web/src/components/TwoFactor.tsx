@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ErrorText } from "@/components/dialogs";
+import { ErrorText, errorProps } from "@/components/dialogs";
 import { cn, copyAndSay } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 
@@ -150,9 +150,18 @@ export function TwoFactorDialog({ onClose }: { onClose(): void }) {
         <SetupCode setup={setup} />
         <div className="grid gap-1.5">
           <Label htmlFor="tf-code">{t("Code from the app")}</Label>
-          <Input id="tf-code" inputMode="numeric" autoComplete="one-time-code" maxLength={7} value={code} onChange={(e) => setCode(e.target.value)} autoFocus />
+          <Input
+            id="tf-code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={7}
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            autoFocus
+            {...errorProps(enable.error, "tf-code-error")}
+          />
         </div>
-        <ErrorText>{enable.error?.message}</ErrorText>
+        <ErrorText id="tf-code-error">{enable.error?.message}</ErrorText>
         <div className="flex justify-end gap-2">
           <Button type="button" variant="outline" onClick={reset}>
             {t("Cancel")}
@@ -169,15 +178,29 @@ export function TwoFactorDialog({ onClose }: { onClose(): void }) {
       <form className="grid gap-3" onSubmit={passwordForm(action)}>
         <div className="grid gap-1.5">
           <Label htmlFor="tf-pw">{t("Current password")}</Label>
-          <Input id="tf-pw" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />
+          <Input
+            id="tf-pw"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoFocus
+            {...errorProps(confirm.error, "tf-confirm-error")}
+          />
         </div>
         {s.enabled && (
           <div className="grid gap-1.5">
             <Label htmlFor="tf-current-code">{t("Code from your app, or a recovery code")}</Label>
-            <Input id="tf-current-code" autoComplete="one-time-code" value={currentCode} onChange={(e) => setCurrentCode(e.target.value)} />
+            <Input
+              id="tf-current-code"
+              autoComplete="one-time-code"
+              value={currentCode}
+              onChange={(e) => setCurrentCode(e.target.value)}
+              {...errorProps(confirm.error, "tf-confirm-error")}
+            />
           </div>
         )}
-        <ErrorText>{confirm.error?.message}</ErrorText>
+        <ErrorText id="tf-confirm-error">{confirm.error?.message}</ErrorText>
         <div className="flex justify-end gap-2">
           <Button type="button" variant="outline" onClick={reset}>
             {t("Cancel")}

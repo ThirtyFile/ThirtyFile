@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { ShareAccessLog } from "@/components/logs/ShareAccessLog";
 import { useMe } from "@/lib/session";
 import { t, tc } from "@/lib/i18n";
+import { NativeSelect } from "@/components/ui/native-select";
 
 /** "My share links": the caller's own links, or every link they may manage (space managers, item owners) */
 export function SharesPage() {
@@ -27,15 +28,15 @@ export function SharesPage() {
       extraToolbar={
         <>
           <ToolSeparator />
-          <select
-            className="h-7 rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          <NativeSelect
+            size="xs"
             aria-label={t("Show")}
             value={scope}
             onChange={(e) => setScope(e.target.value as "mine" | "managed")}
           >
             <option value="mine">{t("Links I created")}</option>
             <option value="managed">{t("All links I can manage")}</option>
-          </select>
+          </NativeSelect>
         </>
       }
       empty={

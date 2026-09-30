@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ConfirmDialog, ErrorText } from "@/components/dialogs";
+import { ConfirmDialog, ErrorText, errorProps } from "@/components/dialogs";
 import { LocationSelect, useDefaultLocationId, useLocationName } from "@/components/LocationSelect";
 import { confirm } from "@/components/confirm";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
@@ -21,6 +21,7 @@ import { formatBytes, formatDate, formatDateTime } from "@/lib/utils";
 import { LoginLogDialog } from "@/components/logs/LoginLog";
 import { DevicesDialog } from "@/components/DevicesDialog";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
+import { NativeSelect } from "@/components/ui/native-select";
 
 const GB = 1024 ** 3;
 const USERS_PAGE = 200;
@@ -346,11 +347,10 @@ function PersonalFilesChoice({ c }: { c: ReturnType<typeof usePersonalFiles> }) 
   return (
     <div className="grid gap-3" role="radiogroup" aria-label={t("Their files")}>
       <Label className="flex items-start gap-2 font-normal">
-        <input type="radio" className="mt-1 accent-brand" checked={c.choice === "move"} onChange={() => c.setChoice("move")} />
+        <input type="radio" name="personal-files" className="mt-1 accent-brand" checked={c.choice === "move"} onChange={() => c.setChoice("move")} />
         <span className="grid min-w-0 flex-1 gap-1.5">
           <span>{t("Move their files to:")}</span>
-          <select
-            className="h-8 min-w-0 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          <NativeSelect
             aria-label={t("Move their files to:")}
             value={c.moveTo}
             disabled={c.choice !== "move"}
@@ -361,7 +361,7 @@ function PersonalFilesChoice({ c }: { c: ReturnType<typeof usePersonalFiles> }) 
                 {spaceLabel(d)}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           <span className="text-xs text-muted-foreground">
             {own?.mode === "folder"
               ? t("They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash stays in their folder on the server.", { name: user.username })
@@ -370,7 +370,7 @@ function PersonalFilesChoice({ c }: { c: ReturnType<typeof usePersonalFiles> }) 
         </span>
       </Label>
       <Label className="flex items-start gap-2 font-normal">
-        <input type="radio" className="mt-1 accent-brand" checked={c.choice === "delete"} onChange={() => c.setChoice("delete")} />
+        <input type="radio" name="personal-files" className="mt-1 accent-brand" checked={c.choice === "delete"} onChange={() => c.setChoice("delete")} />
         {own?.mode === "folder" ? (
           <span className="min-w-0">
             {t("Remove their files from ThirtyFile")}
@@ -652,15 +652,22 @@ function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow | null;
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="u-pw">{user ? t("Reset password (leave blank to keep current)") : t("Password (at least {n} characters)", { n: me.min_password_length })}</Label>
-              <Input id="u-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+              <Input
+                id="u-pw"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="new-password"
+                {...errorProps(save.error, "u-error")}
+              />
             </div>
             <div className="grid gap-1.5">
-              <Label>{t("Role")}</Label>
-              <div className="flex gap-1.5">
-                <Button type="button" size="sm" variant={role === "user" ? "default" : "outline"} disabled={self} onClick={() => setRole("user")}>
+              <Label id="u-role">{t("Role")}</Label>
+              <div role="group" aria-labelledby="u-role" className="flex gap-1.5">
+                <Button type="button" size="sm" variant={role === "user" ? "default" : "outline"} aria-pressed={role === "user"} disabled={self} onClick={() => setRole("user")}>
                   {t("Standard user")}
                 </Button>
-                <Button type="button" size="sm" variant={role === "admin" ? "default" : "outline"} onClick={() => setRole("admin")}>
+                <Button type="button" size="sm" variant={role === "admin" ? "default" : "outline"} aria-pressed={role === "admin"} onClick={() => setRole("admin")}>
                   {t("Administrator")}
                 </Button>
               </div>
@@ -735,7 +742,7 @@ function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow | null;
                 {t("Disable this account (can't sign in, and share links stop working)")}
               </Label>
             )}
-            <ErrorText>{save.error?.message}</ErrorText>
+            <ErrorText id="u-error">{save.error?.message}</ErrorText>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>

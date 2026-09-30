@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { ErrorText } from "@/components/dialogs";
+import { ErrorText, errorProps } from "@/components/dialogs";
 import { ErrorState } from "@/components/ErrorState";
 import { useConfirm, type ConfirmOptions } from "@/components/confirm";
 import { copyAndSay, copyText, formatDate } from "@/lib/utils";
@@ -261,10 +261,11 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
             }}
           >
             <div className="grid gap-1.5">
-              <Label>{t("Expiration")}</Label>
-              <div className="flex flex-wrap gap-1.5">
+              <Label id="share-expiry">{t("Expiration")}</Label>
+              {/* One of the buttons is chosen: aria-pressed says which */}
+              <div role="group" aria-labelledby="share-expiry" className="flex flex-wrap gap-1.5">
                 {choices.map((o) => (
-                  <Button key={o.days} type="button" size="sm" variant={days === o.days ? "default" : "outline"} onClick={() => setDays(o.days)}>
+                  <Button key={o.days} type="button" size="sm" variant={days === o.days ? "default" : "outline"} aria-pressed={days === o.days} onClick={() => setDays(o.days)}>
                     {o.label}
                   </Button>
                 ))}
@@ -283,6 +284,7 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
                   placeholder={policy.password_required ? undefined : tc("unset", "None")}
                   required={policy.password_required}
                   autoComplete="off"
+                  {...errorProps(create.error, "share-error")}
                 />
               </div>
               <div className="grid gap-1.5">
@@ -297,7 +299,7 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
                 />
               </div>
             </div>
-            <ErrorText>{create.error?.message}</ErrorText>
+            <ErrorText id="share-error">{create.error?.message}</ErrorText>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={onClose}>
                 {t("Close")}
@@ -362,13 +364,13 @@ export function EditShareDialog({ share, onClose }: { share: ShareInfo; onClose(
             <DialogDescription className="font-mono text-xs">{sharePath(share.id)}</DialogDescription>
           </DialogHeader>
           <div className="grid gap-1.5">
-            <Label>{t("Expiration")}</Label>
-            <div className="flex flex-wrap gap-1.5">
-              <Button type="button" size="sm" variant={expiry === "keep" ? "default" : "outline"} onClick={() => setExpiry("keep")}>
+            <Label id="edit-share-expiry">{t("Expiration")}</Label>
+            <div role="group" aria-labelledby="edit-share-expiry" className="flex flex-wrap gap-1.5">
+              <Button type="button" size="sm" variant={expiry === "keep" ? "default" : "outline"} aria-pressed={expiry === "keep"} onClick={() => setExpiry("keep")}>
                 {share.expires_at ? t("Keep ({date})", { date: formatDate(share.expires_at) }) : t("Keep (never expires)")}
               </Button>
               {choices.map((o) => (
-                <Button key={o.days} type="button" size="sm" variant={expiry === o.days ? "default" : "outline"} onClick={() => setExpiry(o.days)}>
+                <Button key={o.days} type="button" size="sm" variant={expiry === o.days ? "default" : "outline"} aria-pressed={expiry === o.days} onClick={() => setExpiry(o.days)}>
                   {o.label}
                 </Button>
               ))}
@@ -385,6 +387,7 @@ export function EditShareDialog({ share, onClose }: { share: ShareInfo; onClose(
               onChange={(e) => setPassword(e.target.value)}
               disabled={removePassword}
               autoComplete="off"
+              {...errorProps(save.error, "edit-share-error")}
             />
             {share.has_password && !policy.password_required && (
               <Label className="flex items-center gap-2 font-normal">
@@ -399,7 +402,7 @@ export function EditShareDialog({ share, onClose }: { share: ShareInfo; onClose(
             <Input id="edit-share-max" type="number" min={1} value={maxDownloads} onChange={(e) => setMaxDownloads(e.target.value)} placeholder={t("Unlimited")} />
             <p className="text-xs text-muted-foreground">{t("Downloaded {n} time|Downloaded {n} times", { n: share.downloads })}</p>
           </div>
-          <ErrorText>{save.error?.message}</ErrorText>
+          <ErrorText id="edit-share-error">{save.error?.message}</ErrorText>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
               {t("Cancel")}

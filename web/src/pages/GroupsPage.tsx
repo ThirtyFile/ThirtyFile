@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ConfirmDialog, ErrorText } from "@/components/dialogs";
+import { ConfirmDialog, ErrorText, errorProps } from "@/components/dialogs";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { useSettingsSearch } from "@/lib/controlPanel";
 import { t, tc } from "@/lib/i18n";
@@ -177,7 +177,7 @@ function GroupDialog({ group, onClose }: { group: Group | null; onClose(): void 
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="g-name">{t("Name")}</Label>
-            <Input id="g-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("ESG team")} autoFocus />
+            <Input id="g-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("ESG team")} autoFocus {...errorProps(save.error, "g-error")} />
             <Label htmlFor="g-desc">{t("Description (optional)")}</Label>
             <Input id="g-desc" value={description} onChange={(e) => setDescription(e.target.value)} />
             <Label>{t("Members ({n} selected)", { n: members.size })}</Label>
@@ -205,7 +205,7 @@ function GroupDialog({ group, onClose }: { group: Group | null; onClose(): void 
                 </label>
               ))}
             </div>
-            <ErrorText>{save.error?.message}</ErrorText>
+            <ErrorText id="g-error">{save.error?.message}</ErrorText>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>

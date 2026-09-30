@@ -5,7 +5,7 @@ import { api } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ErrorText } from "@/components/dialogs";
+import { ErrorText, errorProps } from "@/components/dialogs";
 import { SiteName } from "@/components/SiteName";
 import { useBranding } from "@/lib/branding";
 import { t } from "@/lib/i18n";
@@ -60,9 +60,9 @@ function AskForLink() {
       <p className="text-sm text-muted-foreground">{t("Enter your username or email address. We'll send a link to choose a new password.")}</p>
       <div className="grid gap-1.5">
         <Label htmlFor="rp-account">{t("Username or email address")}</Label>
-        <Input id="rp-account" value={account} onChange={(e) => setAccount(e.target.value)} autoComplete="username" autoFocus />
+        <Input id="rp-account" value={account} onChange={(e) => setAccount(e.target.value)} autoComplete="username" autoFocus {...errorProps(error, "rp-error")} />
       </div>
-      <ErrorText>{error}</ErrorText>
+      <ErrorText id="rp-error">{error}</ErrorText>
       <Button type="submit" disabled={busy || !account.trim()}>
         {busy && <Loader2Icon className="animate-spin" />}
         {t("Send link")}
@@ -105,13 +105,13 @@ function NewPassword({ token }: { token: string }) {
     <form onSubmit={submit} className="grid gap-3">
       <div className="grid gap-1.5">
         <Label htmlFor="rp-new">{t("New password")}</Label>
-        <Input id="rp-new" type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" autoFocus />
+        <Input id="rp-new" type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" autoFocus {...errorProps(error, "rp-new-error")} />
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="rp-confirm">{t("Confirm new password")}</Label>
-        <Input id="rp-confirm" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
+        <Input id="rp-confirm" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" {...errorProps(error, "rp-new-error")} />
       </div>
-      <ErrorText>{error}</ErrorText>
+      <ErrorText id="rp-new-error">{error}</ErrorText>
       <Button type="submit" disabled={busy || !next || !confirm}>
         {busy && <Loader2Icon className="animate-spin" />}
         {t("Change password")}

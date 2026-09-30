@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ActivityLog } from "@/components/logs/ActivityLog";
-import { ErrorText } from "@/components/dialogs";
+import { ErrorText, errorProps } from "@/components/dialogs";
 import { LocationSelect } from "@/components/LocationSelect";
 import { DRIVE_ICON, DRIVE_KIND_LABEL, ROLE_LABEL, atLeast } from "@/lib/drives";
 import { useMe } from "@/lib/session";
@@ -50,7 +50,14 @@ export function CreateDriveDialog({ onClose, onCreated }: { onClose(): void; onC
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="drive-name">{t("Name")}</Label>
-            <Input id="drive-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={tc("example", "Marketing")} autoFocus />
+            <Input
+              id="drive-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={tc("example", "Marketing")}
+              autoFocus
+              {...errorProps(error, "drive-error")}
+            />
             {me.role === "admin" && (
               <>
                 <Label htmlFor="drive-quota">{t("Quota (GB, leave blank for unlimited)")}</Label>
@@ -68,7 +75,7 @@ export function CreateDriveDialog({ onClose, onCreated }: { onClose(): void; onC
               </>
             )}
             <p className="text-xs text-muted-foreground">{t("You'll be the owner of this space. After creating it, you can invite users or groups.")}</p>
-            <ErrorText>{error}</ErrorText>
+            <ErrorText id="drive-error">{error}</ErrorText>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>

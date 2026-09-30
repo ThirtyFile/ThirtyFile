@@ -9,13 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pending } from "@/components/ErrorState";
-import { ErrorText } from "@/components/dialogs";
+import { ErrorText, errorProps } from "@/components/dialogs";
 import { Section, SettingsFrame, Toggle } from "@/pages/SettingsFrame";
 import { t } from "@/lib/i18n";
 import { SMTP_PORT, portForSecurity } from "@/lib/notifications";
 import { useMe } from "@/lib/session";
+import { NativeSelect } from "@/components/ui/native-select";
 
-const selectCls = "h-9 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
 
 type Form = EmailSettingsReq & { port: number };
 
@@ -98,9 +98,9 @@ export function EmailPage() {
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="smtp-security">{t("Encryption")}</Label>
-                <select
+                <NativeSelect
                   id="smtp-security"
-                  className={selectCls}
+                  size="lg"
                   value={form.security}
                   onChange={(e) => {
                     const security = e.target.value as SmtpSecurity;
@@ -110,7 +110,7 @@ export function EmailPage() {
                   <option value="starttls">{t("STARTTLS (usually port 587)")}</option>
                   <option value="tls">{t("TLS (usually port 465)")}</option>
                   <option value="none">{t("None (only for a server on your own network)")}</option>
-                </select>
+                </NativeSelect>
               </div>
               {form.security !== "none" && (
                 <label className="flex items-start gap-2 text-sm">
@@ -177,13 +177,14 @@ export function EmailPage() {
                   value={to}
                   placeholder={t("name@example.com")}
                   onChange={(e) => setTo(e.target.value)}
+                  {...errorProps(test.error, "smtp-test-error")}
                 />
                 <Button type="button" size="sm" variant="outline" disabled={!to.trim() || !form.host.trim() || test.isPending} onClick={() => test.mutate(form)}>
                   {test.isPending ? <Loader2Icon className="animate-spin" /> : <SendIcon />}
                   {t("Send test email")}
                 </Button>
               </div>
-              <ErrorText>{test.error?.message}</ErrorText>
+              <ErrorText id="smtp-test-error">{test.error?.message}</ErrorText>
               {!me.public_url && <p className="text-xs text-muted-foreground">{t("Set the site URL under General, so emails can link to what they are about. Until then, the sign-in page doesn't offer to reset a forgotten password by email.")}</p>}
             </div>
           </Section>

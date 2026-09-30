@@ -13,6 +13,7 @@ import { ROLE_HINT, ROLE_LABEL, atLeast } from "@/lib/drives";
 import { useMe } from "@/lib/session";
 import { cn, formatDate } from "@/lib/utils";
 import { t, tServer, tc } from "@/lib/i18n";
+import { NativeSelect } from "@/components/ui/native-select";
 
 const PRINCIPAL_ICON = { user: UserIcon, group: UsersIcon, everyone: GlobeIcon } as const;
 
@@ -28,7 +29,6 @@ const EXPIRY = [
 const roleDetail = (detail: string) => (detail === "Administrator" ? t("Admin") : tServer(detail));
 const principalName = (g: Grant) => (g.principal_type === "everyone" || g.principal_name === "(deleted)" ? tServer(g.principal_name) : g.principal_name);
 
-const selectCls = "h-8 rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 function PrincipalPicker(props: { value: Principal | null; onChange(p: Principal | null): void; allowEveryone: boolean }) {
   const [q, setQ] = useState("");
@@ -118,13 +118,13 @@ function GrantRow(props: { g: Grant; editable: boolean; roles: Role[]; onRole?(r
         </div>
       </div>
       {props.editable && props.onRole ? (
-        <select className={selectCls} value={g.role} onChange={(e) => props.onRole!(e.target.value as Role)} aria-label={t("Role")}>
+        <NativeSelect size="sm" value={g.role} onChange={(e) => props.onRole!(e.target.value as Role)} aria-label={t("Role")}>
           {props.roles.map((r) => (
             <option key={r} value={r}>
               {ROLE_LABEL[r]}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       ) : (
         <span className="text-xs text-muted-foreground">{ROLE_LABEL[g.role]}</span>
       )}
@@ -238,20 +238,20 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
               >
                 <div className="flex gap-2">
                   <PrincipalPicker value={principal} onChange={setPrincipal} allowEveryone={info.drive.kind !== "personal"} />
-                  <select className={selectCls} value={role} onChange={(e) => setRole(e.target.value as Role)} aria-label={t("Role")}>
+                  <NativeSelect size="sm" value={role} onChange={(e) => setRole(e.target.value as Role)} aria-label={t("Role")}>
                     {roles.map((r) => (
                       <option key={r} value={r}>
                         {ROLE_LABEL[r]}
                       </option>
                     ))}
-                  </select>
-                  <select className={selectCls} value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label={tc("short", "Expiration")}>
+                  </NativeSelect>
+                  <NativeSelect size="sm" value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label={tc("short", "Expiration")}>
                     {EXPIRY.map((x) => (
                       <option key={x.days} value={x.days}>
                         {x.label}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                   <Button type="submit" size="sm" className="h-8" disabled={!principal || add.isPending}>
                     {add.isPending && <Loader2Icon className="animate-spin" />}
                     {t("Add")}

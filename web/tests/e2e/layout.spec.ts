@@ -1,16 +1,6 @@
 // The file explorer's layout on a phone and on a desktop, and the arrows of the navigation pane.
 import { expect, test, type Page } from "@playwright/test";
-
-const PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? "e2e-admin-password";
-
-async function signIn(page: Page) {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Click or press any key to sign in" }).click();
-  await page.getByLabel("Username").fill("admin");
-  await page.getByLabel("Password").fill(PASSWORD);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.waitForURL(/\/files/);
-}
+import { signIn } from "./helpers";
 
 /** A folder in My files (unique name) holding a folder with a folder in it, a folder without, and a few files */
 async function sample(page: Page) {

@@ -679,7 +679,7 @@ function Workspace({
               aria-current={i === sheetIdx ? "true" : undefined}
               className={cn(
                 "shrink-0 border-r px-3 py-1.5 whitespace-nowrap hover:bg-muted",
-                i === sheetIdx ? "border-b-2 border-b-[#2563eb] bg-background font-medium text-[#2563eb]" : "text-muted-foreground",
+                i === sheetIdx ? "border-b-2 border-b-brand bg-background font-medium text-brand" : "text-muted-foreground",
               )}
               onClick={() => {
                 if (editing) commitEdit(null);

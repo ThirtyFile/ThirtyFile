@@ -20,6 +20,8 @@ test("sign in, upload, preview and download", async ({ page }) => {
   // Sign in (the page opens on a lock screen)
   await page.goto("/");
   await page.getByRole("button", { name: "Click or press any key to sign in" }).click();
+  // The username field takes the focus once the form shows: typing waits for it
+  await expect(page.getByLabel("Username")).toBeFocused();
   await page.getByLabel("Username").fill("admin");
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();

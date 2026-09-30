@@ -1,16 +1,6 @@
 // Text editor and tabs against the real server: edits typed while a save is on its way, and closing other tabs
 import { expect, test, type Page } from "@playwright/test";
-
-const PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? "e2e-admin-password";
-
-async function signIn(page: Page) {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Click or press any key to sign in" }).click();
-  await page.getByLabel("Username").fill("admin");
-  await page.getByLabel("Password").fill(PASSWORD);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.waitForURL(/\/files/);
-}
+import { signIn } from "./helpers";
 
 /** A folder of the test's own in My files (unique, so a retry on the same server starts afresh) */
 async function folder(page: Page, name: string): Promise<string> {
@@ -43,7 +33,9 @@ test("edits typed while a text file is being saved stay unsaved, and survive swi
   });
   await page.goto(`/view/${id}`);
   const editor = page.locator(".cm-content");
-  const closeButton = page.getByRole("button", { name: "Close notes.txt" });
+  const tab = page.getByRole("tab", { name: "notes.txt" });
+  // The tab's close button (for the mouse; the keyboard closes a tab with Delete)
+  const closeButton = tab.locator("button");
   await editor.click();
   await page.keyboard.type("A");
   await page.keyboard.press("Control+s");
@@ -57,7 +49,7 @@ test("edits typed while a text file is being saved stay unsaved, and survive swi
   // Another tab and back: the newer text is still there
   await page.getByRole("button", { name: "New tab" }).click();
   await page.waitForURL(/\/files$/);
-  await page.getByRole("button", { name: "Close notes.txt" }).locator("..").click();
+  await tab.click();
   await page.waitForURL(`**/view/${id}`);
   await expect(editor).toHaveText("AB");
   await expect(closeButton).toHaveAttribute("title", "Unsaved changes");
@@ -81,14 +73,15 @@ test("closing other tabs from a tab that isn't shown shows that tab's page", asy
   await page.waitForURL(/\/files$/);
   await page.goto(`/view/${id}`);
   await expect(page.locator(".cm-content")).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Close / })).toHaveCount(2);
+  const tabs = page.getByRole("tablist", { name: "Tabs" }).getByRole("tab");
+  await expect(tabs).toHaveCount(2);
 
   // Close other tabs, from the folder's tab
-  const folderTab = page.getByRole("button", { name: /^Close Tabs / }).locator("..");
+  const folderTab = page.getByRole("tab", { name: /^Tabs / });
   await folderTab.click({ button: "right" });
   await page.getByRole("menuitem", { name: "Close other tabs" }).click();
   await page.waitForURL(`**/files/${dir}`);
-  await expect(page.getByRole("button", { name: /^Close / })).toHaveCount(1);
+  await expect(tabs).toHaveCount(1);
   await expect(page.locator("[data-node-id]").filter({ hasText: "open.txt" })).toBeVisible();
   await expect(page.locator(".cm-content")).toHaveCount(0);
 });

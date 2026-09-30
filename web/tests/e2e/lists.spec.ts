@@ -1,17 +1,7 @@
 // The smaller lists (control panel, admin tables, storage locations, all spaces) work with the keyboard like the file
 // list, and tell screen readers which item is selected.
 import { expect, test, type Page } from "@playwright/test";
-
-const PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? "e2e-admin-password";
-
-async function signIn(page: Page) {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Click or press any key to sign in" }).click();
-  await page.getByLabel("Username").fill("admin");
-  await page.getByLabel("Password").fill(PASSWORD);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.waitForURL(/\/files/);
-}
+import { signIn } from "./helpers";
 
 /** How many of the page's options can be reached with Tab */
 const tabStops = (page: Page) => page.getByRole("option").evaluateAll((els) => els.filter((el) => (el as HTMLElement).tabIndex === 0).length);

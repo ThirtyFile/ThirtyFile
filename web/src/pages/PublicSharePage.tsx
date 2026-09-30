@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ErrorText } from "@/components/dialogs";
+import { ErrorText, errorProps } from "@/components/dialogs";
 import { ErrorState } from "@/components/ErrorState";
 import { FileList, Thumb, type ViewMode } from "@/components/FileList";
 import { canPreview } from "@/components/FileViewer";
@@ -98,9 +98,10 @@ function Unlock({ token }: { token: string }) {
           onChange={(e) => setPassword(e.target.value)}
           placeholder={t("Enter password")}
           autoFocus
+          {...errorProps(error, "share-password-error")}
         />
       </div>
-      <ErrorText>{error}</ErrorText>
+      <ErrorText id="share-password-error">{error}</ErrorText>
       <Button type="submit" disabled={busy || !password}>
         {busy && <Loader2Icon className="animate-spin" />}
         {t("Open")}

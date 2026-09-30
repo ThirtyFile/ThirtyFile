@@ -7,8 +7,8 @@ import { ToolSeparator } from "@/components/Frame";
 import { controlPanelItem, useSettingsSearch } from "@/lib/controlPanel";
 import { t } from "@/lib/i18n";
 import { ShareLinks } from "@/pages/SharesPage";
+import { NativeSelect } from "@/components/ui/native-select";
 
-const selectCls = "h-7 max-w-44 rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
 
 /** Control panel › All share links: every public link, filtered by space, creator and state, to find and revoke them */
 export function AdminSharesPage() {
@@ -39,27 +39,27 @@ export function AdminSharesPage() {
       extraToolbar={
         <>
           <ToolSeparator />
-          <select className={selectCls} aria-label={t("Space")} value={driveId} onChange={(e) => setDriveId(e.target.value)}>
+          <NativeSelect size="xs" className="max-w-44" aria-label={t("Space")} value={driveId} onChange={(e) => setDriveId(e.target.value)}>
             <option value="">{t("All spaces")}</option>
             {(drives.data ?? []).map((d) => (
               <option key={d.id} value={d.id}>
                 {d.kind === "personal" ? t("My files of {name}", { name: d.owner_name }) : driveName(d)}
               </option>
             ))}
-          </select>
-          <select className={selectCls} aria-label={t("Created by")} value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
+          </NativeSelect>
+          <NativeSelect size="xs" className="max-w-44" aria-label={t("Created by")} value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
             <option value="">{t("Everyone")}</option>
             {(users.data ?? []).map((u) => (
               <option key={u.id} value={u.id}>
                 {u.username}
               </option>
             ))}
-          </select>
-          <select className={selectCls} aria-label={t("State")} value={state} onChange={(e) => setState(e.target.value as typeof state)}>
+          </NativeSelect>
+          <NativeSelect size="xs" className="max-w-44" aria-label={t("State")} value={state} onChange={(e) => setState(e.target.value as typeof state)}>
             <option value="">{t("All links")}</option>
             <option value="active">{t("Working")}</option>
             <option value="expired">{t("Expired or used up")}</option>
-          </select>
+          </NativeSelect>
         </>
       }
       empty={<EmptyState icon={Link2OffIcon} title={t("No share links")} hint={t("No public link matches these filters.")} />}
