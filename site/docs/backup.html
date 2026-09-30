@@ -25,6 +25,7 @@ docker stop thirtyfile && docker rm thirtyfile
 docker run -d --name thirtyfile --restart unless-stopped …   # the same options as when you installed it</code></pre>
         <h3>Docker Compose</h3>
         <pre><code>docker compose pull && docker compose up -d</code></pre>
+        <p>The <code>compose.yaml</code> from the releases page follows the release line it came with, such as <code>ghcr.io/thirtyfile/thirtyfile:0.4</code>: this brings that line's repairs. To move to a newer line, read its release notes, then change the tag on the <code>image:</code> line (to <code>:0.5</code>, say) and run the same commands.</p>
         <p>Data from 0.4.0 and later is upgraded in place: start the newer version on the same <code>data</code> and <code>storage</code> folders. Only versions up to 0.3 can't be upgraded, as the database was started over after them: install the new version with empty <code>data</code> and <code>storage</code> folders, then copy your files into it. Started on data from 0.3 or older, a newer version stops at once and says so in the log, before it writes anything into the <code>data</code> or <code>storage</code> folder, so the old data stays as it was. It also stops with a plain message on a database a newer version has changed (see <a href="#downgrade">Going back to an older version</a>).</p>
         <h3>Which version you get</h3>
         <div class="table-scroll">

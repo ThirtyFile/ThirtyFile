@@ -1,17 +1,23 @@
 # Makes a release, started by hand: Actions › Release › Run workflow, with the new version number.
-# Tests what is on main right now, scans it with CodeQL (codeql.yml) and builds the Docker image for both platforms
-# (build.yml pushes it by digest only), side by side. Once all of them have passed, gives that very image its tags
-#   ghcr.io/thirtyfile/thirtyfile:1.2.3, :1.2, :1 (from 1.0.0 on; none for 0.x) and :latest
-# and then creates the tag v1.2.3 and the GitHub release, with notes put together from the merged pull requests
-# (see .github/release.yml), the server programs for amd64 and arm64 taken from the image, their SHA-256 checksums,
-# LICENSE, THIRD-PARTY-NOTICES and compose.yaml. The image carries an SBOM and build provenance; the provenance of the
-# image and of the programs is signed (GitHub attestations). Nothing is tagged or released if the tests, the scan (it
-# stops on open alerts of high or critical severity) or the image build fail.
+# Scans main with CodeQL (codeql.yml; it stops on open alerts of high or critical severity), then tests it and builds
+# the Docker image for both platforms (build.yml): the image is started, and pushed by its digest, without a tag, only
+# once everything has passed. Then, in this order, so that a step that fails leaves nothing half published:
+#   1. the files of the release: the server programs for amd64 and arm64 taken from the image, their SHA-256
+#      checksums, LICENSE, THIRD-PARTY-NOTICES, and compose.yaml following the release line (such as :0.4); the
+#      provenance of the image and of the programs is signed (GitHub attestations);
+#   2. a draft GitHub release with those files, and notes put together from the merged pull requests (.github/release.yml);
+#   3. the image tags, the version first: ghcr.io/thirtyfile/thirtyfile:1.2.3, then :1.2, :1 (from 1.0.0 on; none for
+#      0.x) and :latest;
+#   4. the release is published, which creates the tag v1.2.3 on the commit the image was built from;
+#   5. the website is published from that tag (pages.yml).
+# Nothing is tagged or released if the scan, the tests or the image fail. When a later step fails, run the workflow
+# again with the same version: it finds the image already tagged 1.2.3 and publishes that one instead of building
+# another, so the tags never point at a different image.
 #
 # Pre-releases (1.2.3-rc.1, anything with a "-") only get their own image tag and are marked as pre-releases on
-# GitHub, so `latest` and the release lines never move to them. A release of the same commit as the last pre-release
-# (1.2.3 right after 1.2.3-rc.1, with nothing merged in between) tags the pre-release's image instead of building
-# it again: people get exactly what they tried.
+# GitHub, so `latest` and the release lines never move to them, and the website isn't published. A release of the
+# same commit as the last pre-release (1.2.3 right after 1.2.3-rc.1, with nothing merged in between) tags the
+# pre-release's image instead of building it again: people get exactly what they tried.
 name: Release
 
 on:
@@ -37,16 +43,26 @@ jobs:
     name: Check version
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
     outputs:
       version: ${{ steps.check.outputs.version }}
       prerelease: ${{ steps.check.outputs.prerelease }}
       tags: ${{ steps.check.outputs.tags }}
+      line: ${{ steps.check.outputs.line }}
       reuse: ${{ steps.check.outputs.reuse }}
       notes_start: ${{ steps.check.outputs.notes_start }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - id: check
         env:
           VERSION: ${{ inputs.version }}
@@ -66,6 +82,12 @@ jobs:
           if [ -n "$previous" ]; then
             newest=$(printf '%s\n%s\n' "$previous" "$VERSION" | vsort | tail -n 1)
             [ "$newest" = "$VERSION" ] || fail "$VERSION must be newer than the last release, v$previous."
+          fi
+          if docker buildx imagetools inspect "$IMAGE:$VERSION" >/dev/null 2>&1; then
+            # An earlier run of this release tagged the image, then failed: publish that image, never another
+            reuse="$VERSION"
+            echo "The image $VERSION exists from an earlier run: it is published as it is, without building it again."
+          elif [ -n "$previous" ]; then
             if [ -z "$(git log --oneline "v$previous..HEAD")" ]; then
               case "$previous" in
                 *-*) reuse="$previous"
@@ -79,13 +101,15 @@ jobs:
           fi
 
           # Image tags. A release line (1.2) and the major version (1, from 1.0.0 on) follow the newest release in
-          # them; before 1.0.0 every minor version may break things, so there is no "0"
+          # them; before 1.0.0 every minor version may break things, so there is no "0". The compose.yaml of the release
+          # follows its line: the major version from 1.0.0 on, the minor version before, the version itself for a
+          # pre-release
+          major="${VERSION%%.*}"
           case "$VERSION" in
-            *-*) prerelease=true; tags="$VERSION" ;;
+            *-*) prerelease=true; tags="$VERSION"; line="$VERSION" ;;
             *) prerelease=false
-               major="${VERSION%%.*}"
                tags="$VERSION ${VERSION%.*}"
-               if [ "$major" != 0 ]; then tags="$tags $major"; fi
+               if [ "$major" != 0 ]; then tags="$tags $major"; line="$major"; else line="${VERSION%.*}"; fi
                tags="$tags latest" ;;
           esac
 
@@ -96,25 +120,15 @@ jobs:
             if [ -n "$last" ]; then notes_start="v$last"; fi
           fi
 
-          echo "Image tags: $tags"
+          echo "Image tags: $tags; compose.yaml follows :$line"
           {
             echo "version=$VERSION"
             echo "prerelease=$prerelease"
             echo "tags=$tags"
+            echo "line=$line"
             echo "reuse=$reuse"
             echo "notes_start=$notes_start"
           } >> "$GITHUB_OUTPUT"
-
-  build:
-    name: Build
-    needs: prepare
-    if: needs.prepare.outputs.reuse == ''
-    uses: ./.github/workflows/build.yml
-    permissions:
-      contents: read
-      packages: write
-    with:
-      release_version: ${{ needs.prepare.outputs.version }}
 
   codeql:
     name: CodeQL
@@ -124,30 +138,47 @@ jobs:
       contents: read
       security-events: write
 
-  # Tags the image build.yml pushed, or the pre-release's image, by its digest: nothing is rebuilt, so the published
+  # After the scan, so that an image is only pushed once everything else has passed
+  build:
+    name: Build
+    needs: [prepare, codeql]
+    if: needs.prepare.outputs.reuse == ''
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      release_version: ${{ needs.prepare.outputs.version }}
+
+  # Publishes the image build.yml pushed, or the one tagged earlier, by its digest: nothing is rebuilt, so the published
   # image is the one that was tested
-  images:
-    name: Tag images
-    needs: [prepare, build, codeql]
+  publish:
+    name: Publish
+    needs: [prepare, codeql, build]
     if: >-
       !cancelled() && needs.prepare.result == 'success' && needs.codeql.result == 'success' &&
       (needs.build.result == 'success' || (needs.build.result == 'skipped' && needs.prepare.outputs.reuse != ''))
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     permissions:
+      contents: write
       packages: write
       # Signed provenance: a Sigstore certificate for this workflow (id-token), stored as an attestation
       id-token: write
       attestations: write
-    outputs:
-      digest: ${{ steps.tag.outputs.digest }}
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: v${{ needs.prepare.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - id: tag
+
+      # The image, and the commit it was built from (its revision label): main may have moved on since
+      - id: image
         env:
           REUSE: ${{ needs.prepare.outputs.reuse }}
           BUILT: ${{ needs.build.outputs.digest }}
@@ -158,54 +189,29 @@ jobs:
             digest="$BUILT"
           fi
           case "$digest" in sha256:*) ;; *) echo "::error::No image digest (got \"$digest\")."; exit 1 ;; esac
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          index=$(docker buildx imagetools inspect --raw "$IMAGE@$digest")
+          amd64=$(jq -r '.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest' <<<"$index")
+          docker pull -q "$IMAGE@$amd64" >/dev/null
+          commit=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE@$amd64")
+          echo "$commit" | grep -qE '^[0-9a-f]{40}$' || { echo "::error::The image names no commit (got \"$commit\")."; exit 1; }
+          echo "Publishing $IMAGE@$digest, built from $commit"
+          {
+            echo "digest=$digest"
+            echo "commit=$commit"
+          } >> "$GITHUB_OUTPUT"
 
-      # Signed build provenance for a newly built image (a reused pre-release image already has it), pushed next to
-      # the image. Check it with: gh attestation verify oci://ghcr.io/thirtyfile/thirtyfile:1.2.3 -R ThirtyFile/ThirtyFile
-      - if: needs.prepare.outputs.reuse == ''
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-name: ${{ env.IMAGE }}
-          subject-digest: ${{ steps.tag.outputs.digest }}
-          push-to-registry: true
-          create-storage-record: false
-
-      - env:
-          TAGS: ${{ needs.prepare.outputs.tags }}
-          DIGEST: ${{ steps.tag.outputs.digest }}
-        run: |
-          args=()
-          for tag in $TAGS; do args+=(-t "$IMAGE:$tag"); done
-          docker buildx imagetools create "${args[@]}" "$IMAGE@$DIGEST"
-          docker buildx imagetools inspect "$IMAGE@$DIGEST"
-
-  publish:
-    name: GitHub release
-    needs: [prepare, images]
-    if: ${{ !cancelled() && needs.images.result == 'success' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: write
-      packages: read
-      id-token: write
-      attestations: write
-    env:
-      VERSION: ${{ needs.prepare.outputs.version }}
-      DIGEST: ${{ needs.images.outputs.digest }}
-    steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ steps.image.outputs.commit }}
           persist-credentials: false
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The server is one static program: the same file as in the image, for running without Docker, with the
-      # licence notices of what it contains
+      # 1. The server is one static program: the same file as in the image, for running without Docker, with the
+      # licence notices of what it contains. compose.yaml follows the release line instead of latest, so that
+      # `docker compose pull` brings repairs but not the next minor version, which may change things before 1.0.0
       - name: Files for the release
+        env:
+          DIGEST: ${{ steps.image.outputs.digest }}
+          LINE: ${{ needs.prepare.outputs.line }}
         run: |
           mkdir dist
           for arch in amd64 arm64; do
@@ -219,24 +225,73 @@ jobs:
             docker cp "$id:/usr/share/licenses/thirtyfile/THIRD-PARTY-NOTICES" dist/THIRD-PARTY-NOTICES
             docker rm "$id" >/dev/null
           done
-          cp compose.yaml LICENSE dist/
+          sed "s|^\(    image: $IMAGE\):latest\$|\1:$LINE|" compose.yaml > dist/compose.yaml
+          grep -qx "    image: $IMAGE:$LINE" dist/compose.yaml || { echo "::error::compose.yaml has no image line to set to :$LINE"; exit 1; }
+          cp LICENSE dist/
           cd dist
           sha256sum -- * > SHA256SUMS
           cat SHA256SUMS
 
-      # Signed build provenance for the programs: gh attestation verify thirtyfile-1.2.3-linux-amd64 -R ThirtyFile/ThirtyFile
+      # Signed build provenance, pushed next to the image (a reused pre-release image already has it). Check it with:
+      # gh attestation verify oci://ghcr.io/thirtyfile/thirtyfile:1.2.3 -R ThirtyFile/ThirtyFile
+      - if: needs.prepare.outputs.reuse == '' || needs.prepare.outputs.reuse == needs.prepare.outputs.version
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+      # And for the programs: gh attestation verify thirtyfile-1.2.3-linux-amd64 -R ThirtyFile/ThirtyFile
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/thirtyfile-*
 
-      # Tags exactly the commit that was tested and built, even if main has moved on since
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: v${{ needs.prepare.outputs.version }}
+      # 2. A draft: nobody sees it yet, and it creates no tag. One left by an earlier run is replaced
+      - name: Draft release
+        env:
+          COMMIT: ${{ steps.image.outputs.commit }}
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
           NOTES_START: ${{ needs.prepare.outputs.notes_start }}
         run: |
-          args=(--repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$TAG" --generate-notes)
+          if [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)" = true ]; then
+            echo "Replacing the draft left by an earlier run"
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes
+          fi
+          args=(--repo "$GITHUB_REPOSITORY" --draft --target "$COMMIT" --title "$TAG" --generate-notes)
           if [ "$PRERELEASE" = true ]; then args+=(--prerelease); fi
           if [ -n "$NOTES_START" ]; then args+=(--notes-start-tag "$NOTES_START"); fi
           gh release create "$TAG" "${args[@]}" dist/*
+
+      # 3. The version's tag first: a run that fails after it publishes this same image when it is run again
+      - name: Tag the image
+        env:
+          TAGS: ${{ needs.prepare.outputs.tags }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          docker buildx imagetools create -t "$IMAGE:$VERSION" "$IMAGE@$DIGEST"
+          for tag in $TAGS; do
+            if [ "$tag" != "$VERSION" ]; then docker buildx imagetools create -t "$IMAGE:$tag" "$IMAGE@$DIGEST"; fi
+          done
+          docker buildx imagetools inspect "$IMAGE@$DIGEST"
+
+      # 4. Publishing the draft creates the tag v1.2.3 on the commit the image was built from
+      - name: Publish the release
+        env:
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          args=(--repo "$GITHUB_REPOSITORY" --draft=false)
+          if [ "$PRERELEASE" = false ]; then args+=(--latest); fi
+          gh release edit "$TAG" "${args[@]}"
+
+  # 5. The guides of the released version (not for pre-releases)
+  website:
+    name: Website
+    needs: [prepare, publish]
+    if: needs.prepare.outputs.prerelease == 'false'
+    uses: ./.github/workflows/pages.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    with:
+      ref: v${{ needs.prepare.outputs.version }}

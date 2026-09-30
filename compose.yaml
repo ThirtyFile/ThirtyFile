@@ -5,6 +5,8 @@
 # Change it right after signing in.
 services:
   thirtyfile:
+    # The compose.yaml attached to each release names its release line here instead of latest, such as :0.4:
+    # `docker compose pull` then brings its repairs (0.4.1, 0.4.2…), and moving to the next line (:0.5) is up to you
     image: ghcr.io/thirtyfile/thirtyfile:latest
     # To build the image from the source code instead, remove the line above and use:
     # build: .
