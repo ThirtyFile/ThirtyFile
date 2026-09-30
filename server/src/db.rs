@@ -643,7 +643,7 @@ mod tests {
         let cases = [
             // 0.3 kept a migration per change
             ("0.3", (1..=24).map(|v| (v, vec![v as u8; 48])).collect::<Vec<_>>(), "ThirtyFile 0.3 or older"),
-            ("newer", vec![(1, current.clone()), (2, vec![2; 48])], "a newer version"),
+            ("newer", vec![(1, current.clone()), (9999, vec![2; 48])], "a newer version"),
             ("other build", vec![(1, vec![9; 48])], "a different build"),
         ];
         for (what, applied, says) in cases {
@@ -661,6 +661,28 @@ mod tests {
         db.close().await;
         check_existing(&base.join("drive.db")).await.unwrap();
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn items_of_folder_spaces_from_0_4_0_are_kept_without_a_birth_time() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-040-{}", crate::util::new_id()));
+        let path = dir.join("drive.db");
+        // As 0.4.0 left it: its one migration, and an item of a folder space
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'amy', 'x', 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO nodes (id, owner_id, kind, name, created_at, updated_at, fs_path, fs_ino) VALUES ('n', 1, 'folder', 'Docs', 0, 0, 'Docs', 7)")
+            .execute(&db)
+            .await
+            .unwrap();
+        db.close().await;
+        // Until the next scan records when it was created (folders.rs)
+        let db = connect(&path, 16).await.unwrap();
+        let (ino, birth): (Option<i64>, Option<i64>) = sqlx::query_as("SELECT fs_ino, fs_birth_ns FROM nodes WHERE id = 'n'").fetch_one(&db).await.unwrap();
+        assert_eq!((ino, birth), (Some(7), None));
+        db.close().await;
+        assert!(dir.join("backups").join(format!("drive-before-{}.db", crate::VERSION)).is_file());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     async fn admin_hash(password: Option<&str>) -> String {

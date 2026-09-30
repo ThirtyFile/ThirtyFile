@@ -70,6 +70,8 @@ struct Entry {
     ino: i64,
     size: i64,
     mtime_ns: i64,
+    /// When it was created, where the file system tells (`birth_ns`)
+    birth_ns: Option<i64>,
     /// Changed within the last few seconds
     settling: bool,
 }
@@ -165,6 +167,12 @@ pub(crate) fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
     meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos() as i64).unwrap_or(0)
 }
 
+/// When an item was created (it never changes, also not when the item is renamed or edited); None where the file
+/// system doesn't tell
+pub(crate) fn birth_ns(meta: &std::fs::Metadata) -> Option<i64> {
+    meta.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos() as i64)
+}
+
 #[cfg(unix)]
 pub(crate) fn identity(meta: &std::fs::Metadata) -> (i64, i64) {
     use std::os::unix::fs::MetadataExt;
@@ -245,6 +253,7 @@ fn walk(root: &Path, only: Option<&str>, report: &mut ScanReport, found: Option<
                 ino,
                 size: if meta.is_dir() { 0 } else { meta.len() as i64 },
                 mtime_ns: mtime,
+                birth_ns: birth_ns(&meta),
                 settling: !meta.is_dir() && (mtime as i128) > settle_after,
             });
         }
@@ -277,11 +286,14 @@ struct Indexed {
     fs_ino: Option<i64>,
     fs_size: Option<i64>,
     fs_mtime_ns: Option<i64>,
+    fs_birth_ns: Option<i64>,
 }
 
 enum Op {
     Create { id: String, parent: String, e: Entry },
     Update { id: String, e: Entry },
+    /// Records when an unchanged item was created (the index didn't have it yet)
+    Birth { id: String, birth: i64 },
     /// First step of a move: a name no other item has, so moves in any order can't collide
     Park { id: String },
     Move { id: String, parent: String, e: Entry },
@@ -362,7 +374,7 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
         }
     };
     let indexed: Vec<Indexed> = sqlx::query_as(
-        "SELECT id, parent_id, kind, fs_path, fs_dev, fs_ino, fs_size, fs_mtime_ns FROM nodes WHERE drive_id = ? AND trashed_at IS NULL",
+        "SELECT id, parent_id, kind, fs_path, fs_dev, fs_ino, fs_size, fs_mtime_ns, fs_birth_ns FROM nodes WHERE drive_id = ? AND trashed_at IS NULL",
     )
     .bind(&drive.id)
     .fetch_all(&st.db)
@@ -452,7 +464,7 @@ async fn try_sync_folder(st: &AppState, folder: &Node) -> AppResult<()> {
         }
     };
     let mut indexed: Vec<Indexed> = sqlx::query_as(
-        "SELECT id, parent_id, kind, fs_path, fs_dev, fs_ino, fs_size, fs_mtime_ns FROM nodes WHERE (parent_id = ?1 OR id = ?1) AND trashed_at IS NULL",
+        "SELECT id, parent_id, kind, fs_path, fs_dev, fs_ino, fs_size, fs_mtime_ns, fs_birth_ns FROM nodes WHERE (parent_id = ?1 OR id = ?1) AND trashed_at IS NULL",
     )
     .bind(&folder.id)
     .fetch_all(&st.db)
@@ -680,13 +692,15 @@ fn plan(drive: &Drive, indexed: &[Indexed], entries: &[Entry], full: bool, repor
                     if !e.is_dir {
                         report.changed += 1;
                     }
+                } else if let Some(birth) = e.birth_ns.filter(|b| !changed && n.fs_birth_ns != Some(*b)) {
+                    ops.push(Op::Birth { id: n.id.clone(), birth });
                 }
             }
             _ => {
                 if e.settling {
                     continue;
                 }
-                match missing.remove(&(e.dev, e.ino)).filter(|n| n.kind == e.kind()) {
+                match missing.remove(&(e.dev, e.ino)).filter(|n| n.kind == e.kind() && same_item(n, e)) {
                     Some(n) => {
                         parks.push(Op::Park { id: n.id.clone() });
                         ops.push(Op::Move { id: n.id.clone(), parent, e: e.clone() });
@@ -741,6 +755,17 @@ fn plan(drive: &Drive, indexed: &[Indexed], entries: &[Entry], full: bool, repor
     parks
 }
 
+/// Whether an item found at a new path is the indexed one whose path is gone, rather than a new item that got its inode
+/// number after it was deleted (ext4 and XFS give them out again): created at the same time, where the file system
+/// tells; else, for a file, of the same size and modification time, which moving or renaming it doesn't change. A
+/// folder whose creation time isn't known can't be told apart: it counts as removed and added.
+fn same_item(n: &Indexed, e: &Entry) -> bool {
+    match (n.fs_birth_ns, e.birth_ns) {
+        (Some(was), Some(now)) => was == now,
+        _ => !e.is_dir && n.fs_size == Some(e.size) && n.fs_mtime_ns == Some(e.mtime_ns),
+    }
+}
+
 impl Entry {
     fn kind(&self) -> &'static str {
         if self.is_dir { "folder" } else { "file" }
@@ -757,11 +782,13 @@ async fn apply(st: &AppState, drive: &Drive, ops: Vec<Op>) -> AppResult<()> {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let mut n = 0;
+        let mut unused = Vec::new();
         for op in ops.by_ref().take(BATCH) {
-            apply_one(&mut tx, drive, owner, op).await?;
+            unused.extend(apply_one(&mut tx, drive, owner, op).await?);
             n += 1;
         }
         tx.commit().await?;
+        tree::schedule_blob_removal(st, unused);
         if progress_map().lock().unwrap().contains_key(&drive.id) {
             set_progress(&drive.id, |p| p.done += n);
         }
@@ -769,13 +796,15 @@ async fn apply(st: &AppState, drive: &Drive, ops: Vec<Op>) -> AppResult<()> {
     Ok(())
 }
 
-async fn apply_one(conn: &mut SqliteConnection, drive: &Drive, owner: i64, op: Op) -> AppResult<()> {
+/// Returns content of the content store no longer used (earlier versions of a removed file kept there, say), to remove
+/// after the commit
+async fn apply_one(conn: &mut SqliteConnection, drive: &Drive, owner: i64, op: Op) -> AppResult<Vec<tree::BlobRef>> {
     match op {
         Op::Create { id, parent, e } => {
             sqlx::query(
                 "INSERT INTO nodes (id, owner_id, parent_id, kind, name, size, mime, drive_id, created_at, updated_at,
-                                    fs_path, fs_dev, fs_ino, fs_size, fs_mtime_ns)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                    fs_path, fs_dev, fs_ino, fs_size, fs_mtime_ns, fs_birth_ns)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&id)
             .bind(owner)
@@ -792,13 +821,15 @@ async fn apply_one(conn: &mut SqliteConnection, drive: &Drive, owner: i64, op: O
             .bind(e.ino)
             .bind(e.size)
             .bind(e.mtime_ns)
+            .bind(e.birth_ns)
             .execute(&mut *conn)
             .await?;
         }
         Op::Update { id, e } => {
             // The time is the version the editors compare, so it only moves forward
             sqlx::query(
-                "UPDATE nodes SET size = ?, updated_at = MAX(?, updated_at + 1), fs_dev = ?, fs_ino = ?, fs_size = ?, fs_mtime_ns = ? WHERE id = ?",
+                "UPDATE nodes SET size = ?, updated_at = MAX(?, updated_at + 1), fs_dev = ?, fs_ino = ?, fs_size = ?, fs_mtime_ns = ?, fs_birth_ns = ?
+                 WHERE id = ?",
             )
             .bind(e.size)
             .bind(e.secs())
@@ -806,16 +837,21 @@ async fn apply_one(conn: &mut SqliteConnection, drive: &Drive, owner: i64, op: O
             .bind(e.ino)
             .bind(e.size)
             .bind(e.mtime_ns)
+            .bind(e.birth_ns)
             .bind(&id)
             .execute(&mut *conn)
             .await?;
+        }
+        Op::Birth { id, birth } => {
+            sqlx::query("UPDATE nodes SET fs_birth_ns = ? WHERE id = ?").bind(birth).bind(&id).execute(&mut *conn).await?;
         }
         Op::Park { id } => {
             sqlx::query("UPDATE nodes SET name = char(1) || id WHERE id = ?").bind(&id).execute(&mut *conn).await?;
         }
         Op::Move { id, parent, e } => {
             sqlx::query(
-                "UPDATE nodes SET parent_id = ?, name = ?, mime = ?, size = ?, fs_path = ?, fs_dev = ?, fs_ino = ?, fs_size = ?, fs_mtime_ns = ?
+                "UPDATE nodes SET parent_id = ?, name = ?, mime = ?, size = ?, fs_path = ?, fs_dev = ?, fs_ino = ?, fs_size = ?, fs_mtime_ns = ?,
+                                  fs_birth_ns = ?
                  WHERE id = ?",
             )
             .bind(&parent)
@@ -827,19 +863,20 @@ async fn apply_one(conn: &mut SqliteConnection, drive: &Drive, owner: i64, op: O
             .bind(e.ino)
             .bind(e.size)
             .bind(e.mtime_ns)
+            .bind(e.birth_ns)
             .bind(&id)
             .execute(&mut *conn)
             .await?;
         }
         Op::Remove { id } => {
-            // Folder spaces keep no content in the store, so nothing is released there; grants, shares and favourites
-            // of the removed items go with them
+            // Grants, shares and favourites of the removed items go with them. Their content is in the folder, but
+            // earlier versions from before a file came into the folder may still be in the content store.
             if tree::get_node(&mut *conn, &id).await?.is_some() {
-                tree::purge_subtree(&mut *conn, &id).await?;
+                return tree::purge_subtree(&mut *conn, &id).await;
             }
         }
     }
-    Ok(())
+    Ok(Vec::new())
 }
 
 /// Space used is what the folder holds, its trash included (like `tree::recompute_usage`)
@@ -1095,6 +1132,70 @@ mod tests {
         assert!(check_source(&env.st, &env.dir.join("missing").to_string_lossy()).is_err());
         assert!(check_source(&env.st, &env.dir.to_string_lossy()).is_err(), "the data folder itself");
         assert!(check_source(&env.st, &env.dir.join("blobs").to_string_lossy()).is_err(), "the storage folder");
+    }
+
+    #[tokio::test]
+    async fn an_item_is_taken_for_a_moved_one_only_when_it_is_provably_the_same() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let drive = folder_drive(&env.st, &space.drive).await.unwrap();
+        // Items with the same device and inode number: what the index had, and what the folder has now
+        let old = |kind: &str, rel: &str, size: i64, mtime: i64, birth: Option<i64>| Indexed {
+            id: format!("id-{rel}"),
+            parent_id: Some(drive.root_id.clone()),
+            kind: kind.into(),
+            fs_path: Some(rel.into()),
+            fs_dev: Some(1),
+            fs_ino: Some(7),
+            fs_size: Some(size),
+            fs_mtime_ns: Some(mtime),
+            fs_birth_ns: birth,
+        };
+        let new = |kind: &str, rel: &str, size: i64, mtime: i64, birth: Option<i64>| Entry {
+            rel: rel.into(),
+            parent_rel: String::new(),
+            name: rel.into(),
+            is_dir: kind == "folder",
+            dev: 1,
+            ino: 7,
+            size,
+            mtime_ns: mtime,
+            birth_ns: birth,
+            settling: false,
+        };
+        // (moved, added, removed)
+        let seen = |was: Indexed, now: Entry| {
+            let mut report = ScanReport::default();
+            let ops = plan(&drive, &[was], &[now], true, &mut report);
+            assert_eq!(ops.iter().filter(|op| matches!(op, Op::Move { .. })).count(), report.moved);
+            (report.moved, report.added, report.removed)
+        };
+        // Deleted, and a new file got its inode number (ext4 and XFS give them out again): a new file
+        assert_eq!(seen(old("file", "a.xlsx", 10, 100, None), new("file", "notes.txt", 3, 200, None)), (0, 1, 1));
+        // Renamed: the same size and date
+        assert_eq!(seen(old("file", "a.xlsx", 10, 100, None), new("file", "b.xlsx", 10, 100, None)), (1, 0, 0));
+        // Creation times, where known, tell: the same file renamed and edited, or another one
+        assert_eq!(seen(old("file", "a.xlsx", 10, 100, Some(5)), new("file", "b.xlsx", 12, 300, Some(5))), (1, 0, 0));
+        assert_eq!(seen(old("file", "a.xlsx", 10, 100, Some(5)), new("file", "b.xlsx", 10, 100, Some(6))), (0, 1, 1));
+        // Folders only by their creation time
+        assert_eq!(seen(old("folder", "Old", 0, 100, Some(5)), new("folder", "New", 0, 900, Some(5))), (1, 0, 0));
+        assert_eq!(seen(old("folder", "Old", 0, 100, Some(5)), new("folder", "New", 0, 100, Some(6))), (0, 1, 1));
+        assert_eq!(seen(old("folder", "Old", 0, 100, None), new("folder", "New", 0, 100, None)), (0, 1, 1));
+
+        // A folder renamed on the server keeps its id where the file system tells when it was created
+        std::fs::create_dir(space.dir.join("Sub")).unwrap();
+        write_old(&space.dir.join("Sub/a.txt"), b"a");
+        scan(&env.st, &space.drive).await.unwrap();
+        let (sub, _) = env.node_at(&space.drive, "Sub").await.unwrap();
+        let (a, _) = env.node_at(&space.drive, "Sub/a.txt").await.unwrap();
+        std::fs::rename(space.dir.join("Sub"), space.dir.join("Moved")).unwrap();
+        scan(&env.st, &space.drive).await.unwrap();
+        if cfg!(unix) && std::fs::metadata(space.dir.join("Moved")).and_then(|m| m.created()).is_ok() {
+            assert_eq!(env.node_at(&space.drive, "Moved").await.unwrap().0, sub);
+        }
+        if cfg!(unix) {
+            assert_eq!(env.node_at(&space.drive, "Moved/a.txt").await.unwrap().0, a);
+        }
     }
 
     #[test]

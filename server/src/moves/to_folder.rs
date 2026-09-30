@@ -534,12 +534,17 @@ async fn switch(cx: &Ctx<'_>, folder: &Path) -> AppResult<bool> {
             if pending.is_some() {
                 return Ok((Vec::new(), 0, false));
             }
-            // Copies whose item went meanwhile (a version no longer kept, say): removed from the folder afterwards
+            // Copies whose item went meanwhile (a version no longer kept, say, or an item moved to another space):
+            // removed from the folder afterwards. Everything below joins on the item and the space, so an item that
+            // left the space keeps what it has where it is now.
             let gone: Vec<(String,)> = sqlx::query_as(
-                "SELECT path FROM space_move_items i WHERE i.move_id = ? AND i.kind IN ('file', 'version')
-                   AND NOT EXISTS (SELECT 1 FROM nodes n WHERE n.id = i.item_id) AND NOT EXISTS (SELECT 1 FROM node_versions v WHERE v.id = i.item_id)",
+                "SELECT path FROM space_move_items i WHERE i.move_id = ?1 AND i.kind IN ('file', 'version', 'folder') AND i.path != ''
+                   AND NOT EXISTS (SELECT 1 FROM nodes n WHERE n.id = i.item_id AND n.drive_id = ?2)
+                   AND NOT EXISTS (SELECT 1 FROM node_versions v JOIN nodes n ON n.id = v.node_id WHERE v.id = i.item_id AND n.drive_id = ?2)
+                 ORDER BY i.kind = 'folder', length(i.path) DESC",
             )
             .bind(&job.id)
+            .bind(&job.drive_id)
             .fetch_all(&mut *tx)
             .await?;
             let hashes: Vec<(String,)> = sqlx::query_as(
@@ -551,20 +556,22 @@ async fn switch(cx: &Ctx<'_>, folder: &Path) -> AppResult<bool> {
             .fetch_all(&mut *tx)
             .await?;
             let renamed: Vec<(String, String)> = sqlx::query_as(
-                "SELECT i.item_id, i.name FROM space_move_items i JOIN nodes n ON n.id = i.item_id WHERE i.move_id = ? AND i.name IS NOT NULL",
+                "SELECT i.item_id, i.name FROM space_move_items i JOIN nodes n ON n.id = i.item_id AND n.drive_id = ?2 WHERE i.move_id = ?1 AND i.name IS NOT NULL",
             )
             .bind(&job.id)
+            .bind(&job.drive_id)
             .fetch_all(&mut *tx)
             .await?;
             for (id, _) in &renamed {
                 sqlx::query("UPDATE nodes SET name = char(1) || id WHERE id = ?").bind(id).execute(&mut *tx).await?;
             }
             sqlx::query(
-                "UPDATE nodes SET fs_path = i.path, fs_dev = i.dst_dev, fs_ino = i.dst_ino, fs_mtime_ns = i.dst_mtime_ns,
+                "UPDATE nodes SET fs_path = i.path, fs_dev = i.dst_dev, fs_ino = i.dst_ino, fs_mtime_ns = i.dst_mtime_ns, fs_birth_ns = NULL,
                                   fs_size = CASE WHEN nodes.kind = 'file' THEN i.size ELSE 0 END, blob_hash = NULL
-                 FROM space_move_items i WHERE i.move_id = ? AND i.item_id = nodes.id AND i.kind IN ('file', 'folder')",
+                 FROM space_move_items i WHERE i.move_id = ?1 AND i.item_id = nodes.id AND nodes.drive_id = ?2 AND i.kind IN ('file', 'folder')",
             )
             .bind(&job.id)
+            .bind(&job.drive_id)
             .execute(&mut *tx)
             .await?;
             for (id, name) in &renamed {
@@ -572,7 +579,8 @@ async fn switch(cx: &Ctx<'_>, folder: &Path) -> AppResult<bool> {
             }
             sqlx::query(
                 "UPDATE node_versions SET drive_id = ?2, fs_path = i.path, blob_hash = NULL
-                 FROM space_move_items i WHERE i.move_id = ?1 AND i.kind = 'version' AND node_versions.id = i.item_id",
+                 FROM space_move_items i WHERE i.move_id = ?1 AND i.kind = 'version' AND node_versions.id = i.item_id
+                   AND node_versions.node_id IN (SELECT id FROM nodes WHERE drive_id = ?2)",
             )
             .bind(&job.id)
             .bind(&job.drive_id)

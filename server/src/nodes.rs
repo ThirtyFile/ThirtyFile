@@ -412,8 +412,9 @@ pub async fn rename(
     if name == node.name {
         return Ok(Json(node));
     }
-    // Changing only the letter case isn't a conflict (in a folder space, other letter case is another name)
-    let case_only = !node.in_folder_space() && name.eq_ignore_ascii_case(&node.name);
+    // Changing only the letter case isn't a conflict (in a folder space, other letter case is another name). The same
+    // rule as the names' unique key (`unicode_lower`), so "été" can become "Été".
+    let case_only = !node.in_folder_space() && name.to_lowercase() == node.name.to_lowercase();
     if !case_only && tree::name_taken(&mut tx, &parent, &name).await? {
         return Err(AppError::conflict(format!("\"{name}\" already exists")));
     }
@@ -1403,6 +1404,11 @@ mod tests {
         .execute(&mut *c)
         .await;
         assert!(dup.is_err());
+        drop(c);
+        // Only its letter case changes: the same name, not one that is taken
+        let file = env.file(&amy, amy.root(), "été.txt").await;
+        let Json(renamed) = rename(State(env.st.clone()), amy.clone(), Path(file), Json(RenameReq { name: "Été.txt".into() })).await.unwrap();
+        assert_eq!(renamed.name, "Été.txt");
     }
 
     #[tokio::test]

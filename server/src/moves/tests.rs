@@ -1418,3 +1418,133 @@ async fn the_checks_before_a_switch_start_from_the_space_not_from_every_content(
         assert!(!steps.iter().any(|s| s.starts_with("SCAN b") || s.contains("blobs_location") || s.contains("(hash>?)")), "{steps:?}");
     }
 }
+
+#[tokio::test]
+async fn a_move_whose_end_couldnt_be_recorded_runs_again() {
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    let drive = env.drive_of(amy.root()).await;
+    add_bucket(&env, "bucket").await;
+    let files = many_files(&env, &amy, 3).await;
+    let id = move_to(&env, &[&drive], "bucket").await.unwrap();
+    let (_job, ctl) = take_job(&env, &id).await;
+    // Its task ended without recording how (the disk was full, say, or it panicked): it is no longer running, and the
+    // database still says it is
+    drop(Running(&env.st, id.clone()));
+    drop(ctl);
+    assert_eq!(state(&env, &id).await, "running");
+    start_due(&env.st).await.unwrap();
+    for _ in 0..500 {
+        if state(&env, &id).await == "done" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(state(&env, &id).await, "done");
+    for (id, content) in &files {
+        assert_eq!(read(&env, &amy, id).await, *content);
+    }
+}
+
+#[tokio::test]
+async fn items_moved_out_of_a_folder_space_while_it_moves_to_a_content_store_are_left_as_they_are() {
+    let env = testutil::folders_env().await;
+    let admin = env.admin().await;
+    add_bucket(&env, "bucket").await;
+    let company = env.st.shared_root().unwrap();
+    let all = env.drive_of(&company).await;
+    let folder = env.dir.join("blobs").join("company");
+    for i in 0..6 {
+        let content: &'static [u8] = format!("file {i}").into_bytes().leak();
+        env.upload(&admin, &company, &format!("f{i}.txt"), content).await;
+    }
+    let id = move_to(&env, &[&all], "bucket").await.unwrap();
+    let (job, ctl) = take_job(&env, &id).await;
+    stop_on_put(&env, &ctl, 3, false);
+    run(&env.st, &job, &ctl).await;
+    assert_eq!(state(&env, &id).await, "paused");
+    // A file already copied is moved to another space by a change that committed meanwhile
+    let (moved, name): (String, String) =
+        sqlx::query_as("SELECT n.id, n.name FROM space_move_items i JOIN nodes n ON n.id = i.item_id WHERE i.move_id = ? AND i.kind = 'file' LIMIT 1")
+            .bind(&id)
+            .fetch_one(&env.st.db)
+            .await
+            .unwrap();
+    let content = std::fs::read(folder.join(&name)).unwrap();
+    let other = env.folder_space("Other").await;
+    std::fs::rename(folder.join(&name), other.dir.join(&name)).unwrap();
+    sqlx::query("UPDATE nodes SET drive_id = ?, parent_id = ? WHERE id = ?").bind(&other.drive).bind(&other.root).bind(&moved).execute(&env.st.db).await.unwrap();
+    let _ = resume(State(env.st.clone()), Admin(admin.clone()), Path(id.clone())).await.unwrap();
+    assert_eq!(run_move(&env, &id).await, "done");
+    let (hash, path, drive): (Option<String>, Option<String>, String) =
+        sqlx::query_as("SELECT blob_hash, fs_path, drive_id FROM nodes WHERE id = ?").bind(&moved).fetch_one(&env.st.db).await.unwrap();
+    assert_eq!((hash, path.as_deref(), drive), (None, Some(name.as_str()), other.drive.clone()));
+    // Nothing counts it as using the content that was copied
+    let refs: Option<(i64,)> = sqlx::query_as("SELECT refcount FROM blobs WHERE hash = ?").bind(crate::util::sha256_hex(&content)).fetch_optional(&env.st.db).await.unwrap();
+    assert_eq!(refs, None);
+    assert_eq!(read(&env, &admin, &moved).await, content);
+}
+
+#[tokio::test]
+async fn items_moved_out_of_a_space_while_it_moves_into_a_folder_are_left_as_they_are() {
+    let env = testutil::folders_env().await;
+    add_bucket(&env, "bucket").await;
+    make_default_bucket(&env).await;
+    let amy = env.user("amy", true).await;
+    let bob = env.user("bob", true).await;
+    let mine = env.drive_of(amy.root()).await;
+    let files = many_files(&env, &amy, 6).await;
+    let id = move_to(&env, &[&mine], "local").await.unwrap();
+    let (job, ctl) = take_job(&env, &id).await;
+    stop_reading(&env, "bucket", &ctl, 3, false);
+    run(&env.st, &job, &ctl).await;
+    assert_eq!(state(&env, &id).await, "paused");
+    // A file already copied is moved to Bob's space by a change that committed meanwhile
+    let (moved,): (String,) = sqlx::query_as("SELECT item_id FROM space_move_items WHERE move_id = ? AND kind = 'file' AND done = 1 LIMIT 1")
+        .bind(&id)
+        .fetch_one(&env.st.db)
+        .await
+        .unwrap();
+    let content = files.iter().find(|(f, _)| *f == moved).unwrap().1;
+    sqlx::query("UPDATE nodes SET drive_id = ?, parent_id = ? WHERE id = ?").bind(env.drive_of(bob.root()).await).bind(bob.root()).bind(&moved).execute(&env.st.db).await.unwrap();
+    let _ = resume(State(env.st.clone()), Admin(env.admin().await), Path(id.clone())).await.unwrap();
+    assert_eq!(run_move(&env, &id).await, "done");
+    let (hash, path): (Option<String>, Option<String>) = sqlx::query_as("SELECT blob_hash, fs_path FROM nodes WHERE id = ?").bind(&moved).fetch_one(&env.st.db).await.unwrap();
+    assert_eq!((hash.as_deref(), path), (Some(crate::util::sha256_hex(content).as_str()), None));
+    assert_eq!(read(&env, &bob, &moved).await, content);
+    let (blobs,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blobs").fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(blobs, 1, "Bob's file still uses its content");
+}
+
+#[tokio::test]
+async fn folders_removed_or_renamed_while_a_space_moves_between_folders_arent_left_in_the_new_one() {
+    let env = testutil::folders_env().await;
+    let admin = env.admin().await;
+    let nas = add_nas(&env, "nas").await;
+    let company = env.st.shared_root().unwrap();
+    let all = env.drive_of(&company).await;
+    let folder = env.dir.join("blobs").join("company");
+    for name in ["Docs", "Old"] {
+        let f = env.folder(&admin, &company, name).await;
+        env.upload(&admin, &f, "a.txt", b"inside").await;
+    }
+    env.folder(&admin, &company, "Empty").await;
+    let id = move_to(&env, &[&all], "nas").await.unwrap();
+    let _copy = switch_on(&between_folders::OTHER_DISK, true);
+    // Paused before the first file: the folders of the top level are made in the new folder
+    let (job, ctl) = take_job(&env, &id).await;
+    ctl.pause.store(true, SeqCst);
+    run(&env.st, &job, &ctl).await;
+    assert_eq!(state(&env, &id).await, "paused");
+    let new = nas.join("company");
+    assert!(new.join("Old").is_dir() && new.join("Empty").is_dir());
+    // Meanwhile, on the server: one renamed, one removed
+    std::fs::rename(folder.join("Old"), folder.join("Renamed")).unwrap();
+    std::fs::remove_dir(folder.join("Empty")).unwrap();
+    let _ = resume(State(env.st.clone()), Admin(admin.clone()), Path(id.clone())).await.unwrap();
+    assert_eq!(run_move(&env, &id).await, "done");
+    assert!(new.join("Renamed/a.txt").is_file() && new.join("Docs/a.txt").is_file());
+    assert!(!new.join("Old").exists() && !new.join("Empty").exists());
+    let report = crate::folders::scan(&env.st, &all).await.unwrap();
+    assert_eq!((report.added, report.removed), (0, 0), "{report:?}");
+}

@@ -413,6 +413,8 @@ async fn move_into(src: &Path, dest: &Path) -> io::Result<()> {
         let tmp = dest.with_extension(format!("partial-{}", uuid::Uuid::new_v4().simple()));
         let copied = async {
             tokio::fs::copy(src, &tmp).await?;
+            // On the disk before it takes the content's name: after a power loss, a name never leads to part of it
+            tokio::fs::File::open(&tmp).await?.sync_all().await?;
             tokio::fs::rename(&tmp, dest).await
         }
         .await;
@@ -444,7 +446,12 @@ impl Storage for LocalStorage {
             let dest = self.path(hash)?;
             // Below the verified folder, the folders named by the hash are made as needed
             self.verify().await?;
-            if tokio::fs::try_exists(&dest).await? {
+            // Already stored, unless what is there is shorter or longer (a copy cut short by a power loss, say): then it
+            // is replaced
+            if let Ok(there) = tokio::fs::symlink_metadata(&dest).await
+                && there.is_file()
+                && there.len() == tokio::fs::metadata(src).await?.len()
+            {
                 let _ = tokio::fs::remove_file(src).await;
                 return Ok(());
             }
@@ -1262,6 +1269,31 @@ mod tests {
         s.check().await.unwrap();
         s.put_file(&hash, &tmp).await.unwrap();
         assert!(root.join(&hash[0..2]).join(&hash[2..4]).join(&hash).is_file());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn a_copy_cut_short_in_the_store_is_replaced_by_the_whole_content() {
+        let base = std::env::temp_dir().join(format!("thirtyfile-short-{}", crate::util::new_id()));
+        let root = base.join("nas");
+        claim_folder(&root, "nas").unwrap();
+        let s = LocalStorage::new(root.clone(), "nas");
+        let content = b"the whole content of the file";
+        let hash = crate::util::sha256_hex(content);
+        // Left by a copy that a power loss cut short
+        let stored = root.join(&hash[0..2]).join(&hash[2..4]).join(&hash);
+        std::fs::create_dir_all(stored.parent().unwrap()).unwrap();
+        std::fs::write(&stored, &content[..7]).unwrap();
+        let tmp = base.join("tmp");
+        std::fs::write(&tmp, content).unwrap();
+        s.put_file(&hash, &tmp).await.unwrap();
+        assert_eq!(std::fs::read(&stored).unwrap(), content);
+        assert!(!tmp.exists());
+        // The whole content already there: kept, and the temp file goes
+        std::fs::write(&tmp, content).unwrap();
+        s.put_file(&hash, &tmp).await.unwrap();
+        assert_eq!(std::fs::read(&stored).unwrap(), content);
+        assert!(!tmp.exists());
         let _ = std::fs::remove_dir_all(&base);
     }
 

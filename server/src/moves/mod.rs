@@ -404,8 +404,28 @@ async fn clean_up(st: &AppState, job: &Job) {
     }
 }
 
+/// Moves recorded as running that no task runs (recording how one ended failed, on a full disk say, or it panicked):
+/// they wait for their turn again, as after a restart, rather than stay running with pause, resume and cancel refused
+/// and the space read-only
+async fn requeue_orphans(st: &AppState) -> AppResult<()> {
+    let _w = st.write_lock.lock().await;
+    // Read with the write lock held: a task takes its place in the list before its move is marked running (`take`),
+    // and leaves it only after its last write (`Running`)
+    let running: Vec<String> = st.moves.running.lock().unwrap().keys().cloned().collect();
+    let orphans = sqlx::query("UPDATE space_moves SET state = 'queued' WHERE state = 'running' AND id NOT IN (SELECT value FROM json_each(?))")
+        .bind(serde_json::to_string(&running).unwrap())
+        .execute(&st.db)
+        .await?
+        .rows_affected();
+    if orphans > 0 {
+        tracing::warn!("{orphans} moves of spaces were left running without anything running them: they continue in turn");
+    }
+    Ok(())
+}
+
 /// Starts queued moves while fewer than the setting are running
 async fn start_due(st: &AppState) -> AppResult<()> {
+    requeue_orphans(st).await?;
     loop {
         let limit = st.system.read().unwrap().move_jobs.clamp(1, MAX_JOBS) as usize;
         let busy: Vec<String> = st.moves.running.lock().unwrap().keys().cloned().collect();
