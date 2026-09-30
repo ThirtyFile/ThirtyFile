@@ -85,8 +85,12 @@ fn inline_script_hashes(html: &str) -> Vec<String> {
     out
 }
 
+/// Hash of a script as the browser runs it. HTML parsing turns CRLF and lone CR into LF (and NUL into U+FFFD) before
+/// the script is compared with the policy, so an index.html built from a Windows checkout, with CRLF line endings,
+/// must be hashed after the same changes.
 fn script_hash(script: &str) -> String {
-    format!("'sha256-{}'", base64::engine::general_purpose::STANDARD.encode(Sha256::digest(script.as_bytes())))
+    let parsed = script.replace("\r\n", "\n").replace('\r', "\n").replace('\0', "\u{FFFD}");
+    format!("'sha256-{}'", base64::engine::general_purpose::STANDARD.encode(Sha256::digest(parsed.as_bytes())))
 }
 
 /// Hash of office-frame.js exactly as the page inlines it into the iframe (`</script` is escaped as `<\/script` there).
@@ -198,6 +202,16 @@ mod tests {
         // …but not over a language the person picked themselves
         assert!(wants_chinese(&with(&[("cookie", "tf_lang=zh-TW; tf_lang_chosen=1")]), "en"));
         assert!(!wants_chinese(&with(&[("cookie", "tf_lang_chosen=1; tf_lang=en")]), "zh-TW"));
+    }
+
+    #[test]
+    fn line_endings_are_hashed_as_the_browser_parses_them() {
+        // base64(sha256("\n  let a = 1;\n  let b = 2;\n")), the script a browser runs from any of these pages
+        let want = "'sha256-HZCPBoNcEBwurXrAGF/huOP1Ag8cIJGt2uMjvefHpAQ='";
+        for body in ["\n  let a = 1;\n  let b = 2;\n", "\r\n  let a = 1;\r\n  let b = 2;\r\n", "\r  let a = 1;\r  let b = 2;\r", "\r\n  let a = 1;\r  let b = 2;\n"] {
+            let html = format!("<html><head><script>{body}</script></head></html>");
+            assert_eq!(inline_script_hashes(&html), vec![want.to_string()], "{body:?}");
+        }
     }
 
     #[test]
