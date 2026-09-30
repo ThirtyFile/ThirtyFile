@@ -183,7 +183,7 @@ export function EmailPage() {
                 </Button>
               </div>
               <ErrorText>{test.error?.message}</ErrorText>
-              {!me.public_url && <p className="text-xs text-muted-foreground">{t("Set the site URL under General, so emails can link to what they are about.")}</p>}
+              {!me.public_url && <p className="text-xs text-muted-foreground">{t("Set the site URL under General, so emails can link to what they are about. Until then, the sign-in page doesn't offer to reset a forgotten password by email.")}</p>}
             </div>
           </Section>
         </form>

@@ -612,11 +612,13 @@ pub async fn change_password(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-/// Ends a user's sign-in sessions (all but the one whose token hash is `keep`) and removes their app passwords: after
-/// the password changed or was reset, or two-factor sign-in was reset
+/// Ends a user's sign-in sessions (all but the one whose token hash is `keep`) and removes their app passwords and
+/// password reset links: after the password changed or was reset, or two-factor sign-in was reset. Sign-ins waiting
+/// for their second step end with the password they were started with (`twofactor::ticket`).
 pub async fn sign_out_everywhere(conn: &mut sqlx::SqliteConnection, user_id: i64, keep: Option<&str>) -> AppResult<()> {
     sqlx::query("DELETE FROM sessions WHERE user_id = ? AND token_hash IS NOT ?").bind(user_id).bind(keep).execute(&mut *conn).await?;
     sqlx::query("DELETE FROM app_passwords WHERE user_id = ?").bind(user_id).execute(&mut *conn).await?;
+    sqlx::query("DELETE FROM password_resets WHERE user_id = ?").bind(user_id).execute(&mut *conn).await?;
     Ok(())
 }
 
