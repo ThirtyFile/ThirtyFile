@@ -257,12 +257,18 @@ mod tests {
     async fn a_thumbnail_is_finished_when_the_browser_stops_waiting_for_it() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let data = png(2000, 1500);
+        let data = png(4000, 3000);
         let pic = env.stored_file(&amy, amy.root(), "large.png", &data).await;
-        // The browser goes away as soon as it asked: the picture is decoded all the same, holding its turn until it
-        // is done, and kept, so asking again doesn't decode it again
-        let asked = thumbnail(State(env.st.clone()), amy.clone(), Path(pic.clone()), HeaderMap::new());
-        assert!(tokio::time::timeout(std::time::Duration::from_millis(1), asked).await.is_err());
+        // The browser goes away while the picture is being decoded: the decoding keeps its turn until it is done, and
+        // its thumbnail is kept, so asking again doesn't decode it again
+        let asked = tokio::spawn(thumbnail(State(env.st.clone()), amy.clone(), Path(pic.clone()), HeaderMap::new()));
+        while env.st.thumb_permits.available_permits() == 2 {
+            assert!(!asked.is_finished(), "the thumbnail was made before its turn was seen");
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+        asked.abort();
+        let _ = asked.await;
+        assert_eq!(env.st.thumb_permits.available_permits(), 1, "the turn was given back while the picture is still decoded");
         let cached = env.st.thumb_path(&crate::util::sha256_hex(&data));
         for _ in 0..3000 {
             if std::fs::metadata(&cached).is_ok_and(|m| m.len() > 0) {
