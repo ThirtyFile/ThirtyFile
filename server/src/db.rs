@@ -318,7 +318,16 @@ pub async fn set_setting(conn: &mut SqliteConnection, key: &str, value: &str) ->
 /// Read-only transactions (a consistent view over several queries) may still use a deferred `begin()`, with
 /// `#[allow(clippy::disallowed_methods)]` and a reason.
 pub async fn begin_write(pool: &SqlitePool) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>, sqlx::Error> {
+    WRITES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     pool.begin_with("BEGIN IMMEDIATE").await
+}
+
+/// Write transactions begun so far: what was read before the latest one began may be out of date since (shares.rs keeps
+/// a link's details for a moment, as long as nothing was changed meanwhile)
+static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn writes() -> u64 {
+    WRITES.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Ends a write transaction by what the work in it returned: committed when it succeeded, rolled back when it failed,

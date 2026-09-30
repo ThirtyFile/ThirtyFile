@@ -129,17 +129,22 @@ async fn can_manage(conn: &mut SqliteConnection, user: &User, creator: i64, node
 }
 
 /// Counts a visit on the share itself: the access log is archived and trimmed, the counters stay
-async fn note_access(st: &AppState, share_id: &str, view: bool) {
-    let _w = st.write_lock.lock().await;
-    let res = sqlx::query("UPDATE shares SET views = views + ?, last_access = ? WHERE id = ?")
-        .bind(view as i64)
-        .bind(now())
-        .bind(share_id)
-        .execute(&st.db)
-        .await;
-    if let Err(e) = res {
-        tracing::warn!("Couldn't count a visit of share {share_id}: {e}");
-    }
+/// Counts a visit of a link, in the background: a visitor never waits for the write lock (another change may hold it a
+/// while), and the answer doesn't depend on it
+fn note_access(st: &AppState, share_id: &str, view: bool) {
+    let (st, share_id, at) = (st.clone(), share_id.to_string(), now());
+    tokio::spawn(async move {
+        let _w = st.write_lock.lock().await;
+        let res = sqlx::query("UPDATE shares SET views = views + ?, last_access = MAX(COALESCE(last_access, 0), ?) WHERE id = ?")
+            .bind(view as i64)
+            .bind(at)
+            .bind(&share_id)
+            .execute(&st.db)
+            .await;
+        if let Err(e) = res {
+            tracing::warn!("Couldn't count a visit of share {share_id}: {e}");
+        }
+    });
 }
 
 #[derive(Deserialize, Default)]
@@ -467,7 +472,7 @@ pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<Strin
 
 // ───────────── Public access ─────────────
 
-#[derive(sqlx::FromRow)]
+#[derive(Clone, sqlx::FromRow)]
 struct Share {
     id: String,
     node_id: String,
@@ -577,9 +582,57 @@ async fn find_share(st: &AppState, token: &str) -> AppResult<(Share, Node)> {
     Ok((share, node))
 }
 
+/// What a link's page asks for again and again, kept for a moment: the link, its item, that its creator may still
+/// share it, and the items found within it. A folder of 200 pictures asks for 200 thumbnails at once, and each took
+/// about seven queries to check. Kept for two seconds at most, and forgotten as soon as anything changes (a write
+/// transaction begins: `db::writes`).
+struct Seen {
+    at: std::time::Instant,
+    writes: u64,
+    share: Share,
+    root: Node,
+    within: std::collections::HashMap<String, Node>,
+}
+
+static SEEN: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Seen>>> = std::sync::LazyLock::new(Default::default);
+const SEEN_FOR: std::time::Duration = std::time::Duration::from_secs(2);
+/// Links, and items per link, kept at most
+const SEEN_LINKS: usize = 1000;
+const SEEN_ITEMS: usize = 5000;
+
+/// The link `token` as it was seen a moment ago, when nothing changed since and it still works
+fn seen(st: &AppState, token: &str) -> Option<(Share, Node)> {
+    let links = SEEN.lock().unwrap();
+    let s = links.get(token).filter(|s| s.at.elapsed() < SEEN_FOR && s.writes == crate::db::writes())?;
+    if !policy(st).public_links || s.share.expires_at.is_some_and(|t| t <= now()) {
+        return None;
+    }
+    Some((s.share.clone(), s.root.clone()))
+}
+
+/// Keeps what was found of the link `token`, read after `writes` write transactions had begun
+fn keep_seen(token: &str, share: &Share, root: &Node, writes: u64) {
+    let mut links = SEEN.lock().unwrap();
+    if links.len() >= SEEN_LINKS {
+        links.retain(|_, s| s.at.elapsed() < SEEN_FOR);
+        if links.len() >= SEEN_LINKS {
+            links.clear();
+        }
+    }
+    links.insert(token.to_string(), Seen { at: std::time::Instant::now(), writes, share: share.clone(), root: root.clone(), within: Default::default() });
+}
+
 /// Finds the share and checks it has been unlocked (when it has a password)
 async fn open_share(st: &AppState, token: &str, headers: &HeaderMap) -> AppResult<(Share, Node)> {
-    let (share, node) = find_share(st, token).await?;
+    let (share, node) = match seen(st, token) {
+        Some(s) => s,
+        None => {
+            let writes = crate::db::writes();
+            let (share, node) = find_share(st, token).await?;
+            keep_seen(token, &share, &node, writes);
+            (share, node)
+        }
+    };
     if !unlocked(st, headers, token, &share) {
         return Err(AppError::new(StatusCode::UNAUTHORIZED, "This share requires a password").with_code("password"));
     }
@@ -594,9 +647,18 @@ async fn shared_node(st: &AppState, share: &Share, root: &Node, id: &str) -> App
     if share.drop_only {
         return Err(AppError::not_found("Item not found"));
     }
+    let writes = crate::db::writes();
+    if let Some(n) = SEEN.lock().unwrap().get(&share.id).filter(|s| s.writes == writes && s.at.elapsed() < SEEN_FOR).and_then(|s| s.within.get(id)) {
+        return Ok(n.clone());
+    }
     let mut c = st.db.acquire().await?;
     match tree::get_node(&mut c, id).await? {
-        Some(n) if n.trashed_at.is_none() && tree::is_within(&mut c, &n.id, &share.node_id).await? => Ok(n),
+        Some(n) if n.trashed_at.is_none() && tree::is_within(&mut c, &n.id, &share.node_id).await? => {
+            if let Some(s) = SEEN.lock().unwrap().get_mut(&share.id).filter(|s| s.writes == writes && s.within.len() < SEEN_ITEMS) {
+                s.within.insert(n.id.clone(), n.clone());
+            }
+            Ok(n)
+        }
         _ => Err(AppError::not_found("Item not found")),
     }
 }
@@ -661,7 +723,7 @@ pub async fn public_info(
     // The address is only kept in memory for this; whether it is written to the log depends on the log settings
     if logs::first_view_in_a_while(&st, &share.id, &auth::client_ip(&st, addr, &headers)) {
         record_share_access(&st, &share.id, share.owner_id, Some(&node), "view", &visitor);
-        note_access(&st, &share.id, true).await;
+        note_access(&st, &share.id, true);
     }
     let unlocked = unlocked(&st, &headers, &token, &share);
     let mut info = json!({
@@ -803,12 +865,21 @@ pub async fn public_content(
     }
     // Opened first: a download that fails because the storage can't be reached doesn't use up the link
     let mut res = serve_blob(&st, &headers, node_blob(&node)?, download).await?;
-    if counted {
+    if counted && limited {
+        // Checked against the limit before it is served
         count_download(&st, &share).await?;
+    } else if counted {
+        // Only counted: in the background, so the file doesn't wait for another change holding the write lock
+        let (st, share) = (st.clone(), share.clone());
+        tokio::spawn(async move {
+            if let Err(e) = count_download(&st, &share).await {
+                tracing::warn!("Couldn't count a download of share {}: {}", share.id, e.message);
+            }
+        });
     }
     if !continuation {
         record_share_access(&st, &share.id, share.owner_id, Some(&node), if download { "download" } else { "preview" }, &visitor);
-        note_access(&st, &share.id, false).await;
+        note_access(&st, &share.id, false);
     }
     if counted && limited {
         res.headers_mut().append(header::SET_COOKIE, download_cookie(&st, &token, &share, &node.id)?);
@@ -916,7 +987,7 @@ async fn serve_public_download(
     if !continuation {
         count_download(st, &share).await?;
         record_share_access(st, &share.id, share.owner_id, roots.first(), if single { "download" } else { "zip" }, visitor);
-        note_access(st, &share.id, false).await;
+        note_access(st, &share.id, false);
         if single && share.max_downloads.is_some() {
             res.headers_mut().append(header::SET_COOKIE, download_cookie(st, token, &share, &roots[0].id)?);
         }
@@ -1040,6 +1111,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn looking_through_a_link_doesnt_wait_for_other_changes() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let folder = env.folder(&amy, amy.root(), "Photos").await;
+        let photo = stored_file(&env, &amy, &folder, "a.jpg", b"picture").await;
+        let Json(link) = create(State(env.st.clone()), amy.clone(), Json(link(&folder))).await.unwrap();
+        let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
+        // A long change holds the write lock meanwhile (deleting a large folder, say)
+        let held = env.st.write_lock.lock().await;
+        let started = std::time::Instant::now();
+        let seen = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            public_content(State(env.st.clone()), Path((link.id.clone(), photo.clone())), Query(ContentQuery { download: None }), HeaderMap::new(), visitor()),
+        )
+        .await;
+        assert!(seen.is_ok_and(|r| r.is_ok()), "the preview answers");
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        // Counted once the change is done
+        drop(held);
+        let mut counted = false;
+        for _ in 0..100 {
+            let (last,): (Option<i64>,) = sqlx::query_as("SELECT last_access FROM shares WHERE id = ?").bind(&link.id).fetch_one(&env.st.db).await.unwrap();
+            if last.is_some() {
+                counted = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(counted);
+    }
+
+    #[tokio::test]
+    async fn a_link_seen_a_moment_ago_follows_changes_at_once() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let folder = env.folder(&amy, amy.root(), "Photos").await;
+        let photo = env.file(&amy, &folder, "a.jpg").await;
+        let Json(link) = create(State(env.st.clone()), amy.clone(), Json(link(&folder))).await.unwrap();
+        let node = |id: &str| public_node(State(env.st.clone()), Path((link.id.clone(), id.to_string())), HeaderMap::new());
+        assert!(node(&photo).await.is_ok() && node(&photo).await.is_ok());
+        // Kept for a moment, but not past a change: the item deleted, then the link's folder
+        let trash = |id: &str| crate::nodes::trash(State(env.st.clone()), amy.clone(), Json(serde_json::from_value(serde_json::json!({ "ids": [id] })).unwrap()));
+        let _ = trash(&photo).await.unwrap();
+        assert_eq!(node(&photo).await.err().map(|e| e.status), Some(StatusCode::NOT_FOUND));
+        let _ = trash(&folder).await.unwrap();
+        assert_eq!(node("root").await.err().map(|e| e.status), Some(StatusCode::NOT_FOUND));
+    }
+
+    /// A link's page asking for the items of a folder of 200 pictures one by one (as the thumbnails do):
+    /// `cargo test --release -- --ignored --nocapture measure_a_link`
+    #[tokio::test]
+    #[ignore]
+    async fn measure_a_link_page_asking_for_200_items() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let folder = env.folder(&amy, amy.root(), "Photos").await;
+        let mut ids = Vec::new();
+        for i in 0..200 {
+            ids.push(env.file(&amy, &folder, &format!("photo-{i}.jpg")).await);
+        }
+        let Json(link) = create(State(env.st.clone()), amy.clone(), Json(link(&folder))).await.unwrap();
+        let started = std::time::Instant::now();
+        for id in &ids {
+            let _ = public_node(State(env.st.clone()), Path((link.id.clone(), id.clone())), HeaderMap::new()).await.unwrap();
+        }
+        println!("200 items asked for through a link: {} ms", started.elapsed().as_millis());
+    }
+
+    #[tokio::test]
     async fn a_download_that_fails_to_open_doesnt_use_up_the_link() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
@@ -1100,6 +1240,14 @@ mod tests {
         for ip in ["203.0.113.1:1", "203.0.113.2:1"] {
             let addr: std::net::SocketAddr = ip.parse().unwrap();
             let _ = public_info(State(env.st.clone()), Path(info.id.clone()), ConnectInfo(addr), HeaderMap::new(), visitor()).await.unwrap();
+        }
+        // (counted in the background, so a visitor never waits for another change)
+        for _ in 0..100 {
+            let (views,): (i64,) = sqlx::query_as("SELECT views FROM shares WHERE id = ?").bind(&info.id).fetch_one(&env.st.db).await.unwrap();
+            if views == 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
         // The access log is trimmed after its retention period; the count stays
         sqlx::query("DELETE FROM share_access").execute(&env.st.db).await.unwrap();
