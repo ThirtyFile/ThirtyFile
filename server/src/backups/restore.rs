@@ -151,7 +151,7 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
         });
     }
     notes.push("Earlier versions and permissions aren't restored".to_string());
-    let note = notes.join(". ");
+    let note = notes.join("\n");
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let res = async {
