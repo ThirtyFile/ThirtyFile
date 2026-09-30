@@ -139,6 +139,14 @@ fn runs_as_code(mime: &str) -> bool {
     m.contains("javascript") || m.contains("ecmascript") || m == "text/css" || m == "application/wasm" || m == "text/jscript"
 }
 
+/// Types a browser opens as a page of this site. Even sandboxed, an uploaded page could look like one of the app's own
+/// pages at the app's address, so they are shown as plain text (downloads keep their type: they are saved, not opened).
+/// SVG pictures stay pictures.
+fn opens_as_page(mime: &str) -> bool {
+    let m = mime.split(';').next().unwrap_or_default().trim().to_ascii_lowercase();
+    m == "text/html" || m == "text/xml" || m == "application/xml" || (m.ends_with("+xml") && m != "image/svg+xml")
+}
+
 pub async fn serve_blob(st: &AppState, headers: &HeaderMap, b: Blob<'_>, download: bool) -> AppResult<Response> {
     // A page loading a stored file as a script, style sheet or worker (never how this app uses them)
     if let Some(dest) = headers.get("sec-fetch-dest").and_then(|v| v.to_str().ok())
@@ -168,7 +176,7 @@ pub async fn serve_blob(st: &AppState, headers: &HeaderMap, b: Blob<'_>, downloa
 
     let mime = if b.mime.is_empty() {
         "application/octet-stream"
-    } else if runs_as_code(b.mime) {
+    } else if runs_as_code(b.mime) || (!download && opens_as_page(b.mime)) {
         "text/plain; charset=utf-8"
     } else {
         b.mime
@@ -378,6 +386,26 @@ mod tests {
         let res = content(State(env.st.clone()), user.clone(), Path(id.to_string()), q, h).await.unwrap();
         let (parts, body) = res.into_parts();
         (parts.status, parts.headers, axum::body::to_bytes(body, usize::MAX).await.unwrap().to_vec())
+    }
+
+    #[tokio::test]
+    async fn pages_and_xml_open_as_plain_text_and_download_as_they_are() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        for (name, mime) in [("page.html", "text/html"), ("page.xhtml", "application/xhtml+xml"), ("feed.xml", "text/xml"), ("data.xml", "application/xml"), ("news.rss", "application/rss+xml")] {
+            let id = env.stored_file(&amy, amy.root(), name, b"<html><body>Sign in</body></html>").await;
+            sqlx::query("UPDATE nodes SET mime = ? WHERE id = ?").bind(mime).bind(&id).execute(&env.st.db).await.unwrap();
+            let (status, h, _) = fetch(&env, &amy, &id, &[]).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(h[header::CONTENT_TYPE], "text/plain; charset=utf-8", "{name}");
+            let q = Query(ContentQuery { download: Some(1) });
+            let res = content(State(env.st.clone()), amy.clone(), Path(id), q, HeaderMap::new()).await.unwrap();
+            assert_eq!(res.headers()[header::CONTENT_TYPE], mime, "{name}");
+            assert!(res.headers()[header::CONTENT_DISPOSITION].to_str().unwrap().starts_with("attachment"), "{name}");
+        }
+        // Pictures stay pictures
+        let svg = env.stored_file(&amy, amy.root(), "logo.svg", b"<svg xmlns='http://www.w3.org/2000/svg'/>").await;
+        assert_eq!(fetch(&env, &amy, &svg, &[]).await.1[header::CONTENT_TYPE], "image/svg+xml");
     }
 
     #[tokio::test]

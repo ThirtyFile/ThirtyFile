@@ -90,10 +90,16 @@ pub async fn thumbnail_response(st: &AppState, headers: &HeaderMap, n: &Node) ->
         };
     }
     if !tokio::fs::try_exists(&path).await? {
-        let _permit = st.thumb_permits.acquire().await.map_err(AppError::internal)?;
-        if !tokio::fs::try_exists(&path).await? {
+        // Made in a task of its own, which holds its turn (a permit) until the thumbnail is in the cache: a browser
+        // that stops waiting neither frees the turn while the picture is still being decoded nor throws the work away
+        let (st, path) = (st.clone(), path.clone());
+        tokio::spawn(async move {
+            let _permit = st.thumb_permits.acquire().await.map_err(AppError::internal)?;
+            if tokio::fs::try_exists(&path).await? {
+                return Ok(());
+            }
             let mut data = Vec::with_capacity(size as usize);
-            source.open(st, 0, size).await?.read_to_end(&mut data).await?;
+            source.open(&st, 0, size).await?.read_to_end(&mut data).await?;
             let max_alloc = st.thumb_decode_bytes;
             let jpeg = tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
                 let mut reader = image::ImageReader::new(std::io::Cursor::new(data)).with_guessed_format().ok()?;
@@ -107,7 +113,9 @@ pub async fn thumbnail_response(st: &AppState, headers: &HeaderMap, n: &Node) ->
             .await?;
             // Write an empty file for images that can't be decoded, so we don't retry every time
             write_thumb(&path, &jpeg.unwrap_or_default()).await?;
-        }
+            AppResult::Ok(())
+        })
+        .await??;
     }
     let data = tokio::fs::read(&path).await?;
     if data.is_empty() {
@@ -243,6 +251,33 @@ mod tests {
         assert_eq!(put(ben.clone(), pdf.clone(), png(100, 100)).await.unwrap(), StatusCode::NO_CONTENT);
         assert_eq!(std::fs::read(env.st.thumb_path(&hash)).unwrap(), body.to_vec());
         assert!(!env.st.thumb_path(&content).exists(), "not kept by content alone");
+    }
+
+    #[tokio::test]
+    async fn a_thumbnail_is_finished_when_the_browser_stops_waiting_for_it() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let data = png(2000, 1500);
+        let pic = env.stored_file(&amy, amy.root(), "large.png", &data).await;
+        // The browser goes away as soon as it asked: the picture is decoded all the same, holding its turn until it
+        // is done, and kept, so asking again doesn't decode it again
+        let asked = thumbnail(State(env.st.clone()), amy.clone(), Path(pic.clone()), HeaderMap::new());
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(1), asked).await.is_err());
+        let cached = env.st.thumb_path(&crate::util::sha256_hex(&data));
+        for _ in 0..3000 {
+            if std::fs::metadata(&cached).is_ok_and(|m| m.len() > 0) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(std::fs::metadata(&cached).is_ok_and(|m| m.len() > 0), "the thumbnail was dropped with the request");
+        for _ in 0..500 {
+            if env.st.thumb_permits.available_permits() == 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(env.st.thumb_permits.available_permits(), 2);
     }
 
     #[tokio::test]

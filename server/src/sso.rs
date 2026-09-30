@@ -418,13 +418,23 @@ pub async fn start_link(State(st): State<AppState>, user: User, Path(provider): 
     Ok(Json(json!({ "url": url })))
 }
 
-fn login_error(message: &str, next: Option<&str>) -> Response {
+/// The cookie that carries why a sign-in failed to the page shown next (read and removed by the page)
+const ERROR_COOKIE: &str = "tf_sso_error";
+
+/// Goes back to the sign-in page (or, when linking, the page it started from) with the reason. The address only says
+/// that there is one (`sso_error=1`) and the text travels in a short-lived cookie only this server can set, so a link
+/// from elsewhere can't make the page show a message of its own.
+fn login_error(st: &AppState, message: &str, next: Option<&str>) -> Response {
     let url = match next {
         // Link mode: go back to the original page to show the error
-        Some(n) => format!("{n}{}{}", if n.contains('?') { "&" } else { "?" }, encode(&[("sso_error", message)])),
-        None => format!("/login?{}", encode(&[("sso_error", message)])),
+        Some(n) => format!("{n}{}sso_error=1", if n.contains('?') { "&" } else { "?" }),
+        None => "/login?sso_error=1".to_string(),
     };
-    Redirect::to(&url).into_response()
+    let text = percent_encoding::utf8_percent_encode(message, percent_encoding::NON_ALPHANUMERIC);
+    let secure = if st.https() { "; Secure" } else { "" };
+    // Read by the page's script, so not HttpOnly; it holds nothing but the message
+    let cookie = format!("{ERROR_COOKIE}={text}; Path=/; SameSite=Lax; Max-Age=300{secure}");
+    ([(header::SET_COOKIE, cookie)], Redirect::to(&url)).into_response()
 }
 
 pub async fn start(
@@ -438,15 +448,15 @@ pub async fn start(
     let next = safe_next(q.next.as_deref());
     let cfg = st.sso.read().unwrap().provider(&provider).cloned();
     let Some(cfg) = cfg.filter(ProviderConfig::ready) else {
-        return login_error("This sign-in method isn't enabled", None);
+        return login_error(&st, "This sign-in method isn't enabled", None);
     };
     let link_user = match q.link.as_deref() {
         Some(ticket) => {
-            let Ok(u) = user else { return login_error("Sign in before linking an external account", None) };
+            let Ok(u) = user else { return login_error(&st, "Sign in before linking an external account", None) };
             let issued = link_tickets().lock().unwrap().remove(ticket);
             match issued {
                 Some((id, created)) if id == u.id && created.elapsed() < LINK_TICKET_TTL => Some(u.id),
-                _ => return login_error("The link request has expired. Try again.", Some(&next)),
+                _ => return login_error(&st, "The link request has expired. Try again.", Some(&next)),
             }
         }
         None => None,
@@ -536,23 +546,23 @@ pub async fn callback(
     let ip = client_ip(&st, addr, &headers);
     let pending = match take_pending(&st, &provider, q.state.as_deref(), &headers, &user) {
         Ok(p) => p,
-        Err(msg) => return login_error(msg, None),
+        Err(msg) => return login_error(&st, msg, None),
     };
     let link_next = pending.link_user.map(|_| pending.next.clone());
     if let Some(err) = q.error {
         // The user clicked cancel on the provider's page
         let msg = if err == "access_denied" { "Sign-in canceled".to_string() } else { format!("{} sign-in failed: {}", label(&provider), q.error_description.unwrap_or(err)) };
-        return login_error(&msg, link_next.as_deref());
+        return login_error(&st, &msg, link_next.as_deref());
     }
-    let Some(code) = q.code else { return login_error("Sign-in failed: no authorization code was received", link_next.as_deref()) };
+    let Some(code) = q.code else { return login_error(&st, "Sign-in failed: no authorization code was received", link_next.as_deref()) };
     let cfg = st.sso.read().unwrap().provider(&provider).cloned().filter(ProviderConfig::ready);
-    let Some(cfg) = cfg else { return login_error("This sign-in method isn't enabled", link_next.as_deref()) };
+    let Some(cfg) = cfg else { return login_error(&st, "This sign-in method isn't enabled", link_next.as_deref()) };
 
     let ident = match fetch_identity(&provider, &cfg, &code, &pending).await {
         Ok(i) => i,
         Err(e) => {
             tracing::warn!("{} sign-in failed: {e}", label(&provider));
-            return login_error(&format!("{} sign-in failed. Try again later.", label(&provider)), link_next.as_deref());
+            return login_error(&st, &format!("{} sign-in failed. Try again later.", label(&provider)), link_next.as_deref());
         }
     };
 
@@ -563,7 +573,7 @@ pub async fn callback(
                 let next = &pending.next;
                 Redirect::to(&format!("{next}{}sso_linked={provider}", if next.contains('?') { "&" } else { "?" })).into_response()
             }
-            Err(e) => login_error(&e.message, link_next.as_deref()),
+            Err(e) => login_error(&st, &e.message, link_next.as_deref()),
         };
     }
     sign_in(&st, &provider, &ident, &pending.next, &ip, &headers).await
@@ -596,7 +606,7 @@ async fn sign_in(st: &AppState, provider: &str, ident: &Identity, next: &str, ip
             }
             let cookie = match open_session(st, user_id, provider, ip, headers).await {
                 Ok(c) => c,
-                Err(e) => return login_error(&e.message, None),
+                Err(e) => return login_error(st, &e.message, None),
             };
             if let Err(e) = sync_profile(st, user_id, provider, ident).await {
                 tracing::warn!("{} sign-in: couldn't update the profile of {username}: {}", label(provider), e.message);
@@ -607,7 +617,7 @@ async fn sign_in(st: &AppState, provider: &str, ident: &Identity, next: &str, ip
         Err(e) => {
             let who = if ident.email.is_empty() { format!("{}:{}", provider, ident.subject) } else { ident.email.clone() };
             record_login_via(st, None, &who, "sso_denied", provider, ip, headers);
-            login_error(&e.message, None)
+            login_error(st, &e.message, None)
         }
     }
 }
@@ -1487,8 +1497,15 @@ mod tests {
         m.lock().unwrap().claims = google(&nonce, "g-1", "amy@example.com", true);
         let q = CallbackQuery { code: Some("code-1".into()), state: Some(state), error: None, error_description: None };
         let r = callback(State(env.st.clone()), Path("google".into()), Query(q), ConnectInfo("127.0.0.1:1".parse().unwrap()), headers, Err(AppError::unauthorized())).await;
-        assert!(location(&r).starts_with("/login?sso_error="), "{}", location(&r));
-        assert!(r.headers().get(header::SET_COOKIE).is_none(), "no sign-in session was created");
+        // The reason goes to the sign-in page in a cookie: the address only says there is one, so a link can't make
+        // the page show a text of its own
+        assert_eq!(location(&r), "/login?sso_error=1");
+        let set: Vec<&str> = r.headers().get_all(header::SET_COOKIE).iter().map(|v| v.to_str().unwrap()).collect();
+        assert!(set.iter().all(|c| !c.starts_with(crate::auth::SESSION_COOKIE)), "no sign-in session was created: {set:?}");
+        let reason = set.iter().find_map(|c| c.strip_prefix("tf_sso_error=")).expect("the reason is in a cookie");
+        assert!(reason.contains("Max-Age=") && reason.contains("Path=/") && !reason.contains("HttpOnly"), "{reason}");
+        let text = reason.split(';').next().unwrap();
+        assert!(!text.is_empty() && percent_encoding::percent_decode_str(text).decode_utf8().unwrap().len() > 10, "{reason}");
     }
 
     #[tokio::test]

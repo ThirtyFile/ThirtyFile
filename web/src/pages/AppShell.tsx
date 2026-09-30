@@ -20,6 +20,7 @@ import { api, type SortKey, type SortOrder } from "@/api";
 import { refreshFirstPage } from "@/lib/pages";
 import { FOLDER_CONTENTS } from "@/lib/queries";
 import { t, tServer } from "@/lib/i18n";
+import { takeSsoError } from "@/lib/signInReturn";
 
 /** Site logo and name (from branding settings; switches automatically when there's a dark-mode logo) */
 export function Logo({ className, imgClassName = "h-7" }: { className?: string; imgClassName?: string }) {
@@ -56,7 +57,7 @@ export function AppShell() {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const linked = params.get("sso_linked");
-    const error = params.get("sso_error");
+    const error = takeSsoError(params);
     if (!linked && !error) return;
     if (linked) toast.success(t("Your {provider} account is linked. You can use it to sign in from now on.", { provider: SSO_LABEL[linked as SsoProviderId] ?? linked }));
     if (error) toast.error(tServer(error));

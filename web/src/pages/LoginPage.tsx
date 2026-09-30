@@ -10,6 +10,7 @@ import { LanguageSwitch } from "@/components/LanguageSwitch";
 import { RecoveryCodes, SetupCode } from "@/components/TwoFactor";
 import { cn } from "@/lib/utils";
 import { lang, locale, t, tServer } from "@/lib/i18n";
+import { safeNext, takeSsoError } from "@/lib/signInReturn";
 
 /** Account last used for a password sign-in (like an OS, next time only the password is needed) */
 const LAST_USER = "tf-last-user";
@@ -142,15 +143,11 @@ export function LoginPage() {
   const b = useBranding();
   const providers = useQuery({ queryKey: ["sso-providers"], queryFn: api.ssoProviders, staleTime: 60_000 });
   const options = useQuery({ queryKey: ["auth-options"], queryFn: api.authOptions, staleTime: 60_000 });
-  const nextPath = (() => {
-    const next = params.get("next");
-    // Only allow same-site paths (same rule as the server's safe_next): "//host" and "/\host" are treated by browsers as other sites
-    return next?.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/files";
-  })();
+  const nextPath = safeNext(params.get("next"));
 
   // When a third-party login fails, the server redirects back with the reason
   const [error, setError] = useState<string | null>(() => {
-    const e = params.get("sso_error");
+    const e = takeSsoError(params);
     return e ? tServer(e) : null;
   });
   const [stage, setStage] = useState<Stage>(() => (b.login_lock && !error ? "lock" : "signin"));
