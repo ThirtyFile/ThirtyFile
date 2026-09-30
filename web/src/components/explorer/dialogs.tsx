@@ -1,6 +1,4 @@
 /** File explorer dialogs: move / copy, delete, share and access (creating and renaming are edited inline in the list) */
-import { api } from "@/api";
-import { toastWithUndo } from "@/lib/undo";
 import { AccessDialog } from "@/components/AccessDialog";
 import { ConfirmDialog, FolderPickerDialog } from "@/components/dialogs";
 import { ShareDialog } from "@/components/ShareDialog";
@@ -13,47 +11,39 @@ import type { ExplorerState } from "./state";
 import type { ExplorerActions } from "./actions";
 
 export function ExplorerDialogs({ p, s, a }: { p: ExplorerProps; s: ExplorerState; a: ExplorerActions }) {
-  const { setSelected, dialog, setDialog } = s;
-  const { changed, parentsOf, transfer } = a;
+  const { dialog, setDialog } = s;
+  const { transfer, trash } = a;
   const me = useMe();
   return (
     <>
       {(dialog?.t === "move" || dialog?.t === "copy") && (
         <FolderPickerDialog
-          title={dialog.t === "move" ? t("Move {n} item to…|Move {n} items to…", { n: dialog.ids.length }) : t("Copy {n} item to…|Copy {n} items to…", { n: dialog.ids.length })}
+          title={
+            dialog.t === "move" ? t("Move {n} item to…|Move {n} items to…", { n: dialog.picked.count }) : t("Copy {n} item to…|Copy {n} items to…", { n: dialog.picked.count })
+          }
           confirmText={dialog.t === "move" ? t("Move here") : t("Copy here")}
           startId={p.folderId ?? homeFolder(me, undefined) ?? null}
-          excludeIds={new Set(dialog.ids)}
+          excludeIds={new Set(dialog.picked.ids)}
           onClose={() => setDialog(null)}
           onPick={async (dest) => {
             // Closed first: a question about names the destination already has may follow
             setDialog(null);
-            if (dialog.t === "move") await transfer("move", dialog.ids, dest, () => t("Moved"), t("Couldn't move"));
-            else await transfer("copy", dialog.ids, dest, () => t("Copied"), t("Couldn't copy"));
+            if (dialog.t === "move") await transfer("move", dialog.picked, dest, () => t("Moved"), t("Couldn't move"));
+            else await transfer("copy", dialog.picked, dest, () => t("Copied"), t("Couldn't copy"));
           }}
         />
       )}
       {dialog?.t === "trash" && (
         <ConfirmDialog
-          title={t("Move {n} item to trash?|Move {n} items to trash?", { n: dialog.ids.length })}
+          title={t("Move {n} item to trash?|Move {n} items to trash?", { n: dialog.picked.count })}
           description={trashHint(me.trash_days)}
           confirmText={t("Move to trash")}
           destructive
           onClose={() => setDialog(null)}
           onConfirm={async () => {
-            const ids = dialog.ids;
-            const parents = parentsOf(ids);
-            await api.trash(ids);
-            // Restoring can fail, e.g. the original folder was deleted, a name conflict, or the space is full
-            toastWithUndo(t("Moved to trash"), {
-              undo: () => api.restore(ids),
-              undoneText: t("Restored"),
-              after: () => changed({ folders: parents, trash: true, contents: true, usage: true }),
-            });
+            const picked = dialog.picked;
             setDialog(null);
-            setSelected(new Set());
-            // The rows go at once; the lists aren't loaded again for it
-            void changed({ removed: ids, usage: true });
+            await trash(picked);
           }}
         />
       )}

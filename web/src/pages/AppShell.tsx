@@ -60,9 +60,12 @@ export function AppShell() {
           void refreshFiles(qc, { folders: batch.folders, trees: batch.trees, contents: true, usage: true, recent: true, trash: true });
           return;
         }
-        // Folder lists are ["children", id, sort, order]; the folder tree's (not in pages) waits for the end
-        for (const id of parentIds)
+        // Folder lists loaded page by page are ["children", id, sort, order]; a folder loaded a part at a time
+        // (lib/windows) loads the parts in view again (the others once they show). The folder tree's waits for the end.
+        for (const id of parentIds) {
           void refreshFirstPage(qc, ["children", id], ([, , sort, order], limit) => api.childrenPage(id, sort as SortKey, order as SortOrder, limit));
+          void qc.invalidateQueries({ queryKey: ["children", id], predicate: (q) => q.queryKey[4] === "at" });
+        }
       }),
     [qc],
   );

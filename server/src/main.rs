@@ -531,6 +531,8 @@ fn file_api() -> Router<AppState> {
         .route("/auth/me", get(auth::me))
         .route("/nodes/{id}", get(nodes::get).patch(nodes::rename))
         .route("/nodes/{id}/children", get(nodes::children))
+        .route("/nodes/{id}/position", get(nodes::position))
+        .route("/nodes/{id}/select", post(nodes::select))
         .route("/nodes/move", post(nodes::move_nodes))
         .route("/nodes/copy", post(nodes::copy_nodes))
         .route("/nodes/conflicts", post(nodes::conflicts))

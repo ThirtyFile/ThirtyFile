@@ -27,7 +27,12 @@ test("sign in, upload, preview and download", async ({ page }) => {
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.waitForURL(/\/files/);
 
-  // Upload both files to "My files"
+  // Upload both files to a new folder in "My files" (which holds the other tests' folders, more than fit on screen)
+  const root = (await (await page.request.get("/api/auth/me")).json()).root_id;
+  const made = await page.request.post("/api/folders", { data: { parent_id: root, name: `Smoke ${Date.now().toString(36)}` } });
+  expect(made.ok()).toBe(true);
+  await page.goto(`/files/${(await made.json()).id}`);
+  await expect(page.getByText("No files here yet")).toBeVisible();
   await page.locator('input[type="file"][multiple]').setInputFiles([
     { name: "letter.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", buffer: docx },
     { name: "budget.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: xlsx },

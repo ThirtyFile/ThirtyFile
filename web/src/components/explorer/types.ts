@@ -1,12 +1,13 @@
 /** Types shared by the file explorer */
 import type { Located, Node } from "@/api";
+import type { Picked } from "@/lib/span";
 
 export type Item = Node & Partial<Pick<Located, "location">>;
 
 export type DialogState =
   | { t: "rename"; node: Pick<Node, "id" | "name"> }
-  | { t: "move" | "copy"; ids: string[] }
-  | { t: "trash"; ids: string[] }
+  | { t: "move" | "copy"; picked: Picked }
+  | { t: "trash"; picked: Picked }
   | { t: "share"; node: Node }
   | { t: "access"; nodeId: string };
 

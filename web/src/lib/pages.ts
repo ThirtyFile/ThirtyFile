@@ -9,33 +9,24 @@ const NEXT_PAGES = 2000;
 type FetchPage<T> = (limit: number, after: string | undefined, signal: AbortSignal) => Promise<CursorPage<T>>;
 
 /**
- * A folder or the trash, page by page: the first page shows right away, the others load one after another in the
- * background until the list is complete (so Select all covers everything), or until `enough` says the items loaded so
- * far will do. A refresh reloads the pages the same way. With `reuse`, pages already loaded aren't loaded again when
- * this starts using them.
+ * The trash, a shared folder, or a folder grouped by date or type, page by page: the first page shows right away, the
+ * others load one after another in the background until the list is complete (so Select all and the groups cover
+ * everything). A refresh reloads the pages the same way. A folder's own list loads only the parts in view (lib/windows).
  */
-export function useAllPages<T extends { id: string }>(
-  queryKey: QueryKey,
-  fetchPage: FetchPage<T>,
-  enabled = true,
-  { enough, reuse = false }: { enough?: (items: T[]) => boolean; reuse?: boolean } = {},
-) {
+export function useAllPages<T extends { id: string }>(queryKey: QueryKey, fetchPage: FetchPage<T>, enabled = true) {
   const q = useInfiniteQuery({
     queryKey,
     queryFn: ({ pageParam, signal }) => fetchPage(pageParam ? NEXT_PAGES : FIRST_PAGE, pageParam ?? undefined, signal),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next,
     enabled,
-    // Loaded pages stay as they are until a change marks them out of date
-    ...(reuse ? { staleTime: Infinity } : {}),
   });
   const { hasNextPage, isFetchingNextPage, isError, fetchNextPage } = q;
   const items = useMemo(() => allItems(q.data), [q.data]);
-  const done = !!enough?.(items);
   useEffect(() => {
-    if (hasNextPage && !isFetchingNextPage && !isError && !done) void fetchNextPage();
-  }, [hasNextPage, isFetchingNextPage, isError, done, fetchNextPage]);
-  return { items, isLoading: q.isLoading, error: q.error, loadingMore: !!hasNextPage && !done, complete: !!q.data && !hasNextPage, refetch: q.refetch };
+    if (hasNextPage && !isFetchingNextPage && !isError) void fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, isError, fetchNextPage]);
+  return { items, isLoading: q.isLoading, error: q.error, loadingMore: !!hasNextPage, complete: !!q.data && !hasNextPage, refetch: q.refetch };
 }
 
 /** The items of every page loaded so far; an item renamed between two pages can come twice, so each is kept once */
@@ -46,12 +37,6 @@ export function allItems<T extends { id: string }>(data: InfiniteData<CursorPage
   return data.pages.flatMap((p) => p.items.filter((n) => !seen.has(n.id) && !!seen.add(n.id)));
 }
 
-/** The items loaded so far reach past the file `id`, so both files next to it are known (for Previous and Next) */
-export function hasFileAfter(items: readonly { id: string; kind: string }[], id: string | undefined): boolean {
-  if (!id) return false;
-  const at = items.findIndex((n) => n.id === id);
-  return at >= 0 && items.slice(at + 1).some((n) => n.kind === "file");
-}
 
 /**
  * A list with its first page replaced by a newer copy. The items the old first page had are kept after the new ones

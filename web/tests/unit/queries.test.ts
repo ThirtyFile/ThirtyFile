@@ -152,6 +152,20 @@ describe("refreshFiles", () => {
     expect(loaded(other)).toBe(0);
   });
 
+  test("a part of a large folder loads again when a row leaves it; a part holding the whole folder only counts one less", async () => {
+    const part = ["children", "big", "name", "asc", "at", 500];
+    const small = ["children", "small", "name", "asc", "at", 0];
+    const { qc, loaded } = setup([
+      [part, { items: [node("a", "big"), node("b", "big")], next: null, total: 1200 }, true],
+      [small, { items: [node("x", "small"), node("y", "small")], next: null, total: 2 }, true],
+    ]);
+    await refreshFiles(qc, { removed: ["a", "x"] });
+    // The items after "a" moved up: the server says which one is at the end of the part now
+    expect(loaded(part)).toBe(1);
+    expect(loaded(small)).toBe(0);
+    expect(qc.getQueryData(small)).toMatchObject({ items: [{ id: "y" }], total: 1 });
+  });
+
   test("changes made in the same moment are applied together", async () => {
     const { qc, loaded } = setup([[big, pages([node("a", "big")]), true]]);
     await Promise.all([refreshFiles(qc, { folders: ["big"] }), refreshFiles(qc, { folders: ["big"], contents: true }), refreshFiles(qc, { folders: ["big"] })]);

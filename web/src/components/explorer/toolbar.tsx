@@ -80,15 +80,12 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
   const {
     caps,
     canCreate,
-    selectedNodes,
-    selectedIds,
     single,
     allFavorite,
     view,
     setView,
     groupBy,
     setGroupBy,
-    selected,
     setSelected,
     setDialog,
     showCheckboxes,
@@ -97,7 +94,7 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
     setDetailsOpen,
   } = s;
   const { download, toggleFavorite, cut, copy, canPaste, paste } = a;
-  const none = selectedNodes.length === 0;
+  const none = s.count === 0;
   // Windows 11 style command bar: New | Cut Copy Paste Rename Share Delete | Sort | View | ⋯ | Details
   const icon = "size-9 px-0 [&_svg]:size-[18px]";
   const phoneHidden = "max-md:hidden";
@@ -150,7 +147,7 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
         title={`${t("Delete")} (Delete)`}
         className={cn(icon, phoneHidden)}
         disabled={none || !caps.del}
-        onClick={() => setDialog({ t: "trash", ids: selectedIds })}
+        onClick={() => setDialog({ t: "trash", picked: s.picked })}
       />
       <ToolSeparator className="max-md:hidden" />
       {p.sort && p.onSortChange && (
@@ -222,16 +219,16 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
       <DropdownMenu>
         <DropdownMenuTrigger render={<ToolButton icon={EllipsisIcon} label={t("See more")} className={icon} />} />
         <DropdownMenuContent className="w-48">
-          <DropdownMenuItem disabled={none} onClick={() => download(selectedIds)}>
+          <DropdownMenuItem disabled={none} onClick={() => download(s.picked)}>
             <DownloadIcon /> {t("Download")}
           </DropdownMenuItem>
           <DropdownMenuItem disabled={none} onClick={toggleFavorite}>
             {allFavorite ? <StarOffIcon /> : <StarIcon />} {allFavorite ? t("Remove from favorites") : t("Add to favorites")}
           </DropdownMenuItem>
-          <DropdownMenuItem disabled={none || !caps.write} onClick={() => setDialog({ t: "move", ids: selectedIds })}>
+          <DropdownMenuItem disabled={none || !caps.write} onClick={() => setDialog({ t: "move", picked: s.picked })}>
             <FolderInputIcon /> {t("Move to…")}
           </DropdownMenuItem>
-          <DropdownMenuItem disabled={none || !caps.write} onClick={() => setDialog({ t: "copy", ids: selectedIds })}>
+          <DropdownMenuItem disabled={none || !caps.write} onClick={() => setDialog({ t: "copy", picked: s.picked })}>
             <CopyIcon /> {t("Copy to…")}
           </DropdownMenuItem>
           {p.folderId && (
@@ -240,14 +237,14 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setSelected(new Set(p.items.map((n) => n.id)))}>
+          <DropdownMenuItem onClick={s.selectAll}>
             <SquareCheckIcon /> {t("Select all")} <Kbd>Ctrl+A</Kbd>
           </DropdownMenuItem>
           <DropdownMenuItem disabled={none} onClick={() => setSelected(new Set())}>
             <XSquareIcon /> {t("Select none")} <Kbd>Esc</Kbd>
           </DropdownMenuItem>
           {/* With nothing selected, inverting selects everything (like File Explorer) */}
-          <DropdownMenuItem onClick={() => setSelected(new Set(p.items.filter((n) => !selected.has(n.id)).map((n) => n.id)))}>
+          <DropdownMenuItem disabled={!s.canInvert} onClick={s.invert}>
             <SquareCheckIcon /> {t("Invert selection")}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
