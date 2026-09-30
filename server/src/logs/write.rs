@@ -1,5 +1,5 @@
-//! Writing the logs: the activity log (within the caller's transaction), and sign-in and share link events (queued
-//! and written in batches by a background task).
+//! Writing the logs: the activity log (within the caller's transaction), and sign-in, share link and error events
+//! (queued and written in batches by a background task).
 
 use axum::http::HeaderMap;
 use sqlx::SqliteConnection;
@@ -15,10 +15,11 @@ use crate::{
 
 // ───────────── Background log writer ─────────────
 
-/// One sign-in or share-access event, queued for the background writer
+/// One sign-in, share-access or error event, queued for the background writer
 pub enum LogEvent {
     ShareAccess { at: i64, share_id: String, owner_id: i64, node_id: Option<String>, node_name: String, event: &'static str, ip: String, user_agent: String },
     Login { at: i64, user_id: Option<i64>, username: String, event: &'static str, method: String, ip: String, user_agent: String },
+    Error(Box<super::ErrorEvent>),
 }
 
 /// Queue capacity: beyond this, events are dropped (counted in the log) rather than piling up tasks waiting for the write lock
@@ -116,6 +117,7 @@ async fn write_batch(st: &AppState, batch: &[LogEvent]) {
                         .execute(&mut *tx)
                         .await?;
                 }
+                LogEvent::Error(e) => super::errors::write_error(&mut tx, st, e).await?,
             }
         }
         tx.commit().await
@@ -126,7 +128,7 @@ async fn write_batch(st: &AppState, batch: &[LogEvent]) {
     }
 }
 
-fn enqueue(st: &AppState, event: LogEvent) {
+pub(super) fn enqueue(st: &AppState, event: LogEvent) {
     static DROPPED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     if st.log_tx.try_send(event).is_err() {
         let n = DROPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;

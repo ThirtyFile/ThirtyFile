@@ -85,6 +85,8 @@ pub struct Inner {
     pub log_tx: tokio::sync::mpsc::Sender<crate::logs::LogEvent>,
     /// Storage operations counted since the last sample (usage/)
     pub usage: Arc<crate::usage::Meters>,
+    /// The error log's rate limits and recently failed requests (logs/errors.rs)
+    pub error_log: crate::logs::ErrorLogState,
 }
 
 #[derive(Debug, Clone)]

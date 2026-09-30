@@ -391,6 +391,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         jobs: Default::default(),
         log_tx,
         usage: Default::default(),
+        error_log: Default::default(),
     }));
 
     let log_writer = logs::spawn_writer(state.clone(), log_rx);
@@ -433,7 +434,14 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
 /// All routes: the API (with or without the request timeout) and the web interface
 fn router(state: AppState) -> Router {
     Router::new()
-        .nest("/api", api().layer(TimeoutLayer::with_status_code(StatusCode::GATEWAY_TIMEOUT, Duration::from_secs(120))).merge(untimed()))
+        .nest(
+            "/api",
+            api()
+                .layer(TimeoutLayer::with_status_code(StatusCode::GATEWAY_TIMEOUT, Duration::from_secs(120)))
+                .merge(untimed())
+                // The error log records the route that answered, not the path asked for (logs/errors.rs)
+                .route_layer(middleware::from_fn(logs::note_route)),
+        )
         // WebDAV (dav.rs): outside the request timeout too, as it receives and sends whole files
         .route(dav::PREFIX, any(dav::handle))
         .route("/dav/", any(dav::handle))
@@ -448,6 +456,9 @@ fn router(state: AppState) -> Router {
         .layer(TraceLayer::new_for_http())
         // A bug hit by one request answers that request with an error instead of stopping the server for everyone
         .layer(tower_http::catch_panic::CatchPanicLayer::new())
+        // Outermost, so a request that panicked is recorded too: gives each request an id and records the errors
+        // people run into (logs/errors.rs)
+        .layer(middleware::from_fn_with_state(state.clone(), logs::track))
         .with_state(state)
 }
 
@@ -745,6 +756,10 @@ fn api() -> Router<AppState> {
         .route("/admin/branding", put(branding::update))
         .route("/login-log", get(logs::login_log))
         .route("/login-log/export", get(logs::export_login_log))
+        // Errors the page ran into (anyone may report, within limits), and the error log for administrators
+        .route("/client-errors", post(logs::client_report))
+        .route("/admin/errors", get(logs::error_log))
+        .route("/admin/errors/export", get(logs::export_errors))
         .route("/admin/logs", get(logs::get_status).put(logs::update_settings))
         .route("/admin/logs/archive", post(logs::archive_now))
         .route("/admin/logs/archives/{id}", get(logs::download_archive).delete(logs::delete_archive))

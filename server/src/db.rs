@@ -692,6 +692,26 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[tokio::test]
+    async fn a_database_from_0_4_0_gets_an_empty_error_log_and_keeps_its_logs() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-040-errors-{}", crate::util::new_id()));
+        let path = dir.join("drive.db");
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO activity (at, username, node_name, action) VALUES (1, 'amy', 'Plan.docx', 'upload')").execute(&db).await.unwrap();
+        assert!(sqlx::query("SELECT id FROM error_log").fetch_all(&db).await.is_err(), "0.4.0 has no error log");
+        db.close().await;
+
+        let db = connect(&path, 16).await.unwrap();
+        let (activity,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM activity").fetch_one(&db).await.unwrap();
+        assert_eq!(activity, 1);
+        sqlx::query("INSERT INTO error_log (at, first_at, source, severity, fingerprint) VALUES (2, 2, 'backend', 'error', 'f')").execute(&db).await.unwrap();
+        let (count, message): (i64, String) = sqlx::query_as("SELECT count, message FROM error_log").fetch_one(&db).await.unwrap();
+        assert_eq!((count, message.as_str()), (1, ""));
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     async fn admin_hash(password: Option<&str>) -> String {
         let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));
         std::fs::create_dir_all(&dir).unwrap();

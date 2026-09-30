@@ -9,6 +9,7 @@ import { ApiError, api, fetchOk, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
 import { getDraft, setDraft, textSaved } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
+import { reportShown } from "@/lib/errorReport";
 import { shortcut } from "@/lib/keys";
 import { decodeText, encodeText, lineEnding, normalizeLines, type TextEncodingName } from "@/lib/textEncoding";
 import { useTheme } from "@/lib/theme";
@@ -83,7 +84,11 @@ export default function TextEditor(props: {
         }
         setEncoding(d.encoding);
       })
-      .catch((e) => !cancelled && setError(e.message));
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e.message);
+        reportShown("preview", e, props.node.id);
+      });
     const desc = LanguageDescription.matchFilename(languages, props.node.name);
     desc?.load().then((l) => !cancelled && setLang(l));
     return () => {
@@ -131,6 +136,7 @@ export default function TextEditor(props: {
           },
         });
       } else toast.error(e instanceof Error ? e.message : t("Couldn't save"));
+      reportShown("save", e, props.node.id);
     } finally {
       setSaving(false);
     }

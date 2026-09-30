@@ -10,13 +10,15 @@ pub struct AppError {
     pub status: StatusCode,
     pub message: String,
     pub code: Option<&'static str>,
+    /// For server failures: what kind of failure, for the error log (never names, paths or contents; see `logs::errors`)
+    pub diag: Option<String>,
 }
 
 pub type AppResult<T> = Result<T, AppError>;
 
 impl AppError {
     pub fn new(status: StatusCode, message: impl Into<String>) -> Self {
-        Self { status, message: message.into(), code: None }
+        Self { status, message: message.into(), code: None, diag: None }
     }
     pub fn with_code(mut self, code: &'static str) -> Self {
         self.code = Some(code);
@@ -37,19 +39,49 @@ impl AppError {
     pub fn conflict(m: impl Into<String>) -> Self {
         Self::new(StatusCode::CONFLICT, m)
     }
-    pub fn internal(e: impl std::fmt::Display) -> Self {
-        tracing::error!("internal error: {e}");
-        Self::new(StatusCode::INTERNAL_SERVER_ERROR, "A server error occurred")
+    /// An unexpected failure: its text goes to the server log under the request's id; the person is told a server error
+    /// occurred, and the error log records what kind of failure it was (the text can name files and paths)
+    pub fn internal<E: std::fmt::Display + 'static>(e: E) -> Self {
+        let request = crate::logs::request_id().unwrap_or_default();
+        tracing::error!(request, "internal error: {e}");
+        let mut err = Self::new(StatusCode::INTERNAL_SERVER_ERROR, "A server error occurred");
+        err.diag = Some(diagnosis(&e));
+        err
     }
+}
+
+/// What kind of failure an error is, without its text: SQLite's messages name tables and columns (never values) and
+/// fixed wording (`&'static str`) names nothing; other text can name files, folders and hosts
+fn diagnosis<E: std::fmt::Display + 'static>(e: &E) -> String {
+    let any = e as &dyn std::any::Any;
+    if let Some(io) = any.downcast_ref::<std::io::Error>() {
+        return match io.raw_os_error() {
+            Some(code) => format!("Disk or storage error: {:?} (os error {code})", io.kind()),
+            None => format!("Disk or storage error: {:?}", io.kind()),
+        };
+    }
+    if let Some(db) = any.downcast_ref::<sqlx::Error>() {
+        return format!("Database error: {}", crate::logs::redact(&db.to_string()));
+    }
+    if let Some(text) = any.downcast_ref::<&str>() {
+        return text.to_string();
+    }
+    if any.is::<tokio::task::JoinError>() {
+        return "A background task failed".into();
+    }
+    format!("{} (the text is in the server log)", std::any::type_name::<E>())
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        let info = self.info();
         let body = match self.code {
             Some(code) => json!({ "error": self.message, "code": code }),
             None => json!({ "error": self.message }),
         };
-        (self.status, Json(body)).into_response()
+        let mut res = (self.status, Json(body)).into_response();
+        res.extensions_mut().insert(info);
+        res
     }
 }
 

@@ -16,6 +16,7 @@ const KIND_LABEL: Record<LogArchive["kind"], string> = {
   activity: t("Activity log"),
   share_access: t("Share link access log"),
   login_log: t("Sign-in log"),
+  error_log: t("Error log"),
 };
 
 function days(n: number) {
@@ -85,7 +86,7 @@ export function LogSettingsPage() {
       ) : (
         <>
           <Section title={t("Current status")}>
-            <dl className="grid grid-cols-2 sm:grid-cols-5">
+            <dl className="grid grid-cols-2 sm:grid-cols-3">
               {[
                 [
                   t("Activity log"),
@@ -102,10 +103,15 @@ export function LogSettingsPage() {
                   t("{n} entry|{n} entries", { n: d.login_log.rows }),
                   d.login_log.oldest ? t("Oldest: {date}", { date: formatDate(d.login_log.oldest) }) : "—",
                 ],
+                [
+                  t("Error log"),
+                  t("{n} entry|{n} entries", { n: d.error_log.rows }),
+                  d.error_log.oldest ? t("Oldest: {date}", { date: formatDate(d.error_log.oldest) }) : "—",
+                ],
                 [t("Archives"), t("{n}", { n: d.archives.length }), formatBytes(d.archive_bytes)],
                 [t("Last cleanup"), d.last_run ? formatDate(d.last_run) : t("Not run yet"), t("Runs automatically every day")],
               ].map(([k, v, hint]) => (
-                <div key={k} className="border-r border-b p-4 [&:nth-child(2n)]:max-sm:border-r-0 sm:[&:nth-child(5n)]:border-r-0">
+                <div key={k} className="border-r border-b p-4 [&:nth-child(2n)]:max-sm:border-r-0 sm:[&:nth-child(3n)]:border-r-0">
                   <dt className="text-xs text-muted-foreground">{k}</dt>
                   <dd className="mt-1 text-lg font-medium tabular-nums">{v}</dd>
                   <dd className="text-[11px] text-muted-foreground">{hint}</dd>
@@ -125,7 +131,7 @@ export function LogSettingsPage() {
               <div className="grid gap-5 sm:grid-cols-2">
                 <DayInput
                   label={t("Activity log retention (days)")}
-                  hint={t("Days to keep in the database; older entries are cleaned up once a day. 0 = no cleanup")}
+                  hint={t("Days to keep activity and error log entries in the database; older entries are cleaned up once a day. 0 = no cleanup")}
                   value={cur.activity_days}
                   onChange={(v) => set({ activity_days: v })}
                 />

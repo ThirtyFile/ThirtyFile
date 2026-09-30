@@ -13,6 +13,7 @@ import { askBeforeTransfer } from "@/components/ConflictDialog";
 import { carriesFiles, dropFiles, dropItems } from "@/lib/dnd";
 import { filesFromDrop, uploadFiles } from "@/uploads";
 import { runJob, waitForJob } from "@/lib/jobs";
+import { reportShown } from "@/lib/errorReport";
 import { type Item, isTyping } from "./types";
 import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
@@ -70,6 +71,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       setDialog({ t: "rename", node: { id, name } });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Couldn't create"));
+      reportShown("create", e, p.folderId ?? undefined);
     }
   };
 
@@ -99,6 +101,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Operation failed"));
+      reportShown("favorite", e);
     }
   };
 
@@ -134,6 +137,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : fallback);
+      reportShown(mode, e, dest);
       // What was done before it failed shows
       refreshContents();
       return false;
@@ -180,6 +184,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       setSelected(new Set());
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Operation failed"));
+      reportShown("delete", e);
     }
     refreshContents();
   };

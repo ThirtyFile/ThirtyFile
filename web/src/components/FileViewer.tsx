@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { FileIcon, categoryOf, isBrowserMedia, isTextLike } from "@/components/FileIcon";
 import { hasDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
+import { reportShown } from "@/lib/errorReport";
 import { cn, extOf, formatBytes } from "@/lib/utils";
 import { MAX_OFFICE_PREVIEW_BYTES } from "@/lib/office/limits";
 
@@ -114,18 +115,22 @@ function MarkdownFile(props: Parameters<typeof FileViewer>[0]) {
 /** Picture or video; if the browser can't show it after all (format or codec), offer the download instead of a broken image or an empty player */
 function Media({ node, url, source, allowDownload }: { node: Node; url: string; source: FileSource; allowDownload?: boolean }) {
   const [failed, setFailed] = useState(false);
+  const fail = () => {
+    setFailed(true);
+    reportShown("preview", new Error(`The browser couldn't show this ${categoryOf(node)} file (${node.mime || "unknown type"})`), node.id);
+  };
   if (failed) return <NoPreview node={node} source={source} allowDownload={allowDownload} reason={t("Your browser can't show this file")} />;
   if (categoryOf(node) === "image")
-    return <img src={url} alt={node.name} onError={() => setFailed(true)} className="max-h-full max-w-full object-contain select-none" />;
+    return <img src={url} alt={node.name} onError={fail} className="max-h-full max-w-full object-contain select-none" />;
   if (categoryOf(node) === "audio")
     return (
       <div className="flex w-full max-w-md flex-col items-center gap-6 rounded-2xl border bg-background p-8 text-foreground">
         <FileIcon node={node} className="size-16" />
         <div className="text-sm font-medium break-all">{node.name}</div>
-        <audio src={url} controls autoPlay onError={() => setFailed(true)} className="w-full" />
+        <audio src={url} controls autoPlay onError={fail} className="w-full" />
       </div>
     );
-  return <video src={url} controls autoPlay onError={() => setFailed(true)} className="max-h-full max-w-full rounded-lg bg-black" />;
+  return <video src={url} controls autoPlay onError={fail} className="max-h-full max-w-full rounded-lg bg-black" />;
 }
 
 function NoPreview({ node, source, allowDownload, reason }: { node: Node; source: FileSource; allowDownload?: boolean; reason: string }) {

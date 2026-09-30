@@ -1,15 +1,18 @@
-//! Logs: the activity log, share link visit log and sign-in log, and their settings. Split into writing (`write`),
-//! querying (`query`), CSV export (`export`) and periodic compressed archiving (`archive`).
+//! Logs: the activity log, share link visit log, sign-in log and error log, and their settings. Split into writing
+//! (`write`), querying (`query`), CSV export (`export`), periodic compressed archiving (`archive`) and the error log
+//! (`errors`).
 //!
 //! The database keeps only recent records (180 days by default); older ones are compressed daily into `data/archives/*.jsonl.gz`
 //! (one JSON record per line, importable with any text tool or spreadsheet). Archive files have their own retention period, so data doesn't grow forever.
 
 mod archive;
+mod errors;
 mod export;
 mod query;
 mod write;
 
 pub use archive::*;
+pub use errors::*;
 pub use export::*;
 pub use query::*;
 pub use write::*;
@@ -196,7 +199,7 @@ mod tests {
             .unwrap();
 
         let sum = run_archive(&env.st).await.unwrap();
-        assert_eq!(sum.archived, [50, 1, 0]);
+        assert_eq!(sum.archived, [50, 1, 0, 0]);
         let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM activity WHERE node_name LIKE 'old-file-%'").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(left, 0, "archived records should be removed from the database");
         let (kept,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM activity WHERE node_name = 'new-file'").fetch_one(&env.st.db).await.unwrap();
@@ -332,7 +335,7 @@ mod tests {
         // Sign-in records past the retention period are archived too
         sqlx::query("UPDATE login_log SET at = at - 400 * 86400").execute(&env.st.db).await.unwrap();
         let sum = run_archive(&env.st).await.unwrap();
-        assert_eq!(sum.archived, [0, 0, 8]);
+        assert_eq!(sum.archived, [0, 0, 8, 0]);
         assert!(sum.describe() == "Archived 8 sign-in log entries");
     }
 

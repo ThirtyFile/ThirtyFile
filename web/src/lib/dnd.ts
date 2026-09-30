@@ -8,6 +8,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/api";
 import { t } from "@/lib/i18n";
+import { reportShown } from "@/lib/errorReport";
 import { wantsCopy } from "@/lib/keys";
 import { waitForJob } from "@/lib/jobs";
 import { FOLDER_CONTENTS, invalidateFiles } from "@/lib/queries";
@@ -73,6 +74,7 @@ export async function dropItems(qc: QueryClient, ids: string[], folder: DropFold
     refresh();
   } catch (e) {
     toast.error(e instanceof Error ? e.message : copy ? t("Couldn't copy") : t("Couldn't move"));
+    reportShown(copy ? "copy" : "move", e, folder.id);
     refresh();
   }
 }

@@ -2,6 +2,7 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 import { TriangleAlertIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { isChunkLoadError, reloadForNewVersion } from "@/lib/reload";
+import { reportRender } from "@/lib/errorReport";
 import { t } from "@/lib/i18n";
 
 /**
@@ -19,6 +20,8 @@ export class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: s
     // The site was updated and the old code chunk no longer exists: reload automatically
     if (isChunkLoadError(error) && reloadForNewVersion()) return;
     console.error("Render error", error, info.componentStack);
+    // Recorded in the error log for administrators (in the background; nothing waits for it)
+    reportRender(error, info.componentStack);
   }
 
   // A new reset key (another page or file) clears the error

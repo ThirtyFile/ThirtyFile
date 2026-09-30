@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { t } from "@/lib/i18n";
+import { reportShown } from "@/lib/errorReport";
 
 /**
  * Inline rename (like Windows File Explorer): the name turns into an input with only the base name selected.
@@ -63,6 +64,7 @@ export function InlineRename({
       onDone(byKey);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Couldn't rename"));
+      reportShown("rename", e);
       setBusy(false);
       // Stay in edit mode so the user can fix it
       requestAnimationFrame(() => ref.current?.focus());

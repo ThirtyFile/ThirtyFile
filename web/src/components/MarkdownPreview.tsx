@@ -3,6 +3,7 @@ import { Loader2Icon } from "lucide-react";
 import { fetchOk, type FileSource, type Node } from "@/api";
 import { getDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
+import { reportShown } from "@/lib/errorReport";
 import { renderMarkdown } from "@/lib/markdown";
 import { decodeText, normalizeLines } from "@/lib/textEncoding";
 
@@ -24,7 +25,11 @@ export default function MarkdownPreview(props: { node: Node; source: FileSource;
         const draft = getDraft(props.node.id, "text");
         setText(draft ? draft.text : normalizeLines(decodeText(buf).text));
       })
-      .catch((e) => !cancelled && setError(e.message));
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e.message);
+        reportShown("preview", e, props.node.id);
+      });
     return () => {
       cancelled = true;
       abort.abort();
