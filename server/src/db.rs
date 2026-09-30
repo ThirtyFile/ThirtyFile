@@ -14,6 +14,11 @@ use crate::{
 
 /// Opens the database; `cache_mb` is the page cache of each connection (`THIRTYFILE_DB_CACHE_MB`)
 pub async fn connect(path: &Path, cache_mb: u32) -> Result<SqlitePool, Box<dyn std::error::Error>> {
+    open(path, cache_mb, &sqlx::migrate!("./migrations")).await
+}
+
+/// `connect` with the given migrations: the tests add one to see an upgrade through
+async fn open(path: &Path, cache_mb: u32, migrator: &sqlx::migrate::Migrator) -> Result<SqlitePool, Box<dyn std::error::Error>> {
     let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", path.display()))?
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
@@ -35,14 +40,13 @@ pub async fn connect(path: &Path, cache_mb: u32) -> Result<SqlitePool, Box<dyn s
         .after_connect(|conn, _| Box::pin(async move { register_functions(conn).await }))
         .connect_with(opts)
         .await?;
-    let migrator = sqlx::migrate!("./migrations");
     // Said plainly, before the database is copied or changed (`check_existing` usually said it already)
     if let Ok(applied) = sqlx::query_as::<_, (i64, Vec<u8>)>("SELECT version, checksum FROM _sqlx_migrations WHERE success = 1").fetch_all(&pool).await
-        && let Some(message) = unusable(&applied, &migrator)
+        && let Some(message) = unusable(&applied, migrator)
     {
         return Err(message.into());
     }
-    backup_before_migrations(&pool, &migrator, path).await?;
+    backup_before_migrations(&pool, migrator, path).await?;
     migrator.run(&pool).await?;
     optimize(&pool).await;
     Ok(pool)
@@ -671,34 +675,77 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_database_is_copied_before_new_migrations_and_on_request() {
+    async fn the_database_is_only_copied_on_request_when_it_is_up_to_date() {
         let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("drive.db");
         let db = connect(&path, 16).await.unwrap();
-        // Up to date: no copy
-        let current = sqlx::migrate!("./migrations");
-        backup_before_migrations(&db, &current, &path).await.unwrap();
+        backup_before_migrations(&db, &sqlx::migrate!("./migrations"), &path).await.unwrap();
         assert!(!dir.join("backups").exists());
-        // A newer version with one more migration: copied first
-        let newer_dir = dir.join("migrations");
-        std::fs::create_dir_all(&newer_dir).unwrap();
-        for e in std::fs::read_dir("migrations").unwrap() {
-            let e = e.unwrap();
-            std::fs::copy(e.path(), newer_dir.join(e.file_name())).unwrap();
-        }
-        std::fs::write(newer_dir.join("9999_next.sql"), "CREATE TABLE next (id INTEGER);").unwrap();
-        let newer = sqlx::migrate::Migrator::new(newer_dir.as_path()).await.unwrap();
-        backup_before_migrations(&db, &newer, &path).await.unwrap();
-        let copy = dir.join("backups").join(format!("drive-before-{}.db", crate::VERSION));
-        let copied = connect(&copy, 16).await.unwrap();
-        let (users,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users").fetch_one(&copied).await.unwrap();
-        assert_eq!(users, 0);
-        copied.close().await;
         // On request, never over an existing file
         backup_to(&db, &dir.join("manual.db")).await.unwrap();
         assert!(backup_to(&db, &dir.join("manual.db")).await.is_err());
         db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Migrations read from a folder holding `files` from server/migrations, plus `extra` (name, SQL)
+    async fn migrations_in(dir: &Path, files: &[std::path::PathBuf], extra: Option<(&str, &str)>) -> sqlx::migrate::Migrator {
+        std::fs::create_dir_all(dir).unwrap();
+        for f in files {
+            std::fs::copy(f, dir.join(f.file_name().unwrap())).unwrap();
+        }
+        if let Some((name, sql)) = extra {
+            std::fs::write(dir.join(name), sql).unwrap();
+        }
+        sqlx::migrate::Migrator::new(dir).await.unwrap()
+    }
+
+    /// The structure is frozen at 0.4.0 (CI checks that 0001_init.sql is the file of v0.4.0): later changes are new
+    /// migration files. A data folder made by 0.4.0 is copied before they run, then upgraded with its data kept.
+    #[tokio::test]
+    async fn a_database_from_0_4_0_is_copied_then_upgraded_when_a_migration_file_is_added() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-upgrade-{}", crate::util::new_id()));
+        let path = dir.join("data").join("drive.db");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut ours: Vec<_> = std::fs::read_dir("migrations").unwrap().map(|e| e.unwrap().path()).collect();
+        ours.sort();
+
+        // 0.4.0: 0001_init.sql only, with an account and a setting in it
+        let v040 = migrations_in(&dir.join("v0.4.0"), &ours[..1], None).await;
+        assert_eq!(v040.iter().map(|m| m.version).collect::<Vec<_>>(), [1]);
+        let db = open(&path, 16, &v040).await.unwrap();
+        bootstrap_admin(&db, Some("upgrade-test"), None).await.unwrap();
+        set_setting(&mut db.acquire().await.unwrap(), "upgrade-test", "kept").await.unwrap();
+        db.close().await;
+
+        // This version and one more migration file after it (test-only)
+        let next = sqlx::migrate!("./migrations").iter().map(|m| m.version).max().unwrap() + 1;
+        let newer = migrations_in(&dir.join("newer"), &ours, Some((&format!("{next:04}_upgrade_test.sql"), "CREATE TABLE upgrade_test (id INTEGER);"))).await;
+        check_existing(&path).await.unwrap();
+        let db = open(&path, 16, &newer).await.unwrap();
+        let applied: Vec<(i64,)> = sqlx::query_as("SELECT version FROM _sqlx_migrations WHERE success = 1 ORDER BY version").fetch_all(&db).await.unwrap();
+        assert_eq!(applied.into_iter().map(|(v,)| v).collect::<Vec<_>>(), newer.iter().map(|m| m.version).collect::<Vec<_>>());
+        sqlx::query("SELECT id FROM upgrade_test").fetch_all(&db).await.unwrap();
+        assert_eq!(get_setting(&db, "upgrade-test").await.unwrap().as_deref(), Some("kept"));
+        let (users,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users WHERE username = 'admin'").fetch_one(&db).await.unwrap();
+        assert_eq!(users, 1);
+        db.close().await;
+
+        // The copy is the database as 0.4.0 left it, and 0.4.0 can start on it again
+        let copy = dir.join("data").join("backups").join(format!("drive-before-{}.db", crate::VERSION));
+        assert!(copy.is_file(), "no copy in {}", copy.display());
+        let old = open(&copy, 16, &v040).await.unwrap();
+        let applied: Vec<(i64,)> = sqlx::query_as("SELECT version FROM _sqlx_migrations").fetch_all(&old).await.unwrap();
+        assert_eq!(applied, [(1,)]);
+        assert_eq!(get_setting(&old, "upgrade-test").await.unwrap().as_deref(), Some("kept"));
+        old.close().await;
+
+        // Starting again changes nothing and copies nothing more
+        let db = open(&path, 16, &newer).await.unwrap();
+        db.close().await;
+        let copies = std::fs::read_dir(copy.parent().unwrap()).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().ends_with(".db")).count();
+        assert_eq!(copies, 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

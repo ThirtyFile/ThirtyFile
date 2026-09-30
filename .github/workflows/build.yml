@@ -60,6 +60,31 @@ jobs:
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # The database structure is frozen at v0.4.0: data folders made by a release must keep starting, and the server
+  # refuses a database whose applied migration file has changed since (db.rs, "made by a different build"). Changes to
+  # the structure go into a new migration file (0002_…), and the database is copied before it runs
+  migrations:
+    name: Released migrations unchanged
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: |
+          # v0.4.0 and the newest release: every migration file in them is still here, byte for byte
+          latest=$(git tag -l 'v*' --sort=-v:refname | grep -v -- - | head -n 1)
+          failed=0
+          for tag in v0.4.0 $latest; do
+            for file in $(git ls-tree -r --name-only "$tag" -- server/migrations/); do
+              if ! git diff --quiet "$tag" HEAD -- "$file"; then
+                echo "::error file=$file::$file differs from the file released in $tag. Released migrations never change: put the change in a new file, server/migrations/000N_<name>.sql"
+                failed=1
+              fi
+            done
+          done
+          exit "$failed"
+
   check:
     name: Tests
     timeout-minutes: 45
@@ -218,14 +243,14 @@ jobs:
   result:
     name: Checks passed
     timeout-minutes: 5
-    needs: [changes, check, image]
+    needs: [changes, migrations, check, image]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          echo "changes, tests, image: $RESULTS"
+          echo "changes, migrations, tests, image: $RESULTS"
           case " $RESULTS " in
             *" failure "* | *" cancelled "*) exit 1 ;;
           esac
