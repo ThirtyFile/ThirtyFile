@@ -430,7 +430,7 @@ async fn make_folder(cx: &Ctx<'_>, target: &tree::Drive, parent: &str, name: &st
             None => {
                 let free =
                     if target.is_folder() { crate::fsops::free_name(&mut tx, &parent, &name, true).await? } else { tree::unique_name(&mut tx, &parent.id, &name, true).await? };
-                (tree::create_folder(&mut tx, owner_of(cx, target), &parent.id, &free).await?, free)
+                (crate::content::create_folder(&mut tx, owner_of(cx, target), &parent.id, &free).await?, free)
             }
         };
         sqlx::query("INSERT INTO backup_restored (job_id, source_id, node_id) VALUES (?, ?, ?)").bind(&cx.job.id).bind(source).bind(&id).execute(&mut *tx).await?;

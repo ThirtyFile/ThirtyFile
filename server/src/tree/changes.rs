@@ -764,10 +764,10 @@ mod tests {
         let make = |name: &'static str| {
             let (st, root, owner) = (env.st.clone(), amy.root().to_string(), amy.id);
             async move {
-                let top = crate::tree::create_folder(&mut st.db.acquire().await.unwrap(), owner, &root, name).await.unwrap();
+                let top = crate::content::create_folder(&mut st.db.acquire().await.unwrap(), owner, &root, name).await.unwrap();
                 let mut tx = crate::db::begin_write(&st.db).await.unwrap();
                 for f in 0..n / 100 {
-                    let d = crate::tree::create_folder(&mut tx, owner, &top, &format!("d{f}")).await.unwrap();
+                    let d = crate::content::create_folder(&mut tx, owner, &top, &format!("d{f}")).await.unwrap();
                     let rows: Vec<serde_json::Value> = (0..99).map(|i| json!([new_id(), format!("f{i}.txt")])).collect();
                     sqlx::query(
                         "INSERT INTO nodes (id, owner_id, parent_id, kind, name, size, drive_id, created_at, updated_at)

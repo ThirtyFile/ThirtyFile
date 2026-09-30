@@ -640,7 +640,7 @@ async fn commit_upload(st: &AppState, up: &Uploader, upload: &Upload, staged: &c
         return Err(AppError::forbidden("You no longer have permission to upload to this folder"));
     }
     staged.check(&parent)?;
-    let folder_id = tree::ensure_folders(&mut tx, upload.owner_id, &parent.id, &upload.rel_path, &upload.batch).await?;
+    let folder_id = crate::content::ensure_folders(&mut tx, upload.owner_id, &parent.id, &upload.rel_path, &upload.batch).await?;
     let folder = tree::get_node(&mut tx, &folder_id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
     let replaced = replaced_file(&mut tx, user, upload, &folder.id).await?;
     // Checked again now: an upload idle for a day stopped holding its space (it may be taken by now), and a folder

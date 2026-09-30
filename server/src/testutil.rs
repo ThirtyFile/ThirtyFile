@@ -141,7 +141,7 @@ impl TestEnv {
 
     pub async fn folder(&self, owner: &User, parent: &str, name: &str) -> String {
         let mut conn = self.st.db.acquire().await.unwrap();
-        crate::tree::create_folder(&mut conn, owner.id, parent, name).await.unwrap()
+        crate::content::create_folder(&mut conn, owner.id, parent, name).await.unwrap()
     }
 
     /// Creates a file node (without physical content) in a folder

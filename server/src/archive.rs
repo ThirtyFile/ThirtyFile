@@ -435,7 +435,7 @@ async fn extract_into(st: &AppState, user: &User, progress: &Tracker, zip: &Node
         // The new folder is named after the archive
         let stem = validate_name(split_name(&zip.name, false).0).unwrap_or_else(|_| "Extracted".into());
         let name = tree::unique_name(&mut tx, &parent.id, &stem, true).await?;
-        let root = tree::create_folder(&mut tx, user.id, &parent.id, &name).await?;
+        let root = crate::content::create_folder(&mut tx, user.id, &parent.id, &name).await?;
         let root_node = tree::get_node(&mut tx, &root).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
         let mut folders: HashMap<Vec<String>, Node> = HashMap::new();
         folders.insert(Vec::new(), root_node.clone());
@@ -449,7 +449,7 @@ async fn extract_into(st: &AppState, user: &User, progress: &Tracker, zip: &Node
                 folder = match folders.get(&key) {
                     Some(n) => n.clone(),
                     None => {
-                        let id = tree::ensure_folders(&mut tx, user.id, &folder.id, d, "").await?;
+                        let id = crate::content::ensure_folders(&mut tx, user.id, &folder.id, d, "").await?;
                         let n = tree::get_node(&mut tx, &id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
                         folders.insert(key.clone(), n.clone());
                         n

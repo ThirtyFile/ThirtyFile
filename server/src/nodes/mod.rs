@@ -38,8 +38,6 @@ use crate::{
 const MAX_BATCH: usize = 1000;
 /// Files and folders one copy may create (counted after expanding folders)
 const MAX_COPY_ITEMS: usize = 20_000;
-/// First segment of the location text for items accessed through a folder share (the browser uses its own text)
-const SHARED_WITH_ME: &str = "Shared with me";
 
 /// What people who can open a space are told about it
 #[derive(Serialize)]
@@ -234,7 +232,7 @@ async fn locate(st: &AppState, user: &User, mut nodes: Vec<Node>) -> AppResult<V
         // Accessed through a folder share: only shown from the shared folder down
         let start = if space.is_some() { 0 } else { tree::shared_start(&path, &shared).unwrap_or(path.len()) };
         let location_path: Vec<String> = path[start..].iter().map(|p| p.name.clone()).collect();
-        let first = space.as_ref().map_or(SHARED_WITH_ME, |s| s.name.as_str());
+        let first = space.as_ref().map_or(paths::SHARED, |s| s.name.as_str());
         let location = std::iter::once(first).chain(location_path.iter().map(String::as_str)).collect::<Vec<_>>().join("/");
         out.push(Located { node, location, location_space: space, location_path, deleted_by: None });
     }
@@ -264,7 +262,7 @@ mod tests {
         assert!(tree::name_taken(&mut c, amy.root(), "été").await.unwrap());
         assert_eq!(tree::unique_name(&mut c, amy.root(), "ÉTÉ", true).await.unwrap(), "ÉTÉ (1)");
         // An uploaded folder "été/x" goes into the existing "Été"
-        let found = tree::ensure_folders(&mut c, amy.id, amy.root(), "été", "").await.unwrap();
+        let found = crate::content::ensure_folders(&mut c, amy.id, amy.root(), "été", "").await.unwrap();
         assert_eq!(found, folder);
         // The database refuses a second one too
         let dup = sqlx::query(

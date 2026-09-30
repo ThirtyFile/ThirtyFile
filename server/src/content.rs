@@ -1,5 +1,6 @@
-//! Where a received file becomes a file in a folder: the only place that happens, for both kinds of space. Uploads,
-//! WebDAV, saving from the editor, restoring an earlier version and making a ZIP file all go through here.
+//! Where a received file becomes a file in a folder, and where folders are made: the only places that happens, for
+//! both kinds of space. Uploads, WebDAV, saving from the editor, restoring an earlier version or a backup and making
+//! or extracting a ZIP file all go through here.
 //!
 //! - A space that keeps its files in the content store: the content is stored on the space's storage location first,
 //!   named by its SHA-256 (`stage`, without the write lock: S3 may take a while); the file records a reference to it
@@ -216,6 +217,93 @@ pub async fn replace(conn: &mut SqliteConnection, st: &AppState, staged: &Staged
             Ok(Written { extra: None, removed })
         }
     }
+}
+
+/// Finds or creates folders under parent following a relative path (a/b/c), returning the id of the deepest folder.
+///
+/// When a name on the way is taken by a file, a numbered folder is created instead ("Photos (1)"). Every file of an
+/// uploaded folder is its own upload, so with a `batch` the numbered folder is remembered and the other files of the
+/// same batch go into it too, instead of each creating another one.
+pub async fn ensure_folders(conn: &mut SqliteConnection, owner_id: i64, parent_id: &str, rel: &str, batch: &str) -> AppResult<String> {
+    let mut current = parent_id.to_string();
+    for part in rel.split('/').filter(|p| !p.is_empty()) {
+        let name = crate::util::validate_name(part)?;
+        let existing: Option<(String, String)> = sqlx::query_as(
+            "SELECT id, kind FROM nodes WHERE parent_id = ?1 AND name_key = CASE WHEN fs_path IS NULL THEN unicode_lower(?2) ELSE ?2 END AND trashed_at IS NULL",
+        )
+        .bind(&current)
+        .bind(&name)
+        .fetch_optional(&mut *conn)
+        .await?;
+        current = match existing {
+            Some((id, kind)) if kind == "folder" => id,
+            None => create_folder(conn, owner_id, &current, &name).await?,
+            // Taken by a file
+            Some(_) => {
+                let key = name.to_lowercase();
+                let known: Option<(String,)> = if batch.is_empty() {
+                    None
+                } else {
+                    sqlx::query_as(
+                        "SELECT b.folder_id FROM upload_batch_folders b
+                         JOIN nodes n ON n.id = b.folder_id AND n.kind = 'folder' AND n.trashed_at IS NULL
+                         WHERE b.batch = ? AND b.parent_id = ? AND b.name = ?",
+                    )
+                    .bind(batch)
+                    .bind(&current)
+                    .bind(&key)
+                    .fetch_optional(&mut *conn)
+                    .await?
+                };
+                match known {
+                    Some((id,)) => id,
+                    None => {
+                        let numbered = tree::unique_name(conn, &current, &name, true).await?;
+                        let id = create_folder(conn, owner_id, &current, &numbered).await?;
+                        if !batch.is_empty() {
+                            sqlx::query(
+                                "INSERT OR REPLACE INTO upload_batch_folders (batch, parent_id, name, folder_id, created_at) VALUES (?, ?, ?, ?, ?)",
+                            )
+                            .bind(batch)
+                            .bind(&current)
+                            .bind(&key)
+                            .bind(&id)
+                            .bind(crate::util::now())
+                            .execute(&mut *conn)
+                            .await?;
+                        }
+                        id
+                    }
+                }
+            }
+        };
+    }
+    Ok(current)
+}
+
+/// Creates a folder; in a folder space it is made on the disk first
+pub async fn create_folder(conn: &mut SqliteConnection, owner_id: i64, parent_id: &str, name: &str) -> AppResult<String> {
+    let id = crate::util::new_id();
+    let ts = now();
+    if let Some(parent) = tree::get_node(conn, parent_id).await?.filter(|p| p.in_folder_space()) {
+        let (rel, stat) = fsops::make_dir(&parent, name).await?;
+        fsops::insert(conn, &id, owner_id, &parent, name, &rel, &stat).await?;
+        tree::touch(conn, parent_id).await?;
+        return Ok(id);
+    }
+    sqlx::query(
+        "INSERT INTO nodes (id, owner_id, parent_id, kind, name, drive_id, created_at, updated_at)
+         SELECT ?1, ?2, ?3, 'folder', ?4, drive_id, ?5, ?5 FROM nodes WHERE id = ?3",
+    )
+    .bind(&id)
+    .bind(owner_id)
+    .bind(parent_id)
+    .bind(name)
+    .bind(ts)
+    .execute(&mut *conn)
+    .await?;
+    tree::touch(conn, parent_id).await?;
+    Ok(id)
 }
 
 #[cfg(test)]
