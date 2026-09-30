@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CopyIcon, KeyRoundIcon, Link2Icon, Loader2Icon, PencilIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Node, type ShareAccessOptions, type SharePolicy, type ShareInfo, type ShareUpdate } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -143,7 +144,7 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
   const policy = me.share_policy;
   const { link: shareLink, local, admin } = useShareLink();
   const shares = useQuery({
-    queryKey: ["shares", node.id],
+    queryKey: keys.sharesOf(node.id),
     queryFn: () => api.shares(node.id),
   });
   const choices = expiryChoices(policy);
@@ -164,7 +165,7 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
       }),
     onSuccess: () => {
       setPassword("");
-      qc.invalidateQueries({ queryKey: ["shares"] });
+      qc.invalidateQueries({ queryKey: keys.shares() });
     },
   });
   // The link is put on the clipboard from within the click (as it is being made): some browsers allow writing to the
@@ -188,7 +189,7 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
     mutationFn: (id: string) => api.deleteShare(id),
     onSuccess: () => {
       toast.success(t("Share link deleted"));
-      qc.invalidateQueries({ queryKey: ["shares"] });
+      qc.invalidateQueries({ queryKey: keys.shares() });
     },
     onError: (e) => toast.error(e.message),
   });
@@ -344,7 +345,7 @@ export function EditShareDialog({ share, onClose }: { share: ShareInfo; onClose(
     },
     onSuccess: () => {
       toast.success(t("Share link updated"));
-      qc.invalidateQueries({ queryKey: ["shares"] });
+      qc.invalidateQueries({ queryKey: keys.shares() });
       onClose();
     },
   });

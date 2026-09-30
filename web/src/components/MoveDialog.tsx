@@ -4,6 +4,7 @@ import { Loader2Icon } from "lucide-react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { api, moveActive, type StorageLocation } from "@/api";
+import { queries } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -48,8 +49,8 @@ export function MoveDialog({
   onDone(target: StorageLocation, moved: number): void;
 }) {
   const navigate = useNavigate();
-  const locations = useQuery({ queryKey: ["storage-locations"], queryFn: api.storageLocations });
-  const moves = useQuery({ queryKey: ["moves"], queryFn: api.moves });
+  const locations = useQuery(queries.storageLocations);
+  const moves = useQuery(queries.moves);
   const targets = (locations.data ?? []).filter((l) => l.id !== from);
   const [value, setValue] = useState<string>("");
   const [busy, setBusy] = useState(false);

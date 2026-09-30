@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangleIcon, Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type BackupPolicySettings, type BackupSchedule, type BackupSet } from "@/api";
+import { keys, queries } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -54,7 +55,7 @@ type Kind = "every" | "daily" | "weekly";
  */
 export function BackupPolicyDialog({ set, source: preset, onClose, onDone }: { set?: BackupSet; source?: string; onClose(): void; onDone(): void }) {
   const p = set?.policy ?? null;
-  const locations = useQuery({ queryKey: ["storage-locations"], queryFn: api.storageLocations });
+  const locations = useQuery(queries.storageLocations);
   const [name, setName] = useState(set?.name ?? "");
   const [source, setSource] = useState(set?.source_location ?? preset ?? "");
   const [dest, setDest] = useState(set?.dest_location ?? "");
@@ -80,11 +81,11 @@ export function BackupPolicyDialog({ set, source: preset, onClose, onDone }: { s
   const sources = list.filter((l) => l.drive_count > 0 || l.id === source);
   const dests = list.filter((l) => l.id !== source);
   const sourceName = list.find((l) => l.id === source)?.name ?? set?.source_name ?? "";
-  const on = useQuery({ queryKey: ["storage-location-spaces", source], queryFn: () => api.storageLocationSpaces(source), enabled: !!source });
-  const preview = useQuery({ queryKey: ["copy-preview", source, dest], queryFn: () => api.copyPreview(source, dest), enabled: !set && !!source && !!dest, retry: false });
+  const on = useQuery({ ...queries.storageLocationSpaces(source), enabled: !!source });
+  const preview = useQuery({ queryKey: keys.copyPreview(source, dest), queryFn: () => api.copyPreview(source, dest), enabled: !set && !!source && !!dest, retry: false });
   const schedule: BackupSchedule = kind === "every" ? { every } : kind === "daily" ? { daily: time } : { weekly: time, days };
   const next = useQuery({
-    queryKey: ["backup-next-runs", JSON.stringify(schedule), tz],
+    queryKey: keys.backupNextRuns(JSON.stringify(schedule), tz),
     queryFn: () => api.backupNextRuns(schedule, tz),
     enabled: mode !== "realtime" && (kind !== "weekly" || days.length > 0),
     retry: false,

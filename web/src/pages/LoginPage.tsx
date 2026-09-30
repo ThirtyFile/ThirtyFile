@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRightIcon, KeyRoundIcon, Loader2Icon, UserRoundIcon } from "lucide-react";
 import { api, ApiError, type Me, type TwoFactorSetup } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { backgroundUrl, logoUrl, useBranding, type Branding } from "@/lib/branding";
 import { SiteName } from "@/components/SiteName";
 import { ProviderIcon } from "@/components/ProviderIcon";
@@ -141,8 +142,8 @@ export function LoginPage() {
   const [params] = useSearchParams();
   const qc = useQueryClient();
   const b = useBranding();
-  const providers = useQuery({ queryKey: ["sso-providers"], queryFn: api.ssoProviders, staleTime: 60_000 });
-  const options = useQuery({ queryKey: ["auth-options"], queryFn: api.authOptions, staleTime: 60_000 });
+  const providers = useQuery({ queryKey: keys.ssoProviders(), queryFn: api.ssoProviders, staleTime: 60_000 });
+  const options = useQuery({ queryKey: keys.authOptions(), queryFn: api.authOptions, staleTime: 60_000 });
   const nextPath = safeNext(params.get("next"));
 
   // When a third-party login fails, the server redirects back with the reason
@@ -271,7 +272,7 @@ export function LoginPage() {
     saveLastUser(me.username);
     setStage("welcome");
     await new Promise((r) => setTimeout(r, 700));
-    qc.setQueryData(["me"], me);
+    qc.setQueryData(keys.me(), me);
     navigate(nextPath, { replace: true });
   };
 

@@ -2,6 +2,7 @@
 import { useEffect, type DragEvent } from "react";
 import { toast } from "sonner";
 import { api, privateSource, type Node } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { triggerDownload } from "@/downloads";
 import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
@@ -71,7 +72,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       // renaming a row that isn't there (that would leave the shortcuts turned off)
       await changed({ folders: [p.folderId], contents: true, recent: kind === "file" });
       // The folder's pages, and the folder tree's list of subfolders
-      const listed = qc.getQueriesData({ queryKey: ["children", p.folderId] }).some(([, d]) => rowsOf(d)?.some((n) => n.id === id));
+      const listed = qc.getQueriesData({ queryKey: keys.children(p.folderId) }).some(([, d]) => rowsOf(d)?.some((n) => n.id === id));
       if (!listed) {
         // A large folder where it sorts into a part not loaded: go there; renaming starts once that part has loaded
         const at = p.list ? await p.list.locate(id).catch(() => null) : null;

@@ -1,7 +1,8 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { ActivityIcon, CircleAlertIcon, Link2Icon, LogInIcon, RefreshCwIcon, SettingsIcon, type LucideIcon } from "lucide-react";
 import { Link } from "react-router";
 import { Tabs } from "@base-ui/react/tabs";
+import { keys } from "@/api/queryKeys";
 import { ActivityLog } from "@/components/logs/ActivityLog";
 import { ShareAccessLog } from "@/components/logs/ShareAccessLog";
 import { LoginLog } from "@/components/logs/LoginLog";
@@ -13,14 +14,14 @@ import { usePersisted } from "@/lib/session";
 import { t } from "@/lib/i18n";
 
 type LogTab = "activity" | "login" | "share" | "errors";
-const LOG_TABS: Record<LogTab, { query: string; footer: string }> = {
-  activity: { query: "activity", footer: t("Actions users performed in the system") },
-  login: { query: "login-log", footer: t("Records of successful and failed sign-ins, sign-outs, and password changes") },
+const LOG_TABS: Record<LogTab, { query: QueryKey; footer: string }> = {
+  activity: { query: keys.activity(), footer: t("Actions users performed in the system") },
+  login: { query: keys.loginLog(), footer: t("Records of successful and failed sign-ins, sign-outs, and password changes") },
   share: {
-    query: "share-access",
+    query: keys.shareAccess(),
     footer: t("Records of public share links being opened, previewed, and downloaded"),
   },
-  errors: { query: "errors", footer: t("Errors people ran into, reported by the server and by the web page") },
+  errors: { query: keys.errors(), footer: t("Errors people ran into, reported by the server and by the web page") },
 };
 
 export function ActivitySettingsPage() {
@@ -45,7 +46,7 @@ export function ActivitySettingsPage() {
     <Frame
       toolbar={
         <>
-          <ToolButton icon={RefreshCwIcon} label={t("Refresh")} showLabel onClick={() => qc.invalidateQueries({ queryKey: [LOG_TABS[tab].query] })} />
+          <ToolButton icon={RefreshCwIcon} label={t("Refresh")} showLabel onClick={() => qc.invalidateQueries({ queryKey: LOG_TABS[tab].query })} />
           <span className="flex-1" />
           <Link
             to="/admin/logs"

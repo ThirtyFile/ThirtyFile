@@ -4,6 +4,7 @@ import { CopyIcon, Loader2Icon, PlusIcon, Trash2Icon, TriangleAlertIcon } from "
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { api, type SsoDomainRule, type SsoProviderReq, type SsoProvisioning, type SsoSettings, type SsoSettingsReq } from "@/api";
+import { keys, queries } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -99,7 +100,7 @@ const PROVISIONING: { value: SsoProvisioning; label: string; help: string }[] = 
 ];
 
 export function SsoPage() {
-  const q = useQuery({ queryKey: ["sso-settings"], queryFn: api.ssoSettings });
+  const q = useQuery({ queryKey: keys.ssoSettings(), queryFn: api.ssoSettings });
   return (
     <SettingsFrame item="sso" onRefresh={() => q.refetch()}>
       {q.data ? <SsoForm saved={q.data} /> : <Pending query={q} loading={<Skeleton className="h-60" />} />}
@@ -120,7 +121,7 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
   const [domains, setDomains] = useState(() => fieldsOf(saved).domains);
   const [providerDomains, setProviderDomains] = useState(() => fieldsOf(saved).providerDomains);
   const [quotaGb, setQuotaGb] = useState(() => fieldsOf(saved).quotaGb);
-  const groups = useQuery({ queryKey: ["groups"], queryFn: api.groups });
+  const groups = useQuery(queries.groups);
   const [rules, setRules] = useState<RuleDraft[]>(() => saved.domain_rules.map(ruleDraft));
   /** Show these settings in the form, dropping what was typed */
   const reset = (to: SsoSettings) => {
@@ -174,8 +175,8 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
       // What the server stored: secrets are blank again, domains are trimmed and lower-cased
       shown.current = data;
       reset(data);
-      qc.setQueryData(["sso-settings"], data);
-      qc.invalidateQueries({ queryKey: ["sso-providers"] });
+      qc.setQueryData(keys.ssoSettings(), data);
+      qc.invalidateQueries({ queryKey: keys.ssoProviders() });
       toast.success(t("Single sign-on settings updated"));
     },
     onError: (e) => toast.error(e.message),

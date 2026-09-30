@@ -4,6 +4,7 @@ import { ArchiveIcon, CalendarClockIcon, DatabaseIcon, KeyRoundIcon, ShieldCheck
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { api, type DefaultLang, type SystemSettingsReq } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pending } from "@/components/ErrorState";
 import { Button } from "@/components/ui/button";
@@ -210,7 +211,7 @@ export function GeneralSettingsPage() {
   const save = useMutation({
     mutationFn: (req: SystemSettingsReq) => api.updateSystemSettings(req),
     onSuccess: (data) => {
-      qc.setQueryData(["system"], data);
+      qc.setQueryData(keys.system(), data);
       // The left-hand menu and permissions both depend on the space list and me
       invalidateFiles(qc);
       toast.success(t("System settings updated"));

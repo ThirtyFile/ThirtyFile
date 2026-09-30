@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArchiveRestoreIcon, BellIcon, CalendarClockIcon, CheckCheckIcon, CopyCheckIcon, HardDriveIcon, InboxIcon, KeySquareIcon, Link2Icon, SettingsIcon, Trash2Icon, UsersRoundIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type AppNotification } from "@/api";
+import { affected, invalidate, keys } from "@/api/queryKeys";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { NotificationSettingsDialog } from "@/components/NotificationSettingsDialog";
 import { notificationLink, notificationText, unreadBadge } from "@/lib/notifications";
@@ -45,7 +46,7 @@ export function NotificationBell() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [settings, setSettings] = useState(false);
-  const q = useQuery({ queryKey: ["notifications"], queryFn: api.notifications, refetchInterval: POLL_MS });
+  const q = useQuery({ queryKey: keys.notifications(), queryFn: api.notifications, refetchInterval: POLL_MS });
   const unread = q.data?.unread ?? 0;
   const items = useMemo(() => q.data?.items ?? [], [q.data]);
 
@@ -54,12 +55,12 @@ export function NotificationBell() {
   const seen = useRef<number | null>(null);
   useEffect(() => {
     if (seen.current !== null && newest > seen.current && items.some((n) => n.id > seen.current! && n.kind === "shared")) {
-      for (const key of ["drives", "shared-with-me"]) qc.invalidateQueries({ queryKey: [key] });
+      void invalidate(qc, ...affected.myAccess());
     }
     seen.current = newest;
   }, [newest, items, qc]);
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ["notifications"] });
+  const refresh = () => qc.invalidateQueries({ queryKey: keys.notifications() });
   const read = useMutation({ mutationFn: (ids?: number[]) => api.markNotificationsRead(ids), onSettled: refresh });
   const clear = useMutation({
     mutationFn: api.clearNotifications,

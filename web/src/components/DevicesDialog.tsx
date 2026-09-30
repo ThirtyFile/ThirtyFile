@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon, LogOutIcon, MonitorIcon, SmartphoneIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Device } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -16,7 +17,7 @@ import { t } from "@/lib/i18n";
  */
 export function DevicesDialog({ user, onClose }: { user?: { id: number; username: string }; onClose(): void }) {
   const qc = useQueryClient();
-  const key = ["devices", user?.id ?? "me"];
+  const key = keys.devices(user?.id ?? "me");
   const q = useQuery({ queryKey: key, queryFn: () => (user ? api.userDevices(user.id) : api.devices()) });
   const devices = q.data ?? [];
   /** An administrator looking at someone else's devices signs out all of them */

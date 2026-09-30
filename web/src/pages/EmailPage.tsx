@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon, MailIcon, SendIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type EmailSettings, type EmailSettingsReq, type SmtpSecurity } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -27,7 +28,7 @@ function formOf(s: EmailSettings): Form {
 export function EmailPage() {
   const qc = useQueryClient();
   const me = useMe();
-  const q = useQuery({ queryKey: ["email-settings"], queryFn: api.emailSettings });
+  const q = useQuery({ queryKey: keys.emailSettings(), queryFn: api.emailSettings });
   const [form, setForm] = useState<Form | null>(null);
   const [to, setTo] = useState("");
   useEffect(() => {
@@ -38,8 +39,8 @@ export function EmailPage() {
   const save = useMutation({
     mutationFn: (f: Form) => api.updateEmailSettings(f),
     onSuccess: (data) => {
-      qc.setQueryData(["email-settings"], data);
-      qc.invalidateQueries({ queryKey: ["notification-settings"] });
+      qc.setQueryData(keys.emailSettings(), data);
+      qc.invalidateQueries({ queryKey: keys.notificationSettings() });
       setForm(formOf(data));
       toast.success(t("Email settings saved"));
     },

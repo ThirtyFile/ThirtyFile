@@ -3,6 +3,7 @@ import { Link, NavLink } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRightIcon, ChevronsDownUpIcon, CloudOffIcon, FolderIcon, FolderOpenIcon, LayersIcon, LocateFixedIcon, type LucideIcon } from "lucide-react";
 import { api, type Node, type NodeInfo } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { useFolderDrop } from "@/lib/dnd";
 import { NavMenu } from "@/components/NavMenu";
 import { ToolButton } from "@/components/frame/ToolButton";
@@ -180,7 +181,7 @@ function TreeFolder({
 }) {
   const open = useExpanded().has(id);
   const children = useQuery({
-    queryKey: ["children", id, "folders"],
+    queryKey: keys.folders(id),
     queryFn: ({ signal }) => api.children(id, "name", "asc", true, signal),
     enabled: open,
   });
@@ -241,7 +242,7 @@ function SpaceRoot({
 }) {
   const open = useExpanded().has(rootId);
   const folders = useQuery({
-    queryKey: ["children", rootId, "folders"],
+    queryKey: keys.folders(rootId),
     queryFn: ({ signal }) => api.children(rootId, "name", "asc", true, signal),
     enabled: open,
   });
@@ -385,7 +386,7 @@ function revealRow(scope: Element, id: string) {
  */
 export function FolderTreeToolbar({ activeId }: { activeId?: string }) {
   // Shares the query of the folder page, which usually has it already
-  const info = useQuery({ queryKey: ["node", activeId], queryFn: () => api.node(activeId!), enabled: !!activeId });
+  const info = useQuery({ queryKey: keys.node(activeId), queryFn: () => api.node(activeId!), enabled: !!activeId });
   const path = activeId && info.data?.node.id === activeId ? treePathOf(info.data) : null;
   const button = "size-7 px-0";
   return (

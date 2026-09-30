@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { api, shareSource, shareUploadEndpoint, type Node, type PublicShare } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { triggerDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,7 +27,7 @@ import { refreshFirstPage, useAllPages } from "@/lib/pages";
 
 export function PublicSharePage() {
   const { token = "" } = useParams();
-  const info = useQuery({ queryKey: ["public", token], queryFn: () => api.publicShare(token), retry: false });
+  const info = useQuery({ queryKey: keys.publicShare(token), queryFn: () => api.publicShare(token), retry: false });
 
   let body;
   if (info.isLoading) body = <Skeleton className="h-64 w-full max-w-3xl" />;
@@ -78,7 +79,7 @@ function Unlock({ token }: { token: string }) {
     setError(null);
     try {
       await api.unlockShare(token, password);
-      await qc.invalidateQueries({ queryKey: ["public", token] });
+      await qc.invalidateQueries({ queryKey: keys.publicShare(token) });
     } catch (err) {
       setError(err instanceof Error ? err.message : t("Couldn't unlock"));
     } finally {
@@ -208,7 +209,7 @@ function useShareDownload(token: string) {
       return;
     }
     // The browser downloads in the background; the server counts it when the download starts
-    setTimeout(() => qc.invalidateQueries({ queryKey: ["public", token] }), 1500);
+    setTimeout(() => qc.invalidateQueries({ queryKey: keys.publicShare(token) }), 1500);
   };
 }
 
@@ -296,8 +297,8 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
     setPreviewId(null);
   }
 
-  const info = useQuery({ queryKey: ["public-node", share.token, current], queryFn: () => api.publicNode(share.token, current) });
-  const children = useAllPages(["public-children", share.token, current], (limit, after, signal) =>
+  const info = useQuery({ queryKey: keys.publicNode(share.token, current), queryFn: () => api.publicNode(share.token, current) });
+  const children = useAllPages(keys.publicChildren(share.token, current), (limit, after, signal) =>
     api.publicChildrenPage(share.token, current, limit, after, signal),
   );
   const items = children.items;
@@ -317,10 +318,10 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
   useEffect(
     () =>
       onUploadsLanded((parentIds, final) => {
-        if (final) void qc.invalidateQueries({ queryKey: ["public-children", share.token] });
+        if (final) void qc.invalidateQueries({ queryKey: keys.publicChildren(share.token) });
         else
           for (const id of parentIds)
-            void refreshFirstPage(qc, ["public-children", share.token, id], (_, limit) => api.publicChildrenPage(share.token, id, limit));
+            void refreshFirstPage(qc, keys.publicChildren(share.token, id), (_, limit) => api.publicChildrenPage(share.token, id, limit));
       }),
     [qc, share.token],
   );

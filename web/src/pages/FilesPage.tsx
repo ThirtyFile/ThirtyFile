@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { FolderIcon, Loader2Icon, UsersRoundIcon } from "lucide-react";
 import { MovingBanner, OfflineBanner, ReadOnlyBanner } from "@/components/OfflineNotice";
 import { SORT_KEYS, api, type NodeInfo, type SortKey, type SortOrder } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { Explorer } from "@/components/Explorer";
 import { Frame, crumbPath, type Crumb } from "@/components/Frame";
 import { EmptyState } from "@/components/DataTable";
@@ -84,7 +85,7 @@ function FolderPage({ id }: { id: string }) {
   const [sort, onSort, setSort] = useSort();
   // Refresh more often while the storage service is offline, so the notice disappears automatically once it recovers
   const info = useQuery({
-    queryKey: ["node", id],
+    queryKey: keys.node(id),
     queryFn: () => api.node(id),
     refetchInterval: (q) => (q.state.data?.offline ? 15_000 : 60_000),
   });
@@ -96,7 +97,7 @@ function FolderPage({ id }: { id: string }) {
   const grouped = groupBy !== "none";
   const windows = useFolderWindows(folderId, sort.key, sort.order, !!folderId && !grouped);
   const pages = useAllPages(
-    ["children", folderId, sort.key, sort.order],
+    keys.childrenPages(folderId, sort.key, sort.order),
     (limit, after, signal) => api.childrenPage(folderId!, sort.key, sort.order, limit, after, signal),
     !!folderId && grouped,
   );

@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Drive, type SharedItem } from "@/api";
+import { invalidate, keys, queries } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -123,7 +124,7 @@ export function ThisPcPage() {
   const navigate = useNavigate();
   const tabs = useTabActions();
   const drives = useDrives();
-  const shared = useQuery({ queryKey: ["shared-with-me"], queryFn: api.sharedWithMe });
+  const shared = useQuery(queries.sharedWithMe);
   const [view, setView] = usePersisted<"tiles" | "list">("tf-drives-view", "tiles");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dialog, setDialog] = useState<DialogState>(null);
@@ -172,7 +173,7 @@ export function ThisPcPage() {
     else navigate(url);
   };
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ["drives"] });
+  const refresh = () => qc.invalidateQueries({ queryKey: keys.drives() });
 
   const driveMenu = (d: Drive) => (
     <>
@@ -544,8 +545,7 @@ export function ThisPcPage() {
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => {
-                  qc.invalidateQueries({ queryKey: ["drives"] });
-                  qc.invalidateQueries({ queryKey: ["shared-with-me"] });
+                  void invalidate(qc, keys.drives(), keys.sharedWithMe());
                 }}
               >
                 <RefreshCwIcon /> {t("Refresh")}
@@ -592,7 +592,7 @@ export function ThisPcPage() {
             setDialog(null);
             selectOnly(null);
             void refreshFiles(qc, { spaces: [dialog.drive.id] });
-            void qc.invalidateQueries({ queryKey: ["admin-drives"] });
+            void qc.invalidateQueries({ queryKey: keys.adminDrives() });
           }}
         />
       )}

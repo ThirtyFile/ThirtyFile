@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Switch } from "@base-ui/react/switch";
 import { RefreshCwIcon, type LucideIcon } from "lucide-react";
-import { api } from "@/api";
+import { queries } from "@/api/queryKeys";
 import { Frame, ToolButton } from "@/components/Frame";
 import { controlPanelItem, type ControlPanelKey, useSettingsSearch } from "@/lib/controlPanel";
 import { cn } from "@/lib/utils";
@@ -66,5 +66,5 @@ export function SettingsFrame({
 
 /** The system settings (general settings and usage pages) */
 export function useSystem() {
-  return useQuery({ queryKey: ["system"], queryFn: api.systemSettings });
+  return useQuery(queries.system);
 }

@@ -26,6 +26,7 @@ import {
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { api, moveActive, type SpaceMove, type StorageConfig, type StorageKind, type StorageLocation } from "@/api";
+import { affected, invalidate, keys, queries } from "@/api/queryKeys";
 import { MoveDialog } from "@/components/MoveDialog";
 import { CopyEverythingDialog } from "@/components/CopyEverythingDialog";
 import { DRIVE_ICON, DRIVE_KIND_LABEL } from "@/lib/drives";
@@ -79,7 +80,7 @@ export function StorageLocations() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   // The server checks connection status every 30 seconds; the view refreshes every 30 seconds
-  const q = useQuery({ queryKey: ["storage-locations"], queryFn: api.storageLocations, refetchInterval: 30_000 });
+  const q = useQuery({ ...queries.storageLocations, refetchInterval: 30_000 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editing, setEditing] = useState<StorageLocation | "new" | null>(null);
   const [deleting, setDeleting] = useState<StorageLocation | null>(null);
@@ -103,8 +104,7 @@ export function StorageLocations() {
     nameOf: (l) => l.name,
   });
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: ["storage-locations"] });
-    qc.invalidateQueries({ queryKey: ["admin-drives"] });
+    void invalidate(qc, ...affected.storage());
   };
 
   const test = async (l: StorageLocation) => {
@@ -331,7 +331,7 @@ export function StorageLocations() {
       {emptying && <MoveEverythingDialog location={emptying} onClose={() => setEmptying(null)} onDone={() => {
         setEmptying(null);
         refresh();
-        qc.invalidateQueries({ queryKey: ["moves"] });
+        qc.invalidateQueries({ queryKey: keys.moves() });
       }} />}
       {copying && <CopyEverythingDialog location={copying} onClose={() => setCopying(null)} />}
       {tool?.kind === "test" && <LocationTestDialog location={tool.location} onClose={() => setTool(null)} />}
@@ -359,7 +359,7 @@ export function StorageLocations() {
 
 /** "Move everything to…": every space on a location, moved to another one (a move each, one after the other) */
 function MoveEverythingDialog({ location, onClose, onDone }: { location: StorageLocation; onClose(): void; onDone(): void }) {
-  const q = useQuery({ queryKey: ["storage-location-spaces", location.id], queryFn: () => api.storageLocationSpaces(location.id) });
+  const q = useQuery(queries.storageLocationSpaces(location.id));
   if (!q.data) {
     return q.error ? (
       <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -449,7 +449,7 @@ function MovedOff({
 
 /** The spaces on a location: name, kind, owner and size (nothing of what is in them) */
 function SpacesDialog({ location, onClose }: { location: StorageLocation; onClose(): void }) {
-  const q = useQuery({ queryKey: ["storage-location-spaces", location.id], queryFn: () => api.storageLocationSpaces(location.id) });
+  const q = useQuery(queries.storageLocationSpaces(location.id));
   const spaces = q.data ?? [];
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>

@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronRightIcon, FileIcon, FolderIcon, Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type BackupSet, type RestoreRequest } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -45,7 +46,7 @@ export function RestoreDialog({ set, onClose, onDone }: { set: BackupSet; onClos
   const folderName = chosen && snapshot?.cutoff ? t("Restored {name} {date}", { name: chosen.name, date: nameDate(snapshot.cutoff) }) : "";
   const browsing = choose && !personal;
   const page = useQuery({
-    queryKey: ["snapshot-browse", snapshotId, space, folder],
+    queryKey: keys.snapshotBrowse(snapshotId, space, folder),
     queryFn: () => api.browseSnapshot(snapshotId, space, folder),
     enabled: browsing && !!snapshotId && !!space,
   });
@@ -61,7 +62,7 @@ export function RestoreDialog({ set, onClose, onDone }: { set: BackupSet; onClos
     folder_name: folderName,
   };
   const preview = useQuery({
-    queryKey: ["restore-preview", snapshotId, JSON.stringify(req)],
+    queryKey: keys.restorePreview(snapshotId, JSON.stringify(req)),
     queryFn: () => api.restorePreview(snapshotId, req),
     enabled: !!snapshotId && !!space && (!browsing || !!page.data),
     retry: false,

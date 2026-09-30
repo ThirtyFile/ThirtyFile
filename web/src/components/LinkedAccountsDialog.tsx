@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link2Icon, Loader2Icon, UnlinkIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
@@ -15,11 +16,11 @@ import { t } from "@/lib/i18n";
 /** Account menu › Sign-in methods: link or unlink Microsoft / Google / GitHub accounts */
 export function LinkedAccountsDialog({ onClose }: { onClose(): void }) {
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["identities"], queryFn: api.myIdentities });
+  const q = useQuery({ queryKey: keys.identities(), queryFn: api.myIdentities });
   const unlink = useMutation({
     mutationFn: api.unlinkIdentity,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["identities"] });
+      qc.invalidateQueries({ queryKey: keys.identities() });
       toast.success(t("Account unlinked"));
     },
     onError: (e) => toast.error(e.message),

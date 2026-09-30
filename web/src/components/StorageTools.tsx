@@ -22,6 +22,7 @@ import {
   type StorageLocation,
   type UnusedJob,
 } from "@/api";
+import { invalidate, keys } from "@/api/queryKeys";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ConfirmDialog, ErrorText } from "@/components/dialogs";
@@ -50,7 +51,7 @@ export function LocationTestDialog({ location, onClose }: { location: StorageLoc
   const qc = useQueryClient();
   const run = useMutation({
     mutationFn: () => api.testStorageSteps(location.id),
-    onSettled: () => qc.invalidateQueries({ queryKey: ["storage-locations"] }),
+    onSettled: () => qc.invalidateQueries({ queryKey: keys.storageLocations() }),
   });
   // Once when opened (not again when React runs effects twice in development)
   const started = useRef(false);
@@ -197,7 +198,7 @@ export function LocationBrowseDialog({ location, onClose }: { location: StorageL
   const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
   const after = cursors[cursors.length - 1];
   const q = useQuery({
-    queryKey: ["storage-browse", location.id, path, after],
+    queryKey: keys.storageBrowse(location.id, path, after),
     queryFn: () => api.browseStorage(location.id, path, after),
   });
   const open = (p: string) => {
@@ -328,7 +329,7 @@ export function LocationBrowseDialog({ location, onClose }: { location: StorageL
 /** Finding content nothing uses, and removing it after confirmation */
 export function UnusedContentDialog({ location, onClose }: { location: StorageLocation; onClose(): void }) {
   const qc = useQueryClient();
-  const key = ["storage-unused", location.id];
+  const key = keys.storageUnused(location.id);
   const busy = (j: UnusedJob | null | undefined) => j?.phase === "scanning" || j?.phase === "removing";
   const q = useQuery({
     queryKey: key,
@@ -345,8 +346,7 @@ export function UnusedContentDialog({ location, onClose }: { location: StorageLo
   // Once removed, the location's figures and listings change
   useEffect(() => {
     if (!removed) return;
-    qc.invalidateQueries({ queryKey: ["storage-locations"] });
-    qc.invalidateQueries({ queryKey: ["storage-browse", location.id] });
+    void invalidate(qc, keys.storageLocations(), keys.storageBrowse(location.id));
   }, [removed, qc, location.id]);
 
   return (

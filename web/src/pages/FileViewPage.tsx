@@ -19,6 +19,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/component
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { AccessDialog } from "@/components/AccessDialog";
 import { api, privateSource, type Node } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { triggerDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { DetailsPane } from "@/components/DetailsPane";
@@ -51,7 +52,7 @@ export function FileViewPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const info = useQuery({
-    queryKey: ["node", id],
+    queryKey: keys.node(id),
     queryFn: () => api.node(id),
     // While the storage service is offline, check every 15 seconds and open automatically once it recovers
     refetchInterval: (q) => (q.state.data?.offline ? 15_000 : false),
@@ -123,7 +124,7 @@ export function FileViewPage() {
   // A save from the editor: the new version shows here, in the folder's list and in Recent. The folder's pages aren't
   // loaded again while the file stays open: they're only marked out of date, for the list to reload when it shows
   const onSaved = (n: Node) => {
-    qc.setQueryData(["node", id], (old: typeof info.data) => (old ? { ...old, node: { ...old.node, ...n } } : old));
+    qc.setQueryData(keys.node(id), (old: typeof info.data) => (old ? { ...old, node: { ...old.node, ...n } } : old));
     void refreshFiles(qc, saved(n, "later"));
   };
   const canEditSheet = !!node && extOf(node.name) === "xlsx" && caps.write && node.size <= me.max_edit_bytes;

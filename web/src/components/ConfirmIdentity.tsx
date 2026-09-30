@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/api";
+import { queries } from "@/api/queryKeys";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { t } from "@/lib/i18n";
@@ -11,7 +11,7 @@ import { t } from "@/lib/i18n";
  * signed in recently instead, which the server checks.
  */
 export function useConfirmIdentity(id: string) {
-  const tf = useQuery({ queryKey: ["two-factor"], queryFn: api.twoFactor });
+  const tf = useQuery(queries.twoFactor);
   const hasPassword = tf.data?.has_password ?? true;
   const needsCode = !!tf.data?.enabled;
   const [password, setPassword] = useState("");

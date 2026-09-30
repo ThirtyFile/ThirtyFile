@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DownloadIcon, ExternalLinkIcon, HistoryIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type FileVersion, type Node } from "@/api";
+import { keys } from "@/api/queryKeys";
 import { confirm } from "@/components/confirm";
 import { ErrorState } from "@/components/ErrorState";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -17,7 +18,7 @@ export function VersionsSection({ node, canRestore, ready = true }: { node: Node
   const qc = useQueryClient();
   // Keyed by the file's version too, so saving or restoring lists the new one
   const versions = useQuery({
-    queryKey: ["versions", node.id, node.updated_at],
+    queryKey: keys.versions(node.id, node.updated_at),
     queryFn: ({ signal }) => api.versions(node.id, signal),
     enabled: ready,
   });
