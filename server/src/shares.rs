@@ -486,29 +486,33 @@ fn cookie_name(token: &str) -> String {
     format!("tf_share_{token}")
 }
 
-/// Cookie handed out with a counted download: later Range requests carrying it are continuations of that download
-/// (resuming, video seeking) and aren't counted again; without it a Range request counts as a new download
+/// Cookie handed out with a counted download: later Range requests for the same file carrying it are continuations
+/// of that download (resuming, video seeking) and aren't counted again; without it a Range request counts as a new
+/// download
 fn download_cookie_name(token: &str) -> String {
     format!("tf_dl_{token}")
 }
 
-/// `<expiry>.<HMAC of the share and the expiry>`: the server checks the expiry itself, not only the browser's Max-Age
-fn download_value(st: &AppState, share: &Share, expires: i64) -> String {
+/// `<expiry>.<HMAC of the share, the file and the expiry>`: the server checks the expiry itself, not only the
+/// browser's Max-Age, and the cookie continues only the file that was counted, not the other files of a folder link
+fn download_value(st: &AppState, share: &Share, node_id: &str, expires: i64) -> String {
     let mut mac = Hmac::<Sha256>::new_from_slice(&st.secret).expect("hmac key");
     mac.update(b"download:");
     mac.update(share.id.as_bytes());
+    mac.update(b":");
+    mac.update(node_id.as_bytes());
     mac.update(b":");
     mac.update(expires.to_string().as_bytes());
     format!("{expires}.{}", hex::encode(mac.finalize().into_bytes()))
 }
 
-/// Whether the request carries the cookie of a counted download that hasn't expired
-fn continues_download(st: &AppState, headers: &HeaderMap, token: &str, share: &Share) -> bool {
+/// Whether the request carries the cookie of a counted download of this file that hasn't expired
+fn continues_download(st: &AppState, headers: &HeaderMap, token: &str, share: &Share, node_id: &str) -> bool {
     let name = download_cookie_name(token);
     let Some(expires) = auth::get_cookie(headers, &name).and_then(|v| v.split_once('.')).and_then(|(e, _)| e.parse::<i64>().ok()) else {
         return false;
     };
-    expires > now() && auth::cookie_matches(headers, &name, &download_value(st, share, expires))
+    expires > now() && auth::cookie_matches(headers, &name, &download_value(st, share, node_id, expires))
 }
 
 /// How long a share link stays unlocked after the password was entered
@@ -792,7 +796,7 @@ pub async fn public_content(
     // download and counts too, so skipping byte 0 can't be used to fetch the file without being counted
     let limited = share.max_downloads.is_some();
     let continuation =
-        files::range_start(&headers, node.size as u64) > 0 && (!limited || continues_download(&st, &headers, &token, &share));
+        files::range_start(&headers, node.size as u64) > 0 && (!limited || continues_download(&st, &headers, &token, &share, &node.id));
     let counted = !continuation && (download || limited);
     if counted {
         ensure_quota_left(&share)?;
@@ -807,14 +811,15 @@ pub async fn public_content(
         note_access(&st, &share.id, false).await;
     }
     if counted && limited {
-        res.headers_mut().append(header::SET_COOKIE, download_cookie(&st, &token, &share)?);
+        res.headers_mut().append(header::SET_COOKIE, download_cookie(&st, &token, &share, &node.id)?);
     }
     Ok(res)
 }
 
-/// Continuation cookie for a counted download: an hour is enough to resume a large download or seek through a video
-fn download_cookie(st: &AppState, token: &str, share: &Share) -> AppResult<HeaderValue> {
-    let value = download_value(st, share, now() + DOWNLOAD_CONTINUES);
+/// Continuation cookie for a counted download of a file: an hour is enough to resume a large download or seek through
+/// a video
+fn download_cookie(st: &AppState, token: &str, share: &Share, node_id: &str) -> AppResult<HeaderValue> {
+    let value = download_value(st, share, node_id, now() + DOWNLOAD_CONTINUES);
     let cookie = cookie_header(st, &download_cookie_name(token), &value, &format!("/api/public/shares/{token}"), DOWNLOAD_CONTINUES);
     HeaderValue::from_str(&cookie).map_err(AppError::internal)
 }
@@ -898,7 +903,7 @@ async fn serve_public_download(
     let single = matches!(roots.as_slice(), [one] if !one.is_folder());
     let continuation = single
         && files::range_start(headers, roots[0].size as u64) > 0
-        && (share.max_downloads.is_none() || continues_download(st, headers, token, &share));
+        && (share.max_downloads.is_none() || continues_download(st, headers, token, &share, &roots[0].id));
     if !continuation {
         ensure_quota_left(&share)?;
     }
@@ -913,7 +918,7 @@ async fn serve_public_download(
         record_share_access(st, &share.id, share.owner_id, roots.first(), if single { "download" } else { "zip" }, visitor);
         note_access(st, &share.id, false).await;
         if single && share.max_downloads.is_some() {
-            res.headers_mut().append(header::SET_COOKIE, download_cookie(st, token, &share)?);
+            res.headers_mut().append(header::SET_COOKIE, download_cookie(st, token, &share, &roots[0].id)?);
         }
     }
     Ok(res)
@@ -1194,6 +1199,33 @@ mod tests {
         assert_eq!(download(Some("bytes=2048-"), Some(cookie)).await.unwrap().status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(download(Some("bytes=1-"), None).await.unwrap_err().status, StatusCode::GONE);
         assert_eq!(download(None, None).await.unwrap_err().status, StatusCode::GONE);
+    }
+
+    #[tokio::test]
+    async fn the_continuation_cookie_of_a_folder_link_continues_only_the_file_it_came_with() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let folder = env.folder(&amy, amy.root(), "Films").await;
+        let first = stored_file(&env, &amy, &folder, "one.bin", &[1u8; 4096]).await;
+        let second = stored_file(&env, &amy, &folder, "two.bin", &[2u8; 4096]).await;
+        let req = CreateReq { max_downloads: Some(1), ..link(&folder) };
+        let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
+        let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
+        let get = |id: &String, range: Option<&'static str>, cookie: Option<&String>| {
+            let mut h = HeaderMap::new();
+            if let Some(r) = range {
+                h.insert(header::RANGE, r.parse().unwrap());
+            }
+            if let Some(c) = cookie {
+                h.insert(header::COOKIE, c.parse().unwrap());
+            }
+            public_content(State(env.st.clone()), Path((info.id.clone(), id.clone())), Query(ContentQuery { download: Some(1) }), h, visitor())
+        };
+        let res = get(&first, None, None).await.unwrap();
+        let cookie = res.headers()[header::SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_string();
+        assert_eq!(get(&first, Some("bytes=2048-"), Some(&cookie)).await.unwrap().status(), StatusCode::PARTIAL_CONTENT);
+        // Another file of the folder is a new download, which the limit no longer allows
+        assert_eq!(get(&second, Some("bytes=1-"), Some(&cookie)).await.unwrap_err().status, StatusCode::GONE);
     }
 
     #[tokio::test]
@@ -1663,6 +1695,36 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(start_upload(&env, &info.id, None, "y.pdf", 1, None).await.unwrap_err().status, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn a_link_that_only_accepts_files_tells_nothing_of_the_names_or_folders_there() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let inbox = env.folder(&amy, amy.root(), "Inbox").await;
+        let private = env.folder(&amy, &inbox, "Private").await;
+        stored_file(&env, &amy, &inbox, "secret.txt", b"secret").await;
+        let Json(info) = create(State(env.st.clone()), amy.clone(), Json(folder_link(&inbox, true))).await.unwrap();
+        use base64::Engine;
+        let b64 = |s: &str| base64::engine::general_purpose::STANDARD.encode(s);
+        let mut h = HeaderMap::new();
+        h.insert("upload-length", "5".parse().unwrap());
+        h.insert("upload-metadata", format!("filename {},relativePath {}", b64("secret.txt"), b64("Private")).parse().unwrap());
+        let res = public_upload_create(State(env.st.clone()), Path(info.id.clone()), h, visitor()).await.unwrap();
+        let up = res.headers()[header::LOCATION].to_str().unwrap().rsplit('/').next().unwrap().to_string();
+        let mut h = HeaderMap::new();
+        h.insert(header::CONTENT_TYPE, "application/offset+octet-stream".parse().unwrap());
+        h.insert("upload-offset", "0".parse().unwrap());
+        let res = public_upload_patch(State(env.st.clone()), Path((info.id.clone(), up.clone())), h, visitor(), axum::body::Body::from(&b"hello"[..])).await.unwrap();
+        // The file is kept under another name, but the visitor isn't told which: that would say the name was taken
+        assert!(res.headers().get("x-node-name").is_none());
+        let id = res.headers()["x-node-id"].to_str().unwrap().to_string();
+        // Nor can a folder path put it into a folder the visitor can't see
+        assert_eq!(node(&env, &id).await.parent_id.as_deref(), Some(inbox.as_str()));
+        let (inside,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE parent_id = ?").bind(&private).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(inside, 0);
+        let res = public_upload_head(State(env.st.clone()), Path((info.id.clone(), up)), HeaderMap::new(), visitor()).await.unwrap();
+        assert!(res.headers().get("x-node-name").is_none());
     }
 
     #[tokio::test]

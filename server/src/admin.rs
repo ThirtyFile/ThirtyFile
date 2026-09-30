@@ -229,6 +229,7 @@ pub async fn update(
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        still_admin(&mut tx, me.id).await?;
         if !changes.is_empty() {
             logs::record_activity(&mut tx, &me, None, "user_update", &format!("{}: {}", target.username, changes.join(", "))).await?;
         }
@@ -308,6 +309,17 @@ pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     Ok(Json(json!({ "ok": true })))
 }
 
+/// Refuses unless the account making a change is still an enabled administrator, read inside the change's transaction.
+/// Two administrators demoting, disabling or deleting each other at the same moment were both allowed when signing in
+/// was all that was checked, leaving no administrator; now the second change finds it no longer may.
+async fn still_admin(tx: &mut sqlx::SqliteConnection, me: i64) -> AppResult<()> {
+    let row: Option<(String, bool)> = sqlx::query_as("SELECT role, disabled FROM users WHERE id = ?").bind(me).fetch_optional(&mut *tx).await?;
+    if !matches!(row, Some((role, false)) if role == "admin") {
+        return Err(AppError::forbidden("Administrator permission required"));
+    }
+    Ok(())
+}
+
 /// Deletes the user in the transaction: returns their removed personal space and the uploads that were cancelled
 async fn delete_in(
     tx: &mut sqlx::SqliteConnection,
@@ -317,6 +329,7 @@ async fn delete_in(
     q: &DeleteQuery,
     moved: Option<&Moved>,
 ) -> AppResult<(Option<Removed>, Vec<(String,)>)> {
+    still_admin(tx, me.id).await?;
     let removed = remove_personal_in(tx, me, id, username, q, moved).await?;
     let detail = match removed.as_ref().and_then(|r| r.detail.as_deref()) {
         Some(d) => format!("{username}: {d}"),
@@ -998,6 +1011,24 @@ mod tests {
         let _ = delete(State(env.st.clone()), Admin(admin.clone()), Path(first.id), Query(DeleteQuery::default())).await.unwrap();
         let Json(next) = create(State(env.st.clone()), Admin(admin.clone()), req("next", None)).await.unwrap();
         assert!(next.id > first.id, "the deleted account's id was given out again");
+    }
+
+    #[tokio::test]
+    async fn two_administrators_removing_each_other_leave_one() {
+        let env = testutil::env().await;
+        let first = env.admin().await;
+        let Json(row) = create(State(env.st.clone()), Admin(first.clone()), Json(CreateReq { role: "admin".into(), ..req("second", None).0 })).await.unwrap();
+        let second = crate::auth::user_by_id(&env.st, &mut env.st.db.acquire().await.unwrap(), row.id).await.unwrap().unwrap();
+        let demote = || Json(serde_json::from_value::<UpdateReq>(json!({ "role": "user" })).unwrap());
+        // Both signed in as administrators; the first one's change lands first
+        let _ = update(State(env.st.clone()), Admin(first.clone()), Path(second.id), demote()).await.unwrap();
+        let res = update(State(env.st.clone()), Admin(second.clone()), Path(first.id), demote()).await;
+        assert!(matches!(res, Err(e) if e.status == axum::http::StatusCode::FORBIDDEN));
+        let disable = Json(serde_json::from_value::<UpdateReq>(json!({ "disabled": true })).unwrap());
+        assert!(update(State(env.st.clone()), Admin(second.clone()), Path(first.id), disable).await.is_err());
+        assert!(delete(State(env.st.clone()), Admin(second.clone()), Path(first.id), Query(DeleteQuery::default())).await.is_err());
+        let (admins,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users WHERE role = 'admin' AND disabled = 0").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(admins, 1);
     }
 
     #[tokio::test]

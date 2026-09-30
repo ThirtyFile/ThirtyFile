@@ -151,6 +151,7 @@ export default {
   "Copy at most 20,000 items at once": "一次最多複製 20,000 個項目",
   "You can create at most 20 spaces. Ask an administrator for more.": "最多只能建立 20 個空間，需要更多請洽管理員",
   "You can't change the access of someone whose role is higher than yours": "不能變更角色比自己高的人的權限",
+  "Your access here ends at a set time, so you can't give yourself access that lasts longer": "你在這裡的權限有到期時間，不能給自己更久的權限",
   "User or group not found": "找不到授權對象",
   "Access entry not found": "找不到這筆授權",
   "The owner of a personal space can't be removed": "無法移除個人空間的擁有者",

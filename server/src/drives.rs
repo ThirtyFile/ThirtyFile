@@ -56,17 +56,19 @@ pub struct DriveInfo {
     scanning: Option<crate::folders::ScanProgress>,
 }
 
-async fn drive_info(st: &AppState, conn: &mut SqliteConnection, d: Drive, role: Option<Role>) -> AppResult<DriveInfo> {
-    Ok(drive_infos(st, conn, vec![(d, role)], false).await?.pop().expect("one space in, one out"))
+async fn drive_info(st: &AppState, conn: &mut SqliteConnection, d: Drive, role: Option<Role>, admin: bool) -> AppResult<DriveInfo> {
+    Ok(drive_infos(st, conn, vec![(d, role)], false, admin).await?.pop().expect("one space in, one out"))
 }
 
 /// What the space cards show, for many spaces in one query (the lists don't run a query per space). With
-/// `scan_details`, folder spaces also report their folder and last scan (administrators).
+/// `scan_details`, folder spaces also report their folder and last scan (administrators). `admin`: the person asking is
+/// an administrator, who is told why a storage location is offline.
 async fn drive_infos(
     st: &AppState,
     conn: &mut SqliteConnection,
     drives: Vec<(Drive, Option<Role>)>,
     scan_details: bool,
+    admin: bool,
 ) -> AppResult<Vec<DriveInfo>> {
     #[derive(sqlx::FromRow)]
     struct Row {
@@ -99,7 +101,7 @@ async fn drive_infos(
         let r = rows.remove(&d.id).ok_or_else(|| AppError::not_found("Space not found"))?;
         // A folder space on a location (the built-in one, or a Local folder location) is offline with it: its
         // disk may not be mounted. A folder an administrator chose is on no location.
-        let offline = r.location_id.as_deref().and_then(|location| st.location_offline(location));
+        let offline = r.location_id.as_deref().and_then(|location| st.location_offline_for(location, admin));
         let details = scan_details && d.is_folder();
         out.push(DriveInfo {
             mode: d.mode.clone(),
@@ -130,7 +132,7 @@ async fn drive_infos(
 pub async fn list(State(st): State<AppState>, user: User) -> AppResult<Json<Vec<DriveInfo>>> {
     let mut c = st.db.acquire().await?;
     let drives = tree::user_drives(&mut c, &user).await?.into_iter().map(|(d, role)| (d, Some(role))).collect();
-    Ok(Json(drive_infos(&st, &mut c, drives, false).await?))
+    Ok(Json(drive_infos(&st, &mut c, drives, false, user.is_admin()).await?))
 }
 
 fn can_create_drive(st: &AppState, user: &User) -> bool {
@@ -225,7 +227,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     let root = tree::get_node(&mut tx, &root_id).await?.unwrap();
     logs::record_activity(&mut tx, &user, Some(&root), "drive_create", source.as_deref().unwrap_or_default()).await?;
     let drive = tree::get_drive(&mut tx, &drive_id).await?.unwrap();
-    let info = drive_info(&st, &mut tx, drive, Some(Role::Owner)).await?;
+    let info = drive_info(&st, &mut tx, drive, Some(Role::Owner), user.is_admin()).await?;
     tx.commit().await?;
     drop(_w);
     if source.is_some() {
@@ -310,7 +312,7 @@ pub async fn update(
     let root = tree::get_node(&mut tx, &drive.root_id).await?.unwrap();
     logs::record_activity(&mut tx, &user, Some(&root), "drive_update", "").await?;
     let drive = tree::get_drive(&mut tx, &drive.id).await?.unwrap();
-    let info = drive_info(&st, &mut tx, drive, role).await?;
+    let info = drive_info(&st, &mut tx, drive, role, user.is_admin()).await?;
     tx.commit().await?;
     crate::folders::spaces_changed();
     Ok(Json(info))
@@ -326,6 +328,10 @@ pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<Strin
     }
     if !(user.is_admin() || role == Some(Role::Owner)) {
         return Err(AppError::forbidden("Only the space owner or an administrator can delete a space"));
+    }
+    // Deleting the space deletes everything in it: an owner whose account may not delete files can't
+    if !user.is_admin() && !user.can_delete {
+        return Err(AppError::forbidden("You don't have permission to delete here"));
     }
     crate::moves::refuse_busy(&mut tx, &drive.id).await?;
     // The space disappears now; its files are deleted in the background, a batch at a time. A folder space's folder
@@ -353,7 +359,7 @@ pub async fn admin_list(State(st): State<AppState>, Admin(user): Admin) -> AppRe
         let role = roles.get(&d.id).copied();
         (d, role)
     });
-    Ok(Json(drive_infos(&st, &mut c, drives.collect(), true).await?))
+    Ok(Json(drive_infos(&st, &mut c, drives.collect(), true, true).await?))
 }
 
 // ───────────── Access (space members / folder sharing) ─────────────
@@ -385,7 +391,7 @@ const GRANT_COLS: &str = "g.id, g.node_id, g.principal_type, g.principal_id,
 #[derive(Serialize)]
 pub struct AccessInfo {
     node: Node,
-    drive: Drive,
+    drive: crate::nodes::DriveBrief,
     is_drive_root: bool,
     my_role: Option<Role>,
     can_manage: bool,
@@ -456,7 +462,7 @@ pub async fn access(State(st): State<AppState>, user: User, Path(id): Path<Strin
         }
     }
     let is_drive_root = node.parent_id.is_none();
-    Ok(Json(AccessInfo { node, drive, is_drive_root, my_role, can_manage, direct, inherited }))
+    Ok(Json(AccessInfo { node, drive: drive.into(), is_drive_root, my_role, can_manage, direct, inherited }))
 }
 
 #[derive(Deserialize)]
@@ -503,6 +509,14 @@ pub async fn grant(
     }
     let principal_id = if req.principal_type == "everyone" { 0 } else { req.principal_id };
     let name = principal_name(&mut tx, &req.principal_type, principal_id).await?.ok_or_else(|| AppError::bad_request("User or group not found"))?;
+    // Someone who manages this only until a given time can't give access that includes themselves beyond it
+    if !user.is_admin()
+        && let Some(until) = tree::manages_until(&mut tx, &user, &node).await?
+        && req.expires_at.is_none_or(|t| t > until)
+        && tree::grant_applies_to(&mut tx, &user, &req.principal_type, principal_id).await?
+    {
+        return Err(AppError::forbidden("Your access here ends at a set time, so you can't give yourself access that lasts longer"));
+    }
     // The grant replaced by this one: only someone with at least that role may change it, and an owner may only be
     // lowered or given an expiry while another owner remains
     let existing: Option<(String,)> =
@@ -861,6 +875,82 @@ mod tests {
         sqlx::query("UPDATE grants SET expires_at = ? WHERE node_id = ? AND principal_id = ?").bind(now() - 1).bind(&root).bind(carol.id).execute(&env.st.db).await.unwrap();
         let err = revoke(st(), amy.clone(), Path(grant_id(&env, &root, &amy).await)).await.unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn the_access_dialog_names_the_space_but_not_its_folder_on_the_server() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let space = env.folder_space("Archive").await;
+        env.grant(&space.root, &amy, "viewer").await;
+        let Json(info) = access(State(env.st.clone()), amy.clone(), Path(space.root.clone())).await.unwrap();
+        let v = serde_json::to_value(&info).unwrap();
+        assert_eq!(v["drive"]["name"], "Archive");
+        assert_eq!(v["drive"]["kind"], "team");
+        let keys: Vec<&String> = v["drive"].as_object().unwrap().keys().collect();
+        assert_eq!(keys.len(), 4, "only the id, name, kind and root: {keys:?}");
+    }
+
+    #[tokio::test]
+    async fn only_administrators_read_why_a_storage_location_is_offline() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let detail = "connection to nas.example.com (192.0.2.7:22) refused";
+        env.st.location_health.lock().unwrap().insert("local".into(), crate::state::LocationHealth { ok: false, error: Some(detail.into()), checked_at: 0 });
+        let Json(spaces) = list(State(env.st.clone()), amy.clone()).await.unwrap();
+        assert!(!spaces.is_empty());
+        for s in &spaces {
+            assert_eq!(s.offline.as_deref(), Some("Can't connect"));
+        }
+        let Json(node) = crate::nodes::get(State(env.st.clone()), amy.clone(), Path(amy.root().to_string())).await.unwrap();
+        assert_eq!(serde_json::to_value(&node).unwrap()["offline"], "Can't connect");
+        let admin = env.admin().await;
+        let Json(spaces) = admin_list(State(env.st.clone()), Admin(admin)).await.unwrap();
+        assert!(spaces.iter().all(|s| s.offline.as_deref() == Some(detail)));
+    }
+
+    #[tokio::test]
+    async fn deleting_a_team_space_needs_the_delete_permission() {
+        let env = testutil::env().await;
+        env.st.system.write().unwrap().allow_user_drives = true;
+        let amy = env.user("amy", true).await;
+        let req = CreateDriveReq { name: "Team".into(), quota_bytes: 0, source_path: None, read_only: false, location_id: None };
+        let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
+        sqlx::query("UPDATE users SET can_delete = 0 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+        let amy = crate::auth::user_by_id(&env.st, &mut env.st.db.acquire().await.unwrap(), amy.id).await.unwrap().unwrap();
+        let err = delete(State(env.st.clone()), amy.clone(), Path(info.id.clone())).await.unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::FORBIDDEN);
+        assert!(tree::get_drive(&mut env.st.db.acquire().await.unwrap(), &info.id).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn access_that_ends_cant_be_extended_by_whoever_has_it() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let carol = env.user("carol", true).await;
+        let root = {
+            let mut conn = env.st.db.acquire().await.unwrap();
+            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0, "local").await.unwrap();
+            crate::db::add_grant(&mut conn, &root, "user", amy.id, "owner", Some(amy.id), None).await.unwrap();
+            let ends = now() + 3600;
+            crate::db::add_grant(&mut conn, &root, "user", ben.id, "manager", Some(amy.id), Some(ends)).await.unwrap();
+            root
+        };
+        let st = || State(env.st.clone());
+        let ends = now() + 3600;
+        // Ben manages the space for an hour: he can't make his own access, or everyone's, last longer
+        for req in [grant_req(&ben, "manager", None), grant_req(&ben, "viewer", Some(ends + 86400))] {
+            let err = grant(st(), ben.clone(), Path(root.clone()), req).await.unwrap_err();
+            assert_eq!(err.status, axum::http::StatusCode::FORBIDDEN);
+        }
+        let everyone = Json(GrantReq { principal_type: "everyone".into(), principal_id: 0, role: "viewer".into(), expires_at: None });
+        assert_eq!(grant(st(), ben.clone(), Path(root.clone()), everyone).await.unwrap_err().status, axum::http::StatusCode::FORBIDDEN);
+        // Access for others, and his own until it ends, he still manages
+        let _ = grant(st(), ben.clone(), Path(root.clone()), grant_req(&carol, "editor", None)).await.unwrap();
+        let _ = grant(st(), ben.clone(), Path(root.clone()), grant_req(&ben, "editor", Some(ends - 60))).await.unwrap();
+        // The owner, whose access doesn't end, gives it for good
+        let _ = grant(st(), amy.clone(), Path(root.clone()), grant_req(&ben, "manager", None)).await.unwrap();
     }
 
     #[tokio::test]

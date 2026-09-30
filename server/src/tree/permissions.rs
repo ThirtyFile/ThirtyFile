@@ -107,6 +107,39 @@ pub async fn role_on(conn: &mut SqliteConnection, user: &User, node: &Node) -> A
     Ok(best)
 }
 
+/// When the user's right to manage access to a node ends: the latest end of the grants that make them a manager or
+/// owner there; None when one of them doesn't end (or they manage it through no grant)
+pub async fn manages_until(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppResult<Option<i64>> {
+    let sql = format!(
+        "WITH RECURSIVE up(id, parent_id) AS (
+           SELECT id, parent_id FROM nodes WHERE id = ?1
+           UNION ALL SELECT n.id, n.parent_id FROM nodes n JOIN up ON n.id = up.parent_id
+         )
+         SELECT CASE WHEN COUNT(*) = COUNT(g.expires_at) THEN MAX(g.expires_at) END
+         FROM grants g JOIN up ON g.node_id = up.id WHERE g.role IN ('manager', 'owner') AND {}",
+        principal_match(2, 3)
+    );
+    let (until,): (Option<i64>,) = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).bind(user.id).bind(now()).fetch_one(conn).await?;
+    Ok(until)
+}
+
+/// Whether a grant to this principal gives the user access: it names them, a group of theirs, or everyone
+pub async fn grant_applies_to(conn: &mut SqliteConnection, user: &User, principal_type: &str, principal_id: i64) -> AppResult<bool> {
+    Ok(match principal_type {
+        "everyone" => true,
+        "user" => principal_id == user.id,
+        "group" => {
+            let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM group_members WHERE group_id = ? AND user_id = ?")
+                .bind(principal_id)
+                .bind(user.id)
+                .fetch_one(conn)
+                .await?;
+            n > 0
+        }
+        _ => false,
+    })
+}
+
 /// Gets a node the user can access that isn't in the trash, together with the user's role.
 /// `root` means the user's own personal space, `shared` means the "All files" company space.
 pub async fn node_with_role(conn: &mut SqliteConnection, user: &User, id: &str) -> AppResult<(Node, Role)> {

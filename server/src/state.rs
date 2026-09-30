@@ -144,6 +144,13 @@ impl Inner {
         health.get(location).filter(|h| !h.ok).map(|h| h.error.clone().unwrap_or_else(|| "Can't connect".into()))
     }
 
+    /// `location_offline` as a person is told: the reason names hosts, addresses and folders, which only
+    /// administrators see; everyone else learns that it can't be reached
+    pub fn location_offline_for(&self, location: &str, admin: bool) -> Option<String> {
+        let reason = self.location_offline(location)?;
+        Some(if admin || reason == "Storage location unavailable" { reason } else { "Can't connect".into() })
+    }
+
     /// Gets the backend of a storage location
     pub fn storage(&self, location: &str) -> crate::error::AppResult<Arc<dyn Storage>> {
         self.storages

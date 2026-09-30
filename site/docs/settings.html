@@ -22,7 +22,7 @@
           <table>
             <thead><tr><th>Setting</th><th>Default</th><th>Description</th></tr></thead>
             <tbody>
-              <tr><td><code>THIRTYFILE_ADMIN_PASSWORD</code></td><td>random</td><td>Password of the <code>admin</code> account. Used on the first start only</td></tr>
+              <tr><td><code>THIRTYFILE_ADMIN_PASSWORD</code></td><td>random</td><td>Password of the <code>admin</code> account. Used on the first start only. The example <code>choose-a-password</code> counts as not set</td></tr>
               <tr><td><code>THIRTYFILE_ADMIN_PASSWORD_FILE</code></td><td></td><td>A file holding that password instead, for example a Docker secret</td></tr>
               <tr><td><code>THIRTYFILE_SECURE_COOKIE</code></td><td><code>false</code></td><td>Set to <code>true</code> when the site uses HTTPS (a Site URL starting with <code>https://</code> does the same). Cookies are then only sent over HTTPS, and browsers are told to use HTTPS only for a year (HSTS)</td></tr>
               <tr><td><code>THIRTYFILE_TRUST_PROXY</code></td><td><code>false</code></td><td>Set to <code>true</code> when the site is behind a reverse proxy on the same computer or Docker network. For a proxy on another computer, list its addresses instead, for example <code>203.0.113.7, 10.1.0.0/16</code>. <code>true</code> trusts every private address, including other computers on your network; a list of the proxy's addresses is safer. What a proxy says about the request (<code>X-Forwarded-For</code>, <code>-Host</code> and <code>-Proto</code>) is only believed from these addresses</td></tr>
