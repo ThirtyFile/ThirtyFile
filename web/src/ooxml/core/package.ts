@@ -132,18 +132,64 @@ const MAX_TOTAL = 300 * 1024 * 1024;
 const MAX_ENTRIES = 5000;
 
 /**
+ * The entries of a ZIP archive as its central directory declares them: names and uncompressed sizes (ZIP64 included).
+ * Null when the directory can't be read; JSZip then says whether the file is an archive at all.
+ */
+export function* declaredEntries(buf: ArrayBuffer): Generator<{ name: string; size: number }, null | undefined> {
+  const bytes = new Uint8Array(buf);
+  const view = new DataView(buf);
+  // The end of central directory record: 22 bytes, followed by a comment of up to 65535
+  let end = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 22 - 0xffff); i--) {
+    if (view.getUint32(i, true) === 0x06054b50) {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) return null;
+  let count = view.getUint16(end + 10, true);
+  let at = view.getUint32(end + 16, true);
+  // ZIP64: a locator right before the record points at the ZIP64 record, which holds the real count and offset
+  if ((count === 0xffff || at === 0xffffffff) && end >= 20 && view.getUint32(end - 20, true) === 0x07064b50) {
+    const record = Number(view.getBigUint64(end - 12, true));
+    if (record + 56 > bytes.length || view.getUint32(record, true) !== 0x06064b50) return null;
+    count = Number(view.getBigUint64(record + 32, true));
+    at = Number(view.getBigUint64(record + 48, true));
+  }
+  const decoder = new TextDecoder();
+  for (let n = 0; n < count; n++) {
+    if (at + 46 > bytes.length || view.getUint32(at, true) !== 0x02014b50) return null;
+    const nameLength = view.getUint16(at + 28, true);
+    const extraLength = view.getUint16(at + 30, true);
+    const commentLength = view.getUint16(at + 32, true);
+    let size = view.getUint32(at + 24, true);
+    // A ZIP64 size is in the extra field (id 1), which starts with the uncompressed size
+    if (size === 0xffffffff) {
+      for (let e = at + 46 + nameLength, stop = e + extraLength; e + 4 <= stop; e += 4 + view.getUint16(e + 2, true)) {
+        if (view.getUint16(e, true) === 1 && view.getUint16(e + 2, true) >= 8) {
+          size = Number(view.getBigUint64(e + 4, true));
+          break;
+        }
+      }
+    }
+    yield { name: decoder.decode(bytes.subarray(at + 46, at + 46 + nameLength)), size };
+    at += 46 + nameLength + extraLength + commentLength;
+  }
+  return undefined;
+}
+
+/**
  * Before decompressing, check the entry count and the sizes declared in the central directory: refuse to open if a single part
  * or the total is too large. The declared sizes can lie, so `readEntry` enforces the same limits again while inflating.
  */
-export function checkZipSizes(zip: JSZip) {
+export function checkZipSizes(buf: ArrayBuffer) {
   let total = 0;
   let count = 0;
-  for (const f of Object.values(zip.files)) {
-    if (f.dir) continue;
+  for (const { name, size } of declaredEntries(buf)) {
+    if (name.endsWith("/")) continue;
     if (++count > MAX_ENTRIES) throw new Error(TOO_LARGE);
-    const size = (f as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0;
     total += size;
-    if (size > (isXmlPart(f.name) ? MAX_XML_PART : MAX_MEDIA_PART) || total > MAX_TOTAL) throw new Error(TOO_LARGE);
+    if (size > (isXmlPart(name) ? MAX_XML_PART : MAX_MEDIA_PART) || total > MAX_TOTAL) throw new Error(TOO_LARGE);
   }
 }
 
@@ -222,7 +268,7 @@ export class OoxmlPackage {
 
   static async open(buf: ArrayBuffer): Promise<OoxmlPackage> {
     const zip = await JSZip.loadAsync(buf);
-    checkZipSizes(zip);
+    checkZipSizes(buf);
     return new OoxmlPackage(zip);
   }
 

@@ -246,7 +246,7 @@ export async function readXlsx(buf: ArrayBuffer): Promise<{ zip: JSZip; book: Wo
     throw new OoxmlError("not-ooxml");
   });
   try {
-    checkZipSizes(zip);
+    checkZipSizes(buf);
   } catch {
     throw new OoxmlError("too-large");
   }
