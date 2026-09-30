@@ -317,6 +317,123 @@ export interface MovesList {
 /** Whether a move isn't over: the space is being moved, or waits to be */
 export const moveActive = (m: SpaceMove) => m.state === "queued" || m.state === "running" || m.state === "paused" || m.state === "failed";
 
+export type BackupJobState = "queued" | "running" | "paused" | "waiting" | "failed" | "done" | "cancelled";
+export type BackupJobKind = "snapshot" | "restore" | "verify" | "remove";
+
+/** A space held in a copy (Control panel › Backups): what it is, never what is in it */
+export interface BackupSpace {
+  id: string;
+  name: string;
+  kind: DriveKind;
+  /** Personal spaces: the owner's user name */
+  owner: string;
+  mode: "store" | "folder";
+  files: number;
+  bytes: number;
+}
+
+/** What a copy held at a point in time; only a complete one can be restored from */
+export interface BackupSnapshot {
+  id: string;
+  state: "making" | "complete";
+  /** When the spaces were read: the copy shows them as they were then */
+  cutoff: number | null;
+  spaces: BackupSpace[];
+  folders: number;
+  files: number;
+  versions: number;
+  logical_bytes: number;
+  created_at: number;
+  completed_at: number | null;
+}
+
+/** A copy of a storage location's spaces, kept on another location */
+export interface BackupSet {
+  id: string;
+  kind: "copy" | "policy" | "imported";
+  name: string;
+  source_location: string | null;
+  source_name: string;
+  dest_location: string;
+  dest_name: string;
+  created_by_name: string;
+  created_at: number;
+  /** Being deleted from its location */
+  removing: boolean;
+  /** Content held on the destination (each content once) */
+  objects: number;
+  bytes: number;
+  snapshots: BackupSnapshot[];
+}
+
+/** Work on a copy: making it, restoring from it, checking it, deleting it */
+export interface BackupJob {
+  id: string;
+  kind: BackupJobKind;
+  set_id: string;
+  snapshot_id: string | null;
+  state: BackupJobState;
+  /** The copy's name; for a restore the space's */
+  label: string;
+  files_total: number;
+  bytes_total: number;
+  files_done: number;
+  bytes_done: number;
+  failed_items: number;
+  /** The first items that couldn't be done; `item` is null in personal spaces */
+  failures: { item: string | null; error: string }[];
+  error: string | null;
+  note: string | null;
+  created_by_name: string;
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  speed?: number | null;
+  /** Restores: the space restored into */
+  target?: string | null;
+}
+
+export interface BackupsOverview {
+  sets: BackupSet[];
+  jobs: BackupJob[];
+}
+
+/** Whether a backup job isn't over */
+export const backupJobActive = (j: BackupJob) => j.state === "queued" || j.state === "running" || j.state === "paused" || j.state === "waiting" || j.state === "failed";
+
+/** What "Copy everything to…" would copy, and whether the destination can take it */
+export interface CopyPreview {
+  source_name: string;
+  dest_name: string;
+  dest_kind: StorageKind;
+  spaces: { id: string; name: string; kind: DriveKind; owner_name: string; mode: "store" | "folder"; used_bytes: number }[];
+  files: number;
+  trash_files: number;
+  versions: number;
+  /** Files and versions, identical content counted every time */
+  bytes: number;
+  /** What goes to the destination: each content once */
+  content_bytes: number;
+  /** On a disk of this server; null when it can't be told */
+  free_bytes: number | null;
+  /** On the same disk or storage service as the source */
+  shared: boolean;
+  /** FTP without TLS */
+  unencrypted: boolean;
+  /** Why the destination can't be used now */
+  problem: string | null;
+}
+
+/** What restoring a space of a copy would do */
+export interface RestorePreview {
+  space: BackupSpace;
+  target_drive: string | null;
+  target_name: string | null;
+  folder_name: string;
+  targets: { id: string; name: string; kind: DriveKind }[];
+  problem: string | null;
+}
+
 export type PrincipalType = "user" | "group" | "everyone";
 
 export interface Grant {
@@ -1341,6 +1458,35 @@ export const api = {
   resumeMove: (id: string) => post(enc`/admin/moves/${id}/resume`),
   cancelMove: (id: string) => post(enc`/admin/moves/${id}/cancel`),
   setMoveConcurrency: (concurrency: number) => request("PUT", "/admin/moves/settings", { concurrency }),
+  backups: () =>
+    get<BackupsOverview>("/admin/backups").then((o) => ({
+      ...o,
+      sets: o.sets.map((s) => ({
+        ...s,
+        source_name: s.source_location ? locationName(s.source_location, s.source_name) : s.source_name,
+        dest_name: locationName(s.dest_location, s.dest_name),
+        snapshots: s.snapshots.map((n) => ({ ...n, spaces: n.spaces.map((sp) => ({ ...sp, name: driveName(sp) })) })),
+      })),
+    })),
+  copyPreview: (source: string, dest: string) =>
+    post<CopyPreview>("/admin/backups/copies/preview", { source, dest }).then((p) => ({
+      ...p,
+      spaces: p.spaces.map((s) => ({ ...s, name: driveName(s) })),
+    })),
+  startCopy: (source: string, dest: string, name: string) => post<{ set_id: string; job_id: string }>("/admin/backups/copies", { source, dest, name }),
+  pauseBackupJob: (id: string) => post(enc`/admin/backups/jobs/${id}/pause`),
+  resumeBackupJob: (id: string) => post(enc`/admin/backups/jobs/${id}/resume`),
+  cancelBackupJob: (id: string) => post(enc`/admin/backups/jobs/${id}/cancel`),
+  verifyBackup: (id: string) => post<{ job_id: string }>(enc`/admin/backups/sets/${id}/verify`),
+  deleteBackup: (id: string) => request("DELETE", enc`/admin/backups/sets/${id}`),
+  restorePreview: (snapshot: string, req: { space: string; target_drive?: string | null; trash?: boolean; tz?: number }) =>
+    post<RestorePreview>(enc`/admin/backups/snapshots/${snapshot}/restore/preview`, req).then((p) => ({
+      ...p,
+      space: { ...p.space, name: driveName(p.space) },
+      targets: p.targets.map((t) => ({ ...t, name: driveName(t) })),
+    })),
+  restoreBackup: (snapshot: string, req: { space: string; target_drive?: string | null; trash?: boolean; tz?: number; folder_name?: string }) =>
+    post<{ job_id: string }>(enc`/admin/backups/snapshots/${snapshot}/restore`, req),
   groups: () => get<Group[]>("/admin/groups"),
   createGroup: (req: { name: string; description?: string; members?: number[] }) => post<{ id: number }>("/admin/groups", req),
   updateGroup: (id: number, req: { name?: string; description?: string; members?: number[] }) => request("PATCH", enc`/admin/groups/${id}`, req),
