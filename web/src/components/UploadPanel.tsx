@@ -17,20 +17,25 @@ import { Button } from "@/components/ui/button";
 import { FileIcon } from "@/components/FileIcon";
 import { confirm } from "@/components/confirm";
 import { cn, formatBytes } from "@/lib/utils";
-import { cancel, cancelAll, clearFinished, pause, resume, retryFailed, useUploads } from "@/uploads";
+import { RecoveredUploads } from "@/components/RecoveredUploads";
+import { cancel, cancelAll, clearFinished, pause, resume, retryFailed, useInterrupted, useUploads } from "@/uploads";
 import { t } from "@/lib/i18n";
 
 /** Above this many uploads, only those in progress, paused or failed get a row; the rest are counted in a summary */
 const ROW_LIMIT = 100;
 
-/** Upload progress; `visitor`: on a share link's page, where the destination folder can't be opened */
-export function UploadPanel({ visitor = false }: { visitor?: boolean }) {
+/**
+ * Upload progress, and uploads to `endpoint` that a reload or a closed browser interrupted; `visitor`: on a share
+ * link's page, where the destination folder can't be opened
+ */
+export function UploadPanel({ visitor = false, endpoint = "/api/uploads" }: { visitor?: boolean; endpoint?: string }) {
   const { tasks, totals } = useUploads();
+  const recovered = useInterrupted(endpoint);
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   // One context menu for every row: remembers which row it was opened on
   const [menuId, setMenuId] = useState<string | null>(null);
-  if (tasks.length === 0) return null;
+  if (tasks.length === 0 && recovered.length === 0) return null;
 
   const active = totals.uploading + totals.queued;
   const failed = totals.error;
@@ -39,7 +44,9 @@ export function UploadPanel({ visitor = false }: { visitor?: boolean }) {
     ? t("Uploading {n} file · {pct}%|Uploading {n} files · {pct}%", { n: active, pct })
     : failed
       ? t("{n} file failed to upload|{n} files failed to upload", { n: failed })
-      : t("{n} upload complete|{n} uploads complete", { n: tasks.length });
+      : tasks.length
+        ? t("{n} upload complete|{n} uploads complete", { n: tasks.length })
+        : t("{n} interrupted upload|{n} interrupted uploads", { n: recovered.length });
 
   const condensed = tasks.length > ROW_LIMIT;
   const shown = condensed ? tasks.filter((x) => x.status === "uploading" || x.status === "paused" || x.status === "error") : tasks;
@@ -71,6 +78,7 @@ export function UploadPanel({ visitor = false }: { visitor?: boolean }) {
           variant="ghost"
           aria-label={t("Close")}
           title={t("Close")}
+          disabled={tasks.length === 0}
           onClick={async () => {
             if (!active) return clearFinished();
             if (await confirm({ title: t("Cancel all uploads in progress?"), confirmText: t("Cancel uploads"), destructive: true })) cancelAll();
@@ -88,7 +96,8 @@ export function UploadPanel({ visitor = false }: { visitor?: boolean }) {
           <div className="h-full bg-brand transition-[width]" style={{ width: `${pct}%` }} />
         </div>
       )}
-      {!collapsed && (
+      {!collapsed && recovered.length > 0 && <RecoveredUploads endpoint={endpoint} batches={recovered} />}
+      {!collapsed && tasks.length > 0 && (
         <ContextMenu>
           <ContextMenuTrigger className="block max-h-72 overflow-y-auto" onContextMenuCapture={() => setMenuId(null)}>
             {rows.map((task) => {

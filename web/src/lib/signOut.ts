@@ -1,5 +1,6 @@
 import { clearDownloads } from "@/downloads";
 import { cancelAll } from "@/uploads";
+import { forgetRecords, setRecoveryUser } from "@/lib/uploadRecovery";
 
 /** The start of the keys of the tree's expanded folders (earlier versions kept one for everyone, under this key alone) */
 const TREE_STORAGE_PREFIX = "tf-tree-expanded";
@@ -15,6 +16,8 @@ export const treeStorageKey = (userId: number) => `${TREE_STORAGE_PREFIX}-${user
 export function leaveAfterSignOut(userId: number) {
   cancelAll();
   clearDownloads();
+  // Interrupted uploads that could be continued name files and folders too
+  forgetRecords(null, true);
   try {
     for (const key of Object.keys(localStorage)) {
       if (key.startsWith("tus::")) localStorage.removeItem(key);
@@ -50,9 +53,12 @@ function forgetOtherUsers(userId: number) {
       for (const key of keysOf(storage, "tf-tabs-")) if (key !== ownTabs) storage.removeItem(key);
     }
     for (const key of keysOf(localStorage, TREE_STORAGE_PREFIX)) if (key !== ownTree) localStorage.removeItem(key);
-    if (localStorage.getItem(LAST_USER_KEY) !== String(userId)) {
+    const someoneElse = localStorage.getItem(LAST_USER_KEY) !== String(userId);
+    if (someoneElse) {
       for (const key of keysOf(localStorage, "tus::")) localStorage.removeItem(key);
     }
+    // Other people's interrupted uploads (and, after someone else, those made through share links in this browser)
+    forgetRecords(`u${userId}`, someoneElse);
     localStorage.setItem(LAST_USER_KEY, String(userId));
   } catch {
     // Storage blocked by the browser: nothing was kept there either
@@ -74,4 +80,5 @@ export function noteSignedIn(userId: number) {
   }
   if (signedInAs === null) forgetOtherUsers(userId);
   signedInAs = userId;
+  setRecoveryUser(userId);
 }
