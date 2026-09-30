@@ -17,7 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/dialogs";
-import { askBeforeTransfer } from "@/components/ConflictDialog";
+import { askBeforeTransfer } from "@/lib/conflicts";
 import { ErrorState } from "@/components/ErrorState";
 import { FileList } from "@/components/FileList";
 import { Frame, ToolButton } from "@/components/Frame";

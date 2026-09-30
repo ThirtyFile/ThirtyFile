@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { backgroundUrl, brandForeground, contrastRatio, DEFAULT_BRANDING, logoUrl, PAGE_BACKGROUND, useBranding, type Branding } from "@/lib/branding";
 import { SiteName } from "@/components/SiteName";
 import { formatClock, formatDate, LoginAvatar, LoginWallpaper } from "@/components/LoginScreen";
-import { confirm } from "@/components/confirm";
+import { confirm } from "@/lib/confirm";
 import type { ThemeMode } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { t, tServer, tc } from "@/lib/i18n";

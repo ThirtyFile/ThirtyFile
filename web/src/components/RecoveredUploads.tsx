@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { FileUpIcon, FolderUpIcon, HistoryIcon, Loader2Icon, RotateCcwIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { confirm } from "@/components/confirm";
+import { confirm } from "@/lib/confirm";
 import { t } from "@/lib/i18n";
 import { formatBytes } from "@/lib/utils";
 import { hasSession, type RecoveredBatch } from "@/lib/uploadRecovery";
