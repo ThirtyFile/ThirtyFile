@@ -665,18 +665,18 @@ async fn copies_go_to_s3_sftp_and_ftp_locations_and_come_back_from_them() {
     let a = env.upload(&amy, &docs, "a.txt", b"over the network").await;
     let big: &'static [u8] = vec![7u8; 300_000].leak();
     let b = env.upload(&amy, amy.root(), "big.bin", big).await;
-    let sftp = crate::sftp::tests::server(testutil::password()).await;
-    let ftp = crate::ftp::tests::server(testutil::password()).await;
+    let sftp = crate::storage::sftp::tests::server(testutil::password()).await;
+    let ftp = crate::storage::ftp::tests::server(testutil::password()).await;
     add_location(&env, "bucket", "s3", json!({ "endpoint": "https://s3.example.com", "bucket": "b" }), Arc::new(storage::S3Storage::in_memory("tf"))).await;
     add_location(
         &env,
         "sftp",
         "sftp",
         json!({ "host": "127.0.0.1", "path": "/files" }),
-        Arc::new(crate::sftp::tests::storage(&sftp, testutil::password(), &sftp.fingerprint)),
+        Arc::new(crate::storage::sftp::tests::storage(&sftp, testutil::password(), &sftp.fingerprint)),
     )
     .await;
-    add_location(&env, "ftp", "ftp", json!({ "host": "127.0.0.2", "path": "/files" }), Arc::new(crate::ftp::tests::storage(&ftp, testutil::password()))).await;
+    add_location(&env, "ftp", "ftp", json!({ "host": "127.0.0.2", "path": "/files" }), Arc::new(crate::storage::ftp::tests::storage(&ftp, testutil::password()))).await;
     let mut snapshots = Vec::new();
     for dest in ["bucket", "sftp", "ftp"] {
         let (set, job) = copy_all(&env, "local", dest).await;

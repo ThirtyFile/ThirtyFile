@@ -20,7 +20,8 @@ use tokio::io::AsyncWriteExt;
 
 use crate::{
     auth::User,
-    beneath::{Below, Pinned},
+    beneath::Pinned,
+    folders::Below,
     error::{AppError, AppResult},
     files::{Blob, Source, serve_blob},
     fsops,

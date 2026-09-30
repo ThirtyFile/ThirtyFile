@@ -153,7 +153,7 @@ impl FromRequestParts<AppState> for User {
     async fn from_request_parts(parts: &mut Parts, st: &AppState) -> Result<Self, Self::Rejection> {
         let user = session_user(parts, st).await?;
         // The error log records who a failed request came from
-        crate::logs::note_user(user.id, &user.username);
+        crate::error::note_user(user.id, &user.username);
         Ok(user)
     }
 }

@@ -1,6 +1,10 @@
+use std::sync::{Arc, Mutex};
+
 use axum::{
     Json,
+    extract::{MatchedPath, Request},
     http::StatusCode,
+    middleware::Next,
     response::{IntoResponse, Response},
 };
 use serde_json::json;
@@ -42,7 +46,7 @@ impl AppError {
     /// An unexpected failure: its text goes to the server log under the request's id; the person is told a server error
     /// occurred, and the error log records what kind of failure it was (the text can name files and paths)
     pub fn internal<E: std::fmt::Display + 'static>(e: E) -> Self {
-        let request = crate::logs::request_id().unwrap_or_default();
+        let request = request_id().unwrap_or_default();
         tracing::error!(request, "internal error: {e}");
         let mut err = Self::new(StatusCode::INTERNAL_SERVER_ERROR, "A server error occurred");
         err.diag = Some(diagnosis(&e));
@@ -61,7 +65,7 @@ fn diagnosis<E: std::fmt::Display + 'static>(e: &E) -> String {
         };
     }
     if let Some(db) = any.downcast_ref::<sqlx::Error>() {
-        return format!("Database error: {}", crate::logs::redact(&db.to_string()));
+        return format!("Database error: {}", crate::redact::redact(&db.to_string()));
     }
     if let Some(text) = any.downcast_ref::<&str>() {
         return text.to_string();
@@ -110,21 +114,58 @@ fn unique_violation(message: &str) -> &'static str {
     }
 }
 
-impl From<std::io::Error> for AppError {
-    fn from(e: std::io::Error) -> Self {
-        if let Some(se) = e.get_ref().and_then(|inner| inner.downcast_ref::<crate::storage::StorageError>()) {
-            tracing::warn!("{se}");
-            crate::locations::request_recheck();
-            return Self::new(StatusCode::SERVICE_UNAVAILABLE, se.text());
-        }
-        Self::internal(e)
-    }
-}
-
 impl From<tokio::task::JoinError> for AppError {
     fn from(e: tokio::task::JoinError) -> Self {
         Self::internal(e)
     }
+}
+
+impl AppError {
+    /// What this error response tells the error log
+    pub(crate) fn info(&self) -> ErrorInfo {
+        ErrorInfo { message: self.message.clone(), code: self.code, diag: self.diag.clone() }
+    }
+}
+
+// ───────────── The request being answered ─────────────
+
+tokio::task_local! {
+    pub(crate) static REQUEST: Arc<RequestCtx>;
+}
+
+/// What is known about the request being answered: its id, and who sent it once that is known
+pub struct RequestCtx {
+    pub(crate) id: String,
+    pub(crate) user: Mutex<Option<(i64, String)>>,
+    pub(crate) route: Mutex<Option<String>>,
+}
+
+/// The id of the request being answered (none outside a request, e.g. in a background task)
+pub fn request_id() -> Option<String> {
+    REQUEST.try_with(|c| c.id.clone()).ok()
+}
+
+/// Notes who sent the request being answered (called when the session is recognised)
+pub fn note_user(id: i64, username: &str) {
+    let _ = REQUEST.try_with(|c| *c.user.lock().unwrap() = Some((id, username.to_string())));
+}
+
+/// Notes the route template that answers the request (a `route_layer`: routing is done by then)
+pub async fn note_route(req: Request, next: Next) -> Response {
+    if let Some(p) = req.extensions().get::<MatchedPath>() {
+        let p = p.as_str().to_string();
+        let _ = REQUEST.try_with(|c| *c.route.lock().unwrap() = Some(p));
+    }
+    next.run(req).await
+}
+
+/// What an error response says, for the error log (a response extension added by `AppError`)
+#[derive(Clone, Debug)]
+pub struct ErrorInfo {
+    pub message: String,
+    pub code: Option<&'static str>,
+    /// For server failures: what kind of failure (never names, paths or contents)
+    pub diag: Option<String>,
 }
 
 #[cfg(test)]

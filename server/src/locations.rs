@@ -20,7 +20,8 @@ use crate::{
     util::{self, new_id, now, validate_name},
 };
 
-pub const BUILTIN: &str = "local";
+/// The id of the built-in location
+pub use crate::storage::BUILTIN;
 
 #[derive(sqlx::FromRow)]
 struct LocationRow {
@@ -576,12 +577,6 @@ const HEALTH_INTERVAL: Duration = Duration::from_secs(30);
 /// Shorter check interval while a location is offline, so it's usable again soon after recovering
 const OFFLINE_INTERVAL: Duration = Duration::from_secs(20);
 
-static RECHECK: tokio::sync::Notify = tokio::sync::Notify::const_new();
-
-/// Called when an operation hits a storage service error: recheck the connection right away so the UI soon shows "offline"
-pub fn request_recheck() {
-    RECHECK.notify_one();
-}
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 
 fn set_health(st: &AppState, id: &str, error: Option<String>) {
@@ -655,7 +650,7 @@ pub fn spawn_health_monitor(st: AppState) {
                 tokio::select! {
                     _ = tokio::time::sleep(if any_down { OFFLINE_INTERVAL } else { HEALTH_INTERVAL }) => {}
                     // Several requests may fail at the same time: wait a moment and merge them into one check
-                    _ = RECHECK.notified() => tokio::time::sleep(Duration::from_secs(1)).await,
+                    _ = crate::storage::RECHECK.notified() => tokio::time::sleep(Duration::from_secs(1)).await,
                 }
             }
             first = false;
