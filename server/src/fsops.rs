@@ -247,10 +247,7 @@ pub async fn lock(st: &AppState, user: &User, ids: &[&str]) -> AppResult<SpaceLo
 }
 
 pub async fn lock_space(drive_id: &str) -> OwnedMutexGuard<()> {
-    let guard = crate::folders::drive_lock(drive_id).lock_owned().await;
-    // A scan reading the folder meanwhile reads it again
-    crate::folders::changing(drive_id);
-    guard
+    crate::folders::drive_lock(drive_id).lock_owned().await
 }
 
 // ───────────── Disks that don't answer ─────────────
@@ -1560,7 +1557,7 @@ async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
     }
     still_there(&mut tx, dest).await?;
     let planned: HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
-    let now_there: Vec<String> = tree::subtree(&mut tx, &top.id).await?.into_iter().filter(|(n, _)| n.trashed_at.is_none()).map(|(n, _)| n.id).collect();
+    let now_there = tree::live_subtree_ids(&mut tx, &top.id).await?;
     if now_there.len() != planned.len() || !now_there.iter().all(|id| planned.contains(id.as_str())) {
         return Err(changed());
     }

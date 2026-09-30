@@ -146,13 +146,10 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
 #[derive(sqlx::FromRow)]
 struct Item {
     id: String,
-    parent_id: Option<String>,
     kind: String,
     name: String,
     blob_hash: Option<String>,
     size: i64,
-    trash_id: Option<String>,
-    trash_root: bool,
 }
 
 /// A planned path, with the name on disk when it differs, and the content
@@ -184,26 +181,89 @@ async fn drop_gone_items(st: &AppState, job: &Job, only: Option<&str>) -> AppRes
     Ok(())
 }
 
-/// Plans a path in the folder for every item and version that has none yet (all of them the first time)
+/// Plans a path in the folder for every item and version that has none yet (all of them the first time). It goes
+/// through the space a folder at a time, so what it holds doesn't grow with the space: the folders still to go
+/// through, and the items of one.
 async fn plan(st: &AppState, job: &Job) -> AppResult<()> {
-    let items: Vec<Item> = sqlx::query_as("SELECT id, parent_id, kind, name, blob_hash, size, trash_id, trash_root FROM nodes WHERE drive_id = ?")
-        .bind(&job.drive_id)
-        .fetch_all(&st.db)
-        .await?;
-    let versions: Vec<(String, String, String, i64)> = sqlx::query_as(
-        "SELECT v.id, v.node_id, v.blob_hash, v.size FROM node_versions v JOIN nodes n ON n.id = v.node_id
-         WHERE n.drive_id = ? AND v.blob_hash IS NOT NULL",
-    )
-    .bind(&job.drive_id)
-    .fetch_all(&st.db)
-    .await?;
-    let planned: HashMap<String, String> =
-        sqlx::query_as::<_, (String, String)>("SELECT item_id, path FROM space_move_items WHERE move_id = ?").bind(&job.id).fetch_all(&st.db).await?.into_iter().collect();
     let root_id: String = sqlx::query_as::<_, (String,)>("SELECT root_id FROM drives WHERE id = ?").bind(&job.drive_id).fetch_one(&st.db).await?.0;
-    let wants = assign(&root_id, &items, &versions, &planned);
-    if wants.is_empty() {
-        return Ok(());
+    let mut out: Vec<Want> = Vec::new();
+    if planned_paths(st, job, std::slice::from_ref(&root_id)).await?.is_empty() {
+        out.push(Want { id: root_id.clone(), kind: "folder", path: String::new(), name: None, hash: None, size: 0 });
     }
+    // The space's root folder, then the trash by its trash id, then the folders found in them
+    let mut queue: VecDeque<(Option<String>, String)> = VecDeque::from([(Some(root_id.clone()), String::new())]);
+    let trash_ids: Vec<(String,)> =
+        sqlx::query_as("SELECT DISTINCT COALESCE(trash_id, id) FROM nodes WHERE drive_id = ? AND trash_root = 1 ORDER BY 1").bind(&job.drive_id).fetch_all(&st.db).await?;
+    queue.extend(trash_ids.into_iter().map(|(t,)| (None, format!("{TRASH_DIR}/{t}"))));
+    while let Some((folder, dir)) = queue.pop_front() {
+        let kids: Vec<Item> = match &folder {
+            Some(id) => sqlx::query_as(
+                "SELECT id, kind, name, blob_hash, size FROM nodes WHERE parent_id = ? AND drive_id = ? AND trash_root = 0 AND id != ?",
+            )
+            .bind(id)
+            .bind(&job.drive_id)
+            .bind(&root_id)
+            .fetch_all(&st.db)
+            .await?,
+            // A group of the trash: the items deleted together
+            None => sqlx::query_as(
+                "SELECT id, kind, name, blob_hash, size FROM nodes
+                 WHERE drive_id = ? AND trash_root = 1 AND COALESCE(trash_id, id) = ?",
+            )
+            .bind(&job.drive_id)
+            .bind(dir.trim_start_matches(&format!("{TRASH_DIR}/")))
+            .fetch_all(&st.db)
+            .await?,
+        };
+        let ids: Vec<String> = kids.iter().map(|k| k.id.clone()).collect();
+        let planned = planned_paths(st, job, &ids).await?;
+        let folders = place_all(&dir, kids.iter().collect(), &planned, &mut out);
+        queue.extend(folders.into_iter().map(|(id, path)| (Some(id), path)));
+        if out.len() >= 500 {
+            save_wants(st, job, std::mem::take(&mut out)).await?;
+        }
+    }
+    save_wants(st, job, out).await?;
+    // Earlier versions of the files planned, by their file
+    loop {
+        let _w = st.write_lock.lock().await;
+        let added = sqlx::query(
+            "INSERT OR IGNORE INTO space_move_items (move_id, item_id, kind, done, hash, size, path, name)
+             SELECT ?1, v.id, 'version', 0, v.blob_hash, v.size, ?3 || '/' || v.node_id || '/' || v.id, NULL
+             FROM node_versions v JOIN nodes n ON n.id = v.node_id
+             WHERE n.drive_id = ?2 AND v.blob_hash IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM space_move_items i WHERE i.move_id = ?1 AND i.item_id = v.id)
+               AND EXISTS (SELECT 1 FROM space_move_items i WHERE i.move_id = ?1 AND i.item_id = v.node_id)
+             LIMIT 500",
+        )
+        .bind(&job.id)
+        .bind(&job.drive_id)
+        .bind(VERSIONS_DIR)
+        .execute(&st.db)
+        .await?
+        .rows_affected();
+        if added == 0 {
+            return Ok(());
+        }
+    }
+}
+
+/// The paths planned already for these items (by id)
+async fn planned_paths(st: &AppState, job: &Job, ids: &[String]) -> AppResult<HashMap<String, String>> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    Ok(sqlx::query_as::<_, (String, String)>("SELECT item_id, path FROM space_move_items WHERE move_id = ? AND item_id IN (SELECT value FROM json_each(?))")
+        .bind(&job.id)
+        .bind(serde_json::to_string(ids).unwrap())
+        .fetch_all(&st.db)
+        .await?
+        .into_iter()
+        .collect())
+}
+
+/// Records planned paths, a batch per transaction
+async fn save_wants(st: &AppState, job: &Job, wants: Vec<Want>) -> AppResult<()> {
     for chunk in wants.chunks(500) {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
@@ -230,43 +290,10 @@ async fn plan(st: &AppState, job: &Job) -> AppResult<()> {
     Ok(())
 }
 
-/// Paths for what isn't planned yet: parents before their contents, the trash by its trash id, versions by their file
-fn assign(root_id: &str, items: &[Item], versions: &[(String, String, String, i64)], planned: &HashMap<String, String>) -> Vec<Want> {
-    let mut children: HashMap<&str, Vec<&Item>> = HashMap::new();
-    let mut trash: std::collections::BTreeMap<String, Vec<&Item>> = std::collections::BTreeMap::new();
-    for it in items.iter().filter(|it| it.id != root_id) {
-        if it.trash_root {
-            trash.entry(it.trash_id.clone().unwrap_or_else(|| it.id.clone())).or_default().push(it);
-        } else if let Some(p) = &it.parent_id {
-            children.entry(p.as_str()).or_default().push(it);
-        }
-    }
-    let mut out = Vec::new();
-    if !planned.contains_key(root_id) {
-        out.push(Want { id: root_id.to_string(), kind: "folder", path: String::new(), name: None, hash: None, size: 0 });
-    }
-    let mut queue: VecDeque<(&str, String)> = VecDeque::new();
-    place_all("", children.remove(root_id).unwrap_or_default(), planned, &mut out, &mut queue);
-    for (id, list) in trash {
-        place_all(&format!("{TRASH_DIR}/{id}"), list, planned, &mut out, &mut queue);
-    }
-    while let Some((id, dir)) = queue.pop_front() {
-        place_all(&dir, children.remove(id).unwrap_or_default(), planned, &mut out, &mut queue);
-    }
-    let placed: HashSet<&str> = planned.keys().map(String::as_str).chain(out.iter().map(|w| w.id.as_str())).collect();
-    let mut vs = Vec::new();
-    for (id, node, hash, size) in versions {
-        if !planned.contains_key(id) && placed.contains(node.as_str()) {
-            vs.push(Want { id: id.clone(), kind: "version", path: format!("{VERSIONS_DIR}/{node}/{id}"), name: None, hash: Some(hash.clone()), size: *size });
-        }
-    }
-    out.extend(vs);
-    out
-}
-
 /// Names the items of one folder on disk, next to what is planned there already: unique regardless of letter case,
 /// and something a scan shows
-fn place_all<'a>(dir: &str, mut kids: Vec<&'a Item>, planned: &HashMap<String, String>, out: &mut Vec<Want>, queue: &mut VecDeque<(&'a str, String)>) {
+fn place_all(dir: &str, mut kids: Vec<&Item>, planned: &HashMap<String, String>, out: &mut Vec<Want>) -> Vec<(String, String)> {
+    let mut folders = Vec::new();
     kids.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
     let name_of = |path: &str| path.rsplit('/').next().unwrap_or(path).to_lowercase();
     let mut taken: HashSet<String> = kids.iter().filter_map(|k| planned.get(&k.id)).map(|p| name_of(p)).collect();
@@ -296,9 +323,10 @@ fn place_all<'a>(dir: &str, mut kids: Vec<&'a Item>, planned: &HashMap<String, S
             }
         };
         if is_dir {
-            queue.push_back((it.id.as_str(), path));
+            folders.push((it.id.clone(), path));
         }
     }
+    folders
 }
 
 /// Makes a folder of the plan (and those on the way), reached without following a link
@@ -547,13 +575,19 @@ async fn switch(cx: &Ctx<'_>, folder: &Path) -> AppResult<bool> {
             .bind(&job.drive_id)
             .fetch_all(&mut *tx)
             .await?;
-            let hashes: Vec<(String,)> = sqlx::query_as(
-                "SELECT blob_hash FROM nodes WHERE drive_id = ?1 AND blob_hash IS NOT NULL
-                 UNION ALL
-                 SELECT v.blob_hash FROM node_versions v JOIN nodes n ON n.id = v.node_id WHERE n.drive_id = ?1 AND v.blob_hash IS NOT NULL",
+            // The content store lets go of the content of the space's files and versions: counted in the database (a
+            // list of it all would be as large as the space), before the files forget it below
+            sqlx::query(
+                "UPDATE blobs SET refcount = refcount - d.n FROM (
+                   SELECT h, COUNT(*) AS n FROM (
+                     SELECT blob_hash AS h FROM nodes WHERE drive_id = ?1 AND blob_hash IS NOT NULL
+                     UNION ALL
+                     SELECT v.blob_hash FROM node_versions v JOIN nodes x ON x.id = v.node_id WHERE x.drive_id = ?1 AND v.blob_hash IS NOT NULL
+                   ) GROUP BY h
+                 ) d WHERE blobs.hash = d.h",
             )
             .bind(&job.drive_id)
-            .fetch_all(&mut *tx)
+            .execute(&mut *tx)
             .await?;
             let renamed: Vec<(String, String)> = sqlx::query_as(
                 "SELECT i.item_id, i.name FROM space_move_items i JOIN nodes n ON n.id = i.item_id AND n.drive_id = ?2 WHERE i.move_id = ?1 AND i.name IS NOT NULL",
@@ -587,8 +621,14 @@ async fn switch(cx: &Ctx<'_>, folder: &Path) -> AppResult<bool> {
             .execute(&mut *tx)
             .await?;
             // The content store lets go of the content: what nothing else uses is deleted a minute later
-            let hashes: Vec<String> = hashes.into_iter().map(|(h,)| h).collect();
-            for (hash, location) in crate::tree::release_blobs(&mut tx, &hashes).await? {
+            let released: Vec<(String, String)> = sqlx::query_as(
+                "DELETE FROM blobs WHERE refcount <= 0 AND NOT EXISTS (SELECT 1 FROM nodes WHERE blob_hash = blobs.hash)
+                   AND NOT EXISTS (SELECT 1 FROM node_versions WHERE blob_hash = blobs.hash)
+                 RETURNING hash, location_id",
+            )
+            .fetch_all(&mut *tx)
+            .await?;
+            for (hash, location) in released {
                 sqlx::query(
                     "INSERT INTO pending_blob_deletes (hash, location_id, created_at, attempts, last_error) VALUES (?, ?, ?, 0, 'deferred')
                      ON CONFLICT (hash, location_id) DO UPDATE SET created_at = MIN(created_at, excluded.created_at)",

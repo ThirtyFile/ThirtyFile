@@ -120,14 +120,14 @@ fn zip_name(plan: &crate::downloads::ZipPlan, roots: &[Node]) -> String {
 async fn run_compress(st: AppState, user: User, progress: Tracker, roots: Vec<Node>, dest_id: String, offset: i64) -> AppResult<Outcome> {
     let plan = crate::downloads::zip_plan(&st, roots.clone(), offset).await?;
     let name = zip_name(&plan, &roots);
-    let total: u64 = plan.items.iter().map(|it| it.size).sum();
-    progress.set_total(total);
+    progress.set_total(plan.bytes);
 
     let tmp = st.tmp_dir().join(format!("zip-{}", new_id()));
     let written = async {
         let file = tokio::fs::File::create(&tmp).await?;
         let mut zip = ZipWriter::deflating(tokio::io::BufWriter::with_capacity(256 * 1024, file));
-        for item in plan.items {
+        let mut walk = plan.walk();
+        while let Some(item) = walk.next(&st).await? {
             match item.blob {
                 None => zip.add_dir(&item.path, item.mtime).await?,
                 Some(source) => {

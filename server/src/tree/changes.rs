@@ -426,19 +426,38 @@ pub fn finish_later(st: &AppState, rows: Vec<Unfinished>, held: Vec<OwnedMutexGu
 }
 
 /// Deletes an item and everything in it for good, a batch per transaction, without hiding it first: for items that
-/// are gone from a folder space's folder, with its scan lock held
-pub async fn purge_now(st: &AppState, id: &str) -> AppResult<()> {
+/// are gone from a folder space's folder, with its scan lock held. Returns how many items went.
+pub async fn purge_now(st: &AppState, id: &str) -> AppResult<usize> {
     let mut stack = VecDeque::new();
+    let mut deleted = 0;
     loop {
         let mut out = Leftovers::default();
         let done = {
             let _w = st.write_lock.lock().await;
             let mut tx = crate::db::begin_write(&st.db).await?;
-            let (_, done) = purge_batch(&mut tx, id, &mut stack, batch(), &mut out).await?;
+            let (n, done) = purge_batch(&mut tx, id, &mut stack, batch(), &mut out).await?;
             tx.commit().await?;
+            deleted += n as usize;
             done
         };
         schedule_blob_removal(st, out.blobs);
+        if done {
+            return Ok(deleted);
+        }
+    }
+}
+
+/// Items of a folder space at `old` and below it are at `new` now, a batch per transaction: for a folder a scan found
+/// moved, with the space's scan lock held
+pub async fn repath_now(st: &AppState, drive_id: &str, old: &str, new: &str) -> AppResult<()> {
+    if old == new {
+        return Ok(());
+    }
+    loop {
+        let _w = st.write_lock.lock().await;
+        let mut tx = crate::db::begin_write(&st.db).await?;
+        let (_, done) = repath_batch(&mut tx, drive_id, old, new, batch()).await?;
+        tx.commit().await?;
         if done {
             return Ok(());
         }

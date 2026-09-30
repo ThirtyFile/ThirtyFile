@@ -208,9 +208,8 @@ pub(crate) fn identity(_: &std::fs::Metadata) -> (i64, i64) {
     (0, 0)
 }
 
-/// What `walk` read: the folder (open), its marker and its items
+/// What `walk` read: the folder's marker and its items
 struct Walked {
-    root: crate::beneath::Pinned,
     marker: Option<String>,
     entries: Vec<Entry>,
 }
@@ -219,6 +218,25 @@ struct Walked {
 /// before their contents, and the space's marker. Everything is read through the folder opened once, so the marker
 /// and the items are those of the same folder, whatever is put in its place meanwhile. Runs on a blocking thread.
 fn walk(root: &Path, only: Option<&str>, report: &mut ScanReport, found: Option<&dyn Fn(usize)>) -> std::io::Result<Walked> {
+    let mut entries = Vec::new();
+    let (_, marker) = walk_each(root, only, report, &mut |_, items| {
+        entries.extend(items);
+        if let Some(found) = found {
+            found(entries.len());
+        }
+        true
+    })?;
+    Ok(Walked { marker, entries })
+}
+
+/// `walk`, handing the items of each folder read to `visit` (the folder's path, its items) instead of keeping them
+/// all; `visit` returns false to stop. Returns the folder opened and its marker.
+fn walk_each(
+    root: &Path,
+    only: Option<&str>,
+    report: &mut ScanReport,
+    visit: &mut dyn FnMut(&str, Vec<Entry>) -> bool,
+) -> std::io::Result<(crate::beneath::Pinned, Option<String>)> {
     // Each folder is reached without following a symbolic link on the way (one could replace a folder meanwhile)
     let pinned = crate::beneath::Pinned::root(root)?;
     let root_meta = std::fs::metadata(pinned.as_path())?;
@@ -228,7 +246,6 @@ fn walk(root: &Path, only: Option<&str>, report: &mut ScanReport, found: Option<
     let (root_dev, _) = identity(&root_meta);
     let marker = space_marker(&pinned)?;
     let settle_after = (now() - SETTLE_SECONDS) as i128 * 1_000_000_000;
-    let mut out = Vec::new();
     let mut queue = std::collections::VecDeque::from([only.unwrap_or("").to_string()]);
     let mut first = true;
     while let Some(dir_rel) = queue.pop_front() {
@@ -290,27 +307,14 @@ fn walk(root: &Path, only: Option<&str>, report: &mut ScanReport, found: Option<
             });
         }
         children.sort_by(|a, b| a.name.cmp(&b.name));
-        for c in children {
-            if c.is_dir && only.is_none() {
-                queue.push_back(c.rel.clone());
-            }
-            out.push(c);
+        if only.is_none() {
+            queue.extend(children.iter().filter(|c| c.is_dir).map(|c| c.rel.clone()));
         }
-        if let Some(found) = found {
-            found(out.len());
+        if !visit(&dir_rel, children) {
+            break;
         }
     }
-    Ok(Walked { root: pinned, marker, entries: out })
-}
-
-/// Whether the folder read is the one the index has, told by the identity of an item at its indexed path (a folder
-/// put in its place can't have one of its inodes). Without inode numbers (not Unix) it can't be told: taken as it is.
-fn same_folder(indexed: &[Indexed], entries: &[Entry]) -> bool {
-    if entries.iter().all(|e| e.ino == 0) {
-        return true;
-    }
-    let by_path: HashMap<&str, &Indexed> = indexed.iter().filter_map(|n| n.fs_path.as_deref().map(|p| (p, n))).collect();
-    entries.iter().any(|e| e.ino != 0 && by_path.get(e.rel.as_str()).is_some_and(|n| n.fs_dev == Some(e.dev) && n.fs_ino == Some(e.ino)))
+    Ok((pinned, marker))
 }
 
 fn show(dir_rel: &str, name: &str) -> String {
@@ -340,6 +344,8 @@ enum Op {
     Park { id: String },
     Move { id: String, parent: String, e: Entry },
     Remove { id: String },
+    /// What is below a moved folder (`old`, a path below the space's folder) is below its new path now
+    Repath { old: String, new: String },
 }
 
 /// Scans a whole folder space and brings its index up to date (after a scan of it already running, if any)
@@ -349,13 +355,16 @@ pub async fn scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     run_scan(st, drive_id).await
 }
 
-/// Reads before taking the space's lock this many times when changes from the web keep coming in meanwhile; then the
-/// folder is read with the lock held
-const UNLOCKED_READS: u32 = 2;
+/// Folders read on one blocking call while the index is brought up to date
+const FOLDERS_PER_READ: usize = 64;
 
-/// `scan`, with the space's scan lock already held. The folder is read without the space's lock, so uploads and other
-/// changes to the space don't wait for a long read; the lock is held while the index is brought up to date. A change
-/// from the web during the read (`changing`) means the read may be out of date: it is done again.
+/// `scan`, with the space's scan lock already held. It goes through the space's folder one folder at a time, so what
+/// it keeps in memory doesn't grow with the space (a million files would otherwise need gigabytes):
+/// 1. The folder is read without the space's lock, so uploads and other changes to the space don't wait for a long
+///    read, and each folder is compared with what the index has in it: which folders differ.
+/// 2. With the space's lock held, each of those is read again and the index brought up to date with it. An item new
+///    in a folder that the index has elsewhere (the same file system identity, created at the same time) was moved
+///    there; one gone from a folder, and not found elsewhere by then, was removed.
 async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     let drive = folder_drive(st, drive_id).await?;
     let root = PathBuf::from(drive.source_path.clone().unwrap_or_default());
@@ -370,44 +379,10 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     set_progress(drive_id, |_| {});
     let _progress = ProgressGuard(drive_id.to_string());
     let started = std::time::Instant::now();
-    let mut reads = 0;
-    let (walked, _changing) = loop {
-        let held = if reads >= UNLOCKED_READS { Some(drive_lock(drive_id).lock_owned().await) } else { None };
-        // Taken after the changes in progress are done (waiting for the lock): any change counted from now on
-        // happened while the folder was being read
-        let before = if held.is_some() {
-            generation(drive_id)
-        } else {
-            let _wait = drive_lock(drive_id).lock_owned().await;
-            generation(drive_id)
-        };
-        let walked = {
-            let (root, id) = (root.clone(), drive_id.to_string());
-            let mut r = ScanReport::default();
-            let res = tokio::task::spawn_blocking(move || {
-                let found = |n: usize| set_progress(&id, |p| p.found = n);
-                walk(&root, None, &mut r, Some(&found)).map(|w| (w, r))
-            })
-            .await
-            .map_err(AppError::internal)?;
-            res.map(|(e, r)| {
-                report.skipped = r.skipped;
-                report.unreadable = r.unreadable;
-                report.leftovers = r.leftovers;
-                e
-            })
-        };
-        let lock = match held {
-            Some(l) => l,
-            None => drive_lock(drive_id).lock_owned().await,
-        };
-        if reads >= UNLOCKED_READS || generation(drive_id) == before {
-            break (walked, lock);
-        }
-        reads += 1;
-    };
-    let walked = match walked {
-        Ok(w) => w,
+
+    // 1. Which folders differ from the index
+    let compared = match compare(st, &drive, &root, &mut report).await? {
+        Ok(c) => c,
         Err(e) => {
             // The folder is gone (an unmounted disk, say): keep the index rather than removing everything
             report.error = Some(format!("Can't read {}: {e}", root.display()));
@@ -415,18 +390,10 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
             return Ok(report);
         }
     };
-    let indexed: Vec<Indexed> = sqlx::query_as(
-        "SELECT id, parent_id, kind, fs_path, fs_dev, fs_ino, fs_size, fs_mtime_ns, fs_birth_ns FROM nodes WHERE drive_id = ? AND trashed_at IS NULL",
-    )
-    .bind(&drive.id)
-    .fetch_all(&st.db)
-    .await?;
     report.read_ms = started.elapsed().as_millis() as u64;
-    let (entries, found) = (walked.entries, walked.marker);
     // An empty folder where the index has items is what a disk or share that isn't mounted looks like (its mount
     // point is an empty folder): only a folder that has the marker is really empty
-    let marker = walked.root.join(MARKER);
-    if found.as_ref().is_some_and(|id| *id != drive.id) {
+    if compared.marker.as_ref().is_some_and(|id| *id != drive.id) {
         // Another space's folder: a different disk mounted at the same place, say
         report.error = Some(format!(
             "{} holds another space's .thirtyfile-space file: if a different disk is mounted there, mount the right one and check again.",
@@ -435,9 +402,13 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
         save_report(st, &drive, &report).await?;
         return Ok(report);
     }
-    let marked = found.is_some();
-    let has_items = indexed.iter().any(|n| n.fs_path.as_deref().is_some_and(|p| !p.is_empty()));
-    if entries.is_empty() && has_items && !marked {
+    let marked = compared.marker.is_some();
+    let (has_items,): (bool,) =
+        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM nodes WHERE drive_id = ? AND trashed_at IS NULL AND fs_path IS NOT NULL AND fs_path <> '')")
+            .bind(&drive.id)
+            .fetch_one(&st.db)
+            .await?;
+    if compared.root_empty && has_items && !marked {
         report.error = Some(format!(
             "{} is empty, but the space still has items: if it is on a disk or network share that isn't mounted, mount it and check again. To empty the space, delete its items in ThirtyFile.",
             root.display()
@@ -447,7 +418,7 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     }
     // Without its marker, the folder is taken for the space's only when it holds an item the index knows by its
     // identity (the marker was deleted, say): another folder put in its place (a link elsewhere) is never indexed
-    if has_items && !marked && !same_folder(&indexed, &entries) {
+    if has_items && !marked && !compared.same_folder {
         report.error = Some(format!(
             "{} doesn't hold this space's .thirtyfile-space file, nor the items the space has: if another folder or disk is there now, put the right one back and check again.",
             root.display()
@@ -456,20 +427,20 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
         return Ok(report);
     }
     if !marked
-        && let Err(e) = marker.and_then(|m| crate::beneath::write_new(&m, drive.id.as_bytes()))
+        && let Err(e) = compared.root.join(MARKER).and_then(|m| crate::beneath::write_new(&m, drive.id.as_bytes()))
     {
         tracing::debug!("Couldn't write the marker file in {}: {e}", root.display());
     }
+
+    // 2. The index brought up to date, folder by folder
     let indexing = std::time::Instant::now();
-    let ops = plan(&drive, &indexed, &entries, true, &mut report);
-    set_progress(drive_id, |p| {
-        p.phase = "indexing";
-        p.total = ops.len();
-    });
-    apply(st, &drive, ops).await?;
+    if !compared.differing.is_empty() {
+        let _changing = drive_lock(&drive.id).lock_owned().await;
+        update_index(st, &drive, &root, compared.differing, compared.any_gone, &mut report).await?;
+    }
     crate::fsops::clean_trash(st, &drive.id, &root).await?;
     // In the folder read (whose marker was checked)
-    let leftovers: Vec<crate::beneath::Pinned> = report.leftovers.iter().filter_map(|rel| walked.root.join(rel).ok()).collect();
+    let leftovers: Vec<crate::beneath::Pinned> = report.leftovers.iter().filter_map(|rel| compared.root.join(rel).ok()).collect();
     if !leftovers.is_empty() {
         tokio::task::spawn_blocking(move || crate::fsops::clean_leftovers(leftovers, crate::fsops::TRASH_GRACE)).await.map_err(AppError::internal)?;
     }
@@ -479,13 +450,310 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
         tracing::info!(
             "Scanned the folder space {}: {} items read in {} s, index updated in {} s",
             drive.name,
-            entries.len(),
+            compared.found,
             report.read_ms / 1000,
             report.index_ms / 1000
         );
     }
     finish(st, &drive, &report).await?;
     Ok(report)
+}
+
+/// What reading the whole folder found (`compare`)
+struct Compared {
+    /// The folder, opened when it was read, and the marker it held
+    root: crate::beneath::Pinned,
+    marker: Option<String>,
+    /// Items found
+    found: usize,
+    /// The folder itself holds nothing
+    root_empty: bool,
+    /// An item was found at its indexed path with its indexed identity (or there are no identities to tell by)
+    same_folder: bool,
+    /// Folders whose items differ from what the index has in them (paths below the space's folder), parents first
+    differing: Vec<String>,
+    /// Whether an indexed item is gone from where the index has it: only then can an item have moved
+    any_gone: bool,
+}
+
+/// Reads the space's whole folder without its lock, one folder at a time, comparing each with the index. The inner
+/// result is the error of a folder that can't be read at all.
+async fn compare(st: &AppState, drive: &Drive, root: &Path, report: &mut ScanReport) -> AppResult<std::io::Result<Compared>> {
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(String, Vec<Entry>)>(4);
+    let (root, id) = (root.to_path_buf(), drive.id.clone());
+    let walker = tokio::task::spawn_blocking(move || {
+        let mut r = ScanReport::default();
+        let res = walk_each(&root, None, &mut r, &mut |rel, items| tx.blocking_send((rel.to_string(), items)).is_ok());
+        res.map(|opened| (opened, r))
+    });
+    let (mut found, mut root_empty, mut matched, mut identities, mut any_gone) = (0, false, false, false, false);
+    let mut differing = Vec::new();
+    while let Some((rel, items)) = rx.recv().await {
+        if rel.is_empty() {
+            root_empty = items.is_empty();
+        }
+        found += items.len();
+        set_progress(&id, |p| p.found = found);
+        identities |= items.iter().any(|e| e.ino != 0);
+        let children = indexed_in(st, drive, &rel).await?;
+        let (differ, gone) = differs(children.as_deref(), &items, &mut matched);
+        any_gone |= gone;
+        if differ {
+            differing.push(rel);
+        }
+    }
+    let ((opened, marker), r) = match walker.await.map_err(AppError::internal)? {
+        Ok(w) => w,
+        Err(e) => return Ok(Err(e)),
+    };
+    report.skipped = r.skipped;
+    report.unreadable = r.unreadable;
+    report.leftovers = r.leftovers;
+    Ok(Ok(Compared { root: opened, marker, found, root_empty, same_folder: matched || !identities, differing, any_gone }))
+}
+
+/// What the index has directly in the folder at `rel`; None when it has no folder there
+async fn indexed_in(st: &AppState, drive: &Drive, rel: &str) -> AppResult<Option<Vec<Indexed>>> {
+    let Some(folder) = folder_at(st, drive, rel).await? else { return Ok(None) };
+    Ok(Some(
+        sqlx::query_as(
+            "SELECT id, parent_id, kind, fs_path, fs_dev, fs_ino, fs_size, fs_mtime_ns, fs_birth_ns FROM nodes WHERE parent_id = ? AND trashed_at IS NULL",
+        )
+        .bind(&folder)
+        .fetch_all(&st.db)
+        .await?,
+    ))
+}
+
+/// The id of the indexed folder at `rel` ("" for the space's root folder)
+async fn folder_at(st: &AppState, drive: &Drive, rel: &str) -> AppResult<Option<String>> {
+    if rel.is_empty() {
+        return Ok(Some(drive.root_id.clone()));
+    }
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM nodes WHERE drive_id = ? AND fs_path = ? AND kind = 'folder' AND trashed_at IS NULL")
+            .bind(&drive.id)
+            .bind(rel)
+            .fetch_optional(&st.db)
+            .await?;
+    Ok(row.map(|(id,)| id))
+}
+
+/// Whether the items of a folder differ from what the index has in it (`children`; None: it has no folder there), and
+/// whether one of those is gone. An item found at its indexed path with its indexed identity sets `matched`.
+fn differs(children: Option<&[Indexed]>, items: &[Entry], matched: &mut bool) -> (bool, bool) {
+    let Some(children) = children else { return (true, false) };
+    let by_path: HashMap<&str, &Indexed> = children.iter().filter_map(|n| n.fs_path.as_deref().map(|p| (p, n))).collect();
+    let mut differ = false;
+    for e in items {
+        match by_path.get(e.rel.as_str()) {
+            Some(n) if n.kind == e.kind() => {
+                let same = e.dev == n.fs_dev.unwrap_or(-1) && e.ino == n.fs_ino.unwrap_or(-1);
+                *matched |= same && e.ino != 0;
+                let changed = !same || (!e.is_dir && (e.size != n.fs_size.unwrap_or(-1) || e.mtime_ns != n.fs_mtime_ns.unwrap_or(-1)));
+                differ |= (changed && !e.settling) || (!changed && e.birth_ns.is_some_and(|b| n.fs_birth_ns != Some(b)));
+            }
+            Some(_) => differ = true,
+            None => differ |= !e.settling,
+        }
+    }
+    let present: HashMap<&str, &str> = items.iter().map(|e| (e.rel.as_str(), e.kind())).collect();
+    // Gone, or the other kind now
+    let gone = children.iter().any(|n| n.fs_path.as_deref().is_some_and(|p| !p.is_empty() && present.get(p).is_none_or(|k| *k != n.kind)));
+    (differ || gone, gone)
+}
+
+/// Brings the index up to date with the folders `differing` (parents first), with the space's lock held: each is read
+/// again, a few at a time, and its changes made. Items gone from one are removed once all of them were gone through
+/// (one may have moved to a folder further on).
+/// `may_move`: whether an item may have moved (something was gone when the folder was read); else new items aren't looked
+/// for elsewhere in the index, which saves a query per item when a large folder is scanned the first time.
+async fn update_index(st: &AppState, drive: &Drive, root: &Path, differing: Vec<String>, may_move: bool, report: &mut ScanReport) -> AppResult<()> {
+    set_progress(&drive.id, |p| {
+        p.phase = "indexing";
+        p.total = differing.len();
+    });
+    let mut gone: Vec<(String, String)> = Vec::new();
+    let mut pending = Vec::new();
+    for chunk in differing.chunks(FOLDERS_PER_READ) {
+        // Read again, now that nothing else changes the space
+        let (root, rels) = (root.to_path_buf(), chunk.to_vec());
+        let read = tokio::task::spawn_blocking(move || {
+            rels.into_iter()
+                .map(|rel| {
+                    let mut r = ScanReport::default();
+                    let w = walk(&root, Some(&rel), &mut r, None);
+                    (rel, w.map(|w| w.entries), r)
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(AppError::internal)?;
+        for (rel, items, r) in read {
+            for s in r.skipped {
+                report.skip(s);
+            }
+            // (can't be read now: what the index has in it stays)
+            let Ok(items) = items else { continue };
+            let mut folder = folder_at(st, drive, &rel).await?;
+            // Made by changes not made yet (a new folder in a folder gone through just before)
+            if folder.is_none() && !pending.is_empty() {
+                report.removed += apply(st, drive, std::mem::take(&mut pending)).await?;
+                folder = folder_at(st, drive, &rel).await?;
+            }
+            let Some(folder) = folder else {
+                report.skip(format!("{}: its folder couldn't be indexed", if rel.is_empty() { "/" } else { &rel }));
+                continue;
+            };
+            let (ops, left) = reconcile(st, drive, &folder, items, may_move, report).await?;
+            pending.extend(ops);
+            gone.extend(left);
+            // The changes of several folders together, a batch per transaction
+            if pending.len() >= 10 * BATCH {
+                report.removed += apply(st, drive, std::mem::take(&mut pending)).await?;
+            }
+            set_progress(&drive.id, |p| p.done += 1);
+        }
+    }
+    report.removed += apply(st, drive, pending).await?;
+    remove_gone(st, drive, root, gone, report).await
+}
+
+/// The changes that make the index's folder `folder` hold what `items` (read from its folder) says; and the items of
+/// it that are gone from there, which may have moved elsewhere: (id, path)
+async fn reconcile(
+    st: &AppState,
+    drive: &Drive,
+    folder: &str,
+    items: Vec<Entry>,
+    may_move: bool,
+    report: &mut ScanReport,
+) -> AppResult<(Vec<Op>, Vec<(String, String)>)> {
+    let children: Vec<Indexed> = sqlx::query_as(
+        "SELECT id, parent_id, kind, fs_path, fs_dev, fs_ino, fs_size, fs_mtime_ns, fs_birth_ns FROM nodes WHERE parent_id = ? AND trashed_at IS NULL",
+    )
+    .bind(folder)
+    .fetch_all(&st.db)
+    .await?;
+    let by_path: HashMap<&str, &Indexed> = children.iter().filter_map(|n| n.fs_path.as_deref().map(|p| (p, n))).collect();
+    let present: HashMap<String, &'static str> = items.iter().map(|e| (e.rel.clone(), e.kind())).collect();
+    let mut ops = Vec::new();
+    // A path that holds the other kind now (a file replaced by a folder of the same name): the item goes first
+    let mut kind_changed = HashSet::new();
+    for n in &children {
+        if let Some(p) = n.fs_path.as_deref()
+            && present.get(p).is_some_and(|k| *k != n.kind)
+        {
+            kind_changed.insert(n.id.clone());
+            ops.push(Op::Remove { id: n.id.clone() });
+        }
+    }
+    // New items that the index has elsewhere by their identity: moved here, when their old path is gone
+    let mut moves: HashMap<String, Indexed> = HashMap::new();
+    let new: Vec<&Entry> =
+        items.iter().filter(|e| may_move && !e.settling && e.ino != 0 && by_path.get(e.rel.as_str()).is_none_or(|n| kind_changed.contains(&n.id))).collect();
+    for e in &new {
+        let found: Vec<Indexed> = sqlx::query_as(
+            "SELECT id, parent_id, kind, fs_path, fs_dev, fs_ino, fs_size, fs_mtime_ns, fs_birth_ns FROM nodes
+             WHERE fs_dev = ? AND fs_ino = ? AND drive_id = ? AND trashed_at IS NULL",
+        )
+        .bind(e.dev)
+        .bind(e.ino)
+        .bind(&drive.id)
+        .fetch_all(&st.db)
+        .await?;
+        if let Some(n) = found.into_iter().find(|n| n.kind == e.kind() && same_item(n, e) && n.fs_path.as_deref().is_some_and(|p| p != e.rel && !present.contains_key(p))) {
+            moves.insert(e.rel.clone(), n);
+        }
+    }
+    // Only those whose old path is gone: an item at two paths (a hard link) stays where it is
+    if !moves.is_empty() {
+        let root = drive.source_path.clone().unwrap_or_default();
+        let old: Vec<(String, String, i64, i64)> = moves.iter().map(|(rel, n)| (rel.clone(), n.fs_path.clone().unwrap_or_default(), n.fs_dev.unwrap_or(0), n.fs_ino.unwrap_or(0))).collect();
+        let still: HashSet<String> = tokio::task::spawn_blocking(move || {
+            let Ok(top) = crate::beneath::Pinned::root(Path::new(&root)) else { return HashSet::new() };
+            old.into_iter()
+                .filter(|(_, path, dev, ino)| top.join(path).ok().and_then(|p| crate::fsops::stat(p.as_path()).ok()).is_some_and(|s| (s.dev, s.ino) == (*dev, *ino)))
+                .map(|(rel, ..)| rel)
+                .collect()
+        })
+        .await
+        .map_err(AppError::internal)?;
+        moves.retain(|rel, _| !still.contains(rel));
+    }
+    let mut moved = HashSet::new();
+    for e in items {
+        match by_path.get(e.rel.as_str()) {
+            Some(n) if !kind_changed.contains(&n.id) => {
+                let changed = e.dev != n.fs_dev.unwrap_or(-1)
+                    || e.ino != n.fs_ino.unwrap_or(-1)
+                    || (!e.is_dir && (e.size != n.fs_size.unwrap_or(-1) || e.mtime_ns != n.fs_mtime_ns.unwrap_or(-1)));
+                if changed && !e.settling {
+                    if !e.is_dir {
+                        report.changed += 1;
+                    }
+                    ops.push(Op::Update { id: n.id.clone(), e });
+                } else if let Some(birth) = e.birth_ns.filter(|b| !changed && n.fs_birth_ns != Some(*b)) {
+                    ops.push(Op::Birth { id: n.id.clone(), birth });
+                }
+            }
+            _ if e.settling => {}
+            _ => match moves.remove(&e.rel) {
+                Some(n) => {
+                    report.moved += 1;
+                    moved.insert(n.id.clone());
+                    ops.push(Op::Park { id: n.id.clone() });
+                    // What is in a moved folder is at new paths too
+                    let old = n.fs_path.clone().unwrap_or_default();
+                    let folder_moved = e.is_dir.then(|| (old, e.rel.clone()));
+                    ops.push(Op::Move { id: n.id, parent: folder.to_string(), e });
+                    if let Some((old, new)) = folder_moved {
+                        ops.push(Op::Repath { old, new });
+                    }
+                }
+                None => {
+                    report.added += 1;
+                    ops.push(Op::Create { id: new_id(), parent: folder.to_string(), e });
+                }
+            },
+        }
+    }
+    let gone = children
+        .into_iter()
+        .filter(|n| !kind_changed.contains(&n.id) && !moved.contains(&n.id))
+        .filter_map(|n| n.fs_path.filter(|p| !p.is_empty() && !present.contains_key(p.as_str())).map(|p| (n.id, p)))
+        .collect();
+    Ok((ops, gone))
+}
+
+/// Removes what was gone from its folder and wasn't found elsewhere by then: still at its old path in the index, and
+/// not on the disk there. Only the topmost of them: what is in them goes with them.
+async fn remove_gone(st: &AppState, drive: &Drive, root: &Path, mut gone: Vec<(String, String)>, report: &mut ScanReport) -> AppResult<()> {
+    gone.sort_by(|a, b| a.1.cmp(&b.1));
+    let mut ops = Vec::new();
+    let mut last_removed: Option<String> = None;
+    for (id, path) in gone {
+        if last_removed.as_deref().is_some_and(|up| path.strip_prefix(up).is_some_and(|rest| rest.starts_with('/'))) {
+            continue;
+        }
+        let now: Option<(Option<String>,)> = sqlx::query_as("SELECT fs_path FROM nodes WHERE id = ? AND trashed_at IS NULL").bind(&id).fetch_optional(&st.db).await?;
+        if now.is_none_or(|(p,)| p.as_deref() != Some(path.as_str())) {
+            continue;
+        }
+        let (root, rel) = (root.to_path_buf(), path.clone());
+        let there = tokio::task::spawn_blocking(move || {
+            crate::beneath::Pinned::root(&root).and_then(|t| t.join(&rel)).is_ok_and(|p| std::fs::symlink_metadata(p.as_path()).is_ok())
+        })
+        .await
+        .map_err(AppError::internal)?;
+        if there {
+            continue;
+        }
+        ops.push(Op::Remove { id });
+        last_removed = Some(path);
+    }
+    report.removed += apply(st, drive, ops).await?;
+    Ok(())
 }
 
 /// A folder opened again within this long isn't read again: what changed on the server shows at the next opening
@@ -605,7 +873,7 @@ async fn try_sync_folder(st: &AppState, folder: &Node, wait: bool) -> AppResult<
         ops.into_iter().filter(|op| !matches!(op, Op::Remove { id } if !replaced.contains(id.as_str()))).collect()
     };
     let changed = !ops.is_empty();
-    if let Err(e) = apply(st, &drive, ops).await {
+    if let Err(e) = apply(st, &drive, ops).await.map(|_| ()) {
         drop(_scanning);
         scan_later(st, &drive.id);
         return Err(e);
@@ -710,20 +978,6 @@ pub(crate) async fn hold(drive_id: &str) -> (tokio::sync::OwnedMutexGuard<()>, t
 fn scan_lock(drive_id: &str) -> Arc<tokio::sync::Mutex<()>> {
     static LOCKS: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
     LOCKS.get_or_init(Default::default).lock().unwrap().entry(drive_id.to_string()).or_default().clone()
-}
-
-fn generations() -> &'static Mutex<HashMap<String, u64>> {
-    static GENERATIONS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
-    GENERATIONS.get_or_init(Default::default)
-}
-
-/// A change from the web is about to change the space's folder (it holds the space's lock)
-pub(crate) fn changing(drive_id: &str) {
-    *generations().lock().unwrap().entry(drive_id.to_string()).or_default() += 1;
-}
-
-fn generation(drive_id: &str) -> u64 {
-    generations().lock().unwrap().get(drive_id).copied().unwrap_or(0)
 }
 
 /// Why the storage location a folder space is on can't be used now (its folder isn't there, or holds another
@@ -883,12 +1137,17 @@ impl Entry {
     }
 }
 
-async fn apply(st: &AppState, drive: &Drive, ops: Vec<Op>) -> AppResult<()> {
+/// Makes the changes `ops`, a batch per transaction; returns how many items were removed
+async fn apply(st: &AppState, drive: &Drive, ops: Vec<Op>) -> AppResult<usize> {
+    if ops.is_empty() {
+        return Ok(0);
+    }
     let owner = sqlx::query_as::<_, (i64,)>("SELECT owner_id FROM nodes WHERE id = ?").bind(&drive.root_id).fetch_one(&st.db).await?.0;
     let mut ops = ops.into_iter().peekable();
+    let mut removed = 0;
     while ops.peek().is_some() {
         let mut n = 0;
-        let mut removed = None;
+        let mut after = None;
         {
             let _w = st.write_lock.lock().await;
             let mut tx = crate::db::begin_write(&st.db).await?;
@@ -897,10 +1156,11 @@ async fn apply(st: &AppState, drive: &Drive, ops: Vec<Op>) -> AppResult<()> {
                 && let Some(op) = ops.next()
             {
                 n += 1;
-                // An item gone from the folder goes with everything in it, which may be a lot: a batch per transaction
-                // of its own (the space's lock is held, so nothing else changes the space meanwhile)
-                if let Op::Remove { id } = op {
-                    removed = Some(id);
+                // An item gone from the folder goes with everything in it, and a moved folder takes what is in it to
+                // its new path: that may be a lot, so a batch per transaction of its own (the space's lock is held, so
+                // nothing else changes the space meanwhile)
+                if matches!(op, Op::Remove { .. } | Op::Repath { .. }) {
+                    after = Some(op);
                     break;
                 }
                 unused.extend(apply_one(&mut tx, drive, owner, op).await?);
@@ -908,14 +1168,13 @@ async fn apply(st: &AppState, drive: &Drive, ops: Vec<Op>) -> AppResult<()> {
             tx.commit().await?;
             tree::schedule_blob_removal(st, unused);
         }
-        if let Some(id) = removed {
-            tree::changes::purge_now(st, &id).await?;
-        }
-        if progress_map().lock().unwrap().contains_key(&drive.id) {
-            set_progress(&drive.id, |p| p.done += n);
+        match after {
+            Some(Op::Remove { id }) => removed += tree::changes::purge_now(st, &id).await?,
+            Some(Op::Repath { old, new }) => tree::changes::repath_now(st, &drive.id, &old, &new).await?,
+            _ => {}
         }
     }
-    Ok(())
+    Ok(removed)
 }
 
 /// Returns content of the content store no longer used (earlier versions of a removed file kept there, say), to remove
@@ -991,8 +1250,9 @@ async fn apply_one(conn: &mut SqliteConnection, drive: &Drive, owner: i64, op: O
             .await?;
         }
         // Removed a batch at a time by `apply` (tree/changes.rs): grants, shares and favourites of the removed items go
-        // with them, and so do earlier versions from before a file came into the folder, kept in the content store
-        Op::Remove { .. } => {}
+        // with them, and so do earlier versions from before a file came into the folder, kept in the content store.
+        // Paths below a moved folder change a batch at a time as well.
+        Op::Remove { .. } | Op::Repath { .. } => {}
     }
     Ok(Vec::new())
 }
@@ -1227,6 +1487,50 @@ mod tests {
         assert_eq!(list().await, ["a.txt", "b.txt"]);
     }
 
+    /// The process's own memory (not files it maps, such as the database: Linux's RssAnon), in MB
+    fn anon_mb() -> Option<u64> {
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        let line = status.lines().find(|l| l.starts_with("RssAnon:"))?;
+        line.split_whitespace().nth(1)?.parse::<u64>().ok().map(|kb| kb / 1024)
+    }
+
+    /// The issue's estimate (a first scan of a million files holds about 1 GB), measured on Linux: the most memory the
+    /// process held while scanning, sampled every 10 ms.
+    /// `ITEMS=200000 cargo test --release -- --ignored --nocapture measure_scanning`
+    #[tokio::test]
+    #[ignore]
+    async fn measure_scanning_a_large_space() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Big").await;
+        let n: usize = std::env::var("ITEMS").ok().and_then(|v| v.parse().ok()).unwrap_or(200_000);
+        for i in 0..n {
+            write_old(&space.dir.join(format!("d{:04}/sub/file-with-a-longer-name-{i:07}.txt", i / 100)), b"x");
+        }
+        for what in ["first scan (everything new)", "scan with nothing changed"] {
+            let before = anon_mb().unwrap_or(0);
+            let peak = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(before));
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let (p, s) = (peak.clone(), stop.clone());
+            let sampler = std::thread::spawn(move || {
+                while !s.load(std::sync::atomic::Ordering::SeqCst) {
+                    p.fetch_max(anon_mb().unwrap_or(0), std::sync::atomic::Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            });
+            let started = std::time::Instant::now();
+            let r = scan(&env.st, &space.drive).await.unwrap();
+            let took = started.elapsed();
+            stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            sampler.join().unwrap();
+            println!(
+                "{n} files, {what}: {:.1} s, memory {before} MB before, at most {} MB during, {} added",
+                took.as_secs_f64(),
+                peak.load(std::sync::atomic::Ordering::SeqCst),
+                r.added
+            );
+        }
+    }
+
     /// Opening a large folder of a folder space again and again (the web asks for its first page each time it is opened
     /// or refreshed): `ITEMS=20000 cargo test --release -- --ignored --nocapture measure_opening`
     #[tokio::test]
@@ -1254,6 +1558,43 @@ mod tests {
         let first = open().await;
         let again = open().await;
         println!("{n} items: opened {} ms (reads the folder), opened again right away {} ms", first.as_millis(), again.as_millis());
+    }
+
+    #[tokio::test]
+    async fn items_moved_between_folders_keep_their_ids_whichever_folder_is_read_first() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let (dir, drive) = (space.dir.clone(), space.drive.clone());
+        write_old(&dir.join("A/x.txt"), b"x");
+        write_old(&dir.join("B/keep.txt"), b"k");
+        write_old(&dir.join("Z/deep/y.txt"), b"y");
+        write_old(&dir.join("C/Inner/z.txt"), b"z");
+        write_old(&dir.join("D/Old/w.txt"), b"w");
+        scan(&env.st, &drive).await.unwrap();
+        let id = |rel: &'static str| {
+            let env = &env;
+            let drive = drive.clone();
+            async move { env.node_at(&drive, rel).await.map(|(id, _)| id) }
+        };
+        let (x, deep, y, inner, z) = (id("A/x.txt").await, id("Z/deep").await, id("Z/deep/y.txt").await, id("C/Inner").await, id("C/Inner/z.txt").await);
+        // Into a folder read later, into one read earlier, a folder with what is in it into a folder further down, and
+        // a folder removed with what is in it
+        std::fs::rename(dir.join("A/x.txt"), dir.join("Z/x.txt")).unwrap();
+        std::fs::rename(dir.join("Z/deep"), dir.join("B/deep")).unwrap();
+        std::fs::rename(dir.join("C/Inner"), dir.join("A/Inner")).unwrap();
+        std::fs::remove_dir_all(dir.join("D/Old")).unwrap();
+        let r = scan(&env.st, &drive).await.unwrap();
+        assert!(id("A/x.txt").await.is_none() && id("Z/deep").await.is_none() && id("C/Inner/z.txt").await.is_none() && id("D/Old/w.txt").await.is_none(), "{r:?}");
+        let now = (id("Z/x.txt").await, id("B/deep").await, id("B/deep/y.txt").await, id("A/Inner").await, id("A/Inner/z.txt").await);
+        assert!(now.0.is_some() && now.1.is_some() && now.2.is_some() && now.3.is_some() && now.4.is_some(), "{r:?}");
+        if cfg!(unix) {
+            // Recognised by their inodes: the same nodes, with their shares and permissions
+            assert_eq!(now, (x, deep, y, inner, z));
+            assert_eq!((r.moved, r.added, r.removed), (3, 0, 2), "{r:?}");
+        }
+        // Nothing left to do
+        let again = scan(&env.st, &drive).await.unwrap();
+        assert_eq!((again.added, again.moved, again.removed, again.changed), (0, 0, 0, 0), "{again:?}");
     }
 
     #[tokio::test]
