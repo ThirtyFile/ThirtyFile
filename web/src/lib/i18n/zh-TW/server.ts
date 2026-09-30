@@ -257,6 +257,7 @@ export default {
   "Invalid endpoint URL. It should be https://hostname": "端點網址格式不正確，應為 https://主機名稱",
   "Enter an absolute path": "請輸入絕對路徑",
   "The folder isn't there, or a different disk is mounted there": "資料夾不在，或那裡掛載的是另一顆磁碟",
+  "The disk of the folder on the server doesn't answer. Try again later.": "伺服器上資料夾所在的磁碟沒有回應，請稍後再試。",
   "Another storage location uses this folder (it holds that location's .thirtyfile-location file)": "另一個儲存位置正在使用這個資料夾（資料夾中有該位置的 .thirtyfile-location 檔案）",
   "The folder has items but no .thirtyfile-location file. If it is this location's folder, create that file in it holding this line: {id}": "資料夾中有項目，但沒有 .thirtyfile-location 檔案。如果這是這個位置的資料夾，請在其中建立這個檔案，內容為這一行：{id}",
   "Another storage location uses this place: its .thirtyfile-location file names another location or another ThirtyFile installation": "另一個儲存位置正在使用這個地方：其中的 .thirtyfile-location 檔案指名了另一個位置或另一套 ThirtyFile",

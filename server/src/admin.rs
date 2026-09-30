@@ -593,6 +593,7 @@ async fn move_personal_across(st: &AppState, me: &crate::auth::User, username: &
     let mut _scans = Vec::new();
     for d in spaces {
         _scans.push(crate::fsops::lock_space(d).await);
+        crate::fsops::ready(st, d).await?;
     }
     let (dest, items, label) = {
         let _w = st.write_lock.lock().await;

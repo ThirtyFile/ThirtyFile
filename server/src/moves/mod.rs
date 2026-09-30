@@ -581,7 +581,7 @@ async fn free_space(path: std::path::PathBuf) -> Option<u64> {
     if let Some(free) = FREE_SPACE.with(|f| f.get()) {
         return Some(free);
     }
-    tokio::task::spawn_blocking(move || crate::util::disk_space(&path)).await.ok().flatten().map(|(free, _)| free)
+    crate::util::disk_space_soon(&path).await.map(|(free, _)| free)
 }
 
 /// On a disk of this server (the built-in storage, a Local folder location): refuses when the disk has less free space

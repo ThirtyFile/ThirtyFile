@@ -142,6 +142,55 @@ pub fn numbered_name(name: &str, n: u32, is_folder: bool) -> String {
     format!("{stem} ({n}){ext}")
 }
 
+/// Work that may not come back (a call to a disk or network share that stopped answering), by what it is waiting for
+static WAITING: std::sync::Mutex<std::collections::BTreeSet<String>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
+
+/// Marks `key` as waited for until dropped; None when it is already
+struct Waiting(String);
+
+impl Waiting {
+    fn claim(key: String) -> Option<Waiting> {
+        let claimed = WAITING.lock().unwrap().insert(key.clone());
+        claimed.then(|| Waiting(key))
+    }
+}
+
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        WAITING.lock().unwrap().remove(&self.0);
+    }
+}
+
+/// Runs a blocking step on a blocking thread and waits up to `wait` for it; None when it didn't answer by then, or
+/// when a step for the same `key` still hasn't answered: a disk that hangs ties up one thread, not one more per call
+pub async fn blocking_within<T: Send + 'static>(key: String, wait: std::time::Duration, step: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    let claimed = Waiting::claim(key)?;
+    let task = tokio::task::spawn_blocking(move || {
+        let r = step();
+        drop(claimed);
+        r
+    });
+    tokio::time::timeout(wait, task).await.ok()?.ok()
+}
+
+/// `blocking_within` for work that is a future (a check of a storage service): it runs as a task of its own, so it
+/// finishes (and lets `key` go) whether or not anyone still waits for it
+pub async fn within<T: Send + 'static>(key: String, wait: std::time::Duration, work: impl Future<Output = T> + Send + 'static) -> Option<T> {
+    let claimed = Waiting::claim(key)?;
+    let task = tokio::spawn(async move {
+        let r = work.await;
+        drop(claimed);
+        r
+    });
+    tokio::time::timeout(wait, task).await.ok()?.ok()
+}
+
+/// `disk_space`, on a blocking thread and within a few seconds (None when the disk doesn't answer)
+pub async fn disk_space_soon(path: &std::path::Path) -> Option<(u64, u64)> {
+    let p = path.to_path_buf();
+    blocking_within(format!("disk space of {}", path.display()), std::time::Duration::from_secs(3), move || disk_space(&p)).await.flatten()
+}
+
 /// Free and total bytes of the file system holding `path` (what an unprivileged user may still write)
 #[cfg(unix)]
 pub fn disk_space(path: &std::path::Path) -> Option<(u64, u64)> {
@@ -235,6 +284,41 @@ pub fn system_folder(real: &std::path::Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
+    #[tokio::test]
+    async fn a_disk_that_doesnt_answer_ties_up_one_thread_and_is_asked_again_once_it_answers() {
+        let key = || format!("test disk {:?}", std::thread::current().id());
+        let (go, wait) = std::sync::mpsc::channel::<()>();
+        let started = Instant::now();
+        // It doesn't answer: given up after the wait
+        assert_eq!(super::blocking_within(key(), Duration::from_millis(100), move || wait.recv().is_ok()).await, None);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        // Asked again meanwhile: not asked at all (no second thread waits for it)
+        let asked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let a = asked.clone();
+        let again = Instant::now();
+        assert_eq!(super::blocking_within(key(), Duration::from_secs(5), move || a.store(true, std::sync::atomic::Ordering::SeqCst)).await, None);
+        assert!(again.elapsed() < Duration::from_millis(100) && !asked.load(std::sync::atomic::Ordering::SeqCst));
+        // Once it has answered, it is asked again
+        go.send(()).unwrap();
+        let mut answered = None;
+        for _ in 0..100 {
+            answered = super::blocking_within(key(), Duration::from_secs(1), || 7).await;
+            if answered.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(answered, Some(7));
+        // The same for a check that is a future (a storage service that doesn't answer)
+        let key = format!("test service {:?}", std::thread::current().id());
+        assert_eq!(super::within(key.clone(), Duration::from_millis(50), std::future::pending::<()>()).await, None);
+        let again = Instant::now();
+        assert_eq!(super::within(key, Duration::from_secs(5), async { 1 }).await, None);
+        assert!(again.elapsed() < Duration::from_millis(100));
+    }
+
     #[test]
     fn system_folders_are_told_apart() {
         use std::path::Path;

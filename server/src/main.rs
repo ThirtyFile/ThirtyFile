@@ -678,7 +678,8 @@ async fn health(axum::extract::State(st): axum::extract::State<AppState>) -> axu
     let mut warnings = Vec::new();
     let mut disks = serde_json::Map::new();
     for (name, path) in [("data", &st.data_dir), ("storage", &st.storage_dir)] {
-        if let Some((free, total)) = util::disk_space(path) {
+        // A disk that doesn't answer leaves its figures out, rather than the health check
+        if let Some((free, total)) = util::disk_space_soon(path).await {
             if free < LOW_DISK {
                 warnings.push(format!("{name}: {} free", util::format_bytes_u64(free)));
             }

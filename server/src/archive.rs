@@ -162,8 +162,11 @@ async fn store_new_file(st: &AppState, user: &User, folder_id: &str, name: &str,
         // A folder space: the file goes into the folder on the disk under a name scans ignore, then renamed into place
         let staged = crate::fsops::stage_upload(st, &folder, tmp, size).await?;
         let _space = crate::fsops::lock_space(folder.drive()).await;
+        // Its folder answers, before the write lock is taken
+        let ready = crate::fsops::ready(st, folder.drive()).await;
         let _w = st.write_lock.lock().await;
         let result = async {
+            ready?;
             let mut tx = crate::db::begin_write(&st.db).await?;
             let folder = tree::folder_for(&mut tx, user, folder_id, Need::Write).await?;
             tree::check_quota(&mut tx, folder.drive(), size as i64).await?;
@@ -536,7 +539,7 @@ async fn extract_into_folder(
     archive: &std::path::Path,
     plan: Vec<Planned>,
 ) -> AppResult<(String, String)> {
-    let staged = fsops::staging(parent)?;
+    let staged = fsops::staging(parent).await?;
     for p in &plan {
         // Names a folder space can't show (.DS_Store, Thumbs.db, ThirtyFile's own…) are left out
         if p.dirs.iter().chain(&p.file).any(|n| crate::folders::ignored(n)) {

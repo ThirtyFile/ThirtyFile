@@ -632,8 +632,11 @@ async fn finalize_in_folder(st: &AppState, up: &Uploader, upload: &Upload, path:
         }
     };
     let _space = crate::fsops::lock_space(parent.drive()).await;
+    // Its folder answers, before the write lock is taken
+    let ready = crate::fsops::ready(st, parent.drive()).await;
     let _w = st.write_lock.lock().await;
     let result = async {
+        ready?;
         let mut tx = crate::db::begin_write(&st.db).await?;
         // The account's upload permission, or the folder, may have changed while the upload was running
         if !user.can_write && !user.is_admin() {

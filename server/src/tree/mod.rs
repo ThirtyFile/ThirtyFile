@@ -400,7 +400,7 @@ pub async fn create_folder(conn: &mut SqliteConnection, owner_id: i64, parent_id
     let id = crate::util::new_id();
     let ts = now();
     if let Some(parent) = get_node(conn, parent_id).await?.filter(|p| p.in_folder_space()) {
-        let (rel, stat) = crate::fsops::make_dir(&parent, name)?;
+        let (rel, stat) = crate::fsops::make_dir(&parent, name).await?;
         crate::fsops::insert(conn, &id, owner_id, &parent, name, &rel, &stat).await?;
         touch(conn, parent_id).await?;
         return Ok(id);
