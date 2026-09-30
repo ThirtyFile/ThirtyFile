@@ -4,53 +4,24 @@
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
+use tracing_subscriber::EnvFilter;
 
-use crate::{VERSION, auth, check, db, locations, secrets, twofactor};
+#[cfg(unix)]
+use crate::privileges;
+use crate::{
+    VERSION,
+    app::{
+        health::health_probe,
+        startup::{self, Settings},
+    },
+    auth, check, db, locations, secrets, twofactor,
+};
 
 #[derive(Parser)]
 #[command(name = "thirtyfile", version = VERSION, about = "ThirtyFile — lightweight cloud file management system")]
 pub struct Config {
-    /// Listen address
-    #[arg(long, env = "THIRTYFILE_ADDR", default_value = "0.0.0.0:8080")]
-    pub addr: String,
-    /// Data directory (database, files, thumbnails)
-    #[arg(long, env = "THIRTYFILE_DATA", default_value = "./data")]
-    pub data: PathBuf,
-    /// Folder for the file contents of the built-in storage location (default: blobs in the data directory)
-    #[arg(long, env = "THIRTYFILE_STORAGE")]
-    pub storage: Option<PathBuf>,
-    /// Administrator password on first startup; if not set, a random one is generated and printed to the log
-    #[arg(long, env = "THIRTYFILE_ADMIN_PASSWORD", hide_env_values = true)]
-    pub admin_password: Option<String>,
-    /// A file holding the administrator password for the first startup (for Docker secrets)
-    #[arg(long, env = "THIRTYFILE_ADMIN_PASSWORD_FILE")]
-    pub admin_password_file: Option<PathBuf>,
-    /// Key that encrypts the passwords and keys saved in the database (64 hex characters); default: secret.key in the
-    /// data folder, created on first start
-    #[arg(long, env = "THIRTYFILE_SECRET_KEY", hide_env_values = true)]
-    pub secret_key: Option<String>,
-    /// A file holding that key instead (for example a Docker secret)
-    #[arg(long, env = "THIRTYFILE_SECRET_KEY_FILE")]
-    pub secret_key_file: Option<PathBuf>,
-    /// Enable when serving over HTTPS; cookies get the Secure attribute (true/false, also 1/0, yes/no, on/off)
-    #[arg(long, env = "THIRTYFILE_SECURE_COOKIE", default_value = "false", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
-    pub secure_cookie: bool,
-    /// Enable when behind a reverse proxy (nginx, Caddy…): take the user's real IP from X-Forwarded-For (for sign-in rate
-    /// limiting). `true` trusts proxies on private and loopback addresses; or list the proxies' addresses or networks
-    #[arg(long, env = "THIRTYFILE_TRUST_PROXY", default_value = "false", value_parser = auth::TrustProxy::parse)]
-    pub trust_proxy: auth::TrustProxy,
-    /// Days to keep items in the trash, 0 = until emptied
-    #[arg(long, env = "THIRTYFILE_TRASH_DAYS", default_value_t = 30, value_parser = clap::value_parser!(i64).range(0..=36500))]
-    pub trash_days: i64,
-    /// Upload size limit per file (MB), 0 = unlimited
-    #[arg(long, env = "THIRTYFILE_MAX_UPLOAD_MB", default_value_t = 0)]
-    pub max_upload_mb: u64,
-    /// SQLite page cache per database connection (MB); up to 8 connections are open
-    #[arg(long, env = "THIRTYFILE_DB_CACHE_MB", default_value_t = 16, value_parser = clap::value_parser!(u32).range(1..=1024))]
-    pub db_cache_mb: u32,
-    /// Thumbnails made at the same time (default: 1 with less than 2 GB of memory, else 2)
-    #[arg(long, env = "THIRTYFILE_THUMBNAIL_JOBS", value_parser = clap::value_parser!(u32).range(1..=16))]
-    pub thumbnail_jobs: Option<u32>,
+    #[command(flatten)]
+    pub server: Settings,
     /// When started as root: give the data directory to this user (`uid` or `uid:gid`) and run as that user (set in the Docker image)
     #[arg(long, env = "THIRTYFILE_RUN_AS")]
     #[cfg_attr(not(unix), allow(dead_code))]
@@ -81,6 +52,64 @@ pub enum Command {
         #[arg(long)]
         verify: bool,
     },
+}
+
+pub fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::IsTerminal;
+    // Colours only on a terminal (not in `docker logs` or a log collector); THIRTYFILE_LOG_FORMAT=json for JSON lines
+    let logs = tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "thirtyfile=info,tower_http=warn".into()))
+        .with_ansi(std::io::stdout().is_terminal());
+    if std::env::var("THIRTYFILE_LOG_FORMAT").is_ok_and(|f| f.eq_ignore_ascii_case("json")) {
+        logs.json().init();
+    } else {
+        logs.init();
+    }
+    let runtime = || tokio::runtime::Builder::new_multi_thread().enable_all().build();
+    let cfg = match Config::try_parse() {
+        Ok(cfg) => cfg,
+        // The health check only needs the address: a mistyped setting (which stops the server with a clear message)
+        // mustn't also make Docker report the check itself as broken
+        Err(e) if std::env::args().nth(1).as_deref() == Some("health") && e.kind() != clap::error::ErrorKind::DisplayHelp => {
+            let addr = std::env::var("THIRTYFILE_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into());
+            std::process::exit(if runtime()?.block_on(health_probe(&addr)) { 0 } else { 1 });
+        }
+        Err(e) => e.exit(),
+    };
+
+    // The health check only connects to the running service and doesn't touch the data directory
+    if let Some(Command::Health) = &cfg.command {
+        std::process::exit(if runtime()?.block_on(health_probe(&cfg.server.addr)) { 0 } else { 1 });
+    }
+
+    // The built-in storage location's folder
+    let storage = cfg.server.storage.clone().unwrap_or_else(|| cfg.server.data.join("blobs"));
+
+    // Data this version can't use (from 0.3 or older, say) stops the start before anything is written into the data
+    // or storage folder
+    let checked = tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(db::check_existing(&cfg.server.data.join("drive.db")));
+    if let Err(message) = checked {
+        return Err(message.into());
+    }
+
+    // Before the runtime starts its threads, so that all of them run as the new user. A storage folder that isn't
+    // there isn't made here: whether it may be made is decided once the database is open (`storage::prepare_builtin`).
+    #[cfg(unix)]
+    if let Some(user) = &cfg.run_as {
+        let folders: Vec<&std::path::Path> = [cfg.server.data.as_path(), storage.as_path()].into_iter().filter(|f| *f == cfg.server.data.as_path() || f.exists()).collect();
+        privileges::drop_to(user, &folders)?;
+    }
+
+    runtime()?.block_on(start(cfg, storage))
+}
+
+/// Runs the subcommand given, or starts the server and serves until a stop signal
+async fn start(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    let (db, key_source) = startup::open(&cfg.server).await?;
+    if run(&cfg, &db, &storage, &key_source).await? {
+        return Ok(());
+    }
+    startup::start(cfg.server, storage, db).await?.serve().await
 }
 
 /// Runs the subcommand that works on the database, if one was given: `true` when it ran and the program is done,
@@ -182,13 +211,13 @@ mod tests {
     fn settings_accept_common_ways_of_writing_true_and_refuse_impossible_values() {
         let parse = |args: &[&str]| Config::try_parse_from(std::iter::once("thirtyfile").chain(args.iter().copied()));
         for yes in ["true", "TRUE", "1", "yes", "on"] {
-            assert!(parse(&["--secure-cookie", yes]).unwrap().secure_cookie, "{yes}");
+            assert!(parse(&["--secure-cookie", yes]).unwrap().server.secure_cookie, "{yes}");
         }
         for no in ["false", "0", "no", "off"] {
-            assert!(!parse(&["--secure-cookie", no]).unwrap().secure_cookie, "{no}");
+            assert!(!parse(&["--secure-cookie", no]).unwrap().server.secure_cookie, "{no}");
         }
         assert!(parse(&["--trash-days=-5"]).is_err(), "a negative number of days would turn off emptying the trash");
-        assert_eq!(parse(&["--trash-days", "0"]).unwrap().trash_days, 0);
+        assert_eq!(parse(&["--trash-days", "0"]).unwrap().server.trash_days, 0);
     }
 
     #[test]

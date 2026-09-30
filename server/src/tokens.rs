@@ -3,7 +3,7 @@
 //!
 //! A token is `tfa_<id>_<secret>`; only its SHA-256 is stored, and it is shown once when created. It is sent as
 //! `Authorization: Bearer <token>`, or as the password of HTTP Basic sign-in (username + app password). Tokens only work
-//! on the routes that allow them (file operations, see `allow` in main.rs): the account itself, sign-in methods, sharing
+//! on the routes that allow them (file operations, see `allow` in app/routes.rs): the account itself, sign-in methods, sharing
 //! and administration always need a browser session. A read-only token is refused for anything but reading (see `reads_only`).
 
 use std::net::SocketAddr;

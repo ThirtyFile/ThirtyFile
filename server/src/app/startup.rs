@@ -4,9 +4,7 @@
 use std::path::PathBuf;
 
 use crate::{
-    backups, branding,
-    cli::{self, Config},
-    db, folders, locations, logs, moves, personal, replicas, secrets, sso,
+    backups, branding, db, folders, locations, logs, moves, personal, replicas, secrets, sso,
     state::{AppState, Setup},
     thumbnails, tree, upload, usage, util,
 };
@@ -14,6 +12,52 @@ use crate::{
 use crate::watch;
 
 use super::{maintenance::spawn_maintenance, routes::router, serve::serve};
+
+/// The server's settings: flags and THIRTYFILE_* variables (the command line is in cli.rs)
+#[derive(clap::Args)]
+pub struct Settings {
+    /// Listen address
+    #[arg(long, env = "THIRTYFILE_ADDR", default_value = "0.0.0.0:8080")]
+    pub addr: String,
+    /// Data directory (database, files, thumbnails)
+    #[arg(long, env = "THIRTYFILE_DATA", default_value = "./data")]
+    pub data: PathBuf,
+    /// Folder for the file contents of the built-in storage location (default: blobs in the data directory)
+    #[arg(long, env = "THIRTYFILE_STORAGE")]
+    pub storage: Option<PathBuf>,
+    /// Administrator password on first startup; if not set, a random one is generated and printed to the log
+    #[arg(long, env = "THIRTYFILE_ADMIN_PASSWORD", hide_env_values = true)]
+    pub admin_password: Option<String>,
+    /// A file holding the administrator password for the first startup (for Docker secrets)
+    #[arg(long, env = "THIRTYFILE_ADMIN_PASSWORD_FILE")]
+    pub admin_password_file: Option<PathBuf>,
+    /// Key that encrypts the passwords and keys saved in the database (64 hex characters); default: secret.key in the
+    /// data folder, created on first start
+    #[arg(long, env = "THIRTYFILE_SECRET_KEY", hide_env_values = true)]
+    pub secret_key: Option<String>,
+    /// A file holding that key instead (for example a Docker secret)
+    #[arg(long, env = "THIRTYFILE_SECRET_KEY_FILE")]
+    pub secret_key_file: Option<PathBuf>,
+    /// Enable when serving over HTTPS; cookies get the Secure attribute (true/false, also 1/0, yes/no, on/off)
+    #[arg(long, env = "THIRTYFILE_SECURE_COOKIE", default_value = "false", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
+    pub secure_cookie: bool,
+    /// Enable when behind a reverse proxy (nginx, Caddy…): take the user's real IP from X-Forwarded-For (for sign-in rate
+    /// limiting). `true` trusts proxies on private and loopback addresses; or list the proxies' addresses or networks
+    #[arg(long, env = "THIRTYFILE_TRUST_PROXY", default_value = "false", value_parser = crate::auth::TrustProxy::parse)]
+    pub trust_proxy: crate::auth::TrustProxy,
+    /// Days to keep items in the trash, 0 = until emptied
+    #[arg(long, env = "THIRTYFILE_TRASH_DAYS", default_value_t = 30, value_parser = clap::value_parser!(i64).range(0..=36500))]
+    pub trash_days: i64,
+    /// Upload size limit per file (MB), 0 = unlimited
+    #[arg(long, env = "THIRTYFILE_MAX_UPLOAD_MB", default_value_t = 0)]
+    pub max_upload_mb: u64,
+    /// SQLite page cache per database connection (MB); up to 8 connections are open
+    #[arg(long, env = "THIRTYFILE_DB_CACHE_MB", default_value_t = 16, value_parser = clap::value_parser!(u32).range(1..=1024))]
+    pub db_cache_mb: u32,
+    /// Thumbnails made at the same time (default: 1 with less than 2 GB of memory, else 2)
+    #[arg(long, env = "THIRTYFILE_THUMBNAIL_JOBS", value_parser = clap::value_parser!(u32).range(1..=16))]
+    pub thumbnail_jobs: Option<u32>,
+}
 
 /// Holds `thirtyfile.lock` in the data folder while the server runs, so two never run on the same data at the same
 /// time. Where the file system can't lock files, nothing is held.
@@ -31,7 +75,16 @@ fn lock_data(data: &std::path::Path) -> Result<Option<std::fs::File>, Box<dyn st
     }
 }
 
-pub async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+/// A server that has started: its data folder is locked, its background tasks run, and it is ready to serve
+pub struct Server {
+    pub state: AppState,
+    addr: String,
+    log_writer: logs::LogWriter,
+    _lock: Option<std::fs::File>,
+}
+
+/// Opens the database of the data folder, with the key of the secrets saved in it
+pub async fn open(cfg: &Settings) -> Result<(sqlx::SqlitePool, secrets::KeySource), Box<dyn std::error::Error>> {
     for dir in ["tmp", "thumbs"] {
         std::fs::create_dir_all(cfg.data.join(dir))?;
     }
@@ -39,12 +92,13 @@ pub async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error
     let key = key_source.load()?;
     secrets::init(&key);
     let db = db::connect(&cfg.data.join("drive.db"), cfg.db_cache_mb).await?;
+    Ok((db, key_source))
+}
 
-    if cli::run(&cfg, &db, &storage, &key_source).await? {
-        return Ok(());
-    }
-
-    let _lock = lock_data(&cfg.data)?;
+/// Starts the server on the database `open` opened: locks the data folder, loads the settings and starts the
+/// background tasks
+pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Result<Server, Box<dyn std::error::Error>> {
+    let lock = lock_data(&cfg.data)?;
     // The storage folder: made with its marker on a new install. When the database records files or spaces there, a
     // missing or empty folder (a volume that isn't mounted) or one without the marker stops the start.
     let (recorded,): (bool,) = sqlx::query_as(
@@ -133,20 +187,32 @@ pub async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error
     #[cfg(target_os = "linux")]
     watch::spawn_watchers(state.clone());
 
-    // JSON requests that take longer than this are cut off (a stuck storage service, a slow provider). Requests that
-    // carry a body to store, and thumbnails (which queue), are outside the limit (`untimed`); downloads stream after
-    // the handler returned, so the limit doesn't apply to them either
-    let db_pool = state.db.clone();
-    let app = router(state);
+    Ok(Server { state, addr: cfg.addr, log_writer, _lock: lock })
+}
 
-    let listener = tokio::net::TcpListener::bind(&cfg.addr).await?;
-    tracing::info!("ThirtyFile started: http://{}", cfg.addr);
-    serve(listener, app).await?;
-    // Sign-in and share access events still queued are written before exiting
-    log_writer.finish().await;
-    // Let SQLite update its statistics and fold the write-ahead log into the database file
-    let _ = sqlx::query("PRAGMA optimize").execute(&db_pool).await;
-    db_pool.close().await;
-    tracing::info!("Stopped");
-    Ok(())
+impl Server {
+    /// The routes, answering with this server's state
+    pub fn router(&self) -> axum::Router {
+        router(self.state.clone())
+    }
+
+    /// Serves on the listen address until a stop signal
+    pub async fn serve(self) -> Result<(), Box<dyn std::error::Error>> {
+        // JSON requests that take longer than this are cut off (a stuck storage service, a slow provider). Requests that
+        // carry a body to store, and thumbnails (which queue), are outside the limit (`untimed`); downloads stream after
+        // the handler returned, so the limit doesn't apply to them either
+        let db_pool = self.state.db.clone();
+        let app = self.router();
+
+        let listener = tokio::net::TcpListener::bind(&self.addr).await?;
+        tracing::info!("ThirtyFile started: http://{}", self.addr);
+        serve(listener, app).await?;
+        // Sign-in and share access events still queued are written before exiting
+        self.log_writer.finish().await;
+        // Let SQLite update its statistics and fold the write-ahead log into the database file
+        let _ = sqlx::query("PRAGMA optimize").execute(&db_pool).await;
+        db_pool.close().await;
+        tracing::info!("Stopped");
+        Ok(())
+    }
 }
