@@ -79,6 +79,9 @@ export default {
   "How long logs are kept, whether older logs are archived or deleted, and whether visitor IPs are recorded": "紀錄保留多久、超過後壓縮封存或刪除、是否記錄訪客 IP",
   // pages/ControlPanelPage.tsx
   "{n} user|{n} users": "{n} 位使用者",
+  "{n} user found|{n} users found": "找到 {n} 位使用者",
+  "Search users": "搜尋使用者",
+  "No users match \"{query}\"": "沒有符合「{query}」的使用者",
   "{n} group|{n} groups": "{n} 個群組",
   "{n} team space|{n} team spaces": "{n} 個團隊空間",
   "{n} location · Default: {name}|{n} locations · Default: {name}": "{n} 個位置 · 預設：{name}",

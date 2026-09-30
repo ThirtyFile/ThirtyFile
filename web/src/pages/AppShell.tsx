@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect } from "react";
+import { Suspense, useEffect, useLayoutEffect } from "react";
+import { Loader2Icon } from "lucide-react";
 import { Outlet, useLocation, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
@@ -9,9 +10,6 @@ import { NotificationBell } from "@/components/NotificationBell";
 import { UploadPanel } from "@/components/UploadPanel";
 import { DownloadPanel } from "@/components/DownloadPanel";
 import { useMe } from "@/lib/session";
-import { cn } from "@/lib/utils";
-import { logoUrl, useBranding } from "@/lib/branding";
-import { SiteName } from "@/components/SiteName";
 import { MAIN_ID } from "@/components/Frame";
 import { loadTabs, syncLocation } from "@/tabs";
 import { loadTree } from "@/components/FolderTree";
@@ -20,27 +18,6 @@ import { api, type SortKey, type SortOrder } from "@/api";
 import { refreshFirstPage } from "@/lib/pages";
 import { FOLDER_CONTENTS } from "@/lib/queries";
 import { t, tServer } from "@/lib/i18n";
-
-/** Site logo and name (from branding settings; switches automatically when there's a dark-mode logo) */
-export function Logo({ className, imgClassName = "h-7" }: { className?: string; imgClassName?: string }) {
-  const b = useBranding();
-  const img = cn("w-auto max-w-48 object-contain", imgClassName);
-  return (
-    <div className={cn("flex items-center gap-2 font-semibold", className)}>
-      {!b.has_logo ? (
-        <img src="/favicon.svg" alt="" className={cn(img, "aspect-square")} />
-      ) : b.has_logo_dark ? (
-        <>
-          <img src={logoUrl(b)} alt={b.show_name ? "" : b.site_name} className={cn(img, "dark:hidden")} />
-          <img src={logoUrl(b, true)} alt={b.show_name ? "" : b.site_name} className={cn(img, "hidden dark:block")} />
-        </>
-      ) : (
-        <img src={logoUrl(b)} alt={b.show_name ? "" : b.site_name} className={img} />
-      )}
-      {(b.show_name || !b.has_logo) && <SiteName name={b.site_name} />}
-    </div>
-  );
-}
 
 export function AppShell() {
   const me = useMe();
@@ -116,7 +93,16 @@ export function AppShell() {
       <div className="min-h-0 flex-1">
         {/* An error in one page only affects the content area; the tab bar and upload panel keep working */}
         <ErrorBoundary resetKey={location.pathname}>
-          <Outlet />
+          {/* Pages load when first opened: the tab bar and panels stay while one does */}
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center text-muted-foreground" role="status" aria-label={t("Loading…")}>
+                <Loader2Icon className="size-6 animate-spin" />
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </ErrorBoundary>
       </div>
       {/* Transfer progress at the bottom right: downloads above, uploads below (above the phone selection bar while it shows) */}
