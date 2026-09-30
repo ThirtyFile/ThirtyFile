@@ -5,8 +5,6 @@
 //! Counters are kept per location, operation and kind of work. Durations go into a histogram of fixed buckets
 //! (`Hist`), so memory stays the same however many operations there are, and percentiles can be merged across
 //! periods.
-// Percentiles and the operations running now are read by the Storage usage API, which comes next
-#![cfg_attr(not(test), allow(dead_code))]
 
 use std::{
     collections::HashMap,
@@ -39,6 +37,7 @@ pub enum Op {
 }
 
 impl Op {
+    pub const ALL: [Op; 5] = [Op::Read, Op::Write, Op::Delete, Op::List, Op::Check];
     pub fn as_str(self) -> &'static str {
         match self {
             Op::Read => "read",
@@ -47,6 +46,9 @@ impl Op {
             Op::List => "list",
             Op::Check => "check",
         }
+    }
+    pub fn parse(s: &str) -> Option<Op> {
+        Op::ALL.into_iter().find(|o| o.as_str() == s)
     }
 }
 
@@ -62,12 +64,16 @@ pub enum Work {
 }
 
 impl Work {
+    pub const ALL: [Work; 3] = [Work::Foreground, Work::Background, Work::Probe];
     pub fn as_str(self) -> &'static str {
         match self {
             Work::Foreground => "foreground",
             Work::Background => "background",
             Work::Probe => "probe",
         }
+    }
+    pub fn parse(s: &str) -> Option<Work> {
+        Work::ALL.into_iter().find(|w| w.as_str() == s)
     }
 }
 
@@ -290,6 +296,11 @@ impl Meters {
     /// The counters so far, which start again from nothing
     pub fn take(&self) -> Windows {
         std::mem::take(&mut *self.windows.lock().unwrap())
+    }
+
+    /// The counters so far, left as they are
+    pub fn snapshot(&self) -> Windows {
+        self.windows.lock().unwrap().clone()
     }
 
     /// Puts counters back (writing them failed: they are written with the next ones)
