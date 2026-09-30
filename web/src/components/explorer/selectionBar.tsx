@@ -3,7 +3,6 @@ import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { DownloadIcon, EllipsisVerticalIcon, FolderInputIcon, Share2Icon, SquareCheckIcon, Trash2Icon, XIcon, type LucideIcon } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { t } from "@/lib/i18n";
-import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
 import type { ExplorerActions } from "./actions";
 
@@ -22,9 +21,9 @@ function BarButton({ icon: Icon, label, ...props }: { icon: LucideIcon; label: s
   );
 }
 
-export function SelectionBar({ p, s, a, menuItems }: { p: ExplorerProps; s: ExplorerState; a: ExplorerActions; menuItems: ReactNode }) {
-  const { caps, selectedNodes, selectedIds, single, setSelected, setDialog } = s;
-  const all = selectedNodes.length === p.items.length;
+export function SelectionBar({ s, a, menuItems }: { s: ExplorerState; a: ExplorerActions; menuItems: ReactNode }) {
+  const { caps, single, setSelected, setDialog } = s;
+  const all = s.count === s.total;
   // Transfer panels and messages move up while the bar shows, so they don't cover it
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -50,8 +49,8 @@ export function SelectionBar({ p, s, a, menuItems }: { p: ExplorerProps; s: Expl
       >
         <XIcon className="size-5" />
       </button>
-      <span className="min-w-0 flex-1 truncate text-xs">{t("{n} selected", { n: selectedNodes.length })}</span>
-      <BarButton icon={DownloadIcon} label={t("Download")} onClick={() => a.download(selectedIds)} />
+      <span className="min-w-0 flex-1 truncate text-xs">{t("{n} selected", { n: s.count })}</span>
+      <BarButton icon={DownloadIcon} label={t("Download")} onClick={() => a.download(s.picked)} />
       {/* A share link where the role allows one, else sharing with people */}
       <BarButton
         icon={Share2Icon}
@@ -59,14 +58,14 @@ export function SelectionBar({ p, s, a, menuItems }: { p: ExplorerProps; s: Expl
         disabled={!single}
         onClick={() => single && setDialog(caps.share ? { t: "share", node: single } : { t: "access", nodeId: single.id })}
       />
-      <BarButton icon={FolderInputIcon} label={t("Move")} disabled={!caps.write} onClick={() => setDialog({ t: "move", ids: selectedIds })} />
-      <BarButton icon={Trash2Icon} label={t("Delete")} disabled={!caps.del} onClick={() => setDialog({ t: "trash", ids: selectedIds })} />
+      <BarButton icon={FolderInputIcon} label={t("Move")} disabled={!caps.write} onClick={() => setDialog({ t: "move", picked: s.picked })} />
+      <BarButton icon={Trash2Icon} label={t("Delete")} disabled={!caps.del} onClick={() => setDialog({ t: "trash", picked: s.picked })} />
       <DropdownMenu>
         <DropdownMenuTrigger render={<BarButton icon={EllipsisVerticalIcon} label={t("More")} />} />
         <DropdownMenuContent side="top" align="end" className="w-56">
           {!all && (
             <>
-              <DropdownMenuItem onClick={() => setSelected(new Set(p.items.map((n) => n.id)))}>
+              <DropdownMenuItem onClick={s.selectAll}>
                 <SquareCheckIcon /> {t("Select all")}
               </DropdownMenuItem>
               <DropdownMenuSeparator />

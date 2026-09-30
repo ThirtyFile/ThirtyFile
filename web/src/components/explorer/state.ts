@@ -7,6 +7,7 @@ import { useClipboard } from "@/lib/clipboard";
 import { capsOf } from "@/lib/drives";
 import { focusIsFree } from "@/lib/focus";
 import type { GroupBy } from "@/lib/listView";
+import { inSpan, spanCount, type FolderSpan, type ListSpan, type Picked } from "@/lib/span";
 import { usePersisted, useMe } from "@/lib/session";
 import { useTabActions } from "@/tabs";
 import type { DialogState } from "./types";
@@ -21,7 +22,9 @@ export function useExplorerState(p: ExplorerProps) {
   const tabs = useTabActions();
   const [view, setView] = usePersisted<ViewMode>("tf-view", "list");
   const [groupBy, setGroupBy] = usePersisted<GroupBy>("tf-group", "none");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selected, setChosen] = useState<Set<string>>(new Set());
+  /** A large folder: what is selected without being loaded (Select all, or Shift across parts not loaded; lib/span) */
+  const [span, setSpan] = useState<FolderSpan | null>(null);
   const [anchor, setAnchor] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -35,9 +38,51 @@ export function useExplorerState(p: ExplorerProps) {
   // New folder and paste only touch the database; uploading and creating files need to write to the storage service, so they're disabled while offline
   const canCreate = !!p.folderId && caps.write;
   const canUpload = canCreate && !p.offline;
-  const selectedNodes = useMemo(() => p.items.filter((n) => selected.has(n.id)), [p.items, selected]);
-  const selectedIds = selectedNodes.map((n) => n.id);
-  const single = selectedNodes.length === 1 ? selectedNodes[0] : null;
+  const list = p.list;
+  const total = list ? Math.max(0, list.total) : p.items.length;
+
+  /** Selects items picked one by one (none: `span` is cleared too) */
+  const setSelected = (next: Set<string>) => {
+    setChosen(next);
+    setSpan(null);
+  };
+  /** The file list's selection: with a span of a large folder, where and in which order it was made */
+  const choose = (next: Set<string>, listSpan?: ListSpan | null) => {
+    setChosen(next);
+    setSpan(listSpan && p.folderId && p.sort ? { ...listSpan, folder: p.folderId, sort: p.sort.key, order: p.sort.order, count: spanCount(listSpan, total) } : null);
+  };
+  /** Ctrl+A: every item; in a large folder not all loaded, that is a span of the whole folder */
+  const selectAll = () => {
+    if (list && !list.complete && p.folderId && p.sort) {
+      setChosen(new Set());
+      setSpan({ folder: p.folderId, sort: p.sort.key, order: p.sort.order, except: new Set(), count: total });
+    } else setSelected(new Set(p.items.map((n) => n.id)));
+  };
+  /**
+   * Invert selection. In a large folder not all loaded: everything but the items picked (a span of the whole folder),
+   * or, from a span of the whole folder, the items it left out. A span from one item to another can't be inverted.
+   */
+  const whole = !!span && !span.from && !span.to;
+  const canInvert = !span || whole;
+  const invert = () => {
+    if (whole) setSelected(new Set(span.except));
+    else if (list && !list.complete && p.folderId && p.sort) {
+      setChosen(new Set());
+      setSpan({ folder: p.folderId, sort: p.sort.key, order: p.sort.order, except: new Set(selected), count: total - selected.size });
+    } else setSelected(new Set(p.items.filter((n) => !selected.has(n.id)).map((n) => n.id)));
+  };
+
+  // The items selected that are loaded (all of them, unless a span holds items not loaded)
+  const selectedNodes = useMemo(
+    () => p.items.filter((n) => selected.has(n.id) || (!!span && inSpan(span, list?.index.get(n.id) ?? -1, n.id))),
+    [p.items, selected, span, list],
+  );
+  /** Items picked one by one; the span's aren't all known here (see `picked`) */
+  const selectedIds = span ? [...selected] : selectedNodes.map((n) => n.id);
+  const count = span ? selected.size + spanCount(span, total) : selectedNodes.length;
+  /** What the commands work on */
+  const picked: Picked = { ids: selectedIds, span, count };
+  const single = !span && selectedNodes.length === 1 ? selectedNodes[0] : null;
   const allFavorite = selectedNodes.length > 0 && selectedNodes.every((n) => n.is_favorite);
 
   // Clear the selection when switching folders
@@ -54,16 +99,43 @@ export function useExplorerState(p: ExplorerProps) {
     }
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the folder id is part of the place
   }, [place]);
+  // A span is a part of the folder in one order: sorted another way, it would be other items
+  const order = `${p.sort?.key}|${p.sort?.order}`;
+  useEffect(() => setSpan(null), [order]);
   // Going up (or back) to the folder holding the one shown before selects that one, like File Explorer; the focus
   // goes to it too when it was lost with the list (Alt+Up, Backspace), not when it's on a button that was clicked
+  const locating = useRef<string | null>(null);
   useEffect(() => {
     const id = cameFrom.current;
-    if (!id || !p.items.some((n) => n.id === id)) return;
+    if (!id) return;
+    if (!p.items.some((n) => n.id === id)) {
+      // A large folder: go to where it is; it is selected once its part has loaded
+      if (list && !list.complete && list.total >= 0 && locating.current !== id) {
+        locating.current = id;
+        void list
+          .locate(id)
+          .then((at) => (at === null ? (cameFrom.current = undefined) : listNav.current?.scrollTo(at)))
+          .catch(() => undefined);
+      }
+      return;
+    }
     cameFrom.current = undefined;
     setSelected(new Set([id]));
     setAnchor(id);
     const focus = !document.activeElement || document.activeElement === document.body;
     setTimeout(() => listNav.current?.show(id, focus));
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- runs as items load; the list is read as it is then
+  }, [p.items]);
+  /** An item just made in a part of a large folder not loaded: renamed once that part has loaded (actions' createNew) */
+  const renameWhenShown = useRef<{ id: string; name: string } | null>(null);
+  useEffect(() => {
+    const wanted = renameWhenShown.current;
+    if (!wanted || !p.items.some((n) => n.id === wanted.id)) return;
+    renameWhenShown.current = null;
+    setSelected(new Set([wanted.id]));
+    setAnchor(wanted.id);
+    setDialog({ t: "rename", node: wanted });
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- when items load
   }, [p.items]);
   /** A folder opened with Enter: once its items are shown, the focus goes to the first so the arrows carry on there */
   const enteredByKey = useRef<string | null>(null);
@@ -86,10 +158,20 @@ export function useExplorerState(p: ExplorerProps) {
     dirInput,
     listNav,
     enteredByKey,
+    renameWhenShown,
     canCreate,
     canUpload,
     selectedNodes,
     selectedIds,
+    picked,
+    count,
+    total,
+    span,
+    choose,
+    selectAll,
+    invert,
+    canInvert,
+    whole,
     single,
     allFavorite,
     view,

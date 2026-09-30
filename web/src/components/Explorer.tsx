@@ -12,6 +12,7 @@ import { Frame, type Crumb } from "@/components/Frame";
 import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
 import { renamed } from "@/lib/queries";
+import type { SparseList } from "@/lib/windows";
 import { toastWithUndo } from "@/lib/undo";
 import { formatBytes } from "@/lib/utils";
 import { filesFromInput, uploadFiles } from "@/uploads";
@@ -29,11 +30,17 @@ export interface ExplorerProps {
   notice?: ReactNode;
   /** Why the storage service is offline: disables uploads (new folder and paste only touch the database, so they still work) */
   offline?: string | null;
+  /** The items loaded (a large folder, with `list`, has only some of them) */
   items: Item[];
+  /** A large folder loaded a part at a time (lib/windows): the list shows every item's place */
+  list?: SparseList<Node>;
   loading: boolean;
   /** Further pages of a large folder are still loading in the background */
   loadingMore?: boolean;
   error?: Error | null;
+  /** A part of a large folder couldn't be loaded (the list shows the rest), and how to try again */
+  partError?: Error | null;
+  onRetryPart?(): void;
   /** Current folder; when set, uploading and creating are possible */
   folderId?: string;
   /** The space the folder is in (not when it was reached through a share) */
@@ -94,22 +101,32 @@ export function Explorer(p: ExplorerProps) {
   // Phones: a bar with the selected items' actions takes the place of the context menu on a long press
   const phone = useMediaQuery("(max-width: 47.99rem)");
   const dimmed = useMemo(() => (clip?.mode === "cut" ? new Set(clip.ids) : undefined), [clip]);
+  const clipCount = clip ? (clip.count ?? clip.ids.length) : 0;
   const footer = (
     <>
       {/* Not "0 items" while the folder loads */}
       <span>
-        {p.loading ? t("Loading…") : t("{n} item|{n} items", { n: p.items.length })}
+        {p.loading ? t("Loading…") : t("{n} item|{n} items", { n: s.total })}
         {p.loadingMore && ` · ${t("Loading more items…")}`}
       </span>
-      {selectedNodes.length > 0 && (
+      {p.partError && (
+        <span className="border-l pl-3 text-destructive">
+          {t("Some items couldn't be loaded.")}
+          <button type="button" className="ml-1.5 underline hover:text-foreground" onClick={p.onRetryPart}>
+            {t("Retry")}
+          </button>
+        </span>
+      )}
+      {s.count > 0 && (
         <span className="border-l pl-3">
-          {t("{n} item selected|{n} items selected", { n: selectedNodes.length })}
-          {selectedNodes.some((n) => n.kind === "file") && `  ${formatBytes(selectedNodes.reduce((s, n) => s + n.size, 0))}`}
+          {t("{n} item selected|{n} items selected", { n: s.count })}
+          {/* The size of a span isn't known here: only what is loaded */}
+          {!s.span && selectedNodes.some((n) => n.kind === "file") && `  ${formatBytes(selectedNodes.reduce((s, n) => s + n.size, 0))}`}
         </span>
       )}
       {clip && (
         <span className="border-l pl-3">
-          {clip.mode === "cut" ? t("Clipboard: {n} item cut|Clipboard: {n} items cut", { n: clip.ids.length }) : t("Clipboard: {n} item copied|Clipboard: {n} items copied", { n: clip.ids.length })}
+          {clip.mode === "cut" ? t("Clipboard: {n} item cut|Clipboard: {n} items cut", { n: clipCount }) : t("Clipboard: {n} item copied|Clipboard: {n} items copied", { n: clipCount })}
           <button type="button" className="ml-1.5 underline hover:text-foreground" onClick={() => setClipboard(null)}>
             {t("Clear")}
           </button>
@@ -168,15 +185,18 @@ export function Explorer(p: ExplorerProps) {
               <ErrorState message={p.error.message} onRetry={a.refresh} />
             ) : (
               <FileList
-                items={p.items}
+                items={p.list?.at ?? p.items}
+                onShow={p.list?.show}
                 view={view}
                 source={privateSource}
                 selected={selected}
+                span={s.span}
                 anchor={anchor}
-                onSelect={(s, a) => {
-                  setSelected(s);
-                  if (a !== undefined) setAnchor(a);
+                onSelect={(next, at, span) => {
+                  s.choose(next, span);
+                  if (at !== undefined) setAnchor(at);
                 }}
+                onSelectAll={s.selectAll}
                 onOpen={open}
                 onOpenInNewTab={(n) => tabs.open(n.kind === "folder" ? `/files/${n.id}` : `/view/${n.id}`, { reuse: n.kind === "file" })}
                 sort={p.sort}
@@ -229,9 +249,17 @@ export function Explorer(p: ExplorerProps) {
           </ContextMenuTrigger>
           <ContextMenuContent>{menuItems}</ContextMenuContent>
         </ContextMenu>
-        {detailsOpen && <DetailsPane selected={selectedNodes} folder={p.folder} onClose={() => setDetailsOpen(false)} />}
+        {detailsOpen && (
+          <DetailsPane
+            selected={selectedNodes}
+            count={s.span ? s.count : undefined}
+            whole={s.whole && !s.span?.except.size && !selected.size}
+            folder={p.folder}
+            onClose={() => setDetailsOpen(false)}
+          />
+        )}
       </div>
-      {phone && selectedNodes.length > 0 && <SelectionBar p={p} s={s} a={a} menuItems={menuItems} />}
+      {phone && s.count > 0 && <SelectionBar s={s} a={a} menuItems={menuItems} />}
 
       <input
         ref={fileInput}

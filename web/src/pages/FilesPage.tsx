@@ -11,9 +11,11 @@ import { ErrorState } from "@/components/ErrorState";
 import { expandPath, treePathOf } from "@/components/FolderTree";
 import { DRIVE_ICON, useDrives } from "@/lib/drives";
 import { hasPersonal, homeFolder } from "@/lib/home";
+import type { GroupBy } from "@/lib/listView";
 import { useAllPages } from "@/lib/pages";
 import { pathOf } from "@/lib/paths";
 import { useMe, usePersisted } from "@/lib/session";
+import { useFolderWindows } from "@/lib/windows";
 import { t } from "@/lib/i18n";
 
 export function useSort() {
@@ -88,12 +90,19 @@ function FolderPage({ id }: { id: string }) {
   });
   const node = info.data?.node;
   const folderId = node?.id;
-  // Large folders come in pages: the first shows at once, the rest loads in the background
-  const children = useAllPages(
+  // A large folder loads the parts in view (lib/windows). Grouped by date or type, every group shows in full, so the
+  // whole folder loads, a page after another
+  const [groupBy] = usePersisted<GroupBy>("tf-group", "none");
+  const grouped = groupBy !== "none";
+  const windows = useFolderWindows(folderId, sort.key, sort.order, !!folderId && !grouped);
+  const pages = useAllPages(
     ["children", folderId, sort.key, sort.order],
     (limit, after, signal) => api.childrenPage(folderId!, sort.key, sort.order, limit, after, signal),
-    !!folderId,
+    !!folderId && grouped,
   );
+  const children = grouped
+    ? { items: pages.items, list: undefined, isLoading: pages.isLoading, error: pages.error, loadingMore: pages.loadingMore, partError: null, retry: undefined }
+    : { items: windows.list.loaded, list: windows.list, isLoading: windows.isLoading, error: windows.error, loadingMore: windows.loadingMore, partError: windows.partError, retry: windows.retry };
   const path = info.data?.path ?? [];
   const loc = locationOf(info.data);
 
@@ -121,9 +130,12 @@ function FolderPage({ id }: { id: string }) {
       readOnly={info.data?.read_only}
       offline={info.data?.offline}
       items={children.items}
+      list={children.list}
       loading={info.isLoading || children.isLoading}
       loadingMore={children.loadingMore}
       error={info.error ?? children.error}
+      partError={children.partError}
+      onRetryPart={children.retry}
       folderId={folderId}
       spaceId={info.data && !info.data.via_share ? info.data.drive.id : undefined}
       role={info.data?.role}

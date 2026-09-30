@@ -260,8 +260,15 @@ async function apply(qc: QueryClient, c: Combined) {
       const folder = q.queryKey[0] === "children" ? idOf(q) : undefined;
       // A moved item leaves the lists of other folders; the lists of several places show it where it went (below)
       const leaves = (n: Row) => gone.has(n.id) || (!!folder && moved.has(n.id) && c.moved.get(n.id) !== folder);
-      qc.setQueryData(q.queryKey, withRows(q.state.data, (items) => items.filter((n) => !leaves(n)).map((n) => (c.updated.has(n.id) ? { ...n, ...c.updated.get(n.id) } : n))));
-      if (q.state.fetchStatus === "fetching") patched.add(q);
+      const next = withRows(q.state.data, (items) => items.filter((n) => !leaves(n)).map((n) => (c.updated.has(n.id) ? { ...n, ...c.updated.get(n.id) } : n)));
+      // A part of a folder asked for by its position (lib/windows). One that holds the whole folder only counts one
+      // less; in a larger folder the items after a row taken out move up, and only the server knows what comes in at
+      // the end of each part
+      const total = (q.state.data as { total?: unknown }).total;
+      const whole = typeof total === "number" && rows.length === total;
+      const out = rows.filter(leaves).length;
+      qc.setQueryData(q.queryKey, whole && out ? { ...(next as object), total: total - out } : next);
+      if (q.state.fetchStatus === "fetching" || (typeof total === "number" && !whole && out)) patched.add(q);
     }
     for (const [id, values] of c.updated) {
       qc.setQueryData<NodeInfo>(["node", id], (info) => (info?.node ? { ...info, node: { ...info.node, ...values } } : info));

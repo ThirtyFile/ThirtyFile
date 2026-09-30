@@ -47,6 +47,7 @@ import { InlineRename } from "@/components/InlineRename";
 import { carriesFiles, carriesItems, dropEffect, droppedIds, startDrag } from "@/lib/dnd";
 import { t, tc } from "@/lib/i18n";
 import { findByPrefix, wantsCopy } from "@/lib/keys";
+import { inSpan, spanCount, type ListSpan } from "@/lib/span";
 
 /** "list" is Details and "grid" Large icons (the names they were saved under); "compact" is File Explorer's List */
 export type ViewMode = "list" | "grid" | "medium" | "compact" | "tiles";
@@ -59,16 +60,26 @@ export interface ListNav {
   show(id: string, focus: boolean): void;
   /** Focus the item Tab reaches (the first selected, else the first item); false when there are no items */
   focusStart(): boolean;
+  /** Scroll to a position (an item not loaded yet, whose part then loads) */
+  scrollTo(index: number): void;
 }
 
 type Item = Node & { location?: string };
 
 export interface FileListProps {
-  items: Item[];
+  /** In the order shown; a large folder has only some loaded (lib/windows): the others are empty until they load */
+  items: readonly (Item | undefined)[];
+  /** The positions in view (a large folder loads them) */
+  onShow?(first: number, last: number): void;
   view: ViewMode;
   source: FileSource;
   selected: Set<string>;
-  onSelect(selected: Set<string>, anchor?: string): void;
+  /** Selected besides `selected`: items from one to another, or all, in a large folder not all loaded (lib/span) */
+  span?: ListSpan | null;
+  /** A new selection; `span` is the span it has (none when left out) */
+  onSelect(selected: Set<string>, anchor?: string, span?: ListSpan | null): void;
+  /** Ctrl+A or the header's check box: select everything (the list may not have every item) */
+  onSelectAll?(): void;
   /** Anchor of a range selection (Shift); stored by item id so it stays correct when the list changes */
   anchor: string | null;
   /** `byKey`: opened with Enter, so the keyboard carries on in what opens */
@@ -579,6 +590,59 @@ interface LayoutRow {
   group?: Group<Item>;
 }
 
+/** The rows of the list: worked out as needed when all rows are alike, so a folder of any size costs nothing to lay out */
+interface Layout {
+  count: number;
+  row(r: number): LayoutRow;
+  /** The row holding the item at a position */
+  rowOf(index: number): number;
+  /** The first row that reaches below `y` (from the top of the first row) */
+  rowAt(y: number): number;
+}
+
+function evenLayout(n: number, cols: number, size: number): Layout {
+  const count = Math.ceil(n / cols);
+  return {
+    count,
+    row: (r) => ({ start: r * cols, end: Math.min(n, r * cols + cols), size, top: r * size }),
+    rowOf: (i) => Math.floor(i / cols),
+    rowAt: (y) => Math.max(0, Math.min(count - 1, Math.floor(y / size))),
+  };
+}
+
+function groupedLayout(groups: Group<Item>[], cols: number, size: number, headSize: number): Layout {
+  const rows: LayoutRow[] = [];
+  const rowOf: number[] = [];
+  let top = 0;
+  const add = (r: Omit<LayoutRow, "top">) => {
+    rows.push({ ...r, top });
+    top += r.size;
+  };
+  let start = 0;
+  for (const group of groups) {
+    const end = start + group.items.length;
+    add({ start, end: start, size: headSize, group });
+    for (let i = start; i < end; i += cols) {
+      const last = Math.min(i + cols, end);
+      for (let k = i; k < last; k++) rowOf[k] = rows.length;
+      add({ start: i, end: last, size });
+    }
+    start = end;
+  }
+  return { count: rows.length, row: (r) => rows[r], rowOf: (i) => rowOf[i], rowAt: () => 0 };
+}
+
+/** A row whose item isn't loaded yet (a large folder loads it as it comes into view) */
+function PlaceholderRow({ cells, ariaRow }: { cells: number; ariaRow: number }) {
+  return (
+    <tr role="row" aria-rowindex={ariaRow} aria-busy>
+      <td role="gridcell" colSpan={cells} className="h-7 px-3">
+        <span className="block h-3 w-1/3 animate-pulse rounded bg-muted" />
+      </td>
+    </tr>
+  );
+}
+
 export function FileList(p: FileListProps) {
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   /** The item with the keyboard focus: always rendered, so the focus isn't lost when it scrolls out of view */
@@ -593,60 +657,61 @@ export function FileList(p: FileListProps) {
   // Anything but an icon view (also a view saved by a later version) is Details
   const tile: (typeof TILED)[keyof typeof TILED] | null = view === "list" ? null : (TILED[view] ?? null);
   const grid = !!tile;
-  const selecting = p.selected.size > 0;
+  const span = p.span ?? null;
+  const selecting = p.selected.size > 0 || !!span;
   const prefs = useColumnPrefs();
   // Column widths apply from tablet width up; narrower, only the name and size show
   const wide = useMediaQuery("(min-width: 48rem)");
   const large = useMediaQuery("(min-width: 64rem)");
 
-  // Grouped, items are shown group by group: that's their order for the keyboard and Shift ranges too
+  // Where each loaded item is; a large folder has only some loaded
+  const loaded = useMemo(() => {
+    const at = new Map<string, number>();
+    p.items.forEach((x, i) => x && at.set(x.id, i));
+    return at;
+  }, [p.items]);
+  const complete = loaded.size === p.items.length;
+  // Grouped, items are shown group by group: that's their order for the keyboard and Shift ranges too (only when every
+  // item is loaded: the explorer loads them all when grouping)
   const dateOf = p.dateOf ?? ((x: Item) => x.updated_at);
   const groups = useMemo(
-    () => groupItems<Item>(p.items, p.groupBy ?? "none", { dateOf, typeOf: typeLabel, now: new Date(), reversed: p.groupReversed }),
+    () =>
+      complete
+        ? groupItems<Item>(p.items as Item[], p.groupBy ?? "none", { dateOf, typeOf: typeLabel, now: new Date(), reversed: p.groupReversed })
+        : null,
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the date function is a new one on every render
-    [p.items, p.groupBy, p.groupReversed],
+    [p.items, p.groupBy, p.groupReversed, complete],
   );
   const items = useMemo(() => (groups ? groups.flatMap((g) => g.items) : p.items), [groups, p.items]);
   const n = items.length;
 
-  const indexOf = useMemo(() => new Map(items.map((x, i) => [x.id, i])), [items]);
+  const indexOf = useMemo(() => (groups ? new Map(items.map((x, i) => [x!.id, i])) : loaded), [groups, items, loaded]);
+  const isSelected = (index: number, id: string) => p.selected.has(id) || inSpan(span, index, id);
   // The first selected item holds the Tab stop: found once per selection, not for every row
   const firstSelected = useMemo(() => {
-    let first = -1;
+    let first = span ? (span.from?.index ?? 0) : -1;
     for (const id of p.selected) {
       const i = indexOf.get(id);
       if (i !== undefined && (first < 0 || i < first)) first = i;
     }
-    return first;
-  }, [p.selected, indexOf]);
-  const allSelected = useMemo(() => n > 0 && p.selected.size >= n && items.every((x) => p.selected.has(x.id)), [items, p.selected, n]);
+    return Math.min(first, n - 1);
+  }, [p.selected, indexOf, span, n]);
+  const allSelected = useMemo(
+    () =>
+      n > 0 &&
+      (span && !span.from && !span.to ? span.except.size === 0 : complete && p.selected.size >= n && items.every((x) => p.selected.has(x!.id))),
+    [items, p.selected, n, span, complete],
+  );
 
   // Phones: large icons a little narrower, three to a row rather than two with wide gaps
   const minTileW = tile && view === "grid" && !wide ? PHONE_GRID_W : tile?.w;
   const cols = tile ? Math.max(1, Math.floor((geo.width - 2 * PAD + tile.gap) / (minTileW! + tile.gap))) : 1;
   // The rows: in each group, its heading and then its items, `cols` to a row
-  const layout = useMemo(() => {
-    const rows: LayoutRow[] = [];
-    const rowOf: number[] = new Array(n);
-    let top = 0;
-    const add = (r: Omit<LayoutRow, "top">) => {
-      rows.push({ ...r, top });
-      top += r.size;
-    };
-    let start = 0;
-    for (const group of groups ?? [undefined]) {
-      const end = group ? start + group.items.length : n;
-      if (group) add({ start, end: start, size: tile ? GROUP_H : GROUP_ROW, group });
-      for (let i = start; i < end; i += cols) {
-        const last = Math.min(i + cols, end);
-        for (let k = i; k < last; k++) rowOf[k] = rows.length;
-        add({ start: i, end: last, size: tile ? tile.h + tile.gap : ROW });
-      }
-      start = end;
-    }
-    return { rows, rowOf };
-  }, [groups, n, cols, tile]);
-  const rowOf = (i: number) => layout.rowOf[i];
+  const layout = useMemo(
+    () => (groups ? groupedLayout(groups, cols, tile ? tile.h + tile.gap : ROW, tile ? GROUP_H : GROUP_ROW) : evenLayout(n, cols, tile ? tile.h + tile.gap : ROW)),
+    [groups, n, cols, tile],
+  );
+  const rowOf = (i: number) => layout.rowOf(i);
   const tabStop = firstSelected >= 0 ? firstSelected : 0;
   // Rows rendered even out of view: the Tab stop, the focused item and the one being renamed
   const pinned = [tabStop, focusId === null ? undefined : indexOf.get(focusId), p.renamingId ? indexOf.get(p.renamingId) : undefined]
@@ -657,9 +722,9 @@ export function FileList(p: FileListProps) {
   // oxlint-disable-next-line react-hooks/exhaustive-deps -- the layout is what invalidates the keys
   const rowKey = useCallback((i: number) => i, [layout]);
   const v = useVirtualizer({
-    count: layout.rows.length,
+    count: layout.count,
     getScrollElement: () => scroller,
-    estimateSize: (i) => layout.rows[i].size,
+    estimateSize: (i) => layout.row(i).size,
     getItemKey: rowKey,
     overscan: grid ? 2 : 12,
     scrollMargin: geo.top,
@@ -694,8 +759,13 @@ export function FileList(p: FileListProps) {
     return () => ro.disconnect();
   }, [measureGeo, grid, empty]);
 
-  // Keyboard moves: focus the item once its row is rendered
+  // Keyboard moves: focus the item once its row is rendered; a move to an item not loaded yet is made once it loads
   useLayoutEffect(() => {
+    const nav = pendingNav.current;
+    if (nav && items[nav.index]) {
+      pendingNav.current = null;
+      moveTo(nav.index, nav.mode);
+    }
     const id = pendingFocus.current;
     const el = id && root.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
     if (el) {
@@ -703,6 +773,13 @@ export function FileList(p: FileListProps) {
       el.focus({ preventScroll: true });
     }
   });
+
+  // The positions in view (without the rows rendered around them), for a large folder to load them
+  const range = v.range;
+  const firstShown = range && layout.count ? layout.row(Math.min(range.startIndex, layout.count - 1)).start : 0;
+  const lastShown = range && layout.count ? layout.row(Math.min(range.endIndex, layout.count - 1)).end - 1 : 0;
+  const onShow = p.onShow;
+  useEffect(() => onShow?.(firstShown, lastShown), [onShow, firstShown, lastShown]);
 
   // A new item is renamed right after it's created, wherever it sorts: bring it into view
   const renamingIndex = p.renamingId ? indexOf.get(p.renamingId) : undefined;
@@ -713,38 +790,75 @@ export function FileList(p: FileListProps) {
   }, [p.renamingId, renamingShown]);
 
   const focusItem = (index: number) => {
-    const id = items[index].id;
+    const item = items[index];
     v.scrollToIndex(rowOf(index));
-    setFocusId(id);
-    const el = root.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
+    if (!item) return;
+    setFocusId(item.id);
+    const el = root.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(item.id)}"]`);
     if (el) el.focus({ preventScroll: true });
-    else pendingFocus.current = id;
+    else pendingFocus.current = item.id;
   };
 
-  const rangeTo = (index: number, keep?: Set<string>) => {
+  /**
+   * The selection from the anchor to an item (Shift), with the items in `keep` (Ctrl+Shift). With items between them
+   * not loaded, it is a span from one to the other (the server knows what is between them).
+   */
+  const rangeTo = (index: number, keep?: Set<string>): { selected: Set<string>; span: ListSpan | null } | null => {
     const anchorIndex = p.anchor === null ? -1 : (indexOf.get(p.anchor) ?? -1);
-    if (anchorIndex < 0) return null;
+    if (anchorIndex < 0 || !items[index]) return null;
+    const [lo, hi] = [Math.min(anchorIndex, index), Math.max(anchorIndex, index)];
     const next = new Set(keep);
-    for (let i = Math.min(anchorIndex, index); i <= Math.max(anchorIndex, index); i++) next.add(items[i].id);
-    return next;
+    for (let i = lo; i <= hi; i++) {
+      const item = items[i];
+      if (!item) return { selected: new Set(keep), span: { from: { id: items[lo]!.id, index: lo }, to: { id: items[hi]!.id, index: hi }, except: new Set() } };
+      next.add(item.id);
+    }
+    return { selected: next, span: null };
   };
 
+  /** Ctrl+click or Ctrl+Space: the item in or out of the selection (in a span, it is left out of it, or back in) */
   const toggle = (index: number) => {
-    const id = items[index].id;
+    const item = items[index];
+    if (!item) return;
+    const id = item.id;
+    if (span && index >= (span.from?.index ?? 0) && index <= (span.to?.index ?? Infinity) && !p.selected.has(id)) {
+      const except = new Set(span.except);
+      if (except.has(id)) except.delete(id);
+      else except.add(id);
+      p.onSelect(p.selected, id, { ...span, except });
+      return;
+    }
     const next = new Set(p.selected);
     if (next.has(id)) next.delete(id);
     else next.add(id);
-    p.onSelect(next, id);
+    p.onSelect(next, id, span);
+  };
+
+  /** A keyboard move to an item: select it (or up to it, or only focus it); one not loaded yet is scrolled to, and waited for */
+  const pendingNav = useRef<{ index: number; mode: "only" | "range" | "focus" } | null>(null);
+  const moveTo = (index: number, mode: "only" | "range" | "focus") => {
+    const item = items[index];
+    if (!item) {
+      pendingNav.current = { index, mode };
+      v.scrollToIndex(rowOf(index));
+      return;
+    }
+    if (mode !== "focus") {
+      const range = mode === "range" ? rangeTo(index) : null;
+      if (range) p.onSelect(range.selected, p.anchor!, range.span);
+      else p.onSelect(new Set([item.id]), item.id, null);
+    }
+    focusItem(index);
   };
 
   /** The item below or above: in the same column of the next row of items (group headings are skipped), else the last or first item */
   const vertical = (index: number, dir: 1 | -1) => {
-    const { rows } = layout;
+    const at = (r: number) => (r >= 0 && r < layout.count ? layout.row(r) : undefined);
     let r = rowOf(index) + dir;
-    while (rows[r]?.group) r += dir;
-    const to = rows[r];
+    while (at(r)?.group) r += dir;
+    const to = at(r);
     if (!to) return dir > 0 ? n - 1 : 0;
-    return Math.min(to.start + index - rows[rowOf(index)].start, to.end - 1);
+    return Math.min(to.start + index - layout.row(rowOf(index)).start, to.end - 1);
   };
 
   /** The item a page further down or up (PageDown, PageUp): as many rows as fit in view, less one */
@@ -788,10 +902,11 @@ export function FileList(p: FileListProps) {
    */
   const keyNav = (e: KeyboardEvent<HTMLElement>, index: number) => {
     // Keys typed in a control inside the row (its checkbox, the rename box) belong to that control
-    if (e.target !== e.currentTarget || items[index].id === p.renamingId) return;
+    const current = items[index];
+    if (e.target !== e.currentTarget || !current || current.id === p.renamingId) return;
     if (e.key === "Enter" && !e.altKey && !e.repeat) {
       e.preventDefault();
-      p.onOpen(items[index], true);
+      p.onOpen(current, true);
       return;
     }
     if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey)) {
@@ -813,21 +928,14 @@ export function FileList(p: FileListProps) {
     else if (e.key === " ") {
       e.preventDefault();
       if (e.ctrlKey || e.metaKey) toggle(index);
-      else p.onSelect(new Set([items[index].id]), items[index].id);
+      else p.onSelect(new Set([current.id]), current.id, null);
       return;
     }
     if (next === null) return;
     e.preventDefault();
-    // Ctrl moves the focus and leaves the selection alone, like File Explorer: Ctrl+Space then adds or removes the item
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey) {
-      focusItem(next);
-      return;
-    }
-    const item = items[next];
-    const range = e.shiftKey ? rangeTo(next) : null;
-    if (range) p.onSelect(range, p.anchor!);
-    else p.onSelect(new Set([item.id]), item.id);
-    focusItem(next);
+    // Ctrl moves the focus and leaves the selection alone, like File Explorer: Ctrl+Space then adds or removes the item.
+    // An item not loaded yet (End in a large folder) is selected once its part has loaded.
+    moveTo(next, (e.ctrlKey || e.metaKey) && !e.shiftKey ? "focus" : e.shiftKey ? "range" : "only");
   };
 
   /** Letters typed to find an item, and when the last one was typed */
@@ -840,14 +948,14 @@ export function FileList(p: FileListProps) {
     const at = current === null ? -1 : (indexOf.get(current) ?? -1);
     // The same letter again moves on to the next item starting with it; more letters narrow down from the current item
     const same = [...text].every((c) => c === text[0]);
+    // In a large folder, among the items loaded
     const next = findByPrefix(
-      items.map((x) => x.name),
+      Array.from({ length: n }, (_, i) => items[i]?.name ?? ""),
       same ? text[0] : text,
       same ? at : Math.max(at, 0) - 1,
     );
     if (next < 0) return;
-    p.onSelect(new Set([items[next].id]), items[next].id);
-    focusItem(next);
+    moveTo(next, "only");
   };
   const show = (id: string, focus: boolean) => {
     const index = indexOf.get(id);
@@ -857,10 +965,11 @@ export function FileList(p: FileListProps) {
   };
   const focusStart = () => {
     if (n === 0) return false;
-    focusItem(tabStop);
+    moveTo(tabStop, "focus");
     return true;
   };
-  if (p.navRef) p.navRef.current = { typeAhead, show, focusStart };
+  const scrollTo = (index: number) => index >= 0 && index < n && v.scrollToIndex(rowOf(index), { align: "center" });
+  if (p.navRef) p.navRef.current = { typeAhead, show, focusStart, scrollTo };
 
   /** A finger resting on an item: selected once it has stayed long enough */
   const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number; done: boolean } | null>(null);
@@ -871,15 +980,16 @@ export function FileList(p: FileListProps) {
   };
   /** Long press (on every platform, iOS included): select the item, adding it when items are already selected */
   const longPress = (index: number) => {
-    const id = items[index].id;
-    if (!p.selected.has(id)) p.onSelect(selecting ? new Set(p.selected).add(id) : new Set([id]), id);
+    const id = items[index]!.id;
+    if (!isSelected(index, id)) p.onSelect(selecting ? new Set(p.selected).add(id) : new Set([id]), id, selecting ? span : null);
     navigator.vibrate?.(15);
   };
 
+  // Rows are rendered (and so used) only for items that are loaded
   const h = useRef<Handlers>(null!);
   h.current = {
     click: (e, index) => {
-      const item = items[index];
+      const item = items[index]!;
       // Marquee selection prevents the default mousedown, so the row wouldn't get the focus: arrows continue from the clicked row
       (e.currentTarget as HTMLElement).focus({ preventScroll: true });
       if (ignoreClick.current.index === index && Date.now() < ignoreClick.current.until) return;
@@ -888,9 +998,9 @@ export function FileList(p: FileListProps) {
         return;
       }
       const range = e.shiftKey ? rangeTo(index, e.ctrlKey || e.metaKey ? p.selected : undefined) : null;
-      if (range) p.onSelect(range, p.anchor!);
+      if (range) p.onSelect(range.selected, p.anchor!, range.span);
       else if (e.ctrlKey || e.metaKey || (coarse && selecting)) toggle(index);
-      else p.onSelect(new Set([item.id]), item.id);
+      else p.onSelect(new Set([item.id]), item.id, null);
     },
     toggle,
     keyDown: keyNav,
@@ -911,7 +1021,8 @@ export function FileList(p: FileListProps) {
         }
         return;
       }
-      if (!p.selected.has(items[index].id)) p.onSelect(new Set([items[index].id]), items[index].id);
+      const id = items[index]!.id;
+      if (!isSelected(index, id)) p.onSelect(new Set([id]), id, null);
     },
     touchStart: (e, index) => {
       cancelPress();
@@ -944,10 +1055,16 @@ export function FileList(p: FileListProps) {
       }, 600);
     },
     dragStart: (e, index) => {
-      const id = items[index].id;
-      const ids = p.selected.has(id) ? [...p.selected] : [id];
-      if (!p.selected.has(id)) p.onSelect(new Set([id]), id);
-      startDrag(e, ids, items);
+      const id = items[index]!.id;
+      const chosen = isSelected(index, id);
+      if (!chosen) p.onSelect(new Set([id]), id, null);
+      // A span goes with the items picked one by one: where they are dropped asks the server for what it holds
+      startDrag(
+        e,
+        chosen ? [...p.selected] : [id],
+        items.filter((x): x is Item => !!x),
+        chosen ? span : null,
+      );
     },
     dragOver: (e, id) => {
       const items = carriesItems(e.dataTransfer) && !!p.onDropInto;
@@ -992,7 +1109,6 @@ export function FileList(p: FileListProps) {
   // Marquee selection finds the boxed items from the row geometry: most rows aren't in the DOM
   const measure: MeasureHits = (container) => {
     const el = root.current;
-    const { rows } = layout;
     const shown = items;
     if (!el) return () => [];
     const at = offsetIn(el, container);
@@ -1001,16 +1117,22 @@ export function FileList(p: FileListProps) {
     const tileW = tile ? (el.clientWidth - 2 * PAD - (cols - 1) * gap) / cols : 0;
     return function* (b: Box) {
       if (!grid && (b.x > at.left + at.width || b.x + b.w < at.left)) return;
-      for (const row of rows) {
+      // Items not loaded yet can't be boxed
+      for (let r = layout.rowAt(b.y - top); r < layout.count; r++) {
+        const row = layout.row(r);
         const y = top + row.top;
         if (y > b.y + b.h) return;
         if (row.group || y + row.size - gap < b.y) continue;
         if (!tile) {
-          yield shown[row.start].id;
+          const item = shown[row.start];
+          if (item) yield item.id;
           continue;
         }
         const [c0, c1] = touching(at.left + PAD, tileW, tileW + gap, row.end - row.start, b.x, b.x + b.w);
-        for (let c = c0; c <= c1; c++) yield shown[row.start + c].id;
+        for (let c = c0; c <= c1; c++) {
+          const item = shown[row.start + c];
+          if (item) yield item.id;
+        }
       }
     };
   };
@@ -1041,9 +1163,10 @@ export function FileList(p: FileListProps) {
   if (n === 0) return <>{p.empty}</>;
 
   // Screen readers announce how many items are selected (the status bar isn't read out)
+  const chosen = p.selected.size + (span ? spanCount(span, n) : 0);
   const status = (
     <div role="status" className="sr-only">
-      {p.selected.size > 0 ? t("{n} item selected|{n} items selected", { n: p.selected.size }) : ""}
+      {chosen > 0 ? t("{n} item selected|{n} items selected", { n: chosen }) : ""}
     </div>
   );
   const label = p.label ?? t("Items");
@@ -1058,12 +1181,12 @@ export function FileList(p: FileListProps) {
   const rest = v.getTotalSize() + geo.top - end;
 
   const row = (index: number): RowProps => {
-    const item = items[index];
+    const item = items[index]!;
     return {
       item,
       index,
       h,
-      selected: p.selected.has(item.id),
+      selected: isSelected(index, item.id),
       tabStop: index === tabStop,
       dimmed: !!p.dimmed?.has(item.id),
       dropping: dropTarget === item.id,
@@ -1080,7 +1203,7 @@ export function FileList(p: FileListProps) {
         {status}
         <div ref={(el) => void (root.current = el)} role="listbox" aria-multiselectable aria-label={label} className="p-3">
           {rows.map(({ row: r, gap }) => {
-            const at = layout.rows[r];
+            const at = layout.row(r);
             return (
               <Fragment key={r}>
                 {gap > 0 && <div aria-hidden style={{ height: gap }} />}
@@ -1090,9 +1213,13 @@ export function FileList(p: FileListProps) {
                   </div>
                 ) : (
                   <div role="none" className="grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: tile.gap, marginBottom: tile.gap }}>
-                    {items.slice(at.start, at.end).map((item, k) => (
-                      <Tile key={item.id} {...row(at.start + k)} view={view as Exclude<ViewMode, "list">} source={p.source} count={n} checkboxes={!!p.showCheckboxes} />
-                    ))}
+                    {Array.from({ length: at.end - at.start }, (_, k) => {
+                      const i = at.start + k;
+                      const item = items[i];
+                      // Not loaded yet: its place, until its part loads
+                      if (!item) return <div key={`#${i}`} aria-hidden className="animate-pulse rounded-md bg-muted/60" style={{ height: tile.h }} />;
+                      return <Tile key={item.id} {...row(i)} view={view as Exclude<ViewMode, "list">} source={p.source} count={n} checkboxes={!!p.showCheckboxes} />;
+                    })}
                   </div>
                 )}
               </Fragment>
@@ -1142,7 +1269,7 @@ export function FileList(p: FileListProps) {
         role="grid"
         aria-multiselectable
         aria-label={label}
-        aria-rowcount={layout.rows.length + 1}
+        aria-rowcount={layout.count + 1}
         className="w-full table-fixed border-collapse text-xs whitespace-nowrap select-none"
         style={minWidth === undefined ? undefined : { minWidth }}
       >
@@ -1160,7 +1287,9 @@ export function FileList(p: FileListProps) {
                     ref={(el) => {
                       if (el) el.indeterminate = selecting && !allSelected;
                     }}
-                    onChange={() => p.onSelect(allSelected ? new Set() : new Set(items.map((x) => x.id)))}
+                    onChange={() =>
+                      allSelected ? p.onSelect(new Set(), undefined, null) : p.onSelectAll ? p.onSelectAll() : p.onSelect(new Set(indexOf.keys()), undefined, null)
+                    }
                   />
                 </th>
               )}
@@ -1186,9 +1315,10 @@ export function FileList(p: FileListProps) {
         </thead>
         <tbody>
           {rows.map(({ row: r, gap }) => {
-            const at = layout.rows[r];
+            const at = layout.row(r);
+            const item = items[at.start];
             return (
-              <Fragment key={at.group ? `group:${at.group.key}` : items[at.start].id}>
+              <Fragment key={at.group ? `group:${at.group.key}` : (item?.id ?? `#${at.start}`)}>
                 {gap > 0 && spacer(gap)}
                 {at.group ? (
                   <tr role="row" aria-rowindex={r + 2}>
@@ -1196,8 +1326,10 @@ export function FileList(p: FileListProps) {
                       <GroupHeading group={at.group} />
                     </td>
                   </tr>
-                ) : (
+                ) : item ? (
                   <ListRow {...row(at.start)} checkboxes={!!p.showCheckboxes} columns={shownIds} filler={filler} ariaRow={r + 2} />
+                ) : (
+                  <PlaceholderRow cells={cellCount} ariaRow={r + 2} />
                 )}
               </Fragment>
             );

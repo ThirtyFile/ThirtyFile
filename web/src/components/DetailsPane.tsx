@@ -78,11 +78,25 @@ function History({ node, query }: { node: Node; query: { data?: HistoryEntry[]; 
   );
 }
 
-export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; folder?: Node; onClose(): void }) {
+/**
+ * `count`: how many items are selected, when that is more than `selected` (a large folder where only some of them are
+ * loaded); `whole`: every item of `folder` is selected
+ */
+export function DetailsPane({ selected, folder, onClose, count, whole }: { selected: Node[]; folder?: Node; onClose(): void; count?: number; whole?: boolean }) {
   const [width, setWidth] = usePersisted("tf-details-width", PANE_DEFAULT_WIDTH);
-  const node = selected.length === 1 ? selected[0] : selected.length === 0 ? folder : undefined;
-  // What folders hold is summed on the server (every level, not the trash): one folder, or the folders of a selection
-  const folderIds = node ? (node.kind === "folder" ? [node.id] : []) : selected.filter((n) => n.kind === "folder").map((n) => n.id);
+  const partly = count !== undefined && count > selected.length;
+  const node = partly ? undefined : selected.length === 1 ? selected[0] : selected.length === 0 ? folder : undefined;
+  // What folders hold is summed on the server (every level, not the trash): one folder, or the folders of a selection.
+  // Everything in a large folder selected: what the folder holds; only part of it: not known here
+  const folderIds = partly
+    ? whole && folder
+      ? [folder.id]
+      : []
+    : node
+      ? node.kind === "folder"
+        ? [node.id]
+        : []
+      : selected.filter((n) => n.kind === "folder").map((n) => n.id);
   // Details are asked for once the selection stays put (what is known already shows at once), and a request for an
   // item left meanwhile is cancelled: React Query aborts its signal when nothing shows its answer any more
   const shownKey = `${node?.id ?? ""}|${folderIds.join()}`;
@@ -120,7 +134,9 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
     const own = { size: selectedFiles.reduce((s, n) => s + n.size, 0), files: selectedFiles.length, folders: folderIds.length };
     // The selected files and folders plus everything inside the folders
     let summary: React.ReactNode = null;
-    if (folderIds.length === 0) summary = `${t("{n} file|{n} files", { n: own.files })} · ${formatBytes(own.size)}`;
+    if (partly && !folderIds.length) summary = null;
+    else if (partly && contents.data) summary = `${containsText(contents.data)} · ${formatBytes(contents.data.size)}`;
+    else if (folderIds.length === 0) summary = `${t("{n} file|{n} files", { n: own.files })} · ${formatBytes(own.size)}`;
     else if (contents.data) summary = `${containsText(add(own, contents.data))} · ${formatBytes(own.size + contents.data.size)}`;
     else if (contents.error) summary = "—";
     else summary = t("Calculating size…");
@@ -133,7 +149,7 @@ export function DetailsPane({ selected, folder, onClose }: { selected: Node[]; f
             </span>
           ))}
         </div>
-        <div className="text-sm">{t("{n} item selected|{n} items selected", { n: selected.length })}</div>
+        <div className="text-sm">{t("{n} item selected|{n} items selected", { n: count ?? selected.length })}</div>
         <div className="text-xs text-muted-foreground">{summary}</div>
       </div>
     );

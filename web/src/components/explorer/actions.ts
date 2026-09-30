@@ -1,15 +1,14 @@
 /** File explorer actions: open, download, favorite, cut / copy / paste, new folder / text file, delete for good, keyboard shortcuts and drag-and-drop upload */
 import { useEffect, type DragEvent } from "react";
-import type { InfiniteData } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { api, privateSource, triggerDownload, type CursorPage, type Node } from "@/api";
+import { api, privateSource, triggerDownload, type Node } from "@/api";
 import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
-import { allItems } from "@/lib/pages";
-import { type FileChange, invalidateFiles, refreshFiles } from "@/lib/queries";
-import { type Origins, moveBack, movedBack, originsOf, toastWithUndo, undoLast } from "@/lib/undo";
+import { type FileChange, invalidateFiles, refreshFiles, rowsOf } from "@/lib/queries";
+import { eachBatch, idsOf, type Picked } from "@/lib/span";
+import { transferItems } from "@/lib/transfer";
+import { type Origins, originsOf, toastWithUndo, undoLast } from "@/lib/undo";
 import { confirm } from "@/components/confirm";
-import { askBeforeTransfer } from "@/components/ConflictDialog";
 import { carriesFiles, dropFiles, dropItems } from "@/lib/dnd";
 import { filesFromDrop, uploadFiles } from "@/uploads";
 import { runJob, waitForJob } from "@/lib/jobs";
@@ -17,6 +16,9 @@ import { reportShown } from "@/lib/errorReport";
 import { type Item, isTyping } from "./types";
 import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
+
+/** The most items a download or a ZIP file takes at once (the server's limit, which it words when there are more) */
+const MAX_AT_ONCE = 10_000;
 
 export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
   const {
@@ -42,9 +44,6 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
   const refresh = () => invalidateFiles(qc);
   /** After a change: what it touched loads again (lib/queries) */
   const changed = (change: FileChange) => refreshFiles(qc, change);
-  /** Items moved or copied into `dest`: that folder, the folders they left (a move) and the space used */
-  const transferred = (mode: "move" | "copy", ids: string[], dest: string): FileChange =>
-    mode === "move" ? { moved: [{ ids, to: dest }], usage: true } : { folders: [dest], contents: true, usage: true };
   /** The folders items are in (the folder shown, or each item's own in lists of several places) */
   const parentsOf = (ids: readonly string[]) => {
     const wanted = new Set(ids);
@@ -71,10 +70,15 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       // renaming a row that isn't there (that would leave the shortcuts turned off)
       await changed({ folders: [p.folderId], contents: true, recent: kind === "file" });
       // The folder's pages, and the folder tree's list of subfolders
-      const listed = qc
-        .getQueriesData<Node[] | InfiniteData<CursorPage<Node>>>({ queryKey: ["children", p.folderId] })
-        .some(([, d]) => (Array.isArray(d) ? d : allItems(d)).some((n) => n.id === id));
-      if (!listed) return;
+      const listed = qc.getQueriesData({ queryKey: ["children", p.folderId] }).some(([, d]) => rowsOf(d)?.some((n) => n.id === id));
+      if (!listed) {
+        // A large folder where it sorts into a part not loaded: go there; renaming starts once that part has loaded
+        const at = p.list ? await p.list.locate(id).catch(() => null) : null;
+        if (at === null || at === undefined) return;
+        s.listNav.current?.scrollTo(at);
+        s.renameWhenShown.current = { id, name };
+        return;
+      }
       setSelected(new Set([id]));
       setAnchor(id);
       setDialog({ t: "rename", node: { id, name } });
@@ -93,26 +97,33 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     } else tabs.openFile(`/view/${n.id}`);
   };
 
-  // Multiple items or folders are zipped by the server while streaming; progress shows in the download panel at the bottom right
-  const download = (ids: string[]) => ids.length && void triggerDownload(() => privateSource.downloadLink(ids));
+  // Multiple items or folders are zipped by the server while streaming; progress shows in the download panel at the bottom right.
+  // A span of a large folder is asked of the server first (a download takes at most 10,000 items: more, and it says so)
+  const download = (picked: Picked) => {
+    if (!picked.count) return;
+    void triggerDownload(async () => privateSource.downloadLink(picked.span ? await idsOf(picked, MAX_AT_ONCE) : picked.ids));
+  };
 
   // A new ZIP file in this folder, or a new folder with a ZIP file's contents: made on the server, followed in a message
-  const compress = (ids: string[]) => {
+  const compress = (picked: Picked) => {
     const folder = p.folderId;
-    if (folder && ids.length) void runJob(qc, () => api.compress(ids, folder), { folders: [folder], contents: true, usage: true });
+    if (folder && picked.count)
+      void runJob(qc, async () => api.compress(picked.span ? await idsOf(picked, MAX_AT_ONCE) : picked.ids, folder), { folders: [folder], contents: true, usage: true });
   };
   const extract = (n: Item) => void runJob(qc, () => api.extract(n.id), { folders: [n.parent_id], contents: true, usage: true });
 
   const toggleFavorite = async () => {
+    const picked = s.picked;
     try {
-      const ids = selectedIds;
-      await api.setFavorite(ids, !allFavorite);
+      await eachBatch(picked, allFavorite ? t("Removing from favorites…") : t("Adding to favorites…"), (ids) => api.setFavorite(ids, !allFavorite));
       toast.success(allFavorite ? t("Removed from favorites") : t("Added to favorites"));
-      // The star shows at once in every list; only the list of favorites loads again
-      void changed({ updated: ids.map((id) => ({ id, is_favorite: !allFavorite })), favorites: true });
+      // The star shows at once in every list; only the list of favorites loads again (and the parts of a large folder
+      // whose items were selected without being loaded)
+      void changed({ updated: selectedNodes.map((n) => ({ id: n.id, is_favorite: !allFavorite })), favorites: true, folders: [picked.span?.folder] });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Operation failed"));
       reportShown("favorite", e);
+      if (picked.span) void changed({ folders: [picked.span.folder], favorites: true });
     }
   };
 
@@ -127,84 +138,91 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
    * keep both). `done` words the message for the number of items that went; a move can be undone from it. False when
    * it was cancelled or failed (the reason is shown).
    */
-  const transfer = async (mode: "move" | "copy", ids: string[], dest: string, done: (n: number) => string, fallback: string, known?: Origins) => {
-    try {
-      const resolutions = await askBeforeTransfer(mode, ids, dest);
-      if (!resolutions) return false;
-      const sent = ids.filter((id) => resolutions[id] !== "skip");
-      if (sent.length) {
-        if (mode === "move") {
-          const origins = new Map([...(known ?? originsOf(p.items, sent, dest))].filter(([id, parent]) => sent.includes(id) && parent !== dest));
-          await waitForJob(await api.move(sent, dest, resolutions));
-          if (origins.size) toastWithUndo(done(sent.length), { undo: () => moveBack(origins), undoneText: t("Moved back"), after: () => changed(movedBack(origins)) });
-          else toast.success(done(sent.length));
-        } else {
-          await waitForJob(await api.copy(sent, dest, resolutions));
-          toast.success(done(sent.length));
-        }
-      }
-      setSelected(new Set());
-      void changed(transferred(mode, sent, dest));
-      return true;
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : fallback);
-      reportShown(mode, e, dest);
-      // What was done before it failed shows: the destination, and the folders the items were in
-      void changed({ ...transferred("copy", ids, dest), folders: [dest, ...parentsOf(ids)] });
-      return false;
-    }
+  const transfer = async (mode: "move" | "copy", picked: Picked, dest: string, done: (n: number) => string, fallback: string, known?: Origins) => {
+    const ok = await transferItems(qc, mode, picked, dest, { done, fallback, origins: known, items: p.items });
+    if (ok) setSelected(new Set());
+    return ok;
   };
   const uploadInto = (dt: DataTransfer, folder: Node) => void dropFiles(dt, folder);
 
   const cut = () => {
-    if (!selectedIds.length || !caps.write) return;
-    setClipboard({ mode: "cut", ids: selectedIds, origins: originsOf(selectedNodes, selectedIds, "") });
-    toast(t("{n} item cut. Go to the destination folder and select Paste to move it.|{n} items cut. Go to the destination folder and select Paste to move them.", { n: selectedIds.length }));
+    if (!s.count || !caps.write) return;
+    setClipboard({ mode: "cut", ids: selectedIds, span: s.span, count: s.count, origins: originsOf(selectedNodes, selectedIds, "") });
+    toast(t("{n} item cut. Go to the destination folder and select Paste to move it.|{n} items cut. Go to the destination folder and select Paste to move them.", { n: s.count }));
   };
   const copy = () => {
-    if (!selectedIds.length) return;
-    setClipboard({ mode: "copy", ids: selectedIds });
-    toast(t("{n} item copied|{n} items copied", { n: selectedIds.length }));
+    if (!s.count) return;
+    setClipboard({ mode: "copy", ids: selectedIds, span: s.span, count: s.count });
+    toast(t("{n} item copied|{n} items copied", { n: s.count }));
   };
   const canPaste = !!clip && canCreate;
   const paste = async () => {
     if (!clip || !p.folderId) return;
+    const picked: Picked = { ids: clip.ids, span: clip.span ?? null, count: clip.count ?? clip.ids.length };
     if (clip.mode === "cut") {
-      const moved = await transfer("move", clip.ids, p.folderId, (n) => t("Moved {n} item|Moved {n} items", { n }), t("Couldn't paste"), clip.origins ?? new Map());
+      const moved = await transfer("move", picked, p.folderId, (n) => t("Moved {n} item|Moved {n} items", { n }), t("Couldn't paste"), clip.origins ?? new Map());
       if (moved) setClipboard(null);
     } else {
-      await transfer("copy", clip.ids, p.folderId, (n) => t("Pasted {n} item|Pasted {n} items", { n }), t("Couldn't paste"));
+      await transfer("copy", picked, p.folderId, (n) => t("Pasted {n} item|Pasted {n} items", { n }), t("Couldn't paste"));
     }
   };
 
   /** Shift+Delete: delete for good without going through the trash, after asking */
-  const deleteForever = async (ids: string[]) => {
+  const deleteForever = async (picked: Picked) => {
     const ok = await confirm({
-      title: t("Permanently delete {n} item?|Permanently delete {n} items?", { n: ids.length }),
+      title: t("Permanently delete {n} item?|Permanently delete {n} items?", { n: picked.count }),
       description: t("Permanently deleted items can't be recovered."),
       confirmText: t("Delete permanently"),
       destructive: true,
       irreversible: true,
     });
     if (!ok) return;
-    const gone: FileChange = { removed: ids, usage: true };
+    setSelected(new Set());
+    const parents = parentsOf(picked.ids);
     try {
-      // Only items in the trash can be deleted for good: put them there first
-      await api.trash(ids);
-      const job = await api.deleteForever(ids);
-      setSelected(new Set());
-      void changed(gone);
-      await waitForJob(job);
+      await eachBatch(picked, t("Deleting permanently…"), async (ids) => {
+        // Only items in the trash can be deleted for good: put them there first
+        await api.trash(ids);
+        const job = await api.deleteForever(ids);
+        // The rows of what is picked one by one go at once; a span's folder loads again
+        void changed(picked.span ? { folders: [picked.span.folder], trash: true, usage: true } : { removed: ids, usage: true });
+        await waitForJob(job);
+      });
       toast.success(t("Permanently deleted"));
-      void changed(gone);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Operation failed"));
       reportShown("delete", e);
       // Some may have gone to the trash, or been deleted, before it failed
-      void changed({ folders: parentsOf(ids), trash: true, contents: true, usage: true });
+      void changed({ folders: [...parents, picked.span?.folder], trash: true, contents: true, usage: true });
     }
   };
 
+  /** Move to the trash (after the dialog asked); `picked` one by one can be put back from the message */
+  const trash = async (picked: Picked) => {
+    const parents = parentsOf(picked.ids);
+    try {
+      await eachBatch(picked, t("Moving to the trash…"), (ids) => api.trash(ids));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("Operation failed"));
+      reportShown("trash", e);
+      void changed({ folders: [...parents, picked.span?.folder], trash: true, contents: true, usage: true });
+      return;
+    }
+    setSelected(new Set());
+    if (picked.span) {
+      toast.success(t("Moved {n} item to trash|Moved {n} items to trash", { n: picked.count }));
+      void changed({ folders: [picked.span.folder], trash: true, contents: true, usage: true });
+      return;
+    }
+    // Restoring can fail, e.g. the original folder was deleted, a name conflict, or the space is full
+    toastWithUndo(t("Moved to trash"), {
+      undo: () => api.restore(picked.ids),
+      undoneText: t("Restored"),
+      after: () => changed({ folders: parents, trash: true, contents: true, usage: true }),
+    });
+    // The rows go at once; the lists aren't loaded again for it
+    void changed({ removed: picked.ids, usage: true });
+  };
   // Keyboard shortcuts (moving around, search and refresh are the address bar's: see Frame)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -220,18 +238,18 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         paste();
       } else if (mod && key === "a") {
         e.preventDefault();
-        setSelected(new Set(p.items.map((n) => n.id)));
+        s.selectAll();
       } else if (e.altKey && e.key === "Enter") {
         setDetailsOpen(true);
       } else if (mod && !e.shiftKey && key === "z") {
         // Ctrl+Z: take back the last move, rename or delete
         e.preventDefault();
         undoLast();
-      } else if (e.key === "Delete" && e.shiftKey && selectedNodes.length && caps.del) {
+      } else if (e.key === "Delete" && e.shiftKey && s.count && caps.del) {
         e.preventDefault();
-        void deleteForever(selectedIds);
-      } else if (e.key === "Delete" && selectedNodes.length && caps.del) {
-        setDialog({ t: "trash", ids: selectedIds });
+        void deleteForever(s.picked);
+      } else if (e.key === "Delete" && s.count && caps.del) {
+        setDialog({ t: "trash", picked: s.picked });
       } else if (mod && e.shiftKey && key === "n" && canCreate) {
         // Ctrl+Shift+N: new folder (like Windows)
         e.preventDefault();
@@ -291,7 +309,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         }
       : {};
 
-  return { refresh, changed, parentsOf, open, download, compress, extract, toggleFavorite, dropInto, uploadInto, transfer, cut, copy, canPaste, paste, dragProps, createNew };
+  return { refresh, changed, parentsOf, open, download, compress, extract, toggleFavorite, dropInto, uploadInto, transfer, trash, deleteForever, cut, copy, canPaste, paste, dragProps, createNew };
 }
 
 export type ExplorerActions = ReturnType<typeof useExplorerActions>;

@@ -595,6 +595,11 @@ export interface CursorPage<T> {
   next: string | null;
 }
 
+/** A part of a folder asked for by its position, with how many items the folder has */
+export interface PositionedPage<T> extends CursorPage<T> {
+  total: number;
+}
+
 /** Share link access log */
 export interface ShareAccess {
   id: number;
@@ -1134,6 +1139,15 @@ export const api = {
     get<Node[]>(enc`/nodes/${id}/children` + qs({ sort, order, folders_only: foldersOnly ? "true" : undefined }), signal),
   childrenPage: (id: string, sort: SortKey, order: SortOrder, limit: number, after?: string, signal?: AbortSignal) =>
     get<CursorPage<Node>>(enc`/nodes/${id}/children` + qs({ sort, order, limit: String(limit), after }), signal),
+  /** The part of a folder from `offset` on (a large folder is shown a part at a time), with how many items it has */
+  childrenAt: (id: string, sort: SortKey, order: SortOrder, offset: number, limit: number, signal?: AbortSignal) =>
+    get<PositionedPage<Node>>(enc`/nodes/${id}/children` + qs({ sort, order, limit: String(limit), offset: String(offset) }), signal),
+  /** Where an item is in a folder's listing (null: not in it) */
+  position: (id: string, item: string, sort: SortKey, order: SortOrder) =>
+    get<{ position: number | null; total: number }>(enc`/nodes/${id}/position` + qs({ item, sort, order })),
+  /** The ids of items selected in a folder (all of them, or from one to another, less some), a batch at a time */
+  selection: (id: string, req: { sort: SortKey; order: SortOrder; from?: string; to?: string; except: string[]; after?: string }) =>
+    post<{ ids: string[]; next: string | null }>(enc`/nodes/${id}/select`, req),
   /** What a typed path names; `aliases` maps names as the UI language shows them to the ones paths use */
   findPath: (path: string, aliases: Record<string, string>) => post<FoundPath>("/nodes/find", { path, aliases }),
   createFolder: (parent_id: string, name: string) => post<Node>("/folders", { parent_id, name }),

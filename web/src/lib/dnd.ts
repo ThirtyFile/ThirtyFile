@@ -5,15 +5,10 @@
  */
 import { useState, type DragEvent } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { api } from "@/api";
 import { t } from "@/lib/i18n";
-import { reportShown } from "@/lib/errorReport";
 import { wantsCopy } from "@/lib/keys";
-import { waitForJob } from "@/lib/jobs";
-import { refreshFiles } from "@/lib/queries";
-import { moveBack, movedBack, originsOf, toastWithUndo } from "@/lib/undo";
-import { askBeforeTransfer } from "@/components/ConflictDialog";
+import type { FolderSpan, ListSpan } from "@/lib/span";
+import { transferItems } from "@/lib/transfer";
 import { filesFromDrop, uploadFiles } from "@/uploads";
 
 export const DRAG_MIME = "application/x-thirtyfile-nodes";
@@ -25,14 +20,17 @@ export interface DropFolder {
   name: string;
 }
 
-/** The items being dragged from this page, with the folders they came from (for Undo) */
-let dragged: { ids: string[]; items: readonly { id: string; parent_id: string | null }[] } | null = null;
+/**
+ * The items being dragged from this page, with the folders they came from (for Undo), and a span of a large folder
+ * dragged with them (lib/span)
+ */
+let dragged: { ids: string[]; items: readonly { id: string; parent_id: string | null }[]; span: FolderSpan | null } | null = null;
 
 /** Start dragging items of the list: they can be moved, or copied with Ctrl (Option) */
-export function startDrag(e: DragEvent, ids: string[], items: readonly { id: string; parent_id: string | null }[]) {
+export function startDrag(e: DragEvent, ids: string[], items: readonly { id: string; parent_id: string | null }[], span?: ListSpan | null) {
   e.dataTransfer.setData(DRAG_MIME, JSON.stringify(ids));
   e.dataTransfer.effectAllowed = "copyMove";
-  dragged = { ids, items };
+  dragged = { ids, items, span: span && "folder" in span ? (span as FolderSpan) : null };
   e.currentTarget.addEventListener("dragend", () => (dragged = null), { once: true });
 }
 
@@ -53,32 +51,17 @@ export function droppedIds(dt: DataTransfer): string[] | null {
 
 /** Move or copy items into a folder, asking first what to do with names it already has; a move can be undone */
 export async function dropItems(qc: QueryClient, ids: string[], folder: DropFolder, copy: boolean) {
+  // A span of a large folder dragged from this page goes with the items (none when these came from elsewhere)
+  const span = dragged && dragged.ids.length === ids.length && dragged.ids.every((id, i) => id === ids[i]) ? dragged.span : null;
+  if (span?.folder === folder.id) return;
   ids = ids.filter((id) => id !== folder.id);
-  if (!ids.length) return;
-  // The folders the items came from, when they were dragged from a list of this page
-  const from = dragged?.items.filter((n) => ids.includes(n.id)).map((n) => n.parent_id) ?? [];
-  try {
-    const resolutions = await askBeforeTransfer(copy ? "copy" : "move", ids, folder.id);
-    if (!resolutions) return;
-    ids = ids.filter((id) => resolutions[id] !== "skip");
-    if (!ids.length) return;
-    if (copy) {
-      await waitForJob(await api.copy(ids, folder.id, resolutions));
-      toast.success(t("Copied {n} item to \"{name}\"|Copied {n} items to \"{name}\"", { n: ids.length, name: folder.name }));
-    } else {
-      const origins = dragged ? originsOf(dragged.items, ids, folder.id) : new Map<string, string>();
-      await waitForJob(await api.move(ids, folder.id, resolutions));
-      const moved = t("Moved {n} item to \"{name}\"|Moved {n} items to \"{name}\"", { n: ids.length, name: folder.name });
-      if (origins.size) toastWithUndo(moved, { undo: () => moveBack(origins), undoneText: t("Moved back"), after: () => refreshFiles(qc, movedBack(origins)) });
-      else toast.success(moved);
-    }
-    void refreshFiles(qc, copy ? { folders: [folder.id], contents: true, usage: true } : { moved: [{ ids, to: folder.id }], usage: true });
-  } catch (e) {
-    toast.error(e instanceof Error ? e.message : copy ? t("Couldn't copy") : t("Couldn't move"));
-    reportShown(copy ? "copy" : "move", e, folder.id);
-    // What was done before it failed shows
-    void refreshFiles(qc, { folders: [folder.id, ...from], contents: true, usage: true });
-  }
+  if (!ids.length && !span) return;
+  await transferItems(qc, copy ? "copy" : "move", { ids, span, count: ids.length + (span?.count ?? 0) }, folder.id, {
+    done: (n) =>
+      copy ? t("Copied {n} item to \"{name}\"|Copied {n} items to \"{name}\"", { n, name: folder.name }) : t("Moved {n} item to \"{name}\"|Moved {n} items to \"{name}\"", { n, name: folder.name }),
+    fallback: copy ? t("Couldn't copy") : t("Couldn't move"),
+    items: dragged?.items,
+  });
 }
 
 /** Upload files and folders dropped from the computer into a folder */

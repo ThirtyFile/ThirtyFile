@@ -71,7 +71,17 @@
           <li><strong>View</strong>: choose how the list looks (see <a href="#views">Views, columns and groups</a>). The two buttons at the bottom right switch between <strong>Details</strong> and <strong>Large icons</strong>.</li>
         </ul>
         <p><strong>Recent</strong> lists the files you uploaded, edited or opened, newest first, wherever they are: your own files, and files of others in shared spaces and folders. Opening means viewing a file in the browser (the viewer, the editor or the preview pane); downloads and file clients using an app password don't count. Files you can no longer open, and files in the trash, are left out.</p>
-        <p>A folder with thousands of items opens with its first items right away, and the rest loads in the background: the status bar shows <strong>Loading more items…</strong> until the list is complete. You can scroll, select and open items in the meantime; <kbd>Ctrl</kbd> + <kbd>A</kbd> selects everything loaded so far.</p>
+        <h3 id="large-folders">Large folders</h3>
+        <p>A folder with thousands of items opens with its first items right away, and loads the rest as you get to them: the part you scroll to, the part <kbd>End</kbd> or <kbd>Page Down</kbd> goes to, or where you drag the scroll bar. Rows not loaded yet show as grey lines for a moment, and the status bar shows <strong>Loading more items…</strong> meanwhile. The status bar counts every item of the folder, loaded or not. Only the parts near where you are stay loaded, so a folder of a hundred thousand items doesn't slow your browser down.</p>
+        <p>Selecting works on the whole folder, also on items not loaded yet:</p>
+        <ul>
+          <li><kbd>Ctrl</kbd> + <kbd>A</kbd> (or <strong>Select all</strong>) selects every item of the folder. <kbd>Ctrl</kbd> + click leaves items out again; the status bar says how many are selected.</li>
+          <li><kbd>Shift</kbd> + click, or <kbd>Shift</kbd> + <kbd>End</kbd>, selects everything between the two items, however far apart they are.</li>
+          <li>Moving, copying, cutting and pasting, dragging, adding to favorites, moving to the trash and deleting permanently then take every selected item. ThirtyFile does it a thousand items at a time, and a message at the bottom shows how far it got. Such a large change can't be undone from its message.</li>
+          <li>A download or a ZIP file takes up to 10,000 items at once: for more, download the folder itself.</li>
+          <li>The details pane shows how many items are selected; their size shows when the whole folder is selected.</li>
+        </ul>
+        <p>Typing the start of a name goes to the next matching item among those loaded. Going up (or back) to a large folder shows the folder you came from and selects it, wherever it is in the list. Grouping a large folder by date or type (see below) loads the whole folder, so every group is complete.</p>
 
         <h2 id="views">Views, columns and groups</h2>
         <p>The <strong>View</strong> menu has the same views as File Explorer:</p>

@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useEffectEvent, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useEffectEvent, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -36,7 +36,7 @@ import { categoryOf, isTextLike, typeLabel } from "@/components/FileIcon";
 import { capsOf } from "@/lib/drives";
 import { locationOf, useSort } from "@/pages/FilesPage";
 import { pathOf } from "@/lib/paths";
-import { hasFileAfter, useAllPages } from "@/lib/pages";
+import { neighbours, useFolderWindows } from "@/lib/windows";
 
 const SheetEditor = lazy(() => import("@/components/sheet/SheetEditor"));
 
@@ -70,16 +70,31 @@ export function FileViewPage() {
   const [sort] = useSort();
   const parentId = node?.parent_id ?? undefined;
   const nodeId = node?.id;
-  const siblings = useAllPages(
-    ["children", parentId, sort.key, sort.order],
-    (limit, after, signal) => api.childrenPage(parentId!, sort.key, sort.order, limit, after, signal),
-    !!parentId && node?.kind === "file",
-    { enough: useCallback((items: Node[]) => hasFileAfter(items, nodeId), [nodeId]), reuse: true },
-  );
-  const files = useMemo(() => siblings.items.filter((n) => n.kind === "file"), [siblings.items]);
-  const at = node ? files.findIndex((n) => n.id === node.id) : -1;
-  const prev = at > 0 ? files[at - 1] : undefined;
-  const next = at >= 0 ? files[at + 1] : undefined;
+  const { list } = useFolderWindows(parentId, sort.key, sort.order, !!parentId && node?.kind === "file");
+  // Where the file is in its folder (asked of the server when that part isn't loaded): the parts around it load
+  const [located, setLocated] = useState<{ id: string; at: number | null } | null>(null);
+  const known = list.total >= 0;
+  const locate = list.locate;
+  useEffect(() => {
+    if (!nodeId || !known) return;
+    let current = true;
+    void locate(nodeId)
+      .then((at) => current && setLocated({ id: nodeId, at }))
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- once per file, when the folder's size is known
+  }, [nodeId, known]);
+  const here = nodeId ? (list.index.get(nodeId) ?? (located?.id === nodeId ? located.at : null)) : null;
+  const show = list.show;
+  useEffect(() => {
+    if (here !== null) show(Math.max(0, here - 1), here + 1);
+  }, [here, show]);
+  const { prev, next } = useMemo(() => neighbours(list.at, here), [list.at, here]);
+  // "3 of 12" when every item of the folder is loaded (a large folder isn't)
+  const files = useMemo(() => (list.complete ? list.loaded.filter((n) => n.kind === "file") : null), [list.complete, list.loaded]);
+  const fileAt = files && nodeId ? files.findIndex((n) => n.id === nodeId) : -1;
   const goTo = (n: { id: string } | undefined) => n && navigate(`/view/${n.id}`);
   // Images, media and unpreviewable files use a custom context menu; text, Word and Excel keep the browser menu so text can be copied
   const customMenu = !!node && ["image", "video", "audio", "other", "archive"].includes(categoryOf(node)) && !isTextLike(node);
@@ -165,7 +180,7 @@ export function FileViewPage() {
         </>
       )}
       <span className="flex-1" />
-      {at >= 0 && files.length > 1 && (
+      {here !== null && (prev || next) && (
         <>
           <ToolButton icon={ChevronLeftIcon} label={t("Previous (←)")} className="size-9 px-0 [&_svg]:size-[18px]" disabled={!prev} onClick={() => goTo(prev)} />
           <ToolButton icon={ChevronRightIcon} label={t("Next (→)")} className="size-9 px-0 [&_svg]:size-[18px]" disabled={!next} onClick={() => goTo(next)} />
@@ -197,7 +212,7 @@ export function FileViewPage() {
         node && (
           <span>
             {typeLabel(node)} · {formatBytes(node.size)} · {t("Modified {date}", { date: formatWinDate(node.updated_at) })}
-            {at >= 0 && siblings.complete && files.length > 1 && ` · ${t("{n} of {total}", { n: at + 1, total: files.length })}`}
+            {fileAt >= 0 && files && files.length > 1 && ` · ${t("{n} of {total}", { n: fileAt + 1, total: files.length })}`}
           </span>
         )
       }

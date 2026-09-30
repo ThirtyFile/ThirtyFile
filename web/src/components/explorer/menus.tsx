@@ -33,7 +33,7 @@ import { t } from "@/lib/i18n";
 import { isZip } from "@/components/FileIcon";
 
 export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerActions) {
-  const { caps, navigate, tabs, fileInput, dirInput, canCreate, canUpload, selectedNodes, selectedIds, single, allFavorite, setDialog, setDetailsOpen } = s;
+  const { caps, navigate, tabs, fileInput, dirInput, canCreate, canUpload, single, allFavorite, setDialog, setDetailsOpen } = s;
   const { refresh, open, download, compress, extract, toggleFavorite, cut, copy, canPaste, paste, createNew } = a;
   const newItems = (
     <>
@@ -58,7 +58,7 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
     </>
   );
 
-  const menuItems = selectedNodes.length ? (
+  const menuItems = s.count ? (
     <>
       {single && <DropdownMenuItem onClick={() => open(single)}>{single.kind === "folder" ? <FolderOpenIcon /> : <EyeIcon />} {t("Open")}</DropdownMenuItem>}
       {single?.kind === "folder" && (
@@ -71,12 +71,12 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
           <FolderOpenIcon /> {t("Open file location")}
         </DropdownMenuItem>
       )}
-      <DropdownMenuItem onClick={() => download(selectedIds)}>
-        <DownloadIcon /> {selectedNodes.length > 1 || single?.kind === "folder" ? t("Download (ZIP)") : t("Download")}
+      <DropdownMenuItem onClick={() => download(s.picked)}>
+        <DownloadIcon /> {s.count > 1 || single?.kind === "folder" ? t("Download (ZIP)") : t("Download")}
       </DropdownMenuItem>
       {/* Made next to the items, so only where new files can be added (not in search results or other lists) */}
       {canUpload && (
-        <DropdownMenuItem onClick={() => compress(selectedIds)}>
+        <DropdownMenuItem onClick={() => compress(s.picked)}>
           <FileArchiveIcon /> {t("Compress to ZIP file")}
         </DropdownMenuItem>
       )}
@@ -114,16 +114,16 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
               <PencilIcon /> {t("Rename")} <Kbd>F2</Kbd>
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem onClick={() => setDialog({ t: "move", ids: selectedIds })}>
+          <DropdownMenuItem onClick={() => setDialog({ t: "move", picked: s.picked })}>
             <FolderInputIcon /> {t("Move to…")}
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setDialog({ t: "copy", ids: selectedIds })}>
+          <DropdownMenuItem onClick={() => setDialog({ t: "copy", picked: s.picked })}>
             <CopyIcon /> {t("Copy to…")}
           </DropdownMenuItem>
         </>
       )}
       {caps.del && (
-        <DropdownMenuItem variant="destructive" onClick={() => setDialog({ t: "trash", ids: selectedIds })}>
+        <DropdownMenuItem variant="destructive" onClick={() => setDialog({ t: "trash", picked: s.picked })}>
           <Trash2Icon /> {t("Delete")} <Kbd>Delete</Kbd>
         </DropdownMenuItem>
       )}

@@ -1,8 +1,8 @@
-// Folders in pages: a newer first page while files are uploaded, and how far Previous / Next need the folder loaded
+// Folders in pages: a newer first page while files are uploaded
 import { describe, expect, test } from "vitest";
 import { QueryClient, QueryObserver, type InfiniteData } from "@tanstack/react-query";
 import type { CursorPage } from "@/api";
-import { allItems, hasFileAfter, refreshFirstPage, withFirstPage } from "@/lib/pages";
+import { allItems, refreshFirstPage, withFirstPage } from "@/lib/pages";
 
 type Item = { id: string; kind: "file" | "folder" };
 const file = (id: string): Item => ({ id, kind: "file" });
@@ -23,15 +23,6 @@ describe("withFirstPage", () => {
   });
 });
 
-describe("hasFileAfter", () => {
-  test("is true once a file after the open one is loaded", () => {
-    expect(hasFileAfter([file("a"), file("b")], "a")).toBe(true);
-    expect(hasFileAfter([file("a"), folder("x")], "a")).toBe(false);
-    expect(hasFileAfter([file("a"), file("b")], "b")).toBe(false);
-    expect(hasFileAfter([file("a")], "z")).toBe(false);
-    expect(hasFileAfter([file("a")], undefined)).toBe(false);
-  });
-});
 
 describe("refreshFirstPage", () => {
   test("replaces the first page of lists shown, and leaves other lists alone", async () => {
