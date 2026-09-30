@@ -306,7 +306,14 @@ pub async fn list_children(conn: &mut SqliteConnection, parent_id: &str, q: &Lis
     let sort = SortCol::parse(q.sort.as_deref());
     let desc = q.order.as_deref() == Some("desc");
     let (limit, after) = page_of::<Cursor>(q.limit, q.after.as_deref())?;
-    let kind_filter = if q.folders_only == Some(true) { "AND n.kind = 'folder'" } else { "" };
+    let folders_only = q.folders_only == Some(true);
+    let kind_filter = if folders_only { "AND n.kind = 'folder'" } else { "" };
+    // The navigation pane shows an arrow only on folders with folders in them (the index nodes_subfolders answers it)
+    let has_folders = if folders_only {
+        ", EXISTS (SELECT 1 FROM nodes c WHERE c.parent_id = n.id AND c.kind = 'folder' AND c.trashed_at IS NULL) AS has_folders"
+    } else {
+        ""
+    };
     // Everything after the cursor in that order: folders before files, then the sort column, the name and the id
     let col = sort.expr();
     let keyset = if after.is_some() {
@@ -320,7 +327,7 @@ pub async fn list_children(conn: &mut SqliteConnection, parent_id: &str, q: &Lis
     };
     let ext = if sort == SortCol::Type { col } else { "NULL" };
     let sql = format!(
-        "SELECT {NODE_COLS}, {ext} AS ext FROM nodes n
+        "SELECT {NODE_COLS}{has_folders}, {ext} AS ext FROM nodes n
          WHERE n.parent_id = ?1 AND n.trashed_at IS NULL {kind_filter} {keyset} {} LIMIT ?6",
         order_clause(q.sort.as_deref(), q.order.as_deref())
     );
@@ -1533,6 +1540,28 @@ mod tests {
         let Json(page) = children(State(env.st.clone()), amy.clone(), Path(amy.root().to_string()), Query(q)).await.unwrap();
         let v = serde_json::to_value(&page).unwrap();
         assert_eq!((v["items"][0]["name"].as_str(), v["next"].is_null()), (Some("a.txt"), true));
+    }
+
+    #[tokio::test]
+    async fn folder_listings_say_which_folders_have_folders_in_them() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let parent = env.folder(&amy, amy.root(), "Parent").await;
+        env.folder(&amy, &parent, "Child").await;
+        let files_only = env.folder(&amy, amy.root(), "Files only").await;
+        env.file(&amy, &files_only, "a.txt").await;
+        // A folder whose only folder is in the trash has none to show
+        let emptied = env.folder(&amy, amy.root(), "Emptied").await;
+        let gone = env.folder(&amy, &emptied, "Gone").await;
+        let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&gone])).await.unwrap();
+        let q = ListQuery { folders_only: Some(true), ..Default::default() };
+        let Json(list) = children(State(env.st.clone()), amy.clone(), Path(amy.root().to_string()), Query(q)).await.unwrap();
+        let v = serde_json::to_value(&list).unwrap();
+        let flags: Vec<_> = v.as_array().unwrap().iter().map(|n| (n["name"].as_str().unwrap(), n["has_folders"].as_bool())).collect();
+        assert_eq!(flags, [("Emptied", Some(false)), ("Files only", Some(false)), ("Parent", Some(true))]);
+        // Other listings don't carry it
+        let Json(all) = children(State(env.st.clone()), amy.clone(), Path(amy.root().to_string()), Query(ListQuery::default())).await.unwrap();
+        assert!(serde_json::to_value(&all).unwrap()[0].get("has_folders").is_none());
     }
 
     #[tokio::test]

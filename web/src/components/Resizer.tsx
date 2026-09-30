@@ -36,6 +36,8 @@ export function Resizer(props: {
       className={cn(
         "absolute inset-y-0 z-10 w-1.5 cursor-col-resize outline-none max-md:hidden",
         props.edge === "right" ? "-right-[3px]" : "-left-[3px]",
+        // The last column's handle stays inside the table: sticking out, it would make the list scroll sideways
+        "[th:last-child>&]:right-0",
       )}
       onDoubleClick={() => (props.onReset ? props.onReset() : props.onChange(props.defaultWidth))}
       onKeyDown={(e) => {

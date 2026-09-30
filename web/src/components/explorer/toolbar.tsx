@@ -46,6 +46,7 @@ import { ColumnChoices, listColumns, type ViewMode } from "@/components/FileList
 import { ToolButton, ToolSeparator } from "@/components/Frame";
 import { openShortcuts } from "@/components/ShortcutsDialog";
 import { shortcut } from "@/lib/keys";
+import { cn } from "@/lib/utils";
 import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
 import type { ExplorerActions } from "./actions";
@@ -99,37 +100,47 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
   const none = selectedNodes.length === 0;
   // Windows 11 style command bar: New | Cut Copy Paste Rename Share Delete | Sort | View | ⋯ | Details
   const icon = "size-9 px-0 [&_svg]:size-[18px]";
+  const phoneHidden = "max-md:hidden";
   const toolbar = (
     <>
       <DropdownMenu>
         <DropdownMenuTrigger
-          render={<ToolButton icon={PlusCircleIcon} label={t("New")} showLabel disabled={!canCreate} className="h-9 px-2.5 text-[13px]" />}
+          render={<ToolButton icon={PlusCircleIcon} label={t("New")} showLabel phoneLabel disabled={!canCreate} className="h-9 px-2.5 text-[13px]" />}
         />
         <DropdownMenuContent className="w-56">{newItems}</DropdownMenuContent>
       </DropdownMenu>
-      <ToolSeparator />
-      <ToolButton icon={ScissorsIcon} label={t("Cut")} title={`${t("Cut")} (${shortcut("Ctrl+X")})`} className={icon} disabled={none || !caps.write} onClick={cut} />
-      <ToolButton icon={CopyIcon} label={t("Copy")} title={`${t("Copy")} (${shortcut("Ctrl+C")})`} className={icon} disabled={none} onClick={copy} />
-      <ToolButton icon={ClipboardPasteIcon} label={t("Paste")} title={`${t("Paste")} (${shortcut("Ctrl+V")})`} className={icon} disabled={!canPaste} onClick={paste} />
+      {/* Phones: what works on the selected items is in the bar that shows below the list while items are selected (and
+          in its menu), so the toolbar keeps to one row; Paste stays while there is something to paste */}
+      <ToolSeparator className="max-md:hidden" />
+      <ToolButton icon={ScissorsIcon} label={t("Cut")} title={`${t("Cut")} (${shortcut("Ctrl+X")})`} className={cn(icon, phoneHidden)} disabled={none || !caps.write} onClick={cut} />
+      <ToolButton icon={CopyIcon} label={t("Copy")} title={`${t("Copy")} (${shortcut("Ctrl+C")})`} className={cn(icon, phoneHidden)} disabled={none} onClick={copy} />
+      <ToolButton
+        icon={ClipboardPasteIcon}
+        label={t("Paste")}
+        title={`${t("Paste")} (${shortcut("Ctrl+V")})`}
+        className={cn(icon, !canPaste && phoneHidden)}
+        disabled={!canPaste}
+        onClick={paste}
+      />
       <ToolButton
         icon={PencilIcon}
         label={t("Rename")}
         title={`${t("Rename")} (F2)`}
-        className={icon}
+        className={cn(icon, phoneHidden)}
         disabled={!single || !caps.write}
         onClick={() => single && setDialog({ t: "rename", node: single })}
       />
       <ToolButton
         icon={UsersRoundIcon}
         label={t("Share with…")}
-        className={icon}
+        className={cn(icon, phoneHidden)}
         disabled={!single}
         onClick={() => single && setDialog({ t: "access", nodeId: single.id })}
       />
       <ToolButton
         icon={Share2Icon}
         label={t("Create share link")}
-        className={icon}
+        className={cn(icon, phoneHidden)}
         disabled={!single || !caps.share}
         onClick={() => single && setDialog({ t: "share", node: single })}
       />
@@ -137,14 +148,14 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
         icon={Trash2Icon}
         label={t("Delete")}
         title={`${t("Delete")} (Delete)`}
-        className={icon}
+        className={cn(icon, phoneHidden)}
         disabled={none || !caps.del}
         onClick={() => setDialog({ t: "trash", ids: selectedIds })}
       />
-      <ToolSeparator />
+      <ToolSeparator className="max-md:hidden" />
       {p.sort && p.onSortChange && (
         <DropdownMenu>
-          <DropdownMenuTrigger render={<ToolButton icon={ArrowDownUpIcon} label={t("Sort")} showLabel className="h-9 px-2.5 text-[13px]" />} />
+          <DropdownMenuTrigger render={<ToolButton icon={ArrowDownUpIcon} label={t("Sort")} showLabel phoneLabel className="h-9 px-2.5 text-[13px]" />} />
           <DropdownMenuContent className="w-44">
             {/* Radio items, so screen readers say which one is chosen */}
             <DropdownMenuRadioGroup value={p.sort.key} onValueChange={(k) => p.onSortChange!({ key: k as SortKey, order: p.sort!.order })}>
@@ -167,7 +178,7 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
         </DropdownMenu>
       )}
       <DropdownMenu>
-        <DropdownMenuTrigger render={<ToolButton icon={LayoutListIcon} label={t("View")} showLabel className="h-9 px-2.5 text-[13px]" />} />
+        <DropdownMenuTrigger render={<ToolButton icon={LayoutListIcon} label={t("View")} showLabel phoneLabel className="h-9 px-2.5 text-[13px]" />} />
         <DropdownMenuContent className="w-52">
           <DropdownMenuRadioGroup value={view} onValueChange={(v) => setView(v as ViewMode)}>
             {VIEWS.map(([v, Icon, label]) => (

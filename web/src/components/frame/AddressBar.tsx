@@ -316,7 +316,12 @@ export function AddressBar({
         ) : (
           <>
             <Icon className="size-4 shrink-0 text-muted-foreground" />
-            <nav ref={trail} aria-label={t("File path")} className="flex min-w-0 flex-1 items-center overflow-x-auto text-[13px] whitespace-nowrap">
+            <nav
+              ref={trail}
+              aria-label={t("File path")}
+              // Scrolls sideways (to the end at first) without a scroll bar inside the address bar
+              className="flex min-w-0 flex-1 items-center overflow-x-auto text-[13px] whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            >
               {crumbs.map((c, i) => (
                 <CrumbItem key={i} crumb={c} last={i === crumbs.length - 1} path={crumbPath(crumbs.slice(0, i + 1))} />
               ))}

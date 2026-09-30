@@ -70,6 +70,11 @@ pub struct Node {
     #[serde(skip)]
     #[sqlx(default)]
     pub space_moving: bool,
+    /// In listings of folders only (the navigation pane): whether the folder has folders in it, so it shows an arrow
+    /// to expand only then
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[sqlx(default)]
+    pub has_folders: Option<bool>,
 }
 
 impl Node {
