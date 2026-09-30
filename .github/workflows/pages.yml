@@ -1,14 +1,26 @@
-# Publishes the website in site/ to GitHub Pages (https://thirtyfile.github.io/ThirtyFile/).
+# Publishes the website in site/ to GitHub Pages (https://thirtyfile.github.io/ThirtyFile/) as it is in a release, so
+# that the guides describe what people can install: the Release workflow (release.yml) calls this once a release is
+# published. Merges into main don't publish it; guides for changes that aren't released yet wait for their release.
+#
+# By hand (Actions › Website › Run workflow): publishes the latest release's website, or the branch or tag given, such
+# as main after a fix to the guides that is true of the released version too.
 # One-time setup: repository Settings › Pages › Source: "GitHub Actions".
 name: Website
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "site/**"
-      - ".github/workflows/pages.yml"
+  workflow_call:
+    inputs:
+      ref:
+        description: Tag to publish the website of
+        type: string
+        required: true
   workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch or tag to publish (empty for the latest release)
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -27,7 +39,20 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
+      - id: ref
+        env:
+          REF: ${{ inputs.ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$REF" ]; then
+            REF=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          fi
+          echo "Publishing the website of $REF"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.ref.outputs.ref }}
+          persist-credentials: false
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
