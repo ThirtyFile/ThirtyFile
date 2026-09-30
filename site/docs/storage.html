@@ -98,7 +98,7 @@
 
         <h3 id="list">What the list shows</h3>
         <ul>
-          <li><strong>Used space</strong>: the files of the spaces on the location. For folder spaces, the size of the files in their folders, as of the latest check; for the content store, the contents kept there. Contents that are the same in several files are counted once.</li>
+          <li><strong>Used space</strong>: the files of the spaces on the location. For folder spaces, the size of the files in their folders, as of the latest check; for the content store, the contents kept there. Contents that are the same in several files are counted once. <a href="#usage">Storage usage</a> has the history.</li>
           <li><strong>Free space</strong>: for the storage folder and <em>Local folder</em> locations, how much is free on the disk that holds the folder, and how big it is.</li>
           <li><strong>Files and spaces</strong>: how many contents the content store keeps there, and how many spaces are on the location. Click the number of spaces to list them, with their kind, owner and size. What is in them isn't shown.</li>
         </ul>
@@ -209,6 +209,49 @@
         <h3 id="one-place">One place, one location</h3>
         <p>Two locations in the same place would each take the other's files for unused content. So a location can't be added, or changed, to a place another location already uses: the same bucket and prefix on the same service, or the same folder on the same SFTP or FTP server (a relative folder counts per account).</p>
         <p>The place of an S3, SFTP or FTP location also holds a small <code>.thirtyfile-location</code> file: the location's id on the first line, the ThirtyFile installation's id on the second. It is written when the location is added. A location added before these files existed gets its file at its next successful connection check. A place whose file names another location, or another installation of ThirtyFile, can't be added, and its content isn't searched or removed. Deleting a location removes its file.</p>
+
+        <h2 id="usage">Storage usage and performance</h2>
+        <p><strong>Control panel › Storage usage</strong> shows how much is stored, how that changes over time, and how storage operations go. Only administrators see it. At the top are the totals by kind of space, the trash and earlier versions. Below them, each location has a card, and so does the data folder.</p>
+        <h3 id="usage-figures">What the figures mean</h3>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Figure</th><th>What it counts</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Files</strong></td><td>The files of the spaces on the location as people see them, not counting the trash. This is what quotas count. Two files with the same content count twice. The trash and earlier versions are shown under it.</td></tr>
+              <tr><td><strong>Stored by ThirtyFile</strong></td><td>What ThirtyFile actually keeps there: the content store, where identical content is kept once, plus the files of folder spaces (with their trash) and the earlier versions kept in their folders. It can be smaller than <em>Files</em> because of that sharing, and larger because of the trash and versions.</td></tr>
+              <tr><td><strong>Disk</strong></td><td>The whole disk, as the system reports it, whatever else is on it. For the storage folder and <em>Local folder</em> locations only. Two locations on the same disk say so, and the disk is counted once.</td></tr>
+              <tr><td><strong>Capacity unknown</strong></td><td>S3, SFTP and FTP don't report how much room is left, and a disk that doesn't answer within 3 seconds isn't measured. No percentage or time to full is shown then: unknown is not zero.</td></tr>
+              <tr><td><strong>Waiting to be deleted</strong></td><td>Contents whose deletion failed (a location that was offline, say) or old copies after a move, which are retried in the background. Their size isn't known any more.</td></tr>
+              <tr><td><strong>Data folder</strong></td><td>The database, thumbnails and uploads in progress, and the disk they are on. It also lists moves, running tasks and deletions that are waiting.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Files changed in a folder space by other programs are counted after the next check for changes. Backups and replicas will get their own figures when ThirtyFile makes them.</p>
+        <h3 id="usage-operations">Operations</h3>
+        <p>Every read, write, delete, listing and connection check on a location is timed and counted, and so are the files of folder spaces that are read or uploaded. Renaming, deleting and scanning inside folder spaces aren't measured. The counting happens in memory and is written once every five minutes, so it doesn't slow down file operations. Up to five minutes of counts are lost when the server stops.</p>
+        <ul>
+          <li><strong>Kinds of work.</strong> <em>People using files</em> are downloads, previews, uploads and saves. <em>Background work</em> covers moves of spaces, compressing and extracting, long copies and moves, and deleting unused content. <em>Checks and tests</em> are the connection checks made every 20 to 30 seconds, and the step-by-step test. They are kept apart, so a move doesn't make upload times hard to read, and a test isn't taken for real traffic.</li>
+          <li><strong>Time per operation.</strong> Shown as the median (p50) and the 95th percentile (p95): half the operations were faster than p50, and 95 in 100 faster than p95. Percentiles are accurate to about 10%. A read is timed until it can start, and the transfer after that isn't included. A write is timed until the content is stored. On the same disk that is a rename, so it is quick.</li>
+          <li><strong>Throughput.</strong> Bytes read and written per second, averaged over each period.</li>
+          <li><strong>Failed or timed out.</strong> Operations that failed, plus those that took too long or were given up, for example when a person left during an upload. A download that breaks off partway counts as failed too. Errors people ran into are under <strong>Control panel › Activity log</strong>, on the <a href="logs.html#errors">Errors tab</a>, and moves under <strong>Control panel › Moves</strong>. The page links to both.</li>
+          <li><strong>Idle.</strong> A period without operations has no point, and the chart shows a gap there. It never shows 0 ms.</li>
+        </ul>
+        <h3 id="usage-history">History</h3>
+        <p>Choose a location (or all of them), a range and a kind of work. Every chart states its unit and the period each point stands for. Pointing at a chart, or moving along it with the arrow keys, shows the values of one period. <strong>Show as a table</strong> lists them all. <strong>Download CSV</strong> saves what is shown.</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Range</th><th>Each point is</th><th>Kept for</th></tr></thead>
+            <tbody>
+              <tr><td>Last 6 hours, last 2 days</td><td>5 minutes (operations), 15 minutes (capacity)</td><td>2 days</td></tr>
+              <tr><td>Last 30 days</td><td>an hour</td><td>45 days</td></tr>
+              <tr><td>Last year</td><td>a day, counted in UTC</td><td>400 days</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Capacity is measured every 15 minutes and shortly after the start. The last measurement of an hour or a day stands for it. Operations are added up per hour and day, so the history stays small. Times are shown in your browser's time zone. A card whose latest measurement is more than 30 minutes old is marked <em>Out of date</em>.</p>
+        <p><strong>Time to full</strong> draws a straight line through the disk's use over the last 30 days. It is only shown for a disk whose size is known, with at least 3 days of measurements, while the disk is filling up at a steady pace. Otherwise the page says why it isn't shown.</p>
+        <h3 id="usage-alerts">Alerts</h3>
+        <p>Under <strong>Alert thresholds</strong>, choose when the page raises an alert: when a disk is fuller than a percentage (90% at first), or when more than a percentage of a location's operations failed or timed out in the last hour (5% at first). The failure alert needs at least 20 operations in that hour. Enter 0 to turn one off. Offline locations and measurements that are out of date raise an alert too. Alerts are shown at the top of the page, and they aren't sent by email.</p>
 
         <h2 id="offline">When a location is offline</h2>
         <p>Browsing, searching and organising folders keep working. Opening, downloading and uploading are paused, and resume by themselves when the location is back. The space is marked as offline in the meantime. In a folder space, whose folders are on the disk, organising folders is paused too.</p>
