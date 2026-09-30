@@ -28,6 +28,11 @@ pub async fn verify(cx: &Ctx<'_>) -> AppResult<Stop> {
         .await
         .map_err(|e| AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("The copy's location can't be reached: {e}")))?;
     let dst = st.storage(&set.dest_location)?;
+    // A set found on a location: its records are made from its manifests first
+    let params: serde_json::Value = serde_json::from_str(&job.params).unwrap_or_default();
+    if params["rebuild"].as_bool() == Some(true) {
+        rebuild(cx, &set, dst.as_ref()).await?;
+    }
     let (files, bytes): (i64, i64) = sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM backup_objects WHERE set_id = ?")
         .bind(&set.id)
         .fetch_one(&st.db)
@@ -100,6 +105,65 @@ pub async fn verify(cx: &Ctx<'_>) -> AppResult<Stop> {
     .await;
     crate::db::settle(tx, res).await?;
     Ok(Stop::Done)
+}
+
+/// The spaces a manifest lists, and the content it names with its size
+type Held = (Vec<super::SpaceInfo>, Vec<(String, i64)>);
+
+/// A set found on a location (imported): which spaces each snapshot holds, and which content the set should have, as
+/// its manifests say (each checked against its completion marker)
+async fn rebuild(cx: &Ctx<'_>, set: &super::Set, dst: &dyn Storage) -> AppResult<()> {
+    let st = cx.st;
+    let snapshots: Vec<(String, String, i64)> =
+        sqlx::query_as("SELECT id, manifest_sha256, manifest_size FROM backup_snapshots WHERE set_id = ? AND state = 'complete'")
+            .bind(&set.id)
+            .fetch_all(&st.db)
+            .await?;
+    for (id, sha, size) in snapshots {
+        let path = layout::manifest(st, dst, &set.id, &id, &sha, size as u64).await?;
+        let (spaces, objects) = tokio::task::spawn_blocking(move || -> std::io::Result<Held> {
+            let mut spaces: Vec<super::SpaceInfo> = Vec::new();
+            let mut objects = std::collections::HashMap::new();
+            for line in layout::lines(&path)? {
+                match line? {
+                    layout::Line::Space { id, name, kind, owner, owner_id, mode, .. } => {
+                        spaces.push(super::SpaceInfo { id, name, kind, owner, owner_id, mode, files: 0, bytes: 0 })
+                    }
+                    layout::Line::File { space, hash, size, .. } => {
+                        if let Some(s) = spaces.iter_mut().find(|s| s.id == space) {
+                            s.files += 1;
+                            s.bytes += size;
+                        }
+                        objects.insert(hash, size);
+                    }
+                    layout::Line::Version { space, hash, size, .. } => {
+                        if let Some(s) = spaces.iter_mut().find(|s| s.id == space) {
+                            s.bytes += size;
+                        }
+                        objects.insert(hash, size);
+                    }
+                    _ => {}
+                }
+            }
+            Ok((spaces, objects.into_iter().collect()))
+        })
+        .await
+        .map_err(|e| AppError::internal(e.to_string()))??;
+        let _w = st.write_lock.lock().await;
+        sqlx::query("UPDATE backup_snapshots SET space_list = ? WHERE id = ?").bind(serde_json::to_string(&spaces).unwrap()).bind(&id).execute(&st.db).await?;
+        for chunk in objects.chunks(500) {
+            sqlx::query(
+                "INSERT OR IGNORE INTO backup_objects (set_id, hash, size, created_at)
+                 SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), ?3 FROM json_each(?2)",
+            )
+            .bind(&set.id)
+            .bind(serde_json::to_string(chunk).unwrap())
+            .bind(now())
+            .execute(&st.db)
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 fn read_error(e: &std::io::Error) -> AppError {

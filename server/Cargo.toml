@@ -67,6 +67,9 @@ data-encoding = "2"
 # WebDAV (dav.rs): reading the XML requests, and dates in HTTP format; both already used by object_store and hyper
 quick-xml = "0.42"
 httpdate = "1"
+# Backup schedules in a named time zone (backups/policy.rs), with the time zone database built in: the Docker image
+# has none
+jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 
 [target.'cfg(unix)'.dependencies]
 # Switching to an unprivileged user in the Docker image (privileges.rs)

@@ -1,4 +1,5 @@
 import { driveName, type AppNotification, type NotificationKind, type SmtpSecurity } from "@/api";
+import { tServer } from "@/lib/i18n";
 import { ROLE_LABEL } from "@/lib/drives";
 import { t } from "@/lib/i18n";
 import { formatBytes, formatDateTime } from "@/lib/utils";
@@ -11,7 +12,11 @@ export const NOTIFICATION_KINDS: { kind: NotificationKind; label: string; desc: 
   { kind: "link_upload", label: t("Files received through a link"), desc: t("Someone uploads files through a link you made that accepts files") },
   { kind: "app_password", label: t("New app password"), desc: t("An app password is created for your account") },
   { kind: "sign_in_method", label: t("New sign-in method"), desc: t("A Microsoft, Google, GitHub or other account is linked to yours") },
+  { kind: "backup", label: t("Backups"), desc: t("Administrators: a backup fails, can't reach its location or is overdue, and when it works again") },
 ];
+
+/** Kinds only administrators get */
+export const ADMIN_NOTIFICATION_KINDS: NotificationKind[] = ["backup"];
 
 /** The name as the app shows it elsewhere: spaces the system named itself are translated */
 function shownName(n: AppNotification) {
@@ -59,6 +64,19 @@ export function notificationText(n: AppNotification): { title: string; detail: s
           ? t("{account}, from {ip}. If you didn't link it, unlink it under Sign-in methods and change your password.", { account: d.account, ip: d.ip || "—" })
           : t("From {ip}. If you didn't link it, unlink it under Sign-in methods and change your password.", { ip: d.ip || "—" }),
       };
+    case "backup": {
+      const since = d.since ? t("Newest complete snapshot: {time}", { time: formatDateTime(d.since) }) : t("No complete snapshot yet");
+      switch (d.state) {
+        case "failing":
+          return { title: t("The backup “{name}” failed", { name }), detail: d.error ? tServer(d.error) : since };
+        case "waiting":
+          return { title: t("The backup “{name}” can't reach its location", { name }), detail: d.error ? tServer(d.error) : since };
+        case "overdue":
+          return { title: t("The backup “{name}” is overdue", { name }), detail: since };
+        default:
+          return { title: t("The backup “{name}” works again", { name }), detail: since };
+      }
+    }
     default:
       return { title: name, detail: "" };
   }
@@ -66,6 +84,7 @@ export function notificationText(n: AppNotification): { title: string; detail: s
 
 /** Where opening a notification goes: the folder or space, or the file's viewer */
 export function notificationLink(n: AppNotification): string | null {
+  if (n.kind === "backup") return "/admin/backups";
   if (!n.node_id) return null;
   return n.data.item === "file" ? `/view/${encodeURIComponent(n.node_id)}` : `/files/${encodeURIComponent(n.node_id)}`;
 }

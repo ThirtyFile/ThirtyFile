@@ -11,6 +11,8 @@
 //! - `sign_in_method`: a Microsoft, Google, GitHub or other account was linked to theirs, and can now sign in to it
 //! - `link_upload`: files arrived through a share link they made that accepts files. Files through the same link
 //!   within an hour count up the unread notification instead of adding one (and send no further email)
+//! - `backup` (administrators): a backup policy's snapshots fail, wait for a location that can't be reached, or are
+//!   overdue; and when it is fine again. Told once per trouble (backups/policy.rs)
 //!
 //! Each person can turn each kind off, in the app and by email separately. Emails are sent in the person's interface
 //! language and time zone (the ones they last used the app with), after the change that caused them is saved.
@@ -33,7 +35,7 @@ use crate::{
     util::{format_bytes, now},
 };
 
-pub const KINDS: [&str; 6] = ["shared", "space_full", "access_expiring", "app_password", "sign_in_method", "link_upload"];
+pub const KINDS: [&str; 7] = ["shared", "space_full", "access_expiring", "app_password", "sign_in_method", "link_upload", "backup"];
 /// Files through one link within this long are told in one notification
 const LINK_UPLOAD_BATCH: i64 = 3600;
 /// A space is almost full from this share of its size (percent)…
@@ -459,6 +461,30 @@ pub fn render(n: &Notice, zh: bool, tz_offset: i64, site: &str, base_url: &str) 
                     format!("“{name}” uses {used} of {quota} ({percent}%). Once it is full, no more files can be added. Delete files you no longer need and empty the trash, or ask an administrator for more space.\n"),
                 )
             }
+        }
+        ("backup", _) => {
+            let backup = d["name"].as_str().unwrap_or_default();
+            let error = d["error"].as_str().unwrap_or_default();
+            let since = d["since"].as_i64().map(|t| local_time(t, tz_offset));
+            let (subject, text) = match (d["state"].as_str().unwrap_or_default(), zh) {
+                ("failing", false) => (format!("The backup “{backup}” failed"), format!("The latest snapshot of “{backup}” stopped by an error: {error}\n")),
+                ("failing", true) => (format!("備份「{backup}」失敗"), format!("「{backup}」最新的快照因錯誤而停止：{error}\n")),
+                ("waiting", false) => (
+                    format!("The backup “{backup}” can't reach its location"),
+                    format!("The location of “{backup}” can't be reached: {error}\nIt is tried again every few minutes.\n"),
+                ),
+                ("waiting", true) => (format!("備份「{backup}」無法連線到存放位置"), format!("無法連線到「{backup}」的存放位置：{error}\n每隔幾分鐘會自動再試一次。\n")),
+                ("overdue", false) => (format!("The backup “{backup}” is overdue"), format!("“{backup}” made no complete snapshot for longer than it should.\n")),
+                ("overdue", true) => (format!("備份「{backup}」逾期了"), format!("「{backup}」超過預定的時間都沒有完成快照。\n")),
+                (_, false) => (format!("The backup “{backup}” works again"), format!("“{backup}” made a complete snapshot again.\n")),
+                (_, true) => (format!("備份「{backup}」恢復正常"), format!("「{backup}」又完成了快照。\n")),
+            };
+            let mut body = text;
+            if let Some(since) = since {
+                body.push_str(&if zh { format!("\n最新的完整快照：{since}。\n") } else { format!("\nNewest complete snapshot: {since}.\n") });
+            }
+            body.push_str(if zh { "\n請到「控制台 › 備份」查看。\n" } else { "\nSee Control panel › Backups.\n" });
+            (subject, body)
         }
         ("link_upload", _) => {
             let file = d["file"].as_str().unwrap_or_default();

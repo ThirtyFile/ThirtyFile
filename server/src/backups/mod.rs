@@ -22,10 +22,13 @@
 pub mod api;
 mod capture;
 pub mod layout;
+pub mod policy;
 mod restore;
 mod runner;
 mod tidy;
 
+#[cfg(test)]
+mod policy_tests;
 #[cfg(test)]
 mod tests;
 

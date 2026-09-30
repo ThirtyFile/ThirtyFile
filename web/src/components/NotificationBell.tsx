@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BellIcon, CalendarClockIcon, CheckCheckIcon, HardDriveIcon, InboxIcon, KeySquareIcon, Link2Icon, SettingsIcon, Trash2Icon, UsersRoundIcon } from "lucide-react";
+import { ArchiveRestoreIcon, BellIcon, CalendarClockIcon, CheckCheckIcon, HardDriveIcon, InboxIcon, KeySquareIcon, Link2Icon, SettingsIcon, Trash2Icon, UsersRoundIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type AppNotification } from "@/api";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -10,7 +10,15 @@ import { notificationLink, notificationText, unreadBadge } from "@/lib/notificat
 import { cn, formatTime } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 
-const ICON = { shared: UsersRoundIcon, space_full: HardDriveIcon, access_expiring: CalendarClockIcon, app_password: KeySquareIcon, sign_in_method: Link2Icon, link_upload: InboxIcon };
+const ICON = {
+  shared: UsersRoundIcon,
+  space_full: HardDriveIcon,
+  access_expiring: CalendarClockIcon,
+  app_password: KeySquareIcon,
+  sign_in_method: Link2Icon,
+  link_upload: InboxIcon,
+  backup: ArchiveRestoreIcon,
+};
 
 /** How often the bell asks for new notifications */
 const POLL_MS = 60_000;
@@ -20,7 +28,7 @@ function Item({ n, onOpen }: { n: AppNotification; onOpen(n: AppNotification): v
   const Icon = ICON[n.kind] ?? BellIcon;
   return (
     <DropdownMenuItem onClick={() => onOpen(n)} className="items-start gap-2.5 py-2">
-      <Icon className={cn("mt-0.5", n.kind === "space_full" && "text-destructive")} />
+      <Icon className={cn("mt-0.5", (n.kind === "space_full" || (n.kind === "backup" && n.data.state !== "recovered")) && "text-destructive")} />
       <span className="grid min-w-0 flex-1 gap-0.5">
         <span className={cn("text-[13px] leading-snug whitespace-normal", !n.read && "font-medium")}>{title}</span>
         {detail && <span className="text-xs whitespace-normal text-muted-foreground">{detail}</span>}

@@ -71,6 +71,17 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
         .await
         .map_err(|e| AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("The destination can't be reached: {e}")))?;
     let dst = st.storage(&set.dest_location)?;
+    // A policy's snapshot takes the policy's spaces as they are now: a space moved away since it was asked for is
+    // left out, one added is taken
+    let mut p = p;
+    let policy = super::policy::is_policy(&mut *st.db.acquire().await?, &set.id).await?;
+    if policy {
+        p.spaces = super::policy::scope(&mut *st.db.acquire().await?, &set.id).await?;
+        let mut params: serde_json::Value = serde_json::from_str(&job.params).unwrap_or_default();
+        params["spaces"] = serde_json::json!(p.spaces);
+        let _w = st.write_lock.lock().await;
+        sqlx::query("UPDATE backup_jobs SET params = ? WHERE id = ?").bind(params.to_string()).bind(&job.id).execute(&st.db).await?;
+    }
     write_set_file(st, &set, dst.as_ref()).await?;
     let snapshot = snapshot_of(cx).await?;
     cx.set_counts(0, 0, 0, 0);
@@ -104,7 +115,14 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
         if let Some(stop) = cx.stop() {
             return Ok(stop);
         }
-        publish(cx, &set, &snapshot, dst.as_ref(), &m).await?;
+        publish(cx, &set, &snapshot, dst.as_ref(), &m, policy).await?;
+        if policy {
+            // Snapshots the policy no longer keeps, and content none of the others holds
+            if let Err(e) = super::policy::prune(st, &set).await {
+                tracing::warn!("Backup {}: old snapshots couldn't be deleted now, tried again next time: {}", set.name, e.message);
+            }
+            st.backups.policies.notify_one();
+        }
         return Ok(Stop::Done);
     }
     Err(AppError::conflict("The spaces kept changing while they were copied. Try again later."))
@@ -395,6 +413,8 @@ pub(super) struct Manifest {
     spaces: Vec<SpaceInfo>,
     /// Folder files the set hasn't read as the index has them now
     stale: i64,
+    /// The changes of each space the snapshot holds (`space_changes.seq` as read)
+    changes: HashMap<String, i64>,
 }
 
 /// Writes lines to a local file, hashing them
@@ -551,7 +571,19 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params) -> 
     let file = tokio::fs::File::create(&path).await?;
     let mut w = Writer { out: tokio::io::BufWriter::new(file), hash: Sha256::new(), size: 0 };
     let mut pins = Pins { st, job: &cx.job.id, batch: Vec::new() };
-    let mut m = Manifest { path: path.clone(), sha256: String::new(), size: 0, cutoff: now(), folders: 0, files: 0, versions: 0, logical_bytes: 0, spaces: Vec::new(), stale: 0 };
+    let mut m = Manifest {
+        path: path.clone(),
+        sha256: String::new(),
+        size: 0,
+        cutoff: now(),
+        folders: 0,
+        files: 0,
+        versions: 0,
+        logical_bytes: 0,
+        spaces: Vec::new(),
+        stale: 0,
+        changes: HashMap::new(),
+    };
     let mut conn = st.db.acquire().await?;
     // Read-only: one consistent view of every space for the whole manifest, while changes go on
     #[allow(clippy::disallowed_methods)]
@@ -565,6 +597,14 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params) -> 
     .fetch_all(&mut *tx)
     .await?;
     m.cutoff = now();
+    // The changes this view holds, for backups made after changes (policy.rs)
+    let seqs: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT d.value, COALESCE((SELECT seq FROM space_changes WHERE drive_id = d.value), 0) FROM json_each(?) d",
+    )
+    .bind(serde_json::to_string(&p.spaces).unwrap())
+    .fetch_all(&mut *tx)
+    .await?;
+    m.changes = seqs.into_iter().collect();
     w.line(&Line::Header {
         format: layout::FORMAT,
         app: crate::VERSION.to_string(),
@@ -911,7 +951,7 @@ pub(super) async fn copy_checked(reader: &mut crate::storage::BoxReader, hash: &
 // ───────────── Publishing ─────────────
 
 /// Stores the manifest on the destination, then the completion marker; then the snapshot is complete
-async fn publish(cx: &Ctx<'_>, set: &Set, snapshot: &str, dst: &dyn Storage, m: &Manifest) -> AppResult<()> {
+async fn publish(cx: &Ctx<'_>, set: &Set, snapshot: &str, dst: &dyn Storage, m: &Manifest, policy: bool) -> AppResult<()> {
     let st = cx.st;
     // The manifest stays on this server too (restores read it from there): the copy sent is a temp file
     let copy = st.tmp_dir().join(format!("backup-manifest-{}", new_id()));
@@ -952,7 +992,7 @@ async fn publish(cx: &Ctx<'_>, set: &Set, snapshot: &str, dst: &dyn Storage, m: 
     let res = async {
         sqlx::query(
             "UPDATE backup_snapshots SET state = 'complete', cutoff = ?, space_list = ?, folders = ?, files = ?, versions = ?, logical_bytes = ?,
-                                         manifest_sha256 = ?, manifest_size = ?, completed_at = ?
+                                         manifest_sha256 = ?, manifest_size = ?, completed_at = ?, changes = ?
              WHERE id = ?",
         )
         .bind(m.cutoff)
@@ -964,10 +1004,14 @@ async fn publish(cx: &Ctx<'_>, set: &Set, snapshot: &str, dst: &dyn Storage, m: 
         .bind(&m.sha256)
         .bind(m.size as i64)
         .bind(completed_at)
+        .bind(serde_json::to_string(&m.changes).unwrap())
         .bind(snapshot)
         .execute(&mut *tx)
         .await?;
         sqlx::query("DELETE FROM backup_pending WHERE job_id = ?").bind(&cx.job.id).execute(&mut *tx).await?;
+        if policy {
+            super::policy::completed(&mut tx, &set.id, &m.changes).await?;
+        }
         super::runner::finish(&mut tx, cx, note).await?;
         super::log(&mut tx, cx.job, "backup_done", &cx.job.label).await?;
         AppResult::Ok(())

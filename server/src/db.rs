@@ -769,6 +769,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[tokio::test]
+    async fn a_database_from_0_4_0_counts_the_changes_of_its_spaces_from_then_on() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-040-changes-{}", crate::util::new_id()));
+        let path = dir.join("drive.db");
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'amy', 'x', 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO nodes (id, owner_id, kind, name, created_at, updated_at) VALUES ('r', 1, 'folder', '', 0, 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO drives (id, name, kind, root_id, owner_id, created_at, location_id) VALUES ('d', 'My files', 'personal', 'r', 1, 0, 'local')").execute(&db).await.unwrap();
+        sqlx::query("UPDATE nodes SET drive_id = 'd' WHERE id = 'r'").execute(&db).await.unwrap();
+        db.close().await;
+
+        let db = connect(&path, 16).await.unwrap();
+        // Nothing counted before the upgrade; every change after it
+        let count = || async { sqlx::query_as::<_, (i64,)>("SELECT COALESCE((SELECT seq FROM space_changes WHERE drive_id = 'd'), 0)").fetch_one(&db).await.unwrap().0 };
+        assert_eq!(count().await, 0);
+        sqlx::query("INSERT INTO nodes (id, owner_id, parent_id, kind, name, drive_id, created_at, updated_at) VALUES ('f', 1, 'r', 'folder', 'Docs', 'd', 0, 0)")
+            .execute(&db)
+            .await
+            .unwrap();
+        let first = count().await;
+        assert!(first > 0);
+        sqlx::query("UPDATE nodes SET name = 'Papers' WHERE id = 'f'").execute(&db).await.unwrap();
+        assert!(count().await > first);
+        sqlx::query("INSERT INTO backup_sets (id, kind, name, dest_location, created_at) VALUES ('s', 'policy', 'Nightly', 'local', 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO backup_policies (set_id, mode, created_at, updated_at) VALUES ('s', 'scheduled', 0, 0)").execute(&db).await.unwrap();
+        let (schedule, keep): (String, i64) = sqlx::query_as("SELECT schedule, keep_days FROM backup_policies").fetch_one(&db).await.unwrap();
+        assert_eq!((schedule.as_str(), keep), (r#"{"daily":"03:00"}"#, 30));
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     async fn admin_hash(password: Option<&str>) -> String {
         let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));
         std::fs::create_dir_all(&dir).unwrap();
