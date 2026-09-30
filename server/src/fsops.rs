@@ -25,6 +25,7 @@ use crate::{
     beneath::Pinned,
     error::{AppError, AppResult},
     files::Source,
+    jobs::Tracker,
     logs,
     state::AppState,
     tree::{self, BlobRef, Need, Node, StagedBlob},
@@ -266,15 +267,16 @@ struct CopiedTree {
 
 /// Copies a file or folder on disk, including what the index doesn't have yet; symbolic links stay links. `copied`
 /// lists the originals (by their path below the item), folders before what is in them.
-fn copy_tree(from: &Pinned, to: &Pinned, rel: &str, copied: &mut Vec<Copied>) -> io::Result<()> {
+fn copy_tree(from: &Pinned, to: &Pinned, rel: &str, copied: &mut Vec<Copied>, progress: &Tracker) -> io::Result<()> {
     let meta = std::fs::symlink_metadata(from.as_path())?;
     if meta.is_dir() {
         std::fs::create_dir(to.as_path())?;
+        progress.add(ITEM_WORK);
         copied.push(Copied { rel: rel.to_string(), is_dir: true, seen: None });
         let (from_dir, to_dir) = (from.dir()?, to.dir()?);
         for item in std::fs::read_dir(from_dir.as_path())? {
             let name = item?.file_name().into_string().map_err(|_| io::Error::other("a name that isn't valid text"))?;
-            copy_tree(&from_dir.join(&name)?, &to_dir.join(&name)?, &child_rel(rel, &name), copied)?;
+            copy_tree(&from_dir.join(&name)?, &to_dir.join(&name)?, &child_rel(rel, &name), copied, progress)?;
         }
     } else if meta.file_type().is_symlink() {
         #[cfg(unix)]
@@ -284,6 +286,7 @@ fn copy_tree(from: &Pinned, to: &Pinned, rel: &str, copied: &mut Vec<Copied>) ->
         if crate::beneath::copy_file(from, to.as_path())? != meta.len() {
             return Err(io::Error::other("a file wasn't copied completely"));
         }
+        progress.add(meta.len() + ITEM_WORK);
         copied.push(Copied { rel: rel.to_string(), is_dir: false, seen: Some((meta.len(), crate::folders::mtime_ns(&meta))) });
     }
     Ok(())
@@ -775,12 +778,13 @@ fn layout(nodes: &[Node]) -> Vec<Option<String>> {
 }
 
 /// Writes the items to `top` on disk, from wherever their content is
-async fn write_tree(st: &AppState, nodes: &[Node], top: &Pinned) -> AppResult<()> {
+async fn write_tree(st: &AppState, nodes: &[Node], top: &Pinned, progress: &Tracker) -> AppResult<()> {
     for (n, rel) in nodes.iter().zip(layout(nodes)) {
         let Some(rel) = rel else { continue };
         let to = below(top, &rel).map_err(disk_error)?;
         if n.is_folder() {
             tokio::fs::create_dir(to.as_path()).await.map_err(disk_error)?;
+            progress.add(ITEM_WORK);
             continue;
         }
         match Source::of(n)? {
@@ -807,6 +811,7 @@ async fn write_tree(st: &AppState, nodes: &[Node], top: &Pinned) -> AppResult<()
                 }
             }
         }
+        progress.add(work_of(n));
     }
     Ok(())
 }
@@ -830,7 +835,7 @@ fn copy_checked(from: &Pinned, to: &Path) -> io::Result<(u64, i64)> {
 }
 
 /// Stores the files of a folder space in the content store of the space `drive`, for a move (`moving`) or a copy
-async fn ingest(st: &AppState, nodes: &[Node], drive: &str, moving: bool) -> AppResult<Placed> {
+async fn ingest(st: &AppState, nodes: &[Node], drive: &str, moving: bool, progress: &Tracker) -> AppResult<Placed> {
     let (mut staged, mut seen) = (HashMap::new(), HashMap::new());
     for n in nodes.iter().filter(|n| !n.is_folder()) {
         let tmp = st.tmp_dir().join(new_id());
@@ -851,6 +856,7 @@ async fn ingest(st: &AppState, nodes: &[Node], drive: &str, moving: bool) -> App
         .await;
         match stored {
             Ok((s, copied)) => {
+                progress.add(work_of(n));
                 staged.insert(n.id.clone(), s);
                 seen.insert(n.id.clone(), copied);
             }
@@ -863,37 +869,50 @@ async fn ingest(st: &AppState, nodes: &[Node], drive: &str, moving: bool) -> App
             }
         }
     }
+    progress.add(ITEM_WORK * nodes.iter().filter(|n| n.is_folder()).count() as u64);
     Ok(Placed::Store(staged, seen))
 }
 
 /// Puts the content of `nodes` (an item and everything in it) into place for `dest`
-async fn place(st: &AppState, nodes: &[Node], dest: &Node, moving: bool) -> AppResult<Placed> {
+async fn place(st: &AppState, nodes: &[Node], dest: &Node, moving: bool, progress: &Tracker) -> AppResult<Placed> {
     let top = &nodes[0];
     if !dest.in_folder_space() {
-        return ingest(st, nodes, dest.drive(), moving).await;
+        return ingest(st, nodes, dest.drive(), moving, progress).await;
     }
     for n in nodes {
         check_name(&n.name)?;
     }
-    let wrap = abs(dest)?.join(&format!("{}{}", if moving { MOVE_PREFIX } else { COPY_PREFIX }, new_id())).map_err(gone_or_disk_error)?;
+    let within = abs(dest)?;
+    let wrap = within.join(&format!("{}{}", if moving { MOVE_PREFIX } else { COPY_PREFIX }, new_id())).map_err(gone_or_disk_error)?;
     tokio::fs::create_dir(wrap.as_path()).await.map_err(disk_error)?;
     let tmp = wrap.join(&top.name).map_err(disk_error)?;
     if moving && top.in_folder_space() {
         let from = abs(top)?;
         let renamed = if other_disk() { Err(io::ErrorKind::CrossesDevices.into()) } else { std::fs::rename(from.as_path(), tmp.as_path()) };
         match renamed {
-            Ok(()) => return Ok(Placed::Disk { wrap, tmp, renamed_from: Some(from), copied: None }),
+            Ok(()) => {
+                progress.add(nodes.iter().map(work_of).sum());
+                return Ok(Placed::Disk { wrap, tmp, renamed_from: Some(from), copied: None });
+            }
             Err(e) if e.kind() != io::ErrorKind::CrossesDevices => {
                 let _ = std::fs::remove_dir(wrap.as_path());
                 return Err(disk_error(e));
             }
             Err(_) => {}
         }
-        // Another disk: copy everything, including what the index doesn't have yet, before the original goes
-        let (f, t) = (from.clone(), tmp.clone());
+        // Another disk: copy everything, including what the index doesn't have yet, before the original goes. Until the
+        // index follows, the original stays where it was and this is only a copy: it is made in a folder named as one,
+        // which is removed rather than put back should ThirtyFile stop meanwhile (`clean_leftovers`)
+        let copy_wrap = within.join(&format!("{COPY_PREFIX}{}", new_id())).map_err(disk_error)?;
+        if let Err(e) = rename_new(wrap.as_path(), copy_wrap.as_path()) {
+            let _ = std::fs::remove_dir(wrap.as_path());
+            return Err(disk_error(e));
+        }
+        let (wrap, tmp) = (copy_wrap.clone(), copy_wrap.join(&top.name).map_err(disk_error)?);
+        let (f, t, p) = (from.clone(), tmp.clone(), progress.clone());
         match tokio::task::spawn_blocking(move || {
             let mut items = Vec::new();
-            copy_tree(&f, &t, "", &mut items).map(|()| CopiedTree { top: f, items })
+            copy_tree(&f, &t, "", &mut items, &p).map(|()| CopiedTree { top: f, items })
         })
         .await?
         {
@@ -904,11 +923,20 @@ async fn place(st: &AppState, nodes: &[Node], dest: &Node, moving: bool) -> AppR
             }
         }
     }
-    if let Err(e) = write_tree(st, nodes, &tmp).await {
+    if let Err(e) = write_tree(st, nodes, &tmp, progress).await {
         remove_later(vec![wrap]);
         return Err(e);
     }
     Ok(Placed::Disk { wrap, tmp, renamed_from: None, copied: None })
+}
+
+/// A move or copy's progress counts each item as this many bytes besides its content: making a file or folder takes
+/// about as long as copying that much, so a folder of many small files doesn't look done long before it is
+const ITEM_WORK: u64 = 256 * 1024;
+
+/// What moving or copying an item counts for in the progress
+fn work_of(n: &Node) -> u64 {
+    ITEM_WORK + if n.is_folder() { 0 } else { n.size.max(0) as u64 }
 }
 
 /// Folders holding an item on its way into a folder (`Placed::Disk`)
@@ -1070,6 +1098,34 @@ async fn after_place() {
     }
 }
 
+/// Tests: clears the hook of `hook_after_place` when dropped
+#[cfg(test)]
+pub(crate) struct HookGuard;
+
+#[cfg(test)]
+impl Drop for HookGuard {
+    fn drop(&mut self) {
+        AFTER_PLACE.with(|h| *h.borrow_mut() = None);
+    }
+}
+
+/// Tests: runs `hook` each time the content of a move or copy to another space is in place, before the index follows
+#[cfg(test)]
+pub(crate) fn hook_after_place(hook: impl Fn() -> futures_util::future::BoxFuture<'static, ()> + 'static) -> HookGuard {
+    AFTER_PLACE.with(|h| *h.borrow_mut() = Some(Box::new(hook)));
+    HookGuard
+}
+
+/// Tests: a hook for `hook_after_place` that waits until `go` is notified
+#[cfg(test)]
+pub(crate) fn wait_for(go: &std::sync::Arc<tokio::sync::Notify>) -> impl Fn() -> futures_util::future::BoxFuture<'static, ()> + 'static {
+    let go = go.clone();
+    move || {
+        let go = go.clone();
+        Box::pin(async move { go.notified().await })
+    }
+}
+
 #[cfg(not(test))]
 fn other_disk() -> bool {
     false
@@ -1131,13 +1187,38 @@ fn id_list<'a>(ids: impl Iterator<Item = &'a str>) -> String {
     serde_json::to_string(&ids.collect::<Vec<_>>()).unwrap()
 }
 
+/// Items to move or copy to or from a folder space, checked in the transaction of the move or copy. Their content is
+/// copied (or renamed) item by item afterwards, which can take long: the request runs it as a job (jobs.rs).
+pub struct Across {
+    dest: Node,
+    /// Each item with everything in it (not in the trash), ordered by depth
+    items: Vec<Vec<Node>>,
+    moving: bool,
+}
+
+impl Across {
+    /// None when there is nothing to do this way
+    pub fn new(dest: Node, items: Vec<Vec<Node>>, moving: bool) -> Option<Across> {
+        (!items.is_empty()).then_some(Across { dest, items, moving })
+    }
+
+    pub async fn run(self, st: &AppState, user: &User, progress: &Tracker) -> AppResult<()> {
+        progress.add_total(self.items.iter().flatten().map(work_of).sum());
+        if self.moving {
+            move_across(st, user, &self.dest, self.items, progress).await
+        } else {
+            copy_across(st, user, &self.dest, self.items, progress).await
+        }
+    }
+}
+
 /// Moves items to a folder of another space, where one of the two (or both) is a folder space. The content is put in
 /// place first (renamed when both folders are on the same disk, else copied); then the index moves the items, which
 /// keep their ids and with them their shares, permissions and favourites; then the originals are removed.
 /// `items`: each item with everything in it (not in the trash), ordered by depth.
-pub async fn move_across(st: &AppState, user: &User, dest: &Node, items: Vec<Vec<Node>>) -> AppResult<()> {
+pub async fn move_across(st: &AppState, user: &User, dest: &Node, items: Vec<Vec<Node>>, progress: &Tracker) -> AppResult<()> {
     for nodes in items {
-        let mut placed = place(st, &nodes, dest, true).await?;
+        let mut placed = place(st, &nodes, dest, true, progress).await?;
         #[cfg(test)]
         after_place().await;
         let result = {
@@ -1283,9 +1364,11 @@ async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], pl
 /// Copies items to a folder of another space (or of the same folder space), where one of the two (or both) is a folder
 /// space: the content is written first, then indexed. `plans`: each item with everything in it (not in the trash),
 /// ordered by depth.
-pub async fn copy_across(st: &AppState, user: &User, dest: &Node, plans: Vec<Vec<Node>>) -> AppResult<()> {
+pub async fn copy_across(st: &AppState, user: &User, dest: &Node, plans: Vec<Vec<Node>>, progress: &Tracker) -> AppResult<()> {
     for nodes in plans {
-        let placed = place(st, &nodes, dest, false).await?;
+        let placed = place(st, &nodes, dest, false, progress).await?;
+        #[cfg(test)]
+        after_place().await;
         let result = {
             let _w = st.write_lock.lock().await;
             commit_copy(st, user, dest, &nodes, &placed).await
@@ -1819,7 +1902,7 @@ mod tests {
         write_old(&from.join("Sub/edited.txt"), b"before");
         let pin = |p: &Path| Pinned::root(p.parent().unwrap()).unwrap().join(p.file_name().unwrap().to_str().unwrap()).unwrap();
         let mut items = Vec::new();
-        copy_tree(&pin(&from), &pin(&to), "", &mut items).unwrap();
+        copy_tree(&pin(&from), &pin(&to), "", &mut items, &Tracker::default()).unwrap();
         assert_eq!(std::fs::read(to.join("Sub/edited.txt")).unwrap(), b"before");
         // Saved over SMB while the copy ran, and a file added
         std::fs::write(from.join("Sub/edited.txt"), b"after, and longer").unwrap();
@@ -1938,21 +2021,6 @@ mod tests {
         }
     }
 
-    /// Clears the hook of `hook_after_place` when dropped
-    struct HookGuard;
-
-    impl Drop for HookGuard {
-        fn drop(&mut self) {
-            AFTER_PLACE.with(|h| *h.borrow_mut() = None);
-        }
-    }
-
-    /// Runs `hook` each time the content of a move to another space is in place, before the index follows
-    fn hook_after_place(hook: impl Fn() -> futures_util::future::BoxFuture<'static, ()> + 'static) -> HookGuard {
-        AFTER_PLACE.with(|h| *h.borrow_mut() = Some(Box::new(hook)));
-        HookGuard
-    }
-
     /// Waits until the removal of this content from the built-in location is scheduled
     async fn removal_scheduled(env: &testutil::TestEnv, content: &[u8]) -> bool {
         let hash = crate::util::sha256_hex(content);
@@ -2022,6 +2090,85 @@ mod tests {
         assert_eq!(node(&env, &a).await.fs_path.as_deref(), Some("a.txt"));
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         assert!(space.dir.join("a.txt").is_file());
+    }
+
+    #[tokio::test]
+    async fn a_move_to_another_space_goes_on_when_the_request_is_given_up() {
+        let env = testutil::env().await;
+        let one = env.folder_space("One").await;
+        let two = env.folder_space("Two").await;
+        let admin = env.admin().await;
+        write_old(&one.dir.join("Sub/x.txt"), b"x");
+        crate::folders::scan(&env.st, &one.drive).await.unwrap();
+        let (sub, _) = env.node_at(&one.drive, "Sub").await.unwrap();
+        // The content takes a while to copy: longer than the browser waits
+        let go = std::sync::Arc::new(tokio::sync::Notify::new());
+        let _hook = hook_after_place(wait_for(&go));
+        OTHER_DISK.with(|d| d.set(true));
+        let asked = crate::nodes::move_nodes(State(env.st.clone()), admin.clone(), req(json!({ "ids": [sub], "dest_id": two.root })));
+        // The browser (or a proxy) gives up on the request: the move goes on regardless
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(300), asked).await;
+        go.notify_one();
+        let mut moved = false;
+        for _ in 0..200 {
+            if env.drive_of(&sub).await == two.drive {
+                moved = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        OTHER_DISK.with(|d| d.set(false));
+        assert!(moved, "the move finished");
+        assert_eq!(std::fs::read(two.dir.join("Sub/x.txt")).unwrap(), b"x");
+        assert!(eventually_gone(&one.dir.join("Sub")).await);
+        let hidden: Vec<String> =
+            std::fs::read_dir(&two.dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with(".thirtyfile-m") || n.starts_with(".thirtyfile-c")).collect();
+        assert!(hidden.is_empty(), "nothing is left behind: {hidden:?}");
+
+        // A copy inside a folder space, the same
+        let asked = crate::nodes::copy_nodes(State(env.st.clone()), admin.clone(), req(json!({ "ids": [sub], "dest_id": two.root })));
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(300), asked).await;
+        go.notify_one();
+        let mut copied = false;
+        for _ in 0..200 {
+            if env.node_at(&two.drive, "Sub (1)/x.txt").await.is_some() {
+                copied = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(copied, "the copy finished");
+        assert_eq!(std::fs::read(two.dir.join("Sub (1)/x.txt")).unwrap(), b"x");
+    }
+
+    #[tokio::test]
+    async fn a_move_to_another_disk_copies_under_a_name_that_is_removed_should_it_stop() {
+        let env = testutil::env().await;
+        let one = env.folder_space("One").await;
+        let two = env.folder_space("Two").await;
+        let admin = env.admin().await;
+        write_old(&one.dir.join("Sub/x.txt"), b"x");
+        crate::folders::scan(&env.st, &one.drive).await.unwrap();
+        let (sub, _) = env.node_at(&one.drive, "Sub").await.unwrap();
+        // While the copy waits for the index, the destination holds it under a copy's name: should ThirtyFile stop
+        // now, the copy is removed later (`clean_leftovers`) rather than put in place next to the original, which is
+        // still in "One"
+        let (dir, seen) = (two.dir.clone(), std::sync::Arc::new(std::sync::Mutex::new(Vec::new())));
+        let names = seen.clone();
+        let _hook = hook_after_place(move || {
+            let (dir, names) = (dir.clone(), names.clone());
+            Box::pin(async move {
+                let found = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned());
+                names.lock().unwrap().extend(found.filter(|n| n.starts_with(".thirtyfile-") && n != crate::folders::MARKER));
+            })
+        });
+        OTHER_DISK.with(|d| d.set(true));
+        let moved = crate::nodes::move_nodes(State(env.st.clone()), admin.clone(), req(json!({ "ids": [sub], "dest_id": two.root }))).await;
+        OTHER_DISK.with(|d| d.set(false));
+        assert_eq!(moved.unwrap().0.state, "done");
+        let seen = seen.lock().unwrap().clone();
+        assert!(seen.len() == 1 && seen[0].starts_with(COPY_PREFIX), "{seen:?}");
+        assert!(two.dir.join("Sub/x.txt").is_file());
     }
 
     #[tokio::test]

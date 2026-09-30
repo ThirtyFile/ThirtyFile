@@ -37,7 +37,9 @@ use tokio::io::AsyncWriteExt;
 use crate::{
     auth::User,
     error::{AppError, AppResult},
-    files, fsops, nodes,
+    files, fsops,
+    jobs::{self, Limit, Outcome},
+    nodes,
     logs,
     paths::{Found, SHARED, Target, child_named, resolve, tops},
     state::AppState,
@@ -209,8 +211,13 @@ async fn rename(st: &AppState, user: &User, id: &str, name: &str) -> AppResult<(
     nodes::rename(State(st.clone()), user.clone(), extract::Path(id.to_string()), json_req(json!({ "name": name }))?).await.map(|_| ())
 }
 
+/// Moves an item into another folder, content included (a WebDAV request waits for all of it: see `transfer`)
 async fn move_into(st: &AppState, user: &User, id: &str, dest: &str) -> AppResult<()> {
-    nodes::move_nodes(State(st.clone()), user.clone(), json_req(json!({ "ids": [id], "dest_id": dest }))?).await.map(|_| ())
+    let Json(req) = json_req(json!({ "ids": [id], "dest_id": dest }))?;
+    if let Some(across) = nodes::move_items(st, user, &req).await? {
+        across.run(st, user, &Default::default()).await?;
+    }
+    Ok(())
 }
 
 async fn trash(st: &AppState, user: &User, id: &str) -> AppResult<()> {
@@ -573,6 +580,12 @@ async fn mkcol(st: &AppState, user: &User, segs: &[String], body: Body) -> AppRe
     Ok(StatusCode::CREATED.into_response())
 }
 
+/// How long MOVE and COPY wait for the change before answering 202 Accepted. Clients expect them to be done when they
+/// answer, and most do, well within this; a large copy to or from a folder on the server may not be: it goes on in the
+/// background, and the client sees the result when it looks again. (Any 2xx is success to clients, and none of them
+/// keeps waiting for minutes.)
+const TRANSFER_WAIT: std::time::Duration = std::time::Duration::from_millis(if cfg!(test) { 300 } else { 60_000 });
+
 /// MOVE and COPY, with Destination and Overwrite (an item already at the destination goes to the trash)
 async fn transfer(st: &AppState, user: &User, segs: &[String], headers: &HeaderMap, moving: bool) -> AppResult<Response> {
     let dest_segs = destination(headers)?;
@@ -586,7 +599,7 @@ async fn transfer(st: &AppState, user: &User, segs: &[String], headers: &HeaderM
     if tree::is_within(&mut c, &dest.id, &src.id).await? {
         return Err(AppError::forbidden("A folder can't go into itself"));
     }
-    let mut replaced = false;
+    let mut replaced = None;
     match child_named(&mut c, &dest.id, &name).await? {
         Some(existing) if existing.id == src.id => {
             if !moving {
@@ -597,18 +610,28 @@ async fn transfer(st: &AppState, user: &User, segs: &[String], headers: &HeaderM
             if !overwrite {
                 return Err(precondition("The destination already exists"));
             }
-            drop(c);
-            trash(st, user, &existing.id).await?;
-            replaced = true;
+            replaced = Some(existing.id);
         }
-        None => drop(c),
+        None => {}
     }
-    if moving {
-        move_to(st, user, &src, &dest, &name).await?;
-    } else {
-        copy_to(st, user, &src, &dest, &name).await?;
-    }
-    Ok(if replaced { StatusCode::NO_CONTENT } else { StatusCode::CREATED }.into_response())
+    drop(c);
+    // The change runs as a job, so a client that gives up waiting (or loses its connection) doesn't cut it off halfway
+    let done = if replaced.is_some() { StatusCode::NO_CONTENT } else { StatusCode::CREATED };
+    let (st, user) = (st.clone(), user.clone());
+    let job = jobs::run(&st.clone(), &user.clone(), "webdav", Limit::None, TRANSFER_WAIT, move |_| async move {
+        if let Some(existing) = replaced {
+            trash(&st, &user, &existing).await?;
+        }
+        if moving {
+            move_to(&st, &user, &src, &dest, &name).await?;
+        } else {
+            copy_to(&st, &user, &src, &dest, &name).await?;
+        }
+        Ok(Outcome::default())
+    })
+    .await?;
+    // Still going: accepted, and done in the background
+    Ok(if job.running() { StatusCode::ACCEPTED } else { done }.into_response())
 }
 
 /// Moves an item into `dest` as `name`: a rename, a move, or both (in the order the names allow)
@@ -659,7 +682,10 @@ async fn children_of(conn: &mut SqliteConnection, parent_id: &str, kind: &str) -
 /// Copies an item into `dest` as `name` (the copy gets a free name first, then the one asked for)
 async fn copy_to(st: &AppState, user: &User, src: &Node, dest: &Node, name: &str) -> AppResult<()> {
     let before: HashSet<String> = children_of(&mut *st.db.acquire().await?, &dest.id, &src.kind).await?.into_iter().map(|(id, _)| id).collect();
-    let _ = nodes::copy_nodes(State(st.clone()), user.clone(), json_req(json!({ "ids": [src.id], "dest_id": dest.id }))?).await?;
+    let Json(req) = json_req(json!({ "ids": [src.id], "dest_id": dest.id }))?;
+    if let Some(across) = nodes::copy_items(st, user, &req).await? {
+        across.run(st, user, &Default::default()).await?;
+    }
     let after = children_of(&mut *st.db.acquire().await?, &dest.id, &src.kind).await?;
     let (id, copied) = after.into_iter().find(|(id, _)| !before.contains(id)).ok_or_else(|| AppError::internal("the copy wasn't found"))?;
     if copied != name {
@@ -1278,6 +1304,37 @@ mod tests {
         assert_eq!(res.status, StatusCode::MULTI_STATUS);
         assert!(res.body.contains(r#"<R:Win32LastModifiedTime xmlns:R="urn:schemas-microsoft-com:"/></D:prop><D:status>HTTP/1.1 200 OK"#), "{}", res.body);
         assert_eq!(dav.send("PROPPATCH", "/dav/My%20files/Nothing.docx", &[], body).await.status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn a_long_copy_or_move_is_accepted_and_finishes_in_the_background() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let space = env.folder_space("Server").await;
+        testutil::write_old(&space.dir.join("Photos/a.txt"), b"a");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let dav = Client::new(&env, &admin, "write").await;
+        // Copying takes longer than the client is kept waiting: accepted, and done meanwhile
+        let go = std::sync::Arc::new(tokio::sync::Notify::new());
+        let hook = fsops::hook_after_place(fsops::wait_for(&go));
+        let h = [("destination", "/dav/Server/Copied")];
+        assert_eq!(dav.send("COPY", "/dav/Server/Photos", &h, "").await.status, StatusCode::ACCEPTED);
+        go.notify_one();
+        let mut done = false;
+        for _ in 0..200 {
+            if env.node_at(&space.drive, "Copied/a.txt").await.is_some() {
+                done = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(done, "the copy got its name");
+        assert_eq!(std::fs::read(space.dir.join("Copied/a.txt")).unwrap(), b"a");
+        // Quick ones answer as always
+        drop(hook);
+        let h = [("destination", "/dav/My%20files/Photos")];
+        assert_eq!(dav.send("MOVE", "/dav/Server/Photos", &h, "").await.status, StatusCode::CREATED);
+        assert!(env.node_at(&space.drive, "Photos").await.is_none());
     }
 
     #[tokio::test]

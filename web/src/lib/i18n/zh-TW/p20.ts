@@ -14,4 +14,13 @@ export default {
   "Extracted to \"{name}\"": "已解壓縮到「{name}」",
   "Couldn't compress to ZIP": "無法壓縮成 ZIP",
   "Couldn't extract": "無法解壓縮",
+  // Other changes that run on the server as tasks (lib/jobs.tsx)
+  "Moving…": "正在移動…",
+  "Copying…": "正在複製…",
+  "Deleting permanently…": "正在永久刪除…",
+  "Emptying the trash…": "正在清空垃圾桶…",
+  "Checking the folder for changes…": "正在檢查資料夾的變更…",
+  "Deleting the user…": "正在刪除使用者…",
+  "Removing \"My files\"…": "正在移除「我的檔案」…",
+  "Working…": "處理中…",
 } satisfies Record<string, string>;

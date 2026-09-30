@@ -27,6 +27,7 @@ use crate::{
     auth::Admin,
     db::{add_grant, create_drive},
     error::{AppError, AppResult},
+    jobs::{self, Job, Limit},
     logs,
     state::AppState,
 };
@@ -237,21 +238,29 @@ async fn add_in(st: &AppState, tx: &mut SqliteConnection, me: &crate::auth::User
 
 /// Removes a user's personal space: its files are moved into a folder "Files of <username>" in another space
 /// (`move_to`), or deleted (`delete_files`), as when deleting the user. Also cancels one waiting for its location.
-pub async fn remove(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<i64>, Query(q): Query<DeleteQuery>) -> AppResult<Json<UserRow>> {
+/// Moving the files to or from a folder space copies them, which can take long: the removal runs as a job (jobs.rs),
+/// which the page follows.
+pub async fn remove(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<i64>, Query(q): Query<DeleteQuery>) -> AppResult<Json<Job>> {
     let username = crate::admin::get_row(&st, id).await?.username;
-    let moved = crate::admin::move_personal_first(&st, &me, id, &username, &q).await?;
+    let pending = jobs::reserve(&st, me.id, "remove_personal", Limit::Changes)?;
+    let job = pending.run(jobs::WAIT, move |t| async move { remove_now(&st, &me, id, &username, &q, &t).await.map(|()| Default::default()) }).await?;
+    Ok(Json(job))
+}
+
+async fn remove_now(st: &AppState, me: &crate::auth::User, id: i64, username: &str, q: &DeleteQuery, progress: &jobs::Tracker) -> AppResult<()> {
+    let moved = crate::admin::move_personal_first(st, me, id, username, q, progress).await?;
     let res = {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
-        let res = remove_in(&mut tx, &me, id, &username, &q, moved.as_ref()).await;
+        let res = remove_in(&mut tx, me, id, username, q, moved.as_ref()).await;
         // Rolled back before the lock goes when it fails (`db::settle`)
         crate::db::settle(tx, res).await
     };
-    let removed = crate::admin::Moved::kept_on_error(moved.as_ref(), &st, res).await?;
+    let removed = crate::admin::Moved::kept_on_error(moved.as_ref(), st, res).await?;
     if let Some(removed) = removed {
-        removed.finish(&st).await;
+        removed.finish(st).await;
     }
-    Ok(Json(crate::admin::get_row(&st, id).await?))
+    Ok(())
 }
 
 async fn remove_in(
@@ -412,7 +421,11 @@ mod tests {
         let company = env.drive_of(&env.st.shared_root().unwrap()).await;
         let remove = |q: Value| {
             let (st, admin) = (env.st.clone(), admin.clone());
-            async move { super::remove(State(st), Admin(admin), Path(row.id), Query(serde_json::from_value(q).unwrap())).await }
+            async move {
+                let Json(job) = super::remove(State(st.clone()), Admin(admin), Path(row.id), Query(serde_json::from_value(q).unwrap())).await?;
+                assert_eq!(job.state, "done");
+                crate::admin::get_row(&st, row.id).await.map(Json)
+            }
         };
         // A choice is needed while it holds files
         assert_eq!(remove(json!({})).await.map(|_| ()).unwrap_err().status, axum::http::StatusCode::BAD_REQUEST);
@@ -497,7 +510,8 @@ mod tests {
         let cat = new_user(&env, "cat", json!({ "personal_location": "nas" })).await.unwrap();
         assert_eq!(cat.personal_pending.as_deref(), Some("nas"));
         let q = Query(serde_json::from_value(json!({})).unwrap());
-        let Json(after) = remove(State(env.st.clone()), Admin(env.admin().await), Path(cat.id), q).await.unwrap();
+        let _ = remove(State(env.st.clone()), Admin(env.admin().await), Path(cat.id), q).await.unwrap();
+        let after = crate::admin::get_row(&env.st, cat.id).await.unwrap();
         assert_eq!((after.personal_space, after.personal_pending), (false, None));
     }
 }

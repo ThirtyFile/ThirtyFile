@@ -33,6 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { t, tServer, tc } from "@/lib/i18n";
+import { waitForJob } from "@/lib/jobs";
 import { invalidateFiles } from "@/lib/queries";
 import { useMoves } from "@/lib/moves";
 import { MoveProgress, moveRoute } from "@/pages/MovesPage";
@@ -71,18 +72,20 @@ export function AdminDrivesPage() {
   /** Checks a folder space for changes made on the server's folder now */
   const scanNow = async (d: Drive) => {
     setScanning(true);
-    // A big folder takes a while: the list shows how far the check is as soon as it has started
+    // A big folder takes a while: the list shows how far the check is as soon as it has started, and a message follows
+    // it to the end
     const started = setTimeout(refresh, 500);
     try {
-      const r = await api.scanDrive(d.id);
+      const job = await waitForJob(await api.scanDrive(d.id));
+      const r = job.result as ScanReport;
       if (r.error) toast.error(tServer(r.error));
       else toast.success(scanSummary(r));
-      refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Couldn't check the folder"));
     } finally {
       clearTimeout(started);
       setScanning(false);
+      refresh();
     }
   };
   // Refreshed every few seconds while a space is being moved

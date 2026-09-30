@@ -941,6 +941,8 @@ export default {
   // Compress to ZIP and extract (archive.rs)
   "Several ZIP files are being made or extracted already. Wait for one to finish.": "已有多個 ZIP 檔案正在建立或解壓縮，請等其中一個完成。",
   "This task has finished or doesn't exist": "這項工作已結束或不存在",
+  // Other changes that run as tasks (jobs.rs)
+  "Several changes are still being made. Wait for one to finish.": "已有多項變更正在進行，請等其中一項完成。",
   "Select items to compress": "請選擇要壓縮的項目",
   "At most {n} items can be compressed at once. Compress the folder they are in, or select fewer items.": "一次最多只能壓縮 {n} 個項目。請壓縮它們所在的資料夾，或選擇較少的項目。",
   "Only ZIP files can be extracted": "只能解壓縮 ZIP 檔案",
