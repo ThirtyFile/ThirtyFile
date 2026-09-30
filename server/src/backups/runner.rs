@@ -34,6 +34,8 @@ const FLUSH_EVERY: Duration = Duration::from_secs(2);
 pub struct Backups {
     pub(super) running: Mutex<HashMap<String, Arc<Control>>>,
     pub(super) wake: tokio::sync::Notify,
+    /// Wakes the scheduler of backup policies (policy.rs)
+    pub(super) policies: tokio::sync::Notify,
 }
 
 /// What a running job is asked to do, and how far it got
@@ -98,6 +100,9 @@ pub struct Ctx<'a> {
     pub(super) ctl: &'a Control,
     /// Personal spaces' items aren't named in failures
     pub private: std::collections::HashSet<String>,
+    /// Bytes per second the job may copy (0: no limit), and when it started copying
+    pub rate_limit: i64,
+    pub started: Instant,
 }
 
 impl Ctx<'_> {
@@ -144,7 +149,20 @@ impl Ctx<'_> {
         if due {
             self.flush().await?;
         }
+        self.throttle().await;
         Ok(())
+    }
+
+    /// Waits while the job copied more than its limit allows so far (a policy's bandwidth limit)
+    async fn throttle(&self) {
+        if self.rate_limit <= 0 {
+            return;
+        }
+        let done = self.ctl.progress.lock().unwrap().bytes_done.max(0) as f64;
+        let due = Duration::from_secs_f64(done / self.rate_limit as f64);
+        while self.started.elapsed() < due && self.stop().is_none() {
+            tokio::time::sleep((due - self.started.elapsed()).min(Duration::from_millis(500))).await;
+        }
     }
 
     /// An item that couldn't be done after a few tries. `item` names it; `space` is the space it is in (items of
@@ -241,6 +259,7 @@ impl Ctx<'_> {
 
 /// Starts the runner: jobs that were running when ThirtyFile stopped continue, then queued jobs start in turn
 pub fn spawn_runner(st: AppState) {
+    super::policy::spawn_scheduler(st.clone());
     tokio::spawn(async move {
         if let Err(e) = recover(&st).await {
             tracing::warn!("Couldn't continue the backup jobs that were running: {}", e.message);
@@ -365,7 +384,8 @@ pub(super) async fn run(st: &AppState, job: &Job, ctl: &Control) {
             Default::default()
         }
     };
-    let cx = Ctx { st, job, ctl, private };
+    let rate_limit = serde_json::from_str::<serde_json::Value>(&job.params).ok().and_then(|p| p["rate_limit"].as_i64()).unwrap_or(0);
+    let cx = Ctx { st, job, ctl, private, rate_limit, started: Instant::now() };
     let res = match job.kind.as_str() {
         "snapshot" => super::capture::run(&cx).await,
         "restore" => super::restore::run(&cx).await,
@@ -379,9 +399,26 @@ pub(super) async fn run(st: &AppState, job: &Job, ctl: &Control) {
         Ok(Stop::Cancelled) => super::cancelled(st, job).await,
         Err(e) => {
             tracing::warn!("A backup job ({}) failed: {}", job.kind, e.message);
-            set_state(&cx, "failed", Some(&e.message)).await
+            // A policy's snapshot waits for a location that can't be reached, and is tried again by itself
+            let waits = e.status == axum::http::StatusCode::SERVICE_UNAVAILABLE || super::policy::waits(st, job).await;
+            let state = if waits && job.kind == "snapshot" && super::policy::is_policy(&mut *match st.db.acquire().await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("Couldn't record how a backup job ended: {e}");
+                    return;
+                }
+            }, &job.set_id)
+            .await
+            .unwrap_or(false)
+            {
+                "waiting"
+            } else {
+                "failed"
+            };
+            set_state(&cx, state, Some(&e.message)).await
         }
     };
+    st.backups.policies.notify_one();
     if let Err(e) = ended {
         tracing::warn!("Couldn't record how a backup job ended: {}", e.message);
     }

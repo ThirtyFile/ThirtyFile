@@ -549,7 +549,7 @@ export interface SsoProvider {
   label: string;
 }
 
-export type NotificationKind = "shared" | "space_full" | "access_expiring" | "app_password" | "sign_in_method" | "link_upload";
+export type NotificationKind = "shared" | "space_full" | "access_expiring" | "app_password" | "sign_in_method" | "link_upload" | "backup";
 
 /** What a notification shows; names are copied when it was made */
 export interface NotificationData {
@@ -576,6 +576,11 @@ export interface NotificationData {
   /** Linked sign-in methods: the provider's name, and the linked account's email (or name) */
   label?: string;
   account?: string;
+  /** Backups (administrators): what happened (failing, waiting, overdue, recovered), the error, and when the newest
+   * complete snapshot read the spaces */
+  state?: "failing" | "waiting" | "overdue" | "recovered";
+  error?: string | null;
+  since?: number | null;
 }
 
 /** A notification under the bell (`GET /notifications`) */

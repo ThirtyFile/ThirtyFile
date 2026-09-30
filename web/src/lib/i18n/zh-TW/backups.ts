@@ -95,4 +95,17 @@ export default {
   "Copy checked": "副本已檢查",
   "Start deleting a copy": "開始刪除副本",
   "Copy deleted": "副本已刪除",
+  "Create backup policy": "建立備份規則",
+  "Change backup policy": "變更備份規則",
+  "Back up now": "立即備份",
+  "Backup needs attention": "備份需要處理",
+  "Found backups on a location": "在位置上找到備份",
+  // Notifications (lib/notifications.ts)
+  "Administrators: a backup fails, can't reach its location or is overdue, and when it works again": "管理員：備份失敗、無法連線到存放位置或逾期，以及恢復正常時",
+  "Newest complete snapshot: {time}": "最新的完整快照：{time}",
+  "No complete snapshot yet": "還沒有完整的快照",
+  "The backup “{name}” failed": "備份「{name}」失敗",
+  "The backup “{name}” can't reach its location": "備份「{name}」無法連線到存放位置",
+  "The backup “{name}” is overdue": "備份「{name}」逾期了",
+  "The backup “{name}” works again": "備份「{name}」恢復正常",
 };

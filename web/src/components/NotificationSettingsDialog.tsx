@@ -10,13 +10,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ErrorText } from "@/components/dialogs";
 import { useConfirmIdentity } from "@/components/ConfirmIdentity";
-import { NOTIFICATION_KINDS } from "@/lib/notifications";
+import { ADMIN_NOTIFICATION_KINDS, NOTIFICATION_KINDS } from "@/lib/notifications";
+import { useMe } from "@/lib/session";
 import { t } from "@/lib/i18n";
 
 /** Account menu (or the bell) › Notification settings: the email address, and each kind on or off in the app and by email */
 export function NotificationSettingsDialog({ onClose }: { onClose(): void }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["notification-settings"], queryFn: api.notificationSettings });
+  const admin = useMe().role === "admin";
   const [email, setEmail] = useState("");
   const [kinds, setKinds] = useState<NotificationSettings["kinds"] | null>(null);
   useEffect(() => {
@@ -86,7 +88,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose(): void }) {
                   <span className="text-center">{t("In the app")}</span>
                   <span className="text-center">{t("By email")}</span>
                 </div>
-                {NOTIFICATION_KINDS.map(({ kind, label, desc }) => (
+                {NOTIFICATION_KINDS.filter((k) => admin || !ADMIN_NOTIFICATION_KINDS.includes(k.kind)).map(({ kind, label, desc }) => (
                   <div key={kind} className="grid grid-cols-[1fr_4rem_4rem] items-center gap-2 border-b px-3 py-2.5 last:border-b-0">
                     <div className="min-w-0">
                       <div className="text-sm">{label}</div>

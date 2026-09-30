@@ -742,3 +742,142 @@ async fn spaces_on_an_s3_location_are_copied_to_a_local_folder() {
     assert_eq!(read(&env, &amy, &f).await, b"from the bucket");
     assert_eq!(blob_location(&env, b"from the bucket").await.as_deref(), Some("bucket"), "stored where the space keeps its files");
 }
+
+// ───────────── Restoring folders and items, into their place ─────────────
+
+async fn restore_with(env: &TestEnv, snapshot: &str, body: serde_json::Value) -> crate::error::AppResult<String> {
+    let Json(v) = api::restore(State(env.st.clone()), Admin(env.admin().await), Path(snapshot.to_string()), Json(serde_json::from_value(body).unwrap())).await?;
+    Ok(v["job_id"].as_str().unwrap().to_string())
+}
+
+async fn preview_with(env: &TestEnv, snapshot: &str, body: serde_json::Value) -> serde_json::Value {
+    let Json(p) = api::restore_preview(State(env.st.clone()), Admin(env.admin().await), Path(snapshot.to_string()), Json(serde_json::from_value(body).unwrap()))
+        .await
+        .unwrap();
+    serde_json::to_value(&p).unwrap()
+}
+
+/// The ids in a snapshot of the items at `path` in a space, from browsing it
+async fn snapshot_item(env: &TestEnv, snapshot: &str, space: &str, path: &[&str]) -> String {
+    let mut folder: Option<String> = None;
+    let mut found = String::new();
+    for part in path {
+        let q = serde_json::from_value(json!({ "space": space, "folder": folder })).unwrap();
+        let Json(page) = api::browse(State(env.st.clone()), Admin(env.admin().await), Path(snapshot.to_string()), Query(q)).await.unwrap();
+        let page = serde_json::to_value(&page).unwrap();
+        let item = page["items"].as_array().unwrap().iter().find(|i| i["name"] == *part).unwrap_or_else(|| panic!("{part} in {page}"));
+        found = item["id"].as_str().unwrap().to_string();
+        folder = Some(found.clone());
+    }
+    found
+}
+
+#[tokio::test]
+async fn a_folder_or_some_items_come_back_into_their_place_or_a_new_folder_and_names_taken_are_handled_as_chosen() {
+    let env = testutil::env().await;
+    let admin = env.admin().await;
+    let bob = env.user("bob", true).await;
+    let company = env.st.system.read().unwrap().shared_root_id.clone();
+    let space = env.drive_of(&company).await;
+    let docs = env.folder(&admin, &company, "Docs").await;
+    let sub = env.folder(&admin, &docs, "Sub").await;
+    let a = env.upload(&admin, &docs, "a.txt", b"a as it was").await;
+    let b = env.upload(&admin, &docs, "b.txt", b"b as it was").await;
+    env.upload(&admin, &sub, "c.txt", b"c as it was").await;
+    add_nas(&env, "nas").await;
+    let (set, job) = copy_all(&env, "local", "nas").await;
+    assert_eq!(run_job(&env, &job).await, "done");
+    let snapshot = snapshot_of(&env, &set).await;
+    // Browsing: folders first; a personal space stays closed
+    let docs_id = snapshot_item(&env, &snapshot, &space, &["Docs"]).await;
+    let q = serde_json::from_value(json!({ "space": space, "folder": docs_id })).unwrap();
+    let Json(page) = api::browse(State(env.st.clone()), Admin(admin.clone()), Path(snapshot.clone()), Query(q)).await.unwrap();
+    let names: Vec<String> = serde_json::to_value(&page).unwrap()["items"].as_array().unwrap().iter().map(|i| i["name"].as_str().unwrap().to_string()).collect();
+    assert_eq!(names, ["Sub", "a.txt", "b.txt"]);
+    let bobs = env.drive_of(bob.root()).await;
+    let q = serde_json::from_value(json!({ "space": bobs })).unwrap();
+    assert_eq!(api::browse(State(env.st.clone()), Admin(admin.clone()), Path(snapshot.clone()), Query(q)).await.unwrap_err().status, axum::http::StatusCode::FORBIDDEN);
+    assert!(restore_with(&env, &snapshot, json!({ "space": bobs, "folder": "x" })).await.is_err(), "a personal space only whole");
+
+    // Since then: a.txt was changed, b.txt deleted, Sub deleted with what is in it
+    save(&env, &admin, &a, b"a changed since").await;
+    trash(&env, &admin, &b).await;
+    trash(&env, &admin, &sub).await;
+    // Back into their place, skipping what is there: one file is in the way
+    let body = json!({ "space": space, "folder": docs_id, "mode": "original", "on_conflict": "skip" });
+    let preview = preview_with(&env, &snapshot, body.clone()).await;
+    assert_eq!((preview["files"].as_i64(), preview["conflicts"].as_i64(), preview["original"].as_bool()), (Some(3), Some(1), Some(true)), "{preview}");
+    let job = restore_with(&env, &snapshot, body).await.unwrap();
+    assert_eq!(run_job(&env, &job).await, "done", "{:?}", state(&env, &job).await);
+    assert_eq!(read(&env, &admin, &a).await, b"a changed since", "skipped");
+    let b2 = at(&env, &docs, "b.txt").await.expect("back");
+    assert_eq!(read(&env, &admin, &b2).await, b"b as it was");
+    let c2 = at(&env, &docs, "Sub/c.txt").await.expect("its folder made again");
+    assert_eq!(read(&env, &admin, &c2).await, b"c as it was");
+    let (note,): (Option<String>,) = sqlx::query_as("SELECT note FROM backup_jobs WHERE id = ?").bind(&job).fetch_one(&env.st.db).await.unwrap();
+    assert!(note.unwrap().contains("1 file was skipped"));
+    // Again, keeping both: the restored one gets a number; the rest is found where it was already
+    let job = restore_with(&env, &snapshot, json!({ "space": space, "folder": docs_id, "mode": "original", "on_conflict": "keep" })).await.unwrap();
+    assert_eq!(run_job(&env, &job).await, "done");
+    let kept = at(&env, &docs, "a (1).txt").await.expect("kept both");
+    assert_eq!(read(&env, &admin, &kept).await, b"a as it was");
+    // Replacing: a.txt gets its content back, and what it had becomes an earlier version
+    let job = restore_with(&env, &snapshot, json!({ "space": space, "folder": docs_id, "items": [snapshot_item(&env, &snapshot, &space, &["Docs", "a.txt"]).await], "mode": "original", "on_conflict": "replace" })).await.unwrap();
+    assert_eq!(run_job(&env, &job).await, "done");
+    assert_eq!(read(&env, &admin, &a).await, b"a as it was");
+    let (versions,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM node_versions WHERE node_id = ?").bind(&a).fetch_one(&env.st.db).await.unwrap();
+    assert!(versions >= 2, "the changed content is kept as an earlier version");
+    // One item into a new folder: just it
+    let sub_id = snapshot_item(&env, &snapshot, &space, &["Docs", "Sub"]).await;
+    let c_id = snapshot_item(&env, &snapshot, &space, &["Docs", "Sub", "c.txt"]).await;
+    let job = restore_with(&env, &snapshot, json!({ "space": space, "folder": sub_id, "items": [c_id], "folder_name": "Just c" })).await.unwrap();
+    assert_eq!(run_job(&env, &job).await, "done");
+    let top = at(&env, &company, "Just c").await.unwrap();
+    assert_eq!(children(&env, &top).await.into_keys().collect::<Vec<_>>(), ["c.txt"]);
+}
+
+#[tokio::test]
+async fn a_new_installation_restores_from_a_backup_found_on_a_location_alone() {
+    // The place the backup is kept outlives the first server
+    let place = std::env::temp_dir().join(format!("thirtyfile-backup-place-{}", crate::util::new_id()));
+    {
+        let old = testutil::env().await;
+        let amy = old.user("amy", true).await;
+        let docs = old.folder(&amy, amy.root(), "Docs").await;
+        old.upload(&amy, &docs, "report.txt", b"the report").await;
+        add_location(&old, "nas", "local", json!({ "path": place.to_string_lossy() }), Arc::new(LocalStorage::create(place.clone(), "nas").unwrap())).await;
+        let (_, job) = copy_all(&old, "local", "nas").await;
+        assert_eq!(run_job(&old, &job).await, "done");
+        // The server, its database and its storage are gone
+    }
+    let new = testutil::env().await;
+    // Adding the place as a location again: its .thirtyfile-location file names the old server's location, so it is
+    // removed first, as the guide says
+    std::fs::remove_file(place.join(storage::LOCATION_MARKER)).unwrap();
+    add_location(&new, "found", "local", json!({ "path": place.to_string_lossy() }), Arc::new(LocalStorage::create(place.clone(), "found").unwrap())).await;
+    let req = serde_json::from_value(json!({ "location": "found" })).unwrap();
+    let Json(v) = api::import(State(new.st.clone()), Admin(new.admin().await), Json(req)).await.unwrap();
+    assert_eq!((v["found"].as_i64(), v["added"].as_array().map(Vec::len)), (Some(1), Some(1)), "{v}");
+    let (set,): (String,) = sqlx::query_as("SELECT id FROM backup_sets WHERE kind = 'imported'").fetch_one(&new.st.db).await.unwrap();
+    // Read back and checked, which records what it holds
+    let check = job_of(&new, &set, "verify").await.unwrap();
+    assert_eq!(run_job(&new, &check).await, "done", "{:?}", state(&new, &check).await);
+    let snapshot = snapshot_of(&new, &set).await;
+    let (list,): (String,) = sqlx::query_as("SELECT space_list FROM backup_snapshots WHERE id = ?").bind(&snapshot).fetch_one(&new.st.db).await.unwrap();
+    let spaces: Vec<super::SpaceInfo> = serde_json::from_str(&list).unwrap();
+    let amys = spaces.iter().find(|s| s.owner == "amy").expect("Amy's space is listed");
+    // Amy's personal space goes into the personal space of the user called amy here
+    assert!(restore(&new, &snapshot, &amys.id, None, false).await.is_err(), "no such user yet");
+    let amy = new.user("amy", true).await;
+    let job = restore(&new, &snapshot, &amys.id, None, false).await.unwrap();
+    assert_eq!(run_job(&new, &job).await, "done", "{:?}", state(&new, &job).await);
+    let top = restored_folder(&new, amy.root()).await;
+    let f = at(&new, &top, "Docs/report.txt").await.unwrap();
+    assert_eq!(read(&new, &amy, &f).await, b"the report");
+    // Found again: nothing new
+    let req = serde_json::from_value(json!({ "location": "found" })).unwrap();
+    let Json(v) = api::import(State(new.st.clone()), Admin(new.admin().await), Json(req)).await.unwrap();
+    assert_eq!(v["added"].as_array().map(Vec::len), Some(0));
+    drop(new);
+    let _ = std::fs::remove_dir_all(&place);
+}
