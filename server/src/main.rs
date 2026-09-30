@@ -403,6 +403,10 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         Err(e) => tracing::warn!("Couldn't clean the temporary directory: {}", e.message),
         _ => {}
     }
+    // Changes of many items that a stop left unfinished: before anything scans the folder spaces they change
+    if let Err(e) = tree::changes::resume(&state).await {
+        tracing::warn!("Couldn't finish the changes left unfinished: {}", e.message);
+    }
     spawn_maintenance(state.clone(), cfg.trash_days);
     locations::spawn_health_monitor(state.clone());
     usage::sample::spawn(state.clone());

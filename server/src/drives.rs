@@ -243,7 +243,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
 /// Scans a folder space now (Control panel › Spaces › Check for changes). A large folder takes a while: the scan runs
 /// as a job (jobs.rs), whose result is the scan's report
 pub async fn scan(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>) -> AppResult<Json<crate::jobs::Job>> {
-    let job = crate::jobs::run(&st.clone(), &user, "scan", crate::jobs::Limit::Changes, crate::jobs::WAIT, move |t| async move {
+    let job = crate::jobs::run(&st.clone(), &user, "scan", crate::jobs::Limit::Changes, crate::jobs::wait(), move |t| async move {
         let scan = crate::folders::scan(&st, &id);
         tokio::pin!(scan);
         let report = loop {
@@ -797,6 +797,7 @@ mod tests {
         assert_eq!((job.kind, job.state), ("scan", "done"));
         assert_eq!(job.result.unwrap()["added"], 1);
         // One that takes longer (it waits for the space's lock here) answers with the running job
+        let _short = crate::jobs::short_wait();
         let held = crate::fsops::lock_space(&space.drive).await;
         testutil::write_old(&space.dir.join("b.txt"), b"b");
         let Json(job) = scan(State(env.st.clone()), Admin(admin), Path(space.drive.clone())).await.unwrap();

@@ -18,7 +18,10 @@ use crate::{
     jobs::{self, Job, Limit, Outcome},
     logs, paths,
     state::AppState,
-    tree::{self, Crumb, NODE_COLS, Need, Node, Role},
+    tree::{
+        self, Crumb, NODE_COLS, Need, Node, Role,
+        changes::{self, NOT_PURGING},
+    },
     util::{new_id, now, validate_name},
 };
 
@@ -534,7 +537,7 @@ pub async fn copy_nodes(State(st): State<AppState>, user: User, Json(req): Json<
 async fn run_across(st: &AppState, user: &User, pending: jobs::Pending, across: Option<fsops::Across>) -> AppResult<Job> {
     let Some(across) = across else { return Ok(Job::done(pending.kind())) };
     let (st, user) = (st.clone(), user.clone());
-    pending.run(jobs::WAIT, move |t| async move { across.run(&st, &user, &t).await.map(|()| Outcome::default()) }).await
+    pending.run(jobs::wait(), move |t| async move { across.run(&st, &user, &t).await.map(|()| Outcome::default()) }).await
 }
 
 /// Moves items in the index; what goes to or from a folder space is returned, for its content to be moved next
@@ -551,6 +554,7 @@ pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
     let mut across_items = 0usize;
     for id in &ids {
         let mut node = tree::node_for(&mut tx, &user, id, Need::Write).await?;
+        changes::refuse_busy(&mut tx, &node.id).await?;
         locks.check(&node)?;
         not_root(&node)?;
         if node.parent_id.as_deref() == Some(dest.id.as_str()) {
@@ -640,6 +644,7 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
     let mut items = 0usize;
     for id in &ids {
         let node = tree::node_for(&mut tx, &user, id, Need::Read).await?;
+        changes::refuse_busy(&mut tx, &node.id).await?;
         locks.check(&node)?;
         not_root(&node)?;
         if tree::is_within(&mut tx, &dest.id, &node.id).await? {
@@ -731,24 +736,21 @@ pub async fn trash(State(st): State<AppState>, user: User, Json(req): Json<Batch
 /// Moves an item (the user may delete it) and everything in it to the trash; `detail` goes into the activity log
 async fn trash_one(conn: &mut SqliteConnection, user: &User, locks: &fsops::SpaceLocks, node: &Node, detail: &str) -> AppResult<()> {
     not_root(node)?;
-    let trash_id = new_id();
+    changes::refuse_busy(conn, &node.id).await?;
+    let (trash_id, at) = (new_id(), now());
     if node.in_folder_space() {
         // Into the space's trash folder on disk, so it can be restored
         fsops::trash(conn, locks, node, &trash_id).await?;
     }
-    sqlx::query(
-        "WITH RECURSIVE sub(id) AS (
-           SELECT ?1 UNION ALL
-           SELECT c.id FROM nodes c JOIN sub ON c.parent_id = sub.id WHERE c.trashed_at IS NULL
-         )
-         UPDATE nodes SET trashed_at = ?2, trash_id = ?3 WHERE id IN (SELECT id FROM sub)",
-    )
-    .bind(&node.id)
-    .bind(now())
-    .bind(&trash_id)
-    .execute(&mut *conn)
-    .await?;
-    sqlx::query("UPDATE nodes SET trash_root = 1, trashed_by = ? WHERE id = ?").bind(user.id).bind(&node.id).execute(&mut *conn).await?;
+    sqlx::query("UPDATE nodes SET trashed_at = ?, trash_id = ?, trash_root = 1, trashed_by = ? WHERE id = ?")
+        .bind(at)
+        .bind(&trash_id)
+        .bind(user.id)
+        .bind(&node.id)
+        .execute(&mut *conn)
+        .await?;
+    // Everything in it goes with it; a large folder a batch at a time (tree/changes.rs)
+    locks.later(changes::trash(conn, &node.id, &trash_id, at).await?);
     tree::touch(conn, node.parent_id.as_deref().unwrap()).await?;
     logs::record_activity(conn, user, Some(node), "trash", detail).await?;
     Ok(())
@@ -928,7 +930,7 @@ pub async fn list_trash(State(st): State<AppState>, user: User, Query(q): Query<
     let mine = if q.mine == Some(true) { "AND n.trashed_by = ?5" } else { "" };
     let sql = format!(
         "SELECT {NODE_COLS}, (SELECT username FROM users WHERE id = n.trashed_by) AS deleted_by FROM nodes n
-         WHERE n.trash_root = 1 AND n.drive_id IN (SELECT value FROM json_each(?1)) {keyset} {mine}
+         WHERE n.trash_root = 1 AND n.drive_id IN (SELECT value FROM json_each(?1)) AND {NOT_PURGING} {keyset} {mine}
          ORDER BY n.trashed_at DESC, n.id DESC LIMIT ?4"
     );
     #[derive(sqlx::FromRow)]
@@ -986,7 +988,9 @@ async fn trash_role(conn: &mut SqliteConnection, user: &User, node: &Node) -> Ap
 async fn trash_root(conn: &mut SqliteConnection, user: &User, id: &str, need: Need) -> AppResult<(Node, String)> {
     let not_found = || AppError::not_found("Item not found in trash");
     let node = tree::get_node(conn, id).await?.ok_or_else(not_found)?;
-    let (is_root,): (bool,) = sqlx::query_as("SELECT trash_root FROM nodes WHERE id = ?").bind(id).fetch_one(&mut *conn).await?;
+    // Not one being deleted for good already
+    let sql = format!("SELECT n.trash_root AND {} FROM nodes n WHERE n.id = ?", changes::NOT_PURGING);
+    let (is_root,): (bool,) = sqlx::query_as(sqlx::AssertSqlSafe(sql)).bind(id).fetch_one(&mut *conn).await?;
     if !is_root {
         return Err(not_found());
     }
@@ -1022,6 +1026,7 @@ pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<Bat
         // Restored into the original folder, or the space's root folder if that was deleted too
         let (node, parent_id) = trash_root(&mut tx, &user, id, Need::Write).await?;
         locks.check(&node)?;
+        changes::refuse_busy(&mut tx, &node.id).await?;
         // Without an answer the item gets a number when its name is taken, as it always did
         if let Some(existing) = tree::find_child(&mut tx, &parent_id, &node.name).await? {
             match req.resolution(&node.id) {
@@ -1038,19 +1043,17 @@ pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<Bat
         } else {
             tree::unique_name(&mut tx, &parent_id, &node.name, node.is_folder()).await?
         };
-        sqlx::query("UPDATE nodes SET parent_id = ?, name = ? WHERE id = ?")
+        let (trash_id,): (Option<String>,) = sqlx::query_as("SELECT trash_id FROM nodes WHERE id = ?").bind(&node.id).fetch_one(&mut *tx).await?;
+        sqlx::query("UPDATE nodes SET parent_id = ?, name = ?, trashed_at = NULL, trash_root = 0, trash_id = NULL, trashed_by = NULL WHERE id = ?")
             .bind(&parent_id)
             .bind(&name)
             .bind(&node.id)
             .execute(&mut *tx)
             .await?;
-        sqlx::query(
-            "UPDATE nodes SET trashed_at = NULL, trash_root = 0, trash_id = NULL, trashed_by = NULL
-             WHERE trash_id = (SELECT trash_id FROM nodes WHERE id = ?)",
-        )
-        .bind(&node.id)
-        .execute(&mut *tx)
-        .await?;
+        // Everything that went to the trash with it comes back; a large folder a batch at a time (tree/changes.rs)
+        if let Some(trash_id) = trash_id {
+            locks.later(changes::restore(&mut tx, &node.id, &trash_id).await?);
+        }
         tree::touch(&mut tx, &parent_id).await?;
         logs::record_activity(&mut tx, &user, Some(&node), "restore", "").await?;
     }
@@ -1059,21 +1062,35 @@ pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<Bat
     Ok(Json(json!({ "ok": true })))
 }
 
-pub async fn delete_forever(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Value>> {
-    let _w = st.write_lock.lock().await;
-    let mut tx = crate::db::begin_write(&st.db).await?;
-    let mut orphans = Vec::new();
-    let mut on_disk = Vec::new();
-    for id in &outermost(&mut tx, &req.ids()?).await? {
-        let (node, _) = trash_root(&mut tx, &user, id, Need::Delete).await?;
-        logs::record_activity(&mut tx, &user, Some(&node), "delete", "").await?;
-        on_disk.extend(fsops::trash_folder(&node));
-        orphans.extend(tree::purge_subtree(&mut tx, &node.id).await?);
-    }
-    tx.commit().await?;
-    tree::schedule_blob_removal(&st, orphans);
-    fsops::remove_below_later(on_disk);
-    Ok(Json(json!({ "ok": true })))
+/// Deletes items in the trash for good. They leave the trash at once; deleting a large folder takes a while, so it runs
+/// as a job the page follows, a batch per transaction (tree/changes.rs)
+pub async fn delete_forever(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Job>> {
+    let pending = jobs::reserve(&st, user.id, "delete", Limit::Changes)?;
+    let rows = {
+        let _w = st.write_lock.lock().await;
+        let mut tx = crate::db::begin_write(&st.db).await?;
+        let mut rows = Vec::new();
+        for id in &outermost(&mut tx, &req.ids()?).await? {
+            let (node, _) = trash_root(&mut tx, &user, id, Need::Delete).await?;
+            logs::record_activity(&mut tx, &user, Some(&node), "delete", "").await?;
+            rows.push(changes::purge(&mut tx, &node.id).await?);
+        }
+        tx.commit().await?;
+        rows
+    };
+    Ok(Json(purge_as_job(&st, pending, rows, None).await?))
+}
+
+/// Deletes what `rows` started deleting, as the job `pending`; its result is `result`
+async fn purge_as_job(st: &AppState, pending: jobs::Pending, rows: Vec<changes::Unfinished>, result: Option<Value>) -> AppResult<Job> {
+    let st = st.clone();
+    pending
+        .run(jobs::wait(), move |t| async move {
+            t.set_total(changes::items_left(&st, &rows).await?);
+            changes::run(&st, rows, &t).await?;
+            Ok(Outcome { result, ..Default::default() })
+        })
+        .await
 }
 
 /// The spaces whose trash Empty trash deletes: those the user manages (or owns), except read-only spaces. The trash
@@ -1102,69 +1119,52 @@ pub struct EmptyTrashSpace {
 pub async fn empty_trash_preview(State(st): State<AppState>, user: User) -> AppResult<Json<Vec<EmptyTrashSpace>>> {
     let mut c = st.db.acquire().await?;
     let drive_ids = empty_trash_drives(&mut c, &user).await?;
-    let rows: Vec<(String, String, i64)> = sqlx::query_as(
+    let rows: Vec<(String, String, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT d.kind, d.name, COUNT(*) FROM nodes n JOIN drives d ON d.id = n.drive_id
-         WHERE n.trash_root = 1 AND n.drive_id IN (SELECT value FROM json_each(?))
-         GROUP BY d.id ORDER BY CASE d.kind WHEN 'personal' THEN 0 WHEN 'company' THEN 1 ELSE 2 END, d.name",
-    )
+         WHERE n.trash_root = 1 AND n.drive_id IN (SELECT value FROM json_each(?)) AND {NOT_PURGING}
+         GROUP BY d.id ORDER BY CASE d.kind WHEN 'personal' THEN 0 WHEN 'company' THEN 1 ELSE 2 END, d.name"
+    )))
     .bind(serde_json::to_string(&drive_ids).unwrap())
     .fetch_all(&mut *c)
     .await?;
     Ok(Json(rows.into_iter().map(|(kind, name, items)| EmptyTrashSpace { kind, name, items }).collect()))
 }
 
-/// Empty trash: spaces where I'm a manager (or owner)
-pub async fn empty_trash(State(st): State<AppState>, user: User) -> AppResult<Json<Value>> {
+/// Empty trash: spaces where I'm a manager (or owner). Everything leaves the trash at once, and is deleted as a job
+/// the page follows; its result is how many items were in the trash (`deleted`)
+pub async fn empty_trash(State(st): State<AppState>, user: User) -> AppResult<Json<Job>> {
+    let pending = jobs::reserve(&st, user.id, "empty_trash", Limit::Changes)?;
     let drive_ids = empty_trash_drives(&mut *st.db.acquire().await?, &user).await?;
-    let total = purge_trash_in_batches(
-        &st,
-        "SELECT id FROM nodes WHERE trash_root = 1 AND drive_id IN (SELECT value FROM json_each(?1)) LIMIT ?2",
-        serde_json::to_string(&drive_ids).unwrap(),
-    )
-    .await?;
-    if total > 0 {
+    let rows = {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
-        logs::record_activity(&mut tx, &user, None, "empty_trash", &format!("{total} {}", if total == 1 { "item" } else { "items" })).await?;
+        let select = format!("SELECT id FROM nodes n WHERE n.trash_root = 1 AND n.drive_id IN (SELECT value FROM json_each(?1)) AND {NOT_PURGING}");
+        let rows = changes::purge_selected(&mut tx, &select, &serde_json::to_string(&drive_ids).unwrap()).await?;
+        let total = rows.len();
+        if total > 0 {
+            logs::record_activity(&mut tx, &user, None, "empty_trash", &format!("{total} {}", if total == 1 { "item" } else { "items" })).await?;
+        }
         tx.commit().await?;
-    }
-    Ok(Json(json!({ "ok": true, "deleted": total })))
+        rows
+    };
+    let deleted = json!({ "deleted": rows.len() });
+    Ok(Json(purge_as_job(&st, pending, rows, Some(deleted)).await?))
 }
 
-/// Automatically purges trash items older than the retention period
+/// Automatically purges trash items older than the retention period; returns how many there were
 pub async fn purge_expired_trash(st: &AppState, days: i64) -> AppResult<usize> {
     let cutoff = now() - days * 86400;
-    purge_trash_in_batches(st, "SELECT id FROM nodes WHERE trash_root = 1 AND trashed_at < ?1 LIMIT ?2", cutoff.to_string()).await
-}
-
-/// Number of trash items purged per transaction
-const PURGE_BATCH: i64 = 100;
-
-/// Permanently deletes the trash roots selected by `select` (`?1` = parameter, `?2` = batch size), a batch per transaction,
-/// so purging thousands of items doesn't hold the write lock (and block every upload and save) for the whole time.
-/// Returns the number of trash roots purged.
-async fn purge_trash_in_batches(st: &AppState, select: &'static str, param: String) -> AppResult<usize> {
-    let mut total = 0;
-    loop {
+    let rows = {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
-        let ids: Vec<(String,)> = sqlx::query_as(select).bind(&param).bind(PURGE_BATCH).fetch_all(&mut *tx).await?;
-        if ids.is_empty() {
-            return Ok(total);
-        }
-        let mut orphans = Vec::new();
-        let mut on_disk = Vec::new();
-        for (id,) in &ids {
-            if let Some(node) = tree::get_node(&mut tx, id).await? {
-                on_disk.extend(fsops::trash_folder(&node));
-            }
-            orphans.extend(tree::purge_subtree(&mut tx, id).await?);
-        }
+        let select = format!("SELECT id FROM nodes n WHERE n.trash_root = 1 AND n.trashed_at < ?1 AND {NOT_PURGING}");
+        let rows = changes::purge_selected(&mut tx, &select, &cutoff.to_string()).await?;
         tx.commit().await?;
-        tree::schedule_blob_removal(st, orphans);
-        fsops::remove_below_later(on_disk);
-        total += ids.len();
-    }
+        rows
+    };
+    let total = rows.len();
+    changes::run(st, rows, &Default::default()).await?;
+    Ok(total)
 }
 
 #[derive(Deserialize)]
@@ -1639,7 +1639,7 @@ mod tests {
         assert!(preview.is_empty());
 
         let Json(done) = empty_trash(State(env.st.clone()), amy.clone()).await.unwrap();
-        assert_eq!(done["deleted"], 2);
+        assert_eq!(done.result.unwrap()["deleted"], 2);
         let left = list_trash(State(env.st.clone()), bob.clone(), Query(TrashQuery::default())).await.unwrap().0.into_items();
         assert_eq!(left.len(), 1);
     }

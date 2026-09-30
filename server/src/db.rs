@@ -712,6 +712,31 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[tokio::test]
+    async fn a_database_from_0_4_0_gets_the_list_of_unfinished_changes() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-040-{}", crate::util::new_id()));
+        let path = dir.join("drive.db");
+        // As 0.4.0 left it: its one migration, and a folder in the trash
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'amy', 'x', 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO nodes (id, owner_id, kind, name, created_at, updated_at, trashed_at, trash_id, trash_root) VALUES ('n', 1, 'folder', 'Old', 0, 0, 5, 't', 1)")
+            .execute(&db)
+            .await
+            .unwrap();
+        db.close().await;
+        let db = connect(&path, 16).await.unwrap();
+        // The item is kept; a change to it can be recorded, and goes with it
+        sqlx::query("INSERT INTO tree_changes (id, kind, node_id, created_at) VALUES ('c', 'purge', 'n', 0)").execute(&db).await.unwrap();
+        assert!(sqlx::query("INSERT INTO tree_changes (id, kind, node_id, created_at) VALUES ('d', 'other', 'n', 0)").execute(&db).await.is_err());
+        sqlx::query("DELETE FROM nodes WHERE id = 'n'").execute(&db).await.unwrap();
+        let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM tree_changes").fetch_one(&db).await.unwrap();
+        assert_eq!(n, 0);
+        db.close().await;
+        assert!(dir.join("backups").join(format!("drive-before-{}.db", crate::VERSION)).is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     async fn admin_hash(password: Option<&str>) -> String {
         let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));
         std::fs::create_dir_all(&dir).unwrap();

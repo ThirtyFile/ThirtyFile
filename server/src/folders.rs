@@ -837,16 +837,30 @@ async fn apply(st: &AppState, drive: &Drive, ops: Vec<Op>) -> AppResult<()> {
     let owner = sqlx::query_as::<_, (i64,)>("SELECT owner_id FROM nodes WHERE id = ?").bind(&drive.root_id).fetch_one(&st.db).await?.0;
     let mut ops = ops.into_iter().peekable();
     while ops.peek().is_some() {
-        let _w = st.write_lock.lock().await;
-        let mut tx = crate::db::begin_write(&st.db).await?;
         let mut n = 0;
-        let mut unused = Vec::new();
-        for op in ops.by_ref().take(BATCH) {
-            unused.extend(apply_one(&mut tx, drive, owner, op).await?);
-            n += 1;
+        let mut removed = None;
+        {
+            let _w = st.write_lock.lock().await;
+            let mut tx = crate::db::begin_write(&st.db).await?;
+            let mut unused = Vec::new();
+            while n < BATCH
+                && let Some(op) = ops.next()
+            {
+                n += 1;
+                // An item gone from the folder goes with everything in it, which may be a lot: a batch per transaction
+                // of its own (the space's lock is held, so nothing else changes the space meanwhile)
+                if let Op::Remove { id } = op {
+                    removed = Some(id);
+                    break;
+                }
+                unused.extend(apply_one(&mut tx, drive, owner, op).await?);
+            }
+            tx.commit().await?;
+            tree::schedule_blob_removal(st, unused);
         }
-        tx.commit().await?;
-        tree::schedule_blob_removal(st, unused);
+        if let Some(id) = removed {
+            tree::changes::purge_now(st, &id).await?;
+        }
         if progress_map().lock().unwrap().contains_key(&drive.id) {
             set_progress(&drive.id, |p| p.done += n);
         }
@@ -926,13 +940,9 @@ async fn apply_one(conn: &mut SqliteConnection, drive: &Drive, owner: i64, op: O
             .execute(&mut *conn)
             .await?;
         }
-        Op::Remove { id } => {
-            // Grants, shares and favourites of the removed items go with them. Their content is in the folder, but
-            // earlier versions from before a file came into the folder may still be in the content store.
-            if tree::get_node(&mut *conn, &id).await?.is_some() {
-                return tree::purge_subtree(&mut *conn, &id).await;
-            }
-        }
+        // Removed a batch at a time by `apply` (tree/changes.rs): grants, shares and favourites of the removed items go
+        // with them, and so do earlier versions from before a file came into the folder, kept in the content store
+        Op::Remove { .. } => {}
     }
     Ok(Vec::new())
 }

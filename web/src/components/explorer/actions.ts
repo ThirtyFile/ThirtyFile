@@ -179,9 +179,11 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     try {
       // Only items in the trash can be deleted for good: put them there first
       await api.trash(ids);
-      await api.deleteForever(ids);
-      toast.success(t("Permanently deleted"));
+      const job = await api.deleteForever(ids);
       setSelected(new Set());
+      refreshContents();
+      await waitForJob(job);
+      toast.success(t("Permanently deleted"));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Operation failed"));
       reportShown("delete", e);

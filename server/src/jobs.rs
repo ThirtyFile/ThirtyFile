@@ -30,6 +30,33 @@ use crate::{
 /// How long a request waits for its job before answering with the job instead: long enough for ordinary changes to
 /// answer as before, short enough that the page can show the progress of a long one
 pub const WAIT: Duration = Duration::from_secs(2);
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: how long requests wait for their jobs
+    static TEST_WAIT: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+}
+
+/// How long a request waits for its job (`WAIT`; in tests long enough for a busy machine, unless `short_wait`)
+pub fn wait() -> Duration {
+    #[cfg(test)]
+    return TEST_WAIT.with(|w| w.get()).unwrap_or(Duration::from_secs(30));
+    #[cfg(not(test))]
+    WAIT
+}
+
+/// Tests: requests wait only briefly for their jobs until the guard is dropped
+#[cfg(test)]
+pub fn short_wait() -> impl Drop {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            TEST_WAIT.with(|w| w.set(None));
+        }
+    }
+    TEST_WAIT.with(|w| w.set(Some(Duration::from_millis(200))));
+    Reset
+}
 /// How long a finished job can still be looked up
 const KEEP_FINISHED_SECS: i64 = 3600;
 

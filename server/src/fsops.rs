@@ -28,7 +28,7 @@ use crate::{
     jobs::Tracker,
     logs,
     state::AppState,
-    tree::{self, BlobRef, Need, Node, StagedBlob},
+    tree::{self, BlobRef, Need, Node, StagedBlob, changes},
     util::{guess_mime, new_id, now, numbered_name, split_name},
     versions,
 };
@@ -144,9 +144,14 @@ struct Renamed {
 
 /// Scan locks of the folder spaces a change touches, held until it is done. They also keep the renames the change
 /// made on disk: unless `committed` is called, dropping them puts those back (still holding the locks), newest first.
+/// And they keep what the change left to finish after its transaction (tree/changes.rs): once it is committed, that is
+/// finished in the background, the locks held until it is done.
 pub struct SpaceLocks {
+    st: AppState,
     held: Vec<(String, OwnedMutexGuard<()>)>,
     renamed: std::sync::Mutex<Vec<Renamed>>,
+    unfinished: std::sync::Mutex<Vec<changes::Unfinished>>,
+    committed: std::sync::atomic::AtomicBool,
 }
 
 impl SpaceLocks {
@@ -162,14 +167,25 @@ impl SpaceLocks {
         self.renamed.lock().unwrap_or_else(|e| e.into_inner()).push(Renamed { now, was, made });
     }
 
-    /// The change is in the index: its renames stay
+    /// What the change leaves to finish after its transaction, if anything
+    pub fn later(&self, unfinished: Option<changes::Unfinished>) {
+        self.unfinished.lock().unwrap_or_else(|e| e.into_inner()).extend(unfinished);
+    }
+
+    /// The change is in the index: its renames stay, and what it left to finish is finished once the locks go
     pub fn committed(&self) {
         self.renamed.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.committed.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
 impl Drop for SpaceLocks {
     fn drop(&mut self) {
+        let unfinished = std::mem::take(self.unfinished.get_mut().unwrap_or_else(|e| e.into_inner()));
+        if *self.committed.get_mut() && !unfinished.is_empty() {
+            let held = std::mem::take(&mut self.held).into_iter().map(|(_, g)| g).collect();
+            changes::finish_later(&self.st, unfinished, held);
+        }
         let renamed = std::mem::take(self.renamed.get_mut().unwrap_or_else(|e| e.into_inner()));
         for r in renamed.into_iter().rev() {
             match rename_new(r.now.as_path(), r.was.as_path()) {
@@ -199,7 +215,7 @@ pub async fn lock(st: &AppState, user: &User, ids: &[&str]) -> AppResult<SpaceLo
         let guard = lock_space(&d).await;
         held.push((d, guard));
     }
-    Ok(SpaceLocks { held, renamed: Default::default() })
+    Ok(SpaceLocks { st: st.clone(), held, renamed: Default::default(), unfinished: Default::default(), committed: Default::default() })
 }
 
 pub async fn lock_space(drive_id: &str) -> OwnedMutexGuard<()> {
@@ -438,21 +454,6 @@ async fn record(conn: &mut SqliteConnection, id: &str, drive_id: &str, rel: &str
     Ok(())
 }
 
-/// An item and everything in it moved on disk from `old` to `new` (paths below the space's folder)
-async fn repath(conn: &mut SqliteConnection, drive_id: &str, old: &str, new: &str) -> AppResult<()> {
-    // A range rather than `substr`, so the index on (drive_id, fs_path) finds the items ('0' comes right after '/')
-    sqlx::query(
-        "UPDATE nodes SET fs_path = ?3 || substr(fs_path, length(?2) + 1)
-         WHERE drive_id = ?1 AND fs_path IS NOT NULL AND (fs_path = ?2 OR (fs_path >= ?2 || '/' AND fs_path < ?2 || '0'))",
-    )
-    .bind(drive_id)
-    .bind(old)
-    .bind(new)
-    .execute(conn)
-    .await?;
-    Ok(())
-}
-
 // ───────────── Changes within a space ─────────────
 
 /// Makes a folder on disk; one that was made on the server meanwhile is used as it is
@@ -470,7 +471,8 @@ pub async fn rename(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node
     let (from, to) = (abs(node)?, abs(dest)?.join(name).map_err(gone_or_disk_error)?);
     rename_new(from.as_path(), to.as_path()).map_err(disk_error)?;
     locks.note(to, from, None);
-    repath(conn, node.drive(), rel_of(node), &child_rel(rel_of(dest), name)).await
+    locks.later(changes::repath(conn, &node.id, node.drive(), rel_of(node), &child_rel(rel_of(dest), name)).await?);
+    Ok(())
 }
 
 /// Moves an item to the space's trash folder, where it can be restored from
@@ -490,7 +492,8 @@ pub async fn trash(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node,
             return Err(disk_error(e));
         }
     }
-    repath(conn, node.drive(), rel_of(node), &format!("{TRASH_DIR}/{trash_id}/{}", node.name)).await
+    locks.later(changes::repath(conn, &node.id, node.drive(), rel_of(node), &format!("{TRASH_DIR}/{trash_id}/{}", node.name)).await?);
+    Ok(())
 }
 
 /// Moves a trashed item back into `dest` as `name`
@@ -499,7 +502,8 @@ pub async fn restore(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Nod
     rename_new(from.as_path(), to.as_path()).map_err(disk_error)?;
     // Its emptied trash folder stays until `clean_trash` (should the change fail, the item goes back into it)
     locks.note(to, from, None);
-    repath(conn, node.drive(), rel_of(node), &child_rel(rel_of(dest), name)).await
+    locks.later(changes::repath(conn, &node.id, node.drive(), rel_of(node), &child_rel(rel_of(dest), name)).await?);
+    Ok(())
 }
 
 /// The folder holding a trashed item of a folder space, removed from disk when the item is deleted for good
