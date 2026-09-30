@@ -289,7 +289,6 @@ fn virtual_hosted_endpoint(endpoint: &str, bucket: &str) -> io::Result<String> {
     Ok(format!("{scheme}://{bucket}.{host}"))
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
