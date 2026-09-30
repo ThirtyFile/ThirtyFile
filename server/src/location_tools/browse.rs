@@ -62,8 +62,8 @@ pub struct SpaceRef {
 /// What uses a content
 #[derive(Debug, Serialize)]
 pub struct Usage {
-    /// used (by a file), version (an earlier version of a file), trash (a file in the trash), pending (waiting to
-    /// be deleted) or unused
+    /// used (by a file), version (an earlier version of a file), trash (a file in the trash), replica (a copy kept as a
+    /// replica of content kept elsewhere), pending (waiting to be deleted) or unused
     pub status: &'static str,
     pub space: Option<SpaceRef>,
     /// The file's path in its space; None in someone else's personal space
@@ -343,6 +343,16 @@ pub async fn usage_of(c: &mut SqliteConnection, me: i64, location: &str, hashes:
             .into_iter()
             .map(|r| r.0)
             .collect();
+    // Replicas kept here of content kept elsewhere (replicas/)
+    let replicas: HashSet<String> =
+        sqlx::query_as::<_, (String,)>("SELECT hash FROM replica_copies WHERE location_id = ?2 AND hash IN (SELECT value FROM json_each(?1))")
+            .bind(&list)
+            .bind(location)
+            .fetch_all(&mut *c)
+            .await?
+            .into_iter()
+            .map(|r| r.0)
+            .collect();
     // One file per content: one outside the trash first, then one the administrator may see; and how many use it
     let private = "EXISTS (SELECT 1 FROM drives d WHERE d.id = n.drive_id AND d.kind = 'personal' AND d.owner_id IS NOT ?2)";
     let files: Vec<(String, String, Option<String>, bool, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
@@ -394,6 +404,8 @@ pub async fn usage_of(c: &mut SqliteConnection, me: i64, location: &str, hashes:
                 (None, Some(v)) => ("version", Some(v.1.as_str()), v.2.as_deref()),
                 (None, None) => ("unused", None, None),
             }
+        } else if replicas.contains(hash) {
+            ("replica", None, None)
         } else if pending.contains(hash) {
             ("pending", None, None)
         } else {
@@ -404,7 +416,7 @@ pub async fn usage_of(c: &mut SqliteConnection, me: i64, location: &str, hashes:
         if let (Some(n), true) = (node, visible) {
             shown.push(n.to_string());
         }
-        let uses = if status == "unused" || status == "pending" { 0 } else { uses };
+        let uses = if matches!(status, "unused" | "pending" | "replica") { 0 } else { uses };
         chosen.insert(hash.as_str(), Chosen { status, node, drive, uses });
     }
     let paths = tree::paths_of(c, &shown).await?;

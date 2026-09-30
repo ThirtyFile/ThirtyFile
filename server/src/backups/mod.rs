@@ -20,11 +20,11 @@
 //! personal space.
 
 pub mod api;
-mod capture;
+pub(crate) mod capture;
 pub mod layout;
 pub mod policy;
 mod restore;
-mod runner;
+pub(crate) mod runner;
 mod tidy;
 
 #[cfg(test)]
@@ -35,7 +35,7 @@ mod tests;
 use serde::{Deserialize, Serialize};
 use sqlx::{SqliteConnection, SqlitePool};
 
-pub use runner::{Backups, spawn_runner};
+pub use runner::{Queue, spawn_runner};
 use runner::{ACTIVE, Job};
 
 use crate::{

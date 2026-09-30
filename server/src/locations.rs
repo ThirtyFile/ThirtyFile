@@ -952,7 +952,10 @@ async fn in_use(conn: &mut SqliteConnection, id: &str) -> AppResult<bool> {
     .bind(id)
     .fetch_one(&mut *conn)
     .await?;
-    Ok(n > 0 || crate::moves::location_busy(conn, id).await? || crate::backups::sets_on(conn, id).await? > 0)
+    Ok(n > 0
+        || crate::moves::location_busy(conn, id).await?
+        || crate::backups::sets_on(conn, id).await? > 0
+        || crate::replicas::location_used(conn, id).await? != (0, false))
 }
 
 /// The folder spaces of the location `id` follow its folder from `from` to `to`
@@ -1037,6 +1040,14 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
         } else {
             format!("This location holds {sets} copies. Delete them in Control panel › Backups first.")
         }));
+    }
+    // Replicas kept there, or a replica policy from or to it
+    let (copies, replicated) = crate::replicas::location_used(&mut tx, &id).await?;
+    if replicated {
+        return Err(AppError::bad_request("A replica policy copies from or to this location. Change or delete it in Control panel › Replicas first."));
+    }
+    if copies > 0 {
+        return Err(AppError::bad_request("This location holds replicas. Remove them in Control panel › Replicas first."));
     }
     if crate::backups::location_busy(&mut tx, &id).await? {
         return Err(AppError::bad_request("A copy is being made from or to this location. Wait until it finishes, or cancel it."));

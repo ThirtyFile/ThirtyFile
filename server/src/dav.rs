@@ -549,7 +549,7 @@ async fn proppatch(st: &AppState, user: &User, segs: &[String], body: Body) -> A
 
 async fn get(st: &AppState, user: &User, segs: &[String], headers: &HeaderMap) -> AppResult<Response> {
     match resolve(&mut *st.db.acquire().await?, user, segs).await?.ok_or_else(not_found)?.target {
-        Target::Node(node) if !node.is_folder() => files::serve_blob(st, headers, files::node_blob(&node)?, false).await,
+        Target::Node(node) if !node.is_folder() => files::serve_blob(st, headers, files::node_blob(st, &node).await?, false).await,
         _ => Ok((StatusCode::OK, [(header::CONTENT_TYPE, "text/plain; charset=utf-8")], "This is a WebDAV folder of ThirtyFile. Open it with a WebDAV client, or map it as a network drive.\n").into_response()),
     }
 }

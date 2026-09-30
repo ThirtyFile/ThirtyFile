@@ -170,7 +170,7 @@ pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Overvi
     .await?;
     for j in &mut jobs {
         j.failure_list = serde_json::from_str(&j.failures).unwrap_or_default();
-        if let Some((fd, bd, ft, bt, rate)) = runner::live(&st, &j.id) {
+        if let Some((fd, bd, ft, bt, rate)) = runner::live(&st.backups, &j.id) {
             (j.files_done, j.bytes_done, j.files_total, j.bytes_total, j.speed) = (fd, bd, ft, bt, Some(rate));
         }
         if j.kind == "restore" {

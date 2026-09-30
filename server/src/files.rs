@@ -78,6 +78,15 @@ impl Source {
         Ok(Source::Stored { hash: hash.to_string(), location: location.to_string() })
     }
 
+    /// Where to read a file's content from: as `of`, except that a folder space's file whose folder can't be opened
+    /// is read from a checked replica, when there is one (replicas/folders.rs)
+    pub async fn resolve(st: &AppState, n: &Node) -> AppResult<Source> {
+        match Source::of(n) {
+            Err(e) if n.in_folder_space() => crate::replicas::folders::fallback(st, n).await.ok_or(e),
+            found => found,
+        }
+    }
+
     /// The size and a version tag of the content as it is now. A stored content never changes; a file in a folder
     /// space may have changed since it was indexed, so it is looked at again
     pub async fn describe(&self, indexed_size: u64) -> AppResult<(u64, String)> {
@@ -97,10 +106,20 @@ impl Source {
     /// Reads the content in [start, start + len)
     pub async fn open(&self, st: &AppState, start: u64, len: u64) -> std::io::Result<crate::storage::BoxReader> {
         match self {
-            Source::Stored { hash, location } => match st.storage(location) {
-                Ok(s) => s.open(hash, start, len).await,
-                Err(e) => Err(std::io::Error::other(e.message)),
-            },
+            Source::Stored { hash, location } => {
+                let primary = match st.storage(location) {
+                    Ok(s) => s.open(hash, start, len).await,
+                    Err(e) => Err(std::io::Error::other(e.message)),
+                };
+                match primary {
+                    Ok(r) => Ok(r),
+                    // Its location can't be read: a checked replica of the same content, if there is one (replicas/)
+                    Err(e) => match crate::replicas::open_fallback(st, hash, location, start, len).await {
+                        Ok(r) => Ok(r),
+                        Err(_) => Err(e),
+                    },
+                }
+            }
             Source::File(path) => {
                 use tokio::io::AsyncSeekExt;
                 let f = path.clone();
@@ -210,11 +229,11 @@ pub async fn serve_blob(st: &AppState, headers: &HeaderMap, b: Blob<'_>, downloa
     Ok(res)
 }
 
-pub fn node_blob(n: &Node) -> AppResult<Blob<'_>> {
+pub async fn node_blob<'a>(st: &AppState, n: &'a Node) -> AppResult<Blob<'a>> {
     if n.is_folder() {
         return Err(AppError::bad_request("This isn't a file"));
     }
-    Ok(Blob { source: Source::of(n)?, size: n.size as u64, name: &n.name, mime: &n.mime })
+    Ok(Blob { source: Source::resolve(st, n).await?, size: n.size as u64, name: &n.name, mime: &n.mime })
 }
 
 #[derive(Deserialize)]
@@ -231,7 +250,7 @@ pub async fn content(
 ) -> AppResult<Response> {
     let node = tree::owned_node(&mut *st.db.acquire().await?, &user, &id).await?;
     let download = q.download == Some(1);
-    let mut res = serve_blob(&st, &headers, node_blob(&node)?, download).await?;
+    let mut res = serve_blob(&st, &headers, node_blob(&st, &node).await?, download).await?;
     // Opened or previewed in the browser: listed in Recent. Downloads and app passwords (sync tools, backups) aren't
     // opening, and recording happens after the answer so it never slows the file down
     if !download && user.session_id.is_some() {

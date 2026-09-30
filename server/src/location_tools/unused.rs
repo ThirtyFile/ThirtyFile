@@ -1,7 +1,7 @@
 //! Finding content in a location that nothing in ThirtyFile uses, and removing it once an administrator confirms.
 //!
-//! Content is unused when no file or version records it at this location (`blobs`), it isn't waiting to be deleted
-//! anyway (`pending_blob_deletes`), no upload is storing it right now, and it was written more than a day ago:
+//! Content is unused when no file or version records it at this location (`blobs`), it isn't a replica kept there
+//! (`replica_copies`), it isn't waiting to be deleted anyway (`pending_blob_deletes`), no upload is storing it right now, and it was written more than a day ago:
 //! uploads store their content before recording it. Removing re-checks each item right before deleting it, under the
 //! write lock (`tree::remove_unreferenced`), so content used again meanwhile stays.
 
@@ -174,7 +174,8 @@ pub async fn scan(st: &AppState, id: &str, s: &dyn Storage, cutoff: i64, seen: &
         let list = serde_json::to_string(&chunk.iter().map(|e| e.name.as_str()).collect::<Vec<_>>()).unwrap();
         let known: HashSet<String> = sqlx::query_as::<_, (String,)>(
             "SELECT hash FROM blobs WHERE location_id = ?2 AND hash IN (SELECT value FROM json_each(?1))
-             UNION SELECT hash FROM pending_blob_deletes WHERE location_id = ?2 AND hash IN (SELECT value FROM json_each(?1))",
+             UNION SELECT hash FROM pending_blob_deletes WHERE location_id = ?2 AND hash IN (SELECT value FROM json_each(?1))
+             UNION SELECT hash FROM replica_copies WHERE location_id = ?2 AND hash IN (SELECT value FROM json_each(?1))",
         )
         .bind(&list)
         .bind(id)

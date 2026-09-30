@@ -42,8 +42,8 @@ fn browser_thumbnailable(n: &Node) -> bool {
 /// keyed by its hash (the same picture wherever it is). A thumbnail a browser drew (`browser_thumbnailable`) is kept
 /// for the space only: people elsewhere with the same content never see one someone else uploaded. A folder space's
 /// file is keyed by its space, identity, size and time, so a changed file gets a new thumbnail.
-async fn thumb_key(n: &Node) -> AppResult<(Source, u64, String)> {
-    let source = Source::of(n)?;
+async fn thumb_key(st: &AppState, n: &Node) -> AppResult<(Source, u64, String)> {
+    let source = Source::resolve(st, n).await?;
     let (size, tag) = source.describe(n.size as u64).await?;
     let hash = match &source {
         Source::Stored { hash, .. } if !browser_thumbnailable(n) => hash.clone(),
@@ -71,7 +71,7 @@ pub async fn thumbnail_response(st: &AppState, headers: &HeaderMap, n: &Node) ->
     if !made_here && !browser_thumbnailable(n) {
         return Err(AppError::not_found("No thumbnail"));
     }
-    let (source, size, hash) = thumb_key(n).await?;
+    let (source, size, hash) = thumb_key(st, n).await?;
     if made_here && size > MAX_THUMB_SOURCE as u64 {
         return Err(AppError::not_found("No thumbnail"));
     }
@@ -157,7 +157,7 @@ pub async fn upload_thumbnail(State(st): State<AppState>, user: User, Path(id): 
     if body.len() > MAX_THUMB_UPLOAD {
         return Err(AppError::new(StatusCode::PAYLOAD_TOO_LARGE, "The thumbnail is too large"));
     }
-    let (_, _, hash) = thumb_key(&node).await?;
+    let (_, _, hash) = thumb_key(&st, &node).await?;
     let path = st.thumb_path(&hash);
     if tokio::fs::metadata(&path).await.is_ok_and(|m| m.len() > 0) {
         return Ok(StatusCode::NO_CONTENT);

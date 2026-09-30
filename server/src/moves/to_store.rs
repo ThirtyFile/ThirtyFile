@@ -332,11 +332,11 @@ async fn store(cx: &Ctx<'_>, dst: &Arc<dyn Storage>, hash: &str, tmp: &std::path
 }
 
 /// An item of a space: (id, parent id, name, kind)
-type Named = (String, Option<String>, String, String);
+pub(crate) type Named = (String, Option<String>, String, String);
 
 /// Names for the items of the space that are in the same folder with names differing only in letter case (a folder can
 /// hold "A.txt" and "a.txt", the content store can't): (node id, new name)
-fn case_apart(nodes: &[Named]) -> Vec<(String, String)> {
+pub(crate) fn case_apart(nodes: &[Named]) -> Vec<(String, String)> {
     let mut by_parent: HashMap<&str, Vec<&Named>> = HashMap::new();
     for n in nodes {
         by_parent.entry(n.1.as_deref().unwrap_or_default()).or_default().push(n);

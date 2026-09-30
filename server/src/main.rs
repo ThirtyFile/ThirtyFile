@@ -28,6 +28,7 @@ mod paths;
 mod personal;
 #[cfg(unix)]
 mod privileges;
+mod replicas;
 mod reset;
 mod secrets;
 mod sessions;
@@ -364,7 +365,8 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
         db,
         storages: std::sync::RwLock::new(storages),
         moves: Default::default(),
-        backups: Default::default(),
+        backups: crate::backups::Queue::backups(),
+        replicas: crate::backups::Queue::replicas(),
         data_dir: cfg.data.clone(),
         storage_dir: storage,
         space_folders: Some(space_folders),
@@ -414,6 +416,7 @@ async fn run(cfg: Config, storage: PathBuf) -> Result<(), Box<dyn std::error::Er
     usage::sample::spawn(state.clone());
     moves::spawn_runner(state.clone());
     backups::spawn_runner(state.clone());
+    replicas::spawn_runner(state.clone());
     personal::spawn_retry(state.clone());
     folders::spawn_scanner(state.clone());
     // Folder spaces on local disks report changes as they happen
@@ -817,6 +820,15 @@ fn api() -> Router<AppState> {
         .route("/admin/backups/snapshots/{id}/browse", get(backups::api::browse))
         .route("/admin/backups/snapshots/{id}/restore", post(backups::api::restore))
         .route("/admin/backups/snapshots/{id}/restore/preview", post(backups::api::restore_preview))
+        .route("/admin/replicas", get(replicas::api::list).post(replicas::api::create))
+        .route("/admin/replicas/purge", post(replicas::api::purge))
+        .route("/admin/replicas/jobs/{id}/pause", post(replicas::api::pause_job))
+        .route("/admin/replicas/jobs/{id}/resume", post(replicas::api::resume_job))
+        .route("/admin/replicas/jobs/{id}/cancel", post(replicas::api::cancel_job))
+        .route("/admin/replicas/{id}", patch(replicas::api::update).delete(replicas::api::delete))
+        .route("/admin/replicas/{id}/sync", post(replicas::api::sync))
+        .route("/admin/replicas/{id}/verify", post(replicas::api::verify))
+        .route("/admin/replicas/{id}/promote", get(replicas::api::promote_preview).post(replicas::api::promote))
         .route("/admin/storage", get(locations::list).post(locations::create))
         .route("/admin/storage/test", post(locations::test))
         .route("/admin/storage/{id}", patch(locations::update).delete(locations::delete))

@@ -286,6 +286,18 @@ async fn claim_for_deletion(st: &AppState, hash: &str, location: &str) -> Option
             return None;
         }
     }
+    // A replica ThirtyFile keeps there (replicas/): it goes only once its record went first
+    match crate::replicas::kept(&st.db, hash, location).await {
+        Ok(false) => {}
+        Ok(true) => {
+            let _ = forget_pending(st, hash, location).await;
+            return None;
+        }
+        Err(e) => {
+            tracing::warn!("Failed to check whether physical file {hash} is a replica: {e}");
+            return None;
+        }
+    }
     // Recorded by a snapshot that is being made and hasn't copied it yet (backups/): kept until it has, or has ended.
     // Looked at again in an hour.
     match crate::backups::pinned(&st.db, hash).await {
@@ -498,6 +510,10 @@ pub async fn commit_blob(conn: &mut SqliteConnection, staged: &StagedBlob) -> Ap
             Ok(uploaded.as_ref().filter(|u| *u != loc).map(|u| (staged.hash.clone(), u.clone())))
         }
         (None, Some(loc)) => {
+            // A location a replica took over from, not checked since: new content isn't kept there (replicas/)
+            if crate::replicas::fenced(conn, loc).await? {
+                return Err(AppError::conflict("Something changed at the same time. Try again."));
+            }
             add_blob_ref(conn, &staged.hash, staged.size, loc).await?;
             Ok(None)
         }

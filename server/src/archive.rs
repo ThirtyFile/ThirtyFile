@@ -401,7 +401,7 @@ fn extract_entry(archive: &std::path::Path, entry: &ReadEntry, tmp: PathBuf, pro
 
 async fn run_extract(st: AppState, user: User, progress: Tracker, zip: Node, parent_id: String) -> AppResult<Outcome> {
     // The archive is read in any order, so it is copied to a temporary file first (a folder space's file is read in place)
-    let source = Source::of(&zip)?;
+    let source = Source::resolve(&st, &zip).await?;
     // A folder space's file stays open meanwhile, so the path keeps leading to it
     let mut _open = None;
     let (archive, copied) = match &source {

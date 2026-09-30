@@ -13,6 +13,8 @@
 //!   within an hour count up the unread notification instead of adding one (and send no further email)
 //! - `backup` (administrators): a backup policy's snapshots fail, wait for a location that can't be reached, or are
 //!   overdue; and when it is fine again. Told once per trouble (backups/policy.rs)
+//! - `replica` (administrators): a replica policy doesn't keep its copies (a target not working, damaged copies, too
+//!   few targets, or behind for too long); and when it does again (replicas/policy.rs)
 //!
 //! Each person can turn each kind off, in the app and by email separately. Emails are sent in the person's interface
 //! language and time zone (the ones they last used the app with), after the change that caused them is saved.
@@ -35,7 +37,7 @@ use crate::{
     util::{format_bytes, now},
 };
 
-pub const KINDS: [&str; 7] = ["shared", "space_full", "access_expiring", "app_password", "sign_in_method", "link_upload", "backup"];
+pub const KINDS: [&str; 8] = ["shared", "space_full", "access_expiring", "app_password", "sign_in_method", "link_upload", "backup", "replica"];
 /// Files through one link within this long are told in one notification
 const LINK_UPLOAD_BATCH: i64 = 3600;
 /// A space is almost full from this share of its size (percent)…
@@ -484,6 +486,25 @@ pub fn render(n: &Notice, zh: bool, tz_offset: i64, site: &str, base_url: &str) 
                 body.push_str(&if zh { format!("\n最新的完整快照：{since}。\n") } else { format!("\nNewest complete snapshot: {since}.\n") });
             }
             body.push_str(if zh { "\n請到「控制台 › 備份」查看。\n" } else { "\nSee Control panel › Backups.\n" });
+            (subject, body)
+        }
+        ("replica", _) => {
+            let policy = d["name"].as_str().unwrap_or_default();
+            let error = d["error"].as_str().filter(|e| !e.is_empty());
+            let (current, wanted) = (d["current"].as_i64().unwrap_or_default(), d["wanted"].as_i64().unwrap_or_default());
+            let (subject, mut body) = match (d["state"].as_str() == Some("degraded"), zh) {
+                (true, false) => (
+                    format!("The replicas “{policy}” aren't all kept"),
+                    format!("“{policy}” keeps {current} of the {wanted} copies it should: a target can't be reached, failed, holds damaged copies or is behind.\n"),
+                ),
+                (true, true) => (format!("複本「{policy}」沒有全部保持"), format!("「{policy}」應保持 {wanted} 份複本，目前只有 {current} 份是最新的：有目標無法連線、失敗、有損毀的複本或落後。\n")),
+                (false, false) => (format!("The replicas “{policy}” are kept again"), format!("“{policy}” keeps its copies again.\n")),
+                (false, true) => (format!("複本「{policy}」恢復正常"), format!("「{policy}」又保持了它的複本。\n")),
+            };
+            if let Some(error) = error {
+                body.push_str(&format!("\n{error}\n"));
+            }
+            body.push_str(if zh { "\n請到「控制台 › 複本」查看。\n" } else { "\nSee Control panel › Replicas.\n" });
             (subject, body)
         }
         ("link_upload", _) => {
