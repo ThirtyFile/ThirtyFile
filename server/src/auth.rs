@@ -268,6 +268,9 @@ pub struct LoginReq {
     pub password: String,
 }
 
+/// Longest user name a sign-in is looked at with: twice the longest an account may have
+const MAX_SIGN_IN_NAME: usize = 64;
+
 /// Counts an attempt against `key` *before* the password is checked, so parallel requests can't all slip past the
 /// limit while the first one is still hashing. Returns false (nothing recorded) when the limit is already reached.
 /// A successful attempt is taken back with `attempt_succeeded`.
@@ -443,12 +446,20 @@ pub async fn login(
     let ip = client_ip(&st, addr, &headers);
     let username = req.username.trim();
     let limit_ip = limit_key_ip(&ip);
-    // Usernames are unique regardless of the case of A–Z only (`COLLATE NOCASE`), so the keys fold the same letters
-    let key = format!("u:{}|{limit_ip}", username.to_ascii_lowercase());
     let ip_key = format!("ip:{limit_ip}");
-    let account_key = format!("a:{}", username.to_ascii_lowercase());
     // Attempts during the lockout aren't logged individually (one "locked" entry was logged when the lockout began), so the log can't be flooded
     let too_many = AppError::new(axum::http::StatusCode::TOO_MANY_REQUESTS, "Too many failed sign-in attempts. Try again in 15 minutes.");
+    // No account has a name this long (`validate_username`): refused before the name becomes a key of the limits kept
+    // in memory, or an entry of the log, so long names can't fill either. It counts toward the address's limit.
+    if username.chars().count() > MAX_SIGN_IN_NAME {
+        if !begin_attempt(&st, &ip_key, IP_FAIL_LIMIT) {
+            return Err(too_many);
+        }
+        return Err(AppError::new(axum::http::StatusCode::UNAUTHORIZED, "Incorrect username or password"));
+    }
+    // Usernames are unique regardless of the case of A–Z only (`COLLATE NOCASE`), so the keys fold the same letters
+    let key = format!("u:{}|{limit_ip}", username.to_ascii_lowercase());
+    let account_key = format!("a:{}", username.to_ascii_lowercase());
     if !begin_attempt(&st, &key, FAIL_LIMIT) {
         return Err(too_many);
     }
@@ -703,6 +714,19 @@ mod tests {
 mod attempt_tests {
     use super::*;
     use crate::testutil;
+
+    #[tokio::test]
+    async fn a_user_name_longer_than_any_account_has_is_refused_before_it_is_remembered() {
+        let env = testutil::env().await;
+        let addr: std::net::SocketAddr = "203.0.113.20:5000".parse().unwrap();
+        let req = LoginReq { username: "x".repeat(100_000), password: testutil::wrong_password() };
+        let err = login(State(env.st.clone()), ConnectInfo(addr), HeaderMap::new(), Json(req)).await.map(|_| ()).unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::UNAUTHORIZED);
+        let longest = env.st.login_failures.lock().unwrap().keys().map(String::len).max().unwrap_or(0);
+        assert!(longest < 300, "a key of {longest} bytes was kept");
+        // It still counts toward the address's limit
+        assert!(env.st.login_failures.lock().unwrap().contains_key("ip:203.0.113.20"));
+    }
 
     #[tokio::test]
     async fn guessing_one_account_from_many_addresses_slows_down() {

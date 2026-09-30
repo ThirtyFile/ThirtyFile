@@ -60,29 +60,46 @@ pub async fn drive_quota(conn: &mut SqliteConnection, drive: &Drive) -> AppResul
 
 /// Checks that adding `extra` bytes to the space won't exceed its quota (including unfinished uploads).
 pub async fn check_quota(conn: &mut SqliteConnection, drive_id: &str, extra: i64) -> AppResult<()> {
+    check_quota_except(conn, drive_id, extra, None).await
+}
+
+/// `check_quota` for finishing an upload: its own reservation (`upload`) isn't counted twice
+pub async fn check_quota_except(conn: &mut SqliteConnection, drive_id: &str, extra: i64, upload: Option<&str>) -> AppResult<()> {
     if extra <= 0 {
         return Ok(());
     }
-    let Some(drive) = get_drive(conn, drive_id).await? else { return Ok(()) };
-    let quota = drive_quota(conn, &drive).await?;
-    if quota <= 0 {
-        return Ok(());
-    }
-    // Files already there plus uploads still in progress (they were admitted against the quota when they started)
-    // Only uploads that received data within the last day hold space: an abandoned one can't block a space for days
-    // (every request of an upload moves its expiry to UPLOAD_TTL from then)
-    let active_since = crate::util::now() + crate::upload::UPLOAD_TTL - 86400;
-    let (pending,): (i64,) =
-        sqlx::query_as("SELECT COALESCE(SUM(size), 0) FROM uploads WHERE drive_id = ? AND node_id IS NULL AND expires_at > ?")
-            .bind(drive_id)
-            .bind(active_since)
-            .fetch_one(conn)
-            .await?;
-    let used = drive.used_bytes + pending;
-    if used + extra > quota {
-        return Err(AppError::new(axum::http::StatusCode::PAYLOAD_TOO_LARGE, format!("Not enough storage space in \"{}\"", drive.name)).with_code("quota"));
+    if let Some((left, drive)) = room_left(conn, drive_id, upload).await?
+        && extra > left
+    {
+        return Err(quota_error(&drive));
     }
     Ok(())
+}
+
+/// What a space can still take (None without a size limit): its quota less the files there and the uploads still in
+/// progress (they were admitted against the quota when they started), except `upload`. Only uploads that received data
+/// within the last day hold space: an abandoned one can't block a space for days (data arriving moves an upload's
+/// expiry to UPLOAD_TTL from then).
+pub async fn room_left(conn: &mut SqliteConnection, drive_id: &str, upload: Option<&str>) -> AppResult<Option<(i64, Drive)>> {
+    let Some(drive) = get_drive(conn, drive_id).await? else { return Ok(None) };
+    let quota = drive_quota(conn, &drive).await?;
+    if quota <= 0 {
+        return Ok(None);
+    }
+    let active_since = crate::util::now() + crate::upload::UPLOAD_TTL - 86400;
+    let (pending,): (i64,) = sqlx::query_as(
+        "SELECT COALESCE(SUM(size), 0) FROM uploads WHERE drive_id = ? AND node_id IS NULL AND expires_at > ? AND id IS NOT ?",
+    )
+    .bind(drive_id)
+    .bind(active_since)
+    .bind(upload)
+    .fetch_one(conn)
+    .await?;
+    Ok(Some((quota - drive.used_bytes - pending, drive)))
+}
+
+pub fn quota_error(drive: &Drive) -> AppError {
+    AppError::new(axum::http::StatusCode::PAYLOAD_TOO_LARGE, format!("Not enough storage space in \"{}\"", drive.name)).with_code("quota")
 }
 
 #[cfg(test)]

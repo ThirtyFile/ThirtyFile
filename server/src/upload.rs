@@ -98,6 +98,10 @@ impl Uploader {
 /// Uploads through one share link that may be in progress at once: each one reserves its size in the space and a
 /// temporary file, so a visitor can't start any number of them
 pub const MAX_PENDING_PER_SHARE: i64 = 200;
+/// Bytes those uploads may hold together (their temporary files are in the data folder)
+pub const MAX_PENDING_BYTES_PER_SHARE: u64 = 20 * 1024 * 1024 * 1024;
+/// A day without progress ends an upload through a link (people's own uploads stay resumable for `UPLOAD_TTL`)
+const LINK_UPLOAD_IDLE: i64 = 86400;
 
 /// How long a finished upload is remembered, so a client that lost the last response learns the result
 const FINISHED_TTL: i64 = 24 * 3600;
@@ -199,12 +203,13 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
         }
         if let Some(s) = &up.share {
             check_in_share(&mut tx, s, &parent.id).await?;
-            let (pending,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM uploads WHERE share_id = ? AND node_id IS NULL AND expires_at > ?")
-                .bind(&s.id)
-                .bind(now())
-                .fetch_one(&mut *tx)
-                .await?;
-            if pending >= MAX_PENDING_PER_SHARE {
+            let (pending, bytes): (i64, i64) =
+                sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM uploads WHERE share_id = ? AND node_id IS NULL AND expires_at > ?")
+                    .bind(&s.id)
+                    .bind(now())
+                    .fetch_one(&mut *tx)
+                    .await?;
+            if pending >= MAX_PENDING_PER_SHARE || bytes as u64 + size > MAX_PENDING_BYTES_PER_SHARE {
                 return Err(AppError::new(StatusCode::TOO_MANY_REQUESTS, "Too many uploads at once through this link. Try again later."));
             }
         }
@@ -367,12 +372,8 @@ pub async fn patch_as(st: &AppState, up: &Uploader, id: &str, headers: &HeaderMa
         finished_headers(&st, up, res.headers_mut(), node_id).await?;
         return Ok(res);
     }
-    // The deadline moves when data starts arriving, so the hourly cleanup can't remove an upload that is being received
-    {
-        let _w = st.write_lock.lock().await;
-        sqlx::query("UPDATE uploads SET expires_at = ? WHERE id = ?").bind(now() + UPLOAD_TTL).bind(&id).execute(&st.db).await?;
-    }
-
+    // Only data arriving moves the deadline (below), so requests that send nothing can't keep space reserved. The
+    // hourly cleanup leaves an upload that is being received alone (`purge_expired`).
     let client_offset = header_u64(headers, "upload-offset").ok_or_else(|| AppError::bad_request("Missing Upload-Offset"))?;
     if client_offset != upload.offset as u64 {
         return Err(AppError::conflict("Upload-Offset mismatch"));
@@ -428,9 +429,13 @@ pub async fn patch_as(st: &AppState, up: &Uploader, id: &str, headers: &HeaderMa
     drop(file);
     {
         let _w = st.write_lock.lock().await;
-        // Progress extends the deadline: a large upload that keeps resuming isn't discarded after 7 days. The hash
-        // state is saved with the offset (the data is on disk by now), so a resumed upload continues from it.
-        sqlx::query("UPDATE uploads SET offset = ?1, expires_at = ?2, hash_state = ?3, hashed = CASE WHEN ?3 IS NULL THEN 0 ELSE ?1 END WHERE id = ?4")
+        // Progress extends the deadline: a large upload that keeps resuming isn't discarded after 7 days (a request
+        // that brought nothing doesn't). The hash state is saved with the offset (the data is on disk by now), so a
+        // resumed upload continues from it.
+        sqlx::query(
+            "UPDATE uploads SET offset = ?1, expires_at = CASE WHEN ?1 > offset THEN ?2 ELSE expires_at END, hash_state = ?3,
+             hashed = CASE WHEN ?3 IS NULL THEN 0 ELSE ?1 END WHERE id = ?4",
+        )
             .bind(offset as i64)
             .bind(now() + UPLOAD_TTL)
             .bind(hasher.as_ref().map(|h| h.serialize().to_vec()))
@@ -643,7 +648,11 @@ async fn finalize_in_folder(st: &AppState, up: &Uploader, upload: &Upload, path:
         }
         let folder_id = tree::ensure_folders(&mut tx, upload.owner_id, &target.id, &upload.rel_path, &upload.batch).await?;
         let folder = tree::get_node(&mut tx, &folder_id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
-        let (id, replaced) = match replaced_file(&mut tx, user, upload, &folder.id).await? {
+        let existing = replaced_file(&mut tx, user, upload, &folder.id).await?;
+        // Checked again now, as for the content store (`commit_upload`)
+        let grows = size as i64 - existing.as_ref().map_or(0, |r| r.size);
+        tree::check_quota_except(&mut tx, folder.drive(), grows, Some(&upload.id)).await?;
+        let (id, replaced) = match existing {
             Some(existing) => {
                 let removed = crate::fsops::replace_file(&mut tx, crate::versions::Policy::of(st), &staged, &existing, user.id).await?;
                 (existing.id.clone(), Some((existing, removed)))
@@ -716,16 +725,16 @@ async fn commit_upload(
     if parent.in_folder_space() || parent.space_read_only {
         return Err(AppError::conflict("Something changed at the same time. Try again."));
     }
-    // It was admitted against the quota of the space it started in: a folder moved to another space meanwhile must
-    // have room there too
-    if upload.drive_id.as_deref() != Some(parent.drive()) {
-        tree::check_quota(&mut tx, parent.drive(), size as i64).await?;
-    }
     let folder = tree::ensure_folders(&mut tx, upload.owner_id, &parent.id, &upload.rel_path, &upload.batch).await?;
+    let replaced = replaced_file(&mut tx, user, upload, &folder).await?;
+    // Checked again now: an upload idle for a day stopped holding its space (it may be taken by now), and a folder
+    // moved to another space meanwhile must have room there. Its own reservation isn't counted twice.
+    let grows = size as i64 - replaced.as_ref().map_or(0, |r| r.size);
+    tree::check_quota_except(&mut tx, parent.drive(), grows, Some(&upload.id)).await?;
     let ts = now();
-    let (id, extra, removed) = match replaced_file(&mut tx, user, upload, &folder).await? {
+    let (id, extra, removed) = match replaced {
         Some(existing) => {
-            // Admitted against the quota for its full size when it started; only the difference counts now
+            // Only the difference counts
             let extra = tree::commit_blob(&mut tx, staged).await?;
             let removed = tree::set_content(&mut tx, crate::versions::Policy::of(st), &existing, hash, size as i64, user.id).await?;
             logs::record_activity(&mut tx, user, Some(&existing), "upload", "Replaced the existing file").await?;
@@ -817,11 +826,24 @@ pub async fn clean_tmp(st: &AppState) -> AppResult<usize> {
     Ok(removed)
 }
 
-/// Cleans up expired unfinished uploads
+/// Cleans up expired unfinished uploads, and uploads through a link without progress for a day. One that is receiving
+/// data right now is left alone (its deadline moves when the data is in).
 pub async fn purge_expired(st: &AppState) -> AppResult<usize> {
     let ids: Vec<(String,)> = {
         let _w = st.write_lock.lock().await;
-        let ids = sqlx::query_as("DELETE FROM uploads WHERE expires_at < ? RETURNING id").bind(now()).fetch_all(&st.db).await?;
+        let ts = now();
+        let expired: Vec<(String,)> = sqlx::query_as(
+            "SELECT id FROM uploads WHERE expires_at < ?1 OR (share_id IS NOT NULL AND node_id IS NULL AND expires_at < ?1 + ?2 - ?3)",
+        )
+        .bind(ts)
+        .bind(UPLOAD_TTL)
+        .bind(LINK_UPLOAD_IDLE)
+        .fetch_all(&st.db)
+        .await?;
+        let active = st.active_uploads.lock().unwrap().clone();
+        let ids: Vec<(String,)> = expired.into_iter().filter(|(id,)| !active.contains(id)).collect();
+        let list = serde_json::to_string(&ids.iter().map(|(id,)| id).collect::<Vec<_>>()).unwrap();
+        sqlx::query("DELETE FROM uploads WHERE id IN (SELECT value FROM json_each(?))").bind(list).execute(&st.db).await?;
         // Batches are no longer needed once their uploads can't be finished any more
         sqlx::query("DELETE FROM upload_batch_folders WHERE created_at < ?").bind(now() - UPLOAD_TTL).execute(&st.db).await?;
         ids

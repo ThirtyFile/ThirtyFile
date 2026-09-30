@@ -214,3 +214,53 @@ async fn files_of_an_uploaded_folder_go_into_folders_already_there() {
     assert_ne!(parent.id, old);
     assert!(parent.trashed_at.is_none());
 }
+
+/// Moves an upload's last progress back by `secs`
+async fn idle_for(env: &testutil::TestEnv, id: &str, secs: i64) {
+    sqlx::query("UPDATE uploads SET expires_at = ? WHERE id = ?").bind(now() + UPLOAD_TTL - secs).bind(id).execute(&env.st.db).await.unwrap();
+}
+
+async fn expires(env: &testutil::TestEnv, id: &str) -> i64 {
+    let (t,): (i64,) = sqlx::query_as("SELECT expires_at FROM uploads WHERE id = ?").bind(id).fetch_one(&env.st.db).await.unwrap();
+    t
+}
+
+#[tokio::test]
+async fn requests_that_send_nothing_dont_keep_space_reserved() {
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    sqlx::query("UPDATE users SET quota_bytes = 1000 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+    let id = start(&env, &amy, "root", "", "big.bin", 900).await.unwrap();
+    idle_for(&env, &id, 2 * 86400).await;
+    let before = expires(&env, &id).await;
+    // A wrong offset, or the right one with nothing after it: the upload still has made no progress for two days
+    assert_eq!(send(&env, &amy, &id, 5, b"").await.unwrap_err().status, StatusCode::CONFLICT);
+    assert!(send(&env, &amy, &id, 0, b"").await.is_ok());
+    assert_eq!(expires(&env, &id).await, before);
+    let drive = env.drive_of(amy.root()).await;
+    tree::check_quota(&mut env.st.db.acquire().await.unwrap(), &drive, 500).await.unwrap();
+    // Data arriving counts as progress again
+    assert!(send(&env, &amy, &id, 0, b"abc").await.is_ok());
+    assert!(expires(&env, &id).await > before);
+}
+
+static EIGHT_HUNDRED: [u8; 800] = [b'a'; 800];
+
+#[tokio::test]
+async fn an_upload_left_idle_is_checked_against_the_space_again_when_it_finishes() {
+    for folders in [false, true] {
+        let env = if folders { testutil::folders_env().await } else { testutil::env().await };
+        let amy = env.user("amy", true).await;
+        sqlx::query("UPDATE users SET quota_bytes = 1000 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+        let first = start(&env, &amy, "root", "", "first.bin", 800).await.unwrap();
+        assert!(send(&env, &amy, &first, 0, &EIGHT_HUNDRED[..10]).await.is_ok());
+        // Idle for two days, it no longer holds space: another file takes it
+        idle_for(&env, &first, 2 * 86400).await;
+        let second = start(&env, &amy, "root", "", "second.bin", 800).await.unwrap();
+        assert!(send(&env, &amy, &second, 0, &EIGHT_HUNDRED).await.is_ok());
+        // Finishing the first one now would go past the space's size
+        let err = send(&env, &amy, &first, 10, &EIGHT_HUNDRED[10..]).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::PAYLOAD_TOO_LARGE, "folders: {folders}");
+        assert_eq!(used(&env, amy.root()).await, 800, "folders: {folders}");
+    }
+}

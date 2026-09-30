@@ -170,6 +170,7 @@ pub async fn check(st: &AppState) -> AppResult<usize> {
         sqlx::query("DELETE FROM notifications WHERE created_at < ?").bind(ts - KEEP).execute(&mut *tx).await?;
         // The access these were about has ended by now
         sqlx::query("DELETE FROM notification_marks WHERE key LIKE 'access_expiring:%' AND at < ?").bind(ts - 30 * 86400).execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM notification_marks WHERE key LIKE 'link_upload:%' AND at < ?").bind(ts - LINK_UPLOAD_BATCH).execute(&mut *tx).await?;
         tx.commit().await?;
     }
     send_later(st, emails);
@@ -313,7 +314,25 @@ pub async fn link_upload(st: &AppState, owner: i64, share_id: &str, file: &crate
                 node_id: Some(folder_id),
                 data: json!({ "share": share_id, "name": name, "item": "folder", "file": file.name, "count": 1 }),
             };
-            add(&mut tx, &[owner], &notice).await?
+            let mut emails = add(&mut tx, &[owner], &notice).await?;
+            // By email, too, the files of an hour are told once: also when the notice isn't wanted in the app (where
+            // a notification of the hour counts them up), or was read meanwhile
+            let key = format!("link_upload:{share_id}");
+            let (recent,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM notification_marks WHERE key = ? AND at > ?)")
+                .bind(&key)
+                .bind(ts - LINK_UPLOAD_BATCH)
+                .fetch_one(&mut *tx)
+                .await?;
+            if recent {
+                emails.clear();
+            } else if !emails.is_empty() {
+                sqlx::query("INSERT INTO notification_marks (key, at) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET at = ?2")
+                    .bind(&key)
+                    .bind(ts)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            emails
         };
         tx.commit().await?;
         emails
@@ -322,8 +341,13 @@ pub async fn link_upload(st: &AppState, owner: i64, share_id: &str, file: &crate
     Ok(())
 }
 
+/// Emails of one kind an address gets within the sign-in limits' window (15 minutes): access taken away and given
+/// again, over and over, can't turn into a stream of emails
+const MAX_EMAILS_PER_KIND: usize = 5;
+
 /// Sends the emails in the background, one after another; nothing happens when no email server is set up
-pub fn send_later(st: &AppState, emails: Vec<Outgoing>) {
+pub fn send_later(st: &AppState, mut emails: Vec<Outgoing>) {
+    emails.retain(|e| crate::auth::begin_attempt(st, &format!("mail:{}:{}", e.notice.kind, e.to.to_lowercase()), MAX_EMAILS_PER_KIND));
     if emails.is_empty() {
         return;
     }
@@ -839,6 +863,41 @@ mod tests {
         assert!(rx.try_recv().is_err(), "cat turned emails off");
         let s = get_settings(State(env.st.clone()), ben.clone()).await.unwrap().0;
         assert_eq!((s["email"].as_str(), s["email_ready"].as_bool()), (Some("ben@example.com"), Some(true)));
+    }
+
+    #[tokio::test]
+    async fn repeated_notices_send_a_few_emails_not_one_each() {
+        let env = testutil::env().await;
+        let (port, mut rx) = crate::mail::tests::fake_server(true).await;
+        let mut c = env.st.db.acquire().await.unwrap();
+        crate::mail::store(&mut c, &crate::mail::tests::settings(port)).await.unwrap();
+        drop(c);
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let prefs = json!({ "email": "ben@example.com", "password": testutil::password(), "kinds": { "shared": { "in_app": true, "email": true } } });
+        let _ = update_settings(State(env.st.clone()), ben.clone(), Json(serde_json::from_value(prefs).unwrap())).await.unwrap();
+        let prefs = json!({ "email": "amy@example.com", "password": testutil::password(), "kinds": { "link_upload": { "in_app": false, "email": true } } });
+        let _ = update_settings(State(env.st.clone()), amy.clone(), Json(serde_json::from_value(prefs).unwrap())).await.unwrap();
+
+        // Access taken away and given again, over and over
+        let folder = env.folder(&amy, amy.root(), "Plans").await;
+        for _ in 0..20 {
+            share(&env, &amy, &folder, json!({ "principal_type": "user", "principal_id": ben.id, "role": "viewer" })).await;
+            env.revoke(&folder, &ben).await;
+        }
+        // Files through a link whose notices are only wanted by email: told once for the hour, like in the app
+        let inbox = env.folder(&amy, amy.root(), "Inbox").await;
+        let file = crate::tree::get_node(&mut env.st.db.acquire().await.unwrap(), &env.file(&amy, &inbox, "a.txt").await).await.unwrap().unwrap();
+        for _ in 0..10 {
+            link_upload(&env.st, amy.id, "link1", &file).await.unwrap();
+        }
+        let mut to = std::collections::HashMap::<String, usize>::new();
+        while let Ok(Some((addr, _))) = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await {
+            *to.entry(addr).or_default() += 1;
+        }
+        assert_eq!(to.get("amy@example.com"), Some(&1), "{to:?}");
+        let ben_got = to.get("ben@example.com").copied().unwrap_or(0);
+        assert!((1..=MAX_EMAILS_PER_KIND).contains(&ben_got), "{to:?}");
     }
 
     #[test]

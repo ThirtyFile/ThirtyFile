@@ -42,6 +42,9 @@ use crate::{
 pub const MAX_EXTRACT_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 /// Most files and folders an archive may hold
 pub const MAX_EXTRACT_ENTRIES: u64 = 20_000;
+/// Most folders a path in an archive may go down, like an uploaded folder (each level is created while every other
+/// change waits)
+pub const MAX_EXTRACT_DEPTH: usize = 64;
 /// Most an entry (or the whole archive) may grow when extracted. Ordinary files compress to a tenth or so, a file of
 /// zeros to a thousandth: that is how a small "ZIP bomb" fills a disk. Small entries are exempt
 pub const MAX_RATIO: u64 = 250;
@@ -240,6 +243,8 @@ async fn store_new_file(st: &AppState, user: &User, folder_id: &str, name: &str,
     let folder = tree::folder_for(&mut *st.db.acquire().await?, user, folder_id, Need::Write).await?;
     let size = tokio::fs::metadata(tmp).await?.len();
     if folder.in_folder_space() {
+        // Checked first, so a file that can't fit isn't copied into the folder at all
+        tree::check_quota(&mut *st.db.acquire().await?, folder.drive(), size as i64).await?;
         // A folder space: the file goes into the folder on the disk under a name scans ignore, then renamed into place
         let staged = crate::fsops::stage_upload(&folder, tmp, size).await?;
         let _space = crate::fsops::lock_space(folder.drive()).await;
@@ -247,6 +252,7 @@ async fn store_new_file(st: &AppState, user: &User, folder_id: &str, name: &str,
         let result = async {
             let mut tx = crate::db::begin_write(&st.db).await?;
             let folder = tree::folder_for(&mut tx, user, folder_id, Need::Write).await?;
+            tree::check_quota(&mut tx, folder.drive(), size as i64).await?;
             let name = crate::fsops::free_name(&mut tx, &folder, name, false).await?;
             let id = crate::fsops::place_file(&mut tx, &staged, user.id, &folder, &name).await?;
             tree::touch(&mut tx, &folder.id).await?;
@@ -357,6 +363,10 @@ struct Planned {
 fn plan_entries(entries: Vec<ReadEntry>, archive_size: u64) -> AppResult<(Vec<Planned>, u64)> {
     let mut out = Vec::with_capacity(entries.len());
     let mut total = 0u64;
+    // The folders the paths imply, each once (by its parent's number and its name), counted with the files: an entry
+    // "a/b/c/x" is four items, not one
+    let mut folders: HashMap<(usize, String), usize> = HashMap::new();
+    let mut files = 0u64;
     for entry in entries {
         let path = entry.name.replace('\\', "/");
         let shown = path.trim_end_matches('/').to_string();
@@ -369,8 +379,24 @@ fn plan_entries(entries: Vec<ReadEntry>, archive_size: u64) -> AppResult<(Vec<Pl
             }
             let name = validate_name(part).map_err(|e| AppError::bad_request(format!("\"{shown}\" in the ZIP file can't be extracted: {}", e.message)))?;
             parts.push(name);
+            // A file below the deepest folder allowed is one part more
+            if parts.len() > MAX_EXTRACT_DEPTH + 1 {
+                return Err(too_deep());
+            }
         }
         let Some(last) = parts.pop() else { continue };
+        if parts.len() + usize::from(entry.is_dir) > MAX_EXTRACT_DEPTH {
+            return Err(too_deep());
+        }
+        let mut parent = 0;
+        for name in parts.iter().chain(entry.is_dir.then_some(&last)) {
+            let next = folders.len() + 1;
+            parent = *folders.entry((parent, name.clone())).or_insert(next);
+        }
+        files += u64::from(!entry.is_dir);
+        if folders.len() as u64 + files > MAX_EXTRACT_ENTRIES {
+            return Err(AppError::bad_request(format!("This ZIP file holds more than {MAX_EXTRACT_ENTRIES} items, more than can be extracted at once")));
+        }
         if entry.is_dir {
             parts.push(last);
             out.push(Planned { dirs: parts, file: None, entry });
@@ -396,6 +422,10 @@ fn plan_entries(entries: Vec<ReadEntry>, archive_size: u64) -> AppResult<(Vec<Pl
         return Err(too_compressed());
     }
     Ok((out, total))
+}
+
+fn too_deep() -> AppError {
+    AppError::bad_request(format!("A path in this ZIP file goes more than {MAX_EXTRACT_DEPTH} folders deep, more than can be extracted"))
 }
 
 fn too_compressed() -> AppError {
@@ -758,6 +788,12 @@ mod tests {
         let many: Vec<(&'static str, Vec<u8>)> =
             (0..=MAX_EXTRACT_ENTRIES).map(|i| (&*Box::leak(format!("d{i}/").into_boxed_str()), Vec::new())).collect();
         assert!(fails(many, false, "many.zip").await.contains("more than 20000 items"));
+        // Folders nested too deep, and more folders than items once the folders each path implies are counted
+        let deep: &'static str = Box::leak(format!("{}x.txt", "a/".repeat(MAX_EXTRACT_DEPTH + 1)).into_boxed_str());
+        assert!(fails(vec![(deep, b"x".to_vec())], false, "deep.zip").await.contains("folders deep"));
+        let implied: Vec<(&'static str, Vec<u8>)> =
+            (0..400).map(|i| (&*Box::leak(format!("e{i}/{}x.txt", "f/".repeat(59)).into_boxed_str()), Vec::new())).collect();
+        assert!(fails(implied, false, "implied.zip").await.contains("more than 20000 items"));
         // Not a ZIP at all
         let junk = env.stored_file(&amy, amy.root(), "junk.zip", b"this is not a zip").await;
         assert!(extract_now(&env, &amy, &junk).await.unwrap().error.unwrap().contains("damaged"));
@@ -776,10 +812,25 @@ mod tests {
 
         // Nothing was created by any of them, and no temporary files are left
         let names: Vec<String> = listing(&env, amy.root()).await.into_iter().map(|(n, _, _)| n).collect();
-        assert_eq!(names.len(), before + 10, "{names:?}");
+        assert_eq!(names.len(), before + 12, "{names:?}");
         assert!(names.iter().all(|n| n.ends_with(".zip")));
         let left: Vec<_> = std::fs::read_dir(env.st.tmp_dir()).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name()).collect();
         assert!(left.iter().all(|n| !n.to_string_lossy().starts_with("unzip-")), "{left:?}");
+    }
+
+    #[tokio::test]
+    async fn a_zip_made_in_a_folder_space_must_fit_in_it() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let space = env.folder_space("Scans").await;
+        testutil::write_old(&space.dir.join("page.txt"), crate::util::new_id().repeat(40).as_bytes());
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (page, size) = env.node_at(&space.drive, "page.txt").await.unwrap();
+        sqlx::query("UPDATE drives SET quota_bytes = ? WHERE id = ?").bind(size + 10).bind(&space.drive).execute(&env.st.db).await.unwrap();
+        let job = compress_now(&env, &admin, &[&page], &space.root).await.unwrap();
+        assert!(job.error.as_deref().unwrap_or_default().starts_with("Not enough storage space"), "{job:?}");
+        assert!(!space.dir.join("page.zip").exists());
+        assert!(env.node_at(&space.drive, "page.zip").await.is_none());
     }
 
     #[tokio::test]

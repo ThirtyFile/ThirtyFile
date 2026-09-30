@@ -1728,6 +1728,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn uploads_through_a_link_are_limited_in_size_and_dropped_after_a_day_without_progress() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let inbox = env.folder(&amy, amy.root(), "Inbox").await;
+        let Json(info) = create(State(env.st.clone()), amy.clone(), Json(folder_link(&inbox, true))).await.unwrap();
+        // Unfinished uploads through the link already take all it may hold
+        let pending = |id: &str, size: u64, idle: i64, share: Option<&str>| {
+            sqlx::query("INSERT INTO uploads (id, owner_id, parent_id, name, size, created_at, expires_at, share_id) VALUES (?, ?, ?, 'x', ?, ?, ?, ?)")
+                .bind(id.to_string())
+                .bind(amy.id)
+                .bind(inbox.clone())
+                .bind(size as i64)
+                .bind(now())
+                .bind(now() + upload::UPLOAD_TTL - idle)
+                .bind(share.map(str::to_string))
+                .execute(&env.st.db)
+        };
+        pending("big", upload::MAX_PENDING_BYTES_PER_SHARE - 10, 0, Some(&info.id)).await.unwrap();
+        assert_eq!(start_upload(&env, &info.id, None, "y.pdf", 100, None).await.unwrap_err().status, StatusCode::TOO_MANY_REQUESTS);
+        assert!(start_upload(&env, &info.id, None, "y.pdf", 5, None).await.is_ok());
+        // A day without progress ends an upload through a link; the person's own uploads stay for the week
+        pending("idle-link", 10, 2 * 86400, Some(&info.id)).await.unwrap();
+        pending("idle-own", 10, 2 * 86400, None).await.unwrap();
+        upload::purge_expired(&env.st).await.unwrap();
+        let left: Vec<(String,)> = sqlx::query_as("SELECT id FROM uploads WHERE id LIKE 'idle-%'").fetch_all(&env.st.db).await.unwrap();
+        assert_eq!(left, vec![("idle-own".to_string(),)]);
+    }
+
+    #[tokio::test]
     async fn a_preview_only_link_serves_previews_but_no_downloads() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;

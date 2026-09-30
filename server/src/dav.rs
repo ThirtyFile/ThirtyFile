@@ -706,14 +706,19 @@ async fn put(st: &AppState, user: &User, segs: &[String], headers: &HeaderMap, b
             return Err(precondition("The file already exists"));
         }
     }
+    let replaced = existing.as_ref().map_or(0, |n| n.size);
+    // Without a stated length (a body sent in chunks), receiving stops as soon as more arrived than the space can take
+    let mut room = None;
     if let Some(len) = headers.get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<u64>().ok()) {
         check_size(st, len)?;
-        tree::check_quota(&mut c, parent.drive(), len as i64 - existing.as_ref().map_or(0, |n| n.size)).await?;
+        tree::check_quota(&mut c, parent.drive(), len as i64 - replaced).await?;
+    } else if let Some((left, drive)) = tree::room_left(&mut c, parent.drive(), None).await? {
+        room = Some((u64::try_from(left + replaced).unwrap_or(0), drive));
     }
     drop(c);
     let tmp = st.tmp_dir().join(format!("dav-{}", new_id()));
     // Content for the content store is hashed as it arrives, so storing it doesn't read the file again
-    let (size, hash) = match receive(st, body, &tmp, !parent.in_folder_space()).await {
+    let (size, hash) = match receive(st, body, &tmp, !parent.in_folder_space(), room).await {
         Ok(received) => received,
         Err(e) => {
             let _ = tokio::fs::remove_file(&tmp).await;
@@ -725,8 +730,9 @@ async fn put(st: &AppState, user: &User, segs: &[String], headers: &HeaderMap, b
     Ok(if created { StatusCode::CREATED } else { StatusCode::NO_CONTENT }.into_response())
 }
 
-/// Writes the body to a file, within the upload size limit; returns its size, and with `hash` its SHA-256
-async fn receive(st: &AppState, body: Body, path: &Path, hash: bool) -> AppResult<(u64, Option<String>)> {
+/// Writes the body to a file, within the upload size limit and the `room` the space has left; returns its size, and
+/// with `hash` its SHA-256
+async fn receive(st: &AppState, body: Body, path: &Path, hash: bool, room: Option<(u64, tree::Drive)>) -> AppResult<(u64, Option<String>)> {
     use sha2::Digest;
     let mut file = tokio::fs::File::create(path).await?;
     let mut stream = body.into_data_stream();
@@ -736,6 +742,11 @@ async fn receive(st: &AppState, body: Body, path: &Path, hash: bool) -> AppResul
         let chunk = chunk.map_err(|_| AppError::bad_request("Connection interrupted"))?;
         size += chunk.len() as u64;
         check_size(st, size)?;
+        if let Some((left, drive)) = &room
+            && size > *left
+        {
+            return Err(tree::quota_error(drive));
+        }
         file.write_all(&chunk).await?;
         if let Some(h) = &mut hasher {
             h.update(&chunk);
@@ -1092,6 +1103,27 @@ mod tests {
         sqlx::query("UPDATE users SET quota_bytes = 10 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
         assert_eq!(dav.send("PUT", "/dav/My%20files/big.txt", &[], "0123456789").await.status, StatusCode::PAYLOAD_TOO_LARGE);
         assert_eq!(dav.send("PUT", "/dav/My%20files/small.txt", &[], "012").await.status, StatusCode::CREATED);
+    }
+
+    #[tokio::test]
+    async fn a_file_sent_without_its_length_stops_where_the_space_ends() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let dav = Client::new(&env, &amy, "write").await;
+        sqlx::query("UPDATE users SET quota_bytes = 1000000 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+        // A body that never ends, sent in chunks (no Content-Length)
+        let endless = futures_util::stream::repeat_with(|| Ok::<_, std::io::Error>(axum::body::Bytes::from_static(&[7u8; 65536])));
+        let req = axum::http::Request::builder()
+            .method("PUT")
+            .uri("/dav/My%20files/endless.bin")
+            .header(header::AUTHORIZATION, &dav.auth)
+            .extension(ConnectInfo(std::net::SocketAddr::from(([10, 0, 0, 9], 5000))))
+            .body(Body::from_stream(endless))
+            .unwrap();
+        let res = tokio::time::timeout(std::time::Duration::from_secs(30), dav.app.clone().oneshot(req)).await.expect("the server kept receiving");
+        assert_eq!(res.unwrap().status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let left: Vec<_> = std::fs::read_dir(env.st.tmp_dir()).unwrap().flatten().collect();
+        assert!(left.is_empty(), "{left:?}");
     }
 
     #[tokio::test]

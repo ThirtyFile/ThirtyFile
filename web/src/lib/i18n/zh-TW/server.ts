@@ -950,6 +950,7 @@ export default {
   "This ZIP file would grow far more than ordinary files do when extracted, so it isn't extracted": "這個 ZIP 檔案解壓縮後會比一般檔案膨脹得多，因此不予解壓縮",
   "This ZIP file is damaged and can't be extracted": "這個 ZIP 檔案已損毀，無法解壓縮",
   "This ZIP file holds more than {n} items, more than can be extracted at once": "這個 ZIP 檔案包含超過 {n} 個項目，超出一次能解壓縮的數量",
+  "A path in this ZIP file goes more than {n} folders deep, more than can be extracted": "這個 ZIP 檔案中有路徑超過 {n} 層資料夾，無法解壓縮",
   // Notifications and the email server (notify.rs, mail.rs)
   "Enter a valid email address": "請輸入有效的電子郵件地址",
   "Unknown kind of notification": "未知的通知類型",
