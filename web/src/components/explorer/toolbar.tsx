@@ -42,7 +42,8 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ColumnChoices, listColumns, type ViewMode } from "@/components/FileList";
+import { ColumnChoices, listColumns } from "@/components/fileList/columns";
+import type { ViewMode } from "@/components/fileList/layout";
 import { ToolButton, ToolSeparator } from "@/components/Frame";
 import { openShortcuts } from "@/components/ShortcutsDialog";
 import { shortcut } from "@/lib/keys";
