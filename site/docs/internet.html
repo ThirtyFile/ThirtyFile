@@ -69,6 +69,7 @@ server {
         <pre><code>services:
   thirtyfile:
     image: ghcr.io/thirtyfile/thirtyfile:latest
+    container_name: thirtyfile
     restart: unless-stopped
     volumes:
       - ./data:/data
@@ -76,6 +77,10 @@ server {
     environment:
       THIRTYFILE_SECURE_COOKIE: "true"
       THIRTYFILE_TRUST_PROXY: "true"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_READ_SEARCH]
+    security_opt: ["no-new-privileges:true"]
 
   caddy:
     image: caddy:2
@@ -86,6 +91,7 @@ server {
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./caddy-data:/data</code></pre>
+        <p><code>container_name</code> keeps the name the commands in the other guides use (<code>docker exec thirtyfile …</code>, <code>docker logs thirtyfile</code>), and the last four lines of the service run ThirtyFile with as few privileges as it needs, as the <code>compose.yaml</code> of each release does. The Traefik example below has them too.</p>
         <p>And the <code>Caddyfile</code> next to it, which reaches ThirtyFile by its service name:</p>
         <pre><code>files.example.com {
     reverse_proxy thirtyfile:8080 {
@@ -98,6 +104,7 @@ server {
         <pre><code>services:
   thirtyfile:
     image: ghcr.io/thirtyfile/thirtyfile:latest
+    container_name: thirtyfile
     restart: unless-stopped
     volumes:
       - ./data:/data
@@ -105,6 +112,10 @@ server {
     environment:
       THIRTYFILE_SECURE_COOKIE: "true"
       THIRTYFILE_TRUST_PROXY: "true"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_READ_SEARCH]
+    security_opt: ["no-new-privileges:true"]
     networks: [traefik]
     labels:
       traefik.enable: "true"

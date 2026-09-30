@@ -30,15 +30,15 @@
               <tr><td><code>THIRTYFILE_MAX_UPLOAD_MB</code></td><td><code>0</code></td><td>Largest file that can be uploaded. <code>0</code> means no limit</td></tr>
               <tr><td><code>THIRTYFILE_DB_CACHE_MB</code></td><td><code>16</code></td><td>Database cache per connection, in MB (up to 8 connections). Raise it on a large server with many users</td></tr>
               <tr><td><code>THIRTYFILE_THUMBNAIL_JOBS</code></td><td>1 or 2</td><td>Thumbnails made at the same time: 1 when the server or container has less than 2 GB of memory, else 2</td></tr>
-              <tr><td><code>THIRTYFILE_RUN_AS</code></td><td><code>1000:1000</code></td><td>User and group the server runs as. The data and storage folders are given to them on start</td></tr>
+              <tr><td><code>THIRTYFILE_RUN_AS</code></td><td><code>1000:1000</code></td><td>User and group the server runs as. The data and storage folders are given to them on start. Set by the image; the server program on its own keeps running as the user who started it</td></tr>
               <tr><td><code>THIRTYFILE_LOG_FORMAT</code></td><td>text</td><td><code>json</code> writes one JSON object per log line, for log collectors</td></tr>
               <tr><td><code>RUST_LOG</code></td><td><code>thirtyfile=info</code></td><td>How much is logged, for example <code>thirtyfile=debug</code> while looking into a problem</td></tr>
               <tr><td><code>TZ</code></td><td><code>UTC</code></td><td>Time zone, for example <code>Asia/Taipei</code></td></tr>
               <tr><td><code>THIRTYFILE_SECRET_KEY</code></td><td><code>secret.key</code> in <code>/data</code></td><td>Key that encrypts the passwords and keys saved in the database (storage locations, single sign-on, the signing secret): 64 hex characters, for example from <code>openssl rand -hex 32</code>. Without it, a key is created in <code>/data/secret.key</code> on first start. See <a href="backup.html#key">Upgrade and backup</a></td></tr>
               <tr><td><code>THIRTYFILE_SECRET_KEY_FILE</code></td><td></td><td>A file holding that key instead, for example a Docker secret</td></tr>
               <tr><td><code>THIRTYFILE_ADDR</code></td><td><code>0.0.0.0:8080</code></td><td>Address and port the server listens on inside the container. To use another port on your computer, change the published port (<code>-p 9000:8080</code>) instead</td></tr>
-              <tr><td><code>THIRTYFILE_DATA</code></td><td><code>/data</code></td><td>Folder for the database, thumbnails and uploads in progress. Set by the image; mount a folder there rather than changing it</td></tr>
-              <tr><td><code>THIRTYFILE_STORAGE</code></td><td><code>/storage</code></td><td>Folder of the built-in storage location. Set by the image, like <code>THIRTYFILE_DATA</code></td></tr>
+              <tr><td><code>THIRTYFILE_DATA</code></td><td><code>/data</code></td><td>Folder for the database, thumbnails and uploads in progress. Set by the image; mount a folder there rather than changing it. The server program on its own uses <code>./data</code></td></tr>
+              <tr><td><code>THIRTYFILE_STORAGE</code></td><td><code>/storage</code></td><td>Folder of the built-in storage location. Set by the image, like <code>THIRTYFILE_DATA</code>. The server program on its own uses <code>blobs</code> in the data folder</td></tr>
             </tbody>
           </table>
         </div>

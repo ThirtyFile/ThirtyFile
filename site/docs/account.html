@@ -34,7 +34,7 @@
         <p>From the same dialog you can create new recovery codes (the old ones stop working), move to another phone or app with <strong>Change app</strong>, or turn two-factor sign-in off. Each asks for your password.</p>
         <ul>
           <li>After five wrong codes you have to enter your password again. After ten wrong codes for one account, further codes are refused for up to 15 minutes.</li>
-          <li>Sign-in with Microsoft, Google or GitHub doesn't ask for a code: those providers have their own two-step verification. <a href="#app-passwords">App passwords</a> don't ask for one either.</li>
+          <li><a href="sign-in.html">Single sign-on</a> (Microsoft, Google, GitHub or an OpenID Connect provider) doesn't ask for a code: the provider has its own two-step verification. <a href="#app-passwords">App passwords</a> don't ask for one either.</li>
           <li>If an administrator requires two-factor sign-in, you're asked to set it up right after your password the next time you sign in, and you can't turn it off.</li>
         </ul>
         <div class="note">Lost your phone and your recovery codes? Ask an administrator to reset your two-factor sign-in. You can then sign in with your password and set it up again.</div>
@@ -45,13 +45,13 @@
           <li><strong>Sign out</strong> next to a device ends its session right away. It has to sign in again.</li>
           <li><strong>Sign out everywhere else</strong> signs out every device except this one.</li>
         </ul>
-        <div class="note">If you see a device you don't recognise, sign it out here. If you sign in with a password, change it too. If you sign in with Microsoft, Google or GitHub, you have no password here: signing the device out is what ends its access, and it is worth checking that account's own security page as well.</div>
+        <div class="note">If you see a device you don't recognise, sign it out here. If you sign in with a password, change it too. If you sign in with single sign-on, you have no password here: signing the device out is what ends its access, and it is worth checking that account's own security page as well.</div>
 
         <h2 id="app-passwords">App passwords</h2>
-        <p>Scripts, backup tools and file clients can't sign in through the sign-in page. Give each one its own app password under <strong>App passwords</strong>. This is also the way for accounts that sign in with Microsoft, Google or GitHub, which have no password of their own.</p>
+        <p>Scripts, backup tools and file clients can't sign in through the sign-in page. Give each one its own app password under <strong>App passwords</strong>. This is also the way for accounts that sign in with single sign-on, which have no password of their own.</p>
         <ul>
           <li>Give it a <strong>name</strong> that says where it's used, choose whether it may only <strong>read files</strong> or also <strong>change</strong> them, and when it <strong>expires</strong>.</li>
-          <li>Enter your current password, and with two-factor sign-in a code from your app. Accounts that sign in with Microsoft, Google or GitHub have no password to enter: they create app passwords within 10 minutes of signing in.</li>
+          <li>Enter your current password, and with two-factor sign-in a code from your app. Accounts that sign in with single sign-on have no password to enter: they create app passwords within 10 minutes of signing in.</li>
           <li>You get a notification for every app password created for your account, so one you didn't create doesn't go unnoticed.</li>
           <li>The app password is shown once, right after you create it. Copy it then: only a fingerprint of it is kept, so nobody can show it again.</li>
           <li>The list shows when and from which address each one was last used. <strong>Remove</strong> one and whatever uses it stops working right away.</li>
@@ -76,7 +76,7 @@ curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;fil
           <li><strong>New app password</strong>: an app password was created for your account, with the address it was created from.</li>
         </ul>
         <p>A number on the bell counts the ones you haven't read. Click one to open what it is about. <strong>Mark all as read</strong> and <strong>Clear all</strong> are at the bottom of the list. Notifications are kept for 90 days.</p>
-        <p><strong>Notification settings</strong>, at the bottom of the bell's list or in the account menu, turns each kind on or off, in the app and by email separately. Emails go to the <strong>email address</strong> you enter there. If you sign in with Microsoft, Google or GitHub, the address that account gives is filled in the first time, and you can change it. Leave it blank to get no emails.</p>
+        <p><strong>Notification settings</strong>, at the bottom of the bell's list or in the account menu, turns each kind on or off, in the app and by email separately. Emails go to the <strong>email address</strong> you enter there. If you sign in with single sign-on, the address that account gives is filled in the first time, and you can change it. Leave it blank to get no emails.</p>
         <div class="note">Emails are only sent once an administrator has set up an email server (<a href="users.html#email">Notification emails</a>). They are written in the language you last used ThirtyFile in, with times in your time zone.</div>
       </main>
     </div>
