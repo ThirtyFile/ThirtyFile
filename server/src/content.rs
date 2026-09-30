@@ -160,15 +160,16 @@ pub async fn free_name(conn: &mut SqliteConnection, folder: &Node, name: &str) -
 }
 
 /// The staged content becomes the new file `name` in `folder` (a free name, see `free_name`), owned by `owner`, and
-/// counts in the space's usage; returns the file's id. In the write transaction.
-pub async fn create(conn: &mut SqliteConnection, staged: &Staged, owner: i64, folder: &Node, name: &str) -> AppResult<(String, Written)> {
+/// counts in the space's usage; returns the file's id. `modified`: the date of its content when it isn't now (a file of
+/// a folder space has the date its folder gives it). In the write transaction.
+pub async fn create(conn: &mut SqliteConnection, staged: &Staged, owner: i64, folder: &Node, name: &str, modified: Option<i64>) -> AppResult<(String, Written)> {
     match &staged.kind {
         Kind::Store(blob) => {
             let extra = tree::commit_blob(conn, blob).await?;
             let id = new_id();
             sqlx::query(
                 "INSERT INTO nodes (id, owner_id, parent_id, kind, name, blob_hash, size, mime, drive_id, created_at, updated_at)
-                 SELECT ?1, ?2, ?3, 'file', ?4, ?5, ?6, ?7, drive_id, ?8, ?8 FROM nodes WHERE id = ?3",
+                 SELECT ?1, ?2, ?3, 'file', ?4, ?5, ?6, ?7, drive_id, ?8, ?9 FROM nodes WHERE id = ?3",
             )
             .bind(&id)
             .bind(owner)
@@ -178,6 +179,7 @@ pub async fn create(conn: &mut SqliteConnection, staged: &Staged, owner: i64, fo
             .bind(blob.size)
             .bind(guess_mime(name))
             .bind(now())
+            .bind(modified.unwrap_or_else(now))
             .execute(&mut *conn)
             .await?;
             tree::adjust_usage(conn, folder.drive(), blob.size).await?;
@@ -275,7 +277,7 @@ mod tests {
             let turn = staged.turn(&env.st).await;
             let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
             let name = free_name(&mut tx, &folder, "notes.txt").await.unwrap();
-            let (id, written) = create(&mut tx, &staged, amy.id, &folder, &name).await.unwrap();
+            let (id, written) = create(&mut tx, &staged, amy.id, &folder, &name, None).await.unwrap();
             tx.commit().await.unwrap();
             drop(turn);
             staged.finish(&env.st, written).await;

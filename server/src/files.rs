@@ -361,7 +361,7 @@ async fn store_content(st: AppState, user: User, before: Node, body: Bytes, hash
             let parent = tree::get_node(&mut tx, node.parent_id.as_deref().unwrap_or_default()).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
             let (stem, ext) = split_name(&node.name, false);
             let name = content::free_name(&mut tx, &parent, &format!("{stem} (conflict copy){ext}")).await?;
-            let (copy_id, written) = content::create(&mut tx, &staged, user.id, &parent, &name).await?;
+            let (copy_id, written) = content::create(&mut tx, &staged, user.id, &parent, &name, None).await?;
             let copy = tree::get_node(&mut tx, &copy_id).await?;
             logs::record_activity(&mut tx, &user, copy.as_ref(), "upload", "").await?;
             tx.commit().await?;

@@ -170,7 +170,7 @@ async fn store_new_file(st: &AppState, user: &User, folder_id: &str, name: &str,
         staged.check(&folder)?;
         tree::check_quota(&mut tx, folder.drive(), size as i64).await?;
         let name = content::free_name(&mut tx, &folder, name).await?;
-        let (id, written) = content::create(&mut tx, &staged, user.id, &folder, &name).await?;
+        let (id, written) = content::create(&mut tx, &staged, user.id, &folder, &name, None).await?;
         tree::touch(&mut tx, &folder.id).await?;
         let node = tree::get_node(&mut tx, &id).await?;
         logs::record_activity(&mut tx, user, node.as_ref(), action, "").await?;
@@ -458,7 +458,7 @@ async fn extract_into(st: &AppState, user: &User, progress: &Tracker, zip: &Node
             }
             let (Some(file), Some(s)) = (&p.file, blobs.get(&i)) else { continue };
             let name = content::free_name(&mut tx, &folder, file).await?;
-            let (_, w) = content::create(&mut tx, s, user.id, &folder, &name).await?;
+            let (_, w) = content::create(&mut tx, s, user.id, &folder, &name, None).await?;
             written.insert(i, w);
         }
         let node = tree::get_node(&mut tx, &root).await?;

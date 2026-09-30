@@ -655,7 +655,7 @@ async fn commit_upload(st: &AppState, up: &Uploader, upload: &Upload, staged: &c
         }
         None => {
             let name = content::free_name(&mut tx, &folder, &upload.name).await?;
-            let (id, written) = content::create(&mut tx, staged, upload.owner_id, &folder, &name).await?;
+            let (id, written) = content::create(&mut tx, staged, upload.owner_id, &folder, &name, None).await?;
             if let Some(n) = tree::get_node(&mut tx, &id).await? {
                 logs::record_activity(&mut tx, user, Some(&n), "upload", &up.log_detail()).await?;
             }
