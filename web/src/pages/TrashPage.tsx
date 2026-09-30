@@ -24,7 +24,7 @@ import { useMe } from "@/lib/session";
 import { locale, t } from "@/lib/i18n";
 import { followJob } from "@/lib/jobs";
 import { useAllPages } from "@/lib/pages";
-import { FOLDER_CONTENTS, invalidateFiles } from "@/lib/queries";
+import { refreshFiles, type FileChange } from "@/lib/queries";
 import { trashHint } from "@/lib/utils";
 
 export function TrashPage() {
@@ -44,10 +44,11 @@ export function TrashPage() {
   const items = q.items;
   const ids = [...selected];
 
-  const done = (msg: string) => {
-    toast.success(msg);
-    setSelected(new Set());
-    invalidateFiles(qc, FOLDER_CONTENTS);
+  /** Restored: they leave the trash, and show again in the folders they were in */
+  const restored = (sent: string[]) => {
+    const wanted = new Set(sent);
+    const parents = items.filter((n) => wanted.has(n.id)).map((n) => n.parent_id);
+    return refreshFiles(qc, { folders: parents, nodes: sent, trash: true, contents: true, usage: true });
   };
 
   const restore = async () => {
@@ -58,8 +59,14 @@ export function TrashPage() {
       const sent = ids.filter((id) => resolutions[id] !== "skip");
       // Every item skipped: nothing was restored, and the selection stays
       if (!sent.length) return void toast.info(t("Nothing was restored: every item was skipped"));
-      await api.restore(sent, resolutions);
-      done(t("Restored {n} item|Restored {n} items", { n: sent.length }));
+      try {
+        await api.restore(sent, resolutions);
+      } finally {
+        // Also what was restored before it failed
+        void restored(sent);
+      }
+      toast.success(t("Restored {n} item|Restored {n} items", { n: sent.length }));
+      setSelected(new Set());
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Couldn't restore"));
     }
@@ -214,8 +221,10 @@ export function TrashPage() {
             setConfirm(null);
             // The items have left the trash; deleting a large folder goes on, followed by a message at the bottom
             setSelected(new Set());
-            invalidateFiles(qc, FOLDER_CONTENTS);
-            void followJob(job, t("Permanently deleted"), () => invalidateFiles(qc, FOLDER_CONTENTS));
+            // Items in the trash aren't in any folder's list: only the trash and the space used change
+            const change: FileChange = confirm === "empty" ? { trash: true, usage: true } : { removed: ids, usage: true };
+            void refreshFiles(qc, change);
+            void followJob(job, t("Permanently deleted"), () => refreshFiles(qc, change));
           }}
         />
       )}

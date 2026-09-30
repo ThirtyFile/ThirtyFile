@@ -34,7 +34,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { t, tServer, tc } from "@/lib/i18n";
 import { waitForJob } from "@/lib/jobs";
-import { invalidateFiles } from "@/lib/queries";
+import { refreshFiles } from "@/lib/queries";
 import { useMoves } from "@/lib/moves";
 import { MoveProgress, moveRoute } from "@/pages/MovesPage";
 import { MoveDialog } from "@/components/MoveDialog";
@@ -64,7 +64,7 @@ export function AdminDrivesPage() {
       await api.updateDrive(d.id, { read_only: readOnly });
       toast.success(readOnly ? t("\"{name}\" is read-only now", { name: d.name }) : t("\"{name}\" can be changed from the web now", { name: d.name }));
       refresh();
-      invalidateFiles(qc);
+      void refreshFiles(qc, { spaces: [d.id] });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("Couldn't save"));
     }
@@ -422,7 +422,8 @@ export function AdminDrivesPage() {
             toast.success(t("Space deleted"));
             setDialog(null);
             setSelectedId(null);
-            invalidateFiles(qc, "admin-drives", "storage-locations");
+            void refreshFiles(qc, { spaces: [dialog.drive!.id] });
+            for (const key of ["admin-drives", "storage-locations"]) void qc.invalidateQueries({ queryKey: [key] });
           }}
         />
       )}

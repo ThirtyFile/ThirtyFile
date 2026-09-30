@@ -11,6 +11,7 @@ import { MarqueeBox, useMarquee, type MeasureHits } from "@/components/useMarque
 import { Frame, type Crumb } from "@/components/Frame";
 import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
+import { renamed } from "@/lib/queries";
 import { toastWithUndo } from "@/lib/undo";
 import { formatBytes } from "@/lib/utils";
 import { filesFromInput, uploadFiles } from "@/uploads";
@@ -86,7 +87,7 @@ export function Explorer(p: ExplorerProps) {
     dialog,
     setDialog,
   } = s;
-  const { open, dropInto, uploadInto, dragProps, refresh } = a;
+  const { open, dropInto, uploadInto, dragProps, changed } = a;
   // Hold the left button and drag on empty space to marquee-select (disabled while renaming); the list gives its row geometry
   const measure = useRef<MeasureHits>(null);
   const marquee = useMarquee({ selected, onSelect: setSelected, enabled: !p.loading && dialog?.t !== "rename", measure });
@@ -195,10 +196,12 @@ export function Explorer(p: ExplorerProps) {
                 onUploadInto={s.canUpload ? uploadInto : undefined}
                 renamingId={dialog?.t === "rename" ? dialog.node.id : null}
                 onRename={async (n, name) => {
-                  await api.rename(n.id, name);
-                  refresh();
+                  void changed(renamed(await api.rename(n.id, name)));
                   if (name !== n.name)
-                    toastWithUndo(t("Renamed to \"{name}\"", { name }), { undo: () => api.rename(n.id, n.name), undoneText: t("Renamed back"), after: refresh });
+                    toastWithUndo(t("Renamed to \"{name}\"", { name }), {
+                      undo: async () => void changed(renamed(await api.rename(n.id, n.name))),
+                      undoneText: t("Renamed back"),
+                    });
                 }}
                 onRenameDone={() => setDialog(null)}
                 empty={

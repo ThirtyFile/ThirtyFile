@@ -10,6 +10,7 @@ import { ErrorText } from "@/components/dialogs";
 import { Pending } from "@/components/ErrorState";
 import { useConfirm } from "@/components/confirm";
 import { ROLE_HINT, ROLE_LABEL, atLeast } from "@/lib/drives";
+import { refreshFiles } from "@/lib/queries";
 import { useMe } from "@/lib/session";
 import { cn, formatDate } from "@/lib/utils";
 import { t, tServer, tc } from "@/lib/i18n";
@@ -147,8 +148,7 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
   const [days, setDays] = useState(0);
 
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: ["access", nodeId] });
-    qc.invalidateQueries({ queryKey: ["drives"] });
+    void refreshFiles(qc, { access: [nodeId] });
   };
 
   const add = useMutation({
@@ -182,8 +182,15 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
             destructive: true,
           },
     );
-    // Once you have left, there is nothing more here for you to see
-    if (ok) remove.mutate(g.id, { onSuccess: () => self && onClose() });
+    // Once you have left, there is nothing more here for you to see, nor loaded inside it
+    if (ok)
+      remove.mutate(g.id, {
+        onSuccess: () => {
+          if (!self) return;
+          void refreshFiles(qc, { left: [nodeId] });
+          onClose();
+        },
+      });
   };
 
   const info = q.data;

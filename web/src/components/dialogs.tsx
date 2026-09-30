@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { useDrives } from "@/lib/drives";
 import { useMe } from "@/lib/session";
 import { t } from "@/lib/i18n";
-import { invalidateFiles } from "@/lib/queries";
+import { refreshFiles } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { NativeSelect } from "@/components/ui/native-select";
 
@@ -192,7 +192,7 @@ export function FolderPickerDialog(props: {
   };
   const createFolder = async (name: string) => {
     const f = await api.createFolder(current, name);
-    void invalidateFiles(qc);
+    void refreshFiles(qc, { folders: [current], contents: true });
     setTrail([...trail, { id: f.id, name: f.name }]);
     setNaming(false);
   };

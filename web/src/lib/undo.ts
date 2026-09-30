@@ -2,6 +2,7 @@ import { toast } from "sonner";
 import { api } from "@/api";
 import { t } from "@/lib/i18n";
 import { waitForJob } from "@/lib/jobs";
+import type { FileChange } from "@/lib/queries";
 
 /** How long a message with an Undo button stays: long enough to read it and reach the button */
 export const UNDO_MS = 8000;
@@ -49,9 +50,18 @@ export function originsOf(items: readonly { id: string; parent_id: string | null
   return new Map(items.filter((n) => wanted.has(n.id) && n.parent_id && n.parent_id !== dest).map((n) => [n.id, n.parent_id!]));
 }
 
+function byParent(origins: Origins) {
+  const out = new Map<string, string[]>();
+  for (const [id, parent] of origins) out.set(parent, [...(out.get(parent) ?? []), id]);
+  return out;
+}
+
 /** Move items back to the folders they came from (they may come from several, e.g. in search results) */
 export async function moveBack(origins: Origins) {
-  const byParent = new Map<string, string[]>();
-  for (const [id, parent] of origins) byParent.set(parent, [...(byParent.get(parent) ?? []), id]);
-  for (const [parent, ids] of byParent) await waitForJob(await api.move(ids, parent));
+  for (const [parent, ids] of byParent(origins)) await waitForJob(await api.move(ids, parent));
+}
+
+/** What moving items back changed (lib/queries) */
+export function movedBack(origins: Origins): FileChange {
+  return { moved: [...byParent(origins)].map(([to, ids]) => ({ ids, to })), usage: true };
 }

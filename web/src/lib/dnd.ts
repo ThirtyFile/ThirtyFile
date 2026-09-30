@@ -11,8 +11,8 @@ import { t } from "@/lib/i18n";
 import { reportShown } from "@/lib/errorReport";
 import { wantsCopy } from "@/lib/keys";
 import { waitForJob } from "@/lib/jobs";
-import { FOLDER_CONTENTS, invalidateFiles } from "@/lib/queries";
-import { moveBack, originsOf, toastWithUndo } from "@/lib/undo";
+import { refreshFiles } from "@/lib/queries";
+import { moveBack, movedBack, originsOf, toastWithUndo } from "@/lib/undo";
 import { askBeforeTransfer } from "@/components/ConflictDialog";
 import { filesFromDrop, uploadFiles } from "@/uploads";
 
@@ -55,7 +55,8 @@ export function droppedIds(dt: DataTransfer): string[] | null {
 export async function dropItems(qc: QueryClient, ids: string[], folder: DropFolder, copy: boolean) {
   ids = ids.filter((id) => id !== folder.id);
   if (!ids.length) return;
-  const refresh = () => invalidateFiles(qc, FOLDER_CONTENTS);
+  // The folders the items came from, when they were dragged from a list of this page
+  const from = dragged?.items.filter((n) => ids.includes(n.id)).map((n) => n.parent_id) ?? [];
   try {
     const resolutions = await askBeforeTransfer(copy ? "copy" : "move", ids, folder.id);
     if (!resolutions) return;
@@ -68,14 +69,15 @@ export async function dropItems(qc: QueryClient, ids: string[], folder: DropFold
       const origins = dragged ? originsOf(dragged.items, ids, folder.id) : new Map<string, string>();
       await waitForJob(await api.move(ids, folder.id, resolutions));
       const moved = t("Moved {n} item to \"{name}\"|Moved {n} items to \"{name}\"", { n: ids.length, name: folder.name });
-      if (origins.size) toastWithUndo(moved, { undo: () => moveBack(origins), undoneText: t("Moved back"), after: refresh });
+      if (origins.size) toastWithUndo(moved, { undo: () => moveBack(origins), undoneText: t("Moved back"), after: () => refreshFiles(qc, movedBack(origins)) });
       else toast.success(moved);
     }
-    refresh();
+    void refreshFiles(qc, copy ? { folders: [folder.id], contents: true, usage: true } : { moved: [{ ids, to: folder.id }], usage: true });
   } catch (e) {
     toast.error(e instanceof Error ? e.message : copy ? t("Couldn't copy") : t("Couldn't move"));
     reportShown(copy ? "copy" : "move", e, folder.id);
-    refresh();
+    // What was done before it failed shows
+    void refreshFiles(qc, { folders: [folder.id, ...from], contents: true, usage: true });
   }
 }
 

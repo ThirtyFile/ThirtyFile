@@ -1,8 +1,9 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError } from "@/api";
+import { forgetUnreachable } from "@/lib/queries";
 import { Toaster } from "@/components/ui/sonner";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import "./style.css";
@@ -18,7 +19,9 @@ window.addEventListener("vite:preloadError", (e) => {
   if (reloadForNewVersion()) e.preventDefault();
 });
 
-const queryClient = new QueryClient({
+const queryClient: QueryClient = new QueryClient({
+  // A folder that can't be opened any more (access taken away, deleted): what was loaded inside it is forgotten
+  queryCache: new QueryCache({ onError: (err, query) => err instanceof ApiError && forgetUnreachable(queryClient, query.queryKey, err.status) }),
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
