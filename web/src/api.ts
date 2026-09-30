@@ -386,7 +386,7 @@ export interface SsoProvider {
   label: string;
 }
 
-export type NotificationKind = "shared" | "space_full" | "access_expiring" | "app_password" | "link_upload";
+export type NotificationKind = "shared" | "space_full" | "access_expiring" | "app_password" | "sign_in_method" | "link_upload";
 
 /** What a notification shows; names are copied when it was made */
 export interface NotificationData {
@@ -410,6 +410,9 @@ export interface NotificationData {
   /** App passwords: what it may do, and the address it was made from */
   scope?: "read" | "write";
   ip?: string;
+  /** Linked sign-in methods: the provider's name, and the linked account's email (or name) */
+  label?: string;
+  account?: string;
 }
 
 /** A notification under the bell (`GET /notifications`) */
@@ -1055,10 +1058,11 @@ export const api = {
   loginCode: (ticket: string, code: string) => post<Me & { recovery_codes?: string[] }>("/auth/login/2fa", { ticket, code }),
   loginSetup: (ticket: string) => post<TwoFactorSetup>("/auth/login/2fa/setup", { ticket }),
   twoFactor: () => get<TwoFactorStatus>("/auth/2fa"),
-  startTwoFactor: (password: string) => post<TwoFactorSetup>("/auth/2fa/setup", { password }),
+  /** Once two-factor sign-in is on, changing it also takes a code from the app or a recovery code */
+  startTwoFactor: (password: string, code?: string) => post<TwoFactorSetup>("/auth/2fa/setup", { password, code }),
   enableTwoFactor: (code: string) => post<{ recovery_codes: string[] }>("/auth/2fa/enable", { code }),
-  disableTwoFactor: (password: string) => post("/auth/2fa/disable", { password }),
-  newRecoveryCodes: (password: string) => post<{ recovery_codes: string[] }>("/auth/2fa/recovery-codes", { password }),
+  disableTwoFactor: (password: string, code?: string) => post("/auth/2fa/disable", { password, code }),
+  newRecoveryCodes: (password: string, code?: string) => post<{ recovery_codes: string[] }>("/auth/2fa/recovery-codes", { password, code }),
   resetTwoFactor: (userId: number) => request("DELETE", `/admin/users/${userId}/2fa`),
   logout: () => post("/auth/logout"),
   changePassword: (current: string, next: string) => request("PUT", "/auth/password", { current, new: next }),
@@ -1207,7 +1211,8 @@ export const api = {
   /** Start a third-party login (full-page redirect); link = link to the currently signed-in account */
   ssoStartUrl: (provider: string, next: string) => enc`/api/auth/sso/${provider}/start` + qs({ next }),
   /** Linking starts with a request from this page, which returns where to go next */
-  ssoLink: (provider: string, next: string) => post<{ url: string }>(enc`/auth/sso/${provider}/link`, { next }),
+  /** Linking takes the current password (and a two-factor code); accounts without a password, a recent sign-in */
+  ssoLink: (provider: string, next: string, password?: string, code?: string) => post<{ url: string }>(enc`/auth/sso/${provider}/link`, { next, password, code }),
   myIdentities: () => get<{ linked: LinkedIdentity[]; available: string[] }>("/auth/identities"),
   unlinkIdentity: (provider: string) => request("DELETE", enc`/auth/identities/${provider}`),
   /** Also tells the server the time zone, for the times in emails */
@@ -1217,7 +1222,8 @@ export const api = {
   deleteNotification: (id: number) => request("DELETE", enc`/notifications/${id}`),
   clearNotifications: () => request("DELETE", "/notifications"),
   notificationSettings: () => get<NotificationSettings>("/notifications/settings"),
-  updateNotificationSettings: (req: { email?: string; kinds?: Partial<Record<NotificationKind, NotificationPrefs>> }) =>
+  /** Changing the email address takes the current password (and a two-factor code when it is on) */
+  updateNotificationSettings: (req: { email?: string; kinds?: Partial<Record<NotificationKind, NotificationPrefs>>; password?: string; code?: string }) =>
     request<NotificationSettings>("PUT", "/notifications/settings", req),
   emailSettings: () => get<EmailSettings>("/admin/email"),
   updateEmailSettings: (req: EmailSettingsReq) => request<EmailSettings>("PUT", "/admin/email", req),

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BellIcon, CalendarClockIcon, CheckCheckIcon, HardDriveIcon, InboxIcon, KeySquareIcon, SettingsIcon, Trash2Icon, UsersRoundIcon } from "lucide-react";
+import { BellIcon, CalendarClockIcon, CheckCheckIcon, HardDriveIcon, InboxIcon, KeySquareIcon, Link2Icon, SettingsIcon, Trash2Icon, UsersRoundIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type AppNotification } from "@/api";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -10,7 +10,7 @@ import { notificationLink, notificationText, unreadBadge } from "@/lib/notificat
 import { cn, formatTime } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 
-const ICON = { shared: UsersRoundIcon, space_full: HardDriveIcon, access_expiring: CalendarClockIcon, app_password: KeySquareIcon, link_upload: InboxIcon };
+const ICON = { shared: UsersRoundIcon, space_full: HardDriveIcon, access_expiring: CalendarClockIcon, app_password: KeySquareIcon, sign_in_method: Link2Icon, link_upload: InboxIcon };
 
 /** How often the bell asks for new notifications */
 const POLL_MS = 60_000;

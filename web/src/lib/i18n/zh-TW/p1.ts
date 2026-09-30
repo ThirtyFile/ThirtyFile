@@ -258,6 +258,8 @@ export default {
   // Sign-in methods (My account)
   "Account unlinked": "已取消連結",
   "Link a work or personal external account to sign in with it directly from the sign-in page.": "連結公司或個人的外部帳號後，就能在登入頁直接用它登入。",
+  "Link your {provider} account": "連結你的 {provider} 帳號",
+  "The linked account can sign in to yours without the password, so confirm it's you first.": "連結的帳號不需要密碼就能登入你的帳號，所以請先確認你的身分。",
   "Your administrator hasn't turned on any third-party sign-in.": "管理員尚未啟用任何三方登入。",
   "Linked": "已連結",
   "Last sign-in {time}": "上次登入 {time}",

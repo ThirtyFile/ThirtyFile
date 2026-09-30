@@ -467,6 +467,10 @@ pub async fn status(State(st): State<AppState>, user: User) -> AppResult<Json<St
 #[derive(Deserialize)]
 pub struct PasswordReq {
     password: String,
+    /// Once two-factor sign-in is on, a code from the app (or a recovery code) too: the password alone doesn't
+    /// replace the app, renew the recovery codes or turn it off
+    #[serde(default)]
+    code: Option<String>,
 }
 
 /// Starts setting up (or replacing the authenticator app): after the password, a new secret to add to the app
@@ -478,6 +482,7 @@ pub async fn start_setup(State(st): State<AppState>, user: User, Json(req): Json
         ));
     }
     auth::confirm_password(&st, user.id, req.password).await?;
+    confirm_code(&st, user.id, req.code.as_deref()).await?;
     let secret = new_secret();
     {
         let mut map = st.twofactor_setups.lock().unwrap();
@@ -527,6 +532,7 @@ pub async fn disable(
         return Err(AppError::bad_request("Your administrator requires two-factor sign-in, so it can't be turned off."));
     }
     auth::confirm_password(&st, user.id, req.password).await?;
+    confirm_code(&st, user.id, req.code.as_deref()).await?;
     if turn_off(&st, user.id).await? {
         logs::record_login(&st, Some(user.id), &user.username, "2fa_disabled", &client_ip(&st, addr, &headers), &headers);
     }
@@ -546,6 +552,7 @@ pub async fn new_recovery_codes_for_me(
         return Err(AppError::bad_request("Two-factor sign-in isn't turned on"));
     }
     auth::confirm_password(&st, user.id, req.password).await?;
+    confirm_code(&st, user.id, req.code.as_deref()).await?;
     let codes = new_recovery_codes();
     {
         let _w = st.write_lock.lock().await;
@@ -609,7 +616,7 @@ pub(crate) mod tests {
 
     /// Sets two-factor sign-in up from the account menu, returning the secret and the recovery codes
     async fn set_up(env: &testutil::TestEnv, user: &User) -> (Vec<u8>, Vec<String>) {
-        let Json(v) = start_setup(State(env.st.clone()), user.clone(), Json(PasswordReq { password: testutil::password().into() })).await.unwrap();
+        let Json(v) = start_setup(State(env.st.clone()), user.clone(), Json(PasswordReq { password: testutil::password().into(), code: None })).await.unwrap();
         let secret = secret_bytes(v["secret"].as_str().unwrap());
         assert!(v["uri"].as_str().unwrap().starts_with("otpauth://totp/"));
         assert!(v["qr_svg"].as_str().unwrap().contains("<svg"));
@@ -735,7 +742,7 @@ pub(crate) mod tests {
         assert!(s.enabled && s.required);
 
         // It can't be turned off while required; an administrator can reset it
-        let off = disable(State(env.st.clone()), amy.clone(), addr(), HeaderMap::new(), Json(PasswordReq { password: testutil::password().into() })).await;
+        let off = disable(State(env.st.clone()), amy.clone(), addr(), HeaderMap::new(), Json(PasswordReq { password: testutil::password().into(), code: None })).await;
         assert!(off.is_err());
         let _ = admin_reset(State(env.st.clone()), Admin(admin), Path(amy.id), addr(), HeaderMap::new()).await.unwrap();
         let Json(s) = status(State(env.st.clone()), amy).await.unwrap();
@@ -745,23 +752,30 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn changes_need_the_password() {
+    async fn changes_need_the_password_and_a_code() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        let wrong = || Json(PasswordReq { password: testutil::wrong_password() });
-        assert!(start_setup(State(env.st.clone()), amy.clone(), wrong()).await.is_err());
+        let req = |password: &str, code: Option<&str>| Json(PasswordReq { password: password.into(), code: code.map(Into::into) });
+        let (pw, wrong) = (testutil::password(), testutil::wrong_password());
+        assert!(start_setup(State(env.st.clone()), amy.clone(), req(&wrong, None)).await.is_err());
         let (secret, old) = set_up(&env, &amy).await;
-        assert!(new_recovery_codes_for_me(State(env.st.clone()), amy.clone(), addr(), HeaderMap::new(), wrong()).await.is_err());
-        let Json(v) = new_recovery_codes_for_me(State(env.st.clone()), amy.clone(), addr(), HeaderMap::new(), Json(PasswordReq { password: testutil::password().into() })).await.unwrap();
+        // Once it is on, the password alone doesn't replace the app, renew the codes or turn it off
+        assert!(start_setup(State(env.st.clone()), amy.clone(), req(pw, None)).await.is_err());
+        assert!(new_recovery_codes_for_me(State(env.st.clone()), amy.clone(), addr(), HeaderMap::new(), req(pw, None)).await.is_err());
+        assert!(disable(State(env.st.clone()), amy.clone(), addr(), HeaderMap::new(), req(pw, None)).await.is_err());
+        assert!(new_recovery_codes_for_me(State(env.st.clone()), amy.clone(), addr(), HeaderMap::new(), req(&wrong, Some(&old[0]))).await.is_err());
+        let Json(v) = new_recovery_codes_for_me(State(env.st.clone()), amy.clone(), addr(), HeaderMap::new(), req(pw, Some(&old[0]))).await.unwrap();
         assert_ne!(v["recovery_codes"][0].as_str().unwrap(), old[0]);
         // The old recovery codes stopped working
         assert!(!use_recovery_code(&env.st, amy.id, &old[1]).await.unwrap());
-        assert!(disable(State(env.st.clone()), amy.clone(), addr(), HeaderMap::new(), wrong()).await.is_err());
-        let _ = disable(State(env.st.clone()), amy.clone(), addr(), HeaderMap::new(), Json(PasswordReq { password: testutil::password().into() })).await.unwrap();
+        // Replacing the app: a code from the current one
+        assert!(start_setup(State(env.st.clone()), amy.clone(), req(pw, Some(&next_code(&secret)))).await.is_ok());
+        let fresh = v["recovery_codes"][0].as_str().unwrap();
+        assert!(disable(State(env.st.clone()), amy.clone(), addr(), HeaderMap::new(), req(&wrong, Some(fresh))).await.is_err());
+        let _ = disable(State(env.st.clone()), amy.clone(), addr(), HeaderMap::new(), req(pw, Some(fresh))).await.unwrap();
         // Without it, the password signs in straight away
         let res = login(&env, "amy").await;
         assert!(res.headers().contains_key(axum::http::header::SET_COOKIE));
-        let _ = secret;
     }
 
     #[tokio::test]
@@ -769,7 +783,7 @@ pub(crate) mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?").bind(crate::sso::NO_PASSWORD).bind(amy.id).execute(&env.st.db).await.unwrap();
-        let err = start_setup(State(env.st.clone()), amy.clone(), Json(PasswordReq { password: String::new() })).await.unwrap_err();
+        let err = start_setup(State(env.st.clone()), amy.clone(), Json(PasswordReq { password: String::new(), code: None })).await.unwrap_err();
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
         let Json(s) = status(State(env.st.clone()), amy).await.unwrap();
         assert!(!s.has_password);

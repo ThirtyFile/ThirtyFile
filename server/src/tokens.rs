@@ -211,16 +211,17 @@ pub struct CreateReq {
 /// Accounts without a password (single sign-on) confirm who they are by having signed in this recently
 const RECENT_SIGN_IN: i64 = 10 * 60;
 
-/// An app password keeps working after the browser session that made it ends, so making one asks who it is again:
-/// the password (and a two-factor code when the account has one), or for accounts that sign in with Microsoft,
-/// Google or GitHub, a recent sign-in
-async fn confirm_identity(st: &AppState, user: &User, password: Option<String>, code: Option<&str>) -> AppResult<()> {
+/// Before a change that outlasts the browser session making it (an app password, a linked sign-in method, the
+/// account's email address), asks who it is again: the password (and a two-factor code when the account has one), or
+/// for accounts that sign in with Microsoft, Google or GitHub, a recent sign-in (`sign_in_again` is the message when
+/// it isn't recent enough)
+pub async fn confirm_identity(st: &AppState, user: &User, password: Option<String>, code: Option<&str>, sign_in_again: &'static str) -> AppResult<()> {
     let (hash,): (String,) = sqlx::query_as("SELECT password_hash FROM users WHERE id = ?").bind(user.id).fetch_one(&st.db).await?;
     if hash == crate::sso::NO_PASSWORD {
         let signed_in: Option<(i64,)> =
             sqlx::query_as("SELECT created_at FROM sessions WHERE id = ? AND user_id = ?").bind(&user.session_id).bind(user.id).fetch_optional(&st.db).await?;
         if signed_in.is_none_or(|(at,)| now() - at > RECENT_SIGN_IN) {
-            return Err(AppError::forbidden("Sign out and sign in again, then create the app password within 10 minutes").with_code("sign_in_again"));
+            return Err(AppError::forbidden(sign_in_again).with_code("sign_in_again"));
         }
         return Ok(());
     }
@@ -249,7 +250,7 @@ pub async fn create(
     if req.expires_days.is_some_and(|d| !(1..=MAX_DAYS).contains(&d)) {
         return Err(AppError::bad_request("An app password can be valid for 1 to 3650 days"));
     }
-    confirm_identity(&st, &user, req.password, req.code.as_deref()).await?;
+    confirm_identity(&st, &user, req.password, req.code.as_deref(), "Sign out and sign in again, then create the app password within 10 minutes").await?;
     let ip = client_ip(&st, addr, &headers);
     let id = random_token(ID_LEN);
     let token = format!("{PREFIX}{id}_{}", random_token(SECRET_LEN));
