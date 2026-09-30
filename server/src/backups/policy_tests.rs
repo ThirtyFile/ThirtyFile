@@ -156,6 +156,28 @@ async fn every_change_of_a_space_is_counted_in_the_transaction_that_makes_it() {
     // Bob's space didn't change
     assert_eq!(seq(&env, &bobs).await, bob_before);
 }
+#[tokio::test]
+async fn a_check_for_changes_that_finds_none_and_counting_usage_again_dont_count_as_changes() {
+    let env = testutil::folders_env().await;
+    let admin = env.admin().await;
+    let company = env.st.shared_root().unwrap();
+    let all = env.drive_of(&company).await;
+    env.upload(&admin, &company, "a.txt", b"one").await;
+    crate::folders::scan(&env.st, &all).await.unwrap();
+    let before = seq(&env, &all).await;
+    // Nothing changed in the folder: the check writes its report only
+    crate::folders::scan(&env.st, &all).await.unwrap();
+    crate::tree::recompute_usage(&env.st).await.unwrap();
+    assert_eq!(seq(&env, &all).await, before, "no change");
+    // A change of the space's settings counts
+    sqlx::query("UPDATE drives SET quota_bytes = 1000 WHERE id = ?").bind(&all).execute(&env.st.db).await.unwrap();
+    assert!(seq(&env, &all).await > before, "a setting changed");
+    // A file another program added counts once the check sees it
+    let before = seq(&env, &all).await;
+    testutil::write_old(&env.dir.join("blobs").join("company").join("scan.pdf"), b"scanned");
+    crate::folders::scan(&env.st, &all).await.unwrap();
+    assert!(seq(&env, &all).await > before, "a file added in the folder");
+}
 
 #[tokio::test]
 async fn a_policy_backs_up_changes_one_snapshot_at_a_time_and_keeps_the_last_one_whatever_its_age() {
