@@ -15,7 +15,7 @@ import { ErrorState } from "@/components/ErrorState";
 import { FileList, Thumb, type ViewMode } from "@/components/FileList";
 import { canPreview } from "@/components/FileViewer";
 import { Preview } from "@/components/Preview";
-import { Logo } from "@/pages/AppShell";
+import { Logo } from "@/components/Logo";
 import { LanguageSwitch } from "@/components/LanguageSwitch";
 import { UploadPanel } from "@/components/UploadPanel";
 import { enqueue, filesFromDrop, filesFromInput, onUploadsLanded, type PickedFile } from "@/uploads";

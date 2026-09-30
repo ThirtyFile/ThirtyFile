@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { type QueryClient, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClockIcon, FolderMinusIcon, FolderPlusIcon, HistoryIcon, Loader2Icon, MonitorSmartphoneIcon, ShieldCheckIcon, ShieldOffIcon, PencilIcon, RefreshCwIcon, Trash2Icon, TriangleAlertIcon, UserCheckIcon, UserPlusIcon, UsersIcon, UserXIcon } from "lucide-react";
+import { ClockIcon, FolderMinusIcon, SearchXIcon, FolderPlusIcon, HistoryIcon, Loader2Icon, MonitorSmartphoneIcon, ShieldCheckIcon, ShieldOffIcon, PencilIcon, RefreshCwIcon, Trash2Icon, TriangleAlertIcon, UserCheckIcon, UserPlusIcon, UsersIcon, UserXIcon } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
-import { DataTable, type Column } from "@/components/DataTable";
+import { DataTable, EmptyState, type Column } from "@/components/DataTable";
 import { toast } from "sonner";
 import { api, type Drive, type UserRow } from "@/api";
 import { Badge } from "@/components/ui/badge";
@@ -16,7 +16,6 @@ import { LocationSelect, useDefaultLocationId, useLocationName } from "@/compone
 import { confirm } from "@/components/confirm";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { useMe } from "@/lib/session";
-import { useSettingsSearch } from "@/lib/controlPanel";
 import { t, tc } from "@/lib/i18n";
 import { formatBytes, formatDate, formatDateTime } from "@/lib/utils";
 import { LoginLogDialog } from "@/components/logs/LoginLog";
@@ -28,10 +27,17 @@ const USERS_PAGE = 200;
 
 export function AdminUsersPage() {
   const me = useMe();
+  // The search box finds accounts by username, display name or email, on the server (the list comes in pages)
+  const [typed, setTyped] = useState("");
+  const [search, setSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(typed.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [typed]);
   // Loaded a page at a time: there is one account per person, so the list can be long
   const q = useInfiniteQuery({
-    queryKey: ["admin-users", "pages"],
-    queryFn: ({ pageParam }) => api.usersPage(pageParam, USERS_PAGE),
+    queryKey: ["admin-users", "pages", search],
+    queryFn: ({ pageParam, signal }) => api.usersPage(pageParam, USERS_PAGE, search, signal),
     initialPageParam: 0,
     getNextPageParam: (last) => (last.length < USERS_PAGE ? undefined : last[last.length - 1].id),
   });
@@ -66,7 +72,6 @@ export function AdminUsersPage() {
     </>
   );
 
-  const searchSettings = useSettingsSearch();
   const columns: Column<UserRow>[] = [
     {
       header: t("Account"),
@@ -161,12 +166,12 @@ export function AdminUsersPage() {
       toolbar={toolbar}
       crumbs={[{ label: t("Control panel"), to: "/admin" }, { label: t("Users") }]}
       upTo="/admin"
-      searchPlaceholder={t("Search settings")}
-      onSearch={searchSettings}
+      searchPlaceholder={t("Search users")}
+      onSearch={setTyped}
       icon={UsersIcon}
       footer={
         <span className="flex items-center gap-2">
-          {t("{n} user|{n} users", { n: users.length })}
+          {search ? t("{n} user found|{n} users found", { n: users.length }) : t("{n} user|{n} users", { n: users.length })}
           {q.hasNextPage && (
             <Button variant="link" size="sm" className="h-auto p-0" disabled={q.isFetchingNextPage} onClick={() => q.fetchNextPage()}>
               {t("Show more")}
@@ -182,6 +187,7 @@ export function AdminUsersPage() {
         loading={q.isLoading}
         error={q.error}
         onRetry={() => q.refetch()}
+        empty={search ? <EmptyState icon={SearchXIcon} title={t("No users match \"{query}\"", { query: search })} /> : undefined}
         selectedKey={selectedId === null ? null : String(selectedId)}
         onSelect={(k) => setSelectedId(k ? Number(k) : null)}
         onOpen={(u) => setEditing(u)}

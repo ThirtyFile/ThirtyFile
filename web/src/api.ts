@@ -1159,7 +1159,8 @@ export const api = {
 
   users: () => get<UserRow[]>("/admin/users"),
   /** A page of accounts, by id */
-  usersPage: (after: number, limit: number) => get<UserRow[]>(`/admin/users${qs({ after: String(after), limit: String(limit) })}`),
+  usersPage: (after: number, limit: number, q = "", signal?: AbortSignal) =>
+    get<UserRow[]>(`/admin/users${qs({ after: String(after), limit: String(limit), q: q.trim() || undefined })}`, signal),
   /** `personal_space` / `personal_location`: "My files" and its storage location; left out, the system settings decide */
   createUser: (req: Partial<Omit<UserRow, "personal_space" | "personal_location">> & { password: string; personal_space?: boolean; personal_location?: string }) =>
     post<UserRow>("/admin/users", req),

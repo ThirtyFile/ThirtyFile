@@ -62,12 +62,22 @@ pub struct ListQuery {
     after: Option<i64>,
     /// Page size; without it every account is returned (the group editor picks members from all of them)
     limit: Option<i64>,
+    /// Only accounts whose username, display name or an email address (their own, or a linked sign-in's) contains this
+    /// (letter case ignored)
+    #[serde(default)]
+    q: Option<String>,
 }
 
 pub async fn list(State(st): State<AppState>, _: Admin, Query(q): Query<ListQuery>) -> AppResult<Json<Vec<UserRow>>> {
-    let sql = format!("{USER_ROW_SQL} WHERE u.id > ? ORDER BY u.id LIMIT ?");
+    let sql = format!(
+        r"{USER_ROW_SQL} WHERE u.id > ?1 AND (?3 IS NULL OR u.username LIKE ?3 ESCAPE '\' OR u.display_name LIKE ?3 ESCAPE '\' OR u.email LIKE ?3 ESCAPE '\'
+           OR EXISTS (SELECT 1 FROM user_identities WHERE user_id = u.id AND email LIKE ?3 ESCAPE '\'))
+         ORDER BY u.id LIMIT ?2"
+    );
     let limit = q.limit.map_or(-1, |l| l.clamp(1, 1000));
-    Ok(Json(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(q.after.unwrap_or(0)).bind(limit).fetch_all(&st.db).await?))
+    let term = q.q.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(|s| format!("%{}%", crate::util::like_escape(s)));
+    let query = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(q.after.unwrap_or(0)).bind(limit).bind(term);
+    Ok(Json(query.fetch_all(&st.db).await?))
 }
 
 /// Trimmed, at most 80 characters, no control characters
@@ -979,7 +989,7 @@ mod tests {
         let page = |after, limit| {
             let (st, admin) = (env.st.clone(), admin.clone());
             async move {
-                let Json(rows) = list(State(st), Admin(admin), Query(ListQuery { after, limit })).await.unwrap();
+                let Json(rows) = list(State(st), Admin(admin), Query(ListQuery { after, limit, q: None })).await.unwrap();
                 rows.into_iter().map(|r| r.id).collect::<Vec<_>>()
             }
         };
@@ -1007,6 +1017,28 @@ mod tests {
         store.stored_file(&admin, &root, "b.txt", b"abc").await;
         store.stored_file(&admin, &root, "c.txt", b"abc").await;
         assert_eq!(system_info(&store.st).await.unwrap().stats.stored_bytes, 3);
+    }
+
+    #[tokio::test]
+    async fn the_user_list_can_be_searched() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        for name in ["amy", "ben", "cat_1", "cat21"] {
+            env.user(name, false).await;
+        }
+        sqlx::query("UPDATE users SET display_name = 'Benjamin Smith' WHERE username = 'ben'").execute(&env.st.db).await.unwrap();
+        let find = |q: &str| {
+            let (st, admin, q) = (env.st.clone(), admin.clone(), Some(q.to_string()));
+            async move {
+                let Json(rows) = list(State(st), Admin(admin), Query(ListQuery { after: None, limit: Some(200), q })).await.unwrap();
+                rows.into_iter().map(|r| r.username).collect::<Vec<_>>()
+            }
+        };
+        assert_eq!(find("AMY").await, ["amy"]);
+        assert_eq!(find("smith").await, ["ben"]);
+        // _ is a letter here, not "any character"
+        assert_eq!(find("cat_").await, ["cat_1"]);
+        assert_eq!(find("  ").await.len(), 5);
     }
 
     fn req(name: &str, quota: Option<i64>) -> Json<CreateReq> {
