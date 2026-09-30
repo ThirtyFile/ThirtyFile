@@ -126,7 +126,7 @@ pub struct Crumb {
 pub struct Drive {
     pub id: String,
     pub name: String,
-    pub kind: String,
+    pub kind: SpaceKind,
     pub root_id: String,
     pub owner_id: Option<i64>,
     pub quota_bytes: i64,
@@ -146,6 +146,19 @@ impl Drive {
     pub fn is_folder(&self) -> bool {
         self.mode == SpaceMode::Folder
     }
+}
+
+/// What a space is (`drives.kind`), in the order spaces are listed
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, sqlx::Type)]
+#[serde(rename_all = "lowercase")]
+#[sqlx(rename_all = "lowercase")]
+pub enum SpaceKind {
+    /// Someone's "My files"
+    Personal,
+    /// "All files", which everyone may use
+    Company,
+    /// A space for a team
+    Team,
 }
 
 /// How a space keeps its files (`drives.mode`)

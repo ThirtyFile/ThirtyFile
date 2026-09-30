@@ -51,7 +51,7 @@ pub async fn used_bytes(db: &SqlitePool, user_id: i64) -> AppResult<i64> {
 
 /// Space quota (0 = unlimited): personal spaces use the owner account's quota
 pub async fn drive_quota(conn: &mut SqliteConnection, drive: &Drive) -> AppResult<i64> {
-    if drive.kind == "personal" {
+    if drive.kind == super::SpaceKind::Personal {
         let (q,): (i64,) = sqlx::query_as("SELECT COALESCE((SELECT quota_bytes FROM users WHERE id = ?), 0)")
             .bind(drive.owner_id)
             .fetch_one(conn)

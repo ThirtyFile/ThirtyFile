@@ -91,7 +91,7 @@ pub async fn role_on(conn: &mut SqliteConnection, user: &User, node: &Node) -> A
         return Ok(None);
     }
     // Administrators manage the company shared space (personal spaces are unaffected, for privacy)
-    let mut best = (drive.kind == "company" && user.is_admin()).then_some(Role::Manager);
+    let mut best = (drive.kind == super::SpaceKind::Company && user.is_admin()).then_some(Role::Manager);
     let sql = format!(
         "WITH RECURSIVE up(id, parent_id) AS (
            SELECT id, parent_id FROM nodes WHERE id = ?1
@@ -216,12 +216,7 @@ pub async fn user_drives(conn: &mut SqliteConnection, user: &User) -> AppResult<
         }
     }
     let mut out: Vec<(Drive, Role)> = map.into_values().collect();
-    let rank = |k: &str| match k {
-        "personal" => 0,
-        "company" => 1,
-        _ => 2,
-    };
-    out.sort_by(|a, b| rank(&a.0.kind).cmp(&rank(&b.0.kind)).then_with(|| a.0.name.cmp(&b.0.name)));
+    out.sort_by(|a, b| a.0.kind.cmp(&b.0.kind).then_with(|| a.0.name.cmp(&b.0.name)));
     Ok(out)
 }
 

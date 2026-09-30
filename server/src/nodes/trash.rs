@@ -86,7 +86,7 @@ pub(super) async fn trash_role(conn: &mut SqliteConnection, user: &User, node: &
     let role = tree::role_on(conn, user, node).await?;
     if user.is_admin()
         && let Some(drive) = tree::get_drive(conn, node.drive()).await?
-        && drive.kind != "personal"
+        && drive.kind != tree::SpaceKind::Personal
         && !drive.disabled
     {
         return Ok(role.max(Some(Role::Manager)));

@@ -571,8 +571,8 @@ async fn check_room(conn: &mut sqlx::SqliteConnection, root_id: &str, target: &t
 
 /// How the log names the space the files went to
 async fn space_label(conn: &mut sqlx::SqliteConnection, target: &tree::Drive) -> AppResult<String> {
-    Ok(match target.kind.as_str() {
-        "personal" => {
+    Ok(match target.kind {
+        tree::SpaceKind::Personal => {
             let (owner,): (String,) = sqlx::query_as("SELECT COALESCE((SELECT username FROM users WHERE id = ?), '')").bind(target.owner_id).fetch_one(&mut *conn).await?;
             format!("My files of {owner}")
         }

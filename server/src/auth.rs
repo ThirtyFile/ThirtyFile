@@ -100,13 +100,24 @@ pub fn cookie_header(st: &AppState, name: &str, value: &str, path: &str, max_age
 
 pub const USER_COLS: &str = "u.id, u.username, u.display_name, u.role, u.can_write, u.can_delete, u.can_share, u.quota_bytes, u.root_id, u.must_change_password";
 
+/// What an account may do (`users.role`)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, sqlx::Type)]
+#[serde(rename_all = "lowercase")]
+#[sqlx(rename_all = "lowercase")]
+pub enum UserRole {
+    /// An administrator
+    Admin,
+    /// A standard user
+    User,
+}
+
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 pub struct User {
     pub id: i64,
     pub username: String,
     /// Shown next to the username; may be blank
     pub display_name: String,
-    pub role: String,
+    pub role: UserRole,
     pub can_write: bool,
     pub can_delete: bool,
     pub can_share: bool,
@@ -126,7 +137,7 @@ pub struct User {
 
 impl User {
     pub fn is_admin(&self) -> bool {
-        self.role == "admin"
+        self.role == UserRole::Admin
     }
 
     /// Tests: the root folder of the user's personal space, which test users have

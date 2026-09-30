@@ -46,7 +46,7 @@ const SHARED_WITH_ME: &str = "Shared with me";
 pub struct DriveBrief {
     id: String,
     name: String,
-    kind: String,
+    kind: tree::SpaceKind,
     root_id: String,
 }
 
@@ -197,7 +197,7 @@ pub struct Located {
 
 #[derive(Serialize, Clone)]
 pub struct SpaceRef {
-    kind: String,
+    kind: tree::SpaceKind,
     name: String,
 }
 
@@ -209,7 +209,7 @@ async fn locate(st: &AppState, user: &User, mut nodes: Vec<Node>) -> AppResult<V
         tree::user_drives(&mut c, user).await?.into_iter().map(|(d, _)| (d.id, SpaceRef { kind: d.kind, name: d.name })).collect();
     if user.is_admin() && nodes.iter().any(|n| !drives.contains_key(n.drive())) {
         // Spaces an administrator manages without being a member (their trash is listed too)
-        let all: Vec<(String, String, String)> =
+        let all: Vec<(String, tree::SpaceKind, String)> =
             sqlx::query_as("SELECT id, kind, name FROM drives WHERE kind != 'personal' AND disabled = 0").fetch_all(&mut *c).await?;
         for (id, kind, name) in all {
             drives.entry(id).or_insert(SpaceRef { kind, name });
@@ -827,7 +827,7 @@ mod tests {
         let listed = list_trash(State(env.st.clone()), admin.clone(), Query(TrashQuery::default())).await.unwrap().0.into_items();
         let plan = listed.iter().find(|l| l.node.name == "plan.txt").unwrap();
         let space = plan.location_space.as_ref().unwrap();
-        assert_eq!((space.kind.as_str(), space.name.as_str(), plan.location_path.len()), ("team", "Team", 0));
+        assert_eq!((space.kind, space.name.as_str(), plan.location_path.len()), (tree::SpaceKind::Team, "Team", 0));
         let listed: Vec<(String, String)> = listed.into_iter().map(|l| (l.node.name.clone(), l.location.clone())).collect();
         assert!(listed.contains(&("plan.txt".to_string(), "Team".to_string())), "{listed:?}");
         assert!(!listed.iter().any(|(n, _)| n == "diary.txt"), "personal spaces stay private: {listed:?}");
