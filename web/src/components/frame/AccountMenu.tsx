@@ -27,7 +27,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ChangePasswordDialog } from "@/components/dialogs";
+import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
 import { LoginLogDialog } from "@/components/logs/LoginLog";
 import { LinkedAccountsDialog } from "@/components/LinkedAccountsDialog";
 import { DevicesDialog } from "@/components/DevicesDialog";

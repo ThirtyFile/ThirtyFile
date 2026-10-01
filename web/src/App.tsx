@@ -22,8 +22,8 @@ const ResetPasswordPage = page(() => import("@/pages/ResetPasswordPage"), "Reset
 const PublicSharePage = page(() => import("@/pages/PublicSharePage"), "PublicSharePage");
 const AppShell = page(() => import("@/pages/AppShell"), "AppShell");
 const ConflictHost = page(() => import("@/components/ConflictDialog"), "ConflictHost");
-const ChangePasswordDialog = page<typeof import("@/components/dialogs"), "ChangePasswordDialog", { required?: boolean; onClose(): void }>(
-  () => import("@/components/dialogs"),
+const ChangePasswordDialog = page<typeof import("@/components/ChangePasswordDialog"), "ChangePasswordDialog", { required?: boolean; onClose(): void }>(
+  () => import("@/components/ChangePasswordDialog"),
   "ChangePasswordDialog",
 );
 const FilesPage = page(() => import("@/pages/FilesPage"), "FilesPage");
