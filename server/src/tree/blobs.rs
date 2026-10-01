@@ -440,6 +440,8 @@ pub struct StagedBlob {
     uploaded_to: Option<String>,
     /// Where the content already existed when staging started (its file is protected from background deletion while staged)
     existing_at: Option<String>,
+    /// A restore repaired this location's missing or damaged content; only replace the same primary at commit.
+    repair_from: Option<String>,
     guard: BlobMark,
 }
 
@@ -460,24 +462,67 @@ pub async fn stage_guard(st: &AppState, hash: &str) -> BlobMark {
 }
 
 pub async fn stage_blob(st: &AppState, drive_id: &str, hash: String, size: i64, tmp: std::path::PathBuf) -> AppResult<StagedBlob> {
+    stage_blob_inner(st, drive_id, hash, size, tmp, false).await
+}
+
+/// A restore may reuse registered content only after checking its bytes, not merely its database record.
+pub async fn stage_restored_blob(st: &AppState, drive_id: &str, hash: String, size: i64, tmp: std::path::PathBuf) -> AppResult<StagedBlob> {
+    stage_blob_inner(st, drive_id, hash, size, tmp, true).await
+}
+
+async fn whole(st: &AppState, location: &str, hash: &str, size: i64) -> bool {
+    if size < 0 {
+        return false;
+    }
+    let checked = async {
+        let mut reader = st.storage(location)?.open(hash, 0, size as u64 + 1).await?;
+        let (got, bytes) = crate::hashing::read_async(&mut reader).await?;
+        AppResult::Ok(got == hash && bytes == size as u64)
+    }
+    .await;
+    checked.unwrap_or(false)
+}
+
+async fn stage_blob_inner(st: &AppState, drive_id: &str, hash: String, size: i64, tmp: std::path::PathBuf, verify: bool) -> AppResult<StagedBlob> {
     let guard = stage_guard(st, &hash).await;
     let result = async {
         let mut c = st.db.acquire().await?;
         let exists: Option<(String,)> = sqlx::query_as("SELECT location_id FROM blobs WHERE hash = ?").bind(&hash).fetch_optional(&mut *c).await?;
-        if let Some((loc,)) = exists {
-            return Ok((None, Some(loc)));
+        if !verify && let Some((loc,)) = &exists {
+            return Ok((None, Some(loc.clone()), None));
         }
         let location = drive_location(&mut c, drive_id).await?;
         drop(c);
+        let existing = exists.map(|(loc,)| loc);
+        if let Some(loc) = &existing {
+            if !verify || whole(st, loc, &hash, size).await {
+                return Ok((None, existing, None));
+            }
+            // The first attempt may have no temporary file because the blob was registered. The restore fetches
+            // and verifies its backup before trying again. Never overwrite anything using unverified bytes.
+            let (got, bytes) = crate::hashing::file(tmp.clone()).await?;
+            if got != hash || bytes != size as u64 {
+                return Err(AppError::internal("Restored content does not match its hash and size"));
+            }
+        }
         // If the server stops between storing and recording it, the content would stay in storage unreferenced: list
         // it for deletion a day from now; recording it removes the entry, and deletion skips content still in use
         defer_blob_removal(st, &[(hash.clone(), location.clone())], STAGED_GRACE).await;
-        st.storage(&location)?.put_file(&hash, &tmp).await?;
-        Ok::<_, crate::error::AppError>((Some(location), None))
+        let storage = st.storage(&location)?;
+        if verify {
+            // Ordinary writes may reuse existing content. A repair must replace damaged bytes on every adapter.
+            storage.repair_file(&hash, &tmp).await?;
+            if !whole(st, &location, &hash, size).await {
+                return Err(AppError::internal("Restored content does not match its hash and size"));
+            }
+        } else {
+            storage.put_file(&hash, &tmp).await?;
+        }
+        Ok::<_, crate::error::AppError>((Some(location), existing.clone(), if verify { existing } else { None }))
     }
     .await;
-    let (uploaded_to, existing_at) = result?;
-    Ok(StagedBlob { hash, size, tmp, uploaded_to, existing_at, guard })
+    let (uploaded_to, existing_at, repair_from) = result?;
+    Ok(StagedBlob { hash, size, tmp, uploaded_to, existing_at, repair_from, guard })
 }
 
 /// How long content stored for an upload may stay unrecorded before background deletion removes it
@@ -493,6 +538,14 @@ pub async fn commit_blob(conn: &mut SqliteConnection, staged: &StagedBlob) -> Ap
             .await?;
     }
     let current: Option<(String,)> = sqlx::query_as("SELECT location_id FROM blobs WHERE hash = ?").bind(&staged.hash).fetch_optional(&mut *conn).await?;
+    if let (Some(old), Some((loc,)), Some(new)) = (&staged.repair_from, &current, &staged.uploaded_to) {
+        if loc != old || crate::replicas::fenced(conn, new).await? {
+            return Err(AppError::conflict("Something changed at the same time. Try again."));
+        }
+        sqlx::query("UPDATE blobs SET location_id = ? WHERE hash = ?").bind(new).bind(&staged.hash).execute(&mut *conn).await?;
+        add_blob_ref(conn, &staged.hash, staged.size, new).await?;
+        return Ok((old != new).then(|| (staged.hash.clone(), old.clone())));
+    }
     match (&current, &staged.uploaded_to) {
         // The content already exists: keep its original location; if a copy was also uploaded elsewhere, that one is redundant
         (Some((loc,)), uploaded) => {

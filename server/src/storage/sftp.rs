@@ -246,7 +246,7 @@ impl SftpStorage {
     }
 
     async fn put(&self, hash: &str, src: &Path) -> io::Result<()> {
-        self.put_to(&self.blob_dir(hash), &self.blob_path(hash)?, src).await
+        self.put_to(&self.blob_dir(hash), &self.blob_path(hash)?, src, false).await
     }
 
     /// A path in the location (checked; "" is its folder)
@@ -311,7 +311,7 @@ impl SftpStorage {
     }
 
     /// Writes a temp file to `path` in the folder `dir`, through a temporary name
-    async fn put_to(&self, dir: &str, path: &str, src: &Path) -> io::Result<()> {
+    async fn put_to(&self, dir: &str, path: &str, src: &Path, repair: bool) -> io::Result<()> {
         let conn = self.conn().await?;
         self.ensure_dir(&conn, dir).await?;
         let tmp = format!("{path}.part-{}", uuid::Uuid::new_v4().simple());
@@ -328,13 +328,23 @@ impl SftpStorage {
             let _ = conn.sftp.remove_file(tmp.as_str()).await;
             return Err(e);
         }
-        // SFTP v3 rename doesn't overwrite existing files: if the same content already exists, keep the original
+        // SFTP v3 rename doesn't overwrite existing files. Ordinary writes keep the original, but a repair
+        // replaces it only after the complete replacement has reached its temporary name.
         if let Err(e) = conn.sftp.rename(tmp.as_str(), path).await {
             let exists = conn.sftp.try_exists(path).await.unwrap_or(false);
+            let result = if repair && exists {
+                async {
+                    conn.sftp.remove_file(path).await.map_err(sftp_err)?;
+                    conn.sftp.rename(tmp.as_str(), path).await.map_err(sftp_err)
+                }
+                .await
+            } else if exists {
+                Ok(())
+            } else {
+                Err(sftp_err(e))
+            };
             let _ = conn.sftp.remove_file(tmp.as_str()).await;
-            if !exists {
-                return Err(sftp_err(e));
-            }
+            result?;
         }
         Ok(())
     }
@@ -446,11 +456,24 @@ impl Storage for SftpStorage {
         })
     }
 
+    fn repair_file<'a>(&'a self, hash: &'a str, src: &'a Path) -> BoxFuture<'a, io::Result<()>> {
+        Box::pin(async move {
+            let path = self.blob_path(hash)?;
+            let res = self.put_to(&self.blob_dir(hash), &path, src, true).await;
+            if res.as_ref().is_err_and(|e| e.kind() != io::ErrorKind::InvalidInput) {
+                self.reset().await;
+            }
+            res?;
+            let _ = tokio::fs::remove_file(src).await;
+            Ok(())
+        })
+    }
+
     fn put_at<'a>(&'a self, key: &'a str, src: &'a Path) -> BoxFuture<'a, io::Result<()>> {
         Box::pin(async move {
             let path = self.path_at(key)?;
             let dir = path.rsplit_once('/').map_or(self.root.as_str(), |(d, _)| d).to_string();
-            let res = self.put_to(&dir, &path, src).await;
+            let res = self.put_to(&dir, &path, src, false).await;
             if res.as_ref().is_err_and(|e| e.kind() != io::ErrorKind::InvalidInput) {
                 self.reset().await;
             }
@@ -851,6 +874,21 @@ pub(crate) mod tests {
         let report = crate::location_tools::steps::run(&env.st, st.clone(), "sftp", 1 << 20).await;
         assert!(report.ok, "{report:?}");
         assert_eq!(std::fs::read_dir(s.dir.join("files/.thirtyfile-check")).unwrap().count(), 0, "the test files are deleted");
+    }
+
+    #[tokio::test]
+    async fn damaged_content_is_replaced_when_sftp_rename_refuses_overwrite() {
+        let s = server(testutil::password()).await;
+        let st = storage(&s, testutil::password(), "");
+        let hash = put(&st, &s, b"healthy content").await;
+        let stored = s.dir.join(format!("files/blobs/{}/{}/{hash}", &hash[..2], &hash[2..4]));
+        std::fs::write(&stored, b"damaged content").unwrap();
+        let src = s.dir.join("repair.tmp");
+        std::fs::write(&src, b"healthy content").unwrap();
+        st.repair_file(&hash, &src).await.unwrap();
+        assert_eq!(read(&st, &hash, 0, 15).await, b"healthy content");
+        assert!(!src.exists());
+        assert_eq!(std::fs::read_dir(stored.parent().unwrap()).unwrap().count(), 1);
     }
 
     #[cfg(unix)]

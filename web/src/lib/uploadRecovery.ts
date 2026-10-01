@@ -2,7 +2,7 @@
  * Recovering interrupted uploads after a reload or a browser restart.
  *
  * The upload queue lives in memory (uploads.ts), with the files the person picked. What is needed to find an upload
- * again is kept in the browser's storage: the file's name, folder path, size, date and a sample of its content, where
+ * again is kept in the browser's storage: the file's name, folder path, size, date and its complete content identity, where
  * it goes, its batch and the answer to a name clash, and how far it got. Never the content itself, nor anything that
  * signs in: the server session of an upload is found again the way tus-js-client finds it (its own records, which
  * hold only the upload's address).
@@ -16,6 +16,8 @@
  * chosen again: a page can't reopen them by itself.
  */
 
+import { sha256 } from "@noble/hashes/sha2.js";
+
 /** A file that was being uploaded, as kept in the browser's storage */
 export interface UploadRecord {
   id: string;
@@ -27,7 +29,7 @@ export interface UploadRecord {
   size: number;
   lastModified: number;
   onConflict: "replace" | "keep";
-  /** A sample of the content (`sampleOf`), once the upload started: a file changed since doesn't continue the old upload */
+  /** Complete content identity (`sampleOf`) checked before resuming; legacy records held sparse samples here. */
   sample?: string;
   /** Bytes the server had received, as far as this page knew */
   sent: number;
@@ -78,7 +80,7 @@ export function setRecoveryUser(id: number | null) {
   changed();
 }
 
-/** A short, stable hash (not for security): of a share link's address, and of content samples */
+/** A short, stable hash (not for security): of a share link's address */
 export function hash(text: string): string {
   let h1 = 0xdeadbeef;
   let h2 = 0x41c6ce57;
@@ -180,36 +182,31 @@ export function groupByBatch(records: UploadRecord[]): RecoveredBatch[] {
 /** Where a file sits in what was picked: its folder path and name */
 export const pathOf = (relativePath: string, name: string) => (relativePath ? `${relativePath}/${name}` : name);
 
-// ───────────── Content samples ─────────────
+// ───────────── Content identity ─────────────
 
-/** Bytes read from each place in the file, and how many places: 64 KB in all, read in a moment even from a slow disk */
-const SAMPLE_BYTES = 4096;
-const SAMPLES = 16;
+/** Bytes read at a time: the identity covers every byte without loading the entire file into memory. */
+const IDENTITY_CHUNK = 4 * 1024 * 1024;
+export const IDENTITY_PREFIX = "sha256-v1:";
 
 /**
- * A sample of a file's content, with its size: the whole of a small file, and 4 KB from 16 places spread from the start
- * to the end of a larger one. Another file with the same name, size and date (a replaced file) differs in it, so an
- * upload doesn't continue with it. An edit that keeps the size and the date and falls between the places isn't seen:
- * editing a file changes its date.
+ * A versioned SHA-256 of every byte, computed incrementally with bounded memory. This also works on self-hosted HTTP
+ * sites where WebCrypto is unavailable. Old sparse samples cannot authorize a resume.
  */
 export async function sampleOf(file: Blob): Promise<string> {
-  const whole = file.size <= SAMPLE_BYTES * SAMPLES;
-  const at = whole ? [0] : Array.from({ length: SAMPLES }, (_, i) => Math.floor(((file.size - SAMPLE_BYTES) * i) / (SAMPLES - 1)));
-  const parts: string[] = [String(file.size)];
-  for (const start of at) {
-    const bytes = new Uint8Array(await file.slice(start, start + (whole ? file.size : SAMPLE_BYTES)).arrayBuffer());
-    let s = "";
-    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
-    parts.push(hash(s));
+  const digest = sha256.create();
+  for (let start = 0; start < file.size; start += IDENTITY_CHUNK) {
+    const bytes = new Uint8Array(await file.slice(start, start + IDENTITY_CHUNK).arrayBuffer());
+    digest.update(bytes);
   }
-  return hash(parts.join("|"));
+  return IDENTITY_PREFIX + Array.from(digest.digest(), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // ───────────── Server sessions (tus-js-client's records) ─────────────
 
 /** The tus fingerprint of an upload: uploads to other places, or with another answer to a name clash, don't resume each other */
-export function fingerprintOf(endpoint: string, r: Pick<UploadRecord, "parentId" | "relativePath" | "onConflict" | "name" | "size" | "lastModified">) {
-  return ["sd", endpoint, r.parentId, r.relativePath, r.onConflict, r.name, r.size, r.lastModified].join("|");
+export function fingerprintOf(endpoint: string, r: Pick<UploadRecord, "parentId" | "relativePath" | "onConflict" | "name" | "size" | "lastModified"> & { sample?: string }) {
+  const base = ["sd", endpoint, r.parentId, r.relativePath, r.onConflict, r.name, r.size, r.lastModified].join("|");
+  return r.sample?.startsWith(IDENTITY_PREFIX) ? `${base}|${r.sample}` : base;
 }
 
 /** The upload addresses tus-js-client kept for a fingerprint, with their storage keys */

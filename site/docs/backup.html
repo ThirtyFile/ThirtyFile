@@ -139,6 +139,7 @@ docker start thirtyfile</code></pre>
         <h3 id="backup-size">How much room it takes</h3>
         <p>Content several snapshots hold is stored once, so a backup takes about the size of the spaces, plus what changed or was deleted during the days snapshots are kept. After each new snapshot, the ones older than the policy keeps are deleted (never the newest ones), then content none of the others holds. <strong>Control panel › Storage usage</strong> shows what backups take on each location.</p>
         <h3 id="backup-restore">Restoring from a backup</h3>
+        <p>Restoring checks existing content before reusing it. Missing or damaged content in the content store is recovered from the checked backup, preserving files that share it. The choice for a taken name is applied when each file is written, including names taken while the restore was reading its backup.</p>
         <p>Select the backup and choose <strong>Restore…</strong>, then a restore point and a space. For company and team spaces you can pick a folder, or some of its items; a personal space is restored whole, only into its owner's personal space, since administrators don't see its files.</p>
         <ul>
           <li><strong>Into a new folder</strong> (the default): everything goes into a folder of its own, <em>Restored &lt;space&gt; &lt;date&gt;</em>, in the space or another one you choose. Nothing there is replaced.</li>

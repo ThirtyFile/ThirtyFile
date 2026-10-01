@@ -18,6 +18,7 @@ import {
   recordsVersion,
   removeRecords,
   sampleOf,
+  IDENTITY_PREFIX,
   saveLive,
   scopeOf,
   sessionState,
@@ -52,7 +53,7 @@ export interface UploadTask {
   recordId: string;
   scope: string | null;
   created: number;
-  /** A sample of the content, taken when it starts */
+  /** A complete content identity, computed before sending */
   sample?: string;
   /** Continued after a reload: how far it had got, and whether it must start again (the file changed, or "Start over") */
   recovered?: { sent: number; fresh: boolean };
@@ -236,7 +237,7 @@ export interface ResumeResult {
 
 /**
  * Continues interrupted uploads with the files chosen again. A file is matched by its folder path and name, then must
- * have the same size, date and content sample; one that doesn't starts a new upload, and the part sent before is
+ * have the same size, date and complete content identity; one that doesn't starts a new upload, and the part sent before is
  * dropped. The destination, batch and answer to a name clash stay as they were. `restart` starts them all again.
  */
 export async function resumeRecovered(endpoint: string, records: UploadRecord[], picked: PickedFile[], restart = false): Promise<ResumeResult> {
@@ -251,7 +252,7 @@ export async function resumeRecovered(endpoint: string, records: UploadRecord[],
       continue;
     }
     used.add(p);
-    const same = p.file.size === r.size && p.file.lastModified === r.lastModified && (!r.sample || (await sampleOf(p.file).catch(() => "")) === r.sample);
+    const same = p.file.size === r.size && p.file.lastModified === r.lastModified && !!r.sample?.startsWith(IDENTITY_PREFIX) && (await sampleOf(p.file).catch(() => "")) === r.sample;
     const fresh = restart || !same;
     // The old upload can't be continued with this file: let the server drop what it received
     if (fresh) await forgetSessions(fingerprintOf(endpoint, r));
@@ -373,7 +374,7 @@ export function savedName(header: string | undefined, uploaded: string): string 
 }
 
 function start(task: UploadTask) {
-  const fingerprint = fingerprintOf(task.endpoint, { ...task, lastModified: task.file.lastModified });
+  const fingerprint = () => fingerprintOf(task.endpoint, { ...task, lastModified: task.file.lastModified });
   const upload = new tus.Upload(task.file, {
     endpoint: task.endpoint,
     chunkSize: 32 * 1024 * 1024,
@@ -388,7 +389,7 @@ function start(task: UploadTask) {
       onConflict: task.onConflict,
     },
     // Uploads of the same file to different locations, or with a different answer to a name clash, must not resume each other
-    fingerprint: async () => fingerprint,
+    fingerprint: async () => fingerprint(),
     onProgress: (sent) => {
       if (task.upload !== upload || task.status !== "uploading") return;
       setSent(task, sent);
@@ -420,7 +421,7 @@ function start(task: UploadTask) {
   setStatus(task, "uploading");
   task.upload = upload;
   task.error = undefined;
-  void begin(task, upload, fingerprint);
+  void begin(task, upload);
 }
 
 /** A task failed: it says why, and lets go of its file for other tabs */
@@ -435,12 +436,12 @@ function fail(task: UploadTask, message: string) {
 }
 
 /**
- * Starts sending: takes the file's lock (another tab may be sending it), notes a sample of its content, and continues
+ * Starts sending: takes the file's lock (another tab may be sending it), notes its complete content identity, and continues
  * the upload the server has, if any. An upload continued after a reload asks the server first: one it finished (the
  * answer was lost) is done, and one it no longer has starts again, unless everything had been sent, which is then
  * reported rather than sent a second time.
  */
-async function begin(task: UploadTask, upload: tus.Upload, fingerprint: string) {
+async function begin(task: UploadTask, upload: tus.Upload) {
   // The user may pause or cancel meanwhile: abort() has no effect before start(), so check after each step
   const current = () => byId.get(task.id) === task && task.status === "uploading" && task.upload === upload;
   const release = await acquire(`tf-upload:${task.recordId}`);
@@ -452,7 +453,8 @@ async function begin(task: UploadTask, upload: tus.Upload, fingerprint: string) 
   task.release = release;
   if (!current()) return releaseLock(task);
   task.sample ??= await sampleOf(task.file).catch(() => undefined);
-  let previous = await upload.findPreviousUploads().catch(() => []);
+  const fingerprint = fingerprintOf(task.endpoint, { ...task, lastModified: task.file.lastModified });
+  let previous = task.sample?.startsWith(IDENTITY_PREFIX) ? await upload.findPreviousUploads().catch(() => []) : [];
   if (!current()) return releaseLock(task);
   const recovered = task.recovered;
   task.recovered = undefined;

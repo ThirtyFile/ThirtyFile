@@ -114,14 +114,14 @@ describe("which uploads were interrupted", () => {
 });
 
 describe("telling files apart", () => {
-  test("a sample of the content tells a replaced file from the original, even with the same size", async () => {
+  test("the complete content identity tells a replaced file from the original, even with the same size", async () => {
     const m = await load();
     const big = new Uint8Array(1_000_000).map((_, i) => i % 251);
     const same = await m.sampleOf(new Blob([big]));
     expect(await m.sampleOf(new Blob([big.slice()]))).toBe(same);
     // Another file of the same size
     expect(await m.sampleOf(new Blob([big.map((b) => b ^ 0x55)]))).not.toBe(same);
-    // Changes at the start, the end, or anywhere in a sampled place
+    // Changes at the start, the end, or between the old sampled places
     for (const at of [0, 999_999, 531_200]) {
       const changed = big.slice();
       changed[at] ^= 1;
@@ -151,4 +151,29 @@ describe("clearing", () => {
     m.forgetRecords(null, true);
     expect(Object.keys(localStorage)).toEqual([]);
   });
+});
+
+test("content identity detects edits between the old sampled regions", async () => {
+  const m = await load();
+  const old = new Uint8Array(1_000_000);
+  const changed = old.slice();
+  changed[20000] = 1;
+  expect(await m.sampleOf(new Blob([changed]))).not.toBe(await m.sampleOf(new Blob([old])));
+});
+
+test("tus identities distinguish changed content with matching names and timestamps", async () => {
+  const m = await load();
+  const r = record();
+  const a = { ...r, sample: await m.sampleOf(new Blob(["old"])) };
+  const b = { ...r, sample: await m.sampleOf(new Blob(["new"])) };
+  expect(m.fingerprintOf("/api/uploads", a)).not.toBe(m.fingerprintOf("/api/uploads", b));
+  expect(m.fingerprintOf("/api/uploads", a)).not.toBe(m.fingerprintOf("/api/uploads", r));
+});
+
+test("the complete identity matches standard SHA-256 across chunk boundaries", async () => {
+  const m = await load();
+  const { createHash } = await import("node:crypto");
+  const bytes = new Uint8Array(5 * 1024 * 1024).fill(42);
+  const got = await m.sampleOf(new Blob([bytes]));
+  expect(got).toBe(m.IDENTITY_PREFIX + createHash("sha256").update(bytes).digest("hex"));
 });

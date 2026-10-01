@@ -629,3 +629,59 @@ async fn a_folder_space_is_promoted_into_a_content_store_on_the_target_and_its_f
     super::sync::release(&env.st, "nas").await.unwrap();
     assert!(has(&copies(&env, "nas").await, b"dear diary"));
 }
+
+/// An upload during the network preflight must not bypass missing-content acceptance.
+#[tokio::test]
+async fn a_promotion_refuses_content_missing_since_its_preflight() {
+    use futures_util::future::BoxFuture;
+    struct PausedPing {
+        inner: Arc<dyn Storage>,
+        entered: Arc<tokio::sync::Notify>,
+        proceed: Arc<tokio::sync::Notify>,
+    }
+    impl Storage for PausedPing {
+        fn put_file<'a>(&'a self, h: &'a str, p: &'a std::path::Path) -> BoxFuture<'a, std::io::Result<()>> {
+            self.inner.put_file(h, p)
+        }
+        fn open<'a>(&'a self, h: &'a str, s: u64, n: u64) -> BoxFuture<'a, std::io::Result<storage::BoxReader>> {
+            self.inner.open(h, s, n)
+        }
+        fn delete<'a>(&'a self, h: &'a str) -> BoxFuture<'a, std::io::Result<()>> {
+            self.inner.delete(h)
+        }
+        fn check(&self) -> BoxFuture<'_, std::io::Result<()>> {
+            self.inner.check()
+        }
+        fn ping(&self) -> BoxFuture<'_, std::io::Result<()>> {
+            Box::pin(async move {
+                self.entered.notify_one();
+                self.proceed.notified().await;
+                self.inner.ping().await
+            })
+        }
+    }
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    env.upload(&amy, amy.root(), "replicated.txt", b"on both locations").await;
+    add_nas(&env, "nas").await;
+    let id = make(&env, json!({"source":"local", "targets":[{"location":"nas"}]})).await;
+    assert_eq!(settle(&env, &id).await, ["done"]);
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let proceed = Arc::new(tokio::sync::Notify::new());
+    let inner = env.st.storage("nas").unwrap();
+    env.st.storages.write().unwrap().insert("nas".into(), Arc::new(PausedPing { inner, entered: entered.clone(), proceed: proceed.clone() }));
+    let st = env.st.clone();
+    let admin = env.admin().await;
+    let task = tokio::spawn(async move {
+        let req = serde_json::from_value(json!({"target":"nas","accept_missing":false})).unwrap();
+        api::promote(State(st), Admin(admin), Path(id), Json(req)).await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(30), entered.notified()).await.unwrap();
+    let late = env.upload(&amy, amy.root(), "late.txt", b"concurrent upload, not on target").await;
+    proceed.notify_one();
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), task).await.unwrap().unwrap();
+    assert!(outcome.is_err(), "a concurrent upload must invalidate the preflight");
+    let (source, epoch): (String, i64) = sqlx::query_as("SELECT source_location,epoch FROM replica_policies").fetch_one(&env.st.db).await.unwrap();
+    assert_eq!((source.as_str(), epoch), ("local", 1));
+    assert_eq!(read(&env, &amy, &late).await.unwrap(), b"concurrent upload, not on target");
+}

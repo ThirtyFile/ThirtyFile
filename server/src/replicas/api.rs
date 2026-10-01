@@ -815,6 +815,11 @@ pub async fn promote(State(st): State<AppState>, Admin(user): Admin, Path(id): P
                 }
             }
             let missing = missing + staying;
+            // Network checks and waiting for space locks leave time for uploads or replica verification to change
+            // the coverage. A new gap must never inherit acceptance of an earlier preflight.
+            if missing != check.missing || (missing > 0 && (check.source_reachable || !req.accept_missing)) {
+                return Err(AppError::conflict("Something changed at the same time. Try again."));
+            }
             // The policy: its location, a new epoch (jobs asked for before are refused), the old location as a target
             // checked before it counts
             sqlx::query("UPDATE replica_policies SET source_location = ?, epoch = epoch + 1, updated_at = ? WHERE id = ?")
