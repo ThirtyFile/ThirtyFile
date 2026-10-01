@@ -1043,6 +1043,8 @@ export interface Me {
   version_keep: number;
   /** Largest file that can be edited and saved online (bytes) */
   max_edit_bytes: number;
+  /** The release the server runs ("dev" for a local build); only people who are signed in are told */
+  version: string;
 }
 
 export interface SharePolicy {

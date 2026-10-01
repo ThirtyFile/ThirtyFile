@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use crate::{VERSION, state::AppState, util};
+use crate::{state::AppState, util};
 
 /// `thirtyfile health`: connects to the local listen address (0.0.0.0 becomes 127.0.0.1) and requests /api/health
 pub async fn health_probe(addr: &str) -> bool {
@@ -53,17 +53,18 @@ async fn probe_once(target: std::net::SocketAddr) -> bool {
     }
 }
 
-/// Health check (for Docker HEALTHCHECK and load balancers): no sign-in required; checks that the database is readable
 /// Free space below this (on /data or /storage) makes the health check report "degraded": a full disk is the most likely
 /// outage of a file server, and SQLite fails when it can't write
 const LOW_DISK: u64 = 1024 * 1024 * 1024;
 
+/// Health check (for Docker HEALTHCHECK and load balancers): no sign-in required; checks that the database is readable.
+/// It doesn't name the version, which would tell anyone which release to look up for known problems: people who are
+/// signed in get it from /api/auth/me.
 pub async fn health(axum::extract::State(st): axum::extract::State<AppState>) -> axum::response::Response {
     use axum::response::IntoResponse;
-    let version = VERSION;
     if let Err(e) = sqlx::query_scalar::<_, i64>("SELECT 1").fetch_one(&st.db).await {
         tracing::warn!("health check failed: {e}");
-        return (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "status": "error", "version": version }))).into_response();
+        return (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "status": "error" }))).into_response();
     }
     let mut warnings = Vec::new();
     let mut disks = serde_json::Map::new();
@@ -95,7 +96,7 @@ pub async fn health(axum::extract::State(st): axum::extract::State<AppState>) ->
         }
     }
     // Still 200: restarting the container doesn't free disk space or bring a storage service back
-    axum::Json(serde_json::json!({ "status": status, "version": version, "disks": disks, "locations": locations })).into_response()
+    axum::Json(serde_json::json!({ "status": status, "disks": disks, "locations": locations })).into_response()
 }
 
 #[cfg(test)]
@@ -112,6 +113,7 @@ mod tests {
         let res = health(axum::extract::State(env.st.clone())).await;
         assert_eq!(res.status(), StatusCode::OK);
         let v = body(res).await;
+        assert!(v.get("version").is_none(), "anyone can ask, so it doesn't name the release");
         // Disk space is only read on Unix
         assert!(!cfg!(unix) || v["disks"]["data"]["total_bytes"].as_u64().unwrap() > 0);
         env.st.location_health.lock().unwrap().insert("nas".into(), state::LocationHealth { ok: false, error: Some("secret host".into()), checked_at: 0 });

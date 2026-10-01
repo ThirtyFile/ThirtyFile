@@ -25,6 +25,9 @@ export default {
   "Light": "淺色",
   "Dark": "深色",
   "Sign out": "登出",
+  // The release that runs: the account menu, and the Control panel's status bar (admin/ControlPanelPage.tsx)
+  "ThirtyFile {version}": "ThirtyFile {version}",
+  "What's new in this release": "這個版本的新功能與修正",
   "Back": "返回",
   "Forward": "向前",
   "Up": "上一層",

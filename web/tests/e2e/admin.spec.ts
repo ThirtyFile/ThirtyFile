@@ -1,6 +1,7 @@
-// Every page of the Control panel opens from its tile, without an error, and only for administrators
+// Every page of the Control panel opens from its tile, without an error, and only for administrators; and which
+// release runs is told only to people who are signed in
 import { expect, test } from "@playwright/test";
-import { signIn } from "./helpers";
+import { makeFolder, signIn, uploadFile } from "./helpers";
 
 const PAGES = [
   "Users",
@@ -55,4 +56,65 @@ test("someone who isn't an administrator is sent to their files", async ({ page 
   expect((await page.request.put("/api/auth/password", { data: { current: "a-long-test-password-1", new: "another-long-password-2" } })).ok()).toBe(true);
   await page.goto("/admin/users");
   await page.waitForURL(/\/files/);
+});
+
+test("only people who are signed in are told which release runs", async ({ page, browser, baseURL }) => {
+  // Anyone may ask whether the server is up, and the answer doesn't name the release
+  const health = await (await page.request.get("/api/health")).json();
+  expect(health.status).toBe("ok");
+  expect(health).not.toHaveProperty("version");
+  const signedOut = await page.request.get("/api/auth/me");
+  expect(signedOut.status()).toBe(401);
+  expect(await signedOut.text()).not.toContain("version");
+
+  await signIn(page);
+  const version = (await (await page.request.get("/api/auth/me")).json()).version as string;
+  expect(version).toBeTruthy();
+  const line = `ThirtyFile ${version}`;
+
+  // A quiet line at the bottom of the account menu, not something to choose
+  await page.getByRole("button", { name: /^a\s*admin$/i }).click();
+  const menu = page.getByRole("menu");
+  await expect(menu.getByText(line, { exact: true })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: line })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  // The Control panel's status bar: a local build has no release notes to link to
+  await page.goto("/admin");
+  const status = page.locator("footer");
+  await expect(status.getByText(line, { exact: true })).toBeVisible();
+  if (version === "dev") await expect(status.getByRole("link")).toHaveCount(0);
+  // A release links to its notes
+  await page.route("**/api/auth/me", async (route) => {
+    const res = await route.fetch();
+    await route.fulfill({ response: res, json: { ...(await res.json()), version: "0.5.0" } });
+  });
+  await page.reload();
+  await expect(status.getByRole("link", { name: "ThirtyFile 0.5.0" })).toHaveAttribute("href", "https://github.com/ThirtyFile/ThirtyFile/releases/tag/v0.5.0");
+  await page.unroute("**/api/auth/me");
+
+  // Pages that need no sign-in never show it: sign-in, password reset, a share link
+  const folder = await makeFolder(page, "Version check");
+  const file = await uploadFile(page, folder, "readme.txt", "Hello");
+  const share = await page.request.post("/api/shares", { data: { node_id: file } });
+  expect(share.ok()).toBe(true);
+  const link = (await share.json()).id as string;
+  const visitor = await browser.newContext({ baseURL });
+  const guest = await visitor.newPage();
+  const told: string[] = [];
+  guest.on("response", async (r) => {
+    const body = r.url().includes("/api/") ? await r.text().catch(() => "") : "";
+    if (body.includes(`"version":"${version}"`)) told.push(r.url());
+  });
+  await guest.goto("/login");
+  await expect(guest.getByRole("button", { name: "Click or press any key to sign in" })).toBeVisible();
+  await expect(guest.getByText(line)).toHaveCount(0);
+  await guest.goto("/reset-password");
+  await expect(guest.getByLabel("Username or email address")).toBeVisible();
+  await expect(guest.getByText(line)).toHaveCount(0);
+  await guest.goto(`/share/${link}`);
+  await expect(guest.getByText("readme.txt").first()).toBeVisible();
+  await expect(guest.getByText(line)).toHaveCount(0);
+  expect(told).toEqual([]);
+  await visitor.close();
 });
