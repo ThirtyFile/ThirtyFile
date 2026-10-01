@@ -60,6 +60,15 @@ pub struct Written {
 /// Puts received content where the space of `into` (a folder or file of it) keeps content, outside the write lock.
 /// The temporary file is taken over when this succeeds; when it fails, it is left where it is.
 pub async fn stage(st: &AppState, into: &Node, received: Received) -> AppResult<Staged> {
+    stage_inner(st, into, received, false).await
+}
+
+/// Backup restores also check and repair existing content-store objects before reusing them.
+pub async fn stage_restored(st: &AppState, into: &Node, received: Received) -> AppResult<Staged> {
+    stage_inner(st, into, received, true).await
+}
+
+async fn stage_inner(st: &AppState, into: &Node, received: Received, restored: bool) -> AppResult<Staged> {
     let kind = if into.in_folder_space() {
         Kind::Folder(fsops::stage_upload(st, into, &received.path, received.size).await?)
     } else {
@@ -73,7 +82,12 @@ pub async fn stage(st: &AppState, into: &Node, received: Received) -> AppResult<
                 hash
             }
         };
-        Kind::Store(tree::stage_blob(st, into.drive(), hash, received.size as i64, received.path).await?)
+        let staged = if restored {
+            tree::stage_restored_blob(st, into.drive(), hash, received.size as i64, received.path).await?
+        } else {
+            tree::stage_blob(st, into.drive(), hash, received.size as i64, received.path).await?
+        };
+        Kind::Store(staged)
     };
     Ok(Staged { drive: into.drive().to_string(), kind })
 }

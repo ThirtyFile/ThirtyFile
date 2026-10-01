@@ -114,7 +114,10 @@ test("a file replaced since, with the same name, size and date, starts again ins
   await startAndHold(page, path);
   await reload(page);
 
-  diskFile("replaced.bin", 40 * MB, 3);
+  const changed = readFileSync(path);
+  changed[MB] ^= 1;
+  changed[35 * MB] ^= 1;
+  writeFileSync(path, changed);
   utimesSync(path, mtime, mtime);
   const offsets = patchOffsets(page);
   await page.getByRole("region", { name: "Interrupted uploads" }).locator('input[type="file"][multiple]').setInputFiles(path);
@@ -124,6 +127,41 @@ test("a file replaced since, with the same name, size and date, starts again ins
   const [file] = await children(page, target);
   const content = await (await page.request.get(`/api/files/${file.id}/content`)).body();
   expect(sha(content)).toBe(sha(readFileSync(path)));
+});
+
+test("a legacy sparse-sample record starts again instead of authorizing a resume", async ({ page }) => {
+  await signIn(page);
+  const target = await folder(page, "Recovery legacy");
+  const path = diskFile("legacy.bin", 40 * MB, 9);
+  await page.goto(`/files/${target}`);
+  await startAndHold(page, path);
+  await reload(page);
+  // An earlier version kept a sparse sample and a metadata-only tus fingerprint.
+  const oldUrl = await page.evaluate(() => {
+    let url: string | null = null;
+    for (const [key, value] of Object.entries(localStorage)) {
+      if (key.startsWith("tf-upload-tasks-")) {
+        const records = JSON.parse(value);
+        for (const record of records) record.sample = "legacy-sparse-sample";
+        localStorage.setItem(key, JSON.stringify(records));
+      }
+      if (key.startsWith("tus::")) {
+        localStorage.setItem(key.replace(/\|sha256-v1:[0-9a-f]{64}/, ""), value);
+        localStorage.removeItem(key);
+        url = JSON.parse(value).uploadUrl;
+      }
+    }
+    return url;
+  });
+  expect(oldUrl).not.toBeNull();
+  await page.reload();
+  const offsets = patchOffsets(page);
+  await page.getByRole("region", { name: "Interrupted uploads" }).locator('input[type="file"][multiple]').setInputFiles(path);
+  await expect(page.getByRole("status").filter({ hasText: "1 upload complete" })).toBeAttached({ timeout: 60_000 });
+  expect(offsets[0]).toBe(0);
+  expect((await page.request.head(oldUrl!, { headers: { "Tus-Resumable": "1.0.0" } })).status()).toBe(404);
+  const [file] = await children(page, target);
+  expect(sha(await (await page.request.get(`/api/files/${file.id}/content`)).body())).toBe(sha(readFileSync(path)));
 });
 
 test("an upload the server finished, whose answer was lost, isn't uploaded twice", async ({ page }) => {

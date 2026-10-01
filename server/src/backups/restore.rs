@@ -541,15 +541,15 @@ async fn restore_into(
     let st = cx.st;
     let folder = folder_node(st, parent).await?;
     let received = || content::Received { path: tmp.to_path_buf(), size: size as u64, hash: Some(hash.to_string()) };
-    let staged = match content::stage(st, &folder, received()).await {
+    let staged = match content::stage_restored(st, &folder, received()).await {
         Ok(s) => s,
-        // Deleted meanwhile, and not fetched: fetch it and try again
+        // Registered content is missing or damaged, or its last reference disappeared: fetch the backup and retry.
         Err(_) if !target.is_folder() && tokio::fs::metadata(tmp).await.is_err() => {
             match fetch(cx, set, dst, hash, size, tmp).await? {
                 Ok(()) => {}
                 Err(_) => return Err(AppError::internal("stopped while fetching")),
             }
-            content::stage(st, &folder, received()).await?
+            content::stage_restored(st, &folder, received()).await?
         }
         Err(e) => return Err(e),
     };
@@ -565,7 +565,17 @@ async fn restore_into(
                 .filter(|n| n.is_folder() && n.trashed_at.is_none())
                 .ok_or_else(|| AppError::conflict("The folder being restored into was deleted"))?;
             staged.check(&folder)?;
-            let existing = tree::find_child(&mut tx, &folder.id, name).await?.filter(|n| !n.is_folder());
+            let existing = tree::find_child(&mut tx, &folder.id, name).await?;
+            if let (Some(existing), "skip") = (&existing, conflict) {
+                sqlx::query("INSERT INTO backup_restored (job_id, source_id, node_id) VALUES (?, ?, ?)")
+                    .bind(&cx.job.id)
+                    .bind(source)
+                    .bind(&existing.id)
+                    .execute(&mut *tx)
+                    .await?;
+                return AppResult::Ok((content::Written::default(), Outcome::Skipped));
+            }
+            let existing = existing.filter(|n| !n.is_folder());
             if let (Some(existing), "replace") = (&existing, conflict) {
                 tree::check_quota(&mut tx, &target.id, size - existing.size).await?;
                 let written = content::replace(&mut tx, st, &staged, existing, by).await?;

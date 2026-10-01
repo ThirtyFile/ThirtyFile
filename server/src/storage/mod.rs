@@ -85,6 +85,14 @@ pub trait Storage: Send + Sync {
         let _ = (key, src);
         unsupported()
     }
+    /// Replaces missing or damaged content with a verified temporary file; removes the temp file on success.
+    fn repair_file<'a>(&'a self, hash: &'a str, src: &'a Path) -> BoxFuture<'a, io::Result<()>> {
+        Box::pin(async move {
+            valid_hash(hash)?;
+            let key = join_key(&[self.content_dir(), &hash[..2], &hash[2..4], hash]);
+            self.put_at(&key, src).await
+        })
+    }
     /// Reads [start, start + len) of the file at `key`, refusing a symbolic link
     fn open_at<'a>(&'a self, key: &'a str, start: u64, len: u64) -> BoxFuture<'a, io::Result<BoxReader>> {
         let _ = (key, start, len);

@@ -889,3 +889,121 @@ async fn a_new_installation_restores_from_a_backup_found_on_a_location_alone() {
     drop(new);
     let _ = std::fs::remove_dir_all(&place);
 }
+
+#[tokio::test]
+async fn a_restore_recovers_registered_content_missing_from_the_primary() {
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    env.upload(&amy, amy.root(), "recover.txt", b"healthy backup content").await;
+    let nas = add_nas(&env, "nas").await;
+    let (set, copy) = copy_all(&env, "local", "nas").await;
+    assert_eq!(run_job(&env, &copy).await, "done");
+    assert_eq!(objects_in(&nas, &set).len(), 1);
+    // Disk content is missing, but its file and blob records remain: a restore must read the healthy backup.
+    std::fs::remove_file(testutil::blob_file(&env, b"healthy backup content")).unwrap();
+    let snapshot = snapshot_of(&env, &set).await;
+    let drive = env.drive_of(amy.root()).await;
+    let job = restore(&env, &snapshot, &drive, None, false).await.unwrap();
+    assert_eq!(run_job(&env, &job).await, "done");
+    let top = restored_folder(&env, amy.root()).await;
+    let recovered = at(&env, &top, "recover.txt").await.unwrap();
+    let q = Query(serde_json::from_value(json!({})).unwrap());
+    let result = crate::files::content(State(env.st.clone()), amy, Path(recovered), q, HeaderMap::new()).await;
+    let res = result.unwrap();
+    assert_eq!(axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap().as_ref(), b"healthy backup content");
+}
+
+#[tokio::test]
+async fn a_restore_skips_a_name_taken_while_backup_content_is_read() {
+    struct PauseRead {
+        inner: Arc<dyn Storage>,
+        entered: Arc<tokio::sync::Notify>,
+        proceed: Arc<tokio::sync::Notify>,
+    }
+    impl Storage for PauseRead {
+        fn put_file<'a>(&'a self, h: &'a str, p: &'a FsPath) -> BoxFuture<'a, std::io::Result<()>> {
+            self.inner.put_file(h, p)
+        }
+        fn open<'a>(&'a self, h: &'a str, s: u64, n: u64) -> BoxFuture<'a, std::io::Result<storage::BoxReader>> {
+            self.inner.open(h, s, n)
+        }
+        fn delete<'a>(&'a self, h: &'a str) -> BoxFuture<'a, std::io::Result<()>> {
+            self.inner.delete(h)
+        }
+        fn check(&self) -> BoxFuture<'_, std::io::Result<()>> {
+            self.inner.check()
+        }
+        fn ping(&self) -> BoxFuture<'_, std::io::Result<()>> {
+            self.inner.ping()
+        }
+        fn stat<'a>(&'a self, k: &'a str) -> BoxFuture<'a, std::io::Result<Option<storage::Entry>>> {
+            self.inner.stat(k)
+        }
+        fn open_at<'a>(&'a self, k: &'a str, s: u64, n: u64) -> BoxFuture<'a, std::io::Result<storage::BoxReader>> {
+            Box::pin(async move {
+                if k.contains("/objects/") {
+                    self.entered.notify_one();
+                    self.proceed.notified().await;
+                }
+                self.inner.open_at(k, s, n).await
+            })
+        }
+    }
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    let original = env.upload(&amy, amy.root(), "skip.txt", b"from the backup").await;
+    add_nas(&env, "nas").await;
+    let (set, copy) = copy_all(&env, "local", "nas").await;
+    assert_eq!(run_job(&env, &copy).await, "done");
+    purge(&env, &amy, &original).await;
+    let snapshot = snapshot_of(&env, &set).await;
+    let drive = env.drive_of(amy.root()).await;
+    let req = serde_json::from_value(json!({"space":drive,"mode":"original","on_conflict":"skip"})).unwrap();
+    let Json(v) = api::restore(State(env.st.clone()), Admin(env.admin().await), Path(snapshot), Json(req)).await.unwrap();
+    let id = v["job_id"].as_str().unwrap().to_string();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let proceed = Arc::new(tokio::sync::Notify::new());
+    let inner = env.st.storage("nas").unwrap();
+    env.st.storages.write().unwrap().insert("nas".into(), Arc::new(PauseRead { inner, entered: entered.clone(), proceed: proceed.clone() }));
+    let (job, ctl) = take_job(&env, &id).await;
+    let st = env.st.clone();
+    let task = tokio::spawn(async move {
+        runner::run(&st, &job, &ctl).await;
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(30), entered.notified()).await.unwrap();
+    env.upload(&amy, amy.root(), "skip.txt", b"concurrently uploaded").await;
+    proceed.notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(30), task).await.unwrap().unwrap();
+    assert_eq!(state(&env, &id).await.0, "done");
+    let names = children(&env, amy.root()).await;
+    assert_eq!(names.len(), 1, "skip must not create a numbered copy");
+    assert_eq!(read(&env, &amy, &names["skip.txt"].0).await, b"concurrently uploaded");
+}
+#[tokio::test]
+async fn a_restore_repairs_damaged_content_without_losing_shared_references() {
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    env.upload(&amy, amy.root(), "recover.txt", b"healthy backup content").await;
+    let bob = env.user("bob", true).await;
+    let shared = env.upload(&bob, bob.root(), "shared.txt", b"healthy backup content").await;
+    let nas = add_nas(&env, "nas").await;
+    let (set, copy) = copy_all(&env, "local", "nas").await;
+    assert_eq!(run_job(&env, &copy).await, "done");
+    assert_eq!(objects_in(&nas, &set).len(), 1);
+    // A same-length damaged object must be replaced even though its record and shared references remain.
+    std::fs::write(testutil::blob_file(&env, b"healthy backup content"), b"damaged backup content").unwrap();
+    let snapshot = snapshot_of(&env, &set).await;
+    let drive = env.drive_of(amy.root()).await;
+    let job = restore(&env, &snapshot, &drive, None, false).await.unwrap();
+    assert_eq!(run_job(&env, &job).await, "done");
+    let top = restored_folder(&env, amy.root()).await;
+    let recovered = at(&env, &top, "recover.txt").await.unwrap();
+    let q = Query(serde_json::from_value(json!({})).unwrap());
+    let result = crate::files::content(State(env.st.clone()), amy.clone(), Path(recovered), q, HeaderMap::new()).await;
+    let res = result.unwrap();
+    assert_eq!(axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap().as_ref(), b"healthy backup content");
+    assert_eq!(read(&env, &bob, &shared).await, b"healthy backup content");
+    let (refs,): (i64,) =
+        sqlx::query_as("SELECT refcount FROM blobs WHERE hash=?").bind(crate::util::sha256_hex(b"healthy backup content")).fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(refs, 3);
+}

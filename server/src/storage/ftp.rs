@@ -208,7 +208,7 @@ impl FtpStorage {
     }
 
     async fn put(&self, c: &mut Conn, hash: &str, src: &Path) -> io::Result<()> {
-        self.put_to(c, &self.blob_dir(hash), &self.blob_path(hash)?, src).await
+        self.put_to(c, &self.blob_dir(hash), &self.blob_path(hash)?, src, false).await
     }
 
     /// A path in the location (checked; "" is its folder, itself "" when that is the folder after signing in)
@@ -237,7 +237,7 @@ impl FtpStorage {
     }
 
     /// Writes a temp file to `path` in the folder `dir`, through a temporary name
-    async fn put_to(&self, c: &mut Conn, dir: &str, path: &str, src: &Path) -> io::Result<()> {
+    async fn put_to(&self, c: &mut Conn, dir: &str, path: &str, src: &Path, repair: bool) -> io::Result<()> {
         self.ensure_dir(c, dir).await?;
         let tmp = format!("{path}.part-{}", uuid::Uuid::new_v4().simple());
         let mut input = tokio::fs::File::open(src).await?;
@@ -253,12 +253,22 @@ impl FtpStorage {
             return Err(e);
         }
         if let Err(e) = timed(c.ftp.rename(tmp.as_str(), path)).await {
-            // Some servers don't allow rename to overwrite: if the same content already exists, keep the original
+            // Some servers don't allow rename to overwrite. A repair publishes the complete temporary file
+            // after removing the damaged object; ordinary writes keep the existing object.
             let exists = timed(c.ftp.size(path)).await.is_ok();
+            let result = if repair && exists {
+                async {
+                    timed(c.ftp.rm(path)).await?;
+                    timed(c.ftp.rename(tmp.as_str(), path)).await
+                }
+                .await
+            } else if exists {
+                Ok(())
+            } else {
+                Err(e)
+            };
             let _ = timed(c.ftp.rm(tmp.as_str())).await;
-            if !exists {
-                return Err(e);
-            }
+            result?;
         }
         Ok(())
     }
@@ -457,13 +467,24 @@ impl Storage for FtpStorage {
         })
     }
 
+    fn repair_file<'a>(&'a self, hash: &'a str, src: &'a Path) -> BoxFuture<'a, io::Result<()>> {
+        Box::pin(async move {
+            let path = self.blob_path(hash)?;
+            let (mut c, _permit) = self.checkout().await?;
+            self.put_to(&mut c, &self.blob_dir(hash), &path, src, true).await?;
+            self.checkin(c);
+            let _ = tokio::fs::remove_file(src).await;
+            Ok(())
+        })
+    }
+
     fn put_at<'a>(&'a self, key: &'a str, src: &'a Path) -> BoxFuture<'a, io::Result<()>> {
         Box::pin(async move {
             let path = self.path_at(key)?;
             let dir = path.rsplit_once('/').map_or(self.root.as_str(), |(d, _)| d).to_string();
             let (mut c, _permit) = self.checkout().await?;
             // A failed connection is in an unknown state, so it isn't returned to the pool
-            self.put_to(&mut c, &dir, &path, src).await?;
+            self.put_to(&mut c, &dir, &path, src, false).await?;
             self.checkin(c);
             let _ = tokio::fs::remove_file(src).await;
             Ok(())
@@ -602,7 +623,7 @@ pub(crate) mod tests {
                     from = Some(path);
                     "350 Go on".into()
                 }
-                "RNTO" if from.take().is_some_and(|f| std::fs::rename(f, &path).is_ok()) => "250 Renamed".into(),
+                "RNTO" if from.take().is_some_and(|f| !path.exists() && std::fs::rename(f, &path).is_ok()) => "250 Renamed".into(),
                 "REST" => {
                     rest = arg.parse().unwrap_or(0);
                     "350 Restarting".into()
@@ -752,6 +773,21 @@ pub(crate) mod tests {
         let report = crate::location_tools::steps::run(&env.st, st.clone(), "ftp", 1 << 20).await;
         assert!(report.ok, "{report:?}");
         assert_eq!(std::fs::read_dir(s.dir.join("files/.thirtyfile-check")).unwrap().count(), 0, "the test files are deleted");
+    }
+
+    #[tokio::test]
+    async fn damaged_content_is_replaced_when_ftp_rename_refuses_overwrite() {
+        let s = server(testutil::password()).await;
+        let st = storage(&s, testutil::password());
+        let hash = put(&st, &s, b"healthy content").await;
+        let stored = s.dir.join(format!("files/blobs/{}/{}/{hash}", &hash[..2], &hash[2..4]));
+        std::fs::write(&stored, b"damaged content").unwrap();
+        let src = s.dir.join("repair.tmp");
+        std::fs::write(&src, b"healthy content").unwrap();
+        st.repair_file(&hash, &src).await.unwrap();
+        assert_eq!(read(&st, &hash, 0, 15).await, b"healthy content");
+        assert!(!src.exists());
+        assert_eq!(std::fs::read_dir(stored.parent().unwrap()).unwrap().count(), 1);
     }
 
     #[cfg(unix)]
