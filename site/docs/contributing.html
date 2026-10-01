@@ -110,6 +110,7 @@
         <pre><code>cd server &amp;&amp; cargo fmt
 cd web &amp;&amp; pnpm format</code></pre>
         <p>The server uses rustfmt (its settings are in <code>server/rustfmt.toml</code>), the interface oxfmt (settings in <code>web/.oxfmtrc.json</code>; it formats <code>web/src</code>, <code>web/tests</code> and <code>web/scripts</code>). An editor with a rustfmt or oxfmt extension can format on save with the same settings. A table laid out by hand, with several entries per line, keeps its layout with a <code>// oxfmt-ignore</code> line above it. The Traditional Chinese dictionaries aren't formatted: they keep one entry per line.</p>
+        <p>Commits that only changed the layout of the code are listed in <code>.git-blame-ignore-revs</code>. GitHub's blame view skips them; for <code>git blame</code> to skip them too, run <code>git config blame.ignoreRevsFile .git-blame-ignore-revs</code> once in your clone.</p>
         <ul>
           <li>Code, comments and guides are written in English.</li>
           <li>Text in the interface is written in English in the code, with its Traditional Chinese translation in <code>web/src/lib/i18n/zh-TW/</code>.</li>
