@@ -192,9 +192,7 @@ async fn files_of_an_uploaded_folder_go_into_folders_already_there() {
     let trip = env.folder(&amy, amy.root(), "Trip").await;
     // A folder with the same name in the trash isn't used
     let old = env.folder(&amy, amy.root(), "Old").await;
-    let _ = crate::nodes::trash(State(env.st.clone()), amy.clone(), axum::Json(serde_json::from_value(serde_json::json!({ "ids": [old] })).unwrap()))
-        .await
-        .unwrap();
+    let _ = crate::nodes::trash(State(env.st.clone()), amy.clone(), axum::Json(serde_json::from_value(serde_json::json!({ "ids": [old] })).unwrap())).await.unwrap();
 
     let mut folders = Vec::new();
     for (rel, name) in [("trip/Day 1", "a.jpg"), ("TRIP/day 1", "b.jpg"), ("Trip", "c.jpg"), ("Old/x", "d.jpg")] {

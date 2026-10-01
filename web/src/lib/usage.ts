@@ -167,7 +167,13 @@ export function sumFigures(list: OpFigures[]): OpFigures | null {
     p50_ms: max("p50_ms"),
     p95_ms: max("p95_ms"),
     max_ms: max("max_ms"),
-    mean_ms: timed.length ? timed.reduce((s, f) => s + f.mean_ms! * f.count, 0) / Math.max(1, timed.reduce((n, f) => n + f.count, 0)) : null,
+    mean_ms: timed.length
+      ? timed.reduce((s, f) => s + f.mean_ms! * f.count, 0) /
+        Math.max(
+          1,
+          timed.reduce((n, f) => n + f.count, 0),
+        )
+      : null,
   };
 }
 
@@ -217,28 +223,13 @@ export function historyCsv(h: UsageHistory): string {
   const iso = (ts: number) => new Date(ts * 1000).toISOString();
   const cell = (v: number | string | boolean | null) => (v === null ? "" : typeof v === "string" && /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : String(v));
   const lines = [
-    [
-      "period_start_utc",
-      "period_seconds",
-      "live_bytes",
-      "trash_bytes",
-      "version_bytes",
-      "stored_bytes",
-      "disk_used_bytes",
-      "disk_total_bytes",
-      "pending_deletes",
-      "online",
-    ].join(","),
+    ["period_start_utc", "period_seconds", "live_bytes", "trash_bytes", "version_bytes", "stored_bytes", "disk_used_bytes", "disk_total_bytes", "pending_deletes", "online"].join(","),
     ...h.capacity.map((c) =>
-      [iso(c.at), h.capacity_span, c.live_bytes, c.trash_bytes, c.version_bytes, storedBytes(c), diskUsed(c), c.disk_total, c.pending_deletes, c.online]
-        .map(cell)
-        .join(","),
+      [iso(c.at), h.capacity_span, c.live_bytes, c.trash_bytes, c.version_bytes, storedBytes(c), diskUsed(c), c.disk_total, c.pending_deletes, c.online].map(cell).join(","),
     ),
     "",
     ["period_start_utc", "period_seconds", "operation", "work", "count", "errors", "timeouts", "bytes", "p50_ms", "p95_ms", "max_ms"].join(","),
-    ...h.ops.flatMap((s) =>
-      s.points.map((p) => [iso(p.at), h.ops_span, s.op, h.work, p.count, p.errors, p.timeouts, p.bytes, p.p50_ms, p.p95_ms, p.max_ms].map(cell).join(",")),
-    ),
+    ...h.ops.flatMap((s) => s.points.map((p) => [iso(p.at), h.ops_span, s.op, h.work, p.count, p.errors, p.timeouts, p.bytes, p.p50_ms, p.p95_ms, p.max_ms].map(cell).join(","))),
   ];
   return lines.join("\n") + "\n";
 }

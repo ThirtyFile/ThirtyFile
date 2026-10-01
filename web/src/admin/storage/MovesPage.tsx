@@ -40,9 +40,9 @@ export function MovesPage() {
   const q = useMoves(1500, 10_000, (changes) => {
     const said = changes.flatMap(({ move: m }) => {
       const name = moveSpaceLabel(m);
-      if (m.state === "done") return [t("\"{name}\" was moved to {to}.", { name, to: m.to_name })];
-      if (m.state === "failed") return [t("Moving \"{name}\" stopped by an error.", { name })];
-      if (m.state === "paused") return [t("Moving \"{name}\" is paused.", { name })];
+      if (m.state === "done") return [t('"{name}" was moved to {to}.', { name, to: m.to_name })];
+      if (m.state === "failed") return [t('Moving "{name}" stopped by an error.', { name })];
+      if (m.state === "paused") return [t('Moving "{name}" is paused.', { name })];
       return [];
     });
     if (said.length) setAnnouncement(said.join(" "));
@@ -68,8 +68,8 @@ export function MovesPage() {
   const canPause = (m: SpaceMove | null) => m?.state === "running" || m?.state === "queued";
   const canResume = (m: SpaceMove | null) => m?.state === "paused" || m?.state === "failed";
   const canCancel = (m: SpaceMove | null) => !!m && moveActive(m);
-  const pause = (m: SpaceMove) => act(() => api.pauseMove(m.id), t("\"{name}\" will pause after the file it is copying", { name: moveSpaceLabel(m) }));
-  const resume = (m: SpaceMove) => act(() => api.resumeMove(m.id), t("\"{name}\" continues where it stopped", { name: moveSpaceLabel(m) }));
+  const pause = (m: SpaceMove) => act(() => api.pauseMove(m.id), t('"{name}" will pause after the file it is copying', { name: moveSpaceLabel(m) }));
+  const resume = (m: SpaceMove) => act(() => api.resumeMove(m.id), t('"{name}" continues where it stopped', { name: moveSpaceLabel(m) }));
   const setConcurrency = (n: number) => act(() => api.setMoveConcurrency(n), t("Moves at the same time: {n}", { n }));
 
   const toolbar = (
@@ -90,13 +90,7 @@ export function MovesPage() {
       <div className="flex-1" />
       <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <span className="max-sm:hidden">{t("At the same time")}</span>
-        <NativeSelect
-          size="xs"
-          aria-label={t("Moves at the same time")}
-          value={q.data?.concurrency ?? 1}
-          disabled={!q.data}
-          onChange={(e) => setConcurrency(Number(e.target.value))}
-        >
+        <NativeSelect size="xs" aria-label={t("Moves at the same time")} value={q.data?.concurrency ?? 1} disabled={!q.data} onChange={(e) => setConcurrency(Number(e.target.value))}>
           {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
             <option key={n} value={n}>
               {n}
@@ -153,7 +147,12 @@ export function MovesPage() {
       header: t("State"),
       className: "w-[130px]",
       cell: (m) => (
-        <span className={cn("text-xs", m.state === "failed" ? "text-destructive" : m.state === "running" ? "text-brand" : m.state === "done" ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}>
+        <span
+          className={cn(
+            "text-xs",
+            m.state === "failed" ? "text-destructive" : m.state === "running" ? "text-brand" : m.state === "done" ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
+          )}
+        >
           {MOVE_STATE_LABEL[m.state]}
           {m.failed_items > 0 && m.state !== "done" && ` · ${t("{n} file failed|{n} files failed", { n: m.failed_items })}`}
         </span>
@@ -232,7 +231,7 @@ export function MovesPage() {
       {dialog?.t === "details" && <MoveDetails move={moves.find((m) => m.id === dialog.move.id) ?? dialog.move} onClose={() => setDialog(null)} />}
       {dialog?.t === "cancel" && (
         <ConfirmDialog
-          title={t("Cancel moving \"{name}\"?", { name: moveSpaceLabel(dialog.move) })}
+          title={t('Cancel moving "{name}"?', { name: moveSpaceLabel(dialog.move) })}
           description={t("The space stays on {from}, and what was already copied to {to} is removed.", {
             from: dialog.move.from_name || t("its folder on the server"),
             to: dialog.move.to_name,
@@ -266,7 +265,7 @@ function MoveDetails({ move: m, onClose }: { move: SpaceMove; onClose(): void })
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{t("Moving \"{name}\"", { name: moveSpaceLabel(m) })}</DialogTitle>
+          <DialogTitle>{t('Moving "{name}"', { name: moveSpaceLabel(m) })}</DialogTitle>
           <DialogDescription>{moveRoute(m)}</DialogDescription>
         </DialogHeader>
         <MoveProgress m={m} />
@@ -279,7 +278,14 @@ function MoveDetails({ move: m, onClose }: { move: SpaceMove; onClose(): void })
           ))}
         </dl>
         {m.error && <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{tServer(m.error)}</p>}
-        {m.note && <p className="rounded-md bg-muted px-3 py-2 text-sm break-words whitespace-pre-line">{m.note.split("\n").map((l) => tServer(l)).join("\n")}</p>}
+        {m.note && (
+          <p className="rounded-md bg-muted px-3 py-2 text-sm break-words whitespace-pre-line">
+            {m.note
+              .split("\n")
+              .map((l) => tServer(l))
+              .join("\n")}
+          </p>
+        )}
         {m.failures.length > 0 && (
           <div className="grid gap-1.5">
             <p className="text-sm">{t("{n} file couldn't be copied:|{n} files couldn't be copied:", { n: m.failed_items })}</p>

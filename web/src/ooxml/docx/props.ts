@@ -16,7 +16,18 @@ export function wColor(el: Element | null | undefined, theme: Theme | null, valA
   let c: Rgba | null = null;
   const th = attr(el, themeAttr);
   if (th && theme) {
-    const map: Record<string, string> = { text1: "dk1", dark1: "dk1", background1: "lt1", light1: "lt1", text2: "dk2", dark2: "dk2", background2: "lt2", light2: "lt2", hyperlink: "hlink", followedHyperlink: "folHlink" };
+    const map: Record<string, string> = {
+      text1: "dk1",
+      dark1: "dk1",
+      background1: "lt1",
+      light1: "lt1",
+      text2: "dk2",
+      dark2: "dk2",
+      background2: "lt2",
+      light2: "lt2",
+      hyperlink: "hlink",
+      followedHyperlink: "folHlink",
+    };
     c = hexToRgba(theme.colors[map[th] ?? th]);
   }
   if (!c) {
@@ -64,6 +75,7 @@ export function isDark(hex: string | null | undefined) {
 
 // ───────────── Borders ─────────────
 
+// oxfmt-ignore
 const BORDER_STYLE: Record<string, string> = {
   single: "solid", thick: "solid", hairline: "solid", wave: "solid", doubleWave: "double",
   double: "double", triple: "double",
@@ -107,12 +119,14 @@ export function borderSig(el: Element | null | undefined) {
 
 // ───────────── Text ─────────────
 
+// oxfmt-ignore
 const HIGHLIGHT: Record<string, string> = {
   yellow: "#FFFF00", green: "#00FF00", cyan: "#00FFFF", magenta: "#FF00FF", blue: "#0000FF", red: "#FF0000",
   darkBlue: "#000080", darkCyan: "#008080", darkGreen: "#008000", darkMagenta: "#800080", darkRed: "#800000",
   darkYellow: "#808000", darkGray: "#808080", lightGray: "#C0C0C0", black: "#000000", white: "#FFFFFF",
 };
 
+// oxfmt-ignore
 const UNDERLINE: Record<string, string> = {
   single: "solid", words: "solid", double: "double", thick: "solid", dotted: "dotted", dottedHeavy: "dotted",
   dash: "dashed", dashedHeavy: "dashed", dashLong: "dashed", dashLongHeavy: "dashed", dotDash: "dashed",
@@ -138,12 +152,12 @@ export function runStyle(p: RunProps, theme: Theme | null, script: string): RunS
   const fonts = resolveFonts(p.fonts, theme, script);
   const rtl = !!p.rtl;
   const family = familyOf(fonts, rtl);
-  const size = ((rtl || p.cs ? p.szCs ?? p.sz : p.sz) ?? DEFAULT_SZ) / 2;
+  const size = ((rtl || p.cs ? (p.szCs ?? p.sz) : p.sz) ?? DEFAULT_SZ) / 2;
   const css: Record<string, string> = {};
   css["font-family"] = family;
   let fs = size;
-  const bold = rtl || p.cs ? p.bCs ?? p.b : p.b;
-  const italic = rtl || p.cs ? p.iCs ?? p.i : p.i;
+  const bold = rtl || p.cs ? (p.bCs ?? p.b) : p.b;
+  const italic = rtl || p.cs ? (p.iCs ?? p.i) : p.i;
   if (bold) css["font-weight"] = "bold";
   if (italic) css["font-style"] = "italic";
   if (p.caps) css["text-transform"] = "uppercase";

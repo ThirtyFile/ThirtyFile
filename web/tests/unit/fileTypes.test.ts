@@ -53,6 +53,7 @@ describe("icons", () => {
 
   test("the reviewed languages and data formats each have their own icon", () => {
     // One name per language or format of the inventory in #208; aliases of one format share its icon
+    // oxfmt-ignore
     const groups: string[][] = [
       ["json"], ["xml"], ["yaml", "yml"], ["toml"], ["sql"], ["rs"], ["go"], ["js", "cjs", "mjs"], ["ts", "cts"], ["jsx", "tsx"],
       ["py"], ["pyc", "pyd"], ["java"], ["class", "jar", "war", "ear"], ["c", "h"], ["cpp", "cc", "cxx", "hpp", "hxx"], ["cs"], ["php"], ["rb"],
@@ -73,6 +74,7 @@ describe("icons", () => {
   });
 
   test("engineering files are recognised by their names, whatever their extension", () => {
+    // oxfmt-ignore
     const cases: [string, string][] = [
       ["Dockerfile", "docker"], ["Containerfile", "docker"], ["Dockerfile.production", "docker"], ["api.Dockerfile", "docker"],
       ["compose.yaml", "compose"], ["docker-compose.prod.yml", "compose"],

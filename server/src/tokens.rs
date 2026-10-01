@@ -53,7 +53,10 @@ pub async fn allow(mut req: Request, next: Next) -> Response {
 pub enum Credential {
     Bearer(String),
     /// HTTP Basic sign-in: the username and an app password (never the account's own password)
-    Basic { username: String, token: String },
+    Basic {
+        username: String,
+        token: String,
+    },
 }
 
 /// The app password a request carries in its Authorization header, if any
@@ -274,11 +277,7 @@ pub async fn create(
     }
     logs::record_login_via(&st, Some(user.id), &user.username, "app_password_created", "app_password", &ip, &headers);
     // Told in the app and by email, so an app password someone else made doesn't go unnoticed
-    let notice = crate::notify::Notice {
-        kind: "app_password",
-        node_id: None,
-        data: json!({ "name": name, "scope": req.scope, "ip": ip }),
-    };
+    let notice = crate::notify::Notice { kind: "app_password", node_id: None, data: json!({ "name": name, "scope": req.scope, "ip": ip }) };
     let emails = {
         let _w = st.write_lock.lock().await;
         crate::notify::add(&mut *st.db.acquire().await?, &[user.id], &notice).await?
@@ -488,17 +487,31 @@ mod tests {
         assert_eq!((count(&env, "app_passwords", &amy).await, count(&env, "sessions", &amy).await), (0, 1), "only this browser stays signed in");
 
         // (the password everyone has in the tests again)
-        sqlx::query("UPDATE users SET password_hash = (SELECT password_hash FROM users WHERE id = ?) WHERE id = ?").bind(admin.id).bind(amy.id).execute(&env.st.db).await.unwrap();
+        sqlx::query("UPDATE users SET password_hash = (SELECT password_hash FROM users WHERE id = ?) WHERE id = ?")
+            .bind(admin.id)
+            .bind(amy.id)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
         let _ = new_token(&env, &amy, "write", None).await;
         let req = serde_json::from_value(json!({ "password": "reset by the admin" })).unwrap();
         let _ = crate::admin::update(State(env.st.clone()), auth::Admin(admin.clone()), Path(amy.id), Json(req)).await.unwrap();
         assert_eq!((count(&env, "app_passwords", &amy).await, count(&env, "sessions", &amy).await), (0, 0));
 
         // Resetting two-factor sign-in (a lost phone): whatever was signed in with it stops working too
-        sqlx::query("UPDATE users SET password_hash = (SELECT password_hash FROM users WHERE id = ?) WHERE id = ?").bind(admin.id).bind(amy.id).execute(&env.st.db).await.unwrap();
+        sqlx::query("UPDATE users SET password_hash = (SELECT password_hash FROM users WHERE id = ?) WHERE id = ?")
+            .bind(admin.id)
+            .bind(amy.id)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
         let _ = crate::twofactor::tests::set_up_for(&env, &amy).await;
         let _ = env.sign_in(&amy, "Phone").await;
-        sqlx::query("INSERT INTO app_passwords (id, user_id, name, token_hash, scope, created_at) VALUES ('x', ?, 'Old', 'h', 'read', 0)").bind(amy.id).execute(&env.st.db).await.unwrap();
+        sqlx::query("INSERT INTO app_passwords (id, user_id, name, token_hash, scope, created_at) VALUES ('x', ?, 'Old', 'h', 'read', 0)")
+            .bind(amy.id)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
         let _ = crate::twofactor::admin_reset(State(env.st.clone()), auth::Admin(admin), Path(amy.id), addr(), HeaderMap::new()).await.unwrap();
         assert_eq!((count(&env, "app_passwords", &amy).await, count(&env, "sessions", &amy).await), (0, 0));
     }

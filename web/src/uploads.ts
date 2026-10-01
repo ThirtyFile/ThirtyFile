@@ -258,7 +258,15 @@ export async function resumeRecovered(endpoint: string, records: UploadRecord[],
     if (!same) result.changed++;
     else if (restart) result.restarted++;
     else result.continuing++;
-    inits.push({ file: p.file, relativePath: r.relativePath, parentId: r.parentId, batch: r.batch, onConflict: r.onConflict, recordId: r.id, recovered: { sent: fresh ? 0 : r.sent, fresh } });
+    inits.push({
+      file: p.file,
+      relativePath: r.relativePath,
+      parentId: r.parentId,
+      batch: r.batch,
+      onConflict: r.onConflict,
+      recordId: r.id,
+      recovered: { sent: fresh ? 0 : r.sent, fresh },
+    });
   }
   result.extra = picked.length - used.size;
   addTasks(inits, endpoint);
@@ -268,7 +276,11 @@ export async function resumeRecovered(endpoint: string, records: UploadRecord[],
 /** Drops interrupted uploads: their records, and what the server received of them */
 export async function discardRecovered(endpoint: string, records: UploadRecord[]) {
   const scope = scopeOf(endpoint);
-  if (scope) removeRecords(scope, records.map((r) => r.id));
+  if (scope)
+    removeRecords(
+      scope,
+      records.map((r) => r.id),
+    );
   for (const r of records) await forgetSessions(fingerprintOf(endpoint, r));
 }
 
@@ -345,14 +357,7 @@ function landed(task: UploadTask) {
 function uploadError(err: Error): ApiError {
   const res = (err as tus.DetailedError).originalResponse;
   // Handled like api.request: the server's message translated, and an expired session sends the user to sign in
-  if (res)
-    return errorFromBody(
-      res.getStatus(),
-      res.getBody() ?? "",
-      "/api/uploads",
-      t("Upload failed ({status})", { status: res.getStatus() }),
-      res.getHeader("x-request-id") || undefined,
-    );
+  if (res) return errorFromBody(res.getStatus(), res.getBody() ?? "", "/api/uploads", t("Upload failed ({status})", { status: res.getStatus() }), res.getHeader("x-request-id") || undefined);
   return new ApiError(t("Network connection lost"), 0);
 }
 

@@ -62,7 +62,7 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
       return api.createUser({ ...body, username, password, personal_space: withPersonal, personal_location: withPersonal ? personalLocation || defaultLocation : undefined });
     },
     onSuccess: (row) => {
-      if (row.personal_pending) toast.warning(t("User created. Their \"My files\" is created once its storage location is available."));
+      if (row.personal_pending) toast.warning(t('User created. Their "My files" is created once its storage location is available.'));
       else toast.success(user ? t("User updated") : t("User created"));
       void invalidate(qc, ...affected.account());
       onClose();
@@ -80,7 +80,7 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
           }}
         >
           <DialogHeader>
-            <DialogTitle>{user ? t("Edit \"{name}\"", { name: user.username }) : t("Add user")}</DialogTitle>
+            <DialogTitle>{user ? t('Edit "{name}"', { name: user.username }) : t("Add user")}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-3">
             {!user && (
@@ -93,19 +93,14 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
               <Label htmlFor="u-display">{t("Display name (optional)")}</Label>
               <Input id="u-display" value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoComplete="off" maxLength={80} />
               {user?.source !== "password" && user && (
-                <p className="text-xs text-muted-foreground">{t("Follows the name from {provider} on each sign-in unless you set a different one here", { provider: SSO_LABEL[user.source as SsoProviderId] ?? user.source })}</p>
+                <p className="text-xs text-muted-foreground">
+                  {t("Follows the name from {provider} on each sign-in unless you set a different one here", { provider: SSO_LABEL[user.source as SsoProviderId] ?? user.source })}
+                </p>
               )}
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="u-pw">{user ? t("Reset password (leave blank to keep current)") : t("Password (at least {n} characters)", { n: me.min_password_length })}</Label>
-              <Input
-                id="u-pw"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="new-password"
-                {...errorProps(save.error, "u-error")}
-              />
+              <Input id="u-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" {...errorProps(save.error, "u-error")} />
             </div>
             <div className="grid gap-1.5">
               <Label id="u-role">{t("Role")}</Label>
@@ -145,17 +140,9 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
               <div className="grid gap-1.5">
                 <Label className="flex items-center gap-2 font-normal">
                   <Checkbox checked={withPersonal} disabled={!system.data} onCheckedChange={(v) => setPersonal(!!v)} />
-                  {t("Create \"My files\" (a private space only they can see)")}
+                  {t('Create "My files" (a private space only they can see)')}
                 </Label>
-                {withPersonal && (
-                  <LocationSelect
-                    aria-label={t("Storage location of \"My files\"")}
-                    value={personalLocation}
-                    onChange={setLocation}
-                    blank="default"
-                    disabled={!system.data}
-                  />
-                )}
+                {withPersonal && <LocationSelect aria-label={t('Storage location of "My files"')} value={personalLocation} onChange={setLocation} blank="default" disabled={!system.data} />}
               </div>
             )}
             {user && (
@@ -167,16 +154,16 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
                       ? t("On {location} · {size} used", { location: locationName(user.personal_location), size: formatBytes(user.used_bytes) })
                       : user.personal_pending
                         ? t("My files pending (location unavailable)")
-                        : t("No \"My files\"")}
+                        : t('No "My files"')}
                   </span>
                   {!user.personal_space && (
                     <Button type="button" variant="link" className="h-auto p-0" onClick={() => onPersonal("add", user)}>
-                      {t("Create \"My files\"…")}
+                      {t('Create "My files"…')}
                     </Button>
                   )}
                   {(user.personal_space || user.personal_pending) && (
                     <Button type="button" variant="link" className="h-auto p-0 text-destructive" onClick={() => onPersonal("remove", user)}>
-                      {t("Remove \"My files\"…")}
+                      {t('Remove "My files"…')}
                     </Button>
                   )}
                 </div>

@@ -1,0 +1,4 @@
+# Close to how the code was written before a formatter was used: long lines, with calls, chains, struct literals and
+# the rest kept on one line as long as the line fits (instead of a fraction of it). `cargo fmt` formats everything.
+max_width = 165
+use_small_heuristics = "Max"

@@ -26,10 +26,9 @@ impl LocalStorage {
     async fn verify(&self) -> io::Result<()> {
         match marker_of(&self.root).await? {
             Some(id) if id == self.id => Ok(()),
-            Some(_) => Err(io::Error::other(StorageError {
-                message: NOT_MOUNTED,
-                detail: format!("{} holds another location's {LOCATION_MARKER}", self.root.display()),
-            })),
+            Some(_) => {
+                Err(io::Error::other(StorageError { message: NOT_MOUNTED, detail: format!("{} holds another location's {LOCATION_MARKER}", self.root.display()) }))
+            }
             None => {
                 // A folder with items but no marker: say which file is missing and what it must hold. A missing or
                 // empty folder is a disk that isn't mounted.
@@ -359,8 +358,12 @@ mod tests {
         assert_eq!(se.text(), format!("{MARKER_MISSING} loc-42"));
         assert_eq!(crate::error::AppError::from(err).message, format!("{MARKER_MISSING} loc-42"));
         // Written as it says, the folder is used again
-        std::fs::write(root.join(LOCATION_MARKER), "loc-42
-").unwrap();
+        std::fs::write(
+            root.join(LOCATION_MARKER),
+            "loc-42
+",
+        )
+        .unwrap();
         s.ping().await.unwrap();
         let _ = std::fs::remove_dir_all(&base);
     }

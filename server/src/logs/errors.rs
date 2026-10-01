@@ -123,7 +123,17 @@ fn resource_of(route: Option<&str>, path: &str) -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn record_server(st: &AppState, ctx: &RequestCtx, method: &Method, path: &str, route: Option<String>, status: StatusCode, info: Option<ErrorInfo>, severity: &'static str, kind: &'static str) {
+fn record_server(
+    st: &AppState,
+    ctx: &RequestCtx,
+    method: &Method,
+    path: &str,
+    route: Option<String>,
+    status: StatusCode,
+    info: Option<ErrorInfo>,
+    severity: &'static str,
+    kind: &'static str,
+) {
     if !st.error_log.allow_server() {
         return;
     }
@@ -410,7 +420,8 @@ pub(super) fn client_event(r: ClientReport, user: Option<&User>) -> Option<Error
     let request_id = r.request_id.filter(|id| !id.is_empty() && id.len() <= 32 && id.bytes().all(|b| b.is_ascii_alphanumeric()));
     let build = word(&r.build, 60);
     let version = if build.is_empty() { crate::VERSION.to_string() } else { format!("{} (web {build})", crate::VERSION) };
-    let client = if request_id.is_some() { clip(&format!("{}: {message}", if operation.is_empty() { kind } else { &operation }), MAX_MESSAGE) } else { String::new() };
+    let client =
+        if request_id.is_some() { clip(&format!("{}: {message}", if operation.is_empty() { kind } else { &operation }), MAX_MESSAGE) } else { String::new() };
     Some(
         ErrorEvent {
             at: now(),
@@ -628,7 +639,13 @@ mod tests {
         assert_eq!(kept, 0, "the operation rolled back, its record didn't");
 
         // The page reports the same failure with the request id: added to the server's record, not a second incident
-        let res = send(&app, "/api/client-errors", &cookie, Some(json!({ "kind": "handled", "operation": "rename", "message": "A server error occurred", "request_id": request, "status": 500 }))).await;
+        let res = send(
+            &app,
+            "/api/client-errors",
+            &cookie,
+            Some(json!({ "kind": "handled", "operation": "rename", "message": "A server error occurred", "request_id": request, "status": 500 })),
+        )
+        .await;
         assert_eq!(res.status(), StatusCode::ACCEPTED);
         let all = rows_when(&env.st, |r| r.len() == 1 && !r[0].client.is_empty()).await;
         assert_eq!(all[0].client, "rename: A server error occurred");
@@ -703,7 +720,11 @@ mod tests {
         // Through the real routes: administrators only
         let router = crate::app::routes::router(env.st.clone());
         let get = |cookie: String| {
-            let req = axum::http::Request::get("/api/admin/errors").header(axum::http::header::COOKIE, cookie).extension(ConnectInfo(SocketAddr::from(([10, 0, 0, 1], 5000)))).body(Body::empty()).unwrap();
+            let req = axum::http::Request::get("/api/admin/errors")
+                .header(axum::http::header::COOKIE, cookie)
+                .extension(ConnectInfo(SocketAddr::from(([10, 0, 0, 1], 5000))))
+                .body(Body::empty())
+                .unwrap();
             router.clone().oneshot(req)
         };
         assert_eq!(get(cookie.clone()).await.unwrap().status(), StatusCode::FORBIDDEN);

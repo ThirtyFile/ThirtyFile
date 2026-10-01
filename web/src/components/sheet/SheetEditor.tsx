@@ -9,20 +9,7 @@ import { setDraft } from "@/lib/drafts";
 import { t, tc } from "@/lib/i18n";
 import { shortcut } from "@/lib/keys";
 import { cn } from "@/lib/utils";
-import {
-  Axis,
-  MAX_COLS,
-  MAX_ROWS,
-  cellName,
-  key,
-  mergeAt,
-  normRange,
-  parseCellName,
-  rangeName,
-  type Range,
-  type Scalar,
-  type Sheet,
-} from "@/ooxml/xlsx/model";
+import { Axis, MAX_COLS, MAX_ROWS, cellName, key, mergeAt, normRange, parseCellName, rangeName, type Range, type Scalar, type Sheet } from "@/ooxml/xlsx/model";
 import { checkFormula } from "@/ooxml/xlsx/formula";
 import { formatGeneral } from "@/ooxml/core/numfmt";
 import { deriveStyle } from "@/ooxml/xlsx/ops";
@@ -36,20 +23,7 @@ import { createKeyboard } from "./keyboard";
 import { useGridMouse } from "./mouse";
 import type { Drag, Editing, WorkspaceCtx } from "./workspace";
 import { saveSession } from "./save";
-import {
-  dropSession,
-  editText,
-  keepSession,
-  openSession,
-  parseInput,
-  releaseIfClean,
-  reusableSession,
-  type Change,
-  type Entry,
-  type Layout,
-  type Sel,
-  type Session,
-} from "./session";
+import { dropSession, editText, keepSession, openSession, parseInput, releaseIfClean, reusableSession, type Change, type Entry, type Layout, type Sel, type Session } from "./session";
 import { cancellable } from "@/lib/cancellable";
 import { officeErrorMessage } from "@/lib/officeErrors";
 
@@ -114,19 +88,7 @@ export default function SheetEditor(props: { node: Node; source: FileSource; onS
   );
 }
 
-function Workspace({
-  node,
-  session,
-  onSaved,
-  onExit,
-  onReload,
-}: {
-  node: Node;
-  session: Session;
-  onSaved?(n: Node): void;
-  onExit(): void;
-  onReload(): void;
-}) {
+function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; session: Session; onSaved?(n: Node): void; onExit(): void; onReload(): void }) {
   const { book, calc } = session;
   const [, tick] = useReducer((x: number) => x + 1, 0);
   const [sheetIdx, setSheetIdx] = useState(session.sheet);
@@ -273,8 +235,7 @@ function Workspace({
     if (history.commit(session, changes, sheetIdx, sel, layout)) tick();
   };
 
-  const changeAt = (s: number, r: number, c: number, content: { v: Scalar; f?: string } | null, style?: number | null) =>
-    history.changeAt(book, s, r, c, content, style);
+  const changeAt = (s: number, r: number, c: number, content: { v: Scalar; f?: string } | null, style?: number | null) => history.changeAt(book, s, r, c, content, style);
 
   const applyLayout = (sheetI: number, l: Layout) => history.applyLayout(book, sheetI, l);
 
@@ -477,8 +438,7 @@ function Workspace({
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the cells are changed in place: session.version says when
   }, [range.r1, range.r2, range.c1, range.c2, sheetIdx, session.version]);
 
-  const nameBox =
-    wholeRows && wholeCols ? t("All") : range.r1 === range.r2 && range.c1 === range.c2 ? cellName(active[0], active[1]) : rangeName(range);
+  const nameBox = wholeRows && wholeCols ? t("All") : range.r1 === range.r2 && range.c1 === range.c2 ? cellName(active[0], active[1]) : rangeName(range);
   const rowCount = wholeCols ? 1 : range.r2 - range.r1 + 1;
   const colCount = wholeRows ? 1 : range.c2 - range.c1 + 1;
 
@@ -548,10 +508,24 @@ function Workspace({
           }}
         />
         <div className="flex shrink-0 items-center gap-1">
-          <Button variant="ghost" size="icon-sm" title={t("{action} ({keys})", { action: t("Undo"), keys: shortcut("Ctrl+Z") })} aria-label={t("Undo")} disabled={!session.undo.length} onClick={undo}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            title={t("{action} ({keys})", { action: t("Undo"), keys: shortcut("Ctrl+Z") })}
+            aria-label={t("Undo")}
+            disabled={!session.undo.length}
+            onClick={undo}
+          >
             <Undo2Icon />
           </Button>
-          <Button variant="ghost" size="icon-sm" title={t("{action} ({keys})", { action: t("Redo"), keys: shortcut("Ctrl+Y") })} aria-label={t("Redo")} disabled={!session.redo.length} onClick={redo}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            title={t("{action} ({keys})", { action: t("Redo"), keys: shortcut("Ctrl+Y") })}
+            aria-label={t("Redo")}
+            disabled={!session.redo.length}
+            onClick={redo}
+          >
             <Redo2Icon />
           </Button>
           <Button size="sm" disabled={!dirty || saving} onClick={() => void save()}>
@@ -601,18 +575,14 @@ function Workspace({
                 top: Math.max(HEADER_H, editorRect.y) - 1,
                 minWidth: editorRect.w + 1,
                 width: editing
-                  ? Math.min(
-                      Math.max(editorRect.w + 1, (editing.text.split("\n").reduce((m, l) => Math.max(m, l.length), 0) + 2) * 9),
-                      size.w - editorRect.x - 4,
-                    )
+                  ? Math.min(Math.max(editorRect.w + 1, (editing.text.split("\n").reduce((m, l) => Math.max(m, l.length), 0) + 2) * 9), size.w - editorRect.x - 4)
                   : editorRect.w + 1,
                 height: editing ? Math.max(editorRect.h + 1, editing.text.split("\n").length * 18 + 6) : editorRect.h + 1,
                 font: fontOf(activeStyle),
                 fontWeight: activeStyle?.bold ? "bold" : undefined,
                 color: activeStyle?.color,
                 background: activeStyle?.bg ?? "#ffffff",
-                textAlign:
-                  activeStyle?.hAlign === "center" ? "center" : activeStyle?.hAlign === "right" && editing?.mode === "edit" ? "right" : "left",
+                textAlign: activeStyle?.hAlign === "center" ? "center" : activeStyle?.hAlign === "right" && editing?.mode === "edit" ? "right" : "left",
               }}
               onKeyDown={onKeyDown}
               onInput={onInput}
@@ -622,8 +592,7 @@ function Workspace({
               onPaste={onPaste}
               onBlur={(e) => {
                 // Keep the editing state when moving to the formula bar; commit input when clicking elsewhere on the page
-                if (editing && e.relatedTarget && e.relatedTarget !== barRef.current && !scrollRef.current?.contains(e.relatedTarget as Element))
-                  commitEdit(null);
+                if (editing && e.relatedTarget && e.relatedTarget !== barRef.current && !scrollRef.current?.contains(e.relatedTarget as Element)) commitEdit(null);
               }}
             />
             <p id={descId} className="sr-only">

@@ -9,7 +9,11 @@ describe("live search", () => {
     runs = [];
   });
   afterEach(() => vi.useRealTimers());
-  const debounced = () => liveSearch((q) => runs.push(q), () => 350);
+  const debounced = () =>
+    liveSearch(
+      (q) => runs.push(q),
+      () => 350,
+    );
 
   test("typing searches the last text after a pause", () => {
     const s = debounced();
@@ -70,7 +74,10 @@ describe("live search", () => {
   });
 
   test("a page filtering itself does so at once, but not while composing", () => {
-    const s = liveSearch((q) => runs.push(q), () => 0);
+    const s = liveSearch(
+      (q) => runs.push(q),
+      () => 0,
+    );
     s.input("a", false);
     expect(runs).toEqual(["a"]);
     s.compositionStart();

@@ -24,14 +24,8 @@ const QUIET: Duration = Duration::from_secs(12);
 /// More changed folders than this at once: one full scan instead
 const MAX_FOLDERS: usize = 100;
 
-const WATCH_MASK: u32 = libc::IN_CREATE
-    | libc::IN_DELETE
-    | libc::IN_MOVED_FROM
-    | libc::IN_MOVED_TO
-    | libc::IN_CLOSE_WRITE
-    | libc::IN_ATTRIB
-    | libc::IN_DELETE_SELF
-    | libc::IN_ONLYDIR;
+const WATCH_MASK: u32 =
+    libc::IN_CREATE | libc::IN_DELETE | libc::IN_MOVED_FROM | libc::IN_MOVED_TO | libc::IN_CLOSE_WRITE | libc::IN_ATTRIB | libc::IN_DELETE_SELF | libc::IN_ONLYDIR;
 
 /// A folder space was added, changed or removed: the watchers are updated right away
 pub fn spaces_changed(st: &AppState) {
@@ -246,8 +240,7 @@ impl Watcher {
     /// paths are out of date. A folder moved within the space is watched again at its new path (`add_tree`).
     fn forget(&mut self, drive: &str, rel: &str) {
         let below = format!("{rel}/");
-        let wds: Vec<libc::c_int> =
-            self.dirs.iter().filter(|(_, (d, p))| d == drive && (p == rel || p.starts_with(&below))).map(|(wd, _)| *wd).collect();
+        let wds: Vec<libc::c_int> = self.dirs.iter().filter(|(_, (d, p))| d == drive && (p == rel || p.starts_with(&below))).map(|(wd, _)| *wd).collect();
         for wd in wds {
             self.dirs.remove(&wd);
             // SAFETY: a watch descriptor of this instance
@@ -351,7 +344,8 @@ async fn check_folders(st: &AppState, drive_id: &str, dirs: Vec<String>) {
     let dirs: HashSet<String> = dirs.into_iter().collect();
     for rel in dirs {
         let node: Option<crate::tree::Node> = {
-            let sql = format!("SELECT {} FROM nodes n WHERE n.drive_id = ? AND n.fs_path = ? AND n.kind = 'folder' AND n.trashed_at IS NULL", crate::tree::NODE_COLS);
+            let sql =
+                format!("SELECT {} FROM nodes n WHERE n.drive_id = ? AND n.fs_path = ? AND n.kind = 'folder' AND n.trashed_at IS NULL", crate::tree::NODE_COLS);
             sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(drive_id).bind(&rel).fetch_optional(&st.db).await.ok().flatten()
         };
         match node {

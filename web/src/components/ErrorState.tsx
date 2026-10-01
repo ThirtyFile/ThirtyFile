@@ -49,17 +49,7 @@ export function ErrorState({ message, onRetry, compact, className }: { message: 
  * In place of something that hasn't loaded yet: `loading` while its query is still trying, or the error and Try again
  * once it failed (a failed load mustn't look like an empty list, or keep loading for ever)
  */
-export function Pending({
-  query,
-  loading,
-  compact,
-  className,
-}: {
-  query: { error: Error | null; refetch(): unknown };
-  loading: ReactNode;
-  compact?: boolean;
-  className?: string;
-}) {
+export function Pending({ query, loading, compact, className }: { query: { error: Error | null; refetch(): unknown }; loading: ReactNode; compact?: boolean; className?: string }) {
   if (!query.error) return loading;
   return <ErrorState compact={compact} className={className} message={query.error.message} onRetry={() => query.refetch()} />;
 }

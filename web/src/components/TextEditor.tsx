@@ -149,14 +149,7 @@ export default function TextEditor(props: {
     }
   };
 
-  const extensions = useMemo(
-    () => [
-      EditorView.lineWrapping,
-      keymap.of([{ key: "Mod-s", preventDefault: true, run: () => (saveRef.current(), true) }]),
-      ...(lang ? [lang] : []),
-    ],
-    [lang],
-  );
+  const extensions = useMemo(() => [EditorView.lineWrapping, keymap.of([{ key: "Mod-s", preventDefault: true, run: () => (saveRef.current(), true) }]), ...(lang ? [lang] : [])], [lang]);
 
   const muted = props.embedded ? "text-muted-foreground" : "text-white/70";
   if (error) return <div className={`flex h-full items-center justify-center text-sm ${muted}`}>{error}</div>;

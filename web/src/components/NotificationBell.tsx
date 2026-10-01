@@ -1,7 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArchiveRestoreIcon, BellIcon, CalendarClockIcon, CheckCheckIcon, CopyCheckIcon, HardDriveIcon, InboxIcon, KeySquareIcon, Link2Icon, SettingsIcon, Trash2Icon, UsersRoundIcon } from "lucide-react";
+import {
+  ArchiveRestoreIcon,
+  BellIcon,
+  CalendarClockIcon,
+  CheckCheckIcon,
+  CopyCheckIcon,
+  HardDriveIcon,
+  InboxIcon,
+  KeySquareIcon,
+  Link2Icon,
+  SettingsIcon,
+  Trash2Icon,
+  UsersRoundIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { api, type AppNotification } from "@/api";
 import { affected, invalidate, keys } from "@/api/queryKeys";

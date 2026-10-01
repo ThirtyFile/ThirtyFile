@@ -46,13 +46,7 @@ export function DownloadPanel() {
     <div className="overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-xl">
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <span className="flex-1 truncate text-sm font-medium">{title}</span>
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          aria-label={collapsed ? t("Expand") : t("Collapse")}
-          title={collapsed ? t("Expand") : t("Collapse")}
-          onClick={() => setCollapsed(!collapsed)}
-        >
+        <Button size="icon-xs" variant="ghost" aria-label={collapsed ? t("Expand") : t("Collapse")} title={collapsed ? t("Expand") : t("Collapse")} onClick={() => setCollapsed(!collapsed)}>
           {collapsed ? <ChevronUpIcon /> : <ChevronDownIcon />}
         </Button>
         <Button
@@ -101,10 +95,7 @@ export function DownloadPanel() {
                       aria-valuenow={task.total ? p : undefined}
                       className="mt-1 h-1 overflow-hidden rounded-full bg-muted"
                     >
-                      <div
-                        className={cn("h-full rounded-full bg-brand transition-[width]", !task.total && "w-1/3 animate-pulse")}
-                        style={task.total ? { width: `${p}%` } : undefined}
-                      />
+                      <div className={cn("h-full rounded-full bg-brand transition-[width]", !task.total && "w-1/3 animate-pulse")} style={task.total ? { width: `${p}%` } : undefined} />
                     </div>
                   )}
                   <div className={cn("mt-0.5 truncate text-[11px] text-muted-foreground tabular-nums", task.status === "error" && "text-destructive")} title={detail(task)}>

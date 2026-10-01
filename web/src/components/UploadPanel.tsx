@@ -1,15 +1,5 @@
 import { useState } from "react";
-import {
-  CheckCircle2Icon,
-  ChevronDownIcon,
-  ChevronUpIcon,
-  FolderOpenIcon,
-  PauseIcon,
-  PlayIcon,
-  RotateCwIcon,
-  XIcon,
-  AlertCircleIcon,
-} from "lucide-react";
+import { CheckCircle2Icon, ChevronDownIcon, ChevronUpIcon, FolderOpenIcon, PauseIcon, PlayIcon, RotateCwIcon, XIcon, AlertCircleIcon } from "lucide-react";
 import { useNavigate } from "react-router";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -64,13 +54,7 @@ export function UploadPanel({ visitor = false, endpoint = "/api/uploads" }: { vi
     <div className="overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-xl">
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <span className="flex-1 truncate text-sm font-medium">{title}</span>
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          aria-label={collapsed ? t("Expand") : t("Collapse")}
-          title={collapsed ? t("Expand") : t("Collapse")}
-          onClick={() => setCollapsed(!collapsed)}
-        >
+        <Button size="icon-xs" variant="ghost" aria-label={collapsed ? t("Expand") : t("Collapse")} title={collapsed ? t("Expand") : t("Collapse")} onClick={() => setCollapsed(!collapsed)}>
           {collapsed ? <ChevronUpIcon /> : <ChevronDownIcon />}
         </Button>
         <Button
@@ -103,11 +87,7 @@ export function UploadPanel({ visitor = false, endpoint = "/api/uploads" }: { vi
             {rows.map((task) => {
               const p = task.size ? Math.round((task.sent / task.size) * 100) : 100;
               return (
-                <div
-                  key={task.id}
-                  className="flex items-center gap-2.5 border-b border-border/50 px-3 py-2 last:border-0"
-                  onContextMenu={() => setMenuId(task.id)}
-                >
+                <div key={task.id} className="flex items-center gap-2.5 border-b border-border/50 px-3 py-2 last:border-0" onContextMenu={() => setMenuId(task.id)}>
                   <FileIcon node={{ kind: "file", name: task.relativePath ? `${task.relativePath}/${task.name}` : task.name, mime: task.file.type, size: task.size }} className="size-5" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm" title={task.relativePath ? `${task.relativePath}/${task.name}` : task.name}>
@@ -119,7 +99,7 @@ export function UploadPanel({ visitor = false, endpoint = "/api/uploads" }: { vi
                         : task.status === "done"
                           ? // Both files were kept: say which name the new one got
                             task.savedAs
-                            ? t("Saved as \"{name}\"", { name: task.savedAs })
+                            ? t('Saved as "{name}"', { name: task.savedAs })
                             : formatBytes(task.size)
                           : task.status === "queued"
                             ? t("Waiting")

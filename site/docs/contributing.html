@@ -99,13 +99,17 @@
           <table>
             <thead><tr><th>Part</th><th>Checks</th></tr></thead>
             <tbody>
-              <tr><td><code>scripts/check.sh web</code></td><td>The interface: dependencies as locked, translations (<code>node scripts/check-i18n.mjs</code>), that the Office code in <code>web/src/ooxml</code> imports nothing else from the app (<code>node scripts/check-boundaries.mjs</code>), types, lint and unit tests. With <code>scripts/check.sh web --coverage</code>, as on GitHub, the unit tests also fail when they cover less than the floor in <code>web/vitest.config.ts</code></td></tr>
-              <tr><td><code>scripts/check.sh server</code></td><td>The server: <code>cargo test</code>, and <code>cargo clippy</code> with warnings as errors</td></tr>
+              <tr><td><code>scripts/check.sh web</code></td><td>The interface: dependencies as locked, formatting (<code>pnpm format:check</code>), translations (<code>node scripts/check-i18n.mjs</code>), that the Office code in <code>web/src/ooxml</code> imports nothing else from the app (<code>node scripts/check-boundaries.mjs</code>), types, lint and unit tests. With <code>scripts/check.sh web --coverage</code>, as on GitHub, the unit tests also fail when they cover less than the floor in <code>web/vitest.config.ts</code></td></tr>
+              <tr><td><code>scripts/check.sh server</code></td><td>The server: formatting (<code>cargo fmt --check</code>), <code>cargo test</code>, and <code>cargo clippy</code> with warnings as errors</td></tr>
               <tr><td><code>scripts/check.sh e2e</code></td><td>The end-to-end test: signs in, uploads and previews files in a real browser (Playwright), against a server built from the repository. The first time, get the browser with <code>cd web &amp;&amp; pnpm exec playwright install chromium</code></td></tr>
             </tbody>
           </table>
         </div>
         <p>On Windows, run it in Git Bash. On GitHub, the known security problems of the dependencies are checked too (<code>cargo deny</code> and <code>pnpm audit</code>).</p>
+        <p>The code is formatted by tools, and the checks fail when it isn't. Format it before committing:</p>
+        <pre><code>cd server &amp;&amp; cargo fmt
+cd web &amp;&amp; pnpm format</code></pre>
+        <p>The server uses rustfmt (its settings are in <code>server/rustfmt.toml</code>), the interface oxfmt (settings in <code>web/.oxfmtrc.json</code>; it formats <code>web/src</code>, <code>web/tests</code> and <code>web/scripts</code>). An editor with a rustfmt or oxfmt extension can format on save with the same settings. A table laid out by hand, with several entries per line, keeps its layout with a <code>// oxfmt-ignore</code> line above it. The Traditional Chinese dictionaries aren't formatted: they keep one entry per line.</p>
         <ul>
           <li>Code, comments and guides are written in English.</li>
           <li>Text in the interface is written in English in the code, with its Traditional Chinese translation in <code>web/src/lib/i18n/zh-TW/</code>.</li>

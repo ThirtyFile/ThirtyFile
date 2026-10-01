@@ -78,22 +78,7 @@ const GROUPS: [GroupBy, string][] = [
 ];
 
 export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerActions, newItems: React.ReactNode) {
-  const {
-    caps,
-    canCreate,
-    single,
-    allFavorite,
-    view,
-    setView,
-    groupBy,
-    setGroupBy,
-    setSelected,
-    setDialog,
-    showCheckboxes,
-    setShowCheckboxes,
-    detailsOpen,
-    setDetailsOpen,
-  } = s;
+  const { caps, canCreate, single, allFavorite, view, setView, groupBy, setGroupBy, setSelected, setDialog, showCheckboxes, setShowCheckboxes, detailsOpen, setDetailsOpen } = s;
   const { download, toggleFavorite, cut, copy, canPaste, paste } = a;
   const none = s.count === 0;
   // Windows 11 style command bar: New | Cut Copy Paste Rename Share Delete | Sort | View | ⋯ | Details
@@ -102,9 +87,7 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
   const toolbar = (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger
-          render={<ToolButton icon={PlusCircleIcon} label={t("New")} showLabel phoneLabel disabled={!canCreate} className="h-9 px-2.5 text-[13px]" />}
-        />
+        <DropdownMenuTrigger render={<ToolButton icon={PlusCircleIcon} label={t("New")} showLabel phoneLabel disabled={!canCreate} className="h-9 px-2.5 text-[13px]" />} />
         <DropdownMenuContent className="w-56">{newItems}</DropdownMenuContent>
       </DropdownMenu>
       {/* Phones: what works on the selected items is in the bar that shows below the list while items are selected (and

@@ -19,8 +19,7 @@ export const storageApi = {
   createStorage: (req: { name: string; kind: StorageKind; config: StorageConfig }) => post<{ id: string }>("/admin/storage", req),
   updateStorage: (id: string, req: { name?: string; config?: StorageConfig }) => request("PATCH", enc`/admin/storage/${id}`, req),
   deleteStorage: (id: string) => request("DELETE", enc`/admin/storage/${id}`),
-  testStorage: (req: { id?: string; kind: StorageKind; config: StorageConfig }) =>
-    post<{ ok: boolean; region?: string; host_key?: string }>("/admin/storage/test", req),
+  testStorage: (req: { id?: string; kind: StorageKind; config: StorageConfig }) => post<{ ok: boolean; region?: string; host_key?: string }>("/admin/storage/test", req),
   testExistingStorage: (id: string) => post(enc`/admin/storage/${id}/test`),
   testStorageSteps: (id: string) => post<{ ok: boolean; steps: LocationTestStep[] }>(enc`/admin/storage/${id}/test-steps`),
   browseStorage: (id: string, path: string, after?: string) => get<LocationPage>(enc`/admin/storage/${id}/browse` + qs({ path, after })),
@@ -29,8 +28,7 @@ export const storageApi = {
   findUnusedContent: (id: string) => post<UnusedJob>(enc`/admin/storage/${id}/unused`),
   removeUnusedContent: (id: string, scanId: string) => post<UnusedJob>(enc`/admin/storage/${id}/unused/remove`, { scan_id: scanId }),
   setDefaultStorage: (id: string) => post(enc`/admin/storage/${id}/default`),
-  storageLocationSpaces: (id: string) =>
-    get<LocationSpace[]>(enc`/admin/storage/${id}/spaces`).then((l) => l.map((s) => ({ ...s, name: driveName(s) }))),
+  storageLocationSpaces: (id: string) => get<LocationSpace[]>(enc`/admin/storage/${id}/spaces`).then((l) => l.map((s) => ({ ...s, name: driveName(s) }))),
   moves: () =>
     get<MovesList>("/admin/moves").then((l) => ({
       ...l,

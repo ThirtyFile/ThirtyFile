@@ -8,13 +8,7 @@ import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
-import {
-  CONTROL_PANEL_CATEGORIES,
-  CONTROL_PANEL_ITEMS,
-  controlPanelCategoryLabel,
-  type ControlPanelItem,
-  type ControlPanelKey,
-} from "@/admin/controlPanel";
+import { CONTROL_PANEL_CATEGORIES, CONTROL_PANEL_ITEMS, controlPanelCategoryLabel, type ControlPanelItem, type ControlPanelKey } from "@/admin/controlPanel";
 import { t } from "@/lib/i18n";
 import { useSelectableList } from "@/lib/listSelection";
 import { usePersisted } from "@/lib/session";
@@ -50,19 +44,15 @@ export function ControlPanelPage() {
         groups: t("{n} group|{n} groups", { n: s.groups }),
         shares: system.data?.public_links ? t("{n} share link|{n} share links", { n: s.share_links }) : t("Public links turned off"),
         drives: t("{n} team space|{n} team spaces", { n: s.team_drives }),
-        storage: locations.data
-          ? t("{n} location · Default: {name}|{n} locations · Default: {name}", { n: locations.data.length, name: defaultLocation?.name ?? "—" })
-          : undefined,
+        storage: locations.data ? t("{n} location · Default: {name}|{n} locations · Default: {name}", { n: locations.data.length, name: defaultLocation?.name ?? "—" }) : undefined,
         moves: unfinished === undefined ? undefined : unfinished ? t("{n} move not finished|{n} moves not finished", { n: unfinished }) : t("No moves in progress"),
         usage: t("{size} used on disk", { size: formatBytes(s.stored_bytes) }),
-        general: system.data?.shared_enabled ? t("\"{name}\" enabled", { name: company }) : t("\"{name}\" disabled", { name: company }),
+        general: system.data?.shared_enabled ? t('"{name}" enabled', { name: company }) : t('"{name}" disabled', { name: company }),
       }
     : {};
 
   const q = query.trim().toLowerCase();
-  const items = q
-    ? CONTROL_PANEL_ITEMS.filter((i) => `${i.title} ${i.desc} ${i.keywords} ${controlPanelCategoryLabel(i.category)}`.toLowerCase().includes(q))
-    : CONTROL_PANEL_ITEMS;
+  const items = q ? CONTROL_PANEL_ITEMS.filter((i) => `${i.title} ${i.desc} ${i.keywords} ${controlPanelCategoryLabel(i.category)}`.toLowerCase().includes(q)) : CONTROL_PANEL_ITEMS;
   const selected = items.find((i) => i.key === sel) ?? null;
 
   const open = (item: ControlPanelItem | null, newTab = false) => {
@@ -87,14 +77,7 @@ export function ControlPanelPage() {
 
   const toolbar = (
     <>
-      <ToolButton
-        icon={FolderOpenIcon}
-        label={t("Open")}
-        showLabel
-        className="h-9 px-2.5 text-[13px]"
-        disabled={!selected}
-        onClick={() => open(selected)}
-      />
+      <ToolButton icon={FolderOpenIcon} label={t("Open")} showLabel className="h-9 px-2.5 text-[13px]" disabled={!selected} onClick={() => open(selected)} />
       <ToolButton icon={PanelTopIcon} label={t("Open in new tab")} disabled={!selected} onClick={() => open(selected, true)} />
       <ToolSeparator />
       <ToolButton
@@ -106,7 +89,14 @@ export function ControlPanelPage() {
         }}
       />
       <div className="flex-1" />
-      <Button variant={view === "tiles" ? "secondary" : "ghost"} aria-pressed={view === "tiles"} size="icon-sm" aria-label={t("Large icons")} title={t("Large icons")} onClick={() => setView("tiles")}>
+      <Button
+        variant={view === "tiles" ? "secondary" : "ghost"}
+        aria-pressed={view === "tiles"}
+        size="icon-sm"
+        aria-label={t("Large icons")}
+        title={t("Large icons")}
+        onClick={() => setView("tiles")}
+      >
         <Grid2X2Icon />
       </Button>
       <Button variant={view === "list" ? "secondary" : "ghost"} aria-pressed={view === "list"} size="icon-sm" aria-label={t("Details")} title={t("Details")} onClick={() => setView("list")}>
@@ -141,10 +131,18 @@ export function ControlPanelPage() {
     <table {...list.listProps("grid", t("Control panel"))} className="w-full table-fixed border-collapse text-xs whitespace-nowrap">
       <thead>
         <tr role="row" className="border-b text-left text-muted-foreground">
-          <th role="columnheader" className="h-[30px] w-[180px] px-2 pl-3 font-normal">{t("Name")}</th>
-          <th role="columnheader" className="h-[30px] px-2 font-normal">{t("Description")}</th>
-          <th role="columnheader" className="h-[30px] w-[110px] px-2 font-normal max-md:hidden">{t("Category")}</th>
-          <th role="columnheader" className="h-[30px] w-[200px] px-2 font-normal max-lg:hidden">{t("Status")}</th>
+          <th role="columnheader" className="h-[30px] w-[180px] px-2 pl-3 font-normal">
+            {t("Name")}
+          </th>
+          <th role="columnheader" className="h-[30px] px-2 font-normal">
+            {t("Description")}
+          </th>
+          <th role="columnheader" className="h-[30px] w-[110px] px-2 font-normal max-md:hidden">
+            {t("Category")}
+          </th>
+          <th role="columnheader" className="h-[30px] w-[200px] px-2 font-normal max-lg:hidden">
+            {t("Status")}
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -166,9 +164,15 @@ export function ControlPanelPage() {
                 {item.title}
               </span>
             </td>
-            <td role="gridcell" className="truncate px-2 text-muted-foreground">{item.desc}</td>
-            <td role="gridcell" className="truncate px-2 text-muted-foreground max-md:hidden">{controlPanelCategoryLabel(item.category)}</td>
-            <td role="gridcell" className="truncate px-2 text-muted-foreground max-lg:hidden">{summary[item.key] ?? ""}</td>
+            <td role="gridcell" className="truncate px-2 text-muted-foreground">
+              {item.desc}
+            </td>
+            <td role="gridcell" className="truncate px-2 text-muted-foreground max-md:hidden">
+              {controlPanelCategoryLabel(item.category)}
+            </td>
+            <td role="gridcell" className="truncate px-2 text-muted-foreground max-lg:hidden">
+              {summary[item.key] ?? ""}
+            </td>
           </tr>
         ))}
       </tbody>
@@ -185,7 +189,7 @@ export function ControlPanelPage() {
       upTo={null}
       searchPlaceholder={t("Search settings")}
       onSearch={search}
-      footer={<span>{selected ? t("\"{name}\" selected", { name: selected.title }) : t("{n} item|{n} items", { n: items.length })}</span>}
+      footer={<span>{selected ? t('"{name}" selected', { name: selected.title }) : t("{n} item|{n} items", { n: items.length })}</span>}
     >
       <ContextMenu>
         <ContextMenuTrigger
@@ -195,7 +199,7 @@ export function ControlPanelPage() {
           onContextMenuCapture={(e) => !(e.target as HTMLElement).closest("[data-item]") && setSel(null)}
         >
           {items.length === 0 ? (
-            <p className="pt-10 text-center text-xs text-muted-foreground">{t("No settings match \"{query}\".", { query })}</p>
+            <p className="pt-10 text-center text-xs text-muted-foreground">{t('No settings match "{query}".', { query })}</p>
           ) : view === "list" ? (
             <div className="pt-2">{listView}</div>
           ) : (

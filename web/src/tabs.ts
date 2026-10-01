@@ -79,7 +79,7 @@ async function confirmClose(tab: Tab): Promise<boolean> {
   if (!file || !hasDraft(file)) return true;
   const ok = await confirm({
     title: t("Discard unsaved changes?"),
-    description: t("\"{name}\" has unsaved changes. If you close the tab, your changes will be lost.", { name: tab.title || t("File") }),
+    description: t('"{name}" has unsaved changes. If you close the tab, your changes will be lost.', { name: tab.title || t("File") }),
     confirmText: t("Discard and close"),
     destructive: true,
   });
@@ -252,27 +252,36 @@ export function useTabActions() {
     [go],
   );
 
-  const closeOthers = useCallback(async (id: string) => {
-    if (!store.get().tabs.some((x) => x.id === id)) return;
-    // Ask once for all of them, so cancelling can't leave some drafts already discarded
-    const unsaved = store.get().tabs.filter((x) => x.id !== id).map(viewedFile).filter((f): f is string => !!f && hasDraft(f));
-    if (
-      unsaved.length &&
-      !(await confirm({
-        title: t("Discard unsaved changes?"),
-        description: t("{n} tab has unsaved changes. If you close it, the changes will be lost.|{n} tabs have unsaved changes. If you close them, the changes will be lost.", { n: unsaved.length }),
-        confirmText: t("Discard and close"),
-        destructive: true,
-      }))
-    )
-      return;
-    // Tabs may have changed while the question was open
-    const plan = keepOnly(store.get(), id, unsaved);
-    if (!plan) return;
-    plan.discard.forEach((f) => setDraft(f, null));
-    set(plan.next);
-    if (plan.show !== null) go(plan.show);
-  }, [go]);
+  const closeOthers = useCallback(
+    async (id: string) => {
+      if (!store.get().tabs.some((x) => x.id === id)) return;
+      // Ask once for all of them, so cancelling can't leave some drafts already discarded
+      const unsaved = store
+        .get()
+        .tabs.filter((x) => x.id !== id)
+        .map(viewedFile)
+        .filter((f): f is string => !!f && hasDraft(f));
+      if (
+        unsaved.length &&
+        !(await confirm({
+          title: t("Discard unsaved changes?"),
+          description: t("{n} tab has unsaved changes. If you close it, the changes will be lost.|{n} tabs have unsaved changes. If you close them, the changes will be lost.", {
+            n: unsaved.length,
+          }),
+          confirmText: t("Discard and close"),
+          destructive: true,
+        }))
+      )
+        return;
+      // Tabs may have changed while the question was open
+      const plan = keepOnly(store.get(), id, unsaved);
+      if (!plan) return;
+      plan.discard.forEach((f) => setDraft(f, null));
+      set(plan.next);
+      if (plan.show !== null) go(plan.show);
+    },
+    [go],
+  );
 
   const step = useCallback(
     (delta: number) => {

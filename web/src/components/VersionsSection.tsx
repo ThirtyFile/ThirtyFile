@@ -26,7 +26,7 @@ export function VersionsSection({ node, canRestore, ready = true }: { node: Node
   const restore = async (v: FileVersion) => {
     const ok = await confirm({
       title: t("Restore this version?"),
-      description: t("\"{name}\" gets back the content it had on {date}. Its current content is kept as an earlier version.", {
+      description: t('"{name}" gets back the content it had on {date}. Its current content is kept as an earlier version.', {
         name: node.name,
         date: formatWinDate(v.modified_at),
       }),

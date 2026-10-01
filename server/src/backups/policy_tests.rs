@@ -141,9 +141,8 @@ async fn every_change_of_a_space_is_counted_in_the_transaction_that_makes_it() {
     let req = serde_json::from_value(json!({ "name": "b.txt" })).unwrap();
     let _ = crate::nodes::rename(State(env.st.clone()), amy.clone(), Path(f.clone()), Json(req)).await.unwrap();
     changed(seq(&env, &mine).await, "a rename");
-    let _ = crate::files::save_content(State(env.st.clone()), amy.clone(), Path(f.clone()), Default::default(), axum::body::Bytes::from_static(b"two"))
-        .await
-        .unwrap();
+    let _ =
+        crate::files::save_content(State(env.st.clone()), amy.clone(), Path(f.clone()), Default::default(), axum::body::Bytes::from_static(b"two")).await.unwrap();
     changed(seq(&env, &mine).await, "a save, with its earlier version");
     env.grant(&f, &bob, "viewer").await;
     changed(seq(&env, &mine).await, "access given");
@@ -194,7 +193,8 @@ async fn a_policy_backs_up_changes_one_snapshot_at_a_time_and_keeps_the_last_one
     // Nothing changed: nothing to do, and the next scheduled time is set
     policy::tick(&env.st, t).await.unwrap();
     assert!(open_jobs(&env, &set).await.is_empty());
-    let next: Option<i64> = sqlx::query_as::<_, (Option<i64>,)>("SELECT next_run_at FROM backup_policies WHERE set_id = ?").bind(&set).fetch_one(&env.st.db).await.unwrap().0;
+    let next: Option<i64> =
+        sqlx::query_as::<_, (Option<i64>,)>("SELECT next_run_at FROM backup_policies WHERE set_id = ?").bind(&set).fetch_one(&env.st.db).await.unwrap().0;
     assert!(next.is_some_and(|n| n > t));
     assert_eq!(health(&env, &set).await.state, "protected");
     // Changes: noted, then backed up once they had a few seconds. A file is deleted for good.
@@ -315,7 +315,8 @@ async fn a_policy_takes_the_spaces_on_its_location_when_each_snapshot_starts() {
     let bob = env.user("bob", true).await;
     env.upload(&bob, bob.root(), "b.txt", b"bob's").await;
     assert_eq!(run_queued(&env, &set).await, "done");
-    let (list,): (String,) = sqlx::query_as("SELECT space_list FROM backup_snapshots WHERE set_id = ? AND state = 'complete'").bind(&set).fetch_one(&env.st.db).await.unwrap();
+    let (list,): (String,) =
+        sqlx::query_as("SELECT space_list FROM backup_snapshots WHERE set_id = ? AND state = 'complete'").bind(&set).fetch_one(&env.st.db).await.unwrap();
     assert!(list.contains("\"owner\":\"bob\""), "{list}");
     // Chosen spaces only: Bob's is left out
     let Json(_) = api::update_policy(
@@ -330,9 +331,10 @@ async fn a_policy_takes_the_spaces_on_its_location_when_each_snapshot_starts() {
     assert_eq!(policy::scope(&mut c, &set).await.unwrap(), vec![env.drive_of(amy.root()).await]);
     // Paused: nothing is made, whatever changes
     drop(c);
-    let Json(_) = api::update_policy(State(env.st.clone()), Admin(env.admin().await), Path(set.clone()), Json(serde_json::from_value(json!({ "enabled": false })).unwrap()))
-        .await
-        .unwrap();
+    let Json(_) =
+        api::update_policy(State(env.st.clone()), Admin(env.admin().await), Path(set.clone()), Json(serde_json::from_value(json!({ "enabled": false })).unwrap()))
+            .await
+            .unwrap();
     env.upload(&amy, amy.root(), "c.txt", b"later").await;
     let t = crate::util::now();
     policy::tick(&env.st, t).await.unwrap();

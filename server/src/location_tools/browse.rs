@@ -126,7 +126,8 @@ pub async fn browse(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
         .drain(start..end)
         .map(|entry| {
             let key = storage::join_key(&[&path, &entry.name]);
-            let space = (entry.kind == EntryKind::Folder).then(|| spaces.iter().find(|f| f.path.to_lowercase() == key.to_lowercase()).map(|f| f.space.clone())).flatten();
+            let space =
+                (entry.kind == EntryKind::Folder).then(|| spaces.iter().find(|f| f.path.to_lowercase() == key.to_lowercase()).map(|f| f.space.clone())).flatten();
             let role = if space.is_some() {
                 Some("space")
             } else if entry.name.starts_with(".thirtyfile") {
@@ -143,7 +144,8 @@ pub async fn browse(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
         })
         .collect();
 
-    let hashes: Vec<String> = items.iter().filter_map(|i| storage::content_hash(&i.path, content_dir).filter(|_| i.entry.kind == EntryKind::File)).map(str::to_string).collect();
+    let hashes: Vec<String> =
+        items.iter().filter_map(|i| storage::content_hash(&i.path, content_dir).filter(|_| i.entry.kind == EntryKind::File)).map(str::to_string).collect();
     let mut usage = usage_of(&mut c, me.id, &id, &hashes).await?;
     for item in &mut items {
         if item.entry.kind == EntryKind::File
@@ -509,11 +511,8 @@ pub async fn download(State(st): State<AppState>, Admin(me): Admin, Path(id): Pa
     // Content waiting to be deleted no longer records whose it was (it may have been in a personal space), and a copy
     // still being written beside where content goes (`<hash>.part-…`) is someone's upload: neither is served
     if let Some((hash, whole)) = content_or_copy(&lower, backend.content_dir()) {
-        let (pending,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM pending_blob_deletes WHERE hash = ? AND location_id = ?)")
-            .bind(hash)
-            .bind(&id)
-            .fetch_one(&mut *c)
-            .await?;
+        let (pending,): (bool,) =
+            sqlx::query_as("SELECT EXISTS (SELECT 1 FROM pending_blob_deletes WHERE hash = ? AND location_id = ?)").bind(hash).bind(&id).fetch_one(&mut *c).await?;
         if pending || !whole {
             return Err(AppError::forbidden("This content is being written or deleted, so it can't be downloaded"));
         }

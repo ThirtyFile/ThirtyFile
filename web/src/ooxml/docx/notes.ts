@@ -12,7 +12,7 @@ export function renderNotes(refs: NoteRef[], kind: "foot" | "end", base: Flow, p
   const out = new Map<string, HTMLElement>();
   const doc = base.doc;
   const src = kind === "foot" ? doc.footnotes : doc.endnotes;
-  const rels = part ? doc.rels.get(part) ?? [] : [];
+  const rels = part ? (doc.rels.get(part) ?? []) : [];
   for (const ref of refs) {
     if (ref.kind !== kind || out.has(ref.id)) continue;
     const el = src.get(ref.id);

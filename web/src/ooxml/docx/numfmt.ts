@@ -3,6 +3,7 @@
  * Covers Traditional/Simplified Chinese, Japanese and Korean formats; unknown formats fall back to Arabic numerals.
  */
 
+// oxfmt-ignore
 const ROMAN: [number, string][] = [
   [1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"],
   [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"],
@@ -11,10 +12,11 @@ const ROMAN: [number, string][] = [
 function roman(n: number) {
   if (n <= 0 || n >= 4000) return String(n);
   let out = "";
-  for (const [v, s] of ROMAN) while (n >= v) {
-    out += s;
-    n -= v;
-  }
+  for (const [v, s] of ROMAN)
+    while (n >= v) {
+      out += s;
+      n -= v;
+    }
   return out;
 }
 
@@ -95,7 +97,7 @@ function cjkNumber(n: number, d: CjkDigits) {
     }
     if (out && (needZero || g < 1000) && d.zero) out += d.zero;
     needZero = false;
-    out += cjkGroup(g, d, !out) + (i > 0 ? d.big[i - 1] ?? "" : "");
+    out += cjkGroup(g, d, !out) + (i > 0 ? (d.big[i - 1] ?? "") : "");
   }
   return out;
 }
@@ -103,7 +105,28 @@ function cjkNumber(n: number, d: CjkDigits) {
 /** Digit-by-digit numerals (120 is written one-two-zero): ideographDigital, taiwaneseDigital */
 const digitByDigit = (n: number, digits: string) => String(n).replace(/\d/g, (c) => digits[Number(c)]);
 
-const ONES = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
+const ONES = [
+  "",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+  "ten",
+  "eleven",
+  "twelve",
+  "thirteen",
+  "fourteen",
+  "fifteen",
+  "sixteen",
+  "seventeen",
+  "eighteen",
+  "nineteen",
+];
 const TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
 
 function englishWords(n: number): string {
@@ -235,7 +258,10 @@ export function formatNumber(n: number, format: string | null | undefined, custo
     case "russianLower":
       return letters(n, RU_LOWER);
     case "russianUpper":
-      return letters(n, RU_LOWER.map((c) => c.toUpperCase()));
+      return letters(
+        n,
+        RU_LOWER.map((c) => c.toUpperCase()),
+      );
     case "hebrew2":
       return letters(n, HEBREW);
     case "arabicAlpha":

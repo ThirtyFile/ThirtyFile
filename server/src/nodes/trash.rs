@@ -122,9 +122,7 @@ pub(super) async fn trash_root(conn: &mut SqliteConnection, user: &User, id: &st
             tree::get_node(conn, &root_id).await?.ok_or_else(not_found)?
         }
     };
-    let dest_role = trash_role(conn, user, &dest)
-        .await?
-        .ok_or_else(|| AppError::forbidden("You don't have permission on the folder this item belongs to"))?;
+    let dest_role = trash_role(conn, user, &dest).await?.ok_or_else(|| AppError::forbidden("You don't have permission on the folder this item belongs to"))?;
     tree::allows(user, dest_role, need)?;
     Ok((node, dest.id))
 }
@@ -212,11 +210,10 @@ pub(super) async fn empty_trash_drives(conn: &mut SqliteConnection, user: &User)
         return Ok(Vec::new());
     }
     let ids = trash_drives(conn, user, Role::Manager).await?;
-    let writable: Vec<(String,)> =
-        sqlx::query_as("SELECT id FROM drives WHERE id IN (SELECT value FROM json_each(?)) AND read_only = 0 AND moving = 0")
-            .bind(serde_json::to_string(&ids).unwrap())
-            .fetch_all(conn)
-            .await?;
+    let writable: Vec<(String,)> = sqlx::query_as("SELECT id FROM drives WHERE id IN (SELECT value FROM json_each(?)) AND read_only = 0 AND moving = 0")
+        .bind(serde_json::to_string(&ids).unwrap())
+        .fetch_all(conn)
+        .await?;
     Ok(writable.into_iter().map(|(id,)| id).collect())
 }
 

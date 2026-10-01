@@ -48,7 +48,7 @@ const PRESETS: { key: string; label: string; config: StorageConfig; hint: string
     key: "selfhost",
     label: t("Self-hosted (RustFS / MinIO)"),
     config: { endpoint: "http://rustfs:9000", region: "us-east-1", path_style: true, allow_http: true },
-    hint: t("Internal http endpoints require \"Allow http\". MinIO is no longer freely distributed; RustFS (Apache 2.0) is recommended for new setups."),
+    hint: t('Internal http endpoints require "Allow http". MinIO is no longer freely distributed; RustFS (Apache 2.0) is recommended for new setups.'),
   },
   {
     key: "other",
@@ -117,7 +117,7 @@ export function StorageDialog({ location, onClose, onSaved }: { location: Storag
           }}
         >
           <DialogHeader>
-            <DialogTitle>{location ? t("Edit \"{name}\"", { name: location.name }) : t("Add storage location")}</DialogTitle>
+            <DialogTitle>{location ? t('Edit "{name}"', { name: location.name }) : t("Add storage location")}</DialogTitle>
             <DialogDescription>{t("A connection test (writing, reading back, and deleting a small file) runs before saving.")}</DialogDescription>
           </DialogHeader>
           {/* Room around the fields inside the scrolling area, so their focus rings aren't cut off at its edges */}
@@ -160,19 +160,13 @@ export function StorageDialog({ location, onClose, onSaved }: { location: Storag
                   <>
                     {field("path", t("Folder path (absolute path on the server; can be a NAS mount point)"), { placeholder: t("/mnt/nas/thirtyfile or D:\\thirtyfile") })}
                     <p className="text-xs text-muted-foreground">
-                      {t("Saving creates the folder with a .thirtyfile-location file in it. Later, the location is used only while that file is there, so a disk or share that isn't mounted is never written to.")}
+                      {t(
+                        "Saving creates the folder with a .thirtyfile-location file in it. Later, the location is used only while that file is there, so a disk or share that isn't mounted is never written to.",
+                      )}
                     </p>
                   </>
                 ) : kind === "sftp" || kind === "ftp" ? (
-                  <RemoteFields
-                    kind={kind}
-                    cfg={cfg}
-                    set={set}
-                    hasSecret={!!location?.has_secret}
-                    auth={auth}
-                    setAuth={setAuth}
-                    seenKey={seenKey}
-                  />
+                  <RemoteFields kind={kind} cfg={cfg} set={set} hasSecret={!!location?.has_secret} auth={auth} setAuth={setAuth} seenKey={seenKey} />
                 ) : (
                   <>
                     {!location && (
@@ -218,12 +212,7 @@ export function StorageDialog({ location, onClose, onSaved }: { location: Storag
                   </>
                 )}
                 {tested && (
-                  <p
-                    className={cn(
-                      "flex items-center gap-1.5 text-sm",
-                      tested === "ok" ? "text-emerald-600 dark:text-emerald-400" : "text-destructive",
-                    )}
-                  >
+                  <p className={cn("flex items-center gap-1.5 text-sm", tested === "ok" ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>
                     {tested === "ok" ? <CheckCircle2Icon className="size-4" /> : <XCircleIcon className="size-4" />}
                     {tested === "ok" ? t("Connection test succeeded") : tested}
                   </p>

@@ -10,25 +10,7 @@ import { cloneLayout, type Change } from "./session";
 import type { WorkspaceCtx } from "./workspace";
 
 export function createFormatting(ctx: WorkspaceCtx) {
-  const {
-    session,
-    book,
-    calc,
-    sheet,
-    sheetIdx,
-    sel,
-    range,
-    active,
-    wholeRows,
-    wholeCols,
-    editing,
-    setSel,
-    styleAt,
-    commitChanges,
-    changeAt,
-    pushEntry,
-    commitEdit,
-  } = ctx;
+  const { session, book, calc, sheet, sheetIdx, sel, range, active, wholeRows, wholeCols, editing, setSel, styleAt, commitChanges, changeAt, pushEntry, commitEdit } = ctx;
   // ───── Formatting ─────
 
   /** Range to apply formatting to: whole columns/rows only go as far as the data */

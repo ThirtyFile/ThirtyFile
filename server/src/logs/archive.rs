@@ -42,11 +42,8 @@ async fn status(st: &AppState) -> AppResult<Value> {
     let (share_rows, share_oldest): (i64, Option<i64>) = sqlx::query_as("SELECT COUNT(*), MIN(at) FROM share_access").fetch_one(&st.db).await?;
     let (login_rows, login_oldest): (i64, Option<i64>) = sqlx::query_as("SELECT COUNT(*), MIN(at) FROM login_log").fetch_one(&st.db).await?;
     let (error_rows, error_oldest): (i64, Option<i64>) = sqlx::query_as("SELECT COUNT(*), MIN(at) FROM error_log").fetch_one(&st.db).await?;
-    let archives: Vec<ArchiveRow> = sqlx::query_as(
-        "SELECT id, kind, from_at, to_at, rows, bytes, created_at FROM log_archives ORDER BY to_at DESC, id DESC",
-    )
-    .fetch_all(&st.db)
-    .await?;
+    let archives: Vec<ArchiveRow> =
+        sqlx::query_as("SELECT id, kind, from_at, to_at, rows, bytes, created_at FROM log_archives ORDER BY to_at DESC, id DESC").fetch_all(&st.db).await?;
     let last_run: Option<i64> = get_setting(&st.db, "log_archived_at").await?.and_then(|v| v.parse().ok());
     Ok(json!({
         "settings": *st.logs.read().unwrap(),
@@ -111,8 +108,11 @@ pub async fn archive_now(State(st): State<AppState>, Admin(user): Admin) -> AppR
 }
 
 pub async fn download_archive(State(st): State<AppState>, _: Admin, headers: HeaderMap, Path(id): Path<i64>) -> AppResult<Response> {
-    let (kind, file, from_at, to_at): (String, String, i64, i64) =
-        sqlx::query_as("SELECT kind, file, from_at, to_at FROM log_archives WHERE id = ?").bind(id).fetch_optional(&st.db).await?.ok_or_else(|| AppError::not_found("Archive not found"))?;
+    let (kind, file, from_at, to_at): (String, String, i64, i64) = sqlx::query_as("SELECT kind, file, from_at, to_at FROM log_archives WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&st.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Archive not found"))?;
     let path = archive_dir(&st).join(&file);
     let f = tokio::fs::File::open(&path).await.map_err(|_| AppError::not_found("The archive file no longer exists"))?;
     let slug = match kind.as_str() {
@@ -135,8 +135,11 @@ pub async fn download_archive(State(st): State<AppState>, _: Admin, headers: Hea
 pub async fn delete_archive(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<i64>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    let (file, rows): (String, i64) =
-        sqlx::query_as("SELECT file, rows FROM log_archives WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?.ok_or_else(|| AppError::not_found("Archive not found"))?;
+    let (file, rows): (String, i64) = sqlx::query_as("SELECT file, rows FROM log_archives WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| AppError::not_found("Archive not found"))?;
     sqlx::query("DELETE FROM log_archives WHERE id = ?").bind(id).execute(&mut *tx).await?;
     record_activity(&mut tx, &user, None, "log_archive_delete", &format!("{file} ({})", plural(rows, "record", "records"))).await?;
     tx.commit().await?;
@@ -177,8 +180,7 @@ impl ArchiveSummary {
     pub fn describe(&self) -> String {
         let mut parts = Vec::new();
         for (verb, counts) in [("Archived", &self.archived), ("Deleted", &self.deleted)] {
-            let items: Vec<String> =
-                counts.iter().zip(KIND_NOUNS).filter(|(n, _)| **n > 0).map(|(n, (one, many))| plural(*n, one, many)).collect();
+            let items: Vec<String> = counts.iter().zip(KIND_NOUNS).filter(|(n, _)| **n > 0).map(|(n, (one, many))| plural(*n, one, many)).collect();
             if !items.is_empty() {
                 parts.push(format!("{verb} {}", items.join(", ")));
             }

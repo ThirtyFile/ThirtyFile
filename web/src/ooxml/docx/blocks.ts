@@ -17,7 +17,6 @@ export interface BlockItem {
 
 const px = (n: number) => `${Math.round(n * 100) / 100}px`;
 
-
 interface Last {
   res: ParaResult;
   first: HTMLElement;

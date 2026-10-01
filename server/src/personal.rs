@@ -112,19 +112,18 @@ pub async fn create_or_wait(conn: &mut SqliteConnection, space_folders: Option<&
 /// Tries again to create the personal spaces waiting for their location: every user's, or only `user`'s (when they
 /// sign in). Failures are only logged. Returns how many were created.
 pub async fn retry_pending(st: &AppState, user: Option<i64>) -> usize {
-    let rows: Vec<(i64, String, String)> = match sqlx::query_as(
-        "SELECT id, username, personal_pending FROM users WHERE personal_pending IS NOT NULL AND (?1 IS NULL OR id = ?1)",
-    )
-        .bind(user)
-        .fetch_all(&st.db)
-        .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            tracing::warn!("Couldn't look for personal spaces waiting to be created: {e}");
-            return 0;
-        }
-    };
+    let rows: Vec<(i64, String, String)> =
+        match sqlx::query_as("SELECT id, username, personal_pending FROM users WHERE personal_pending IS NOT NULL AND (?1 IS NULL OR id = ?1)")
+            .bind(user)
+            .fetch_all(&st.db)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::warn!("Couldn't look for personal spaces waiting to be created: {e}");
+                return 0;
+            }
+        };
     let mut created = 0;
     for (id, username, location) in rows {
         // Asked before taking the write lock: a location that is offline, or whose disk doesn't answer, is left for later
@@ -159,7 +158,8 @@ async fn retry_one(st: &AppState, id: i64) -> AppResult<Option<String>> {
 
 async fn retry_in(st: &AppState, tx: &mut SqliteConnection, id: i64) -> AppResult<Option<String>> {
     // Checked again under the lock: another retry or an administrator may have been quicker
-    let row: Option<(Option<String>, Option<String>)> = sqlx::query_as("SELECT root_id, personal_pending FROM users WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?;
+    let row: Option<(Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT root_id, personal_pending FROM users WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?;
     let location = match row {
         Some((None, Some(location))) => location,
         Some((Some(_), Some(_))) => {
@@ -434,7 +434,8 @@ mod tests {
         assert_eq!(personal(&env, row.id).await, (None, None, None));
         assert_eq!(std::fs::read(env.dir.join("blobs/company/Files of amy/a.txt")).unwrap(), b"amy's");
         assert_eq!(env.node_at(&company, "Files of amy/a.txt").await.unwrap().0, a);
-        let (detail,): (String,) = sqlx::query_as("SELECT detail FROM activity WHERE action = 'user_update' ORDER BY id DESC LIMIT 1").fetch_one(&env.st.db).await.unwrap();
+        let (detail,): (String,) =
+            sqlx::query_as("SELECT detail FROM activity WHERE action = 'user_update' ORDER BY id DESC LIMIT 1").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(detail, "amy: removed My files, files moved to All files › Files of amy");
         // Nothing left to remove
         assert_eq!(remove(json!({ "delete_files": true })).await.map(|_| ()).unwrap_err().status, axum::http::StatusCode::BAD_REQUEST);

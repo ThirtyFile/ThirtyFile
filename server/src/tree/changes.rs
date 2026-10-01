@@ -105,16 +105,7 @@ async fn record(conn: &mut SqliteConnection, c: &Change) -> AppResult<()> {
 }
 
 fn change(kind: &str, node_id: &str) -> Change {
-    Change {
-        id: new_id(),
-        kind: kind.into(),
-        node_id: node_id.into(),
-        drive_id: None,
-        trash_id: None,
-        trashed_at: None,
-        old_path: None,
-        new_path: None,
-    }
+    Change { id: new_id(), kind: kind.into(), node_id: node_id.into(), drive_id: None, trash_id: None, trashed_at: None, old_path: None, new_path: None }
 }
 
 /// Refuses a change to an item whose own change, or one of an item it is in, isn't finished yet
@@ -310,7 +301,8 @@ async fn purge_batch(conn: &mut SqliteConnection, top: &str, stack: &mut VecDequ
             }
             // Empty now: the folder itself goes (or the item, when `top` is a file)
             stack.pop_back();
-            let Some(row): Option<Row> = sqlx::query_as("SELECT id, drive_id, kind, size, blob_hash FROM nodes WHERE id = ?").bind(&folder).fetch_optional(&mut *conn).await?
+            let Some(row): Option<Row> =
+                sqlx::query_as("SELECT id, drive_id, kind, size, blob_hash FROM nodes WHERE id = ?").bind(&folder).fetch_optional(&mut *conn).await?
             else {
                 top_gone |= folder == top;
                 continue;
@@ -389,8 +381,7 @@ pub async fn run(st: &AppState, rows: Vec<Unfinished>, progress: &Tracker) -> Ap
                 && let Some(row) = rows.front_mut()
             {
                 // Gone already: its item was deleted meanwhile (with everything in it), or it was finished elsewhere
-                let Some(c): Option<Change> = sqlx::query_as("SELECT * FROM tree_changes WHERE id = ?").bind(&row.id).fetch_optional(&mut *tx).await?
-                else {
+                let Some(c): Option<Change> = sqlx::query_as("SELECT * FROM tree_changes WHERE id = ?").bind(&row.id).fetch_optional(&mut *tx).await? else {
                     rows.pop_front();
                     continue;
                 };
@@ -660,7 +651,11 @@ mod tests {
         let other = env.folder(&amy, amy.root(), "Other").await;
         for copying in [true, false] {
             let r = req(json!({ "ids": [big], "dest_id": other }));
-            let err = if copying { nodes::copy_nodes(State(env.st.clone()), amy.clone(), r).await } else { nodes::move_nodes(State(env.st.clone()), amy.clone(), r).await };
+            let err = if copying {
+                nodes::copy_nodes(State(env.st.clone()), amy.clone(), r).await
+            } else {
+                nodes::move_nodes(State(env.st.clone()), amy.clone(), r).await
+            };
             assert_eq!(err.unwrap_err().status, axum::http::StatusCode::CONFLICT);
         }
         resume(&env.st).await.unwrap();
@@ -681,8 +676,7 @@ mod tests {
         let (sub, _) = env.node_at(&space.drive, "Sub").await.unwrap();
         let _small = small_batches(10);
         let (st, a, id) = (env.st.clone(), admin.clone(), sub.clone());
-        let renaming =
-            tokio::spawn(async move { nodes::rename(State(st), a, axum::extract::Path(id), req(json!({ "name": "Renamed" }))).await.map(|_| ()) });
+        let renaming = tokio::spawn(async move { nodes::rename(State(st), a, axum::extract::Path(id), req(json!({ "name": "Renamed" }))).await.map(|_| ()) });
         let drive = space.drive.clone();
         let old_paths = || {
             let (st, drive) = (env.st.clone(), drive.clone());

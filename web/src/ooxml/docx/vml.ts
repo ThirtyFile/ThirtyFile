@@ -46,6 +46,7 @@ function len(v: string | undefined, def = 0): number {
   }
 }
 
+// oxfmt-ignore
 const NAMED: Record<string, string> = {
   black: "#000000", white: "#ffffff", red: "#ff0000", green: "#008000", blue: "#0000ff", yellow: "#ffff00", silver: "#c0c0c0",
   gray: "#808080", grey: "#808080", navy: "#000080", maroon: "#800000", purple: "#800080", teal: "#008080", olive: "#808000",
@@ -71,10 +72,10 @@ function shapeBox(el: Element, st: Record<string, string>, f: Flow): HTMLElement
   const textpath = kid(el, "textpath");
   const filled = !off(attr(el, "filled"));
   const fillEl = kid(el, "fill");
-  const fill = filled ? vmlColor(attr(fillEl, "color")) ?? vmlColor(attr(el, "fillcolor")) ?? (el.localName === "shape" && !attr(el, "fillcolor") ? null : "#ffffff") : null;
+  const fill = filled ? (vmlColor(attr(fillEl, "color")) ?? vmlColor(attr(el, "fillcolor")) ?? (el.localName === "shape" && !attr(el, "fillcolor") ? null : "#ffffff")) : null;
   const opacity = Number((attr(fillEl, "opacity") ?? "1").replace(/f$/, "")) || 1;
   const stroked = !off(attr(el, "stroked"));
-  const stroke = stroked ? vmlColor(attr(kid(el, "stroke"), "color")) ?? vmlColor(attr(el, "strokecolor")) ?? "#000000" : null;
+  const stroke = stroked ? (vmlColor(attr(kid(el, "stroke"), "color")) ?? vmlColor(attr(el, "strokecolor")) ?? "#000000") : null;
   const sw = len(attr(el, "strokeweight") ?? undefined, 1);
 
   if (textpath) {
@@ -88,7 +89,14 @@ function shapeBox(el: Element, st: Record<string, string>, f: Flow): HTMLElement
       "span",
       {
         class: "tf-docx-wm",
-        style: css({ width: `${r2(w)}px`, height: `${r2(hgt)}px`, color: fill ?? "#c0c0c0", opacity: opacity < 1 ? String(r2(opacity)) : undefined, "font-size": `${r2(size)}px`, "font-family": face ? `"${face}",sans-serif` : undefined }),
+        style: css({
+          width: `${r2(w)}px`,
+          height: `${r2(hgt)}px`,
+          color: fill ?? "#c0c0c0",
+          opacity: opacity < 1 ? String(r2(opacity)) : undefined,
+          "font-size": `${r2(size)}px`,
+          "font-family": face ? `"${face}",sans-serif` : undefined,
+        }),
       },
       text,
     );
@@ -144,7 +152,13 @@ export function renderVml(pict: Element, f: Flow, _p: HTMLElement): ObjOut | nul
     const color = vmlColor(attr(el, "fillcolor")) ?? "#a0a0a0";
     const hr = h("span", {
       class: "tf-docx-hr",
-      style: css({ height: `${r2(Math.max(1, len(st.height, 2)))}px`, width: `${r2(pct)}%`, background: color, "margin-left": align === "center" ? "auto" : align === "right" ? "auto" : undefined, "margin-right": align === "center" ? "auto" : undefined }),
+      style: css({
+        height: `${r2(Math.max(1, len(st.height, 2)))}px`,
+        width: `${r2(pct)}%`,
+        background: color,
+        "margin-left": align === "center" ? "auto" : align === "right" ? "auto" : undefined,
+        "margin-right": align === "center" ? "auto" : undefined,
+      }),
     });
     return { el: hr, mode: "block" };
   }

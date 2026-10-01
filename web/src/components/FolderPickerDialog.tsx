@@ -164,9 +164,7 @@ export function FolderPickerDialog(props: {
             {props.confirmText}
           </Button>
         </DialogFooter>
-        {naming && (
-          <NameDialog title={t("New folder")} label={t("Name")} initial={newFolderName()} confirmText={t("Create")} onSubmit={createFolder} onClose={() => setNaming(false)} />
-        )}
+        {naming && <NameDialog title={t("New folder")} label={t("Name")} initial={newFolderName()} confirmText={t("Create")} onSubmit={createFolder} onClose={() => setNaming(false)} />}
       </DialogContent>
     </Dialog>
   );

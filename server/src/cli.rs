@@ -96,7 +96,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     // there isn't made here: whether it may be made is decided once the database is open (`storage::prepare_builtin`).
     #[cfg(unix)]
     if let Some(user) = &cfg.run_as {
-        let folders: Vec<&std::path::Path> = [cfg.server.data.as_path(), storage.as_path()].into_iter().filter(|f| *f == cfg.server.data.as_path() || f.exists()).collect();
+        let folders: Vec<&std::path::Path> =
+            [cfg.server.data.as_path(), storage.as_path()].into_iter().filter(|f| *f == cfg.server.data.as_path() || f.exists()).collect();
         privileges::drop_to(user, &folders)?;
     }
 

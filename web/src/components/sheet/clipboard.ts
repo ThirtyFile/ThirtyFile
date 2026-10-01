@@ -56,13 +56,9 @@ export function createClipboard(ctx: WorkspaceCtx, deps: Deps) {
       const h = internal.range.r2 - internal.range.r1 + 1;
       const w = internal.range.c2 - internal.range.c1 + 1;
       // A copied single cell or block can repeat to fill the selection (when the selection is an integer multiple of the source)
-      const reps =
-        (range.r2 - range.r1 + 1) % h === 0 && (range.c2 - range.c1 + 1) % w === 0
-          ? [(range.r2 - range.r1 + 1) / h, (range.c2 - range.c1 + 1) / w]
-          : [1, 1];
+      const reps = (range.r2 - range.r1 + 1) % h === 0 && (range.c2 - range.c1 + 1) % w === 0 ? [(range.r2 - range.r1 + 1) / h, (range.c2 - range.c1 + 1) / w] : [1, 1];
       if (internal.cut) {
-        for (let r = 0; r < h; r++)
-          for (let c = 0; c < w; c++) changes.push(changeAt(internal.sheet, internal.range.r1 + r, internal.range.c1 + c, null, null));
+        for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) changes.push(changeAt(internal.sheet, internal.range.r1 + r, internal.range.c1 + c, null, null));
       }
       for (let rr = 0; rr < reps[0]; rr++)
         for (let cc = 0; cc < reps[1]; cc++)
@@ -115,8 +111,7 @@ export function createClipboard(ctx: WorkspaceCtx, deps: Deps) {
     const changes: Change[] = [];
     const g = styleRange();
     for (let r = g.r1; r <= Math.min(g.r2, sheet.maxRow); r++)
-      for (let c = g.c1; c <= Math.min(g.c2, sheet.maxCol); c++)
-        if (sheet.cells.get(key(r, c))?.v != null || sheet.cells.get(key(r, c))?.f) changes.push(changeAt(sheetIdx, r, c, null));
+      for (let c = g.c1; c <= Math.min(g.c2, sheet.maxCol); c++) if (sheet.cells.get(key(r, c))?.v != null || sheet.cells.get(key(r, c))?.f) changes.push(changeAt(sheetIdx, r, c, null));
     commitChanges(changes);
   };
 

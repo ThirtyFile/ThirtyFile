@@ -20,8 +20,7 @@ export const replicasApi = {
   syncReplicas: (id: string, location?: string) => post<{ jobs: string[] }>(enc`/admin/replicas/${id}/sync`, { location }),
   verifyReplicas: (id: string, location?: string) => post<{ jobs: string[] }>(enc`/admin/replicas/${id}/verify`, { location }),
   promotePreflight: (id: string, target: string) => get<PromotePreflight>(enc`/admin/replicas/${id}/promote` + qs({ target })),
-  promoteReplica: (id: string, target: string, accept_missing: boolean) =>
-    post<{ moved: number; missing: number }>(enc`/admin/replicas/${id}/promote`, { target, accept_missing }),
+  promoteReplica: (id: string, target: string, accept_missing: boolean) => post<{ moved: number; missing: number }>(enc`/admin/replicas/${id}/promote`, { target, accept_missing }),
   purgeReplicas: (location: string) => post<{ removed: number }>("/admin/replicas/purge", { location }),
   pauseReplicaJob: (id: string) => post(enc`/admin/replicas/jobs/${id}/pause`),
   resumeReplicaJob: (id: string) => post(enc`/admin/replicas/jobs/${id}/resume`),

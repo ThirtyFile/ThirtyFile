@@ -181,10 +181,7 @@ describe("refreshFiles", () => {
       queryKey: big,
       staleTime: Infinity,
       // The first answer was made before the change; the next one after it
-      queryFn: () =>
-        ++answers === 1
-          ? new Promise<InfiniteData<CursorPage<Node>>>((r) => (release = r))
-          : Promise.resolve(pages([node("b", "big")])),
+      queryFn: () => (++answers === 1 ? new Promise<InfiniteData<CursorPage<Node>>>((r) => (release = r)) : Promise.resolve(pages([node("b", "big")]))),
     });
     stop.push(observer.subscribe(() => {}));
     const first = observer.refetch();

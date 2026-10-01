@@ -1,6 +1,20 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArchiveIcon, CalendarClockIcon, DatabaseIcon, KeyRoundIcon, ShieldCheckIcon, FilesIcon, FolderOpenIcon, FolderSyncIcon, GlobeIcon, HardDriveIcon, HistoryIcon, LanguagesIcon, Link2Icon } from "lucide-react";
+import {
+  ArchiveIcon,
+  CalendarClockIcon,
+  DatabaseIcon,
+  KeyRoundIcon,
+  ShieldCheckIcon,
+  FilesIcon,
+  FolderOpenIcon,
+  FolderSyncIcon,
+  GlobeIcon,
+  HardDriveIcon,
+  HistoryIcon,
+  LanguagesIcon,
+  Link2Icon,
+} from "lucide-react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { api, type DefaultLang, type SystemSettingsReq } from "@/api";
@@ -43,11 +57,7 @@ function NumberInput(props: {
   const [text, setText] = useState(blank !== undefined && !value ? "" : String(scale ? +(value / scale).toFixed(2) : value));
   const empty = blank !== undefined && !text.trim();
   const n = empty ? 0 : scale ? Math.round(Number(text) * scale) : Number(text);
-  const invalid = empty
-    ? false
-    : props.decimal
-      ? !Number.isFinite(Number(text)) || Number(text) < 0
-      : !/^\d+$/.test(text.trim()) || n < (props.min ?? 0) || n > (props.max ?? Infinity);
+  const invalid = empty ? false : props.decimal ? !Number.isFinite(Number(text)) || Number(text) < 0 : !/^\d+$/.test(text.trim()) || n < (props.min ?? 0) || n > (props.max ?? Infinity);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!invalid && n !== value) props.onSave(n);
@@ -108,9 +118,7 @@ function PublicUrlInput({ value, saving, onSave }: { value: string; saving: bool
         </Button>
       </div>
       {invalid ? (
-        <p className="text-xs text-destructive">
-          {t("Invalid format: enter only http:// or https:// followed by a domain or IP (a port is allowed), without a path.")}
-        </p>
+        <p className="text-xs text-destructive">{t("Invalid format: enter only http:// or https:// followed by a domain or IP (a port is allowed), without a path.")}</p>
       ) : (
         <p className="text-xs text-muted-foreground">
           {t("Share links will look like")} <span className="font-mono">{url || location.origin}/share/Ab3dE6gH9k</span>
@@ -151,14 +159,11 @@ export function GeneralSettingsPage() {
               <div className="min-w-0 flex-1">
                 <div className="font-medium">{t("Site URL")}</div>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  {t("The address other people use to reach this site, such as https://drive.example.com or http://192.168.1.10:8080. Share links are generated with this address. If it isn't set, the browser's current address is used; if you opened the site on the server itself (127.0.0.1), others won't be able to open the generated links.")}
+                  {t(
+                    "The address other people use to reach this site, such as https://drive.example.com or http://192.168.1.10:8080. Share links are generated with this address. If it isn't set, the browser's current address is used; if you opened the site on the server itself (127.0.0.1), others won't be able to open the generated links.",
+                  )}
                 </p>
-                <PublicUrlInput
-                  key={q.data.public_url}
-                  value={q.data.public_url}
-                  saving={save.isPending}
-                  onSave={(url) => save.mutate({ public_url: url })}
-                />
+                <PublicUrlInput key={q.data.public_url} value={q.data.public_url} saving={save.isPending} onSave={(url) => save.mutate({ public_url: url })} />
               </div>
             </div>
             <div className="flex items-start gap-4 border-t p-4">
@@ -168,7 +173,9 @@ export function GeneralSettingsPage() {
               <div className="min-w-0 flex-1">
                 <div className="font-medium">{t("Default language")}</div>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  {t("The interface language for people who haven't chosen one themselves. \"Follow browser\" uses the language set in each person's browser. Everyone can still switch languages on the sign-in page or in the account menu, and their own choice takes priority.")}
+                  {t(
+                    "The interface language for people who haven't chosen one themselves. \"Follow browser\" uses the language set in each person's browser. Everyone can still switch languages on the sign-in page or in the account menu, and their own choice takes priority.",
+                  )}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label={t("Default language")}>
                   {([["auto", t("Follow browser")], ...LANGS.map((l) => [l.id, l.label])] as [DefaultLang, string][]).map(([id, label]) => (
@@ -198,18 +205,20 @@ export function GeneralSettingsPage() {
                 <FilesIcon className="size-4" />
               </span>
               <div className="min-w-0 flex-1">
-                <div className="font-medium">{t("\"All files\" company space")}</div>
+                <div className="font-medium">{t('"All files" company space')}</div>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  {t("A folder shared by all users. Each user uploads and organizes files in it according to their own permissions (edit, delete); files in the shared folder don't count toward personal space quotas. Each user can also have their own private \"My files\" folder that no one else can see.")}
+                  {t(
+                    'A folder shared by all users. Each user uploads and organizes files in it according to their own permissions (edit, delete); files in the shared folder don\'t count toward personal space quotas. Each user can also have their own private "My files" folder that no one else can see.',
+                  )}
                 </p>
                 {!q.data.shared_enabled && (
                   <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-                    {t("Currently turned off: users can't see \"All files\", and share links inside it are temporarily disabled. The files are kept; turn it back on to restore access.")}
+                    {t('Currently turned off: users can\'t see "All files", and share links inside it are temporarily disabled. The files are kept; turn it back on to restore access.')}
                   </p>
                 )}
               </div>
               <Toggle
-                label={t("Turn on the \"All files\" company space")}
+                label={t('Turn on the "All files" company space')}
                 checked={q.data.shared_enabled}
                 disabled={save.isPending}
                 onChange={(v) => (v ? save.mutate({ shared_enabled: true }) : setConfirmDisable(true))}
@@ -222,7 +231,9 @@ export function GeneralSettingsPage() {
               <div className="min-w-0 flex-1">
                 <div className="font-medium">{t("Allow regular users to create team spaces")}</div>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  {t("When off, only administrators can create team spaces. When on, users can create their own spaces and invite members; storage limits are still set by administrators in Control panel › Spaces.")}
+                  {t(
+                    "When off, only administrators can create team spaces. When on, users can create their own spaces and invite members; storage limits are still set by administrators in Control panel › Spaces.",
+                  )}
                 </p>
               </div>
               <Toggle
@@ -242,13 +253,15 @@ export function GeneralSettingsPage() {
               <FolderOpenIcon className="size-4" />
             </span>
             <div className="min-w-0 flex-1">
-              <div className="font-medium">{t("Give new users a personal space (\"My files\")")}</div>
+              <div className="font-medium">{t('Give new users a personal space ("My files")')}</div>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                {t("When off, new users only see the spaces they're given access to, such as \"All files\" and team spaces. You can still give someone \"My files\" when adding them, or later under \"Users\". Existing users keep theirs.")}
+                {t(
+                  'When off, new users only see the spaces they\'re given access to, such as "All files" and team spaces. You can still give someone "My files" when adding them, or later under "Users". Existing users keep theirs.',
+                )}
               </p>
             </div>
             <Toggle
-              label={t("Give new users a personal space (\"My files\")")}
+              label={t('Give new users a personal space ("My files")')}
               checked={q.data.personal_spaces}
               disabled={save.isPending}
               onChange={(v) => save.mutate({ personal_spaces: v })}
@@ -260,10 +273,12 @@ export function GeneralSettingsPage() {
             </span>
             <div className="min-w-0 flex-1 basis-60">
               <label htmlFor="personal-location" className="font-medium">
-                {t("Location of new users' \"My files\"")}
+                {t('Location of new users\' "My files"')}
               </label>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                {t("The storage location where new personal spaces are created. \"Default location\" follows the default under \"Storage locations\" at the time each user is added. If the location isn't available (a disk that isn't mounted), the user is still created, and their \"My files\" is created once it's available again.")}
+                {t(
+                  'The storage location where new personal spaces are created. "Default location" follows the default under "Storage locations" at the time each user is added. If the location isn\'t available (a disk that isn\'t mounted), the user is still created, and their "My files" is created once it\'s available again.',
+                )}
               </p>
             </div>
             <LocationSelect
@@ -282,7 +297,9 @@ export function GeneralSettingsPage() {
             <div className="min-w-0 flex-1">
               <div className="font-medium">{t("Personal space size for new users")}</div>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                {t("The default storage limit for \"My files\" when adding a user; you can still adjust it for each user. Leave blank for unlimited. Changes only affect users added afterward; adjust existing users' space in \"Users\".")}
+                {t(
+                  'The default storage limit for "My files" when adding a user; you can still adjust it for each user. Leave blank for unlimited. Changes only affect users added afterward; adjust existing users\' space in "Users".',
+                )}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {t("Current setting: {value}", { value: q.data.default_user_quota ? formatBytes(q.data.default_user_quota) : t("Unlimited") })}
@@ -308,7 +325,9 @@ export function GeneralSettingsPage() {
             <div className="min-w-0 flex-1">
               <div className="font-medium">{t("Require two-factor sign-in for password accounts")}</div>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                {t("Signing in with a password also asks for a code from an authenticator app. People who haven't set it up are asked to right after their password, before they get in, and can't turn it off. Sign-in with Microsoft, Google or GitHub relies on that provider, and app passwords keep working. Devices already signed in stay signed in.")}
+                {t(
+                  "Signing in with a password also asks for a code from an authenticator app. People who haven't set it up are asked to right after their password, before they get in, and can't turn it off. Sign-in with Microsoft, Google or GitHub relies on that provider, and app passwords keep working. Devices already signed in stay signed in.",
+                )}
               </p>
             </div>
             <Toggle
@@ -350,7 +369,9 @@ export function GeneralSettingsPage() {
             <div className="min-w-0 flex-1">
               <div className="font-medium">{t("Check for changes made on the server")}</div>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                {t("Folder spaces show folders on the server. Changes made there (for example over SMB) appear when someone opens the folder, and all folders are checked this often. 0 = only when someone opens a folder or clicks \"Check for changes\".")}
+                {t(
+                  'Folder spaces show folders on the server. Changes made there (for example over SMB) appear when someone opens the folder, and all folders are checked this often. 0 = only when someone opens a folder or clicks "Check for changes".',
+                )}
               </p>
             </div>
             <NumberInput
@@ -375,7 +396,9 @@ export function GeneralSettingsPage() {
             <div className="min-w-0 flex-1">
               <div className="font-medium">{t("Allow public share links")}</div>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                {t("Anyone with a link can open the linked file or folder without an account. When off, no one can create links, and existing links stop working until they're allowed again; they aren't deleted. Find and revoke single links in \"All share links\".")}
+                {t(
+                  "Anyone with a link can open the linked file or folder without an account. When off, no one can create links, and existing links stop working until they're allowed again; they aren't deleted. Find and revoke single links in \"All share links\".",
+                )}
               </p>
               <Link to="/admin/shares" className="mt-2 inline-block text-xs text-brand hover:underline">
                 {t("All share links")}
@@ -398,12 +421,7 @@ export function GeneralSettingsPage() {
                 {t("New links must have a password, and a password can't be removed from a link. Links created earlier keep working as they are.")}
               </p>
             </div>
-            <Toggle
-              label={t("Require a password")}
-              checked={q.data.share_password_required}
-              disabled={save.isPending}
-              onChange={(v) => save.mutate({ share_password_required: v })}
-            />
+            <Toggle label={t("Require a password")} checked={q.data.share_password_required} disabled={save.isPending} onChange={(v) => save.mutate({ share_password_required: v })} />
           </div>
           <div className="flex flex-wrap items-start gap-4 border-t p-4">
             <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-300">
@@ -438,7 +456,9 @@ export function GeneralSettingsPage() {
             <div className="min-w-0 flex-1">
               <div className="font-medium">{t("Versions kept per file")}</div>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                {t("When a file is saved over in the editor, replaced by an upload or restored, the content it had is kept as an earlier version, which people can open, download or restore from the details pane. 0 = don't keep versions (those already kept are removed within the hour). Earlier versions don't count toward the spaces' sizes.")}
+                {t(
+                  "When a file is saved over in the editor, replaced by an upload or restored, the content it had is kept as an earlier version, which people can open, download or restore from the details pane. 0 = don't keep versions (those already kept are removed within the hour). Earlier versions don't count toward the spaces' sizes.",
+                )}
               </p>
             </div>
             <NumberInput
@@ -488,8 +508,8 @@ export function GeneralSettingsPage() {
       )}
       {confirmDisable && (
         <ConfirmDialog
-          title={t("Turn off the \"All files\" company space?")}
-          description={t("Once turned off, no user can see \"All files\", and share links inside it are temporarily disabled. No files are deleted; turn it back on to restore access.")}
+          title={t('Turn off the "All files" company space?')}
+          description={t('Once turned off, no user can see "All files", and share links inside it are temporarily disabled. No files are deleted; turn it back on to restore access.')}
           confirmText={t("Turn off")}
           destructive
           onClose={() => setConfirmDisable(false)}

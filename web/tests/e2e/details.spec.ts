@@ -49,7 +49,10 @@ test("a new share link is said to be copied only when it is on the clipboard", a
   await page.goto(`/files/${dir}`);
   const row = page.locator("[data-node-id]").filter({ hasText: "shared.txt" });
   await row.click({ button: "right" });
-  await page.getByRole("menuitem", { name: /share link/i }).first().click();
+  await page
+    .getByRole("menuitem", { name: /share link/i })
+    .first()
+    .click();
   await page.getByRole("button", { name: "Create link" }).click();
   await expect(page.getByText("Share link created and copied to clipboard")).toBeVisible();
   const copied = await page.evaluate(() => navigator.clipboard.readText());
@@ -75,7 +78,10 @@ test("restoring an item whose name was taken meanwhile and skipping it doesn't s
   await page.goto("/trash");
   await page.locator("[data-node-id]").filter({ hasText: "same.txt" }).first().click();
   await page.getByRole("button", { name: "Restore", exact: true }).first().click();
-  await page.getByRole("dialog").getByRole("button", { name: /Skip this file/ }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /Skip this file/ })
+    .click();
   await expect(page.getByText("Nothing was restored: every item was skipped")).toBeVisible();
   await expect(page.getByText(/Restored 0 items/)).toHaveCount(0);
 });

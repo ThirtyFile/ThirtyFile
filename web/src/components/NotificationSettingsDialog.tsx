@@ -61,14 +61,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose(): void }) {
             <>
               <div className="grid gap-1.5">
                 <Label htmlFor="notify-email">{t("Email address")}</Label>
-                <Input
-                  id="notify-email"
-                  type="email"
-                  value={email}
-                  autoComplete="email"
-                  placeholder={t("name@example.com")}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
+                <Input id="notify-email" type="email" value={email} autoComplete="email" placeholder={t("name@example.com")} onChange={(e) => setEmail(e.target.value)} />
                 <p className="text-xs text-muted-foreground">
                   {emailReady
                     ? t("Emails are sent to this address. Leave it blank to get no emails.")
@@ -96,18 +89,10 @@ export function NotificationSettingsDialog({ onClose }: { onClose(): void }) {
                       <div className="text-xs text-muted-foreground">{desc}</div>
                     </div>
                     <span className="flex justify-center">
-                      <Checkbox
-                        aria-label={t("{kind}: in the app", { kind: label })}
-                        checked={kinds[kind].in_app}
-                        onCheckedChange={(v) => set(kind, { in_app: !!v })}
-                      />
+                      <Checkbox aria-label={t("{kind}: in the app", { kind: label })} checked={kinds[kind].in_app} onCheckedChange={(v) => set(kind, { in_app: !!v })} />
                     </span>
                     <span className="flex justify-center">
-                      <Checkbox
-                        aria-label={t("{kind}: by email", { kind: label })}
-                        checked={kinds[kind].email}
-                        onCheckedChange={(v) => set(kind, { email: !!v })}
-                      />
+                      <Checkbox aria-label={t("{kind}: by email", { kind: label })} checked={kinds[kind].email} onCheckedChange={(v) => set(kind, { email: !!v })} />
                     </span>
                   </div>
                 ))}

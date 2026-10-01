@@ -172,9 +172,7 @@ pub fn progress(st: &AppState, drive_id: &str) -> Option<ScanProgress> {
 
 fn set_progress(st: &AppState, drive_id: &str, f: impl FnOnce(&mut ScanProgress)) {
     let mut map = st.scans.lock().unwrap();
-    let p = map
-        .entry(drive_id.to_string())
-        .or_insert_with(|| ScanProgress { phase: ScanPhase::Reading, found: 0, done: 0, total: 0, started_at: now() });
+    let p = map.entry(drive_id.to_string()).or_insert_with(|| ScanProgress { phase: ScanPhase::Reading, found: 0, done: 0, total: 0, started_at: now() });
     f(p);
 }
 
@@ -393,16 +391,37 @@ struct Indexed {
 }
 
 enum Op {
-    Create { id: String, parent: String, e: Entry },
-    Update { id: String, e: Entry },
+    Create {
+        id: String,
+        parent: String,
+        e: Entry,
+    },
+    Update {
+        id: String,
+        e: Entry,
+    },
     /// Records when an unchanged item was created (the index didn't have it yet)
-    Birth { id: String, birth: i64 },
+    Birth {
+        id: String,
+        birth: i64,
+    },
     /// First step of a move: a name no other item has, so moves in any order can't collide
-    Park { id: String },
-    Move { id: String, parent: String, e: Entry },
-    Remove { id: String },
+    Park {
+        id: String,
+    },
+    Move {
+        id: String,
+        parent: String,
+        e: Entry,
+    },
+    Remove {
+        id: String,
+    },
     /// What is below a moved folder (`old`, a path below the space's folder) is below its new path now
-    Repath { old: String, new: String },
+    Repath {
+        old: String,
+        new: String,
+    },
 }
 
 /// Scans a whole folder space and brings its index up to date (after a scan of it already running, if any)
@@ -483,9 +502,7 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
         save_report(st, &drive, &report).await?;
         return Ok(report);
     }
-    if !marked
-        && let Err(e) = compared.root.join(MARKER).and_then(|m| crate::beneath::write_new(&m, drive.id.as_bytes()))
-    {
+    if !marked && let Err(e) = compared.root.join(MARKER).and_then(|m| crate::beneath::write_new(&m, drive.id.as_bytes())) {
         tracing::debug!("Couldn't write the marker file in {}: {e}", root.display());
     }
 
@@ -587,12 +604,11 @@ async fn folder_at(st: &AppState, drive: &Drive, rel: &str) -> AppResult<Option<
     if rel.is_empty() {
         return Ok(Some(drive.root_id.clone()));
     }
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT id FROM nodes WHERE drive_id = ? AND fs_path = ? AND kind = 'folder' AND trashed_at IS NULL")
-            .bind(&drive.id)
-            .bind(rel)
-            .fetch_optional(&st.db)
-            .await?;
+    let row: Option<(String,)> = sqlx::query_as("SELECT id FROM nodes WHERE drive_id = ? AND fs_path = ? AND kind = 'folder' AND trashed_at IS NULL")
+        .bind(&drive.id)
+        .bind(rel)
+        .fetch_optional(&st.db)
+        .await?;
     Ok(row.map(|(id,)| id))
 }
 
@@ -719,14 +735,17 @@ async fn reconcile(
         .bind(&drive.id)
         .fetch_all(&st.db)
         .await?;
-        if let Some(n) = found.into_iter().find(|n| n.kind == e.kind() && same_item(n, e) && n.fs_path.as_deref().is_some_and(|p| p != e.rel && !present.contains_key(p))) {
+        if let Some(n) =
+            found.into_iter().find(|n| n.kind == e.kind() && same_item(n, e) && n.fs_path.as_deref().is_some_and(|p| p != e.rel && !present.contains_key(p)))
+        {
             moves.insert(e.rel.clone(), n);
         }
     }
     // Only those whose old path is gone: an item at two paths (a hard link) stays where it is
     if !moves.is_empty() {
         let root = drive.source_path.clone().unwrap_or_default();
-        let old: Vec<(String, String, i64, i64)> = moves.iter().map(|(rel, n)| (rel.clone(), n.fs_path.clone().unwrap_or_default(), n.fs_dev.unwrap_or(0), n.fs_ino.unwrap_or(0))).collect();
+        let old: Vec<(String, String, i64, i64)> =
+            moves.iter().map(|(rel, n)| (rel.clone(), n.fs_path.clone().unwrap_or_default(), n.fs_dev.unwrap_or(0), n.fs_ino.unwrap_or(0))).collect();
         let still: HashSet<String> = tokio::task::spawn_blocking(move || {
             let Ok(top) = crate::beneath::Pinned::root(Path::new(&root)) else { return HashSet::new() };
             old.into_iter()
@@ -793,7 +812,8 @@ async fn remove_gone(st: &AppState, drive: &Drive, root: &Path, mut gone: Vec<(S
         if last_removed.as_deref().is_some_and(|up| path.strip_prefix(up).is_some_and(|rest| rest.starts_with('/'))) {
             continue;
         }
-        let now: Option<(Option<String>,)> = sqlx::query_as("SELECT fs_path FROM nodes WHERE id = ? AND trashed_at IS NULL").bind(&id).fetch_optional(&st.db).await?;
+        let now: Option<(Option<String>,)> =
+            sqlx::query_as("SELECT fs_path FROM nodes WHERE id = ? AND trashed_at IS NULL").bind(&id).fetch_optional(&st.db).await?;
         if now.is_none_or(|(p,)| p.as_deref() != Some(path.as_str())) {
             continue;
         }
@@ -915,8 +935,7 @@ async fn try_sync_folder(st: &AppState, folder: &Node, wait: bool) -> AppResult<
     // Removals wait for the full scan (the item may have moved elsewhere), except where the path now holds the other
     // kind (a file replaced by a folder of the same name): the new item needs its place
     let present: HashSet<&str> = entries.iter().map(|e| e.rel.as_str()).collect();
-    let replaced: HashSet<&str> =
-        indexed.iter().filter(|n| n.fs_path.as_deref().is_some_and(|p| present.contains(p))).map(|n| n.id.as_str()).collect();
+    let replaced: HashSet<&str> = indexed.iter().filter(|n| n.fs_path.as_deref().is_some_and(|p| present.contains(p))).map(|n| n.id.as_str()).collect();
     let ops: Vec<Op> = if moved_in {
         // Something came from elsewhere: the full scan works out the whole picture
         Vec::new()
@@ -987,19 +1006,18 @@ pub fn spawn_scanner(st: AppState) {
             if minutes <= 0 {
                 continue;
             }
-            let due: Vec<(String, i64)> = match sqlx::query_as(
-                "SELECT id, COALESCE(last_scan_at, 0) FROM drives WHERE mode = 'folder' AND disabled = 0 AND COALESCE(last_scan_at, 0) <= ?",
-            )
-            .bind(now() - minutes * 60)
-            .fetch_all(&st.db)
-            .await
-            {
-                Ok(d) => d,
-                Err(e) => {
-                    tracing::warn!("Couldn't list folder spaces to scan: {e}");
-                    continue;
-                }
-            };
+            let due: Vec<(String, i64)> =
+                match sqlx::query_as("SELECT id, COALESCE(last_scan_at, 0) FROM drives WHERE mode = 'folder' AND disabled = 0 AND COALESCE(last_scan_at, 0) <= ?")
+                    .bind(now() - minutes * 60)
+                    .fetch_all(&st.db)
+                    .await
+                {
+                    Ok(d) => d,
+                    Err(e) => {
+                        tracing::warn!("Couldn't list folder spaces to scan: {e}");
+                        continue;
+                    }
+                };
             for (id, last) in due {
                 // Watched spaces only need the regular scan for what watching can miss
                 if watched(&st, &id) && last > now() - minutes * 60 * WATCHED_SCAN_FACTOR {
@@ -1144,9 +1162,11 @@ fn plan(drive: &Drive, indexed: &[Indexed], entries: &[Entry], full: bool, repor
                 continue;
             }
             // Only the topmost removed item: its contents go with it
-            let parent_gone = n.parent_id.as_ref().and_then(|p| by_id.get(p.as_str())).is_some_and(|x| {
-                x.fs_path.as_deref().is_some_and(|pp| !pp.is_empty() && !present.contains_key(pp) && !moved.contains(&x.id))
-            });
+            let parent_gone = n
+                .parent_id
+                .as_ref()
+                .and_then(|p| by_id.get(p.as_str()))
+                .is_some_and(|x| x.fs_path.as_deref().is_some_and(|pp| !pp.is_empty() && !present.contains_key(pp) && !moved.contains(&x.id)));
             if !parent_gone {
                 ops.push(Op::Remove { id: n.id.clone() });
             }
@@ -1418,8 +1438,7 @@ async fn claimed(st: &AppState, except: Option<&str>) -> AppResult<(Vec<PathBuf>
         }
     }
     let spaces: Vec<(String,)> = sqlx::query_as("SELECT source_path FROM drives WHERE mode = 'folder' AND source_path IS NOT NULL").fetch_all(&st.db).await?;
-    let shown: Vec<PathBuf> =
-        spaces.into_iter().map(|(p,)| real_path(&p)).filter(|p| !locations.iter().any(|l| p.starts_with(l))).collect();
+    let shown: Vec<PathBuf> = spaces.into_iter().map(|(p,)| real_path(&p)).filter(|p| !locations.iter().any(|l| p.starts_with(l))).collect();
     Ok((locations, shown))
 }
 
@@ -1685,7 +1704,15 @@ mod tests {
 
         // Browsing works; a read-only space can't be changed from the web
         let a = env.node_at(&drive, "a.txt").await.unwrap().0;
-        let res = crate::files::content(State(env.st.clone()), admin.clone(), UrlPath(a.clone()), Query(serde_json::from_value(serde_json::json!({})).unwrap()), axum::http::HeaderMap::new()).await.unwrap();
+        let res = crate::files::content(
+            State(env.st.clone()),
+            admin.clone(),
+            UrlPath(a.clone()),
+            Query(serde_json::from_value(serde_json::json!({})).unwrap()),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .unwrap();
         let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
         assert_eq!(&body[..], b"one, longer");
         assert!(tree::node_for(&mut env.st.db.acquire().await.unwrap(), &admin, &a, tree::Need::Write).await.is_ok());

@@ -75,10 +75,7 @@ export function LoginWallpaper({ b, dark, blurred }: { b: Branding; dark: boolea
 /** Round avatar: known accounts show the first character, other users show a person icon */
 export function LoginAvatar({ name, className, iconClassName }: { name: string | null; className?: string; iconClassName?: string }) {
   return (
-    <span
-      className={cn("grid shrink-0 place-items-center rounded-full bg-white/15 font-light text-white ring-1 ring-white/25 backdrop-blur-md select-none", className)}
-      aria-hidden="true"
-    >
+    <span className={cn("grid shrink-0 place-items-center rounded-full bg-white/15 font-light text-white ring-1 ring-white/25 backdrop-blur-md select-none", className)} aria-hidden="true">
       {name ? [...name][0].toUpperCase() : <UserRoundIcon className={iconClassName} strokeWidth={1.5} />}
     </span>
   );

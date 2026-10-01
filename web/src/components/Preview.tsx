@@ -68,16 +68,7 @@ export function Preview(props: {
   }, [go, close]);
 
   if (!node) return null;
-  const body = (
-    <FileViewer
-      node={node}
-      source={props.source}
-      editable={props.editable}
-      allowDownload={props.allowDownload}
-      onSaved={props.onSaved}
-      onDirtyChange={setDirty}
-    />
-  );
+  const body = <FileViewer node={node} source={props.source} editable={props.editable} allowDownload={props.allowDownload} onSaved={props.onSaved} onDirtyChange={setDirty} />;
 
   return (
     <div ref={root} className="fixed inset-0 z-50 flex flex-col bg-black/90 text-white backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={node.name}>
@@ -91,7 +82,14 @@ export function Preview(props: {
           </div>
         </div>
         {props.allowDownload !== false && (
-          <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 hover:text-white" aria-label={t("Download")} title={t("Download")} onClick={() => triggerDownload(props.source.contentUrl(node, true))}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-white hover:bg-white/10 hover:text-white"
+            aria-label={t("Download")}
+            title={t("Download")}
+            onClick={() => triggerDownload(props.source.contentUrl(node, true))}
+          >
             <DownloadIcon />
           </Button>
         )}

@@ -16,17 +16,7 @@ import { cn } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 
 /** Apply only after typing pauses for 300 ms, to avoid a query on every keystroke */
-export function SearchBox({
-  value,
-  onChange,
-  placeholder,
-  className,
-}: {
-  value: string;
-  onChange(v: string): void;
-  placeholder: string;
-  className?: string;
-}) {
+export function SearchBox({ value, onChange, placeholder, className }: { value: string; onChange(v: string): void; placeholder: string; className?: string }) {
   const [text, setText] = useState(value);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => setText(value), [value]);
@@ -69,30 +59,14 @@ export interface OptionGroup {
 }
 
 /** Multi-select dropdown (e.g. action types, events) */
-export function MultiSelect({
-  label,
-  groups,
-  value,
-  onChange,
-}: {
-  label: string;
-  groups: OptionGroup[];
-  value: string[];
-  onChange(v: string[]): void;
-}) {
+export function MultiSelect({ label, groups, value, onChange }: { label: string; groups: OptionGroup[]; value: string[]; onChange(v: string[]): void }) {
   const all = groups.flatMap((g) => g.options);
   const summary =
-    value.length === 0
-      ? t("{label}: All", { label })
-      : value.length === 1
-        ? (all.find((o) => o.value === value[0])?.label ?? value[0])
-        : t("{label} ({n})", { label, n: value.length });
+    value.length === 0 ? t("{label}: All", { label }) : value.length === 1 ? (all.find((o) => o.value === value[0])?.label ?? value[0]) : t("{label} ({n})", { label, n: value.length });
   const toggle = (v: string, on: boolean) => onChange(on ? [...value, v] : value.filter((x) => x !== v));
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={<Button variant="outline" size="sm" className={cn("h-8 gap-1.5 text-xs font-normal", value.length && "border-brand text-brand")} />}
-      >
+      <DropdownMenuTrigger render={<Button variant="outline" size="sm" className={cn("h-8 gap-1.5 text-xs font-normal", value.length && "border-brand text-brand")} />}>
         <FilterIcon className="size-3.5" />
         {summary}
         <ChevronDownIcon className="size-3 opacity-60" />
@@ -121,12 +95,7 @@ export function MultiSelect({
               </DropdownMenuLabel>
             )}
             {g.options.map((o) => (
-              <DropdownMenuCheckboxItem
-                key={o.value}
-                checked={value.includes(o.value)}
-                onCheckedChange={(on) => toggle(o.value, !!on)}
-                closeOnClick={false}
-              >
+              <DropdownMenuCheckboxItem key={o.value} checked={value.includes(o.value)} onCheckedChange={(on) => toggle(o.value, !!on)} closeOnClick={false}>
                 {o.label}
               </DropdownMenuCheckboxItem>
             ))}
@@ -179,11 +148,7 @@ export function DateRangeFilter({ value, onChange }: { value: DateRange; onChang
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button variant="outline" size="sm" className={cn("h-8 gap-1.5 text-xs font-normal", value.key !== "all" && "border-brand text-brand")} />
-          }
-        >
+        <DropdownMenuTrigger render={<Button variant="outline" size="sm" className={cn("h-8 gap-1.5 text-xs font-normal", value.key !== "all" && "border-brand text-brand")} />}>
           <CalendarIcon className="size-3.5" />
           {value.key === "custom" ? t("Custom range") : label}
           <ChevronDownIcon className="size-3 opacity-60" />
@@ -198,21 +163,9 @@ export function DateRangeFilter({ value, onChange }: { value: DateRange; onChang
       </DropdownMenu>
       {value.key === "custom" && (
         <>
-          <Input
-            type="date"
-            aria-label={t("Start date")}
-            className="h-8 w-36 text-xs md:text-xs"
-            value={value.from ?? ""}
-            onChange={(e) => onChange({ ...value, from: e.target.value })}
-          />
+          <Input type="date" aria-label={t("Start date")} className="h-8 w-36 text-xs md:text-xs" value={value.from ?? ""} onChange={(e) => onChange({ ...value, from: e.target.value })} />
           <span className="text-xs text-muted-foreground">{t("to")}</span>
-          <Input
-            type="date"
-            aria-label={t("End date")}
-            className="h-8 w-36 text-xs md:text-xs"
-            value={value.to ?? ""}
-            onChange={(e) => onChange({ ...value, to: e.target.value })}
-          />
+          <Input type="date" aria-label={t("End date")} className="h-8 w-36 text-xs md:text-xs" value={value.to ?? ""} onChange={(e) => onChange({ ...value, to: e.target.value })} />
         </>
       )}
     </div>

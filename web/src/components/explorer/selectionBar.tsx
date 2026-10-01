@@ -37,9 +37,7 @@ export function SelectionBar({ s, a, menuItems }: { s: ExplorerState; a: Explore
     };
   }, []);
   return (
-    <div
-      ref={ref}
-      role="toolbar" aria-label={t("Selected items")} className="flex shrink-0 items-center gap-1 border-t bg-background px-1.5 py-1 shadow-[0_-2px_6px_rgb(0_0_0/0.06)]">
+    <div ref={ref} role="toolbar" aria-label={t("Selected items")} className="flex shrink-0 items-center gap-1 border-t bg-background px-1.5 py-1 shadow-[0_-2px_6px_rgb(0_0_0/0.06)]">
       <button
         type="button"
         aria-label={t("Select none")}

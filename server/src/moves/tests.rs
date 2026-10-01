@@ -225,10 +225,14 @@ async fn a_space_moves_to_another_content_store_with_its_versions_and_trash() {
     let Json(list) = list(State(env.st.clone()), Admin(env.admin().await)).await.unwrap();
     let m = serde_json::to_value(&list).unwrap()["moves"][0].clone();
     assert_eq!((m["state"].as_str(), m["files_done"].as_i64(), m["files_total"].as_i64()), (Some("done"), Some(63), Some(63)));
-    assert_eq!((m["space_kind"].as_str(), m["owner_name"].as_str(), m["from_name"].as_str(), m["to_name"].as_str()), (Some("personal"), Some("amy"), Some("Local disk"), Some("BUCKET")));
+    assert_eq!(
+        (m["space_kind"].as_str(), m["owner_name"].as_str(), m["from_name"].as_str(), m["to_name"].as_str()),
+        (Some("personal"), Some("amy"), Some("Local disk"), Some("BUCKET"))
+    );
     let (items,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM space_move_items").fetch_one(&env.st.db).await.unwrap();
     assert_eq!(items, 0, "the record of copies goes once the move is done");
-    let actions: Vec<(String, String)> = sqlx::query_as("SELECT action, detail FROM activity WHERE action LIKE 'move_%' ORDER BY id").fetch_all(&env.st.db).await.unwrap();
+    let actions: Vec<(String, String)> =
+        sqlx::query_as("SELECT action, detail FROM activity WHERE action LIKE 'move_%' ORDER BY id").fetch_all(&env.st.db).await.unwrap();
     assert_eq!(actions, [("move_start".into(), "Local disk → BUCKET".into()), ("move_done".into(), "Local disk → BUCKET".into())]);
 }
 
@@ -595,13 +599,13 @@ async fn trash(env: &TestEnv, user: &crate::auth::User, id: &str) {
 }
 
 async fn save(env: &TestEnv, user: &crate::auth::User, id: &str, body: &'static [u8]) {
-    let _ = crate::files::save_content(State(env.st.clone()), user.clone(), Path(id.to_string()), HeaderMap::new(), axum::body::Bytes::from_static(body))
-        .await
-        .unwrap();
+    let _ =
+        crate::files::save_content(State(env.st.clone()), user.clone(), Path(id.to_string()), HeaderMap::new(), axum::body::Bytes::from_static(body)).await.unwrap();
 }
 
 async fn version_contents(env: &TestEnv, user: &crate::auth::User, id: &str) -> Vec<Vec<u8>> {
-    let versions: Vec<(String,)> = sqlx::query_as("SELECT id FROM node_versions WHERE node_id = ? ORDER BY created_at, rowid").bind(id).fetch_all(&env.st.db).await.unwrap();
+    let versions: Vec<(String,)> =
+        sqlx::query_as("SELECT id FROM node_versions WHERE node_id = ? ORDER BY created_at, rowid").bind(id).fetch_all(&env.st.db).await.unwrap();
     let mut out = Vec::new();
     for (v,) in versions {
         let q = Query(serde_json::from_value(json!({})).unwrap());
@@ -656,7 +660,8 @@ async fn a_folder_space_moves_into_a_content_store_with_its_trash_and_versions()
     }
     assert_eq!(read(&env, &amy, &diary).await, b"dear diary");
     assert_eq!(blob_location(&env, b"plan, first").await.as_deref(), Some("bucket"));
-    let (with_path,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id IN (?, ?) AND fs_path IS NOT NULL").bind(&all).bind(&mine).fetch_one(&env.st.db).await.unwrap();
+    let (with_path,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id IN (?, ?) AND fs_path IS NOT NULL").bind(&all).bind(&mine).fetch_one(&env.st.db).await.unwrap();
     assert_eq!(with_path, 0);
     let used_after = sqlx::query_as::<_, (i64,)>("SELECT used_bytes FROM drives WHERE id = ?").bind(&all).fetch_one(&env.st.db).await.unwrap().0;
     assert_eq!(used_after, used_before);
@@ -665,8 +670,11 @@ async fn a_folder_space_moves_into_a_content_store_with_its_trash_and_versions()
     let _ = crate::nodes::restore(State(env.st.clone()), admin.clone(), Json(req)).await.unwrap();
     assert_eq!(read(&env, &admin, &old).await, b"in the trash");
     if cfg!(unix) {
-        let names: Vec<(String,)> =
-            sqlx::query_as("SELECT name FROM nodes WHERE parent_id = ? AND lower(name) LIKE 'case%' ORDER BY name").bind(&company).fetch_all(&env.st.db).await.unwrap();
+        let names: Vec<(String,)> = sqlx::query_as("SELECT name FROM nodes WHERE parent_id = ? AND lower(name) LIKE 'case%' ORDER BY name")
+            .bind(&company)
+            .fetch_all(&env.st.db)
+            .await
+            .unwrap();
         assert_eq!(names, [("Case.txt".into(),), ("case (1).txt".into(),)]);
     }
     // The old folders are gone, apart from what ThirtyFile never showed, which the move names
@@ -710,7 +718,10 @@ async fn a_folder_space_is_read_only_while_it_moves_and_changes_in_the_folder_ar
     assert_eq!(space_state(&env, &all).await, ("folder".into(), Some("local".into()), Some(folder.to_string_lossy().into_owned()), true));
     // Read-only meanwhile, and people are told why
     let err = env.try_upload(&admin, &company, "refused.txt", b"no").await.unwrap_err();
-    assert_eq!((err.status, err.message.as_str()), (axum::http::StatusCode::FORBIDDEN, "This space is being moved to another storage location. It is read-only until the move finishes."));
+    assert_eq!(
+        (err.status, err.message.as_str()),
+        (axum::http::StatusCode::FORBIDDEN, "This space is being moved to another storage location. It is read-only until the move finishes.")
+    );
     let Json(info) = crate::nodes::get(State(env.st.clone()), admin.clone(), Path(company.clone())).await.unwrap();
     let info = serde_json::to_value(&info).unwrap();
     assert_eq!((info["moving"].as_bool(), info["read_only"].as_bool()), (Some(true), Some(true)));
@@ -982,7 +993,8 @@ async fn a_folder_space_moves_to_a_folder_on_another_location() {
         assert_eq!(std::fs::read_to_string(new.join(crate::folders::MARKER)).unwrap(), all);
         if other_disk {
             assert_eq!(read(&env, &admin, &files[0].0).await, b"file 0, changed on the server");
-            let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id = ? AND name IN ('new.txt', 'f1.txt')").bind(&all).fetch_one(&env.st.db).await.unwrap();
+            let (n,): (i64,) =
+                sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id = ? AND name IN ('new.txt', 'f1.txt')").bind(&all).fetch_one(&env.st.db).await.unwrap();
             assert_eq!(n, 1, "the new file is in, the removed one out");
         } else {
             assert_eq!(read(&env, &admin, &files[0].0).await, files[0].1);
@@ -1228,7 +1240,9 @@ async fn names_only_letter_case_tells_apart_stop_a_move_to_a_folder_that_ignores
     let _ = resume(State(env.st.clone()), Admin(admin.clone()), Path(id.clone())).await.unwrap();
     assert_eq!(run_move(&env, &id).await, "done");
     let new = nas.join("company");
-    for (rel, content) in [("Report.txt", &b"upper"[..]), ("report (2).txt", b"lower"), ("Docs/a.txt", b"in Docs"), ("docs (2)/b.txt", b"in docs"), ("other.txt", b"no clash")] {
+    for (rel, content) in
+        [("Report.txt", &b"upper"[..]), ("report (2).txt", b"lower"), ("Docs/a.txt", b"in Docs"), ("docs (2)/b.txt", b"in docs"), ("other.txt", b"no clash")]
+    {
         assert_eq!(std::fs::read(new.join(rel)).unwrap(), content, "{rel}");
     }
 }
@@ -1428,8 +1442,7 @@ async fn files_written_into_a_folder_are_finished_off_the_thread_that_serves_req
 async fn the_checks_before_a_switch_start_from_the_space_not_from_every_content() {
     let env = testutil::env().await;
     for sql in [format!("SELECT 1 {} LIMIT 1", store::PENDING_IN_SPACE), format!("DELETE FROM space_move_items {}", to_store::NO_LONGER_THERE)] {
-        let plan: Vec<(i64, i64, i64, String)> =
-            sqlx::query_as(sqlx::AssertSqlSafe(format!("EXPLAIN QUERY PLAN {sql}"))).fetch_all(&env.st.db).await.unwrap();
+        let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("EXPLAIN QUERY PLAN {sql}"))).fetch_all(&env.st.db).await.unwrap();
         let steps: Vec<&str> = plan.iter().map(|p| p.3.as_str()).collect();
         // Each content is looked up by its hash, never found by reading the contents of a location, or all of them
         assert!(steps.iter().any(|s| s.contains("USING INDEX sqlite_autoindex_blobs_1 (hash=?)")), "{steps:?}");
@@ -1498,7 +1511,8 @@ async fn items_moved_out_of_a_folder_space_while_it_moves_to_a_content_store_are
         sqlx::query_as("SELECT blob_hash, fs_path, drive_id FROM nodes WHERE id = ?").bind(&moved).fetch_one(&env.st.db).await.unwrap();
     assert_eq!((hash, path.as_deref(), drive), (None, Some(name.as_str()), other.drive.clone()));
     // Nothing counts it as using the content that was copied
-    let refs: Option<(i64,)> = sqlx::query_as("SELECT refcount FROM blobs WHERE hash = ?").bind(crate::util::sha256_hex(&content)).fetch_optional(&env.st.db).await.unwrap();
+    let refs: Option<(i64,)> =
+        sqlx::query_as("SELECT refcount FROM blobs WHERE hash = ?").bind(crate::util::sha256_hex(&content)).fetch_optional(&env.st.db).await.unwrap();
     assert_eq!(refs, None);
     assert_eq!(read(&env, &admin, &moved).await, content);
 }
@@ -1524,10 +1538,17 @@ async fn items_moved_out_of_a_space_while_it_moves_into_a_folder_are_left_as_the
         .await
         .unwrap();
     let content = files.iter().find(|(f, _)| *f == moved).unwrap().1;
-    sqlx::query("UPDATE nodes SET drive_id = ?, parent_id = ? WHERE id = ?").bind(env.drive_of(bob.root()).await).bind(bob.root()).bind(&moved).execute(&env.st.db).await.unwrap();
+    sqlx::query("UPDATE nodes SET drive_id = ?, parent_id = ? WHERE id = ?")
+        .bind(env.drive_of(bob.root()).await)
+        .bind(bob.root())
+        .bind(&moved)
+        .execute(&env.st.db)
+        .await
+        .unwrap();
     let _ = resume(State(env.st.clone()), Admin(env.admin().await), Path(id.clone())).await.unwrap();
     assert_eq!(run_move(&env, &id).await, "done");
-    let (hash, path): (Option<String>, Option<String>) = sqlx::query_as("SELECT blob_hash, fs_path FROM nodes WHERE id = ?").bind(&moved).fetch_one(&env.st.db).await.unwrap();
+    let (hash, path): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT blob_hash, fs_path FROM nodes WHERE id = ?").bind(&moved).fetch_one(&env.st.db).await.unwrap();
     assert_eq!((hash.as_deref(), path), (Some(crate::util::sha256_hex(content).as_str()), None));
     assert_eq!(read(&env, &bob, &moved).await, content);
     let (blobs,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blobs").fetch_one(&env.st.db).await.unwrap();

@@ -41,10 +41,13 @@ function useNow() {
   useEffect(() => {
     let timer = 0;
     const schedule = () => {
-      timer = window.setTimeout(() => {
-        setNow(new Date());
-        schedule();
-      }, 60_000 - (Date.now() % 60_000) + 50);
+      timer = window.setTimeout(
+        () => {
+          setNow(new Date());
+          schedule();
+        },
+        60_000 - (Date.now() % 60_000) + 50,
+      );
     };
     schedule();
     return () => window.clearTimeout(timer);
@@ -280,10 +283,7 @@ export function LoginPage() {
           stage !== "lock" && "pointer-events-none -translate-y-16 opacity-0",
         )}
       >
-        <time
-          dateTime={now.toISOString()}
-          className="text-[clamp(4.5rem,15vw,8.5rem)] leading-none font-semibold tracking-tight tabular-nums [text-shadow:0_2px_24px_rgb(0_0_0/0.25)]"
-        >
+        <time dateTime={now.toISOString()} className="text-[clamp(4.5rem,15vw,8.5rem)] leading-none font-semibold tracking-tight tabular-nums [text-shadow:0_2px_24px_rgb(0_0_0/0.25)]">
           {formatClock(now)}
         </time>
         <span className="mt-4 text-[clamp(1.1rem,2.8vw,1.65rem)] font-medium [text-shadow:0_1px_12px_rgb(0_0_0/0.3)]">{formatDate(now)}</span>
@@ -337,7 +337,9 @@ export function LoginPage() {
             <div className="mt-6 grid w-full gap-2.5">
               {stage === "setup" && setup ? (
                 <>
-                  <p className="text-sm text-white/85">{t("Your administrator requires two-factor sign-in. Scan the QR code with an authenticator app, then enter the 6-digit code it shows.")}</p>
+                  <p className="text-sm text-white/85">
+                    {t("Your administrator requires two-factor sign-in. Scan the QR code with an authenticator app, then enter the 6-digit code it shows.")}
+                  </p>
                   <SetupCode setup={setup} className="my-1" />
                 </>
               ) : (
@@ -444,11 +446,7 @@ export function LoginPage() {
 
           {/* Phones: switch-account goes below the sign-in box */}
           {lastUser && (stage === "lock" || stage === "signin") && (
-            <button
-              type="button"
-              onClick={() => switchUser(who ? null : lastUser)}
-              className="mt-6 text-sm text-white/85 underline-offset-4 hover:underline sm:hidden"
-            >
+            <button type="button" onClick={() => switchUser(who ? null : lastUser)} className="mt-6 text-sm text-white/85 underline-offset-4 hover:underline sm:hidden">
               {who ? t("Other user") : t("Sign in as {name}", { name: lastUser })}
             </button>
           )}
@@ -478,9 +476,7 @@ export function LoginPage() {
 
       {/* Footer text */}
       {b.login_footer && stage === "signin" && (
-        <p className="absolute inset-x-0 bottom-6 mx-auto max-w-md px-4 text-center text-xs whitespace-pre-line text-white/75 max-sm:bottom-14 sm:max-w-sm">
-          {b.login_footer}
-        </p>
+        <p className="absolute inset-x-0 bottom-6 mx-auto max-w-md px-4 text-center text-xs whitespace-pre-line text-white/75 max-sm:bottom-14 sm:max-w-sm">{b.login_footer}</p>
       )}
 
       {/* Bottom right: language */}

@@ -60,7 +60,8 @@ async fn run_queued(env: &TestEnv, policy: &str) -> Vec<String> {
         let job = runner::job_in(&mut env.st.db.acquire().await.unwrap(), &env.st.replicas, &id).await.unwrap().unwrap();
         let ctl = runner::take_in(&env.st, &REPLICAS, &job).await.unwrap().expect("queued");
         runner::run_in(&env.st, &REPLICAS, &job, &ctl).await;
-        let (state, error): (String, Option<String>) = sqlx::query_as("SELECT state, error FROM replica_jobs WHERE id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
+        let (state, error): (String, Option<String>) =
+            sqlx::query_as("SELECT state, error FROM replica_jobs WHERE id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
         out.push(if let Some(e) = error { format!("{state}: {e}") } else { state });
     }
     out
@@ -153,9 +154,10 @@ async fn replicas_are_copied_checked_kept_from_cleanup_and_read_when_the_primary
     assert!(read(&env, &amy, &a).await.is_err());
     // Not with read fallback off either
     sqlx::query("UPDATE replica_copies SET state = 'verified'").execute(&env.st.db).await.unwrap();
-    let Json(_) = api::update(State(env.st.clone()), Admin(env.admin().await), Path(id.clone()), Json(serde_json::from_value(json!({ "read_fallback": false })).unwrap()))
-        .await
-        .unwrap();
+    let Json(_) =
+        api::update(State(env.st.clone()), Admin(env.admin().await), Path(id.clone()), Json(serde_json::from_value(json!({ "read_fallback": false })).unwrap()))
+            .await
+            .unwrap();
     assert!(read(&env, &amy, &a).await.is_err());
     repair_builtin(&env);
 }
@@ -264,7 +266,8 @@ async fn a_target_is_promoted_after_its_primary_fails_and_the_old_primary_rejoin
     // The files are read from their new location; the late one can't be read (no copy of it was made)
     assert_eq!(read(&env, &amy, &a).await.unwrap(), b"kept on both");
     assert!(read(&env, &amy, &late).await.is_err());
-    let (location,): (String,) = sqlx::query_as("SELECT location_id FROM drives WHERE id = ?").bind(env.drive_of(amy.root()).await).fetch_one(&env.st.db).await.unwrap();
+    let (location,): (String,) =
+        sqlx::query_as("SELECT location_id FROM drives WHERE id = ?").bind(env.drive_of(amy.root()).await).fetch_one(&env.st.db).await.unwrap();
     assert_eq!(location, "nas");
     // New files go there
     let b = env.upload(&amy, amy.root(), "b.txt", b"after the promotion").await;
@@ -280,10 +283,15 @@ async fn a_target_is_promoted_after_its_primary_fails_and_the_old_primary_rejoin
     let ran = settle(&env, &id).await;
     assert_eq!(ran, ["done"]);
     assert_eq!(read(&env, &amy, &late).await.unwrap(), b"not replicated yet", "readable again where it is");
-    let (state,): (String,) = sqlx::query_as("SELECT state FROM replica_targets WHERE policy_id = ? AND location_id = 'local'").bind(&id).fetch_one(&env.st.db).await.unwrap();
+    let (state,): (String,) =
+        sqlx::query_as("SELECT state FROM replica_targets WHERE policy_id = ? AND location_id = 'local'").bind(&id).fetch_one(&env.st.db).await.unwrap();
     assert_eq!(state, "active");
-    assert!(copies(&env, "local").await.iter().any(|(h, s)| *h == crate::util::sha256_hex(b"after the promotion") && s == "verified"), "new files are replicated back");
-    let (location,): (String,) = sqlx::query_as("SELECT location_id FROM drives WHERE id = ?").bind(env.drive_of(amy.root()).await).fetch_one(&env.st.db).await.unwrap();
+    assert!(
+        copies(&env, "local").await.iter().any(|(h, s)| *h == crate::util::sha256_hex(b"after the promotion") && s == "verified"),
+        "new files are replicated back"
+    );
+    let (location,): (String,) =
+        sqlx::query_as("SELECT location_id FROM drives WHERE id = ?").bind(env.drive_of(amy.root()).await).fetch_one(&env.st.db).await.unwrap();
     assert_eq!(location, "nas", "no automatic failback");
     let _ = b;
     // Activity
@@ -340,8 +348,16 @@ async fn replicas_on_sftp_and_ftp_are_checked_and_read_when_the_primary_fails() 
     let a = env.upload(&amy, amy.root(), "big.bin", big).await;
     let sftp = crate::storage::sftp::tests::server(testutil::password()).await;
     let ftp = crate::storage::ftp::tests::server(testutil::password()).await;
-    add_location(&env, "sftp", "sftp", json!({ "host": "127.0.0.1", "path": "/files" }), Arc::new(crate::storage::sftp::tests::storage(&sftp, testutil::password(), &sftp.fingerprint))).await;
-    add_location(&env, "ftp", "ftp", json!({ "host": "127.0.0.2", "path": "/files" }), Arc::new(crate::storage::ftp::tests::storage(&ftp, testutil::password()))).await;
+    add_location(
+        &env,
+        "sftp",
+        "sftp",
+        json!({ "host": "127.0.0.1", "path": "/files" }),
+        Arc::new(crate::storage::sftp::tests::storage(&sftp, testutil::password(), &sftp.fingerprint)),
+    )
+    .await;
+    add_location(&env, "ftp", "ftp", json!({ "host": "127.0.0.2", "path": "/files" }), Arc::new(crate::storage::ftp::tests::storage(&ftp, testutil::password())))
+        .await;
     let id = make(&env, json!({ "source": "local", "copies": 2, "targets": [{ "location": "sftp" }, { "location": "ftp" }] })).await;
     assert_eq!(settle(&env, &id).await, ["done", "done"]);
     let Json(_) = api::verify(State(env.st.clone()), Admin(env.admin().await), Path(id.clone()), Json(serde_json::from_value(json!({})).unwrap())).await.unwrap();
@@ -413,9 +429,8 @@ async fn a_sync_waits_for_its_target_continues_after_a_restart_and_is_refused_af
 // ───────────── Folder spaces ─────────────
 
 async fn save(env: &TestEnv, user: &User, id: &str, body: &'static [u8]) {
-    let _ = crate::files::save_content(State(env.st.clone()), user.clone(), Path(id.to_string()), HeaderMap::new(), axum::body::Bytes::from_static(body))
-        .await
-        .unwrap();
+    let _ =
+        crate::files::save_content(State(env.st.clone()), user.clone(), Path(id.to_string()), HeaderMap::new(), axum::body::Bytes::from_static(body)).await.unwrap();
 }
 
 async fn trash(env: &TestEnv, user: &User, id: &str) {
@@ -468,7 +483,16 @@ async fn folder_spaces_are_read_from_their_folder_kept_from_cleanup_and_read_whe
     delete_due(&env, "nas").await;
     assert!(stored(&nas, b"plan, second").is_file());
     // Failures in personal spaces aren't named
-    let job = runner::Job { id: String::new(), kind: "sync".into(), set_id: id.clone(), snapshot_id: Some("nas".into()), params: "{}".into(), label: String::new(), created_by: None, created_by_name: String::new() };
+    let job = runner::Job {
+        id: String::new(),
+        kind: "sync".into(),
+        set_id: id.clone(),
+        snapshot_id: Some("nas".into()),
+        params: "{}".into(),
+        label: String::new(),
+        created_by: None,
+        created_by_name: String::new(),
+    };
     assert!(runner::Engine::private(&REPLICAS, &env.st, &job).await.unwrap().contains(&mine));
     // The disk fails: the files are read from their copies, as they were read, and open as usual
     fail_builtin(&env);
@@ -488,9 +512,10 @@ async fn folder_spaces_are_read_from_their_folder_kept_from_cleanup_and_read_whe
     assert!(!ran.is_empty() && ran.iter().all(|r| r.starts_with("failed")), "{ran:?}");
     assert_eq!(copies(&env, "nas").await.len(), 5);
     // Without reading from copies, not
-    let Json(_) = api::update(State(env.st.clone()), Admin(admin.clone()), Path(id.clone()), Json(serde_json::from_value(json!({ "read_fallback": false })).unwrap()))
-        .await
-        .unwrap();
+    let Json(_) =
+        api::update(State(env.st.clone()), Admin(admin.clone()), Path(id.clone()), Json(serde_json::from_value(json!({ "read_fallback": false })).unwrap()))
+            .await
+            .unwrap();
     assert!(read(&env, &admin, &plan).await.is_err());
     let Json(info) = crate::nodes::get(State(env.st.clone()), admin.clone(), Path(plan.clone())).await.unwrap();
     assert!(!serde_json::to_value(&info).unwrap()["offline"].is_null());

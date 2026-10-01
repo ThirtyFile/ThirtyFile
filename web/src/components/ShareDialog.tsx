@@ -225,13 +225,7 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
                     {shareSummary(s)}
                   </div>
                 </div>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={t("Copy link")}
-                  title={t("Copy link")}
-                  onClick={() => copyAndSay(shareLink(s.id), t("Link copied"))}
-                >
+                <Button size="icon-sm" variant="ghost" aria-label={t("Copy link")} title={t("Copy link")} onClick={() => copyAndSay(shareLink(s.id), t("Link copied"))}>
                   <CopyIcon />
                 </Button>
                 <Button size="icon-sm" variant="ghost" aria-label={t("Edit link")} title={t("Edit link")} onClick={() => setEditing(s)}>
@@ -291,14 +285,7 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="share-max">{t("Download limit (optional)")}</Label>
-                <Input
-                  id="share-max"
-                  type="number"
-                  min={1}
-                  value={maxDownloads}
-                  onChange={(e) => setMaxDownloads(e.target.value)}
-                  placeholder={t("Unlimited")}
-                />
+                <Input id="share-max" type="number" min={1} value={maxDownloads} onChange={(e) => setMaxDownloads(e.target.value)} placeholder={t("Unlimited")} />
               </div>
             </div>
             <ErrorText id="share-error">{create.error?.message}</ErrorText>

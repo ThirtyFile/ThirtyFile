@@ -91,7 +91,7 @@ export function themeFill(ref: Element | null | undefined, cc: ColorContext, the
   const r = styleRef(ref, cc);
   if (!r || !theme || r.idx === 0) return r && r.idx === 0 ? { t: "none" } : null;
   const list = r.idx >= 1001 ? theme.bgFillStyles : theme.fillStyles;
-  const el = list[(r.idx >= 1001 ? r.idx - 1001 : r.idx - 1)];
+  const el = list[r.idx >= 1001 ? r.idx - 1001 : r.idx - 1];
   return readFill(el, { ...cc, phClr: r.color }, part);
 }
 
@@ -194,7 +194,9 @@ export class Defs {
 }
 
 const stopEls = (stops: GradStop[]) =>
-  stops.map((st) => s("stop", { offset: `${Math.round(st.pos * 1000) / 10}%`, "stop-color": rgbaCss({ ...st.c, a: 1 }), "stop-opacity": st.c.a < 1 ? Math.round(st.c.a * 1000) / 1000 : undefined }));
+  stops.map((st) =>
+    s("stop", { offset: `${Math.round(st.pos * 1000) / 10}%`, "stop-color": rgbaCss({ ...st.c, a: 1 }), "stop-opacity": st.c.a < 1 ? Math.round(st.c.a * 1000) / 1000 : undefined }),
+  );
 
 /** Linear gradient endpoints (userSpace): same as CSS linear-gradient, with corners landing exactly at 0% and 100% */
 function linearEnds(ang: number, w: number, h: number) {
@@ -217,7 +219,10 @@ function patternShapes(prst: string, fg: string): SVGElement[] {
     const n = Math.max(1, Math.round((p / 100) * 64));
     const out: [number, number][] = [];
     // Fill in order of an 8×8 ordered dither matrix
-    const bayer = [0, 32, 8, 40, 2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26, 12, 44, 4, 36, 14, 46, 6, 38, 60, 28, 52, 20, 62, 30, 54, 22, 3, 35, 11, 43, 1, 33, 9, 41, 51, 19, 59, 27, 49, 17, 57, 25, 15, 47, 7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21];
+    const bayer = [
+      0, 32, 8, 40, 2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26, 12, 44, 4, 36, 14, 46, 6, 38, 60, 28, 52, 20, 62, 30, 54, 22, 3, 35, 11, 43, 1, 33, 9, 41, 51, 19, 59, 27, 49, 17, 57, 25,
+      15, 47, 7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21,
+    ];
     bayer.forEach((v, i) => v < n && out.push([i % 8, Math.floor(i / 8)]));
     return dots(out);
   }
@@ -261,11 +266,21 @@ function patternShapes(prst: string, fg: string): SVGElement[] {
     case "lgCheck":
       return [s("path", { d: "M0 0L8 8M0 8L8 0", stroke: fg, "stroke-width": 1, fill: "none" })];
     case "dotGrid":
-      return dots([[0, 0], [4, 0], [0, 4], [4, 4]]);
+      return dots([
+        [0, 0],
+        [4, 0],
+        [0, 4],
+        [4, 4],
+      ]);
     case "dotDmnd":
     case "smConfetti":
     case "lgConfetti":
-      return dots([[0, 0], [4, 4], [2, 6], [6, 2]]);
+      return dots([
+        [0, 0],
+        [4, 4],
+        [2, 6],
+        [6, 2],
+      ]);
     case "solidDmnd":
       return [s("path", { d: "M4 1L7 4L4 7L1 4Z", fill: fg })];
     case "horzBrick":
@@ -281,7 +296,16 @@ function patternShapes(prst: string, fg: string): SVGElement[] {
     case "plaid":
     case "divot":
     case "sphere":
-      return dots([[0, 0], [2, 2], [4, 4], [6, 6], [4, 0], [0, 4], [6, 2], [2, 6]]);
+      return dots([
+        [0, 0],
+        [2, 2],
+        [4, 4],
+        [6, 6],
+        [4, 0],
+        [0, 4],
+        [6, 2],
+        [2, 6],
+      ]);
     default:
       return [s("path", { d: "M0 0L8 8M0 8L8 0", stroke: fg, "stroke-width": 1, fill: "none" })];
   }
@@ -311,7 +335,14 @@ export function svgPaint(fill: Fill | null, pc: PaintCtx): { paint: string; opac
     const f = fill.focus;
     const cx = ((f.l + (1 - f.r)) / 2) * pc.w;
     const cy = ((f.t + (1 - f.b)) / 2) * pc.h;
-    const far = Math.max(...[[0, 0], [pc.w, 0], [0, pc.h], [pc.w, pc.h]].map(([x, y]) => Math.hypot(x - cx, y - cy)));
+    const far = Math.max(
+      ...[
+        [0, 0],
+        [pc.w, 0],
+        [0, pc.h],
+        [pc.w, pc.h],
+      ].map(([x, y]) => Math.hypot(x - cx, y - cy)),
+    );
     const id = pc.defs.add(s("radialGradient", { gradientUnits: "userSpaceOnUse", cx, cy, r: Math.max(far, 1) }, ...stopEls(fill.stops)));
     return { paint: `url(#${id})` };
   }
@@ -342,11 +373,24 @@ export function svgPaint(fill: Fill | null, pc: PaintCtx): { paint: string; opac
       pat.setAttribute("height", String(th));
       pat.setAttribute("x", String((numAttr(info.tile, "tx") ?? 0) / 9525));
       pat.setAttribute("y", String((numAttr(info.tile, "ty") ?? 0) / 9525));
-      pat.append(s("image", { href: url, width: tw, height: th, preserveAspectRatio: "none", opacity: info.opacity < 1 ? info.opacity : undefined, style: filter ? `filter:${filter}` : undefined }));
+      pat.append(
+        s("image", { href: url, width: tw, height: th, preserveAspectRatio: "none", opacity: info.opacity < 1 ? info.opacity : undefined, style: filter ? `filter:${filter}` : undefined }),
+      );
       return;
     }
     const r = imageRect(info, pc.w, pc.h);
-    pat.append(s("image", { href: url, x: r.x, y: r.y, width: r.w, height: r.h, preserveAspectRatio: "none", opacity: info.opacity < 1 ? info.opacity : undefined, style: filter ? `filter:${filter}` : undefined }));
+    pat.append(
+      s("image", {
+        href: url,
+        x: r.x,
+        y: r.y,
+        width: r.w,
+        height: r.h,
+        preserveAspectRatio: "none",
+        opacity: info.opacity < 1 ? info.opacity : undefined,
+        style: filter ? `filter:${filter}` : undefined,
+      }),
+    );
   })();
   return { paint: `url(#${id})` };
 }

@@ -17,10 +17,7 @@ export interface Editing {
   from: "cell" | "bar";
 }
 
-export type Drag =
-  | { kind: "cell" | "row" | "col" }
-  | { kind: "ref"; refStart: number }
-  | { kind: "resize-col" | "resize-row"; index: number; start: number; size: number; before: Layout };
+export type Drag = { kind: "cell" | "row" | "col" } | { kind: "ref"; refStart: number } | { kind: "resize-col" | "resize-row"; index: number; start: number; size: number; before: Layout };
 
 export interface WorkspaceCtx {
   node: Node;

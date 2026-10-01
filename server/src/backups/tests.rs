@@ -128,9 +128,8 @@ async fn read(env: &TestEnv, user: &User, id: &str) -> Vec<u8> {
 }
 
 async fn save(env: &TestEnv, user: &User, id: &str, body: &'static [u8]) {
-    let _ = crate::files::save_content(State(env.st.clone()), user.clone(), Path(id.to_string()), HeaderMap::new(), axum::body::Bytes::from_static(body))
-        .await
-        .unwrap();
+    let _ =
+        crate::files::save_content(State(env.st.clone()), user.clone(), Path(id.to_string()), HeaderMap::new(), axum::body::Bytes::from_static(body)).await.unwrap();
 }
 
 async fn trash(env: &TestEnv, user: &User, id: &str) {
@@ -156,13 +155,12 @@ async fn purge(env: &TestEnv, user: &User, id: &str) {
     loop {
         delete_due(env, &location).await;
         let Some(h) = &hash else { break };
-        let (used, pending): (i64, i64) = sqlx::query_as(
-            "SELECT (SELECT COUNT(*) FROM blobs WHERE hash = ?1), (SELECT COUNT(*) FROM pending_blob_deletes WHERE hash = ?1)",
-        )
-        .bind(h)
-        .fetch_one(&env.st.db)
-        .await
-        .unwrap();
+        let (used, pending): (i64, i64) =
+            sqlx::query_as("SELECT (SELECT COUNT(*) FROM blobs WHERE hash = ?1), (SELECT COUNT(*) FROM pending_blob_deletes WHERE hash = ?1)")
+                .bind(h)
+                .fetch_one(&env.st.db)
+                .await
+                .unwrap();
         let s = env.st.storage(&location).unwrap();
         let gone = s.stat(&storage::join_key(&[s.content_dir(), &h[0..2], &h[2..4], h])).await.unwrap().is_none();
         if used > 0 || (pending == 0 && gone) {
@@ -317,7 +315,8 @@ async fn everything_on_a_location_is_copied_and_a_space_restored_from_it_after_i
     assert!(root.join("set.json").is_file());
     assert!(root.join("snapshots").join(&snapshot).join("manifest.jsonl").is_file());
     assert!(root.join("snapshots").join(&snapshot).join("complete.json").is_file());
-    let (files, versions): (i64, i64) = sqlx::query_as("SELECT files, versions FROM backup_snapshots WHERE id = ?").bind(&snapshot).fetch_one(&env.st.db).await.unwrap();
+    let (files, versions): (i64, i64) =
+        sqlx::query_as("SELECT files, versions FROM backup_snapshots WHERE id = ?").bind(&snapshot).fetch_one(&env.st.db).await.unwrap();
     assert_eq!((files, versions), (3, 1), "a.txt, old.txt in the trash, plan.txt; one earlier version");
 
     // Amy's files go for good, content and all
@@ -416,7 +415,9 @@ async fn content_deleted_while_a_copy_is_being_made_is_kept_until_it_is_copied()
             }
             // Listed for deletion by a task of their own: once all are, their deletion is tried now
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-            while sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM pending_blob_deletes WHERE location_id = 'local'").fetch_one(&st.db).await.unwrap().0 < ids.len() as i64 {
+            while sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM pending_blob_deletes WHERE location_id = 'local'").fetch_one(&st.db).await.unwrap().0
+                < ids.len() as i64
+            {
                 assert!(std::time::Instant::now() < deadline, "the content wasn't listed for deletion");
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             }
@@ -580,7 +581,8 @@ async fn locations_in_the_same_place_or_inside_each_other_are_refused() {
     // Two buckets of one service: allowed, and said to fail together
     add_location(&env, "b1", "s3", json!({ "endpoint": "https://s3.example.com", "bucket": "one" }), Arc::new(storage::S3Storage::in_memory(""))).await;
     add_location(&env, "b2", "s3", json!({ "endpoint": "https://s3.example.com", "bucket": "two" }), Arc::new(storage::S3Storage::in_memory(""))).await;
-    add_location(&env, "b3", "s3", json!({ "endpoint": "https://s3.example.com", "bucket": "one", "prefix": "sub" }), Arc::new(storage::S3Storage::in_memory(""))).await;
+    add_location(&env, "b3", "s3", json!({ "endpoint": "https://s3.example.com", "bucket": "one", "prefix": "sub" }), Arc::new(storage::S3Storage::in_memory("")))
+        .await;
     assert_eq!(crate::locations::relation(&env.st, "b1", "b2").await.unwrap(), crate::locations::Relation::Shared);
     assert_eq!(crate::locations::relation(&env.st, "b1", "b3").await.unwrap(), crate::locations::Relation::Nested);
     add_nas(&env, "nas").await;
@@ -601,7 +603,8 @@ async fn a_copy_can_be_checked_and_what_is_missing_or_damaged_is_found() {
     let Json(v) = api::verify(State(env.st.clone()), Admin(admin.clone()), Path(set.clone())).await.unwrap();
     let check = v["job_id"].as_str().unwrap().to_string();
     assert_eq!(run_job(&env, &check).await, "done");
-    let (verified,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM backup_objects WHERE set_id = ? AND verified_at IS NOT NULL").bind(&set).fetch_one(&env.st.db).await.unwrap();
+    let (verified,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM backup_objects WHERE set_id = ? AND verified_at IS NOT NULL").bind(&set).fetch_one(&env.st.db).await.unwrap();
     assert_eq!(verified, 2);
     let objects = objects_in(&nas, &set);
     std::fs::write(&objects[0], b"xxxxx").unwrap();
@@ -676,7 +679,8 @@ async fn copies_go_to_s3_sftp_and_ftp_locations_and_come_back_from_them() {
         Arc::new(crate::storage::sftp::tests::storage(&sftp, testutil::password(), &sftp.fingerprint)),
     )
     .await;
-    add_location(&env, "ftp", "ftp", json!({ "host": "127.0.0.2", "path": "/files" }), Arc::new(crate::storage::ftp::tests::storage(&ftp, testutil::password()))).await;
+    add_location(&env, "ftp", "ftp", json!({ "host": "127.0.0.2", "path": "/files" }), Arc::new(crate::storage::ftp::tests::storage(&ftp, testutil::password())))
+        .await;
     let mut snapshots = Vec::new();
     for dest in ["bucket", "sftp", "ftp"] {
         let (set, job) = copy_all(&env, "local", dest).await;
@@ -696,14 +700,15 @@ async fn copies_go_to_s3_sftp_and_ftp_locations_and_come_back_from_them() {
     for (dest, _, snapshot) in &snapshots {
         let job = restore(&env, snapshot, &mine, None, false).await.unwrap();
         assert_eq!(run_job(&env, &job).await, "done", "{dest}: {:?}", state(&env, &job).await);
-        let restored: Vec<String> = sqlx::query_as::<_, (String,)>("SELECT id FROM nodes WHERE parent_id = ? AND name LIKE 'Restored %' ORDER BY created_at DESC, rowid DESC")
-            .bind(amy.root())
-            .fetch_all(&env.st.db)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|r| r.0)
-            .collect();
+        let restored: Vec<String> =
+            sqlx::query_as::<_, (String,)>("SELECT id FROM nodes WHERE parent_id = ? AND name LIKE 'Restored %' ORDER BY created_at DESC, rowid DESC")
+                .bind(amy.root())
+                .fetch_all(&env.st.db)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|r| r.0)
+                .collect();
         let top = &restored[0];
         let f = at(&env, top, "Docs/a.txt").await.unwrap();
         assert_eq!(read(&env, &amy, &f).await, b"over the network", "{dest}");
@@ -796,7 +801,10 @@ async fn a_folder_or_some_items_come_back_into_their_place_or_a_new_folder_and_n
     assert_eq!(names, ["Sub", "a.txt", "b.txt"]);
     let bobs = env.drive_of(bob.root()).await;
     let q = serde_json::from_value(json!({ "space": bobs })).unwrap();
-    assert_eq!(api::browse(State(env.st.clone()), Admin(admin.clone()), Path(snapshot.clone()), Query(q)).await.unwrap_err().status, axum::http::StatusCode::FORBIDDEN);
+    assert_eq!(
+        api::browse(State(env.st.clone()), Admin(admin.clone()), Path(snapshot.clone()), Query(q)).await.unwrap_err().status,
+        axum::http::StatusCode::FORBIDDEN
+    );
     assert!(restore_with(&env, &snapshot, json!({ "space": bobs, "folder": "x" })).await.is_err(), "a personal space only whole");
 
     // Since then: a.txt was changed, b.txt deleted, Sub deleted with what is in it

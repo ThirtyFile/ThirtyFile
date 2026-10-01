@@ -274,10 +274,7 @@ async fn send_inner(cfg: &SmtpSettings, sender_name: &str, msg: &Message<'_>) ->
 /// taken) on the way: that is for a relay or a server with a self-signed certificate on the local network only
 fn check_peer(cfg: &SmtpSettings, peer: std::net::IpAddr) -> Result<(), String> {
     if (cfg.security == Security::None || cfg.insecure) && !crate::storage::is_private_ip(&peer) {
-        return Err(format!(
-            "without encryption, or without checking the certificate, the email server must be on the local network ({} is {peer})",
-            cfg.host
-        ));
+        return Err(format!("without encryption, or without checking the certificate, the email server must be on the local network ({} is {peer})", cfg.host));
     }
     Ok(())
 }
@@ -573,10 +570,8 @@ pub mod tests {
         assert_eq!(header_text("Line\r\nBcc: x"), "Line  Bcc: x");
         let long = header_text(&"空間快滿了".repeat(10));
         assert!(long.lines().all(|l| l.len() <= 76), "{long}");
-        let decoded: String = long
-            .split("\r\n ")
-            .map(|w| String::from_utf8(STANDARD.decode(w.trim_start_matches("=?UTF-8?B?").trim_end_matches("?=")).unwrap()).unwrap())
-            .collect();
+        let decoded: String =
+            long.split("\r\n ").map(|w| String::from_utf8(STANDARD.decode(w.trim_start_matches("=?UTF-8?B?").trim_end_matches("?=")).unwrap()).unwrap()).collect();
         assert_eq!(decoded, "空間快滿了".repeat(10));
     }
 
@@ -585,7 +580,11 @@ pub mod tests {
         let saved = settings(25);
         let req = |v: Value| serde_json::from_value::<SettingsReq>(v).unwrap();
         // The saved password is kept for the same server and account…
-        let s = settings_from(req(json!({ "enabled": true, "host": " 127.0.0.1 ", "port": 25, "security": "none", "username": "mailer", "from": "drive@example.com" })), &saved).unwrap();
+        let s = settings_from(
+            req(json!({ "enabled": true, "host": " 127.0.0.1 ", "port": 25, "security": "none", "username": "mailer", "from": "drive@example.com" })),
+            &saved,
+        )
+        .unwrap();
         assert_eq!((s.host.as_str(), s.port, s.password.as_str()), ("127.0.0.1", 25, "secret"));
         // …and never sent anywhere else: another server, port, account, encryption or certificate check asks for it again
         for changed in [
@@ -605,7 +604,11 @@ pub mod tests {
             v["password"] = json!("typed again");
             assert_eq!(settings_from(req(v), &saved).unwrap().password, "typed again");
         }
-        let s = settings_from(req(json!({ "enabled": true, "host": " smtp.example.com ", "security": "tls", "username": "mailer", "password": "new", "from": "drive@example.com" })), &saved).unwrap();
+        let s = settings_from(
+            req(json!({ "enabled": true, "host": " smtp.example.com ", "security": "tls", "username": "mailer", "password": "new", "from": "drive@example.com" })),
+            &saved,
+        )
+        .unwrap();
         assert_eq!((s.host.as_str(), s.port, s.password.as_str()), ("smtp.example.com", 465, "new"));
         let s = settings_from(req(json!({ "enabled": false, "host": "smtp.example.com", "from": "drive@example.com" })), &saved).unwrap();
         assert!(s.password.is_empty(), "no username, no password");

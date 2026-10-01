@@ -384,12 +384,10 @@ pub async fn prune(st: &AppState, now: i64) -> AppResult<u64> {
             }
         }
         for table in ["usage_capacity", "usage_ops"] {
-            n += sqlx::query(sqlx::AssertSqlSafe(format!(
-                "DELETE FROM {table} WHERE location_id <> '' AND location_id NOT IN (SELECT id FROM storage_locations)"
-            )))
-            .execute(&mut *tx)
-            .await?
-            .rows_affected();
+            n += sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table} WHERE location_id <> '' AND location_id NOT IN (SELECT id FROM storage_locations)")))
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
         }
         AppResult::Ok(n)
     }
@@ -433,11 +431,10 @@ pub async fn folder_location(st: &AppState, path: &Path) -> String {
             return String::new();
         }
     }
-    let rows: Vec<(String, String)> =
-        sqlx::query_as("SELECT source_path, COALESCE(location_id, '') FROM drives WHERE mode = 'folder' AND source_path IS NOT NULL")
-            .fetch_all(&st.db)
-            .await
-            .unwrap_or_default();
+    let rows: Vec<(String, String)> = sqlx::query_as("SELECT source_path, COALESCE(location_id, '') FROM drives WHERE mode = 'folder' AND source_path IS NOT NULL")
+        .fetch_all(&st.db)
+        .await
+        .unwrap_or_default();
     // As the system resolves them (links, `/proc/self/fd` paths on Linux): a disk that doesn't answer keeps the path
     let resolve = tokio::task::spawn_blocking(move || {
         rows.into_iter()
@@ -616,11 +613,7 @@ mod tests {
     type Row = (i64, i64, i64, i64, i64, String);
 
     async fn ops_rows(env: &testutil::TestEnv, span: i64) -> Vec<Row> {
-        sqlx::query_as("SELECT at, count, errors, bytes, max_us, hist FROM usage_ops WHERE span = ? ORDER BY at")
-            .bind(span)
-            .fetch_all(&env.st.db)
-            .await
-            .unwrap()
+        sqlx::query_as("SELECT at, count, errors, bytes, max_us, hist FROM usage_ops WHERE span = ? ORDER BY at").bind(span).fetch_all(&env.st.db).await.unwrap()
     }
 
     #[tokio::test]

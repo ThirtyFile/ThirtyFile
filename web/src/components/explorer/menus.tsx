@@ -60,7 +60,11 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
 
   const menuItems = s.count ? (
     <>
-      {single && <DropdownMenuItem onClick={() => open(single)}>{single.kind === "folder" ? <FolderOpenIcon /> : <EyeIcon />} {t("Open")}</DropdownMenuItem>}
+      {single && (
+        <DropdownMenuItem onClick={() => open(single)}>
+          {single.kind === "folder" ? <FolderOpenIcon /> : <EyeIcon />} {t("Open")}
+        </DropdownMenuItem>
+      )}
       {single?.kind === "folder" && (
         <DropdownMenuItem onClick={() => tabs.open(`/files/${single.id}`)}>
           <PanelTopIcon /> {t("Open in new tab")}

@@ -71,10 +71,9 @@ fn unavailable(detail: impl std::fmt::Display) -> io::Error {
 fn ftp_err(e: FtpError) -> io::Error {
     match &e {
         FtpError::UnexpectedResponse(r) if r.status == Status::FileUnavailable => io::Error::new(io::ErrorKind::NotFound, e.to_string()),
-        FtpError::UnexpectedResponse(r) if r.status == Status::NotLoggedIn => io::Error::other(StorageError {
-            message: "Incorrect username or password. Couldn't sign in to FTP.",
-            detail: e.to_string(),
-        }),
+        FtpError::UnexpectedResponse(r) if r.status == Status::NotLoggedIn => {
+            io::Error::other(StorageError { message: "Incorrect username or password. Couldn't sign in to FTP.", detail: e.to_string() })
+        }
         FtpError::SecureError(_) => io::Error::other(StorageError {
             message: "FTPS encrypted connection failed: the server may not support TLS, or its certificate couldn't be verified (for self-signed certificates, select \"Skip certificate verification\")",
             detail: e.to_string(),
@@ -141,11 +140,7 @@ impl FtpStorage {
     async fn connect(&self) -> io::Result<Conn> {
         let cfg = &self.cfg;
         let host = cfg.host.trim();
-        let addr = tokio::net::lookup_host((host, cfg.port()))
-            .await
-            .map_err(unavailable)?
-            .next()
-            .ok_or_else(|| unavailable("Host not found"))?;
+        let addr = tokio::net::lookup_host((host, cfg.port())).await.map_err(unavailable)?.next().ok_or_else(|| unavailable("Host not found"))?;
         let mut ftp = AsyncRustlsFtpStream::connect_timeout(addr, CONNECT_TIMEOUT).await.map_err(ftp_err)?;
         if cfg.tls {
             ftp = timed(ftp.into_secure(tls_connector(cfg.tls_insecure)?, host)).await?;
@@ -648,8 +643,7 @@ pub(crate) mod tests {
                             data.write_all(lines.concat().as_bytes()).await
                         }
                         _ => {
-                            let names: Vec<String> =
-                                std::fs::read_dir(&path)?.flatten().map(|e| format!("{}\r\n", e.file_name().to_string_lossy())).collect();
+                            let names: Vec<String> = std::fs::read_dir(&path)?.flatten().map(|e| format!("{}\r\n", e.file_name().to_string_lossy())).collect();
                             data.write_all(names.concat().as_bytes()).await
                         }
                     };
@@ -669,7 +663,8 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn storage(s: &Server, password: &str) -> FtpStorage {
-        let cfg = FtpConfig { host: "127.0.0.1".into(), port: s.port, username: "backup".into(), password: password.into(), path: "/files".into(), ..Default::default() };
+        let cfg =
+            FtpConfig { host: "127.0.0.1".into(), port: s.port, username: "backup".into(), password: password.into(), path: "/files".into(), ..Default::default() };
         FtpStorage::new(&cfg).unwrap()
     }
 
@@ -818,4 +813,3 @@ pub(crate) mod tests {
         assert_eq!(inner.message, UNAVAILABLE);
     }
 }
-

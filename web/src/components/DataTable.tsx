@@ -89,7 +89,10 @@ export function DataTable<T>(p: {
                   role="row"
                   data-row-id={k}
                   {...list.itemProps(row)}
-                  className={cn("cursor-default outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset aria-selected:bg-selection aria-selected:shadow-[inset_3px_0_0_var(--color-brand)]", p.rowClassName?.(row))}
+                  className={cn(
+                    "cursor-default outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset aria-selected:bg-selection aria-selected:shadow-[inset_3px_0_0_var(--color-brand)]",
+                    p.rowClassName?.(row),
+                  )}
                 >
                   {p.columns.map((c, i) => (
                     <td

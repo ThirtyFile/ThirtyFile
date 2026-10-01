@@ -5,11 +5,8 @@ use super::*;
 /// After a sign-in: remember the provider's current email and name, and keep the user's display name in step with the
 /// provider's name. A display name set by an administrator (different from the name the provider reported last time) is kept.
 pub(super) async fn sync_profile(st: &AppState, user_id: i64, provider: &str, ident: &Identity) -> AppResult<()> {
-    let previous: Option<(String,)> = sqlx::query_as("SELECT name FROM user_identities WHERE provider = ? AND subject = ?")
-        .bind(provider)
-        .bind(&ident.subject)
-        .fetch_optional(&st.db)
-        .await?;
+    let previous: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM user_identities WHERE provider = ? AND subject = ?").bind(provider).bind(&ident.subject).fetch_optional(&st.db).await?;
     let (current,): (String,) = sqlx::query_as("SELECT display_name FROM users WHERE id = ?").bind(user_id).fetch_one(&st.db).await?;
     let name = crate::admin::validate_display_name(&ident.name).unwrap_or("");
     // Compare with the previous name as it would have been stored (trimmed), so surrounding spaces don't break the follow-up
@@ -60,13 +57,12 @@ pub(super) const MATCHING_USER: &str = "u.username = ?1
 pub(super) async fn resolve_user(st: &AppState, provider: &str, ident: &Identity) -> AppResult<(i64, String, bool)> {
     let settings = st.sso.read().unwrap().clone();
     let cfg = settings.provider(provider).cloned().unwrap_or_default();
-    let linked: Option<(i64, String, bool)> = sqlx::query_as(
-        "SELECT u.id, u.username, u.disabled FROM user_identities i JOIN users u ON u.id = i.user_id WHERE i.provider = ? AND i.subject = ?",
-    )
-    .bind(provider)
-    .bind(&ident.subject)
-    .fetch_optional(&st.db)
-    .await?;
+    let linked: Option<(i64, String, bool)> =
+        sqlx::query_as("SELECT u.id, u.username, u.disabled FROM user_identities i JOIN users u ON u.id = i.user_id WHERE i.provider = ? AND i.subject = ?")
+            .bind(provider)
+            .bind(&ident.subject)
+            .fetch_optional(&st.db)
+            .await?;
     if let Some((id, username, disabled)) = linked {
         if disabled {
             return Err(AppError::forbidden("This account is disabled. Contact your administrator."));
@@ -89,8 +85,10 @@ pub(super) async fn resolve_user(st: &AppState, provider: &str, ident: &Identity
         return Err(AppError::forbidden(format!("The domain of {} isn't allowed to sign in to this site", ident.email)));
     }
     // An existing user whose username is this email: link automatically (see `MATCHING_USER`)
-    let existing: Option<(i64, String, bool)> =
-        sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT id, username, disabled FROM users u WHERE {MATCHING_USER}"))).bind(&ident.email).fetch_optional(&st.db).await?;
+    let existing: Option<(i64, String, bool)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT id, username, disabled FROM users u WHERE {MATCHING_USER}")))
+        .bind(&ident.email)
+        .fetch_optional(&st.db)
+        .await?;
     let mut created = false;
     let (id, username) = match existing {
         Some((_, _, true)) => return Err(AppError::forbidden("This account is disabled. Contact your administrator.")),
@@ -159,11 +157,8 @@ pub(super) async fn create_sso_user(st: &AppState, provider: &str, cfg: &Provide
         return Ok(found);
     }
     // A misconfigured tenant or domain list must not fill the user list: at most MAX_CREATED_PER_HOUR new accounts per provider
-    let (recent,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users WHERE source = ? AND created_at > ?")
-        .bind(provider)
-        .bind(now() - 3600)
-        .fetch_one(&mut *tx)
-        .await?;
+    let (recent,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM users WHERE source = ? AND created_at > ?").bind(provider).bind(now() - 3600).fetch_one(&mut *tx).await?;
     if recent >= MAX_CREATED_PER_HOUR {
         tracing::warn!("{} sign-in: account creation paused, {recent} accounts were created in the last hour", label(provider));
         return Err(AppError::forbidden("Too many accounts were created in the last hour. Try again later or ask your administrator to create your account."));
@@ -264,11 +259,8 @@ pub(super) async fn link(st: &AppState, provider: &str, ident: &Identity, user_i
         })?;
     // Told in the app and by email, so an account linked by someone else doesn't go unnoticed
     let account = if ident.email.is_empty() { ident.name.as_str() } else { ident.email.as_str() };
-    let notice = crate::notify::Notice {
-        kind: "sign_in_method",
-        node_id: None,
-        data: json!({ "provider": provider, "label": shown, "account": account, "ip": ip }),
-    };
+    let notice =
+        crate::notify::Notice { kind: "sign_in_method", node_id: None, data: json!({ "provider": provider, "label": shown, "account": account, "ip": ip }) };
     let emails = crate::notify::add(&mut tx, &[user_id], &notice).await?;
     tx.commit().await?;
     crate::notify::send_later(st, emails);

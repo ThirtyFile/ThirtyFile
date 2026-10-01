@@ -132,11 +132,12 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
     cx.flush().await?;
     let mut repaired = 0i64;
     loop {
-        let rows: Vec<(String, i64, String)> =
-            sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT hash, size, state FROM replica_copies WHERE location_id = ? AND state IN ('stale', 'corrupt') ORDER BY hash LIMIT {PAGE}")))
-                .bind(&location)
-                .fetch_all(&st.db)
-                .await?;
+        let rows: Vec<(String, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT hash, size, state FROM replica_copies WHERE location_id = ? AND state IN ('stale', 'corrupt') ORDER BY hash LIMIT {PAGE}"
+        )))
+        .bind(&location)
+        .fetch_all(&st.db)
+        .await?;
         if rows.is_empty() {
             break;
         }
@@ -147,7 +148,12 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
             let whole = state == "stale" && matches!(read_back(dst.as_ref(), &hash, size).await, Ok((h, n)) if h == hash && n == size as u64);
             if whole {
                 let _w = st.write_lock.lock().await;
-                sqlx::query("UPDATE replica_copies SET state = 'verified', verified_at = ? WHERE hash = ? AND location_id = ?").bind(now()).bind(&hash).bind(&location).execute(&st.db).await?;
+                sqlx::query("UPDATE replica_copies SET state = 'verified', verified_at = ? WHERE hash = ? AND location_id = ?")
+                    .bind(now())
+                    .bind(&hash)
+                    .bind(&location)
+                    .execute(&st.db)
+                    .await?;
             } else {
                 // Missing or damaged: it goes (deleted like content nothing uses, never the primary), and is copied
                 // again below if the target should hold it
@@ -278,7 +284,15 @@ async fn pending_count(st: &AppState, spaces: &[String], location: &str) -> AppR
 
 /// Copies one content to the target and records it: Ok(true) when copied, Ok(false) when there was nothing to do
 /// (deleted meanwhile, or listed as failed)
-async fn copy_one(cx: &Ctx<'_>, policy: &super::Policy, dst: &Arc<dyn Storage>, location: &str, hash: &str, size: i64, primary: &str) -> AppResult<Result<bool, Stop>> {
+async fn copy_one(
+    cx: &Ctx<'_>,
+    policy: &super::Policy,
+    dst: &Arc<dyn Storage>,
+    location: &str,
+    hash: &str,
+    size: i64,
+    primary: &str,
+) -> AppResult<Result<bool, Stop>> {
     let st = cx.st;
     // Held until recorded, like an upload's: a deletion of the same content there in progress finishes first
     let _staging = tree::stage_guard(st, hash).await;
@@ -309,7 +323,13 @@ async fn copy_one(cx: &Ctx<'_>, policy: &super::Policy, dst: &Arc<dyn Storage>, 
     let mut last_err = String::new();
     for source in &sources {
         let Ok(src) = st.storage(source) else { continue };
-        match cx.tries(|e: &std::io::Error| e.kind() != std::io::ErrorKind::NotFound && !(crate::hashing::unusable_kind(e) == Some(crate::hashing::Unusable::Damaged)), || crate::backups::capture::fetch_verified(&src, hash, size, &tmp)).await {
+        match cx
+            .tries(
+                |e: &std::io::Error| e.kind() != std::io::ErrorKind::NotFound && !(crate::hashing::unusable_kind(e) == Some(crate::hashing::Unusable::Damaged)),
+                || crate::backups::capture::fetch_verified(&src, hash, size, &tmp),
+            )
+            .await
+        {
             Ok(()) => {
                 fetched = Some(source.clone());
                 break;
@@ -344,7 +364,11 @@ async fn copy_one(cx: &Ctx<'_>, policy: &super::Policy, dst: &Arc<dyn Storage>, 
         match current {
             Some((loc,)) if loc == location => {
                 // It is the primary there now: nothing to record, and nothing to delete
-                sqlx::query("DELETE FROM pending_blob_deletes WHERE hash = ? AND location_id = ? AND last_error = 'deferred'").bind(hash).bind(location).execute(&mut *tx).await?;
+                sqlx::query("DELETE FROM pending_blob_deletes WHERE hash = ? AND location_id = ? AND last_error = 'deferred'")
+                    .bind(hash)
+                    .bind(location)
+                    .execute(&mut *tx)
+                    .await?;
                 Ok(false)
             }
             Some(_) if epoch == policy.epoch => {
@@ -356,12 +380,21 @@ async fn copy_one(cx: &Ctx<'_>, policy: &super::Policy, dst: &Arc<dyn Storage>, 
                     .bind(now())
                     .execute(&mut *tx)
                     .await?;
-                sqlx::query("DELETE FROM pending_blob_deletes WHERE hash = ? AND location_id = ? AND last_error = 'deferred'").bind(hash).bind(location).execute(&mut *tx).await?;
+                sqlx::query("DELETE FROM pending_blob_deletes WHERE hash = ? AND location_id = ? AND last_error = 'deferred'")
+                    .bind(hash)
+                    .bind(location)
+                    .execute(&mut *tx)
+                    .await?;
                 Ok(true)
             }
             // Deleted meanwhile, or promoted: the copy is left to deletion (checked again before)
             _ => {
-                sqlx::query("UPDATE pending_blob_deletes SET created_at = ? WHERE hash = ? AND location_id = ?").bind(now() + REMOVAL_GRACE).bind(hash).bind(location).execute(&mut *tx).await?;
+                sqlx::query("UPDATE pending_blob_deletes SET created_at = ? WHERE hash = ? AND location_id = ?")
+                    .bind(now() + REMOVAL_GRACE)
+                    .bind(hash)
+                    .bind(location)
+                    .execute(&mut *tx)
+                    .await?;
                 Ok(false)
             }
         }
@@ -405,7 +438,11 @@ pub async fn drop_copies(st: &AppState, location: &str, hashes: Vec<String>) -> 
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let res = async {
-            sqlx::query("DELETE FROM replica_copies WHERE location_id = ?1 AND hash IN (SELECT value FROM json_each(?2))").bind(location).bind(&list).execute(&mut *tx).await?;
+            sqlx::query("DELETE FROM replica_copies WHERE location_id = ?1 AND hash IN (SELECT value FROM json_each(?2))")
+                .bind(location)
+                .bind(&list)
+                .execute(&mut *tx)
+                .await?;
             sqlx::query(
                 "INSERT INTO pending_blob_deletes (hash, location_id, created_at, attempts, last_error)
                  SELECT value, ?1, ?3, 0, 'deferred' FROM json_each(?2) WHERE true
@@ -443,12 +480,13 @@ pub async fn verify(cx: &Ctx<'_>) -> AppResult<Stop> {
     let mut damaged = 0i64;
     let mut last = String::new();
     loop {
-        let rows: Vec<(String, i64)> =
-            sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT hash, size FROM replica_copies WHERE location_id = ? AND state = 'verified' AND hash > ? ORDER BY hash LIMIT {PAGE}")))
-                .bind(&location)
-                .bind(&last)
-                .fetch_all(&st.db)
-                .await?;
+        let rows: Vec<(String, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT hash, size FROM replica_copies WHERE location_id = ? AND state = 'verified' AND hash > ? ORDER BY hash LIMIT {PAGE}"
+        )))
+        .bind(&location)
+        .bind(&last)
+        .fetch_all(&st.db)
+        .await?;
         let Some((h, _)) = rows.last() else { break };
         last = h.clone();
         for (hash, size) in rows {
@@ -464,7 +502,12 @@ pub async fn verify(cx: &Ctx<'_>) -> AppResult<Stop> {
             };
             let _w = st.write_lock.lock().await;
             if whole {
-                sqlx::query("UPDATE replica_copies SET verified_at = ? WHERE hash = ? AND location_id = ?").bind(now()).bind(&hash).bind(&location).execute(&st.db).await?;
+                sqlx::query("UPDATE replica_copies SET verified_at = ? WHERE hash = ? AND location_id = ?")
+                    .bind(now())
+                    .bind(&hash)
+                    .bind(&location)
+                    .execute(&st.db)
+                    .await?;
             } else {
                 damaged += 1;
                 sqlx::query("UPDATE replica_copies SET state = 'corrupt' WHERE hash = ? AND location_id = ?").bind(&hash).bind(&location).execute(&st.db).await?;
@@ -477,9 +520,18 @@ pub async fn verify(cx: &Ctx<'_>) -> AppResult<Stop> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let res = async {
-        sqlx::query("UPDATE replica_targets SET last_verify_at = ? WHERE policy_id = ? AND location_id = ?").bind(now()).bind(&policy.id).bind(&location).execute(&mut *tx).await?;
+        sqlx::query("UPDATE replica_targets SET last_verify_at = ? WHERE policy_id = ? AND location_id = ?")
+            .bind(now())
+            .bind(&policy.id)
+            .bind(&location)
+            .execute(&mut *tx)
+            .await?;
         let note = (damaged > 0).then(|| {
-            if damaged == 1 { "1 copy was missing or damaged; the next sync replaces it".to_string() } else { format!("{damaged} copies were missing or damaged; the next sync replaces them") }
+            if damaged == 1 {
+                "1 copy was missing or damaged; the next sync replaces it".to_string()
+            } else {
+                format!("{damaged} copies were missing or damaged; the next sync replaces them")
+            }
         });
         crate::backups::runner::finish(&mut tx, cx, note.as_deref()).await?;
         AppResult::Ok(())
@@ -501,13 +553,14 @@ pub async fn coverage(st: &AppState, policy: &super::Policy, targets: &[Target])
         .bind(serde_json::to_string(&spaces).unwrap())
         .fetch_all(&st.db)
         .await?;
-    let held: std::collections::HashSet<(String, String)> =
-        sqlx::query_as::<_, (String, String)>("SELECT hash, location_id FROM replica_copies WHERE state = 'verified' AND location_id IN (SELECT location_id FROM replica_targets WHERE policy_id = ?)")
-            .bind(&policy.id)
-            .fetch_all(&st.db)
-            .await?
-            .into_iter()
-            .collect();
+    let held: std::collections::HashSet<(String, String)> = sqlx::query_as::<_, (String, String)>(
+        "SELECT hash, location_id FROM replica_copies WHERE state = 'verified' AND location_id IN (SELECT location_id FROM replica_targets WHERE policy_id = ?)",
+    )
+    .bind(&policy.id)
+    .fetch_all(&st.db)
+    .await?
+    .into_iter()
+    .collect();
     let mut out: HashMap<String, (i64, i64)> = targets.iter().map(|t| (t.location_id.clone(), (0, 0))).collect();
     for (hash, primary) in rows {
         for l in super::required(targets, policy.copies, &primary) {

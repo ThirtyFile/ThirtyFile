@@ -140,25 +140,21 @@ export function Explorer(p: ExplorerProps) {
       <Button variant={view === "list" ? "secondary" : "ghost"} aria-pressed={view === "list"} size="icon-xs" aria-label={t("Details")} title={t("Details")} onClick={() => setView("list")}>
         <ListIcon />
       </Button>
-      <Button variant={view === "grid" ? "secondary" : "ghost"} aria-pressed={view === "grid"} size="icon-xs" aria-label={t("Large icons")} title={t("Large icons")} onClick={() => setView("grid")}>
+      <Button
+        variant={view === "grid" ? "secondary" : "ghost"}
+        aria-pressed={view === "grid"}
+        size="icon-xs"
+        aria-label={t("Large icons")}
+        title={t("Large icons")}
+        onClick={() => setView("grid")}
+      >
         <Grid2X2Icon />
       </Button>
     </span>
   );
 
   return (
-    <Frame
-      toolbar={toolbar}
-      crumbs={p.crumbs}
-      icon={p.icon}
-      path={p.path}
-      upTo={p.upTo}
-      activeFolder={p.folderId}
-      space={p.spaceId}
-      footer={footer}
-      footerRight={footerRight}
-      keys
-    >
+    <Frame toolbar={toolbar} crumbs={p.crumbs} icon={p.icon} path={p.path} upTo={p.upTo} activeFolder={p.folderId} space={p.spaceId} footer={footer} footerRight={footerRight} keys>
       {p.notice}
       <div className="relative flex min-h-0 flex-1">
         <ContextMenu>
@@ -202,9 +198,7 @@ export function Explorer(p: ExplorerProps) {
                 sort={p.sort}
                 onSort={p.onSort}
                 groupBy={s.groupBy}
-                groupReversed={
-                  s.groupBy === "date" ? p.sort?.key === "updated" && p.sort.order === "asc" : s.groupBy === "type" && p.sort?.key === "type" && p.sort.order === "desc"
-                }
+                groupReversed={s.groupBy === "date" ? p.sort?.key === "updated" && p.sort.order === "asc" : s.groupBy === "type" && p.sort?.key === "type" && p.sort.order === "desc"}
                 showLocation={p.showLocation}
                 showOwner={p.showOwner}
                 showCheckboxes={showCheckboxes}
@@ -218,7 +212,7 @@ export function Explorer(p: ExplorerProps) {
                 onRename={async (n, name) => {
                   void changed(renamed(await api.rename(n.id, name)));
                   if (name !== n.name)
-                    toastWithUndo(t("Renamed to \"{name}\"", { name }), {
+                    toastWithUndo(t('Renamed to "{name}"', { name }), {
                       undo: async () => void changed(renamed(await api.rename(n.id, n.name))),
                       undoneText: t("Renamed back"),
                     });

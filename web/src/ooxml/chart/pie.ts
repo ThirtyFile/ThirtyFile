@@ -119,7 +119,7 @@ export function renderPie(g: Group, area: Rect, root: SVGElement, ctx: Ctx) {
       // bestFit: inside the slice if it fits, otherwise outside
       r = l.r1 * 0.62;
       const arc = l.span * r;
-      if (l.block.w > arc * 1.1 && l.span < Math.PI || l.block.h > l.r1 * 0.5) {
+      if ((l.block.w > arc * 1.1 && l.span < Math.PI) || l.block.h > l.r1 * 0.5) {
         r = l.r1 + 6;
         inside = false;
       }

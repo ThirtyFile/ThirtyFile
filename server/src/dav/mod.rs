@@ -50,8 +50,7 @@ use crate::{
     error::{AppError, AppResult},
     files,
     jobs::{self, Limit, Outcome},
-    nodes,
-    logs,
+    logs, nodes,
     paths::{Found, SHARED, Target, child_named, resolve, tops},
     state::AppState,
     tokens,
@@ -248,7 +247,14 @@ mod tests {
     }
 
     async fn activity(env: &TestEnv, user: &User) -> Vec<String> {
-        sqlx::query_as::<_, (String,)>("SELECT action FROM activity WHERE user_id = ? ORDER BY id").bind(user.id).fetch_all(&env.st.db).await.unwrap().into_iter().map(|(a,)| a).collect()
+        sqlx::query_as::<_, (String,)>("SELECT action FROM activity WHERE user_id = ? ORDER BY id")
+            .bind(user.id)
+            .fetch_all(&env.st.db)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(a,)| a)
+            .collect()
     }
 
     #[tokio::test]
@@ -271,7 +277,13 @@ mod tests {
         let res = dav.propfind("/dav/", "1").await;
         assert_eq!(res.status, StatusCode::MULTI_STATUS);
         assert!(res.headers[header::CONTENT_TYPE].to_str().unwrap().starts_with("application/xml"));
-        for href in ["<D:href>/dav/</D:href>", "<D:href>/dav/My%20files/</D:href>", "<D:href>/dav/My%20files%20%282%29/</D:href>", "<D:href>/dav/All%20files/</D:href>", "<D:href>/dav/Shared%20with%20me/</D:href>"] {
+        for href in [
+            "<D:href>/dav/</D:href>",
+            "<D:href>/dav/My%20files/</D:href>",
+            "<D:href>/dav/My%20files%20%282%29/</D:href>",
+            "<D:href>/dav/All%20files/</D:href>",
+            "<D:href>/dav/Shared%20with%20me/</D:href>",
+        ] {
             assert!(res.body.contains(href), "{href} in {}", res.body);
         }
         assert!(res.body.contains("<D:displayname>My files (2)</D:displayname>"));
@@ -310,7 +322,8 @@ mod tests {
         assert_eq!(bobs.send("PUT", "/dav/My%20files/Secret/plan.txt", &[], "plan").await.status, StatusCode::CREATED);
         let dav = Client::new(&env, &amy, "write").await;
         assert!(!dav.propfind("/dav/", "1").await.body.contains("Secret"));
-        for path in ["/dav/Secret/", "/dav/My%20files/Secret/", "/dav/Shared%20with%20me/Secret/", "/dav/Shared%20with%20me/Secret/plan.txt", "/dav/My%20files/../x"] {
+        for path in ["/dav/Secret/", "/dav/My%20files/Secret/", "/dav/Shared%20with%20me/Secret/", "/dav/Shared%20with%20me/Secret/plan.txt", "/dav/My%20files/../x"]
+        {
             assert_eq!(dav.propfind(path, "0").await.status, StatusCode::NOT_FOUND, "{path}");
         }
         assert_eq!(dav.send("GET", "/dav/Shared%20with%20me/Secret/plan.txt", &[], "").await.status, StatusCode::NOT_FOUND);
@@ -435,7 +448,8 @@ mod tests {
         dav.send("PUT", "/dav/My%20files/Old/x.txt", &[], "x").await;
         assert_eq!(dav.send("DELETE", "/dav/My%20files/Old/", &[], "").await.status, StatusCode::NO_CONTENT);
         assert_eq!(dav.propfind("/dav/My%20files/Old/", "0").await.status, StatusCode::NOT_FOUND);
-        let (trashed,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE trashed_at IS NOT NULL AND name IN ('Old', 'x.txt')").fetch_one(&env.st.db).await.unwrap();
+        let (trashed,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE trashed_at IS NOT NULL AND name IN ('Old', 'x.txt')").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(trashed, 2);
         assert!(activity(&env, &amy).await.contains(&"trash".to_string()));
         assert_eq!(dav.send("DELETE", "/dav/My%20files/", &[], "").await.status, StatusCode::FORBIDDEN);
@@ -484,7 +498,10 @@ mod tests {
         for headers in [
             vec![],
             vec![(header::COOKIE, cookie)],
-            vec![(header::AUTHORIZATION, format!("Basic {}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, format!("amy:{}", testutil::password()))))],
+            vec![(
+                header::AUTHORIZATION,
+                format!("Basic {}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, format!("amy:{}", testutil::password()))),
+            )],
         ] {
             let res = send(&headers).await;
             assert_eq!(res.status(), StatusCode::UNAUTHORIZED);

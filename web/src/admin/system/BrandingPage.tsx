@@ -129,10 +129,7 @@ function BrandingForm({ saved }: { saved: Branding }) {
                     aria-pressed={active}
                     title={t("{name}: light {light}, dark {dark}", { name: p.name, light: p.light, dark: p.dark })}
                     onClick={() => set({ light_brand: p.light, dark_brand: p.dark })}
-                    className={cn(
-                      "flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-muted",
-                      active && "border-brand ring-2 ring-brand/30",
-                    )}
+                    className={cn("flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-muted", active && "border-brand ring-2 ring-brand/30")}
                   >
                     <span className="flex">
                       <span className="size-4 rounded-full border border-black/10" style={{ background: p.light }} />
@@ -150,7 +147,9 @@ function BrandingForm({ saved }: { saved: Branding }) {
             <ColorField label={t("Dark mode accent color")} icon={MoonIcon} value={draft.dark_brand} onChange={(v) => set({ dark_brand: v })} />
           </div>
           <p className="-mt-2 text-xs text-muted-foreground">
-            {t("The accent color is used for buttons, selected items, links, and focus rings. Dark mode usually needs a slightly brighter color than light mode to stay legible. Button text is automatically set to black or white based on the accent color.")}
+            {t(
+              "The accent color is used for buttons, selected items, links, and focus rings. Dark mode usually needs a slightly brighter color than light mode to stay legible. Button text is automatically set to black or white based on the accent color.",
+            )}
           </p>
           <ContrastWarning light={draft.light_brand} dark={draft.dark_brand} />
           <div className="grid gap-3 sm:grid-cols-2">
@@ -187,14 +186,16 @@ function BrandingForm({ saved }: { saved: Branding }) {
               ))}
             </div>
             <p className="text-xs text-muted-foreground">
-              {t("The appearance used the first time someone opens the site, or when they haven't chosen one. \"Use system setting\" switches automatically based on the computer's or phone's dark mode setting.")}
+              {t(
+                "The appearance used the first time someone opens the site, or when they haven't chosen one. \"Use system setting\" switches automatically based on the computer's or phone's dark mode setting.",
+              )}
             </p>
           </div>
           <div className="flex items-start gap-4">
             <div className="min-w-0 flex-1">
               <div className="text-[13px] font-medium">{t("Let users switch between light and dark")}</div>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                {t("When off, \"Appearance\" is removed from the user menu and everyone uses the default appearance above (previous personal choices no longer apply).")}
+                {t('When off, "Appearance" is removed from the user menu and everyone uses the default appearance above (previous personal choices no longer apply).')}
               </p>
             </div>
             <Toggle label={t("Let users switch between light and dark")} checked={draft.allow_toggle} onChange={(v) => set({ allow_toggle: v })} />
@@ -255,7 +256,11 @@ function BrandingForm({ saved }: { saved: Branding }) {
 
       <div className="sticky bottom-0 -mx-6 -mb-6 flex flex-wrap items-center gap-2 border-t bg-background/95 px-6 py-3 backdrop-blur">
         <span className="text-xs text-muted-foreground">
-          {invalid ? t("Enter a site name. Accent colors must be in #RRGGBB format") : dirty ? t("You have unsaved changes") : t("Logos take effect as soon as they're uploaded; other settings take effect after you click \"Save\"")}
+          {invalid
+            ? t("Enter a site name. Accent colors must be in #RRGGBB format")
+            : dirty
+              ? t("You have unsaved changes")
+              : t('Logos take effect as soon as they\'re uploaded; other settings take effect after you click "Save"')}
         </span>
         <span className="flex-1" />
         <Button
@@ -384,7 +389,13 @@ function LogoSlot({ variant, saved }: { variant: "light" | "dark"; saved: Brandi
           </Button>
         )}
         <span className="text-[11px] text-muted-foreground">
-          {dark ? (has ? t("For dark backgrounds") : saved.has_logo ? t("Not set; the light logo is used") : t("Optional")) : t("PNG, SVG, JPG, or WebP, up to 1 MB. Also used as the site icon")}
+          {dark
+            ? has
+              ? t("For dark backgrounds")
+              : saved.has_logo
+                ? t("Not set; the light logo is used")
+                : t("Optional")
+            : t("PNG, SVG, JPG, or WebP, up to 1 MB. Also used as the site icon")}
         </span>
       </div>
     </div>
@@ -571,7 +582,13 @@ function ContrastWarning({ light, dark }: { light: string; dark: string }) {
     const page_ = contrastRatio(color, page);
     const text = contrastRatio(color, brandForeground(color));
     const out = [];
-    if (page_ < 3) out.push(t("In {mode}, the accent color stands out too little from the page ({ratio}:1, at least 3:1 is needed): focus rings and selected items are hard to see.", { mode, ratio: page_.toFixed(2) }));
+    if (page_ < 3)
+      out.push(
+        t("In {mode}, the accent color stands out too little from the page ({ratio}:1, at least 3:1 is needed): focus rings and selected items are hard to see.", {
+          mode,
+          ratio: page_.toFixed(2),
+        }),
+      );
     if (text < 4.5) out.push(t("In {mode}, button text on the accent color is hard to read ({ratio}:1, at least 4.5:1 is needed).", { mode, ratio: text.toFixed(2) }));
     return out;
   });

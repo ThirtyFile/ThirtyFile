@@ -151,11 +151,7 @@ fn csv_file<T>(en: bool, tz: Option<i64>, name: &str, columns: &[&str], rows: Ve
         out.push('\n');
     }
     let name = format!("{}-{}.csv", localize(name, en), format_time(now(), offset).get(..10).unwrap_or("").replace('-', ""));
-    (
-        [(header::CONTENT_TYPE, "text/csv; charset=utf-8".to_string()), (header::CONTENT_DISPOSITION, content_disposition("attachment", &name))],
-        out,
-    )
-        .into_response()
+    ([(header::CONTENT_TYPE, "text/csv; charset=utf-8".to_string()), (header::CONTENT_DISPOSITION, content_disposition("attachment", &name))], out).into_response()
 }
 
 /// Action names in exports (matching the names shown in the web interface)

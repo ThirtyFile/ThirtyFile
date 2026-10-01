@@ -37,8 +37,7 @@ export const backupsApi = {
   restoreBackup: (snapshot: string, req: RestoreRequest) => post<{ job_id: string }>(enc`/admin/backups/snapshots/${snapshot}/restore`, req),
   browseSnapshot: (snapshot: string, space: string, folder?: string | null) =>
     get<{ path: [string, string][]; items: SnapshotItem[] }>(enc`/admin/backups/snapshots/${snapshot}/browse` + qs({ space, folder: folder ?? undefined })),
-  createBackupPolicy: (req: Partial<BackupPolicySettings> & { name: string; source: string; dest: string }) =>
-    post<{ set_id: string }>("/admin/backups/policies", req),
+  createBackupPolicy: (req: Partial<BackupPolicySettings> & { name: string; source: string; dest: string }) => post<{ set_id: string }>("/admin/backups/policies", req),
   updateBackupPolicy: (id: string, req: Partial<BackupPolicySettings> & { name?: string }) => request("PATCH", enc`/admin/backups/policies/${id}`, req),
   runBackupPolicy: (id: string) => post<{ job_id: string | null }>(enc`/admin/backups/policies/${id}/run`),
   backupNextRuns: (schedule: BackupSchedule, tz: string) => post<number[]>("/admin/backups/policies/next-runs", { schedule, tz }),

@@ -157,8 +157,7 @@ pub async fn check(st: &AppState, location: &str) -> bool {
 /// The folder of the location a new space's files go to, when it is a folder of this server: the built-in location
 /// (`builtin`, the storage folder) or a *Local folder* location. None for S3, SFTP and FTP.
 pub(crate) async fn location_folder(conn: &mut SqliteConnection, builtin: &Path, location: &str) -> AppResult<Option<PathBuf>> {
-    let row: Option<(String, String)> =
-        sqlx::query_as("SELECT kind, config FROM storage_locations WHERE id = ?").bind(location).fetch_optional(&mut *conn).await?;
+    let row: Option<(String, String)> = sqlx::query_as("SELECT kind, config FROM storage_locations WHERE id = ?").bind(location).fetch_optional(&mut *conn).await?;
     let (kind, config) = match row {
         Some(r) => r,
         // The built-in location is always there; an unknown one keeps the content store, which reports it
@@ -193,11 +192,9 @@ pub async fn make_folder_space(conn: &mut SqliteConnection, builtin: Option<&Pat
     let root = std::path::absolute(&root).unwrap_or(root);
     // The location's folder must be there with the location's marker (storage.rs, `LOCATION_MARKER`): a disk or
     // share that isn't mounted must not get the space's folder on the disk below its mount point
-    let unavailable = || {
-        AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("The folder of the storage location ({}) isn't available", root.display()))
-    };
-    let checked_unavailable =
-        UNAVAILABLE.lock().unwrap().get(&(root.clone(), location.clone())).is_some_and(|at| at.elapsed() < UNAVAILABLE_FOR);
+    let unavailable =
+        || AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("The folder of the storage location ({}) isn't available", root.display()));
+    let checked_unavailable = UNAVAILABLE.lock().unwrap().get(&(root.clone(), location.clone())).is_some_and(|at| at.elapsed() < UNAVAILABLE_FOR);
     if checked_unavailable || read_marker(&root).await.as_deref() != Some(location.as_str()) {
         return Err(unavailable());
     }

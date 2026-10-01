@@ -69,7 +69,6 @@ describe("groupItems", () => {
 describe("column settings", () => {
   beforeEach(() => resetColumns());
   it("are kept, and limited to sensible widths", () => {
-
     expect(columnShown(columnPrefs(), "type")).toBe(true);
     expect(columnShown(columnPrefs(), "created")).toBe(false);
     showColumn("created", true);

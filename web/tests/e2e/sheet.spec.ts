@@ -8,9 +8,7 @@ import { makeFolder, signIn, uploadFile } from "./helpers";
 test("a value typed into a workbook is saved into the file, which keeps the rest", async ({ page }) => {
   await signIn(page);
   const dir = await makeFolder(page, "Sheet");
-  const xlsx = Buffer.from(
-    await buildWorkbook([{ name: "Budget", rows: '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1"><v>1234</v></c></row>' }], ["Rent"]),
-  );
+  const xlsx = Buffer.from(await buildWorkbook([{ name: "Budget", rows: '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1"><v>1234</v></c></row>' }], ["Rent"]));
   const id = await uploadFile(page, dir, "budget.xlsx", xlsx);
   await page.goto(`/view/${id}`);
   await page.getByRole("button", { name: "Edit workbook" }).click();

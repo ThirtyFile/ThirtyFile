@@ -40,8 +40,7 @@ export function FileViewer(props: {
 
   // key: a new element (and a fresh error state) for each file
   if (isBrowserMedia(node)) return <Media key={node.id} node={node} url={url} source={props.source} allowDownload={props.allowDownload} />;
-  if (cat === "pdf")
-    return <iframe key={node.id} src={url} title={node.name} className={cn("size-full bg-white", !embedded && "max-w-5xl rounded-lg")} />;
+  if (cat === "pdf") return <iframe key={node.id} src={url} title={node.name} className={cn("size-full bg-white", !embedded && "max-w-5xl rounded-lg")} />;
   if (isOfficePreviewable(node))
     return (
       <div className={cn("size-full overflow-hidden", !embedded && "max-w-6xl rounded-lg")}>
@@ -54,14 +53,7 @@ export function FileViewer(props: {
   if (isTextLike(node))
     return (
       <Suspense fallback={<Loader2Icon className={cn("size-6 animate-spin", embedded ? "text-muted-foreground" : "text-white/70")} />}>
-        <TextEditor
-          node={node}
-          source={props.source}
-          editable={props.editable}
-          embedded={embedded}
-          onSaved={props.onSaved}
-          onDirtyChange={props.onDirtyChange}
-        />
+        <TextEditor node={node} source={props.source} editable={props.editable} embedded={embedded} onSaved={props.onSaved} onDirtyChange={props.onDirtyChange} />
       </Suspense>
     );
   return <OtherFile key={node.id} {...props} />;
@@ -94,23 +86,18 @@ function OtherFile(props: Parameters<typeof FileViewer>[0]) {
       // The editor's own right-click menu (copy, paste) rather than the page's
       <div className="flex size-full min-h-0 items-center justify-center" onContextMenu={(e) => e.stopPropagation()}>
         <Suspense fallback={<Loader2Icon className={cn("size-6 animate-spin", embedded ? "text-muted-foreground" : "text-white/70")} />}>
-          <TextEditor
-            node={node}
-            source={props.source}
-            editable={props.editable}
-            embedded={embedded}
-            asText
-            toolbar={back}
-            onSaved={props.onSaved}
-            onDirtyChange={props.onDirtyChange}
-          />
+          <TextEditor node={node} source={props.source} editable={props.editable} embedded={embedded} asText toolbar={back} onSaved={props.onSaved} onDirtyChange={props.onDirtyChange} />
         </Suspense>
       </div>
     );
   }
   let extra = null;
   if (offered && tooLarge)
-    extra = <p className="max-w-sm text-xs text-muted-foreground">{t("This file is too large to open in the text editor (over {size}). Download it to open it.", { size: formatBytes(MAX_TEXT_BYTES) })}</p>;
+    extra = (
+      <p className="max-w-sm text-xs text-muted-foreground">
+        {t("This file is too large to open in the text editor (over {size}). Download it to open it.", { size: formatBytes(MAX_TEXT_BYTES) })}
+      </p>
+    );
   else if (offered)
     extra = (
       <>
@@ -155,15 +142,7 @@ function MarkdownFile(props: Parameters<typeof FileViewer>[0]) {
       {mode === "preview" ? (
         <MarkdownPreview node={node} source={props.source} embedded={embedded} toolbar={toggle} />
       ) : (
-        <TextEditor
-          node={node}
-          source={props.source}
-          editable={props.editable}
-          embedded={embedded}
-          toolbar={toggle}
-          onSaved={props.onSaved}
-          onDirtyChange={props.onDirtyChange}
-        />
+        <TextEditor node={node} source={props.source} editable={props.editable} embedded={embedded} toolbar={toggle} onSaved={props.onSaved} onDirtyChange={props.onDirtyChange} />
       )}
     </Suspense>
   );
@@ -177,8 +156,7 @@ function Media({ node, url, source, allowDownload }: { node: Node; url: string; 
     reportShown("preview", new Error(`The browser couldn't show this ${categoryOf(node)} file (${node.mime || "unknown type"})`), node.id);
   };
   if (failed) return <NoPreview node={node} source={source} allowDownload={allowDownload} reason={t("Your browser can't show this file")} />;
-  if (categoryOf(node) === "image")
-    return <img src={url} alt={node.name} onError={fail} className="max-h-full max-w-full object-contain select-none" />;
+  if (categoryOf(node) === "image") return <img src={url} alt={node.name} onError={fail} className="max-h-full max-w-full object-contain select-none" />;
   if (categoryOf(node) === "audio")
     return (
       <div className="flex w-full max-w-md flex-col items-center gap-6 rounded-2xl border bg-background p-8 text-foreground">
@@ -196,7 +174,9 @@ function NoPreview({ node, source, allowDownload, reason, extra }: { node: Node;
       <FileIcon node={node} className="size-16" />
       <div>
         <div className="font-medium break-all">{node.name}</div>
-        <div className="text-sm text-muted-foreground">{formatBytes(node.size)} · {reason}</div>
+        <div className="text-sm text-muted-foreground">
+          {formatBytes(node.size)} · {reason}
+        </div>
       </div>
       <div className="flex flex-wrap justify-center gap-2">
         {allowDownload !== false && (

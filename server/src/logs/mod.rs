@@ -26,11 +26,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use crate::{
-    db::get_setting,
-    error::AppError,
-    state::AppState,
-};
+use crate::{db::get_setting, error::AppError, state::AppState};
 
 const DAY: i64 = 86_400;
 
@@ -137,9 +133,17 @@ mod tests {
         let writer = spawn_writer(env.st.clone(), rx);
         // More than one batch, queued faster than they're written, then an immediate shutdown
         for i in 0..(BATCH * 2 + 17) {
-            tx.send(LogEvent::Login { at: i as i64, user_id: None, username: "x".into(), event: "failed", method: "password".into(), ip: String::new(), user_agent: String::new() })
-                .await
-                .unwrap();
+            tx.send(LogEvent::Login {
+                at: i as i64,
+                user_id: None,
+                username: "x".into(),
+                event: "failed",
+                method: "password".into(),
+                ip: String::new(),
+                user_agent: String::new(),
+            })
+            .await
+            .unwrap();
         }
         writer.finish().await;
         let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM login_log WHERE username = 'x'").fetch_one(&env.st.db).await.unwrap();
@@ -163,7 +167,14 @@ mod tests {
         // % and _ are literal characters, not wildcards
         assert_eq!(names(&env.st, |q| q.q = Some("_100%".into())).await, ["Budget_100%.xlsx"]);
         assert_eq!(names(&env.st, |q| q.q = Some("%".into())).await.len(), 1);
-        assert_eq!(names(&env.st, |q| { q.from = Some(t - 2 * DAY - 10); q.to = Some(t - 10) }).await, ["Photo.jpg", "Budget_100%.xlsx"]);
+        assert_eq!(
+            names(&env.st, |q| {
+                q.from = Some(t - 2 * DAY - 10);
+                q.to = Some(t - 10)
+            })
+            .await,
+            ["Photo.jpg", "Budget_100%.xlsx"]
+        );
 
         // Paging: 2 per page, continuing with before
         let page1 = query_activity(&env.st, &q(|_| {}), 2).await.unwrap();
@@ -383,7 +394,9 @@ mod tests {
         log(other.clone(), "upload").await;
         let history = |who: User, id: &str| {
             let (st, id) = (env.st.clone(), id.to_string());
-            async move { node_history(State(st), who, Path(id)).await.map(|Json(rows)| rows.into_iter().map(|r| format!("{} {}", r.action, r.node_name)).collect::<Vec<_>>()) }
+            async move {
+                node_history(State(st), who, Path(id)).await.map(|Json(rows)| rows.into_iter().map(|r| format!("{} {}", r.action, r.node_name)).collect::<Vec<_>>())
+            }
         };
 
         // The folder's own entries and those of everything inside it, newest first; the owner sees permission changes too

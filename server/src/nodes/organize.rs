@@ -30,12 +30,7 @@ pub struct RenameReq {
     pub(super) name: String,
 }
 
-pub async fn rename(
-    State(st): State<AppState>,
-    user: User,
-    Path(id): Path<String>,
-    Json(req): Json<RenameReq>,
-) -> AppResult<Json<Node>> {
+pub async fn rename(State(st): State<AppState>, user: User, Path(id): Path<String>, Json(req): Json<RenameReq>) -> AppResult<Json<Node>> {
     let name = validate_name(&req.name)?;
     let locks = fsops::lock(&st, &user, &[&id]).await?;
     let _w = st.write_lock.lock().await;
@@ -197,10 +192,7 @@ pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
             let src_root = tree::get_node(&mut tx, &src_drive.root_id).await?.ok_or_else(|| AppError::not_found("Source space not found"))?;
             let member_role = tree::role_on(&mut tx, &user, &src_root).await?;
             if member_role.is_none_or(|r| tree::allows(&user, r, Need::Delete).is_err()) {
-                return Err(AppError::forbidden(format!(
-                    "\"{}\" was shared with you and can't be moved to another space. Use \"Copy\" instead.",
-                    node.name
-                )));
+                return Err(AppError::forbidden(format!("\"{}\" was shared with you and can't be moved to another space. Use \"Copy\" instead.", node.name)));
             }
             // Cross-space move: move the whole subtree to the target space and check the target space's quota (added up
             // in the database: this holds the write lock, and the subtree may be large)
@@ -283,8 +275,7 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
         if items > MAX_COPY_ITEMS {
             return Err(AppError::bad_request("Copy at most 20,000 items at once"));
         }
-        let nodes: Vec<Node> =
-            tree::subtree(&mut tx, &node.id).await?.into_iter().map(|(n, _)| n).filter(|n| n.trashed_at.is_none()).collect();
+        let nodes: Vec<Node> = tree::subtree(&mut tx, &node.id).await?.into_iter().map(|(n, _)| n).filter(|n| n.trashed_at.is_none()).collect();
         total += nodes.iter().map(|n| n.size).sum::<i64>();
         plans.push(nodes);
     }
@@ -433,14 +424,28 @@ pub async fn conflicts(State(st): State<AppState>, user: User, Json(req): Json<C
                 continue;
             }
             if let Some(existing) = tree::find_child(&mut c, &dest.id, &node.name).await?.filter(|e| e.id != node.id) {
-                out.push(Conflict { id: Some(node.id.clone()), name: node.name.clone(), kind: Some(node.kind.clone()), size: Some(node.size), updated_at: Some(node.updated_at), existing });
+                out.push(Conflict {
+                    id: Some(node.id.clone()),
+                    name: node.name.clone(),
+                    kind: Some(node.kind.clone()),
+                    size: Some(node.size),
+                    updated_at: Some(node.updated_at),
+                    existing,
+                });
             }
         }
     } else {
         for id in &req.ids {
             let (node, parent) = trash_root(&mut c, &user, id, Need::Read).await?;
             if let Some(existing) = tree::find_child(&mut c, &parent, &node.name).await? {
-                out.push(Conflict { id: Some(node.id.clone()), name: node.name.clone(), kind: Some(node.kind.clone()), size: Some(node.size), updated_at: Some(node.updated_at), existing });
+                out.push(Conflict {
+                    id: Some(node.id.clone()),
+                    name: node.name.clone(),
+                    kind: Some(node.kind.clone()),
+                    size: Some(node.size),
+                    updated_at: Some(node.updated_at),
+                    existing,
+                });
             }
         }
     }

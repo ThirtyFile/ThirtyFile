@@ -28,17 +28,7 @@ export interface Crumb {
   virtual?: boolean;
 }
 
-function SearchInput({
-  placeholder,
-  onSearch,
-  within,
-  inputRef,
-}: {
-  placeholder: string;
-  onSearch?: (q: string) => void;
-  within?: string;
-  inputRef?: React.Ref<HTMLInputElement>;
-}) {
+function SearchInput({ placeholder, onSearch, within, inputRef }: { placeholder: string; onSearch?: (q: string) => void; within?: string; inputRef?: React.Ref<HTMLInputElement> }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [params] = useSearchParams();
@@ -103,7 +93,13 @@ function SearchInput({
 
 /** Path for copying: skips virtual levels like "All spaces", e.g. "/ESG Project/Reports" */
 export function crumbPath(crumbs: Crumb[]) {
-  return "/" + crumbs.filter((c) => !c.virtual).map((c) => c.label).join("/");
+  return (
+    "/" +
+    crumbs
+      .filter((c) => !c.virtual)
+      .map((c) => c.label)
+      .join("/")
+  );
 }
 
 /** A part of the address bar path: a link to that folder, which also takes dropped items and files */
@@ -158,7 +154,7 @@ function PathInput({ path, onDone }: { path: string; onDone(): void }) {
       setFinding(false);
       toast.error(
         e instanceof ApiError && e.status === 404
-          ? t("Can't find \"{path}\". Check the spelling and try again.", { path: typed })
+          ? t('Can\'t find "{path}". Check the spelling and try again.', { path: typed })
           : e instanceof Error
             ? e.message
             : t("Couldn't open this path"),
@@ -295,14 +291,7 @@ export function AddressBar({
       >
         <ArrowUpIcon />
       </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className={cn(nav, "mr-1")}
-        aria-label={t("Refresh")}
-        title={`${t("Refresh")} (F5)`}
-        onClick={refresh}
-      >
+      <Button variant="ghost" size="icon" className={cn(nav, "mr-1")} aria-label={t("Refresh")} title={`${t("Refresh")} (F5)`} onClick={refresh}>
         <RefreshCwIcon className={cn(refreshing && "animate-spin")} />
       </Button>
       <div

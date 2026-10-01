@@ -81,7 +81,7 @@ export class HeaderFooters {
     const s = this.sections[sec];
     const refs = kind === "header" ? s.headers : s.footers;
     // When first/even are not specified: the first page is blank, even pages use the default
-    const id = type === "first" ? refs.first : type === "even" ? refs.even ?? refs.default : refs.default;
+    const id = type === "first" ? refs.first : type === "even" ? (refs.even ?? refs.default) : refs.default;
     if (!id) return null;
     const rel = (this.doc.rels.get("word/document.xml") ?? []).find((r) => r.id === id);
     if (!rel) return null;
@@ -262,7 +262,7 @@ export class Paginator {
           const m = rect(b.el);
           const meta = this.o.doc.blockMeta.get(b.el);
           // Top of page: hard breaks keep the paragraph's space before (handled the same way when building pages)
-          const topGap = page.hard && b.el.tagName === "P" ? meta?.before ?? 0 : 0;
+          const topGap = page.hard && b.el.tagName === "P" ? (meta?.before ?? 0) : 0;
           if (startY === null || empty) startY = empty ? m.top - topGap : m.top - (parseFloat(b.el.style.marginTop) || 0);
           const notes = new Set(page.notes);
           for (const n of meta?.notes ?? []) notes.add(n);
@@ -493,7 +493,7 @@ export class Paginator {
       for (const f of Array.from(page.querySelectorAll<HTMLElement>(".tf-docx-fld"))) {
         const type = f.dataset.f;
         const fmt = f.dataset.fmt;
-        const n = type === "NUMPAGES" ? total : type === "SECTIONPAGES" ? perSection.get(p.sec) ?? 1 : p.number;
+        const n = type === "NUMPAGES" ? total : type === "SECTIONPAGES" ? (perSection.get(p.sec) ?? 1) : p.number;
         f.textContent = formatNumber(n, fmt ?? (type === "PAGE" ? s.pgNumFmt : null) ?? "decimal");
       }
       out.push(page);

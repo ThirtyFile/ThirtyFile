@@ -48,10 +48,7 @@ export function ActivitySettingsPage() {
         <>
           <ToolButton icon={RefreshCwIcon} label={t("Refresh")} showLabel onClick={() => qc.invalidateQueries({ queryKey: LOG_TABS[tab].query })} />
           <span className="flex-1" />
-          <Link
-            to="/admin/logs"
-            className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
+          <Link to="/admin/logs" className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
             <SettingsIcon className="size-4" /> {t("Log settings")}
           </Link>
         </>

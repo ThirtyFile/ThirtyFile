@@ -90,7 +90,20 @@ function parseInstr(instr: string): FieldInfo {
 function fieldFormat(args: string): string | null {
   const m = /\\\*\s*(\w+)/.exec(args);
   if (!m) return null;
-  const map: Record<string, string> = { roman: "lowerRoman", ROMAN: "upperRoman", alphabetic: "lowerLetter", ALPHABETIC: "upperLetter", Arabic: "decimal", ArabicDash: "numberInDash", CHINESENUM1: "taiwaneseCounting", CHINESENUM2: "ideographLegalTraditional", CHINESENUM3: "taiwaneseCountingThousand", CardText: "cardinalText", OrdText: "ordinalText", Ordinal: "ordinal" };
+  const map: Record<string, string> = {
+    roman: "lowerRoman",
+    ROMAN: "upperRoman",
+    alphabetic: "lowerLetter",
+    ALPHABETIC: "upperLetter",
+    Arabic: "decimal",
+    ArabicDash: "numberInDash",
+    CHINESENUM1: "taiwaneseCounting",
+    CHINESENUM2: "ideographLegalTraditional",
+    CHINESENUM3: "taiwaneseCountingThousand",
+    CardText: "cardinalText",
+    OrdText: "ordinalText",
+    Ordinal: "ordinal",
+  };
   return map[m[1]] ?? null;
 }
 
@@ -513,7 +526,7 @@ class InlineRenderer {
           let mark = "";
           if (!custom || /^(0|false)$/i.test(custom)) {
             const n = kind === "foot" ? ++doc.footCount : ++doc.endCount;
-            const fmt = kind === "foot" ? f.section.footnoteFmt ?? doc.settings.footnoteFmt ?? "decimal" : f.section.endnoteFmt ?? doc.settings.endnoteFmt ?? "lowerRoman";
+            const fmt = kind === "foot" ? (f.section.footnoteFmt ?? doc.settings.footnoteFmt ?? "decimal") : (f.section.endnoteFmt ?? doc.settings.endnoteFmt ?? "lowerRoman");
             mark = formatNumber(n, fmt);
           }
           doc.noteRefs.push({ kind, id, mark });
@@ -642,7 +655,8 @@ export function renderParagraph(p: Element, f: Flow): ParaResult {
   inl.content(p);
 
   // Empty paragraph: section properties only
-  const sectionOnly = !!kid(pPr, "sectPr") && !inl.hasContent && inl.segments.length === 1 && !p.getElementsByTagNameNS("*", "drawing").length && !p.getElementsByTagNameNS("*", "pict").length;
+  const sectionOnly =
+    !!kid(pPr, "sectPr") && !inl.hasContent && inl.segments.length === 1 && !p.getElementsByTagNameNS("*", "drawing").length && !p.getElementsByTagNameNS("*", "pict").length;
 
   // Page break at paragraph end: since Word 2013 the paragraph mark stays on the previous page and the next paragraph starts a new page
   let breakAfter = false;
@@ -729,7 +743,19 @@ export function renderParagraph(p: Element, f: Flow): ParaResult {
 
   // Alignment
   const jc = props.jc ?? (bidi ? "right" : "left");
-  const align: Record<string, string> = { left: "left", start: bidi ? "right" : "left", center: "center", right: "right", end: bidi ? "left" : "right", both: "justify", distribute: "justify", thaiDistribute: "justify", highKashida: "justify", mediumKashida: "justify", lowKashida: "justify" };
+  const align: Record<string, string> = {
+    left: "left",
+    start: bidi ? "right" : "left",
+    center: "center",
+    right: "right",
+    end: bidi ? "left" : "right",
+    both: "justify",
+    distribute: "justify",
+    thaiDistribute: "justify",
+    highKashida: "justify",
+    mediumKashida: "justify",
+    lowKashida: "justify",
+  };
   const shade = shadeColor(props.shd, theme);
 
   const base$: Record<string, string | undefined> = {

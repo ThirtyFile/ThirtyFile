@@ -2,5 +2,5 @@
 # Raised on purpose in a pull request of its own: new versions can bring new clippy warnings, which fail the checks.
 [toolchain]
 channel = "1.98.1"
-components = ["clippy"]
+components = ["clippy", "rustfmt"]
 profile = "minimal"

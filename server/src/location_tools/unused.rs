@@ -219,9 +219,10 @@ pub async fn remove_unused(State(st): State<AppState>, Admin(user): Admin, Path(
     locations::require_own_place(&st, &id, &loc.kind, st.storage(&id)?.as_ref()).await?;
     let (job, items) = {
         let mut jobs = st.unused_searches.lock().unwrap();
-        let job = jobs.get_mut(&id).filter(|j| j.scan_id == req.scan_id && j.phase == Phase::Found).ok_or_else(|| {
-            AppError::conflict("This list is out of date. Find unused content again.")
-        })?;
+        let job = jobs
+            .get_mut(&id)
+            .filter(|j| j.scan_id == req.scan_id && j.phase == Phase::Found)
+            .ok_or_else(|| AppError::conflict("This list is out of date. Find unused content again."))?;
         if job.count == 0 {
             return Err(AppError::bad_request("There is no unused content to remove"));
         }
@@ -336,7 +337,11 @@ mod tests {
         sqlx::query("INSERT INTO pending_blob_deletes (hash, location_id, created_at) VALUES (?, 'local', 0)").bind(&pending).execute(&env.st.db).await.unwrap();
         // Recorded in another location: this copy is unused
         let (moved, _) = orphan(&env, b"moved away", 2 * 86400).await;
-        sqlx::query("INSERT INTO blobs (hash, size, refcount, created_at, location_id) VALUES (?, 10, 1, 0, 'second')").bind(&moved).execute(&env.st.db).await.unwrap();
+        sqlx::query("INSERT INTO blobs (hash, size, refcount, created_at, location_id) VALUES (?, 10, 1, 0, 'second')")
+            .bind(&moved)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
         // Other files in the folder aren't content
         std::fs::write(env.dir.join("blobs").join("notes.txt"), b"not content").unwrap();
 
@@ -416,15 +421,15 @@ mod tests {
         let wait = |phase: Phase| {
             let (admin, st) = (admin.clone(), env.st.clone());
             async move {
-            for _ in 0..200 {
-                if let Json(Some(j)) = unused_status(State(st.clone()), Admin(admin.clone()), Path("local".into())).await
-                    && j.phase == phase
-                {
-                    return j;
+                for _ in 0..200 {
+                    if let Json(Some(j)) = unused_status(State(st.clone()), Admin(admin.clone()), Path("local".into())).await
+                        && j.phase == phase
+                    {
+                        return j;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                 }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-            panic!("never reached {phase:?}");
+                panic!("never reached {phase:?}");
             }
         };
         let found = wait(Phase::Found).await;

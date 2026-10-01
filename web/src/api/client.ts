@@ -14,14 +14,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function request<T>(
-  method: string,
-  path: string,
-  body?: unknown,
-  raw?: BodyInit,
-  extraHeaders?: Record<string, string>,
-  signal?: AbortSignal,
-): Promise<T> {
+export async function request<T>(method: string, path: string, body?: unknown, raw?: BodyInit, extraHeaders?: Record<string, string>, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method,
     signal,
@@ -87,10 +80,7 @@ function checkOoxml(buf: ArrayBuffer) {
 export const get = <T>(p: string, signal?: AbortSignal) => request<T>("GET", p, undefined, undefined, undefined, signal);
 /** Convert filters to query parameters (skipping empty values) */
 export const toParams = (o: object) =>
-  Object.fromEntries(Object.entries(o).flatMap(([k, v]) => (v === undefined || v === null || v === "" ? [] : [[k, String(v)]]))) as Record<
-    string,
-    string
-  >;
+  Object.fromEntries(Object.entries(o).flatMap(([k, v]) => (v === undefined || v === null || v === "" ? [] : [[k, String(v)]]))) as Record<string, string>;
 export const post = <T>(p: string, body?: unknown) => request<T>("POST", p, body ?? {});
 /**
  * API path with every interpolated part encoded as one path segment (or query value): ids and share tokens can come from

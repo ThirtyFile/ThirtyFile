@@ -17,10 +17,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use axum::{
-    Json,
-    extract::State,
-};
+use axum::{Json, extract::State};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncWriteExt, ReadBuf};
@@ -31,12 +28,12 @@ use crate::{
     error::{AppError, AppResult},
     files::Source,
     fsops,
+    jobs::{self, Job, Limit, Outcome, Tracker},
     logs,
     state::AppState,
     tree::{self, Need, Node},
     util::{format_bytes_u64, new_id, split_name, validate_name},
     zip::{ReadEntry, ZipWriter},
-    jobs::{self, Job, Limit, Outcome, Tracker},
 };
 
 /// Most an archive may hold once extracted, whatever the space's quota
@@ -284,7 +281,10 @@ fn plan_entries(entries: Vec<ReadEntry>, archive_size: u64) -> AppResult<(Vec<Pl
         out.push(Planned { dirs: parts, file: Some(last), entry });
     }
     if total > MAX_EXTRACT_BYTES {
-        return Err(AppError::bad_request(format!("This ZIP file holds more than {} once extracted, more than can be extracted here", format_bytes_u64(MAX_EXTRACT_BYTES))));
+        return Err(AppError::bad_request(format!(
+            "This ZIP file holds more than {} once extracted, more than can be extracted here",
+            format_bytes_u64(MAX_EXTRACT_BYTES)
+        )));
     }
     if total > RATIO_EXEMPT_BYTES && total / MAX_RATIO > archive_size {
         return Err(too_compressed());
@@ -607,10 +607,7 @@ mod tests {
         assert_eq!((job.state, job.name.as_deref(), job.error), ("done", Some("Docs"), None));
         let out = job.node_id.unwrap();
         let hash = |s: &[u8]| Some(crate::util::sha256_hex(s));
-        assert_eq!(
-            listing(&env, &out).await,
-            [("Sub".into(), "folder".into(), None), ("a.txt".into(), "file".into(), hash(text.as_bytes()))]
-        );
+        assert_eq!(listing(&env, &out).await, [("Sub".into(), "folder".into(), None), ("a.txt".into(), "file".into(), hash(text.as_bytes()))]);
         let out_sub = id_of(&env, &out, "Sub").await;
         assert_eq!(listing(&env, &out_sub).await, [("Empty".into(), "folder".into(), None), ("b.txt".into(), "file".into(), hash(b"inside"))]);
         // Again: a numbered folder; one file gives "name.zip" without its own extension
@@ -651,14 +648,12 @@ mod tests {
         let bomb = fails(vec![("zeros.bin", vec![0u8; 20 * 1024 * 1024])], true, "bomb.zip").await;
         assert!(bomb.contains("grow far more"), "{bomb}");
         // Too many entries
-        let many: Vec<(&'static str, Vec<u8>)> =
-            (0..=MAX_EXTRACT_ENTRIES).map(|i| (&*Box::leak(format!("d{i}/").into_boxed_str()), Vec::new())).collect();
+        let many: Vec<(&'static str, Vec<u8>)> = (0..=MAX_EXTRACT_ENTRIES).map(|i| (&*Box::leak(format!("d{i}/").into_boxed_str()), Vec::new())).collect();
         assert!(fails(many, false, "many.zip").await.contains("more than 20000 items"));
         // Folders nested too deep, and more folders than items once the folders each path implies are counted
         let deep: &'static str = Box::leak(format!("{}x.txt", "a/".repeat(MAX_EXTRACT_DEPTH + 1)).into_boxed_str());
         assert!(fails(vec![(deep, b"x".to_vec())], false, "deep.zip").await.contains("folders deep"));
-        let implied: Vec<(&'static str, Vec<u8>)> =
-            (0..400).map(|i| (&*Box::leak(format!("e{i}/{}x.txt", "f/".repeat(59)).into_boxed_str()), Vec::new())).collect();
+        let implied: Vec<(&'static str, Vec<u8>)> = (0..400).map(|i| (&*Box::leak(format!("e{i}/{}x.txt", "f/".repeat(59)).into_boxed_str()), Vec::new())).collect();
         assert!(fails(implied, false, "implied.zip").await.contains("more than 20000 items"));
         // Not a ZIP at all
         let junk = env.stored_file(&amy, amy.root(), "junk.zip", b"this is not a zip").await;

@@ -190,7 +190,10 @@ function arrangeCategoryLabels(p: PlacedAxis, area: Rect) {
     // Vertical category axis (bar chart): labels laid out horizontally, truncated when too long
     const maxW = area.w * 0.4;
     if (!skip) skip = Math.max(1, Math.ceil((lh * 1.0) / Math.max(slot, 1)));
-    make(0, texts.map((t) => layoutBlock(plainLines(ellipsize(t, st, maxW), st))));
+    make(
+      0,
+      texts.map((t) => layoutBlock(plainLines(ellipsize(t, st, maxW), st))),
+    );
     p.labelThick = Math.max(0, ...p.tickLabels.map((l) => l.block.w));
     return;
   }
@@ -222,7 +225,10 @@ function arrangeCategoryLabels(p: PlacedAxis, area: Rect) {
   const need = Math.abs(angle) >= 89 ? lh : lh / Math.sin(rad || 1e-6);
   if (!skip) skip = Math.max(1, Math.ceil(need / Math.max(slot, 1) - 0.05));
   const maxLen = maxThick / Math.max(Math.sin(rad), 0.2);
-  make(angle, texts.map((t) => layoutBlock(plainLines(ellipsize(t, st, maxLen), st))));
+  make(
+    angle,
+    texts.map((t) => layoutBlock(plainLines(ellipsize(t, st, maxLen), st))),
+  );
   p.labelThick = Math.max(0, ...p.tickLabels.map((l) => rotatedSize(l.block.w, l.block.h, angle).h));
 }
 
@@ -403,7 +409,7 @@ export function drawAxes(frame: Frame, g: SVGElement) {
     const sign = side === "b" || side === "r" ? 1 : -1;
     const line = crossPos(frame, p);
     const lblLine = labelLine(frame, p);
-    const ticksAt: number[] = p.scale ? p.scale.ticks : Array.from({ length: (spec.between ? spec.count + 1 : spec.count) }, (_, i) => i);
+    const ticksAt: number[] = p.scale ? p.scale.ticks : Array.from({ length: spec.between ? spec.count + 1 : spec.count }, (_, i) => i);
     const minorAt: number[] = p.scale ? p.scale.minorTicks : [];
     const skipMarks = spec.markSkip && spec.markSkip > 1 ? spec.markSkip : 1;
 
@@ -448,7 +454,7 @@ export function drawAxes(frame: Frame, g: SVGElement) {
           v = sign > 0 ? "top" : "bottom";
         } else {
           // Rotated labels align the end (or start) of the text with the tick position
-          h = (rot < 0) === sign > 0 ? "end" : "start";
+          h = rot < 0 === sign > 0 ? "end" : "start";
           v = "middle";
         }
       } else {
@@ -475,8 +481,12 @@ export function drawAxes(frame: Frame, g: SVGElement) {
     if (spec.dispLabel) {
       // Display unit label placed at the max end of the axis
       const blk = spec.dispLabel;
-      if (spec.horizontal) g.append(drawBlock(blk, Math.max(p.a, p.b), outer + sign * (spec.title ? rotatedSize(spec.title.w, spec.title.h, spec.titleRot).h + GAP : 0), "end", sign > 0 ? "top" : "bottom"));
-      else g.append(drawBlock(blk, outer + (sign * blk.h) / 2 + sign * (spec.title ? rotatedSize(spec.title.w, spec.title.h, spec.titleRot).w + GAP : 0), Math.min(p.a, p.b), "end", "middle", -90));
+      if (spec.horizontal)
+        g.append(drawBlock(blk, Math.max(p.a, p.b), outer + sign * (spec.title ? rotatedSize(spec.title.w, spec.title.h, spec.titleRot).h + GAP : 0), "end", sign > 0 ? "top" : "bottom"));
+      else
+        g.append(
+          drawBlock(blk, outer + (sign * blk.h) / 2 + sign * (spec.title ? rotatedSize(spec.title.w, spec.title.h, spec.titleRot).w + GAP : 0), Math.min(p.a, p.b), "end", "middle", -90),
+        );
     }
     offsets[side] += p.labelThick + p.titleThick;
   }
@@ -511,4 +521,3 @@ function drawLevels(p: PlacedAxis, top: number, g: SVGElement) {
 export function levelsThickness(spec: AxisSpec) {
   return spec.levels.length * (lineHeight(spec.text) + GAP);
 }
-

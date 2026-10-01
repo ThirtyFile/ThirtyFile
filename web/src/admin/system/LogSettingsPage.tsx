@@ -89,26 +89,14 @@ export function LogSettingsPage() {
           <Section title={t("Current status")}>
             <dl className="grid grid-cols-2 sm:grid-cols-3">
               {[
-                [
-                  t("Activity log"),
-                  t("{n} entry|{n} entries", { n: d.activity.rows }),
-                  d.activity.oldest ? t("Oldest: {date}", { date: formatDate(d.activity.oldest) }) : "—",
-                ],
+                [t("Activity log"), t("{n} entry|{n} entries", { n: d.activity.rows }), d.activity.oldest ? t("Oldest: {date}", { date: formatDate(d.activity.oldest) }) : "—"],
                 [
                   t("Share link access"),
                   t("{n} entry|{n} entries", { n: d.share_access.rows }),
                   d.share_access.oldest ? t("Oldest: {date}", { date: formatDate(d.share_access.oldest) }) : "—",
                 ],
-                [
-                  t("Sign-in log"),
-                  t("{n} entry|{n} entries", { n: d.login_log.rows }),
-                  d.login_log.oldest ? t("Oldest: {date}", { date: formatDate(d.login_log.oldest) }) : "—",
-                ],
-                [
-                  t("Error log"),
-                  t("{n} entry|{n} entries", { n: d.error_log.rows }),
-                  d.error_log.oldest ? t("Oldest: {date}", { date: formatDate(d.error_log.oldest) }) : "—",
-                ],
+                [t("Sign-in log"), t("{n} entry|{n} entries", { n: d.login_log.rows }), d.login_log.oldest ? t("Oldest: {date}", { date: formatDate(d.login_log.oldest) }) : "—"],
+                [t("Error log"), t("{n} entry|{n} entries", { n: d.error_log.rows }), d.error_log.oldest ? t("Oldest: {date}", { date: formatDate(d.error_log.oldest) }) : "—"],
                 [t("Archives"), t("{n}", { n: d.archives.length }), formatBytes(d.archive_bytes)],
                 [t("Last cleanup"), d.last_run ? formatDate(d.last_run) : t("Not run yet"), t("Runs automatically every day")],
               ].map(([k, v, hint]) => (
@@ -158,10 +146,7 @@ export function LogSettingsPage() {
                       type="button"
                       aria-pressed={cur.archive === v}
                       onClick={() => set({ archive: v })}
-                      className={cn(
-                        "grid max-w-64 gap-0.5 rounded-lg border px-3 py-2 text-left",
-                        cur.archive === v ? "border-brand bg-brand/5" : "hover:bg-muted/60",
-                      )}
+                      className={cn("grid max-w-64 gap-0.5 rounded-lg border px-3 py-2 text-left", cur.archive === v ? "border-brand bg-brand/5" : "hover:bg-muted/60")}
                     >
                       <span className="text-[13px] font-medium">{label}</span>
                       <span className="text-xs text-muted-foreground">{hint}</span>
@@ -180,7 +165,9 @@ export function LogSettingsPage() {
               <div className="flex items-start gap-4">
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium">{t("Record share link visitors' IP address and browser")}</div>
-                  <p className="mt-1 text-xs text-muted-foreground">{t("Used to investigate unusual downloads; when off, only the time and event are recorded. Follow your company's privacy policy when deciding whether to turn this on.")}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("Used to investigate unusual downloads; when off, only the time and event are recorded. Follow your company's privacy policy when deciding whether to turn this on.")}
+                  </p>
                 </div>
                 <Toggle label={t("Record visitors' IP address and browser")} checked={cur.record_visitor} onChange={(v) => set({ record_visitor: v })} />
               </div>
@@ -211,11 +198,17 @@ export function LogSettingsPage() {
                   const vars = { activity: days(d.settings.activity_days), login: days(d.settings.login_days), share: days(d.settings.share_days) };
                   if (!d.settings.archive) return t("Current settings: activity log {activity}, sign-in log {login}, share access {share}. Older entries are deleted.", vars);
                   if (!d.settings.archive_keep_days)
-                    return t("Current settings: activity log {activity}, sign-in log {login}, share access {share}. Older entries are compressed and archived, and archives are kept forever.", vars);
-                  return t("Current settings: activity log {activity}, sign-in log {login}, share access {share}. Older entries are compressed and archived, and archives are kept for {n} day.|Current settings: activity log {activity}, sign-in log {login}, share access {share}. Older entries are compressed and archived, and archives are kept for {n} days.", {
-                    ...vars,
-                    n: d.settings.archive_keep_days,
-                  });
+                    return t(
+                      "Current settings: activity log {activity}, sign-in log {login}, share access {share}. Older entries are compressed and archived, and archives are kept forever.",
+                      vars,
+                    );
+                  return t(
+                    "Current settings: activity log {activity}, sign-in log {login}, share access {share}. Older entries are compressed and archived, and archives are kept for {n} day.|Current settings: activity log {activity}, sign-in log {login}, share access {share}. Older entries are compressed and archived, and archives are kept for {n} days.",
+                    {
+                      ...vars,
+                      n: d.settings.archive_keep_days,
+                    },
+                  );
                 })()}
               </p>
             </form>
@@ -269,12 +262,15 @@ export function LogSettingsPage() {
       {deleting && (
         <ConfirmDialog
           title={t("Delete this archive?")}
-          description={t("{kind} {from} – {to}, {n} entry. This can't be undone, so consider downloading it first.|{kind} {from} – {to}, {n} entries. This can't be undone, so consider downloading it first.", {
-            kind: KIND_LABEL[deleting.kind],
-            from: formatDate(deleting.from_at),
-            to: formatDate(deleting.to_at),
-            n: deleting.rows,
-          })}
+          description={t(
+            "{kind} {from} – {to}, {n} entry. This can't be undone, so consider downloading it first.|{kind} {from} – {to}, {n} entries. This can't be undone, so consider downloading it first.",
+            {
+              kind: KIND_LABEL[deleting.kind],
+              from: formatDate(deleting.from_at),
+              to: formatDate(deleting.to_at),
+              n: deleting.rows,
+            },
+          )}
           confirmText={t("Delete permanently")}
           destructive
           irreversible

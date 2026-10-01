@@ -55,15 +55,7 @@ export function LocationSelect({
   const current = locations.data?.find((l) => l.is_default);
   const blankLabel = blank === "default" ? (current ? t("Default location ({name})", { name: current.name }) : t("Default location")) : blank;
   return (
-    <NativeSelect
-      id={id}
-      aria-label={ariaLabel}
-      size="lg"
-      className={className}
-      value={value}
-      disabled={disabled || !locations.data}
-      onChange={(e) => onChange(e.target.value)}
-    >
+    <NativeSelect id={id} aria-label={ariaLabel} size="lg" className={className} value={value} disabled={disabled || !locations.data} onChange={(e) => onChange(e.target.value)}>
       {blankLabel && <option value="">{blankLabel}</option>}
       {/* A saved choice whose location is gone still shows, so the list doesn't silently change it */}
       {value && locations.data && !locations.data.some((l) => l.id === value) && <option value={value}>{value}</option>}

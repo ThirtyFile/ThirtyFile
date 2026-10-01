@@ -62,9 +62,7 @@ export function AccountMenu({ usage }: { usage: string | null }) {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger render={<button type="button" className="flex items-center gap-2 rounded px-1 py-1 text-left hover:bg-muted" />}>
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-brand text-[11px] font-medium text-brand-foreground uppercase">
-            {me.username.slice(0, 1)}
-          </span>
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-brand text-[11px] font-medium text-brand-foreground uppercase">{me.username.slice(0, 1)}</span>
           <span className="min-w-0 flex-1 truncate text-xs" title={me.display_name ? me.username : undefined}>
             {me.display_name || me.username}
           </span>
@@ -104,7 +102,9 @@ export function AccountMenu({ usage }: { usage: string | null }) {
           </DropdownMenuItem>
           {canToggle && (
             <DropdownMenuSub>
-              <DropdownMenuSubTrigger>{dark ? <MoonIcon /> : <SunIcon />} {t("Appearance")}</DropdownMenuSubTrigger>
+              <DropdownMenuSubTrigger>
+                {dark ? <MoonIcon /> : <SunIcon />} {t("Appearance")}
+              </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
                 <DropdownMenuRadioGroup value={mode} onValueChange={(v) => setMode(v as ThemeMode)}>
                   <DropdownMenuRadioItem value="system">{t("Use system setting")}</DropdownMenuRadioItem>
@@ -144,7 +144,7 @@ export function AccountMenu({ usage }: { usage: string | null }) {
       {showLogins && (
         <LoginLogDialog
           title={t("My sign-in history")}
-          description={t("If you see an IP address or device you don't recognize, sign it out under \"Devices\". If you sign in with a password, change it too.")}
+          description={t('If you see an IP address or device you don\'t recognize, sign it out under "Devices". If you sign in with a password, change it too.')}
           onClose={() => setShowLogins(false)}
         />
       )}

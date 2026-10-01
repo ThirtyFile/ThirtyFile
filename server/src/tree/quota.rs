@@ -34,28 +34,21 @@ pub async fn adjust_usage(conn: &mut SqliteConnection, drive_id: &str, delta: i6
 /// Recomputes every space's usage counter from the node table (startup and once a day, in case a counter drifted)
 pub async fn recompute_usage(st: &AppState) -> AppResult<()> {
     let _w = st.write_lock.lock().await;
-    sqlx::query("UPDATE drives SET used_bytes = (SELECT COALESCE(SUM(size), 0) FROM nodes WHERE drive_id = drives.id AND kind = 'file')")
-        .execute(&st.db)
-        .await?;
+    sqlx::query("UPDATE drives SET used_bytes = (SELECT COALESCE(SUM(size), 0) FROM nodes WHERE drive_id = drives.id AND kind = 'file')").execute(&st.db).await?;
     Ok(())
 }
 
 /// Space used in the user's personal space
 pub async fn used_bytes(db: &SqlitePool, user_id: i64) -> AppResult<i64> {
-    let (used,): (i64,) = sqlx::query_as("SELECT COALESCE(SUM(used_bytes), 0) FROM drives WHERE kind = 'personal' AND owner_id = ?")
-        .bind(user_id)
-        .fetch_one(db)
-        .await?;
+    let (used,): (i64,) =
+        sqlx::query_as("SELECT COALESCE(SUM(used_bytes), 0) FROM drives WHERE kind = 'personal' AND owner_id = ?").bind(user_id).fetch_one(db).await?;
     Ok(used)
 }
 
 /// Space quota (0 = unlimited): personal spaces use the owner account's quota
 pub async fn drive_quota(conn: &mut SqliteConnection, drive: &Drive) -> AppResult<i64> {
     if drive.kind == super::SpaceKind::Personal {
-        let (q,): (i64,) = sqlx::query_as("SELECT COALESCE((SELECT quota_bytes FROM users WHERE id = ?), 0)")
-            .bind(drive.owner_id)
-            .fetch_one(conn)
-            .await?;
+        let (q,): (i64,) = sqlx::query_as("SELECT COALESCE((SELECT quota_bytes FROM users WHERE id = ?), 0)").bind(drive.owner_id).fetch_one(conn).await?;
         return Ok(q);
     }
     Ok(drive.quota_bytes)
@@ -90,14 +83,12 @@ pub async fn room_left(conn: &mut SqliteConnection, drive_id: &str, upload: Opti
         return Ok(None);
     }
     let active_since = crate::util::now() + UPLOAD_TTL - 86400;
-    let (pending,): (i64,) = sqlx::query_as(
-        "SELECT COALESCE(SUM(size), 0) FROM uploads WHERE drive_id = ? AND node_id IS NULL AND expires_at > ? AND id IS NOT ?",
-    )
-    .bind(drive_id)
-    .bind(active_since)
-    .bind(upload)
-    .fetch_one(conn)
-    .await?;
+    let (pending,): (i64,) = sqlx::query_as("SELECT COALESCE(SUM(size), 0) FROM uploads WHERE drive_id = ? AND node_id IS NULL AND expires_at > ? AND id IS NOT ?")
+        .bind(drive_id)
+        .bind(active_since)
+        .bind(upload)
+        .fetch_one(conn)
+        .await?;
     Ok(Some((quota - drive.used_bytes - pending, drive)))
 }
 
@@ -132,5 +123,4 @@ mod tests {
         sqlx::query("UPDATE uploads SET expires_at = ? WHERE id = 'u1'").bind(ts + UPLOAD_TTL - 2 * 86400).execute(&mut *c).await.unwrap();
         assert!(check_quota(&mut c, &drive, 200).await.is_ok(), "an upload idle for two days no longer does");
     }
-
 }

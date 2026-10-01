@@ -15,7 +15,6 @@ import { copyAndSay, formatDate, formatDateTime } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 import { NativeSelect } from "@/components/ui/native-select";
 
-
 /** Expiry choices, in days (0 = never) */
 const EXPIRY = [30, 90, 365, 0];
 
@@ -93,31 +92,29 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
         <DialogHeader>
           <DialogTitle>{t("App passwords")}</DialogTitle>
           <DialogDescription>
-            {t("For scripts, backup tools and file clients, including accounts that sign in with Microsoft, Google or GitHub. They work for files only, not for your account settings, sharing or administration, and don't ask for a two-factor code.")}
+            {t(
+              "For scripts, backup tools and file clients, including accounts that sign in with Microsoft, Google or GitHub. They work for files only, not for your account settings, sharing or administration, and don't ask for a two-factor code.",
+            )}
           </DialogDescription>
         </DialogHeader>
 
         {created ? (
           <div className="grid gap-2 rounded-lg border border-brand/40 bg-brand/5 p-3">
-            <div className="text-sm font-medium">{t("App password \"{name}\" created", { name: created.name })}</div>
+            <div className="text-sm font-medium">{t('App password "{name}" created', { name: created.name })}</div>
             <p className="text-xs text-muted-foreground">{t("Copy it now. It won't be shown again.")}</p>
             <div className="flex gap-2">
               <Input readOnly value={created.token} className="font-mono text-xs" aria-label={t("App password")} onFocus={(e) => e.target.select()} />
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => copyAndSay(created.token)}
-                title={t("Copy")}
-                aria-label={t("Copy")}
-              >
+              <Button type="button" variant="outline" onClick={() => copyAndSay(created.token)} title={t("Copy")} aria-label={t("Copy")}>
                 <CopyIcon />
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              {t("Send it as the header \"Authorization: Bearer <app password>\", or sign in with the username {username} and the app password as the password.", { username: me.username })}
+              {t('Send it as the header "Authorization: Bearer <app password>", or sign in with the username {username} and the app password as the password.', { username: me.username })}
             </p>
             <p className="text-xs text-muted-foreground">
-              {t("To open your files as a drive in File Explorer, Finder or a phone's Files app, connect to {address} over WebDAV with this username and app password.", { address: davAddress(me.public_url) })}
+              {t("To open your files as a drive in File Explorer, Finder or a phone's Files app, connect to {address} over WebDAV with this username and app password.", {
+                address: davAddress(me.public_url),
+              })}
             </p>
             <div className="flex justify-end">
               <Button type="button" size="sm" variant="outline" onClick={() => setCreated(null)}>

@@ -139,17 +139,19 @@ pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Overvi
         }
     }
     let mut unneeded = Vec::new();
-    let locations: Vec<(String, String)> = sqlx::query_as("SELECT DISTINCT c.location_id, COALESCE(l.name, '') FROM replica_copies c LEFT JOIN storage_locations l ON l.id = c.location_id")
-        .fetch_all(&st.db)
-        .await?;
+    let locations: Vec<(String, String)> =
+        sqlx::query_as("SELECT DISTINCT c.location_id, COALESCE(l.name, '') FROM replica_copies c LEFT JOIN storage_locations l ON l.id = c.location_id")
+            .fetch_all(&st.db)
+            .await?;
     for (l, name) in locations {
         let extra = unneeded_on(&st, &l).await?;
         if !extra.is_empty() {
-            let (bytes,): (i64,) = sqlx::query_as("SELECT COALESCE(SUM(size), 0) FROM replica_copies WHERE location_id = ?1 AND hash IN (SELECT value FROM json_each(?2))")
-                .bind(&l)
-                .bind(serde_json::to_string(&extra).unwrap())
-                .fetch_one(&st.db)
-                .await?;
+            let (bytes,): (i64,) =
+                sqlx::query_as("SELECT COALESCE(SUM(size), 0) FROM replica_copies WHERE location_id = ?1 AND hash IN (SELECT value FROM json_each(?2))")
+                    .bind(&l)
+                    .bind(serde_json::to_string(&extra).unwrap())
+                    .fetch_one(&st.db)
+                    .await?;
             unneeded.push((l, name, extra.len() as i64, bytes));
         }
     }
@@ -405,7 +407,8 @@ fn pause_running(st: &AppState, policy: &str) {
     let policy = policy.to_string();
     tokio::spawn(async move {
         for (id, ctl) in running {
-            let mine: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM replica_jobs WHERE id = ? AND policy_id = ?").bind(&id).bind(&policy).fetch_optional(&st.db).await.unwrap_or(None);
+            let mine: Option<(i64,)> =
+                sqlx::query_as("SELECT 1 FROM replica_jobs WHERE id = ? AND policy_id = ?").bind(&id).bind(&policy).fetch_optional(&st.db).await.unwrap_or(None);
             if mine.is_some() {
                 ctl.pause.store(true, Ordering::SeqCst);
             }
@@ -451,7 +454,8 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let res = async {
-        let running: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM replica_jobs WHERE policy_id = ? AND state = 'running'").bind(&id).fetch_optional(&mut *tx).await?;
+        let running: Option<(i64,)> =
+            sqlx::query_as("SELECT 1 FROM replica_jobs WHERE policy_id = ? AND state = 'running'").bind(&id).fetch_optional(&mut *tx).await?;
         if running.is_some() {
             return Err(AppError::conflict("A job of this policy is running: it stops after the item it is copying. Try again in a moment."));
         }
@@ -509,10 +513,8 @@ async fn unneeded_on(st: &AppState, location: &str) -> AppResult<Vec<String>> {
         .map(|(d, _)| d)
         .collect();
     if !offline.is_empty() {
-        let rows: Vec<(String,)> = sqlx::query_as(sqlx::AssertSqlSafe(super::folders::current_hashes(Some("?1"))))
-            .bind(serde_json::to_string(&offline).unwrap())
-            .fetch_all(&st.db)
-            .await?;
+        let rows: Vec<(String,)> =
+            sqlx::query_as(sqlx::AssertSqlSafe(super::folders::current_hashes(Some("?1")))).bind(serde_json::to_string(&offline).unwrap()).fetch_all(&st.db).await?;
         wanted.extend(rows.into_iter().map(|(h,)| h));
     }
     let held: Vec<(String,)> = sqlx::query_as("SELECT hash FROM replica_copies WHERE location_id = ?").bind(location).fetch_all(&st.db).await?;
@@ -691,7 +693,9 @@ async fn preflight(st: &AppState, policy: &Policy, target: &str) -> AppResult<Pr
     } else if busy {
         Some("A space is being moved to or from these locations. Wait until the move finishes, or cancel it.".to_string())
     } else if missing > 0 && source_reachable {
-        Some(format!("{missing} contents aren't on {target_name} yet. Sync it first; a target that is behind is promoted only while {source_name} can't be reached."))
+        Some(format!(
+            "{missing} contents aren't on {target_name} yet. Sync it first; a target that is behind is promoted only while {source_name} can't be reached."
+        ))
     } else if moved == 0 && missing == 0 && affected.is_empty() {
         Some("There is nothing to promote".to_string())
     } else {
@@ -759,7 +763,8 @@ pub async fn promote(State(st): State<AppState>, Admin(user): Admin, Path(id): P
         let mut tx = crate::db::begin_write(&st.db).await?;
         let res = async {
             // The same epoch as the check: nothing promoted it meanwhile
-            let (epoch, source): (i64, String) = sqlx::query_as("SELECT epoch, source_location FROM replica_policies WHERE id = ?").bind(&id).fetch_one(&mut *tx).await?;
+            let (epoch, source): (i64, String) =
+                sqlx::query_as("SELECT epoch, source_location FROM replica_policies WHERE id = ?").bind(&id).fetch_one(&mut *tx).await?;
             if epoch != p.epoch || source != p.source_location {
                 return Err(AppError::conflict("The replicas were promoted meanwhile"));
             }
@@ -791,12 +796,11 @@ pub async fn promote(State(st): State<AppState>, Admin(user): Admin, Path(id): P
             .bind(now())
             .execute(&mut *tx)
             .await?;
-            let (missing,): (i64,) =
-                sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM blobs WHERE location_id = ?2 AND hash IN ({SCOPE_HASHES})")))
-                    .bind(&list)
-                    .bind(&source)
-                    .fetch_one(&mut *tx)
-                    .await?;
+            let (missing,): (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM blobs WHERE location_id = ?2 AND hash IN ({SCOPE_HASHES})")))
+                .bind(&list)
+                .bind(&source)
+                .fetch_one(&mut *tx)
+                .await?;
             // New files of the spaces go to the new location
             sqlx::query("UPDATE drives SET location_id = ?1 WHERE id IN (SELECT value FROM json_each(?2))").bind(&target).bind(&list).execute(&mut *tx).await?;
             // Folder spaces wholly there become content-store spaces there; the others stay where they are
@@ -813,7 +817,12 @@ pub async fn promote(State(st): State<AppState>, Admin(user): Admin, Path(id): P
             let missing = missing + staying;
             // The policy: its location, a new epoch (jobs asked for before are refused), the old location as a target
             // checked before it counts
-            sqlx::query("UPDATE replica_policies SET source_location = ?, epoch = epoch + 1, updated_at = ? WHERE id = ?").bind(&target).bind(now()).bind(&id).execute(&mut *tx).await?;
+            sqlx::query("UPDATE replica_policies SET source_location = ?, epoch = epoch + 1, updated_at = ? WHERE id = ?")
+                .bind(&target)
+                .bind(now())
+                .bind(&id)
+                .execute(&mut *tx)
+                .await?;
             sqlx::query("DELETE FROM replica_targets WHERE policy_id = ? AND location_id = ?").bind(&id).bind(&target).execute(&mut *tx).await?;
             sqlx::query(
                 "INSERT INTO replica_targets (policy_id, location_id, priority, mode, state)
@@ -826,11 +835,13 @@ pub async fn promote(State(st): State<AppState>, Admin(user): Admin, Path(id): P
             .await?;
             sqlx::query("DELETE FROM replica_captured WHERE policy_id = ?").bind(&id).execute(&mut *tx).await?;
             sqlx::query("DELETE FROM replica_dirty WHERE policy_id = ?").bind(&id).execute(&mut *tx).await?;
-            sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE replica_jobs SET state = 'cancelled', finished_at = ? WHERE policy_id = ? AND state IN {ACTIVE} AND state != 'running'")))
-                .bind(now())
-                .bind(&id)
-                .execute(&mut *tx)
-                .await?;
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE replica_jobs SET state = 'cancelled', finished_at = ? WHERE policy_id = ? AND state IN {ACTIVE} AND state != 'running'"
+            )))
+            .bind(now())
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
             let detail = format!(
                 "{}: {} → {} ({} moved{})",
                 p.name,

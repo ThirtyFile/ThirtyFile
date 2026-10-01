@@ -118,7 +118,11 @@ async function renderDrawings({ sheet, cols, rows, frozen }: DrawingsMessage, ge
   root.replaceChildren(layer);
   for (const item of await readDrawings(pkg, sheet)) {
     if (gen !== generation || xlsx?.pkg !== pkg) return;
-    const box = anchorBox(item.anchor, (c) => at(cols, c), (r) => at(rows, r));
+    const box = anchorBox(
+      item.anchor,
+      (c) => at(cols, c),
+      (r) => at(rows, r),
+    );
     const el = await renderItem(item, box, { pkg, theme, colors: { theme } }).catch(() => null);
     // A newer render or a new workbook replaced this one meanwhile
     if (gen !== generation || xlsx?.pkg !== pkg) return;

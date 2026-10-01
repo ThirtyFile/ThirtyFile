@@ -53,8 +53,17 @@ const METHOD_LABEL: Record<string, string> = {
 };
 
 const EVENT_GROUPS = [
-  { label: t("Sign-ins"), options: ["login", "logout", "password_change", "password_reset_requested", "password_reset", "device_signout", "signout_others", "admin_signout"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
-  { label: t("Failed"), options: ["bad_password", "unknown_user", "disabled", "locked", "sso_denied", "app_password_failed", "2fa_failed"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
+  {
+    label: t("Sign-ins"),
+    options: ["login", "logout", "password_change", "password_reset_requested", "password_reset", "device_signout", "signout_others", "admin_signout"].map((v) => ({
+      value: v,
+      label: LOGIN_EVENTS[v].label,
+    })),
+  },
+  {
+    label: t("Failed"),
+    options: ["bad_password", "unknown_user", "disabled", "locked", "sso_denied", "app_password_failed", "2fa_failed"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })),
+  },
   { label: t("External accounts"), options: ["sso_provisioned", "sso_link", "sso_unlink"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
   {
     label: t("Two-factor sign-in"),
@@ -175,9 +184,7 @@ export function LoginLog({ userId, admin, className }: { userId?: number; admin?
           </div>
         )}
       </div>
-      <div className="border-t px-3 py-1.5 text-[11px] text-muted-foreground">
-        {shownCount(rows.length, !!list.hasNextPage, filtered)}
-      </div>
+      <div className="border-t px-3 py-1.5 text-[11px] text-muted-foreground">{shownCount(rows.length, !!list.hasNextPage, filtered)}</div>
     </div>
   );
 }

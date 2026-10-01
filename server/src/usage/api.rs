@@ -129,13 +129,12 @@ struct TimedOps {
 
 /// The last hour's operations by location: the rows written, and what is counted since the last of them
 async fn recent(st: &AppState, now: i64) -> AppResult<Windows> {
-    let rows: Vec<KeyedOps> = sqlx::query_as(
-        "SELECT location_id, op, work, count, errors, timeouts, bytes, total_us, max_us, hist FROM usage_ops WHERE span = ? AND at >= ?",
-    )
-    .bind(OPS_SPAN)
-    .bind(now - RECENT)
-    .fetch_all(&st.db)
-    .await?;
+    let rows: Vec<KeyedOps> =
+        sqlx::query_as("SELECT location_id, op, work, count, errors, timeouts, bytes, total_us, max_us, hist FROM usage_ops WHERE span = ? AND at >= ?")
+            .bind(OPS_SPAN)
+            .bind(now - RECENT)
+            .fetch_all(&st.db)
+            .await?;
     let mut all = st.usage.snapshot();
     for r in rows {
         let (Some(op), Some(work)) = (Op::parse(&r.op), Work::parse(&r.work)) else { continue };
@@ -265,8 +264,7 @@ pub async fn build_overview(st: &AppState, now: i64) -> AppResult<Overview> {
         });
     }
     // Locations on the same disk name each other
-    let disks: Vec<(String, Option<String>)> =
-        locations.iter().map(|l| (l.id.clone(), l.capacity.as_ref().and_then(|c| c.capacity.disk_id.clone()))).collect();
+    let disks: Vec<(String, Option<String>)> = locations.iter().map(|l| (l.id.clone(), l.capacity.as_ref().and_then(|c| c.capacity.disk_id.clone()))).collect();
     for l in &mut locations {
         let mine = l.capacity.as_ref().and_then(|c| c.capacity.disk_id.clone());
         l.same_disk_as = disks.iter().filter(|(id, d)| *id != l.id && mine.is_some() && *d == mine).map(|(id, _)| id.clone()).collect();
@@ -275,9 +273,8 @@ pub async fn build_overview(st: &AppState, now: i64) -> AppResult<Overview> {
     let unplaced = recent.remove("").map(|per| summaries(&per)).unwrap_or_default();
 
     let mut queue = Queue::default();
-    let moves: Vec<(String, i64)> = sqlx::query_as("SELECT state, COUNT(*) FROM space_moves WHERE state IN ('queued', 'running', 'paused') GROUP BY state")
-        .fetch_all(&st.db)
-        .await?;
+    let moves: Vec<(String, i64)> =
+        sqlx::query_as("SELECT state, COUNT(*) FROM space_moves WHERE state IN ('queued', 'running', 'paused') GROUP BY state").fetch_all(&st.db).await?;
     for (state, n) in moves {
         match state.as_str() {
             "queued" => queue.moves_queued = n,
@@ -317,7 +314,8 @@ fn alerts(t: &Thresholds, locations: &[LocationUsage], total: Option<&Sampled>) 
             disk(&l.id, c, &mut out);
         }
         // Failures of what people and background work did: health checks of an offline location are already said above
-        let (count, failed) = l.recent.iter().filter(|s| s.work != Work::Probe.as_str()).fold((0, 0), |(n, f), s| (n + s.figures.count, f + s.figures.errors + s.figures.timeouts));
+        let (count, failed) =
+            l.recent.iter().filter(|s| s.work != Work::Probe.as_str()).fold((0, 0), |(n, f), s| (n + s.figures.count, f + s.figures.errors + s.figures.timeouts));
         let rate = if count > 0 { failed as f64 * 100.0 / count as f64 } else { 0.0 };
         if t.error_percent > 0.0 && count >= MIN_OPS_FOR_ALERT && rate >= t.error_percent {
             out.push(Alert { kind: "errors", location: l.id.clone(), value: rate, threshold: t.error_percent });

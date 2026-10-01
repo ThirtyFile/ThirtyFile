@@ -35,8 +35,7 @@ export function notificationText(n: AppNotification): { title: string; detail: s
   switch (n.kind) {
     case "shared": {
       const by = d.by || t("Someone");
-      const title =
-        d.item === "space" ? t("{by} added you to the space “{name}”", { by, name }) : t("{by} shared “{name}” with you", { by, name });
+      const title = d.item === "space" ? t("{by} added you to the space “{name}”", { by, name }) : t("{by} shared “{name}” with you", { by, name });
       const detail = ends ? t("Role: {role} · Until {time}", { role, time: ends }) : t("Role: {role}", { role });
       return { title, detail };
     }

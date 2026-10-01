@@ -12,7 +12,7 @@ Security problems are reported privately: see the [security policy](SECURITY.md)
 
 1. For anything larger than a small fix, agree on the idea in an issue first.
 2. Create a branch from `main`: `feat/…`, `fix/…`, `docs/…` or `chore/…`.
-3. Run the checks, the same ones that run on GitHub:
+3. Format the code (`cd server && cargo fmt`, `cd web && pnpm format`) and run the checks, the same ones that run on GitHub:
    ```bash
    scripts/check.sh
    ```

@@ -101,12 +101,9 @@ export function useGridMouse(ctx: WorkspaceCtx) {
     if (e.button === 2) {
       setMenuTarget(hit.area === "row" ? "row" : hit.area === "col" ? "col" : "cell");
       if (editing) commitEdit(null);
-      if (hit.area === "cell" && !(hit.r >= range.r1 && hit.r <= range.r2 && hit.c >= range.c1 && hit.c <= range.c2))
-        setSel({ anchor: [hit.r, hit.c], focus: [hit.r, hit.c] }, false);
-      else if (hit.area === "row" && !(wholeRows && hit.r >= range.r1 && hit.r <= range.r2))
-        setSel({ anchor: [hit.r, 0], focus: [hit.r, MAX_COLS - 1] }, false);
-      else if (hit.area === "col" && !(wholeCols && hit.c >= range.c1 && hit.c <= range.c2))
-        setSel({ anchor: [0, hit.c], focus: [MAX_ROWS - 1, hit.c] }, false);
+      if (hit.area === "cell" && !(hit.r >= range.r1 && hit.r <= range.r2 && hit.c >= range.c1 && hit.c <= range.c2)) setSel({ anchor: [hit.r, hit.c], focus: [hit.r, hit.c] }, false);
+      else if (hit.area === "row" && !(wholeRows && hit.r >= range.r1 && hit.r <= range.r2)) setSel({ anchor: [hit.r, 0], focus: [hit.r, MAX_COLS - 1] }, false);
+      else if (hit.area === "col" && !(wholeCols && hit.c >= range.c1 && hit.c <= range.c2)) setSel({ anchor: [0, hit.c], focus: [MAX_ROWS - 1, hit.c] }, false);
       return;
     }
     if (e.button !== 0) return;
@@ -191,9 +188,7 @@ export function useGridMouse(ctx: WorkspaceCtx) {
         insertRef(ref, d.refStart);
         return;
       }
-      setSelState((s) =>
-        d.kind === "col" ? { ...s, focus: [MAX_ROWS - 1, c] } : d.kind === "row" ? { ...s, focus: [r, MAX_COLS - 1] } : { ...s, focus: [r, c] },
-      );
+      setSelState((s) => (d.kind === "col" ? { ...s, focus: [MAX_ROWS - 1, c] } : d.kind === "row" ? { ...s, focus: [r, MAX_COLS - 1] } : { ...s, focus: [r, c] }));
     };
     const up = () => {
       const d = drag.current;

@@ -139,7 +139,13 @@ function truthy(v: Value) {
 
 function mix(a: string, b: string, t: number) {
   const ch = (h: string, i: number) => parseInt(h.slice(i, i + 2), 16);
-  return `#${[1, 3, 5].map((i) => Math.round(ch(a, i) + (ch(b, i) - ch(a, i)) * t).toString(16).padStart(2, "0")).join("")}`;
+  return `#${[1, 3, 5]
+    .map((i) =>
+      Math.round(ch(a, i) + (ch(b, i) - ch(a, i)) * t)
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
 }
 
 /** Percentile (linear interpolation, same as Excel PERCENTILE) */
@@ -337,7 +343,7 @@ export function computeConditional(input: ConditionalInput): Map<number, CellDec
           if (!isBlank(v)) count.set(textOf(v), (count.get(textOf(v)) ?? 0) + 1);
         }
         const dup = type === "duplicateValues";
-        matched((v) => !isBlank(v) && ((count.get(textOf(v)) ?? 0) > 1) === dup);
+        matched((v) => !isBlank(v) && (count.get(textOf(v)) ?? 0) > 1 === dup);
         break;
       }
       case "containsText":

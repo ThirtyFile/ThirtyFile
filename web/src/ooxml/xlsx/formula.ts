@@ -678,11 +678,7 @@ function rangeArg(n: Node | undefined, ctx: EvalContext): RangeRef | FormulaErro
  * Only the populated area (used ranges of each criteria range and the sum range) is visited; cells outside are all blank,
  * and if every criterion matches blanks they are only counted (extra), so whole-column/row ranges are never scanned cell by cell.
  */
-function matchAll(
-  args: Node[],
-  ctx: EvalContext,
-  target?: RangeRef,
-): { base: RangeRef; hits: [number, number][]; extra: number } | FormulaError {
+function matchAll(args: Node[], ctx: EvalContext, target?: RangeRef): { base: RangeRef; hits: [number, number][]; extra: number } | FormulaError {
   const pairs: [RangeRef, (v: Value) => boolean][] = [];
   for (let i = 0; i + 1 < args.length; i += 2) {
     const g = rangeArg(args[i], ctx);

@@ -21,8 +21,7 @@ export function useReplicas(interval: number) {
 }
 
 /** The job of a policy's target that isn't over, if any (the newest) */
-export const targetJob = (p: ReplicaPolicy, location: string, jobs: ReplicaJob[]) =>
-  jobs.find((j) => j.policy_id === p.id && j.location_id === location && replicaJobActive(j)) ?? null;
+export const targetJob = (p: ReplicaPolicy, location: string, jobs: ReplicaJob[]) => jobs.find((j) => j.policy_id === p.id && j.location_id === location && replicaJobActive(j)) ?? null;
 
 export const REPLICA_STATE_LABEL: Record<ReplicaTargetState, string> = {
   current: t("Current"),

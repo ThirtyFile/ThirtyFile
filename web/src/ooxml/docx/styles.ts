@@ -225,7 +225,14 @@ export interface ParaProps {
 export const emptyPara = (): ParaProps => ({ ind: {}, spacing: {}, borders: {}, tabs: [] });
 
 const SIDE_ALIAS: Record<string, "top" | "bottom" | "left" | "right" | "between" | "bar"> = {
-  top: "top", bottom: "bottom", left: "left", start: "left", right: "right", end: "right", between: "between", bar: "bar",
+  top: "top",
+  bottom: "bottom",
+  left: "left",
+  start: "left",
+  right: "right",
+  end: "right",
+  between: "between",
+  bar: "bar",
 };
 
 export function applyPPr(target: ParaProps, pPr: Element | null | undefined, fromStyle: boolean) {
@@ -519,14 +526,14 @@ export class Styles {
     const chain = this.chain(id);
     const out: Element[] = [];
     for (const s of chain) if (s.pPr) out.push(s.pPr);
-    for (const c of conds) for (const s of chain) {
-      const p = s.cond.get(c)?.pPr;
-      if (p) out.push(p);
-    }
+    for (const c of conds)
+      for (const s of chain) {
+        const p = s.cond.get(c)?.pPr;
+        if (p) out.push(p);
+      }
     return out;
   }
 }
 
 /** Font size when unset (half-points): Word's default is 10pt */
 export const DEFAULT_SZ = 20;
-

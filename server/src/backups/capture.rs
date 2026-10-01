@@ -200,12 +200,11 @@ struct FolderSpace {
 /// Reads the files of the folder spaces that changed since the set last read them
 async fn read_folder_spaces(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, p: &Params) -> AppResult<Option<Stop>> {
     let st = cx.st;
-    let spaces: Vec<FolderSpace> = sqlx::query_as(
-        "SELECT id, source_path, read_only, moving FROM drives WHERE mode = 'folder' AND id IN (SELECT value FROM json_each(?)) ORDER BY id",
-    )
-    .bind(serde_json::to_string(&p.spaces).unwrap())
-    .fetch_all(&st.db)
-    .await?;
+    let spaces: Vec<FolderSpace> =
+        sqlx::query_as("SELECT id, source_path, read_only, moving FROM drives WHERE mode = 'folder' AND id IN (SELECT value FROM json_each(?)) ORDER BY id")
+            .bind(serde_json::to_string(&p.spaces).unwrap())
+            .fetch_all(&st.db)
+            .await?;
     for space in spaces {
         // Changes made by other programs, so the index is what the folder holds now
         let report = crate::folders::scan(st, &space.id).await?;
@@ -556,12 +555,10 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params) -> 
     .await?;
     m.cutoff = now();
     // The changes this view holds, for backups made after changes (policy.rs)
-    let seqs: Vec<(String, i64)> = sqlx::query_as(
-        "SELECT d.value, COALESCE((SELECT seq FROM space_changes WHERE drive_id = d.value), 0) FROM json_each(?) d",
-    )
-    .bind(serde_json::to_string(&p.spaces).unwrap())
-    .fetch_all(&mut *tx)
-    .await?;
+    let seqs: Vec<(String, i64)> = sqlx::query_as("SELECT d.value, COALESCE((SELECT seq FROM space_changes WHERE drive_id = d.value), 0) FROM json_each(?) d")
+        .bind(serde_json::to_string(&p.spaces).unwrap())
+        .fetch_all(&mut *tx)
+        .await?;
     m.changes = seqs.into_iter().collect();
     w.line(&Line::Header {
         format: layout::FORMAT,
@@ -596,21 +593,24 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params) -> 
             files: 0,
             bytes: 0,
         };
-        let folders: Vec<FolderRow> =
-            sqlx::query_as("SELECT id, parent_id, name, updated_at, trashed_at FROM nodes WHERE drive_id = ? AND kind = 'folder'")
-                .bind(&s.id)
-                .fetch_all(&mut *tx)
-                .await?;
+        let folders: Vec<FolderRow> = sqlx::query_as("SELECT id, parent_id, name, updated_at, trashed_at FROM nodes WHERE drive_id = ? AND kind = 'folder'")
+            .bind(&s.id)
+            .fetch_all(&mut *tx)
+            .await?;
         let placed = places(&s.root_id, &folders);
-        let mut listed: Vec<(&String, &Place, i64)> = folders
-            .iter()
-            .filter_map(|f| placed.get(&f.0).map(|pl| (&f.0, pl, f.3)))
-            .filter(|(_, pl, _)| p.trash || pl.trashed.is_none())
-            .collect();
+        let mut listed: Vec<(&String, &Place, i64)> =
+            folders.iter().filter_map(|f| placed.get(&f.0).map(|pl| (&f.0, pl, f.3))).filter(|(_, pl, _)| p.trash || pl.trashed.is_none()).collect();
         listed.sort_by(|a, b| a.1.path.cmp(&b.1.path));
         let root_modified: Option<(i64,)> = sqlx::query_as("SELECT updated_at FROM nodes WHERE id = ?").bind(&s.root_id).fetch_optional(&mut *tx).await?;
-        w.line(&Line::Folder { space: s.id.clone(), id: s.root_id.clone(), parent: None, path: String::new(), modified: root_modified.map_or(0, |r| r.0), trashed: None })
-            .await?;
+        w.line(&Line::Folder {
+            space: s.id.clone(),
+            id: s.root_id.clone(),
+            parent: None,
+            path: String::new(),
+            modified: root_modified.map_or(0, |r| r.0),
+            trashed: None,
+        })
+        .await?;
         let parent_of: HashMap<&str, Option<&str>> = folders.iter().map(|f| (f.0.as_str(), f.1.as_deref())).collect();
         for (id, pl, modified) in &listed {
             if **id == s.root_id {
@@ -780,10 +780,8 @@ enum Copied {
 /// could be kept
 async fn copy_pinned(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>) -> AppResult<(Option<Stop>, i64)> {
     let st = cx.st;
-    let (n, bytes): (i64, i64) = sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM backup_pending WHERE job_id = ?")
-        .bind(&cx.job.id)
-        .fetch_one(&st.db)
-        .await?;
+    let (n, bytes): (i64, i64) =
+        sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM backup_pending WHERE job_id = ?").bind(&cx.job.id).fetch_one(&st.db).await?;
     cx.set_left(n, bytes);
     let mut last = String::new();
     let mut vanished = 0;
@@ -828,7 +826,12 @@ async fn copy_content(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, hash: &st
                 continue;
             }
         };
-        let fetched = cx.tries(|e: &std::io::Error| e.kind() != std::io::ErrorKind::NotFound && !(crate::hashing::unusable_kind(e) == Some(crate::hashing::Unusable::Damaged)), || fetch_verified(&src, hash, size, &tmp)).await;
+        let fetched = cx
+            .tries(
+                |e: &std::io::Error| e.kind() != std::io::ErrorKind::NotFound && !(crate::hashing::unusable_kind(e) == Some(crate::hashing::Unusable::Damaged)),
+                || fetch_verified(&src, hash, size, &tmp),
+            )
+            .await;
         match fetched {
             Ok(()) => {
                 let stored = put_object(cx, set, dst, hash, size, &tmp).await;
@@ -868,7 +871,11 @@ async fn copy_content(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, hash: &st
         .fetch_optional(&st.db)
         .await?;
         let (name, space) = named.map_or((None, String::new()), |(n, d)| (Some(n), d.unwrap_or_default()));
-        let why = if crate::hashing::unusable_kind(&e) == Some(crate::hashing::Unusable::Damaged) { "The content is damaged where it is kept" } else { "The content isn't where it is kept" };
+        let why = if crate::hashing::unusable_kind(&e) == Some(crate::hashing::Unusable::Damaged) {
+            "The content is damaged where it is kept"
+        } else {
+            "The content isn't where it is kept"
+        };
         cx.failed(&space, name, why.to_string());
         return Ok(Copied::Done);
     }

@@ -12,13 +12,11 @@ export const usersApi = {
     post<UserRow>("/admin/users", req),
   updateUser: (id: number, req: Partial<UserRow> & { password?: string }) => request<UserRow>("PATCH", enc`/admin/users/${id}`, req),
   /** Deletes a user: their personal space's files are moved to another space (move_to, a space id) or deleted (delete_files) */
-  deleteUser: (id: number, files: { move_to?: string; delete_files?: boolean } = {}) =>
-    request<Job>("DELETE", enc`/admin/users/${id}` + qs(toParams(files))),
+  deleteUser: (id: number, files: { move_to?: string; delete_files?: boolean } = {}) => request<Job>("DELETE", enc`/admin/users/${id}` + qs(toParams(files))),
   /** Gives a user a personal space on a storage location (the system setting's when left out) */
   addPersonalSpace: (id: number, location_id?: string) => post<UserRow>(enc`/admin/users/${id}/personal-space`, { location_id }),
   /** Removes a user's personal space: its files are moved to another space (move_to) or deleted (delete_files) */
-  removePersonalSpace: (id: number, files: { move_to?: string; delete_files?: boolean }) =>
-    request<Job>("DELETE", enc`/admin/users/${id}/personal-space` + qs(toParams(files))),
+  removePersonalSpace: (id: number, files: { move_to?: string; delete_files?: boolean }) => request<Job>("DELETE", enc`/admin/users/${id}/personal-space` + qs(toParams(files))),
   groups: () => get<Group[]>("/admin/groups"),
   createGroup: (req: { name: string; description?: string; members?: number[] }) => post<{ id: number }>("/admin/groups", req),
   updateGroup: (id: number, req: { name?: string; description?: string; members?: number[] }) => request("PATCH", enc`/admin/groups/${id}`, req),

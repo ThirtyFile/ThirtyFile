@@ -51,10 +51,8 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
     let (st, job) = (cx.st, cx.job);
     let dst = st.storage(&job.to_location)?;
     // What an earlier run copied, and what is left
-    let (files_done, bytes_done): (i64, i64) = sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM space_move_items WHERE move_id = ?")
-        .bind(&job.id)
-        .fetch_one(&st.db)
-        .await?;
+    let (files_done, bytes_done): (i64, i64) =
+        sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM space_move_items WHERE move_id = ?").bind(&job.id).fetch_one(&st.db).await?;
     let (files, bytes) = left(st, job).await?;
     cx.set_counts(files_done, bytes_done, files_done + files, bytes_done + bytes);
     cx.flush().await?;

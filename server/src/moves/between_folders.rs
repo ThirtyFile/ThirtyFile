@@ -72,10 +72,7 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
     let dest = Pinned::root(&target).map_err(|_| not_mounted())?;
     let ignores_case = ignores_case(&dest).await?;
     let (files_done, bytes_done): (i64, i64) =
-        sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM space_move_items WHERE move_id = ? AND kind = 'path'")
-            .bind(&job.id)
-            .fetch_one(&st.db)
-            .await?;
+        sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM space_move_items WHERE move_id = ? AND kind = 'path'").bind(&job.id).fetch_one(&st.db).await?;
     // What the index has: files of the space (the trash included) and their versions
     let (files, bytes): (i64, i64) = sqlx::query_as(
         "SELECT (SELECT COUNT(*) FROM nodes WHERE drive_id = ?1 AND kind = 'file') + (SELECT COUNT(*) FROM node_versions WHERE drive_id = ?1),
@@ -239,8 +236,7 @@ pub(super) async fn find_folder(drive_id: &str, from: &Path, to: &Path) -> AppRe
 /// and the move goes on as usual (false)
 async fn resume_rename(cx: &Ctx<'_>, from: &Path) -> AppResult<bool> {
     let (st, job) = (cx.st, cx.job);
-    let (to, renamed): (Option<String>, bool) =
-        sqlx::query_as("SELECT to_path, renamed FROM space_moves WHERE id = ?").bind(&job.id).fetch_one(&st.db).await?;
+    let (to, renamed): (Option<String>, bool) = sqlx::query_as("SELECT to_path, renamed FROM space_moves WHERE id = ?").bind(&job.id).fetch_one(&st.db).await?;
     let (Some(to), true) = (to, renamed) else { return Ok(false) };
     let to = PathBuf::from(to);
     let held = crate::folders::hold(st, &job.drive_id).await;
@@ -316,11 +312,8 @@ async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, ignores_case: bo
             .map_err(disk_error)?
         };
         // What was copied of this folder: its files, and the folders made in it (`FOLDER`)
-        let copied: std::collections::HashMap<String, (Option<i64>, i64, Option<i64>)> = in_folder(st, job, &dir, "path")
-            .await?
-            .into_iter()
-            .map(|(p, ino, size, mtime)| (p, (ino, size, mtime)))
-            .collect();
+        let copied: std::collections::HashMap<String, (Option<i64>, i64, Option<i64>)> =
+            in_folder(st, job, &dir, "path").await?.into_iter().map(|(p, ino, size, mtime)| (p, (ino, size, mtime))).collect();
         let made: HashSet<String> = in_folder(st, job, &dir, FOLDER).await?.into_iter().map(|(p, ..)| p).collect();
         let mut found: HashSet<String> = HashSet::new();
         let clashing = if ignores_case { case_clashes(entries.iter().map(|(name, _)| name.as_str())) } else { HashSet::new() };
@@ -428,15 +421,14 @@ async fn forget_copy(st: &crate::state::AppState, job: &super::Job, dest: &Pinne
 /// Removes a folder made in the new folder for one that is no longer there: the copies in it, the folders made in it
 /// (deepest first), then itself, when nothing else is in it
 async fn forget_folder(st: &crate::state::AppState, job: &super::Job, dest: &Pinned, rel: &str) -> AppResult<()> {
-    let below: Vec<(String, String)> = sqlx::query_as(
-        "SELECT item_id, kind FROM space_move_items WHERE move_id = ?1 AND item_id >= ?2 AND item_id < ?3 AND kind IN ('path', ?4)",
-    )
-    .bind(&job.id)
-    .bind(format!("{rel}/"))
-    .bind(format!("{rel}0"))
-    .bind(FOLDER)
-    .fetch_all(&st.db)
-    .await?;
+    let below: Vec<(String, String)> =
+        sqlx::query_as("SELECT item_id, kind FROM space_move_items WHERE move_id = ?1 AND item_id >= ?2 AND item_id < ?3 AND kind IN ('path', ?4)")
+            .bind(&job.id)
+            .bind(format!("{rel}/"))
+            .bind(format!("{rel}0"))
+            .bind(FOLDER)
+            .fetch_all(&st.db)
+            .await?;
     for (p, _) in below.iter().filter(|(_, k)| k == "path") {
         forget_copy(st, job, dest, p).await?;
     }

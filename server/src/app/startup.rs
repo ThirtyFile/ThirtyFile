@@ -3,13 +3,13 @@
 
 use std::path::PathBuf;
 
+#[cfg(target_os = "linux")]
+use crate::watch;
 use crate::{
     backups, branding, db, folders, locations, logs, moves, personal, replicas, secrets, sso,
     state::{AppState, Setup},
     thumbnails, tree, upload, usage, util,
 };
-#[cfg(target_os = "linux")]
-use crate::watch;
 
 use super::{maintenance::spawn_maintenance, routes::router, serve::serve};
 
@@ -65,9 +65,7 @@ fn lock_data(data: &std::path::Path) -> Result<Option<std::fs::File>, Box<dyn st
     let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(data.join("thirtyfile.lock"))?;
     match file.try_lock() {
         Ok(()) => Ok(Some(file)),
-        Err(std::fs::TryLockError::WouldBlock) => {
-            Err("ThirtyFile is already running with this data folder. Stop it first.".into())
-        }
+        Err(std::fs::TryLockError::WouldBlock) => Err("ThirtyFile is already running with this data folder. Stop it first.".into()),
         Err(std::fs::TryLockError::Error(e)) => {
             tracing::warn!("Couldn't lock the data folder ({e}); make sure only one ThirtyFile uses it");
             Ok(None)
@@ -101,11 +99,10 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
     let lock = lock_data(&cfg.data)?;
     // The storage folder: made with its marker on a new install. When the database records files or spaces there, a
     // missing or empty folder (a volume that isn't mounted) or one without the marker stops the start.
-    let (recorded,): (bool,) = sqlx::query_as(
-        "SELECT EXISTS (SELECT 1 FROM blobs WHERE location_id = 'local') OR EXISTS (SELECT 1 FROM drives WHERE location_id = 'local')",
-    )
-    .fetch_one(&db)
-    .await?;
+    let (recorded,): (bool,) =
+        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM blobs WHERE location_id = 'local') OR EXISTS (SELECT 1 FROM drives WHERE location_id = 'local')")
+            .fetch_one(&db)
+            .await?;
     crate::storage::prepare_builtin(&storage, recorded)?;
     let admin_password = match (&cfg.admin_password, &cfg.admin_password_file) {
         (Some(p), _) => Some(p.clone()),

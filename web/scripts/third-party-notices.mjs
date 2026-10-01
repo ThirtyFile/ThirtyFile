@@ -68,7 +68,9 @@ for (const p of packages) {
   // One text per distinct file (several installed versions usually ship the same licence)
   const texts = new Set();
   for (const dir of p.paths ?? []) {
-    for (const name of readdirSync(dir).filter((f) => noticeFile.test(f)).sort()) {
+    for (const name of readdirSync(dir)
+      .filter((f) => noticeFile.test(f))
+      .sort()) {
       texts.add(readFileSync(join(dir, name), "utf8").trim());
     }
   }

@@ -54,13 +54,18 @@ export async function transferItems(
     if (!count) return false;
   }
   if (count) {
-    const origins = mode === "move" && !span ? new Map([...(o.origins ?? originsOf(o.items ?? [], sent, dest))].filter(([id, parent]) => sent.includes(id) && parent !== dest)) : new Map<string, string>();
+    const origins =
+      mode === "move" && !span ? new Map([...(o.origins ?? originsOf(o.items ?? [], sent, dest))].filter(([id, parent]) => sent.includes(id) && parent !== dest)) : new Map<string, string>();
     if (origins.size) toastWithUndo(o.done(count), { undo: () => moveBack(origins), undoneText: t("Moved back"), after: () => refreshFiles(qc, movedBack(origins)) });
     else toast.success(o.done(count));
   }
   void refreshFiles(
     qc,
-    span ? { folders: [dest, span.folder], contents: true, usage: true } : mode === "move" ? { moved: [{ ids: sent, to: dest }], usage: true } : { folders: [dest], contents: true, usage: true },
+    span
+      ? { folders: [dest, span.folder], contents: true, usage: true }
+      : mode === "move"
+        ? { moved: [{ ids: sent, to: dest }], usage: true }
+        : { folders: [dest], contents: true, usage: true },
   );
   return true;
 }

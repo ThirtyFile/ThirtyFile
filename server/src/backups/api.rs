@@ -176,12 +176,11 @@ pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Overvi
         if j.kind == "restore" {
             let target = serde_json::from_str::<Value>(&j.params).ok().and_then(|p| p["target_drive"].as_str().map(str::to_string));
             if let Some(drive) = target {
-                let row: Option<(String, String, String)> = sqlx::query_as(
-                    "SELECT d.name, d.kind, COALESCE(u.username, '') FROM drives d LEFT JOIN users u ON u.id = d.owner_id WHERE d.id = ?",
-                )
-                .bind(&drive)
-                .fetch_optional(&st.db)
-                .await?;
+                let row: Option<(String, String, String)> =
+                    sqlx::query_as("SELECT d.name, d.kind, COALESCE(u.username, '') FROM drives d LEFT JOIN users u ON u.id = d.owner_id WHERE d.id = ?")
+                        .bind(&drive)
+                        .fetch_optional(&st.db)
+                        .await?;
                 j.target = row.map(|(n, k, o)| space_label(&n, &k, &o));
             }
         }
@@ -350,7 +349,8 @@ pub async fn copy(State(st): State<AppState>, Admin(user): Admin, Json(req): Jso
     }
     // On a disk of this server: room for the content
     if let Some(free) = free_on(&st, &req.dest).await? {
-        let Json(preview) = copy_preview(State(st.clone()), Admin(user.clone()), Json(CopyReq { source: req.source.clone(), dest: req.dest.clone(), name: None })).await?;
+        let Json(preview) =
+            copy_preview(State(st.clone()), Admin(user.clone()), Json(CopyReq { source: req.source.clone(), dest: req.dest.clone(), name: None })).await?;
         if (free as i64) < preview.content_bytes {
             return Err(AppError::bad_request(format!(
                 "There isn't enough free space on {dest_name}: {needed} is needed, {free} is free",
@@ -391,7 +391,16 @@ pub async fn copy(State(st): State<AppState>, Admin(user): Admin, Json(req): Jso
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn insert_job(conn: &mut SqliteConnection, user: &User, id: &str, kind: &str, set: &str, snapshot: Option<&str>, params: &Value, label: &str) -> AppResult<()> {
+async fn insert_job(
+    conn: &mut SqliteConnection,
+    user: &User,
+    id: &str,
+    kind: &str,
+    set: &str,
+    snapshot: Option<&str>,
+    params: &Value,
+    label: &str,
+) -> AppResult<()> {
     sqlx::query(
         "INSERT INTO backup_jobs (id, kind, set_id, snapshot_id, params, label, created_by, created_by_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
@@ -411,10 +420,11 @@ async fn insert_job(conn: &mut SqliteConnection, user: &User, id: &str, kind: &s
 
 /// Queues the removal of a set from its destination (once: a removal already queued stays)
 pub(super) async fn queue_remove(conn: &mut SqliteConnection, by: Option<i64>, by_name: &str, set: &str) -> AppResult<()> {
-    let queued: Option<(i64,)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT 1 FROM backup_jobs WHERE set_id = ? AND kind = 'remove' AND state IN {ACTIVE}")))
-        .bind(set)
-        .fetch_optional(&mut *conn)
-        .await?;
+    let queued: Option<(i64,)> =
+        sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT 1 FROM backup_jobs WHERE set_id = ? AND kind = 'remove' AND state IN {ACTIVE}")))
+            .bind(set)
+            .fetch_optional(&mut *conn)
+            .await?;
     if queued.is_some() {
         return Ok(());
     }
@@ -494,11 +504,7 @@ async fn settings(conn: &mut SqliteConnection, req: &PolicyReq, current: Option<
     if !matches!(mode.as_str(), "realtime" | "scheduled" | "both") {
         return Err(AppError::bad_request("Choose when backups are made"));
     }
-    let schedule = req
-        .schedule
-        .clone()
-        .or_else(|| cur.and_then(|c| serde_json::from_str(&c.schedule).ok()))
-        .unwrap_or_else(|| json!({ "daily": "03:00" }));
+    let schedule = req.schedule.clone().or_else(|| cur.and_then(|c| serde_json::from_str(&c.schedule).ok())).unwrap_or_else(|| json!({ "daily": "03:00" }));
     let tz = req.tz.clone().or_else(|| cur.map(|c| c.tz.clone())).unwrap_or_else(|| "UTC".into());
     super::policy::time_zone(&tz)?;
     let schedule = if mode == "realtime" { schedule } else { super::policy::Schedule::parse(&schedule)?.to_json() };
@@ -683,7 +689,13 @@ pub async fn update_policy(State(st): State<AppState>, Admin(user): Admin, Path(
                     .execute(&mut *tx)
                     .await?;
             }
-            let what = if s.enabled == current.enabled { "settings changed" } else if s.enabled { "resumed" } else { "paused" };
+            let what = if s.enabled == current.enabled {
+                "settings changed"
+            } else if s.enabled {
+                "resumed"
+            } else {
+                "paused"
+            };
             crate::logs::record_activity(&mut tx, &user, None, "backup_policy_update", &format!("{}: {what}", set.name)).await?;
             AppResult::Ok((s.enabled, current.enabled))
         }
@@ -806,7 +818,8 @@ pub async fn verify(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
         let mut tx = crate::db::begin_write(&st.db).await?;
         let res = async {
             set_idle(&mut tx, &id).await?;
-            let (complete,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM backup_snapshots WHERE set_id = ? AND state = 'complete'").bind(&id).fetch_one(&mut *tx).await?;
+            let (complete,): (i64,) =
+                sqlx::query_as("SELECT COUNT(*) FROM backup_snapshots WHERE set_id = ? AND state = 'complete'").bind(&id).fetch_one(&mut *tx).await?;
             if complete == 0 {
                 return Err(AppError::conflict("This copy isn't complete: there is nothing to check yet"));
             }
@@ -856,7 +869,8 @@ pub async fn import(State(st): State<AppState>, Admin(user): Admin, Json(req): J
         .ok_or_else(|| AppError::not_found("Storage location not found"))?;
     crate::locations::probe(&st, &req.location).await.map_err(|e| AppError::bad_request(format!("The location can't be reached: {e}")))?;
     let dst = st.storage(&req.location)?;
-    let read_error = |e: std::io::Error| AppError::new(axum::http::StatusCode::BAD_GATEWAY, format!("Couldn't read from the location: {}", crate::locations::describe(&e)));
+    let read_error =
+        |e: std::io::Error| AppError::new(axum::http::StatusCode::BAD_GATEWAY, format!("Couldn't read from the location: {}", crate::locations::describe(&e)));
     let sets = match dst.list_dir(super::layout::ROOT).await {
         Ok(e) => e,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
@@ -1097,7 +1111,8 @@ async fn restore_plan(st: &AppState, snapshot: &str, req: &RestoreReq) -> AppRes
     // What it brings back, and what is in the way
     let (files, bytes, conflicts, checked) = if problem.is_none() {
         let dst = st.storage(&set.dest_location)?;
-        let (sha, size): (String, i64) = sqlx::query_as("SELECT manifest_sha256, manifest_size FROM backup_snapshots WHERE id = ?").bind(snapshot).fetch_one(&st.db).await?;
+        let (sha, size): (String, i64) =
+            sqlx::query_as("SELECT manifest_sha256, manifest_size FROM backup_snapshots WHERE id = ?").bind(snapshot).fetch_one(&st.db).await?;
         let manifest = super::layout::manifest(st, dst.as_ref(), &set.id, snapshot, &sha, size as u64).await?;
         let plan = super::restore::plan(manifest, params.clone()).await?;
         let (conflicts, checked) = if params.mode == "original" {
@@ -1185,7 +1200,12 @@ pub struct BrowsePage {
 
 /// What a folder of a space held in a snapshot, to choose what to restore. Not for personal spaces: administrators
 /// don't see into them.
-pub async fn browse(State(st): State<AppState>, _: Admin, Path(id): Path<String>, axum::extract::Query(q): axum::extract::Query<BrowseQuery>) -> AppResult<Json<BrowsePage>> {
+pub async fn browse(
+    State(st): State<AppState>,
+    _: Admin,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<BrowseQuery>,
+) -> AppResult<Json<BrowsePage>> {
     let (set, space) = snapshot_space(&st, &id, &q.space).await?;
     if space.kind == "personal" {
         return Err(AppError::forbidden("Administrators don't see into personal spaces: a personal space is restored whole"));

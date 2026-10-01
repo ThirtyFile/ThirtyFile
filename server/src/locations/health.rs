@@ -276,12 +276,7 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(req): J
     Ok(Json(json!({ "id": id })))
 }
 
-pub async fn update(
-    State(st): State<AppState>,
-    Admin(user): Admin,
-    Path(id): Path<String>,
-    Json(req): Json<LocationReq>,
-) -> AppResult<Json<Value>> {
+pub async fn update(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>, Json(req): Json<LocationReq>) -> AppResult<Json<Value>> {
     let row: LocationRow = sqlx::query_as("SELECT id, name, kind, config, is_default FROM storage_locations WHERE id = ?")
         .bind(&id)
         .fetch_optional(&st.db)
@@ -370,12 +365,10 @@ pub(super) const IN_USE: &str = "Spaces or files are on this location, so its fo
 
 /// Whether spaces or content are on the location `id`, or being moved to or from it
 pub(super) async fn in_use(conn: &mut SqliteConnection, id: &str) -> AppResult<bool> {
-    let (n,): (i64,) = sqlx::query_as(
-        "SELECT (SELECT COUNT(*) FROM drives WHERE location_id = ?1) + (SELECT COUNT(*) FROM blobs WHERE location_id = ?1)",
-    )
-    .bind(id)
-    .fetch_one(&mut *conn)
-    .await?;
+    let (n,): (i64,) = sqlx::query_as("SELECT (SELECT COUNT(*) FROM drives WHERE location_id = ?1) + (SELECT COUNT(*) FROM blobs WHERE location_id = ?1)")
+        .bind(id)
+        .fetch_one(&mut *conn)
+        .await?;
     Ok(n > 0
         || crate::moves::location_busy(conn, id).await?
         || crate::backups::sets_on(conn, id).await? > 0
@@ -387,10 +380,8 @@ pub(super) async fn follow_folder(conn: &mut SqliteConnection, id: &str, from: &
     if crate::moves::location_busy(&mut *conn, id).await? {
         return Err(AppError::conflict("A space is being moved to or from this location. Wait until the move finishes, or cancel it."));
     }
-    let rows: Vec<(String, String)> = sqlx::query_as("SELECT id, source_path FROM drives WHERE location_id = ? AND source_path IS NOT NULL")
-        .bind(id)
-        .fetch_all(&mut *conn)
-        .await?;
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, source_path FROM drives WHERE location_id = ? AND source_path IS NOT NULL").bind(id).fetch_all(&mut *conn).await?;
     let from_abs = std::path::absolute(from).unwrap_or_else(|_| from.to_path_buf());
     for (drive, source) in rows {
         let source = std::path::PathBuf::from(source);

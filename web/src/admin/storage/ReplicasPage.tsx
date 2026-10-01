@@ -124,13 +124,10 @@ export function ReplicasPage() {
       refresh();
     }
   };
-  const syncNow = (p: ReplicaPolicy) => act(() => api.syncReplicas(p.id), t("\"{name}\": copies are being brought up to date", { name: p.name }));
-  const verify = (p: ReplicaPolicy) => act(() => api.verifyReplicas(p.id), t("\"{name}\": copies are being read back and checked", { name: p.name }));
+  const syncNow = (p: ReplicaPolicy) => act(() => api.syncReplicas(p.id), t('"{name}": copies are being brought up to date', { name: p.name }));
+  const verify = (p: ReplicaPolicy) => act(() => api.verifyReplicas(p.id), t('"{name}": copies are being read back and checked', { name: p.name }));
   const setEnabled = (p: ReplicaPolicy, enabled: boolean) =>
-    act(
-      () => api.updateReplicaPolicy(p.id, { enabled }),
-      enabled ? t("\"{name}\" replicates again", { name: p.name }) : t("\"{name}\" is paused; its copies stay", { name: p.name }),
-    );
+    act(() => api.updateReplicaPolicy(p.id, { enabled }), enabled ? t('"{name}" replicates again', { name: p.name }) : t('"{name}" is paused; its copies stay', { name: p.name }));
   const open = (t_: "details" | "settings" | "delete" | "promote", p: ReplicaPolicy | null) => p && setDialog({ t: t_, id: p.id });
   const current = dialog ? policies.find((p) => p.id === dialog.id) : null;
 
@@ -262,9 +259,7 @@ export function ReplicasPage() {
           {unneeded.map((u) => (
             <div key={u[0]} className="flex flex-wrap items-center gap-2">
               <AlertTriangleIcon className="size-3.5 shrink-0" />
-              <span className="min-w-0 flex-1">
-                {t("{location} keeps {n} copies no replica policy wants any more ({size}).", { location: u[1], n: u[2], size: formatBytes(u[3]) })}
-              </span>
+              <span className="min-w-0 flex-1">{t("{location} keeps {n} copies no replica policy wants any more ({size}).", { location: u[1], n: u[2], size: formatBytes(u[3]) })}</span>
               <Button size="sm" variant="outline" className="h-7" onClick={() => setPurging(u)}>
                 {t("Remove them…")}
               </Button>
@@ -316,7 +311,7 @@ export function ReplicasPage() {
       {dialog?.t === "promote" && current && <PromoteDialog p={current} target={dialog.target} onClose={() => setDialog(null)} onDone={refresh} />}
       {dialog?.t === "delete" && current && (
         <ConfirmDialog
-          title={t("Delete the replica policy \"{name}\"?", { name: current.name })}
+          title={t('Delete the replica policy "{name}"?', { name: current.name })}
           description={t(
             "No more copies are made. The copies already made stay on {targets}, kept from deletion, until you remove them here as copies no policy wants. The spaces on {source} don't change.",
             { targets: current.targets.map((x) => x.name).join(", "), source: current.source_name },
@@ -326,7 +321,7 @@ export function ReplicasPage() {
           onClose={() => setDialog(null)}
           onConfirm={async () => {
             await api.deleteReplicaPolicy(current.id);
-            toast.success(t("\"{name}\" was deleted", { name: current.name }));
+            toast.success(t('"{name}" was deleted', { name: current.name }));
             setDialog(null);
             refresh();
           }}
@@ -355,19 +350,7 @@ export function ReplicasPage() {
 }
 
 /** A policy's targets one by one, with what they hold and their jobs */
-function PolicyDetails({
-  p,
-  jobs,
-  onClose,
-  onPromote,
-  onChanged,
-}: {
-  p: ReplicaPolicy;
-  jobs: ReplicaJob[];
-  onClose(): void;
-  onPromote(target: string): void;
-  onChanged(): void;
-}) {
+function PolicyDetails({ p, jobs, onClose, onPromote, onChanged }: { p: ReplicaPolicy; jobs: ReplicaJob[]; onClose(): void; onPromote(target: string): void; onChanged(): void }) {
   const act = async (what: () => Promise<unknown>, done: string) => {
     try {
       await what();
@@ -425,10 +408,21 @@ function PolicyDetails({
                       </span>
                     )}
                     <span className="ml-auto flex gap-1">
-                      <Button size="sm" variant="ghost" className="h-7" disabled={!p.enabled} onClick={() => act(() => api.syncReplicas(p.id, x.location_id), t("{name} is being brought up to date", { name: x.name }))}>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7"
+                        disabled={!p.enabled}
+                        onClick={() => act(() => api.syncReplicas(p.id, x.location_id), t("{name} is being brought up to date", { name: x.name }))}
+                      >
                         {t("Sync")}
                       </Button>
-                      <Button size="sm" variant="ghost" className="h-7" onClick={() => act(() => api.verifyReplicas(p.id, x.location_id), t("The copies on {name} are being checked", { name: x.name }))}>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7"
+                        onClick={() => act(() => api.verifyReplicas(p.id, x.location_id), t("The copies on {name} are being checked", { name: x.name }))}
+                      >
                         {t("Check")}
                       </Button>
                       <Button size="sm" variant="ghost" className="h-7" onClick={() => onPromote(x.location_id)}>
@@ -457,7 +451,13 @@ function PolicyDetails({
                         <JobProgress j={job} />
                       </span>
                       {["running", "queued", "waiting"].includes(job.state) && (
-                        <Button size="icon" variant="ghost" className="size-7" aria-label={t("Pause")} onClick={() => act(() => api.pauseReplicaJob(job.id), t("Pauses after the item it is copying"))}>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-7"
+                          aria-label={t("Pause")}
+                          onClick={() => act(() => api.pauseReplicaJob(job.id), t("Pauses after the item it is copying"))}
+                        >
                           <PauseIcon />
                         </Button>
                       )}
@@ -485,7 +485,9 @@ function PolicyDetails({
                   <span className="flex items-center gap-2">
                     <span className="font-medium">{REPLICA_JOB_KIND_LABEL[j.kind]}</span>
                     <span className="min-w-0 truncate text-muted-foreground">{p.targets.find((x) => x.location_id === j.location_id)?.name ?? j.label}</span>
-                    <span className={cn("ml-auto shrink-0", j.state === "failed" ? "text-destructive" : j.state === "done" ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}>
+                    <span
+                      className={cn("ml-auto shrink-0", j.state === "failed" ? "text-destructive" : j.state === "done" ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}
+                    >
                       {BACKUP_JOB_STATE_LABEL[j.state]}
                     </span>
                   </span>
@@ -495,7 +497,14 @@ function PolicyDetails({
                     {j.finished_at ? ` · ${t("Finished {time}", { time: formatDateTime(j.finished_at) })}` : ""}
                   </span>
                   {j.error && <span className="text-destructive">{tServer(j.error)}</span>}
-                  {j.note && <span className="whitespace-pre-line">{j.note.split("\n").map((l) => tServer(l)).join("\n")}</span>}
+                  {j.note && (
+                    <span className="whitespace-pre-line">
+                      {j.note
+                        .split("\n")
+                        .map((l) => tServer(l))
+                        .join("\n")}
+                    </span>
+                  )}
                   {j.failures.length > 0 && (
                     <ul className="grid gap-0.5 rounded bg-muted/50 px-2 py-1">
                       {j.failures.map((f, i) => (
@@ -539,9 +548,12 @@ function PromoteDialog({ p, target: preset, onClose, onDone }: { p: ReplicaPolic
         <DialogHeader>
           <DialogTitle>{t("Promote a location")}</DialogTitle>
           <DialogDescription>
-            {t("The spaces of {source} then read and write the copies on the location you choose. Do this when {source} has failed or is being retired. Nothing is deleted: {source} keeps what it has, and becomes a location with copies once it is checked.", {
-              source: p.source_name,
-            })}
+            {t(
+              "The spaces of {source} then read and write the copies on the location you choose. Do this when {source} has failed or is being retired. Nothing is deleted: {source} keeps what it has, and becomes a location with copies once it is checked.",
+              {
+                source: p.source_name,
+              },
+            )}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-2">
@@ -572,10 +584,18 @@ function PromoteDialog({ p, target: preset, onClose, onDone }: { p: ReplicaPolic
           <div className="grid gap-2 text-sm">
             <ul className="grid gap-1">
               <li>
-                {pf.source_reachable ? t("{name} can be reached.", { name: pf.source_name }) : <span className="text-destructive">{t("{name} can't be reached.", { name: pf.source_name })}</span>}
+                {pf.source_reachable ? (
+                  t("{name} can be reached.", { name: pf.source_name })
+                ) : (
+                  <span className="text-destructive">{t("{name} can't be reached.", { name: pf.source_name })}</span>
+                )}
               </li>
               <li>
-                {pf.target_reachable ? t("{name} can be reached.", { name: pf.target_name }) : <span className="text-destructive">{t("{name} can't be reached.", { name: pf.target_name })}</span>}
+                {pf.target_reachable ? (
+                  t("{name} can be reached.", { name: pf.target_name })
+                ) : (
+                  <span className="text-destructive">{t("{name} can't be reached.", { name: pf.target_name })}</span>
+                )}
                 {pf.target_state !== "unknown" && ` ${REPLICA_STATE_LABEL[pf.target_state]}`}
                 {pf.behind_since ? ` · ${t("{time} behind", { time: ago(pf.behind_since) })}` : ""}
               </li>
@@ -616,9 +636,12 @@ function PromoteDialog({ p, target: preset, onClose, onDone }: { p: ReplicaPolic
               </label>
             )}
             <p className="text-xs text-muted-foreground">
-              {t("Running copies stop. {source} isn't written to by this server any more, and files are never moved back on their own: to go back, promote {source} later, once it is current again.", {
-                source: pf.source_name,
-              })}
+              {t(
+                "Running copies stop. {source} isn't written to by this server any more, and files are never moved back on their own: to go back, promote {source} later, once it is current again.",
+                {
+                  source: pf.source_name,
+                },
+              )}
             </p>
           </div>
         )}

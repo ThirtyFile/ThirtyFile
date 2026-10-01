@@ -55,7 +55,14 @@ describe("applying the answers to an upload", () => {
       { file: file("x.jpg"), relativePath: "Photos/2024" },
       { file: file("new.txt"), relativePath: "" },
     ];
-    const out = applyToUpload(picked, new Map([["a.txt", "skip"], ["b.txt", "keep"], ["Photos", "replace"]]));
+    const out = applyToUpload(
+      picked,
+      new Map([
+        ["a.txt", "skip"],
+        ["b.txt", "keep"],
+        ["Photos", "replace"],
+      ]),
+    );
     expect(out.map((f) => [f.file.name, f.onConflict])).toEqual([
       ["b.txt", "keep"],
       ["x.jpg", "replace"],

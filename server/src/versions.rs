@@ -25,8 +25,7 @@ use crate::{
     error::{AppError, AppResult},
     files::{Blob, Source, serve_blob},
     folders::Below,
-    fsops,
-    logs,
+    fsops, logs,
     state::AppState,
     tree::{self, BlobRef, Need, Node},
     util::{new_id, now},
@@ -89,19 +88,17 @@ pub async fn keep_stored(conn: &mut SqliteConnection, policy: Policy, node: &Nod
         return Ok(Removed { blobs: tree::release_blobs(conn, &[hash]).await?, files: Vec::new() });
     }
     let (author_id, author_name) = author;
-    sqlx::query(
-        "INSERT INTO node_versions (id, node_id, blob_hash, size, author_id, author_name, modified_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(new_id())
-    .bind(&node.id)
-    .bind(&hash)
-    .bind(node.size)
-    .bind(author_id)
-    .bind(author_name)
-    .bind(node.updated_at)
-    .bind(now())
-    .execute(&mut *conn)
-    .await?;
+    sqlx::query("INSERT INTO node_versions (id, node_id, blob_hash, size, author_id, author_name, modified_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(new_id())
+        .bind(&node.id)
+        .bind(&hash)
+        .bind(node.size)
+        .bind(author_id)
+        .bind(author_name)
+        .bind(node.updated_at)
+        .bind(now())
+        .execute(&mut *conn)
+        .await?;
     prune_node(conn, &node.id, policy).await
 }
 
@@ -134,7 +131,8 @@ pub fn keep_on_disk(policy: Policy, node: &Node, path: &Pinned) -> std::io::Resu
     let at = version_file(Path::new(root), node.drive(), &node.id, &id)?;
     // A hard link never follows a symbolic link (on Linux)
     #[cfg(test)]
-    let linked = if fsops::testing::hard_links(node.drive()) { std::fs::hard_link(path.as_path(), at.as_path()) } else { Err(std::io::ErrorKind::Unsupported.into()) };
+    let linked =
+        if fsops::testing::hard_links(node.drive()) { std::fs::hard_link(path.as_path(), at.as_path()) } else { Err(std::io::ErrorKind::Unsupported.into()) };
     #[cfg(not(test))]
     let linked = std::fs::hard_link(path.as_path(), at.as_path());
     let moved_from = match linked {
@@ -259,9 +257,7 @@ pub async fn prune(st: &AppState) -> AppResult<usize> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let mut rows: Vec<(Option<String>, Option<String>, Option<String>)> =
-        sqlx::query_as("DELETE FROM node_versions WHERE node_id NOT IN (SELECT id FROM nodes) RETURNING blob_hash, drive_id, fs_path")
-            .fetch_all(&mut *tx)
-            .await?;
+        sqlx::query_as("DELETE FROM node_versions WHERE node_id NOT IN (SELECT id FROM nodes) RETURNING blob_hash, drive_id, fs_path").fetch_all(&mut *tx).await?;
     if policy.days > 0 {
         rows.extend(
             sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>)>(
@@ -321,14 +317,13 @@ pub async fn clean_folder(st: &AppState, drive_id: &str, root: &Path) -> AppResu
     if found.is_empty() {
         return Ok(());
     }
-    let known: std::collections::HashSet<String> =
-        sqlx::query_as::<_, (String,)>("SELECT fs_path FROM node_versions WHERE drive_id = ? AND fs_path IS NOT NULL")
-            .bind(drive_id)
-            .fetch_all(&st.db)
-            .await?
-            .into_iter()
-            .map(|(p,)| p)
-            .collect();
+    let known: std::collections::HashSet<String> = sqlx::query_as::<_, (String,)>("SELECT fs_path FROM node_versions WHERE drive_id = ? AND fs_path IS NOT NULL")
+        .bind(drive_id)
+        .fetch_all(&st.db)
+        .await?
+        .into_iter()
+        .map(|(p,)| p)
+        .collect();
     fsops::remove_below_later(found.into_iter().filter(|rel| !known.contains(rel)).map(|rel| Below::new(root, drive_id, rel)).collect());
     Ok(())
 }
@@ -359,12 +354,10 @@ async fn file_for(conn: &mut SqliteConnection, user: &User, id: &str, need: Need
 pub async fn list(State(st): State<AppState>, user: User, UrlPath(id): UrlPath<String>) -> AppResult<Json<Vec<VersionInfo>>> {
     let mut c = st.db.acquire().await?;
     let node = file_for(&mut c, &user, &id, Need::Read).await?;
-    let rows = sqlx::query_as(
-        "SELECT id, size, author_name, modified_at, created_at FROM node_versions WHERE node_id = ? ORDER BY created_at DESC, rowid DESC",
-    )
-    .bind(&node.id)
-    .fetch_all(&mut *c)
-    .await?;
+    let rows = sqlx::query_as("SELECT id, size, author_name, modified_at, created_at FROM node_versions WHERE node_id = ? ORDER BY created_at DESC, rowid DESC")
+        .bind(&node.id)
+        .fetch_all(&mut *c)
+        .await?;
     Ok(Json(rows))
 }
 
@@ -573,7 +566,9 @@ mod tests {
         assert_eq!(versions(&env, &cat, &id).await.len(), 3);
         let err = restore(State(env.st.clone()), cat.clone(), UrlPath((id.clone(), list[0].id.clone()))).await.unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::FORBIDDEN);
-        let res = content(State(env.st.clone()), cat.clone(), UrlPath((id.clone(), list[0].id.clone())), Query(ContentQuery { download: None }), HeaderMap::new()).await.unwrap();
+        let res = content(State(env.st.clone()), cat.clone(), UrlPath((id.clone(), list[0].id.clone())), Query(ContentQuery { download: None }), HeaderMap::new())
+            .await
+            .unwrap();
         assert_eq!(res.headers()[header::CONTENT_LENGTH], "4");
     }
 

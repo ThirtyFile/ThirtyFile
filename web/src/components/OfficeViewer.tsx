@@ -27,7 +27,8 @@ function viewError(e: unknown, fallback: string) {
   // Show our own messages (and translated server messages) as-is; only convert the preview components' English errors
   if (e instanceof ViewerError || e instanceof ApiError) return msg;
   if (msg === TOO_LARGE) return t("The file's content is too large to preview. Download it and open it in Office.");
-  if (/central directory|zip|corrupt|invalid|unexpected/i.test(msg) && !/[一-鿿]/.test(msg)) // i18n-ignore: regex that detects CJK text in a message
+  // English errors only: a message with CJK ideographs in it is shown as it is
+  if (/central directory|zip|corrupt|invalid|unexpected/i.test(msg) && !/[\u4e00-\u9fff]/.test(msg))
     return t("The file is damaged or in an unrecognized format, so it can't be previewed. Download it and open it in Office to check.");
   return msg;
 }
@@ -99,8 +100,7 @@ function FramePreview({ node, source, kind }: { node: Node; source: FileSource; 
       } else if (msg.type === "done") {
         window.clearTimeout(timer);
         setLoading(false);
-      }
-      else if (msg.type === "link") {
+      } else if (msg.type === "link") {
         // Only open http(s) / mailto links, and cut the link to this page. The frame only asks when a link is clicked, so the
         // person must have just clicked (a click in the frame activates this page too), and each click opens at most one tab
         const href = String((msg as { href?: unknown }).href ?? "");
@@ -109,8 +109,7 @@ function FramePreview({ node, source, kind }: { node: Node; source: FileSource; 
         if (now - lastOpen < LINK_INTERVAL) return;
         lastOpen = now;
         window.open(href, "_blank", "noopener,noreferrer");
-      }
-      else if (msg.type === "error") {
+      } else if (msg.type === "error") {
         window.clearTimeout(timer);
         setError(viewError(new Error(msg.message ?? ""), kind === "docx" ? t("Couldn't open this document") : t("Couldn't open this presentation")));
         setLoading(false);
@@ -188,7 +187,8 @@ function XlsxPreview({ node, source }: { node: Node; source: FileSource }) {
 export default function OfficeViewer({ node, source }: { node: Node; source: FileSource }) {
   const ext = extOf(node.name);
   // Laying out very large files in the browser uses lots of memory: ask the user to download instead
-  if (node.size > MAX_OFFICE_PREVIEW_BYTES) return <Status loading={false} error={t("The file is too large (over {size}) to preview online. Download it to open it.", { size: MAX_OFFICE_PREVIEW_LABEL })} />;
+  if (node.size > MAX_OFFICE_PREVIEW_BYTES)
+    return <Status loading={false} error={t("The file is too large (over {size}) to preview online. Download it to open it.", { size: MAX_OFFICE_PREVIEW_LABEL })} />;
   if (ext === "docx") return <FramePreview node={node} source={source} kind="docx" />;
   if (ext === "xlsx") return <XlsxPreview node={node} source={source} />;
   if (ext === "pptx") return <FramePreview node={node} source={source} kind="pptx" />;

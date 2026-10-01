@@ -26,7 +26,13 @@ export function hexToRgba(hex: string | null | undefined, a = 1): Rgba | null {
 }
 
 export function rgbaHex(c: Rgba) {
-  return `#${[c.r, c.g, c.b].map((v) => Math.round(clamp(v, 0, 255)).toString(16).padStart(2, "0")).join("")}`;
+  return `#${[c.r, c.g, c.b]
+    .map((v) =>
+      Math.round(clamp(v, 0, 255))
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
 }
 
 export function rgbaCss(c: Rgba | null | undefined): string | undefined {
@@ -179,6 +185,7 @@ function applyModifiers(base: Rgba, el: Element): Rgba {
 }
 
 /** Preset color names (prstClr); only common ones are listed, others are treated as black */
+// oxfmt-ignore
 const PRESET: Record<string, string> = {
   black: "000000", white: "FFFFFF", red: "FF0000", green: "008000", blue: "0000FF", yellow: "FFFF00",
   cyan: "00FFFF", magenta: "FF00FF", gray: "808080", grey: "808080", darkGray: "A9A9A9", lightGray: "D3D3D3",
@@ -252,6 +259,7 @@ export function colorIn(parent: Element | null | undefined, ctx: ColorContext): 
 // ───────────── SpreadsheetML/WordprocessingML colors ─────────────
 
 /** Excel indexed colors (indexed="n"); 64 and 65 are the system foreground and background colors */
+// oxfmt-ignore
 export const INDEXED_COLORS = [
   "000000", "FFFFFF", "FF0000", "00FF00", "0000FF", "FFFF00", "FF00FF", "00FFFF",
   "000000", "FFFFFF", "FF0000", "00FF00", "0000FF", "FFFF00", "FF00FF", "00FFFF",
@@ -288,8 +296,16 @@ export function sheetColor(el: Element | null | undefined, theme: Theme | null |
 
 /** Maps Word themeColor names (text1, background1, accent1…) to theme color scheme names */
 const WORD_THEME: Record<string, string> = {
-  text1: "dk1", dark1: "dk1", background1: "lt1", light1: "lt1", text2: "dk2", dark2: "dk2", background2: "lt2", light2: "lt2",
-  hyperlink: "hlink", followedHyperlink: "folHlink",
+  text1: "dk1",
+  dark1: "dk1",
+  background1: "lt1",
+  light1: "lt1",
+  text2: "dk2",
+  dark2: "dk2",
+  background2: "lt2",
+  light2: "lt2",
+  hyperlink: "hlink",
+  followedHyperlink: "folHlink",
 };
 
 /**

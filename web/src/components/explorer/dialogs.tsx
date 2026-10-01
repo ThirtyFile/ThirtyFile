@@ -19,9 +19,7 @@ export function ExplorerDialogs({ p, s, a }: { p: ExplorerProps; s: ExplorerStat
     <>
       {(dialog?.t === "move" || dialog?.t === "copy") && (
         <FolderPickerDialog
-          title={
-            dialog.t === "move" ? t("Move {n} item to…|Move {n} items to…", { n: dialog.picked.count }) : t("Copy {n} item to…|Copy {n} items to…", { n: dialog.picked.count })
-          }
+          title={dialog.t === "move" ? t("Move {n} item to…|Move {n} items to…", { n: dialog.picked.count }) : t("Copy {n} item to…|Copy {n} items to…", { n: dialog.picked.count })}
           confirmText={dialog.t === "move" ? t("Move here") : t("Copy here")}
           startId={p.folderId ?? homeFolder(me, undefined) ?? null}
           excludeIds={new Set(dialog.picked.ids)}

@@ -119,9 +119,7 @@ pub async fn check_insecure_target(kind: &str, config: &serde_json::Value) -> Re
 /// Private ranges, loopback, link-local, and 100.64.0.0/10 (carrier-grade NAT, also commonly used by VPNs such as Tailscale)
 pub fn is_private_ip(ip: &std::net::IpAddr) -> bool {
     match ip {
-        std::net::IpAddr::V4(v4) => {
-            v4.is_private() || v4.is_loopback() || v4.is_link_local() || (v4.octets()[0] == 100 && (v4.octets()[1] & 0xc0) == 64)
-        }
+        std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local() || (v4.octets()[0] == 100 && (v4.octets()[1] & 0xc0) == 64),
         std::net::IpAddr::V6(v6) => {
             if let Some(v4) = v6.to_ipv4_mapped() {
                 return is_private_ip(&std::net::IpAddr::V4(v4));
@@ -232,7 +230,10 @@ mod tests {
     #[tokio::test]
     async fn sftp_and_ftp_hosts_are_split_into_parts() {
         let cfg = normalize("sftp", serde_json::json!({ "host": "sftp://backup@nas.local:2222/volume1/drive/", "username": "" })).await;
-        assert_eq!((cfg["host"].as_str(), cfg["port"].as_u64(), cfg["path"].as_str(), cfg["username"].as_str()), (Some("nas.local"), Some(2222), Some("/volume1/drive"), Some("backup")));
+        assert_eq!(
+            (cfg["host"].as_str(), cfg["port"].as_u64(), cfg["path"].as_str(), cfg["username"].as_str()),
+            (Some("nas.local"), Some(2222), Some("/volume1/drive"), Some("backup"))
+        );
         // Fields already filled in aren't overwritten; nothing changes without a port
         let cfg = normalize("ftp", serde_json::json!({ "host": " ftp.example.com ", "path": "/data", "port": 2121 })).await;
         assert_eq!((cfg["host"].as_str(), cfg["port"].as_u64(), cfg["path"].as_str()), (Some("ftp.example.com"), Some(2121), Some("/data")));

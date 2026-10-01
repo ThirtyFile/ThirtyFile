@@ -5,13 +5,7 @@ use axum::http::HeaderMap;
 use sqlx::SqliteConnection;
 
 use super::Visitor;
-use crate::{
-    auth::User,
-    error::AppResult,
-    state::AppState,
-    tree::Node,
-    util::now,
-};
+use crate::{auth::User, error::AppResult, state::AppState, tree::Node, util::now};
 
 // ───────────── Background log writer ─────────────
 
@@ -91,19 +85,17 @@ async fn write_batch(st: &AppState, batch: &[LogEvent]) {
         for e in batch {
             match e {
                 LogEvent::ShareAccess { at, share_id, owner_id, node_id, node_name, event, ip, user_agent } => {
-                    sqlx::query(
-                        "INSERT INTO share_access (at, share_id, owner_id, node_id, node_name, event, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    )
-                    .bind(at)
-                    .bind(share_id)
-                    .bind(owner_id)
-                    .bind(node_id)
-                    .bind(node_name)
-                    .bind(event)
-                    .bind(ip)
-                    .bind(user_agent)
-                    .execute(&mut *tx)
-                    .await?;
+                    sqlx::query("INSERT INTO share_access (at, share_id, owner_id, node_id, node_name, event, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+                        .bind(at)
+                        .bind(share_id)
+                        .bind(owner_id)
+                        .bind(node_id)
+                        .bind(node_name)
+                        .bind(event)
+                        .bind(ip)
+                        .bind(user_agent)
+                        .execute(&mut *tx)
+                        .await?;
                 }
                 LogEvent::Login { at, user_id, username, event, method, ip, user_agent } => {
                     sqlx::query("INSERT INTO login_log (at, user_id, username, event, ip, user_agent, method) VALUES (?, ?, ?, ?, ?, ?, ?)")
@@ -180,19 +172,17 @@ pub fn record_share_access(st: &AppState, share_id: &str, owner_id: i64, node: O
 
 /// Records an activity (within the caller's transaction, unlike sign-in and share link events)
 pub async fn record_activity(conn: &mut SqliteConnection, user: &User, node: Option<&Node>, action: &str, detail: &str) -> AppResult<()> {
-    sqlx::query(
-        "INSERT INTO activity (at, user_id, username, drive_id, node_id, node_name, action, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(now())
-    .bind(user.id)
-    .bind(&user.username)
-    .bind(node.and_then(|n| n.drive_id.clone()))
-    .bind(node.map(|n| n.id.clone()))
-    .bind(node.map(|n| n.name.clone()).unwrap_or_default())
-    .bind(action)
-    .bind(detail)
-    .execute(conn)
-    .await?;
+    sqlx::query("INSERT INTO activity (at, user_id, username, drive_id, node_id, node_name, action, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(now())
+        .bind(user.id)
+        .bind(&user.username)
+        .bind(node.and_then(|n| n.drive_id.clone()))
+        .bind(node.map(|n| n.id.clone()))
+        .bind(node.map(|n| n.name.clone()).unwrap_or_default())
+        .bind(action)
+        .bind(detail)
+        .execute(conn)
+        .await?;
     Ok(())
 }
 

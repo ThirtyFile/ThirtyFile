@@ -38,26 +38,11 @@ export function CreateDriveDialog({ onClose, onCreated }: { onClose(): void; onC
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="drive-name">{t("Name")}</Label>
-            <Input
-              id="drive-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={tc("example", "Marketing")}
-              autoFocus
-              {...errorProps(error, "drive-error")}
-            />
+            <Input id="drive-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={tc("example", "Marketing")} autoFocus {...errorProps(error, "drive-error")} />
             {me.role === "admin" && (
               <>
                 <Label htmlFor="drive-quota">{t("Quota (GB, leave blank for unlimited)")}</Label>
-                <Input
-                  id="drive-quota"
-                  type="number"
-                  min={0}
-                  step="0.1"
-                  value={quota}
-                  onChange={(e) => setQuota(e.target.value)}
-                  placeholder={t("Unlimited")}
-                />
+                <Input id="drive-quota" type="number" min={0} step="0.1" value={quota} onChange={(e) => setQuota(e.target.value)} placeholder={t("Unlimited")} />
                 <Label htmlFor="drive-location">{t("Storage location")}</Label>
                 <LocationSelect id="drive-location" value={location} onChange={setLocation} blank="default" />
               </>

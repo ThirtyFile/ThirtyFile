@@ -226,7 +226,10 @@ pub async fn trigger(st: &AppState, set: &str, trigger: &str, by: Option<(i64, S
             Some((id, state @ (JobState::Failed | JobState::Waiting))) => {
                 let wait = if state == JobState::Failed { RETRY_FAILED } else { RETRY_WAITING };
                 if trigger == "manual" || p.last_run_at.is_none_or(|l| t - l >= wait) {
-                    sqlx::query("UPDATE backup_jobs SET state = 'queued', error = NULL WHERE id = ? AND state IN ('failed', 'waiting')").bind(&id).execute(&mut *tx).await?;
+                    sqlx::query("UPDATE backup_jobs SET state = 'queued', error = NULL WHERE id = ? AND state IN ('failed', 'waiting')")
+                        .bind(&id)
+                        .execute(&mut *tx)
+                        .await?;
                     sqlx::query("UPDATE backup_policies SET last_run_at = ? WHERE set_id = ?").bind(t).bind(set).execute(&mut *tx).await?;
                     return Ok(Some(id));
                 }
@@ -285,10 +288,11 @@ pub fn spawn_scheduler(st: AppState) {
 
 /// One look at every policy, as of `t`
 pub async fn tick(st: &AppState, t: i64) -> AppResult<()> {
-    let policies: Vec<Policy> =
-        sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {POLICY_COLS} FROM backup_policies p WHERE EXISTS (SELECT 1 FROM backup_sets s WHERE s.id = p.set_id AND s.removing = 0)")))
-            .fetch_all(&st.db)
-            .await?;
+    let policies: Vec<Policy> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {POLICY_COLS} FROM backup_policies p WHERE EXISTS (SELECT 1 FROM backup_sets s WHERE s.id = p.set_id AND s.removing = 0)"
+    )))
+    .fetch_all(&st.db)
+    .await?;
     for p in policies {
         if let Err(e) = look_at(st, &p, t).await {
             tracing::warn!("Backup policy {}: {}", p.set_id, e.message);
@@ -369,7 +373,8 @@ async fn queue_verify(st: &AppState, set: &str, t: i64) -> AppResult<()> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let res = async {
-        let (complete,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM backup_snapshots WHERE set_id = ? AND state = 'complete'").bind(set).fetch_one(&mut *tx).await?;
+        let (complete,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM backup_snapshots WHERE set_id = ? AND state = 'complete'").bind(set).fetch_one(&mut *tx).await?;
         let busy: Option<(i64,)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT 1 FROM backup_jobs WHERE set_id = ? AND state IN {ACTIVE} LIMIT 1")))
             .bind(set)
             .fetch_optional(&mut *tx)
@@ -458,8 +463,12 @@ async fn alert(st: &AppState, p: &Policy, t: i64) -> AppResult<()> {
             if !trouble && p.alerted.is_empty() {
                 return Ok(Vec::new());
             }
-            let admins: Vec<i64> =
-                sqlx::query_as::<_, (i64,)>("SELECT id FROM users WHERE role = 'admin' AND disabled = 0").fetch_all(&mut *tx).await?.into_iter().map(|(i,)| i).collect();
+            let admins: Vec<i64> = sqlx::query_as::<_, (i64,)>("SELECT id FROM users WHERE role = 'admin' AND disabled = 0")
+                .fetch_all(&mut *tx)
+                .await?
+                .into_iter()
+                .map(|(i,)| i)
+                .collect();
             let notice = crate::notify::Notice {
                 kind: "backup",
                 node_id: None,

@@ -22,7 +22,8 @@ export interface FontSlots {
 export function cleanFace(face: string | null | undefined): string | undefined {
   if (!face) return undefined;
   // oxlint-disable-next-line no-control-regex -- control characters are removed on purpose
-  const v = face.replace(/[;{}<>\\"'`\u0000-\u001f]/g, "").trim().slice(0, 64);
+  const unsafe = /[;{}<>\\"'`\u0000-\u001f]/g;
+  const v = face.replace(unsafe, "").trim().slice(0, 64);
   return v || undefined;
 }
 
@@ -115,6 +116,7 @@ export const hasCjk = (text: string) => /[\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaf
 // ───────────── Symbol fonts ─────────────
 
 /** Symbol font (F0xx or 00xx) → Unicode; mostly Greek letters and math symbols */
+// oxfmt-ignore
 const SYMBOL: Record<number, string> = {
   0x22: "∀", 0x24: "∃", 0x27: "∋", 0x2a: "∗", 0x2d: "−", 0x40: "≅",
   0x41: "Α", 0x42: "Β", 0x43: "Χ", 0x44: "Δ", 0x45: "Ε", 0x46: "Φ", 0x47: "Γ", 0x48: "Η", 0x49: "Ι", 0x4a: "ϑ",
@@ -133,6 +135,7 @@ const SYMBOL: Record<number, string> = {
 };
 
 /** Wingdings → Unicode (common bullets, check boxes, arrows) */
+// oxfmt-ignore
 const WINGDINGS: Record<number, string> = {
   0x21: "✏", 0x22: "✂", 0x28: "☎", 0x2a: "✉", 0x36: "⌛", 0x3e: "✇", 0x3f: "✍",
   0x41: "✌", 0x42: "👌", 0x43: "👍", 0x44: "👎", 0x4a: "☺", 0x4b: "😐", 0x4c: "☹", 0x4e: "☠", 0x52: "☼",
@@ -185,6 +188,7 @@ export function bulletText(text: string, font: string | undefined): { text: stri
   return { text, keepFont: !isSymbolFont(font) };
 }
 
+// oxfmt-ignore
 const PUA_FALLBACK: Record<number, string> = {
   0xf0b7: "•", 0xf0a7: "▪", 0xf076: "❖", 0xf0d8: "➢", 0xf0fc: "✓", 0xf0a8: "☐", 0xf0fe: "☑",
   0xf02d: "–", 0xf06e: "■", 0xf071: "❑", 0xf075: "◆", 0xf06c: "●", 0xf06f: "□", 0xf0e8: "➔",

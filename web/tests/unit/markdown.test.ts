@@ -22,7 +22,9 @@ describe("markdown", () => {
   });
 
   test("raw HTML can't run scripts", () => {
-    const d = dom('<script>alert(1)</script>\n\n<img src=x onerror="alert(1)">\n\n<a href="javascript:alert(1)">x</a>\n\n<iframe src="/"></iframe><div style="position:fixed" onclick="alert(1)">y</div>');
+    const d = dom(
+      '<script>alert(1)</script>\n\n<img src=x onerror="alert(1)">\n\n<a href="javascript:alert(1)">x</a>\n\n<iframe src="/"></iframe><div style="position:fixed" onclick="alert(1)">y</div>',
+    );
     const html = d.innerHTML;
     expect(html).not.toMatch(/<script|onerror|onclick|javascript:|<iframe|style=/i);
   });

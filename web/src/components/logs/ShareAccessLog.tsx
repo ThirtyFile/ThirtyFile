@@ -40,17 +40,7 @@ export function describeAgent(ua: string) {
             : /curl|wget|python|Go-http/i.test(ua)
               ? t("Script")
               : t("Other");
-  const os = /Windows/.test(ua)
-    ? "Windows"
-    : /iPhone|iPad/.test(ua)
-      ? "iOS"
-      : /Android/.test(ua)
-        ? "Android"
-        : /Mac OS X/.test(ua)
-          ? "macOS"
-          : /Linux/.test(ua)
-            ? "Linux"
-            : "";
+  const os = /Windows/.test(ua) ? "Windows" : /iPhone|iPad/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /Mac OS X/.test(ua) ? "macOS" : /Linux/.test(ua) ? "Linux" : "";
   return os ? `${browser} · ${os}` : browser;
 }
 
@@ -148,9 +138,7 @@ export function ShareAccessLog({ shareId, admin, className }: { shareId?: string
           </div>
         )}
       </div>
-      <div className="border-t px-3 py-1.5 text-[11px] text-muted-foreground">
-        {shownCount(rows.length, !!list.hasNextPage, filtered)}
-      </div>
+      <div className="border-t px-3 py-1.5 text-[11px] text-muted-foreground">{shownCount(rows.length, !!list.hasNextPage, filtered)}</div>
     </div>
   );
 }

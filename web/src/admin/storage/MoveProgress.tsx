@@ -31,14 +31,7 @@ export function MoveProgress({ m, compact }: { m: SpaceMove; compact?: boolean }
   });
   return (
     <span className="grid min-w-0 gap-0.5">
-      <span
-        role="progressbar"
-        aria-label={label}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(pct)}
-        className="h-1.5 overflow-hidden rounded bg-muted"
-      >
+      <span role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)} className="h-1.5 overflow-hidden rounded bg-muted">
         <span className={cn("block h-full transition-[width]", m.state === "failed" ? "bg-destructive" : "bg-brand")} style={{ width: `${pct}%` }} />
       </span>
       {!compact && <span className="truncate text-[11px] text-muted-foreground tabular-nums">{label}</span>}

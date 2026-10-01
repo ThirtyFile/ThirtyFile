@@ -21,8 +21,7 @@ use crate::{
     util::{now, numbered_name},
 };
 
-pub const NODE_COLS: &str =
-    "n.id, n.owner_id, n.parent_id, n.kind, n.name, n.blob_hash, n.size, n.mime, n.created_at, n.updated_at, n.trashed_at, n.drive_id,
+pub const NODE_COLS: &str = "n.id, n.owner_id, n.parent_id, n.kind, n.name, n.blob_hash, n.size, n.mime, n.created_at, n.updated_at, n.trashed_at, n.drive_id,
      COALESCE((SELECT username FROM users WHERE id = n.owner_id), '') AS owner_name,
      (SELECT location_id FROM blobs WHERE hash = n.blob_hash) AS blob_location,
      n.fs_path, (SELECT source_path FROM drives WHERE id = n.drive_id AND mode = 'folder') AS fs_root,
@@ -97,7 +96,7 @@ impl Node {
     pub fn fs_file(&self) -> Option<std::path::PathBuf> {
         let (root, rel) = (self.fs_root.as_deref()?, self.fs_path.as_deref()?);
         // Paths come from scanning the folder; never step outside it whatever they say
-        if rel.split('/').any(|part| part == ".." || part == "." ) || rel.starts_with('/') {
+        if rel.split('/').any(|part| part == ".." || part == ".") || rel.starts_with('/') {
             return None;
         }
         Some(if rel.is_empty() { std::path::PathBuf::from(root) } else { std::path::Path::new(root).join(rel) })
@@ -341,11 +340,7 @@ pub async fn find_children(conn: &mut SqliteConnection, parent_id: &str, names: 
                      AND n.name_key = CASE WHEN n.fs_path IS NULL THEN unicode_lower(j.value) ELSE j.value END
          ORDER BY j.key"
     );
-    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
-        .bind(parent_id)
-        .bind(serde_json::to_string(names).unwrap())
-        .fetch_all(conn)
-        .await?;
+    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(parent_id).bind(serde_json::to_string(names).unwrap()).fetch_all(conn).await?;
     Ok(rows.into_iter().map(|r| (r.asked, r.node)).collect())
 }
 
@@ -366,9 +361,7 @@ pub async fn unique_name(conn: &mut SqliteConnection, parent_id: &str, name: &st
     };
     // `LIKE` alone only ignores the case of A–Z; the name key is lower case in every language (exact in folder spaces,
     // where this finds more names than needed, which only skips numbers)
-    let taken: Vec<(String,)> = sqlx::query_as(
-        "SELECT name FROM nodes WHERE parent_id = ? AND name_key LIKE unicode_lower(?) ESCAPE '\\' AND trashed_at IS NULL",
-    )
+    let taken: Vec<(String,)> = sqlx::query_as("SELECT name FROM nodes WHERE parent_id = ? AND name_key LIKE unicode_lower(?) ESCAPE '\\' AND trashed_at IS NULL")
         .bind(parent_id)
         .bind(pattern)
         .fetch_all(conn)
@@ -431,5 +424,4 @@ mod tests {
         let mut conn = env.st.db.acquire().await.unwrap();
         assert_eq!(unique_name(&mut conn, amy.root(), "file (0).txt", false).await.unwrap(), "file (0) (2).txt");
     }
-
 }

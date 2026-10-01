@@ -20,7 +20,7 @@ export function MoveEverythingDialog({ location, onClose, onDone }: { location: 
       <Dialog open onOpenChange={(o) => !o && onClose()}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t("Move everything on \"{name}\"", { name: location.name })}</DialogTitle>
+            <DialogTitle>{t('Move everything on "{name}"', { name: location.name })}</DialogTitle>
           </DialogHeader>
           <ErrorText>{errorMessage(q.error, t("Operation failed"))}</ErrorText>
         </DialogContent>
@@ -38,11 +38,14 @@ export function MoveEverythingDialog({ location, onClose, onDone }: { location: 
   return (
     <MoveDialog
       spaces={spaces}
-      title={t("Move everything on \"{name}\"", { name: location.name })}
-      description={t("Its space ({size}) is moved to the location you choose. Once it's there, this location can be deleted.|Each of its {n} spaces ({size}) is moved to the location you choose, one after the other. Once they're all there, this location can be deleted.", {
-        n: spaces.length,
-        size: formatBytes(spaces.reduce((n, s) => n + s.used_bytes, 0)),
-      })}
+      title={t('Move everything on "{name}"', { name: location.name })}
+      description={t(
+        "Its space ({size}) is moved to the location you choose. Once it's there, this location can be deleted.|Each of its {n} spaces ({size}) is moved to the location you choose, one after the other. Once they're all there, this location can be deleted.",
+        {
+          n: spaces.length,
+          size: formatBytes(spaces.reduce((n, s) => n + s.used_bytes, 0)),
+        },
+      )}
       from={location.id}
       onClose={onClose}
       onDone={onDone}
@@ -70,11 +73,7 @@ export function MovedOff({
   const active = moves.filter(moveActive);
   if (active.length > 0) {
     const done = moves.filter((m) => m.state === "done" && m.finished_at && m.finished_at >= Math.min(...active.map((a) => a.created_at))).length;
-    return (
-      <div className="mt-0.5 text-xs text-brand">
-        {t("Moving its spaces to other locations: {done} of {total} done", { done, total: active.length + done })}
-      </div>
-    );
+    return <div className="mt-0.5 text-xs text-brand">{t("Moving its spaces to other locations: {done} of {total} done", { done, total: active.length + done })}</div>;
   }
   const last = moves.find((m) => m.state === "done");
   if (!last || l.builtin || l.drive_count > 0 || l.blob_count > 0) return null;
@@ -84,17 +83,29 @@ export function MovedOff({
   return (
     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
       <span className="text-muted-foreground">
-        {clearing
-          ? t("Its spaces were moved. The old copies are being removed from here; then it can be deleted.")
-          : t("Its spaces were moved; nothing uses this location any more.")}
+        {clearing ? t("Its spaces were moved. The old copies are being removed from here; then it can be deleted.") : t("Its spaces were moved; nothing uses this location any more.")}
       </span>
       {l.is_default && to && (
-        <Button size="xs" variant="outline" onClick={(e) => { e.stopPropagation(); onDefault(to); }}>
-          {t("Make \"{name}\" the default", { name: to.name })}
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDefault(to);
+          }}
+        >
+          {t('Make "{name}" the default', { name: to.name })}
         </Button>
       )}
       {!l.is_default && !clearing && (
-        <Button size="xs" variant="outline" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+        >
           <Trash2Icon /> {t("Delete this location")}
         </Button>
       )}
@@ -110,7 +121,7 @@ export function SpacesDialog({ location, onClose }: { location: StorageLocation;
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{t("Spaces on \"{name}\"", { name: location.name })}</DialogTitle>
+          <DialogTitle>{t('Spaces on "{name}"', { name: location.name })}</DialogTitle>
           <DialogDescription>{t("Spaces stay on the location they were created on until they're moved.")}</DialogDescription>
         </DialogHeader>
         {q.isLoading ? (

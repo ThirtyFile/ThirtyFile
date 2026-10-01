@@ -118,7 +118,10 @@ async function build(pkg: OoxmlPackage, root: HTMLElement, state: RenderState) {
   const hfTargets = docRels.filter((r) => /\/(header|footer)$/.test(r.type) && !r.external).map((r) => r.target);
   const noteParts = [target("/footnotes"), target("/endnotes"), target("/numbering")].filter((x): x is string => !!x);
   const parts = new Map<string, Document | null>();
-  const rels = new Map<string, Rel[]>([[docPath, docRels], ["word/document.xml", docRels]]);
+  const rels = new Map<string, Rel[]>([
+    [docPath, docRels],
+    ["word/document.xml", docRels],
+  ]);
   await Promise.all([
     ...hfTargets.map(async (p) => {
       const [x, r] = await Promise.all([pkg.xml(p), pkg.rels(p)]);
@@ -131,8 +134,7 @@ async function build(pkg: OoxmlPackage, root: HTMLElement, state: RenderState) {
   const theme = parseTheme(themeXml);
   const styles = new Styles(stylesXml);
   const referenced = new Set<string>();
-  for (const x of [docXml, footXml, endXml, ...parts.values()])
-    for (const n of ["pStyle", "rStyle", "tblStyle"]) for (const e of descendants(x, n)) referenced.add(attr(e, "val") ?? "");
+  for (const x of [docXml, footXml, endXml, ...parts.values()]) for (const n of ["pStyle", "rStyle", "tblStyle"]) for (const e of descendants(x, n)) referenced.add(attr(e, "val") ?? "");
   referenced.add("FootnoteText");
   referenced.add("FootnoteReference");
   referenced.add("EndnoteReference");
@@ -164,7 +166,8 @@ async function build(pkg: OoxmlPackage, root: HTMLElement, state: RenderState) {
         if (!dmRel) return;
         const data = await pkg.xml(dmRel.target);
         const ext = descendants(data, "dataModelExt")[0];
-        const drawingRel = partRels.find((r) => r.id === attr(ext, "relId")) ?? partRels.find((r) => r.type.endsWith("/diagramDrawing") && r.target.replace(/\D/g, "") === dmRel.target.replace(/\D/g, ""));
+        const drawingRel =
+          partRels.find((r) => r.id === attr(ext, "relId")) ?? partRels.find((r) => r.type.endsWith("/diagramDrawing") && r.target.replace(/\D/g, "") === dmRel.target.replace(/\D/g, ""));
         if (drawingRel) doc.diagrams.set(`${part}|${dm}`, await pkg.xml(drawingRel.target));
       }),
     ),
@@ -199,7 +202,15 @@ async function build(pkg: OoxmlPackage, root: HTMLElement, state: RenderState) {
 
   // ── Layout ──
   const bg = textColor(kid(docXml?.documentElement, "background"), theme);
-  const normal = runStyle(cascadeRun(styles.baseRunProps(), [styles.styleRun(styles.defaults.paragraph)].filter((x) => !!x), null), theme, settings.script);
+  const normal = runStyle(
+    cascadeRun(
+      styles.baseRunProps(),
+      [styles.styleRun(styles.defaults.paragraph)].filter((x) => !!x),
+      null,
+    ),
+    theme,
+    settings.script,
+  );
   const style = h("style", null, DOCX_CSS);
   const container = h("div", {
     class: "tf-docx",
@@ -220,7 +231,7 @@ async function build(pkg: OoxmlPackage, root: HTMLElement, state: RenderState) {
     // Measure right away when font loading status is unavailable
   }
   // Finish loading images and charts first (headers/footers carry the image URLs when cloned for each page)
-  for (let n = 0; n < doc.pending.length; ) {
+  for (let n = 0; n < doc.pending.length;) {
     const batch = doc.pending.slice(n);
     n = doc.pending.length;
     await Promise.allSettled(batch);

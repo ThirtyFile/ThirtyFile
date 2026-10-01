@@ -51,7 +51,12 @@ pub struct ForgotReq {
     account: String,
 }
 
-pub async fn forgot(State(st): State<AppState>, ConnectInfo(addr): ConnectInfo<SocketAddr>, headers: HeaderMap, Json(req): Json<ForgotReq>) -> AppResult<Json<Value>> {
+pub async fn forgot(
+    State(st): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(req): Json<ForgotReq>,
+) -> AppResult<Json<Value>> {
     let smtp = crate::mail::load(&st.db).await;
     let Some(base) = link_base(&st).filter(|_| smtp.enabled) else {
         return Err(AppError::bad_request("Ask your administrator to reset your password"));
@@ -108,12 +113,16 @@ fn message(zh: bool, site: &str, username: &str, link: &str) -> (String, String)
     if zh {
         (
             format!("重設 {site} 的密碼"),
-            format!("有人要求重設 {site} 帳號「{username}」的密碼。\n\n在一小時內開啟這個連結，設定新密碼（只能使用一次）：\n{link}\n\n如果不是你要求的，請忽略這封郵件，你的密碼不會改變。\n"),
+            format!(
+                "有人要求重設 {site} 帳號「{username}」的密碼。\n\n在一小時內開啟這個連結，設定新密碼（只能使用一次）：\n{link}\n\n如果不是你要求的，請忽略這封郵件，你的密碼不會改變。\n"
+            ),
         )
     } else {
         (
             format!("Reset your password for {site}"),
-            format!("Someone asked to reset the password of the account \"{username}\" on {site}.\n\nOpen this link within an hour to choose a new password (it works once):\n{link}\n\nIf it wasn't you, ignore this email: your password stays as it is.\n"),
+            format!(
+                "Someone asked to reset the password of the account \"{username}\" on {site}.\n\nOpen this link within an hour to choose a new password (it works once):\n{link}\n\nIf it wasn't you, ignore this email: your password stays as it is.\n"
+            ),
         )
     }
 }
@@ -204,7 +213,12 @@ mod tests {
 
         // A known token (the one stored is only its hash): replaced by one the test knows
         let token = random_token(43);
-        sqlx::query("UPDATE password_resets SET token_hash = ? WHERE user_id = ?").bind(sha256_hex(token.as_bytes())).bind(amy.id).execute(&env.st.db).await.unwrap();
+        sqlx::query("UPDATE password_resets SET token_hash = ? WHERE user_id = ?")
+            .bind(sha256_hex(token.as_bytes()))
+            .bind(amy.id)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
         let reset_req = |token: &str, new: &str| reset(State(env.st.clone()), addr(), HeaderMap::new(), Json(ResetReq { token: token.into(), new: new.into() }));
         // (passwords made for the test, not written in the code)
         let (new, another, short) = (random_token(20), random_token(20), random_token(3));
@@ -342,7 +356,8 @@ mod tests {
         let env = testutil::env().await;
         let admin = env.admin().await;
         let (first, own) = (random_token(20), random_token(20));
-        let req = serde_json::from_value(json!({ "username": "ben", "password": first, "role": "user", "can_write": true, "can_delete": true, "can_share": true })).unwrap();
+        let req = serde_json::from_value(json!({ "username": "ben", "password": first, "role": "user", "can_write": true, "can_delete": true, "can_share": true }))
+            .unwrap();
         let _ = crate::admin::create(State(env.st.clone()), auth::Admin(admin), Json(req)).await.unwrap();
         let (id,): (i64,) = sqlx::query_as("SELECT id FROM users WHERE username = 'ben'").fetch_one(&env.st.db).await.unwrap();
         let ben = auth::user_by_id(&env.st, &mut env.st.db.acquire().await.unwrap(), id).await.unwrap().unwrap();

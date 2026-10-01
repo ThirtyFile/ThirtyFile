@@ -74,7 +74,11 @@ export function PublicSharePage() {
 function Unlock({ token }: { token: string }) {
   const qc = useQueryClient();
   const [password, setPassword] = useState("");
-  const { busy, error, run: submit } = useSubmit(async () => {
+  const {
+    busy,
+    error,
+    run: submit,
+  } = useSubmit(async () => {
     await api.unlockShare(token, password);
     await qc.invalidateQueries({ queryKey: keys.publicShare(token) });
   }, t("Couldn't unlock"));
@@ -176,9 +180,7 @@ function DropBox({ share, root }: { share: PublicShare; root: Node }) {
       <InboxIcon className="size-12 stroke-1 text-muted-foreground" />
       <div>
         <div className="font-medium break-all">{t("Send files to “{name}”", { name: root.name })}</div>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t("Drag files here or choose them. You won't see what others have sent, and nothing can be downloaded here.")}
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">{t("Drag files here or choose them. You won't see what others have sent, and nothing can be downloaded here.")}</p>
       </div>
       <Button className="bg-brand text-brand-foreground hover:bg-brand/90" onClick={picker.pick}>
         <UploadIcon /> {t("Choose files")}
@@ -229,17 +231,15 @@ function SharedFile({ share, node }: { share: PublicShare; node: Node }) {
               </Button>
             )}
             {share.allow_download && (
-              <Button
-                className="bg-brand text-brand-foreground hover:bg-brand/90"
-                disabled={exhausted}
-                onClick={() => download(source.contentUrl(node, true))}
-              >
+              <Button className="bg-brand text-brand-foreground hover:bg-brand/90" disabled={exhausted} onClick={() => download(source.contentUrl(node, true))}>
                 <DownloadIcon /> {exhausted ? t("Download limit reached") : t("Download")}
               </Button>
             )}
           </div>
           {!share.allow_download && (
-            <p className="text-xs text-muted-foreground">{canPreview(node) ? t("This link is for viewing only.") : t("This link is for viewing only, and this type of file can't be previewed.")}</p>
+            <p className="text-xs text-muted-foreground">
+              {canPreview(node) ? t("This link is for viewing only.") : t("This link is for viewing only, and this type of file can't be previewed.")}
+            </p>
           )}
         </ContextMenuTrigger>
         <ContextMenuContent>
@@ -255,17 +255,7 @@ function SharedFile({ share, node }: { share: PublicShare; node: Node }) {
           )}
         </ContextMenuContent>
       </ContextMenu>
-      {previewing && (
-        <Preview
-          files={[node]}
-          index={0}
-          source={source}
-          editable={false}
-          allowDownload={canDownload}
-          onIndexChange={() => {}}
-          onClose={() => setPreviewing(false)}
-        />
-      )}
+      {previewing && <Preview files={[node]} index={0} source={source} editable={false} allowDownload={canDownload} onIndexChange={() => {}} onClose={() => setPreviewing(false)} />}
     </>
   );
 }
@@ -290,9 +280,7 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
   }
 
   const info = useQuery({ queryKey: keys.publicNode(share.token, current), queryFn: () => api.publicNode(share.token, current) });
-  const children = useAllPages(keys.publicChildren(share.token, current), (limit, after, signal) =>
-    api.publicChildrenPage(share.token, current, limit, after, signal),
-  );
+  const children = useAllPages(keys.publicChildren(share.token, current), (limit, after, signal) => api.publicChildrenPage(share.token, current, limit, after, signal));
   const items = children.items;
   const files = useMemo(() => items.filter((n) => n.kind === "file"), [items]);
   const previewIndex = previewId ? files.findIndex((f) => f.id === previewId) : -1;
@@ -311,9 +299,7 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
     () =>
       onUploadsLanded((parentIds, final) => {
         if (final) void qc.invalidateQueries({ queryKey: keys.publicChildren(share.token) });
-        else
-          for (const id of parentIds)
-            void refreshFirstPage(qc, keys.publicChildren(share.token, id), (_, limit) => api.publicChildrenPage(share.token, id, limit));
+        else for (const id of parentIds) void refreshFirstPage(qc, keys.publicChildren(share.token, id), (_, limit) => api.publicChildrenPage(share.token, id, limit));
       }),
     [qc, share.token],
   );
@@ -328,10 +314,7 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
               {i === arr.length - 1 ? (
                 <span className="truncate px-1.5 font-semibold">{c.name}</span>
               ) : (
-                <Link
-                  to={`/share/${share.token}/${c.id}`}
-                  className="truncate rounded-md px-1.5 py-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                >
+                <Link to={`/share/${share.token}/${c.id}`} className="truncate rounded-md px-1.5 py-1 text-muted-foreground hover:bg-muted hover:text-foreground">
                   {c.name}
                 </Link>
               )}
@@ -357,20 +340,13 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
           </Button>
         )}
         {share.allow_download && (
-          <Button
-            size="sm"
-            className="bg-brand text-brand-foreground hover:bg-brand/90"
-            disabled={exhausted}
-            onClick={() => download(source.downloadLink(downloadIds))}
-          >
+          <Button size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90" disabled={exhausted} onClick={() => download(source.downloadLink(downloadIds))}>
             <DownloadIcon /> {selected.size ? t("Download {n} item|Download {n} items", { n: selected.size }) : t("Download all")}
           </Button>
         )}
         {picker.input}
       </div>
-      {share.allow_upload && (
-        <div className="border-b bg-muted/40 px-4 py-1.5 text-xs text-muted-foreground">{t("You can add files here: drag them onto the list or click Upload.")}</div>
-      )}
+      {share.allow_upload && <div className="border-b bg-muted/40 px-4 py-1.5 text-xs text-muted-foreground">{t("You can add files here: drag them onto the list or click Upload.")}</div>}
       {children.isLoading ? (
         <div className="grid gap-2 p-4">
           {[0, 1, 2, 3].map((i) => (

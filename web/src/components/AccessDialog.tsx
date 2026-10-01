@@ -31,7 +31,6 @@ const EXPIRY = [
 const roleDetail = (detail: string) => (detail === "Administrator" ? t("Admin") : tServer(detail));
 const principalName = (g: Grant) => (g.principal_type === "everyone" || g.principal_name === "(deleted)" ? tServer(g.principal_name) : g.principal_name);
 
-
 function PrincipalPicker(props: { value: Principal | null; onChange(p: Principal | null): void; allowEveryone: boolean }) {
   const [q, setQ] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -111,11 +110,7 @@ function GrantRow(props: { g: Grant; editable: boolean; roles: Role[]; onRole?(r
           {g.principal_type === "group" && <span className="ml-1.5 text-xs text-muted-foreground">{t("Groups")}</span>}
         </div>
         <div className="truncate text-xs text-muted-foreground">
-          {g.inherited_from
-            ? t("Inherited from “{name}”", { name: g.inherited_from })
-            : g.granted_by_name
-              ? t("Granted by {name}", { name: g.granted_by_name })
-              : t("System default")}
+          {g.inherited_from ? t("Inherited from “{name}”", { name: g.inherited_from }) : g.granted_by_name ? t("Granted by {name}", { name: g.granted_by_name }) : t("System default")}
           {g.expires_at && ` · ${tc("date", "Expires {date}", { date: formatDate(g.expires_at) })}`}
         </div>
       </div>
@@ -197,11 +192,7 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
   const info = q.data;
   const personalRoot = info?.drive.kind === "personal" && info.is_drive_root;
   const roles: Role[] = info?.is_drive_root && info.drive.kind === "team" ? ["viewer", "editor", "manager", "owner"] : ["viewer", "editor", "manager"];
-  const title = info
-    ? info.is_drive_root
-      ? t("Members of “{name}”", { name: info.drive.name })
-      : t("Share “{name}”", { name: info.node.name })
-    : t("Manage access");
+  const title = info ? (info.is_drive_root ? t("Members of “{name}”", { name: info.drive.name }) : t("Share “{name}”", { name: info.node.name })) : t("Manage access");
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -265,9 +256,7 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
                     {t("Add")}
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {t("{role}: {hint}", { role: ROLE_LABEL[role], hint: ROLE_HINT[role] })}
-                </p>
+                <p className="text-xs text-muted-foreground">{t("{role}: {hint}", { role: ROLE_LABEL[role], hint: ROLE_HINT[role] })}</p>
                 <ErrorText>{add.error?.message}</ErrorText>
               </form>
             )}
@@ -283,17 +272,13 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
                       g={g}
                       roles={roles}
                       editable={info.can_manage}
-                      onRole={(r) =>
-                        add.mutate({ principal_type: g.principal_type, principal_id: g.principal_id, role: r, expires_at: g.expires_at })
-                      }
+                      onRole={(r) => add.mutate({ principal_type: g.principal_type, principal_id: g.principal_id, role: r, expires_at: g.expires_at })}
                       onRemove={info.can_manage || canLeave ? () => confirmRemove(g, self) : undefined}
                       removeLabel={canLeave && !info.can_manage ? t("Leave") : t("Remove")}
                     />
                   );
                 })}
-                {info.direct.length === 0 && info.inherited.length === 0 && (
-                  <p className="py-4 text-center text-sm text-muted-foreground">{t("Not shared with anyone yet")}</p>
-                )}
+                {info.direct.length === 0 && info.inherited.length === 0 && <p className="py-4 text-center text-sm text-muted-foreground">{t("Not shared with anyone yet")}</p>}
               </div>
               {info.inherited.length > 0 && (
                 <>

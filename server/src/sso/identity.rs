@@ -66,8 +66,7 @@ pub(super) async fn fetch_identity(provider: &str, cfg: &ProviderConfig, code: &
 /// so per OpenID Connect Core 3.1.3.7 TLS can authenticate the issuer without separately verifying the signature
 pub(super) fn verify_id_token(provider: &str, cfg: &ProviderConfig, token: &str, nonce: &str) -> Result<Value, String> {
     let payload = token.split('.').nth(1).ok_or("malformed id_token")?;
-    let claims: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    let claims: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let client_id = cfg.client_id.trim();
     let aud_ok = match &claims["aud"] {
         Value::String(a) => a == client_id,
@@ -97,18 +96,12 @@ pub(super) fn verify_id_token(provider: &str, cfg: &ProviderConfig, token: &str,
 }
 
 pub(super) async fn github_identity(client: &reqwest::Client, ep: &Endpoints, access: &str) -> Result<Identity, String> {
-    let get = |url: String| {
-        client
-            .get(url)
-            .header(header::AUTHORIZATION, format!("Bearer {access}"))
-            .header(header::ACCEPT, "application/vnd.github+json")
-            .send()
-    };
-    let user: Value = serde_json::from_str(&get(ep.user.clone()).await.map_err(|e| e.to_string())?.text().await.map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    let get = |url: String| client.get(url).header(header::AUTHORIZATION, format!("Bearer {access}")).header(header::ACCEPT, "application/vnd.github+json").send();
+    let user: Value =
+        serde_json::from_str(&get(ep.user.clone()).await.map_err(|e| e.to_string())?.text().await.map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let subject = user["id"].as_i64().map(|i| i.to_string()).ok_or("GitHub returned no user id")?;
-    let emails: Value = serde_json::from_str(&get(ep.emails.clone()).await.map_err(|e| e.to_string())?.text().await.map_err(|e| e.to_string())?)
-        .unwrap_or(Value::Null);
+    let emails: Value =
+        serde_json::from_str(&get(ep.emails.clone()).await.map_err(|e| e.to_string())?.text().await.map_err(|e| e.to_string())?).unwrap_or(Value::Null);
     // Only use the primary email that GitHub has verified
     let email = emails
         .as_array()

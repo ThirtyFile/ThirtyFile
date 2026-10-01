@@ -1,6 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { ClockIcon, FolderMinusIcon, SearchXIcon, FolderPlusIcon, HistoryIcon, MonitorSmartphoneIcon, ShieldCheckIcon, ShieldOffIcon, PencilIcon, RefreshCwIcon, Trash2Icon, TriangleAlertIcon, UserCheckIcon, UserPlusIcon, UsersIcon, UserXIcon } from "lucide-react";
+import {
+  ClockIcon,
+  FolderMinusIcon,
+  SearchXIcon,
+  FolderPlusIcon,
+  HistoryIcon,
+  MonitorSmartphoneIcon,
+  ShieldCheckIcon,
+  ShieldOffIcon,
+  PencilIcon,
+  RefreshCwIcon,
+  Trash2Icon,
+  TriangleAlertIcon,
+  UserCheckIcon,
+  UserPlusIcon,
+  UsersIcon,
+  UserXIcon,
+} from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { DataTable, EmptyState, type Column } from "@/components/DataTable";
 import { toast } from "sonner";
@@ -57,13 +74,7 @@ export function AdminUsersPage() {
       <ToolButton icon={UserPlusIcon} label={t("Add user")} showLabel onClick={() => setEditing("new")} />
       <ToolSeparator />
       <ToolButton icon={PencilIcon} label={t("Edit")} showLabel disabled={!selected} onClick={() => selected && setEditing(selected)} />
-      <ToolButton
-        icon={Trash2Icon}
-        label={t("Delete")}
-        showLabel
-        disabled={!selected || selected.id === me.id}
-        onClick={() => selected && setDeleting(selected)}
-      />
+      <ToolButton icon={Trash2Icon} label={t("Delete")} showLabel disabled={!selected || selected.id === me.id} onClick={() => selected && setDeleting(selected)} />
       <ToolSeparator />
       <ToolButton icon={HistoryIcon} label={t("Sign-in log")} showLabel disabled={!selected} onClick={() => selected && setLoginsOf(selected)} />
       <ToolButton icon={MonitorSmartphoneIcon} label={t("Devices")} showLabel disabled={!selected} onClick={() => selected && setDevicesOf(selected)} />
@@ -75,9 +86,7 @@ export function AdminUsersPage() {
       header: t("Account"),
       cell: (u) => (
         <div className="flex items-center gap-2">
-          <span className="flex size-5 items-center justify-center rounded-full bg-brand/80 text-[10px] text-brand-foreground uppercase">
-            {u.username.slice(0, 1)}
-          </span>
+          <span className="flex size-5 items-center justify-center rounded-full bg-brand/80 text-[10px] text-brand-foreground uppercase">{u.username.slice(0, 1)}</span>
           <span>{u.username}</span>
           {u.display_name && <span className="truncate text-muted-foreground">{u.display_name}</span>}
           {u.sso_email && u.sso_email.toLowerCase() !== u.username.toLowerCase() && (
@@ -92,7 +101,11 @@ export function AdminUsersPage() {
               </span>
             ))}
           {u.source !== "password" && (
-            <Badge variant="outline" className="h-4 px-1.5 text-[10px]" title={t("Created automatically by {provider} sign-in", { provider: SSO_LABEL[u.source as SsoProviderId] ?? u.source })}>
+            <Badge
+              variant="outline"
+              className="h-4 px-1.5 text-[10px]"
+              title={t("Created automatically by {provider} sign-in", { provider: SSO_LABEL[u.source as SsoProviderId] ?? u.source })}
+            >
               {t("Auto-created")}
             </Badge>
           )}
@@ -113,10 +126,7 @@ export function AdminUsersPage() {
     {
       header: t("Permissions"),
       cellClassName: "text-muted-foreground",
-      cell: (u) =>
-        u.role === "admin"
-          ? t("All")
-          : [u.can_write && t("Edit"), u.can_delete && t("Delete"), u.can_share && t("Share")].filter(Boolean).join(t(", ")) || t("View only"),
+      cell: (u) => (u.role === "admin" ? t("All") : [u.can_write && t("Edit"), u.can_delete && t("Delete"), u.can_share && t("Share")].filter(Boolean).join(t(", ")) || t("View only")),
     },
     {
       header: tc("space", "Used"),
@@ -133,7 +143,7 @@ export function AdminUsersPage() {
               {t("My files pending (location unavailable)")}
             </Badge>
           ) : (
-            <span className="text-muted-foreground">{t("No \"My files\"")}</span>
+            <span className="text-muted-foreground">{t('No "My files"')}</span>
           )
         ) : (
           <div className="flex items-center gap-2" title={t("Includes items in the trash")}>
@@ -186,7 +196,7 @@ export function AdminUsersPage() {
         loading={q.isLoading}
         error={q.error}
         onRetry={() => q.refetch()}
-        empty={search ? <EmptyState icon={SearchXIcon} title={t("No users match \"{query}\"", { query: search })} /> : undefined}
+        empty={search ? <EmptyState icon={SearchXIcon} title={t('No users match "{query}"', { query: search })} /> : undefined}
         selectedKey={selectedId === null ? null : String(selectedId)}
         onSelect={(k) => setSelectedId(k ? Number(k) : null)}
         onOpen={(u) => setEditing(u)}
@@ -211,12 +221,12 @@ export function AdminUsersPage() {
               <DropdownMenuSeparator />
               {!selected.personal_space && (
                 <DropdownMenuItem onClick={() => setPersonalOf({ t: "add", user: selected })}>
-                  <FolderPlusIcon /> {t("Create \"My files\"…")}
+                  <FolderPlusIcon /> {t('Create "My files"…')}
                 </DropdownMenuItem>
               )}
               {(selected.personal_space || selected.personal_pending) && (
                 <DropdownMenuItem onClick={() => setPersonalOf({ t: "remove", user: selected })}>
-                  <FolderMinusIcon /> {t("Remove \"My files\"…")}
+                  <FolderMinusIcon /> {t('Remove "My files"…')}
                 </DropdownMenuItem>
               )}
               {selected.id !== me.id && (
@@ -225,7 +235,7 @@ export function AdminUsersPage() {
                     if (
                       !selected.disabled &&
                       !(await confirm({
-                        title: t("Disable account \"{name}\"?", { name: selected.username }),
+                        title: t('Disable account "{name}"?', { name: selected.username }),
                         description: t("They can no longer sign in, and their share links stop working until the account is enabled again."),
                         confirmText: t("Disable account"),
                         destructive: true,
@@ -276,12 +286,14 @@ export function AdminUsersPage() {
           }}
         />
       )}
-      {loginsOf && <LoginLogDialog title={t("Sign-in log for \"{name}\"", { name: loginsOf.username })} userId={loginsOf.id} onClose={() => setLoginsOf(null)} />}
+      {loginsOf && <LoginLogDialog title={t('Sign-in log for "{name}"', { name: loginsOf.username })} userId={loginsOf.id} onClose={() => setLoginsOf(null)} />}
       {devicesOf && <DevicesDialog user={devicesOf} onClose={() => setDevicesOf(null)} />}
       {resetting && (
         <ConfirmDialog
-          title={t("Reset two-factor sign-in for \"{name}\"?", { name: resetting.username })}
-          description={t("For someone who lost their phone and recovery codes. Their authenticator app and recovery codes stop working, and they sign in with just their password until they set it up again (right away, if two-factor sign-in is required).")}
+          title={t('Reset two-factor sign-in for "{name}"?', { name: resetting.username })}
+          description={t(
+            "For someone who lost their phone and recovery codes. Their authenticator app and recovery codes stop working, and they sign in with just their password until they set it up again (right away, if two-factor sign-in is required).",
+          )}
           confirmText={t("Reset")}
           destructive
           onClose={() => setResetting(null)}

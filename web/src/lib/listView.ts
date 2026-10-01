@@ -144,11 +144,7 @@ export function dateGroup(time: number, now: Date): DateGroup {
  * type's name). `reversed` turns the groups around, when the list is sorted the other way by what it's grouped by.
  * Empty groups are left out; null when not grouped.
  */
-export function groupItems<T extends { kind: string }>(
-  items: T[],
-  by: GroupBy,
-  o: { dateOf(x: T): number; typeOf(x: T): string; now: Date; reversed?: boolean },
-): Group<T>[] | null {
+export function groupItems<T extends { kind: string }>(items: T[], by: GroupBy, o: { dateOf(x: T): number; typeOf(x: T): string; now: Date; reversed?: boolean }): Group<T>[] | null {
   if (by === "none") return null;
   const groups = new Map<string, Group<T>>();
   for (const x of items) {

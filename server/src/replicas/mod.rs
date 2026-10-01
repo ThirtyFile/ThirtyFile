@@ -123,7 +123,8 @@ pub async fn bytes_by_location(db: &SqlitePool) -> Result<Vec<(String, i64)>, sq
 /// Whether a location is an old primary after a promotion, not checked since: new content isn't stored there, so it
 /// can't take writes the new primary doesn't have (tree::commit_blob)
 pub async fn fenced(conn: &mut SqliteConnection, location: &str) -> Result<bool, sqlx::Error> {
-    let row: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM replica_targets WHERE location_id = ? AND state = 'stale' LIMIT 1").bind(location).fetch_optional(conn).await?;
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM replica_targets WHERE location_id = ? AND state = 'stale' LIMIT 1").bind(location).fetch_optional(conn).await?;
     Ok(row.is_some())
 }
 
@@ -218,8 +219,7 @@ pub struct Policy {
     pub updated_at: i64,
 }
 
-pub const POLICY_COLS: &str =
-    "id, name, source_location, enabled, all_spaces, copies, read_fallback, verify_days, alert_hours, rate_limit, epoch, alerted, created_by_name, created_at, updated_at";
+pub const POLICY_COLS: &str = "id, name, source_location, enabled, all_spaces, copies, read_fallback, verify_days, alert_hours, rate_limit, epoch, alerted, created_by_name, created_at, updated_at";
 
 pub async fn load(conn: &mut SqliteConnection, id: &str) -> AppResult<Option<Policy>> {
     Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {POLICY_COLS} FROM replica_policies WHERE id = ?"))).bind(id).fetch_optional(conn).await?)

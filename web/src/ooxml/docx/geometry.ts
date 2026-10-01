@@ -24,7 +24,13 @@ function ellipse(cx: number, cy: number, rx: number, ry: number) {
 
 function roundRect(w: number, h: number, r: number) {
   const k = Math.max(0, Math.min(r, w / 2, h / 2));
-  if (!k) return poly([[0, 0], [w, 0], [w, h], [0, h]]);
+  if (!k)
+    return poly([
+      [0, 0],
+      [w, 0],
+      [w, h],
+      [0, h],
+    ]);
   return `M${P(k, 0)} L${P(w - k, 0)} A${r2(k)},${r2(k)} 0 0,1 ${P(w, k)} L${P(w, h - k)} A${r2(k)},${r2(k)} 0 0,1 ${P(w - k, h)} L${P(k, h)} A${r2(k)},${r2(k)} 0 0,1 ${P(0, h - k)} L${P(0, k)} A${r2(k)},${r2(k)} 0 0,1 ${P(k, 0)} Z`;
 }
 
@@ -65,7 +71,14 @@ export function presetPath(prst: string, w: number, h: number, av: Record<string
     case "rect":
     case "flowChartProcess":
     case "textBox":
-      return { d: poly([[0, 0], [w, 0], [w, h], [0, h]]) };
+      return {
+        d: poly([
+          [0, 0],
+          [w, 0],
+          [w, h],
+          [0, h],
+        ]),
+      };
     case "roundRect":
     case "flowChartAlternateProcess":
       return { d: roundRect(w, h, ss * a("adj", 16667)) };
@@ -76,11 +89,28 @@ export function presetPath(prst: string, w: number, h: number, av: Record<string
       return { d: roundRect(w, h, Math.min(w, h) / 2) };
     case "snip1Rect": {
       const k = ss * a("adj", 16667);
-      return { d: poly([[0, 0], [w - k, 0], [w, k], [w, h], [0, h]]) };
+      return {
+        d: poly([
+          [0, 0],
+          [w - k, 0],
+          [w, k],
+          [w, h],
+          [0, h],
+        ]),
+      };
     }
     case "snip2SameRect": {
       const k = ss * a("adj1", 16667);
-      return { d: poly([[k, 0], [w - k, 0], [w, k], [w, h], [0, h], [0, k]]) };
+      return {
+        d: poly([
+          [k, 0],
+          [w - k, 0],
+          [w, k],
+          [w, h],
+          [0, h],
+          [0, k],
+        ]),
+      };
     }
     case "ellipse":
     case "flowChartConnector":
@@ -94,40 +124,113 @@ export function presetPath(prst: string, w: number, h: number, av: Record<string
     case "triangle":
     case "flowChartExtract": {
       const x = w * a("adj", 50000);
-      return { d: poly([[x, 0], [w, h], [0, h]]) };
+      return {
+        d: poly([
+          [x, 0],
+          [w, h],
+          [0, h],
+        ]),
+      };
     }
     case "flowChartMerge":
-      return { d: poly([[0, 0], [w, 0], [w / 2, h]]) };
+      return {
+        d: poly([
+          [0, 0],
+          [w, 0],
+          [w / 2, h],
+        ]),
+      };
     case "rtTriangle":
-      return { d: poly([[0, 0], [w, h], [0, h]]) };
+      return {
+        d: poly([
+          [0, 0],
+          [w, h],
+          [0, h],
+        ]),
+      };
     case "diamond":
     case "flowChartDecision":
-      return { d: poly([[w / 2, 0], [w, h / 2], [w / 2, h], [0, h / 2]]) };
+      return {
+        d: poly([
+          [w / 2, 0],
+          [w, h / 2],
+          [w / 2, h],
+          [0, h / 2],
+        ]),
+      };
     case "parallelogram":
     case "flowChartInputOutput": {
       const k = prst === "parallelogram" ? ss * a("adj", 25000) : w / 5;
-      return { d: poly([[k, 0], [w, 0], [w - k, h], [0, h]]) };
+      return {
+        d: poly([
+          [k, 0],
+          [w, 0],
+          [w - k, h],
+          [0, h],
+        ]),
+      };
     }
     case "trapezoid": {
       const k = ss * a("adj", 25000);
-      return { d: poly([[k, 0], [w - k, 0], [w, h], [0, h]]) };
+      return {
+        d: poly([
+          [k, 0],
+          [w - k, 0],
+          [w, h],
+          [0, h],
+        ]),
+      };
     }
     case "flowChartManualOperation":
-      return { d: poly([[0, 0], [w, 0], [w * 0.8, h], [w * 0.2, h]]) };
+      return {
+        d: poly([
+          [0, 0],
+          [w, 0],
+          [w * 0.8, h],
+          [w * 0.2, h],
+        ]),
+      };
     case "flowChartManualInput":
-      return { d: poly([[0, h * 0.2], [w, 0], [w, h], [0, h]]) };
+      return {
+        d: poly([
+          [0, h * 0.2],
+          [w, 0],
+          [w, h],
+          [0, h],
+        ]),
+      };
     case "pentagon":
       return { d: regular(w, h, 5) };
     case "hexagon":
     case "flowChartPreparation": {
       const k = prst === "hexagon" ? ss * a("adj", 25000) : w / 5;
-      return { d: poly([[k, 0], [w - k, 0], [w, h / 2], [w - k, h], [k, h], [0, h / 2]]) };
+      return {
+        d: poly([
+          [k, 0],
+          [w - k, 0],
+          [w, h / 2],
+          [w - k, h],
+          [k, h],
+          [0, h / 2],
+        ]),
+      };
     }
     case "heptagon":
       return { d: regular(w, h, 7) };
     case "octagon": {
       const k = ss * a("adj", 29289);
-      return { d: poly([[k, 0], [w - k, 0], [w, k], [w, h - k], [w - k, h], [k, h], [0, h - k], [0, k]]) };
+      return {
+        d: poly([
+          [k, 0],
+          [w - k, 0],
+          [w, k],
+          [w, h - k],
+          [w - k, h],
+          [k, h],
+          [0, h - k],
+          [0, k],
+        ]),
+      };
     }
     case "decagon":
       return { d: regular(w, h, 10) };
@@ -136,7 +239,22 @@ export function presetPath(prst: string, w: number, h: number, av: Record<string
     case "plus":
     case "mathPlus": {
       const k = ss * a("adj", 25000);
-      return { d: poly([[k, 0], [w - k, 0], [w - k, k], [w, k], [w, h - k], [w - k, h - k], [w - k, h], [k, h], [k, h - k], [0, h - k], [0, k], [k, k]]) };
+      return {
+        d: poly([
+          [k, 0],
+          [w - k, 0],
+          [w - k, k],
+          [w, k],
+          [w, h - k],
+          [w - k, h - k],
+          [w - k, h],
+          [k, h],
+          [k, h - k],
+          [0, h - k],
+          [0, k],
+          [k, k],
+        ]),
+      };
     }
     case "star4":
       return { d: star(w, h, 4, a("adj", 12500) * 2) };
@@ -163,7 +281,15 @@ export function presetPath(prst: string, w: number, h: number, av: Record<string
       const hl = ss * a("adj2", 50000);
       const y1 = (h - t) / 2;
       const y2 = y1 + t;
-      const pts: [number, number][] = [[0, y1], [w - hl, y1], [w - hl, 0], [w, h / 2], [w - hl, h], [w - hl, y2], [0, y2]];
+      const pts: [number, number][] = [
+        [0, y1],
+        [w - hl, y1],
+        [w - hl, 0],
+        [w, h / 2],
+        [w - hl, h],
+        [w - hl, y2],
+        [0, y2],
+      ];
       return { d: poly(prst === "leftArrow" ? pts.map(([x, y]) => [w - x, y]) : pts) };
     }
     case "upArrow":
@@ -172,7 +298,15 @@ export function presetPath(prst: string, w: number, h: number, av: Record<string
       const hl = ss * a("adj2", 50000);
       const x1 = (w - t) / 2;
       const x2 = x1 + t;
-      const pts: [number, number][] = [[x1, h], [x1, hl], [0, hl], [w / 2, 0], [w, hl], [x2, hl], [x2, h]];
+      const pts: [number, number][] = [
+        [x1, h],
+        [x1, hl],
+        [0, hl],
+        [w / 2, 0],
+        [w, hl],
+        [x2, hl],
+        [x2, h],
+      ];
       return { d: poly(prst === "downArrow" ? pts.map(([x, y]) => [x, h - y]) : pts) };
     }
     case "leftRightArrow": {
@@ -180,44 +314,124 @@ export function presetPath(prst: string, w: number, h: number, av: Record<string
       const hl = ss * a("adj2", 50000);
       const y1 = (h - t) / 2;
       const y2 = y1 + t;
-      return { d: poly([[0, h / 2], [hl, 0], [hl, y1], [w - hl, y1], [w - hl, 0], [w, h / 2], [w - hl, h], [w - hl, y2], [hl, y2], [hl, h]]) };
+      return {
+        d: poly([
+          [0, h / 2],
+          [hl, 0],
+          [hl, y1],
+          [w - hl, y1],
+          [w - hl, 0],
+          [w, h / 2],
+          [w - hl, h],
+          [w - hl, y2],
+          [hl, y2],
+          [hl, h],
+        ]),
+      };
     }
     case "upDownArrow": {
       const t = w * a("adj1", 50000);
       const hl = ss * a("adj2", 50000);
       const x1 = (w - t) / 2;
       const x2 = x1 + t;
-      return { d: poly([[w / 2, 0], [w, hl], [x2, hl], [x2, h - hl], [w, h - hl], [w / 2, h], [0, h - hl], [x1, h - hl], [x1, hl], [0, hl]]) };
+      return {
+        d: poly([
+          [w / 2, 0],
+          [w, hl],
+          [x2, hl],
+          [x2, h - hl],
+          [w, h - hl],
+          [w / 2, h],
+          [0, h - hl],
+          [x1, h - hl],
+          [x1, hl],
+          [0, hl],
+        ]),
+      };
     }
     case "chevron": {
       const k = ss * a("adj", 50000);
-      return { d: poly([[0, 0], [w - k, 0], [w, h / 2], [w - k, h], [0, h], [k, h / 2]]) };
+      return {
+        d: poly([
+          [0, 0],
+          [w - k, 0],
+          [w, h / 2],
+          [w - k, h],
+          [0, h],
+          [k, h / 2],
+        ]),
+      };
     }
     case "homePlate":
     case "flowChartOffpageConnector": {
-      if (prst === "flowChartOffpageConnector") return { d: poly([[0, 0], [w, 0], [w, h * 0.8], [w / 2, h], [0, h * 0.8]]) };
+      if (prst === "flowChartOffpageConnector")
+        return {
+          d: poly([
+            [0, 0],
+            [w, 0],
+            [w, h * 0.8],
+            [w / 2, h],
+            [0, h * 0.8],
+          ]),
+        };
       const k = ss * a("adj", 50000);
-      return { d: poly([[0, 0], [w - k, 0], [w, h / 2], [w - k, h], [0, h]]) };
+      return {
+        d: poly([
+          [0, 0],
+          [w - k, 0],
+          [w, h / 2],
+          [w - k, h],
+          [0, h],
+        ]),
+      };
     }
     case "frame": {
       const k = ss * a("adj1", 12500);
-      return { d: `${poly([[0, 0], [w, 0], [w, h], [0, h]])} ${poly([[k, k], [k, h - k], [w - k, h - k], [w - k, k]])}` };
+      return {
+        d: `${poly([
+          [0, 0],
+          [w, 0],
+          [w, h],
+          [0, h],
+        ])} ${poly([
+          [k, k],
+          [k, h - k],
+          [w - k, h - k],
+          [w - k, k],
+        ])}`,
+      };
     }
     case "flowChartDocument": {
       return { d: `M0,0 L${P(w, 0)} L${P(w, h * 0.83)} C${P(w * 0.75, h * 0.7)} ${P(w * 0.5, h * 1.05)} ${P(0, h * 0.92)} Z` };
     }
     case "flowChartPredefinedProcess":
-      return { d: `${poly([[0, 0], [w, 0], [w, h], [0, h]])} M${P(w / 8, 0)} L${P(w / 8, h)} M${P((w * 7) / 8, 0)} L${P((w * 7) / 8, h)}` };
+      return {
+        d: `${poly([
+          [0, 0],
+          [w, 0],
+          [w, h],
+          [0, h],
+        ])} M${P(w / 8, 0)} L${P(w / 8, h)} M${P((w * 7) / 8, 0)} L${P((w * 7) / 8, h)}`,
+      };
     case "can":
     case "flowChartMagneticDisk": {
-      const ry = Math.min(h / 4, ss * a("adj", 25000) / 2);
+      const ry = Math.min(h / 4, (ss * a("adj", 25000)) / 2);
       return {
         d: `M0,${r2(ry)} A${r2(w / 2)},${r2(ry)} 0 0,1 ${P(w, ry)} L${P(w, h - ry)} A${r2(w / 2)},${r2(ry)} 0 0,1 ${P(0, h - ry)} Z M0,${r2(ry)} A${r2(w / 2)},${r2(ry)} 0 0,0 ${P(w, ry)}`,
       };
     }
     case "cube": {
       const k = ss * a("adj", 25000);
-      return { d: `${poly([[0, k], [k, 0], [w, 0], [w, h - k], [w - k, h], [0, h]])} M0,${r2(k)} L${P(w - k, k)} L${P(w, 0)} M${P(w - k, k)} L${P(w - k, h)}` };
+      return {
+        d: `${poly([
+          [0, k],
+          [k, 0],
+          [w, 0],
+          [w, h - k],
+          [w - k, h],
+          [0, h],
+        ])} M0,${r2(k)} L${P(w - k, k)} L${P(w, 0)} M${P(w - k, k)} L${P(w - k, h)}`,
+      };
     }
     case "heart":
       return {
@@ -228,12 +442,33 @@ export function presetPath(prst: string, w: number, h: number, av: Record<string
     case "wedgeEllipseCallout": {
       const tx = w / 2 + w * a("adj1", -20833);
       const ty = h / 2 + h * a("adj2", 62500);
-      const body = prst === "wedgeEllipseCallout" ? ellipse(w / 2, h / 2, w / 2, h / 2) : prst === "wedgeRoundRectCallout" ? roundRect(w, h, ss * 0.1667) : poly([[0, 0], [w, 0], [w, h], [0, h]]);
+      const body =
+        prst === "wedgeEllipseCallout"
+          ? ellipse(w / 2, h / 2, w / 2, h / 2)
+          : prst === "wedgeRoundRectCallout"
+            ? roundRect(w, h, ss * 0.1667)
+            : poly([
+                [0, 0],
+                [w, 0],
+                [w, h],
+                [0, h],
+              ]);
       // Pointer: draw a triangle from the nearest edge
       const bx = Math.max(0, Math.min(w, tx));
       const by = ty > h ? h : ty < 0 ? 0 : h / 2;
       const spread = Math.min(w, h) * 0.12;
-      const tail = ty > h || ty < 0 ? poly([[bx - spread, by], [tx, ty], [bx + spread, by]]) : poly([[bx, h / 2 - spread], [tx, ty], [bx, h / 2 + spread]]);
+      const tail =
+        ty > h || ty < 0
+          ? poly([
+              [bx - spread, by],
+              [tx, ty],
+              [bx + spread, by],
+            ])
+          : poly([
+              [bx, h / 2 - spread],
+              [tx, ty],
+              [bx, h / 2 + spread],
+            ]);
       return { d: `${body} ${tail}` };
     }
     case "line":
@@ -265,11 +500,24 @@ export function presetPath(prst: string, w: number, h: number, av: Record<string
       return { d: `M${P(k, 0)} Q0,0 0,${r2(k)} L0,${r2(h - k)} Q0,${r2(h)} ${P(k, h)} M${P(w - k, 0)} Q${P(w, 0)} ${P(w, k)} L${P(w, h - k)} Q${P(w, h)} ${P(w - k, h)}`, open: true };
     }
     case "leftBrace":
-      return { d: `M${P(w, 0)} Q${P(w / 2, 0)} ${P(w / 2, h * 0.1)} L${P(w / 2, h * 0.4)} Q${P(w / 2, h / 2)} 0,${r2(h / 2)} Q${P(w / 2, h / 2)} ${P(w / 2, h * 0.6)} L${P(w / 2, h * 0.9)} Q${P(w / 2, h)} ${P(w, h)}`, open: true };
+      return {
+        d: `M${P(w, 0)} Q${P(w / 2, 0)} ${P(w / 2, h * 0.1)} L${P(w / 2, h * 0.4)} Q${P(w / 2, h / 2)} 0,${r2(h / 2)} Q${P(w / 2, h / 2)} ${P(w / 2, h * 0.6)} L${P(w / 2, h * 0.9)} Q${P(w / 2, h)} ${P(w, h)}`,
+        open: true,
+      };
     case "rightBrace":
-      return { d: `M0,0 Q${P(w / 2, 0)} ${P(w / 2, h * 0.1)} L${P(w / 2, h * 0.4)} Q${P(w / 2, h / 2)} ${P(w, h / 2)} Q${P(w / 2, h / 2)} ${P(w / 2, h * 0.6)} L${P(w / 2, h * 0.9)} Q${P(w / 2, h)} 0,${r2(h)}`, open: true };
+      return {
+        d: `M0,0 Q${P(w / 2, 0)} ${P(w / 2, h * 0.1)} L${P(w / 2, h * 0.4)} Q${P(w / 2, h / 2)} ${P(w, h / 2)} Q${P(w / 2, h / 2)} ${P(w / 2, h * 0.6)} L${P(w / 2, h * 0.9)} Q${P(w / 2, h)} 0,${r2(h)}`,
+        open: true,
+      };
     default:
-      return { d: poly([[0, 0], [w, 0], [w, h], [0, h]]) };
+      return {
+        d: poly([
+          [0, 0],
+          [w, 0],
+          [w, h],
+          [0, h],
+        ]),
+      };
   }
 }
 
@@ -329,5 +577,15 @@ export function customPath(custGeom: Element, w: number, h: number): ShapePath {
       }
     }
   }
-  return { d: parts.join(" ") || poly([[0, 0], [w, 0], [w, h], [0, h]]), open };
+  return {
+    d:
+      parts.join(" ") ||
+      poly([
+        [0, 0],
+        [w, 0],
+        [w, h],
+        [0, h],
+      ]),
+    open,
+  };
 }

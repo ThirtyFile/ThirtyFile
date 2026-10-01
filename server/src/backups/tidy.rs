@@ -30,10 +30,8 @@ pub async fn verify(cx: &Ctx<'_>) -> AppResult<Stop> {
     if params["rebuild"].as_bool() == Some(true) {
         rebuild(cx, &set, dst.as_ref()).await?;
     }
-    let (files, bytes): (i64, i64) = sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM backup_objects WHERE set_id = ?")
-        .bind(&set.id)
-        .fetch_one(&st.db)
-        .await?;
+    let (files, bytes): (i64, i64) =
+        sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM backup_objects WHERE set_id = ?").bind(&set.id).fetch_one(&st.db).await?;
     cx.set_counts(0, 0, files, bytes);
     cx.flush().await?;
     // The snapshots first: a manifest that isn't what was written makes the snapshot useless
@@ -57,13 +55,12 @@ pub async fn verify(cx: &Ctx<'_>) -> AppResult<Stop> {
     }
     let mut last = String::new();
     loop {
-        let rows: Vec<(String, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT hash, size FROM backup_objects WHERE set_id = ? AND hash > ? ORDER BY hash LIMIT {PAGE}"
-        )))
-        .bind(&set.id)
-        .bind(&last)
-        .fetch_all(&st.db)
-        .await?;
+        let rows: Vec<(String, i64)> =
+            sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT hash, size FROM backup_objects WHERE set_id = ? AND hash > ? ORDER BY hash LIMIT {PAGE}")))
+                .bind(&set.id)
+                .bind(&last)
+                .fetch_all(&st.db)
+                .await?;
         let Some((hash, _)) = rows.last() else { break };
         last = hash.clone();
         for (hash, size) in rows {
@@ -75,7 +72,12 @@ pub async fn verify(cx: &Ctx<'_>) -> AppResult<Stop> {
             match read {
                 Ok((h, n)) if h == hash && n == size as u64 => {
                     let _w = st.write_lock.lock().await;
-                    sqlx::query("UPDATE backup_objects SET verified_at = ? WHERE set_id = ? AND hash = ?").bind(now()).bind(&set.id).bind(&hash).execute(&st.db).await?;
+                    sqlx::query("UPDATE backup_objects SET verified_at = ? WHERE set_id = ? AND hash = ?")
+                        .bind(now())
+                        .bind(&set.id)
+                        .bind(&hash)
+                        .execute(&st.db)
+                        .await?;
                 }
                 Ok(_) => cx.failed("", None, format!("The content {} is damaged", &hash[..12])),
                 Err(Ok(stop)) => return Ok(stop),
@@ -191,17 +193,16 @@ pub async fn remove(cx: &Ctx<'_>) -> AppResult<Stop> {
         .await
         .map_err(|e| AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("The copy's location can't be reached: {e}")))?;
     let dst = st.storage(&set.dest_location)?;
-    let (files, bytes): (i64, i64) = sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM backup_objects WHERE set_id = ?")
-        .bind(&set.id)
-        .fetch_one(&st.db)
-        .await?;
+    let (files, bytes): (i64, i64) =
+        sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM backup_objects WHERE set_id = ?").bind(&set.id).fetch_one(&st.db).await?;
     cx.set_counts(0, 0, files, bytes);
     cx.flush().await?;
     loop {
-        let rows: Vec<(String, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT hash, size FROM backup_objects WHERE set_id = ? ORDER BY hash LIMIT {PAGE}")))
-            .bind(&set.id)
-            .fetch_all(&st.db)
-            .await?;
+        let rows: Vec<(String, i64)> =
+            sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT hash, size FROM backup_objects WHERE set_id = ? ORDER BY hash LIMIT {PAGE}")))
+                .bind(&set.id)
+                .fetch_all(&st.db)
+                .await?;
         if rows.is_empty() {
             break;
         }

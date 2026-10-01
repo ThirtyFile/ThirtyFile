@@ -182,11 +182,8 @@ mod tests {
         let carls = env.drive_of(carl.root()).await;
         assert_eq!(tree::drive_location(&mut env.st.db.acquire().await.unwrap(), &carls).await.unwrap(), "bucket");
         let id = env.upload(&carl, carl.root(), "a.txt", b"carl's").await;
-        let (location,): (String,) = sqlx::query_as("SELECT b.location_id FROM nodes n JOIN blobs b ON b.hash = n.blob_hash WHERE n.id = ?")
-            .bind(&id)
-            .fetch_one(&env.st.db)
-            .await
-            .unwrap();
+        let (location,): (String,) =
+            sqlx::query_as("SELECT b.location_id FROM nodes n JOIN blobs b ON b.hash = n.blob_hash WHERE n.id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(location, "bucket");
     }
 
@@ -495,7 +492,13 @@ mod tests {
             .unwrap();
         let req = json!({ "name": "Again", "kind": "s3", "config": s3("https://s3.example.com/files", "", "/drive") });
         let err = create(State(env.st.clone()), Admin(env.admin().await), Json(serde_json::from_value(req).unwrap())).await.unwrap_err();
-        assert_eq!((err.status, err.message.as_str()), (axum::http::StatusCode::CONFLICT, "The storage location \"Bucket\" already uses this place (the same bucket and prefix, or the same server and folder)"));
+        assert_eq!(
+            (err.status, err.message.as_str()),
+            (
+                axum::http::StatusCode::CONFLICT,
+                "The storage location \"Bucket\" already uses this place (the same bucket and prefix, or the same server and folder)"
+            )
+        );
         // Editing a location to point there is refused too; itself is no duplicate
         let mut c = env.st.db.acquire().await.unwrap();
         assert!(check_place_free(&mut c, Some("b2"), "s3", &s3("https://s3.example.com", "files", "drive")).await.is_err());

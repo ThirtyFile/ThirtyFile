@@ -32,17 +32,7 @@ export function Section({ title, children }: { title: string; children: React.Re
 }
 
 /** Settings page under the control panel: the address bar shows "Control panel › item", and going up returns to the control panel */
-export function SettingsFrame({
-  item,
-  onRefresh,
-  footer,
-  children,
-}: {
-  item: ControlPanelKey;
-  onRefresh(): void;
-  footer?: React.ReactNode;
-  children: React.ReactNode;
-}) {
+export function SettingsFrame({ item, onRefresh, footer, children }: { item: ControlPanelKey; onRefresh(): void; footer?: React.ReactNode; children: React.ReactNode }) {
   const { title, icon } = controlPanelItem(item);
   const searchSettings = useSettingsSearch();
   return (

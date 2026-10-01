@@ -47,12 +47,10 @@ pub async fn release_blobs(conn: &mut SqliteConnection, hashes: &[String]) -> Ap
     .bind(&list)
     .execute(&mut *conn)
     .await?;
-    let orphans: Vec<BlobRef> = sqlx::query_as(
-        "DELETE FROM blobs WHERE hash IN (SELECT value FROM json_each(?)) AND refcount <= 0 RETURNING hash, location_id",
-    )
-    .bind(&list)
-    .fetch_all(&mut *conn)
-    .await?;
+    let orphans: Vec<BlobRef> = sqlx::query_as("DELETE FROM blobs WHERE hash IN (SELECT value FROM json_each(?)) AND refcount <= 0 RETURNING hash, location_id")
+        .bind(&list)
+        .fetch_all(&mut *conn)
+        .await?;
     Ok(orphans)
 }
 
@@ -170,9 +168,7 @@ pub fn purge_detached_later(st: &AppState) {
 
 async fn purge_detached(st: &AppState) -> AppResult<()> {
     let drives: Vec<(String,)> =
-        sqlx::query_as("SELECT DISTINCT drive_id FROM nodes WHERE drive_id IS NOT NULL AND drive_id NOT IN (SELECT id FROM drives)")
-            .fetch_all(&st.db)
-            .await?;
+        sqlx::query_as("SELECT DISTINCT drive_id FROM nodes WHERE drive_id IS NOT NULL AND drive_id NOT IN (SELECT id FROM drives)").fetch_all(&st.db).await?;
     for (drive,) in drives {
         let mut total = 0;
         loop {
@@ -349,12 +345,7 @@ async fn record_deletion(st: &AppState, hash: &str, location: &str, failed: Opti
             .await
             .map(|_| ())
         }
-        None => sqlx::query("DELETE FROM pending_blob_deletes WHERE hash = ? AND location_id = ?")
-            .bind(hash)
-            .bind(location)
-            .execute(&st.db)
-            .await
-            .map(|_| ()),
+        None => sqlx::query("DELETE FROM pending_blob_deletes WHERE hash = ? AND location_id = ?").bind(hash).bind(location).execute(&st.db).await.map(|_| ()),
     };
     if let Err(e) = res {
         tracing::warn!("Failed to update the pending deletion list: {e}");
@@ -364,7 +355,6 @@ async fn record_deletion(st: &AppState, hash: &str, location: &str, failed: Opti
 /// Wait before retrying a deletion that failed once; it doubles with every further failure, up to `RETRY_MAX`
 const RETRY_BASE: i64 = 60;
 const RETRY_MAX: i64 = 24 * 3600;
-
 
 /// Keeps a hash marked as "being staged" or "being deleted" (the caller counted it in); dropping it (commit, failure,
 /// or a cancelled request) releases the mark
@@ -604,11 +594,8 @@ mod tests {
         assert_eq!(retry_pending_deletes(&env.st, "flaky").await, (1, 1), "still disconnected: retry fails and keeps waiting");
         assert_eq!(pending().await, 1);
         // Each failure waits twice as long
-        let (attempts, wait): (i64, i64) = sqlx::query_as("SELECT attempts, created_at - ? FROM pending_blob_deletes")
-            .bind(crate::util::now())
-            .fetch_one(&env.st.db)
-            .await
-            .unwrap();
+        let (attempts, wait): (i64, i64) =
+            sqlx::query_as("SELECT attempts, created_at - ? FROM pending_blob_deletes").bind(crate::util::now()).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(attempts, 2);
         assert!((RETRY_BASE * 2 - 5..=RETRY_BASE * 2).contains(&wait), "{wait}");
 
@@ -681,5 +668,4 @@ mod tests {
         remove_unreferenced(&env.st, vec![(hash.clone(), "local".into())]).await;
         assert!(!blob.exists());
     }
-
 }

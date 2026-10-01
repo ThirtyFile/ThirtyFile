@@ -44,7 +44,8 @@ import { neighbours, useFolderWindows } from "@/lib/windows";
 const SheetEditor = lazy(() => import("@/components/sheet/SheetEditor"));
 
 /** Where focus takes the arrow keys for itself: typing, a media player's seek bar, lists, menus and the workbook */
-const OWN_ARROWS = ".cm-editor, video, audio, input, textarea, select, [contenteditable], [role=grid], [role=tree], [role=tablist], [role=menu], [role=listbox], [role=slider], [data-slot=dialog-content]";
+const OWN_ARROWS =
+  ".cm-editor, video, audio, input, textarea, select, [contenteditable], [role=grid], [role=tree], [role=tablist], [role=menu], [role=listbox], [role=slider], [data-slot=dialog-content]";
 
 /** File opened in a tab: `/view/:id` */
 export function FileViewPage() {
@@ -136,14 +137,7 @@ export function FileViewPage() {
 
   const toolbar = (
     <>
-      <ToolButton
-        icon={FolderOpenIcon}
-        label={t("Open file location")}
-        showLabel
-        className="h-9 px-2.5 text-[13px]"
-        disabled={!node}
-        onClick={() => navigate(parentUrl)}
-      />
+      <ToolButton icon={FolderOpenIcon} label={t("Open file location")} showLabel className="h-9 px-2.5 text-[13px]" disabled={!node} onClick={() => navigate(parentUrl)} />
       <ToolSeparator />
       <ToolButton
         icon={DownloadIcon}
@@ -152,20 +146,8 @@ export function FileViewPage() {
         disabled={!node}
         onClick={() => node && triggerDownload(privateSource.contentUrl(node, true))}
       />
-      <ToolButton
-        icon={Share2Icon}
-        label={t("Create share link")}
-        className="size-9 px-0 [&_svg]:size-[18px]"
-        disabled={!node || !caps.share}
-        onClick={() => setDialog("share")}
-      />
-      <ToolButton
-        icon={PencilIcon}
-        label={t("Rename")}
-        className="size-9 px-0 [&_svg]:size-[18px]"
-        disabled={!node || !caps.write}
-        onClick={() => setDialog("rename")}
-      />
+      <ToolButton icon={Share2Icon} label={t("Create share link")} className="size-9 px-0 [&_svg]:size-[18px]" disabled={!node || !caps.share} onClick={() => setDialog("share")} />
+      <ToolButton icon={PencilIcon} label={t("Rename")} className="size-9 px-0 [&_svg]:size-[18px]" disabled={!node || !caps.write} onClick={() => setDialog("rename")} />
       {canEditSheet && (
         <>
           {/* Excel-specific features are kept separate from general file actions */}
@@ -233,21 +215,10 @@ export function FileViewPage() {
               <div className="flex size-full items-center justify-center p-0 [&>img]:p-4 [&>video]:p-4">
                 {sheetEditing ? (
                   <Suspense fallback={<Loader2Icon className="size-6 animate-spin text-muted-foreground" />}>
-                    <SheetEditor
-                      node={node}
-                      source={privateSource}
-                      onExit={() => setEditingId(null)}
-                      onSaved={onSaved}
-                    />
+                    <SheetEditor node={node} source={privateSource} onExit={() => setEditingId(null)} onSaved={onSaved} />
                   </Suspense>
                 ) : (
-                  <FileViewer
-                    node={node}
-                    source={privateSource}
-                    editable={caps.write}
-                    embedded
-                    onSaved={onSaved}
-                  />
+                  <FileViewer node={node} source={privateSource} editable={caps.write} embedded onSaved={onSaved} />
                 )}
               </div>
             )}
@@ -289,7 +260,7 @@ export function FileViewPage() {
             setDialog(null);
             void refreshFiles(qc, renamed(after));
             if (name !== before)
-              toastWithUndo(t("Renamed to \"{name}\"", { name }), {
+              toastWithUndo(t('Renamed to "{name}"', { name }), {
                 undo: async () => void refreshFiles(qc, renamed(await api.rename(node.id, before))),
                 undoneText: t("Renamed back"),
               });

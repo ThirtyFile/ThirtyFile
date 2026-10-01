@@ -18,20 +18,7 @@ import { fileTypeOf, isScriptNotVideo, type FileType } from "@/lib/fileTypes";
 import { t } from "@/lib/i18n";
 import { cn, extOf } from "@/lib/utils";
 
-export type FileCategory =
-  | "folder"
-  | "markdown"
-  | "image"
-  | "video"
-  | "audio"
-  | "pdf"
-  | "word"
-  | "sheet"
-  | "slides"
-  | "code"
-  | "text"
-  | "archive"
-  | "other";
+export type FileCategory = "folder" | "markdown" | "image" | "video" | "audio" | "pdf" | "word" | "sheet" | "slides" | "code" | "text" | "archive" | "other";
 
 /** A file or folder as far as its type goes; the size, when known, tells TypeScript from video (`.ts`, `.mts`) */
 type NodeLike = Pick<Node, "kind" | "mime" | "name"> & { size?: number };

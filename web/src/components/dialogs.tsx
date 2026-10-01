@@ -23,14 +23,7 @@ export function errorProps(error: unknown, id: string) {
   return error ? { "aria-invalid": true, "aria-describedby": id } : {};
 }
 
-export function NameDialog(props: {
-  title: string;
-  label?: string;
-  initial?: string;
-  confirmText?: string;
-  onSubmit(name: string): Promise<void>;
-  onClose(): void;
-}) {
+export function NameDialog(props: { title: string; label?: string; initial?: string; confirmText?: string; onSubmit(name: string): Promise<void>; onClose(): void }) {
   const [name, setName] = useState(props.initial ?? "");
   const ref = useRef<HTMLInputElement>(null);
   const { busy, error, run } = useSubmit(() => props.onSubmit(name.trim()));
