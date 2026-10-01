@@ -1,0 +1,5 @@
+# Commits that only change the layout of the code, which `git blame` skips: GitHub's blame view reads this file, and
+# locally `git config blame.ignoreRevsFile .git-blame-ignore-revs` does the same
+
+# Format the server with rustfmt and the interface with oxfmt (#313)
+caeaad34d935b34bce2e6b0686838a885a3ce625
