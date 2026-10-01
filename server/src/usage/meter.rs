@@ -436,16 +436,27 @@ impl Drop for Counted {
 pub struct Metered {
     inner: Arc<dyn Storage>,
     meters: Arc<Meters>,
+    /// `Inner::recheck`
+    recheck: Arc<tokio::sync::Notify>,
     location: String,
 }
 
 impl Metered {
-    pub fn wrap(inner: Arc<dyn Storage>, meters: Arc<Meters>, location: &str) -> Arc<dyn Storage> {
-        Arc::new(Metered { inner, meters, location: location.to_string() })
+    pub fn wrap(inner: Arc<dyn Storage>, meters: Arc<Meters>, recheck: Arc<tokio::sync::Notify>, location: &str) -> Arc<dyn Storage> {
+        Arc::new(Metered { inner, meters, recheck, location: location.to_string() })
     }
 
+    /// A call that fails with an error of the storage service has the location's connection checked again right away,
+    /// so people soon see it offline (unless the call was that check)
     async fn timed<T>(&self, op: Op, bytes: u64, fut: impl Future<Output = io::Result<T>>) -> io::Result<T> {
-        self.meters.timed(&self.location, op, bytes, fut).await
+        let res = self.meters.timed(&self.location, op, bytes, fut).await;
+        if let Err(e) = &res
+            && current_work() != Work::Probe
+            && e.get_ref().is_some_and(|inner| inner.is::<crate::storage::StorageError>())
+        {
+            self.recheck.notify_one();
+        }
+        res
     }
 
     async fn read(&self, fut: impl Future<Output = io::Result<BoxReader>>) -> io::Result<BoxReader> {
@@ -613,7 +624,7 @@ mod tests {
     #[tokio::test]
     async fn every_call_is_timed_and_counted_by_location_operation_and_work() {
         let meters = Arc::new(Meters::default());
-        let s = Metered::wrap(Arc::new(Slow { delay: Duration::from_millis(20), fail: false }), meters.clone(), "nas");
+        let s = Metered::wrap(Arc::new(Slow { delay: Duration::from_millis(20), fail: false }), meters.clone(), Default::default(), "nas");
         let tmp = std::env::temp_dir().join(format!("thirtyfile-meter-{}", crate::util::new_id()));
         std::fs::write(&tmp, vec![1u8; 3000]).unwrap();
         s.put_file(&"a".repeat(64), &tmp).await.unwrap();
@@ -649,10 +660,10 @@ mod tests {
     #[tokio::test]
     async fn a_call_given_up_counts_as_timed_out_and_failures_as_errors() {
         let meters = Arc::new(Meters::default());
-        let slow = Metered::wrap(Arc::new(Slow { delay: Duration::from_secs(30), fail: false }), meters.clone(), "s3");
+        let slow = Metered::wrap(Arc::new(Slow { delay: Duration::from_secs(30), fail: false }), meters.clone(), Default::default(), "s3");
         let tmp = std::env::temp_dir().join("thirtyfile-meter-missing");
         assert!(tokio::time::timeout(Duration::from_millis(30), slow.put_file(&"b".repeat(64), &tmp)).await.is_err());
-        let failing = Metered::wrap(Arc::new(Slow { delay: Duration::ZERO, fail: true }), meters.clone(), "s3");
+        let failing = Metered::wrap(Arc::new(Slow { delay: Duration::ZERO, fail: true }), meters.clone(), Default::default(), "s3");
         assert!(failing.put_file(&"b".repeat(64), &tmp).await.is_err());
         let w = &meters.take()["s3"][&(Op::Write, Work::Foreground)];
         assert_eq!((w.count, w.errors, w.timeouts, w.bytes), (2, 1, 1, 0));

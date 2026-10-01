@@ -47,20 +47,19 @@ pub async fn probe(st: &AppState, id: &str) -> Result<(), String> {
 /// Retries a location's failed deletions in a task of its own, so a long batch (a slow or refusing storage service)
 /// doesn't hold up the health checks of the other locations. At most one batch per location runs at a time.
 pub(super) fn retry_in_background(st: &AppState, id: &str) {
-    static RUNNING: std::sync::Mutex<std::collections::BTreeSet<String>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
-    if !RUNNING.lock().unwrap().insert(id.to_string()) {
+    if !st.location_retries.lock().unwrap().insert(id.to_string()) {
         return;
     }
     // Released when the task ends, also if it panics
-    struct Running(String);
+    struct Running(AppState, String);
     impl Drop for Running {
         fn drop(&mut self) {
-            RUNNING.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.0);
+            self.0.location_retries.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.1);
         }
     }
-    let (st, running) = (st.clone(), Running(id.to_string()));
+    let (st, running) = (st.clone(), Running(st.clone(), id.to_string()));
     tokio::spawn(async move {
-        let id = &running.0;
+        let id = &running.1;
         // One line per location: failures of single files are only logged at debug level
         let (n, failed) = tree::retry_pending_deletes(&st, id).await;
         if n > 0 {
@@ -80,7 +79,7 @@ pub fn spawn_health_monitor(st: AppState) {
                 tokio::select! {
                     _ = tokio::time::sleep(if any_down { OFFLINE_INTERVAL } else { HEALTH_INTERVAL }) => {}
                     // Several requests may fail at the same time: wait a moment and merge them into one check
-                    _ = crate::storage::RECHECK.notified() => tokio::time::sleep(Duration::from_secs(1)).await,
+                    _ = st.recheck.notified() => tokio::time::sleep(Duration::from_secs(1)).await,
                 }
             }
             first = false;
@@ -354,12 +353,12 @@ pub async fn update(
         // Just checked
         set_health(&st, &id, None);
         if moved.is_some() {
-            crate::folders::spaces_changed();
+            crate::folders::spaces_changed(&st);
         }
         // An S3, SFTP or FTP location moved to another place: the old one is free again
         if place_moved && let Some(old) = old {
             release_place(&st, &id, old.as_ref()).await;
-            MARKED.lock().unwrap().insert(id.clone());
+            st.location_marked.lock().unwrap().insert(id.clone());
         }
     }
     Ok(Json(json!({ "ok": true })))

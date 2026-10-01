@@ -320,7 +320,7 @@ pub(crate) fn case_apart(nodes: &[Named]) -> Vec<(String, String)> {
 /// something isn't copied as it is now (copied in the next round).
 async fn switch(cx: &Ctx<'_>) -> AppResult<bool> {
     let (st, job) = (cx.st, cx.job);
-    let _held = crate::folders::hold(&job.drive_id).await;
+    let _held = crate::folders::hold(st, &job.drive_id).await;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let res = async {
@@ -439,7 +439,7 @@ async fn switch(cx: &Ctx<'_>) -> AppResult<bool> {
     .await;
     let switched = crate::db::settle(tx, res).await?;
     if switched {
-        crate::folders::spaces_changed();
+        crate::folders::spaces_changed(st);
     }
     Ok(switched)
 }

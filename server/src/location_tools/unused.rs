@@ -5,10 +5,7 @@
 //! uploads store their content before recording it. Removing re-checks each item right before deleting it, under the
 //! write lock (`tree::remove_unreferenced`), so content used again meanwhile stays.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{LazyLock, Mutex},
-};
+use std::collections::HashSet;
 
 use axum::{
     Json,
@@ -106,17 +103,15 @@ impl Job {
     }
 }
 
-/// Searches by location id (one per location, the latest)
-static JOBS: LazyLock<Mutex<HashMap<String, Job>>> = LazyLock::new(Default::default);
-
-fn update(id: &str, scan_id: &str, f: impl FnOnce(&mut Job)) {
-    if let Some(job) = JOBS.lock().unwrap().get_mut(id).filter(|j| j.scan_id == scan_id) {
+/// Changes the search of location `id` (`Inner::unused_searches`, one per location, the latest) if it is `scan_id`
+fn update(st: &AppState, id: &str, scan_id: &str, f: impl FnOnce(&mut Job)) {
+    if let Some(job) = st.unused_searches.lock().unwrap().get_mut(id).filter(|j| j.scan_id == scan_id) {
         f(job);
     }
 }
 
-pub async fn unused_status(_: Admin, Path(id): Path<String>) -> Json<Option<Job>> {
-    Json(JOBS.lock().unwrap().get(&id).map(Job::view))
+pub async fn unused_status(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> Json<Option<Job>> {
+    Json(st.unused_searches.lock().unwrap().get(&id).map(Job::view))
 }
 
 /// Starts a search in the background; its progress is read with `unused_status`
@@ -143,7 +138,7 @@ pub async fn find_unused(State(st): State<AppState>, _: Admin, Path(id): Path<St
         all: Vec::new(),
     };
     {
-        let mut jobs = JOBS.lock().unwrap();
+        let mut jobs = st.unused_searches.lock().unwrap();
         if jobs.get(&id).is_some_and(|j| matches!(j.phase, Phase::Scanning | Phase::Removing)) {
             return Err(AppError::conflict("This location is already being checked or cleaned up"));
         }
@@ -151,9 +146,9 @@ pub async fn find_unused(State(st): State<AppState>, _: Admin, Path(id): Path<St
     }
     let scan_id = job.scan_id.clone();
     tokio::spawn(async move {
-        let seen = |n: u64| update(&id, &scan_id, |j| j.scanned = n);
+        let seen = |n: u64| update(&st, &id, &scan_id, |j| j.scanned = n);
         let found = crate::usage::background(scan(&st, &id, backend.as_ref(), now() - MARGIN, &seen)).await;
-        update(&id, &scan_id, |j| {
+        update(&st, &id, &scan_id, |j| {
             j.finished_at = Some(now());
             match found {
                 Ok((items, recent)) => {
@@ -223,7 +218,7 @@ pub async fn remove_unused(State(st): State<AppState>, Admin(user): Admin, Path(
     let loc = location(&st, &id).await?;
     locations::require_own_place(&st, &id, &loc.kind, st.storage(&id)?.as_ref()).await?;
     let (job, items) = {
-        let mut jobs = JOBS.lock().unwrap();
+        let mut jobs = st.unused_searches.lock().unwrap();
         let job = jobs.get_mut(&id).filter(|j| j.scan_id == req.scan_id && j.phase == Phase::Found).ok_or_else(|| {
             AppError::conflict("This list is out of date. Find unused content again.")
         })?;
@@ -237,13 +232,13 @@ pub async fn remove_unused(State(st): State<AppState>, Admin(user): Admin, Path(
     let scan_id = job.scan_id.clone();
     tokio::spawn(async move {
         let progress = |r: Removal| {
-            update(&id, &scan_id, |j| {
+            update(&st, &id, &scan_id, |j| {
                 (j.removed, j.removed_bytes, j.kept, j.failed) = (r.removed, r.bytes, r.kept, r.failed);
             })
         };
         let done = crate::usage::background(remove(&st, &id, &items, now() - MARGIN, &progress)).await;
         let logged = log_removal(&st, &user, &loc.name, done.removed).await;
-        update(&id, &scan_id, |j| {
+        update(&st, &id, &scan_id, |j| {
             j.phase = Phase::Removed;
             j.finished_at = Some(now());
             if let Err(e) = logged {
@@ -419,10 +414,10 @@ mod tests {
         let (_, file) = orphan(&env, b"left behind", 2 * 86400).await;
         let Json(job) = find_unused(State(env.st.clone()), Admin(admin.clone()), Path("local".into())).await.unwrap();
         let wait = |phase: Phase| {
-            let admin = admin.clone();
+            let (admin, st) = (admin.clone(), env.st.clone());
             async move {
             for _ in 0..200 {
-                if let Json(Some(j)) = unused_status(Admin(admin.clone()), Path("local".into())).await
+                if let Json(Some(j)) = unused_status(State(st.clone()), Admin(admin.clone()), Path("local".into())).await
                     && j.phase == phase
                 {
                     return j;

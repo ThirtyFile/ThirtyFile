@@ -486,7 +486,7 @@ pub async fn resume(st: &AppState) -> AppResult<()> {
     drives.dedup();
     let mut held = Vec::with_capacity(drives.len());
     for d in &drives {
-        held.push(crate::fsops::lock_space(d).await);
+        held.push(crate::fsops::lock_space(st, d).await);
     }
     tracing::info!("Finishing {} change(s) of many items that stopped when ThirtyFile stopped", rows.len());
     finish_later(st, rows.into_iter().map(|(id, _)| Unfinished { id, frontier: None }).collect(), held);

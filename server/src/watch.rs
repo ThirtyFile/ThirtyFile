@@ -33,25 +33,18 @@ const WATCH_MASK: u32 = libc::IN_CREATE
     | libc::IN_DELETE_SELF
     | libc::IN_ONLYDIR;
 
-static CHANGED: tokio::sync::Notify = tokio::sync::Notify::const_new();
-
 /// A folder space was added, changed or removed: the watchers are updated right away
-pub fn spaces_changed() {
-    CHANGED.notify_one();
+pub fn spaces_changed(st: &AppState) {
+    st.spaces_changed.notify_one();
 }
 
 /// What the watching thread is told: the folder spaces to watch now (id → folder)
 type Spaces = HashMap<String, PathBuf>;
 
-/// The spaces whose every folder is watched now: changes there show up by themselves, so the regular scan of them runs
-/// less often (folders.rs)
-fn watched() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
-    static WATCHED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
-    WATCHED.get_or_init(Default::default)
-}
-
-pub fn is_watched(drive_id: &str) -> bool {
-    watched().lock().unwrap().contains(drive_id)
+/// Whether every folder of the space is watched now: changes there show up by themselves, so the regular scan of it
+/// runs less often (folders.rs)
+pub fn is_watched(st: &AppState, drive_id: &str) -> bool {
+    st.watched_spaces.lock().unwrap().contains(drive_id)
 }
 
 /// Watches every folder space from one thread with one inotify instance, since every user has a folder space and
@@ -79,7 +72,7 @@ pub fn spawn_watchers(st: AppState) {
             }
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(60)) => {}
-                _ = CHANGED.notified() => {}
+                _ = st.spaces_changed.notified() => {}
             }
         }
     });
@@ -113,6 +106,8 @@ struct Watcher {
     limited: bool,
     /// Spaces on network file systems, left to the regular scan (told in the log once)
     skipped: HashSet<String>,
+    /// Where the fully watched spaces are told (`Inner::watched_spaces`)
+    published: std::sync::Arc<std::sync::Mutex<HashSet<String>>>,
 }
 
 impl Drop for Watcher {
@@ -262,7 +257,7 @@ impl Watcher {
 
     /// Tells the scanner which spaces are fully watched: none once the watch limit was reached
     fn publish(&self) {
-        *watched().lock().unwrap() = if self.limited { Default::default() } else { self.roots.keys().cloned().collect() };
+        *self.published.lock().unwrap() = if self.limited { Default::default() } else { self.roots.keys().cloned().collect() };
     }
 }
 
@@ -273,7 +268,7 @@ fn watch(st: AppState, handle: tokio::runtime::Handle, rx: std::sync::mpsc::Rece
         tracing::warn!("Can't watch folder spaces for changes: {}", std::io::Error::last_os_error());
         return;
     }
-    let mut w = Watcher { fd, dirs: HashMap::new(), roots: HashMap::new(), limited: false, skipped: HashSet::new() };
+    let mut w = Watcher { fd, dirs: HashMap::new(), roots: HashMap::new(), limited: false, skipped: HashSet::new(), published: st.watched_spaces.clone() };
     // (space, folder) → last change
     let mut changed: HashMap<(String, String), Instant> = HashMap::new();
     let mut overflow = false;
@@ -375,7 +370,7 @@ mod tests {
         // SAFETY: plain system call
         let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
         assert!(fd >= 0);
-        Watcher { fd, dirs: HashMap::new(), roots: HashMap::new(), limited: false, skipped: HashSet::new() }
+        Watcher { fd, dirs: HashMap::new(), roots: HashMap::new(), limited: false, skipped: HashSet::new(), published: Default::default() }
     }
 
     fn paths(w: &Watcher) -> Vec<String> {
@@ -404,7 +399,7 @@ mod tests {
         let mut w = watcher();
         w.update(HashMap::from([("d1".to_string(), dir.clone())]));
         assert_eq!(paths(&w), ["", "Sub", "Sub/Inner"]);
-        assert!(is_watched("d1"));
+        assert!(w.published.lock().unwrap().contains("d1"));
 
         // Renamed: the old paths go, the new ones come (not a lookup of a missing path at every change)
         std::fs::rename(dir.join("Sub"), dir.join("Moved")).unwrap();
@@ -426,7 +421,7 @@ mod tests {
 
         // Spaces that go stop being watched
         w.update(HashMap::new());
-        assert!(w.dirs.is_empty() && !is_watched("d1"));
+        assert!(w.dirs.is_empty() && !w.published.lock().unwrap().contains("d1"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -135,7 +135,7 @@ async fn renamed(cx: &Ctx<'_>, from: &Path, to: &Path) -> AppResult<bool> {
     if other_disk() {
         return Ok(false);
     }
-    let held = crate::folders::hold(&job.drive_id).await;
+    let held = crate::folders::hold(cx.st, &job.drive_id).await;
     set_renamed(cx, true).await?;
     let (f, t, drive) = (from.to_path_buf(), to.to_path_buf(), job.drive_id.clone());
     let moved = tokio::task::spawn_blocking(move || -> std::io::Result<bool> {
@@ -204,7 +204,7 @@ async fn commit_rename(cx: &Ctx<'_>, to: &Path) -> AppResult<()> {
         .await;
         crate::db::settle(tx, res).await?;
     }
-    crate::folders::spaces_changed();
+    crate::folders::spaces_changed(st);
     crate::folders::scan_later(st, &job.drive_id);
     Ok(())
 }
@@ -243,7 +243,7 @@ async fn resume_rename(cx: &Ctx<'_>, from: &Path) -> AppResult<bool> {
         sqlx::query_as("SELECT to_path, renamed FROM space_moves WHERE id = ?").bind(&job.id).fetch_one(&st.db).await?;
     let (Some(to), true) = (to, renamed) else { return Ok(false) };
     let to = PathBuf::from(to);
-    let held = crate::folders::hold(&job.drive_id).await;
+    let held = crate::folders::hold(st, &job.drive_id).await;
     match find_folder(&job.drive_id, from, &to).await? {
         Found::New => {
             commit_rename(cx, &to).await?;
@@ -542,7 +542,7 @@ async fn record(cx: &Ctx<'_>, rel: &str, src: crate::folders::Seen, dst: crate::
 /// has it now.
 async fn switch(cx: &Ctx<'_>, target: &Path) -> AppResult<bool> {
     let (st, job) = (cx.st, cx.job);
-    let held = crate::folders::hold(&job.drive_id).await;
+    let held = crate::folders::hold(st, &job.drive_id).await;
     let w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let res = async {
@@ -585,7 +585,7 @@ async fn switch(cx: &Ctx<'_>, target: &Path) -> AppResult<bool> {
     let switched = crate::db::settle(tx, res).await?;
     drop((w, held));
     if switched {
-        crate::folders::spaces_changed();
+        crate::folders::spaces_changed(st);
         // Folders get the new disk's identities from a scan
         crate::folders::scan_later(st, &job.drive_id);
     }

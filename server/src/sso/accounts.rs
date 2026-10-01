@@ -221,7 +221,7 @@ pub(super) async fn create_sso_user(st: &AppState, provider: &str, cfg: &Provide
         logs::record_activity(&mut tx, &user, None, "user_create", &detail).await?;
     }
     tx.commit().await?;
-    crate::folders::spaces_changed();
+    crate::folders::spaces_changed(st);
     tracing::info!("Automatically created account {username} via {} sign-in", label(provider));
     Ok((id, username))
 }

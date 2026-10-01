@@ -259,25 +259,15 @@ impl StorageError {
     }
 }
 
-/// A storage service error is shown to people as what it is (503 with its message), and the location's connection is
-/// checked again right away (`RECHECK`)
+/// A storage service error is shown to people as what it is (503 with its message)
 impl From<std::io::Error> for crate::error::AppError {
     fn from(e: std::io::Error) -> Self {
         if let Some(se) = e.get_ref().and_then(|inner| inner.downcast_ref::<StorageError>()) {
             tracing::warn!("{se}");
-            request_recheck();
             return Self::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, se.text());
         }
         Self::internal(e)
     }
-}
-
-/// The connection check of the storage locations (`locations::spawn_health_monitor`) waits for this too
-pub static RECHECK: tokio::sync::Notify = tokio::sync::Notify::const_new();
-
-/// Called when an operation hits a storage service error: recheck the connection right away so the UI soon shows "offline"
-pub fn request_recheck() {
-    RECHECK.notify_one();
 }
 
 #[cfg(test)]

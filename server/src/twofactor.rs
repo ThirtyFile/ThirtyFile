@@ -10,7 +10,7 @@
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    sync::{Mutex, OnceLock},
+    sync::Mutex,
     time::{Duration, Instant},
 };
 
@@ -253,7 +253,7 @@ fn too_many() -> AppError {
 // ───────────── Signing in ─────────────
 
 #[derive(Clone)]
-enum Step {
+pub enum Step {
     /// Two-factor sign-in is set up: a code is asked for
     Code,
     /// Required but not set up yet: the secret shown for setting it up, once asked for
@@ -261,7 +261,7 @@ enum Step {
 }
 
 /// A correct password waiting for its second factor
-struct Pending {
+pub struct Pending {
     user_id: i64,
     step: Step,
     /// The password the ticket was given for (`credential`): once it changes or is reset, the ticket stops working
@@ -278,10 +278,7 @@ async fn credential(st: &AppState, user_id: i64) -> AppResult<Option<String>> {
 }
 
 /// Sign-ins in progress, by the SHA-256 of their ticket (the ticket itself is only known to the browser)
-fn pending() -> &'static Mutex<HashMap<String, Pending>> {
-    static P: OnceLock<Mutex<HashMap<String, Pending>>> = OnceLock::new();
-    P.get_or_init(Default::default)
-}
+pub type Logins = Mutex<HashMap<String, Pending>>;
 
 /// After a correct password: when the account has (or must set up) two-factor sign-in, a ticket for the second step
 /// instead of a session
@@ -296,7 +293,7 @@ pub async fn after_password(st: &AppState, user_id: i64) -> AppResult<Option<Val
     let Some(credential) = credential(st, user_id).await? else { return Err(expired()) };
     let ticket = random_token(43);
     {
-        let mut map = pending().lock().unwrap();
+        let mut map = st.twofactor_logins.lock().unwrap();
         map.retain(|_, p| p.created.elapsed() < TICKET_TTL);
         while map.len() >= MAX_PENDING {
             let Some(oldest) = map.iter().min_by_key(|(_, p)| p.created).map(|(k, _)| k.clone()) else { break };
@@ -315,7 +312,7 @@ fn expired() -> AppError {
 /// password (a password changed or reset since, e.g. to lock someone out, ends the sign-ins it started)
 async fn ticket(st: &AppState, hash: &str) -> AppResult<(i64, Step, String)> {
     let found = {
-        let mut map = pending().lock().unwrap();
+        let mut map = st.twofactor_logins.lock().unwrap();
         match map.get(hash) {
             Some(p) if p.created.elapsed() < TICKET_TTL => Some((p.user_id, p.step.clone(), p.credential.clone())),
             _ => {
@@ -326,7 +323,7 @@ async fn ticket(st: &AppState, hash: &str) -> AppResult<(i64, Step, String)> {
     };
     let Some((user_id, step, cred)) = found else { return Err(expired()) };
     if !still_valid(st, user_id, &cred).await? {
-        pending().lock().unwrap().remove(hash);
+        st.twofactor_logins.lock().unwrap().remove(hash);
         return Err(expired());
     }
     Ok((user_id, step, cred))
@@ -351,7 +348,7 @@ pub async fn login_setup(State(st): State<AppState>, Json(req): Json<TicketReq>)
         Some(s) => s,
         None => {
             let s = new_secret();
-            if let Some(p) = pending().lock().unwrap().get_mut(&hash) {
+            if let Some(p) = st.twofactor_logins.lock().unwrap().get_mut(&hash) {
                 p.step = Step::Setup(Some(s.clone()));
             }
             s
@@ -380,7 +377,7 @@ pub async fn login_code(
     let (user_id, step, cred) = ticket(&st, &hash).await?;
     let row: Option<(String, bool)> =sqlx::query_as("SELECT username, disabled FROM users WHERE id = ?").bind(user_id).fetch_optional(&st.db).await?;
     let Some((username, false)) = row else {
-        pending().lock().unwrap().remove(&hash);
+        st.twofactor_logins.lock().unwrap().remove(&hash);
         return Err(expired());
     };
     // Counted before the check, like passwords; a right code takes it back
@@ -401,7 +398,7 @@ pub async fn login_code(
     };
     let Some(accepted) = accepted else {
         let ticket_used_up = {
-            let mut map = pending().lock().unwrap();
+            let mut map = st.twofactor_logins.lock().unwrap();
             let used_up = map.get_mut(&hash).is_none_or(|p| {
                 p.tries += 1;
                 p.tries >= TICKET_TRIES
@@ -423,7 +420,7 @@ pub async fn login_code(
     };
     auth::attempt_succeeded(&st, &key);
     // A ticket signs in once
-    if pending().lock().unwrap().remove(&hash).is_none() {
+    if st.twofactor_logins.lock().unwrap().remove(&hash).is_none() {
         return Err(expired());
     }
     // The password may have changed while the code was checked

@@ -13,7 +13,7 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock},
+    sync::Arc,
 };
 
 use serde::Serialize;
@@ -165,18 +165,13 @@ pub struct ScanProgress {
     pub started_at: i64,
 }
 
-fn progress_map() -> &'static Mutex<HashMap<String, ScanProgress>> {
-    static MAP: OnceLock<Mutex<HashMap<String, ScanProgress>>> = OnceLock::new();
-    MAP.get_or_init(Default::default)
-}
-
 /// The scan of this space running now, if any
-pub fn progress(drive_id: &str) -> Option<ScanProgress> {
-    progress_map().lock().unwrap().get(drive_id).cloned()
+pub fn progress(st: &AppState, drive_id: &str) -> Option<ScanProgress> {
+    st.scans.lock().unwrap().get(drive_id).cloned()
 }
 
-fn set_progress(drive_id: &str, f: impl FnOnce(&mut ScanProgress)) {
-    let mut map = progress_map().lock().unwrap();
+fn set_progress(st: &AppState, drive_id: &str, f: impl FnOnce(&mut ScanProgress)) {
+    let mut map = st.scans.lock().unwrap();
     let p = map
         .entry(drive_id.to_string())
         .or_insert_with(|| ScanProgress { phase: ScanPhase::Reading, found: 0, done: 0, total: 0, started_at: now() });
@@ -184,11 +179,11 @@ fn set_progress(drive_id: &str, f: impl FnOnce(&mut ScanProgress)) {
 }
 
 /// Removes the progress entry when a scan ends, however it ends
-struct ProgressGuard(String);
+struct ProgressGuard(AppState, String);
 
 impl Drop for ProgressGuard {
     fn drop(&mut self) {
-        progress_map().lock().unwrap_or_else(|e| e.into_inner()).remove(&self.0);
+        self.0.scans.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.1);
     }
 }
 
@@ -412,7 +407,7 @@ enum Op {
 
 /// Scans a whole folder space and brings its index up to date (after a scan of it already running, if any)
 pub async fn scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
-    let lock = scan_lock(drive_id);
+    let lock = scan_lock(st, drive_id);
     let _scanning = lock.lock().await;
     run_scan(st, drive_id).await
 }
@@ -438,8 +433,8 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
         save_report(st, &drive, &report).await?;
         return Ok(report);
     }
-    set_progress(drive_id, |_| {});
-    let _progress = ProgressGuard(drive_id.to_string());
+    set_progress(st, drive_id, |_| {});
+    let _progress = ProgressGuard(st.clone(), drive_id.to_string());
     let started = std::time::Instant::now();
 
     // 1. Which folders differ from the index
@@ -497,7 +492,7 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     // 2. The index brought up to date, folder by folder
     let indexing = std::time::Instant::now();
     if !compared.differing.is_empty() {
-        let _changing = drive_lock(&drive.id).lock_owned().await;
+        let _changing = drive_lock(st, &drive.id).lock_owned().await;
         update_index(st, &drive, &root, compared.differing, compared.any_gone, &mut report).await?;
     }
     crate::fsops::clean_trash(st, &drive.id, &root).await?;
@@ -555,7 +550,7 @@ async fn compare(st: &AppState, drive: &Drive, root: &Path, report: &mut ScanRep
             root_empty = items.is_empty();
         }
         found += items.len();
-        set_progress(&id, |p| p.found = found);
+        set_progress(st, &id, |p| p.found = found);
         identities |= items.iter().any(|e| e.ino != 0);
         let children = indexed_in(st, drive, &rel).await?;
         let (differ, gone) = differs(children.as_deref(), &items, &mut matched);
@@ -631,7 +626,7 @@ fn differs(children: Option<&[Indexed]>, items: &[Entry], matched: &mut bool) ->
 /// `may_move`: whether an item may have moved (something was gone when the folder was read); else new items aren't looked
 /// for elsewhere in the index, which saves a query per item when a large folder is scanned the first time.
 async fn update_index(st: &AppState, drive: &Drive, root: &Path, differing: Vec<String>, may_move: bool, report: &mut ScanReport) -> AppResult<()> {
-    set_progress(&drive.id, |p| {
+    set_progress(st, &drive.id, |p| {
         p.phase = ScanPhase::Indexing;
         p.total = differing.len();
     });
@@ -674,7 +669,7 @@ async fn update_index(st: &AppState, drive: &Drive, root: &Path, differing: Vec<
             if pending.len() >= 10 * BATCH {
                 report.removed += apply(st, drive, std::mem::take(&mut pending)).await?;
             }
-            set_progress(&drive.id, |p| p.done += 1);
+            set_progress(st, &drive.id, |p| p.done += 1);
         }
     }
     report.removed += apply(st, drive, pending).await?;
@@ -826,16 +821,10 @@ const OPEN_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 /// How long bringing a folder up to date otherwise (the watcher, a WebDAV name check) waits for its disk
 const SYNC_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// When each folder was last read from disk (by id), to leave out reading it again right away
-fn last_reads() -> &'static Mutex<HashMap<String, std::time::Instant>> {
-    static READS: OnceLock<Mutex<HashMap<String, std::time::Instant>>> = OnceLock::new();
-    READS.get_or_init(Default::default)
-}
-
 /// Tests: every folder counts as not read for a while
 #[cfg(test)]
-pub fn forget_reads() {
-    last_reads().lock().unwrap().clear();
+pub fn forget_reads(st: &AppState) {
+    st.folder_reads.lock().unwrap().clear();
 }
 
 /// A folder of a folder space is opened (listed on the web, or over WebDAV): new and changed items on the server show
@@ -844,7 +833,7 @@ pub fn forget_reads() {
 /// copy of a large folder into it, say), or when its disk doesn't answer within a few seconds: the listing then shows
 /// the index as it is.
 pub async fn sync_opened(st: &AppState, folder: &Node) {
-    if watched(folder.drive()) || last_reads().lock().unwrap().get(&folder.id).is_some_and(|t| t.elapsed() < REREAD_AFTER) {
+    if watched(st, folder.drive()) || st.folder_reads.lock().unwrap().get(&folder.id).is_some_and(|t| t.elapsed() < REREAD_AFTER) {
         return;
     }
     if let Err(e) = try_sync_folder(st, folder, false).await {
@@ -867,7 +856,7 @@ async fn try_sync_folder(st: &AppState, folder: &Node, wait: bool) -> AppResult<
     let drive = folder_drive(st, folder.drive()).await?;
     // Takes turns with changes from the web and with scans updating the index (both hold the lock only briefly: a
     // scan reads the folder without it), so a change seen here is never skipped
-    let lock = drive_lock(&drive.id);
+    let lock = drive_lock(st, &drive.id);
     let _scanning = if wait {
         lock.lock_owned().await
     } else {
@@ -945,7 +934,7 @@ async fn try_sync_folder(st: &AppState, folder: &Node, wait: bool) -> AppResult<
     }
     drop(_scanning);
     {
-        let mut reads = last_reads().lock().unwrap();
+        let mut reads = st.folder_reads.lock().unwrap();
         reads.retain(|_, t| t.elapsed() < REREAD_AFTER);
         reads.insert(folder.id.clone(), read_at);
     }
@@ -956,15 +945,17 @@ async fn try_sync_folder(st: &AppState, folder: &Node, wait: bool) -> AppResult<
 }
 
 /// Folder spaces were added, changed or removed: file system watching follows right away
-pub fn spaces_changed() {
+pub fn spaces_changed(st: &AppState) {
     #[cfg(target_os = "linux")]
-    crate::watch::spaces_changed();
+    crate::watch::spaces_changed(st);
+    #[cfg(not(target_os = "linux"))]
+    let _ = st;
 }
 
 /// Starts a full scan in the background unless one is running. The lock is taken before the task starts, so a scan
 /// asked for afterwards waits for this one instead of possibly running first
 pub fn scan_later(st: &AppState, drive_id: &str) {
-    let Ok(scanning) = scan_lock(drive_id).try_lock_owned() else { return };
+    let Ok(scanning) = scan_lock(st, drive_id).try_lock_owned() else { return };
     let (st, id) = (st.clone(), drive_id.to_string());
     tokio::spawn(async move {
         let _scanning = scanning;
@@ -977,12 +968,12 @@ pub fn scan_later(st: &AppState, drive_id: &str) {
 /// Spaces watched for changes are scanned this many times less often than the interval set in the Control panel
 const WATCHED_SCAN_FACTOR: i64 = 4;
 
-fn watched(drive_id: &str) -> bool {
+fn watched(st: &AppState, drive_id: &str) -> bool {
     #[cfg(target_os = "linux")]
-    return crate::watch::is_watched(drive_id);
+    return crate::watch::is_watched(st, drive_id);
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = drive_id;
+        let _ = (st, drive_id);
         false
     }
 }
@@ -1011,7 +1002,7 @@ pub fn spawn_scanner(st: AppState) {
             };
             for (id, last) in due {
                 // Watched spaces only need the regular scan for what watching can miss
-                if watched(&id) && last > now() - minutes * 60 * WATCHED_SCAN_FACTOR {
+                if watched(&st, &id) && last > now() - minutes * 60 * WATCHED_SCAN_FACTOR {
                     continue;
                 }
                 if let Err(e) = scan(&st, &id).await {
@@ -1023,23 +1014,21 @@ pub fn spawn_scanner(st: AppState) {
 }
 
 /// The lock a change to a folder space and the index update of a scan or sync take turns with
-pub(crate) fn drive_lock(drive_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-    static LOCKS: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
-    LOCKS.get_or_init(Default::default).lock().unwrap().entry(drive_id.to_string()).or_default().clone()
+pub(crate) fn drive_lock(st: &AppState, drive_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    st.space_locks.lock().unwrap().entry(drive_id.to_string()).or_default().clone()
 }
 
 /// Holds a folder space still while a move switches it over (moves/): no scan updates its index and no change from the
 /// web is made meanwhile (both wait). The scan lock first, as everywhere.
-pub(crate) async fn hold(drive_id: &str) -> (tokio::sync::OwnedMutexGuard<()>, tokio::sync::OwnedMutexGuard<()>) {
-    let scanning = scan_lock(drive_id).lock_owned().await;
-    let changing = drive_lock(drive_id).lock_owned().await;
+pub(crate) async fn hold(st: &AppState, drive_id: &str) -> (tokio::sync::OwnedMutexGuard<()>, tokio::sync::OwnedMutexGuard<()>) {
+    let scanning = scan_lock(st, drive_id).lock_owned().await;
+    let changing = drive_lock(st, drive_id).lock_owned().await;
     (scanning, changing)
 }
 
 /// Scans of a space, one at a time (a scan asked for while one runs waits for it, `scan_later` skips)
-fn scan_lock(drive_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-    static LOCKS: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
-    LOCKS.get_or_init(Default::default).lock().unwrap().entry(drive_id.to_string()).or_default().clone()
+fn scan_lock(st: &AppState, drive_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    st.scan_locks.lock().unwrap().entry(drive_id.to_string()).or_default().clone()
 }
 
 /// Why the storage location a folder space is on can't be used now (its folder isn't there, or holds another
@@ -1533,7 +1522,7 @@ mod tests {
         };
         // A long change holds the space (copying a large folder into it, say): the listing answers meanwhile, from the
         // index as it is
-        let held = crate::fsops::lock_space(&space.drive).await;
+        let held = crate::fsops::lock_space(&env.st, &space.drive).await;
         let started = std::time::Instant::now();
         let names = tokio::time::timeout(std::time::Duration::from_secs(3), list()).await.expect("the listing answers");
         assert!(started.elapsed() < std::time::Duration::from_secs(1));
@@ -1545,7 +1534,7 @@ mod tests {
         write_old(&space.dir.join("b.txt"), b"b");
         assert_eq!(list().await, ["a.txt"]);
         // A while later it is (and a scan shows it anyway)
-        forget_reads();
+        forget_reads(&env.st);
         assert_eq!(list().await, ["a.txt", "b.txt"]);
     }
 
@@ -1616,7 +1605,7 @@ mod tests {
                 started.elapsed()
             }
         };
-        forget_reads();
+        forget_reads(&env.st);
         let first = open().await;
         let again = open().await;
         println!("{n} items: opened {} ms (reads the folder), opened again right away {} ms", first.as_millis(), again.as_millis());

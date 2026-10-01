@@ -110,7 +110,7 @@ async fn health(env: &TestEnv, id: &str) -> policy::Health {
 /// The built-in location stops answering: its folder is gone (a disk that failed)
 fn fail_builtin(env: &TestEnv) {
     std::fs::rename(env.dir.join("blobs"), env.dir.join("failed-disk")).unwrap();
-    crate::storage::request_recheck();
+    env.st.recheck.notify_one();
 }
 
 fn repair_builtin(env: &TestEnv) {
