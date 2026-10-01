@@ -135,6 +135,7 @@ interface RunStyle {
 }
 
 /** Common Wingdings/Symbol bullets → Unicode */
+// oxfmt-ignore
 const SYMBOL_MAP: Record<string, Record<number, string>> = {
   wingdings: {
     0x6c: "●", 0x6e: "■", 0x71: "❑", 0x75: "◆", 0x76: "❖", 0xa7: "▪", 0xa8: "◻",
@@ -155,6 +156,7 @@ function symbolChar(ch: string, font: string | null): { ch: string; font: string
   return m ? { ch: m, font: null } : { ch, font };
 }
 
+// oxfmt-ignore
 const UNDERLINE: Record<string, string> = {
   sng: "solid", dbl: "double", heavy: "solid", dotted: "dotted", dottedHeavy: "dotted", dash: "dashed", dashHeavy: "dashed",
   dashLong: "dashed", dashLongHeavy: "dashed", dotDash: "dashed", dotDashHeavy: "dashed", dotDotDash: "dashed",

@@ -46,6 +46,7 @@ function len(v: string | undefined, def = 0): number {
   }
 }
 
+// oxfmt-ignore
 const NAMED: Record<string, string> = {
   black: "#000000", white: "#ffffff", red: "#ff0000", green: "#008000", blue: "#0000ff", yellow: "#ffff00", silver: "#c0c0c0",
   gray: "#808080", grey: "#808080", navy: "#000080", maroon: "#800000", purple: "#800080", teal: "#008080", olive: "#808000",

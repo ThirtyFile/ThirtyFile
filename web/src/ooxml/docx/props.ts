@@ -64,6 +64,7 @@ export function isDark(hex: string | null | undefined) {
 
 // ───────────── Borders ─────────────
 
+// oxfmt-ignore
 const BORDER_STYLE: Record<string, string> = {
   single: "solid", thick: "solid", hairline: "solid", wave: "solid", doubleWave: "double",
   double: "double", triple: "double",
@@ -107,12 +108,14 @@ export function borderSig(el: Element | null | undefined) {
 
 // ───────────── Text ─────────────
 
+// oxfmt-ignore
 const HIGHLIGHT: Record<string, string> = {
   yellow: "#FFFF00", green: "#00FF00", cyan: "#00FFFF", magenta: "#FF00FF", blue: "#0000FF", red: "#FF0000",
   darkBlue: "#000080", darkCyan: "#008080", darkGreen: "#008000", darkMagenta: "#800080", darkRed: "#800000",
   darkYellow: "#808000", darkGray: "#808080", lightGray: "#C0C0C0", black: "#000000", white: "#FFFFFF",
 };
 
+// oxfmt-ignore
 const UNDERLINE: Record<string, string> = {
   single: "solid", words: "solid", double: "double", thick: "solid", dotted: "dotted", dottedHeavy: "dotted",
   dash: "dashed", dashedHeavy: "dashed", dashLong: "dashed", dashLongHeavy: "dashed", dotDash: "dashed",

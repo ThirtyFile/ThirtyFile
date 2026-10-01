@@ -179,6 +179,7 @@ function applyModifiers(base: Rgba, el: Element): Rgba {
 }
 
 /** Preset color names (prstClr); only common ones are listed, others are treated as black */
+// oxfmt-ignore
 const PRESET: Record<string, string> = {
   black: "000000", white: "FFFFFF", red: "FF0000", green: "008000", blue: "0000FF", yellow: "FFFF00",
   cyan: "00FFFF", magenta: "FF00FF", gray: "808080", grey: "808080", darkGray: "A9A9A9", lightGray: "D3D3D3",
@@ -252,6 +253,7 @@ export function colorIn(parent: Element | null | undefined, ctx: ColorContext): 
 // ───────────── SpreadsheetML/WordprocessingML colors ─────────────
 
 /** Excel indexed colors (indexed="n"); 64 and 65 are the system foreground and background colors */
+// oxfmt-ignore
 export const INDEXED_COLORS = [
   "000000", "FFFFFF", "FF0000", "00FF00", "0000FF", "FFFF00", "FF00FF", "00FFFF",
   "000000", "FFFFFF", "FF0000", "00FF00", "0000FF", "FFFF00", "FF00FF", "00FFFF",

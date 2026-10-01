@@ -142,6 +142,7 @@ function readFont(font: Element | undefined): CellStyle {
 }
 
 /** Foreground color ratio of pattern fills */
+// oxfmt-ignore
 const PATTERN_DENSITY: Record<string, number> = {
   gray0625: 0.0625, gray125: 0.125, lightGray: 0.25, mediumGray: 0.5, darkGray: 0.75,
   lightHorizontal: 0.25, lightVertical: 0.25, lightDown: 0.25, lightUp: 0.25, lightGrid: 0.4, lightTrellis: 0.4,

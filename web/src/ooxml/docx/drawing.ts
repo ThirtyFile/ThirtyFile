@@ -107,6 +107,7 @@ interface Line {
   tail: string | null;
 }
 
+// oxfmt-ignore
 const DASH: Record<string, number[]> = {
   dash: [4, 3], sysDash: [3, 1], dot: [1, 1], sysDot: [1, 1], dashDot: [4, 3, 1, 3], lgDash: [8, 3],
   lgDashDot: [8, 3, 1, 3], lgDashDotDot: [8, 3, 1, 3, 1, 3], sysDashDot: [3, 1, 1, 1], sysDashDotDot: [3, 1, 1, 1, 1, 1],

@@ -27,7 +27,8 @@ function viewError(e: unknown, fallback: string) {
   // Show our own messages (and translated server messages) as-is; only convert the preview components' English errors
   if (e instanceof ViewerError || e instanceof ApiError) return msg;
   if (msg === TOO_LARGE) return t("The file's content is too large to preview. Download it and open it in Office.");
-  if (/central directory|zip|corrupt|invalid|unexpected/i.test(msg) && !/[一-鿿]/.test(msg)) // i18n-ignore: regex that detects CJK text in a message
+  // English errors only: a message with CJK ideographs in it is shown as it is
+  if (/central directory|zip|corrupt|invalid|unexpected/i.test(msg) && !/[\u4e00-\u9fff]/.test(msg))
     return t("The file is damaged or in an unrecognized format, so it can't be previewed. Download it and open it in Office to check.");
   return msg;
 }

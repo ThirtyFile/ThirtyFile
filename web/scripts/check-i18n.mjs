@@ -162,11 +162,11 @@ if (!only) {
 const unused = [];
 if (!only) {
   const code = corpus.join("\n");
-  const escaped = (s) => JSON.stringify(s).slice(1, -1);
-  const written = (s) =>
-    code.includes(s) ||
-    code.includes(escaped(s)) ||
-    new RegExp(escaped(s).split(/\{[^{}]*\}/).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\{[^{}]*\\}")).test(code);
+  // How a text is spelled in code: as it is, inside "…" (escaped as in JSON), or inside '…', which the formatter
+  // picks for a text with more " than ' in it
+  const spellings = (s) => [s, JSON.stringify(s).slice(1, -1), s.replace(/[\\']/g, "\\$&")];
+  const withOtherNames = (w) => new RegExp(w.split(/\{[^{}]*\}/).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\{[^{}]*\\}"));
+  const written = (s) => spellings(s).some((w) => code.includes(w)) || spellings(s).some((w) => withOtherNames(w).test(code));
   for (const { key, file } of entries) {
     if (file.endsWith("/server.ts")) continue;
     const text = key.includes("::") ? key.slice(key.indexOf("::") + 2) : key;

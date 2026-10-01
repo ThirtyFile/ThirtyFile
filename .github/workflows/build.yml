@@ -129,22 +129,22 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
 
       # The checks are the ones in scripts/check.sh, which contributors run too.
-      # The interface: translations, types, lint (oxlint, web/.oxlintrc.json) and the unit tests (Vitest), with the
-      # coverage in the job summary
+      # The interface: formatting (oxfmt, web/.oxfmtrc.json), translations, types, lint (oxlint, web/.oxlintrc.json)
+      # and the unit tests (Vitest), with the coverage in the job summary
       - name: Frontend
         run: |
           bash scripts/check.sh web --coverage
           (cd web && node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY")
 
-      # rustup installs the version and clippy named in server/rust-toolchain.toml on first use
+      # rustup installs the version, clippy and rustfmt named in server/rust-toolchain.toml on first use
       - run: rustup toolchain install
         working-directory: server
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: server
 
-      # The backend tests (cargo test), clippy, and the end-to-end test in a real browser (sign in, upload, preview,
-      # download) run against one build instrumented for coverage (cargo llvm-cov show-env): the dependencies are
+      # The backend's formatting (rustfmt, server/rustfmt.toml), then its tests (cargo test), clippy, and the end-to-end
+      # test in a real browser (sign in, upload, preview, download) run against one build instrumented for coverage (cargo llvm-cov show-env): the dependencies are
       # compiled once for both, and the coverage in the job summary counts what the browser test reaches too.
       - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:

@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  // Close to how the code was written before a formatter was used: double quotes, semicolons, trailing commas and
+  // long lines. `pnpm format` formats src, tests and scripts; `pnpm format:check` checks them. Tables laid out by
+  // hand, with several entries per line, keep their layout with a `// oxfmt-ignore` line above them.
+  "printWidth": 190,
+  // The Traditional Chinese dictionaries keep one entry per line, however long: scripts/check-i18n.mjs reads them
+  // line by line
+  "ignorePatterns": ["src/lib/i18n/zh-TW/**"]
+}
