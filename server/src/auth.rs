@@ -262,6 +262,8 @@ pub struct Me {
     pub version_keep: i64,
     /// Largest file that can be edited and saved online (bytes)
     pub max_edit_bytes: usize,
+    /// The release this server runs (`dev` for a local build). Only people who are signed in get it.
+    pub version: &'static str,
 }
 
 async fn me_of(st: &AppState, user: User) -> AppResult<Me> {
@@ -284,6 +286,7 @@ async fn me_of(st: &AppState, user: User) -> AppResult<Me> {
         share_policy,
         version_keep,
         max_edit_bytes: crate::files::MAX_EDIT_BYTES,
+        version: crate::VERSION,
     })
 }
 

@@ -11,9 +11,22 @@ import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { CONTROL_PANEL_CATEGORIES, CONTROL_PANEL_ITEMS, controlPanelCategoryLabel, type ControlPanelItem, type ControlPanelKey } from "@/admin/controlPanel";
 import { t } from "@/lib/i18n";
 import { useSelectableList } from "@/lib/listSelection";
-import { usePersisted } from "@/lib/session";
+import { useMe, usePersisted } from "@/lib/session";
 import { cn, formatBytes } from "@/lib/utils";
+import { releaseNotesUrl } from "@/lib/version";
 import { useTabActions } from "@/tabs";
+
+/** The release that runs, in the status bar: a release links to its notes on GitHub, a local build ("dev") doesn't */
+function VersionNote({ version }: { version: string }) {
+  const label = t("ThirtyFile {version}", { version });
+  const url = releaseNotesUrl(version);
+  if (!url) return <span>{label}</span>;
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" title={t("What's new in this release")} className="hover:text-foreground hover:underline">
+      {label}
+    </a>
+  );
+}
 
 /** Control panel: like an OS's settings, lists every admin item as an icon, operated the same way as the file explorer */
 export function ControlPanelPage() {
@@ -28,6 +41,7 @@ export function ControlPanelPage() {
     setParams(v ? { q: v } : {}, { replace: true });
   };
   const [collapsed, setCollapsed] = useState<string[]>([]);
+  const me = useMe();
   const system = useQuery(queries.system);
   const locations = useQuery(queries.storageLocations);
   const drives = useQuery(queries.adminDrives);
@@ -190,6 +204,7 @@ export function ControlPanelPage() {
       searchPlaceholder={t("Search settings")}
       onSearch={search}
       footer={<span>{selected ? t('"{name}" selected', { name: selected.title }) : t("{n} item|{n} items", { n: items.length })}</span>}
+      footerRight={<VersionNote version={me.version} />}
     >
       <ContextMenu>
         <ContextMenuTrigger

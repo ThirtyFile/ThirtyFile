@@ -71,7 +71,7 @@ RUN xx-apk add --no-cache musl-dev gcc
 WORKDIR /src/server
 COPY server/ ./
 COPY --from=web /src/web/dist /src/web/dist
-# The version `thirtyfile --version` and /api/health report
+# The version `thirtyfile --version` reports, and the web app shows to people who are signed in
 ARG VERSION=dev
 ENV THIRTYFILE_VERSION=$VERSION
 # Dependencies and build output are cached, so rebuilds after code changes only recompile what changed

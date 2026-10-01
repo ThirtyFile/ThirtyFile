@@ -133,6 +133,8 @@ export function AccountMenu({ usage }: { usage: string | null }) {
           <DropdownMenuItem onClick={logout}>
             <LogOutIcon /> {t("Sign out")}
           </DropdownMenuItem>
+          {/* Which release runs: only people who are signed in are told */}
+          <div className="px-1.5 pt-1 pb-0.5 text-[11px] text-muted-foreground/80 select-text">{t("ThirtyFile {version}", { version: me.version })}</div>
         </DropdownMenuContent>
       </DropdownMenu>
       {changingPassword && <ChangePasswordDialog onClose={() => setChangingPassword(false)} />}
