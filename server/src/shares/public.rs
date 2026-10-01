@@ -114,8 +114,8 @@ pub(super) async fn find_share(st: &AppState, token: &str) -> AppResult<(Share, 
 
 /// What a link's page asks for again and again, kept for a moment: the link, its item, that its creator may still
 /// share it, and the items found within it. A folder of 200 pictures asks for 200 thumbnails at once, and each took
-/// about seven queries to check. Kept for two seconds at most, and forgotten as soon as anything changes (a write
-/// transaction begins: `db::writes`).
+/// about seven queries to check. Kept for two seconds at most, and forgotten as soon as anything changes (a write is
+/// saved: `db::writes`).
 pub struct Seen {
     pub(super) at: std::time::Instant,
     pub(super) writes: u64,
@@ -141,7 +141,7 @@ pub(super) fn seen(st: &AppState, token: &str) -> Option<(Share, Node)> {
     Some((s.share.clone(), s.root.clone()))
 }
 
-/// Keeps what was found of the link `token`, read after `writes` write transactions had begun
+/// Keeps what was found of the link `token`, read after `writes` writes had been saved
 pub(super) fn keep_seen(st: &AppState, token: &str, share: &Share, root: &Node, writes: u64) {
     let mut links = st.share_links.lock().unwrap();
     if links.len() >= SEEN_LINKS {
@@ -223,8 +223,8 @@ pub(super) const UNLOCK_ATTEMPTS: usize = 10;
 
 pub(super) async fn count_download(st: &AppState, share: &Share) -> AppResult<()> {
     let _w = st.write_lock.lock().await;
-    // A write transaction (`db::begin_write`), so the link's details kept for a moment (`seen`), with the downloads
-    // counted before this one, are read again
+    // Once saved, the link's details kept for a moment (`seen`), with the downloads counted before this one, are read
+    // again (`db::writes`). The limit itself holds whatever a visitor read before: only this UPDATE checks it
     let mut tx = crate::db::begin_write(&st.db).await?;
     let res = sqlx::query("UPDATE shares SET downloads = downloads + 1 WHERE id = ? AND (max_downloads IS NULL OR downloads < max_downloads)")
         .bind(&share.id)

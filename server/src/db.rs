@@ -33,8 +33,16 @@ async fn open(path: &Path, cache_mb: u32, migrator: &sqlx::migrate::Migrator) ->
         .pragma("mmap_size", "268435456")
         // Sorting names the way File Explorer does ("File 2" before "File 10", letter case ignored in every language)
         .collation("natural_name", crate::util::natural_cmp);
-    let pool =
-        SqlitePoolOptions::new().max_connections(8).after_connect(|conn, _| Box::pin(async move { register_functions(conn).await })).connect_with(opts).await?;
+    let pool = SqlitePoolOptions::new()
+        .max_connections(8)
+        .after_connect(|conn, _| {
+            Box::pin(async move {
+                register_functions(conn).await?;
+                count_writes(conn).await
+            })
+        })
+        .connect_with(opts)
+        .await?;
     // Said plainly, before the database is copied or changed (`check_existing` usually said it already)
     if let Ok(applied) = sqlx::query_as::<_, (i64, Vec<u8>)>("SELECT version, checksum FROM _sqlx_migrations WHERE success = 1").fetch_all(&pool).await
         && let Some(message) = unusable(&applied, migrator)
@@ -193,6 +201,35 @@ async fn register_functions(conn: &mut SqliteConnection) -> Result<(), sqlx::Err
     Ok(())
 }
 
+/// Counts each write saved on a connection (`WRITES`), whoever made it: SQLite calls the WAL hook once a transaction
+/// that changed the database has committed, before the statement that committed it returns, so anything read after
+/// the count was taken sees that write.
+///
+/// The hook replaces SQLite's own, which checkpoints the WAL file once it holds 1000 pages (`wal_autocheckpoint`,
+/// which would replace this hook in turn, so it isn't set): this one checkpoints the same way.
+async fn count_writes(conn: &mut SqliteConnection) -> Result<(), sqlx::Error> {
+    use libsqlite3_sys as ffi;
+    use std::ffi::{c_char, c_int, c_void};
+
+    const CHECKPOINT_PAGES: c_int = 1000;
+
+    unsafe extern "C" fn committed(_: *mut c_void, db: *mut ffi::sqlite3, name: *const c_char, pages: c_int) -> c_int {
+        WRITES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if pages >= CHECKPOINT_PAGES {
+            // SAFETY: SQLite passes the connection and the name of the database that was written, valid for the call.
+            // A passive checkpoint, like SQLite's own: a reader in the way only leaves part of the WAL for later.
+            unsafe { ffi::sqlite3_wal_checkpoint(db, name) };
+        }
+        ffi::SQLITE_OK
+    }
+
+    let mut handle = conn.lock_handle().await?;
+    let db = handle.as_raw_handle().as_ptr();
+    // SAFETY: `db` is the open connection, held locked for the call; the hook has no user data.
+    unsafe { ffi::sqlite3_wal_hook(db, Some(committed), std::ptr::null_mut()) };
+    Ok(())
+}
+
 pub async fn get_setting(db: &SqlitePool, key: &str) -> Result<Option<String>, sqlx::Error> {
     Ok(sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = ?").bind(key).fetch_optional(db).await?.map(|(v,)| v))
 }
@@ -220,12 +257,15 @@ pub async fn set_setting(conn: &mut SqliteConnection, key: &str, value: &str) ->
 /// Read-only transactions (a consistent view over several queries) may still use a deferred `begin()`, with
 /// `#[allow(clippy::disallowed_methods)]` and a reason.
 pub async fn begin_write(pool: &SqlitePool) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>, sqlx::Error> {
-    WRITES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     pool.begin_with("BEGIN IMMEDIATE").await
 }
 
-/// Write transactions begun so far: what was read before the latest one began may be out of date since (shares.rs keeps
-/// a link's details for a moment, as long as nothing was changed meanwhile)
+/// Writes saved so far, by any connection and any code (`count_writes`): what was read after taking this count is out
+/// of date only once it changes (shares.rs keeps a link's details for a moment, as long as nothing was changed
+/// meanwhile).
+///
+/// Counted when a write is saved, not when its transaction begins: a read between the two would see the database as
+/// it was, yet be kept as if it came after the change.
 static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 pub fn writes() -> u64 {
@@ -571,6 +611,32 @@ mod tests {
         // On request, never over an existing file
         backup_to(&db, &dir.join("manual.db")).await.unwrap();
         assert!(backup_to(&db, &dir.join("manual.db")).await.is_err());
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn every_saved_write_is_counted_and_the_wal_file_is_still_checkpointed() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = connect(&dir.join("drive.db"), 16).await.unwrap();
+        sqlx::query("CREATE TABLE scratch (data BLOB)").execute(&db).await.unwrap();
+        // Counted once saved, also when written outside `begin_write`
+        let mut tx = begin_write(&db).await.unwrap();
+        sqlx::query("INSERT INTO scratch (data) VALUES (x'00')").execute(&mut *tx).await.unwrap();
+        let before = writes();
+        tx.commit().await.unwrap();
+        assert!(writes() > before);
+        let before = writes();
+        sqlx::query("DELETE FROM scratch").execute(&db).await.unwrap();
+        assert!(writes() > before);
+        // 20 MB written in 40 transactions: the WAL file is checkpointed and reused once it holds 1000 pages (4 MB),
+        // instead of growing with every write
+        for _ in 0..40 {
+            sqlx::query("INSERT INTO scratch (data) VALUES (zeroblob(512 * 1024))").execute(&db).await.unwrap();
+        }
+        let wal = std::fs::metadata(dir.join("drive.db-wal")).unwrap().len();
+        assert!(wal < 10 << 20, "{wal}");
         db.close().await;
         let _ = std::fs::remove_dir_all(&dir);
     }
