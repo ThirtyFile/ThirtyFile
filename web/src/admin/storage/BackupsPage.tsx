@@ -115,7 +115,12 @@ function SetState({ set, job }: { set: BackupSet; job: BackupJob | null }) {
     );
   }
   if (head) return head;
-  if (job) return <span className="truncate text-xs text-destructive">{BACKUP_JOB_KIND_LABEL[job.kind]} · {BACKUP_JOB_STATE_LABEL[job.state]}</span>;
+  if (job)
+    return (
+      <span className="truncate text-xs text-destructive">
+        {BACKUP_JOB_KIND_LABEL[job.kind]} · {BACKUP_JOB_STATE_LABEL[job.state]}
+      </span>
+    );
   return completeSnapshot(set) ? (
     <span className="text-xs text-emerald-600 dark:text-emerald-400">{t("Complete")}</span>
   ) : (
@@ -134,8 +139,8 @@ export function BackupsPage() {
   const [announcement, setAnnouncement] = useState("");
   const q = useBackups(1500, 10_000, (changes) => {
     const said = changes.flatMap(({ job: j }) => {
-      if (j.state === "done") return [t("{what} \"{name}\": done.", { what: BACKUP_JOB_KIND_LABEL[j.kind], name: j.label })];
-      if (j.state === "failed") return [t("{what} \"{name}\" stopped by an error.", { what: BACKUP_JOB_KIND_LABEL[j.kind], name: j.label })];
+      if (j.state === "done") return [t('{what} "{name}": done.', { what: BACKUP_JOB_KIND_LABEL[j.kind], name: j.label })];
+      if (j.state === "failed") return [t('{what} "{name}" stopped by an error.', { what: BACKUP_JOB_KIND_LABEL[j.kind], name: j.label })];
       return [];
     });
     if (said.length) setAnnouncement(said.join(" "));
@@ -169,15 +174,12 @@ export function BackupsPage() {
   const canCancel = (s: BackupSet | null) => !!jobOf(s) && jobOf(s)!.kind !== "remove";
   const idle = (s: BackupSet | null) => !!s && !jobOf(s) && !s.removing;
   const canRestore = (s: BackupSet | null) => !!s && !s.removing && !!completeSnapshot(s);
-  const pause = (s: BackupSet) => act(() => api.pauseBackupJob(jobOf(s)!.id), t("\"{name}\" pauses after the item it is working on", { name: s.name }));
-  const resume = (s: BackupSet) => act(() => api.resumeBackupJob(jobOf(s)!.id), t("\"{name}\" continues where it stopped", { name: s.name }));
-  const verify = (s: BackupSet) => act(() => api.verifyBackup(s.id), t("\"{name}\" is being read back and checked", { name: s.name }));
-  const runNow = (s: BackupSet) => act(() => api.runBackupPolicy(s.id), t("\"{name}\": a snapshot is being made", { name: s.name }));
+  const pause = (s: BackupSet) => act(() => api.pauseBackupJob(jobOf(s)!.id), t('"{name}" pauses after the item it is working on', { name: s.name }));
+  const resume = (s: BackupSet) => act(() => api.resumeBackupJob(jobOf(s)!.id), t('"{name}" continues where it stopped', { name: s.name }));
+  const verify = (s: BackupSet) => act(() => api.verifyBackup(s.id), t('"{name}" is being read back and checked', { name: s.name }));
+  const runNow = (s: BackupSet) => act(() => api.runBackupPolicy(s.id), t('"{name}": a snapshot is being made', { name: s.name }));
   const setEnabled = (s: BackupSet, enabled: boolean) =>
-    act(
-      () => api.updateBackupPolicy(s.id, { enabled }),
-      enabled ? t("\"{name}\" backs up again", { name: s.name }) : t("\"{name}\" is paused; what it made stays", { name: s.name }),
-    );
+    act(() => api.updateBackupPolicy(s.id, { enabled }), enabled ? t('"{name}" backs up again', { name: s.name }) : t('"{name}" is paused; what it made stays', { name: s.name }));
 
   const toolbar = (
     <>
@@ -258,8 +260,7 @@ export function BackupsPage() {
       header: t("Next"),
       className: "w-[150px] max-xl:hidden",
       cellClassName: "text-muted-foreground",
-      cell: (s) =>
-        s.policy?.enabled && s.policy.next_run_at ? zonedTime(s.policy.next_run_at, s.policy.tz) : s.policy?.enabled && s.policy.mode === "realtime" ? t("After changes") : "—",
+      cell: (s) => (s.policy?.enabled && s.policy.next_run_at ? zonedTime(s.policy.next_run_at, s.policy.tz) : s.policy?.enabled && s.policy.mode === "realtime" ? t("After changes") : "—"),
     },
     {
       header: t("Size there"),
@@ -336,7 +337,11 @@ export function BackupsPage() {
       upTo="/admin"
       searchPlaceholder={t("Search settings")}
       onSearch={searchSettings}
-      footer={<span>{t("{n} copy|{n} copies", { n: sets.length })} · {t("{n} job not finished|{n} jobs not finished", { n: running })}</span>}
+      footer={
+        <span>
+          {t("{n} copy|{n} copies", { n: sets.length })} · {t("{n} job not finished|{n} jobs not finished", { n: running })}
+        </span>
+      }
     >
       <DataTable
         label={title}
@@ -380,13 +385,16 @@ export function BackupsPage() {
       {dialog?.t === "restore" && completeSnapshot(dialog.set) && <RestoreDialog set={dialog.set} onClose={() => setDialog(null)} onDone={refresh} />}
       {dialog?.t === "delete" && (
         <ConfirmDialog
-          title={t("Delete the copy \"{name}\"?", { name: dialog.set.name })}
+          title={t('Delete the copy "{name}"?', { name: dialog.set.name })}
           description={
             dialog.set.policy
-              ? t("The backup stops, and its folder on {dest} is deleted with every snapshot in it: it can't be restored from any more. Nothing on {source} changes. To stop making snapshots and keep them, pause it instead.", {
-                  dest: dialog.set.dest_name,
-                  source: dialog.set.source_name,
-                })
+              ? t(
+                  "The backup stops, and its folder on {dest} is deleted with every snapshot in it: it can't be restored from any more. Nothing on {source} changes. To stop making snapshots and keep them, pause it instead.",
+                  {
+                    dest: dialog.set.dest_name,
+                    source: dialog.set.source_name,
+                  },
+                )
               : t("Its folder on {dest} is deleted, with everything in it; it can't be restored from any more. Nothing on {source} changes.", {
                   dest: dialog.set.dest_name,
                   source: dialog.set.source_name,
@@ -397,7 +405,7 @@ export function BackupsPage() {
           onClose={() => setDialog(null)}
           onConfirm={async () => {
             await api.deleteBackup(dialog.set.id);
-            toast.success(t("\"{name}\" is being deleted in the background", { name: dialog.set.name }));
+            toast.success(t('"{name}" is being deleted in the background', { name: dialog.set.name }));
             setDialog(null);
             refresh();
           }}
@@ -405,7 +413,7 @@ export function BackupsPage() {
       )}
       {dialog?.t === "cancel" && cancelling && (
         <ConfirmDialog
-          title={t("Cancel \"{name}\"?", { name: cancelling.kind === "restore" ? cancelling.label : dialog.set.name })}
+          title={t('Cancel "{name}"?', { name: cancelling.kind === "restore" ? cancelling.label : dialog.set.name })}
           description={
             cancelling.kind === "snapshot"
               ? completeSnapshot(dialog.set)
@@ -452,7 +460,9 @@ function FindBackupsDialog({ onClose, onDone }: { onClose(): void; onDone(): voi
           <DialogHeader>
             <DialogTitle>{t("Find backups on a location")}</DialogTitle>
             <DialogDescription>
-              {t("Lists copies and backups kept on a location that this server doesn't know, for example after its database was lost. Their complete snapshots can then be restored from; a personal space goes into the personal space of the user with the same user name.")}
+              {t(
+                "Lists copies and backups kept on a location that this server doesn't know, for example after its database was lost. Their complete snapshots can then be restored from; a personal space goes into the personal space of the user with the same user name.",
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
@@ -495,10 +505,7 @@ function SetDetails({ set: s, jobs, onClose }: { set: BackupSet; jobs: BackupJob
     ...(p
       ? ([
           [t("State"), HEALTH_LABEL[p.health.state] + (p.health.error ? ` · ${tServer(p.health.error)}` : "")],
-          [
-            t("When"),
-            p.mode === "realtime" ? t("Soon after changes") : p.mode === "scheduled" ? t("On a schedule") : t("Soon after changes, and on a schedule"),
-          ],
+          [t("When"), p.mode === "realtime" ? t("Soon after changes") : p.mode === "scheduled" ? t("On a schedule") : t("Soon after changes, and on a schedule")],
           ...(p.next_run_at ? ([[t("Next"), `${zonedTime(p.next_run_at, p.tz)} (${p.tz})`]] as [string, string][]) : []),
           [t("Kept"), t("{days} days, and always the newest {n}", { days: p.keep_days, n: p.keep_min })],
           ...(p.last_verify_at ? ([[t("Last checked"), formatDateTime(p.last_verify_at)]] as [string, string][]) : []),
@@ -507,7 +514,10 @@ function SetDetails({ set: s, jobs, onClose }: { set: BackupSet; jobs: BackupJob
     ...(snap
       ? ([
           [t("Protected as of"), snap.cutoff ? formatDateTime(snap.cutoff) : "—"],
-          [t("Holds"), `${t("{n} file|{n} files", { n: snap.files })} · ${t("{n} folder|{n} folders", { n: snap.folders })} · ${t("{n} earlier version|{n} earlier versions", { n: snap.versions })}`],
+          [
+            t("Holds"),
+            `${t("{n} file|{n} files", { n: snap.files })} · ${t("{n} folder|{n} folders", { n: snap.folders })} · ${t("{n} earlier version|{n} earlier versions", { n: snap.versions })}`,
+          ],
           [t("Size"), t("{size} of files; {stored} kept there (each content once)", { size: formatBytes(snap.logical_bytes), stored: formatBytes(s.bytes) })],
         ] as [string, string][])
       : []),
@@ -554,7 +564,9 @@ function SetDetails({ set: s, jobs, onClose }: { set: BackupSet; jobs: BackupJob
                   <li key={sp.id} className="flex items-center gap-2 px-3 py-1.5">
                     <Icon className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 flex-1 truncate">{backupSpaceLabel(sp)}</span>
-                    <span className="text-muted-foreground tabular-nums">{t("{n} file|{n} files", { n: sp.files })} · {formatBytes(sp.bytes)}</span>
+                    <span className="text-muted-foreground tabular-nums">
+                      {t("{n} file|{n} files", { n: sp.files })} · {formatBytes(sp.bytes)}
+                    </span>
                   </li>
                 );
               })}
@@ -570,11 +582,11 @@ function SetDetails({ set: s, jobs, onClose }: { set: BackupSet; jobs: BackupJob
                   <span className="flex items-center gap-2">
                     <span className="font-medium">{BACKUP_JOB_KIND_LABEL[j.kind]}</span>
                     {j.kind === "restore" && (
-                      <span className="min-w-0 truncate text-muted-foreground">
-                        {j.target ? t("{space} into {target}", { space: j.label, target: j.target }) : j.label}
-                      </span>
+                      <span className="min-w-0 truncate text-muted-foreground">{j.target ? t("{space} into {target}", { space: j.label, target: j.target }) : j.label}</span>
                     )}
-                    <span className={cn("ml-auto shrink-0", j.state === "failed" ? "text-destructive" : j.state === "done" ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}>
+                    <span
+                      className={cn("ml-auto shrink-0", j.state === "failed" ? "text-destructive" : j.state === "done" ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}
+                    >
                       {BACKUP_JOB_STATE_LABEL[j.state]}
                     </span>
                   </span>
@@ -585,7 +597,14 @@ function SetDetails({ set: s, jobs, onClose }: { set: BackupSet; jobs: BackupJob
                     {j.finished_at ? ` · ${t("Finished {time}", { time: formatDateTime(j.finished_at) })}` : ""}
                   </span>
                   {j.error && <span className="text-destructive">{tServer(j.error)}</span>}
-                  {j.note && <span className="whitespace-pre-line">{j.note.split("\n").map((l) => tServer(l)).join("\n")}</span>}
+                  {j.note && (
+                    <span className="whitespace-pre-line">
+                      {j.note
+                        .split("\n")
+                        .map((l) => tServer(l))
+                        .join("\n")}
+                    </span>
+                  )}
                   {j.failures.length > 0 && (
                     <ul className="grid gap-0.5 rounded bg-muted/50 px-2 py-1">
                       {j.failures.map((f, i) => (

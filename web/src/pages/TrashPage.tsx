@@ -78,9 +78,7 @@ export function TrashPage() {
       <ToolButton icon={ArchiveRestoreIcon} label={t("Restore")} showLabel disabled={!ids.length} onClick={restore} />
       <ToolButton icon={Trash2Icon} label={t("Delete permanently")} showLabel disabled={!ids.length || !me.can_delete} onClick={() => setConfirm("delete")} />
       <DropdownMenu>
-        <DropdownMenuTrigger
-          render={<ToolButton icon={FilterIcon} label={mine ? t("Deleted by me") : t("Deleted by everyone")} showLabel className={mine ? "text-brand" : undefined} />}
-        />
+        <DropdownMenuTrigger render={<ToolButton icon={FilterIcon} label={mine ? t("Deleted by me") : t("Deleted by everyone")} showLabel className={mine ? "text-brand" : undefined} />} />
         <DropdownMenuContent className="w-48">
           <DropdownMenuRadioGroup
             value={deletedBy}

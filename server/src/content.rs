@@ -261,16 +261,14 @@ pub async fn ensure_folders(conn: &mut SqliteConnection, owner_id: i64, parent_i
                         let numbered = tree::unique_name(conn, &current, &name, true).await?;
                         let id = create_folder(conn, owner_id, &current, &numbered).await?;
                         if !batch.is_empty() {
-                            sqlx::query(
-                                "INSERT OR REPLACE INTO upload_batch_folders (batch, parent_id, name, folder_id, created_at) VALUES (?, ?, ?, ?, ?)",
-                            )
-                            .bind(batch)
-                            .bind(&current)
-                            .bind(&key)
-                            .bind(&id)
-                            .bind(crate::util::now())
-                            .execute(&mut *conn)
-                            .await?;
+                            sqlx::query("INSERT OR REPLACE INTO upload_batch_folders (batch, parent_id, name, folder_id, created_at) VALUES (?, ?, ?, ?, ?)")
+                                .bind(batch)
+                                .bind(&current)
+                                .bind(&key)
+                                .bind(&id)
+                                .bind(crate::util::now())
+                                .execute(&mut *conn)
+                                .await?;
                         }
                         id
                     }

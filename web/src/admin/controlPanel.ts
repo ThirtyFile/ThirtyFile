@@ -156,11 +156,12 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     key: "general",
     to: adminPath("general"),
     title: t("General"),
-    desc: t("Site URL, default language, the \"All files\" company space, who can create team spaces, and new users' \"My files\""),
+    desc: t('Site URL, default language, the "All files" company space, who can create team spaces, and new users\' "My files"'),
     icon: SlidersHorizontalIcon,
     tone: "bg-brand/12 text-brand",
     category: "system",
-    keywords: "網址 網域 url domain 分享連結 全部檔案 公司 共用 團隊空間 建立 新使用者 我的檔案 個人空間 儲存位置 預設 空間大小 配額 容量 語言 中文 英文 預設語言 兩步驟驗證 驗證碼 密碼長度 安全 版本 較早版本 歷程 general site address share link all files company shared team space create new user my files personal space storage location default size quota language english chinese two-factor 2fa totp authenticator password length security versions history", // i18n-ignore: bilingual search keywords
+    keywords:
+      "網址 網域 url domain 分享連結 全部檔案 公司 共用 團隊空間 建立 新使用者 我的檔案 個人空間 儲存位置 預設 空間大小 配額 容量 語言 中文 英文 預設語言 兩步驟驗證 驗證碼 密碼長度 安全 版本 較早版本 歷程 general site address share link all files company shared team space create new user my files personal space storage location default size quota language english chinese two-factor 2fa totp authenticator password length security versions history", // i18n-ignore: bilingual search keywords
   },
   {
     key: "branding",
@@ -170,7 +171,8 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     icon: PaletteIcon,
     tone: "bg-pink-500/12 text-pink-600 dark:text-pink-300",
     category: "system",
-    keywords: "品牌 logo 標誌 圖示 名稱 標題 配色 顏色 主題 主色 深色 淺色 暗色 亮色 外觀 登入頁 歡迎 鎖定畫面 時鐘 背景 桌布 favicon branding icon name title color theme accent dark light mode appearance sign-in page welcome lock screen clock background wallpaper", // i18n-ignore: bilingual search keywords
+    keywords:
+      "品牌 logo 標誌 圖示 名稱 標題 配色 顏色 主題 主色 深色 淺色 暗色 亮色 外觀 登入頁 歡迎 鎖定畫面 時鐘 背景 桌布 favicon branding icon name title color theme accent dark light mode appearance sign-in page welcome lock screen clock background wallpaper", // i18n-ignore: bilingual search keywords
   },
   {
     key: "sso",
@@ -180,7 +182,8 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     icon: KeyRoundIcon,
     tone: "bg-amber-500/12 text-amber-600 dark:text-amber-300",
     category: "users",
-    keywords: "sso 單一登入 三方登入 第三方 oauth oidc microsoft entra azure ad office 365 google workspace github openid keycloak authentik 登入 帳號 連結 single sign-on third-party sign in login account link", // i18n-ignore: bilingual search keywords
+    keywords:
+      "sso 單一登入 三方登入 第三方 oauth oidc microsoft entra azure ad office 365 google workspace github openid keycloak authentik 登入 帳號 連結 single sign-on third-party sign in login account link", // i18n-ignore: bilingual search keywords
   },
   {
     key: "email",
@@ -200,7 +203,8 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     icon: ActivityIcon,
     tone: "bg-slate-500/12 text-slate-600 dark:text-slate-300",
     category: "system",
-    keywords: "紀錄 稽核 log 查詢 篩選 匯出 csv 分享連結 存取 下載 ip 登入 登出 密碼 失敗 鎖定 activity audit search filter export share link access download sign in sign out login logout password failed locked", // i18n-ignore: bilingual search keywords
+    keywords:
+      "紀錄 稽核 log 查詢 篩選 匯出 csv 分享連結 存取 下載 ip 登入 登出 密碼 失敗 鎖定 activity audit search filter export share link access download sign in sign out login logout password failed locked", // i18n-ignore: bilingual search keywords
   },
   {
     key: "logs",

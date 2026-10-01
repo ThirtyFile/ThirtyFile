@@ -118,18 +118,7 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
         }
     };
     let (read_only, moving) = (drive.read_only || drive.moving, drive.moving);
-    Ok(Json(NodeInfo {
-        node,
-        path,
-        is_root,
-        drive: drive.into(),
-        role,
-        via_share,
-        location,
-        offline,
-        read_only,
-        moving,
-    }))
+    Ok(Json(NodeInfo { node, path, is_root, drive: drive.into(), role, via_share, location, offline, read_only, moving }))
 }
 
 #[derive(Deserialize)]
@@ -411,7 +400,9 @@ mod tests {
                     let offsets: Vec<i64> = (0..20).step_by(limit as usize).collect();
                     for offset in offsets.into_iter().rev() {
                         let q = ListQuery { sort: Some(sort.into()), order: Some(order.into()), limit: Some(limit), offset: Some(offset), ..Default::default() };
-                        let Json(Listing::Page { items, total, .. }) = children(State(env.st.clone()), amy.clone(), Path(amy.root().to_string()), Query(q)).await.unwrap() else {
+                        let Json(Listing::Page { items, total, .. }) =
+                            children(State(env.st.clone()), amy.clone(), Path(amy.root().to_string()), Query(q)).await.unwrap()
+                        else {
                             panic!("a limit gives a page")
                         };
                         assert_eq!(total, Some(15));
@@ -631,9 +622,8 @@ mod tests {
                 sqlx::query("UPDATE nodes SET blob_hash = ?, size = 5 WHERE id = ?").bind(&hash).bind(id).execute(&mut *c).await.unwrap();
             }
         }
-        let refs = || async {
-            sqlx::query_as::<_, (i64,)>("SELECT refcount FROM blobs WHERE hash = ?").bind(&hash).fetch_optional(&env.st.db).await.unwrap().map(|r| r.0)
-        };
+        let refs =
+            || async { sqlx::query_as::<_, (i64,)>("SELECT refcount FROM blobs WHERE hash = ?").bind(&hash).fetch_optional(&env.st.db).await.unwrap().map(|r| r.0) };
         // Copying the folder adds a reference per file, in one statement
         let _ = copy_nodes(State(env.st.clone()), amy.clone(), batch(&[&folder], amy.root())).await.unwrap();
         assert_eq!(refs().await, Some(4));
@@ -1042,7 +1032,8 @@ mod tests {
 
         // Opening again within a minute doesn't write; later it moves the file up
         let at = || async {
-            let (at,): (i64,) = sqlx::query_as("SELECT at FROM recent_files WHERE user_id = ? AND node_id = ?").bind(ben.id).bind(&opened).fetch_one(&env.st.db).await.unwrap();
+            let (at,): (i64,) =
+                sqlx::query_as("SELECT at FROM recent_files WHERE user_id = ? AND node_id = ?").bind(ben.id).bind(&opened).fetch_one(&env.st.db).await.unwrap();
             at
         };
         sqlx::query("UPDATE recent_files SET at = ?").bind(t - 30).execute(&env.st.db).await.unwrap();
@@ -1099,9 +1090,13 @@ mod tests {
         let a = env.file(&amy, &src, "report.docx").await;
 
         // The browser learns about the clash first
-        let Json(found) = conflicts(st(), amy.clone(), Json(ConflictsReq { dest_id: Some(dest.clone()), names: vec!["REPORT.docx".into(), "new.txt".into()], ids: vec![a.clone()] }))
-            .await
-            .unwrap();
+        let Json(found) = conflicts(
+            st(),
+            amy.clone(),
+            Json(ConflictsReq { dest_id: Some(dest.clone()), names: vec!["REPORT.docx".into(), "new.txt".into()], ids: vec![a.clone()] }),
+        )
+        .await
+        .unwrap();
         assert_eq!(found.len(), 2);
         assert!(found.iter().all(|c| c.existing.id == there));
         assert_eq!((found[0].id.as_deref(), found[1].id.as_deref()), (None, Some(a.as_str())));
@@ -1139,7 +1134,8 @@ mod tests {
         let count = |parent: String| {
             let db = env.st.db.clone();
             async move {
-                let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE parent_id = ? AND trashed_at IS NULL").bind(parent).fetch_one(&db).await.unwrap();
+                let (n,): (i64,) =
+                    sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE parent_id = ? AND trashed_at IS NULL").bind(parent).fetch_one(&db).await.unwrap();
                 n
             }
         };

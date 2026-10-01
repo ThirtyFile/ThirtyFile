@@ -39,7 +39,7 @@ export function CopyEverythingDialog({ location, onClose }: { location: StorageL
   const { busy, error, run } = useSubmit(async () => {
     if (!dest) return;
     await api.startCopy(location.id, dest, name.trim());
-    toast.success(t("\"{name}\" is being made in the background", { name: name.trim() }), {
+    toast.success(t('"{name}" is being made in the background', { name: name.trim() }), {
       action: { label: t("Show copies"), onClick: () => navigate("/admin/backups") },
     });
     onClose();
@@ -49,11 +49,14 @@ export function CopyEverythingDialog({ location, onClose }: { location: StorageL
       <DialogContent className="sm:max-w-lg">
         <form className="grid gap-4" onSubmit={run}>
           <DialogHeader>
-            <DialogTitle>{t("Copy everything on \"{name}\"", { name: location.name })}</DialogTitle>
+            <DialogTitle>{t('Copy everything on "{name}"', { name: location.name })}</DialogTitle>
             <DialogDescription>
-              {t("Its spaces are copied to the location you choose, with their trash and earlier versions. Nothing on {name} changes: no file is removed, the spaces stay on it, and the default location stays as it is.", {
-                name: location.name,
-              })}
+              {t(
+                "Its spaces are copied to the location you choose, with their trash and earlier versions. Nothing on {name} changes: no file is removed, the spaces stay on it, and the default location stays as it is.",
+                {
+                  name: location.name,
+                },
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
@@ -105,20 +108,23 @@ export function CopyEverythingDialog({ location, onClose }: { location: StorageL
                   })}
                 </p>
                 <p className="text-muted-foreground">
-                  {p.free_bytes != null
-                    ? t("{free} is free there.", { free: formatBytes(p.free_bytes) })
-                    : t("How much room is left there can't be told: the storage service doesn't say.")}
+                  {p.free_bytes != null ? t("{free} is free there.", { free: formatBytes(p.free_bytes) }) : t("How much room is left there can't be told: the storage service doesn't say.")}
                 </p>
               </div>
               <div className="grid gap-1 text-muted-foreground">
                 <p className="font-medium text-foreground">{t("Where it goes, and how it is used")}</p>
                 <p>
-                  {t("The copy gets a folder of its own on {name} (in .thirtyfile-backups), which nothing else writes to: nothing there is replaced, and each copy is kept apart. It is listed in Control panel › Backups, where a space of it can be restored into a new folder, and where it can be checked or deleted.", {
-                    name: destName,
-                  })}
+                  {t(
+                    "The copy gets a folder of its own on {name} (in .thirtyfile-backups), which nothing else writes to: nothing there is replaced, and each copy is kept apart. It is listed in Control panel › Backups, where a space of it can be restored into a new folder, and where it can be checked or deleted.",
+                    {
+                      name: destName,
+                    },
+                  )}
                 </p>
                 <p>
-                  {t("The spaces stay usable meanwhile. The copy shows them as they were when their list of files was made: files changed or deleted after that are copied as they were. Content-store files are kept from deletion until they are copied; files in folders are read and checked unchanged.")}
+                  {t(
+                    "The spaces stay usable meanwhile. The copy shows them as they were when their list of files was made: files changed or deleted after that are copied as they were. Content-store files are kept from deletion until they are copied; files in folders are read and checked unchanged.",
+                  )}
                 </p>
                 <p>{t("Share links, favorites and upload sessions aren't copied. Who had access is recorded, but restoring doesn't give it again.")}</p>
               </div>

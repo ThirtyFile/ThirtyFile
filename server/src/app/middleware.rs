@@ -27,16 +27,17 @@ impl Predicate for Compressible {
             return false;
         }
         // Content-Length isn't set yet at this layer for JSON bodies, so ask the body itself when it knows its size
-        let len = response.body().size_hint().exact().or_else(|| {
-            response.headers().get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok())
-        });
+        let len = response
+            .body()
+            .size_hint()
+            .exact()
+            .or_else(|| response.headers().get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()));
         if len.is_some_and(|len| len < 1024) {
             return false;
         }
         let Some(ct) = response.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()) else { return false };
         let ct = ct.split(';').next().unwrap_or_default().trim();
-        ct.starts_with("text/")
-            || matches!(ct, "application/json" | "application/javascript" | "application/xml" | "image/svg+xml" | "application/manifest+json")
+        ct.starts_with("text/") || matches!(ct, "application/json" | "application/javascript" | "application/xml" | "image/svg+xml" | "application/manifest+json")
     }
 }
 
@@ -65,20 +66,20 @@ pub async fn forwarding(axum::extract::State(st): axum::extract::State<AppState>
 pub async fn same_origin(axum::extract::State(st): axum::extract::State<AppState>, req: Request, next: Next) -> Response {
     let path = req.uri().path();
     let dav = path == dav::PREFIX || path.starts_with("/dav/");
-    let app_password_only = !dav
-        && matches!(tokens::credential(req.headers()), Some(tokens::Credential::Bearer(_)))
-        && auth::get_cookie(req.headers(), auth::SESSION_COOKIE).is_none();
+    let app_password_only =
+        !dav && matches!(tokens::credential(req.headers()), Some(tokens::Credential::Bearer(_))) && auth::get_cookie(req.headers(), auth::SESSION_COOKIE).is_none();
     if !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS)
         && !app_password_only
-        && let Some(origin) = req.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
-            let origin_host = origin.split_once("://").map(|(_, h)| h).unwrap_or(origin);
-            let h = req.headers();
-            let hosts = [h.get("x-forwarded-host").filter(|_| st.trust_proxy.enabled()), h.get(header::HOST)];
-            let ok = hosts.iter().flatten().filter_map(|v| v.to_str().ok()).any(|host| host == origin_host);
-            if !ok {
-                return (StatusCode::FORBIDDEN, "cross-origin request blocked").into_response();
-            }
+        && let Some(origin) = req.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok())
+    {
+        let origin_host = origin.split_once("://").map(|(_, h)| h).unwrap_or(origin);
+        let h = req.headers();
+        let hosts = [h.get("x-forwarded-host").filter(|_| st.trust_proxy.enabled()), h.get(header::HOST)];
+        let ok = hosts.iter().flatten().filter_map(|v| v.to_str().ok()).any(|host| host == origin_host);
+        if !ok {
+            return (StatusCode::FORBIDDEN, "cross-origin request blocked").into_response();
         }
+    }
     next.run(req).await
 }
 
@@ -110,7 +111,10 @@ mod tests {
         assert!(!ok("application/zip"));
         assert!(!ok("video/mp4"));
         assert!(!ok("image/jpeg"));
-        assert!(!Compressible.should_compress(&response(StatusCode::OK, &[(header::CONTENT_TYPE, "text/plain"), (header::CONTENT_DISPOSITION, "inline; filename=\"a.txt\"")])));
+        assert!(
+            !Compressible
+                .should_compress(&response(StatusCode::OK, &[(header::CONTENT_TYPE, "text/plain"), (header::CONTENT_DISPOSITION, "inline; filename=\"a.txt\"")]))
+        );
         // Range responses and tiny bodies are left alone
         assert!(!Compressible.should_compress(&response(StatusCode::PARTIAL_CONTENT, &[(header::CONTENT_TYPE, "text/plain")])));
         assert!(!Compressible.should_compress(&response_of(StatusCode::OK, &[(header::CONTENT_TYPE, "text/plain")], 20)));

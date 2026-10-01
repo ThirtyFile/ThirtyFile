@@ -308,11 +308,10 @@ impl Job {
 
 /// Whether a space is being moved, or waits to be (a move that isn't over)
 pub async fn drive_busy(conn: &mut SqliteConnection, drive_id: &str) -> Result<bool, sqlx::Error> {
-    let row: Option<(i64,)> =
-        sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT 1 FROM space_moves WHERE drive_id = ? AND state IN {ACTIVE} LIMIT 1")))
-            .bind(drive_id)
-            .fetch_optional(conn)
-            .await?;
+    let row: Option<(i64,)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT 1 FROM space_moves WHERE drive_id = ? AND state IN {ACTIVE} LIMIT 1")))
+        .bind(drive_id)
+        .fetch_optional(conn)
+        .await?;
     Ok(row.is_some())
 }
 
@@ -326,12 +325,11 @@ pub async fn refuse_busy(conn: &mut SqliteConnection, drive_id: &str) -> AppResu
 
 /// Whether a move that isn't over goes from or to this location
 pub async fn location_busy(conn: &mut SqliteConnection, location: &str) -> Result<bool, sqlx::Error> {
-    let row: Option<(i64,)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT 1 FROM space_moves WHERE (from_location = ?1 OR to_location = ?1) AND state IN {ACTIVE} LIMIT 1"
-    )))
-    .bind(location)
-    .fetch_optional(conn)
-    .await?;
+    let row: Option<(i64,)> =
+        sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT 1 FROM space_moves WHERE (from_location = ?1 OR to_location = ?1) AND state IN {ACTIVE} LIMIT 1")))
+            .bind(location)
+            .fetch_optional(conn)
+            .await?;
     Ok(row.is_some())
 }
 
@@ -474,15 +472,14 @@ async fn take(st: &AppState, job: &Job) -> AppResult<Option<Arc<Control>>> {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let res = async {
-            let taken = sqlx::query(
-                "UPDATE space_moves SET state = 'running', started_at = COALESCE(started_at, ?), error = NULL WHERE id = ? AND state = 'queued'",
-            )
-            .bind(now())
-            .bind(&job.id)
-            .execute(&mut *tx)
-            .await?
-            .rows_affected()
-                == 1;
+            let taken =
+                sqlx::query("UPDATE space_moves SET state = 'running', started_at = COALESCE(started_at, ?), error = NULL WHERE id = ? AND state = 'queued'")
+                    .bind(now())
+                    .bind(&job.id)
+                    .execute(&mut *tx)
+                    .await?
+                    .rows_affected()
+                    == 1;
             // Read-only from the first start until the move is over
             if taken && job.locks_space() {
                 sqlx::query("UPDATE drives SET moving = 1 WHERE id = ?").bind(&job.drive_id).execute(&mut *tx).await?;
@@ -539,9 +536,7 @@ async fn run(st: &AppState, job: &Job, ctl: &Control) {
 /// Before copying: the target can be reached, and a disk of this server has room for what is left to copy. A folder
 /// moving to a folder is checked once it is clear that it can't simply be renamed (between_folders.rs).
 async fn prepare(cx: &Ctx<'_>) -> AppResult<()> {
-    crate::locations::probe(cx.st, &cx.job.to_location)
-        .await
-        .map_err(|e| AppError::bad_request(format!("The target storage location can't be reached: {e}")))?;
+    crate::locations::probe(cx.st, &cx.job.to_location).await.map_err(|e| AppError::bad_request(format!("The target storage location can't be reached: {e}")))?;
     if !(cx.job.from_mode == SpaceMode::Folder && cx.job.to_mode == SpaceMode::Folder) {
         check_room(cx.st, &cx.job.to_location, left_to_copy(cx.st, cx.job).await?).await?;
     }
@@ -555,10 +550,8 @@ async fn prepare(cx: &Ctx<'_>) -> AppResult<()> {
         // The folder itself (into a folder, it may be in its new place already: between_folders.rs looks)
         to_store::source(cx.job)?;
         // Each file goes through a temp file in the data folder: the largest must fit
-        let (largest,): (i64,) = sqlx::query_as("SELECT COALESCE(MAX(size), 0) FROM nodes WHERE drive_id = ? AND kind = 'file'")
-            .bind(&cx.job.drive_id)
-            .fetch_one(&cx.st.db)
-            .await?;
+        let (largest,): (i64,) =
+            sqlx::query_as("SELECT COALESCE(MAX(size), 0) FROM nodes WHERE drive_id = ? AND kind = 'file'").bind(&cx.job.drive_id).fetch_one(&cx.st.db).await?;
         let free = free_space(cx.st.tmp_dir()).await;
         if let Some(free) = free.filter(|f| (*f as i64) < largest) {
             return Err(AppError::bad_request(format!(
@@ -801,9 +794,7 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(mut req
         .fetch_optional(&st.db)
         .await?
         .ok_or_else(|| AppError::not_found("Storage location not found"))?;
-    crate::locations::probe(&st, &target)
-        .await
-        .map_err(|e| AppError::bad_request(format!("The target storage location can't be reached: {e}")))?;
+    crate::locations::probe(&st, &target).await.map_err(|e| AppError::bad_request(format!("The target storage location can't be reached: {e}")))?;
     let to_mode = mode_on(&st, &mut *st.db.acquire().await?, &target).await?;
     // The whole size of the spaces, versions included, must fit on a disk of this server
     let (bytes,): (i64,) = sqlx::query_as(
@@ -832,14 +823,7 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(mut req
 }
 
 /// Adds one move to the queue
-async fn queue(
-    conn: &mut SqliteConnection,
-    user: &crate::auth::User,
-    drive_id: &str,
-    target: &str,
-    to_name: &str,
-    to_mode: SpaceMode,
-) -> AppResult<String> {
+async fn queue(conn: &mut SqliteConnection, user: &crate::auth::User, drive_id: &str, target: &str, to_name: &str, to_mode: SpaceMode) -> AppResult<String> {
     #[derive(sqlx::FromRow)]
     struct Space {
         name: String,

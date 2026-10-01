@@ -59,9 +59,7 @@ pub(super) async fn disk_of(path: std::path::PathBuf) -> Option<(u64, u64)> {
 
 pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<LocationInfo>>> {
     let rows: Vec<LocationRow> =
-        sqlx::query_as("SELECT id, name, kind, config, is_default FROM storage_locations ORDER BY (id = 'local') DESC, created_at")
-            .fetch_all(&st.db)
-            .await?;
+        sqlx::query_as("SELECT id, name, kind, config, is_default FROM storage_locations ORDER BY (id = 'local') DESC, created_at").fetch_all(&st.db).await?;
     // Totals of every location in three grouped queries (blobs by the covering index blobs_location_size; spaces are
     // few). A folder space's size is its index's (`drives.used_bytes`, kept up to date by every change and scan).
     let db = &st.db;
@@ -174,12 +172,11 @@ pub(super) const TARGET_FIELDS: [&str; 8] = ["host", "port", "endpoint", "bucket
 pub(super) async fn merged_config(st: &AppState, id: Option<&str>, kind: &str, config: Value) -> AppResult<Value> {
     let mut config = config;
     let Some(id) = id else { return Ok(config) };
-    let old: Option<(String, String)> =
-        sqlx::query_as("SELECT kind, config FROM storage_locations WHERE id = ?").bind(id).fetch_optional(&st.db).await?;
+    let old: Option<(String, String)> = sqlx::query_as("SELECT kind, config FROM storage_locations WHERE id = ?").bind(id).fetch_optional(&st.db).await?;
     let Some((old_kind, old)) = old.map(|(k, c)| (k, config_json(id, &c))) else { return Ok(config) };
-    let wanted = SECRET_FIELDS.iter().any(|f| {
-        config.get(*f).and_then(Value::as_str).is_none_or(str::is_empty) && old.get(*f).and_then(Value::as_str).is_some_and(|s| !s.is_empty())
-    });
+    let wanted = SECRET_FIELDS
+        .iter()
+        .any(|f| config.get(*f).and_then(Value::as_str).is_none_or(str::is_empty) && old.get(*f).and_then(Value::as_str).is_some_and(|s| !s.is_empty()));
     if !wanted {
         return Ok(config);
     }
@@ -225,7 +222,12 @@ pub(super) fn friendly(detail: &str, err: &str) -> String {
     let e = detail.to_ascii_lowercase();
     let msg = if e.contains("signaturedoesnotmatch") || e.contains("invalidaccesskeyid") || e.contains("403 forbidden") {
         "Incorrect Access Key or Secret Key, or no permission for this bucket"
-    } else if e.contains("permanentredirect") || e.contains("redirect") || e.contains("authorizationheadermalformed") || e.contains("301 moved") || e.contains("invalidregionname") {
+    } else if e.contains("permanentredirect")
+        || e.contains("redirect")
+        || e.contains("authorizationheadermalformed")
+        || e.contains("301 moved")
+        || e.contains("invalidregionname")
+    {
         "The region doesn't match the bucket's region. For AWS, leave the region blank to detect it automatically; for R2, enter auto."
     } else if e.contains("nosuchbucket") || e.contains("404 not found") {
         "Bucket not found. Create it in the storage service first."

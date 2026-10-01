@@ -10,16 +10,7 @@ export function Thumb({ node, source, className, iconClass }: { node: Node; sour
   const [failed, setFailed] = useState(false);
   if (canBrowserThumbnail(node)) return <BrowserThumb node={node} source={source} className={className} iconClass={iconClass} />;
   if (canThumbnail(node) && !failed) {
-    return (
-      <img
-        src={source.thumbUrl(node)}
-        loading="lazy"
-        draggable={false}
-        onError={() => setFailed(true)}
-        className={cn("object-contain", className)}
-        alt=""
-      />
-    );
+    return <img src={source.thumbUrl(node)} loading="lazy" draggable={false} onError={() => setFailed(true)} className={cn("object-contain", className)} alt="" />;
   }
   return <FileIcon node={node} className={iconClass} />;
 }

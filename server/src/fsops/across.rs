@@ -50,10 +50,8 @@ pub(super) async fn write_tree(st: &AppState, nodes: &[Node], top: &Pinned, prog
                 }
             }
             source => {
-                let mut reader = source
-                    .open(st, 0, n.size as u64)
-                    .await
-                    .map_err(|e| AppError::new(StatusCode::BAD_GATEWAY, format!("Couldn't read \"{}\": {e}", n.name)))?;
+                let mut reader =
+                    source.open(st, 0, n.size as u64).await.map_err(|e| AppError::new(StatusCode::BAD_GATEWAY, format!("Couldn't read \"{}\": {e}", n.name)))?;
                 let mut file = tokio::fs::OpenOptions::new().write(true).create_new(true).open(to.as_path()).await.map_err(disk_error)?;
                 let got = tokio::io::copy(&mut reader, &mut file).await.map_err(disk_error)?;
                 file.sync_all().await.map_err(disk_error)?;
@@ -289,11 +287,7 @@ impl Across {
 
     pub async fn run(self, st: &AppState, user: &User, progress: &Tracker) -> AppResult<()> {
         progress.add_total(self.items.iter().flatten().map(work_of).sum());
-        if self.moving {
-            move_across(st, user, &self.dest, self.items, progress).await
-        } else {
-            copy_across(st, user, &self.dest, self.items, progress).await
-        }
+        if self.moving { move_across(st, user, &self.dest, self.items, progress).await } else { copy_across(st, user, &self.dest, self.items, progress).await }
     }
 }
 
@@ -340,10 +334,8 @@ pub async fn move_across(st: &AppState, user: &User, dest: &Node, items: Vec<Vec
 /// place for: there, writable, and in the same space kept the same way (its folder, or the content store). The space
 /// may have been moved to another storage location, or made read-only, while the content was copied.
 pub(super) async fn still_there(conn: &mut SqliteConnection, dest: &Node) -> AppResult<()> {
-    let now = tree::get_node(conn, &dest.id)
-        .await?
-        .filter(|d| d.trashed_at.is_none())
-        .ok_or_else(|| AppError::not_found("The destination folder no longer exists"))?;
+    let now =
+        tree::get_node(conn, &dest.id).await?.filter(|d| d.trashed_at.is_none()).ok_or_else(|| AppError::not_found("The destination folder no longer exists"))?;
     if now.space_read_only {
         return Err(tree::read_only_error(&now));
     }

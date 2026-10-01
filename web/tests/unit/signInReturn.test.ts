@@ -10,7 +10,18 @@ describe("the page after signing in", () => {
   });
 
   test("anything that leads to another site, or isn't a path, goes to the files", () => {
-    for (const next of [null, "", "files", "https://elsewhere.example/", "//elsewhere.example", "/\\elsewhere.example", "/\t/elsewhere.example", "/\n/elsewhere.example", "\t//elsewhere.example", "javascript:alert(1)"]) {
+    for (const next of [
+      null,
+      "",
+      "files",
+      "https://elsewhere.example/",
+      "//elsewhere.example",
+      "/\\elsewhere.example",
+      "/\t/elsewhere.example",
+      "/\n/elsewhere.example",
+      "\t//elsewhere.example",
+      "javascript:alert(1)",
+    ]) {
       expect(safeNext(next, origin)).toBe("/files");
     }
   });

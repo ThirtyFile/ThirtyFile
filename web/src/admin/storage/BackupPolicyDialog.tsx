@@ -111,10 +111,10 @@ export function BackupPolicyDialog({ set, source: preset, onClose, onDone }: { s
     };
     if (set) {
       await api.updateBackupPolicy(set.id, { ...settings, name: name.trim() || undefined });
-      toast.success(t("\"{name}\" was changed", { name: name.trim() || set.name }));
+      toast.success(t('"{name}" was changed', { name: name.trim() || set.name }));
     } else {
       await api.createBackupPolicy({ ...settings, name: name.trim() || defaultName, source, dest });
-      toast.success(t("\"{name}\" was made; its first snapshot is being made in the background", { name: name.trim() || defaultName }));
+      toast.success(t('"{name}" was made; its first snapshot is being made in the background', { name: name.trim() || defaultName }));
     }
     onDone();
     onClose();
@@ -169,7 +169,9 @@ export function BackupPolicyDialog({ set, source: preset, onClose, onDone }: { s
                   <AlertTriangleIcon className="mt-px size-3.5 shrink-0" /> {t("{name} can't be reached now: {error}", { name: pv.dest_name, error: tServer(pv.problem) })}
                 </p>
               )}
-              {pv.shared && <p>{t("{name} is on the same disk or storage service as {source}: the copy doesn't survive a failure of it.", { name: pv.dest_name, source: pv.source_name })}</p>}
+              {pv.shared && (
+                <p>{t("{name} is on the same disk or storage service as {source}: the copy doesn't survive a failure of it.", { name: pv.dest_name, source: pv.source_name })}</p>
+              )}
               {pv.unencrypted && <p>{t("{name} is FTP without encryption: the files travel unencrypted.", { name: pv.dest_name })}</p>}
             </div>
           )}
@@ -190,10 +192,7 @@ export function BackupPolicyDialog({ set, source: preset, onClose, onDone }: { s
                   return (
                     <li key={s.id}>
                       <label className="flex items-center gap-2 px-2.5 py-1.5">
-                        <Checkbox
-                          checked={spaces.includes(s.id)}
-                          onCheckedChange={(v) => setSpaces((cur) => (v === true ? [...cur, s.id] : cur.filter((x) => x !== s.id)))}
-                        />
+                        <Checkbox checked={spaces.includes(s.id)} onCheckedChange={(v) => setSpaces((cur) => (v === true ? [...cur, s.id] : cur.filter((x) => x !== s.id)))} />
                         <Icon className="size-3.5 shrink-0 text-muted-foreground" />
                         <span className="truncate">{s.kind === "personal" && s.owner_name ? `${s.name} · ${s.owner_name}` : s.name}</span>
                       </label>
@@ -220,7 +219,9 @@ export function BackupPolicyDialog({ set, source: preset, onClose, onDone }: { s
             </NativeSelect>
             {mode !== "scheduled" && (
               <p className="text-xs text-muted-foreground">
-                {t("Changes are gathered for a few seconds, then copied in the background: files are protected a little after they change, not at the same moment. Changes other programs make in folder spaces are seen at the next check for changes.")}
+                {t(
+                  "Changes are gathered for a few seconds, then copied in the background: files are protected a little after they change, not at the same moment. Changes other programs make in folder spaces are seen at the next check for changes.",
+                )}
               </p>
             )}
             {mode !== "realtime" && (
@@ -268,9 +269,7 @@ export function BackupPolicyDialog({ set, source: preset, onClose, onDone }: { s
                     ))}
                   </NativeSelect>
                 </div>
-                {next.data && next.data.length > 0 && (
-                  <p className="text-xs text-muted-foreground">{t("Next: {times}", { times: next.data.map((n) => zonedTime(n, tz)).join(" · ") })}</p>
-                )}
+                {next.data && next.data.length > 0 && <p className="text-xs text-muted-foreground">{t("Next: {times}", { times: next.data.map((n) => zonedTime(n, tz)).join(" · ") })}</p>}
                 {next.error && <ErrorText>{errorMessage(next.error, t("Operation failed"))}</ErrorText>}
                 <p className="text-xs text-muted-foreground">
                   {t("A time clocks skip when summer time starts isn't run that day; one that happens twice when it ends is run once. After the server was off, one snapshot catches up.")}

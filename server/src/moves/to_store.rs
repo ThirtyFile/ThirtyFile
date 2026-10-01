@@ -43,7 +43,8 @@ const PENDING_FILES: &str = "FROM nodes n LEFT JOIN space_move_items i ON i.move
        AND (i.item_id IS NULL OR i.size IS NOT n.fs_size OR i.src_mtime_ns IS NOT n.fs_mtime_ns OR i.path IS NOT n.fs_path)";
 /// Copies of the move `?1` that found their content at the target `?2` already, and it isn't there any more (each
 /// looked up by its hash, not by reading every content at the target)
-pub(super) const NO_LONGER_THERE: &str = "WHERE move_id = ?1 AND uploaded = 0 AND NOT EXISTS (SELECT 1 FROM blobs b WHERE b.hash = space_move_items.hash AND b.location_id = ?2)";
+pub(super) const NO_LONGER_THERE: &str =
+    "WHERE move_id = ?1 AND uploaded = 0 AND NOT EXISTS (SELECT 1 FROM blobs b WHERE b.hash = space_move_items.hash AND b.location_id = ?2)";
 /// Earlier versions kept in the folder that aren't copied yet
 const PENDING_VERSIONS: &str = "FROM node_versions v LEFT JOIN space_move_items i ON i.move_id = ?1 AND i.item_id = v.id
      WHERE v.drive_id = ?2 AND v.fs_path IS NOT NULL AND v.id > ?3 AND i.item_id IS NULL";
@@ -64,10 +65,8 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
     let (st, job) = (cx.st, cx.job);
     let dst = st.storage(&job.to_location)?;
     let root = source(job)?;
-    let (files_done, bytes_done): (i64, i64) = sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM space_move_items WHERE move_id = ?")
-        .bind(&job.id)
-        .fetch_one(&st.db)
-        .await?;
+    let (files_done, bytes_done): (i64, i64) =
+        sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM space_move_items WHERE move_id = ?").bind(&job.id).fetch_one(&st.db).await?;
     let (files, bytes) = left(st, job).await?;
     cx.set_counts(files_done, bytes_done, files_done + files, bytes_done + bytes);
     cx.flush().await?;
@@ -325,8 +324,12 @@ async fn switch(cx: &Ctx<'_>) -> AppResult<bool> {
     let mut tx = crate::db::begin_write(&st.db).await?;
     let res = async {
         for pending in [PENDING_FILES, PENDING_VERSIONS] {
-            let row: Option<(i64,)> =
-                sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT 1 {pending} LIMIT 1"))).bind(&job.id).bind(&job.drive_id).bind("").fetch_optional(&mut *tx).await?;
+            let row: Option<(i64,)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT 1 {pending} LIMIT 1")))
+                .bind(&job.id)
+                .bind(&job.drive_id)
+                .bind("")
+                .fetch_optional(&mut *tx)
+                .await?;
             if row.is_some() {
                 return Ok(false);
             }

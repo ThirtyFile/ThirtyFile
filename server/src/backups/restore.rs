@@ -337,7 +337,11 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
         });
     }
     if skipped > 0 {
-        notes.push(if skipped == 1 { "1 file was skipped: its place was taken".to_string() } else { format!("{skipped} files were skipped: their places were taken") });
+        notes.push(if skipped == 1 {
+            "1 file was skipped: its place was taken".to_string()
+        } else {
+            format!("{skipped} files were skipped: their places were taken")
+        });
     }
     if replaced > 0 {
         notes.push(if replaced == 1 {
@@ -384,9 +388,8 @@ pub(super) fn read_lines(path: std::path::PathBuf) -> tokio::sync::mpsc::Receive
 
 /// The space restored into, as it is now
 pub(super) async fn target_space(st: &AppState, p: &Params) -> AppResult<tree::Drive> {
-    let drive = tree::get_drive(&mut *st.db.acquire().await?, &p.target_drive)
-        .await?
-        .ok_or_else(|| AppError::not_found("The space to restore into no longer exists"))?;
+    let drive =
+        tree::get_drive(&mut *st.db.acquire().await?, &p.target_drive).await?.ok_or_else(|| AppError::not_found("The space to restore into no longer exists"))?;
     if drive.disabled || drive.read_only || drive.moving {
         return Err(AppError::conflict("The space to restore into can't be changed now (it is disabled, read-only, or being moved)"));
     }
@@ -428,8 +431,11 @@ async fn make_folder(cx: &Ctx<'_>, target: &tree::Drive, parent: &str, name: &st
         let (id, free) = match there {
             Some(folder) => (folder.id, name.clone()),
             None => {
-                let free =
-                    if target.is_folder() { crate::fsops::free_name(&mut tx, &parent, &name, true).await? } else { tree::unique_name(&mut tx, &parent.id, &name, true).await? };
+                let free = if target.is_folder() {
+                    crate::fsops::free_name(&mut tx, &parent, &name, true).await?
+                } else {
+                    tree::unique_name(&mut tx, &parent.id, &name, true).await?
+                };
                 (crate::content::create_folder(&mut tx, owner_of(cx, target), &parent.id, &free).await?, free)
             }
         };
@@ -465,17 +471,19 @@ async fn restore_file(
         if let Some(existing) = tree::find_child(&mut c, parent, &name).await? {
             drop(c);
             let _w = st.write_lock.lock().await;
-            sqlx::query("INSERT INTO backup_restored (job_id, source_id, node_id) VALUES (?, ?, ?)").bind(&cx.job.id).bind(source).bind(&existing.id).execute(&st.db).await?;
+            sqlx::query("INSERT INTO backup_restored (job_id, source_id, node_id) VALUES (?, ?, ?)")
+                .bind(&cx.job.id)
+                .bind(source)
+                .bind(&existing.id)
+                .execute(&st.db)
+                .await?;
             return Ok(Ok(Outcome::Skipped));
         }
     }
     let tmp = st.tmp_dir().join(format!("backup-{}", new_id()));
     // A content store that holds this content already needs no copy of it
-    let held: Option<(String,)> = if target.is_folder() {
-        None
-    } else {
-        sqlx::query_as("SELECT location_id FROM blobs WHERE hash = ?").bind(hash).fetch_optional(&st.db).await?
-    };
+    let held: Option<(String,)> =
+        if target.is_folder() { None } else { sqlx::query_as("SELECT location_id FROM blobs WHERE hash = ?").bind(hash).fetch_optional(&st.db).await? };
     if held.is_none() {
         match fetch(cx, set, dst, hash, size, &tmp).await? {
             Ok(()) => {}
@@ -504,8 +512,12 @@ async fn fetch(cx: &Ctx<'_>, set: &str, dst: &dyn Storage, hash: &str, size: i64
         Ok(()) => Ok(Ok(())),
         Err(Ok(stop)) => Ok(Err(stop)),
         Err(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => Err(AppError::conflict("The copy doesn't hold this file's content any more")),
-        Err(Err(e)) if crate::hashing::unusable_kind(&e) == Some(crate::hashing::Unusable::Damaged) => Err(AppError::conflict("The copy of this file's content is damaged")),
-        Err(Err(e)) => Err(AppError::new(axum::http::StatusCode::BAD_GATEWAY, format!("Couldn't read from the copy's location: {}", crate::locations::describe(&e)))),
+        Err(Err(e)) if crate::hashing::unusable_kind(&e) == Some(crate::hashing::Unusable::Damaged) => {
+            Err(AppError::conflict("The copy of this file's content is damaged"))
+        }
+        Err(Err(e)) => {
+            Err(AppError::new(axum::http::StatusCode::BAD_GATEWAY, format!("Couldn't read from the copy's location: {}", crate::locations::describe(&e))))
+        }
     }
 }
 
@@ -548,20 +560,33 @@ async fn restore_into(
         turn.ready()?;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let res = async {
-            let folder = tree::get_node(&mut tx, parent).await?.filter(|n| n.is_folder() && n.trashed_at.is_none()).ok_or_else(|| AppError::conflict("The folder being restored into was deleted"))?;
+            let folder = tree::get_node(&mut tx, parent)
+                .await?
+                .filter(|n| n.is_folder() && n.trashed_at.is_none())
+                .ok_or_else(|| AppError::conflict("The folder being restored into was deleted"))?;
             staged.check(&folder)?;
             let existing = tree::find_child(&mut tx, &folder.id, name).await?.filter(|n| !n.is_folder());
             if let (Some(existing), "replace") = (&existing, conflict) {
                 tree::check_quota(&mut tx, &target.id, size - existing.size).await?;
                 let written = content::replace(&mut tx, st, &staged, existing, by).await?;
-                sqlx::query("INSERT INTO backup_restored (job_id, source_id, node_id) VALUES (?, ?, ?)").bind(&cx.job.id).bind(source).bind(&existing.id).execute(&mut *tx).await?;
+                sqlx::query("INSERT INTO backup_restored (job_id, source_id, node_id) VALUES (?, ?, ?)")
+                    .bind(&cx.job.id)
+                    .bind(source)
+                    .bind(&existing.id)
+                    .execute(&mut *tx)
+                    .await?;
                 return AppResult::Ok((written, Outcome::Replaced));
             }
             tree::check_quota(&mut tx, &target.id, size).await?;
             let free = content::free_name(&mut tx, &folder, name).await?;
             // A file of the content store keeps the date it had
             let (id, written) = content::create(&mut tx, &staged, owner_of(cx, target), &folder, &free, Some(modified)).await?;
-            sqlx::query("INSERT INTO backup_restored (job_id, source_id, node_id) VALUES (?, ?, ?)").bind(&cx.job.id).bind(source).bind(&id).execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO backup_restored (job_id, source_id, node_id) VALUES (?, ?, ?)")
+                .bind(&cx.job.id)
+                .bind(source)
+                .bind(&id)
+                .execute(&mut *tx)
+                .await?;
             AppResult::Ok((written, Outcome::Restored { renamed: free != name }))
         }
         .await;

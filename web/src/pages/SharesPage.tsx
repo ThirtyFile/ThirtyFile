@@ -17,12 +17,7 @@ export function SharesPage() {
       extraToolbar={
         <>
           <ToolSeparator />
-          <NativeSelect
-            size="xs"
-            aria-label={t("Show")}
-            value={scope}
-            onChange={(e) => setScope(e.target.value as "mine" | "managed")}
-          >
+          <NativeSelect size="xs" aria-label={t("Show")} value={scope} onChange={(e) => setScope(e.target.value as "mine" | "managed")}>
             <option value="mine">{t("Links I created")}</option>
             <option value="managed">{t("All links I can manage")}</option>
           </NativeSelect>
@@ -38,4 +33,3 @@ export function SharesPage() {
     />
   );
 }
-

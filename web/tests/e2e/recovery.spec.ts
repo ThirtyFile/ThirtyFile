@@ -84,7 +84,11 @@ test("after a reload, choosing the file again continues from what the server has
   await expect(region).toContainText("big-resume.bin");
   await expect(region).toContainText("Can continue");
   // Only a record of it is kept, never the content
-  const kept = await page.evaluate(() => Object.entries(localStorage).filter(([k]) => k.startsWith("tf-upload-tasks-")).map(([, v]) => v.length));
+  const kept = await page.evaluate(() =>
+    Object.entries(localStorage)
+      .filter(([k]) => k.startsWith("tf-upload-tasks-"))
+      .map(([, v]) => v.length),
+  );
   expect(kept.length).toBe(1);
   expect(kept[0]).toBeLessThan(2000);
 
@@ -237,10 +241,7 @@ test("a share link's visitor gets their interrupted upload back on that link, an
   const region = visitor.getByRole("region", { name: "Interrupted uploads" });
   await expect(region).toContainText("visitor.bin");
   // The link's token isn't in the records
-  const leaks = await visitor.evaluate(
-    (token) => Object.entries(localStorage).some(([k, v]) => k.startsWith("tf-upload-tasks-") && (k + v).includes(token)),
-    share.id,
-  );
+  const leaks = await visitor.evaluate((token) => Object.entries(localStorage).some(([k, v]) => k.startsWith("tf-upload-tasks-") && (k + v).includes(token)), share.id);
   expect(leaks).toBe(false);
   // Another link doesn't offer it
   await visitor.goto("/share/nosuchlink");

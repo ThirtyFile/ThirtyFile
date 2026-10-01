@@ -119,10 +119,7 @@ export async function download(source: DownloadSource, opts: { zip?: boolean; na
   const id = `d${++seq}`;
   const controller = new AbortController();
   const zip = !!opts.zip;
-  tasks.set([
-    { id, name: opts.name ?? (zip ? t("Download.zip") : t("Downloading…")), zip, total: null, received: 0, rate: 0, status: "downloading", source, controller },
-    ...tasks.get(),
-  ]);
+  tasks.set([{ id, name: opts.name ?? (zip ? t("Download.zip") : t("Downloading…")), zip, total: null, received: 0, rate: 0, status: "downloading", source, controller }, ...tasks.get()]);
   const drop = () => tasks.set(tasks.get().filter((x) => x.id !== id));
   // Too large to keep in the page: stop reading and let the browser download it itself (to disk, with its own
   // progress). A short-lived link may have expired while the first part was read: a new one is asked for first.
@@ -204,7 +201,10 @@ export async function download(source: DownloadSource, opts: { zip?: boolean; na
 }
 
 export function cancelDownload(id: string) {
-  tasks.get().find((x) => x.id === id)?.controller.abort();
+  tasks
+    .get()
+    .find((x) => x.id === id)
+    ?.controller.abort();
 }
 
 export function retryDownload(id: string) {

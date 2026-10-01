@@ -10,7 +10,6 @@ import { t } from "@/lib/i18n";
 import { ShareLinks } from "@/components/ShareLinks";
 import { NativeSelect } from "@/components/ui/native-select";
 
-
 /** Control panel › All share links: every public link, filtered by space, creator and state, to find and revoke them */
 export function AdminSharesPage() {
   const { title, icon } = controlPanelItem("shares");

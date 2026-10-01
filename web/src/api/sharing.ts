@@ -7,8 +7,7 @@ export const sharingApi = {
   /** With a node: every link on it the caller may manage; otherwise the caller's own links, or those matching the filter */
   shares: (nodeId?: string, filter: ShareFilter = {}, signal?: AbortSignal) => get<ShareInfo[]>(`/shares${qs(toParams({ ...filter, node_id: nodeId }))}`, signal),
   updateShare: (id: string, req: ShareUpdate) => request<ShareInfo>("PATCH", enc`/shares/${id}`, req),
-  createShare: (req: { node_id: string; password?: string; expires_at?: number; max_downloads?: number } & Partial<ShareAccessOptions>) =>
-    post<ShareInfo>("/shares", req),
+  createShare: (req: { node_id: string; password?: string; expires_at?: number; max_downloads?: number } & Partial<ShareAccessOptions>) => post<ShareInfo>("/shares", req),
   deleteShare: (id: string) => request("DELETE", enc`/shares/${id}`),
   access: (nodeId: string) => get<AccessInfo>(enc`/nodes/${nodeId}/access`),
   grant: (

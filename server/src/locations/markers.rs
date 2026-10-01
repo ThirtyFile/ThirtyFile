@@ -169,7 +169,9 @@ pub(super) async fn check_place_free(conn: &mut SqliteConnection, id: Option<&st
     let rows: Vec<(String, String, String)> = sqlx::query_as("SELECT id, name, config FROM storage_locations WHERE kind = ?").bind(kind).fetch_all(conn).await?;
     for (other, name, raw) in rows {
         if Some(other.as_str()) != id && place_of(kind, &config_json(&other, &raw)).as_deref() == Some(place.as_str()) {
-            return Err(AppError::conflict(format!("The storage location \"{name}\" already uses this place (the same bucket and prefix, or the same server and folder)")));
+            return Err(AppError::conflict(format!(
+                "The storage location \"{name}\" already uses this place (the same bucket and prefix, or the same server and folder)"
+            )));
         }
     }
     Ok(())

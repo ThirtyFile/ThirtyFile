@@ -1,27 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  CheckCircle2Icon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  CircleMinusIcon,
-  DownloadIcon,
-  FileIcon,
-  FolderIcon,
-  Link2Icon,
-  Loader2Icon,
-  LockIcon,
-  XCircleIcon,
-} from "lucide-react";
-import {
-  api,
-  driveName,
-  type LocationItem,
-  type LocationItemSpace,
-  type LocationTestStep,
-  type StorageLocation,
-  type UnusedJob,
-} from "@/api";
+import { CheckCircle2Icon, ChevronLeftIcon, ChevronRightIcon, CircleMinusIcon, DownloadIcon, FileIcon, FolderIcon, Link2Icon, Loader2Icon, LockIcon, XCircleIcon } from "lucide-react";
+import { api, driveName, type LocationItem, type LocationItemSpace, type LocationTestStep, type StorageLocation, type UnusedJob } from "@/api";
 import { invalidate, keys } from "@/api/queryKeys";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -76,10 +56,8 @@ export function LocationTestDialog({ location, onClose }: { location: StorageLoc
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{t("Test \"{name}\" step by step", { name: location.name })}</DialogTitle>
-          <DialogDescription>
-            {t("Writes a small and a larger file (24 MB, uploaded in parts on S3), reads them back, and deletes them. Takes up to two minutes.")}
-          </DialogDescription>
+          <DialogTitle>{t('Test "{name}" step by step', { name: location.name })}</DialogTitle>
+          <DialogDescription>{t("Writes a small and a larger file (24 MB, uploaded in parts on S3), reads them back, and deletes them. Takes up to two minutes.")}</DialogDescription>
         </DialogHeader>
         <div aria-live="polite" aria-busy={run.isPending}>
           {run.isPending && (
@@ -88,12 +66,7 @@ export function LocationTestDialog({ location, onClose }: { location: StorageLoc
             </p>
           )}
           {run.data && (
-            <p
-              className={cn(
-                "mb-2 flex items-center gap-1.5 text-sm font-medium",
-                run.data.ok ? "text-emerald-600 dark:text-emerald-400" : "text-destructive",
-              )}
-            >
+            <p className={cn("mb-2 flex items-center gap-1.5 text-sm font-medium", run.data.ok ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>
               {run.data.ok ? <CheckCircle2Icon className="size-4" /> : <XCircleIcon className="size-4" />}
               {run.data.ok ? t("Every step passed") : t("The test failed")}
             </p>
@@ -123,11 +96,7 @@ export function LocationTestDialog({ location, onClose }: { location: StorageLoc
                       </span>
                     )}
                   </span>
-                  {s.message && (
-                    <span className={cn("block text-xs break-words", s.outcome === "error" ? "text-destructive" : "text-muted-foreground")}>
-                      {tServer(s.message)}
-                    </span>
-                  )}
+                  {s.message && <span className={cn("block text-xs break-words", s.outcome === "error" ? "text-destructive" : "text-muted-foreground")}>{tServer(s.message)}</span>}
                 </span>
               </li>
             ))}
@@ -212,7 +181,7 @@ export function LocationBrowseDialog({ location, onClose }: { location: StorageL
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{t("Browse \"{name}\"", { name: location.name })}</DialogTitle>
+          <DialogTitle>{t('Browse "{name}"', { name: location.name })}</DialogTitle>
           <DialogDescription>{t("Read-only. Files in other people's personal spaces aren't shown.")}</DialogDescription>
         </DialogHeader>
         <nav aria-label={t("Folder path")} className="flex flex-wrap items-center gap-0.5 text-sm">
@@ -233,9 +202,7 @@ export function LocationBrowseDialog({ location, onClose }: { location: StorageL
             </span>
           ))}
         </nav>
-        {page?.space && (
-          <p className="text-xs text-muted-foreground">{t("This is the folder of {space}.", { space: spaceLabel(page.space) })}</p>
-        )}
+        {page?.space && <p className="text-xs text-muted-foreground">{t("This is the folder of {space}.", { space: spaceLabel(page.space) })}</p>}
         <div className="min-h-40 flex-1 overflow-auto rounded-md border">
           {q.isLoading ? (
             <div className="flex h-40 items-center justify-center text-muted-foreground">
@@ -353,9 +320,11 @@ export function UnusedContentDialog({ location, onClose }: { location: StorageLo
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{t("Unused content in \"{name}\"", { name: location.name })}</DialogTitle>
+          <DialogTitle>{t('Unused content in "{name}"', { name: location.name })}</DialogTitle>
           <DialogDescription>
-            {t("Finds stored content that no file, earlier version or item in the trash uses. Content written in the last 24 hours is left alone: uploads store their content before recording it.")}
+            {t(
+              "Finds stored content that no file, earlier version or item in the trash uses. Content written in the last 24 hours is left alone: uploads store their content before recording it.",
+            )}
           </DialogDescription>
         </DialogHeader>
         <div className="grid min-h-0 gap-2 overflow-auto" aria-live="polite">
@@ -423,11 +392,7 @@ export function UnusedContentDialog({ location, onClose }: { location: StorageLo
                       ))}
                     </tbody>
                   </table>
-                  {job.count > job.items.length && (
-                    <p className="border-t px-2.5 py-1.5 text-xs text-muted-foreground">
-                      {t("…and {n} more", { n: job.count - job.items.length })}
-                    </p>
-                  )}
+                  {job.count > job.items.length && <p className="border-t px-2.5 py-1.5 text-xs text-muted-foreground">{t("…and {n} more", { n: job.count - job.items.length })}</p>}
                 </div>
               )}
             </>
@@ -448,7 +413,7 @@ export function UnusedContentDialog({ location, onClose }: { location: StorageLo
         {confirming && job && (
           <ConfirmDialog
             title={t("Remove {n} unused item?|Remove {n} unused items?", { n: job.count })}
-            description={t("They are deleted from \"{name}\" for good ({size}). Each one is checked again right before: anything used or written again meanwhile is kept.", {
+            description={t('They are deleted from "{name}" for good ({size}). Each one is checked again right before: anything used or written again meanwhile is kept.', {
               name: location.name,
               size: formatBytes(job.bytes),
             })}

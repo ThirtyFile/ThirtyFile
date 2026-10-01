@@ -173,11 +173,7 @@ impl SftpStorage {
         let cfg = &self.cfg;
         let expected = Some(cfg.host_key.trim().to_string()).filter(|k| !k.is_empty()).or_else(|| self.first_key.lock().unwrap().clone());
         let handler = Handler { expected: expected.clone(), seen: self.seen_key.clone() };
-        let config = client::Config {
-            inactivity_timeout: Some(Duration::from_secs(600)),
-            keepalive_interval: Some(Duration::from_secs(30)),
-            ..Default::default()
-        };
+        let config = client::Config { inactivity_timeout: Some(Duration::from_secs(600)), keepalive_interval: Some(Duration::from_secs(30)), ..Default::default() };
         let addr = (cfg.host.trim().to_string(), cfg.port());
         let mut handle = match tokio::time::timeout(CONNECT_TIMEOUT, client::connect(Arc::new(config), addr, handler)).await {
             Err(_) => return Err(unavailable("Timed out")),

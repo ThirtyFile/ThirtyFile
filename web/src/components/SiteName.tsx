@@ -17,7 +17,10 @@ export function SiteName({
   if (name !== DEFAULT_BRANDING.site_name) return <span className={cn("truncate", className)}>{name}</span>;
   return (
     <span className={cn("truncate tracking-tight", className)}>
-      Thirty<span className={accentColor ? undefined : accentClassName} style={accentColor ? { color: accentColor } : undefined}>File</span>
+      Thirty
+      <span className={accentColor ? undefined : accentClassName} style={accentColor ? { color: accentColor } : undefined}>
+        File
+      </span>
     </span>
   );
 }

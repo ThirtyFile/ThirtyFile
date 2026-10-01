@@ -16,7 +16,18 @@ export function wColor(el: Element | null | undefined, theme: Theme | null, valA
   let c: Rgba | null = null;
   const th = attr(el, themeAttr);
   if (th && theme) {
-    const map: Record<string, string> = { text1: "dk1", dark1: "dk1", background1: "lt1", light1: "lt1", text2: "dk2", dark2: "dk2", background2: "lt2", light2: "lt2", hyperlink: "hlink", followedHyperlink: "folHlink" };
+    const map: Record<string, string> = {
+      text1: "dk1",
+      dark1: "dk1",
+      background1: "lt1",
+      light1: "lt1",
+      text2: "dk2",
+      dark2: "dk2",
+      background2: "lt2",
+      light2: "lt2",
+      hyperlink: "hlink",
+      followedHyperlink: "folHlink",
+    };
     c = hexToRgba(theme.colors[map[th] ?? th]);
   }
   if (!c) {
@@ -141,12 +152,12 @@ export function runStyle(p: RunProps, theme: Theme | null, script: string): RunS
   const fonts = resolveFonts(p.fonts, theme, script);
   const rtl = !!p.rtl;
   const family = familyOf(fonts, rtl);
-  const size = ((rtl || p.cs ? p.szCs ?? p.sz : p.sz) ?? DEFAULT_SZ) / 2;
+  const size = ((rtl || p.cs ? (p.szCs ?? p.sz) : p.sz) ?? DEFAULT_SZ) / 2;
   const css: Record<string, string> = {};
   css["font-family"] = family;
   let fs = size;
-  const bold = rtl || p.cs ? p.bCs ?? p.b : p.b;
-  const italic = rtl || p.cs ? p.iCs ?? p.i : p.i;
+  const bold = rtl || p.cs ? (p.bCs ?? p.b) : p.b;
+  const italic = rtl || p.cs ? (p.iCs ?? p.i) : p.i;
   if (bold) css["font-weight"] = "bold";
   if (italic) css["font-style"] = "italic";
   if (p.caps) css["text-transform"] = "uppercase";

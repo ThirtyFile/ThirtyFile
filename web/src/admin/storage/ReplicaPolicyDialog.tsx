@@ -84,10 +84,10 @@ export function ReplicaPolicyDialog({ policy: p, source: preset, onClose, onDone
     };
     if (p) {
       await api.updateReplicaPolicy(p.id, { ...settings, name: name.trim() || undefined });
-      toast.success(t("\"{name}\" was changed", { name: name.trim() || p.name }));
+      toast.success(t('"{name}" was changed', { name: name.trim() || p.name }));
     } else {
       await api.createReplicaPolicy({ ...settings, name: name.trim() || defaultName, source });
-      toast.success(t("\"{name}\" was made; the first copies are being made in the background", { name: name.trim() || defaultName }));
+      toast.success(t('"{name}" was made; the first copies are being made in the background', { name: name.trim() || defaultName }));
     }
     onDone();
     onClose();
@@ -99,7 +99,9 @@ export function ReplicaPolicyDialog({ policy: p, source: preset, onClose, onDone
           <DialogHeader>
             <DialogTitle>{p ? t("Replica settings") : t("New replicas")}</DialogTitle>
             <DialogDescription>
-              {t("The files of the spaces of a location are kept on other locations too, checked, and read from there when the location fails. A replica holds the files as they are now, not earlier states: for those, make a backup.")}
+              {t(
+                "The files of the spaces of a location are kept on other locations too, checked, and read from there when the location fails. A replica holds the files as they are now, not earlier states: for those, make a backup.",
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
@@ -221,10 +223,7 @@ export function ReplicaPolicyDialog({ policy: p, source: preset, onClose, onDone
                   return (
                     <li key={s.id}>
                       <label className="flex items-center gap-2 px-2.5 py-1.5">
-                        <Checkbox
-                          checked={spaces.includes(s.id)}
-                          onCheckedChange={(v) => setSpaces((cur) => (v === true ? [...cur, s.id] : cur.filter((x) => x !== s.id)))}
-                        />
+                        <Checkbox checked={spaces.includes(s.id)} onCheckedChange={(v) => setSpaces((cur) => (v === true ? [...cur, s.id] : cur.filter((x) => x !== s.id)))} />
                         <Icon className="size-3.5 shrink-0 text-muted-foreground" />
                         <span className="truncate">{s.kind === "personal" && s.owner_name ? `${s.name} · ${s.owner_name}` : s.name}</span>
                       </label>

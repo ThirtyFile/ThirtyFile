@@ -6,8 +6,7 @@ import { t } from "@/lib/i18n";
 import { errorMessage } from "@/lib/utils";
 
 const MESSAGES: Record<OoxmlErrorCode, (detail?: string) => string> = {
-  "not-ooxml": () =>
-    t("This file isn't a valid Office document (it may be damaged, or wasn't created by Office), so it can't be opened online. Download it to check."),
+  "not-ooxml": () => t("This file isn't a valid Office document (it may be damaged, or wasn't created by Office), so it can't be opened online. Download it to check."),
   "too-large": () => t("The file's content is too large to open. Download it and open it in Excel."),
   "no-workbook": () => t("Couldn't find the workbook contents. This may not be an Excel file."),
   "no-sheets": () => t("The workbook has no editable sheets"),

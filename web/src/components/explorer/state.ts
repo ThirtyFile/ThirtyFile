@@ -74,10 +74,7 @@ export function useExplorerState(p: ExplorerProps) {
   };
 
   // The items selected that are loaded (all of them, unless a span holds items not loaded)
-  const selectedNodes = useMemo(
-    () => p.items.filter((n) => selected.has(n.id) || (!!span && inSpan(span, list?.index.get(n.id) ?? -1, n.id))),
-    [p.items, selected, span, list],
-  );
+  const selectedNodes = useMemo(() => p.items.filter((n) => selected.has(n.id) || (!!span && inSpan(span, list?.index.get(n.id) ?? -1, n.id))), [p.items, selected, span, list]);
   /** Items picked one by one; the span's aren't all known here (see `picked`) */
   const selectedIds = span ? [...selected] : selectedNodes.map((n) => n.id);
   const count = span ? selected.size + spanCount(span, total) : selectedNodes.length;

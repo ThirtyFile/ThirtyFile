@@ -9,7 +9,6 @@
 //!   exact match first, then templates with parameters
 //! - The language is decided at load time (so module-level constants can call t); switching reloads the page
 
-
 export type Lang = "zh-TW" | "en";
 
 export const LANGS: { id: Lang; label: string }[] = [
@@ -36,7 +35,7 @@ function detect(): Lang {
   }
   const preset = typeof window !== "undefined" ? window.__TF_DEFAULT_LANG__ : undefined;
   if (preset === "zh-TW" || preset === "en") return preset;
-  const nav = typeof navigator !== "undefined" ? navigator.languages?.[0] ?? navigator.language ?? "" : "";
+  const nav = typeof navigator !== "undefined" ? (navigator.languages?.[0] ?? navigator.language ?? "") : "";
   return nav.toLowerCase().startsWith("zh") ? "zh-TW" : "en";
 }
 
@@ -69,7 +68,7 @@ export async function loadDictionary() {
  * 24-hour times), else en-US
  */
 function englishLocale() {
-  const nav = typeof navigator !== "undefined" ? navigator.languages?.[0] ?? navigator.language ?? "" : "";
+  const nav = typeof navigator !== "undefined" ? (navigator.languages?.[0] ?? navigator.language ?? "") : "";
   if (!nav.toLowerCase().startsWith("en")) return "en-US";
   try {
     return Intl.DateTimeFormat.supportedLocalesOf([nav])[0] ?? "en-US";

@@ -134,11 +134,8 @@ pub async fn start(
     }
     // The state is also stored in the browser that started the sign-in: the provider must redirect back to the same browser,
     // so an attacker can't hand their own authorization result (or link request) to someone else to open
-    let cookie = format!(
-        "{STATE_COOKIE}={state}; HttpOnly; SameSite=Lax; Path=/api/auth/sso; Max-Age={}{}",
-        PENDING_TTL.as_secs(),
-        if st.https() { "; Secure" } else { "" }
-    );
+    let cookie =
+        format!("{STATE_COOKIE}={state}; HttpOnly; SameSite=Lax; Path=/api/auth/sso; Max-Age={}{}", PENDING_TTL.as_secs(), if st.https() { "; Secure" } else { "" });
     ([(header::SET_COOKIE, cookie)], Redirect::to(&url)).into_response()
 }
 
@@ -186,7 +183,11 @@ pub async fn callback(
     let link_next = pending.link_user.map(|_| pending.next.clone());
     if let Some(err) = q.error {
         // The user clicked cancel on the provider's page
-        let msg = if err == "access_denied" { "Sign-in canceled".to_string() } else { format!("{} sign-in failed: {}", label(&provider), q.error_description.unwrap_or(err)) };
+        let msg = if err == "access_denied" {
+            "Sign-in canceled".to_string()
+        } else {
+            format!("{} sign-in failed: {}", label(&provider), q.error_description.unwrap_or(err))
+        };
         return login_error(&st, &msg, link_next.as_deref());
     }
     let Some(code) = q.code else { return login_error(&st, "Sign-in failed: no authorization code was received", link_next.as_deref()) };

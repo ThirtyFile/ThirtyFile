@@ -39,9 +39,7 @@ test("Storage usage shows each location, its history as charts and tables, and s
   await page.locator('input[type="file"][multiple]').setInputFiles([{ name: `chart ${Date.now().toString(36)}.txt`, mimeType: "text/plain", buffer: Buffer.alloc(5000, 98) }]);
   await expect(page.locator("[data-node-id]").filter({ hasText: "chart " })).toBeVisible();
   // The first capacity sample is taken shortly after the start
-  await expect
-    .poll(async () => (await (await page.request.get("/api/admin/usage")).json()).total !== null, { timeout: 30_000 })
-    .toBe(true);
+  await expect.poll(async () => (await (await page.request.get("/api/admin/usage")).json()).total !== null, { timeout: 30_000 }).toBe(true);
 
   await page.goto("/admin/usage");
   const local = page.getByRole("article", { name: "Local disk" });

@@ -64,7 +64,7 @@ export function AdminDrivesPage() {
   const setReadOnly = async (d: Drive, readOnly: boolean) => {
     try {
       await api.updateDrive(d.id, { read_only: readOnly });
-      toast.success(readOnly ? t("\"{name}\" is read-only now", { name: d.name }) : t("\"{name}\" can be changed from the web now", { name: d.name }));
+      toast.success(readOnly ? t('"{name}" is read-only now', { name: d.name }) : t('"{name}" can be changed from the web now', { name: d.name }));
       refresh();
       void refreshFiles(qc, { spaces: [d.id] });
     } catch (e) {
@@ -109,30 +109,11 @@ export function AdminDrivesPage() {
 
   const toolbar = (
     <>
-      <ToolButton
-        icon={CirclePlusIcon}
-        label={t("New team space")}
-        showLabel
-        className="h-9 px-2.5 text-[13px]"
-        onClick={() => setDialog({ t: "create" })}
-      />
-      <ToolButton
-        icon={FolderSyncIcon}
-        label={t("New folder space")}
-        showLabel
-        className="h-9 px-2.5 text-[13px]"
-        onClick={() => setDialog({ t: "folder" })}
-      />
+      <ToolButton icon={CirclePlusIcon} label={t("New team space")} showLabel className="h-9 px-2.5 text-[13px]" onClick={() => setDialog({ t: "create" })} />
+      <ToolButton icon={FolderSyncIcon} label={t("New folder space")} showLabel className="h-9 px-2.5 text-[13px]" onClick={() => setDialog({ t: "folder" })} />
       <ToolSeparator />
       {selected?.mode === "folder" && (
-        <ToolButton
-          icon={RefreshCwIcon}
-          label={t("Check for changes")}
-          showLabel
-          className="h-9 px-2.5 text-[13px]"
-          disabled={scanning}
-          onClick={() => scanNow(selected)}
-        />
+        <ToolButton icon={RefreshCwIcon} label={t("Check for changes")} showLabel className="h-9 px-2.5 text-[13px]" disabled={scanning} onClick={() => scanNow(selected)} />
       )}
       <ToolButton
         icon={TruckIcon}
@@ -185,7 +166,7 @@ export function AdminDrivesPage() {
       className: "w-[38px]",
       cell: (d) => (
         <span className="flex items-center" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
-          <Checkbox aria-label={t("Select \"{name}\"", { name: driveLabel(d, true) })} checked={checked.includes(d.id)} onCheckedChange={(v) => toggle(d.id, !!v)} />
+          <Checkbox aria-label={t('Select "{name}"', { name: driveLabel(d, true) })} checked={checked.includes(d.id)} onCheckedChange={(v) => toggle(d.id, !!v)} />
         </span>
       ),
     },
@@ -259,11 +240,7 @@ export function AdminDrivesPage() {
       upTo="/admin"
       searchPlaceholder={t("Search settings")}
       onSearch={searchSettings}
-      footer={
-        <span>
-          {t("{n} space · {size} used|{n} spaces · {size} used", { n: drives.length, size: formatBytes(total) })}
-        </span>
-      }
+      footer={<span>{t("{n} space · {size} used|{n} spaces · {size} used", { n: drives.length, size: formatBytes(total) })}</span>}
     >
       <DataTable
         label={t("Spaces")}
@@ -357,7 +334,7 @@ export function AdminDrivesPage() {
       )}
       {dialog?.t === "quota" && dialog.drive && (
         <NameDialog
-          title={t("Change quota for \"{name}\"", { name: driveLabel(dialog.drive, true) })}
+          title={t('Change quota for "{name}"', { name: driveLabel(dialog.drive, true) })}
           label={t("Quota (GB, enter 0 for unlimited)")}
           initial={dialog.drive.quota_bytes ? String(+(dialog.drive.quota_bytes / GB).toFixed(2)) : "0"}
           confirmText={t("Save")}
@@ -376,7 +353,7 @@ export function AdminDrivesPage() {
           spaces={dialog.drives.map((d) => ({ ...d, label: driveLabel(d, true) }))}
           title={
             dialog.drives.length === 1
-              ? t("Move \"{name}\" to another location", { name: driveLabel(dialog.drives[0], true) })
+              ? t('Move "{name}" to another location', { name: driveLabel(dialog.drives[0], true) })
               : t("Move {n} spaces to another location", { n: dialog.drives.length })
           }
           description={
@@ -405,7 +382,7 @@ export function AdminDrivesPage() {
       )}
       {dialog?.t === "delete" && dialog.drive && (
         <ConfirmDialog
-          title={t("Delete space \"{name}\"?", { name: dialog.drive.name })}
+          title={t('Delete space "{name}"?', { name: dialog.drive.name })}
           description={
             dialog.drive.mode === "folder"
               ? t("The space is removed from ThirtyFile. Its folder on the server, {path}, is kept with the files in it ({size}): delete it there when it's no longer needed.", {
@@ -481,10 +458,10 @@ function FolderCell({ drive, move }: { drive: Drive; move?: SpaceMove }) {
             ? t("Checking the folder: {n} items read…", { n: drive.scanning.found })
             : t("Updating: {done} of {total} changes…", { done: drive.scanning.done, total: drive.scanning.total })
           : r?.error
-          ? t("Can't read the folder")
-          : drive.last_scan_at
-            ? t("Checked {time}", { time: formatDateTime(drive.last_scan_at) })
-            : t("Being indexed…")}
+            ? t("Can't read the folder")
+            : drive.last_scan_at
+              ? t("Checked {time}", { time: formatDateTime(drive.last_scan_at) })
+              : t("Being indexed…")}
       </span>
     </span>
   );
@@ -502,7 +479,9 @@ function FolderSpaceDialog({ onClose, onCreated }: { onClose(): void; onCreated(
         <DialogHeader>
           <DialogTitle>{t("New folder space")}</DialogTitle>
           <DialogDescription>
-            {t("Shows a folder on the server as a space. Its files stay where they are: changes made here are made in the folder, and changes made there (for example over SMB) appear here automatically.")}
+            {t(
+              "Shows a folder on the server as a space. Its files stay where they are: changes made here are made in the folder, and changes made there (for example over SMB) appear here automatically.",
+            )}
           </DialogDescription>
         </DialogHeader>
         <form className="grid gap-3" onSubmit={run}>

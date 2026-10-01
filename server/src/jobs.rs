@@ -192,20 +192,7 @@ pub fn start(st: &AppState, owner: i64, kind: &'static str, limit: Limit) -> App
     {
         return Err(AppError::new(StatusCode::TOO_MANY_REQUESTS, message));
     }
-    let job = Job {
-        id: new_id(),
-        kind,
-        state: "running",
-        done: 0,
-        total: 0,
-        error: None,
-        node_id: None,
-        name: None,
-        result: None,
-        owner,
-        limit,
-        finished_at: None,
-    };
+    let job = Job { id: new_id(), kind, state: "running", done: 0, total: 0, error: None, node_id: None, name: None, result: None, owner, limit, finished_at: None };
     jobs.insert(job.id.clone(), job.clone());
     Ok(job)
 }
@@ -375,7 +362,8 @@ mod tests {
         let job = run(&env.st, &amy, "move", Limit::Changes, WAIT, |_| async { Ok(Outcome::default()) }).await.unwrap();
         assert_eq!(job.state, "done");
         // Failed at once: the error is the answer
-        let err = run(&env.st, &amy, "move", Limit::Changes, WAIT, |_| async { Err(AppError::conflict("An item with the same name already exists")) }).await.unwrap_err();
+        let err =
+            run(&env.st, &amy, "move", Limit::Changes, WAIT, |_| async { Err(AppError::conflict("An item with the same name already exists")) }).await.unwrap_err();
         assert_eq!((err.status, err.message.as_str()), (StatusCode::CONFLICT, "An item with the same name already exists"));
         // Longer: the running job is the answer, with its progress
         let (go, wait) = tokio::sync::oneshot::channel::<()>();

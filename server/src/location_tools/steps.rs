@@ -145,9 +145,7 @@ impl Steps {
         for id in ["connect", "write", "read", "write_large", "read_large", "delete", "cleanup"] {
             match self.list.iter().position(|s| s.id == id) {
                 Some(i) => steps.push(self.list.swap_remove(i)),
-                None if id != "cleanup" => {
-                    steps.push(Step { id, outcome: Outcome::Skipped, ms: 0, bytes: None, speed: None, message: None })
-                }
+                None if id != "cleanup" => steps.push(Step { id, outcome: Outcome::Skipped, ms: 0, bytes: None, speed: None, message: None }),
                 None => {}
             }
         }
@@ -424,7 +422,14 @@ mod tests {
         assert!(report.ok, "{report:?}");
         assert_eq!(
             outcomes(&report),
-            [("connect", Outcome::Ok), ("write", Outcome::Ok), ("read", Outcome::Ok), ("write_large", Outcome::Ok), ("read_large", Outcome::Ok), ("delete", Outcome::Ok)]
+            [
+                ("connect", Outcome::Ok),
+                ("write", Outcome::Ok),
+                ("read", Outcome::Ok),
+                ("write_large", Outcome::Ok),
+                ("read_large", Outcome::Ok),
+                ("delete", Outcome::Ok)
+            ]
         );
         let large = report.step("write_large").unwrap();
         assert_eq!(large.bytes, Some(3 << 20));
@@ -477,6 +482,9 @@ mod tests {
         let e = storage::delete_failed(io::Error::new(io::ErrorKind::PermissionDenied, "Access Denied"), storage::CANT_DELETE_S3);
         assert_eq!(describe(&e), storage::CANT_DELETE_S3);
         let unreachable = io::Error::other(storage::StorageError { message: storage::UNAVAILABLE, detail: "timed out".into() });
-        assert_eq!(describe(&storage::delete_failed(unreachable, storage::CANT_DELETE_S3)), describe(&io::Error::other(storage::StorageError { message: storage::UNAVAILABLE, detail: "timed out".into() })));
+        assert_eq!(
+            describe(&storage::delete_failed(unreachable, storage::CANT_DELETE_S3)),
+            describe(&io::Error::other(storage::StorageError { message: storage::UNAVAILABLE, detail: "timed out".into() }))
+        );
     }
 }

@@ -250,7 +250,10 @@ export function seriesLegend(g: Group, s: Series, ctx: Ctx): LegendEntry {
 /** Drawing order: areas at the bottom, then bars, stock, lines, scatter and bubbles */
 function orderForDraw(groups: Group[]): Group[] {
   const rank: Record<string, number> = { area: 0, surface: 0, bar: 1, stock: 2, line: 3, radar: 3, scatter: 4, bubble: 5 };
-  return groups.map((g, i) => ({ g, i })).sort((a, b) => (rank[a.g.kind] ?? 9) - (rank[b.g.kind] ?? 9) || a.i - b.i).map((x) => x.g);
+  return groups
+    .map((g, i) => ({ g, i }))
+    .sort((a, b) => (rank[a.g.kind] ?? 9) - (rank[b.g.kind] ?? 9) || a.i - b.i)
+    .map((x) => x.g);
 }
 
 /** Cases where legend order is reversed: stacked column and stacked area charts (matching the stacking direction) */
@@ -343,7 +346,10 @@ interface Table {
 function tableLayout(el: Element, groups: Group[], cat: AxisSpec, ctx: Ctx): Table {
   const style = txPrStyle(ctx.base, kid(el, "txPr"), ctx);
   const rows = orderForDraw(groups).flatMap((g) =>
-    g.series.map((ser) => ({ entry: seriesLegend(g, ser, ctx), vals: Array.from({ length: cat.count }, (_, i) => (ser.vals[i] === null || ser.vals[i] === undefined ? "" : formatValue(ser.vals[i], ser.format || "General"))) })),
+    g.series.map((ser) => ({
+      entry: seriesLegend(g, ser, ctx),
+      vals: Array.from({ length: cat.count }, (_, i) => (ser.vals[i] === null || ser.vals[i] === undefined ? "" : formatValue(ser.vals[i], ser.format || "General"))),
+    })),
   );
   const rowH = lineHeight(style) + 4;
   const keys = toggle(kid(el, "showKeys")) !== false;
@@ -452,7 +458,14 @@ function drawBars(g: Group, c: PlacedAxis, v: PlacedAxis, ctx: Ctx, L: Layers) {
     }
     // Error bars drawn at the center of the bar end
     const mid = (x: number) => c.center(Math.round(x) - 1) + dir * (off + barW / 2);
-    drawErrBars(ser, ser.vals.map((_, i) => i + 1), (x, y) => (c.spec.horizontal ? [mid(x), v.pos(y)] : [v.pos(y), mid(x)]), "y", ctx, L.labels);
+    drawErrBars(
+      ser,
+      ser.vals.map((_, i) => i + 1),
+      (x, y) => (c.spec.horizontal ? [mid(x), v.pos(y)] : [v.pos(y), mid(x)]),
+      "y",
+      ctx,
+      L.labels,
+    );
   });
 }
 

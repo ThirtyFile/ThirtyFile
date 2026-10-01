@@ -178,9 +178,17 @@ export function Cell({ id, item, h }: { id: ColumnId; item: Item; h: HandlersRef
         </td>
       );
     case "date":
-      return <td role="gridcell" className={muted}>{formatWinDate(h.current.dateOf(item))}</td>;
+      return (
+        <td role="gridcell" className={muted}>
+          {formatWinDate(h.current.dateOf(item))}
+        </td>
+      );
     case "created":
-      return <td role="gridcell" className={muted}>{formatWinDate(item.created_at)}</td>;
+      return (
+        <td role="gridcell" className={muted}>
+          {formatWinDate(item.created_at)}
+        </td>
+      );
     case "type":
       return (
         <td role="gridcell" className={muted} title={typeTitle(item)}>
@@ -188,11 +196,23 @@ export function Cell({ id, item, h }: { id: ColumnId; item: Item; h: HandlersRef
         </td>
       );
     case "size":
-      return <td role="gridcell" className={cn(muted, "pr-3 text-right tabular-nums")}>{item.kind === "folder" ? "" : formatWinSize(item.size)}</td>;
+      return (
+        <td role="gridcell" className={cn(muted, "pr-3 text-right tabular-nums")}>
+          {item.kind === "folder" ? "" : formatWinSize(item.size)}
+        </td>
+      );
     case "owner":
-      return <td role="gridcell" className={muted}>{item.owner_name}</td>;
+      return (
+        <td role="gridcell" className={muted}>
+          {item.owner_name}
+        </td>
+      );
     case "extra":
-      return <td role="gridcell" className={muted}>{h.current.extra?.(item)}</td>;
+      return (
+        <td role="gridcell" className={muted}>
+          {h.current.extra?.(item)}
+        </td>
+      );
   }
 }
 

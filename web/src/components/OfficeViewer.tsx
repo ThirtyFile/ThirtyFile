@@ -100,8 +100,7 @@ function FramePreview({ node, source, kind }: { node: Node; source: FileSource; 
       } else if (msg.type === "done") {
         window.clearTimeout(timer);
         setLoading(false);
-      }
-      else if (msg.type === "link") {
+      } else if (msg.type === "link") {
         // Only open http(s) / mailto links, and cut the link to this page. The frame only asks when a link is clicked, so the
         // person must have just clicked (a click in the frame activates this page too), and each click opens at most one tab
         const href = String((msg as { href?: unknown }).href ?? "");
@@ -110,8 +109,7 @@ function FramePreview({ node, source, kind }: { node: Node; source: FileSource; 
         if (now - lastOpen < LINK_INTERVAL) return;
         lastOpen = now;
         window.open(href, "_blank", "noopener,noreferrer");
-      }
-      else if (msg.type === "error") {
+      } else if (msg.type === "error") {
         window.clearTimeout(timer);
         setError(viewError(new Error(msg.message ?? ""), kind === "docx" ? t("Couldn't open this document") : t("Couldn't open this presentation")));
         setLoading(false);
@@ -189,7 +187,8 @@ function XlsxPreview({ node, source }: { node: Node; source: FileSource }) {
 export default function OfficeViewer({ node, source }: { node: Node; source: FileSource }) {
   const ext = extOf(node.name);
   // Laying out very large files in the browser uses lots of memory: ask the user to download instead
-  if (node.size > MAX_OFFICE_PREVIEW_BYTES) return <Status loading={false} error={t("The file is too large (over {size}) to preview online. Download it to open it.", { size: MAX_OFFICE_PREVIEW_LABEL })} />;
+  if (node.size > MAX_OFFICE_PREVIEW_BYTES)
+    return <Status loading={false} error={t("The file is too large (over {size}) to preview online. Download it to open it.", { size: MAX_OFFICE_PREVIEW_LABEL })} />;
   if (ext === "docx") return <FramePreview node={node} source={source} kind="docx" />;
   if (ext === "xlsx") return <XlsxPreview node={node} source={source} />;
   if (ext === "pptx") return <FramePreview node={node} source={source} kind="pptx" />;

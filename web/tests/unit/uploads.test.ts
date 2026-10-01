@@ -56,8 +56,7 @@ function Probe() {
 const root = createRoot(document.createElement("div"));
 beforeAll(() => act(() => root.render(createElement(Probe))));
 
-const files = (n: number, folder = "") =>
-  Array.from({ length: n }, (_, i) => ({ file: new File([`content ${i}`], `file${i}.txt`), relativePath: folder }));
+const files = (n: number, folder = "") => Array.from({ length: n }, (_, i) => ({ file: new File([`content ${i}`], `file${i}.txt`), relativePath: folder }));
 const started = () => uploads.filter((u) => u.started && !u.aborted);
 const statuses = () => shown.tasks.map((t) => t.status);
 const succeed = (u: FakeUpload) => act(() => u.options.onSuccess({ lastResponse: { getHeader: () => undefined } }));

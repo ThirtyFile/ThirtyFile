@@ -73,7 +73,7 @@ export function MoveDialog({
     );
     toast.success(
       movable.length === 1
-        ? t("\"{name}\" is being moved in the background", { name: movable[0].label })
+        ? t('"{name}" is being moved in the background', { name: movable[0].label })
         : t("{n} spaces are being moved in the background, one after the other", { n: movable.length }),
       { action: { label: t("Show moves"), onClick: () => navigate("/admin/moves") } },
     );
@@ -89,12 +89,7 @@ export function MoveDialog({
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="move-target">{t("Move to")}</Label>
-            <NativeSelect
-              id="move-target"
-              size="lg"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-            >
+            <NativeSelect id="move-target" size="lg" value={value} onChange={(e) => setValue(e.target.value)}>
               <option value="" disabled>
                 {t("Choose a location")}
               </option>
@@ -104,35 +99,48 @@ export function MoveDialog({
                 </option>
               ))}
             </NativeSelect>
-            {spaces.length > 1 && target && (
-              <p className="text-xs">{t("{n} space to move · {size}|{n} spaces to move · {size}", { n: movable.length, size: formatBytes(bytes) })}</p>
+            {spaces.length > 1 && target && <p className="text-xs">{t("{n} space to move · {size}|{n} spaces to move · {size}", { n: movable.length, size: formatBytes(bytes) })}</p>}
+            {busyCount > 0 && (
+              <p className="text-xs text-muted-foreground">{t("{n} is being moved already and is left out.|{n} are being moved already and are left out.", { n: busyCount })}</p>
             )}
-            {busyCount > 0 && <p className="text-xs text-muted-foreground">{t("{n} is being moved already and is left out.|{n} are being moved already and are left out.", { n: busyCount })}</p>}
             {there > 0 && <p className="text-xs text-muted-foreground">{t("{n} is there already and stays.|{n} are there already and stay.", { n: there })}</p>}
             {tooSmall && <p className="text-xs text-destructive">{t("There isn't enough free space there for this space.")}</p>}
             {readOnly ? (
               <div className="grid gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100" role="note">
                 <p>
-                  {t("The space is read-only while its files are copied: people can open, download and share files, but not change them. It switches to the new location once all of them are there.")}
+                  {t(
+                    "The space is read-only while its files are copied: people can open, download and share files, but not change them. It switches to the new location once all of them are there.",
+                  )}
                 </p>
                 {fromFolder.length === 1 && movable.length === 1 && fromFolder[0].source_path && (
                   <p>
-                    {t("Changes made in its folder from outside ThirtyFile meanwhile are copied too. Afterwards the folder {path} is removed, apart from anything that changed at the last moment.", {
-                      path: fromFolder[0].source_path ?? "",
-                    })}
+                    {t(
+                      "Changes made in its folder from outside ThirtyFile meanwhile are copied too. Afterwards the folder {path} is removed, apart from anything that changed at the last moment.",
+                      {
+                        path: fromFolder[0].source_path ?? "",
+                      },
+                    )}
                   </p>
                 )}
                 {fromFolder.length > 0 && (movable.length > 1 || !fromFolder[0].source_path) && (
-                  <p>{t("Changes made in the folders of folder spaces from outside ThirtyFile meanwhile are copied too. Afterwards their folders are removed, apart from anything that changed at the last moment.")}</p>
+                  <p>
+                    {t(
+                      "Changes made in the folders of folder spaces from outside ThirtyFile meanwhile are copied too. Afterwards their folders are removed, apart from anything that changed at the last moment.",
+                    )}
+                  </p>
                 )}
                 {target?.kind === "local" && <p>{t("There it gets a folder of its own, like a new space's, with its files as ordinary files.")}</p>}
               </div>
             ) : (
               <p className="text-xs text-muted-foreground">
-                {t("The space stays usable while its files are copied, and switches to the new location once all of them are there. The copies are checked before the old files are removed.")}
+                {t(
+                  "The space stays usable while its files are copied, and switches to the new location once all of them are there. The copies are checked before the old files are removed.",
+                )}
               </p>
             )}
-            <p className="text-xs text-muted-foreground">{t("Files with identical content are stored only once across the system. If other spaces have the same files, they'll be moved too.")}</p>
+            <p className="text-xs text-muted-foreground">
+              {t("Files with identical content are stored only once across the system. If other spaces have the same files, they'll be moved too.")}
+            </p>
             <ErrorText>{error}</ErrorText>
           </div>
           <DialogFooter>

@@ -25,12 +25,7 @@ export function SetupCode({ setup, className }: { setup: TwoFactorSetup; classNa
         draggable={false}
       />
       <div className="text-xs opacity-80">{t("Can't scan it? Enter this key in the app:")}</div>
-      <button
-        type="button"
-        className="rounded px-1.5 font-mono text-sm tracking-wide select-all hover:bg-black/10"
-        title={t("Copy")}
-        onClick={() => copyAndSay(setup.secret)}
-      >
+      <button type="button" className="rounded px-1.5 font-mono text-sm tracking-wide select-all hover:bg-black/10" title={t("Copy")} onClick={() => copyAndSay(setup.secret)}>
         {grouped}
       </button>
     </div>
@@ -50,9 +45,7 @@ export function RecoveryCodes({ codes, className }: { codes: string[]; className
   };
   return (
     <div className={cn("grid gap-2", className)}>
-      <p className="text-xs opacity-80">
-        {t("Keep these recovery codes somewhere safe. Each one signs you in once if you lose your phone. They won't be shown again.")}
-      </p>
+      <p className="text-xs opacity-80">{t("Keep these recovery codes somewhere safe. Each one signs you in once if you lose your phone. They won't be shown again.")}</p>
       <ul className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-md border border-current/20 p-3 font-mono text-sm">
         {codes.map((c) => (
           <li key={c}>{c}</li>
@@ -128,7 +121,11 @@ export function TwoFactorDialog({ onClose }: { onClose(): void }) {
   if (!s) {
     body = <Loader2Icon className="mx-auto size-5 animate-spin text-muted-foreground" />;
   } else if (!s.has_password) {
-    body = <p className="text-sm text-muted-foreground">{t("You sign in with Microsoft, Google or GitHub, so there's no password here to protect. Use two-step verification in that account instead.")}</p>;
+    body = (
+      <p className="text-sm text-muted-foreground">
+        {t("You sign in with Microsoft, Google or GitHub, so there's no password here to protect. Use two-step verification in that account instead.")}
+      </p>
+    );
   } else if (codes) {
     body = (
       <div className="grid gap-3">
@@ -147,7 +144,9 @@ export function TwoFactorDialog({ onClose }: { onClose(): void }) {
           if (code && !enable.isPending) enable.mutate();
         }}
       >
-        <p className="text-sm">{t("Scan the QR code with an authenticator app (such as Microsoft Authenticator, Google Authenticator or 1Password), then enter the 6-digit code it shows.")}</p>
+        <p className="text-sm">
+          {t("Scan the QR code with an authenticator app (such as Microsoft Authenticator, Google Authenticator or 1Password), then enter the 6-digit code it shows.")}
+        </p>
         <SetupCode setup={setup} />
         <div className="grid gap-1.5">
           <Label htmlFor="tf-code">{t("Code from the app")}</Label>
@@ -262,7 +261,9 @@ export function TwoFactorDialog({ onClose }: { onClose(): void }) {
         <DialogHeader>
           <DialogTitle>{t("Two-factor sign-in")}</DialogTitle>
           <DialogDescription>
-            {t("After your password, sign-in asks for a code from an authenticator app, so a stolen password alone isn't enough. App passwords and sign-in with Microsoft, Google or GitHub don't ask for it.")}
+            {t(
+              "After your password, sign-in asks for a code from an authenticator app, so a stolen password alone isn't enough. App passwords and sign-in with Microsoft, Google or GitHub don't ask for it.",
+            )}
           </DialogDescription>
         </DialogHeader>
         {body}

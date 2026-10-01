@@ -148,7 +148,15 @@ export function renderTable(tbl: Element, f: Flow): HTMLElement | null {
     for (const tc of cellsOf(tr)) {
       const tcPr = kid(tc, "tcPr");
       const span = Math.min(MAX_TABLE_COLS, Math.max(1, numAttr(kid(tcPr, "gridSpan"), "val") ?? 1));
-      list.push({ tc, tcPr, row: r, col, span, rowspan: 1, sides: { top: { css: null, level: -1 }, bottom: { css: null, level: -1 }, left: { css: null, level: -1 }, right: { css: null, level: -1 } } });
+      list.push({
+        tc,
+        tcPr,
+        row: r,
+        col,
+        span,
+        rowspan: 1,
+        sides: { top: { css: null, level: -1 }, bottom: { css: null, level: -1 }, left: { css: null, level: -1 }, right: { css: null, level: -1 } },
+      });
       col += span;
     }
     ncols = Math.min(MAX_TABLE_COLS * 4, Math.max(ncols, col));
@@ -324,10 +332,10 @@ export function renderTable(tbl: Element, f: Flow): HTMLElement | null {
         const b = readBorders(el, {});
         const rowish = ROW_CONDS.has(cond);
         const colish = COL_CONDS.has(cond);
-        setSide(c, "top", colish ? (atTop ? b.top : b.insideH) : rowish ? b.top : atTop ? b.top : b.insideH ?? b.top, 1);
-        setSide(c, "bottom", colish ? (atBottom ? b.bottom : b.insideH) : rowish ? b.bottom : atBottom ? b.bottom : b.insideH ?? b.bottom, 1);
-        setSide(c, "left", rowish ? (atLeft ? b.left : b.insideV) : colish ? b.left : atLeft ? b.left : b.insideV ?? b.left, 1);
-        setSide(c, "right", rowish ? (atRight ? b.right : b.insideV) : colish ? b.right : atRight ? b.right : b.insideV ?? b.right, 1);
+        setSide(c, "top", colish ? (atTop ? b.top : b.insideH) : rowish ? b.top : atTop ? b.top : (b.insideH ?? b.top), 1);
+        setSide(c, "bottom", colish ? (atBottom ? b.bottom : b.insideH) : rowish ? b.bottom : atBottom ? b.bottom : (b.insideH ?? b.bottom), 1);
+        setSide(c, "left", rowish ? (atLeft ? b.left : b.insideV) : colish ? b.left : atLeft ? b.left : (b.insideV ?? b.left), 1);
+        setSide(c, "right", rowish ? (atRight ? b.right : b.insideV) : colish ? b.right : atRight ? b.right : (b.insideV ?? b.right), 1);
       }
       const tcb = kid(c.tcPr, "tcBorders");
       const direct = readBorders(tcb, {});
@@ -337,7 +345,9 @@ export function renderTable(tbl: Element, f: Flow): HTMLElement | null {
         const svg = s("svg", { class: "tf-docx-diag", viewBox: "0 0 100 100", preserveAspectRatio: "none" });
         for (const [n, v] of diag) {
           const parts = v!.split(" ");
-          svg.append(s("line", { x1: 0, y1: n === "tl2br" ? 0 : 100, x2: 100, y2: n === "tl2br" ? 100 : 0, stroke: parts[2], "stroke-width": parts[0], "vector-effect": "non-scaling-stroke" }));
+          svg.append(
+            s("line", { x1: 0, y1: n === "tl2br" ? 0 : 100, x2: 100, y2: n === "tl2br" ? 100 : 0, stroke: parts[2], "stroke-width": parts[0], "vector-effect": "non-scaling-stroke" }),
+          );
         }
         td.classList.add("tf-docx-rel");
         td.append(svg);
@@ -374,7 +384,16 @@ export function renderTable(tbl: Element, f: Flow): HTMLElement | null {
 
       // Content
       const width = Math.max(10, cellWidth(c) - mar.left - mar.right);
-      const flow = childFlow(f, { inCell: true, tableStyle: styleId ? { id: styleId, conds } : undefined, width, depth: f.depth + 1, fields: f.fields, comments: f.comments, floats: f.floats, notes: f.notes });
+      const flow = childFlow(f, {
+        inCell: true,
+        tableStyle: styleId ? { id: styleId, conds } : undefined,
+        width,
+        depth: f.depth + 1,
+        fields: f.fields,
+        comments: f.comments,
+        floats: f.floats,
+        notes: f.notes,
+      });
       const content = flatKids(c.tc).filter((x) => x.localName !== "tcPr");
       const dir = attr(kid(c.tcPr, "textDirection"), "val");
       if (dir && dir !== "lrTb" && dir !== "tb") {

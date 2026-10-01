@@ -15,9 +15,9 @@ mod unused;
 
 pub use browse::{browse, download};
 pub use steps::test_steps;
-pub use unused::{Job as UnusedSearch, find_unused, remove_unused, unused_status};
 #[cfg(test)]
 pub use unused::scan as unused_scan;
+pub use unused::{Job as UnusedSearch, find_unused, remove_unused, unused_status};
 
 use std::path::PathBuf;
 

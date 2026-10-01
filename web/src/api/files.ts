@@ -2,7 +2,22 @@ import { t } from "@/lib/i18n";
 import type { Resolution } from "@/lib/conflicts";
 import { request, get, post, enc, qs, toParams, responseError } from "@/api/client";
 import { driveName, localizeLocated } from "@/api/names";
-import type { Node, Job, SearchFilter, Located, FolderContents, NodeInfo, FoundPath, HistoryEntry, CursorPage, PositionedPage, SortKey, FileVersion, NameConflict, SortOrder } from "@/api/types";
+import type {
+  Node,
+  Job,
+  SearchFilter,
+  Located,
+  FolderContents,
+  NodeInfo,
+  FoundPath,
+  HistoryEntry,
+  CursorPage,
+  PositionedPage,
+  SortKey,
+  FileVersion,
+  NameConflict,
+  SortOrder,
+} from "@/api/types";
 
 export const SORT_KEYS = ["name", "updated", "created", "size", "type"] as const;
 
@@ -17,8 +32,7 @@ export const filesApi = {
   childrenAt: (id: string, sort: SortKey, order: SortOrder, offset: number, limit: number, signal?: AbortSignal) =>
     get<PositionedPage<Node>>(enc`/nodes/${id}/children` + qs({ sort, order, limit: String(limit), offset: String(offset) }), signal),
   /** Where an item is in a folder's listing (null: not in it) */
-  position: (id: string, item: string, sort: SortKey, order: SortOrder) =>
-    get<{ position: number | null; total: number }>(enc`/nodes/${id}/position` + qs({ item, sort, order })),
+  position: (id: string, item: string, sort: SortKey, order: SortOrder) => get<{ position: number | null; total: number }>(enc`/nodes/${id}/position` + qs({ item, sort, order })),
   /** The ids of items selected in a folder (all of them, or from one to another, less some), a batch at a time */
   selection: (id: string, req: { sort: SortKey; order: SortOrder; from?: string; to?: string; except: string[]; after?: string }) =>
     post<{ ids: string[]; next: string | null }>(enc`/nodes/${id}/select`, req),
@@ -59,13 +73,7 @@ export const filesApi = {
   job: (id: string) => get<Job>(enc`/jobs/${id}`),
   /** Save from the online editor; with baseVersion (updated_at when the file was opened), returns 409 if someone else changed the file */
   saveContent: (id: string, content: BodyInit, baseVersion?: number) =>
-    request<Node>(
-      "PUT",
-      enc`/files/${id}/content`,
-      undefined,
-      content,
-      baseVersion !== undefined ? { "X-Base-Version": String(baseVersion) } : undefined,
-    ),
+    request<Node>("PUT", enc`/files/${id}/content`, undefined, content, baseVersion !== undefined ? { "X-Base-Version": String(baseVersion) } : undefined),
   /** A file's earlier versions, newest first */
   versions: (id: string, signal?: AbortSignal) => get<FileVersion[]>(enc`/files/${id}/versions`, signal),
   /** Where to open (preview) or download an earlier version */

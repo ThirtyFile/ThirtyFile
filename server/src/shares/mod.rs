@@ -21,8 +21,8 @@ use sqlx::SqliteConnection;
 
 use crate::{
     auth::{self, User, cookie_header, hash_password, verify_password},
-    error::{AppError, AppResult},
     downloads::{self, DownloadQuery},
+    error::{AppError, AppResult},
     files::{self, node_blob, serve_blob},
     logs::{self, Visitor, record_share_access},
     nodes::{ListQuery as ChildrenQuery, Listing, list_children},
@@ -108,11 +108,7 @@ fn check_expiry(policy: &SharePolicy, expires_at: Option<i64>) -> AppResult<()> 
         return Err(AppError::bad_request("The expiration time must be in the future"));
     }
     if policy.max_days > 0 && expires_at.is_none_or(|t| t > now() + policy.max_days * 86400 + EXPIRY_SLACK) {
-        return Err(AppError::bad_request(format!(
-            "Share links must expire within {} {}",
-            policy.max_days,
-            if policy.max_days == 1 { "day" } else { "days" }
-        )));
+        return Err(AppError::bad_request(format!("Share links must expire within {} {}", policy.max_days, if policy.max_days == 1 { "day" } else { "days" })));
     }
     Ok(())
 }
@@ -504,13 +500,29 @@ mod tests {
         let addr: std::net::SocketAddr = "203.0.113.5:4000".parse().unwrap();
 
         // Behind a password: nothing about the owner before unlocking
-        let req = CreateReq { node_id: folder.clone(), password: Some(testutil::wrong_password()), expires_at: None, max_downloads: None, allow_upload: false, drop_only: false, allow_download: true };
+        let req = CreateReq {
+            node_id: folder.clone(),
+            password: Some(testutil::wrong_password()),
+            expires_at: None,
+            max_downloads: None,
+            allow_upload: false,
+            drop_only: false,
+            allow_download: true,
+        };
         let Json(locked) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let Json(info) = public_info(State(env.st.clone()), Path(locked.id), ConnectInfo(addr), HeaderMap::new(), visitor()).await.unwrap();
         assert!(info["owner"].is_null() && info["node"].is_null(), "{info}");
 
         // Open: items without usernames, spaces or ids outside the share
-        let req = CreateReq { node_id: folder.clone(), password: None, expires_at: None, max_downloads: None, allow_upload: false, drop_only: false, allow_download: true };
+        let req = CreateReq {
+            node_id: folder.clone(),
+            password: None,
+            expires_at: None,
+            max_downloads: None,
+            allow_upload: false,
+            drop_only: false,
+            allow_download: true,
+        };
         let Json(open) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let Json(info) = public_info(State(env.st.clone()), Path(open.id.clone()), ConnectInfo(addr), HeaderMap::new(), visitor()).await.unwrap();
         assert_eq!(info["owner"], "amy");
@@ -607,10 +619,19 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let doc = stored_file(&env, &amy, amy.root(), "report.pdf", b"content").await;
-        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: Some(1), allow_upload: false, drop_only: false, allow_download: true };
+        let req = CreateReq {
+            node_id: doc.clone(),
+            password: None,
+            expires_at: None,
+            max_downloads: Some(1),
+            allow_upload: false,
+            drop_only: false,
+            allow_download: true,
+        };
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
-        let get = || public_content(State(env.st.clone()), Path((info.id.clone(), doc.clone())), Query(ContentQuery { download: Some(1) }), HeaderMap::new(), visitor());
+        let get =
+            || public_content(State(env.st.clone()), Path((info.id.clone(), doc.clone())), Query(ContentQuery { download: Some(1) }), HeaderMap::new(), visitor());
         // The stored content can't be read (a storage service that is down behaves the same)
         let hash = crate::util::sha256_hex(b"content");
         let blob = env.dir.join("blobs").join(&hash[0..2]).join(&hash[2..4]).join(&hash);
@@ -629,7 +650,15 @@ mod tests {
         let amy = env.user("amy", true).await;
         let folder = env.folder(&amy, amy.root(), "Reports").await;
         let doc = stored_file(&env, &amy, &folder, "report.pdf", b"zipped").await;
-        let req = CreateReq { node_id: folder.clone(), password: None, expires_at: None, max_downloads: Some(1), allow_upload: false, drop_only: false, allow_download: true };
+        let req = CreateReq {
+            node_id: folder.clone(),
+            password: None,
+            expires_at: None,
+            max_downloads: Some(1),
+            allow_upload: false,
+            drop_only: false,
+            allow_download: true,
+        };
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
         // The whole shared folder, and the file inside it together with the folder (two items make a ZIP too)
@@ -657,7 +686,8 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let doc = stored_file(&env, &amy, amy.root(), "a.txt", b"hello").await;
-        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: None, allow_upload: false, drop_only: false, allow_download: true };
+        let req =
+            CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: None, allow_upload: false, drop_only: false, allow_download: true };
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
         for ip in ["203.0.113.1:1", "203.0.113.2:1"] {
@@ -716,7 +746,15 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let doc = stored_file(&env, &amy, amy.root(), "movie.bin", &[7u8; 4096]).await;
-        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: Some(1), allow_upload: false, drop_only: false, allow_download: true };
+        let req = CreateReq {
+            node_id: doc.clone(),
+            password: None,
+            expires_at: None,
+            max_downloads: Some(1),
+            allow_upload: false,
+            drop_only: false,
+            allow_download: true,
+        };
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
         let content = |range: Option<&'static str>, cookie: Option<String>| {
@@ -748,7 +786,15 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let doc = stored_file(&env, &amy, amy.root(), "movie.bin", &[7u8; 4096]).await;
-        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: Some(1), allow_upload: false, drop_only: false, allow_download: true };
+        let req = CreateReq {
+            node_id: doc.clone(),
+            password: None,
+            expires_at: None,
+            max_downloads: Some(1),
+            allow_upload: false,
+            drop_only: false,
+            allow_download: true,
+        };
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let visitor = || Visitor { ip: String::new(), user_agent: String::new() };
         let download = |range: Option<&'static str>, cookie: Option<String>| {
@@ -846,7 +892,8 @@ mod tests {
         let doc = env.file(&amy, &folder, "report.txt").await;
         env.grant(&folder, &ben, "editor").await;
 
-        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: None, allow_upload: false, drop_only: false, allow_download: true };
+        let req =
+            CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: None, allow_upload: false, drop_only: false, allow_download: true };
         let Json(info) = create(State(env.st.clone()), ben.clone(), Json(req)).await.unwrap();
         assert!(find_share(&env.st, &info.id).await.is_ok());
 
@@ -868,7 +915,8 @@ mod tests {
         assert!(find_share(&env.st, &info.id).await.is_err());
 
         // The file owner's own links are unaffected
-        let req = CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: None, allow_upload: false, drop_only: false, allow_download: true };
+        let req =
+            CreateReq { node_id: doc.clone(), password: None, expires_at: None, max_downloads: None, allow_upload: false, drop_only: false, allow_download: true };
         let Json(own) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         assert!(find_share(&env.st, &own.id).await.is_ok());
     }
@@ -960,7 +1008,8 @@ mod tests {
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
         let addr: std::net::SocketAddr = "203.0.113.9:1".parse().unwrap();
         let visitor = Visitor { ip: String::new(), user_agent: String::new() };
-        let res = unlock(State(env.st.clone()), Path(info.id.clone()), ConnectInfo(addr), HeaderMap::new(), visitor, Json(UnlockReq { password: first })).await.unwrap();
+        let res =
+            unlock(State(env.st.clone()), Path(info.id.clone()), ConnectInfo(addr), HeaderMap::new(), visitor, Json(UnlockReq { password: first })).await.unwrap();
         let cookie = res.headers()[header::SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_string();
         let mut headers = HeaderMap::new();
         headers.insert(header::COOKIE, cookie.parse().unwrap());
@@ -1125,11 +1174,13 @@ mod tests {
         let id = upload_through(&env, &info.id, Some(&sub), "b.txt", b"hi").await.unwrap();
         assert_eq!(node(&env, &id).await.parent_id.as_deref(), Some(sub.as_str()));
         // Recorded in the activity log and the link's access log
-        let (detail,): (String,) = sqlx::query_as("SELECT detail FROM activity WHERE action = 'upload' AND node_id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
+        let (detail,): (String,) =
+            sqlx::query_as("SELECT detail FROM activity WHERE action = 'upload' AND node_id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(detail, format!("Through share link /share/{}", info.id));
         let mut logged = 0;
         for _ in 0..100 {
-            (logged,) = sqlx::query_as("SELECT COUNT(*) FROM share_access WHERE share_id = ? AND event = 'upload'").bind(&info.id).fetch_one(&env.st.db).await.unwrap();
+            (logged,) =
+                sqlx::query_as("SELECT COUNT(*) FROM share_access WHERE share_id = ? AND event = 'upload'").bind(&info.id).fetch_one(&env.st.db).await.unwrap();
             if logged == 2 {
                 break;
             }
@@ -1201,7 +1252,8 @@ mod tests {
         change(&env, &ben, &plain.id, json!({ "password": pw })).await.unwrap();
         assert_eq!(start_upload(&env, &plain.id, None, "c.txt", 1, None).await.unwrap_err().status, StatusCode::UNAUTHORIZED);
         let addr: std::net::SocketAddr = "203.0.113.7:1".parse().unwrap();
-        let res = unlock(State(env.st.clone()), Path(plain.id.clone()), ConnectInfo(addr), HeaderMap::new(), visitor(), Json(UnlockReq { password: pw })).await.unwrap();
+        let res =
+            unlock(State(env.st.clone()), Path(plain.id.clone()), ConnectInfo(addr), HeaderMap::new(), visitor(), Json(UnlockReq { password: pw })).await.unwrap();
         let cookie = res.headers()[header::SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_string();
         assert!(start_upload(&env, &plain.id, None, "c.txt", 1, Some(&cookie)).await.is_ok());
         // And an expired link takes none
@@ -1227,11 +1279,13 @@ mod tests {
         assert_eq!(err.status, StatusCode::FORBIDDEN);
         assert!(public_node(State(env.st.clone()), Path((info.id.clone(), sub.clone())), HeaderMap::new()).await.is_err());
         for download in [None, Some(1)] {
-            let res = public_content(State(env.st.clone()), Path((info.id.clone(), secret.clone())), Query(ContentQuery { download }), HeaderMap::new(), visitor()).await;
+            let res =
+                public_content(State(env.st.clone()), Path((info.id.clone(), secret.clone())), Query(ContentQuery { download }), HeaderMap::new(), visitor()).await;
             assert_eq!(res.unwrap_err().status, StatusCode::FORBIDDEN);
         }
         assert!(public_thumbnail(State(env.st.clone()), Path((info.id.clone(), secret.clone())), HeaderMap::new()).await.is_err());
-        let zip = public_download(State(env.st.clone()), Path(info.id.clone()), Query(DownloadQuery { ids: "root".into(), tz: None }), HeaderMap::new(), visitor()).await;
+        let zip =
+            public_download(State(env.st.clone()), Path(info.id.clone()), Query(DownloadQuery { ids: "root".into(), tz: None }), HeaderMap::new(), visitor()).await;
         assert_eq!(zip.unwrap_err().status, StatusCode::FORBIDDEN);
 
         // Files go into the shared folder itself, never into a folder below it
@@ -1286,7 +1340,8 @@ mod tests {
         let mut h = HeaderMap::new();
         h.insert(header::CONTENT_TYPE, "application/offset+octet-stream".parse().unwrap());
         h.insert("upload-offset", "0".parse().unwrap());
-        let res = public_upload_patch(State(env.st.clone()), Path((info.id.clone(), up.clone())), h, visitor(), axum::body::Body::from(&b"hello"[..])).await.unwrap();
+        let res =
+            public_upload_patch(State(env.st.clone()), Path((info.id.clone(), up.clone())), h, visitor(), axum::body::Body::from(&b"hello"[..])).await.unwrap();
         // The file is kept under another name, but the visitor isn't told which: that would say the name was taken
         assert!(res.headers().get("x-node-name").is_none());
         let id = res.headers()["x-node-id"].to_str().unwrap().to_string();
@@ -1335,11 +1390,13 @@ mod tests {
         let photo = stored_file(&env, &amy, &folder, "a.jpg", b"jpeg").await;
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(CreateReq { allow_download: false, ..link(&folder) })).await.unwrap();
         assert!(!info.allow_download);
-        let content = |download| public_content(State(env.st.clone()), Path((info.id.clone(), photo.clone())), Query(ContentQuery { download }), HeaderMap::new(), visitor());
+        let content =
+            |download| public_content(State(env.st.clone()), Path((info.id.clone(), photo.clone())), Query(ContentQuery { download }), HeaderMap::new(), visitor());
         assert_eq!(content(None).await.unwrap().status(), StatusCode::OK);
         assert_eq!(content(Some(1)).await.unwrap_err().status, StatusCode::FORBIDDEN);
         for ids in ["root", photo.as_str()] {
-            let res = public_download(State(env.st.clone()), Path(info.id.clone()), Query(DownloadQuery { ids: ids.into(), tz: None }), HeaderMap::new(), visitor()).await;
+            let res =
+                public_download(State(env.st.clone()), Path(info.id.clone()), Query(DownloadQuery { ids: ids.into(), tz: None }), HeaderMap::new(), visitor()).await;
             assert_eq!(res.unwrap_err().status, StatusCode::FORBIDDEN);
         }
         // Allowed again by editing the link

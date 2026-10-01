@@ -9,22 +9,7 @@ import { renderChart } from "../chart";
 import { evaluate, parseCustGeom, readAdjust, type GeomDef, type GeomOut } from "./geometry";
 import { presetGeom, RECT_GEOM } from "./presets";
 import { matchLayoutPh, matchMasterPh, phOf, phStyleKind, type SlideInfo } from "./model";
-import {
-  blipFilter,
-  blipInfo,
-  Defs,
-  fillElIn,
-  imageRect,
-  readFill,
-  reflectionCss,
-  resolveLine,
-  shadowFilter,
-  strokeAttrs,
-  svgPaint,
-  themeFill,
-  type Fill,
-  type Line,
-} from "./paint";
+import { blipFilter, blipInfo, Defs, fillElIn, imageRect, readFill, reflectionCss, resolveLine, shadowFilter, strokeAttrs, svgPaint, themeFill, type Fill, type Line } from "./paint";
 import { hasVisibleText, readBodyPr, textBox, type BodyProps, type TextCtx } from "./text";
 import { renderTable } from "./table";
 import { C } from "./styles";
@@ -501,7 +486,11 @@ async function renderFrame(el: Element, ctx: Ctx, m: Mapper): Promise<HTMLElemen
   // OLE objects and others: use the preview image
   const pic = Array.from(el.getElementsByTagNameNS("*", "pic"))[0];
   if (pic) {
-    const node = await renderPic(pic, { ...ctx, layer: "drawing" }, { ox: numAttr(kidPath(pic, "spPr", "xfrm", "off"), "x") ?? 0, oy: numAttr(kidPath(pic, "spPr", "xfrm", "off"), "y") ?? 0, sx: m.sx, sy: m.sy });
+    const node = await renderPic(
+      pic,
+      { ...ctx, layer: "drawing" },
+      { ox: numAttr(kidPath(pic, "spPr", "xfrm", "off"), "x") ?? 0, oy: numAttr(kidPath(pic, "spPr", "xfrm", "off"), "y") ?? 0, sx: m.sx, sy: m.sy },
+    );
     if (node) {
       node.style.left = "0";
       node.style.top = "0";

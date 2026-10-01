@@ -242,13 +242,7 @@ pub struct ContentQuery {
     download: Option<u8>,
 }
 
-pub async fn content(
-    State(st): State<AppState>,
-    user: User,
-    Path(id): Path<String>,
-    Query(q): Query<ContentQuery>,
-    headers: HeaderMap,
-) -> AppResult<Response> {
+pub async fn content(State(st): State<AppState>, user: User, Path(id): Path<String>, Query(q): Query<ContentQuery>, headers: HeaderMap) -> AppResult<Response> {
     let node = tree::owned_node(&mut *st.db.acquire().await?, &user, &id).await?;
     let download = q.download == Some(1);
     let mut res = serve_blob(&st, &headers, node_blob(&st, &node).await?, download).await?;
@@ -274,13 +268,7 @@ pub async fn hash_file(path: PathBuf) -> AppResult<(String, u64)> {
 
 /// Save from the online editor: replaces the file with new content.
 /// With `X-Base-Version` (the updated_at when the file was opened), returns 409 without overwriting if someone else changed the file in the meantime
-pub async fn save_content(
-    State(st): State<AppState>,
-    user: User,
-    Path(id): Path<String>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> AppResult<Json<Node>> {
+pub async fn save_content(State(st): State<AppState>, user: User, Path(id): Path<String>, headers: HeaderMap, body: Bytes) -> AppResult<Json<Node>> {
     if body.len() > MAX_EDIT_BYTES {
         return Err(AppError::new(StatusCode::PAYLOAD_TOO_LARGE, "The file is too large to edit online"));
     }
@@ -368,11 +356,8 @@ async fn store_content(st: AppState, user: User, before: Node, body: Bytes, hash
         }
         Ok(Err((name, written))) => {
             staged.finish(&st, written).await;
-            Err(AppError::new(
-                StatusCode::CONFLICT,
-                format!("The file was changed on the server while you were editing it. Your version was saved as \"{name}\"."),
-            )
-            .with_code("conflict_copy"))
+            Err(AppError::new(StatusCode::CONFLICT, format!("The file was changed on the server while you were editing it. Your version was saved as \"{name}\"."))
+                .with_code("conflict_copy"))
         }
         Err(e) => {
             staged.abandon(&st).await;
@@ -423,7 +408,13 @@ mod tests {
     async fn pages_and_xml_open_as_plain_text_and_download_as_they_are() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        for (name, mime) in [("page.html", "text/html"), ("page.xhtml", "application/xhtml+xml"), ("feed.xml", "text/xml"), ("data.xml", "application/xml"), ("news.rss", "application/rss+xml")] {
+        for (name, mime) in [
+            ("page.html", "text/html"),
+            ("page.xhtml", "application/xhtml+xml"),
+            ("feed.xml", "text/xml"),
+            ("data.xml", "application/xml"),
+            ("news.rss", "application/rss+xml"),
+        ] {
             let id = env.stored_file(&amy, amy.root(), name, b"<html><body>Sign in</body></html>").await;
             sqlx::query("UPDATE nodes SET mime = ? WHERE id = ?").bind(mime).bind(&id).execute(&env.st.db).await.unwrap();
             let (status, h, _) = fetch(&env, &amy, &id, &[]).await;

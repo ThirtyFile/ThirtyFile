@@ -34,7 +34,11 @@ function useClientSort(items: Located[] | undefined, sort: { key: SortKey; order
           ? n.updated_at
           : sort.key === "created"
             ? n.created_at
-            : sort.key === "type" ? (n.kind === "folder" ? "" : extOf(n.name)) : n.name;
+            : sort.key === "type"
+              ? n.kind === "folder"
+                ? ""
+                : extOf(n.name)
+              : n.name;
     return [...items].sort((a, b) => {
       if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
       const x = val(a);
@@ -193,7 +197,7 @@ export function SearchPage() {
       onSort={onSort}
       onSortChange={setSort}
       notice={filters}
-      crumbs={crumbs(t("Search results for \"{term}\"", { term }))}
+      crumbs={crumbs(t('Search results for "{term}"', { term }))}
       icon={SearchIcon}
       empty={<Empty icon={SearchXIcon} text={t("No matching files found")} />}
     />

@@ -165,8 +165,7 @@ pub async fn zip_plan(st: &AppState, roots: Vec<Node>, offset: i64) -> AppResult
     // Items inside other selected items come with them; selected twice counts once
     let roots = {
         let ids: Vec<String> = roots.iter().map(|n| n.id.clone()).collect();
-        let keep: std::collections::HashSet<String> =
-            crate::nodes::outermost(&mut *st.db.acquire().await?, &ids).await?.into_iter().collect();
+        let keep: std::collections::HashSet<String> = crate::nodes::outermost(&mut *st.db.acquire().await?, &ids).await?.into_iter().collect();
         let mut seen = std::collections::HashSet::new();
         roots.into_iter().filter(|n| keep.contains(&n.id) && seen.insert(n.id.clone())).collect::<Vec<_>>()
     };
@@ -180,12 +179,8 @@ pub async fn zip_plan(st: &AppState, roots: Vec<Node>, offset: i64) -> AppResult
             && roots.iter().all(|r| r.parent_id.as_deref() == Some(parent.as_str()))
             && let Some(p) = tree::get_node(&mut c, &parent).await?
         {
-            parent_name = Some(if p.name.is_empty() {
-                tree::get_drive(&mut c, p.drive()).await?.map(|d| d.name).unwrap_or_default()
-            } else {
-                p.name
-            })
-            .filter(|n| !n.is_empty());
+            parent_name = Some(if p.name.is_empty() { tree::get_drive(&mut c, p.drive()).await?.map(|d| d.name).unwrap_or_default() } else { p.name })
+                .filter(|n| !n.is_empty());
         }
         for root in roots {
             if root.trashed_at.is_some() {
@@ -338,8 +333,7 @@ pub struct DownloadLink {
 /// The ids of a download, without blanks and repeats. Nothing is dropped: a selection above the limit is refused
 pub fn download_ids<S: AsRef<str>>(ids: impl IntoIterator<Item = S>) -> AppResult<Vec<String>> {
     let mut seen = std::collections::HashSet::new();
-    let ids: Vec<String> =
-        ids.into_iter().map(|s| s.as_ref().trim().to_string()).filter(|s| !s.is_empty() && seen.insert(s.clone())).collect();
+    let ids: Vec<String> = ids.into_iter().map(|s| s.as_ref().trim().to_string()).filter(|s| !s.is_empty() && seen.insert(s.clone())).collect();
     if ids.is_empty() {
         return Err(AppError::bad_request("Select items to download"));
     }
@@ -406,19 +400,15 @@ async fn owned_nodes(st: &AppState, user: &User, ids: &[String]) -> AppResult<Ve
 /// A single file is downloaded directly, anything else is packed into a ZIP
 async fn serve_download(st: &AppState, headers: &HeaderMap, roots: Vec<Node>, tz: i64) -> AppResult<Response> {
     if let [one] = roots.as_slice()
-        && !one.is_folder() {
-            return serve_blob(st, headers, node_blob(st, one).await?, true).await;
-        }
+        && !one.is_folder()
+    {
+        return serve_blob(st, headers, node_blob(st, one).await?, true).await;
+    }
     zip_response(st, roots, tz).await
 }
 
 /// Multi-select download with the ids in the URL, for a few items (any number goes through `create_download_link`)
-pub async fn download(
-    State(st): State<AppState>,
-    user: User,
-    Query(q): Query<DownloadQuery>,
-    headers: HeaderMap,
-) -> AppResult<Response> {
+pub async fn download(State(st): State<AppState>, user: User, Query(q): Query<DownloadQuery>, headers: HeaderMap) -> AppResult<Response> {
     let ids = download_ids(q.ids.split(','))?;
     let roots = owned_nodes(&st, &user, &ids).await?;
     serve_download(&st, &headers, roots, q.tz.unwrap_or(0)).await

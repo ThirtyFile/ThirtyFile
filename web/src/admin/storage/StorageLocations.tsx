@@ -1,6 +1,27 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2Icon, CloudIcon, CopyCheckIcon, CopyIcon, DatabaseBackupIcon, EllipsisIcon, FolderOpenIcon, HardDriveIcon, LayersIcon, ListChecksIcon, Loader2Icon, PencilIcon, PlugZapIcon, PlusIcon, SearchXIcon, ServerIcon, StarIcon, Trash2Icon, TruckIcon, XCircleIcon } from "lucide-react";
+import {
+  CheckCircle2Icon,
+  CloudIcon,
+  CopyCheckIcon,
+  CopyIcon,
+  DatabaseBackupIcon,
+  EllipsisIcon,
+  FolderOpenIcon,
+  HardDriveIcon,
+  LayersIcon,
+  ListChecksIcon,
+  Loader2Icon,
+  PencilIcon,
+  PlugZapIcon,
+  PlusIcon,
+  SearchXIcon,
+  ServerIcon,
+  StarIcon,
+  Trash2Icon,
+  TruckIcon,
+  XCircleIcon,
+} from "lucide-react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { api, type StorageLocation } from "@/api";
@@ -67,7 +88,7 @@ export function StorageLocations() {
     setTesting(l.id);
     try {
       await api.testExistingStorage(l.id);
-      toast.success(t("Connected to \"{name}\" successfully", { name: l.name }));
+      toast.success(t('Connected to "{name}" successfully', { name: l.name }));
     } catch (e) {
       toast.error(errorMessage(e, t("Connection failed")));
     } finally {
@@ -78,7 +99,7 @@ export function StorageLocations() {
   const makeDefault = async (l: StorageLocation) => {
     try {
       await api.setDefaultStorage(l.id);
-      toast.success(t("New spaces will be stored in \"{name}\"", { name: l.name }));
+      toast.success(t('New spaces will be stored in "{name}"', { name: l.name }));
       refresh();
     } catch (e) {
       toast.error(errorMessage(e, t("Operation failed")));
@@ -136,7 +157,9 @@ export function StorageLocations() {
       <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
         <p className="text-xs leading-relaxed text-muted-foreground">
           {(() => {
-            const [before, after] = t("Where spaces keep their files. New spaces are created on the {default}; changing it doesn't move existing spaces. A space's files can be moved in Control panel › Spaces.").split("{default}");
+            const [before, after] = t(
+              "Where spaces keep their files. New spaces are created on the {default}; changing it doesn't move existing spaces. A space's files can be moved in Control panel › Spaces.",
+            ).split("{default}");
             return (
               <>
                 {before}
@@ -184,12 +207,7 @@ export function StorageLocations() {
                     selectedId === l.id && "bg-selection shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection",
                   )}
                 >
-                  <Icon
-                    className={cn(
-                      "size-5 shrink-0",
-                      l.kind === "s3" ? "text-sky-500" : l.kind === "local" ? "text-muted-foreground" : "text-violet-500",
-                    )}
-                  />
+                  <Icon className={cn("size-5 shrink-0", l.kind === "s3" ? "text-sky-500" : l.kind === "local" ? "text-muted-foreground" : "text-violet-500")} />
                   <div role="gridcell" className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 text-sm">
                       <span className="truncate">{l.name}</span>
@@ -204,16 +222,13 @@ export function StorageLocations() {
                         {tServer(l.health_error)}
                       </div>
                     )}
-                    <MovedOff
-                      location={l}
-                      moves={movesFrom(l.id)}
-                      list={list}
-                      onDefault={makeDefault}
-                      onDelete={() => setDeleting(l)}
-                    />
+                    <MovedOff location={l} moves={movesFrom(l.id)} list={list} onDefault={makeDefault} onDelete={() => setDeleting(l)} />
                     {l.pending_deletes > 0 && (
                       <div className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">
-                        {t("{n} deleted file hasn't been removed from here yet; it will be retried automatically once the connection is restored|{n} deleted files haven't been removed from here yet; they will be retried automatically once the connection is restored", { n: l.pending_deletes })}
+                        {t(
+                          "{n} deleted file hasn't been removed from here yet; it will be retried automatically once the connection is restored|{n} deleted files haven't been removed from here yet; they will be retried automatically once the connection is restored",
+                          { n: l.pending_deletes },
+                        )}
                       </div>
                     )}
                   </div>
@@ -241,25 +256,14 @@ export function StorageLocations() {
                   <span
                     role="gridcell"
                     title={l.checked_at ? t("Last checked: {time} (checked automatically every 30 seconds)", { time: formatDateTime(l.checked_at) }) : undefined}
-                    className={cn(
-                      "flex w-20 shrink-0 items-center gap-1 text-xs",
-                      l.connected ? "text-emerald-600 dark:text-emerald-400" : "text-destructive",
-                    )}
+                    className={cn("flex w-20 shrink-0 items-center gap-1 text-xs", l.connected ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}
                   >
-                    {testing === l.id ? (
-                      <Loader2Icon className="size-3.5 animate-spin" />
-                    ) : l.connected ? (
-                      <CheckCircle2Icon className="size-3.5" />
-                    ) : (
-                      <XCircleIcon className="size-3.5" />
-                    )}
+                    {testing === l.id ? <Loader2Icon className="size-3.5 animate-spin" /> : l.connected ? <CheckCircle2Icon className="size-3.5" /> : <XCircleIcon className="size-3.5" />}
                     {l.connected ? t("Connected") : t("Unreachable")}
                   </span>
                   <div role="gridcell">
                     <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={<Button size="icon-sm" variant="ghost" aria-label={t("More actions")} onClick={(e) => e.stopPropagation()} />}
-                      >
+                      <DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={t("More actions")} onClick={(e) => e.stopPropagation()} />}>
                         <EllipsisIcon />
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-max max-w-(--available-width)">
@@ -284,18 +288,24 @@ export function StorageLocations() {
         />
       )}
       {showing && <SpacesDialog location={showing} onClose={() => setShowing(null)} />}
-      {emptying && <MoveEverythingDialog location={emptying} onClose={() => setEmptying(null)} onDone={() => {
-        setEmptying(null);
-        refresh();
-        qc.invalidateQueries({ queryKey: keys.moves() });
-      }} />}
+      {emptying && (
+        <MoveEverythingDialog
+          location={emptying}
+          onClose={() => setEmptying(null)}
+          onDone={() => {
+            setEmptying(null);
+            refresh();
+            qc.invalidateQueries({ queryKey: keys.moves() });
+          }}
+        />
+      )}
       {copying && <CopyEverythingDialog location={copying} onClose={() => setCopying(null)} />}
       {tool?.kind === "test" && <LocationTestDialog location={tool.location} onClose={() => setTool(null)} />}
       {tool?.kind === "browse" && <LocationBrowseDialog location={tool.location} onClose={() => setTool(null)} />}
       {tool?.kind === "unused" && <UnusedContentDialog location={tool.location} onClose={() => setTool(null)} />}
       {deleting && (
         <ConfirmDialog
-          title={t("Delete storage location \"{name}\"?", { name: deleting.name })}
+          title={t('Delete storage location "{name}"?', { name: deleting.name })}
           description={t("This only removes the setting; data in the storage service isn't deleted. A location can't be deleted while files or spaces are still using it.")}
           confirmText={t("Delete")}
           destructive

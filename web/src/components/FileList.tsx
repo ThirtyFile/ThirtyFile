@@ -112,10 +112,7 @@ export function FileList(p: FileListProps) {
   // item is loaded: the explorer loads them all when grouping)
   const dateOf = p.dateOf ?? ((x: Item) => x.updated_at);
   const groups = useMemo(
-    () =>
-      complete
-        ? groupItems<Item>(p.items as Item[], p.groupBy ?? "none", { dateOf, typeOf: typeLabel, now: new Date(), reversed: p.groupReversed })
-        : null,
+    () => (complete ? groupItems<Item>(p.items as Item[], p.groupBy ?? "none", { dateOf, typeOf: typeLabel, now: new Date(), reversed: p.groupReversed }) : null),
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the date function is a new one on every render
     [p.items, p.groupBy, p.groupReversed, complete],
   );
@@ -134,9 +131,7 @@ export function FileList(p: FileListProps) {
     return Math.min(first, n - 1);
   }, [p.selected, indexOf, span, n]);
   const allSelected = useMemo(
-    () =>
-      n > 0 &&
-      (span && !span.from && !span.to ? span.except.size === 0 : complete && p.selected.size >= n && items.every((x) => p.selected.has(x!.id))),
+    () => n > 0 && (span && !span.from && !span.to ? span.except.size === 0 : complete && p.selected.size >= n && items.every((x) => p.selected.has(x!.id))),
     [items, p.selected, n, span, complete],
   );
 
@@ -448,10 +443,7 @@ export function FileList(p: FileListProps) {
   const nameWidth = wide ? prefs.widths.name : undefined;
   const filler = nameWidth !== undefined;
   // ...and the other columns can't squeeze it below its smallest width
-  const minWidth =
-    wide && !filler
-      ? columns.filter((c) => large || c.id !== "location").reduce((sum, c) => sum + widthOf(c.id), MIN_NAME + (p.showCheckboxes ? 30 : 0))
-      : undefined;
+  const minWidth = wide && !filler ? columns.filter((c) => large || c.id !== "location").reduce((sum, c) => sum + widthOf(c.id), MIN_NAME + (p.showCheckboxes ? 30 : 0)) : undefined;
   const cellCount = 1 + columns.length + (p.showCheckboxes ? 1 : 0) + (filler ? 1 : 0);
   const spacer = (height: number) => (
     <tr aria-hidden>
@@ -468,7 +460,7 @@ export function FileList(p: FileListProps) {
       max={MAX_COLUMN}
       defaultWidth={id === "name" ? MIN_NAME : COLUMN_WIDTH[id]}
       edge="right"
-      label={t("Resize the \"{name}\" column", { name: label })}
+      label={t('Resize the "{name}" column', { name: label })}
     />
   );
 
@@ -499,24 +491,13 @@ export function FileList(p: FileListProps) {
                     ref={(el) => {
                       if (el) el.indeterminate = selecting && !allSelected;
                     }}
-                    onChange={() =>
-                      allSelected ? p.onSelect(new Set(), undefined, null) : p.onSelectAll ? p.onSelectAll() : p.onSelect(new Set(indexOf.keys()), undefined, null)
-                    }
+                    onChange={() => (allSelected ? p.onSelect(new Set(), undefined, null) : p.onSelectAll ? p.onSelectAll() : p.onSelect(new Set(indexOf.keys()), undefined, null))}
                   />
                 </th>
               )}
               <Head sort={p.sort} onSort={p.onSort} k="name" label={t("Name")} className="pl-3" width={nameWidth} resize={resizer("name", t("Name"))} />
               {columns.map((c) => (
-                <Head
-                  key={c.id}
-                  sort={p.sort}
-                  onSort={p.onSort}
-                  k={c.sort}
-                  label={c.label}
-                  className={COLUMN_CLASS[c.id]}
-                  width={widthOf(c.id)}
-                  resize={resizer(c.id, c.label)}
-                />
+                <Head key={c.id} sort={p.sort} onSort={p.onSort} k={c.sort} label={c.label} className={COLUMN_CLASS[c.id]} width={widthOf(c.id)} resize={resizer(c.id, c.label)} />
               ))}
               {filler && <th aria-hidden className={th} />}
             </ContextMenuTrigger>

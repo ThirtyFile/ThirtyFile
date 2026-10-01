@@ -161,16 +161,12 @@ fn manifest_json(b: &Branding) -> Value {
 /// The focus ring is the accent color itself: a tint of it would fall below 3:1 against the page
 pub fn palette_css(b: &Branding) -> String {
     let mut out = String::new();
-    for (selector, color, default, bg, sel) in
-        [(":root", &b.light_brand, DEFAULT_LIGHT, "#ffffff", 13), (".dark", &b.dark_brand, DEFAULT_DARK, "#1c1c1e", 24)]
-    {
+    for (selector, color, default, bg, sel) in [(":root", &b.light_brand, DEFAULT_LIGHT, "#ffffff", 13), (".dark", &b.dark_brand, DEFAULT_DARK, "#1c1c1e", 24)] {
         if color.eq_ignore_ascii_case(default) || !is_hex_color(color) {
             continue;
         }
         let fg = if luminance(color) > 0.19 { "#111111" } else { "#ffffff" };
-        out.push_str(&format!(
-            "{selector}{{--brand:{color};--brand-foreground:{fg};--ring:{color};--selection:color-mix(in srgb,{color} {sel}%,{bg})}}\n"
-        ));
+        out.push_str(&format!("{selector}{{--brand:{color};--brand-foreground:{fg};--ring:{color};--selection:color-mix(in srgb,{color} {sel}%,{bg})}}\n"));
     }
     out
 }

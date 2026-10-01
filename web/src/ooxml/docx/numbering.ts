@@ -113,14 +113,14 @@ export class Numbering {
         start: numAttr(kid(el, "start"), "val") ?? 0,
         fmt: attr(fmtEl, "val") ?? "decimal",
         custom: attr(fmtEl, "format"),
-        text: lvlText ? attr(lvlText, "val") ?? "" : null,
+        text: lvlText ? (attr(lvlText, "val") ?? "") : null,
         jc: attr(kid(el, "lvlJc"), "val") ?? "left",
         suff: attr(kid(el, "suff"), "val") ?? "tab",
         pPr: kid(el, "pPr"),
         rPr: kid(el, "rPr"),
         restart: restart ?? undefined,
         isLgl: toggle(kid(el, "isLgl")) ?? false,
-        picBullet: pic !== null ? this.picBullets.get(pic) ?? null : null,
+        picBullet: pic !== null ? (this.picBullets.get(pic) ?? null) : null,
       };
       // Start from 1 when there is no start (Word's actual behavior; the spec's 0 is rare)
       if (!kid(el, "start")) def.start = 1;
@@ -167,7 +167,7 @@ export class Numbering {
         const k = Number(d) - 1;
         const def = this.level(numId, k);
         const v = counts[k] ?? this.startOf(numId, k);
-        const fmt = level.isLgl && def?.fmt !== "decimalZero" ? "decimal" : def?.fmt ?? "decimal";
+        const fmt = level.isLgl && def?.fmt !== "decimalZero" ? "decimal" : (def?.fmt ?? "decimal");
         return formatNumber(v, fmt, def?.custom);
       });
     }

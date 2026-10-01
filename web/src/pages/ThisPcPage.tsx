@@ -104,12 +104,7 @@ function RoleBadge({ role }: { role: string | null }) {
 function Section({ title, count, open, onToggle, children }: { title: string; count: number; open: boolean; onToggle(): void; children: ReactNode }) {
   return (
     <section>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={onToggle}
-        className="mt-4 mb-2 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-      >
+      <button type="button" aria-expanded={open} onClick={onToggle} className="mt-4 mb-2 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
         <ChevronDownIcon className={cn("size-3.5 transition-transform", !open && "-rotate-90")} />
         {t("{title} ({n})", { title, n: count })}
       </button>
@@ -246,11 +241,7 @@ export function ThisPcPage() {
           className={cn(
             "mt-0.5 size-8 shrink-0 stroke-[1.4]",
             d.offline && "opacity-40",
-            d.kind === "personal"
-              ? "text-brand"
-              : d.kind === "company"
-                ? "text-emerald-600 dark:text-emerald-400"
-                : "text-violet-600 dark:text-violet-400",
+            d.kind === "personal" ? "text-brand" : d.kind === "company" ? "text-emerald-600 dark:text-emerald-400" : "text-violet-600 dark:text-violet-400",
           )}
         />
         <div className="min-w-0 flex-1">
@@ -315,21 +306,14 @@ export function ThisPcPage() {
   });
 
   const listView = (
-    <table
-      {...nav.listProps("grid", t("All spaces"))}
-      aria-rowcount={ordered.length + 1}
-      className="w-full table-fixed border-collapse text-xs whitespace-nowrap"
-    >
+    <table {...nav.listProps("grid", t("All spaces"))} aria-rowcount={ordered.length + 1} className="w-full table-fixed border-collapse text-xs whitespace-nowrap">
       <thead>
         <tr role="row" aria-rowindex={1} className="border-b text-left text-muted-foreground">
           {[t("Name"), t("Type"), t("Used"), t("Total size"), t("My role"), t("Owner")].map((h, i) => (
             <th
               key={h}
               role="columnheader"
-              className={cn(
-                "h-[30px] px-2 font-normal",
-                i === 0 ? "pl-3" : i === 1 ? "w-[120px] max-md:hidden" : i === 5 ? "w-[110px] max-md:hidden" : "w-[100px]",
-              )}
+              className={cn("h-[30px] px-2 font-normal", i === 0 ? "pl-3" : i === 1 ? "w-[120px] max-md:hidden" : i === 5 ? "w-[110px] max-md:hidden" : "w-[100px]")}
             >
               {h}
             </th>
@@ -358,11 +342,21 @@ export function ThisPcPage() {
                   <OfflineBadge d={d} />
                 </span>
               </td>
-              <td role="gridcell" className="px-2 text-muted-foreground max-md:hidden">{DRIVE_KIND_LABEL[d.kind]}</td>
-              <td role="gridcell" className="px-2 text-muted-foreground">{formatBytes(d.used_bytes)}</td>
-              <td role="gridcell" className="px-2 text-muted-foreground">{d.quota_bytes ? formatBytes(d.quota_bytes) : tc("short", "Unlimited")}</td>
-              <td role="gridcell" className="px-2 text-muted-foreground">{d.role ? ROLE_LABEL[d.role] : "—"}</td>
-              <td role="gridcell" className="truncate px-2 text-muted-foreground max-md:hidden">{d.kind === "company" ? t("Company") : d.owner_name}</td>
+              <td role="gridcell" className="px-2 text-muted-foreground max-md:hidden">
+                {DRIVE_KIND_LABEL[d.kind]}
+              </td>
+              <td role="gridcell" className="px-2 text-muted-foreground">
+                {formatBytes(d.used_bytes)}
+              </td>
+              <td role="gridcell" className="px-2 text-muted-foreground">
+                {d.quota_bytes ? formatBytes(d.quota_bytes) : tc("short", "Unlimited")}
+              </td>
+              <td role="gridcell" className="px-2 text-muted-foreground">
+                {d.role ? ROLE_LABEL[d.role] : "—"}
+              </td>
+              <td role="gridcell" className="truncate px-2 text-muted-foreground max-md:hidden">
+                {d.kind === "company" ? t("Company") : d.owner_name}
+              </td>
             </tr>
           );
         })}
@@ -385,11 +379,19 @@ export function ThisPcPage() {
                   <FileIcon node={item} className="size-4" /> {item.name}
                 </span>
               </td>
-              <td role="gridcell" className="px-2 text-muted-foreground max-md:hidden">{t("Shared with me")}</td>
-              <td role="gridcell" className="px-2 text-muted-foreground">{item.kind === "file" ? formatBytes(item.size) : ""}</td>
+              <td role="gridcell" className="px-2 text-muted-foreground max-md:hidden">
+                {t("Shared with me")}
+              </td>
+              <td role="gridcell" className="px-2 text-muted-foreground">
+                {item.kind === "file" ? formatBytes(item.size) : ""}
+              </td>
               <td role="gridcell" className="px-2 text-muted-foreground" />
-              <td role="gridcell" className="px-2 text-muted-foreground">{ROLE_LABEL[item.role]}</td>
-              <td role="gridcell" className="truncate px-2 text-muted-foreground max-md:hidden">{item.sharer}</td>
+              <td role="gridcell" className="px-2 text-muted-foreground">
+                {ROLE_LABEL[item.role]}
+              </td>
+              <td role="gridcell" className="truncate px-2 text-muted-foreground max-md:hidden">
+                {item.sharer}
+              </td>
             </tr>
           );
         })}
@@ -399,14 +401,7 @@ export function ThisPcPage() {
 
   const toolbar = (
     <>
-      <ToolButton
-        icon={CirclePlusIcon}
-        label={t("New space")}
-        showLabel
-        className="h-9 px-2.5 text-[13px]"
-        disabled={!me.can_create_drive}
-        onClick={() => setDialog({ t: "create" })}
-      />
+      <ToolButton icon={CirclePlusIcon} label={t("New space")} showLabel className="h-9 px-2.5 text-[13px]" disabled={!me.can_create_drive} onClick={() => setDialog({ t: "create" })} />
       <ToolSeparator />
       <ToolButton icon={FolderOpenIcon} label={t("Open")} showLabel className="h-9 px-2.5 text-[13px]" disabled={!sel} onClick={() => openSel(sel)} />
       <ToolButton
@@ -417,27 +412,9 @@ export function ThisPcPage() {
         disabled={!canMembers}
         onClick={() => drive && setDialog({ t: "members", drive })}
       />
-      <ToolButton
-        icon={PencilIcon}
-        label={t("Rename")}
-        className="size-9 px-0 [&_svg]:size-[18px]"
-        disabled={!canRename}
-        onClick={() => drive && setDialog({ t: "rename", drive })}
-      />
-      <ToolButton
-        icon={InfoIcon}
-        label={t("Properties")}
-        className="size-9 px-0 [&_svg]:size-[18px]"
-        disabled={!drive}
-        onClick={() => drive && setDialog({ t: "props", drive })}
-      />
-      <ToolButton
-        icon={Trash2Icon}
-        label={t("Delete space")}
-        className="size-9 px-0 [&_svg]:size-[18px]"
-        disabled={!canDelete}
-        onClick={() => drive && setDialog({ t: "delete", drive })}
-      />
+      <ToolButton icon={PencilIcon} label={t("Rename")} className="size-9 px-0 [&_svg]:size-[18px]" disabled={!canRename} onClick={() => drive && setDialog({ t: "rename", drive })} />
+      <ToolButton icon={InfoIcon} label={t("Properties")} className="size-9 px-0 [&_svg]:size-[18px]" disabled={!drive} onClick={() => drive && setDialog({ t: "props", drive })} />
+      <ToolButton icon={Trash2Icon} label={t("Delete space")} className="size-9 px-0 [&_svg]:size-[18px]" disabled={!canDelete} onClick={() => drive && setDialog({ t: "delete", drive })} />
       <span className="flex-1" />
       <Button variant={view === "tiles" ? "secondary" : "ghost"} aria-pressed={view === "tiles"} size="icon-sm" aria-label={t("Tiles")} title={t("Tiles")} onClick={() => setView("tiles")}>
         <Grid2X2Icon />
@@ -511,9 +488,7 @@ export function ThisPcPage() {
             </>
           )}
           {/* The spaces showed, but what was shared with me couldn't be loaded */}
-          {drives.data && shared.error && !shared.data && (
-            <ErrorState compact className="mt-4" message={shared.error.message} onRetry={() => shared.refetch()} />
-          )}
+          {drives.data && shared.error && !shared.data && <ErrorState compact className="mt-4" message={shared.error.message} onRetry={() => shared.refetch()} />}
         </ContextMenuTrigger>
         <ContextMenuContent>
           {selItems.length > 1 ? (
@@ -552,10 +527,12 @@ export function ThisPcPage() {
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setView("tiles")}>
-                <Grid2X2Icon /> {t("Tiles")}{view === "tiles" && " ✓"}
+                <Grid2X2Icon /> {t("Tiles")}
+                {view === "tiles" && " ✓"}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setView("list")}>
-                <ListIcon /> {t("Details")}{view === "list" && " ✓"}
+                <ListIcon /> {t("Details")}
+                {view === "list" && " ✓"}
               </DropdownMenuItem>
             </>
           )}
@@ -574,13 +551,18 @@ export function ThisPcPage() {
       )}
       {dialog?.t === "delete" && (
         <ConfirmDialog
-          title={t("Delete space \"{name}\"?", { name: dialog.drive.name })}
+          title={t('Delete space "{name}"?', { name: dialog.drive.name })}
           description={
             dialog.drive.mode === "folder"
-              ? t("The space is removed from ThirtyFile and no member will be able to access it. Its folder on the server is kept with the files in it ({size}), for an administrator to delete.", {
+              ? t(
+                  "The space is removed from ThirtyFile and no member will be able to access it. Its folder on the server is kept with the files in it ({size}), for an administrator to delete.",
+                  {
+                    size: formatBytes(dialog.drive.used_bytes),
+                  },
+                )
+              : t("All files in this space ({size}) will be permanently deleted and no member will be able to access them. This can't be undone.", {
                   size: formatBytes(dialog.drive.used_bytes),
                 })
-              : t("All files in this space ({size}) will be permanently deleted and no member will be able to access them. This can't be undone.", { size: formatBytes(dialog.drive.used_bytes) })
           }
           confirmText={t("Delete permanently")}
           destructive

@@ -58,7 +58,7 @@ export async function dropItems(qc: QueryClient, ids: string[], folder: DropFold
   if (!ids.length && !span) return;
   await transferItems(qc, copy ? "copy" : "move", { ids, span, count: ids.length + (span?.count ?? 0) }, folder.id, {
     done: (n) =>
-      copy ? t("Copied {n} item to \"{name}\"|Copied {n} items to \"{name}\"", { n, name: folder.name }) : t("Moved {n} item to \"{name}\"|Moved {n} items to \"{name}\"", { n, name: folder.name }),
+      copy ? t('Copied {n} item to "{name}"|Copied {n} items to "{name}"', { n, name: folder.name }) : t('Moved {n} item to "{name}"|Moved {n} items to "{name}"', { n, name: folder.name }),
     fallback: copy ? t("Couldn't copy") : t("Couldn't move"),
     items: dragged?.items,
   });

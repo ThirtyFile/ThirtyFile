@@ -208,12 +208,7 @@ async fn session_user(parts: &mut Parts, st: &AppState) -> Result<User, AppError
 fn touch_session(st: AppState, id: String, ip: Option<String>) {
     tokio::spawn(async move {
         let _w = st.write_lock.lock().await;
-        let res = sqlx::query("UPDATE sessions SET last_used_at = ?, ip = COALESCE(?, ip) WHERE id = ?")
-            .bind(now())
-            .bind(ip)
-            .bind(&id)
-            .execute(&st.db)
-            .await;
+        let res = sqlx::query("UPDATE sessions SET last_used_at = ?, ip = COALESCE(?, ip) WHERE id = ?").bind(now()).bind(ip).bind(&id).execute(&st.db).await;
         if let Err(e) = res {
             tracing::debug!("Couldn't record the use of a session: {e}");
         }
@@ -278,7 +273,18 @@ async fn me_of(st: &AppState, user: User) -> AppResult<Me> {
         (user.is_admin() || s.allow_user_drives, s.public_url.clone(), s.min_password_length, s.version_keep)
     };
     let share_policy = crate::shares::policy(st);
-    Ok(Me { user, used_bytes, personal_pending, can_create_drive, public_url, trash_days: st.trash_days, min_password_length, share_policy, version_keep, max_edit_bytes: crate::files::MAX_EDIT_BYTES })
+    Ok(Me {
+        user,
+        used_bytes,
+        personal_pending,
+        can_create_drive,
+        public_url,
+        trash_days: st.trash_days,
+        min_password_length,
+        share_policy,
+        version_keep,
+        max_edit_bytes: crate::files::MAX_EDIT_BYTES,
+    })
 }
 
 #[derive(Deserialize)]
@@ -494,10 +500,8 @@ pub async fn login(
             format!("Too many failed sign-in attempts for this account. Try again in {wait} seconds."),
         ));
     }
-    let row: Option<(i64, String, bool)> = sqlx::query_as("SELECT id, password_hash, disabled FROM users WHERE username = ?")
-        .bind(username)
-        .fetch_optional(&st.db)
-        .await?;
+    let row: Option<(i64, String, bool)> =
+        sqlx::query_as("SELECT id, password_hash, disabled FROM users WHERE username = ?").bind(username).fetch_optional(&st.db).await?;
     // Hash once even when the username doesn't exist, so response timing doesn't reveal whether it exists
     let (id, hash, disabled) = row.unwrap_or((0, DUMMY_HASH.into(), false));
     let password_ok = verify_password(req.password, hash).await?;
@@ -585,18 +589,13 @@ pub async fn open_session(st: &AppState, user_id: i64, method: &str, ip: &str, h
     Ok(cookie_header(st, SESSION_COOKIE, &token, "/", SESSION_TTL))
 }
 
-pub async fn logout(
-    State(st): State<AppState>,
-    ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
-    headers: HeaderMap,
-) -> AppResult<impl IntoResponse> {
+pub async fn logout(State(st): State<AppState>, ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>, headers: HeaderMap) -> AppResult<impl IntoResponse> {
     if let Some(token) = get_cookie(&headers, SESSION_COOKIE) {
         let hash = sha256_hex(token.as_bytes());
-        let who: Option<(i64, String)> =
-            sqlx::query_as("SELECT u.id, u.username FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?")
-                .bind(&hash)
-                .fetch_optional(&st.db)
-                .await?;
+        let who: Option<(i64, String)> = sqlx::query_as("SELECT u.id, u.username FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?")
+            .bind(&hash)
+            .fetch_optional(&st.db)
+            .await?;
         {
             let _w = st.write_lock.lock().await;
             sqlx::query("DELETE FROM sessions WHERE token_hash = ?").bind(&hash).execute(&st.db).await?;

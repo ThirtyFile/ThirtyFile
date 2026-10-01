@@ -63,13 +63,7 @@ async fn drive_info(st: &AppState, conn: &mut SqliteConnection, d: Drive, role: 
 /// What the space cards show, for many spaces in one query (the lists don't run a query per space). With
 /// `scan_details`, folder spaces also report their folder and last scan (administrators). `admin`: the person asking is
 /// an administrator, who is told why a storage location is offline.
-async fn drive_infos(
-    st: &AppState,
-    conn: &mut SqliteConnection,
-    drives: Vec<(Drive, Option<Role>)>,
-    scan_details: bool,
-    admin: bool,
-) -> AppResult<Vec<DriveInfo>> {
+async fn drive_infos(st: &AppState, conn: &mut SqliteConnection, drives: Vec<(Drive, Option<Role>)>, scan_details: bool, admin: bool) -> AppResult<Vec<DriveInfo>> {
     #[derive(sqlx::FromRow)]
     struct Row {
         id: String,
@@ -283,12 +277,7 @@ pub struct UpdateDriveReq {
     read_only: Option<bool>,
 }
 
-pub async fn update(
-    State(st): State<AppState>,
-    user: User,
-    Path(id): Path<String>,
-    Json(req): Json<UpdateDriveReq>,
-) -> AppResult<Json<DriveInfo>> {
+pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<String>, Json(req): Json<UpdateDriveReq>) -> AppResult<Json<DriveInfo>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let (drive, role) = if user.is_admin() {
@@ -492,12 +481,7 @@ pub struct GrantReq {
     expires_at: Option<i64>,
 }
 
-pub async fn grant(
-    State(st): State<AppState>,
-    user: User,
-    Path(id): Path<String>,
-    Json(req): Json<GrantReq>,
-) -> AppResult<Json<Value>> {
+pub async fn grant(State(st): State<AppState>, user: User, Path(id): Path<String>, Json(req): Json<GrantReq>) -> AppResult<Json<Value>> {
     let role = Role::parse(&req.role).ok_or_else(|| AppError::bad_request("Invalid role"))?;
     if !matches!(req.principal_type.as_str(), "user" | "group" | "everyone") {
         return Err(AppError::bad_request("Invalid user or group"));
@@ -537,13 +521,12 @@ pub async fn grant(
     }
     // The grant replaced by this one: only someone with at least that role may change it, and an owner may only be
     // lowered or given an expiry while another owner remains
-    let existing: Option<(String,)> =
-        sqlx::query_as("SELECT role FROM grants WHERE node_id = ? AND principal_type = ? AND principal_id = ?")
-            .bind(&node.id)
-            .bind(&req.principal_type)
-            .bind(principal_id)
-            .fetch_optional(&mut *tx)
-            .await?;
+    let existing: Option<(String,)> = sqlx::query_as("SELECT role FROM grants WHERE node_id = ? AND principal_type = ? AND principal_id = ?")
+        .bind(&node.id)
+        .bind(&req.principal_type)
+        .bind(principal_id)
+        .fetch_optional(&mut *tx)
+        .await?;
     let is_new = existing.is_none();
     if let Some(old) = existing.and_then(|(r,)| Role::parse(&r)) {
         if !user.is_admin() && my_role.is_some_and(|r| old > r) {
@@ -675,14 +658,10 @@ pub struct GroupMember {
 }
 
 pub async fn list_groups(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<GroupInfo>>> {
-    let groups: Vec<(i64, String, String, i64)> =
-        sqlx::query_as("SELECT id, name, description, created_at FROM groups ORDER BY name").fetch_all(&st.db).await?;
+    let groups: Vec<(i64, String, String, i64)> = sqlx::query_as("SELECT id, name, description, created_at FROM groups ORDER BY name").fetch_all(&st.db).await?;
     // Every group's members in one query
-    let members: Vec<(i64, i64, String)> = sqlx::query_as(
-        "SELECT m.group_id, u.id, u.username FROM group_members m JOIN users u ON u.id = m.user_id ORDER BY u.username",
-    )
-    .fetch_all(&st.db)
-    .await?;
+    let members: Vec<(i64, i64, String)> =
+        sqlx::query_as("SELECT m.group_id, u.id, u.username FROM group_members m JOIN users u ON u.id = m.user_id ORDER BY u.username").fetch_all(&st.db).await?;
     let mut by_group: HashMap<i64, Vec<GroupMember>> = HashMap::new();
     for (group_id, id, username) in members {
         by_group.entry(group_id).or_default().push(GroupMember { id, username });
@@ -725,29 +704,23 @@ pub async fn create_group(State(st): State<AppState>, Admin(user): Admin, Json(r
         .bind(now())
         .execute(&mut *tx)
         .await
-        .map_err(|e| if matches!(&e, sqlx::Error::Database(d) if d.is_unique_violation()) { AppError::conflict("A group with this name already exists") } else { e.into() })?;
+        .map_err(|e| {
+            if matches!(&e, sqlx::Error::Database(d) if d.is_unique_violation()) { AppError::conflict("A group with this name already exists") } else { e.into() }
+        })?;
     set_members(&mut tx, id, req.members.as_deref().unwrap_or_default()).await?;
     logs::record_activity(&mut tx, &user, None, "group_create", &name).await?;
     tx.commit().await?;
     Ok(Json(json!({ "id": id })))
 }
 
-pub async fn update_group(
-    State(st): State<AppState>,
-    Admin(user): Admin,
-    Path(id): Path<i64>,
-    Json(req): Json<GroupReq>,
-) -> AppResult<Json<Value>> {
+pub async fn update_group(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<i64>, Json(req): Json<GroupReq>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     if let Some(name) = &req.name {
         let name = validate_name(name)?;
-        sqlx::query("UPDATE groups SET name = ? WHERE id = ?")
-            .bind(&name)
-            .bind(id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| if matches!(&e, sqlx::Error::Database(d) if d.is_unique_violation()) { AppError::conflict("A group with this name already exists") } else { e.into() })?;
+        sqlx::query("UPDATE groups SET name = ? WHERE id = ?").bind(&name).bind(id).execute(&mut *tx).await.map_err(|e| {
+            if matches!(&e, sqlx::Error::Database(d) if d.is_unique_violation()) { AppError::conflict("A group with this name already exists") } else { e.into() }
+        })?;
     }
     if let Some(d) = &req.description {
         sqlx::query("UPDATE groups SET description = ? WHERE id = ?").bind(d).bind(id).execute(&mut *tx).await?;
@@ -780,7 +753,6 @@ pub async fn delete_group(State(st): State<AppState>, Admin(user): Admin, Path(i
     }
     Ok(Json(json!({ "ok": true })))
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -832,9 +804,20 @@ mod tests {
         env.st.system.write().unwrap().allow_user_drives = true;
         let amy = env.user("amy", true).await;
         for i in 0..MAX_OWN_SPACES {
-            let _ = create(State(env.st.clone()), amy.clone(), Json(CreateDriveReq { name: format!("Team {i}"), quota_bytes: 0, source_path: None, read_only: false, location_id: None })).await.unwrap();
+            let _ = create(
+                State(env.st.clone()),
+                amy.clone(),
+                Json(CreateDriveReq { name: format!("Team {i}"), quota_bytes: 0, source_path: None, read_only: false, location_id: None }),
+            )
+            .await
+            .unwrap();
         }
-        let res = create(State(env.st.clone()), amy.clone(), Json(CreateDriveReq { name: "One more".into(), quota_bytes: 0, source_path: None, read_only: false, location_id: None })).await;
+        let res = create(
+            State(env.st.clone()),
+            amy.clone(),
+            Json(CreateDriveReq { name: "One more".into(), quota_bytes: 0, source_path: None, read_only: false, location_id: None }),
+        )
+        .await;
         assert!(matches!(res, Err(e) if e.status == axum::http::StatusCode::BAD_REQUEST));
     }
 
@@ -910,7 +893,13 @@ mod tests {
 
         // An owner whose access has expired doesn't count as the remaining owner
         env.grant(&root, &carol, "owner").await;
-        sqlx::query("UPDATE grants SET expires_at = ? WHERE node_id = ? AND principal_id = ?").bind(now() - 1).bind(&root).bind(carol.id).execute(&env.st.db).await.unwrap();
+        sqlx::query("UPDATE grants SET expires_at = ? WHERE node_id = ? AND principal_id = ?")
+            .bind(now() - 1)
+            .bind(&root)
+            .bind(carol.id)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
         let err = revoke(st(), amy.clone(), Path(grant_id(&env, &root, &amy).await)).await.unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::BAD_REQUEST);
     }
@@ -1003,7 +992,13 @@ mod tests {
         let Json(info) = create(State(env.st.clone()), amy, Json(req)).await.unwrap();
         assert_eq!(info.quota_bytes, 5000, "not unlimited, whatever the request said");
         let admin = env.admin().await;
-        let Json(info) = create(State(env.st.clone()), admin, Json(CreateDriveReq { name: "Big".into(), quota_bytes: 0, source_path: None, read_only: false, location_id: None })).await.unwrap();
+        let Json(info) = create(
+            State(env.st.clone()),
+            admin,
+            Json(CreateDriveReq { name: "Big".into(), quota_bytes: 0, source_path: None, read_only: false, location_id: None }),
+        )
+        .await
+        .unwrap();
         assert_eq!(info.quota_bytes, 0, "administrators may create unlimited spaces");
     }
 

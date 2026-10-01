@@ -10,21 +10,7 @@
  *   Everything else (charts, images, pivot tables, all content besides macros) is left untouched
  */
 import JSZip from "jszip";
-import {
-  MAX_COLS,
-  cellName,
-  key,
-  parseCellName,
-  colOf,
-  rowOf,
-  type Borders,
-  type Cell,
-  type CellStyle,
-  type Range,
-  type Scalar,
-  type Sheet,
-  type Workbook,
-} from "./model";
+import { MAX_COLS, cellName, key, parseCellName, colOf, rowOf, type Borders, type Cell, type CellStyle, type Range, type Scalar, type Sheet, type Workbook } from "./model";
 import { shiftFormula } from "./formula";
 import { parseTheme, rgbaHex, sheetColor, INDEXED_COLORS, type Theme } from "../core/theme";
 import { checkZipSizes, readEntry } from "../core/package";
@@ -73,7 +59,7 @@ const BUILTIN_NUMFMT: Record<number, string> = {
   21: "h:mm:ss",
   22: "yyyy/m/d h:mm",
   // Built-in formats for the Traditional Chinese (Taiwan) locale; e is the ROC (Minguo) year
-  27: '[$-404]e/m/d',
+  27: "[$-404]e/m/d",
   28: '[$-404]e"年"m"月"d"日"', // i18n-ignore: Excel built-in number format code
   29: '[$-404]e"年"m"月"d"日"', // i18n-ignore: Excel built-in number format code
   30: "m/d/yy",
@@ -82,15 +68,15 @@ const BUILTIN_NUMFMT: Record<number, string> = {
   33: 'hh"時"mm"分"ss"秒"', // i18n-ignore: Excel built-in number format code
   34: '上午/下午hh"時"mm"分"', // i18n-ignore: Excel built-in number format code
   35: '上午/下午hh"時"mm"分"ss"秒"', // i18n-ignore: Excel built-in number format code
-  36: '[$-404]e/m/d',
-  50: '[$-404]e/m/d',
+  36: "[$-404]e/m/d",
+  50: "[$-404]e/m/d",
   51: '[$-404]e"年"m"月"d"日"', // i18n-ignore: Excel built-in number format code
   52: '上午/下午hh"時"mm"分"', // i18n-ignore: Excel built-in number format code
   53: '上午/下午hh"時"mm"分"ss"秒"', // i18n-ignore: Excel built-in number format code
   54: '[$-404]e"年"m"月"d"日"', // i18n-ignore: Excel built-in number format code
   55: '上午/下午hh"時"mm"分"', // i18n-ignore: Excel built-in number format code
   56: '上午/下午hh"時"mm"分"ss"秒"', // i18n-ignore: Excel built-in number format code
-  57: '[$-404]e/m/d',
+  57: "[$-404]e/m/d",
   58: '[$-404]e"年"m"月"d"日"', // i18n-ignore: Excel built-in number format code
   37: "#,##0 ;(#,##0)",
   38: "#,##0 ;[Red](#,##0)",
@@ -189,7 +175,9 @@ function readStyles(doc: Document | null): CellStyle[] {
     const gradient = fill && child(fill, "gradientFill");
     if (gradient) {
       // Gradient: use the midpoint of the two end colors
-      const stops = Array.from(gradient.children).map((st) => color(child(st, "color"))).filter((c): c is string => !!c);
+      const stops = Array.from(gradient.children)
+        .map((st) => color(child(st, "color")))
+        .filter((c): c is string => !!c);
       if (stops.length) s.bg = stops.length > 1 ? mixHex(stops[0], stops[stops.length - 1], 0.5) : stops[0];
     }
     const border = readBorder(borders[Number(xf.getAttribute("borderId") ?? 0)]);
@@ -407,7 +395,10 @@ export async function readXlsx(buf: ArrayBuffer): Promise<{ zip: JSZip; book: Wo
   // Sheet shown on open (activeTab indexes all sheets, including skipped chart sheets)
   const activeTab = Number(byTag(workbook, "workbookView")[0]?.getAttribute("activeTab") ?? 0);
   const activeName = byTag(workbook, "sheet")[activeTab]?.getAttribute("name");
-  const active = Math.max(0, sheets.findIndex((sh) => sh.name === activeName && !sh.hidden));
+  const active = Math.max(
+    0,
+    sheets.findIndex((sh) => sh.name === activeName && !sh.hidden),
+  );
   return { zip, book: { sheets, styles, xfCount: styles.length, styleBase: new Map(), active }, snapshot };
 }
 
@@ -543,9 +534,7 @@ function unshare(doc: Document, si: string) {
 }
 
 function unshareAll(doc: Document) {
-  const ids = new Set(
-    byTag(doc, "f").flatMap((f) => (f.getAttribute("t") === "shared" && f.getAttribute("si") !== null ? [f.getAttribute("si")!] : [])),
-  );
+  const ids = new Set(byTag(doc, "f").flatMap((f) => (f.getAttribute("t") === "shared" && f.getAttribute("si") !== null ? [f.getAttribute("si")!] : [])));
   for (const si of ids) unshare(doc, si);
 }
 
@@ -702,8 +691,7 @@ function replayPositions(doc: Document, op: StructOp) {
   }
   // Remove containers that became empty as a result
   for (const tag of ["conditionalFormatting", "dataValidations", "hyperlinks"]) {
-    for (const el of byTag(doc, tag))
-      if (el.children.length === 0 || (tag === "conditionalFormatting" && !el.getAttribute("sqref"))) el.parentNode?.removeChild(el);
+    for (const el of byTag(doc, tag)) if (el.children.length === 0 || (tag === "conditionalFormatting" && !el.getAttribute("sqref"))) el.parentNode?.removeChild(el);
   }
   const dv = byTag(doc, "dataValidations")[0];
   if (dv) dv.setAttribute("count", String(byTag(dv, "dataValidation").length));
@@ -745,23 +733,7 @@ const sameBorder = (a?: Borders, b?: Borders) => JSON.stringify(a ?? {}) === JSO
 const argb = (hex: string) => `FF${hex.replace("#", "").toUpperCase()}`;
 
 /** Reorder child elements into the standard font element order */
-const FONT_ORDER = [
-  "b",
-  "i",
-  "strike",
-  "condense",
-  "extend",
-  "outline",
-  "shadow",
-  "u",
-  "vertAlign",
-  "sz",
-  "color",
-  "name",
-  "family",
-  "charset",
-  "scheme",
-];
+const FONT_ORDER = ["b", "i", "strike", "condense", "extend", "outline", "shadow", "u", "vertAlign", "sz", "color", "name", "family", "charset", "scheme"];
 
 function buildFont(doc: Document, base: Element | undefined, s: CellStyle, origin: CellStyle) {
   const font = (base?.cloneNode(true) as Element | undefined) ?? doc.createElementNS(NS, "font");

@@ -95,11 +95,11 @@ describe("functions", () => {
     ['=TEXT(1234.5,"#,##0.00")', "1,234.50"],
     ['=VALUE("1,234")', 1234],
     ["=DATE(2024,2,29)", 45351],
-    ["=YEAR(45351)&\"/\"&MONTH(45351)&\"/\"&DAY(45351)", "2024/2/29"],
+    ['=YEAR(45351)&"/"&MONTH(45351)&"/"&DAY(45351)', "2024/2/29"],
     ["=WEEKDAY(45351)", 5],
     ["=EDATE(DATE(2024,1,31),1)", 45351],
     ["=EOMONTH(DATE(2023,2,10),0)", 44985],
-    ['=VLOOKUP(20,A1:B3,2,FALSE)', "Banana"],
+    ["=VLOOKUP(20,A1:B3,2,FALSE)", "Banana"],
     ['=HLOOKUP("Banana",B2:B3,2,FALSE)', "cherry"],
     ['=MATCH("cherry",B1:B3,0)', 3],
     ["=INDEX(A1:B3,2,2)", "Banana"],
@@ -204,16 +204,16 @@ describe("large ranges in sparse sheets", () => {
   });
 
   test.each([
-      ["=VLOOKUP(5,A1:XFD1048576,2,FALSE)", "five"],
-      ["=VLOOKUP(4,A1:XFD1048576,2)", null],
-      ["=VLOOKUP(7,A1:XFD1048576,2)", "five"],
-      ["=VLOOKUP(0,A1:XFD1048576,2)", "#N/A"],
-      ['=HLOOKUP("c",A1:XFD1048576,5,FALSE)', null],
-      ["=MATCH(5,A1:A1048576,0)", 5],
-      ["=MATCH(9,A1:A1048576)", 5],
-      ['=MATCH("c",A1:XFD1,0)', 7],
-      ['=XLOOKUP("c",A1:XFD1,A5:XFD5)', null],
-      ['=XLOOKUP(5,A1:A1048576,B1:B1048576)', "five"],
+    ["=VLOOKUP(5,A1:XFD1048576,2,FALSE)", "five"],
+    ["=VLOOKUP(4,A1:XFD1048576,2)", null],
+    ["=VLOOKUP(7,A1:XFD1048576,2)", "five"],
+    ["=VLOOKUP(0,A1:XFD1048576,2)", "#N/A"],
+    ['=HLOOKUP("c",A1:XFD1048576,5,FALSE)', null],
+    ["=MATCH(5,A1:A1048576,0)", 5],
+    ["=MATCH(9,A1:A1048576)", 5],
+    ['=MATCH("c",A1:XFD1,0)', 7],
+    ['=XLOOKUP("c",A1:XFD1,A5:XFD5)', null],
+    ["=XLOOKUP(5,A1:A1048576,B1:B1048576)", "five"],
   ])("lookups over a range reaching the last cell of the sheet stay cheap: %s", (f, want) => {
     const { v, reads } = counted({ A1: 1, A5: 5, B5: "five", E1: "b", G1: "c", XFD1048576: 9 }, f);
     expect(v).toBe(want);
@@ -265,7 +265,7 @@ describe("helpers", () => {
   test("shiftFormula moves relative references only", () => {
     expect(shiftFormula("=A1+$B$2+C$3+$D4", 1, 1)).toBe("=B2+$B$2+D$3+$D5");
     // Text, sheet names and function names are left alone
-    expect(shiftFormula('="A1"&\'Q1 A1\'!A1&LOG10(A1)', 1, 0)).toBe('="A1"&\'Q1 A1\'!A2&LOG10(A2)');
+    expect(shiftFormula("=\"A1\"&'Q1 A1'!A1&LOG10(A1)", 1, 0)).toBe("=\"A1\"&'Q1 A1'!A2&LOG10(A2)");
     expect(shiftFormula("=A1", -1, 0)).toBe("=#REF!");
   });
 

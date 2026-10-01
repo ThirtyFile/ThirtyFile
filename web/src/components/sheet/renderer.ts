@@ -166,9 +166,7 @@ function panes(v: View): Pane[] {
   const H = v.height;
   const rowsMain = { r1: v.rows.indexAt(v.scrollY + fh), r2: v.rows.indexAt(v.scrollY + H - HEADER_H) };
   const colsMain = { c1: v.cols.indexAt(v.scrollX + fw), c2: v.cols.indexAt(v.scrollX + W - HEADER_W) };
-  const out: Pane[] = [
-    { view: v, clip: { x: HEADER_W + fw, y: HEADER_H + fh, w: W - HEADER_W - fw, h: H - HEADER_H - fh }, vis: { ...rowsMain, ...colsMain } },
-  ];
+  const out: Pane[] = [{ view: v, clip: { x: HEADER_W + fw, y: HEADER_H + fh, w: W - HEADER_W - fw, h: H - HEADER_H - fh }, vis: { ...rowsMain, ...colsMain } }];
   if (fr) out.push({ view: { ...v, scrollY: 0 }, clip: { x: HEADER_W + fw, y: HEADER_H, w: W - HEADER_W - fw, h: fh }, vis: { r1: 0, r2: fr - 1, ...colsMain } });
   if (fc) out.push({ view: { ...v, scrollX: 0 }, clip: { x: HEADER_W, y: HEADER_H + fh, w: fw, h: H - HEADER_H - fh }, vis: { ...rowsMain, c1: 0, c2: fc - 1 } });
   if (fr && fc) out.push({ view: { ...v, scrollX: 0, scrollY: 0 }, clip: { x: HEADER_W, y: HEADER_H, w: fw, h: fh }, vis: { r1: 0, r2: fr - 1, c1: 0, c2: fc - 1 } });
@@ -362,12 +360,7 @@ function drawPane(ctx: CanvasRenderingContext2D, pane: Pane, s: DrawState) {
     const lineH = fontPx * 1.25;
     const blockH = lines.length * lineH;
     const vAlign = style?.vAlign ?? "bottom";
-    let y =
-      vAlign === "top"
-        ? rect.y + pad + fontPx
-        : vAlign === "center"
-          ? rect.y + (rect.h - blockH) / 2 + fontPx
-          : rect.y + rect.h - blockH - pad + fontPx;
+    let y = vAlign === "top" ? rect.y + pad + fontPx : vAlign === "center" ? rect.y + (rect.h - blockH) / 2 + fontPx : rect.y + rect.h - blockH - pad + fontPx;
     if (lines.length === 1 && vAlign !== "top") y = vAlign === "center" ? rect.y + rect.h / 2 + fontPx * 0.35 : rect.y + rect.h - pad - 1;
     for (const line of lines) {
       const lw = ctx.measureText(line).width;
@@ -425,12 +418,7 @@ function drawPane(ctx: CanvasRenderingContext2D, pane: Pane, s: DrawState) {
     ctx.setLineDash([4, 3]);
     ctx.strokeStyle = SEL;
     ctx.lineWidth = 1.5;
-    ctx.strokeRect(
-      cx + 1,
-      cy + 1,
-      v.cols.offset(s.clip.c2 + 1) - v.cols.offset(s.clip.c1) - 2,
-      v.rows.offset(s.clip.r2 + 1) - v.rows.offset(s.clip.r1) - 2,
-    );
+    ctx.strokeRect(cx + 1, cy + 1, v.cols.offset(s.clip.c2 + 1) - v.cols.offset(s.clip.c1) - 2, v.rows.offset(s.clip.r2 + 1) - v.rows.offset(s.clip.r1) - 2);
     ctx.setLineDash([]);
   }
   ctx.restore();

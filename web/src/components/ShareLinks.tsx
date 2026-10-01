@@ -67,13 +67,7 @@ export function ShareLinks({
   const toolbar = (
     <>
       <ToolButton icon={CopyIcon} label={t("Copy link")} showLabel disabled={!current} onClick={() => current && copy(current.id)} />
-      <ToolButton
-        icon={ExternalLinkIcon}
-        label={t("Open")}
-        showLabel
-        disabled={!current}
-        onClick={() => current && window.open(sharePath(current.id), "_blank", "noopener")}
-      />
+      <ToolButton icon={ExternalLinkIcon} label={t("Open")} showLabel disabled={!current} onClick={() => current && window.open(sharePath(current.id), "_blank", "noopener")} />
       <ToolButton icon={PencilIcon} label={t("Edit")} showLabel disabled={!current} onClick={() => current && setEditing(current)} />
       <ToolButton icon={Trash2Icon} label={t("Delete link")} showLabel disabled={!current} onClick={() => current && askRemove(current.id)} />
       <ToolSeparator />
@@ -119,8 +113,7 @@ export function ShareLinks({
       header: t("Expires"),
       className: "max-md:hidden",
       cellClassName: "text-muted-foreground",
-      cell: (s) =>
-        s.expires_at ? (s.expires_at * 1000 <= Date.now() ? t("Expired {date}", { date: formatDate(s.expires_at) }) : formatDate(s.expires_at)) : t("Never expires"),
+      cell: (s) => (s.expires_at ? (s.expires_at * 1000 <= Date.now() ? t("Expired {date}", { date: formatDate(s.expires_at) }) : formatDate(s.expires_at)) : t("Never expires")),
     },
     {
       header: t("Downloads"),

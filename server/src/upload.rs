@@ -125,11 +125,8 @@ fn parse_metadata(headers: &HeaderMap) -> std::collections::HashMap<String, Stri
         .filter_map(|pair| {
             let mut it = pair.trim().splitn(2, ' ');
             let key = it.next()?.to_string();
-            let value = it
-                .next()
-                .and_then(|v| base64::engine::general_purpose::STANDARD.decode(v.trim()).ok())
-                .and_then(|b| String::from_utf8(b).ok())
-                .unwrap_or_default();
+            let value =
+                it.next().and_then(|v| base64::engine::general_purpose::STANDARD.decode(v.trim()).ok()).and_then(|b| String::from_utf8(b).ok()).unwrap_or_default();
             Some((key, value))
         })
         .collect()
@@ -179,11 +176,7 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
         rel_parts.push(validate_name(part)?);
     }
     let rel_path = rel_parts.join("/");
-    let batch = meta
-        .get("batchId")
-        .filter(|b| (1..=64).contains(&b.len()) && b.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
-        .cloned()
-        .unwrap_or_default();
+    let batch = meta.get("batchId").filter(|b| (1..=64).contains(&b.len()) && b.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).cloned().unwrap_or_default();
     // Visitors of a share link never replace files: they may not even see what's there
     let on_conflict = match meta.get("onConflict").map(String::as_str) {
         Some("replace") if up.share.is_none() => "replace",
@@ -269,12 +262,12 @@ async fn load(st: &AppState, up: &Uploader, id: &str) -> AppResult<Upload> {
         "SELECT id, owner_id, parent_id, rel_path, name, size, offset, drive_id, batch, node_id, on_conflict, hash_state, hashed FROM uploads
          WHERE id = ?1 AND ((?3 IS NULL AND share_id IS NULL AND owner_id = ?2) OR share_id = ?3)",
     )
-        .bind(id)
-        .bind(up.user.id)
-        .bind(up.share_id())
-        .fetch_optional(&st.db)
-        .await?
-        .ok_or_else(|| AppError::not_found("The upload doesn't exist or has expired"))
+    .bind(id)
+    .bind(up.user.id)
+    .bind(up.share_id())
+    .fetch_optional(&st.db)
+    .await?
+    .ok_or_else(|| AppError::not_found("The upload doesn't exist or has expired"))
 }
 
 pub async fn head(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Response> {
@@ -344,13 +337,7 @@ impl Drop for ActiveGuard {
     }
 }
 
-pub async fn patch(
-    State(st): State<AppState>,
-    user: User,
-    Path(id): Path<String>,
-    headers: HeaderMap,
-    body: Body,
-) -> AppResult<Response> {
+pub async fn patch(State(st): State<AppState>, user: User, Path(id): Path<String>, headers: HeaderMap, body: Body) -> AppResult<Response> {
     patch_as(&st, &Uploader::signed_in(user), &id, &headers, body).await
 }
 
@@ -436,12 +423,12 @@ pub async fn patch_as(st: &AppState, up: &Uploader, id: &str, headers: &HeaderMa
             "UPDATE uploads SET offset = ?1, expires_at = CASE WHEN ?1 > offset THEN ?2 ELSE expires_at END, hash_state = ?3,
              hashed = CASE WHEN ?3 IS NULL THEN 0 ELSE ?1 END WHERE id = ?4",
         )
-            .bind(offset as i64)
-            .bind(now() + UPLOAD_TTL)
-            .bind(hasher.as_ref().map(|h| h.serialize().to_vec()))
-            .bind(&id)
-            .execute(&st.db)
-            .await?;
+        .bind(offset as i64)
+        .bind(now() + UPLOAD_TTL)
+        .bind(hasher.as_ref().map(|h| h.serialize().to_vec()))
+        .bind(&id)
+        .execute(&st.db)
+        .await?;
     }
     if let Some(e) = failure {
         return Err(e);
@@ -704,12 +691,8 @@ pub async fn clean_tmp(st: &AppState) -> AppResult<usize> {
         let modified = entry.metadata().await.and_then(|m| m.modified()).ok();
         files.push((entry.file_name().to_string_lossy().into_owned(), entry.path(), modified));
     }
-    let known: std::collections::HashSet<String> = sqlx::query_as::<_, (String,)>("SELECT id FROM uploads")
-        .fetch_all(&st.db)
-        .await?
-        .into_iter()
-        .map(|(id,)| format!("upload-{id}"))
-        .collect();
+    let known: std::collections::HashSet<String> =
+        sqlx::query_as::<_, (String,)>("SELECT id FROM uploads").fetch_all(&st.db).await?.into_iter().map(|(id,)| format!("upload-{id}")).collect();
     let now = std::time::SystemTime::now();
     let older_than = |t: Option<std::time::SystemTime>, secs: u64| t.is_some_and(|t| t < now - std::time::Duration::from_secs(secs));
     let mut removed = 0;
@@ -728,14 +711,13 @@ pub async fn purge_expired(st: &AppState) -> AppResult<usize> {
     let ids: Vec<(String,)> = {
         let _w = st.write_lock.lock().await;
         let ts = now();
-        let expired: Vec<(String,)> = sqlx::query_as(
-            "SELECT id FROM uploads WHERE expires_at < ?1 OR (share_id IS NOT NULL AND node_id IS NULL AND expires_at < ?1 + ?2 - ?3)",
-        )
-        .bind(ts)
-        .bind(UPLOAD_TTL)
-        .bind(LINK_UPLOAD_IDLE)
-        .fetch_all(&st.db)
-        .await?;
+        let expired: Vec<(String,)> =
+            sqlx::query_as("SELECT id FROM uploads WHERE expires_at < ?1 OR (share_id IS NOT NULL AND node_id IS NULL AND expires_at < ?1 + ?2 - ?3)")
+                .bind(ts)
+                .bind(UPLOAD_TTL)
+                .bind(LINK_UPLOAD_IDLE)
+                .fetch_all(&st.db)
+                .await?;
         let active = st.active_uploads.lock().unwrap().clone();
         let ids: Vec<(String,)> = expired.into_iter().filter(|(id,)| !active.contains(id)).collect();
         let list = serde_json::to_string(&ids.iter().map(|(id,)| id).collect::<Vec<_>>()).unwrap();
@@ -991,7 +973,8 @@ mod tests {
         let (blobs,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blobs").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(blobs, 0);
         // Nothing left behind under a temporary name
-        let leftovers: Vec<_> = std::fs::read_dir(&space.dir).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(".thirtyfile-upload")).collect();
+        let leftovers: Vec<_> =
+            std::fs::read_dir(&space.dir).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(".thirtyfile-upload")).collect();
         assert!(leftovers.is_empty());
     }
 
@@ -1029,7 +1012,8 @@ mod tests {
         // The old content is kept as an earlier version of the file
         let (blobs,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blobs").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(blobs, 3);
-        let (versions,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM node_versions WHERE node_id = ? AND blob_hash IS NOT NULL").bind(&original).fetch_one(&env.st.db).await.unwrap();
+        let (versions,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM node_versions WHERE node_id = ? AND blob_hash IS NOT NULL").bind(&original).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(versions, 1);
     }
 

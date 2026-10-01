@@ -18,11 +18,8 @@ struct Assets;
 /// - Only this site may embed them (prevents clickjacking; the sandboxed iframe for Office previews uses srcdoc, so it's unaffected)
 /// - No referrer URL is sent to other sites (share page URLs contain the share token)
 /// - The Content-Security-Policy is built per page (see `content_security_policy`)
-const SECURITY_HEADERS: [(header::HeaderName, &str); 3] = [
-    (header::X_FRAME_OPTIONS, "SAMEORIGIN"),
-    (header::REFERRER_POLICY, "same-origin"),
-    (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-];
+const SECURITY_HEADERS: [(header::HeaderName, &str); 3] =
+    [(header::X_FRAME_OPTIONS, "SAMEORIGIN"), (header::REFERRER_POLICY, "same-origin"), (header::X_CONTENT_TYPE_OPTIONS, "nosniff")];
 
 /// Content-Security-Policy for the app page. Scripts may only come from this site, plus the inline scripts we generate
 /// ourselves, allowed by hash: the theme bootstrap in index.html, the injected branding settings, and the Office previewer
@@ -208,7 +205,8 @@ mod tests {
     fn line_endings_are_hashed_as_the_browser_parses_them() {
         // base64(sha256("\n  let a = 1;\n  let b = 2;\n")), the script a browser runs from any of these pages
         let want = "'sha256-HZCPBoNcEBwurXrAGF/huOP1Ag8cIJGt2uMjvefHpAQ='";
-        for body in ["\n  let a = 1;\n  let b = 2;\n", "\r\n  let a = 1;\r\n  let b = 2;\r\n", "\r  let a = 1;\r  let b = 2;\r", "\r\n  let a = 1;\r  let b = 2;\n"] {
+        for body in ["\n  let a = 1;\n  let b = 2;\n", "\r\n  let a = 1;\r\n  let b = 2;\r\n", "\r  let a = 1;\r  let b = 2;\r", "\r\n  let a = 1;\r  let b = 2;\n"]
+        {
             let html = format!("<html><head><script>{body}</script></head></html>");
             assert_eq!(inline_script_hashes(&html), vec![want.to_string()], "{body:?}");
         }

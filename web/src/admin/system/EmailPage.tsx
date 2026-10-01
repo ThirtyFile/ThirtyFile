@@ -17,7 +17,6 @@ import { SMTP_PORT, portForSecurity } from "@/lib/notifications";
 import { useMe } from "@/lib/session";
 import { NativeSelect } from "@/components/ui/native-select";
 
-
 type Form = EmailSettingsReq & { port: number };
 
 function formOf(s: EmailSettings): Form {
@@ -74,7 +73,9 @@ export function EmailPage() {
               <div className="min-w-0 flex-1">
                 <div className="font-medium">{t("Send notifications by email")}</div>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  {t("People are always told under the bell in the app. With an email server, those who entered an email address (or signed in with Microsoft, Google or GitHub) also get an email, unless they turned it off in their notification settings. Links in emails use the site URL under General.")}
+                  {t(
+                    "People are always told under the bell in the app. With an email server, those who entered an email address (or signed in with Microsoft, Google or GitHub) also get an email, unless they turned it off in their notification settings. Links in emails use the site URL under General.",
+                  )}
                 </p>
               </div>
               <Toggle label={t("Send notifications by email")} checked={form.enabled} onChange={(enabled) => set({ enabled })} />
@@ -89,12 +90,7 @@ export function EmailPage() {
                 </div>
                 <div className="grid gap-1.5">
                   <Label htmlFor="smtp-port">{t("Port")}</Label>
-                  <Input
-                    id="smtp-port"
-                    inputMode="numeric"
-                    value={form.port || ""}
-                    onChange={(e) => set({ port: Math.min(65535, Number(e.target.value.replace(/\D/g, "")) || 0) })}
-                  />
+                  <Input id="smtp-port" inputMode="numeric" value={form.port || ""} onChange={(e) => set({ port: Math.min(65535, Number(e.target.value.replace(/\D/g, "")) || 0) })} />
                 </div>
               </div>
               <div className="grid gap-1.5">
@@ -125,13 +121,7 @@ export function EmailPage() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
                   <Label htmlFor="smtp-user">{t("Username")}</Label>
-                  <Input
-                    id="smtp-user"
-                    value={form.username}
-                    autoComplete="off"
-                    placeholder={t("Blank if the server doesn't ask")}
-                    onChange={(e) => set({ username: e.target.value })}
-                  />
+                  <Input id="smtp-user" value={form.username} autoComplete="off" placeholder={t("Blank if the server doesn't ask")} onChange={(e) => set({ username: e.target.value })} />
                 </div>
                 <div className="grid gap-1.5">
                   <Label htmlFor="smtp-password">{t("Password")}</Label>
@@ -148,14 +138,7 @@ export function EmailPage() {
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="smtp-from">{t("Sender address")}</Label>
-                <Input
-                  id="smtp-from"
-                  type="email"
-                  value={form.from}
-                  placeholder="drive@example.com"
-                  autoComplete="off"
-                  onChange={(e) => set({ from: e.target.value })}
-                />
+                <Input id="smtp-from" type="email" value={form.from} placeholder="drive@example.com" autoComplete="off" onChange={(e) => set({ from: e.target.value })} />
                 <p className="text-xs text-muted-foreground">{t("Emails come from this address, with the site name as the sender's name. The server must allow sending from it.")}</p>
               </div>
               <ErrorText>{save.error?.message}</ErrorText>
@@ -186,7 +169,11 @@ export function EmailPage() {
                 </Button>
               </div>
               <ErrorText id="smtp-test-error">{test.error?.message}</ErrorText>
-              {!me.public_url && <p className="text-xs text-muted-foreground">{t("Set the site URL under General, so emails can link to what they are about. Until then, the sign-in page doesn't offer to reset a forgotten password by email.")}</p>}
+              {!me.public_url && (
+                <p className="text-xs text-muted-foreground">
+                  {t("Set the site URL under General, so emails can link to what they are about. Until then, the sign-in page doesn't offer to reset a forgotten password by email.")}
+                </p>
+              )}
             </div>
           </Section>
         </form>

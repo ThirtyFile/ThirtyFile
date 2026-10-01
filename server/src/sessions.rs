@@ -85,12 +85,7 @@ pub async fn sign_out(
 }
 
 /// Signs out all my devices except this one
-pub async fn sign_out_others(
-    State(st): State<AppState>,
-    user: User,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
-) -> AppResult<Json<Value>> {
+pub async fn sign_out_others(State(st): State<AppState>, user: User, ConnectInfo(addr): ConnectInfo<SocketAddr>, headers: HeaderMap) -> AppResult<Json<Value>> {
     let removed = end_sessions(&st, user.id, user.session_id.as_deref()).await?;
     if removed > 0 {
         logs::record_login(&st, Some(user.id), &user.username, "signout_others", &client_ip(&st, addr, &headers), &headers);
@@ -183,7 +178,10 @@ mod tests {
         let _ = sign_out(State(env.st.clone()), laptop.clone(), Path(phone_id.clone()), addr(), HeaderMap::new()).await.unwrap();
         assert!(env.session_user(&phone_cookie).await.is_none());
         assert!(env.session_user(&laptop_cookie).await.is_some());
-        assert_eq!(sign_out(State(env.st.clone()), laptop.clone(), Path(phone_id), addr(), HeaderMap::new()).await.unwrap_err().status, axum::http::StatusCode::NOT_FOUND);
+        assert_eq!(
+            sign_out(State(env.st.clone()), laptop.clone(), Path(phone_id), addr(), HeaderMap::new()).await.unwrap_err().status,
+            axum::http::StatusCode::NOT_FOUND
+        );
 
         // Everywhere else: only the laptop stays signed in
         let Json(v) = sign_out_others(State(env.st.clone()), laptop.clone(), addr(), HeaderMap::new()).await.unwrap();
@@ -264,7 +262,8 @@ mod tests {
         let _ = admin_sign_out_all(State(env.st.clone()), Admin(admin_session), Path(admin.id), addr(), HeaderMap::new()).await.unwrap();
         assert!(env.session_user(&admin_cookie).await.is_some() && env.session_user(&admin_other).await.is_none());
 
-        let (details,): (String,) = sqlx::query_as("SELECT group_concat(detail, '|') FROM activity WHERE action = 'user_update'").fetch_one(&env.st.db).await.unwrap();
+        let (details,): (String,) =
+            sqlx::query_as("SELECT group_concat(detail, '|') FROM activity WHERE action = 'user_update'").fetch_one(&env.st.db).await.unwrap();
         assert!(details.contains("amy: signed out one device") && details.contains("amy: signed out on all devices"), "{details}");
         assert!(admin_list(State(env.st.clone()), Admin(admin), Path(9999)).await.is_err());
     }

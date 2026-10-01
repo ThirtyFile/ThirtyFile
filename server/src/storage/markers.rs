@@ -17,8 +17,7 @@ pub const MARKER_MISSING: &str = "The folder has items but no .thirtyfile-locati
 /// Shown when an administrator chooses a folder whose marker names another location
 pub const FOLDER_TAKEN: &str = "Another storage location uses this folder (it holds that location's .thirtyfile-location file)";
 /// Shown when an S3, SFTP or FTP location's marker names another location, or another installation of ThirtyFile
-pub const PLACE_TAKEN: &str =
-    "Another storage location uses this place: its .thirtyfile-location file names another location or another ThirtyFile installation";
+pub const PLACE_TAKEN: &str = "Another storage location uses this place: its .thirtyfile-location file names another location or another ThirtyFile installation";
 /// Items a disk or a NAS puts in a folder by itself: they don't make a storage folder "used"
 pub const SYSTEM_ENTRIES: [&str; 6] = ["lost+found", "#recycle", "@eaDir", ".DS_Store", "System Volume Information", "$RECYCLE.BIN"];
 

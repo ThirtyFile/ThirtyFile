@@ -72,9 +72,7 @@ describe("zip size pre-check", () => {
   });
 
   test("reads ZIP64 sizes, and nothing from bytes that aren't an archive", () => {
-    expect([...declaredEntries(buffer(zip64Directory("ppt/media/image1.png", 5_000_000_000)))]).toEqual([
-      { name: "ppt/media/image1.png", size: 5_000_000_000 },
-    ]);
+    expect([...declaredEntries(buffer(zip64Directory("ppt/media/image1.png", 5_000_000_000)))]).toEqual([{ name: "ppt/media/image1.png", size: 5_000_000_000 }]);
     expect([...declaredEntries(buffer(new TextEncoder().encode("not a zip")))]).toEqual([]);
   });
 

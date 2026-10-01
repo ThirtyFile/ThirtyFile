@@ -66,12 +66,15 @@ pub async fn search(State(st): State<AppState>, user: User, Query(q): Query<Sear
         }
         _ => {}
     }
-    let exts: Vec<String> = q.ext.as_deref().unwrap_or_default().split(',').map(|e| e.trim().trim_start_matches('.').to_lowercase()).filter(|e| !e.is_empty()).collect();
+    let exts: Vec<String> =
+        q.ext.as_deref().unwrap_or_default().split(',').map(|e| e.trim().trim_start_matches('.').to_lowercase()).filter(|e| !e.is_empty()).collect();
     if !exts.is_empty() {
         qb.push(" AND n.kind = 'file' AND (");
         let mut sep = qb.separated(" OR ");
         for e in exts {
-            sep.push("unicode_lower(n.name) LIKE ").push_bind_unseparated(format!("%.{}", e.replace(['%', '\\'], "").replace('_', "\\_"))).push_unseparated(" ESCAPE '\\'");
+            sep.push("unicode_lower(n.name) LIKE ")
+                .push_bind_unseparated(format!("%.{}", e.replace(['%', '\\'], "").replace('_', "\\_")))
+                .push_unseparated(" ESCAPE '\\'");
         }
         qb.push(")");
     }

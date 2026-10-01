@@ -100,7 +100,7 @@ export function drawLabel(g: SVGElement, spec: LabelSpec, block: Block, x: numbe
   const fill = readFill(spec.spPr, ctx);
   const stroke = strokeOr(spec.spPr, ctx.colors, null);
   const pad = fill || stroke ? 2 : 0;
-  const key = spec.showKey && keyFill ? block.h / (block.lines.length || 1) * 0.6 : 0;
+  const key = spec.showKey && keyFill ? (block.h / (block.lines.length || 1)) * 0.6 : 0;
   const w = block.w + (key ? key + 3 : 0);
   const left = h === "start" ? x : h === "middle" ? x - w / 2 : x - w;
   const top = v === "top" ? y : v === "middle" ? y - block.h / 2 : y - block.h;

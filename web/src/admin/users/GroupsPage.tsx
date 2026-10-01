@@ -30,22 +30,8 @@ export function GroupsPage() {
     <>
       <ToolButton icon={UsersRoundIcon} label={t("New group")} showLabel className="h-9 px-2.5 text-[13px]" onClick={() => setEditing("new")} />
       <ToolSeparator />
-      <ToolButton
-        icon={PencilIcon}
-        label={t("Edit")}
-        showLabel
-        className="h-9 px-2.5 text-[13px]"
-        disabled={!selected}
-        onClick={() => selected && setEditing(selected)}
-      />
-      <ToolButton
-        icon={Trash2Icon}
-        label={t("Delete")}
-        showLabel
-        className="h-9 px-2.5 text-[13px]"
-        disabled={!selected}
-        onClick={() => selected && setDeleting(selected)}
-      />
+      <ToolButton icon={PencilIcon} label={t("Edit")} showLabel className="h-9 px-2.5 text-[13px]" disabled={!selected} onClick={() => selected && setEditing(selected)} />
+      <ToolButton icon={Trash2Icon} label={t("Delete")} showLabel className="h-9 px-2.5 text-[13px]" disabled={!selected} onClick={() => selected && setDeleting(selected)} />
     </>
   );
 
@@ -122,7 +108,7 @@ export function GroupsPage() {
       {editing && <GroupDialog group={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
       {deleting && (
         <ConfirmDialog
-          title={t("Delete group \"{name}\"?", { name: deleting.name })}
+          title={t('Delete group "{name}"?', { name: deleting.name })}
           description={t("Group members will lose access to spaces and folders granted through this group.")}
           confirmText={t("Delete group")}
           destructive
@@ -173,7 +159,7 @@ function GroupDialog({ group, onClose }: { group: Group | null; onClose(): void 
           }}
         >
           <DialogHeader>
-            <DialogTitle>{group ? t("Edit group \"{name}\"", { name: group.name }) : t("New group")}</DialogTitle>
+            <DialogTitle>{group ? t('Edit group "{name}"', { name: group.name }) : t("New group")}</DialogTitle>
             <DialogDescription>{t("Groups can be added as space members or shared folder recipients.")}</DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
@@ -186,10 +172,7 @@ function GroupDialog({ group, onClose }: { group: Group | null; onClose(): void 
             <div className="max-h-52 overflow-y-auto rounded-md border">
               {users.isLoading && <Loader2Icon className="m-3 size-4 animate-spin" />}
               {shown.map((u) => (
-                <label
-                  key={u.id}
-                  className="flex cursor-pointer items-center gap-2 border-b border-border/50 px-3 py-1.5 text-sm last:border-0 hover:bg-muted/60"
-                >
+                <label key={u.id} className="flex cursor-pointer items-center gap-2 border-b border-border/50 px-3 py-1.5 text-sm last:border-0 hover:bg-muted/60">
                   <input
                     type="checkbox"
                     className="accent-brand"

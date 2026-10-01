@@ -23,7 +23,6 @@ describe("withFirstPage", () => {
   });
 });
 
-
 describe("refreshFirstPage", () => {
   test("replaces the first page of lists shown, and leaves other lists alone", async () => {
     const qc = new QueryClient();

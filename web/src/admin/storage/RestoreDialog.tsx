@@ -75,7 +75,7 @@ export function RestoreDialog({ set, onClose, onDone }: { set: BackupSet; onClos
   const { busy, error, run } = useSubmit(async () => {
     if (!p || p.problem) return;
     await api.restoreBackup(snapshotId, { ...req, target_drive: mode === "original" ? null : p.target_drive });
-    toast.success(t("\"{name}\" is being restored in the background", { name: chosen ? backupSpaceLabel(chosen) : "" }));
+    toast.success(t('"{name}" is being restored in the background', { name: chosen ? backupSpaceLabel(chosen) : "" }));
     onDone();
     onClose();
   }, t("Couldn't make the change"));
@@ -84,8 +84,10 @@ export function RestoreDialog({ set, onClose, onDone }: { set: BackupSet; onClos
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
         <form className="grid gap-4" onSubmit={run}>
           <DialogHeader>
-            <DialogTitle>{t("Restore from \"{name}\"", { name: set.name })}</DialogTitle>
-            <DialogDescription>{t("Files are copied back from the backup and checked against their fingerprints. Nothing already there is replaced unless you choose to.")}</DialogDescription>
+            <DialogTitle>{t('Restore from "{name}"', { name: set.name })}</DialogTitle>
+            <DialogDescription>
+              {t("Files are copied back from the backup and checked against their fingerprints. Nothing already there is replaced unless you choose to.")}
+            </DialogDescription>
           </DialogHeader>
           {points.length > 1 && (
             <div className="grid gap-2">
@@ -158,32 +160,34 @@ export function RestoreDialog({ set, onClose, onDone }: { set: BackupSet; onClos
                   </div>
                   {page.isLoading && <Loader2Icon className="m-2 size-4 animate-spin" />}
                   <ul className="max-h-48 divide-y overflow-y-auto text-xs">
-                    {(page.data?.items ?? []).filter((i) => trash || !i.trashed).map((i) => (
-                      <li key={i.id} className="flex items-center gap-2 px-2 py-1">
-                        <Checkbox
-                          aria-label={i.name}
-                          checked={items.includes(i.id)}
-                          onCheckedChange={(v) => setItems((cur) => (v === true ? [...cur, i.id] : cur.filter((x) => x !== i.id)))}
-                        />
-                        {i.kind === "folder" ? <FolderIcon className="size-3.5 shrink-0 text-amber-500" /> : <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />}
-                        {i.kind === "folder" ? (
-                          <button
-                            type="button"
-                            className="min-w-0 flex-1 truncate text-left hover:underline"
-                            onClick={() => {
-                              setFolder(i.id);
-                              setItems([]);
-                            }}
-                          >
-                            {i.name}
-                          </button>
-                        ) : (
-                          <span className="min-w-0 flex-1 truncate">{i.name}</span>
-                        )}
-                        {i.trashed && <span className="text-muted-foreground">{t("In the trash")}</span>}
-                        {i.kind === "file" && <span className="text-muted-foreground tabular-nums">{formatBytes(i.size)}</span>}
-                      </li>
-                    ))}
+                    {(page.data?.items ?? [])
+                      .filter((i) => trash || !i.trashed)
+                      .map((i) => (
+                        <li key={i.id} className="flex items-center gap-2 px-2 py-1">
+                          <Checkbox
+                            aria-label={i.name}
+                            checked={items.includes(i.id)}
+                            onCheckedChange={(v) => setItems((cur) => (v === true ? [...cur, i.id] : cur.filter((x) => x !== i.id)))}
+                          />
+                          {i.kind === "folder" ? <FolderIcon className="size-3.5 shrink-0 text-amber-500" /> : <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />}
+                          {i.kind === "folder" ? (
+                            <button
+                              type="button"
+                              className="min-w-0 flex-1 truncate text-left hover:underline"
+                              onClick={() => {
+                                setFolder(i.id);
+                                setItems([]);
+                              }}
+                            >
+                              {i.name}
+                            </button>
+                          ) : (
+                            <span className="min-w-0 flex-1 truncate">{i.name}</span>
+                          )}
+                          {i.trashed && <span className="text-muted-foreground">{t("In the trash")}</span>}
+                          {i.kind === "file" && <span className="text-muted-foreground tabular-nums">{formatBytes(i.size)}</span>}
+                        </li>
+                      ))}
                   </ul>
                   <p className="border-t px-2 py-1.5 text-xs text-muted-foreground">
                     {items.length ? t("{n} item chosen|{n} items chosen", { n: items.length }) : t("Nothing ticked: everything in this folder")}
@@ -196,7 +200,7 @@ export function RestoreDialog({ set, onClose, onDone }: { set: BackupSet; onClos
             <legend className="mb-1 font-medium">{t("Where")}</legend>
             <label className="flex items-center gap-2">
               <input type="radio" name="restore-where" checked={mode === "new_folder"} onChange={() => setMode("new_folder")} />
-              {t("Into a new folder, \"{folder}\"", { folder: folderName })}
+              {t('Into a new folder, "{folder}"', { folder: folderName })}
             </label>
             <label className="flex items-center gap-2">
               <input type="radio" name="restore-where" disabled={!p?.original} checked={mode === "original"} onChange={() => setMode("original")} />
@@ -216,7 +220,9 @@ export function RestoreDialog({ set, onClose, onDone }: { set: BackupSet; onClos
                 ))}
               </NativeSelect>
             )}
-            {mode === "new_folder" && personal && p?.target_name && <p className="text-xs text-muted-foreground">{t("It goes back into {name}'s personal space.", { name: p.space.owner })}</p>}
+            {mode === "new_folder" && personal && p?.target_name && (
+              <p className="text-xs text-muted-foreground">{t("It goes back into {name}'s personal space.", { name: p.space.owner })}</p>
+            )}
             {mode === "original" && (
               <div className="grid gap-1 pl-6">
                 <p className="text-xs text-muted-foreground">{t("Folders still there are used; missing ones are made again. For a file whose name is taken:")}</p>

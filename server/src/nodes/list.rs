@@ -156,11 +156,8 @@ pub async fn list_children(conn: &mut SqliteConnection, parent_id: &str, q: &Lis
     let folders_only = q.folders_only == Some(true);
     let kind_filter = if folders_only { "AND n.kind = 'folder'" } else { "" };
     // The navigation pane shows an arrow only on folders with folders in them (the index nodes_subfolders answers it)
-    let has_folders = if folders_only {
-        ", EXISTS (SELECT 1 FROM nodes c WHERE c.parent_id = n.id AND c.kind = 'folder' AND c.trashed_at IS NULL) AS has_folders"
-    } else {
-        ""
-    };
+    let has_folders =
+        if folders_only { ", EXISTS (SELECT 1 FROM nodes c WHERE c.parent_id = n.id AND c.kind = 'folder' AND c.trashed_at IS NULL) AS has_folders" } else { "" };
     let mut args = vec![Arg::Text(parent_id.to_string())];
     let keyset = match &after {
         Some(c) => format!("AND {}", after_cursor(sort, desc, c, &mut args)),
@@ -375,12 +372,7 @@ pub async fn select(State(st): State<AppState>, user: User, Path(id): Path<Strin
     Ok(Json(Selected { ids: rows.into_iter().map(|r| r.node.id).collect(), next }))
 }
 
-pub async fn children(
-    State(st): State<AppState>,
-    user: User,
-    Path(id): Path<String>,
-    Query(q): Query<ListQuery>,
-) -> AppResult<Json<Listing<Node>>> {
+pub async fn children(State(st): State<AppState>, user: User, Path(id): Path<String>, Query(q): Query<ListQuery>) -> AppResult<Json<Listing<Node>>> {
     let folder = tree::folder_for(&mut *st.db.acquire().await?, &user, &id, Need::Read).await?;
     if folder.in_folder_space() && q.after.is_none() && q.offset.unwrap_or(0) == 0 {
         // Changes made on the server's folder show up when the folder is opened (not again for each further page).

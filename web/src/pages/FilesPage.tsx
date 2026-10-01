@@ -44,8 +44,8 @@ function HomeWithoutPersonal() {
           title={t("You don't have any spaces yet")}
           hint={
             me.personal_pending
-              ? t("Your \"My files\" is being set up, and appears here once its storage is available.")
-              : t("Ask an administrator for access to a space. Files shared with you are under \"Shared with me\".")
+              ? t('Your "My files" is being set up, and appears here once its storage is available.')
+              : t('Ask an administrator for access to a space. Files shared with you are under "Shared with me".')
           }
         />
       ) : drives.error ? (
@@ -81,7 +81,15 @@ function FolderPage({ id }: { id: string }) {
   );
   const children = grouped
     ? { items: pages.items, list: undefined, isLoading: pages.isLoading, error: pages.error, loadingMore: pages.loadingMore, partError: null, retry: undefined }
-    : { items: windows.list.loaded, list: windows.list, isLoading: windows.isLoading, error: windows.error, loadingMore: windows.loadingMore, partError: windows.partError, retry: windows.retry };
+    : {
+        items: windows.list.loaded,
+        list: windows.list,
+        isLoading: windows.isLoading,
+        error: windows.error,
+        loadingMore: windows.loadingMore,
+        partError: windows.partError,
+        retry: windows.retry,
+      };
   const path = info.data?.path ?? [];
   const loc = locationOf(info.data);
 
@@ -97,15 +105,7 @@ function FolderPage({ id }: { id: string }) {
 
   return (
     <Explorer
-      notice={
-        info.data?.offline ? (
-          <OfflineBanner reason={info.data.offline} />
-        ) : info.data?.moving ? (
-          <MovingBanner />
-        ) : info.data?.read_only ? (
-          <ReadOnlyBanner />
-        ) : undefined
-      }
+      notice={info.data?.offline ? <OfflineBanner reason={info.data.offline} /> : info.data?.moving ? <MovingBanner /> : info.data?.read_only ? <ReadOnlyBanner /> : undefined}
       readOnly={info.data?.read_only}
       offline={info.data?.offline}
       items={children.items}

@@ -21,9 +21,7 @@ use sqlx::SqliteConnection;
 
 use super::{Policy, Target, sync::put_verified};
 use crate::{
-    backups::{
-        runner::{Ctx, Stop},
-    },
+    backups::runner::{Ctx, Stop},
     beneath::Pinned,
     error::{AppError, AppResult},
     state::AppState,
@@ -95,10 +93,11 @@ pub async fn sync(cx: &Ctx<'_>, policy: &Policy, targets: &[Target], location: &
         return Ok(Ok((0, seqs)));
     }
     let ids = super::folder_scope(&mut *st.db.acquire().await?, &policy.id).await?;
-    let spaces: Vec<Space> = sqlx::query_as("SELECT id, source_path, read_only, moving FROM drives WHERE mode = 'folder' AND id IN (SELECT value FROM json_each(?)) ORDER BY id")
-        .bind(serde_json::to_string(&ids).unwrap())
-        .fetch_all(&st.db)
-        .await?;
+    let spaces: Vec<Space> =
+        sqlx::query_as("SELECT id, source_path, read_only, moving FROM drives WHERE mode = 'folder' AND id IN (SELECT value FROM json_each(?)) ORDER BY id")
+            .bind(serde_json::to_string(&ids).unwrap())
+            .fetch_all(&st.db)
+            .await?;
     let mut copied = 0;
     for space in spaces {
         // Changes other programs made, so the index is what the folder holds now
@@ -307,12 +306,13 @@ async fn copy_missing(cx: &Ctx<'_>, policy: &Policy, dst: &Arc<dyn Storage>, loc
             let mut got = false;
             // From the folder: a file whose record has this content, if it still has it
             if let Some(root) = root {
-                let item: Option<(String,)> =
-                    sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT f.path FROM replica_folder_files f WHERE f.drive_id = ? AND f.hash = ? AND {MATCHES} LIMIT 1")))
-                        .bind(space)
-                        .bind(&hash)
-                        .fetch_optional(&st.db)
-                        .await?;
+                let item: Option<(String,)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                    "SELECT f.path FROM replica_folder_files f WHERE f.drive_id = ? AND f.hash = ? AND {MATCHES} LIMIT 1"
+                )))
+                .bind(space)
+                .bind(&hash)
+                .fetch_optional(&st.db)
+                .await?;
                 if let Some((rel,)) = item {
                     match read_to(cx, root, space, &rel, &rel, &tmp).await? {
                         Ok(Some((h, _))) if h == hash => got = true,
@@ -402,7 +402,11 @@ async fn store(cx: &Ctx<'_>, policy: &Policy, dst: &Arc<dyn Storage>, location: 
             .bind(now())
             .execute(&mut *tx)
             .await?;
-        sqlx::query("DELETE FROM pending_blob_deletes WHERE hash = ? AND location_id = ? AND last_error = 'deferred'").bind(hash).bind(location).execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM pending_blob_deletes WHERE hash = ? AND location_id = ? AND last_error = 'deferred'")
+            .bind(hash)
+            .bind(location)
+            .execute(&mut *tx)
+            .await?;
         AppResult::Ok(!own)
     }
     .await;
@@ -523,10 +527,12 @@ pub async fn promote(conn: &mut SqliteConnection, space: &str, target: &str) -> 
     .bind(t)
     .execute(&mut *conn)
     .await?;
-    sqlx::query("UPDATE nodes SET blob_hash = f.hash, size = f.size FROM replica_folder_files f WHERE f.item_id = nodes.id AND nodes.drive_id = ? AND nodes.kind = 'file'")
-        .bind(space)
-        .execute(&mut *conn)
-        .await?;
+    sqlx::query(
+        "UPDATE nodes SET blob_hash = f.hash, size = f.size FROM replica_folder_files f WHERE f.item_id = nodes.id AND nodes.drive_id = ? AND nodes.kind = 'file'",
+    )
+    .bind(space)
+    .execute(&mut *conn)
+    .await?;
     for (id, name) in &renamed {
         sqlx::query("UPDATE nodes SET name = ? WHERE id = ?").bind(name).bind(id).execute(&mut *conn).await?;
     }

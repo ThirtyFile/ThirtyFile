@@ -31,7 +31,7 @@ export function placeholder(w?: number, hgt?: number) {
 
 /** Load an image by relationship id; fall back to a placeholder box on failure or unsupported formats */
 export function loadImage(img: HTMLImageElement, relId: string | null | undefined, f: Flow, part?: string) {
-  const rels = part ? f.doc.rels.get(part) ?? [] : f.rels;
+  const rels = part ? (f.doc.rels.get(part) ?? []) : f.rels;
   const rel = relId ? rels.find((r) => r.id === relId) : undefined;
   const swap = () => img.replaceWith(placeholder());
   if (!rel || rel.external) {
@@ -179,7 +179,12 @@ function shapeSvg(spPr: Element | null, style: Element | null, w: number, hgt: n
     ] as const) {
       if (!end) continue;
       const id = `tf-docx-m${++uid}`;
-      const shape = end === "oval" ? s("circle", { cx: 5, cy: 5, r: 4 }) : end === "diamond" ? s("path", { d: "M5,0 L10,5 L5,10 L0,5 Z" }) : s("path", { d: key === "marker-end" ? "M0,0 L10,5 L0,10 Z" : "M10,0 L0,5 L10,10 Z" });
+      const shape =
+        end === "oval"
+          ? s("circle", { cx: 5, cy: 5, r: 4 })
+          : end === "diamond"
+            ? s("path", { d: "M5,0 L10,5 L5,10 L0,5 Z" })
+            : s("path", { d: key === "marker-end" ? "M0,0 L10,5 L0,10 Z" : "M10,0 L0,5 L10,10 Z" });
       shape.setAttribute("fill", attrs.stroke as string);
       defs.append(s("marker", { id, viewBox: "0 0 10 10", refX: 5, refY: 5, markerWidth: 4, markerHeight: 4, orient: "auto" }, shape));
       attrs[key] = `url(#${id})`;
@@ -250,7 +255,10 @@ function picture(pic: Element, w: number, hgt: number, f: Flow, alt: string): HT
   if (cl || ct || cr || cb) {
     const sw = 1 - cl - cr;
     const sh = 1 - ct - cb;
-    img.setAttribute("style", css({ position: "absolute", width: `${r2(100 / sw)}%`, height: `${r2(100 / sh)}%`, left: `${r2((-cl / sw) * 100)}%`, top: `${r2((-ct / sh) * 100)}%`, "max-width": "none" }));
+    img.setAttribute(
+      "style",
+      css({ position: "absolute", width: `${r2(100 / sw)}%`, height: `${r2(100 / sh)}%`, left: `${r2((-cl / sw) * 100)}%`, top: `${r2((-ct / sh) * 100)}%`, "max-width": "none" }),
+    );
   } else img.setAttribute("style", "width:100%;height:100%");
   // Transparency (alphaModFix)
   const alpha = numAttr(kid(blip, "alphaModFix"), "amt");
@@ -411,7 +419,10 @@ function smartArt(gd: Element, w: number, hgt: number, f: Flow): HTMLElement {
   for (const sp of kids(tree, "sp")) {
     const x = xfrmOf(sp);
     const b = { x: x.off[0] * sx, y: x.off[1] * sx, w: x.ext[0] * sx, h: x.ext[1] * sx };
-    const el = h("span", { class: "tf-docx-shape tf-docx-gchild", style: css({ left: `${r2(b.x)}px`, top: `${r2(b.y)}px`, width: `${r2(b.w)}px`, height: `${r2(b.h)}px`, transform: transformOf(x.xfrm) || undefined }) });
+    const el = h("span", {
+      class: "tf-docx-shape tf-docx-gchild",
+      style: css({ left: `${r2(b.x)}px`, top: `${r2(b.y)}px`, width: `${r2(b.w)}px`, height: `${r2(b.h)}px`, transform: transformOf(x.xfrm) || undefined }),
+    });
     const svg = shapeSvg(kid(sp, "spPr"), kid(sp, "style"), b.w, b.h, f);
     if (svg) el.append(svg);
     const txBody = kid(sp, "txBody");
@@ -440,7 +451,20 @@ function drawingText(txBody: Element, style: Element | null, f: Flow): HTMLEleme
       const rPr = kid(r, "rPr");
       const sz = numAttr(rPr, "sz");
       const col = colorIn(kid(rPr, "solidFill"), { theme });
-      para.append(h("span", { style: css({ "font-size": sz ? `${sz / 100}pt` : undefined, "font-weight": attr(rPr, "b") === "1" ? "bold" : undefined, "font-style": attr(rPr, "i") === "1" ? "italic" : undefined, color: col ? rgbaCss(col) : undefined }) }, kid(r, "t")?.textContent ?? ""));
+      para.append(
+        h(
+          "span",
+          {
+            style: css({
+              "font-size": sz ? `${sz / 100}pt` : undefined,
+              "font-weight": attr(rPr, "b") === "1" ? "bold" : undefined,
+              "font-style": attr(rPr, "i") === "1" ? "italic" : undefined,
+              color: col ? rgbaCss(col) : undefined,
+            }),
+          },
+          kid(r, "t")?.textContent ?? "",
+        ),
+      );
     }
     if (!para.childNodes.length) para.append(h("br"));
     inner.append(para);

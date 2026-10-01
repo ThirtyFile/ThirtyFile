@@ -35,8 +35,8 @@ mod tests;
 use serde::{Deserialize, Serialize};
 use sqlx::{SqliteConnection, SqlitePool};
 
-pub use runner::{Queue, spawn_runner};
 use runner::{ACTIVE, Job};
+pub use runner::{Queue, spawn_runner};
 
 use crate::{
     error::{AppError, AppResult},
@@ -116,11 +116,9 @@ pub async fn location_busy(conn: &mut SqliteConnection, location: &str) -> Resul
 
 /// Bytes of the sets kept on each location (Storage usage)
 pub async fn bytes_by_location(db: &SqlitePool) -> Result<Vec<(String, i64)>, sqlx::Error> {
-    sqlx::query_as(
-        "SELECT s.dest_location, COALESCE(SUM(o.size), 0) FROM backup_sets s LEFT JOIN backup_objects o ON o.set_id = s.id GROUP BY s.dest_location",
-    )
-    .fetch_all(db)
-    .await
+    sqlx::query_as("SELECT s.dest_location, COALESCE(SUM(o.size), 0) FROM backup_sets s LEFT JOIN backup_objects o ON o.set_id = s.id GROUP BY s.dest_location")
+        .fetch_all(db)
+        .await
 }
 
 /// Writes an activity log entry about a job, as done by whoever asked for it

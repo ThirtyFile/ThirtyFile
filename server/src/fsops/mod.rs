@@ -577,7 +577,8 @@ mod tests {
         crate::folders::scan(&env.st, &space.drive).await.unwrap();
         let (id, _) = env.node_at(&space.drive, "notes.txt").await.unwrap();
         let limit = |bytes: i64| sqlx::query("UPDATE drives SET quota_bytes = ? WHERE id = ?").bind(bytes).bind(&space.drive).execute(&env.st.db);
-        let save = |body: &'static [u8]| crate::files::save_content(State(env.st.clone()), admin.clone(), UrlPath(id.clone()), HeaderMap::new(), Bytes::from_static(body));
+        let save =
+            |body: &'static [u8]| crate::files::save_content(State(env.st.clone()), admin.clone(), UrlPath(id.clone()), HeaderMap::new(), Bytes::from_static(body));
         limit(10).await.unwrap();
         assert!(save(b"far more than ten bytes").await.is_err(), "over the limit");
         assert_eq!(std::fs::read(space.dir.join("notes.txt")).unwrap(), b"one");
@@ -628,17 +629,12 @@ mod tests {
         write_old(&space.dir.join("notes.txt"), b"one");
         crate::folders::scan(&env.st, &space.drive).await.unwrap();
         let (id, _) = env.node_at(&space.drive, "notes.txt").await.unwrap();
-        let _ = crate::files::save_content(State(env.st.clone()), admin.clone(), UrlPath(id.clone()), HeaderMap::new(), Bytes::from_static(b"two"))
-            .await
-            .unwrap();
+        let _ = crate::files::save_content(State(env.st.clone()), admin.clone(), UrlPath(id.clone()), HeaderMap::new(), Bytes::from_static(b"two")).await.unwrap();
         // The version keeps the file that was replaced (a hard link to it): the file's name now has new content, so
         // a program writing to the file in place (over SMB, say) changes only that
         std::fs::OpenOptions::new().append(true).open(space.dir.join("notes.txt")).unwrap().write_all(b" and more").unwrap();
-        let kept: Vec<Vec<u8>> = std::fs::read_dir(space.dir.join(versions::VERSIONS_DIR).join(&id))
-            .unwrap()
-            .flatten()
-            .map(|e| std::fs::read(e.path()).unwrap())
-            .collect();
+        let kept: Vec<Vec<u8>> =
+            std::fs::read_dir(space.dir.join(versions::VERSIONS_DIR).join(&id)).unwrap().flatten().map(|e| std::fs::read(e.path()).unwrap()).collect();
         assert_eq!(kept, [b"one".to_vec()]);
     }
 
@@ -652,9 +648,7 @@ mod tests {
         let (id, _) = env.node_at(&space.drive, "big.bin").await.unwrap();
         let before = stat(&space.dir.join("big.bin")).unwrap();
         let _no_links = testing::no_hard_links(&space.drive);
-        let _ = crate::files::save_content(State(env.st.clone()), admin.clone(), UrlPath(id.clone()), HeaderMap::new(), Bytes::from_static(b"small"))
-            .await
-            .unwrap();
+        let _ = crate::files::save_content(State(env.st.clone()), admin.clone(), UrlPath(id.clone()), HeaderMap::new(), Bytes::from_static(b"small")).await.unwrap();
         assert_eq!(std::fs::read(space.dir.join("big.bin")).unwrap(), b"small");
         // The file itself became the version (moved, not copied: copying a large file held up every change)
         let kept: Vec<std::path::PathBuf> = std::fs::read_dir(space.dir.join(versions::VERSIONS_DIR).join(&id)).unwrap().flatten().map(|e| e.path()).collect();
@@ -1098,8 +1092,12 @@ mod tests {
         assert!(moved, "the move finished");
         assert_eq!(std::fs::read(two.dir.join("Sub/x.txt")).unwrap(), b"x");
         assert!(eventually_gone(&one.dir.join("Sub")).await);
-        let hidden: Vec<String> =
-            std::fs::read_dir(&two.dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with(".thirtyfile-m") || n.starts_with(".thirtyfile-c")).collect();
+        let hidden: Vec<String> = std::fs::read_dir(&two.dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with(".thirtyfile-m") || n.starts_with(".thirtyfile-c"))
+            .collect();
         assert!(hidden.is_empty(), "nothing is left behind: {hidden:?}");
 
         // A copy inside a folder space, the same
@@ -1155,9 +1153,8 @@ mod tests {
         let admin = env.admin().await;
         // A file of the content store, with an earlier version there, moved into the folder space
         let notes = env.upload(&admin, admin.root(), "notes.txt", b"version one").await;
-        let _ = crate::files::save_content(State(env.st.clone()), admin.clone(), UrlPath(notes.clone()), HeaderMap::new(), Bytes::from_static(b"two"))
-            .await
-            .unwrap();
+        let _ =
+            crate::files::save_content(State(env.st.clone()), admin.clone(), UrlPath(notes.clone()), HeaderMap::new(), Bytes::from_static(b"two")).await.unwrap();
         let _ = crate::nodes::move_nodes(State(env.st.clone()), admin.clone(), req(json!({ "ids": [notes], "dest_id": space.root }))).await.unwrap();
         let (kept,): (Option<String>,) = sqlx::query_as("SELECT blob_hash FROM node_versions WHERE node_id = ?").bind(&notes).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(kept, Some(crate::util::sha256_hex(b"version one")));
@@ -1170,9 +1167,8 @@ mod tests {
         let two = env.folder_space("Two").await;
         let docs = env.folder(&admin, admin.root(), "Docs").await;
         let other = env.upload(&admin, &docs, "other.txt", b"other, one").await;
-        let _ = crate::files::save_content(State(env.st.clone()), admin.clone(), UrlPath(other.clone()), HeaderMap::new(), Bytes::from_static(b"two"))
-            .await
-            .unwrap();
+        let _ =
+            crate::files::save_content(State(env.st.clone()), admin.clone(), UrlPath(other.clone()), HeaderMap::new(), Bytes::from_static(b"two")).await.unwrap();
         let _ = crate::nodes::move_nodes(State(env.st.clone()), admin.clone(), req(json!({ "ids": [docs], "dest_id": space.root }))).await.unwrap();
         let dir = two.dir.clone();
         let _hook = hook_after_place(move || {

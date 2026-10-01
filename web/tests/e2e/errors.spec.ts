@@ -47,10 +47,9 @@ test("uncaught errors and rejected promises of the page are recorded", async ({ 
     });
     void Promise.reject(new Error(`Rejected e2e ${tag}`));
   }, tag);
-  await expect.poll(async () => (await errors(page.request, tag)).map((e) => `${e.source} ${e.kind} ${e.message}`).sort()).toEqual([
-    `frontend rejection Rejected e2e ${tag}`,
-    `frontend uncaught Uncaught e2e ${tag}`,
-  ]);
+  await expect
+    .poll(async () => (await errors(page.request, tag)).map((e) => `${e.source} ${e.kind} ${e.message}`).sort())
+    .toEqual([`frontend rejection Rejected e2e ${tag}`, `frontend uncaught Uncaught e2e ${tag}`]);
   const [e] = await errors(page.request, `Uncaught e2e ${tag}`);
   expect(e.username).toBe("admin");
 });
@@ -73,9 +72,7 @@ test("a failed upload shown to the person is recorded with the server's request 
   await page.goto(`/files/${dir}`);
   await page.locator('input[type="file"][multiple]').setInputFiles([{ name: "big.bin", mimeType: "application/octet-stream", buffer: Buffer.from("x") }]);
   await expect(page.getByText("You no longer have permission to upload files").first()).toBeVisible();
-  await expect.poll(async () => (await errors(page.request, request)).map((e) => `${e.kind} ${e.operation} ${e.status} ${e.severity}`)).toEqual([
-    "handled upload 403 warning",
-  ]);
+  await expect.poll(async () => (await errors(page.request, request)).map((e) => `${e.kind} ${e.operation} ${e.status} ${e.severity}`)).toEqual(["handled upload 403 warning"]);
 });
 
 test("a refused rename is one incident: the server's record with what the page showed", async ({ page }) => {
@@ -91,9 +88,7 @@ test("a refused rename is one incident: the server's record with what the page s
   await input.fill("first.txt");
   await input.press("Enter");
   await expect(page.getByText('"first.txt" already exists')).toBeVisible();
-  await expect
-    .poll(async () => (await errors(page.request, "PATCH /api/nodes/{id}")).find((e) => e.client.startsWith("rename:"))?.kind)
-    .toBe("conflict");
+  await expect.poll(async () => (await errors(page.request, "PATCH /api/nodes/{id}")).find((e) => e.client.startsWith("rename:"))?.kind).toBe("conflict");
   const entries = (await errors(page.request, "PATCH /api/nodes/{id}")).filter((e) => e.client.startsWith("rename:"));
   const e = entries[0];
   expect([e.source, e.severity, e.status]).toEqual(["backend", "warning", 409]);

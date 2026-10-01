@@ -55,20 +55,9 @@ export function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean
       aria-label={t("File locations")}
       onClick={(e) => (e.target as HTMLElement).closest("a") && onNavigate()}
       style={{ width, maxWidth: "85vw" }}
-      className={cn(
-        "relative flex shrink-0 flex-col border-r bg-sidebar max-md:hidden",
-        open && "max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-10 max-md:flex max-md:shadow-xl",
-      )}
+      className={cn("relative flex shrink-0 flex-col border-r bg-sidebar max-md:hidden", open && "max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-10 max-md:flex max-md:shadow-xl")}
     >
-      <Resizer
-        width={width}
-        onChange={setWidth}
-        min={NAV_MIN_WIDTH}
-        max={NAV_MAX_WIDTH}
-        defaultWidth={NAV_DEFAULT_WIDTH}
-        edge="right"
-        label={t("Resize navigation pane")}
-      />
+      <Resizer width={width} onChange={setWidth} min={NAV_MIN_WIDTH} max={NAV_MAX_WIDTH} defaultWidth={NAV_DEFAULT_WIDTH} edge="right" label={t("Resize navigation pane")} />
       <FolderTreeToolbar activeId={activeFolder} />
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-2.5">
         <NavItem to="/recent" icon={ClockIcon} label={t("Recent")} />

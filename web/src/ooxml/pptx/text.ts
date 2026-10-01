@@ -272,7 +272,7 @@ function runStyle(tc: TextCtx, rPr: Element | null, pChain: Link[], scale: numbe
     "font-variant": cap === "small" ? "small-caps" : undefined,
     // baseline is a percentage of the original font size; shrunk text is converted to em
     "vertical-align": baseline ? `${Math.round((baseline / 100000 / 0.66) * 100) / 100}em` : undefined,
-    "letter-spacing": spc ? `${Math.round(((spc / 100) * 96) / 72 * 100) / 100}px` : undefined,
+    "letter-spacing": spc ? `${Math.round((((spc / 100) * 96) / 72) * 100) / 100}px` : undefined,
     "background-color": hlColor ? rgbaCss(hlColor) : undefined,
     "-webkit-text-stroke": lnColor && ln && numAttr(ln, "w") ? `${Math.max(0.3, (numAttr(ln, "w") ?? 0) / 9525)}px ${rgbaCss(lnColor)}` : undefined,
     "text-shadow": textShadow,
@@ -282,15 +282,30 @@ function runStyle(tc: TextCtx, rPr: Element | null, pChain: Link[], scale: numbe
 
 // ───────────── Bullets ─────────────
 
-const ROMAN: [number, string][] = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]];
+const ROMAN: [number, string][] = [
+  [1000, "m"],
+  [900, "cm"],
+  [500, "d"],
+  [400, "cd"],
+  [100, "c"],
+  [90, "xc"],
+  [50, "l"],
+  [40, "xl"],
+  [10, "x"],
+  [9, "ix"],
+  [5, "v"],
+  [4, "iv"],
+  [1, "i"],
+];
 
 function roman(n: number) {
   if (!Number.isInteger(n) || n <= 0 || n >= 4000) return String(n);
   let out = "";
-  for (const [v, s] of ROMAN) while (n >= v) {
-    out += s;
-    n -= v;
-  }
+  for (const [v, s] of ROMAN)
+    while (n >= v) {
+      out += s;
+      n -= v;
+    }
   return out;
 }
 
@@ -392,7 +407,7 @@ export function renderParagraphs(txBody: Element, tc: TextCtx, opts: RenderOpts)
     const lnPct = numAttr(kid(lnSpc, "spcPct"), "val");
     const lnPts = numAttr(kid(lnSpc, "spcPts"), "val");
     let lineHeight: string;
-    if (lnPts !== null) lineHeight = `${Math.round(((lnPts / 100) * 96) / 72 * 100) / 100}px`;
+    if (lnPts !== null) lineHeight = `${Math.round((((lnPts / 100) * 96) / 72) * 100) / 100}px`;
     else {
       const pct = Math.max(0.1, (lnPct ?? 100000) / 100000 - lnReduce);
       lineHeight = String(Math.round(pct * LINE * 1000) / 1000);
@@ -570,4 +585,3 @@ export function hasVisibleText(txBody: Element | null): boolean {
   for (const p of kids(txBody, "p")) for (const r of kids(p)) if ((r.localName === "r" || r.localName === "fld") && (kid(r, "t")?.textContent ?? "") !== "") return true;
   return false;
 }
-

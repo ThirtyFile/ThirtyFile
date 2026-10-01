@@ -22,9 +22,7 @@ function Details({ label, size, modified, folder }: { label: string; size?: numb
       <div className="min-w-0">
         <div className="font-medium">{label}</div>
         <div className="text-xs text-muted-foreground">
-          {[size !== undefined && !folder ? formatBytes(size) : null, modified ? t("Modified {date}", { date: formatDateTime(modified) }) : null]
-            .filter(Boolean)
-            .join(" · ") || " "}
+          {[size !== undefined && !folder ? formatBytes(size) : null, modified ? t("Modified {date}", { date: formatDateTime(modified) }) : null].filter(Boolean).join(" · ") || " "}
         </div>
       </div>
     </div>
@@ -44,24 +42,15 @@ function ConflictDialog({ req, onDone }: { req: ConflictRequest; onDone(answer: 
     {
       choice: "replace",
       icon: ReplaceIcon,
-      title: merge
-        ? t("Merge the folders, replacing files with the same names")
-        : folder
-          ? t("Replace the folder in the destination")
-          : t("Replace the file in the destination"),
-      hint:
-        op !== "upload"
-          ? t("The item there moves to the trash.")
-          : merge || versionKeep <= 0
-            ? undefined
-            : t("Its current content is kept as an earlier version."),
+      title: merge ? t("Merge the folders, replacing files with the same names") : folder ? t("Replace the folder in the destination") : t("Replace the file in the destination"),
+      hint: op !== "upload" ? t("The item there moves to the trash.") : merge || versionKeep <= 0 ? undefined : t("Its current content is kept as an earlier version."),
     },
     { choice: "skip", icon: SkipForwardIcon, title: incomingFolder ? t("Skip this folder") : t("Skip this file") },
     {
       choice: "keep",
       icon: CopyIcon,
       title: merge ? t("Merge the folders, keeping both files when names clash") : t("Keep both"),
-      hint: merge ? undefined : t("The new one is named \"{name}\".", { name: numberedName(clash.name, incomingFolder) }),
+      hint: merge ? undefined : t('The new one is named "{name}".', { name: numberedName(clash.name, incomingFolder) }),
     },
   ];
   return (
@@ -69,9 +58,7 @@ function ConflictDialog({ req, onDone }: { req: ConflictRequest; onDone(answer: 
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {folder
-              ? t("The destination already has a folder named \"{name}\"", { name: clash.name })
-              : t("The destination already has a file named \"{name}\"", { name: clash.name })}
+            {folder ? t('The destination already has a folder named "{name}"', { name: clash.name }) : t('The destination already has a file named "{name}"', { name: clash.name })}
           </DialogTitle>
           <DialogDescription>{t("Choose what to do with this item.")}</DialogDescription>
         </DialogHeader>

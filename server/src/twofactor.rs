@@ -95,12 +95,7 @@ fn setup_view(st: &AppState, username: &str, secret: &str) -> AppResult<Value> {
     let issuer = st.branding.read().unwrap().site_name.trim().to_string();
     let issuer = if issuer.is_empty() { "ThirtyFile".to_string() } else { issuer };
     let enc = |s: &str| utf8_percent_encode(s, NON_ALPHANUMERIC).to_string();
-    let uri = format!(
-        "otpauth://totp/{}:{}?secret={secret}&issuer={}&algorithm=SHA1&digits=6&period=30",
-        enc(&issuer),
-        enc(username),
-        enc(&issuer)
-    );
+    let uri = format!("otpauth://totp/{}:{}?secret={secret}&issuer={}&algorithm=SHA1&digits=6&period=30", enc(&issuer), enc(username), enc(&issuer));
     let qr = qrcode::QrCode::new(uri.as_bytes()).map_err(AppError::internal)?;
     let svg = qr.render::<qrcode::render::svg::Color>().min_dimensions(192, 192).build();
     Ok(json!({ "secret": secret, "uri": uri, "qr_svg": svg }))
@@ -146,7 +141,8 @@ async fn use_recovery_code(st: &AppState, user_id: i64, code: &str) -> AppResult
         return Ok(false);
     }
     let hash = sha256_hex(norm.as_bytes());
-    let unused: Vec<(String,)> = sqlx::query_as("SELECT code_hash FROM recovery_codes WHERE user_id = ? AND used_at IS NULL").bind(user_id).fetch_all(&st.db).await?;
+    let unused: Vec<(String,)> =
+        sqlx::query_as("SELECT code_hash FROM recovery_codes WHERE user_id = ? AND used_at IS NULL").bind(user_id).fetch_all(&st.db).await?;
     // Compared with every unused code in constant time
     let matched = unused.iter().fold(false, |acc, (h,)| acc | bool::from(h.as_bytes().ct_eq(hash.as_bytes())));
     if !matched {
@@ -164,7 +160,8 @@ async fn use_recovery_code(st: &AppState, user_id: i64, code: &str) -> AppResult
 
 /// Accepts a code from the authenticator app once; false when it's wrong, too old or already used
 async fn use_totp(st: &AppState, user_id: i64, code: &str) -> AppResult<bool> {
-    let row: Option<(Option<String>, i64)> = sqlx::query_as("SELECT totp_secret, totp_last_step FROM users WHERE id = ?").bind(user_id).fetch_optional(&st.db).await?;
+    let row: Option<(Option<String>, i64)> =
+        sqlx::query_as("SELECT totp_secret, totp_last_step FROM users WHERE id = ?").bind(user_id).fetch_optional(&st.db).await?;
     let Some((Some(stored), last)) = row else { return Ok(false) };
     // Stored encrypted like the other secrets (secrets.rs); one saved with another key can't be checked
     let Ok(secret) = crate::secrets::open(&format!("user:{user_id}:totp"), &stored) else {
@@ -241,7 +238,8 @@ async fn turn_off(st: &AppState, user_id: i64) -> AppResult<bool> {
 /// Turns two-factor sign-in off for an account and removes its recovery codes (also `thirtyfile reset-two-factor`):
 /// whether it was on
 pub async fn turn_off_in(conn: &mut sqlx::SqliteConnection, user_id: i64) -> AppResult<bool> {
-    let res = sqlx::query("UPDATE users SET totp_secret = NULL, totp_last_step = 0 WHERE id = ? AND totp_secret IS NOT NULL").bind(user_id).execute(&mut *conn).await?;
+    let res =
+        sqlx::query("UPDATE users SET totp_secret = NULL, totp_last_step = 0 WHERE id = ? AND totp_secret IS NOT NULL").bind(user_id).execute(&mut *conn).await?;
     sqlx::query("DELETE FROM recovery_codes WHERE user_id = ?").bind(user_id).execute(&mut *conn).await?;
     Ok(res.rows_affected() > 0)
 }
@@ -375,7 +373,7 @@ pub async fn login_code(
     let ip = client_ip(&st, addr, &headers);
     let hash = sha256_hex(req.ticket.as_bytes());
     let (user_id, step, cred) = ticket(&st, &hash).await?;
-    let row: Option<(String, bool)> =sqlx::query_as("SELECT username, disabled FROM users WHERE id = ?").bind(user_id).fetch_optional(&st.db).await?;
+    let row: Option<(String, bool)> = sqlx::query_as("SELECT username, disabled FROM users WHERE id = ?").bind(user_id).fetch_optional(&st.db).await?;
     let Some((username, false)) = row else {
         st.twofactor_logins.lock().unwrap().remove(&hash);
         return Err(expired());
@@ -481,9 +479,7 @@ pub struct PasswordReq {
 pub async fn start_setup(State(st): State<AppState>, user: User, Json(req): Json<PasswordReq>) -> AppResult<Json<Value>> {
     let (hash,): (String,) = sqlx::query_as("SELECT password_hash FROM users WHERE id = ?").bind(user.id).fetch_one(&st.db).await?;
     if hash == crate::sso::NO_PASSWORD {
-        return Err(AppError::bad_request(
-            "This account has no password: it signs in with Microsoft, Google or GitHub, whose own two-step verification applies.",
-        ));
+        return Err(AppError::bad_request("This account has no password: it signs in with Microsoft, Google or GitHub, whose own two-step verification applies."));
     }
     auth::confirm_password(&st, user.id, req.password).await?;
     confirm_code(&st, user.id, req.code.as_deref()).await?;
@@ -671,7 +667,8 @@ pub(crate) mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let (secret, recovery) = set_up(&env, &amy).await;
-        let (stored,): (String,) = sqlx::query_as("SELECT code_hash FROM recovery_codes WHERE user_id = ? LIMIT 1").bind(amy.id).fetch_one(&env.st.db).await.unwrap();
+        let (stored,): (String,) =
+            sqlx::query_as("SELECT code_hash FROM recovery_codes WHERE user_id = ? LIMIT 1").bind(amy.id).fetch_one(&env.st.db).await.unwrap();
         assert!(!recovery.iter().any(|c| c == &stored), "recovery codes are stored hashed");
 
         // The password alone gets a ticket, not a session
@@ -746,12 +743,14 @@ pub(crate) mod tests {
         assert!(s.enabled && s.required);
 
         // It can't be turned off while required; an administrator can reset it
-        let off = disable(State(env.st.clone()), amy.clone(), addr(), HeaderMap::new(), Json(PasswordReq { password: testutil::password().into(), code: None })).await;
+        let off =
+            disable(State(env.st.clone()), amy.clone(), addr(), HeaderMap::new(), Json(PasswordReq { password: testutil::password().into(), code: None })).await;
         assert!(off.is_err());
         let _ = admin_reset(State(env.st.clone()), Admin(admin), Path(amy.id), addr(), HeaderMap::new()).await.unwrap();
         let Json(s) = status(State(env.st.clone()), amy).await.unwrap();
         assert!(!s.enabled && s.recovery_codes_left == 0);
-        let (detail,): (String,) = sqlx::query_as("SELECT detail FROM activity WHERE action = 'user_update' ORDER BY id DESC LIMIT 1").fetch_one(&env.st.db).await.unwrap();
+        let (detail,): (String,) =
+            sqlx::query_as("SELECT detail FROM activity WHERE action = 'user_update' ORDER BY id DESC LIMIT 1").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(detail, "amy: reset two-factor sign-in");
     }
 

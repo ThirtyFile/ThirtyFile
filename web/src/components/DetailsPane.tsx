@@ -90,15 +90,7 @@ export function DetailsPane({ selected, folder, onClose, count, whole }: { selec
   const node = partly ? undefined : selected.length === 1 ? selected[0] : selected.length === 0 ? folder : undefined;
   // What folders hold is summed on the server (every level, not the trash): one folder, or the folders of a selection.
   // Everything in a large folder selected: what the folder holds; only part of it: not known here
-  const folderIds = partly
-    ? whole && folder
-      ? [folder.id]
-      : []
-    : node
-      ? node.kind === "folder"
-        ? [node.id]
-        : []
-      : selected.filter((n) => n.kind === "folder").map((n) => n.id);
+  const folderIds = partly ? (whole && folder ? [folder.id] : []) : node ? (node.kind === "folder" ? [node.id] : []) : selected.filter((n) => n.kind === "folder").map((n) => n.id);
   // Details are asked for once the selection stays put (what is known already shows at once), and a request for an
   // item left meanwhile is cancelled: React Query aborts its signal when nothing shows its answer any more
   const shownKey = `${node?.id ?? ""}|${folderIds.join()}`;
@@ -158,7 +150,15 @@ export function DetailsPane({ selected, folder, onClose, count, whole }: { selec
   } else {
     const root = info.data ? (info.data.via_share ? t("Shared with me") : info.data.drive.name) : "…";
     const isRoot = !node.parent_id;
-    const location = info.data ? `/${root}` + info.data.path.slice(0, -1).map((c) => `/${c.name}`).join("") : info.error ? "—" : "…";
+    const location = info.data
+      ? `/${root}` +
+        info.data.path
+          .slice(0, -1)
+          .map((c) => `/${c.name}`)
+          .join("")
+      : info.error
+        ? "—"
+        : "…";
     // Values that couldn't be loaded show a dash, with the error and a way to try again below them
     const error = info.error ?? shares.error ?? contents.error;
     const pending = (q: { error: unknown }) => (q.error ? "—" : "…");
@@ -196,15 +196,9 @@ export function DetailsPane({ selected, folder, onClose, count, whole }: { selec
           </dl>
           <History node={node} query={history} />
           {error && (
-            <ErrorState
-              compact
-              message={error.message}
-              onRetry={() => Promise.all([info.error && info.refetch(), shares.error && shares.refetch(), contents.error && contents.refetch()])}
-            />
+            <ErrorState compact message={error.message} onRetry={() => Promise.all([info.error && info.refetch(), shares.error && shares.refetch(), contents.error && contents.refetch()])} />
           )}
-          {node.kind === "file" && !node.trashed_at && (
-            <VersionsSection node={node} ready={ready} canRestore={!!info.data && info.data.role !== "viewer" && !info.data.read_only} />
-          )}
+          {node.kind === "file" && !node.trashed_at && <VersionsSection node={node} ready={ready} canRestore={!!info.data && info.data.role !== "viewer" && !info.data.read_only} />}
         </div>
       </>
     );

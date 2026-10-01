@@ -226,12 +226,10 @@ pub(super) async fn count_download(st: &AppState, share: &Share) -> AppResult<()
     // A write transaction (`db::begin_write`), so the link's details kept for a moment (`seen`), with the downloads
     // counted before this one, are read again
     let mut tx = crate::db::begin_write(&st.db).await?;
-    let res = sqlx::query(
-        "UPDATE shares SET downloads = downloads + 1 WHERE id = ? AND (max_downloads IS NULL OR downloads < max_downloads)",
-    )
-    .bind(&share.id)
-    .execute(&mut *tx)
-    .await?;
+    let res = sqlx::query("UPDATE shares SET downloads = downloads + 1 WHERE id = ? AND (max_downloads IS NULL OR downloads < max_downloads)")
+        .bind(&share.id)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     if res.rows_affected() == 0 {
         return Err(AppError::new(StatusCode::GONE, "The download limit has been reached"));
@@ -340,11 +338,7 @@ pub struct SharedNodeInfo {
     pub(super) path: Vec<Crumb>,
 }
 
-pub async fn public_node(
-    State(st): State<AppState>,
-    Path((token, id)): Path<(String, String)>,
-    headers: HeaderMap,
-) -> AppResult<Json<SharedNodeInfo>> {
+pub async fn public_node(State(st): State<AppState>, Path((token, id)): Path<(String, String)>, headers: HeaderMap) -> AppResult<Json<SharedNodeInfo>> {
     let (share, root) = open_share(&st, &token, &headers).await?;
     let node = shared_node(&st, &share, &root, &id).await?;
     let full = tree::path_of(&mut *st.db.acquire().await?, &node.id).await?;
@@ -392,8 +386,7 @@ pub async fn public_content(
     // continuation (resuming, video seeking) only when it carries the cookie of a counted download; otherwise it's a new
     // download and counts too, so skipping byte 0 can't be used to fetch the file without being counted
     let limited = share.max_downloads.is_some();
-    let continuation =
-        files::range_start(&headers, node.size as u64) > 0 && (!limited || continues_download(&st, &headers, &token, &share, &node.id));
+    let continuation = files::range_start(&headers, node.size as u64) > 0 && (!limited || continues_download(&st, &headers, &token, &share, &node.id));
     let counted = !continuation && (download || limited);
     if counted {
         ensure_quota_left(&share)?;
@@ -430,11 +423,7 @@ pub(super) fn download_cookie(st: &AppState, token: &str, share: &Share, node_id
     HeaderValue::from_str(&cookie).map_err(AppError::internal)
 }
 
-pub async fn public_thumbnail(
-    State(st): State<AppState>,
-    Path((token, id)): Path<(String, String)>,
-    headers: HeaderMap,
-) -> AppResult<Response> {
+pub async fn public_thumbnail(State(st): State<AppState>, Path((token, id)): Path<(String, String)>, headers: HeaderMap) -> AppResult<Response> {
     let (share, root) = open_share(&st, &token, &headers).await?;
     ensure_visible(&share)?;
     let node = shared_node(&st, &share, &root, &id).await?;

@@ -25,7 +25,7 @@ describe("check-boundaries", () => {
         'import JSZip from "jszip";',
         'import { b } from "./b";',
         'import { up } from "../core/b";',
-        "// import { commented } from \"@/lib/i18n\";",
+        '// import { commented } from "@/lib/i18n";',
         'import { t } from "@/lib/i18n";',
         "import type {",
         "  Node,",

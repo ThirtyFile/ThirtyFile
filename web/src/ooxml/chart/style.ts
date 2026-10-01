@@ -261,9 +261,24 @@ export function drawMarker(m: Marker, x: number, y: number): SVGElement {
     case "square":
       return s("rect", { x: r2(x - r), y: r2(y - r), width: r2(m.size), height: r2(m.size), ...fillAttrs });
     case "diamond":
-      return s("polygon", { points: pts([[0, -1], [1, 0], [0, 1], [-1, 0]]), ...fillAttrs });
+      return s("polygon", {
+        points: pts([
+          [0, -1],
+          [1, 0],
+          [0, 1],
+          [-1, 0],
+        ]),
+        ...fillAttrs,
+      });
     case "triangle":
-      return s("polygon", { points: pts([[0, -1], [1, 0.8], [-1, 0.8]]), ...fillAttrs });
+      return s("polygon", {
+        points: pts([
+          [0, -1],
+          [1, 0.8],
+          [-1, 0.8],
+        ]),
+        ...fillAttrs,
+      });
     case "star": {
       const list: [number, number][] = [];
       for (let i = 0; i < 10; i++) {
@@ -275,7 +290,10 @@ export function drawMarker(m: Marker, x: number, y: number): SVGElement {
     }
     case "x":
     case "plus": {
-      const d = m.symbol === "x" ? `M${r2(x - r)},${r2(y - r)}L${r2(x + r)},${r2(y + r)}M${r2(x + r)},${r2(y - r)}L${r2(x - r)},${r2(y + r)}` : `M${r2(x - r)},${r2(y)}L${r2(x + r)},${r2(y)}M${r2(x)},${r2(y - r)}L${r2(x)},${r2(y + r)}`;
+      const d =
+        m.symbol === "x"
+          ? `M${r2(x - r)},${r2(y - r)}L${r2(x + r)},${r2(y + r)}M${r2(x + r)},${r2(y - r)}L${r2(x - r)},${r2(y + r)}`
+          : `M${r2(x - r)},${r2(y)}L${r2(x + r)},${r2(y)}M${r2(x)},${r2(y - r)}L${r2(x)},${r2(y + r)}`;
       const st = m.stroke ?? (m.fill ? { color: m.fill, width: 1 } : null);
       return s("path", { d, fill: "none", ...strokeAttrs(st) });
     }

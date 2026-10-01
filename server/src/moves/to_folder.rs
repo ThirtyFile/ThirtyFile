@@ -65,13 +65,12 @@ pub async fn target(cx: &Ctx<'_>) -> AppResult<PathBuf> {
     if crate::storage::marker_of(&root).await.ok().flatten().as_deref() != Some(job.to_location.as_str()) {
         return Err(not_mounted());
     }
-    let (name, kind, owner): (String, String, String) = sqlx::query_as(
-        "SELECT d.name, d.kind, COALESCE((SELECT username FROM users WHERE id = d.owner_id), '') FROM drives d WHERE d.id = ?",
-    )
-    .bind(&job.drive_id)
-    .fetch_optional(&mut *c)
-    .await?
-    .ok_or_else(|| AppError::not_found("Space not found"))?;
+    let (name, kind, owner): (String, String, String) =
+        sqlx::query_as("SELECT d.name, d.kind, COALESCE((SELECT username FROM users WHERE id = d.owner_id), '') FROM drives d WHERE d.id = ?")
+            .bind(&job.drive_id)
+            .fetch_optional(&mut *c)
+            .await?
+            .ok_or_else(|| AppError::not_found("Space not found"))?;
     let (parent, wanted) = crate::space_folders::place(&root, &kind, &name, &owner, &job.drive_id);
     std::fs::create_dir_all(&parent).map_err(disk_error)?;
     let mut folder = None;
@@ -191,28 +190,32 @@ async fn plan(st: &AppState, job: &Job) -> AppResult<()> {
     }
     // The space's root folder, then the trash by its trash id, then the folders found in them
     let mut queue: VecDeque<(Option<String>, String)> = VecDeque::from([(Some(root_id.clone()), String::new())]);
-    let trash_ids: Vec<(String,)> =
-        sqlx::query_as("SELECT DISTINCT COALESCE(trash_id, id) FROM nodes WHERE drive_id = ? AND trash_root = 1 ORDER BY 1").bind(&job.drive_id).fetch_all(&st.db).await?;
+    let trash_ids: Vec<(String,)> = sqlx::query_as("SELECT DISTINCT COALESCE(trash_id, id) FROM nodes WHERE drive_id = ? AND trash_root = 1 ORDER BY 1")
+        .bind(&job.drive_id)
+        .fetch_all(&st.db)
+        .await?;
     queue.extend(trash_ids.into_iter().map(|(t,)| (None, format!("{TRASH_DIR}/{t}"))));
     while let Some((folder, dir)) = queue.pop_front() {
         let kids: Vec<Item> = match &folder {
-            Some(id) => sqlx::query_as(
-                "SELECT id, kind, name, blob_hash, size FROM nodes WHERE parent_id = ? AND drive_id = ? AND trash_root = 0 AND id != ?",
-            )
-            .bind(id)
-            .bind(&job.drive_id)
-            .bind(&root_id)
-            .fetch_all(&st.db)
-            .await?,
+            Some(id) => {
+                sqlx::query_as("SELECT id, kind, name, blob_hash, size FROM nodes WHERE parent_id = ? AND drive_id = ? AND trash_root = 0 AND id != ?")
+                    .bind(id)
+                    .bind(&job.drive_id)
+                    .bind(&root_id)
+                    .fetch_all(&st.db)
+                    .await?
+            }
             // A group of the trash: the items deleted together
-            None => sqlx::query_as(
-                "SELECT id, kind, name, blob_hash, size FROM nodes
+            None => {
+                sqlx::query_as(
+                    "SELECT id, kind, name, blob_hash, size FROM nodes
                  WHERE drive_id = ? AND trash_root = 1 AND COALESCE(trash_id, id) = ?",
-            )
-            .bind(&job.drive_id)
-            .bind(dir.trim_start_matches(&format!("{TRASH_DIR}/")))
-            .fetch_all(&st.db)
-            .await?,
+                )
+                .bind(&job.drive_id)
+                .bind(dir.trim_start_matches(&format!("{TRASH_DIR}/")))
+                .fetch_all(&st.db)
+                .await?
+            }
         };
         let ids: Vec<String> = kids.iter().map(|k| k.id.clone()).collect();
         let planned = planned_paths(st, job, &ids).await?;
@@ -268,18 +271,16 @@ async fn save_wants(st: &AppState, job: &Job, wants: Vec<Want>) -> AppResult<()>
         let mut tx = crate::db::begin_write(&st.db).await?;
         let res = async {
             for w in chunk {
-                sqlx::query(
-                    "INSERT OR IGNORE INTO space_move_items (move_id, item_id, kind, done, hash, size, path, name) VALUES (?, ?, ?, 0, ?, ?, ?, ?)",
-                )
-                .bind(&job.id)
-                .bind(&w.id)
-                .bind(w.kind)
-                .bind(&w.hash)
-                .bind(w.size)
-                .bind(&w.path)
-                .bind(&w.name)
-                .execute(&mut *tx)
-                .await?;
+                sqlx::query("INSERT OR IGNORE INTO space_move_items (move_id, item_id, kind, done, hash, size, path, name) VALUES (?, ?, ?, 0, ?, ?, ?, ?)")
+                    .bind(&job.id)
+                    .bind(&w.id)
+                    .bind(w.kind)
+                    .bind(&w.hash)
+                    .bind(w.size)
+                    .bind(&w.path)
+                    .bind(&w.name)
+                    .execute(&mut *tx)
+                    .await?;
             }
             AppResult::Ok(())
         }
@@ -425,12 +426,11 @@ async fn copy_left(cx: &Ctx<'_>, root: &Pinned) -> AppResult<Option<Stop>> {
 async fn copy_one(cx: &Ctx<'_>, root: &Pinned, id: &str, rel: &str, hash: Option<&str>, size: i64, name: &str) -> AppResult<Option<Stop>> {
     let (st, job) = (cx.st, cx.job);
     // The file's date: when it last got content (a version: when it got the content it keeps)
-    let (modified,): (i64,) = sqlx::query_as(
-        "SELECT COALESCE((SELECT updated_at FROM nodes WHERE id = ?1), (SELECT modified_at FROM node_versions WHERE id = ?1), 0)",
-    )
-    .bind(id)
-    .fetch_one(&st.db)
-    .await?;
+    let (modified,): (i64,) =
+        sqlx::query_as("SELECT COALESCE((SELECT updated_at FROM nodes WHERE id = ?1), (SELECT modified_at FROM node_versions WHERE id = ?1), 0)")
+            .bind(id)
+            .fetch_one(&st.db)
+            .await?;
     let (dir, file) = rel.rsplit_once('/').unwrap_or(("", rel));
     let dest = {
         let (root, dir) = (root.clone(), dir.to_string());
@@ -440,23 +440,16 @@ async fn copy_one(cx: &Ctx<'_>, root: &Pinned, id: &str, rel: &str, hash: Option
         Some(h) => sqlx::query_as::<_, (String,)>("SELECT location_id FROM blobs WHERE hash = ?").bind(h).fetch_optional(&st.db).await?.map(|r| r.0),
         None => None,
     };
-    let written = cx
-        .tries(
-            |e: &std::io::Error| e.kind() != std::io::ErrorKind::NotFound,
-            || write_one(st, &dest, file, hash, location.as_deref(), size, modified),
-        )
-        .await;
+    let written =
+        cx.tries(|e: &std::io::Error| e.kind() != std::io::ErrorKind::NotFound, || write_one(st, &dest, file, hash, location.as_deref(), size, modified)).await;
     let seen = match written {
         Ok(seen) => seen,
         Err(Ok(stop)) => return Ok(Some(stop)),
         Err(Err(e)) if e.kind() == std::io::ErrorKind::NotFound || crate::hashing::unusable_kind(&e) == Some(crate::hashing::Unusable::Damaged) => {
             // Gone meanwhile (deleted for good, say): nothing to copy for it any more
             drop_gone_items(st, job, Some(id)).await?;
-            let (planned,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM space_move_items WHERE move_id = ? AND item_id = ?")
-                .bind(&job.id)
-                .bind(id)
-                .fetch_one(&st.db)
-                .await?;
+            let (planned,): (i64,) =
+                sqlx::query_as("SELECT COUNT(*) FROM space_move_items WHERE move_id = ? AND item_id = ?").bind(&job.id).bind(id).fetch_one(&st.db).await?;
             if planned == 1 {
                 cx.failed(Some(if name.is_empty() { rel.to_string() } else { name.to_string() }), e.to_string());
             }
@@ -627,14 +620,12 @@ async fn switch(cx: &Ctx<'_>, folder: &Path) -> AppResult<bool> {
                 .execute(&mut *tx)
                 .await?;
             }
-            sqlx::query(
-                "UPDATE drives SET mode = 'folder', location_id = ?2, source_path = ?3, last_scan_at = NULL, scan_report = NULL WHERE id = ?1",
-            )
-            .bind(&job.drive_id)
-            .bind(&job.to_location)
-            .bind(folder.to_string_lossy())
-            .execute(&mut *tx)
-            .await?;
+            sqlx::query("UPDATE drives SET mode = 'folder', location_id = ?2, source_path = ?3, last_scan_at = NULL, scan_report = NULL WHERE id = ?1")
+                .bind(&job.drive_id)
+                .bind(&job.to_location)
+                .bind(folder.to_string_lossy())
+                .execute(&mut *tx)
+                .await?;
             let note = match renamed.len() {
                 0 => None,
                 1 => Some("1 item got another name in the folder: a folder can't hold its name as it was".to_string()),
@@ -659,8 +650,7 @@ async fn switch(cx: &Ctx<'_>, folder: &Path) -> AppResult<bool> {
 /// space's marker goes, and never one a space uses (or one inside it, or holding it), so nothing else is ever removed.
 /// A folder renamed to its new place by a move that stopped before the switch was recorded is renamed back instead.
 pub async fn remove_copies(st: &AppState, job: &Job) -> AppResult<()> {
-    let (chosen, renamed): (Option<String>, bool) =
-        sqlx::query_as("SELECT to_path, renamed FROM space_moves WHERE id = ?").bind(&job.id).fetch_one(&st.db).await?;
+    let (chosen, renamed): (Option<String>, bool) = sqlx::query_as("SELECT to_path, renamed FROM space_moves WHERE id = ?").bind(&job.id).fetch_one(&st.db).await?;
     if let Some(path) = chosen {
         let folder = PathBuf::from(&path);
         let from = PathBuf::from(job.from_path.clone().unwrap_or_default());

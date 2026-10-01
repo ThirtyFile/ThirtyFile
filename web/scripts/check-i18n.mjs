@@ -37,14 +37,12 @@ const ESCAPES = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", v: "\v", 0: "\0" 
  */
 function literal(raw) {
   if (raw.startsWith("`")) return raw.slice(1, -1);
-  return raw
-    .slice(1, -1)
-    .replace(/\\(?:x([0-9a-fA-F]{2})|u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|(\r\n|[\s\S]))/g, (_, x, cp, u, c) => {
-      if (x || u) return String.fromCharCode(parseInt(x ?? u, 16));
-      if (cp) return String.fromCodePoint(parseInt(cp, 16));
-      if (c === "\n" || c === "\r\n" || c === "\u2028" || c === "\u2029") return "";
-      return ESCAPES[c] ?? c;
-    });
+  return raw.slice(1, -1).replace(/\\(?:x([0-9a-fA-F]{2})|u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|(\r\n|[\s\S]))/g, (_, x, cp, u, c) => {
+    if (x || u) return String.fromCharCode(parseInt(x ?? u, 16));
+    if (cp) return String.fromCodePoint(parseInt(cp, 16));
+    if (c === "\n" || c === "\r\n" || c === "\u2028" || c === "\u2029") return "";
+    return ESCAPES[c] ?? c;
+  });
 }
 
 // Dictionaries: each file is `export default { "English": "<Traditional Chinese>", ... }`
@@ -72,16 +70,16 @@ const cjk = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3001\u3002\u300c-\u300f\u
 const isComment = (s) => /^(\/\/|\*|\/\*|\{\/\*)/.test(s);
 /** The line with its comments removed (block comments on one line, JSX comments, trailing // comments) */
 const stripComments = (s) =>
-  s.replace(/\{\/\*.*?\*\/\}/g, "").replace(/\/\*.*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/, "$1");
+  s
+    .replace(/\{\/\*.*?\*\/\}/g, "")
+    .replace(/\/\*.*?\*\//g, "")
+    .replace(/(^|[^:"'`\\])\/\/.*$/, "$1");
 
 const missing = [];
 const bare = [];
 /** The code outside the dictionaries, where their entries are used */
 const corpus = [];
-const files = [
-  ...walk(root, /\.(ts|tsx|css)$/).map((f) => [f, relative(root, f)]),
-  ...walk(toPath("./"), /\.mjs$/).map((f) => [f, relative(web, f)]),
-];
+const files = [...walk(root, /\.(ts|tsx|css)$/).map((f) => [f, relative(root, f)]), ...walk(toPath("./"), /\.mjs$/).map((f) => [f, relative(web, f)])];
 for (const [f, r] of files) {
   const rel = r.replace(/\\/g, "/");
   if (only && !only.some((o) => rel === o || rel.endsWith(o))) continue;
@@ -133,15 +131,19 @@ const shapes = new Set([...dict.keys()].map(shape));
 // plural entry ("… day|… days")
 const forms = [...dict.keys()].flatMap((k) => k.split("|"));
 const matchesSome = (msg) => {
-  const re = new RegExp("^" + msg.split(/\{[^{}]*\}/).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".+?") + "$");
+  const re = new RegExp(
+    "^" +
+      msg
+        .split(/\{[^{}]*\}/)
+        .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join(".+?") +
+      "$",
+  );
   return forms.some((k) => re.test(k));
 };
 const serverDir = toPath("../../server/src/");
 if (!only) {
-  const call = new RegExp(
-    String.raw`AppError::(?:bad_request|forbidden|conflict|not_found|new\(\s*[\w:]+\s*,)\(?\s*(?:format!\(\s*)?("(?:[^"\\]|\\.)*")`,
-    "g",
-  );
+  const call = new RegExp(String.raw`AppError::(?:bad_request|forbidden|conflict|not_found|new\(\s*[\w:]+\s*,)\(?\s*(?:format!\(\s*)?("(?:[^"\\]|\\.)*")`, "g");
   for (const f of walk(serverDir, /\.rs$/)) {
     const rel = "server/src/" + relative(serverDir, f).replace(/\\/g, "/");
     if (rel.endsWith("/dav.rs") || rel.includes("/dav/")) continue;
@@ -165,7 +167,13 @@ if (!only) {
   // How a text is spelled in code: as it is, inside "…" (escaped as in JSON), or inside '…', which the formatter
   // picks for a text with more " than ' in it
   const spellings = (s) => [s, JSON.stringify(s).slice(1, -1), s.replace(/[\\']/g, "\\$&")];
-  const withOtherNames = (w) => new RegExp(w.split(/\{[^{}]*\}/).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\{[^{}]*\\}"));
+  const withOtherNames = (w) =>
+    new RegExp(
+      w
+        .split(/\{[^{}]*\}/)
+        .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join("\\{[^{}]*\\}"),
+    );
   const written = (s) => spellings(s).some((w) => code.includes(w)) || spellings(s).some((w) => withOtherNames(w).test(code));
   for (const { key, file } of entries) {
     if (file.endsWith("/server.ts")) continue;
@@ -174,15 +182,12 @@ if (!only) {
   }
 }
 
-
 console.log(`Dictionary: ${dict.size} entries`);
 console.log(`Conflicting entries across dictionary files: ${conflicts.length}`);
 for (const c of conflicts) console.log("  ✗ " + c);
 console.log(`Missing Traditional Chinese translations: ${new Set(missing).size}`);
 for (const m of [...new Set(missing)]) console.log("  ✗ " + m);
-console.log(
-  `Chinese text outside the dictionary (not marked i18n-ignore${strict ? ", comments included" : ", comments skipped"}): ${bare.length}`,
-);
+console.log(`Chinese text outside the dictionary (not marked i18n-ignore${strict ? ", comments included" : ", comments skipped"}): ${bare.length}`);
 for (const b of bare) console.log("  · " + b);
 console.log(`Dictionary entries no longer used: ${unused.length}`);
 for (const u of unused) console.log("  ✗ " + u);

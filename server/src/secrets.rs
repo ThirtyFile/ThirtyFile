@@ -104,9 +104,7 @@ fn cipher() -> &'static Aes256Gcm {
 
 fn seal_with(cipher: &Aes256Gcm, context: &str, plain: &str) -> String {
     let nonce = Nonce::generate();
-    let ct = cipher
-        .encrypt(&nonce, Payload { msg: plain.as_bytes(), aad: context.as_bytes() })
-        .expect("AES-GCM encryption doesn't fail for short values");
+    let ct = cipher.encrypt(&nonce, Payload { msg: plain.as_bytes(), aad: context.as_bytes() }).expect("AES-GCM encryption doesn't fail for short values");
     let mut out = nonce.to_vec();
     out.extend(ct);
     format!("{PREFIX}{}", B64.encode(out))

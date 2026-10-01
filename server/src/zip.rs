@@ -514,7 +514,8 @@ mod tests {
     #[tokio::test]
     async fn predicted_length_matches_the_output() {
         // CJK and emoji names check that multi-byte UTF-8 name lengths are counted correctly
-        let items = [("報告/", 0, true), ("報告/年度.docx", 12_345, false), ("報告/空白.txt", 0, false), ("照片", 0, true), ("照片/😀 很長的檔名.jpg", 70_000, false)];
+        let items =
+            [("報告/", 0, true), ("報告/年度.docx", 12_345, false), ("報告/空白.txt", 0, false), ("照片", 0, true), ("照片/😀 很長的檔名.jpg", 70_000, false)];
         assert_eq!(predicted_len(items), actual_len(&items).await);
         assert_eq!(predicted_len([]), actual_len(&[]).await);
         // More than 65535 entries switches to the ZIP64 end record

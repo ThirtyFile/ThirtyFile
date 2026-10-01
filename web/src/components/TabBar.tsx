@@ -139,10 +139,7 @@ function TabItem({ tab, active, onlyOne }: { tab: Tab; active: boolean; onlyOne:
               e.stopPropagation();
               requestClose();
             }}
-            className={cn(
-              "flex size-5 shrink-0 items-center justify-center rounded hover:bg-accent",
-              !active && !unsaved && "opacity-0 group-hover:opacity-100",
-            )}
+            className={cn("flex size-5 shrink-0 items-center justify-center rounded hover:bg-accent", !active && !unsaved && "opacity-0 group-hover:opacity-100")}
           >
             {/* Show a dot while unsaved; show close only on hover */}
             {unsaved ? (

@@ -20,7 +20,7 @@ export function SharedWithMePage() {
         <div className="flex min-h-52 flex-col items-center justify-center gap-2 py-10 text-muted-foreground">
           <UsersRoundIcon className="size-9 stroke-[1.4]" />
           <p>{t("Nothing has been shared with you yet")}</p>
-          <p className="text-xs">{t("When someone chooses \"Share with…\" on a folder and adds you (or a group you're in), it will show up here.")}</p>
+          <p className="text-xs">{t('When someone chooses "Share with…" on a folder and adds you (or a group you\'re in), it will show up here.')}</p>
         </div>
       }
     />

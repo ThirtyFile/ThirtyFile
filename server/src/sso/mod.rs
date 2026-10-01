@@ -477,9 +477,8 @@ mod tests {
         *MOCK_BASE.lock().unwrap() = Some(base);
         enable(&env, |_| {});
         let amy = env.user("amy", true).await;
-        let start_with = |password: Option<String>| {
-            start_link(State(env.st.clone()), amy.clone(), Path("google".into()), Json(LinkReq { next: None, password, code: None }))
-        };
+        let start_with =
+            |password: Option<String>| start_link(State(env.st.clone()), amy.clone(), Path("google".into()), Json(LinkReq { next: None, password, code: None }));
         // A session alone doesn't link an account that then signs in without the password
         assert!(start_with(None).await.is_err());
         assert!(start_with(Some(testutil::wrong_password())).await.is_err());
@@ -494,7 +493,8 @@ mod tests {
         let ben = env.user("ben", true).await;
         let r = login(&env, &m, "google", Some(ben.clone()), |n| google(n, "g-7", "ben@example.com", true)).await;
         assert_eq!(location(&r), "/files/abc?sso_linked=google");
-        let (kind, data): (String, String) = sqlx::query_as("SELECT kind, data FROM notifications WHERE user_id = ?").bind(ben.id).fetch_one(&env.st.db).await.unwrap();
+        let (kind, data): (String, String) =
+            sqlx::query_as("SELECT kind, data FROM notifications WHERE user_id = ?").bind(ben.id).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(kind, "sign_in_method");
         let data: Value = serde_json::from_str(&data).unwrap();
         assert_eq!((data["provider"].as_str(), data["account"].as_str()), (Some("google"), Some("ben@example.com")));
@@ -508,7 +508,9 @@ mod tests {
         let (m, base) = mock_server().await;
         *MOCK_BASE.lock().unwrap() = Some(base);
         let amy = env.user("amy", true).await;
-        let linked = || async { sqlx::query_as::<_, (String,)>("SELECT email FROM user_identities WHERE user_id = ?").bind(amy.id).fetch_optional(&env.st.db).await.unwrap() };
+        let linked = || async {
+            sqlx::query_as::<_, (String,)>("SELECT email FROM user_identities WHERE user_id = ?").bind(amy.id).fetch_optional(&env.st.db).await.unwrap()
+        };
 
         // Without a domain list any account can be linked, but an address the provider hasn't verified isn't kept
         // (it could later match an account by its email)
@@ -568,7 +570,15 @@ mod tests {
         let (state, nonce) = (query_param(&url, "state"), query_param(&url, "nonce"));
         m.lock().unwrap().claims = make(&nonce);
         let q = CallbackQuery { code: Some("code-1".into()), state: Some(state), error: None, error_description: None };
-        callback(State(env.st.clone()), Path(provider.into()), Query(q), ConnectInfo("127.0.0.1:1".parse().unwrap()), headers, user.ok_or_else(AppError::unauthorized)).await
+        callback(
+            State(env.st.clone()),
+            Path(provider.into()),
+            Query(q),
+            ConnectInfo("127.0.0.1:1".parse().unwrap()),
+            headers,
+            user.ok_or_else(AppError::unauthorized),
+        )
+        .await
     }
 
     fn google(nonce: &str, sub: &str, email: &str, verified: bool) -> Value {
@@ -589,12 +599,22 @@ mod tests {
         // An attacker starts a sign-in and hands the callback URL to another browser (without the state cookie)
         let mut headers = HeaderMap::new();
         headers.insert(header::HOST, "drive.test".parse().unwrap());
-        let r = start(State(env.st.clone()), Path("google".into()), Query(StartQuery { next: None, link: None }), ConnectInfo("127.0.0.1:1".parse().unwrap()), headers.clone(), Err(AppError::unauthorized())).await;
+        let r = start(
+            State(env.st.clone()),
+            Path("google".into()),
+            Query(StartQuery { next: None, link: None }),
+            ConnectInfo("127.0.0.1:1".parse().unwrap()),
+            headers.clone(),
+            Err(AppError::unauthorized()),
+        )
+        .await;
         let url = location(&r);
         let (state, nonce) = (query_param(&url, "state"), query_param(&url, "nonce"));
         m.lock().unwrap().claims = google(&nonce, "g-1", "amy@example.com", true);
         let q = CallbackQuery { code: Some("code-1".into()), state: Some(state), error: None, error_description: None };
-        let r = callback(State(env.st.clone()), Path("google".into()), Query(q), ConnectInfo("127.0.0.1:1".parse().unwrap()), headers, Err(AppError::unauthorized())).await;
+        let r =
+            callback(State(env.st.clone()), Path("google".into()), Query(q), ConnectInfo("127.0.0.1:1".parse().unwrap()), headers, Err(AppError::unauthorized()))
+                .await;
         // The reason goes to the sign-in page in a cookie: the address only says there is one, so a link can't make
         // the page show a text of its own
         assert_eq!(location(&r), "/login?sso_error=1");
@@ -618,7 +638,14 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(header::HOST, "drive.test".parse().unwrap());
         let go = |user: &User, link: Option<String>| {
-            start(State(env.st.clone()), Path("google".into()), Query(StartQuery { next: Some("/files".into()), link }), ConnectInfo("127.0.0.1:1".parse().unwrap()), headers.clone(), Ok(user.clone()))
+            start(
+                State(env.st.clone()),
+                Path("google".into()),
+                Query(StartQuery { next: Some("/files".into()), link }),
+                ConnectInfo("127.0.0.1:1".parse().unwrap()),
+                headers.clone(),
+                Ok(user.clone()),
+            )
         };
         // A link started from another website carries no ticket, or one that doesn't exist
         assert!(location(&go(&amy, Some("made-up".into())).await).contains("sso_error="));
@@ -643,7 +670,15 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(header::HOST, "drive.test".parse().unwrap());
         let link = Some(ticket(&env, &attacker, "google").await);
-        let r = start(State(env.st.clone()), Path("google".into()), Query(StartQuery { next: None, link }), ConnectInfo("127.0.0.1:1".parse().unwrap()), headers.clone(), Ok(attacker)).await;
+        let r = start(
+            State(env.st.clone()),
+            Path("google".into()),
+            Query(StartQuery { next: None, link }),
+            ConnectInfo("127.0.0.1:1".parse().unwrap()),
+            headers.clone(),
+            Ok(attacker),
+        )
+        .await;
         let url = location(&r);
         let set = r.headers()[header::SET_COOKIE].to_str().unwrap().to_string();
         headers.insert(header::COOKIE, set.split(';').next().unwrap().parse().unwrap());
@@ -660,7 +695,9 @@ mod tests {
     async fn microsoft_tenant_must_be_an_id_or_domain() {
         let env = testutil::env().await;
         let admin = env.admin().await;
-        for (tenant, ok) in [("evil.example/x?", false), ("a@b", false), ("contoso.onmicrosoft.com", true), ("72f988bf-86f1-41af-91ab-2d7cd011db47", true), ("", true)] {
+        for (tenant, ok) in
+            [("evil.example/x?", false), ("a@b", false), ("contoso.onmicrosoft.com", true), ("72f988bf-86f1-41af-91ab-2d7cd011db47", true), ("", true)]
+        {
             let mut s = SsoSettings::default();
             s.microsoft.tenant = tenant.into();
             let res = update_settings(State(env.st.clone()), Admin(admin.clone()), HeaderMap::new(), Json(s)).await;
@@ -727,7 +764,15 @@ mod tests {
 
         // Nonexistent or already used state
         let q = CallbackQuery { code: Some("c".into()), state: Some("not-a-state".into()), error: None, error_description: None };
-        let r = callback(State(env.st.clone()), Path("google".into()), Query(q), ConnectInfo("127.0.0.1:1".parse().unwrap()), HeaderMap::new(), Err(AppError::unauthorized())).await;
+        let r = callback(
+            State(env.st.clone()),
+            Path("google".into()),
+            Query(q),
+            ConnectInfo("127.0.0.1:1".parse().unwrap()),
+            HeaderMap::new(),
+            Err(AppError::unauthorized()),
+        )
+        .await;
         assert!(location(&r).contains("sso_error"));
 
         // Disabled users can't sign in
@@ -874,7 +919,8 @@ mod tests {
         let env = testutil::env().await;
         let (m, base) = mock_server().await;
         *MOCK_BASE.lock().unwrap() = Some(base);
-        let (gid,): (i64,) = sqlx::query_as("INSERT INTO groups (name, description, created_at) VALUES ('staff', '', 0) RETURNING id").fetch_one(&env.st.db).await.unwrap();
+        let (gid,): (i64,) =
+            sqlx::query_as("INSERT INTO groups (name, description, created_at) VALUES ('staff', '', 0) RETURNING id").fetch_one(&env.st.db).await.unwrap();
         env.user("carol@example.com", true).await;
 
         // Google creates accounts with its own defaults, domain list and group; GitHub is linked accounts only
@@ -907,11 +953,12 @@ mod tests {
             let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM user_identities WHERE user_id = ?").bind(dana_id).fetch_one(&env.st.db).await.unwrap();
             assert_eq!(left, 1);
         }
-        let (member,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM group_members m JOIN users u ON u.id = m.user_id WHERE u.username = 'dana@example.com' AND m.group_id = ?")
-            .bind(gid)
-            .fetch_one(&env.st.db)
-            .await
-            .unwrap();
+        let (member,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM group_members m JOIN users u ON u.id = m.user_id WHERE u.username = 'dana@example.com' AND m.group_id = ?")
+                .bind(gid)
+                .fetch_one(&env.st.db)
+                .await
+                .unwrap();
         assert_eq!(member, 1);
         // The provider's own domain list replaces the global one
         let r = login(&env, &m, "google", None, |n| google(n, "g-11", "eve@other.example", true)).await;
@@ -933,7 +980,19 @@ mod tests {
             let mut c = env.st.db.acquire().await.unwrap();
             crate::admin::create_user(
                 &mut c,
-                NewUser { username: &format!("bulk{i}@example.com"), password_hash: &hash, role: "user", can_write: true, can_delete: true, can_share: true, quota_bytes: 0, source: "google", provisioned_by: None, personal_space: None, space_folders: None },
+                NewUser {
+                    username: &format!("bulk{i}@example.com"),
+                    password_hash: &hash,
+                    role: "user",
+                    can_write: true,
+                    can_delete: true,
+                    can_share: true,
+                    quota_bytes: 0,
+                    source: "google",
+                    provisioned_by: None,
+                    personal_space: None,
+                    space_folders: None,
+                },
             )
             .await
             .unwrap();
@@ -952,11 +1011,20 @@ mod tests {
         let env = testutil::env().await;
         let (m, base) = mock_server().await;
         *MOCK_BASE.lock().unwrap() = Some(base);
-        let (gid,): (i64,) = sqlx::query_as("INSERT INTO groups (name, description, created_at) VALUES ('partners', '', 0) RETURNING id").fetch_one(&env.st.db).await.unwrap();
+        let (gid,): (i64,) =
+            sqlx::query_as("INSERT INTO groups (name, description, created_at) VALUES ('partners', '', 0) RETURNING id").fetch_one(&env.st.db).await.unwrap();
         enable(&env, |s| {
             s.google.provisioning = Provisioning::Create;
             s.google.defaults = NewUserDefaults { can_write: true, can_delete: true, can_share: true, quota_bytes: None };
-            s.domain_rules = vec![DomainRule { domain: "partner.example".into(), can_write: true, can_delete: false, can_share: false, quota_bytes: Some(512 << 20), groups: vec![gid], ..Default::default() }];
+            s.domain_rules = vec![DomainRule {
+                domain: "partner.example".into(),
+                can_write: true,
+                can_delete: false,
+                can_share: false,
+                quota_bytes: Some(512 << 20),
+                groups: vec![gid],
+                ..Default::default()
+            }];
         });
         let named = |n: &str, sub: &str, email: &str, name: &str| {
             let mut v = google(n, sub, email, true);
@@ -967,16 +1035,18 @@ mod tests {
         // The domain rule wins over the provider defaults; the display name comes from the provider
         let r = login(&env, &m, "google", None, |n| named(n, "g-20", "pat@partner.example", "Pat Partner")).await;
         assert_eq!(location(&r), "/files/abc");
-        let row: (bool, bool, i64, String) = sqlx::query_as("SELECT can_write, can_delete, quota_bytes, display_name FROM users WHERE username = 'pat@partner.example'")
-            .fetch_one(&env.st.db)
-            .await
-            .unwrap();
+        let row: (bool, bool, i64, String) =
+            sqlx::query_as("SELECT can_write, can_delete, quota_bytes, display_name FROM users WHERE username = 'pat@partner.example'")
+                .fetch_one(&env.st.db)
+                .await
+                .unwrap();
         assert_eq!(row, (true, false, 512 << 20, "Pat Partner".into()));
-        let (member,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM group_members m JOIN users u ON u.id = m.user_id WHERE u.username = 'pat@partner.example' AND m.group_id = ?")
-            .bind(gid)
-            .fetch_one(&env.st.db)
-            .await
-            .unwrap();
+        let (member,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM group_members m JOIN users u ON u.id = m.user_id WHERE u.username = 'pat@partner.example' AND m.group_id = ?")
+                .bind(gid)
+                .fetch_one(&env.st.db)
+                .await
+                .unwrap();
         assert_eq!(member, 1);
         // Other domains get the provider defaults
         let r = login(&env, &m, "google", None, |n| named(n, "g-21", "zoe@example.com", "Zoe")).await;

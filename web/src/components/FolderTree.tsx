@@ -256,7 +256,9 @@ function SpaceRoot({
             aria-expanded={empty ? undefined : open}
             aria-current={activeId === rootId ? "page" : undefined}
             className="flex h-full min-w-0 flex-1 items-center gap-[7px] pr-2 outline-none"
-            title={offline ? t("{name}: storage service offline ({reason}). You can browse, but you can't open, download, or upload files.", { name: label, reason: tServer(offline) }) : undefined}
+            title={
+              offline ? t("{name}: storage service offline ({reason}). You can browse, but you can't open, download, or upload files.", { name: label, reason: tServer(offline) }) : undefined
+            }
           >
             <Icon className={cn("size-[15px] shrink-0", offline && "opacity-40")} />
             <span className="truncate">{label}</span>
@@ -285,7 +287,10 @@ function ThisPc({ activeId }: { activeId?: string }) {
             {...item}
             aria-expanded={open}
             className={({ isActive }) =>
-              cn("-ml-5 flex h-full min-w-0 flex-1 items-center gap-[7px] rounded pr-2 pl-5 outline-none", isActive && "bg-selection text-accent-foreground shadow-[inset_3px_0_0_var(--color-brand)]")
+              cn(
+                "-ml-5 flex h-full min-w-0 flex-1 items-center gap-[7px] rounded pr-2 pl-5 outline-none",
+                isActive && "bg-selection text-accent-foreground shadow-[inset_3px_0_0_var(--color-brand)]",
+              )
             }
           >
             <LayersIcon className="size-[15px] shrink-0" />

@@ -101,16 +101,7 @@ function ColorMenu(props: { label: string; icon: ReactNode; value?: string; none
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={
-          <Button
-            variant="ghost"
-            size="sm"
-            title={props.label}
-            aria-label={props.label}
-            className="h-7 shrink-0 gap-0.5 px-1"
-            onMouseDown={(e) => e.preventDefault()}
-          />
-        }
+        render={<Button variant="ghost" size="sm" title={props.label} aria-label={props.label} className="h-7 shrink-0 gap-0.5 px-1" onMouseDown={(e) => e.preventDefault()} />}
       >
         <span className="flex flex-col items-center leading-none">
           {props.icon}
@@ -123,14 +114,7 @@ function ColorMenu(props: { label: string; icon: ReactNode; value?: string; none
         <DropdownMenuSeparator />
         <div className="grid grid-cols-10 gap-1 p-1">
           {PALETTE.flat().map((c) => (
-            <DropdownMenuItem
-              key={c}
-              title={c}
-              aria-label={c}
-              className="size-5 rounded-sm border border-black/15 p-0"
-              style={{ background: c }}
-              onClick={() => props.onPick(c)}
-            />
+            <DropdownMenuItem key={c} title={c} aria-label={c} className="size-5 rounded-sm border border-black/15 p-0" style={{ background: c }} onClick={() => props.onPick(c)} />
           ))}
         </div>
       </DropdownMenuContent>
@@ -138,17 +122,7 @@ function ColorMenu(props: { label: string; icon: ReactNode; value?: string; none
   );
 }
 
-export function SheetToolbar({
-  style,
-  merged,
-  actions,
-  disabledStructure,
-}: {
-  style: CellStyle;
-  merged: boolean;
-  actions: ToolbarActions;
-  disabledStructure?: string;
-}) {
+export function SheetToolbar({ style, merged, actions, disabledStructure }: { style: CellStyle; merged: boolean; actions: ToolbarActions; disabledStructure?: string }) {
   const toggle = (k: "bold" | "italic" | "underline" | "strike" | "wrap") => actions.style((s) => ({ ...s, [k]: !s[k] }));
   const fmt = NUMBER_FORMATS.find((f) => (f.code ?? undefined) === (style.numFmt ?? undefined));
   return (
@@ -188,47 +162,21 @@ export function SheetToolbar({
         noneLabel={t("Automatic")}
         onPick={(c) => actions.style((s) => ({ ...s, color: c }))}
       />
-      <ColorMenu
-        label={t("Fill color")}
-        icon={<PaintBucketIcon className="size-4" />}
-        value={style.bg}
-        noneLabel={t("No fill")}
-        onPick={(c) => actions.style((s) => ({ ...s, bg: c }))}
-      />
+      <ColorMenu label={t("Fill color")} icon={<PaintBucketIcon className="size-4" />} value={style.bg} noneLabel={t("No fill")} onPick={(c) => actions.style((s) => ({ ...s, bg: c }))} />
       <Sep />
-      <Tool
-        label={t("Align left")}
-        active={style.hAlign === "left"}
-        onClick={() => actions.style((s) => ({ ...s, hAlign: s.hAlign === "left" ? undefined : "left" }))}
-      >
+      <Tool label={t("Align left")} active={style.hAlign === "left"} onClick={() => actions.style((s) => ({ ...s, hAlign: s.hAlign === "left" ? undefined : "left" }))}>
         <AlignLeftIcon />
       </Tool>
-      <Tool
-        label={t("Center")}
-        active={style.hAlign === "center"}
-        onClick={() => actions.style((s) => ({ ...s, hAlign: s.hAlign === "center" ? undefined : "center" }))}
-      >
+      <Tool label={t("Center")} active={style.hAlign === "center"} onClick={() => actions.style((s) => ({ ...s, hAlign: s.hAlign === "center" ? undefined : "center" }))}>
         <AlignCenterIcon />
       </Tool>
-      <Tool
-        label={t("Align right")}
-        active={style.hAlign === "right"}
-        onClick={() => actions.style((s) => ({ ...s, hAlign: s.hAlign === "right" ? undefined : "right" }))}
-      >
+      <Tool label={t("Align right")} active={style.hAlign === "right"} onClick={() => actions.style((s) => ({ ...s, hAlign: s.hAlign === "right" ? undefined : "right" }))}>
         <AlignRightIcon />
       </Tool>
-      <Tool
-        label={t("Top align")}
-        active={style.vAlign === "top"}
-        onClick={() => actions.style((s) => ({ ...s, vAlign: s.vAlign === "top" ? undefined : "top" }))}
-      >
+      <Tool label={t("Top align")} active={style.vAlign === "top"} onClick={() => actions.style((s) => ({ ...s, vAlign: s.vAlign === "top" ? undefined : "top" }))}>
         <ArrowUpToLineIcon />
       </Tool>
-      <Tool
-        label={t("Middle align")}
-        active={style.vAlign === "center"}
-        onClick={() => actions.style((s) => ({ ...s, vAlign: s.vAlign === "center" ? undefined : "center" }))}
-      >
+      <Tool label={t("Middle align")} active={style.vAlign === "center"} onClick={() => actions.style((s) => ({ ...s, vAlign: s.vAlign === "center" ? undefined : "center" }))}>
         <FoldVerticalIcon />
       </Tool>
       <Tool label={t("Bottom align")} active={!style.vAlign || style.vAlign === "bottom"} onClick={() => actions.style((s) => ({ ...s, vAlign: undefined }))}>
@@ -242,16 +190,7 @@ export function SheetToolbar({
       </Tool>
       <DropdownMenu>
         <DropdownMenuTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="sm"
-              title={t("Borders")}
-              aria-label={t("Borders")}
-              className="h-7 shrink-0 gap-0.5 px-1"
-              onMouseDown={(e) => e.preventDefault()}
-            />
-          }
+          render={<Button variant="ghost" size="sm" title={t("Borders")} aria-label={t("Borders")} className="h-7 shrink-0 gap-0.5 px-1" onMouseDown={(e) => e.preventDefault()} />}
         >
           <Grid3x3Icon className="size-4" />
           <ChevronDownIcon className="size-3 opacity-60" />

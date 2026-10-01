@@ -174,15 +174,17 @@ pub(super) fn summary(req: &SsoSettings) -> String {
         Some(Provisioning::Off) => "linked accounts only",
         _ => "matches by email",
     };
-    let providers: Vec<String> = PROVIDERS
-        .iter()
-        .map(|p| format!("{} {} ({})", label(p), if req.provider(p).is_some_and(|c| c.enabled) { "on" } else { "off" }, policy(p)))
-        .collect();
+    let providers: Vec<String> =
+        PROVIDERS.iter().map(|p| format!("{} {} ({})", label(p), if req.provider(p).is_some_and(|c| c.enabled) { "on" } else { "off" }, policy(p))).collect();
     format!(
         "Single sign-on settings: {}{}{}",
         providers.join("; "),
         if req.allowed_domains.is_empty() { String::new() } else { format!("; allowed domains: {}", req.allowed_domains.join(", ")) },
-        if req.domain_rules.is_empty() { String::new() } else { format!("; domain rules: {}", req.domain_rules.iter().map(|r| r.domain.as_str()).collect::<Vec<_>>().join(", ")) },
+        if req.domain_rules.is_empty() {
+            String::new()
+        } else {
+            format!("; domain rules: {}", req.domain_rules.iter().map(|r| r.domain.as_str()).collect::<Vec<_>>().join(", "))
+        },
     )
 }
 
@@ -190,12 +192,8 @@ pub type PendingMap = std::sync::Mutex<HashMap<String, Pending>>;
 
 /// Domain list as entered (commas, spaces or line breaks between entries) → lowercase, deduplicated, validated
 pub(super) fn normalize_domains(raw: &[String]) -> AppResult<Vec<String>> {
-    let mut domains: Vec<String> = raw
-        .iter()
-        .flat_map(|d| d.split([',', ' ', '\n', ';']))
-        .map(|d| d.trim().trim_start_matches('@').to_ascii_lowercase())
-        .filter(|d| !d.is_empty())
-        .collect();
+    let mut domains: Vec<String> =
+        raw.iter().flat_map(|d| d.split([',', ' ', '\n', ';'])).map(|d| d.trim().trim_start_matches('@').to_ascii_lowercase()).filter(|d| !d.is_empty()).collect();
     domains.sort();
     domains.dedup();
     if let Some(bad) = domains.iter().find(|d| !d.contains('.') || !d.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')) {

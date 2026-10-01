@@ -12,9 +12,8 @@ use axum::{
 use tower_http::{CompressionLevel, compression::CompressionLayer, timeout::TimeoutLayer, trace::TraceLayer};
 
 use crate::{
-    admin, archive, auth, backups, branding, dav, downloads, drives, error, files, jobs, location_tools, locations, logs,
-    mail, moves, nodes, notify, paths, personal, replicas, reset, sessions, shares, sso, state::AppState, thumbnails, tokens,
-    twofactor, upload, usage, versions, web,
+    admin, archive, auth, backups, branding, dav, downloads, drives, error, files, jobs, location_tools, locations, logs, mail, moves, nodes, notify, paths,
+    personal, replicas, reset, sessions, shares, sso, state::AppState, thumbnails, tokens, twofactor, upload, usage, versions, web,
 };
 
 use super::{
@@ -65,10 +64,7 @@ fn untimed() -> Router<AppState> {
         )
         .route("/files/{id}/versions/{version}/restore", post(versions::restore))
         .route("/uploads", post(upload::create).options(upload::options))
-        .route(
-            "/uploads/{id}",
-            head(upload::head).patch(upload::patch).delete(upload::delete).layer(DefaultBodyLimit::disable()),
-        )
+        .route("/uploads/{id}", head(upload::head).patch(upload::patch).delete(upload::delete).layer(DefaultBodyLimit::disable()))
         .route_layer(middleware::from_fn(tokens::allow));
     Router::new()
         .merge(files)
@@ -77,15 +73,15 @@ fn untimed() -> Router<AppState> {
         .route("/public/shares/{token}/uploads", post(shares::public_upload_create).options(upload::options))
         .route(
             "/public/shares/{token}/uploads/{id}",
-            head(shares::public_upload_head)
-                .patch(shares::public_upload_patch)
-                .delete(shares::public_upload_delete)
-                .layer(DefaultBodyLimit::disable()),
+            head(shares::public_upload_head).patch(shares::public_upload_patch).delete(shares::public_upload_delete).layer(DefaultBodyLimit::disable()),
         )
         .route("/admin/branding/logo/{variant}", put(branding::upload_logo).delete(branding::delete_logo))
         // One file of a storage location, as it is stored
         .route("/admin/storage/{id}/download", get(location_tools::download))
-        .route("/admin/branding/background", put(branding::upload_background).delete(branding::delete_background).layer(DefaultBodyLimit::max(branding::MAX_BACKGROUND + 1024)))
+        .route(
+            "/admin/branding/background",
+            put(branding::upload_background).delete(branding::delete_background).layer(DefaultBodyLimit::max(branding::MAX_BACKGROUND + 1024)),
+        )
 }
 
 /// Routes that also accept app passwords (`Authorization: Bearer` or HTTP Basic, see tokens.rs): file operations only.
@@ -264,7 +260,8 @@ mod tests {
     use crate::testutil;
 
     async fn call(app: &Router, method: Method, uri: &str, headers: &[(header::HeaderName, String)], body: Option<serde_json::Value>) -> Response {
-        let mut req = axum::http::Request::builder().method(method).uri(uri).extension(axum::extract::ConnectInfo(std::net::SocketAddr::from(([10, 0, 0, 1], 5000))));
+        let mut req =
+            axum::http::Request::builder().method(method).uri(uri).extension(axum::extract::ConnectInfo(std::net::SocketAddr::from(([10, 0, 0, 1], 5000))));
         for (k, v) in headers {
             req = req.header(k, v);
         }
@@ -277,7 +274,14 @@ mod tests {
 
     async fn app_password(env: &testutil::TestEnv, user: &auth::User, scope: &str) -> String {
         let (_, cookie) = env.sign_in(user, "Test").await;
-        let res = call(&router(env.st.clone()), Method::POST, "/api/auth/app-passwords", &[(header::COOKIE, cookie)], Some(serde_json::json!({ "name": "Script", "scope": scope, "password": testutil::password() }))).await;
+        let res = call(
+            &router(env.st.clone()),
+            Method::POST,
+            "/api/auth/app-passwords",
+            &[(header::COOKIE, cookie)],
+            Some(serde_json::json!({ "name": "Script", "scope": scope, "password": testutil::password() })),
+        )
+        .await;
         assert_eq!(res.status(), StatusCode::OK);
         let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
         serde_json::from_slice::<serde_json::Value>(&body).unwrap()["token"].as_str().unwrap().to_string()

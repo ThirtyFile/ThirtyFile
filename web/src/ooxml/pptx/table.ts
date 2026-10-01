@@ -157,7 +157,7 @@ export function renderTable(tbl: Element, tctx: TableCtx, _w: number, _h: number
         const dash = line.dash ? (line.dash[0] <= 1 ? "dotted" : "dashed") : line.compound === "dbl" ? "double" : "solid";
         return `${Math.round(line.width * 100) / 100}px ${dash} ${color}`;
       };
-      const mar = (n: string, d: number) => ((numAttr(tcPr, n) ?? d) * m.sx);
+      const mar = (n: string, d: number) => (numAttr(tcPr, n) ?? d) * m.sx;
       const anchor = attr(tcPr, "anchor") ?? "t";
       const td = h("td", {
         colspan: cs > 1 ? cs : undefined,
@@ -183,12 +183,18 @@ export function renderTable(tbl: Element, tctx: TableCtx, _w: number, _h: number
         for (const p of renderParagraphs(txBody, tcx, { bp })) td.append(p);
       }
       // Diagonal lines
-      for (const [name, d] of [["lnTlToBr", "M0 0L100 100"], ["lnBlToTr", "M0 100L100 0"]] as const) {
+      for (const [name, d] of [
+        ["lnTlToBr", "M0 0L100 100"],
+        ["lnBlToTr", "M0 100L100 0"],
+      ] as const) {
         const line = kid(tcPr, name) ? resolveLine([kid(tcPr, name)], null, cc, theme, info.path) : null;
         if (!line || line.fill.t !== "solid") continue;
         td.append(
-          s("svg", { viewBox: "0 0 100 100", preserveAspectRatio: "none", style: "position:absolute;inset:0;width:100%;height:100%;pointer-events:none" },
-            s("path", { d, stroke: rgbaCss(line.fill.c), "stroke-width": line.width, "vector-effect": "non-scaling-stroke", fill: "none" })),
+          s(
+            "svg",
+            { viewBox: "0 0 100 100", preserveAspectRatio: "none", style: "position:absolute;inset:0;width:100%;height:100%;pointer-events:none" },
+            s("path", { d, stroke: rgbaCss(line.fill.c), "stroke-width": line.width, "vector-effect": "non-scaling-stroke", fill: "none" }),
+          ),
         );
       }
       trEl.append(td);

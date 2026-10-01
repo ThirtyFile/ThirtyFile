@@ -64,10 +64,7 @@ const RFC5987: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'.').remove(b'
 
 /// `attachment` / `inline` Content-Disposition with both an ASCII fallback file name and a UTF-8 file name.
 pub fn content_disposition(kind: &str, name: &str) -> String {
-    let fallback: String = name
-        .chars()
-        .map(|c| if c.is_ascii_graphic() && c != '"' && c != '\\' || c == ' ' { c } else { '_' })
-        .collect();
+    let fallback: String = name.chars().map(|c| if c.is_ascii_graphic() && c != '"' && c != '\\' || c == ' ' { c } else { '_' }).collect();
     format!("{kind}; filename=\"{fallback}\"; filename*=UTF-8''{}", utf8_percent_encode(name, RFC5987))
 }
 
@@ -288,11 +285,8 @@ pub fn system_folder(real: &std::path::Path) -> bool {
             .map(std::path::PathBuf::from)
             .collect();
     #[cfg(not(unix))]
-    let system: Vec<std::path::PathBuf> = ["SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"]
-        .iter()
-        .filter_map(std::env::var_os)
-        .map(std::path::PathBuf::from)
-        .collect();
+    let system: Vec<std::path::PathBuf> =
+        ["SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"].iter().filter_map(std::env::var_os).map(std::path::PathBuf::from).collect();
     let real = real.to_string_lossy();
     // Windows: compared without the `\\?\` form and letter case
     let real = std::path::PathBuf::from(real.strip_prefix(r"\\?\").unwrap_or(&real).to_lowercase());

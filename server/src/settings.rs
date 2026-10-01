@@ -16,10 +16,7 @@ use crate::{
 
 /// Gets (or generates on first startup) the server secret used for signing, stored encrypted (secrets.rs)
 pub async fn load_secret(db: &SqlitePool) -> Result<Vec<u8>, sqlx::Error> {
-    if let Some((v,)) = sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'secret'")
-        .fetch_optional(db)
-        .await?
-    {
+    if let Some((v,)) = sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'secret'").fetch_optional(db).await? {
         match crate::secrets::open("settings:secret", &v) {
             Ok(secret) => return Ok(secret.into_bytes()),
             // A database restored without its key: a new signing secret only signs everyone out and ends share links'
@@ -107,17 +104,13 @@ pub async fn reseal_secrets(db: &SqlitePool, new_key: &[u8; 32]) -> Result<usize
 
 /// Loads system settings (the company space is created first, by `create_company_space`)
 pub async fn load_system_settings(db: &SqlitePool) -> Result<SystemSettings, sqlx::Error> {
-    let (shared_root_id, disabled): (String, bool) =
-        sqlx::query_as("SELECT root_id, disabled FROM drives WHERE kind = 'company' LIMIT 1").fetch_one(db).await?;
+    let (shared_root_id, disabled): (String, bool) = sqlx::query_as("SELECT root_id, disabled FROM drives WHERE kind = 'company' LIMIT 1").fetch_one(db).await?;
     let allow_user_drives = get_setting(db, "allow_user_drives").await?.as_deref() == Some("1");
     let default_user_quota = get_setting(db, "default_user_quota").await?.and_then(|v| v.parse().ok()).unwrap_or(0).max(0);
     let personal_spaces = get_setting(db, "personal_spaces").await?.as_deref() != Some("0");
     let personal_location = get_setting(db, "personal_location").await?.unwrap_or_default();
     let public_url = get_setting(db, "public_url").await?.unwrap_or_default();
-    let default_lang = get_setting(db, "default_lang")
-        .await?
-        .filter(|v| crate::admin::LANGS.contains(&v.as_str()))
-        .unwrap_or_else(|| "auto".into());
+    let default_lang = get_setting(db, "default_lang").await?.filter(|v| crate::admin::LANGS.contains(&v.as_str())).unwrap_or_else(|| "auto".into());
     let scan_minutes = get_setting(db, "scan_minutes").await?.and_then(|v| v.parse().ok()).unwrap_or(15).clamp(0, 1440);
     let require_two_factor = get_setting(db, "require_two_factor").await?.as_deref() == Some("1");
     let min_password_length = get_setting(db, "min_password_length")
@@ -128,16 +121,10 @@ pub async fn load_system_settings(db: &SqlitePool) -> Result<SystemSettings, sql
     let share_password_required = get_setting(db, "share_password_required").await?.as_deref() == Some("1");
     let share_max_days = get_setting(db, "share_max_days").await?.and_then(|v| v.parse().ok()).unwrap_or(0).clamp(0, crate::shares::MAX_EXPIRY_DAYS);
     let public_links = get_setting(db, "public_links").await?.as_deref() != Some("0");
-    let version_keep = get_setting(db, "version_keep")
-        .await?
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(crate::versions::DEFAULT_KEEP)
-        .clamp(0, crate::versions::MAX_KEEP);
-    let version_days = get_setting(db, "version_days")
-        .await?
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(crate::versions::DEFAULT_DAYS)
-        .clamp(0, crate::versions::MAX_DAYS);
+    let version_keep =
+        get_setting(db, "version_keep").await?.and_then(|v| v.parse().ok()).unwrap_or(crate::versions::DEFAULT_KEEP).clamp(0, crate::versions::MAX_KEEP);
+    let version_days =
+        get_setting(db, "version_days").await?.and_then(|v| v.parse().ok()).unwrap_or(crate::versions::DEFAULT_DAYS).clamp(0, crate::versions::MAX_DAYS);
     let move_jobs = get_setting(db, "move_jobs").await?.and_then(|v| v.parse().ok()).unwrap_or(1).clamp(1, crate::moves::MAX_JOBS);
     Ok(SystemSettings {
         shared_enabled: !disabled,
@@ -259,8 +246,10 @@ mod tests {
             .unwrap();
         let dump = || async {
             let s: Vec<(String,)> = sqlx::query_as("SELECT value FROM settings UNION ALL SELECT config FROM storage_locations").fetch_all(db).await.unwrap();
-            s.into_iter().map(|(v,)| v).collect::<Vec<_>>().join("
-")
+            s.into_iter().map(|(v,)| v).collect::<Vec<_>>().join(
+                "
+",
+            )
         };
         let stored = dump().await;
         assert!(!stored.contains(pw), "{stored}");

@@ -43,7 +43,7 @@ export function DevicesDialog({ user, onClose }: { user?: { id: number; username
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{user ? t("Devices of \"{name}\"", { name: user.username }) : t("Devices")}</DialogTitle>
+          <DialogTitle>{user ? t('Devices of "{name}"', { name: user.username }) : t("Devices")}</DialogTitle>
           <DialogDescription>
             {user
               ? t("Browsers where this user is signed in. Signing a device out ends its session right away; app passwords keep working.")

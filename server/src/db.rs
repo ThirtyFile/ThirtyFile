@@ -33,11 +33,8 @@ async fn open(path: &Path, cache_mb: u32, migrator: &sqlx::migrate::Migrator) ->
         .pragma("mmap_size", "268435456")
         // Sorting names the way File Explorer does ("File 2" before "File 10", letter case ignored in every language)
         .collation("natural_name", crate::util::natural_cmp);
-    let pool = SqlitePoolOptions::new()
-        .max_connections(8)
-        .after_connect(|conn, _| Box::pin(async move { register_functions(conn).await }))
-        .connect_with(opts)
-        .await?;
+    let pool =
+        SqlitePoolOptions::new().max_connections(8).after_connect(|conn, _| Box::pin(async move { register_functions(conn).await })).connect_with(opts).await?;
     // Said plainly, before the database is copied or changed (`check_existing` usually said it already)
     if let Ok(applied) = sqlx::query_as::<_, (i64, Vec<u8>)>("SELECT version, checksum FROM _sqlx_migrations WHERE success = 1").fetch_all(&pool).await
         && let Some(message) = unusable(&applied, migrator)
@@ -89,8 +86,7 @@ pub async fn check_existing(path: &Path) -> Result<(), String> {
     let Ok(opts) = SqliteConnectOptions::from_str(&format!("sqlite://{}", path.display())) else { return Ok(()) };
     let opts = opts.read_only(true).create_if_missing(false);
     let Ok(mut conn) = sqlx::ConnectOptions::connect(&opts).await else { return Ok(()) };
-    let applied: Result<Vec<(i64, Vec<u8>)>, _> =
-        sqlx::query_as("SELECT version, checksum FROM _sqlx_migrations WHERE success = 1").fetch_all(&mut conn).await;
+    let applied: Result<Vec<(i64, Vec<u8>)>, _> = sqlx::query_as("SELECT version, checksum FROM _sqlx_migrations WHERE success = 1").fetch_all(&mut conn).await;
     let _ = sqlx::Connection::close(conn).await;
     match applied {
         Ok(applied) => unusable(&applied, &sqlx::migrate!("./migrations")).map_or(Ok(()), Err),
@@ -189,9 +185,8 @@ async fn register_functions(conn: &mut SqliteConnection) -> Result<(), sqlx::Err
     let db = handle.as_raw_handle().as_ptr();
     let flags = ffi::SQLITE_UTF8 | ffi::SQLITE_DETERMINISTIC | ffi::SQLITE_INNOCUOUS;
     // SAFETY: `db` is the open connection, held locked for the call; the function has no user data or destructor.
-    let rc = unsafe {
-        ffi::sqlite3_create_function_v2(db, c"unicode_lower".as_ptr(), 1, flags, std::ptr::null_mut::<c_void>(), Some(unicode_lower), None, None, None)
-    };
+    let rc =
+        unsafe { ffi::sqlite3_create_function_v2(db, c"unicode_lower".as_ptr(), 1, flags, std::ptr::null_mut::<c_void>(), Some(unicode_lower), None, None, None) };
     if rc != ffi::SQLITE_OK {
         return Err(sqlx::Error::Protocol(format!("Couldn't register unicode_lower() (SQLite error {rc})")));
     }
@@ -289,20 +284,18 @@ pub async fn create_drive(
     .bind(ts)
     .execute(&mut *conn)
     .await?;
-    sqlx::query(
-        "INSERT INTO drives (id, name, kind, root_id, owner_id, quota_bytes, created_by, created_at, location_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(&drive_id)
-    .bind(name)
-    .bind(kind)
-    .bind(&root_id)
-    .bind(owner_id)
-    .bind(quota_bytes)
-    .bind(owner_id)
-    .bind(ts)
-    .bind(location_id)
-    .execute(&mut *conn)
-    .await?;
+    sqlx::query("INSERT INTO drives (id, name, kind, root_id, owner_id, quota_bytes, created_by, created_at, location_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(&drive_id)
+        .bind(name)
+        .bind(kind)
+        .bind(&root_id)
+        .bind(owner_id)
+        .bind(quota_bytes)
+        .bind(owner_id)
+        .bind(ts)
+        .bind(location_id)
+        .execute(&mut *conn)
+        .await?;
     Ok((drive_id, root_id))
 }
 
@@ -514,13 +507,17 @@ mod tests {
         let db = open(&path, 16, &v040).await.unwrap();
         sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'amy', 'x', 0)").execute(&db).await.unwrap();
         sqlx::query("INSERT INTO nodes (id, owner_id, kind, name, created_at, updated_at) VALUES ('r', 1, 'folder', '', 0, 0)").execute(&db).await.unwrap();
-        sqlx::query("INSERT INTO drives (id, name, kind, root_id, owner_id, created_at, location_id) VALUES ('d', 'My files', 'personal', 'r', 1, 0, 'local')").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO drives (id, name, kind, root_id, owner_id, created_at, location_id) VALUES ('d', 'My files', 'personal', 'r', 1, 0, 'local')")
+            .execute(&db)
+            .await
+            .unwrap();
         sqlx::query("UPDATE nodes SET drive_id = 'd' WHERE id = 'r'").execute(&db).await.unwrap();
         db.close().await;
 
         let db = connect(&path, 16).await.unwrap();
         // Nothing counted before the upgrade; every change after it
-        let count = || async { sqlx::query_as::<_, (i64,)>("SELECT COALESCE((SELECT seq FROM space_changes WHERE drive_id = 'd'), 0)").fetch_one(&db).await.unwrap().0 };
+        let count =
+            || async { sqlx::query_as::<_, (i64,)>("SELECT COALESCE((SELECT seq FROM space_changes WHERE drive_id = 'd'), 0)").fetch_one(&db).await.unwrap().0 };
         assert_eq!(count().await, 0);
         sqlx::query("INSERT INTO nodes (id, owner_id, parent_id, kind, name, drive_id, created_at, updated_at) VALUES ('f', 1, 'r', 'folder', 'Docs', 'd', 0, 0)")
             .execute(&db)
@@ -548,7 +545,10 @@ mod tests {
         db.close().await;
 
         let db = connect(&path, 16).await.unwrap();
-        sqlx::query("INSERT INTO replica_policies (id, name, source_location, created_at, updated_at) VALUES ('p', 'Mirror', 'local', 0, 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO replica_policies (id, name, source_location, created_at, updated_at) VALUES ('p', 'Mirror', 'local', 0, 0)")
+            .execute(&db)
+            .await
+            .unwrap();
         sqlx::query("INSERT INTO replica_targets (policy_id, location_id, priority) VALUES ('p', 'nas', 0)").execute(&db).await.unwrap();
         sqlx::query("INSERT INTO replica_copies (hash, location_id, size, created_at) VALUES ('h', 'nas', 1, 0)").execute(&db).await.unwrap();
         let (copies, fallback, state): (i64, bool, String) =
@@ -647,7 +647,8 @@ mod tests {
         let (owner,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'nodes_owner'").fetch_one(db).await.unwrap();
         assert_eq!(owner, 0);
         // Every session has its public id
-        let columns: Vec<(i64, String, String, bool)> = sqlx::query_as("SELECT cid, name, type, \"notnull\" FROM pragma_table_info('sessions')").fetch_all(db).await.unwrap();
+        let columns: Vec<(i64, String, String, bool)> =
+            sqlx::query_as("SELECT cid, name, type, \"notnull\" FROM pragma_table_info('sessions')").fetch_all(db).await.unwrap();
         assert!(columns.iter().any(|c| c.1 == "id" && c.3), "{columns:?}");
         // The company space's root is read from the space itself, not kept as a setting too
         assert_eq!(get_setting(db, "shared_root_id").await.unwrap(), None);

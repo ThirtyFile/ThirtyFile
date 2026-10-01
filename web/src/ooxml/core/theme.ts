@@ -26,7 +26,13 @@ export function hexToRgba(hex: string | null | undefined, a = 1): Rgba | null {
 }
 
 export function rgbaHex(c: Rgba) {
-  return `#${[c.r, c.g, c.b].map((v) => Math.round(clamp(v, 0, 255)).toString(16).padStart(2, "0")).join("")}`;
+  return `#${[c.r, c.g, c.b]
+    .map((v) =>
+      Math.round(clamp(v, 0, 255))
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
 }
 
 export function rgbaCss(c: Rgba | null | undefined): string | undefined {
@@ -290,8 +296,16 @@ export function sheetColor(el: Element | null | undefined, theme: Theme | null |
 
 /** Maps Word themeColor names (text1, background1, accent1…) to theme color scheme names */
 const WORD_THEME: Record<string, string> = {
-  text1: "dk1", dark1: "dk1", background1: "lt1", light1: "lt1", text2: "dk2", dark2: "dk2", background2: "lt2", light2: "lt2",
-  hyperlink: "hlink", followedHyperlink: "folHlink",
+  text1: "dk1",
+  dark1: "dk1",
+  background1: "lt1",
+  light1: "lt1",
+  text2: "dk2",
+  dark2: "dk2",
+  background2: "lt2",
+  light2: "lt2",
+  hyperlink: "hlink",
+  followedHyperlink: "folHlink",
 };
 
 /**

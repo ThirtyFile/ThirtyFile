@@ -37,7 +37,6 @@ export function allItems<T extends { id: string }>(data: InfiniteData<CursorPage
   return data.pages.flatMap((p) => p.items.filter((n) => !seen.has(n.id) && !!seen.add(n.id)));
 }
 
-
 /**
  * A list with its first page replaced by a newer copy. The items the old first page had are kept after the new ones
  * (one pushed out of the first page would otherwise be in neither page), and so is where the next page starts.
@@ -54,11 +53,7 @@ export function withFirstPage<T extends { id: string }>(data: InfiniteData<Curso
  * Reload only the first page of the lists shown under `queryKey` (e.g. while files are uploaded into a big folder, rather
  * than every page again). A list that is loading already is left alone: its answer would overwrite this one.
  */
-export async function refreshFirstPage<T extends { id: string }>(
-  qc: QueryClient,
-  queryKey: QueryKey,
-  fetchFirst: (key: QueryKey, limit: number) => Promise<CursorPage<T>> | undefined,
-) {
+export async function refreshFirstPage<T extends { id: string }>(qc: QueryClient, queryKey: QueryKey, fetchFirst: (key: QueryKey, limit: number) => Promise<CursorPage<T>> | undefined) {
   const lists = qc.getQueryCache().findAll({ queryKey, type: "active" });
   await Promise.all(
     lists.map(async (query) => {

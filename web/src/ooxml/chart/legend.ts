@@ -52,7 +52,11 @@ export function manualRect(layout: Element | null, W: number, H: number, auto: R
 
 export function buildLegend(el: Element | null, entries: LegendEntry[], area: Rect, W: number, H: number, ctx: Ctx, reverse: boolean): Legend | null {
   if (!el) return null;
-  const hidden = new Set(kids(el, "legendEntry").filter((e) => toggle(kid(e, "delete"))).map((e) => numAttr(kid(e, "idx"), "val")));
+  const hidden = new Set(
+    kids(el, "legendEntry")
+      .filter((e) => toggle(kid(e, "delete")))
+      .map((e) => numAttr(kid(e, "idx"), "val")),
+  );
   let list = entries.filter((e) => !hidden.has(e.idx));
   if (!list.length) return null;
   // c:legend specifies position via the legendPos child; cx:legend via the pos attribute
@@ -120,7 +124,16 @@ export function buildLegend(el: Element | null, entries: LegendEntry[], area: Re
   else if (pos === "tr") box = { x: area.x + area.w - boxW, y: area.y, w: boxW, h: boxH };
   else box = { x: area.x + (area.w - boxW) / 2, y: area.y + area.h - boxH, w: boxW, h: boxH };
 
-  const take = manual || overlay ? null : pos === "b" ? { side: "b" as const, size: boxH + margin } : pos === "t" ? { side: "t" as const, size: boxH + margin } : pos === "l" ? { side: "l" as const, size: boxW + margin } : { side: "r" as const, size: boxW + margin };
+  const take =
+    manual || overlay
+      ? null
+      : pos === "b"
+        ? { side: "b" as const, size: boxH + margin }
+        : pos === "t"
+          ? { side: "t" as const, size: boxH + margin }
+          : pos === "l"
+            ? { side: "l" as const, size: boxW + margin }
+            : { side: "r" as const, size: boxW + margin };
 
   const spPr = kid(el, "spPr");
   return {
@@ -154,5 +167,14 @@ function drawKey(g: SVGElement, e: LegendEntry, x: number, cy: number, keyW: num
   }
   const size = px * 0.65;
   const kx = x + (keyW - size) / 2;
-  g.append(s("rect", { x: r2(kx), y: r2(cy - size / 2), width: r2(size), height: r2(size), fill: e.fill ?? "none", ...strokeAttrs(e.stroke ? { ...e.stroke, width: Math.min(e.stroke.width, 1.5) } : null) }));
+  g.append(
+    s("rect", {
+      x: r2(kx),
+      y: r2(cy - size / 2),
+      width: r2(size),
+      height: r2(size),
+      fill: e.fill ?? "none",
+      ...strokeAttrs(e.stroke ? { ...e.stroke, width: Math.min(e.stroke.width, 1.5) } : null),
+    }),
+  );
 }

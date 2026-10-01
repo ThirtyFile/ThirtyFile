@@ -163,9 +163,7 @@ pub async fn file_sha256(path: PathBuf) -> std::io::Result<(String, u64)> {
 /// from the destination (and cached) when the cache doesn't have it or it doesn't match
 pub async fn manifest(st: &AppState, dst: &dyn Storage, set: &str, snapshot: &str, sha256: &str, size: u64) -> AppResult<PathBuf> {
     let path = cached_manifest(st, snapshot);
-    if tokio::fs::metadata(&path).await.is_ok_and(|m| m.len() == size)
-        && file_sha256(path.clone()).await.is_ok_and(|(h, _)| h == sha256)
-    {
+    if tokio::fs::metadata(&path).await.is_ok_and(|m| m.len() == size) && file_sha256(path.clone()).await.is_ok_and(|(h, _)| h == sha256) {
         return Ok(path);
     }
     tokio::fs::create_dir_all(cache_dir(st)).await?;
@@ -180,12 +178,18 @@ pub async fn manifest(st: &AppState, dst: &dyn Storage, set: &str, snapshot: &st
     .await;
     if let Err(e) = fetched {
         let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(AppError::new(axum::http::StatusCode::BAD_GATEWAY, format!("The snapshot's list of files couldn't be read: {}", crate::locations::describe(&e))));
+        return Err(AppError::new(
+            axum::http::StatusCode::BAD_GATEWAY,
+            format!("The snapshot's list of files couldn't be read: {}", crate::locations::describe(&e)),
+        ));
     }
     let (hash, len) = file_sha256(tmp.clone()).await?;
     if hash != sha256 || len != size {
         let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(AppError::new(axum::http::StatusCode::BAD_GATEWAY, "The snapshot's list of files on the destination isn't the one that was written: it was changed or damaged"));
+        return Err(AppError::new(
+            axum::http::StatusCode::BAD_GATEWAY,
+            "The snapshot's list of files on the destination isn't the one that was written: it was changed or damaged",
+        ));
     }
     tokio::fs::rename(&tmp, &path).await?;
     Ok(path)

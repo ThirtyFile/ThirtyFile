@@ -8,4 +8,4 @@ pub mod api;
 pub mod meter;
 pub mod sample;
 
-pub use meter::{Meters, Metered, Op, background, probe};
+pub use meter::{Metered, Meters, Op, background, probe};

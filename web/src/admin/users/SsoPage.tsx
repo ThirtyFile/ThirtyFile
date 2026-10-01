@@ -21,10 +21,18 @@ const PROVIDERS: SsoProviderId[] = ["microsoft", "google", "github", "oidc"];
 
 /** Steps for creating an app with each provider */
 const GUIDE: Record<SsoProviderId, string> = {
-  microsoft: t("Microsoft Entra admin center › App registrations › New registration. Select the \"Web\" platform and enter the redirect URI below, then add a client secret under \"Certificates & secrets\". The Application (client) ID and Directory (tenant) ID are on the \"Overview\" page."),
-  google: t("Google Cloud Console › APIs & Services › Credentials › Create credentials › OAuth client ID. Choose \"Web application\" as the application type and add the URL below under \"Authorized redirect URIs\". If this is your first time, configure the OAuth consent screen first."),
-  github: t("GitHub › Settings › Developer settings › OAuth Apps › New OAuth App. Enter the URL below as the Authorization callback URL, then click Generate a new client secret after the app is created. For company use, create the app under your organization's settings."),
-  oidc: t("Any OpenID Connect provider, such as Keycloak, Authentik, Authelia or Zitadel: create a confidential client (web application) with the redirect URI below, and enter its issuer URL, client ID and secret. The provider must send a verified email address."),
+  microsoft: t(
+    'Microsoft Entra admin center › App registrations › New registration. Select the "Web" platform and enter the redirect URI below, then add a client secret under "Certificates & secrets". The Application (client) ID and Directory (tenant) ID are on the "Overview" page.',
+  ),
+  google: t(
+    'Google Cloud Console › APIs & Services › Credentials › Create credentials › OAuth client ID. Choose "Web application" as the application type and add the URL below under "Authorized redirect URIs". If this is your first time, configure the OAuth consent screen first.',
+  ),
+  github: t(
+    "GitHub › Settings › Developer settings › OAuth Apps › New OAuth App. Enter the URL below as the Authorization callback URL, then click Generate a new client secret after the app is created. For company use, create the app under your organization's settings.",
+  ),
+  oidc: t(
+    "Any OpenID Connect provider, such as Keycloak, Authentik, Authelia or Zitadel: create a confidential client (web application) with the redirect URI below, and enter its issuer URL, client ID and secret. The provider must send a verified email address.",
+  ),
 };
 
 const GB = 1024 ** 3;
@@ -94,7 +102,7 @@ const ruleReq = (d: RuleDraft): SsoDomainRule => {
 const splitDomains = (text: string) => text.split(/[,\s;]+/).filter(Boolean);
 
 const PROVISIONING: { value: SsoProvisioning; label: string; help: string }[] = [
-  { value: "off", label: t("Linked accounts only"), help: t("People sign in with their password first and link the account under \"Sign-in methods\".") },
+  { value: "off", label: t("Linked accounts only"), help: t('People sign in with their password first and link the account under "Sign-in methods".') },
   { value: "link", label: t("Match existing users by email"), help: t("Users whose username is their verified email sign in directly; nobody else.") },
   { value: "create", label: t("Create accounts automatically"), help: t("Like the above, and people without an account get one on first sign-in, with the settings below.") },
 ];
@@ -189,7 +197,9 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
           <TriangleAlertIcon className="mt-px size-4 shrink-0" />
           <span>
             {(() => {
-              const [before, after] = t("The site URL isn't set, so the redirect URIs below are based on your browser's current address. Before going live, set the site URL in {link}, then enter the URI in the provider's app settings.").split("{link}");
+              const [before, after] = t(
+                "The site URL isn't set, so the redirect URIs below are based on your browser's current address. Before going live, set the site URL in {link}, then enter the URI in the provider's app settings.",
+              ).split("{link}");
               return (
                 <>
                   {before}
@@ -208,13 +218,23 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
         <div className="grid gap-5 p-4">
           <div className="grid gap-1.5">
             <Label htmlFor="sso-domains">{t("Allow only these email domains")}</Label>
-            <Input id="sso-domains" value={domains} onChange={(e) => setDomains(e.target.value)} placeholder={t("e.g. example.com (separate multiple domains with commas; leave blank for no restriction)")} />
+            <Input
+              id="sso-domains"
+              value={domains}
+              onChange={(e) => setDomains(e.target.value)}
+              placeholder={t("e.g. example.com (separate multiple domains with commas; leave blank for no restriction)")}
+            />
             <p className="text-xs text-muted-foreground">
-              {t("Enter your company domain to prevent personal Google or GitHub accounts from signing in or being created automatically. Already linked accounts aren't affected. A provider with its own domain list below uses that list instead.")}
+              {t(
+                "Enter your company domain to prevent personal Google or GitHub accounts from signing in or being created automatically. Already linked accounts aren't affected. A provider with its own domain list below uses that list instead.",
+              )}
             </p>
           </div>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            {t("What happens on first sign-in, the permissions of new accounts and the groups they join are set per provider below. To limit damage from a misconfiguration, a provider creates at most {n} accounts per hour.", { n: saved.max_created_per_hour })}
+            {t(
+              "What happens on first sign-in, the permissions of new accounts and the groups they join are set per provider below. To limit damage from a misconfiguration, a provider creates at most {n} accounts per hour.",
+              { n: saved.max_created_per_hour },
+            )}
           </p>
         </div>
       </Section>
@@ -222,7 +242,9 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
       <Section title={t("Rules by email domain")}>
         <div className="grid gap-4 p-4">
           <p className="text-xs leading-relaxed text-muted-foreground">
-            {t("Accounts created automatically for an email domain listed here get these settings instead of the provider's defaults (for example, fewer permissions and a smaller space for partners). A rule doesn't allow a domain to sign in by itself: the domain must also be in an allowed list, or the lists must be empty.")}
+            {t(
+              "Accounts created automatically for an email domain listed here get these settings instead of the provider's defaults (for example, fewer permissions and a smaller space for partners). A rule doesn't allow a domain to sign in by itself: the domain must also be in an allowed list, or the lists must be empty.",
+            )}
           </p>
           {rules.map((r, i) => (
             <div key={r.key} className="grid gap-3 rounded-lg border p-3">
@@ -246,23 +268,24 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
                 <div className="grid content-start gap-3">
                   <div className="grid gap-1.5">
                     <Label htmlFor={`rule-${i}-quota`}>{t("Space size of new accounts (GB)")}</Label>
-                    <Input id={`rule-${i}-quota`} inputMode="decimal" value={r.quotaGb} onChange={(e) => setRule(i, { quotaGb: e.target.value })} placeholder={t("Blank = the default for new users; 0 = unlimited")} />
+                    <Input
+                      id={`rule-${i}-quota`}
+                      inputMode="decimal"
+                      value={r.quotaGb}
+                      onChange={(e) => setRule(i, { quotaGb: e.target.value })}
+                      placeholder={t("Blank = the default for new users; 0 = unlimited")}
+                    />
                   </div>
                   <div className="grid gap-1.5">
-                    <Label htmlFor={`rule-${i}-personal`}>{t("\"My files\" of new accounts")}</Label>
-                    <NativeSelect
-                      id={`rule-${i}-personal`}
-                      size="lg"
-                      value={r.personal}
-                      onChange={(e) => setRule(i, { personal: e.target.value as RuleDraft["personal"] })}
-                    >
+                    <Label htmlFor={`rule-${i}-personal`}>{t('"My files" of new accounts')}</Label>
+                    <NativeSelect id={`rule-${i}-personal`} size="lg" value={r.personal} onChange={(e) => setRule(i, { personal: e.target.value as RuleDraft["personal"] })}>
                       <option value="">{t("As in the system settings")}</option>
                       <option value="yes">{t("Create")}</option>
                       <option value="no">{t("Don't create")}</option>
                     </NativeSelect>
                     {r.personal !== "no" && (
                       <LocationSelect
-                        aria-label={t("Storage location of \"My files\"")}
+                        aria-label={t('Storage location of "My files"')}
                         value={r.location}
                         onChange={(location) => setRule(i, { location })}
                         blank={t("Location as in the system settings")}
@@ -281,7 +304,11 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
                               type="button"
                               aria-pressed={on}
                               onClick={() => setRule(i, { groups: on ? r.groups.filter((x) => x !== g.id) : [...r.groups, g.id] })}
-                              className={on ? "rounded-full border border-brand bg-brand/10 px-2.5 py-0.5 text-xs text-brand" : "rounded-full border px-2.5 py-0.5 text-xs text-muted-foreground hover:bg-muted"}
+                              className={
+                                on
+                                  ? "rounded-full border border-brand bg-brand/10 px-2.5 py-0.5 text-xs text-brand"
+                                  : "rounded-full border px-2.5 py-0.5 text-xs text-muted-foreground hover:bg-muted"
+                              }
                             >
                               {g.name}
                             </button>
@@ -325,7 +352,14 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
                   <Label htmlFor="sso-oidc-name">{t("Name on the sign-in button")}</Label>
-                  <Input id="sso-oidc-name" value={draft.oidc.name} maxLength={40} placeholder={t("e.g. Company login")} onChange={(e) => setProvider("oidc", { name: e.target.value })} autoComplete="off" />
+                  <Input
+                    id="sso-oidc-name"
+                    value={draft.oidc.name}
+                    maxLength={40}
+                    placeholder={t("e.g. Company login")}
+                    onChange={(e) => setProvider("oidc", { name: e.target.value })}
+                    autoComplete="off"
+                  />
                 </div>
                 <div className="grid gap-1.5">
                   <Label htmlFor="sso-oidc-issuer">{t("Issuer URL")}</Label>
@@ -470,7 +504,9 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
                   autoComplete="off"
                 />
                 <p className="text-xs text-muted-foreground">
-                  {t("Recommended: only your company's Microsoft accounts can sign in, and accounts can be matched automatically by email. If left blank, accounts from any organization can try to sign in; because other organizations can set any email, users must then sign in first and link their account manually.")}
+                  {t(
+                    "Recommended: only your company's Microsoft accounts can sign in, and accounts can be matched automatically by email. If left blank, accounts from any organization can try to sign in; because other organizations can set any email, users must then sign in first and link their account manually.",
+                  )}
                 </p>
               </div>
             )}
@@ -482,11 +518,7 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
         <span className="text-xs text-muted-foreground">{dirty ? t("You have unsaved changes") : t("Secrets are stored only on the server and won't be shown again")}</span>
         <span className="flex-1" />
         {dirty && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => reset(saved)}
-          >
+          <Button variant="outline" size="sm" onClick={() => reset(saved)}>
             {t("Discard changes")}
           </Button>
         )}

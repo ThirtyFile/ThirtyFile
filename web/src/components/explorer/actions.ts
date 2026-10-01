@@ -24,25 +24,7 @@ import { errorMessage } from "@/lib/utils";
 const MAX_AT_ONCE = 10_000;
 
 export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
-  const {
-    caps,
-    qc,
-    navigate,
-    tabs,
-    clip,
-    canCreate,
-    canUpload,
-    selectedNodes,
-    selectedIds,
-    single,
-    allFavorite,
-    setSelected,
-    setAnchor,
-    dialog,
-    setDialog,
-    setDragging,
-    setDetailsOpen,
-  } = s;
+  const { caps, qc, navigate, tabs, clip, canCreate, canUpload, selectedNodes, selectedIds, single, allFavorite, setSelected, setAnchor, dialog, setDialog, setDragging, setDetailsOpen } = s;
   /** Refresh (the menu, or Retry after an error): everything shown loads again */
   const refresh = () => invalidateFiles(qc);
   /** After a change: what it touched loads again (lib/queries) */
@@ -312,7 +294,27 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         }
       : {};
 
-  return { refresh, changed, parentsOf, open, download, compress, extract, toggleFavorite, dropInto, uploadInto, transfer, trash, deleteForever, cut, copy, canPaste, paste, dragProps, createNew };
+  return {
+    refresh,
+    changed,
+    parentsOf,
+    open,
+    download,
+    compress,
+    extract,
+    toggleFavorite,
+    dropInto,
+    uploadInto,
+    transfer,
+    trash,
+    deleteForever,
+    cut,
+    copy,
+    canPaste,
+    paste,
+    dragProps,
+    createNew,
+  };
 }
 
 export type ExplorerActions = ReturnType<typeof useExplorerActions>;

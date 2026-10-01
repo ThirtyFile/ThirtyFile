@@ -128,7 +128,9 @@ export function LinkedAccountsDialog({ onClose }: { onClose(): void }) {
             })}
           </div>
         )}
-        <p className="text-xs text-muted-foreground">{t("Before unlinking all accounts, make sure you remember your username and password; otherwise, you'll need an administrator to reset your password to sign in.")}</p>
+        <p className="text-xs text-muted-foreground">
+          {t("Before unlinking all accounts, make sure you remember your username and password; otherwise, you'll need an administrator to reset your password to sign in.")}
+        </p>
       </DialogContent>
     </Dialog>
   );

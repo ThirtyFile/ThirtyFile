@@ -56,12 +56,7 @@ function PersonalFilesChoice({ c }: { c: ReturnType<typeof usePersonalFiles> }) 
         <input type="radio" name="personal-files" className="mt-1 accent-brand" checked={c.choice === "move"} onChange={() => c.setChoice("move")} />
         <span className="grid min-w-0 flex-1 gap-1.5">
           <span>{t("Move their files to:")}</span>
-          <NativeSelect
-            aria-label={t("Move their files to:")}
-            value={c.moveTo}
-            disabled={c.choice !== "move"}
-            onChange={(e) => c.setTarget(e.target.value)}
-          >
+          <NativeSelect aria-label={t("Move their files to:")} value={c.moveTo} disabled={c.choice !== "move"} onChange={(e) => c.setTarget(e.target.value)}>
             {c.targets.map((d) => (
               <option key={d.id} value={d.id}>
                 {spaceLabel(d)}
@@ -70,8 +65,10 @@ function PersonalFilesChoice({ c }: { c: ReturnType<typeof usePersonalFiles> }) 
           </NativeSelect>
           <span className="text-xs text-muted-foreground">
             {own?.mode === "folder"
-              ? t("They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash stays in their folder on the server.", { name: user.username })
-              : t("They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash is emptied.", { name: user.username })}
+              ? t('They go into a new folder named "Files of {name}" at the top of that space, and count toward its size. Their trash stays in their folder on the server.', {
+                  name: user.username,
+                })
+              : t('They go into a new folder named "Files of {name}" at the top of that space, and count toward its size. Their trash is emptied.', { name: user.username })}
           </span>
         </span>
       </Label>
@@ -116,7 +113,7 @@ export function AddPersonalDialog({ user, onClose }: { user: UserRow; onClose():
   const add = useMutation({
     mutationFn: () => api.addPersonalSpace(user.id, value || defaultLocation),
     onSuccess: () => {
-      toast.success(t("\"My files\" created"));
+      toast.success(t('"My files" created'));
       invalidatePersonal(qc);
       onClose();
     },
@@ -132,7 +129,7 @@ export function AddPersonalDialog({ user, onClose }: { user: UserRow; onClose():
           }}
         >
           <DialogHeader>
-            <DialogTitle>{t("Create \"My files\" for \"{name}\"", { name: user.username })}</DialogTitle>
+            <DialogTitle>{t('Create "My files" for "{name}"', { name: user.username })}</DialogTitle>
             <DialogDescription>{t("A private space that only they can see.")}</DialogDescription>
           </DialogHeader>
           <div className="grid gap-1.5">
@@ -170,7 +167,7 @@ export function RemovePersonalDialog({ user, onClose }: { user: UserRow; onClose
     // Moving the files to or from a folder on the server can take a while: the dialog closes, and a message follows it
     onSuccess: (job) => {
       onClose();
-      void followJob(job, user.personal_space ? t("\"My files\" removed") : t("Stopped waiting to create \"My files\""), () => invalidatePersonal(qc));
+      void followJob(job, user.personal_space ? t('"My files" removed') : t('Stopped waiting to create "My files"'), () => invalidatePersonal(qc));
     },
   });
   return (
@@ -184,11 +181,13 @@ export function RemovePersonalDialog({ user, onClose }: { user: UserRow; onClose
           }}
         >
           <DialogHeader>
-            <DialogTitle>{t("Remove \"My files\" of \"{name}\"?", { name: user.username })}</DialogTitle>
+            <DialogTitle>{t('Remove "My files" of "{name}"?', { name: user.username })}</DialogTitle>
             <DialogDescription>
               {user.personal_space
-                ? t("Their personal space ({size}) is removed. They keep their account and their access to other spaces, and start in the first space they can use.", { size: formatBytes(user.used_bytes) })
-                : t("Their \"My files\" is still waiting for {location} to be available. It won't be created.", { location: locationName(user.personal_pending) })}
+                ? t("Their personal space ({size}) is removed. They keep their account and their access to other spaces, and start in the first space they can use.", {
+                    size: formatBytes(user.used_bytes),
+                  })
+                : t('Their "My files" is still waiting for {location} to be available. It won\'t be created.', { location: locationName(user.personal_pending) })}
             </DialogDescription>
           </DialogHeader>
           {user.personal_space && <PersonalFilesChoice c={c} />}
@@ -199,7 +198,7 @@ export function RemovePersonalDialog({ user, onClose }: { user: UserRow; onClose
             </Button>
             <Button type="submit" variant="destructive" disabled={remove.isPending || !c.ready}>
               {remove.isPending && <Loader2Icon className="animate-spin" />}
-              {t("Remove \"My files\"")}
+              {t('Remove "My files"')}
             </Button>
           </DialogFooter>
         </form>
@@ -243,14 +242,17 @@ export function DeleteUserDialog({ user, onClose, onDeleted }: { user: UserRow; 
           }}
         >
           <DialogHeader>
-            <DialogTitle>{t("Delete user \"{name}\"?", { name: user.username })}</DialogTitle>
+            <DialogTitle>{t('Delete user "{name}"?', { name: user.username })}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-2 text-sm text-muted-foreground">
             <p>
               {user.personal_space
-                ? t("Their personal space \"My files\" ({size}) is removed. Files they added to other spaces, and team spaces they own, are transferred to you. Their share links are deleted.", {
-                    size: formatBytes(user.used_bytes),
-                  })
+                ? t(
+                    'Their personal space "My files" ({size}) is removed. Files they added to other spaces, and team spaces they own, are transferred to you. Their share links are deleted.',
+                    {
+                      size: formatBytes(user.used_bytes),
+                    },
+                  )
                 : t("Files they added to spaces, and team spaces they own, are transferred to you. Their share links are deleted.")}
             </p>
             {!user.disabled && (

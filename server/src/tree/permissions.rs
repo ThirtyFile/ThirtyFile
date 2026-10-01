@@ -129,11 +129,8 @@ pub async fn grant_applies_to(conn: &mut SqliteConnection, user: &User, principa
         "everyone" => true,
         "user" => principal_id == user.id,
         "group" => {
-            let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM group_members WHERE group_id = ? AND user_id = ?")
-                .bind(principal_id)
-                .bind(user.id)
-                .fetch_one(conn)
-                .await?;
+            let (n,): (i64,) =
+                sqlx::query_as("SELECT COUNT(*) FROM group_members WHERE group_id = ? AND user_id = ?").bind(principal_id).bind(user.id).fetch_one(conn).await?;
             n > 0
         }
         _ => false,
@@ -146,9 +143,10 @@ pub async fn node_with_role(conn: &mut SqliteConnection, user: &User, id: &str) 
     let id = resolve_alias(user, id)?;
     if let Some(n) = get_node(conn, id).await?
         && n.trashed_at.is_none()
-            && let Some(role) = role_on(conn, user, &n).await? {
-                return Ok((n, role));
-            }
+        && let Some(role) = role_on(conn, user, &n).await?
+    {
+        return Ok((n, role));
+    }
     Err(AppError::not_found("Item not found"))
 }
 

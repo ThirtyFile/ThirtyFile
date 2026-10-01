@@ -222,7 +222,26 @@ const NAMES: Record<string, FileType> = {};
 const names = (type: FileType, ...list: string[]) => list.forEach((n) => (NAMES[n] = type));
 names(TOOL.docker, "dockerfile", "containerfile");
 names(TOOL.compose, "compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml");
-names(TOOL.build, "makefile", "gnumakefile", "rakefile", "justfile", "build", "build.bazel", "workspace", "workspace.bazel", "cmakelists.txt", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "meson.build", "vagrantfile", "procfile", "taskfile.yml");
+names(
+  TOOL.build,
+  "makefile",
+  "gnumakefile",
+  "rakefile",
+  "justfile",
+  "build",
+  "build.bazel",
+  "workspace",
+  "workspace.bazel",
+  "cmakelists.txt",
+  "build.gradle",
+  "build.gradle.kts",
+  "settings.gradle",
+  "settings.gradle.kts",
+  "meson.build",
+  "vagrantfile",
+  "procfile",
+  "taskfile.yml",
+);
 names(TOOL.ci, "jenkinsfile", ".gitlab-ci.yml", ".travis.yml", "azure-pipelines.yml", "bitbucket-pipelines.yml", "appveyor.yml");
 names(
   TOOL.manifest,
@@ -298,7 +317,10 @@ const PATTERNS: [RegExp, FileType][] = [
   [/^(docker-)?compose[.-].*\.ya?ml$/, TOOL.compose],
   [/^\.env($|\.)|\.env$/, DATA.env],
   [/^\.github\/workflows\/|^\.?(github|gitlab)-ci\b/, TOOL.ci],
-  [/^\.(prettier|eslint|stylelint|babel|swc|lintstaged|commitlint|markdownlint)rc\b|^(prettier|eslint|stylelint|babel|vite|vitest|webpack|rollup|jest|tailwind|postcss|next|nuxt|svelte|astro)\.config\.[cm]?[jt]s$/, DATA.config],
+  [
+    /^\.(prettier|eslint|stylelint|babel|swc|lintstaged|commitlint|markdownlint)rc\b|^(prettier|eslint|stylelint|babel|vite|vitest|webpack|rollup|jest|tailwind|postcss|next|nuxt|svelte|astro)\.config\.[cm]?[jt]s$/,
+    DATA.config,
+  ],
   [/^tsconfig\..*\.json$/, DATA.config],
   [/^id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$|^(authorized_keys|known_hosts)$/, FORMAT.signature],
   [/^requirements[-_.].*\.(txt|in)$/, TOOL.manifest],

@@ -47,7 +47,7 @@ function runningText(kind: Job["kind"]) {
     case "delete_user":
       return t("Deleting the user…");
     case "remove_personal":
-      return t("Removing \"My files\"…");
+      return t('Removing "My files"…');
     default:
       return t("Working…");
   }
@@ -111,7 +111,7 @@ export async function runJob(qc: QueryClient, start: () => Promise<Job>, change:
     kind = started.kind;
     const job = await waitForJob(started);
     const name = job.name ?? "";
-    toast.success(job.kind === "compress" ? t("Created \"{name}\"", { name }) : t("Extracted to \"{name}\"", { name }), { duration: 5000 });
+    toast.success(job.kind === "compress" ? t('Created "{name}"', { name }) : t('Extracted to "{name}"', { name }), { duration: 5000 });
     void refreshFiles(qc, change);
   } catch (e) {
     const message = errorMessage(e, t("Operation failed"));

@@ -34,7 +34,11 @@ export function ResetPasswordPage() {
 function AskForLink() {
   const [account, setAccount] = useState("");
   const [sent, setSent] = useState(false);
-  const { busy, error, run: submit } = useSubmit(async () => {
+  const {
+    busy,
+    error,
+    run: submit,
+  } = useSubmit(async () => {
     await api.forgotPassword(account.trim());
     setSent(true);
   });
@@ -65,7 +69,11 @@ function NewPassword({ token }: { token: string }) {
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [done, setDone] = useState(false);
-  const { busy, error, run: submit } = useSubmit(async () => {
+  const {
+    busy,
+    error,
+    run: submit,
+  } = useSubmit(async () => {
     if (next !== confirm) throw new Error(t("The new passwords don't match"));
     await api.resetPassword(token, next);
     setDone(true);

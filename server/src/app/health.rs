@@ -63,8 +63,7 @@ pub async fn health(axum::extract::State(st): axum::extract::State<AppState>) ->
     let version = VERSION;
     if let Err(e) = sqlx::query_scalar::<_, i64>("SELECT 1").fetch_one(&st.db).await {
         tracing::warn!("health check failed: {e}");
-        return (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "status": "error", "version": version })))
-            .into_response();
+        return (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "status": "error", "version": version }))).into_response();
     }
     let mut warnings = Vec::new();
     let mut disks = serde_json::Map::new();

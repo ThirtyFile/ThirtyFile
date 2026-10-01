@@ -15,8 +15,7 @@ import { ADMIN_PAGES, adminPath } from "@/admin/pages";
 
 // Each part loads when it is first needed: the sign-in page and a share link don't load the file explorer, and the
 // administration pages load only when an administrator opens them
-const page = <M, K extends keyof M, P = object>(load: () => Promise<M>, name: K) =>
-  lazy(() => load().then((m) => ({ default: m[name] as React.ComponentType<P> })));
+const page = <M, K extends keyof M, P = object>(load: () => Promise<M>, name: K) => lazy(() => load().then((m) => ({ default: m[name] as React.ComponentType<P> })));
 const LoginPage = page(() => import("@/pages/LoginPage"), "LoginPage");
 const ResetPasswordPage = page(() => import("@/pages/ResetPasswordPage"), "ResetPasswordPage");
 const PublicSharePage = page(() => import("@/pages/PublicSharePage"), "PublicSharePage");
@@ -77,8 +76,7 @@ function RequireAuth() {
         <Loader2Icon className="size-6 animate-spin" />
       </div>
     );
-  if (me.error instanceof ApiError && me.error.status === 401)
-    return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
+  if (me.error instanceof ApiError && me.error.status === 401) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
   if (!me.data)
     return (
       <div className="flex flex-col items-center gap-3 p-10 text-center">

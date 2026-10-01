@@ -77,10 +77,7 @@ describe("which uploads were interrupted", () => {
 
   test("saving this tab's uploads keeps other tabs' and waiting ones, and drops this tab's finished ones", async () => {
     const m = await load();
-    localStorage.setItem(
-      "tf-upload-tasks-u7",
-      JSON.stringify([record({ id: "other" }), record({ id: "mine-finished", tab: m.TAB }), record({ id: "mine", tab: m.TAB, sent: 1 })]),
-    );
+    localStorage.setItem("tf-upload-tasks-u7", JSON.stringify([record({ id: "other" }), record({ id: "mine-finished", tab: m.TAB }), record({ id: "mine", tab: m.TAB, sent: 1 })]));
     m.saveLive("u7", [record({ id: "mine", tab: m.TAB, sent: 900 })]);
     const kept: UploadRecord[] = JSON.parse(localStorage.getItem("tf-upload-tasks-u7")!);
     expect(kept.map((r) => [r.id, r.sent])).toEqual([

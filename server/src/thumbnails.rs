@@ -55,15 +55,7 @@ async fn thumb_key(st: &AppState, n: &Node) -> AppResult<(Source, u64, String)> 
 
 /// A cached thumbnail, with the headers that let the browser keep it
 fn thumb_reply(data: Vec<u8>, etag: String) -> Response {
-    (
-        [
-            (header::CONTENT_TYPE, "image/jpeg".to_string()),
-            (header::CACHE_CONTROL, "private, max-age=604800".to_string()),
-            (header::ETAG, etag),
-        ],
-        data,
-    )
-        .into_response()
+    ([(header::CONTENT_TYPE, "image/jpeg".to_string()), (header::CACHE_CONTROL, "private, max-age=604800".to_string()), (header::ETAG, etag)], data).into_response()
 }
 
 pub async fn thumbnail_response(st: &AppState, headers: &HeaderMap, n: &Node) -> AppResult<Response> {
@@ -208,12 +200,7 @@ mod tests {
         let pdf = env.file(&amy, amy.root(), "Report.pdf").await;
         let hash = "ab".repeat(32);
         sqlx::query("INSERT INTO blobs (hash, size, refcount, created_at) VALUES (?, 1000, 1, 0)").bind(&hash).execute(&env.st.db).await.unwrap();
-        sqlx::query("UPDATE nodes SET mime = 'application/pdf', blob_hash = ?, size = 1000 WHERE id = ?")
-            .bind(&hash)
-            .bind(&pdf)
-            .execute(&env.st.db)
-            .await
-            .unwrap();
+        sqlx::query("UPDATE nodes SET mime = 'application/pdf', blob_hash = ?, size = 1000 WHERE id = ?").bind(&hash).bind(&pdf).execute(&env.st.db).await.unwrap();
         // Kept for Amy's space only: the same content elsewhere doesn't get it
         let content = hash;
         let hash = crate::util::sha256_hex(format!("{}:{content}", env.drive_of(&pdf).await).as_bytes());

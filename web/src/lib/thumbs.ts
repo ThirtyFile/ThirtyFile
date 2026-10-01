@@ -143,10 +143,7 @@ async function find(n: Node, source: FileSource, wanted: () => boolean, signal: 
 /** The thumbnail, or null when the file can't give one (not a readable PDF or video); fails when it couldn't be read */
 async function draw(n: Node, source: FileSource, signal: AbortSignal): Promise<Blob | null> {
   signal.throwIfAborted();
-  const canvas =
-    n.mime === "application/pdf"
-      ? await (await import("./pdfThumb")).pdfFirstPage(source.contentUrl(n), THUMB_SIDE, signal)
-      : await videoFrame(source.contentUrl(n), signal);
+  const canvas = n.mime === "application/pdf" ? await (await import("./pdfThumb")).pdfFirstPage(source.contentUrl(n), THUMB_SIDE, signal) : await videoFrame(source.contentUrl(n), signal);
   return canvas && new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
 }
 

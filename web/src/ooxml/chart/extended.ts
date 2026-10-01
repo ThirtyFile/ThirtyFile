@@ -165,7 +165,9 @@ function axisSpec(el: Element | null, id: string, role: "cat" | "val", horizonta
     title: titleEl ? titleBlock(titleEl, { ...text, size: Math.max(text.size, ctx.base.size), bold: true }, ctx, null) : null,
     titleRot: horizontal ? 0 : -90,
     ...extra,
-    ...(sc ? { input: extra.input ? { ...extra.input, min: num("min") ?? extra.input.min, max: num("max") ?? extra.input.max, major: num("majorUnit"), minor: num("minorUnit") } : null } : {}),
+    ...(sc
+      ? { input: extra.input ? { ...extra.input, min: num("min") ?? extra.input.min, max: num("max") ?? extra.input.max, major: num("majorUnit"), minor: num("minorUnit") } : null }
+      : {}),
   };
 }
 
@@ -196,7 +198,11 @@ export function renderChartEx(doc: Document, W: number, H: number, colors: Color
   } else if (layout !== "waterfall")
     entries = series
       .filter((x) => !x.hidden)
-      .map((x, i) => (x.layout === "paretoLine" ? { text: x.name, kind: "line" as const, stroke: strokeOf(x, null, ctx, { color: autoColor(1, ctx.colors), width: 2 }), idx: i } : { text: x.name, kind: "box" as const, fill: fillOf(x, null, autoColor(i, ctx.colors), ctx), idx: i }));
+      .map((x, i) =>
+        x.layout === "paretoLine"
+          ? { text: x.name, kind: "line" as const, stroke: strokeOf(x, null, ctx, { color: autoColor(1, ctx.colors), width: 2 }), idx: i }
+          : { text: x.name, kind: "box" as const, fill: fillOf(x, null, autoColor(i, ctx.colors), ctx), idx: i },
+      );
   const legend = buildLegend(kid(chart, "legend"), entries, area, W, H, ctx, false);
   if (legend?.take) {
     const { side, size } = legend.take;
@@ -219,7 +225,13 @@ export function renderChartEx(doc: Document, W: number, H: number, colors: Color
         renderFunnel(main, axes, area, plot, ctx);
         break;
       case "boxWhisker":
-        renderBoxes(series.filter((x) => x.layout === "boxWhisker" && !x.hidden), axes, area, plot, ctx);
+        renderBoxes(
+          series.filter((x) => x.layout === "boxWhisker" && !x.hidden),
+          axes,
+          area,
+          plot,
+          ctx,
+        );
         break;
       case "treemap":
         renderTreemap(main, area, plot, ctx);
@@ -247,11 +259,24 @@ function frameFor(axes: Element[], labels: string[], lo: number, hi: number, fmt
   const valEl = axisOf(axes, "valScaling");
   const specs: AxisSpec[] = [
     axisSpec(catEl, "c", "cat", true, "b", ctx, { labels, count: labels.length, crossAx: "v" }),
-    axisSpec(valEl, "v", "val", false, "l", ctx, { input: { lo, hi, min: null, max: null, major: null, minor: null, logBase: null }, crossAx: "c", format: attr(kid(valEl, "numFmt"), "formatCode") ?? fmt }),
+    axisSpec(valEl, "v", "val", false, "l", ctx, {
+      input: { lo, hi, min: null, max: null, major: null, minor: null, logBase: null },
+      crossAx: "c",
+      format: attr(kid(valEl, "numFmt"), "formatCode") ?? fmt,
+    }),
   ];
   if (secondary) {
     const el2 = axisOf(axes, "valScaling", 1);
-    specs.push(axisSpec(el2, "p", "val", false, "r", ctx, { input: { lo: 0, hi: 1, min: 0, max: 1, major: null, minor: null, logBase: null, percent: true }, format: "0%", crossAx: "c", crosses: "max", deleted: el2 ? attr(el2, "hidden") === "1" : false, majorGrid: null }));
+    specs.push(
+      axisSpec(el2, "p", "val", false, "r", ctx, {
+        input: { lo: 0, hi: 1, min: 0, max: 1, major: null, minor: null, logBase: null, percent: true },
+        format: "0%",
+        crossAx: "c",
+        crosses: "max",
+        deleted: el2 ? attr(el2, "hidden") === "1" : false,
+        majorGrid: null,
+      }),
+    );
   }
   const frame = layoutFrame(area, specs, null);
   return { frame, c: frame.axes.get("c")!, v: frame.axes.get("v")!, p: frame.axes.get("p") ?? null };
@@ -344,7 +369,10 @@ function renderColumns(series: ExSeries[], axes: Element[], area: Rect, g: SVGEl
     labels = list.map((x) => x[0]);
     values = list.map((x) => x[1]);
   } else {
-    const h = histogram(nums(bars.val).filter((v): v is number => v !== null), binning);
+    const h = histogram(
+      nums(bars.val).filter((v): v is number => v !== null),
+      binning,
+    );
     labels = h.labels;
     values = h.counts;
   }
@@ -358,7 +386,16 @@ function renderColumns(series: ExSeries[], axes: Element[], area: Rect, g: SVGEl
   const auto = autoColor(0, ctx.colors);
   values.forEach((val, i) => {
     const r = barRect(c, v, i, 0, val, gap);
-    g.append(s("rect", { x: r2(r.x), y: r2(r.y), width: r2(r.w), height: r2(r.h), fill: fillOf(bars, i, auto, ctx), ...strokeAttrs(strokeOf(bars, i, ctx, gap === 0 ? { color: "#FFFFFF", width: 0.75 } : null)) }));
+    g.append(
+      s("rect", {
+        x: r2(r.x),
+        y: r2(r.y),
+        width: r2(r.w),
+        height: r2(r.h),
+        fill: fillOf(bars, i, auto, ctx),
+        ...strokeAttrs(strokeOf(bars, i, ctx, gap === 0 ? { color: "#FFFFFF", width: 0.75 } : null)),
+      }),
+    );
     if (vis) {
       const t = labelText(vis, bars, labels[i], val, "General");
       if (t) g.append(drawBlock(textBlock(t, vis.style), c.center(i), r.y - 3, "middle", "bottom"));
@@ -513,14 +550,26 @@ function renderBoxes(list: ExSeries[], axes: Element[], area: Rect, g: SVGElemen
       const bw = w * 0.8;
       const cx = x0 + bw / 2;
       const y = (val: number) => v.pos(val);
-      g.append(s("path", { d: `M${r2(cx)},${r2(y(wHi))}V${r2(y(q3))}M${r2(cx)},${r2(y(q1))}V${r2(y(wLo))}M${r2(cx - bw / 4)},${r2(y(wHi))}h${r2(bw / 2)}M${r2(cx - bw / 4)},${r2(y(wLo))}h${r2(bw / 2)}`, fill: "none", ...strokeAttrs(line) }));
+      g.append(
+        s("path", {
+          d: `M${r2(cx)},${r2(y(wHi))}V${r2(y(q3))}M${r2(cx)},${r2(y(q1))}V${r2(y(wLo))}M${r2(cx - bw / 4)},${r2(y(wHi))}h${r2(bw / 2)}M${r2(cx - bw / 4)},${r2(y(wLo))}h${r2(bw / 2)}`,
+          fill: "none",
+          ...strokeAttrs(line),
+        }),
+      );
       g.append(s("rect", { x: r2(x0), y: r2(y(q3)), width: r2(bw), height: r2(Math.abs(y(q1) - y(q3))), fill, ...strokeAttrs(line) }));
       g.append(s("path", { d: `M${r2(x0)},${r2(y(q2))}h${r2(bw)}`, fill: "none", ...strokeAttrs(line) }));
       const mean = group.reduce((a, b) => a + b, 0) / group.length;
       means.push([cx, y(mean)]);
       if (attr(vis, "meanMarker") !== "0") {
         const m = Math.max(3, Math.min(bw * 0.15, 5));
-        g.append(s("path", { d: `M${r2(cx - m)},${r2(y(mean) - m)}l${r2(m * 2)},${r2(m * 2)}M${r2(cx + m)},${r2(y(mean) - m)}l${r2(-m * 2)},${r2(m * 2)}`, fill: "none", ...strokeAttrs({ ...line, width: 1.25 }) }));
+        g.append(
+          s("path", {
+            d: `M${r2(cx - m)},${r2(y(mean) - m)}l${r2(m * 2)},${r2(m * 2)}M${r2(cx + m)},${r2(y(mean) - m)}l${r2(-m * 2)},${r2(m * 2)}`,
+            fill: "none",
+            ...strokeAttrs({ ...line, width: 1.25 }),
+          }),
+        );
       }
       if (attr(vis, "outliers") !== "0")
         for (const o of group.filter((x) => x < q1 - 1.5 * iqr || x > q3 + 1.5 * iqr)) g.append(s("circle", { cx: r2(cx), cy: r2(y(o)), r: 2.5, fill: "none", ...strokeAttrs(line) }));

@@ -135,9 +135,7 @@ pub fn normalize_public_url(raw: &str) -> AppResult<String> {
     if host.contains('/') {
         return Err(AppError::bad_request("Enter only the domain or IP address (and port) for the site URL, without a path"));
     }
-    let ok = !host.is_empty()
-        && !host.starts_with(':')
-        && host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'));
+    let ok = !host.is_empty() && !host.starts_with(':') && host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'));
     if !ok {
         return Err(invalid());
     }
@@ -154,7 +152,8 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
         }
         if let Some(allow) = req.allow_user_drives {
             set_setting(&mut tx, "allow_user_drives", if allow { "1" } else { "0" }).await?;
-            logs::record_activity(&mut tx, &user, None, "settings", if allow { "Allowed users to create spaces" } else { "Only administrators can create spaces" }).await?;
+            logs::record_activity(&mut tx, &user, None, "settings", if allow { "Allowed users to create spaces" } else { "Only administrators can create spaces" })
+                .await?;
         }
         if let Some(q) = req.default_user_quota {
             if q < 0 {
@@ -183,7 +182,8 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
         let public_url = req.public_url.as_deref().map(normalize_public_url).transpose()?;
         if let Some(url) = &public_url {
             set_setting(&mut tx, "public_url", url).await?;
-            logs::record_activity(&mut tx, &user, None, "settings", &format!("Site URL: {}", if url.is_empty() { "Use the browser's current URL" } else { url })).await?;
+            logs::record_activity(&mut tx, &user, None, "settings", &format!("Site URL: {}", if url.is_empty() { "Use the browser's current URL" } else { url }))
+                .await?;
         }
         if let Some(lang) = &req.default_lang {
             if !LANGS.contains(&lang.as_str()) {
@@ -262,7 +262,11 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
                 return Err(AppError::bad_request("Enter a number of days from 0 to 3650"));
             }
             set_setting(&mut tx, "version_days", &d.to_string()).await?;
-            let detail = if d == 0 { "Earlier versions of files are kept without a time limit".to_string() } else { format!("Earlier versions of files are kept for {d} days") };
+            let detail = if d == 0 {
+                "Earlier versions of files are kept without a time limit".to_string()
+            } else {
+                format!("Earlier versions of files are kept for {d} days")
+            };
             logs::record_activity(&mut tx, &user, None, "settings", &detail).await?;
         }
         tx.commit().await?;

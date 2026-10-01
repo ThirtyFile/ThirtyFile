@@ -33,21 +33,13 @@ export async function buildWorkbook(sheets: SheetSpec[], strings: string[] = [],
       '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
       '<Default Extension="xml" ContentType="application/xml"/>' +
       '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
-      sheets
-        .map(
-          (_, i) =>
-            `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
-        )
-        .join("") +
+      sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("") +
       '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
       '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>' +
       '<Override PartName="/xl/calcChain.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml"/>' +
       "</Types>",
   );
-  zip.file(
-    "_rels/.rels",
-    `${XML}<Relationships xmlns="${PKG}"><Relationship Id="rId1" Type="${DOC_REL}/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
-  );
+  zip.file("_rels/.rels", `${XML}<Relationships xmlns="${PKG}"><Relationship Id="rId1" Type="${DOC_REL}/officeDocument" Target="xl/workbook.xml"/></Relationships>`);
   zip.file(
     "xl/workbook.xml",
     `${XML}<workbook xmlns="${MAIN}" xmlns:r="${R}"><sheets>` +
@@ -67,16 +59,10 @@ export async function buildWorkbook(sheets: SheetSpec[], strings: string[] = [],
   sheets.forEach((s, i) =>
     zip.file(
       `xl/worksheets/sheet${i + 1}.xml`,
-      `${XML}<worksheet xmlns="${MAIN}" xmlns:r="${R}"><dimension ref="A1"/><sheetFormatPr defaultRowHeight="15"/>` +
-        `<sheetData>${s.rows}</sheetData>${s.after ?? ""}</worksheet>`,
+      `${XML}<worksheet xmlns="${MAIN}" xmlns:r="${R}"><dimension ref="A1"/><sheetFormatPr defaultRowHeight="15"/>` + `<sheetData>${s.rows}</sheetData>${s.after ?? ""}</worksheet>`,
     ),
   );
-  zip.file(
-    "xl/sharedStrings.xml",
-    `${XML}<sst xmlns="${MAIN}" count="${strings.length}" uniqueCount="${strings.length}">` +
-      strings.map((s) => `<si><t>${s}</t></si>`).join("") +
-      "</sst>",
-  );
+  zip.file("xl/sharedStrings.xml", `${XML}<sst xmlns="${MAIN}" count="${strings.length}" uniqueCount="${strings.length}">` + strings.map((s) => `<si><t>${s}</t></si>`).join("") + "</sst>");
   zip.file(
     "xl/styles.xml",
     `${XML}<styleSheet xmlns="${MAIN}">` +
@@ -106,10 +92,7 @@ export async function buildDocx(paragraphs: string[]): Promise<ArrayBuffer> {
       '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
       "</Types>",
   );
-  zip.file(
-    "_rels/.rels",
-    `${XML}<Relationships xmlns="${PKG}"><Relationship Id="rId1" Type="${DOC_REL}/officeDocument" Target="word/document.xml"/></Relationships>`,
-  );
+  zip.file("_rels/.rels", `${XML}<Relationships xmlns="${PKG}"><Relationship Id="rId1" Type="${DOC_REL}/officeDocument" Target="word/document.xml"/></Relationships>`);
   zip.file(
     "word/document.xml",
     `${XML}<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>` +

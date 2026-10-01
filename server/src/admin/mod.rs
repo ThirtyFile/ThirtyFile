@@ -49,7 +49,8 @@ pub struct UserRow {
     pub personal_pending: Option<String>,
 }
 
-const USER_ROW_SQL: &str = "SELECT u.id, u.username, u.display_name, u.role, u.can_write, u.can_delete, u.can_share, u.quota_bytes, u.disabled, u.created_at, u.last_login_at, u.source,
+const USER_ROW_SQL: &str =
+    "SELECT u.id, u.username, u.display_name, u.role, u.can_write, u.can_delete, u.can_share, u.quota_bytes, u.disabled, u.created_at, u.last_login_at, u.source,
        (SELECT COALESCE(GROUP_CONCAT(provider), '') FROM user_identities WHERE user_id = u.id) AS sso,
        u.totp_secret IS NOT NULL AS two_factor,
        (SELECT COALESCE(email, '') FROM user_identities WHERE user_id = u.id ORDER BY last_login_at DESC LIMIT 1) AS sso_email,
@@ -100,8 +101,7 @@ fn validate_role(role: &str) -> AppResult<()> {
 }
 
 pub fn validate_username(name: &str) -> AppResult<()> {
-    let ok = (2..=32).contains(&name.chars().count())
-        && name.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | '@'));
+    let ok = (2..=32).contains(&name.chars().count()) && name.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | '@'));
     if ok { Ok(()) } else { Err(AppError::bad_request("Username must be 2–32 characters and can only contain letters, numbers, and _ - . @")) }
 }
 
@@ -177,7 +177,8 @@ pub async fn create(State(st): State<AppState>, Admin(me): Admin, Json(req): Jso
         }
         // The first password is the administrator's: the person chooses their own when signing in
         sqlx::query("UPDATE users SET must_change_password = 1 WHERE id = ?").bind(id).execute(&mut *tx).await?;
-        logs::record_activity(&mut tx, &me, None, "user_create", &format!("{username} ({})", if req.role == "admin" { "administrator" } else { "standard user" })).await?;
+        logs::record_activity(&mut tx, &me, None, "user_create", &format!("{username} ({})", if req.role == "admin" { "administrator" } else { "standard user" }))
+            .await?;
         tx.commit().await?;
         crate::folders::spaces_changed(&st);
         id
@@ -197,12 +198,7 @@ pub struct UpdateReq {
     disabled: Option<bool>,
 }
 
-pub async fn update(
-    State(st): State<AppState>,
-    Admin(me): Admin,
-    Path(id): Path<i64>,
-    Json(req): Json<UpdateReq>,
-) -> AppResult<Json<UserRow>> {
+pub async fn update(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<i64>, Json(req): Json<UpdateReq>) -> AppResult<Json<UserRow>> {
     if id == me.id && (req.role.as_deref().is_some_and(|r| r != "admin") || req.disabled == Some(true)) {
         return Err(AppError::bad_request("You can't disable your own account or remove your own administrator rights"));
     }
@@ -308,9 +304,7 @@ pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     }
     let row = get_row(&st, id).await?;
     let pending = crate::jobs::reserve(&st, me.id, "delete_user", crate::jobs::Limit::Changes)?;
-    let job = pending
-        .run(crate::jobs::wait(), move |t| async move { delete_user(&st, &me, id, &row.username, &q, &t).await.map(|()| Default::default()) })
-        .await?;
+    let job = pending.run(crate::jobs::wait(), move |t| async move { delete_user(&st, &me, id, &row.username, &q, &t).await.map(|()| Default::default()) }).await?;
     Ok(Json(job))
 }
 
@@ -363,12 +357,8 @@ async fn delete_in(
     sqlx::query("DELETE FROM uploads WHERE owner_id = ?").bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM shares WHERE owner_id = ?").bind(id).execute(&mut *tx).await?;
     // Transfer team space ownership to the administrator
-    let owned: Vec<(String,)> = sqlx::query_as(
-        "SELECT node_id FROM grants WHERE principal_type = 'user' AND principal_id = ? AND role = 'owner'",
-    )
-    .bind(id)
-    .fetch_all(&mut *tx)
-    .await?;
+    let owned: Vec<(String,)> =
+        sqlx::query_as("SELECT node_id FROM grants WHERE principal_type = 'user' AND principal_id = ? AND role = 'owner'").bind(id).fetch_all(&mut *tx).await?;
     for (node_id,) in owned {
         add_grant(tx, &node_id, "user", me.id, "owner", Some(me.id), None).await?;
     }
@@ -459,7 +449,14 @@ pub async fn release_interrupted(st: &AppState) {
 /// by item (the removal can't happen halfway: should a move fail, the space stays, with what wasn't moved yet). The
 /// space is read-only from the moment its items are listed until it is removed, so nothing added meanwhile is lost
 /// with it. Returns where they went; None when nothing had to move this way.
-pub async fn move_personal_first(st: &AppState, me: &crate::auth::User, user_id: i64, username: &str, q: &DeleteQuery, progress: &crate::jobs::Tracker) -> AppResult<Option<Moved>> {
+pub async fn move_personal_first(
+    st: &AppState,
+    me: &crate::auth::User,
+    user_id: i64,
+    username: &str,
+    q: &DeleteQuery,
+    progress: &crate::jobs::Tracker,
+) -> AppResult<Option<Moved>> {
     if q.move_to.is_some() && q.delete_files {
         return Err(AppError::bad_request("Choose either to move the user's files or to delete them"));
     }
@@ -573,7 +570,8 @@ async fn check_room(conn: &mut sqlx::SqliteConnection, root_id: &str, target: &t
 async fn space_label(conn: &mut sqlx::SqliteConnection, target: &tree::Drive) -> AppResult<String> {
     Ok(match target.kind {
         tree::SpaceKind::Personal => {
-            let (owner,): (String,) = sqlx::query_as("SELECT COALESCE((SELECT username FROM users WHERE id = ?), '')").bind(target.owner_id).fetch_one(&mut *conn).await?;
+            let (owner,): (String,) =
+                sqlx::query_as("SELECT COALESCE((SELECT username FROM users WHERE id = ?), '')").bind(target.owner_id).fetch_one(&mut *conn).await?;
             format!("My files of {owner}")
         }
         _ => target.name.clone(),
@@ -589,7 +587,14 @@ const LIVE: &str = "WITH RECURSIVE sub(id) AS (
 /// Moves everything in a personal space into a new folder "Files of <username>" at the top of another space when one
 /// of the two is a folder space: item by item, the way the web moves items between spaces (renamed on the same disk,
 /// else copied; items keep their ids). The trash stays behind. Returns where they went (for the log).
-async fn move_personal_across(st: &AppState, me: &crate::auth::User, username: &str, own: &tree::Drive, target: &tree::Drive, progress: &crate::jobs::Tracker) -> AppResult<String> {
+async fn move_personal_across(
+    st: &AppState,
+    me: &crate::auth::User,
+    username: &str,
+    own: &tree::Drive,
+    target: &tree::Drive,
+    progress: &crate::jobs::Tracker,
+) -> AppResult<String> {
     check_target(target, &own.id)?;
     // Scans of the two spaces wait meanwhile (always locked in the same order)
     let mut spaces: Vec<&str> = [own, target].iter().filter(|d| d.is_folder()).map(|d| d.id.as_str()).collect();
@@ -842,7 +847,16 @@ mod tests {
         let err = create(State(env.st.clone()), Admin(admin.clone()), short).await.map(|_| ()).unwrap_err();
         assert_eq!(err.message, "Password must be at least 12 characters");
         let amy = env.user("amy", true).await;
-        let update = UpdateReq { password: Some("elevenchars".into()), display_name: None, role: None, can_write: None, can_delete: None, can_share: None, quota_bytes: None, disabled: None };
+        let update = UpdateReq {
+            password: Some("elevenchars".into()),
+            display_name: None,
+            role: None,
+            can_write: None,
+            can_delete: None,
+            can_share: None,
+            quota_bytes: None,
+            disabled: None,
+        };
         assert!(super::update(State(env.st.clone()), Admin(admin), Path(amy.id), Json(update)).await.is_err());
         let Json(me) = crate::auth::me(State(env.st.clone()), amy).await.unwrap();
         assert_eq!(me.min_password_length, 12);
@@ -916,7 +930,8 @@ mod tests {
 
         let _ = delete_user(&env, amy.id, json!({ "move_to": company_drive })).await.unwrap();
         assert!(get_row(&env.st, amy.id).await.is_err());
-        let (folder,): (String,) = sqlx::query_as("SELECT id FROM nodes WHERE parent_id = ? AND name = 'Files of amy (1)'").bind(&company).fetch_one(&env.st.db).await.unwrap();
+        let (folder,): (String,) =
+            sqlx::query_as("SELECT id FROM nodes WHERE parent_id = ? AND name = 'Files of amy (1)'").bind(&company).fetch_one(&env.st.db).await.unwrap();
         // The whole tree is in the company space now, as it was
         assert_eq!(drive_row(&env, &docs).await, (company_drive.clone(), folder.clone()));
         assert_eq!(drive_row(&env, &top).await, (company_drive.clone(), folder.clone()));
@@ -936,7 +951,11 @@ mod tests {
         assert!(gone().await, "the trash and the root folder were left behind");
         let (moved,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id = ?").bind(&company_drive).fetch_one(&env.st.db).await.unwrap();
         assert!(moved >= 6, "the moved files were purged with the space: {moved}");
-        let (personal,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drives WHERE kind = 'personal' AND name = 'My files' AND root_id = ?").bind(amy.root()).fetch_one(&env.st.db).await.unwrap();
+        let (personal,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drives WHERE kind = 'personal' AND name = 'My files' AND root_id = ?")
+            .bind(amy.root())
+            .fetch_one(&env.st.db)
+            .await
+            .unwrap();
         assert_eq!(personal, 0);
         let (detail,): (String,) = sqlx::query_as("SELECT detail FROM activity WHERE action = 'user_delete'").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(detail, "amy: files moved to All files › Files of amy (1)");
@@ -1042,9 +1061,10 @@ mod tests {
         let _short = crate::jobs::short_wait();
         let ben = env.user("ben", true).await;
         env.stored_file(&ben, ben.root(), "b.txt", b"ben's").await;
-        let Json(job) = delete(State(env.st.clone()), Admin(env.admin().await), Path(ben.id), Query(serde_json::from_value(json!({ "move_to": space.drive })).unwrap()))
-            .await
-            .unwrap();
+        let Json(job) =
+            delete(State(env.st.clone()), Admin(env.admin().await), Path(ben.id), Query(serde_json::from_value(json!({ "move_to": space.drive })).unwrap()))
+                .await
+                .unwrap();
         assert_eq!((job.kind, job.state), ("delete_user", "running"));
         go.notify_one();
         assert_eq!(crate::jobs::wait_for(&env.st, &job.id).await.state, "done");
@@ -1123,7 +1143,8 @@ mod tests {
         let _ = delete_user(&env, ben.id, json!({ "delete_files": true })).await.unwrap();
         assert!(purged(&env, &b).await);
         assert_eq!(std::fs::read(storage.join("users/ben/b.txt")).unwrap(), b"ben's");
-        let (detail,): (String,) = sqlx::query_as("SELECT detail FROM activity WHERE action = 'user_delete' AND detail LIKE 'ben%'").fetch_one(&env.st.db).await.unwrap();
+        let (detail,): (String,) =
+            sqlx::query_as("SELECT detail FROM activity WHERE action = 'user_delete' AND detail LIKE 'ben%'").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(detail, format!("ben: files removed, their folder on the server is kept: {}", storage.join("users").join("ben").display()));
         // A new account with the same name doesn't get the old files
         let ben = env.user("ben", true).await;

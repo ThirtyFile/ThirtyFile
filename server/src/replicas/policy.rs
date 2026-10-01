@@ -39,8 +39,7 @@ pub fn spawn_scheduler(st: AppState) {
 
 /// One look at every policy, as of `t`
 pub async fn tick(st: &AppState, t: i64) -> AppResult<()> {
-    let policies: Vec<Policy> =
-        sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {} FROM replica_policies", super::POLICY_COLS))).fetch_all(&st.db).await?;
+    let policies: Vec<Policy> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {} FROM replica_policies", super::POLICY_COLS))).fetch_all(&st.db).await?;
     for p in policies {
         if let Err(e) = look_at(st, &p, t).await {
             tracing::warn!("Replica policy {}: {}", p.name, e.message);
@@ -89,11 +88,8 @@ async fn look_at(st: &AppState, p: &Policy, t: i64) -> AppResult<()> {
                 // An old primary: checked, then brought up to date, before it counts again
                 due = Some("reconcile");
             } else if target.mode == "realtime" {
-                let (oldest,): (Option<i64>,) = sqlx::query_as("SELECT MIN(since) FROM replica_dirty WHERE policy_id = ? AND location_id = ?")
-                    .bind(&p.id)
-                    .bind(l)
-                    .fetch_one(&st.db)
-                    .await?;
+                let (oldest,): (Option<i64>,) =
+                    sqlx::query_as("SELECT MIN(since) FROM replica_dirty WHERE policy_id = ? AND location_id = ?").bind(&p.id).bind(l).fetch_one(&st.db).await?;
                 if (!changed.is_empty() && oldest.is_some_and(|o| t - o >= BATCH_SECONDS)) || target.synced_at.is_none() {
                     due = Some("change");
                 }
@@ -229,7 +225,8 @@ pub async fn queue_verify(st: &AppState, p: &Policy, location: &str, t: i64) -> 
         if busy.is_some() {
             return Ok(None);
         }
-        let (name,): (String,) = sqlx::query_as("SELECT name FROM storage_locations WHERE id = ?").bind(location).fetch_optional(&mut *tx).await?.unwrap_or_default();
+        let (name,): (String,) =
+            sqlx::query_as("SELECT name FROM storage_locations WHERE id = ?").bind(location).fetch_optional(&mut *tx).await?.unwrap_or_default();
         let id = new_id();
         sqlx::query("INSERT INTO replica_jobs (id, kind, policy_id, location_id, params, label, created_at) VALUES (?, 'verify', ?, ?, ?, ?, ?)")
             .bind(&id)
@@ -240,7 +237,12 @@ pub async fn queue_verify(st: &AppState, p: &Policy, location: &str, t: i64) -> 
             .bind(t)
             .execute(&mut *tx)
             .await?;
-        sqlx::query("UPDATE replica_targets SET last_verify_at = ? WHERE policy_id = ? AND location_id = ?").bind(t).bind(&p.id).bind(location).execute(&mut *tx).await?;
+        sqlx::query("UPDATE replica_targets SET last_verify_at = ? WHERE policy_id = ? AND location_id = ?")
+            .bind(t)
+            .bind(&p.id)
+            .bind(location)
+            .execute(&mut *tx)
+            .await?;
         AppResult::Ok(Some(id))
     }
     .await;
@@ -362,14 +364,22 @@ async fn alert(st: &AppState, p: &Policy, targets: &[Target], t: i64) -> AppResu
         let res = async {
             sqlx::query("UPDATE replica_policies SET alerted = ? WHERE id = ?").bind(now_state).bind(&p.id).execute(&mut *tx).await?;
             let kind = if now_state.is_empty() { "recovered" } else { "degraded" };
-            let admins: Vec<i64> =
-                sqlx::query_as::<_, (i64,)>("SELECT id FROM users WHERE role = 'admin' AND disabled = 0").fetch_all(&mut *tx).await?.into_iter().map(|(i,)| i).collect();
+            let admins: Vec<i64> = sqlx::query_as::<_, (i64,)>("SELECT id FROM users WHERE role = 'admin' AND disabled = 0")
+                .fetch_all(&mut *tx)
+                .await?
+                .into_iter()
+                .map(|(i,)| i)
+                .collect();
             let notice = crate::notify::Notice {
                 kind: "replica",
                 node_id: None,
                 data: json!({ "name": p.name, "state": kind, "error": error, "current": h.current, "wanted": h.wanted }),
             };
-            sqlx::query("INSERT INTO activity (at, action, detail) VALUES (?, 'replica_alert', ?)").bind(t).bind(format!("{}: {kind}", p.name)).execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO activity (at, action, detail) VALUES (?, 'replica_alert', ?)")
+                .bind(t)
+                .bind(format!("{}: {kind}", p.name))
+                .execute(&mut *tx)
+                .await?;
             crate::notify::add(&mut tx, &admins, &notice).await
         }
         .await;

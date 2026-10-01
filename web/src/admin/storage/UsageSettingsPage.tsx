@@ -97,7 +97,11 @@ export function UsageSettingsPage() {
         [t("Team space"), formatBytes(s.team_bytes), `${t("{n} space|{n} spaces", { n: s.team_drives })} · ${t("{n} file|{n} files", { n: s.team_files })}`],
         [t("Trash"), formatBytes(s.trash_bytes)],
         [t("Earlier versions of files"), formatBytes(s.version_bytes), t("Not counted toward the spaces' sizes")],
-        [t("Actual storage used"), formatBytes(s.stored_bytes), `${t("Folder spaces count their files; the content store keeps identical content once")} · ${t("{n} share link|{n} share links", { n: s.share_links })}`],
+        [
+          t("Actual storage used"),
+          formatBytes(s.stored_bytes),
+          `${t("Folder spaces count their files; the content store keeps identical content once")} · ${t("{n} share link|{n} share links", { n: s.share_links })}`,
+        ],
       ]
     : [];
   const refresh = () => {
@@ -128,14 +132,7 @@ export function UsageSettingsPage() {
       ) : (
         <>
           <Locations overview={usage.data} />
-          <History
-            overview={usage.data}
-            filter={filter}
-            onFilter={(f) => setFilter((old) => ({ ...old, ...f }))}
-            history={history.data}
-            loading={history.isFetching}
-            error={history.error}
-          />
+          <History overview={usage.data} filter={filter} onFilter={(f) => setFilter((old) => ({ ...old, ...f }))} history={history.data} loading={history.isFetching} error={history.error} />
           <Thresholds key={JSON.stringify(usage.data.thresholds)} value={usage.data.thresholds} />
         </>
       )}
@@ -178,9 +175,14 @@ function Alerts({ overview }: { overview: UsageOverview }) {
         ))}
       </ul>
       <p className="text-xs text-muted-foreground">
-        {t("Look further in:")} <Link className="underline underline-offset-2" to="/admin/activity">{t("Activity log")}</Link>
+        {t("Look further in:")}{" "}
+        <Link className="underline underline-offset-2" to="/admin/activity">
+          {t("Activity log")}
+        </Link>
         {" · "}
-        <Link className="underline underline-offset-2" to="/admin/moves">{t("Moves")}</Link>
+        <Link className="underline underline-offset-2" to="/admin/moves">
+          {t("Moves")}
+        </Link>
       </p>
     </section>
   );
@@ -193,9 +195,7 @@ function Disk({ c, remote, threshold }: { c: SampledCapacity; remote: boolean; t
     return (
       <>
         <dd className="mt-1 text-sm font-medium">{t("Capacity unknown")}</dd>
-        <dd className="text-[11px] text-muted-foreground">
-          {remote ? t("S3, SFTP and FTP don't report how much room is left") : t("The disk didn't answer in time")}
-        </dd>
+        <dd className="text-[11px] text-muted-foreground">{remote ? t("S3, SFTP and FTP don't report how much room is left") : t("The disk didn't answer in time")}</dd>
       </>
     );
   }
@@ -219,9 +219,7 @@ function Disk({ c, remote, threshold }: { c: SampledCapacity; remote: boolean; t
           <div className={cn("h-full rounded-full", over ? "bg-destructive" : "bg-brand")} style={{ width: `${Math.min(100, pct)}%` }} />
         </div>
       </dd>
-      <dd className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
-        {t("{free} free · {percent} used", { free: formatBytes(c.disk_free), percent: percent(pct) })}
-      </dd>
+      <dd className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">{t("{free} free · {percent} used", { free: formatBytes(c.disk_free), percent: percent(pct) })}</dd>
     </>
   );
 }

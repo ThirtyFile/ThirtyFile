@@ -164,9 +164,23 @@ const RAD = Math.PI / 10800000;
 function builtins(w: number, h: number): Map<string, number> {
   const ss = Math.min(w, h);
   const m = new Map<string, number>([
-    ["w", w], ["h", h], ["l", 0], ["t", 0], ["r", w], ["b", h], ["hc", w / 2], ["vc", h / 2],
-    ["ss", ss], ["ls", Math.max(w, h)],
-    ["cd2", 10800000], ["cd4", 5400000], ["cd8", 2700000], ["3cd4", 16200000], ["3cd8", 8100000], ["5cd8", 13500000], ["7cd8", 18900000],
+    ["w", w],
+    ["h", h],
+    ["l", 0],
+    ["t", 0],
+    ["r", w],
+    ["b", h],
+    ["hc", w / 2],
+    ["vc", h / 2],
+    ["ss", ss],
+    ["ls", Math.max(w, h)],
+    ["cd2", 10800000],
+    ["cd4", 5400000],
+    ["cd8", 2700000],
+    ["3cd4", 16200000],
+    ["3cd8", 8100000],
+    ["5cd8", 13500000],
+    ["7cd8", 18900000],
   ]);
   for (const n of [2, 3, 4, 5, 6, 8, 10, 12, 32]) {
     m.set(`wd${n}`, w / n);
