@@ -99,7 +99,7 @@
           <table>
             <thead><tr><th>Part</th><th>Checks</th></tr></thead>
             <tbody>
-              <tr><td><code>scripts/check.sh web</code></td><td>The interface: dependencies as locked, translations (<code>node scripts/check-i18n.mjs</code>), that the Office code in <code>web/src/ooxml</code> imports nothing else from the app (<code>node scripts/check-boundaries.mjs</code>), types, lint and unit tests</td></tr>
+              <tr><td><code>scripts/check.sh web</code></td><td>The interface: dependencies as locked, translations (<code>node scripts/check-i18n.mjs</code>), that the Office code in <code>web/src/ooxml</code> imports nothing else from the app (<code>node scripts/check-boundaries.mjs</code>), types, lint and unit tests. With <code>scripts/check.sh web --coverage</code>, as on GitHub, the unit tests also fail when they cover less than the floor in <code>web/vitest.config.ts</code></td></tr>
               <tr><td><code>scripts/check.sh server</code></td><td>The server: <code>cargo test</code>, and <code>cargo clippy</code> with warnings as errors</td></tr>
               <tr><td><code>scripts/check.sh e2e</code></td><td>The end-to-end test: signs in, uploads and previews files in a real browser (Playwright), against a server built from the repository. The first time, get the browser with <code>cd web &amp;&amp; pnpm exec playwright install chromium</code></td></tr>
             </tbody>
