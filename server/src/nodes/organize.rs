@@ -18,7 +18,7 @@ pub async fn create_folder(State(st): State<AppState>, user: User, Json(req): Js
     if tree::name_taken(&mut tx, &parent.id, &name).await? {
         return Err(AppError::conflict(format!("\"{name}\" already exists")));
     }
-    let id = tree::create_folder(&mut tx, user.id, &parent.id, &name).await?;
+    let id = crate::content::create_folder(&mut tx, user.id, &parent.id, &name).await?;
     let node = tree::get_node(&mut tx, &id).await?.unwrap();
     logs::record_activity(&mut tx, &user, Some(&node), "create_folder", "").await?;
     tx.commit().await?;

@@ -17,7 +17,8 @@ use crate::{
     util::numbered_name,
 };
 
-/// The folder of items shared from spaces the user isn't a member of
+/// The folder of items shared from spaces the user isn't a member of (also the first part of their location in lists;
+/// the browser uses its own text)
 pub const SHARED: &str = "Shared with me";
 /// The user's own personal space
 pub const MY_FILES: &str = "My files";

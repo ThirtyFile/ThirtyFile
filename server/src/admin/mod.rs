@@ -610,7 +610,7 @@ async fn move_personal_across(st: &AppState, me: &crate::auth::User, username: &
         } else {
             tree::unique_name(&mut tx, &top.id, &wanted, true).await?
         };
-        let folder = tree::create_folder(&mut tx, me.id, &top.id, &name).await?;
+        let folder = crate::content::create_folder(&mut tx, me.id, &top.id, &name).await?;
         let dest = tree::get_node(&mut tx, &folder).await?.unwrap();
         let (tops,): (String,) = sqlx::query_as("SELECT COALESCE(json_group_array(id), '[]') FROM nodes WHERE parent_id = ? AND trashed_at IS NULL")
             .bind(&own.root_id)
@@ -666,7 +666,7 @@ async fn move_personal_files(
     check_target(&target, drive_id)?;
     let bytes = check_room(conn, root_id, &target).await?;
     let name = tree::unique_name(conn, &target.root_id, &format!("Files of {username}"), true).await?;
-    let folder = tree::create_folder(conn, me.id, &target.root_id, &name).await?;
+    let folder = crate::content::create_folder(conn, me.id, &target.root_id, &name).await?;
     let sql = format!("{LIVE} UPDATE nodes SET drive_id = ?2 WHERE id IN (SELECT id FROM sub)");
     sqlx::query(sqlx::AssertSqlSafe(sql.as_str())).bind(root_id).bind(&target.id).execute(&mut *conn).await?;
     sqlx::query("UPDATE nodes SET parent_id = ? WHERE parent_id = ? AND trashed_at IS NULL").bind(&folder).bind(root_id).execute(&mut *conn).await?;

@@ -577,7 +577,7 @@ mod tests {
         // One content for all of them
         sqlx::query("INSERT INTO blobs (hash, size, refcount, created_at, location_id) VALUES ('h', 1, 1, 0, 'local')").execute(&mut *tx).await.unwrap();
         for f in 0..n / 100 {
-            let d = tree::create_folder(&mut tx, amy.id, &top, &format!("d{f}")).await.unwrap();
+            let d = crate::content::create_folder(&mut tx, amy.id, &top, &format!("d{f}")).await.unwrap();
             let rows: Vec<serde_json::Value> = (0..99).map(|i| serde_json::json!([crate::util::new_id(), format!("file-with-a-longer-name-{i}.txt")])).collect();
             sqlx::query(
                 "INSERT INTO nodes (id, owner_id, parent_id, kind, name, size, blob_hash, drive_id, created_at, updated_at)
