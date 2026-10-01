@@ -884,6 +884,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn what_a_visitor_read_while_a_change_was_being_saved_isnt_kept_after_it() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let folder = env.folder(&amy, amy.root(), "Docs").await;
+        let a = stored_file(&env, &amy, &folder, "a.txt", b"first").await;
+        let req = CreateReq { max_downloads: Some(1), ..link(&folder) };
+        let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
+        let make = || {
+            let req = downloads::DownloadReq { ids: vec![a.clone()], tz: None };
+            create_public_download_link(State(env.st.clone()), Path(info.id.clone()), HeaderMap::new(), Json(req))
+        };
+        let download = || {
+            let q = DownloadQuery { ids: a.clone(), tz: None };
+            public_download(State(env.st.clone()), Path(info.id.clone()), Query(q), HeaderMap::new(), Visitor { ip: String::new(), user_agent: String::new() })
+        };
+
+        // Another visitor's download is being counted: its transaction has begun, and isn't saved yet
+        let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+        sqlx::query("UPDATE shares SET downloads = downloads + 1 WHERE id = ?").bind(&info.id).execute(&mut *tx).await.unwrap();
+        // Meanwhile this visitor still sees the download left, as the database does
+        let Json(res) = make().await.unwrap();
+        assert!(res["url"].is_string());
+        tx.commit().await.unwrap();
+
+        // Once it is saved, what was read before isn't used again: the limit has been reached
+        assert_eq!(make().await.unwrap_err().status, StatusCode::GONE);
+        assert_eq!(download().await.unwrap_err().status, StatusCode::GONE);
+    }
+
+    #[tokio::test]
+    async fn a_link_kept_from_before_the_limit_was_reached_still_doesnt_download_beyond_it() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let folder = env.folder(&amy, amy.root(), "Docs").await;
+        let a = stored_file(&env, &amy, &folder, "a.txt", b"first").await;
+        let req = CreateReq { max_downloads: Some(1), ..link(&folder) };
+        let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
+        let (headers, visitor) = (HeaderMap::new(), Visitor { ip: String::new(), user_agent: String::new() });
+        // Two visitors read the link's details while one download was left, then both download
+        let (first, _) = open_share(&env.st, &info.id, &HeaderMap::new()).await.unwrap();
+        let (second, root) = open_share(&env.st, &info.id, &HeaderMap::new()).await.unwrap();
+        assert_eq!((downloads_left(&first), downloads_left(&second)), (Some(1), Some(1)));
+        let roots = shared_nodes(&env.st, &second, &root, std::slice::from_ref(&a)).await.unwrap();
+        let serve = |share: Share| serve_public_download(&env.st, &info.id, share, roots.clone(), 0, &headers, &visitor);
+        assert_eq!(serve(first).await.unwrap().status(), StatusCode::OK);
+        // The count itself checks the limit, whatever the visitor had read
+        assert_eq!(serve(second).await.unwrap_err().status, StatusCode::GONE);
+        let (downloads,): (i64,) = sqlx::query_as("SELECT downloads FROM shares WHERE id = ?").bind(&info.id).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(downloads, 1);
+    }
+
+    #[tokio::test]
     async fn share_link_dies_when_owner_loses_access() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
