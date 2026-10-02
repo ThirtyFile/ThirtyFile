@@ -169,3 +169,30 @@ test("a span of exactly 2,000 items is changed in two batches and ends there", a
   expect(asked).toHaveLength(2);
   expect(await count(page, big)).toBe(100);
 });
+
+test("a new folder made with the end not loaded shows after the items loaded, and stays there after renaming", async ({ page }) => {
+  await signIn(page);
+  const big = await bigFolder(page);
+  const offsets = parts(page);
+  await page.goto(`/files/${big}`);
+  const row = (name: string) => page.locator("[data-node-id]").filter({ hasText: name });
+  await expect(row(nameOf(0))).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  expect(offsets).not.toContain(1000);
+
+  // "New folder" sorts after every "Item", in the part not loaded: it shows after the last item loaded instead
+  await page.keyboard.press("Control+Shift+N");
+  const box = page.getByRole("textbox", { name: "New name" });
+  await expect(box).toBeFocused();
+  await box.fill("Made here");
+  await box.press("Enter");
+  await expect(row("Made here")).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  const next = () =>
+    page.locator("[data-node-id]").evaluateAll((rows, name) => {
+      const at = rows.findIndex((r) => r.textContent?.includes(name));
+      return rows[at + 1]?.querySelector("[data-name]")?.textContent;
+    }, nameOf(999));
+  await expect.poll(next).toBe("Made here");
+  await expect(row("Made here")).toHaveAttribute("aria-selected", "true");
+});

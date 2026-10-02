@@ -14,6 +14,7 @@ import { useUndoLabel } from "@/lib/undo";
 import { useWindowsBehaviour } from "@/lib/windowsBehaviour";
 import { useTabActions } from "@/tabs";
 import type { DialogState } from "./types";
+import { arrange, notLoaded, useNewItems } from "./newItems";
 import type { ExplorerProps } from "../Explorer";
 
 export function useExplorerState(p: ExplorerProps) {
@@ -50,10 +51,35 @@ export function useExplorerState(p: ExplorerProps) {
   const list = p.list;
   const total = list ? Math.max(0, list.total) : p.items.length;
 
+  // New items stay where they were made until a refresh, a change of sort or leaving the folder (explorer/newItems)
+  const dialogNow = useRef(dialog);
+  dialogNow.current = dialog;
+  /** New items being named (from when they are made until the name box closes): they keep their place on a refresh */
+  const naming = useRef(new Set<string>());
+  const newItems = useNewItems(`${p.folderId}|${p.sort?.key}|${p.sort?.order}`, (n) => naming.current.has(n.item.id));
+  const loadedById = useMemo(() => new Map(p.items.map((n) => [n.id, n])), [p.items]);
+  const { see } = newItems;
+  useEffect(() => see(loadedById), [see, loadedById]);
+  /** What the list shows, by position */
+  const shown = useMemo(
+    () => (behaviour.newAtEnd ? arrange(p.list?.at ?? p.items, newItems.items, loadedById) : (p.list?.at ?? p.items)),
+    [behaviour.newAtEnd, p.list, p.items, newItems.items, loadedById],
+  );
+  /** The items known here: those loaded, and new ones that aren't (items being made aren't: nothing can be done with them yet) */
+  const items = useMemo(() => {
+    const more = notLoaded(newItems.items, loadedById);
+    return more.length ? [...p.items, ...more] : p.items;
+  }, [p.items, newItems.items, loadedById]);
+
   /** Selects items picked one by one (none: `span` is cleared too) */
   const setSelected = (next: Set<string>) => {
     setChosen(next);
     setSpan(null);
+  };
+  /** An item selected is now another (a new item that got its id), or none (null) */
+  const replaceSelected = (from: string, to: string | null) => {
+    setChosen((now) => (now.has(from) ? new Set([...now].flatMap((id) => (id !== from ? [id] : to ? [to] : []))) : now));
+    setAnchor((a) => (a === from ? to : a));
   };
   /** The file list's selection: with a span of a large folder, where and in which order it was made */
   const choose = (next: Set<string>, listSpan?: ListSpan | null) => {
@@ -65,7 +91,7 @@ export function useExplorerState(p: ExplorerProps) {
     if (list && !list.complete && p.folderId && p.sort) {
       setChosen(new Set());
       setSpan({ folder: p.folderId, sort: p.sort.key, order: p.sort.order, except: new Set(), count: total });
-    } else setSelected(new Set(p.items.map((n) => n.id)));
+    } else setSelected(new Set(items.map((n) => n.id)));
   };
   /**
    * Invert selection. In a large folder not all loaded: everything but the items picked (a span of the whole folder),
@@ -78,11 +104,11 @@ export function useExplorerState(p: ExplorerProps) {
     else if (list && !list.complete && p.folderId && p.sort) {
       setChosen(new Set());
       setSpan({ folder: p.folderId, sort: p.sort.key, order: p.sort.order, except: new Set(selected), count: total - selected.size });
-    } else setSelected(new Set(p.items.filter((n) => !selected.has(n.id)).map((n) => n.id)));
+    } else setSelected(new Set(items.filter((n) => !selected.has(n.id)).map((n) => n.id)));
   };
 
   // The items selected that are loaded (all of them, unless a span holds items not loaded)
-  const selectedNodes = useMemo(() => p.items.filter((n) => selected.has(n.id) || (!!span && inSpan(span, list?.index.get(n.id) ?? -1, n.id))), [p.items, selected, span, list]);
+  const selectedNodes = useMemo(() => items.filter((n) => selected.has(n.id) || (!!span && inSpan(span, list?.index.get(n.id) ?? -1, n.id))), [items, selected, span, list]);
   /** Items picked one by one; the span's aren't all known here (see `picked`) */
   const selectedIds = span ? [...selected] : selectedNodes.map((n) => n.id);
   const count = span ? selected.size + spanCount(span, total) : selectedNodes.length;
@@ -165,6 +191,12 @@ export function useExplorerState(p: ExplorerProps) {
     listNav,
     area,
     behaviour,
+    newItems,
+    dialogNow,
+    naming,
+    replaceSelected,
+    shown,
+    items,
     undoLabel,
     enteredByKey,
     renameWhenShown,

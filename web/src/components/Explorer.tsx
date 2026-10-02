@@ -1,6 +1,6 @@
 import { useMemo, useRef, type ReactNode } from "react";
 import { FolderOpenIcon, Grid2X2Icon, ListIcon, UploadCloudIcon, type LucideIcon } from "lucide-react";
-import { api, privateSource, type Node, type Role, type SortKey, type SortOrder } from "@/api";
+import { privateSource, type Node, type Role, type SortKey, type SortOrder } from "@/api";
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,9 +11,7 @@ import { MarqueeBox, useMarquee, type MeasureHits } from "@/components/useMarque
 import { Frame, type Crumb } from "@/components/Frame";
 import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
-import { renamed } from "@/lib/queries";
 import type { SparseList } from "@/lib/windows";
-import { toastWithUndo } from "@/lib/undo";
 import { formatBytes } from "@/lib/utils";
 import { filesFromInput, uploadFiles } from "@/uploads";
 import { useExplorerState } from "./explorer/state";
@@ -94,7 +92,7 @@ export function Explorer(p: ExplorerProps) {
     dialog,
     setDialog,
   } = s;
-  const { open, dropInto, uploadInto, dragProps, changed } = a;
+  const { open, dropInto, uploadInto, dragProps } = a;
   // Hold the left button and drag on empty space to marquee-select (disabled while renaming); the list gives its row geometry
   const measure = useRef<MeasureHits>(null);
   /** What had the focus when the context menu opened */
@@ -189,7 +187,7 @@ export function Explorer(p: ExplorerProps) {
               <ItemError error={p.error} kind="folder" onRetry={a.refresh} />
             ) : (
               <FileList
-                items={p.list?.at ?? p.items}
+                items={s.shown}
                 onShow={p.list?.show}
                 view={view}
                 source={privateSource}
@@ -217,16 +215,8 @@ export function Explorer(p: ExplorerProps) {
                 onDropInto={caps.write && p.folderId ? dropInto : undefined}
                 onUploadInto={s.canUpload ? uploadInto : undefined}
                 renamingId={dialog?.t === "rename" ? dialog.node.id : null}
-                onRename={async (n, name) => {
-                  void changed(renamed(await api.rename(n.id, name)));
-                  if (name !== n.name)
-                    toastWithUndo(t('Renamed to "{name}"', { name }), {
-                      undo: async () => void changed(renamed(await api.rename(n.id, n.name))),
-                      undoneText: t("Renamed back"),
-                      label: t("Undo rename"),
-                    });
-                }}
-                onRenameDone={() => setDialog(null)}
+                onRename={a.renameItem}
+                onRenameDone={a.renameDone}
                 onClickRename={s.behaviour.clickToRename && caps.write ? (n) => setDialog({ t: "rename", node: n }) : undefined}
                 empty={
                   p.empty ?? (
