@@ -16,6 +16,7 @@ import { copyAndSay } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 import { Section, SettingsFrame, Toggle } from "@/admin/SettingsFrame";
 import { NativeSelect } from "@/components/ui/native-select";
+import { PERMISSION_LABEL, PERMISSIONS, PERMISSIONS_HINT } from "@/admin/users/permissions";
 
 const PROVIDERS: SsoProviderId[] = ["microsoft", "google", "github", "oidc"];
 
@@ -264,12 +265,13 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-2">
                   <div className="text-[13px] font-medium">{t("New accounts may")}</div>
-                  {(["can_write", "can_delete", "can_share"] as const).map((k) => (
+                  {PERMISSIONS.map((k) => (
                     <label key={k} className="flex items-center justify-between gap-3 text-sm">
-                      <span>{k === "can_write" ? t("Edit files") : k === "can_delete" ? t("Delete files") : t("Share files")}</span>
-                      <Toggle label={k} checked={r[k]} onChange={(v) => setRule(i, { [k]: v })} />
+                      <span>{PERMISSION_LABEL[k]}</span>
+                      <Toggle label={PERMISSION_LABEL[k]} checked={r[k]} onChange={(v) => setRule(i, { [k]: v })} />
                     </label>
                   ))}
+                  <p className="text-xs text-muted-foreground">{PERMISSIONS_HINT}</p>
                 </div>
                 <div className="grid content-start gap-3">
                   <div className="grid gap-1.5">
@@ -452,12 +454,13 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
                 <>
                   <div className="grid gap-2">
                     <div className="text-[13px] font-medium">{t("New accounts may")}</div>
-                    {(["can_write", "can_delete", "can_share"] as const).map((k) => (
+                    {PERMISSIONS.map((k) => (
                       <label key={k} className="flex items-center justify-between gap-3 text-sm">
-                        <span>{k === "can_write" ? t("Edit files") : k === "can_delete" ? t("Delete files") : t("Share files")}</span>
-                        <Toggle label={k} checked={draft[id].defaults[k]} onChange={(v) => setProvider(id, { defaults: { ...draft[id].defaults, [k]: v } })} />
+                        <span>{PERMISSION_LABEL[k]}</span>
+                        <Toggle label={PERMISSION_LABEL[k]} checked={draft[id].defaults[k]} onChange={(v) => setProvider(id, { defaults: { ...draft[id].defaults, [k]: v } })} />
                       </label>
                     ))}
+                    <p className="text-xs text-muted-foreground">{PERMISSIONS_HINT}</p>
                   </div>
                   <div className="grid gap-1.5">
                     <Label htmlFor={`sso-${id}-quota`}>{t("Space size of new accounts (GB)")}</Label>

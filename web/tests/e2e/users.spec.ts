@@ -23,6 +23,23 @@ test("the users list finds accounts on the server by name", async ({ page }) => 
   await expect(page.getByText(`No users match "nobody-${suffix}"`)).toBeVisible();
 });
 
+test("an account's permissions have the same names in the list and the dialog, and Share says what it covers", async ({ page }) => {
+  await signIn(page);
+  const name = `pat-${Date.now().toString(36)}`;
+  const res = await page.request.post("/api/admin/users", { data: { username: name, password: "a-long-test-password-1", can_delete: false } });
+  expect(res.ok()).toBe(true);
+  await page.goto("/admin/users");
+  const row = page.locator("tbody tr").filter({ hasText: name });
+  await expect(row).toContainText("Edit, Share");
+
+  await row.dblclick();
+  const dialog = page.getByRole("dialog", { name: `Edit "${name}"` });
+  await expect(dialog.getByRole("checkbox", { name: "Edit", exact: true })).toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "Delete", exact: true })).not.toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "Share", exact: true })).toBeChecked();
+  await expect(dialog.getByText("Edit includes uploading. Share includes share links, Share with… and managing the members of a space.")).toBeVisible();
+});
+
 test("the sign-in page doesn't load the file explorer", async ({ page }) => {
   const scripts: string[] = [];
   page.on("request", (r) => {

@@ -17,6 +17,7 @@ import { useMe } from "@/lib/session";
 import { t } from "@/lib/i18n";
 import { formatBytes } from "@/lib/utils";
 import { SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
+import { PERMISSION_LABEL, PERMISSIONS_HINT } from "@/admin/users/permissions";
 
 const GB = 1024 ** 3;
 /** `onPersonal`: an existing user's "My files" is to be created or removed (in its own dialog) */
@@ -116,10 +117,11 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
             <div className="grid gap-2">
               <Label>{t("Permissions")}</Label>
               <div className="flex flex-wrap gap-x-5 gap-y-2">
-                <Perm label={t("Upload and edit")} admin={role === "admin"} checked={canWrite} onChange={setCanWrite} />
-                <Perm label={t("Delete")} admin={role === "admin"} checked={canDelete} onChange={setCanDelete} />
-                <Perm label={t("Create share link")} admin={role === "admin"} checked={canShare} onChange={setCanShare} />
+                <Perm label={PERMISSION_LABEL.can_write} admin={role === "admin"} checked={canWrite} onChange={setCanWrite} />
+                <Perm label={PERMISSION_LABEL.can_delete} admin={role === "admin"} checked={canDelete} onChange={setCanDelete} />
+                <Perm label={PERMISSION_LABEL.can_share} admin={role === "admin"} checked={canShare} onChange={setCanShare} />
               </div>
+              <p className="text-xs text-muted-foreground">{PERMISSIONS_HINT}</p>
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="u-quota">{t("Personal space size (GB, leave blank for unlimited)")}</Label>
