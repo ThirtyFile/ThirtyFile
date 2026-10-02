@@ -35,12 +35,13 @@ pub struct ZipItem {
     pub mtime: i64,
 }
 
-/// What a ZIP of some items holds: every file and folder in them, with its path in the ZIP. Only the selected items
-/// are kept: what is in them is gone through a folder at a time (`ZipWalk`), once to add up the ZIP's length and again
-/// to pack it, so a ZIP of a million files doesn't hold a million rows (nor a million open folders) in memory.
+/// What a ZIP of some items holds: every file and folder in them, with its path in the ZIP and the size it was measured
+/// at. The selected items are gone through a folder at a time (`Lister`) to add up the ZIP's length, which a download
+/// announces before it starts; the ZIP then holds exactly what was measured (`ZipWalk`), whatever changes in the
+/// folders meanwhile. A ZIP of many items keeps that list in a temporary file rather than in memory, so a ZIP of a
+/// million files doesn't hold a million rows (nor a million open folders).
 pub struct ZipPlan {
-    roots: Vec<(Node, String)>,
-    offset: i64,
+    items: std::sync::Arc<Recorded>,
     /// The name each selected item has in the ZIP
     pub root_names: Vec<String>,
     /// The folder the items are in, when they are all in the same one
@@ -60,10 +61,154 @@ impl ZipPlan {
         }
     }
 
-    /// What goes into the ZIP, one item at a time
+    /// What goes into the ZIP, one item at a time: what the plan measured
     pub fn walk(&self) -> ZipWalk {
-        let todo = self.roots.iter().rev().map(|(n, name)| Todo::Item(name.clone(), Box::new(n.clone()))).collect();
-        ZipWalk { offset: self.offset, todo }
+        ZipWalk { items: self.items.clone(), next: 0, lines: None }
+    }
+}
+
+/// An item of a ZIP as it was measured
+#[derive(Clone, serde::Serialize, Deserialize)]
+struct Planned {
+    path: String,
+    size: u64,
+    mtime: i64,
+    what: What,
+}
+
+#[derive(Clone, serde::Serialize, Deserialize)]
+enum What {
+    Folder,
+    /// Content of a storage location
+    Stored {
+        hash: String,
+        location: String,
+    },
+    /// A file of a folder space: the space's folder, and the file's path below it
+    File {
+        root: String,
+        drive: String,
+        read_only: bool,
+        rel: String,
+    },
+}
+
+/// Items a plan keeps in memory; a larger plan goes to a temporary file
+#[cfg(not(test))]
+const PLAN_IN_MEMORY: usize = 10_000;
+/// Tests: plans of a few thousand items go to a file
+#[cfg(test)]
+const PLAN_IN_MEMORY: usize = 1_000;
+
+/// The items of a plan, in order
+enum Recorded {
+    Memory(Vec<Planned>),
+    /// One JSON line per item, in the data folder's tmp/ (removed when the plan and its walks are dropped)
+    File(std::path::PathBuf),
+}
+
+impl Drop for Recorded {
+    fn drop(&mut self) {
+        if let Recorded::File(path) = self {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+/// Writes a plan's items as they are measured
+struct Recorder {
+    tmp: std::path::PathBuf,
+    memory: Vec<Planned>,
+    file: Option<tokio::io::BufWriter<tokio::fs::File>>,
+}
+
+impl Recorder {
+    async fn add(&mut self, item: Planned) -> AppResult<()> {
+        if self.file.is_none() && self.memory.len() < PLAN_IN_MEMORY {
+            self.memory.push(item);
+            return Ok(());
+        }
+        if self.file.is_none() {
+            self.file = Some(tokio::io::BufWriter::new(tokio::fs::File::create(&self.tmp).await?));
+            for kept in std::mem::take(&mut self.memory) {
+                Self::write(self.file.as_mut().unwrap(), &kept).await?;
+            }
+        }
+        Self::write(self.file.as_mut().unwrap(), &item).await
+    }
+
+    async fn write(file: &mut tokio::io::BufWriter<tokio::fs::File>, item: &Planned) -> AppResult<()> {
+        use tokio::io::AsyncWriteExt;
+        let mut line = serde_json::to_vec(item).map_err(AppError::internal)?;
+        line.push(b'\n');
+        file.write_all(&line).await?;
+        Ok(())
+    }
+
+    async fn finish(mut self) -> AppResult<Recorded> {
+        use tokio::io::AsyncWriteExt;
+        match self.file.take() {
+            None => Ok(Recorded::Memory(std::mem::take(&mut self.memory))),
+            Some(mut file) => {
+                let recorded = Recorded::File(self.tmp.clone());
+                file.flush().await?;
+                Ok(recorded)
+            }
+        }
+    }
+}
+
+impl Drop for Recorder {
+    fn drop(&mut self) {
+        // Not finished (planning failed): its file goes
+        if self.file.is_some() {
+            let _ = std::fs::remove_file(&self.tmp);
+        }
+    }
+}
+
+/// Goes through what a plan measured, in order
+pub struct ZipWalk {
+    items: std::sync::Arc<Recorded>,
+    next: usize,
+    lines: Option<tokio::io::Lines<tokio::io::BufReader<tokio::fs::File>>>,
+}
+
+impl ZipWalk {
+    /// The next item, None at the end. A folder space's file must still have the size it was measured at: one that
+    /// changed since fails the ZIP, which can't hold anything but what its length was worked out for.
+    pub async fn next(&mut self, _st: &AppState) -> AppResult<Option<ZipItem>> {
+        use tokio::io::AsyncBufReadExt;
+        let planned = match &*self.items {
+            Recorded::Memory(items) => {
+                self.next += 1;
+                items.get(self.next - 1).cloned()
+            }
+            Recorded::File(path) => {
+                if self.lines.is_none() {
+                    self.lines = Some(tokio::io::BufReader::new(tokio::fs::File::open(path).await?).lines());
+                }
+                match self.lines.as_mut().unwrap().next_line().await? {
+                    Some(line) => Some(serde_json::from_str::<Planned>(&line).map_err(AppError::internal)?),
+                    None => None,
+                }
+            }
+        };
+        let Some(p) = planned else { return Ok(None) };
+        let blob = match p.what {
+            What::Folder => None,
+            What::Stored { hash, location } => Some(Source::Stored { hash, location }),
+            What::File { root, drive, read_only, rel } => {
+                let changed = || AppError::conflict(format!("\"{}\" changed while the ZIP file was being made. Try again.", p.path));
+                let file = crate::folders::open_space(std::path::Path::new(&root), &drive, read_only).and_then(|r| r.join(&rel)).map_err(|_| changed())?;
+                let source = Source::File(file);
+                if source.describe(p.size).await.map(|(size, _)| size).ok() != Some(p.size) {
+                    return Err(changed());
+                }
+                Some(source)
+            }
+        };
+        Ok(Some(ZipItem { path: p.path, blob, size: p.size, mtime: p.mtime }))
     }
 }
 
@@ -77,15 +222,15 @@ enum Todo {
     Folder(Box<Node>, String, Option<String>),
 }
 
-/// Goes through what a ZIP holds, depth first, listing a folder's items a page at a time
-pub struct ZipWalk {
+/// Goes through the selected items for a plan, depth first, listing a folder's items a page at a time
+struct Lister {
     offset: i64,
     todo: Vec<Todo>,
 }
 
-impl ZipWalk {
+impl Lister {
     /// The next item, None at the end. A folder space's file is measured as it is now.
-    pub async fn next(&mut self, st: &AppState) -> AppResult<Option<ZipItem>> {
+    async fn next(&mut self, st: &AppState) -> AppResult<Option<Planned>> {
         while let Some(todo) = self.todo.pop() {
             match todo {
                 Todo::Folder(folder, path, after) => {
@@ -101,15 +246,24 @@ impl ZipWalk {
                     let mtime = n.updated_at + self.offset;
                     if n.is_folder() {
                         self.todo.push(Todo::Folder(n, path.clone(), None));
-                        return Ok(Some(ZipItem { path, blob: None, size: 0, mtime }));
+                        return Ok(Some(Planned { path, size: 0, mtime, what: What::Folder }));
                     }
                     let Ok(blob) = Source::resolve(st, &n).await else { continue };
                     // The length of the ZIP is announced up front: a folder space's file is measured as it is now
-                    let size = match &blob {
-                        Source::File(_) => blob.describe(n.size as u64).await.map(|(size, _)| size).unwrap_or(0),
-                        Source::Stored { .. } => n.size as u64,
+                    let (size, what) = match blob {
+                        Source::File(_) => {
+                            let size = blob.describe(n.size as u64).await.map(|(size, _)| size).unwrap_or(0);
+                            let what = What::File {
+                                root: n.fs_root.clone().unwrap_or_default(),
+                                drive: n.drive().to_string(),
+                                read_only: n.space_read_only,
+                                rel: n.fs_path.clone().unwrap_or_default(),
+                            };
+                            (size, what)
+                        }
+                        Source::Stored { hash, location } => (n.size as u64, What::Stored { hash, location }),
                     };
-                    return Ok(Some(ZipItem { path, blob: Some(blob), size, mtime }));
+                    return Ok(Some(Planned { path, size, mtime, what }));
                 }
             }
         }
@@ -203,19 +357,21 @@ pub async fn zip_plan(st: &AppState, roots: Vec<Node>, offset: i64) -> AppResult
             named.push((root, root_name));
         }
     }
-    let mut plan = ZipPlan { roots: named, offset, root_names, parent_name, len: 0, bytes: 0 };
-    // Its length, going through it once
+    // What goes in and its length, going through it once
     let mut len = crate::zip::Length::default();
-    let mut walk = plan.walk();
-    while let Some(item) = walk.next(st).await? {
+    let mut bytes = 0;
+    let mut lister = Lister { offset, todo: named.into_iter().rev().map(|(n, name)| Todo::Item(name, Box::new(n))).collect() };
+    let mut recorder = Recorder { tmp: st.tmp_dir().join(format!("zip-plan-{}", crate::util::new_id())), memory: Vec::new(), file: None };
+    while let Some(item) = lister.next(st).await? {
         if item.path.len() + 1 > u16::MAX as usize {
             return Err(AppError::bad_request("A folder path is too long to put in a ZIP file"));
         }
-        len.add(&item.path, item.size, item.blob.is_none());
-        plan.bytes += item.size;
+        len.add(&item.path, item.size, matches!(item.what, What::Folder));
+        bytes += item.size;
+        recorder.add(item).await?;
     }
-    plan.len = len.total();
-    Ok(plan)
+    let items = std::sync::Arc::new(recorder.finish().await?);
+    Ok(ZipPlan { items, root_names, parent_name, len: len.total(), bytes })
 }
 
 /// Packs multiple nodes (including folder contents) into a streamed ZIP. `tz` is the browser's time zone as JavaScript
@@ -242,7 +398,7 @@ pub async fn zip_response(st: &AppState, roots: Vec<Node>, tz: i64) -> AppResult
     // If packing fails midway, notify the response stream so the connection ends with an error (the browser shows a failed download) rather than saving a truncated ZIP
     let (done_tx, done_rx) = tokio::sync::oneshot::channel::<bool>();
     tokio::spawn(pack_zip(st.clone(), before, first, walk, writer, done_tx));
-    let body = ReaderStream::new(reader).chain(failure_tail(done_rx));
+    let body = within_length(ReaderStream::new(reader), total_len).chain(failure_tail(done_rx));
     Ok((
         [
             // Compute the total size in advance so the browser can show download progress and time remaining
@@ -256,9 +412,29 @@ pub async fn zip_response(st: &AppState, roots: Vec<Node>, tz: i64) -> AppResult
         .into_response())
 }
 
-/// Opens a file's whole content (an owned future, for the packing task)
+/// Opens a file's whole content (an owned future, for the packing task). A folder space's file is read up to a byte
+/// further than measured, so one that grew meanwhile fails the ZIP (`ZipWriter::add_file` checks the size) instead of
+/// going into it cut short.
 async fn open_source(st: AppState, source: Source, size: u64) -> std::io::Result<BoxReader> {
-    source.open(&st, 0, size).await
+    let len = if matches!(source, Source::File(_)) { size + 1 } else { size };
+    source.open(&st, 0, len).await
+}
+
+/// The body of a ZIP download, which must not run past its announced length: a longer body would be cut to that
+/// length on the way, and arrive looking complete without the ZIP's directory. It fails instead.
+fn within_length<S>(body: S, announced: u64) -> impl futures_util::Stream<Item = std::io::Result<Bytes>>
+where
+    S: futures_util::Stream<Item = std::io::Result<Bytes>>,
+{
+    let mut sent = 0u64;
+    body.map(move |chunk| {
+        let chunk = chunk?;
+        sent += chunk.len() as u64;
+        if sent > announced {
+            return Err(std::io::Error::other("The ZIP file came out longer than announced"));
+        }
+        Ok(chunk)
+    })
 }
 
 /// Writes the ZIP into `writer`: the folders `before` the first file, the first file (already opened), then the rest
@@ -627,6 +803,15 @@ mod tests {
         let mut cursor = std::io::Cursor::new(bytes.to_vec());
         let entries = crate::zip::read_entries(&mut cursor, 10_000, 1 << 22).unwrap();
         assert_eq!(entries.len(), 3000 + 30 + 1);
+        // Its plan was kept in a temporary file, removed once the ZIP was made
+        let plans = || std::fs::read_dir(env.st.tmp_dir()).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("zip-plan-")).count();
+        for _ in 0..100 {
+            if plans() == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(plans(), 0);
         let _ = admin;
     }
 
@@ -662,5 +847,58 @@ mod tests {
         std::fs::rename(&away, blob_file(&env, first)).unwrap();
         let res = zip_response(&env.st, vec![node], 0).await.unwrap();
         assert_eq!(unzip(&axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap()).len(), 3);
+    }
+
+    #[tokio::test]
+    async fn a_zip_body_never_runs_past_its_announced_length() {
+        let chunks = || futures_util::stream::iter([Ok(Bytes::from_static(b"12345")), Ok(Bytes::from_static(b"678"))]);
+        let all: Vec<_> = within_length(chunks(), 8).collect().await;
+        assert!(all.iter().all(|c| c.is_ok()));
+        let cut: Vec<_> = within_length(chunks(), 7).collect().await;
+        assert!(cut[0].is_ok() && cut[1].is_err());
+    }
+
+    #[tokio::test]
+    async fn a_zip_holds_what_was_planned_when_its_folder_changes_meanwhile() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let docs = env.folder(&amy, amy.root(), "Docs").await;
+        let sub = env.folder(&amy, &docs, "Sub").await;
+        env.stored_file(&amy, &docs, "a.txt", b"alpha").await;
+        env.stored_file(&amy, &sub, "b.txt", b"beta").await;
+        let node = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &docs).await.unwrap().unwrap();
+        let plan = zip_plan(&env.st, vec![node], 0).await.unwrap();
+        // Added after the length was announced
+        env.stored_file(&amy, &sub, "late.txt", b"added later").await;
+        env.folder(&amy, &docs, "Later").await;
+
+        let mut walk = plan.walk();
+        let (mut paths, mut len) = (Vec::new(), crate::zip::Length::default());
+        while let Some(item) = walk.next(&env.st).await.unwrap() {
+            len.add(&item.path, item.size, item.blob.is_none());
+            paths.push(item.path);
+        }
+        paths.sort();
+        assert_eq!(paths, ["Docs", "Docs/Sub", "Docs/Sub/b.txt", "Docs/a.txt"]);
+        assert_eq!(len.total(), plan.len);
+    }
+
+    #[tokio::test]
+    async fn a_zip_whose_files_grow_while_it_is_sent_fails_rather_than_run_past_its_announced_length() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Scans").await;
+        testutil::write_old(&space.dir.join("Docs/a.txt"), b"alpha");
+        testutil::write_old(&space.dir.join("Docs/b.txt"), b"beta");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (docs, _) = env.node_at(&space.drive, "Docs").await.unwrap();
+        let node = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &docs).await.unwrap().unwrap();
+        let res = zip_response(&env.st, vec![node], 0).await.unwrap();
+        let announced: usize = res.headers()[header::CONTENT_LENGTH].to_str().unwrap().parse().unwrap();
+        // Written to on the server (over SMB, say) once the download started
+        std::fs::write(space.dir.join("Docs/a.txt"), b"alpha, and a lot more").unwrap();
+        std::fs::write(space.dir.join("Docs/b.txt"), b"beta, and a lot more").unwrap();
+        // A body longer than announced would be cut to the announced length on the way, and look complete: it fails
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await;
+        assert!(body.is_err(), "a ZIP of {} bytes, {announced} announced", body.map_or(0, |b| b.len()));
     }
 }
