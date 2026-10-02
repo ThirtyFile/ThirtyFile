@@ -4,8 +4,9 @@
  * The upload queue lives in memory (uploads.ts), with the files the person picked. What is needed to find an upload
  * again is kept in the browser's storage: the file's name, folder path, size, date and its complete content identity, where
  * it goes, its batch and the answer to a name clash, and how far it got. Never the content itself, nor anything that
- * signs in: the server session of an upload is found again the way tus-js-client finds it (its own records, which
- * hold only the upload's address).
+ * signs in. The server session of an upload is found again the way tus-js-client finds it: its own records, keyed by
+ * the upload's record (`fingerprintOf`), hold the upload's address, which for a share link's visitor includes the
+ * link; they go when the upload ends, is discarded or expires with its record.
  *
  * Records are kept per signed-in person, or per share link for a link's visitors, so another account or link never
  * sees or continues them. Signing out removes them all (lib/signOut.ts). They expire after 7 days, when the server
@@ -16,7 +17,7 @@
  * chosen again: a page can't reopen them by itself.
  */
 
-import { sha256 } from "@noble/hashes/sha2.js";
+import { IDENTITY_PREFIX, identityOf } from "@/lib/identity";
 
 /** A file that was being uploaded, as kept in the browser's storage */
 export interface UploadRecord {
@@ -184,30 +185,90 @@ export const pathOf = (relativePath: string, name: string) => (relativePath ? `$
 
 // ───────────── Content identity ─────────────
 
-/** Bytes read at a time: the identity covers every byte without loading the entire file into memory. */
-const IDENTITY_CHUNK = 4 * 1024 * 1024;
-export const IDENTITY_PREFIX = "sha256-v1:";
+export { IDENTITY_PREFIX };
+
+/** The worker that computes identities (null: it can't run here, so the page does it), and the answers it owes */
+let worker: Worker | null | undefined;
+const jobs = new Map<number, { file: Blob; resolve(identity: string): void; reject(err: Error): void }>();
+let jobSeq = 0;
+
+function hashWorker(): Worker | null {
+  if (worker !== undefined) return worker;
+  try {
+    worker = typeof Worker === "undefined" ? null : new Worker(new URL("./identity.worker.ts", import.meta.url), { type: "module" });
+  } catch {
+    worker = null;
+  }
+  if (!worker) return null;
+  worker.onmessage = (e: MessageEvent<{ id: number; identity?: string; error?: string }>) => {
+    const job = jobs.get(e.data.id);
+    jobs.delete(e.data.id);
+    if (e.data.identity) job?.resolve(e.data.identity);
+    else job?.reject(new Error(e.data.error ?? "failed"));
+  };
+  // A worker that can't start (blocked, or an old browser): what it was given is done by the page
+  worker.onerror = () => {
+    worker?.terminate();
+    worker = null;
+    for (const job of jobs.values()) identityOf(job.file).then(job.resolve, job.reject);
+    jobs.clear();
+  };
+  return worker;
+}
 
 /**
- * A versioned SHA-256 of every byte, computed incrementally with bounded memory. This also works on self-hosted HTTP
- * sites where WebCrypto is unavailable. Old sparse samples cannot authorize a resume.
+ * The file's complete content identity (lib/identity.ts), computed in a worker so the page doesn't wait for it. Old
+ * sparse samples cannot authorize a resume. `signal` stops it (the upload was cancelled).
  */
-export async function sampleOf(file: Blob): Promise<string> {
-  const digest = sha256.create();
-  for (let start = 0; start < file.size; start += IDENTITY_CHUNK) {
-    const bytes = new Uint8Array(await file.slice(start, start + IDENTITY_CHUNK).arrayBuffer());
-    digest.update(bytes);
-  }
-  return IDENTITY_PREFIX + Array.from(digest.digest(), (b) => b.toString(16).padStart(2, "0")).join("");
+export function sampleOf(file: Blob, signal?: AbortSignal): Promise<string> {
+  const w = hashWorker();
+  if (!w) return identityOf(file, () => !!signal?.aborted);
+  const id = ++jobSeq;
+  return new Promise((resolve, reject) => {
+    jobs.set(id, { file, resolve, reject });
+    w.postMessage({ id, file });
+    signal?.addEventListener("abort", () => {
+      if (!jobs.delete(id)) return;
+      w.postMessage({ id, stop: true });
+      reject(new Error("stopped"));
+    });
+  });
 }
 
 // ───────────── Server sessions (tus-js-client's records) ─────────────
 
-/** The tus fingerprint of an upload: uploads to other places, or with another answer to a name clash, don't resume each other */
-export function fingerprintOf(endpoint: string, r: Pick<UploadRecord, "parentId" | "relativePath" | "onConflict" | "name" | "size" | "lastModified"> & { sample?: string }) {
-  const base = ["sd", endpoint, r.parentId, r.relativePath, r.onConflict, r.name, r.size, r.lastModified].join("|");
-  return r.sample?.startsWith(IDENTITY_PREFIX) ? `${base}|${r.sample}` : base;
+/**
+ * The tus fingerprint of an upload: its record, so an upload only ever continues its own server session (a file chosen
+ * again after a reload continues only once its content identity matched, `resumeRecovered`). The upload address is
+ * hashed, so a share link isn't in the keys.
+ */
+export function fingerprintOf(endpoint: string, recordId: string) {
+  return `${FINGERPRINT}${hash(endpoint)}|${recordId}`;
 }
+const FINGERPRINT = "tf|";
+
+/**
+ * Forgets tus-js-client's records that outlived the upload records (they expire together), and ends those of earlier
+ * versions, whose keys held the upload address (their uploads can't be continued any more): when the page loads
+ */
+export function sweepSessions(now = Date.now()) {
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (!key.startsWith("tus::")) continue;
+      let kept: { uploadUrl?: unknown; creationTime?: unknown } = {};
+      try {
+        kept = JSON.parse(localStorage.getItem(key) ?? "{}");
+      } catch {
+        // Not readable: forgotten
+      }
+      if (!key.startsWith(`tus::${FINGERPRINT}`)) void endSession(key, kept.uploadUrl);
+      else if (!(now - Date.parse(String(kept.creationTime)) < MAX_AGE)) localStorage.removeItem(key);
+    }
+  } catch {
+    // Storage blocked: nothing kept
+  }
+}
+sweepSessions();
 
 /** The upload addresses tus-js-client kept for a fingerprint, with their storage keys */
 export function sessionsOf(fingerprint: string): { key: string; url: string }[] {
@@ -225,20 +286,23 @@ export function sessionsOf(fingerprint: string): { key: string; url: string }[] 
 }
 
 /** Whether the server may still have part of this upload (tus-js-client kept its address) */
-export const hasSession = (endpoint: string, r: UploadRecord) => sessionsOf(fingerprintOf(endpoint, r)).length > 0;
+export const hasSession = (endpoint: string, r: UploadRecord) => sessionsOf(fingerprintOf(endpoint, r.id)).length > 0;
 
 /** Ends the server sessions of an upload and forgets them, so it can't be continued (discarded, or starting over) */
 export async function forgetSessions(fingerprint: string) {
-  for (const { key, url } of sessionsOf(fingerprint)) {
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      // Blocked storage: nothing to forget
-    }
-    // Same origin only: the address comes from this site's own records
-    if (!url.startsWith("/") && !url.startsWith(location.origin)) continue;
-    await fetch(url, { method: "DELETE", credentials: "same-origin", headers: { "Tus-Resumable": "1.0.0" } }).catch(() => {});
+  for (const { key, url } of sessionsOf(fingerprint)) await endSession(key, url);
+}
+
+/** Forgets a server session kept under `key`, and lets the server drop what it received */
+async function endSession(key: string, url: unknown) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Blocked storage: nothing to forget
   }
+  // Same origin only: the address comes from this site's own records
+  if (typeof url !== "string" || (!url.startsWith("/") && !url.startsWith(location.origin))) return;
+  await fetch(url, { method: "DELETE", credentials: "same-origin", headers: { "Tus-Resumable": "1.0.0" } }).catch(() => {});
 }
 
 /** What the server says about an upload it may have (a HEAD request, as tus-js-client makes before continuing) */
