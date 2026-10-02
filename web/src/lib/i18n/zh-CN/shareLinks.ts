@@ -47,9 +47,9 @@ export default {
   "Turn off public share links?": "要關閉公開分享連結嗎？",
   "All existing links stop working right away, and no one can create new ones. The links aren't deleted: allow public links again and they work as before.": "所有現有的連結會立即失效，也無法再建立新連結。連結不會被刪除：重新允許公開連結後即可照常使用。",
   // Links that accept files, and links for viewing only
-  "Only accepts files": "只收檔案",
-  "Accepts files": "可上傳檔案",
-  "Preview only": "僅供預覽",
+  "Only accepts files": "只收文件",
+  "Accepts files": "可上传文件",
+  "Preview only": "仅限预览",
   "Visitors can": "訪客可以",
   "Visitors can only preview files. A preview still sends the whole file to their browser, so this hides the download buttons but can't stop someone from saving a file.": "訪客只能預覽檔案。預覽時整個檔案仍會傳到訪客的瀏覽器，因此這只會隱藏下載按鈕，無法阻止有心人存下檔案。",
   "Uploaded files are yours and count toward the space's size. A file with a name that is taken gets a number.": "上傳的檔案屬於你，並計入空間的容量。檔名重複時會自動加上編號。",
