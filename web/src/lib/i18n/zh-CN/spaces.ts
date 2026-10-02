@@ -65,6 +65,7 @@ export default {
   "Button text": "按钮文字",
   "Logo updated": "已更新 Logo",
   "Logo removed": "已移除 Logo",
+  "Logo": "Logo",
   "Dark mode logo": "深色模式 Logo",
   "Replace": "更换",
   "Upload": "上传",

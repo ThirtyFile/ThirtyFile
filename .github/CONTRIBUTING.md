@@ -18,6 +18,6 @@ Security problems are reported privately: see the [security policy](SECURITY.md)
    ```
 4. Open a pull request with a title that says what changes, one label (`enhancement`, `bug`, `performance`, `accessibility`, `documentation`, `dependencies` or `maintenance`), and `Closes #123` in the description.
 
-Code, comments and guides are written in English. Text in the interface needs its translation in every required language in `web/src/lib/i18n/<lang>/` (Traditional Chinese for now; `node scripts/check-i18n.mjs` lists what is missing). When behaviour changes, update the guide in `site/docs/` that describes it.
+Code, comments and guides are written in English. Text in the interface needs its translation in every required language in `web/src/lib/i18n/<lang>/` (Traditional Chinese, Simplified Chinese and Japanese; `node scripts/check-i18n.mjs` lists what is missing). When behaviour changes, update the guide in `site/docs/` that describes it.
 
 By contributing, you agree that your contribution is licensed under the [Apache License 2.0](../LICENSE), and you agree to follow the [code of conduct](CODE_OF_CONDUCT.md).

@@ -65,6 +65,7 @@ export default {
   "Button text": "ボタンの文字",
   "Logo updated": "ロゴを更新しました",
   "Logo removed": "ロゴを削除しました",
+  "Logo": "ロゴ",
   "Dark mode logo": "ダークモード用のロゴ",
   "Replace": "置き換え",
   "Upload": "アップロード",

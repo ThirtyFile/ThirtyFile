@@ -349,7 +349,7 @@ function LogoSlot({ variant, saved }: { variant: "light" | "dark"; saved: Brandi
     <div className="grid content-start gap-2">
       <span className="flex items-center gap-1.5 text-[13px] font-medium">
         {dark ? <MoonIcon className="size-3.5 text-muted-foreground" /> : <SunIcon className="size-3.5 text-muted-foreground" />}
-        {dark ? t("Dark mode logo") : "Logo"}
+        {dark ? t("Dark mode logo") : t("Logo")}
       </span>
       <div className="flex h-20 items-center justify-center rounded-lg border px-4" style={{ background: s.bg }}>
         <img src={shown} alt="" className={cn("max-h-12 max-w-full object-contain", !has && !(dark && saved.has_logo) && "opacity-40")} />
