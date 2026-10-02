@@ -1,7 +1,7 @@
 // The smaller lists (control panel, admin tables, storage locations, all spaces) work with the keyboard like the file
 // list, and tell screen readers which item is selected.
 import { expect, test, type Page } from "@playwright/test";
-import { signIn } from "./helpers";
+import { makeUser, signIn, unique } from "./helpers";
 
 /** How many of the page's options can be reached with Tab */
 const tabStops = (page: Page) => page.getByRole("option").evaluateAll((els) => els.filter((el) => (el as HTMLElement).tabIndex === 0).length);
@@ -38,21 +38,24 @@ test("the control panel's tiles are one Tab stop, and the arrows and Enter work"
 
 test("an admin table is a grid: the arrows select the next row and Enter opens it", async ({ page }) => {
   await signIn(page);
-  const suffix = Date.now().toString(36);
-  for (const name of [`kim-${suffix}`, `lee-${suffix}`]) {
-    expect((await page.request.post("/api/admin/users", { data: { username: name, password: "a-long-test-password-1" } })).ok()).toBe(true);
-  }
+  // Two accounts, shown on their own with a search: other tests add accounts at the same time, which the list puts
+  // in the order they were made
+  const tag = `t${unique()}`;
+  const kimName = await makeUser(page, `${tag}-kim`);
+  const leeName = await makeUser(page, `${tag}-lee`);
   await page.goto("/admin/users");
   const grid = page.getByRole("grid", { name: "Users" });
-  const kim = grid.getByRole("row").filter({ hasText: `kim-${suffix}` });
+  await page.getByRole("textbox", { name: "Search users" }).fill(tag);
+  await expect(page.getByText("2 users found")).toBeVisible();
+  const kim = grid.getByRole("row").filter({ hasText: kimName });
   await kim.click();
   await expect(kim).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("ArrowDown");
-  const lee = grid.getByRole("row").filter({ hasText: `lee-${suffix}` });
+  const lee = grid.getByRole("row").filter({ hasText: leeName });
   await expect(lee).toHaveAttribute("aria-selected", "true");
   await expect(lee).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("dialog")).toContainText(`lee-${suffix}`);
+  await expect(page.getByRole("dialog")).toContainText(leeName);
 });
 
 test("storage locations are selected and opened with the keyboard", async ({ page }) => {

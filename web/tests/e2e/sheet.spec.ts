@@ -1,9 +1,12 @@
 // Editing a workbook online and saving it: the file the server keeps has the new values, and what the editor didn't
 // touch is kept
 import JSZip from "jszip";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { buildWorkbook, UNKNOWN_CONTENT, UNKNOWN_PART } from "../fixtures";
-import { makeFolder, signIn, uploadFile } from "./helpers";
+import { answer, makeFolder, signIn, uploadFile } from "./helpers";
+
+/** The server's answer to saving the workbook: it may wait its turn behind other tests' changes */
+const saving = (page: Page, id: string) => answer(page, "PUT", `/api/files/${id}/content`);
 
 test("a value typed into a workbook is saved into the file, which keeps the rest", async ({ page }) => {
   await signIn(page);
@@ -22,7 +25,9 @@ test("a value typed into a workbook is saved into the file, which keeps the rest
   await page.keyboard.press("Enter");
   await page.keyboard.type("=B1+C1");
   await page.keyboard.press("Enter");
+  const save = saving(page, id);
   await page.keyboard.press("ControlOrMeta+s");
+  expect((await save).ok()).toBe(true);
   await expect(page.getByText("Saved (2 cells)")).toBeVisible();
 
   const saved = await JSZip.loadAsync(await (await page.request.get(`/api/files/${id}/content`)).body());
@@ -49,13 +54,17 @@ test("restoring an earlier version while the workbook is open for editing shows 
   await go("C1");
   await page.keyboard.type("42");
   await page.keyboard.press("Enter");
+  let save = saving(page, id);
   await page.keyboard.press("ControlOrMeta+s");
+  expect((await save).ok()).toBe(true);
   await expect(page.getByText("Saved (1 cell)")).toBeVisible();
 
   // The version from before the save, restored from the details pane
   await page.getByRole("button", { name: "Details pane" }).click();
   await page.getByRole("region", { name: "Versions" }).getByRole("button", { name: "Restore" }).click();
+  const restored = answer(page, "POST", new RegExp(`^/api/files/${id}/versions/[^/]+/restore$`));
   await page.getByRole("dialog").getByRole("button", { name: "Restore" }).click();
+  expect((await restored).ok()).toBe(true);
   await expect(page.getByText("Version restored")).toBeVisible();
   // The workbook is opened again, at its first cell
   await expect(nameBox).toHaveValue("A1");
@@ -66,12 +75,12 @@ test("restoring an earlier version while the workbook is open for editing shows 
   await go("D1");
   await page.keyboard.type("7");
   await page.keyboard.press("Enter");
+  save = saving(page, id);
   await page.keyboard.press("ControlOrMeta+s");
-  const sheet = async () => {
-    const saved = await JSZip.loadAsync(await (await page.request.get(`/api/files/${id}/content`)).body());
-    return saved.file("xl/worksheets/sheet1.xml")!.async("string");
-  };
-  await expect.poll(sheet).toMatch(/<c r="D1"[^>]*><v>7<\/v><\/c>/);
-  expect(await sheet()).not.toMatch(/<c r="C1"/);
+  expect((await save).ok()).toBe(true);
+  const workbook = await JSZip.loadAsync(await (await page.request.get(`/api/files/${id}/content`)).body());
+  const sheet = await workbook.file("xl/worksheets/sheet1.xml")!.async("string");
+  expect(sheet).toMatch(/<c r="D1"[^>]*><v>7<\/v><\/c>/);
+  expect(sheet).not.toMatch(/<c r="C1"/);
   await expect(page.getByText(/someone else|changed since/i)).toHaveCount(0);
 });

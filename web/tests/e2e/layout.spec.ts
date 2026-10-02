@@ -1,16 +1,14 @@
 // The file explorer's layout on a phone and on a desktop, and the arrows of the navigation pane.
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { signIn } from "./helpers";
+import { makeFolder, signIn } from "./helpers";
 
 /** A folder in My files (unique name) holding a folder with a folder in it, a folder without, and a few files */
 async function sample(page: Page) {
-  const me = await (await page.request.get("/api/auth/me")).json();
-  const make = async (parent: string, name: string) => (await (await page.request.post("/api/folders", { data: { parent_id: parent, name } })).json()).id as string;
-  const top = await make(me.root_id, `Layout ${Date.now().toString(36)}`);
-  const withChild = await make(top, "With folder");
-  await make(withChild, "Inside");
-  const without = await make(top, "Without folder");
-  for (let i = 0; i < 5; i++) await make(top, `Folder ${i}`);
+  const top = await makeFolder(page, "Layout");
+  const withChild = await makeFolder(page, "With folder", top);
+  await makeFolder(page, "Inside", withChild);
+  const without = await makeFolder(page, "Without folder", top);
+  for (let i = 0; i < 5; i++) await makeFolder(page, `Folder ${i}`, top);
   return { top, without };
 }
 
@@ -66,9 +64,8 @@ test("only folders with folders in them have an arrow in the navigation pane", a
 test("on a phone the Name column keeps the width the size leaves it in a list longer than the screen", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await signIn(page);
-  const me = await (await page.request.get("/api/auth/me")).json();
-  const top = (await (await page.request.post("/api/folders", { data: { parent_id: me.root_id, name: `Long list ${Date.now().toString(36)}` } })).json()).id;
-  for (let i = 0; i < 60; i += 20) await Promise.all(Array.from({ length: 20 }, (_, k) => page.request.post("/api/folders", { data: { parent_id: top, name: `Folder ${i + k}` } })));
+  const top = await makeFolder(page, "Long list");
+  for (let i = 0; i < 60; i += 20) await Promise.all(Array.from({ length: 20 }, (_, k) => makeFolder(page, `Folder ${i + k}`, top)));
   await page.evaluate(() => localStorage.setItem("tf-view", JSON.stringify("list")));
   await page.goto(`/files/${top}`);
   await expect(page.locator("[data-node-id]").first()).toBeVisible();
@@ -97,7 +94,8 @@ async function fitsTheWindow(page: Page, dialog: Locator, last: Locator) {
 test("dialogs taller than the window scroll: notification settings on a phone, adding a user in landscape", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await signIn(page);
-  await page.getByRole("button", { name: "Notifications", exact: true }).click();
+  // (with how many are unread, when other tests have left the administrator some)
+  await page.getByRole("button", { name: /^Notifications( \(\d+ unread\))?$/ }).click();
   await page.getByRole("menuitem", { name: "Notification settings" }).click();
   const notifications = page.getByRole("dialog", { name: "Notification settings" });
   await fitsTheWindow(page, notifications, notifications.getByRole("button", { name: "Cancel" }));

@@ -1,7 +1,7 @@
 // Every page of the Control panel opens from its tile, without an error, and only for administrators; and which
 // release runs is told only to people who are signed in
 import { expect, test } from "@playwright/test";
-import { makeFolder, signIn, uploadFile } from "./helpers";
+import { makeFolder, makeUser, signIn, uploadFile, USER_PASSWORD } from "./helpers";
 
 const PAGES = [
   "Users",
@@ -48,12 +48,11 @@ test("old and unknown addresses under /admin go to the Control panel or the file
 
 test("someone who isn't an administrator is sent to their files", async ({ page }) => {
   await signIn(page);
-  const name = `plain-${Date.now().toString(36)}`;
-  expect((await page.request.post("/api/admin/users", { data: { username: name, password: "a-long-test-password-1" } })).ok()).toBe(true);
+  const name = await makeUser(page, "plain");
   await page.request.post("/api/auth/logout");
-  expect((await page.request.post("/api/auth/login", { data: { username: name, password: "a-long-test-password-1" } })).ok()).toBe(true);
+  expect((await page.request.post("/api/auth/login", { data: { username: name, password: USER_PASSWORD } })).ok()).toBe(true);
   // A password an administrator chose is replaced first
-  expect((await page.request.put("/api/auth/password", { data: { current: "a-long-test-password-1", new: "another-long-password-2" } })).ok()).toBe(true);
+  expect((await page.request.put("/api/auth/password", { data: { current: USER_PASSWORD, new: `${USER_PASSWORD}-2` } })).ok()).toBe(true);
   await page.goto("/admin/users");
   await page.waitForURL(/\/files/);
 });

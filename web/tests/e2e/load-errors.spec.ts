@@ -1,7 +1,7 @@
 // Lists and settings pages whose data can't be loaded say so, with a way to try again, rather than showing an empty
 // list or loading for ever.
 import { expect, test, type Page } from "@playwright/test";
-import { signIn } from "./helpers";
+import { makeFolder, signIn } from "./helpers";
 
 /** Answers requests to `path` with an error until the returned function is called */
 async function failing(page: Page, path: string) {
@@ -38,9 +38,7 @@ test("a settings page that can't be loaded stops loading and offers Try again", 
 
 test("a shared folder whose listing fails doesn't say it is empty", async ({ page }) => {
   await signIn(page);
-  const me = await (await page.request.get("/api/auth/me")).json();
-  const made = await page.request.post("/api/folders", { data: { parent_id: me.root_id, name: `Shared ${Date.now().toString(36)}` } });
-  const folder = (await made.json()).id;
+  const folder = await makeFolder(page, "Shared");
   const share = await (await page.request.post("/api/shares", { data: { node_id: folder } })).json();
   const recover = await failing(page, `/public/shares/${share.id}/nodes/*/children*`);
   await page.goto(`/share/${share.id}`);

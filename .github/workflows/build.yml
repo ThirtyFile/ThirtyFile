@@ -163,6 +163,10 @@ jobs:
         with:
           tool: cargo-llvm-cov
       - name: Backend and end-to-end test
+        env:
+          # The end-to-end tests run 4 at a time, more than Playwright's default here (2), so that a test that isn't
+          # safe to run next to the others fails here rather than on main
+          E2E_WORKERS: 4
         run: |
           (cd web && pnpm exec playwright install --with-deps chromium)
           cd server

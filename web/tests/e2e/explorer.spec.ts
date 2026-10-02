@@ -1,25 +1,12 @@
 // File explorer against the real server: name conflicts when uploading, keyboard browsing, and search typed through an
 // input method. Each test works in a folder of its own inside My files.
-import { randomBytes } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
-import { signIn, uploadFinished } from "./helpers";
+import { makeFolder, openFolder, signIn, uploadFinished } from "./helpers";
 
 interface Item {
   id: string;
   name: string;
   kind: string;
-}
-
-/**
- * A new folder, made through the API with the page's session. In My files (when no parent is given) its name gets a
- * random ending, so a test run again on the same server (a retry), or by another worker at the same moment, starts
- * afresh.
- */
-async function folder(page: Page, name: string, parent?: string): Promise<string> {
-  const parentId = parent ?? (await (await page.request.get("/api/auth/me")).json()).root_id;
-  const res = await page.request.post("/api/folders", { data: { parent_id: parentId, name: parent ? name : `${name} ${randomBytes(4).toString("hex")}` } });
-  expect(res.ok()).toBe(true);
-  return (await res.json()).id;
 }
 
 async function children(page: Page, id: string): Promise<Item[]> {
@@ -35,8 +22,8 @@ test("uploading a name the folder already has asks what to do, and each choice d
   // of them can wait half a minute for its turn
   test.setTimeout(120_000);
   await signIn(page);
-  const dir = await folder(page, "Conflicts");
-  await page.goto(`/files/${dir}`);
+  const dir = await makeFolder(page, "Conflicts");
+  await openFolder(page, dir);
   const upload = (text: string) => page.locator('input[type="file"][multiple]').setInputFiles([{ name: "note.txt", mimeType: "text/plain", buffer: Buffer.from(text) }]);
   const row = (name: string) => page.locator("[data-node-id]").filter({ hasText: name });
   const dialog = page.getByRole("dialog");
@@ -84,11 +71,11 @@ for (const view of ["list", "grid"]) {
   test(`after Enter opens a folder, the arrow keys go on in it (${view} view)`, async ({ page }) => {
     await signIn(page);
     await page.evaluate((v) => localStorage.setItem("tf-view", JSON.stringify(v)), view);
-    const top = await folder(page, "Keyboard");
-    const level1 = await folder(page, "Level 1 a", top);
-    await folder(page, "Level 1 b", top);
-    await folder(page, "Level 2 a", level1);
-    await folder(page, "Level 2 b", level1);
+    const top = await makeFolder(page, "Keyboard");
+    const level1 = await makeFolder(page, "Level 1 a", top);
+    await makeFolder(page, "Level 1 b", top);
+    await makeFolder(page, "Level 2 a", level1);
+    await makeFolder(page, "Level 2 b", level1);
     await page.goto(`/files/${top}`);
     const row = (name: string) => page.locator("[data-node-id]").filter({ hasText: name });
     const focused = () => page.evaluate(() => document.activeElement?.closest("[data-node-id]")?.textContent ?? null);
@@ -116,6 +103,8 @@ for (const view of ["list", "grid"]) {
 }
 
 test("search waits for an input method to finish composing", async ({ page }) => {
+  // The page's clock, moved on by the test: search waits for a pause in typing
+  await page.clock.install();
   await signIn(page);
   await page.goto("/files");
   const box = page.getByRole("textbox", { name: /Search/ }).first();
@@ -126,7 +115,7 @@ test("search waits for an input method to finish composing", async ({ page }) =>
   await cdp.send("Input.imeSetComposition", { text: "ㄓ", selectionStart: 1, selectionEnd: 1 });
   await cdp.send("Input.imeSetComposition", { text: "ㄓㄨ", selectionStart: 2, selectionEnd: 2 });
   await expect(box).toHaveValue("ㄓㄨ");
-  await page.waitForTimeout(1000);
+  await page.clock.runFor(1000);
   expect(new URL(page.url()).pathname).toBe("/files");
 
   // Choosing the candidate commits the text, which is searched
@@ -139,7 +128,7 @@ test("Alt+Up goes up a folder also from a menu button, and a resize handle shows
   await page.setViewportSize({ width: 1280, height: 720 });
   await signIn(page);
   const me = await (await page.request.get("/api/auth/me")).json();
-  const sub = (await (await page.request.post("/api/folders", { data: { parent_id: me.root_id, name: `Up ${Date.now().toString(36)}` } })).json()).id;
+  const sub = await makeFolder(page, "Up");
   await page.evaluate(() => localStorage.setItem("tf-view", JSON.stringify("list")));
   await page.goto(`/files/${sub}`);
   const newMenu = page.getByRole("button", { name: "New", exact: true });

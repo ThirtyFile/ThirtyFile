@@ -1,14 +1,18 @@
 // Uploads interrupted by a reload continue once their files are chosen again, against the real server
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { signIn } from "./helpers";
+import { makeFolder, openFolder, signIn, uploadFinished } from "./helpers";
 
 const MB = 1024 * 1024;
 /** tus-js-client sends 32 MB per request (uploads.ts) */
 const CHUNK = 32 * MB;
+
+// Each upload is a few changes on the server, and each may wait its turn behind a large change made by another test at
+// the same time
+test.describe.configure({ timeout: 120_000 });
 
 let dir: string;
 test.beforeAll(() => {
@@ -25,13 +29,6 @@ function diskFile(name: string, size: number, seed: number): string {
   return path;
 }
 
-async function folder(page: Page, name: string): Promise<string> {
-  const root = (await (await page.request.get("/api/auth/me")).json()).root_id;
-  const res = await page.request.post("/api/folders", { data: { parent_id: root, name: `${name} ${randomBytes(4).toString("hex")}` } });
-  expect(res.ok()).toBe(true);
-  return (await res.json()).id;
-}
-
 async function children(page: Page, id: string): Promise<{ id: string; name: string; size: number }[]> {
   const res = await (await page.request.get(`/api/nodes/${id}/children?limit=100`)).json();
   return Array.isArray(res) ? res : res.items;
@@ -40,21 +37,29 @@ async function children(page: Page, id: string): Promise<{ id: string; name: str
 const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
 
 /**
- * Starts uploading a file and stops it after its first 32 MB reached the server: the rest never gets through (the
- * connection drops), until the page is reloaded
+ * Lets the uploads' first 32 MB through to the server (`url`: where the page sends uploads), and stops the rest: it
+ * never gets through (the connection drops), until the page is reloaded. `held` comes once the server has the first
+ * part.
  */
-async function startAndHold(page: Page, path: string) {
-  let held = false;
-  await page.route("**/api/uploads/*", async (route) => {
+async function holdAfterFirstPart(page: Page, url = "**/api/uploads/*"): Promise<{ held: Promise<void> }> {
+  let hold!: () => void;
+  const held = new Promise<void>((resolve) => (hold = resolve));
+  await page.route(url, async (route) => {
     const r = route.request();
     if (r.method() === "PATCH" && r.headers()["upload-offset"] !== "0") {
-      held = true;
+      hold();
       return route.abort();
     }
     await route.continue();
   });
+  return { held };
+}
+
+/** Starts uploading a file and stops it after its first 32 MB reached the server */
+async function startAndHold(page: Page, path: string) {
+  const { held } = await holdAfterFirstPart(page);
   await page.locator('input[type="file"][multiple]').first().setInputFiles(path);
-  await expect.poll(() => held, { timeout: 30_000 }).toBe(true);
+  await held;
 }
 
 /** Reloads the page while the upload is stopped, then lets requests through again */
@@ -84,9 +89,9 @@ function patchOffsets(page: Page) {
 
 test("after a reload, choosing the file again continues from what the server has", async ({ page }) => {
   await signIn(page);
-  const target = await folder(page, "Recovery");
+  const target = await makeFolder(page, "Recovery");
   const path = diskFile("big-resume.bin", 40 * MB, 1);
-  await page.goto(`/files/${target}`);
+  await openFolder(page, target);
   await startAndHold(page, path);
   await reload(page);
 
@@ -103,9 +108,11 @@ test("after a reload, choosing the file again continues from what the server has
   expect(kept[0]).toBeLessThan(2000);
 
   const offsets = patchOffsets(page);
+  const finished = uploadFinished(page);
   await region.locator('input[type="file"][multiple]').setInputFiles(path);
   await expect(page.getByText("1 file continues where it stopped.")).toBeVisible();
-  await expect(page.getByRole("status").filter({ hasText: "1 upload complete" })).toBeAttached({ timeout: 60_000 });
+  await finished;
+  await expect(page.getByRole("status").filter({ hasText: "1 upload complete" })).toBeAttached();
   expect(offsets[0]).toBe(CHUNK);
   await expect(region).toHaveCount(0);
 
@@ -117,10 +124,10 @@ test("after a reload, choosing the file again continues from what the server has
 
 test("a file replaced since, with the same name, size and date, starts again instead of joining the old part", async ({ page }) => {
   await signIn(page);
-  const target = await folder(page, "Recovery replaced");
+  const target = await makeFolder(page, "Recovery replaced");
   const path = diskFile("replaced.bin", 40 * MB, 2);
   const { mtime } = statSync(path);
-  await page.goto(`/files/${target}`);
+  await openFolder(page, target);
   await startAndHold(page, path);
   await reload(page);
 
@@ -130,9 +137,14 @@ test("a file replaced since, with the same name, size and date, starts again ins
   writeFileSync(path, changed);
   utimesSync(path, mtime, mtime);
   const offsets = patchOffsets(page);
+  const finished = uploadFinished(page);
+  // The page lets the server drop the part it can't continue, then says it starts again
+  const ended = uploadEnded(page);
   await page.getByRole("region", { name: "Interrupted uploads" }).locator('input[type="file"][multiple]').setInputFiles(path);
+  expect((await ended).status()).toBe(204);
   await expect(page.getByText("1 file changed since it was interrupted, so it starts again.")).toBeVisible();
-  await expect(page.getByRole("status").filter({ hasText: "1 upload complete" })).toBeAttached({ timeout: 60_000 });
+  await finished;
+  await expect(page.getByRole("status").filter({ hasText: "1 upload complete" })).toBeAttached();
   expect(offsets[0]).toBe(0);
   const [file] = await children(page, target);
   const content = await (await page.request.get(`/api/files/${file.id}/content`)).body();
@@ -141,9 +153,9 @@ test("a file replaced since, with the same name, size and date, starts again ins
 
 test("a legacy sparse-sample record starts again instead of authorizing a resume", async ({ page }) => {
   await signIn(page);
-  const target = await folder(page, "Recovery legacy");
+  const target = await makeFolder(page, "Recovery legacy");
   const path = diskFile("legacy.bin", 40 * MB, 9);
-  await page.goto(`/files/${target}`);
+  await openFolder(page, target);
   await startAndHold(page, path);
   await reload(page);
   // The page has looked at what is kept (it does so once, when it loads) before it is changed below
@@ -171,8 +183,10 @@ test("a legacy sparse-sample record starts again instead of authorizing a resume
   // Its upload address is no longer kept under the old key
   await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("tus::sd|")))).toEqual([]);
   const offsets = patchOffsets(page);
+  const finished = uploadFinished(page);
   await page.getByRole("region", { name: "Interrupted uploads" }).locator('input[type="file"][multiple]').setInputFiles(path);
-  await expect(page.getByRole("status").filter({ hasText: "1 upload complete" })).toBeAttached({ timeout: 60_000 });
+  await finished;
+  await expect(page.getByRole("status").filter({ hasText: "1 upload complete" })).toBeAttached();
   expect(offsets[0]).toBe(0);
   expect((await ended).status()).toBe(204);
   expect((await page.request.head(oldUrl!, { headers: { "Tus-Resumable": "1.0.0" } })).status()).toBe(404);
@@ -182,16 +196,22 @@ test("a legacy sparse-sample record starts again instead of authorizing a resume
 
 test("an upload the server finished, whose answer was lost, isn't uploaded twice", async ({ page }) => {
   await signIn(page);
-  const target = await folder(page, "Recovery finished");
+  const target = await makeFolder(page, "Recovery finished");
   const path = diskFile("finished.bin", 2 * MB, 4);
-  await page.goto(`/files/${target}`);
+  await openFolder(page, target);
   // The server gets everything, but the page never hears back
+  let saved!: () => void;
+  const done = new Promise<void>((resolve) => (saved = resolve));
   await page.route("**/api/uploads/*", async (route) => {
-    if (route.request().method() === "PATCH") await route.fetch().catch(() => {});
+    if (route.request().method() === "PATCH") {
+      const res = await route.fetch().catch(() => null);
+      if (res?.headers()["x-node-id"]) saved();
+    }
     await route.abort();
   });
   await page.locator('input[type="file"][multiple]').first().setInputFiles(path);
-  await expect.poll(async () => (await children(page, target)).length, { timeout: 30_000 }).toBe(1);
+  await done;
+  expect(await children(page, target)).toHaveLength(1);
   await page.unrouteAll({ behavior: "ignoreErrors" });
   await page.reload();
 
@@ -209,9 +229,9 @@ test("another open tab's upload isn't offered, and a discarded one is gone from 
   // Time flows as usual in both tabs, until the test moves it on (uploadRecovery.ts: BEAT_MS, STALE_MS)
   await context.clock.install();
   await signIn(page);
-  const target = await folder(page, "Recovery tabs");
+  const target = await makeFolder(page, "Recovery tabs");
   const path = diskFile("tabs.bin", 40 * MB, 5);
-  await page.goto(`/files/${target}`);
+  await openFolder(page, target);
   await startAndHold(page, path);
 
   const other = await context.newPage();
@@ -246,7 +266,7 @@ test("another open tab's upload isn't offered, and a discarded one is gone from 
 
 test("a folder upload continues each file by its path, not by its name alone", async ({ page }) => {
   await signIn(page);
-  const target = await folder(page, "Recovery folder");
+  const target = await makeFolder(page, "Recovery folder");
   const root = join(dir, "Project");
   mkdirSync(join(root, "a"), { recursive: true });
   mkdirSync(join(root, "b"), { recursive: true });
@@ -255,26 +275,20 @@ test("a folder upload continues each file by its path, not by its name alone", a
   writeFileSync(big, readFileSync(diskFile("big-folder.bin", 40 * MB, 6)));
   writeFileSync(join(root, "b", "same.bin"), "small");
   rmSync(join(dir, "big-folder.bin"));
-  await page.goto(`/files/${target}`);
-  let held = false;
-  await page.route("**/api/uploads/*", async (route) => {
-    const r = route.request();
-    if (r.method() === "PATCH" && r.headers()["upload-offset"] !== "0") {
-      held = true;
-      return route.abort();
-    }
-    await route.continue();
-  });
+  await openFolder(page, target);
+  const { held } = await holdAfterFirstPart(page);
   await page.locator("input[webkitdirectory]").first().setInputFiles(root);
-  await expect.poll(() => held, { timeout: 30_000 }).toBe(true);
+  await held;
   await reload(page);
 
   const region = page.getByRole("region", { name: "Interrupted uploads" });
   await expect(region).toContainText("Project");
   const offsets = patchOffsets(page);
+  const finished = uploadFinished(page);
   await region.locator("input[webkitdirectory]").setInputFiles(root);
   await expect(page.getByText("1 file continues where it stopped.")).toBeVisible();
-  await expect(page.getByRole("status").filter({ hasText: "1 upload complete" })).toBeAttached({ timeout: 60_000 });
+  await finished;
+  await expect(page.getByRole("status").filter({ hasText: "1 upload complete" })).toBeAttached();
   expect(offsets[0]).toBe(CHUNK);
   const [project] = await children(page, target);
   const inside = await children(page, project.id);
@@ -286,23 +300,17 @@ test("a folder upload continues each file by its path, not by its name alone", a
 
 test("a share link's visitor gets their interrupted upload back on that link, and nowhere else", async ({ page, browser }) => {
   await signIn(page);
-  const target = await folder(page, "Recovery link");
+  const target = await makeFolder(page, "Recovery link");
   const share = await (await page.request.post("/api/shares", { data: { node_id: target, allow_upload: true } })).json();
   const context = await browser.newContext();
   const visitor = await context.newPage();
   const path = diskFile("visitor.bin", 40 * MB, 7);
   await visitor.goto(`/share/${share.id}`);
-  let held = false;
-  await visitor.route("**/uploads/*", async (route) => {
-    const r = route.request();
-    if (r.method() === "PATCH" && r.headers()["upload-offset"] !== "0") {
-      held = true;
-      return route.abort();
-    }
-    await route.continue();
-  });
+  // The link's folder has loaded: its upload field knows where files go
+  await expect(visitor.getByText("This folder is empty")).toBeVisible();
+  const { held } = await holdAfterFirstPart(visitor, "**/uploads/*");
   await visitor.locator('input[type="file"][multiple]').first().setInputFiles(path);
-  await expect.poll(() => held, { timeout: 30_000 }).toBe(true);
+  await held;
   await reload(visitor);
   const region = visitor.getByRole("region", { name: "Interrupted uploads" });
   await expect(region).toContainText("visitor.bin");
@@ -315,9 +323,11 @@ test("a share link's visitor gets their interrupted upload back on that link, an
   await expect(visitor.getByRole("region", { name: "Interrupted uploads" })).toHaveCount(0);
 
   await visitor.goto(`/share/${share.id}`);
+  const finished = uploadFinished(visitor);
   await region.locator('input[type="file"][multiple]').setInputFiles(path);
   await expect(visitor.getByText("1 file continues where it stopped.")).toBeVisible();
-  await expect(visitor.getByRole("status").filter({ hasText: "1 upload complete" })).toBeAttached({ timeout: 60_000 });
+  await finished;
+  await expect(visitor.getByRole("status").filter({ hasText: "1 upload complete" })).toBeAttached();
   const [file] = await children(page, target);
   expect(sha(await (await page.request.get(`/api/files/${file.id}/content`)).body())).toBe(sha(readFileSync(path)));
   await context.close();

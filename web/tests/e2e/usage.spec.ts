@@ -1,7 +1,6 @@
 // How much is used: the status bar shows the space being browsed, and Storage usage counts folder spaces.
-import { randomBytes } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
-import { signIn, uploadFinished } from "./helpers";
+import { makeFolder, openFolder, signIn, unique, uploadFinished } from "./helpers";
 
 interface Drive {
   kind: string;
@@ -34,9 +33,7 @@ async function companySpace(page: Page): Promise<Drive> {
  * it. The folder is this test's own (a random name), so its file is in view however many the space has.
  */
 async function upload(page: Page, space: Drive, name: string, bytes: number) {
-  const res = await page.request.post("/api/folders", { data: { parent_id: space.root_id, name: `Usage ${randomBytes(4).toString("hex")}` } });
-  expect(res.ok()).toBe(true);
-  await page.goto(`/files/${(await res.json()).id}`);
+  await openFolder(page, await makeFolder(page, `Usage ${unique()}`, space.root_id));
   const finished = uploadFinished(page);
   await page.locator('input[type="file"][multiple]').setInputFiles([{ name, mimeType: "text/plain", buffer: Buffer.alloc(bytes, 97) }]);
   await finished;

@@ -2,7 +2,7 @@
 # The checks of a pull request, the same ones the tests on GitHub run (.github/workflows/build.yml calls this script):
 #   scripts/check.sh           everything below, in this order
 #   scripts/check.sh web       the interface: dependencies as locked, formatting, translations, the Office code's
-#                              boundary, types, lint, unit tests
+#                              boundary, no fixed waits in the end-to-end tests, types, lint, unit tests
 #   scripts/check.sh server    the server: migration files numbered without repeats or gaps, formatting, tests, and
 #                              clippy with warnings as errors
 #   scripts/check.sh migrations  only the migration files' numbers
@@ -22,6 +22,8 @@ web() {
   pnpm format:check
   node scripts/check-i18n.mjs
   node scripts/check-boundaries.mjs
+  # The end-to-end tests run in parallel: no fixed waits, no names without a unique part (scripts/check-e2e.mjs)
+  node scripts/check-e2e.mjs
   pnpm typecheck
   pnpm lint
   pnpm test "$@"

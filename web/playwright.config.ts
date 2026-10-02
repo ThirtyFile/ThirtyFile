@@ -8,6 +8,9 @@ export default defineConfig({
   testDir: "tests/e2e",
   timeout: 60_000,
   retries: process.env.CI ? 1 : 0,
+  // How many tests run at once: E2E_WORKERS (CI sets 4), or Playwright's default, half the CPU cores. The tests are
+  // written to run in parallel (tests/e2e/helpers.ts)
+  workers: process.env.E2E_WORKERS ? Number(process.env.E2E_WORKERS) : undefined,
   reporter: process.env.CI ? [["list"], ["github"]] : "list",
   use: {
     baseURL: `http://127.0.0.1:${port}`,

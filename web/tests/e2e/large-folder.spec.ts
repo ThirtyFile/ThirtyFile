@@ -1,27 +1,37 @@
 // A large folder loads the parts in view, not everything: the keyboard still reaches every item, and Select all and
 // Shift select items that aren't loaded, which the changes then include.
-import { expect, test, type Page } from "@playwright/test";
-import { signIn } from "./helpers";
+import { expect, test, type Page, type Response } from "@playwright/test";
+import { answer, listing, makeFolder, signIn } from "./helpers";
 
 /** More than two parts of 500: the part at the end isn't loaded when the folder opens */
 const COUNT = 1200;
 const nameOf = (i: number) => `Item ${String(i).padStart(4, "0")}`;
 
-async function folder(page: Page, name: string, parent?: string): Promise<string> {
-  const parentId = parent ?? (await (await page.request.get("/api/auth/me")).json()).root_id;
-  const res = await page.request.post("/api/folders", { data: { parent_id: parentId, name: parent ? name : `${name} ${Date.now().toString(36)}` } });
-  expect(res.ok()).toBe(true);
-  return (await res.json()).id;
-}
-
-/** A folder of `size` folders, made through the API a few at a time */
-async function bigFolder(page: Page, size = COUNT): Promise<string> {
-  const big = await folder(page, "Large");
-  for (let i = 0; i < size; i += 25) await Promise.all(Array.from({ length: Math.min(25, size - i) }, (_, k) => folder(page, nameOf(i + k), big)));
+/** A folder of `size` folders, made through the API a few at a time; in `parent`, or in My files */
+async function bigFolder(page: Page, size = COUNT, parent?: string): Promise<string> {
+  const big = await makeFolder(page, "Large", parent);
+  for (let i = 0; i < size; i += 25) await Promise.all(Array.from({ length: Math.min(25, size - i) }, (_, k) => makeFolder(page, nameOf(i + k), big)));
   return big;
 }
 
 const count = async (page: Page, id: string) => (await (await page.request.get(`/api/nodes/${id}/children`)).json()).length;
+
+/** The server's answer to the page asking for the part of `id` that starts at `offset` */
+function part(page: Page, id: string, offset: number) {
+  return page.waitForResponse((r) => {
+    const url = new URL(r.url());
+    return url.pathname === `/api/nodes/${id}/children` && url.searchParams.get("offset") === String(offset);
+  });
+}
+
+/**
+ * The server's answer to the last change of `count` items (`path`: the change's request). The page changes them a batch
+ * of at most 1,000 at a time: a large change takes a while, and each batch may wait its turn behind other tests' changes.
+ */
+function lastBatch(page: Page, path: string, count: number): Promise<Response> {
+  let left = count;
+  return page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === path && (left -= r.request().postDataJSON().ids.length) <= 0);
+}
 
 /** Where the parts the page asks for start */
 function parts(page: Page) {
@@ -39,12 +49,13 @@ test("a large folder loads the parts in view, and End and Home reach every item"
   await signIn(page);
   const big = await bigFolder(page);
   const offsets = parts(page);
+  const second = part(page, big, 500);
   await page.goto(`/files/${big}`);
   const row = (name: string) => page.locator("[data-node-id]").filter({ hasText: name });
   await expect(row(nameOf(0))).toBeVisible();
   await expect(page.locator("footer")).toContainText(`${COUNT.toLocaleString("en-US")} items`);
-  await page.waitForLoadState("networkidle");
   // The part in view and the next one, not the part at the end
+  await second;
   expect(new Set(offsets)).toEqual(new Set([0, 500]));
 
   await row(nameOf(0)).click();
@@ -64,7 +75,10 @@ test("a large folder loads the parts in view, and End and Home reach every item"
   const box = page.getByRole("textbox", { name: /name/i });
   await expect(box).toBeFocused();
   await page.keyboard.type("Made at the end");
+  // Named once the server has made the folder and renamed it: it may wait its turn behind other tests' changes
+  const renamed = answer(page, "PATCH", /^\/api\/nodes\/[^/]+$/);
   await page.keyboard.press("Enter");
+  expect((await renamed).ok()).toBe(true);
   await expect(row("Made at the end")).toBeVisible();
 });
 
@@ -84,16 +98,20 @@ test("Select all takes the items not loaded too, less those left out, and the tr
   await page.keyboard.press("Delete");
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText(`Move ${(COUNT - 1).toLocaleString("en-US")} items to trash?`);
+  const trashed = lastBatch(page, "/api/nodes/trash", COUNT - 1);
   await dialog.getByRole("button", { name: "Move to trash" }).click();
-  await expect.poll(() => count(page, big), { timeout: 60_000 }).toBe(1);
+  expect((await trashed).ok()).toBe(true);
+  expect(await count(page, big)).toBe(1);
   await expect(row(nameOf(3))).toBeVisible();
   await expect(page.locator("footer")).toContainText(/^1 item(?!s)/);
 });
 
 test("Shift selects up to an item across parts not loaded, and a cut and paste moves all of them", async ({ page }) => {
   await signIn(page);
-  const big = await bigFolder(page);
-  const other = await folder(page, "Destination");
+  // Both in a folder of their own: going up shows it, and My files holds the other tests' folders too
+  const top = await makeFolder(page, "Large moves");
+  const big = await bigFolder(page, COUNT, top);
+  const other = await makeFolder(page, "Destination", top);
   await page.goto(`/files/${big}`);
   const row = (name: string) => page.locator("[data-node-id]").filter({ hasText: name });
   await row(nameOf(2)).click();
@@ -105,15 +123,17 @@ test("Shift selects up to an item across parts not loaded, and a cut and paste m
   await page.keyboard.press("Alt+ArrowUp");
   await page.locator("[data-node-id]").filter({ hasText: "Destination" }).dblclick();
   await page.waitForURL(`**/files/${other}`);
+  const moved = lastBatch(page, "/api/nodes/move", COUNT - 2);
   await page.getByRole("button", { name: "Paste" }).click();
-  await expect.poll(() => count(page, other), { timeout: 60_000 }).toBe(COUNT - 2);
+  expect((await moved).ok()).toBe(true);
+  expect(await count(page, other)).toBe(COUNT - 2);
   expect(await count(page, big)).toBe(2);
 });
 
 test("going up to a folder far down a large folder shows and selects the folder left", async ({ page }) => {
   await signIn(page);
   const big = await bigFolder(page);
-  const last = await folder(page, "zz last", big);
+  const last = await makeFolder(page, "zz last", big);
   await page.goto(`/files/${big}`);
   await expect(page.locator("[data-node-id]").first()).toBeVisible();
   // Into the last item (by its address: it isn't loaded), then up again
@@ -144,8 +164,10 @@ test("Ctrl+Shift across parts not loaded counts the item it starts from once, an
   await page.keyboard.press("Delete");
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText(`Move ${SPANNED.toLocaleString("en-US")} items to trash?`);
+  const trashed = lastBatch(page, "/api/nodes/trash", SPANNED);
   await dialog.getByRole("button", { name: "Move to trash" }).click();
-  await expect(page.getByText(/Moved 2,?100 items to trash/)).toBeVisible({ timeout: 60_000 });
+  expect((await trashed).ok()).toBe(true);
+  await expect(page.getByText(/Moved 2,?100 items to trash/)).toBeVisible();
   expect(await count(page, big)).toBe(0);
 });
 
@@ -163,9 +185,11 @@ test("a span of exactly 2,000 items is changed in two batches and ends there", a
   await page.keyboard.press("Delete");
   const asked: string[] = [];
   page.on("request", (r) => r.url().endsWith(`/nodes/${big}/select`) && asked.push(r.url()));
+  const trashed = lastBatch(page, "/api/nodes/trash", 2000);
   await page.getByRole("dialog").getByRole("button", { name: "Move to trash" }).click();
+  expect((await trashed).ok()).toBe(true);
   // Not an error after the last batch, when the span's last item is already in the trash
-  await expect(page.getByText(/Moved 2,?000 items to trash/)).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText(/Moved 2,?000 items to trash/)).toBeVisible();
   expect(asked).toHaveLength(2);
   expect(await count(page, big)).toBe(100);
 });
@@ -174,10 +198,11 @@ test("a new folder made with the end not loaded shows after the items loaded, an
   await signIn(page);
   const big = await bigFolder(page);
   const offsets = parts(page);
+  const second = part(page, big, 500);
   await page.goto(`/files/${big}`);
   const row = (name: string) => page.locator("[data-node-id]").filter({ hasText: name });
   await expect(row(nameOf(0))).toBeVisible();
-  await page.waitForLoadState("networkidle");
+  await second;
   expect(offsets).not.toContain(1000);
 
   // "New folder" sorts after every "Item", in the part not loaded: it shows after the last item loaded instead
@@ -185,9 +210,13 @@ test("a new folder made with the end not loaded shows after the items loaded, an
   const box = page.getByRole("textbox", { name: "New name" });
   await expect(box).toBeFocused();
   await box.fill("Made here");
+  // Renamed once the server has answered, and the list loads again
+  const renamed = answer(page, "PATCH", /^\/api\/nodes\/[^/]+$/);
+  const listed = listing(page, big, renamed);
   await box.press("Enter");
   await expect(row("Made here")).toBeVisible();
-  await page.waitForLoadState("networkidle");
+  expect((await renamed).ok()).toBe(true);
+  await listed;
   const next = () =>
     page.locator("[data-node-id]").evaluateAll((rows, name) => {
       const at = rows.findIndex((r) => r.textContent?.includes(name));
