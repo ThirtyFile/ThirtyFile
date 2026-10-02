@@ -147,10 +147,16 @@ impl SortCol {
 /// Sorting of folder listings, folders first. Names sort naturally ("File 2" before "File 10", the `natural_name`
 /// collation), and Type sorts by extension, as the column shows it (`extOf` in the browser: after the last dot, unless
 /// the name starts with it). The id comes last so every item has a fixed place, which paging relies on.
+///
+/// The default order (by name, ascending) is the order of the index `nodes_listed`, so a page of a large folder is read
+/// from it instead of sorting every item of the folder first: by name, the name isn't repeated as the tiebreak, which
+/// would keep SQLite from seeing that.
 pub fn order_clause(sort: Option<&str>, order: Option<&str>) -> String {
-    let col = SortCol::parse(sort).expr();
+    let sort = SortCol::parse(sort);
+    let col = sort.expr();
     let dir = if order == Some("desc") { "DESC" } else { "ASC" };
-    format!("ORDER BY (n.kind = 'folder') DESC, {col} {dir}, n.name COLLATE natural_name, n.id")
+    let by_name = if sort == SortCol::Name { "" } else { "n.name COLLATE natural_name, " };
+    format!("ORDER BY (n.kind = 'folder') DESC, {col} {dir}, {by_name}n.id")
 }
 
 /// The children of a folder (not in the trash) in the order of `order_clause`; with a limit, one page of them.

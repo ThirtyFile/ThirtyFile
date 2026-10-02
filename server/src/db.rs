@@ -50,9 +50,35 @@ async fn open(path: &Path, cache_mb: u32, migrator: &sqlx::migrate::Migrator) ->
         return Err(message.into());
     }
     backup_before_migrations(&pool, migrator, path).await?;
+    let (listed_before,): (bool,) =
+        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'nodes_listed')").fetch_one(&pool).await?;
     migrator.run(&pool).await?;
+    keep_natural_order(&pool, listed_before).await?;
     optimize(&pool).await;
     Ok(pool)
+}
+
+/// The order of `util::natural_cmp`, which the index `nodes_listed` keeps names in (migrations/0015_indexes.sql):
+/// raised whenever natural_cmp orders names differently
+const NATURAL_ORDER: u32 = 1;
+
+/// Rebuilds the indexes in the order of `natural_cmp` when it changed since they were built: in another version of
+/// ThirtyFile (`NATURAL_ORDER`), or with other letter-case rules (the Unicode version Rust's `to_lowercase` follows). An
+/// index out of order would list a folder's items in the wrong order, or leave some out. `built`: whether the index was
+/// there before this start (else it was just built, in the current order).
+async fn keep_natural_order(pool: &SqlitePool, built: bool) -> Result<(), sqlx::Error> {
+    let (major, minor, update) = char::UNICODE_VERSION;
+    let order = format!("{NATURAL_ORDER} (Unicode {major}.{minor}.{update})");
+    if get_setting(pool, "natural_order").await?.as_deref() == Some(order.as_str()) {
+        return Ok(());
+    }
+    let mut tx = begin_write(pool).await?;
+    if built {
+        tracing::info!("Sorting names differently than before: rebuilding the index of folder listings");
+        sqlx::query("REINDEX natural_name").execute(&mut *tx).await?;
+    }
+    set_setting(&mut tx, "natural_order", &order).await?;
+    tx.commit().await
 }
 
 /// The upgrade guide, which says what to do with data from a version that can't be upgraded
@@ -660,6 +686,65 @@ mod tests {
         assert!(replica.contains("USING INDEX replica_jobs_target (policy_id=? AND location_id=? AND state=?)"), "{replica}");
         let (state,): (String,) = sqlx::query_as("SELECT state FROM backup_jobs WHERE id = 'j'").fetch_one(&db).await.unwrap();
         assert_eq!(state, "queued");
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_database_from_0_4_0_counts_changes_with_an_index_and_only_when_kept_columns_change() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-040-seq-{}", crate::util::new_id()));
+        let path = dir.join("drive.db");
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'amy', 'x', 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO nodes (id, owner_id, kind, name, created_at, updated_at) VALUES ('r', 1, 'folder', '', 0, 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO drives (id, name, kind, root_id, owner_id, created_at, location_id) VALUES ('d', 'Disk', 'team', 'r', 1, 0, 'local')")
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE nodes SET drive_id = 'd', fs_path = '' WHERE id = 'r'").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO nodes (id, owner_id, parent_id, kind, name, drive_id, fs_path, created_at, updated_at) VALUES ('f', 1, 'r', 'file', 'a.txt', 'd', 'a.txt', 0, 0)")
+            .execute(&db)
+            .await
+            .unwrap();
+        db.close().await;
+
+        let db = connect(&path, 16).await.unwrap();
+        let seq = async || sqlx::query_as::<_, (i64,)>("SELECT COALESCE((SELECT seq FROM space_changes WHERE drive_id = 'd'), 0)").fetch_one(&db).await.unwrap().0;
+        let first = seq().await;
+        // Bookkeeping, and writes that leave the item as it was, don't count; a new name does
+        for sql in [
+            "UPDATE nodes SET fs_birth_ns = 5, fs_ino = 7, fs_dev = 1, found = 1, content_by = 1 WHERE id = 'f'",
+            "UPDATE nodes SET name = 'a.txt', size = 0 WHERE id = 'f'",
+        ] {
+            sqlx::query(sqlx::AssertSqlSafe(sql)).execute(&db).await.unwrap();
+            assert_eq!(seq().await, first, "{sql}");
+        }
+        sqlx::query("UPDATE nodes SET name = 'b.txt', fs_path = 'b.txt' WHERE id = 'f'").execute(&db).await.unwrap();
+        assert!(seq().await > first);
+        // The next number is read from an index, not from every space
+        let plan: Vec<(i64, i64, i64, String)> =
+            sqlx::query_as("EXPLAIN QUERY PLAN SELECT COALESCE(MAX(seq), 0) + 1 FROM space_changes").fetch_all(&db).await.unwrap();
+        assert!(plan.iter().any(|p| p.3.contains("space_changes_seq")), "{plan:?}");
+        let (unused,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'error_log_user'").fetch_one(&db).await.unwrap();
+        assert_eq!(unused, 0);
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn listings_are_reindexed_when_names_sort_differently() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-order-{}", crate::util::new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("drive.db");
+        let db = connect(&path, 16).await.unwrap();
+        let current = get_setting(&db, "natural_order").await.unwrap().unwrap();
+        assert!(current.starts_with(&format!("{NATURAL_ORDER} ")), "{current}");
+        // As an older version, or a build with other letter-case rules, left it
+        set_setting(&mut db.acquire().await.unwrap(), "natural_order", "0").await.unwrap();
+        db.close().await;
+        let db = connect(&path, 16).await.unwrap();
+        assert_eq!(get_setting(&db, "natural_order").await.unwrap(), Some(current));
         db.close().await;
         let _ = std::fs::remove_dir_all(&dir);
     }

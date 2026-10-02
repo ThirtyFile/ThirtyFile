@@ -242,13 +242,11 @@ pub async fn ensure_folders(conn: &mut SqliteConnection, owner_id: i64, parent_i
     let mut current = parent_id.to_string();
     for part in rel.split('/').filter(|p| !p.is_empty()) {
         let name = crate::util::validate_name(part)?;
-        let existing: Option<(String, String)> = sqlx::query_as(
-            "SELECT id, kind FROM nodes WHERE parent_id = ?1 AND name_key = CASE WHEN fs_path IS NULL THEN unicode_lower(?2) ELSE ?2 END AND trashed_at IS NULL",
-        )
-        .bind(&current)
-        .bind(&name)
-        .fetch_optional(&mut *conn)
-        .await?;
+        let existing: Option<(String, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT id, kind FROM nodes WHERE {}", crate::tree::NAMED)))
+            .bind(&current)
+            .bind(&name)
+            .fetch_optional(&mut *conn)
+            .await?;
         current = match existing {
             Some((id, kind)) if kind == "folder" => id,
             None => create_folder(conn, owner_id, &current, &name).await?,
