@@ -133,7 +133,7 @@ export default {
   "Password (at least {n} characters)": "密碼（至少 {n} 個字元）",
   "Role": "角色",
   "Standard user": "一般使用者",
-  "Upload and edit": "上傳與編輯",
+  "Edit includes uploading. Share includes share links, Share with… and managing the members of a space.": "「編輯」包括上傳。「分享」包括分享連結、「共用給…」和管理空間成員。",
   "Personal space size (GB, leave blank for unlimited)": "個人空間大小（GB，留空為不限制）",
   "Create \"My files\" (a private space only they can see)": "建立「我的檔案」（只有他自己看得到的空間）",
   "Storage location of \"My files\"": "「我的檔案」的儲存位置",

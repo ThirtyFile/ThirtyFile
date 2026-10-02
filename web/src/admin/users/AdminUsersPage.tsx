@@ -37,6 +37,7 @@ import { DevicesDialog } from "@/components/DevicesDialog";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
 import { AddPersonalDialog, RemovePersonalDialog, DeleteUserDialog } from "@/admin/users/AccountDialogs";
 import { UserDialog } from "@/admin/users/UserDialog";
+import { PERMISSION_LABEL, PERMISSIONS } from "@/admin/users/permissions";
 
 const USERS_PAGE = 200;
 
@@ -126,7 +127,12 @@ export function AdminUsersPage() {
     {
       header: t("Permissions"),
       cellClassName: "text-muted-foreground",
-      cell: (u) => (u.role === "admin" ? t("All") : [u.can_write && t("Edit"), u.can_delete && t("Delete"), u.can_share && t("Share")].filter(Boolean).join(t(", ")) || t("View only")),
+      cell: (u) =>
+        u.role === "admin"
+          ? t("All")
+          : PERMISSIONS.filter((p) => u[p])
+              .map((p) => PERMISSION_LABEL[p])
+              .join(t(", ")) || t("View only"),
     },
     {
       header: tc("space", "Used"),

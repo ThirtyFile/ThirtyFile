@@ -50,7 +50,7 @@ pub enum Need {
     Write,
     /// Move to trash, delete permanently
     Delete,
-    /// Create public share links
+    /// Share: create share links, and give people access and manage members (drives.rs); the interface calls it "Share"
     Share,
 }
 
