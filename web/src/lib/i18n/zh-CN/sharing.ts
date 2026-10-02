@@ -59,7 +59,7 @@ export default {
   "Not shared with anyone yet": "尚未共用給任何人",
   "Inherited (managed in a parent folder or the space)": "從上層繼承（在上層資料夾或空間管理）",
   "Your role is “{role}”. Only managers can change access.": "你的角色是「{role}」，只有管理者可以變更存取權。",
-  "{n} member|{n} members": "{n} 位成員",
+  "{n} member|{n} members": "{n} 位成员",
   // Activity log, share access log, filters
   "Correct password": "密碼正確",
   "Wrong password": "密碼錯誤",
@@ -136,11 +136,11 @@ export default {
   "End date": "結束日期",
   "to": "至",
   // Public share page (guests)
-  "This share link doesn't exist or has expired": "分享連結不存在或已失效",
+  "This share link doesn't exist or has expired": "分享链接不存在或已失效",
   "Shared by {name}": "由 {name} 分享",
   "{n} download left|{n} downloads left": "剩餘 {n} 次下載",
   "Couldn't unlock": "解鎖失敗",
-  "This share requires a password": "這個分享需要密碼",
+  "This share requires a password": "这个分享需要密码",
   "Enter password": "輸入密碼",
   "Preview": "預覽",
   "Download limit reached": "已達下載次數上限",

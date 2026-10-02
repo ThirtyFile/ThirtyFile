@@ -21,8 +21,8 @@ export default {
   "Sign-in methods": "登入方式",
   "My sign-in history": "我的登入紀錄",
   "Appearance": "外觀",
-  "Use system setting": "跟隨系統",
-  "Light": "淺色",
+  "Use system setting": "跟随系统",
+  "Light": "浅色",
   "Dark": "深色",
   "Sign out": "登出",
   // The release that runs: the account menu, and the Control panel's status bar (admin/ControlPanelPage.tsx)
@@ -114,7 +114,7 @@ export default {
   "Moved to trash": "已移到垃圾桶",
   "Undo": "復原",
   // components/Explorer.tsx, FileList.tsx
-  "{n} item|{n} items": "{n} 個項目",
+  "{n} item|{n} items": "{n} 个项目",
   "{n} item selected|{n} items selected": "已選取 {n} 個項目",
   "Clipboard: {n} item cut|Clipboard: {n} items cut": "剪貼簿：剪下 {n} 個項目",
   "Clipboard: {n} item copied|Clipboard: {n} items copied": "剪貼簿：複製 {n} 個項目",
