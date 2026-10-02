@@ -127,7 +127,7 @@ describe("upload queue", () => {
     await settle();
     expect(shown.tasks.map((t) => [t.status, t.error])).toEqual([
       ["error", "Not enough space"],
-      ["error", "Network connection lost"],
+      ["error", "Can't reach the server. Check your connection and try again."],
     ]);
     expect(up.hasActiveUploads()).toBe(false);
 

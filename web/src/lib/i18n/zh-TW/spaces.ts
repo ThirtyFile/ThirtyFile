@@ -1,7 +1,7 @@
 /** Traditional Chinese translations: sign-in page, branding, all spaces, space management, folder pages, offline notice */
 export default {
   "Sign in to access your files": "登入以存取你的檔案",
-  "Can't connect to the server": "無法連線到伺服器",
+  "Can't reach the server. Check your connection and try again.": "無法連線到伺服器，請檢查網路連線後再試一次。",
   "This space's storage service is offline.": "這個空間的儲存服務目前離線。",
   "You can browse the file list and organize folders, but you can't open, download, or upload files for now. Everything resumes automatically once the connection is restored.": "可以瀏覽檔案清單、整理資料夾，但暫時無法開啟、下載或上傳檔案。恢復連線後會自動恢復。",
   "This file was changed by someone else since you opened it. Your unsaved changes are kept; reload to see the new version.": "這個檔案在你開啟後已被其他人修改。你尚未儲存的內容已保留；重新載入可查看新版本。",

@@ -1,6 +1,7 @@
 //! Requests to the server's API, and the errors they fail with
 
 import { t, tServer } from "@/lib/i18n";
+import { isNetworkError, unreachable } from "@/lib/utils";
 
 export class ApiError extends Error {
   constructor(
@@ -17,8 +18,20 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * fetch(), except that a server that can't be reached fails with an ApiError (status 0) saying so in the interface's
+ * language, rather than the browser's "Failed to fetch". A cancelled request still fails with its AbortError.
+ */
+export async function send(url: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (e) {
+    throw isNetworkError(e) ? new ApiError(unreachable(), 0, "unreachable") : e;
+  }
+}
+
 export async function request<T>(method: string, path: string, body?: unknown, raw?: BodyInit, extraHeaders?: Record<string, string>, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await send(`/api${path}`, {
     method,
     signal,
     credentials: "same-origin",
@@ -63,7 +76,7 @@ export async function responseError(res: Response, url: string, fallback: string
 
 /** `fetch` for file content and other requests made outside `api`, with the same error handling: throws an ApiError when the response isn't OK */
 export async function fetchOk(url: string, init?: RequestInit): Promise<Response> {
-  const res = await fetch(url, { credentials: "same-origin", ...init });
+  const res = await send(url, { credentials: "same-origin", ...init });
   if (!res.ok) throw await responseError(res, url, t("Couldn't read the file ({status})", { status: res.status }));
   return res;
 }

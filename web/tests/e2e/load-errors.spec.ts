@@ -51,3 +51,30 @@ test("a shared folder whose listing fails doesn't say it is empty", async ({ pag
   await alert.getByRole("button", { name: "Try again" }).click();
   await expect(page.getByText("This folder is empty")).toBeVisible();
 });
+
+test("a folder or file that isn't there says so and offers All spaces instead of Try again", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/files/no-such-folder");
+  const alert = page.getByRole("alert");
+  await expect(alert.getByText("This folder can't be found")).toBeVisible();
+  await expect(alert.getByRole("button", { name: "Try again" })).toHaveCount(0);
+  await alert.getByRole("link", { name: "Go to All spaces" }).click();
+  await expect(page).toHaveURL(/\/drives$/);
+
+  await page.goto("/view/no-such-file");
+  await expect(page.getByRole("alert").getByText("This file can't be found")).toBeVisible();
+  await expect(page.getByRole("alert").getByRole("link", { name: "Go to All spaces" })).toBeVisible();
+});
+
+test("a server that can't be reached is said so in words, not with the browser's Failed to fetch", async ({ page }) => {
+  await signIn(page);
+  await page.route("**/api/admin/groups*", (route) => route.abort("internetdisconnected"));
+  await page.goto("/admin/groups");
+  const alert = page.getByRole("alert");
+  // Tried three times first: the server may be back a moment later
+  await expect(alert.getByText("Can't reach the server. Check your connection and try again.")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Failed to fetch")).toHaveCount(0);
+  await page.unroute("**/api/admin/groups*");
+  await alert.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByText("No groups yet")).toBeVisible();
+});

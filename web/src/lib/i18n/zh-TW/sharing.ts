@@ -165,7 +165,6 @@ export default {
   "Cancel upload": "取消上傳",
   "Clear completed": "清除已完成",
   "Upload failed ({status})": "上傳失敗（{status}）",
-  "Network connection lost": "網路連線中斷",
   // Uploads interrupted by a reload or a closed browser
   "{n} interrupted upload|{n} interrupted uploads": "{n} 個中斷的上傳",
   "Interrupted uploads": "中斷的上傳",

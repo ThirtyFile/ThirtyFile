@@ -27,7 +27,7 @@ import {
   type RecoveredBatch,
   type UploadRecord,
 } from "@/lib/uploadRecovery";
-import { errorMessage } from "@/lib/utils";
+import { errorMessage, unreachable } from "@/lib/utils";
 
 export type UploadStatus = "queued" | "uploading" | "paused" | "done" | "error";
 
@@ -369,7 +369,7 @@ function uploadError(err: Error): ApiError {
   const res = (err as tus.DetailedError).originalResponse;
   // Handled like api.request: the server's message translated, and an expired session sends the user to sign in
   if (res) return errorFromBody(res.getStatus(), res.getBody() ?? "", "/api/uploads", t("Upload failed ({status})", { status: res.getStatus() }), res.getHeader("x-request-id") || undefined);
-  return new ApiError(t("Network connection lost"), 0);
+  return new ApiError(unreachable(), 0, "unreachable");
 }
 
 /** The name the server reports (percent-encoded), when it differs from the one uploaded */

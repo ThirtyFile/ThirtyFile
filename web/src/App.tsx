@@ -8,6 +8,7 @@ import { keys, queries } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { MeContext } from "@/lib/session";
 import { t } from "@/lib/i18n";
+import { errorMessage, unreachable } from "@/lib/utils";
 import { useApplyBranding } from "@/lib/branding";
 import { ConfirmHost } from "@/components/confirm";
 import type { ControlPanelKey } from "@/admin/controlPanel";
@@ -80,7 +81,7 @@ function RequireAuth() {
   if (!me.data)
     return (
       <div className="flex flex-col items-center gap-3 p-10 text-center">
-        <p className="text-destructive">{me.error instanceof ApiError ? me.error.message : t("Can't connect to the server")}</p>
+        <p className="text-destructive">{errorMessage(me.error, unreachable())}</p>
         <Button variant="outline" size="sm" disabled={me.isFetching} onClick={() => void me.refetch()}>
           {me.isFetching && <Loader2Icon className="animate-spin" />}
           {t("Retry")}

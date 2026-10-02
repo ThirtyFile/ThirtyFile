@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { DetailsPane } from "@/components/DetailsPane";
 import { NameDialog } from "@/components/dialogs";
 import { OfflinePanel } from "@/components/OfflineNotice";
+import { ItemError } from "@/components/ErrorState";
 import { FileViewer } from "@/components/FileViewer";
 import { crumbPath, Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { ShareDialog } from "@/components/ShareDialog";
@@ -209,8 +210,10 @@ export function FileViewPage() {
           <ContextMenuTrigger className="flex min-w-0 flex-1 items-center justify-center overflow-auto bg-muted/40">
             {info.isLoading ? (
               <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
-            ) : info.error || !node ? (
-              <div className="text-sm text-destructive">{info.error?.message ?? t("File not found")}</div>
+            ) : info.error ? (
+              <ItemError error={info.error} kind="file" onRetry={() => info.refetch()} />
+            ) : !node ? (
+              <div className="text-sm text-destructive">{t("File not found")}</div>
             ) : info.data?.offline && node.kind === "file" ? (
               <OfflinePanel reason={info.data.offline} retrying={info.isFetching} onRetry={() => info.refetch()} />
             ) : (
