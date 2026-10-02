@@ -508,6 +508,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_span_of_whole_batches_ends_with_its_last_batch() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        mixed_folder(&env, &amy).await;
+        let all: Vec<String> = whole(&env, &amy, "name", "asc").await.into_iter().map(|(id, _)| id).collect();
+        // Two full batches of 4, each put in the trash before the next is asked for: the second says it is the last,
+        // so the browser doesn't ask again once the span's last item is gone
+        let (mut got, mut after) = (Vec::new(), None);
+        for batch in 0..2 {
+            let req =
+                SelectReq { sort: None, order: None, from: Some(all[3].clone()), to: Some(all[10].clone()), except: vec![], after: after.clone(), limit: Some(4) };
+            let Json(page) = select(State(env.st.clone()), amy.clone(), Path(amy.root().to_string()), Json(req)).await.unwrap();
+            assert_eq!(page.ids.len(), 4);
+            let _ = trash(State(env.st.clone()), amy.clone(), Json(BatchReq { ids: page.ids.clone(), ..Default::default() })).await.unwrap();
+            got.extend(page.ids);
+            assert_eq!(page.next.is_some(), batch == 0);
+            after = page.next;
+        }
+        assert_eq!(got, all[3..=10].to_vec());
+    }
+
+    #[tokio::test]
     async fn a_listing_without_a_limit_is_a_plain_array() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;

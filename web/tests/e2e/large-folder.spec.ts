@@ -14,10 +14,10 @@ async function folder(page: Page, name: string, parent?: string): Promise<string
   return (await res.json()).id;
 }
 
-/** A folder of COUNT folders, made through the API a few at a time */
-async function bigFolder(page: Page): Promise<string> {
+/** A folder of `size` folders, made through the API a few at a time */
+async function bigFolder(page: Page, size = COUNT): Promise<string> {
   const big = await folder(page, "Large");
-  for (let i = 0; i < COUNT; i += 25) await Promise.all(Array.from({ length: Math.min(25, COUNT - i) }, (_, k) => folder(page, nameOf(i + k), big)));
+  for (let i = 0; i < size; i += 25) await Promise.all(Array.from({ length: Math.min(25, size - i) }, (_, k) => folder(page, nameOf(i + k), big)));
   return big;
 }
 
@@ -124,4 +124,48 @@ test("going up to a folder far down a large folder shows and selects the folder 
   const left = page.locator("[data-node-id]").filter({ hasText: "zz last" });
   await expect(left).toHaveAttribute("aria-selected", "true");
   await expect(left).toBeInViewport();
+});
+
+/** Parts of 500, with the end far enough that a part in the middle isn't loaded when the list goes there */
+const SPANNED = 2100;
+
+test("Ctrl+Shift across parts not loaded counts the item it starts from once, and the trash gets them all", async ({ page }) => {
+  await signIn(page);
+  const big = await bigFolder(page, SPANNED);
+  await page.goto(`/files/${big}`);
+  const row = (name: string) => page.locator("[data-node-id]").filter({ hasText: name });
+  await row(nameOf(0)).click();
+  // Ctrl moves only the focus
+  await page.keyboard.press("Control+End");
+  const last = row(nameOf(SPANNED - 1));
+  await expect(last).toBeFocused();
+  await last.click({ modifiers: ["Control", "Shift"] });
+  await expect(page.locator("footer")).toContainText(`${SPANNED.toLocaleString("en-US")} items selected`);
+  await page.keyboard.press("Delete");
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText(`Move ${SPANNED.toLocaleString("en-US")} items to trash?`);
+  await dialog.getByRole("button", { name: "Move to trash" }).click();
+  await expect(page.getByText(/Moved 2,?100 items to trash/)).toBeVisible({ timeout: 60_000 });
+  expect(await count(page, big)).toBe(0);
+});
+
+test("a span of exactly 2,000 items is changed in two batches and ends there", async ({ page }) => {
+  await signIn(page);
+  const big = await bigFolder(page, SPANNED);
+  await page.goto(`/files/${big}`);
+  const row = (name: string) => page.locator("[data-node-id]").filter({ hasText: name });
+  await row(nameOf(0)).click();
+  for (let i = 0; i < 100; i++) await page.keyboard.press("ArrowDown");
+  await expect(row(nameOf(100))).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Shift+End");
+  await expect(row(nameOf(SPANNED - 1))).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("footer")).toContainText("2,000 items selected");
+  await page.keyboard.press("Delete");
+  const asked: string[] = [];
+  page.on("request", (r) => r.url().endsWith(`/nodes/${big}/select`) && asked.push(r.url()));
+  await page.getByRole("dialog").getByRole("button", { name: "Move to trash" }).click();
+  // Not an error after the last batch, when the span's last item is already in the trash
+  await expect(page.getByText(/Moved 2,?000 items to trash/)).toBeVisible({ timeout: 60_000 });
+  expect(asked).toHaveLength(2);
+  expect(await count(page, big)).toBe(100);
 });

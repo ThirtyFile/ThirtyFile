@@ -102,6 +102,13 @@ describe("spans", () => {
     ]);
   });
 
+  test("an item picked one by one that the span holds too is changed once", async () => {
+    vi.spyOn(api, "selection").mockResolvedValue({ ids: ["p1", "s1"], next: null });
+    const got: string[][] = [];
+    for await (const batch of batchesOf({ ids: ["p1", "p2"], span: span(5, 9), count: 3 })) got.push(batch);
+    expect(got).toEqual([["p1", "p2"], ["s1"]]);
+  });
+
   test("a change is made batch after batch, each asked for after the one before is done", async () => {
     const order: string[] = [];
     vi.spyOn(api, "selection").mockImplementation(async (_, req) => {
