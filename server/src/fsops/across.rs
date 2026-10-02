@@ -7,8 +7,9 @@ pub(super) enum Placed {
     /// In the destination folder on disk, as `tmp` inside a folder `wrap` that scans ignore (`.thirtyfile-move-…`, so
     /// that after a restart in between, the item is still found there under its name); `renamed_from`: the original
     /// was renamed there (same disk), so undoing renames it back; `copied`: the originals of a move that copied them
-    /// (another disk), removed once the index follows
-    Disk { wrap: Pinned, tmp: Pinned, renamed_from: Option<Pinned>, copied: Option<CopiedTree> },
+    /// (another disk), removed once the index follows; `placed`: where `put_in_place` renamed it to, so that should the
+    /// index not follow after all, `undo` takes it back from there
+    Disk { wrap: Pinned, tmp: Pinned, renamed_from: Option<Pinned>, copied: Option<CopiedTree>, placed: Box<std::sync::Mutex<Option<Pinned>>> },
     /// In the destination's content store: one staged content per file, and the file's size and modification time as
     /// it was stored (by node id)
     Store(HashMap<String, StagedBlob>, HashMap<String, (u64, i64)>),
@@ -158,7 +159,7 @@ pub(super) async fn place(st: &AppState, nodes: &[Node], dest: &Node, moving: bo
     match renamed {
         Some(Ok(from)) => {
             progress.add(nodes.iter().map(work_of).sum());
-            return Ok(Placed::Disk { wrap, tmp, renamed_from: Some(from), copied: None });
+            return Ok(Placed::Disk { wrap, tmp, renamed_from: Some(from), copied: None, placed: Default::default() });
         }
         // Another disk: copy everything, including what the index doesn't have yet, before the original goes. Until the
         // index follows, the original stays where it was and this is only a copy: it is made in a folder named as one,
@@ -180,7 +181,7 @@ pub(super) async fn place(st: &AppState, nodes: &[Node], dest: &Node, moving: bo
             })
             .await?;
             return match copied {
-                Ok((wrap, tmp, copied)) => Ok(Placed::Disk { wrap, tmp, renamed_from: None, copied: Some(copied) }),
+                Ok((wrap, tmp, copied)) => Ok(Placed::Disk { wrap, tmp, renamed_from: None, copied: Some(copied), placed: Default::default() }),
                 Err((e, wrap)) => {
                     remove_later(wrap.into_iter().collect());
                     Err(disk_error(e))
@@ -193,7 +194,7 @@ pub(super) async fn place(st: &AppState, nodes: &[Node], dest: &Node, moving: bo
         remove_later(vec![wrap]);
         return Err(e);
     }
-    Ok(Placed::Disk { wrap, tmp, renamed_from: None, copied: None })
+    Ok(Placed::Disk { wrap, tmp, renamed_from: None, copied: None, placed: Default::default() })
 }
 
 /// A move or copy's progress counts each item as this many bytes besides its content: making a file or folder takes
@@ -212,19 +213,32 @@ pub(crate) const COPY_PREFIX: &str = ".thirtyfile-copy-";
 /// Takes back content put in place when the index couldn't follow
 pub(super) async fn undo(st: &AppState, placed: Placed) {
     match placed {
-        Placed::Disk { wrap, tmp, renamed_from: Some(from), .. } => {
+        Placed::Disk { wrap, tmp, renamed_from, placed, .. } => {
+            let placed = (*placed).into_inner().unwrap_or_else(|e| e.into_inner());
             // On a blocking thread (the disk may be one that doesn't answer), waited for so that it is back when the
             // change reports its failure
             let back = tokio::task::spawn_blocking(move || {
-                if std::fs::rename(tmp.as_path(), from.as_path()).is_err() && std::fs::symlink_metadata(tmp.as_path()).is_ok() {
-                    tracing::warn!("Couldn't move {:?} back where it was", from.name().unwrap_or_default());
-                } else {
-                    let _ = std::fs::remove_dir(wrap.as_path());
+                // Already under its name in the destination: back into the folder it was put in first
+                if let Some(at) = placed
+                    && let Err(e) = rename_new(at.as_path(), tmp.as_path())
+                {
+                    tracing::warn!("Couldn't take {:?} back from where it was put: {e}", at.name().unwrap_or_default());
+                    return;
+                }
+                match renamed_from {
+                    Some(from) => {
+                        if std::fs::rename(tmp.as_path(), from.as_path()).is_err() && std::fs::symlink_metadata(tmp.as_path()).is_ok() {
+                            tracing::warn!("Couldn't move {:?} back where it was", from.name().unwrap_or_default());
+                        } else {
+                            let _ = std::fs::remove_dir(wrap.as_path());
+                        }
+                    }
+                    // A copy: it goes
+                    None => remove_later(vec![wrap]),
                 }
             });
             let _ = tokio::time::timeout(disk_wait(), back).await;
         }
-        Placed::Disk { wrap, renamed_from: None, .. } => remove_later(vec![wrap]),
         Placed::Store(staged, _) => {
             for (_, s) in staged {
                 tree::abandon_staged(st, s).await;
@@ -306,6 +320,7 @@ pub async fn move_across(st: &AppState, user: &User, dest: &Node, items: Vec<Vec
         };
         match result {
             Ok((extras, remove)) => {
+                placed_for_good(&placed).await;
                 let copied = match &mut placed {
                     Placed::Disk { copied, .. } => copied.take(),
                     Placed::Store(..) => None,
@@ -345,17 +360,43 @@ pub(super) async fn still_there(conn: &mut SqliteConnection, dest: &Node) -> App
     Ok(())
 }
 
-/// Renames content put in place for `dest` (`Placed::Disk`) to `name` in it; returns what is at each of `rels` (paths
-/// below it, from `layout`) now, None where nothing is
-pub(super) async fn put_in_place(dest: &Node, wrap: &Pinned, tmp: &Pinned, name: &str, rels: &[Option<String>]) -> AppResult<Vec<Option<Stat>>> {
-    let (d, wrap, tmp, name, rels) = (dest.clone(), wrap.clone(), tmp.clone(), name.to_string(), rels.to_vec());
-    on_disk(dest.drive(), disk_wait(), move || {
+/// Renames content put in place for `dest` (`Placed::Disk`) to `name` in it, noting where in `placed` (the folder that
+/// held it stays until the change is committed, should `undo` need to take it back); returns what is at each of `rels`
+/// (paths below it, from `layout`) now, None where nothing is
+pub(super) async fn put_in_place(
+    dest: &Node,
+    tmp: &Pinned,
+    placed: &std::sync::Mutex<Option<Pinned>>,
+    name: &str,
+    rels: &[Option<String>],
+) -> AppResult<Vec<Option<Stat>>> {
+    let (d, tmp, name, rels) = (dest.clone(), tmp.clone(), name.to_string(), rels.to_vec());
+    let (final_path, stats) = on_disk(dest.drive(), disk_wait(), move || {
         let final_path = abs(&d)?.join(&name).map_err(gone_or_disk_error)?;
         rename_new(tmp.as_path(), final_path.as_path()).map_err(disk_error)?;
-        let _ = std::fs::remove_dir(wrap.as_path());
-        Ok(rels.iter().map(|rel| rel.as_ref().and_then(|rel| below(&final_path, rel).and_then(|p| stat(p.as_path())).ok())).collect())
+        let stats = rels.iter().map(|rel| rel.as_ref().and_then(|rel| below(&final_path, rel).and_then(|p| stat(p.as_path())).ok())).collect();
+        Ok((final_path, stats))
     })
-    .await
+    .await?;
+    *placed.lock().unwrap_or_else(|e| e.into_inner()) = Some(final_path);
+    #[cfg(test)]
+    if testing::stops(dest.drive(), testing::Stop::Placed) {
+        return Err(testing::stopped());
+    }
+    Ok(stats)
+}
+
+/// Once the index followed content put in place: the folder that held it goes, before the change is reported done
+pub(super) async fn placed_for_good(placed: &Placed) {
+    if let Placed::Disk { wrap, placed, .. } = placed
+        && placed.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+    {
+        let wrap = wrap.clone();
+        let removed = tokio::task::spawn_blocking(move || {
+            let _ = std::fs::remove_dir(wrap.as_path());
+        });
+        let _ = tokio::time::timeout(disk_wait(), removed).await;
+    }
 }
 
 /// The index side of a move; returns content no longer used and (for items now in the content store) what to remove
@@ -395,9 +436,9 @@ pub(super) async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: 
     let mut extras = Vec::new();
     let mut remove = Vec::new();
     match placed {
-        Placed::Disk { wrap, tmp, .. } => {
+        Placed::Disk { tmp, placed, .. } => {
             let rels = layout(nodes);
-            let stats = put_in_place(dest, wrap, tmp, &top.name, &rels).await?;
+            let stats = put_in_place(dest, tmp, placed, &top.name, &rels).await?;
             let dest_rel = child_rel(rel_of(dest), &top.name);
             for ((n, rel), s) in nodes.iter().zip(rels).zip(stats) {
                 let Some(rel) = rel else { continue };
@@ -463,7 +504,10 @@ pub async fn copy_across(st: &AppState, user: &User, dest: &Node, plans: Vec<Vec
             commit_copy(st, user, dest, &nodes, &placed).await
         };
         match result {
-            Ok(extras) => finish(st, placed, extras).await,
+            Ok(extras) => {
+                placed_for_good(&placed).await;
+                finish(st, placed, extras).await;
+            }
             Err(e) => {
                 undo(st, placed).await;
                 return Err(e);
@@ -481,10 +525,10 @@ pub(super) async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: 
     let mut extras = Vec::new();
     let mut bytes = 0i64;
     match placed {
-        Placed::Disk { wrap, tmp, .. } => {
+        Placed::Disk { tmp, placed, .. } => {
             let name = free_name(&mut tx, dest, &top.name, top.is_folder()).await?;
             let rels = layout(nodes);
-            let stats = put_in_place(dest, wrap, tmp, &name, &rels).await?;
+            let stats = put_in_place(dest, tmp, placed, &name, &rels).await?;
             let dest_rel = child_rel(rel_of(dest), &name);
             for (i, ((n, rel), s)) in nodes.iter().zip(rels).zip(stats).enumerate() {
                 let Some(rel) = rel else { continue };
@@ -541,4 +585,42 @@ pub(super) async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: 
     logs::record_activity(&mut tx, user, Some(top), "copy", &format!("→ {}", if dest.parent_id.is_none() { "Root folder" } else { &dest.name })).await?;
     tx.commit().await?;
     Ok(extras)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::testing::{self, Stop};
+    use crate::testutil::{self, write_old};
+    use axum::{Json, extract::State};
+
+    #[tokio::test]
+    async fn a_move_or_copy_that_fails_once_its_content_is_in_place_takes_it_back() {
+        for moving in [true, false] {
+            let env = testutil::env().await;
+            let one = env.folder_space("One").await;
+            let two = env.folder_space("Two").await;
+            let admin = env.admin().await;
+            write_old(&one.dir.join("Docs/a.txt"), b"alpha");
+            crate::folders::scan(&env.st, &one.drive).await.unwrap();
+            let (docs, _) = env.node_at(&one.drive, "Docs").await.unwrap();
+            let _stop = testing::stop_at(&two.drive, Stop::Placed);
+            let req = || Json(serde_json::from_value(serde_json::json!({ "ids": [docs], "dest_id": two.root })).unwrap());
+            let res = if moving {
+                crate::nodes::move_nodes(State(env.st.clone()), admin.clone(), req()).await
+            } else {
+                crate::nodes::copy_nodes(State(env.st.clone()), admin.clone(), req()).await
+            };
+            // Failed at once, or as a job that went on after the answer
+            if let Ok(Json(job)) = res {
+                assert_eq!(crate::jobs::wait_for(&env.st, &job.id).await.state, "failed");
+            }
+
+            // The index didn't follow, so neither does the folder: the item is only where it was
+            assert!(!two.dir.join("Docs").exists(), "moving: {moving}");
+            assert_eq!(std::fs::read(one.dir.join("Docs/a.txt")).unwrap(), b"alpha");
+            assert_eq!(env.node_at(&one.drive, "Docs").await.map(|n| n.0), Some(docs.clone()));
+            let r = crate::folders::scan(&env.st, &two.drive).await.unwrap();
+            assert_eq!(r.added, 0, "moving: {moving}");
+        }
+    }
 }

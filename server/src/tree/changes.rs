@@ -109,11 +109,14 @@ fn change(kind: &str, node_id: &str) -> Change {
     Change { id: new_id(), kind: kind.into(), node_id: node_id.into(), drive_id: None, trash_id: None, trashed_at: None, old_path: None, new_path: None }
 }
 
-/// Refuses a change to an item whose own change, or one of an item it is in, isn't finished yet
+/// Refuses a change to an item whose own change, one of an item it is in, or one of an item inside it, isn't finished
+/// yet: a folder whose items are still being moved to the trash, say, would be copied or moved half
 pub async fn refuse_busy(conn: &mut SqliteConnection, node_id: &str) -> AppResult<()> {
+    // Inside it: going up from each unfinished change (there are few) reaches it
     let (busy,): (bool,) = sqlx::query_as(
-        "WITH RECURSIVE up(id) AS (SELECT ?1 UNION ALL SELECT n.parent_id FROM nodes n JOIN up ON n.id = up.id WHERE n.parent_id IS NOT NULL)
-         SELECT EXISTS (SELECT 1 FROM tree_changes WHERE node_id IN (SELECT id FROM up))",
+        "WITH RECURSIVE up(id) AS (SELECT ?1 UNION ALL SELECT n.parent_id FROM nodes n JOIN up ON n.id = up.id WHERE n.parent_id IS NOT NULL),
+           changed(id) AS (SELECT node_id FROM tree_changes UNION SELECT n.parent_id FROM nodes n JOIN changed ON n.id = changed.id WHERE n.parent_id IS NOT NULL)
+         SELECT EXISTS (SELECT 1 FROM tree_changes WHERE node_id IN (SELECT id FROM up)) OR EXISTS (SELECT 1 FROM changed WHERE id = ?1)",
     )
     .bind(node_id)
     .fetch_one(conn)
@@ -666,6 +669,36 @@ mod tests {
         settled(&env.st).await;
         assert_eq!(below(&env, &big).await, (106, 0));
         let _ = nodes::move_nodes(State(env.st.clone()), amy.clone(), req(json!({ "ids": [big], "dest_id": other }))).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_folder_is_left_alone_while_something_inside_it_is_still_being_changed() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", false).await;
+        let top = env.folder(&amy, amy.root(), "Top").await;
+        let big = big_folder(&env, &amy, &top, 5, 20).await;
+        let _small = small_batches(10);
+        // "Big" is in the trash, but not everything in it yet
+        {
+            let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+            sqlx::query("UPDATE nodes SET trashed_at = 5, trash_id = 't', trash_root = 1 WHERE id = ?").bind(&big).execute(&mut *tx).await.unwrap();
+            assert!(trash(&mut tx, &big, "t", 5).await.unwrap().is_some());
+            tx.commit().await.unwrap();
+        }
+        // Copying or moving the folder around it would take half of it along
+        let other = env.folder(&amy, amy.root(), "Other").await;
+        for copying in [true, false] {
+            let r = req(json!({ "ids": [top], "dest_id": other }));
+            let res = if copying {
+                nodes::copy_nodes(State(env.st.clone()), amy.clone(), r).await
+            } else {
+                nodes::move_nodes(State(env.st.clone()), amy.clone(), r).await
+            };
+            assert_eq!(res.unwrap_err().status, axum::http::StatusCode::CONFLICT, "copying: {copying}");
+        }
+        resume(&env.st).await.unwrap();
+        settled(&env.st).await;
+        let _ = nodes::copy_nodes(State(env.st.clone()), amy.clone(), req(json!({ "ids": [top], "dest_id": other }))).await.unwrap();
     }
 
     #[tokio::test]

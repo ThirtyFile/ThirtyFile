@@ -51,7 +51,27 @@ pub async fn release_blobs(conn: &mut SqliteConnection, hashes: &[String]) -> Ap
         .bind(&list)
         .fetch_all(&mut *conn)
         .await?;
+    queue_removal(conn, &orphans).await?;
     Ok(orphans)
+}
+
+/// Lists content no longer used for deletion after `REMOVAL_GRACE`, in the transaction that lets go of it: should the
+/// server stop before the commit is followed up (`schedule_blob_removal`), the queue still has it, and nothing is left
+/// in storage that nothing records (S3 objects that keep costing, say)
+async fn queue_removal(conn: &mut SqliteConnection, blobs: &[BlobRef]) -> AppResult<()> {
+    if blobs.is_empty() {
+        return Ok(());
+    }
+    sqlx::query(
+        "INSERT INTO pending_blob_deletes (hash, location_id, created_at, attempts, last_error)
+         SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), ?2, 0, 'deferred' FROM json_each(?1) WHERE true
+         ON CONFLICT (hash, location_id) DO NOTHING",
+    )
+    .bind(serde_json::to_string(blobs).unwrap())
+    .bind(now() + REMOVAL_GRACE)
+    .execute(conn)
+    .await?;
+    Ok(())
 }
 
 /// Gives a file of the content store new content, keeping its id (and with it its shares, permissions and favourites).
@@ -544,13 +564,17 @@ pub async fn commit_blob(conn: &mut SqliteConnection, staged: &StagedBlob) -> Ap
         }
         sqlx::query("UPDATE blobs SET location_id = ? WHERE hash = ?").bind(new).bind(&staged.hash).execute(&mut *conn).await?;
         add_blob_ref(conn, &staged.hash, staged.size, new).await?;
-        return Ok((old != new).then(|| (staged.hash.clone(), old.clone())));
+        let extra = (old != new).then(|| (staged.hash.clone(), old.clone()));
+        queue_removal(conn, extra.as_slice()).await?;
+        return Ok(extra);
     }
     match (&current, &staged.uploaded_to) {
         // The content already exists: keep its original location; if a copy was also uploaded elsewhere, that one is redundant
         (Some((loc,)), uploaded) => {
             add_blob_ref(conn, &staged.hash, staged.size, loc).await?;
-            Ok(uploaded.as_ref().filter(|u| *u != loc).map(|u| (staged.hash.clone(), u.clone())))
+            let extra = uploaded.as_ref().filter(|u| *u != loc).map(|u| (staged.hash.clone(), u.clone()));
+            queue_removal(conn, extra.as_slice()).await?;
+            Ok(extra)
         }
         (None, Some(loc)) => {
             // A location a replica took over from, not checked since: new content isn't kept there (replicas/)
@@ -658,6 +682,25 @@ mod tests {
         retry_pending_deletes(&env.st, "flaky").await;
         assert!(!blob.exists());
         assert_eq!(pending().await, 0);
+    }
+
+    #[tokio::test]
+    async fn content_no_longer_used_is_queued_for_deletion_by_the_change_that_lets_go_of_it() {
+        let env = testutil::env().await;
+        let hash = "cd".repeat(32);
+        sqlx::query("INSERT INTO blobs (hash, size, refcount, created_at, location_id) VALUES (?, 4, 1, 0, 'local')").bind(&hash).execute(&env.st.db).await.unwrap();
+        let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+        let orphans = release_blobs(&mut tx, std::slice::from_ref(&hash)).await.unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(orphans, [(hash.clone(), "local".to_string())]);
+        // The server stops before anything after the commit runs: the queue has it already
+        let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM pending_blob_deletes WHERE hash = ? AND location_id = 'local' AND created_at > ?")
+            .bind(&hash)
+            .bind(crate::util::now())
+            .fetch_one(&env.st.db)
+            .await
+            .unwrap();
+        assert_eq!(n, 1);
     }
 
     #[tokio::test]

@@ -66,8 +66,9 @@ pub(super) async fn whole(s: &dyn Storage, hash: &str, size: i64) -> bool {
 
 /// Puts a content from a temp file on the target, and reads it back: it counts only once it is known to be whole. A
 /// whole copy already there (stored by a sync that stopped before recording it, say) is kept as it is; one of another
-/// length, or damaged, is replaced. The caller holds the content's staging guard, and the target isn't where the
-/// content is kept. Err(stop) inside when the job is asked to stop while it is tried again.
+/// length, or damaged, is replaced by the checked content, never deleted first: the target may have become where the
+/// content is kept meanwhile (a promotion), and what is there must not be gone in between. The caller holds the
+/// content's staging guard. Err(stop) inside when the job is asked to stop while it is tried again.
 pub(super) async fn put_verified(cx: &Ctx<'_>, dst: &Arc<dyn Storage>, location: &str, hash: &str, size: i64, tmp: &std::path::Path) -> AppResult<Result<(), Stop>> {
     if whole(dst.as_ref(), hash, size).await {
         return Ok(Ok(()));
@@ -76,8 +77,8 @@ pub(super) async fn put_verified(cx: &Ctx<'_>, dst: &Arc<dyn Storage>, location:
         .tries(
             |_: &std::io::Error| true,
             || async {
-                let _ = dst.delete(hash).await;
-                dst.put_file(hash, tmp).await?;
+                // Written in full first, then put in the content's place (`repair_file`): what is there stays until then
+                dst.repair_file(hash, tmp).await?;
                 match read_back(dst.as_ref(), hash, size).await? {
                     (h, n) if h == hash && n == size as u64 => Ok(()),
                     _ => Err(crate::hashing::unusable(crate::hashing::Unusable::Damaged, crate::backups::capture::DAMAGED)),

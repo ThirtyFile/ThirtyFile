@@ -119,6 +119,16 @@ pub(super) fn older_than(p: &Pinned, age: std::time::Duration) -> bool {
     std::fs::symlink_metadata(p.as_path()).and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|a| a >= age))
 }
 
+/// Puts the content of the file just written at `path` on disk, before a name leads to it: after a power loss, the
+/// name never leads to content cut short
+pub fn sync_file(file: &std::fs::File, path: &Path) -> io::Result<()> {
+    file.sync_all()?;
+    #[cfg(test)]
+    testing::synced(path);
+    let _ = path;
+    Ok(())
+}
+
 /// Makes a folder, or uses the one already there (not a link)
 pub fn ensure_dir(p: &Pinned) -> io::Result<()> {
     match std::fs::create_dir(p.as_path()) {
