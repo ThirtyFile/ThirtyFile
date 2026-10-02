@@ -48,7 +48,7 @@ export default {
   "Test email sent to {address}. Check the inbox (and the spam folder).": "已寄出測試郵件到 {address}，請查看收件匣（以及垃圾郵件資料夾）。",
   "Notification emails": "通知郵件",
   "Send notifications by email": "以電子郵件寄送通知",
-  "People are always told under the bell in the app. With an email server, those who entered an email address (or signed in with Microsoft, Google or GitHub) also get an email, unless they turned it off in their notification settings. Links in emails use the site URL under General.": "網站中的鈴鐺一律會顯示通知。設定郵件伺服器後，填寫了電子郵件地址（或以 Microsoft、Google、GitHub 登入）的人也會收到郵件，除非他們在通知設定中關閉。郵件中的連結使用「一般」中的網站網址。",
+  "People are always told under the bell in the app. With an email server, those who entered an email address (or signed in with single sign-on) also get an email, unless they turned it off in their notification settings. Links in emails use the site URL under General.": "網站中的鈴鐺一律會顯示通知。設定郵件伺服器後，填寫了電子郵件地址（或以單一登入登入）的人也會收到郵件，除非他們在通知設定中關閉。郵件中的連結使用「一般」中的網站網址。",
   "Email server (SMTP)": "郵件伺服器（SMTP）",
   "Server": "伺服器",
   "Encryption": "加密",

@@ -326,7 +326,7 @@ export function GeneralSettingsPage() {
               <div className="font-medium">{t("Require two-factor sign-in for password accounts")}</div>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                 {t(
-                  "Signing in with a password also asks for a code from an authenticator app. People who haven't set it up are asked to right after their password, before they get in, and can't turn it off. Sign-in with Microsoft, Google or GitHub relies on that provider, and app passwords keep working. Devices already signed in stay signed in.",
+                  "Signing in with a password also asks for a code from an authenticator app. People who haven't set it up are asked to right after their password, before they get in, and can't turn it off. Sign-in with single sign-on (Microsoft, Google, GitHub or OpenID Connect) relies on that provider, and app passwords keep working. Devices already signed in stay signed in.",
                 )}
               </p>
             </div>

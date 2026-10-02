@@ -479,7 +479,7 @@ pub struct PasswordReq {
 pub async fn start_setup(State(st): State<AppState>, user: User, Json(req): Json<PasswordReq>) -> AppResult<Json<Value>> {
     let (hash,): (String,) = sqlx::query_as("SELECT password_hash FROM users WHERE id = ?").bind(user.id).fetch_one(&st.db).await?;
     if hash == crate::sso::NO_PASSWORD {
-        return Err(AppError::bad_request("This account has no password: it signs in with Microsoft, Google or GitHub, whose own two-step verification applies."));
+        return Err(AppError::bad_request("This account has no password: it signs in with single sign-on, whose own two-factor sign-in applies."));
     }
     auth::confirm_password(&st, user.id, req.password).await?;
     confirm_code(&st, user.id, req.code.as_deref()).await?;

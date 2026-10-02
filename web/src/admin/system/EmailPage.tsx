@@ -74,7 +74,7 @@ export function EmailPage() {
                 <div className="font-medium">{t("Send notifications by email")}</div>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                   {t(
-                    "People are always told under the bell in the app. With an email server, those who entered an email address (or signed in with Microsoft, Google or GitHub) also get an email, unless they turned it off in their notification settings. Links in emails use the site URL under General.",
+                    "People are always told under the bell in the app. With an email server, those who entered an email address (or signed in with single sign-on) also get an email, unless they turned it off in their notification settings. Links in emails use the site URL under General.",
                   )}
                 </p>
               </div>

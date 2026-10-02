@@ -93,7 +93,7 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
           <DialogTitle>{t("App passwords")}</DialogTitle>
           <DialogDescription>
             {t(
-              "For scripts, backup tools and file clients, including accounts that sign in with Microsoft, Google or GitHub. They work for files only, not for your account settings, sharing or administration, and don't ask for a two-factor code.",
+              "For scripts, backup tools and file clients, including accounts that use single sign-on (Microsoft, Google, GitHub or OpenID Connect). They work for files only, not for your account settings, sharing or administration, and don't ask for a two-factor code.",
             )}
           </DialogDescription>
         </DialogHeader>
@@ -191,7 +191,7 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
                   <div className="flex items-center gap-2 text-sm">
                     <span className="truncate">{p.name}</span>
                     <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
-                      {p.scope === "read" ? t("Read only") : t("Read and write")}
+                      {p.scope === "read" ? t("Read files only") : t("Read and change files")}
                     </Badge>
                   </div>
                   <div className="truncate text-xs text-muted-foreground" title={describe(p)}>

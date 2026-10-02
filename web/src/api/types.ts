@@ -191,7 +191,10 @@ export interface StorageLocation {
   used_bytes: number;
   /** Of used_bytes, the folder spaces' part */
   folder_bytes: number;
+  /** Files in the content store there */
   blob_count: number;
+  /** Files in the folder spaces on it */
+  folder_files: number;
   /** Spaces on this location, of every kind */
   drive_count: number;
   /** Locations on this server's disks: the disk's free and total bytes (null when unknown) */
@@ -1083,7 +1086,7 @@ export interface TwoFactorStatus {
   recovery_codes_left: number;
   /** The administrator requires it for password accounts */
   required: boolean;
-  /** Accounts that only sign in with Microsoft, Google or GitHub have no password to protect */
+  /** Accounts that only sign in with single sign-on have no password to protect */
   has_password: boolean;
 }
 

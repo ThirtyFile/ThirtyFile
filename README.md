@@ -18,7 +18,7 @@ A self-hosted file manager that looks and works like Windows File Explorer, in y
 - Share with a link (password, expiry date, download limit), or receive files through one
 - Keep files as ordinary folders on a local disk or NAS, or on S3-compatible storage, SFTP or FTP; show an existing folder as a space
 - Personal, company and team spaces, with roles and size limits
-- Sign in with a password and two-step verification, or with Microsoft, Google, GitHub or any OpenID Connect provider
+- Sign in with a password and two-factor sign-in, or with Microsoft, Google, GitHub or any OpenID Connect provider
 - English and Traditional Chinese, dark mode, works on phones
 
 ## Install

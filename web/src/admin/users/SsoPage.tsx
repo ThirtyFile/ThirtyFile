@@ -211,7 +211,7 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
                 <>
                   {before}
                   <Link to="/admin/general" className="mx-0.5 underline">
-                    {t("General settings")}
+                    {t("Control panel › General")}
                   </Link>
                   {after}
                 </>

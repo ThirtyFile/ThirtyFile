@@ -216,7 +216,7 @@ const RECENT_SIGN_IN: i64 = 10 * 60;
 
 /// Before a change that outlasts the browser session making it (an app password, a linked sign-in method, the
 /// account's email address), asks who it is again: the password (and a two-factor code when the account has one), or
-/// for accounts that sign in with Microsoft, Google or GitHub, a recent sign-in (`sign_in_again` is the message when
+/// for accounts that sign in with single sign-on, a recent sign-in (`sign_in_again` is the message when
 /// it isn't recent enough)
 pub async fn confirm_identity(st: &AppState, user: &User, password: Option<String>, code: Option<&str>, sign_in_again: &'static str) -> AppResult<()> {
     let (hash,): (String,) = sqlx::query_as("SELECT password_hash FROM users WHERE id = ?").bind(user.id).fetch_one(&st.db).await?;

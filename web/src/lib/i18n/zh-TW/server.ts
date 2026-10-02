@@ -68,7 +68,7 @@ export default {
   "The sign-in has expired. Enter your password again.": "登入已逾時，請重新輸入密碼",
   "Two-factor sign-in is already set up for this account": "這個帳號已經設定兩步驟驗證",
   "Set up two-factor sign-in first": "請先設定兩步驟驗證",
-  "This account has no password: it signs in with Microsoft, Google or GitHub, whose own two-step verification applies.": "這個帳號沒有密碼，是用 Microsoft、Google 或 GitHub 登入，請使用該服務的兩步驟驗證。",
+  "This account has no password: it signs in with single sign-on, whose own two-factor sign-in applies.": "這個帳號沒有密碼，是用單一登入登入，請使用該服務的兩步驟驗證。",
   "The setup has expired. Start again.": "設定已逾時，請重新開始",
   "Wrong code. Check that the time on your phone is right, and try again.": "驗證碼錯誤。請確認手機的時間正確後再試一次",
   "Your administrator requires two-factor sign-in, so it can't be turned off.": "管理員要求使用兩步驟驗證，因此無法關閉",
