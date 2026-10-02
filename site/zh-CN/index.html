@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="zh-CN" data-root="..">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ThirtyFile：属于你的文件管理工具，在浏览器中使用</title>
+    <meta name="description" content="ThirtyFile 是可以自托管的文件管理工具，在浏览器中用起来就像 Windows 文件资源管理器。文件保存在你自己的存储上，可以预览和编辑 Office 文档，还能通过链接分享。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/" />
+    <meta property="og:title" content="ThirtyFile" />
+    <meta property="og:description" content="可以自托管的文件管理工具，像文件资源管理器一样，在浏览器中使用。" />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://thirtyfile.github.io/ThirtyFile/assets/files-light-zh-CN.webp" />
+    <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要内容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="./index.html"><img src="../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="网站">
+          <a href="./index.html#features" class="hide-small">功能</a>
+          <a href="./docs/index.html">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">语言 </span><span class="lang-name">简体中文</span></summary>
+            <ul>
+              <li><a href="../index.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="../zh-TW/index.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="index.html" hreflang="zh-CN" lang="zh-CN" aria-current="true">简体中文</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <main id="content">
+      <section class="hero">
+        <div class="wrap">
+          <div class="hero-text">
+            <span class="eyebrow">自托管的文件管理工具</span>
+            <h1>文件存在<em>你自己</em>的服务器上，用起来和资源管理器一样简单。</h1>
+            <p class="lead">ThirtyFile 是在浏览器中运行的团队文件管理工具。界面和操作都与大家熟悉的文件资源管理器一致，文件则保存在由你掌控的存储上。</p>
+            <div class="actions">
+              <a class="button primary" href="#install">一分钟完成安装</a>
+              <a class="button ghost" href="docs/index.html">阅读指南</a>
+            </div>
+          </div>
+          <div class="hero-shot">
+            <div class="window-bar" aria-hidden="true"><span></span><span></span><span></span></div>
+            <img class="only-light" src="../assets/files-light-zh-CN.webp" width="2560" height="1440" alt="ThirtyFile 的文件列表（英文界面）：左侧是文件夹树，右侧是文件夹和文档，上方是标签页和地址栏" />
+            <img class="only-dark" src="../assets/files-dark-zh-CN.webp" width="2560" height="1440" alt="深色模式下的 ThirtyFile 文件列表（英文界面）" />
+          </div>
+        </div>
+      </section>
+
+      <section id="features">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>共享网盘该有的，这里都有</h2>
+            <p>无需培训。会用资源管理器，就会用 ThirtyFile。</p>
+          </div>
+          <div class="grid">
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg></span>
+              <h3>一上手就会用</h3>
+              <p>标签页、地址栏、文件夹树、拖放、右键菜单，还有你早已熟悉的键盘快捷键。也可以在电脑或手机上把它映射为网络驱动器。</p>
+            </div>
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" /><path d="M14 3v5h5M9 13h6M9 17h4" /></svg></span>
+              <h3>在浏览器中打开 Office 文件</h3>
+              <p>无需安装任何软件，即可预览 Word、PowerPoint 和 Excel。Excel 工作簿和文本文件可以在线编辑，并保留历史版本。</p>
+            </div>
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1" /><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" /></svg></span>
+              <h3>通过链接分享</h3>
+              <p>发送带有密码、有效期和下载次数限制的链接。可以把文件夹共享给同事，也可以让别人把文件发给你。</p>
+            </div>
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3" /><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" /></svg></span>
+              <h3>存储由你选择</h3>
+              <p>本地磁盘或 NAS（文件仍是普通的文件夹）、兼容 S3 的存储、SFTP 或 FTP。已有的文件夹，例如 NAS 上的共享文件夹，也可以直接作为一个空间。</p>
+            </div>
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8" /></svg></span>
+              <h3>每个团队都有自己的空间</h3>
+              <p>个人、全公司和团队空间，提供查看者、编辑者和管理者等角色，每个空间都可以设置容量上限。</p>
+            </div>
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.2 7.8 8 9 4.8-1.2 8-4.5 8-9V6Z" /><path d="m9 12 2 2 4-4" /></svg></span>
+              <h3>用你习惯的方式登录</h3>
+              <p>使用密码加两步验证，或使用 Microsoft、Google、GitHub 以及任何 OpenID Connect 服务的账号登录。每次登录和文件操作都有记录。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="soft">
+        <div class="wrap">
+          <div class="feature">
+            <div class="feature-text">
+              <h3>不离开浏览器就能编辑表格</h3>
+              <p>打开 Excel 工作簿，改好需要的地方后保存。文件仍是普通的 Excel 文件，在哪里都能打开。</p>
+              <ul class="ticks">
+                <li>公式、数字格式、颜色和边框</li>
+                <li>可与 Excel 相互复制粘贴</li>
+                <li>图表、图片和文件中的其他内容都原样保留</li>
+              </ul>
+            </div>
+            <div class="shot"><img src="../assets/excel-edit.webp" width="2560" height="1440" loading="lazy" alt="在 ThirtyFile 中编辑的 Excel 预算表，上方有格式工具栏和编辑栏（英文界面）" /></div>
+          </div>
+
+          <div class="feature flip">
+            <div class="feature-text">
+              <h3>分享多少，由你决定</h3>
+              <p>链接可以要求输入密码、一周后失效，或限制下载次数。</p>
+              <ul class="ticks">
+                <li>创建链接的人失去访问权限后，链接也随之失效</li>
+                <li>可以查看谁在什么时候打开了链接</li>
+                <li>接收者无需账号</li>
+              </ul>
+            </div>
+            <div class="shot narrow"><img src="../assets/share-dialog.webp" width="1024" height="600" loading="lazy" alt="分享链接对话框：有效期七天，设置了密码和下载次数限制（英文界面）" /></div>
+          </div>
+
+          <div class="feature">
+            <div class="feature-text">
+              <h3>白天黑夜、电脑手机，都好用</h3>
+              <p>浅色和深色模式、适配手机的布局，每个人都可以选择英文或繁体中文界面。</p>
+              <ul class="ticks">
+                <li>照片有缩略图，视频、音频和 PDF 有查看器</li>
+                <li>网络中断后，上传会从中断处继续</li>
+                <li>每个页面都可以换上你自己的名称、标志和颜色</li>
+              </ul>
+            </div>
+            <div class="shot"><img src="../assets/photos-dark.webp" width="1920" height="1080" loading="lazy" alt="深色模式下以缩略图显示的照片文件夹" /></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="install">
+        <div class="wrap install">
+          <div>
+            <div class="section-head">
+              <h2>一分钟即可开始使用</h2>
+              <p>只有一个小程序，无需另外搭建数据库或 Web 服务器。</p>
+            </div>
+            <ol class="steps">
+              <li><strong>安装 Docker</strong>装在要存放文件的电脑或服务器上。</li>
+              <li><strong>运行命令</strong>并把密码换成你自己的。</li>
+              <li><strong>打开网页</strong>访问 <code>http://localhost:8080</code>，以 <code>admin</code> 登录。</li>
+            </ol>
+          </div>
+          <div>
+            <div class="tabs" role="tablist" aria-label="安装方式">
+              <button type="button" role="tab" id="tab-run-tab" aria-controls="tab-run" data-tab="tab-run">docker run</button>
+              <button type="button" role="tab" id="tab-compose-tab" aria-controls="tab-compose" data-tab="tab-compose">Docker Compose</button>
+            </div>
+            <div id="tab-run" role="tabpanel" aria-labelledby="tab-run-tab">
+              <pre><code>docker run -d --name thirtyfile --restart unless-stopped \
+  -p 8080:8080 \
+  -v /srv/thirtyfile/data:/data \
+  -v /srv/thirtyfile/storage:/storage \
+  -e THIRTYFILE_ADMIN_PASSWORD='choose-a-password' \
+  ghcr.io/thirtyfile/thirtyfile:latest</code></pre>
+            </div>
+            <div id="tab-compose" role="tabpanel" aria-labelledby="tab-compose-tab">
+              <pre><code>curl -fLO https://github.com/ThirtyFile/ThirtyFile/releases/latest/download/compose.yaml
+docker compose up -d</code></pre>
+            </div>
+            <p style="margin: 16px 0 0; color: var(--text-soft)">下一步：<a href="docs/first-steps.html">设置用户、存储位置和你的标志</a>。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="cta">
+        <div class="wrap">
+          <img src="../assets/logo.svg" alt="" width="72" height="72" />
+          <h2>给你的团队一个自己的网盘</h2>
+          <p>一分钟装好，亲自试试。源代码公开在 GitHub 上。</p>
+          <div class="actions">
+            <a class="button primary" href="docs/index.html">开始使用</a>
+            <a class="button ghost" href="https://github.com/ThirtyFile/ThirtyFile">在 GitHub 上查看</a>
+          </div>
+          <p class="lang-note">安装和初始设置的指南有简体中文版，其他详细指南目前只有英文版。</p>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="./docs/index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">源代码</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">报告问题</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 镜像</a>
+      </div>
+    </footer>
+    <script src="../assets/site.js"></script>
+  </body>
+</html>

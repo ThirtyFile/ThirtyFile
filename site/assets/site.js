@@ -16,7 +16,7 @@
   // language's folder (English is at the root, the others in site/<code>/). Every other page is in English only.
   // scripts/check-site.mjs reads both lists (keep each on one line): it fails when a page below is missing in a
   // language, or when the language links of the pages don't match.
-  const LANGUAGES = [["en", "English"], ["zh-TW", "繁體中文"]];
+  const LANGUAGES = [["en", "English"], ["zh-TW", "繁體中文"], ["zh-CN", "简体中文"]];
   const TRANSLATED = ["index.html", "docs/index.html", "docs/first-steps.html"];
 
   const GUIDES = [
@@ -92,6 +92,48 @@
       "Copy": "複製",
       "Copied": "已複製",
       "Select and copy": "請選取後複製",
+    },
+    "zh-CN": {
+      "Site": "网站",
+      "Features": "功能",
+      "Guides": "指南",
+      "Language": "语言",
+      "Skip to content": "跳到主要内容",
+      "Switch between light and dark": "切换浅色与深色",
+      "This page is also available in English.": "此页面也有简体中文版。",
+      "Read it in English": "查看简体中文版",
+      "Close": "关闭",
+      "All guides": "所有指南",
+      "Get started": "开始使用",
+      "Install": "安装",
+      "First steps": "初始设置",
+      "Everyday use": "日常使用",
+      "Working with files": "文件操作",
+      "Preview and editing": "预览与编辑",
+      "Sharing": "分享",
+      "Your account": "你的账号",
+      "Mapping it as a drive": "映射为网络驱动器",
+      "Administration": "管理",
+      "Users and spaces": "用户与空间",
+      "Single sign-on": "单点登录",
+      "Storage locations": "存储位置",
+      "Logs and branding": "日志与品牌",
+      "Running it": "部署与运维",
+      "Settings": "设置",
+      "Putting it on the internet": "通过互联网访问",
+      "Upgrade and backup": "升级与备份",
+      "Troubleshooting": "故障排除",
+      "The project": "项目",
+      "Contributing": "参与贡献",
+      "Previous": "上一篇",
+      "Next": "下一篇",
+      "More guides": "更多指南",
+      "Source code": "源代码",
+      "Report a problem": "报告问题",
+      "Docker image": "Docker 镜像",
+      "Copy": "复制",
+      "Copied": "已复制",
+      "Select and copy": "请选中后复制",
     },
   };
 
