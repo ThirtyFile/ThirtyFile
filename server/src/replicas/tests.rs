@@ -586,28 +586,43 @@ async fn folder_spaces_are_read_from_their_folder_kept_from_cleanup_and_read_whe
     assert_eq!(read(&env, &admin, &plan).await.unwrap(), b"plan, second");
 }
 
+/// The failures and notes of a policy's last job
+async fn last_job(env: &TestEnv, policy: &str) -> (i64, String, Option<String>) {
+    sqlx::query_as("SELECT failed_items, failures, note FROM replica_jobs WHERE policy_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1")
+        .bind(policy)
+        .fetch_one(&env.st.db)
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
-async fn a_folder_file_is_copied_only_as_the_index_has_it_and_content_nothing_uses_lets_go_of_its_copy() {
+async fn a_folder_file_changed_after_its_check_is_copied_as_read_and_content_nothing_uses_lets_go_of_its_copy() {
     let env = testutil::folders_env().await;
     let company = env.st.shared_root().unwrap();
     let all = env.drive_of(&company).await;
     let folder = env.dir.join("blobs").join("company");
     testutil::write_old(&folder.join("report.txt"), b"report, as indexed");
     crate::folders::scan(&env.st, &all).await.unwrap();
-    // Changed by another program just now: the check for changes leaves it for later, and so does the sync
+    // Changed by another program just now: the check for changes leaves it for later, the sync copies it as it read
+    // it whole, and says so
     std::fs::write(folder.join("report.txt"), b"report, being written").unwrap();
     add_nas(&env, "nas").await;
     let id = make(&env, json!({ "source": "local", "targets": [{ "location": "nas" }] })).await;
     assert_eq!(settle(&env, &id).await, ["done"]);
     let held = copies(&env, "nas").await;
-    assert!(!has(&held, b"report, as indexed") && !has(&held, b"report, being written"), "{held:?}");
+    assert!(!has(&held, b"report, as indexed") && has(&held, b"report, being written"), "{held:?}");
+    let (failed, failures, note) = last_job(&env, &id).await;
+    assert_eq!(failed, 0, "{failures}");
+    assert!(failures.contains("report.txt") && failures.contains(super::folders::KEPT_AS_READ), "{failures}");
+    assert_eq!(note.as_deref(), Some("1 content was copied\n1 file kept changing while it was copied: it is kept as it was last read"));
     let h = health(&env, &id).await;
-    assert_eq!((h.targets[0].held, h.targets[0].wanted, h.targets[0].state), (0, 1, "behind"), "{h:?}");
+    assert_eq!((h.targets[0].held, h.targets[0].wanted, h.state), (1, 1, "ok"), "{h:?}");
     // Once it settled and was seen, it is copied as it is
     testutil::write_old(&folder.join("report.txt"), b"report, final");
     crate::folders::scan(&env.st, &all).await.unwrap();
     assert_eq!(settle(&env, &id).await, ["done"]);
-    assert!(has(&copies(&env, "nas").await, b"report, final"));
+    let held = copies(&env, "nas").await;
+    assert!(has(&held, b"report, final") && !has(&held, b"report, being written"), "{held:?}");
     assert_eq!(health(&env, &id).await.state, "ok");
     // Changed again: the new content is copied, the old one's copy goes
     testutil::write_old(&folder.join("report.txt"), b"report, corrected");
@@ -620,6 +635,84 @@ async fn a_folder_file_is_copied_only_as_the_index_has_it_and_content_nothing_us
     crate::folders::scan(&env.st, &all).await.unwrap();
     assert_eq!(settle(&env, &id).await, ["done"]);
     assert!(copies(&env, "nas").await.is_empty());
+}
+
+#[tokio::test]
+async fn a_folder_file_that_keeps_changing_keeps_its_copy_as_last_read_and_is_listed_without_naming_personal_files() {
+    let env = testutil::folders_env().await;
+    let amy = env.user("amy", true).await;
+    let company = env.st.shared_root().unwrap();
+    let (all, mine) = (env.drive_of(&company).await, env.drive_of(amy.root()).await);
+    let (company_dir, amy_dir) = (env.dir.join("blobs").join("company"), env.dir.join("blobs").join("users").join("amy"));
+    testutil::write_old(&company_dir.join("steady.txt"), b"steady");
+    testutil::write_old(&company_dir.join("app.log"), b"line 1;");
+    testutil::write_old(&amy_dir.join("diary.txt"), b"day 1;");
+    crate::folders::scan(&env.st, &all).await.unwrap();
+    crate::folders::scan(&env.st, &mine).await.unwrap();
+    add_nas(&env, "nas").await;
+    let id = make(&env, json!({ "source": "local", "targets": [{ "location": "nas" }] })).await;
+    assert_eq!(settle(&env, &id).await, ["done"]);
+    // Other programs write these all the time from now on: every read finds them changing. A new one was never read.
+    testutil::write_old(&company_dir.join("app.log"), b"line 1; line 2;");
+    testutil::write_old(&amy_dir.join("diary.txt"), b"day 1; day 2;");
+    testutil::write_old(&company_dir.join("new.log"), b"started");
+    crate::folders::scan(&env.st, &all).await.unwrap();
+    crate::folders::scan(&env.st, &mine).await.unwrap();
+    let changing = [(all.clone(), "app.log"), (mine.clone(), "diary.txt"), (all.clone(), "new.log")];
+    let keep_changing = |on: bool| {
+        let mut list = super::folders::KEEPS_CHANGING.lock().unwrap();
+        list.retain(|(s, _)| *s != all && *s != mine);
+        if on {
+            list.extend(changing.iter().map(|(s, p)| (s.clone(), p.to_string())));
+        }
+    };
+    keep_changing(true);
+    let ran = settle(&env, &id).await;
+    keep_changing(false);
+    // Not failed: the copies as last read stay, and they are listed, never by name in a personal space
+    assert_eq!(ran, ["done"]);
+    let (failed, failures, note) = last_job(&env, &id).await;
+    assert_eq!(failed, 0, "{failures}");
+    assert!(failures.contains("app.log") && failures.contains(super::folders::KEPT_AS_READ), "{failures}");
+    assert!(failures.contains("new.log") && failures.contains(super::folders::NOT_COPIED), "{failures}");
+    assert!(!failures.contains("diary") && failures.contains("\"item\":null"), "{failures}");
+    assert_eq!(
+        note.as_deref(),
+        Some(
+            "2 files kept changing while they were copied: each is kept as it was last read\n\
+             1 file kept changing while it was copied and has no copy yet: it is tried again at the next sync"
+        )
+    );
+    let held = copies(&env, "nas").await;
+    for content in [&b"steady"[..], b"line 1;", b"day 1;"] {
+        assert!(has(&held, content), "{content:?}");
+    }
+    // A new target gets the copies as last read too, from the one that has them
+    add_nas(&env, "usb").await;
+    keep_changing(true);
+    let Json(_) = api::update(
+        State(env.st.clone()),
+        Admin(env.admin().await),
+        Path(id.clone()),
+        Json(serde_json::from_value(json!({ "copies": 2, "targets": [{ "location": "nas" }, { "location": "usb" }] })).unwrap()),
+    )
+    .await
+    .unwrap();
+    let ran = settle(&env, &id).await;
+    keep_changing(false);
+    assert_eq!(ran, ["done"]);
+    let usb = copies(&env, "usb").await;
+    assert!(has(&usb, b"line 1;") && has(&usb, b"day 1;") && !has(&usb, b"started"), "{usb:?}");
+    // Tried again by the next sync: once they settle, they are copied as they are, and the old copies go
+    let Json(_) = api::sync(State(env.st.clone()), Admin(env.admin().await), Path(id.clone()), Json(serde_json::from_value(json!({})).unwrap())).await.unwrap();
+    assert_eq!(run_queued(&env, &id).await, ["done", "done"]);
+    let held = copies(&env, "nas").await;
+    for content in [&b"line 1; line 2;"[..], b"day 1; day 2;", b"started"] {
+        assert!(has(&held, content), "{content:?}");
+    }
+    assert!(!has(&held, b"line 1;") && !has(&held, b"day 1;"), "{held:?}");
+    let (failed, failures, _) = last_job(&env, &id).await;
+    assert_eq!((failed, failures.as_str()), (0, "[]"));
 }
 
 #[tokio::test]

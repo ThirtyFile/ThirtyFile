@@ -4,11 +4,14 @@
 //! promotion can make a folder space a content-store space on the target.
 //!
 //! - What was read is recorded per item (`replica_folder_files`): where, its size and modification time, and the
-//!   SHA-256 of its content. A record counts only while the index still has the item as it was read. A file another
-//!   program changed is read again once the check for changes (folders.rs) has seen it: that is how far a folder
-//!   space's replicas can be behind, besides the sync's own delay. Each sync checks the folder for changes first.
-//! - A file that changes while it is read is read again, and a file the folder has differently than the index is left
-//!   for the next check for changes: a copy is never recorded for content the file doesn't have.
+//!   SHA-256 of its content. A file whose record isn't what the index has now is read again: a file another program
+//!   changed is read again once the check for changes (folders.rs) has seen it, which is how far a folder space's
+//!   replicas can be behind, besides the sync's own delay. Each sync checks the folder for changes first.
+//! - A file that keeps changing (a log another program writes, say) is handled as backups handle it: a file read whole
+//!   and unchanged while it was read is copied as read, even when the index has it otherwise by then; one that changed
+//!   every time it was read keeps the copy of its content as last read whole. Either is listed as changed while it was
+//!   copied, not as failed (never by name in a personal space), and read again by the next sync. The content as last
+//!   read stays on the targets until a later read replaces it: it is all there is of the file there meanwhile.
 //! - When the space's folder can't be opened (a disk or share that isn't mounted, a location offline), a file whose
 //!   record still matches the index is read from a checked copy (`fallback`).
 //! - A promotion makes a folder space all of whose files and versions have a checked copy on the target a content-store
@@ -34,21 +37,69 @@ use crate::{
 const PAGE: i64 = 200;
 /// A copy stored and not recorded yet (ThirtyFile stopped in between) is deleted after this long, unless recorded
 const UNRECORDED_GRACE: i64 = 24 * 3600;
+/// What a sync lists for a folder file that kept changing while it was copied: its copy is of the content as last read
+/// whole (as backups say), or there is no copy of it yet
+pub(crate) const KEPT_AS_READ: &str = crate::backups::capture::KEPT_AS_READ;
+pub(crate) const NOT_COPIED: &str = "Changed while it was copied: no copy yet, tried again at the next sync";
 
-/// The content of folder spaces' files and versions as last read, while the index still has them as read. `spaces`:
-/// the SQL parameter with the spaces (a JSON list); None: every folder space.
+/// The content of folder spaces' files and versions as last read, the index having them so or not any more (a file
+/// that kept changing is kept as it was last read). `spaces`: the SQL parameter with the spaces (a JSON list); None:
+/// every folder space.
 pub fn current_hashes(spaces: Option<&str>) -> String {
     let (n, v) = match spaces {
         Some(p) => (format!("n.drive_id IN (SELECT value FROM json_each({p}))"), format!("v.drive_id IN (SELECT value FROM json_each({p}))")),
         None => ("n.drive_id IS NOT NULL".to_string(), "v.drive_id IS NOT NULL".to_string()),
     };
     format!(
-        "SELECT f.hash FROM replica_folder_files f JOIN nodes n ON n.id = f.item_id
-         WHERE {n} AND f.path IS n.fs_path AND f.size IS n.fs_size AND f.mtime_ns IS n.fs_mtime_ns
-         UNION SELECT f.hash FROM replica_folder_files f JOIN node_versions v ON v.id = f.item_id
-         WHERE {v} AND f.path IS v.fs_path AND f.size IS v.size"
+        "SELECT f.hash FROM replica_folder_files f JOIN nodes n ON n.id = f.item_id WHERE {n}
+         UNION SELECT f.hash FROM replica_folder_files f JOIN node_versions v ON v.id = f.item_id WHERE {v}"
     )
 }
+
+/// Files that kept changing while a sync read them
+#[derive(Debug, Default)]
+pub struct Changing {
+    /// Copied as last read whole
+    pub kept: i64,
+    /// Never read whole: no copy yet
+    pub not_copied: i64,
+}
+
+impl Changing {
+    fn kept(&mut self, cx: &Ctx<'_>, space: &str, shown: &str) {
+        self.kept += 1;
+        cx.noted(space, Some(shown.to_string()), KEPT_AS_READ.to_string());
+    }
+
+    fn not_copied(&mut self, cx: &Ctx<'_>, space: &str, shown: &str) {
+        self.not_copied += 1;
+        cx.noted(space, Some(shown.to_string()), NOT_COPIED.to_string());
+    }
+
+    /// What the job's note says of them
+    pub fn notes(&self) -> Vec<String> {
+        let mut notes = Vec::new();
+        if self.kept > 0 {
+            notes.push(if self.kept == 1 {
+                "1 file kept changing while it was copied: it is kept as it was last read".to_string()
+            } else {
+                format!("{} files kept changing while they were copied: each is kept as it was last read", self.kept)
+            });
+        }
+        if self.not_copied > 0 {
+            notes.push(if self.not_copied == 1 {
+                "1 file kept changing while it was copied and has no copy yet: it is tried again at the next sync".to_string()
+            } else {
+                format!("{} files kept changing while they were copied and have no copy yet: they are tried again at the next sync", self.not_copied)
+            });
+        }
+        notes
+    }
+}
+
+/// Folder files a test has keep changing whenever they are read: (space, path)
+#[cfg(test)]
+pub(super) static KEEPS_CHANGING: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
 
 /// Whether the record `f` still matches its item
 const MATCHES: &str = "(EXISTS (SELECT 1 FROM nodes n WHERE n.id = f.item_id AND f.path IS n.fs_path AND f.size IS n.fs_size AND f.mtime_ns IS n.fs_mtime_ns)
@@ -83,14 +134,21 @@ async fn open(space: &Space) -> AppResult<Pinned> {
 
 /// Brings the target up to date with the policy's folder spaces: reads what isn't read as the index has it, copies what
 /// the target doesn't hold. A space whose folder can't be read is listed as failed; the others go on. Returns how many
-/// contents were copied, and the changes of each space it holds (`space_changes`, as of its check for changes); Err(stop)
-/// inside when the job is asked to stop.
-pub async fn sync(cx: &Ctx<'_>, policy: &Policy, targets: &[Target], location: &str, dst: &Arc<dyn Storage>) -> AppResult<Result<(i64, Vec<(String, i64)>), Stop>> {
+/// contents were copied, the changes of each space it holds (`space_changes`, as of its check for changes), and the
+/// files that kept changing; Err(stop) inside when the job is asked to stop.
+pub async fn sync(
+    cx: &Ctx<'_>,
+    policy: &Policy,
+    targets: &[Target],
+    location: &str,
+    dst: &Arc<dyn Storage>,
+) -> AppResult<Result<(i64, Vec<(String, i64)>, Changing), Stop>> {
     let st = cx.st;
     let mut seqs = Vec::new();
+    let mut changing = Changing::default();
     // Only a target that should hold the policy's content
     if !super::required(targets, policy.copies, &policy.source_location).contains(&location) {
-        return Ok(Ok((0, seqs)));
+        return Ok(Ok((0, seqs, changing)));
     }
     let ids = super::folder_scope(&mut *st.db.acquire().await?, &policy.id).await?;
     let spaces: Vec<Space> =
@@ -117,12 +175,12 @@ pub async fn sync(cx: &Ctx<'_>, policy: &Policy, targets: &[Target], location: &
             }
         };
         if let Some(root) = &root {
-            match read_unread(cx, policy, dst, location, root, &space.id).await? {
+            match read_unread(cx, policy, dst, location, root, &space.id, &mut changing).await? {
                 Ok(n) => copied += n,
                 Err(stop) => return Ok(Err(stop)),
             }
         }
-        match copy_missing(cx, policy, dst, location, root.as_ref(), &space.id).await? {
+        match copy_missing(cx, policy, dst, location, root.as_ref(), &space.id, &mut changing).await? {
             Ok(n) => copied += n,
             Err(stop) => return Ok(Err(stop)),
         }
@@ -139,11 +197,20 @@ pub async fn sync(cx: &Ctx<'_>, policy: &Policy, targets: &[Target], location: &
             .await?;
         }
     }
-    Ok(Ok((copied, seqs)))
+    Ok(Ok((copied, seqs, changing)))
 }
 
 /// Reads the files and versions of a space not read as the index has them, and copies their content to the target
-async fn read_unread(cx: &Ctx<'_>, policy: &Policy, dst: &Arc<dyn Storage>, location: &str, root: &Pinned, space: &str) -> AppResult<Result<i64, Stop>> {
+#[allow(clippy::too_many_arguments)]
+async fn read_unread(
+    cx: &Ctx<'_>,
+    policy: &Policy,
+    dst: &Arc<dyn Storage>,
+    location: &str,
+    root: &Pinned,
+    space: &str,
+    changing: &mut Changing,
+) -> AppResult<Result<i64, Stop>> {
     let st = cx.st;
     let mut copied = 0;
     for kind in ["file", "version"] {
@@ -166,7 +233,8 @@ async fn read_unread(cx: &Ctx<'_>, policy: &Policy, dst: &Arc<dyn Storage>, loca
                     return Ok(Err(stop));
                 }
                 let shown = if kind == "version" { format!("{name} (an earlier version)") } else { rel.clone() };
-                match read_one(cx, policy, dst, location, root, space, &item, kind, &rel, &shown).await? {
+                let one = Item { space, id: &item, kind, rel: &rel, shown: &shown };
+                match read_one(cx, policy, dst, location, root, &one, changing).await? {
                     Ok(true) => copied += 1,
                     Ok(false) => {}
                     Err(stop) => return Ok(Err(stop)),
@@ -177,81 +245,141 @@ async fn read_unread(cx: &Ctx<'_>, policy: &Policy, dst: &Arc<dyn Storage>, loca
     Ok(Ok(copied))
 }
 
-/// Reads a file of the folder into a temp file: its SHA-256 and what it was when read. Ok(None) when it isn't there
-/// (moved or deleted since the check for changes: the next one finds it) or can't be read (listed as failed).
-async fn read_to(cx: &Ctx<'_>, root: &Pinned, space: &str, rel: &str, shown: &str, tmp: &Path) -> AppResult<Result<Option<(String, crate::folders::Seen)>, Stop>> {
+/// What reading a file of the folder found
+enum Read {
+    /// Read whole and unchanged while it was read, into the temp file: its SHA-256, and what it was then
+    Whole(String, crate::folders::Seen),
+    /// Not there: moved or deleted since the check for changes (the next one finds it)
+    Gone,
+    /// It changed each time it was read
+    Changing,
+    /// It can't be read
+    Failed(std::io::Error),
+}
+
+/// Reads a file of the folder into a temp file, again a few times while it changes as it is read. Err(stop) when the
+/// job is asked to stop meanwhile. (`space`: tests have files of it keep changing.)
+#[cfg_attr(not(test), allow(unused_variables))]
+async fn read_to(cx: &Ctx<'_>, root: &Pinned, space: &str, rel: &str, tmp: &Path) -> Result<Read, Stop> {
+    let changed = |e: &std::io::Error| crate::hashing::unusable_kind(e) == Some(crate::hashing::Unusable::Changed);
     let read = cx
-        .tries(
-            |e: &std::io::Error| crate::hashing::unusable_kind(e) == Some(crate::hashing::Unusable::Changed),
-            || {
-                let (root, rel, tmp) = (root.clone(), rel.to_string(), tmp.to_path_buf());
-                async move {
-                    let _ = std::fs::remove_file(&tmp);
-                    tokio::task::spawn_blocking(move || crate::folders::read_file(&root, &rel, &tmp)).await.map_err(std::io::Error::other)?
+        .tries(changed, || {
+            #[cfg(test)]
+            let keeps_changing = KEEPS_CHANGING.lock().unwrap().iter().any(|(s, p)| s == space && p == rel);
+            let (root, rel, tmp) = (root.clone(), rel.to_string(), tmp.to_path_buf());
+            async move {
+                let _ = std::fs::remove_file(&tmp);
+                let read = tokio::task::spawn_blocking(move || crate::folders::read_file(&root, &rel, &tmp)).await.map_err(std::io::Error::other)?;
+                #[cfg(test)]
+                if keeps_changing && read.is_ok() {
+                    return Err(crate::hashing::unusable(crate::hashing::Unusable::Changed, crate::folders::CHANGED));
                 }
-            },
-        )
+                read
+            }
+        })
         .await;
     match read {
-        Ok(r) => Ok(Ok(Some(r))),
+        Ok((hash, seen)) => Ok(Read::Whole(hash, seen)),
         Err(Ok(stop)) => {
             let _ = tokio::fs::remove_file(tmp).await;
-            Ok(Err(stop))
+            Err(stop)
         }
         Err(Err(e)) => {
             let _ = tokio::fs::remove_file(tmp).await;
-            if !matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) {
-                cx.failed(space, Some(shown.to_string()), crate::fsops::disk_error(e).message);
-            }
-            Ok(Ok(None))
+            Ok(if changed(&e) {
+                Read::Changing
+            } else if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) {
+                Read::Gone
+            } else {
+                Read::Failed(e)
+            })
         }
     }
 }
 
+/// A file or earlier version of a folder space, as a sync reads it
+struct Item<'a> {
+    space: &'a str,
+    id: &'a str,
+    /// 'file' or 'version'
+    kind: &'a str,
+    /// Its path in the folder
+    rel: &'a str,
+    /// How lists name it
+    shown: &'a str,
+}
+
 /// Reads one file or version, records what it holds, and copies its content to the target when the target doesn't
 /// hold it. Ok(true) when a copy was made.
-#[allow(clippy::too_many_arguments)]
 async fn read_one(
     cx: &Ctx<'_>,
     policy: &Policy,
     dst: &Arc<dyn Storage>,
     location: &str,
     root: &Pinned,
-    space: &str,
-    item: &str,
-    kind: &str,
-    rel: &str,
-    shown: &str,
+    it: &Item<'_>,
+    changing: &mut Changing,
 ) -> AppResult<Result<bool, Stop>> {
     let st = cx.st;
     let tmp = st.tmp_dir().join(format!("replica-{}", new_id()));
-    let (hash, seen) = match read_to(cx, root, space, rel, shown, &tmp).await? {
-        Ok(Some(r)) => r,
-        Ok(None) => return Ok(Ok(false)),
+    let (hash, seen) = match read_to(cx, root, it.space, it.rel, &tmp).await {
+        Ok(Read::Whole(hash, seen)) => (hash, seen),
+        Ok(Read::Gone) => return Ok(Ok(false)),
+        Ok(Read::Failed(e)) => {
+            cx.failed(it.space, Some(it.shown.to_string()), crate::fsops::disk_error(e).message);
+            return Ok(Ok(false));
+        }
+        Ok(Read::Changing) => {
+            // Not read whole this time: the target keeps its content as last read whole, from another checked copy
+            // when it hasn't got one, and the next sync reads it again
+            let last: Option<(String, i64)> =
+                sqlx::query_as("SELECT hash, size FROM replica_folder_files WHERE item_id = ?").bind(it.id).fetch_optional(&st.db).await?;
+            let held = match &last {
+                Some((h, size)) => match hold(cx, policy, dst, location, h, *size).await? {
+                    Ok(held) => held,
+                    Err(stop) => return Ok(Err(stop)),
+                },
+                None => false,
+            };
+            if held {
+                changing.kept(cx, it.space, it.shown);
+            } else {
+                if last.is_some() {
+                    // That content can't be had anywhere any more: as if it was never read
+                    let _w = st.write_lock.lock().await;
+                    sqlx::query("DELETE FROM replica_folder_files WHERE item_id = ?").bind(it.id).execute(&st.db).await?;
+                }
+                changing.not_copied(cx, it.space, it.shown);
+            }
+            cx.done(1, 0).await?;
+            return Ok(Ok(false));
+        }
         Err(stop) => return Ok(Err(stop)),
     };
-    // Only what the index has: a file the folder has differently waits for the next check for changes
-    let indexed: Option<(Option<String>, Option<i64>, Option<i64>)> = if kind == "file" {
-        sqlx::query_as("SELECT fs_path, fs_size, fs_mtime_ns FROM nodes WHERE id = ?").bind(item).fetch_optional(&st.db).await?
+    // The index still has it there (else it moved since the check for changes: the next one finds it). It may have
+    // another size or modification time by now: another program changed it after the check for changes, and it was
+    // read whole and unchanged since. It is copied as read, and read again by the next sync.
+    let indexed: Option<(Option<String>, Option<i64>, Option<i64>)> = if it.kind == "file" {
+        sqlx::query_as("SELECT fs_path, fs_size, fs_mtime_ns FROM nodes WHERE id = ?").bind(it.id).fetch_optional(&st.db).await?
     } else {
-        sqlx::query_as("SELECT fs_path, size, NULL FROM node_versions WHERE id = ?").bind(item).fetch_optional(&st.db).await?
+        sqlx::query_as("SELECT fs_path, size, NULL FROM node_versions WHERE id = ?").bind(it.id).fetch_optional(&st.db).await?
     };
-    let same = indexed.is_some_and(|(p, size, mtime)| p.as_deref() == Some(rel) && size == Some(seen.size) && (kind != "file" || mtime == Some(seen.mtime_ns)));
-    if !same {
+    let Some((_, size, mtime)) = indexed.filter(|(p, ..)| p.as_deref() == Some(it.rel)) else {
         let _ = tokio::fs::remove_file(&tmp).await;
         cx.done(1, seen.size).await?;
         return Ok(Ok(false));
-    }
+    };
+    let as_indexed = size == Some(seen.size) && (it.kind != "file" || mtime == Some(seen.mtime_ns));
     {
         let _w = st.write_lock.lock().await;
         sqlx::query(
             "INSERT OR REPLACE INTO replica_folder_files (item_id, drive_id, path, size, mtime_ns, dev, ino, hash, read_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
-        .bind(item)
-        .bind(space)
-        .bind(rel)
+        .bind(it.id)
+        .bind(it.space)
+        .bind(it.rel)
         .bind(seen.size)
-        .bind((kind == "file").then_some(seen.mtime_ns))
+        .bind((it.kind == "file").then_some(seen.mtime_ns))
         .bind(seen.dev)
         .bind(seen.ino)
         .bind(&hash)
@@ -259,22 +387,77 @@ async fn read_one(
         .execute(&st.db)
         .await?;
     }
-    let held: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM replica_copies WHERE hash = ? AND location_id = ? AND state = 'verified'")
-        .bind(&hash)
-        .bind(location)
-        .fetch_optional(&st.db)
-        .await?;
-    let made = if held.is_none() { store(cx, policy, dst, location, &hash, seen.size, &tmp).await? } else { Ok(false) };
+    let made = if held(st, &hash, location).await? { Ok(false) } else { store(cx, policy, dst, location, &hash, seen.size, &tmp).await? };
     let _ = tokio::fs::remove_file(&tmp).await;
     if made.is_ok() {
+        if !as_indexed {
+            changing.kept(cx, it.space, it.shown);
+        }
         cx.done(1, seen.size).await?;
     }
     Ok(made)
 }
 
+/// Whether the target holds a checked copy of a content
+async fn held(st: &AppState, hash: &str, location: &str) -> AppResult<bool> {
+    let row: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM replica_copies WHERE hash = ? AND location_id = ? AND state = 'verified'")
+        .bind(hash)
+        .bind(location)
+        .fetch_optional(&st.db)
+        .await?;
+    Ok(row.is_some())
+}
+
+/// Reads a content from a checked copy on another location than the target into a temp file; false when none can be
+/// read
+async fn from_copies(st: &AppState, hash: &str, size: i64, location: &str, tmp: &Path) -> AppResult<bool> {
+    let others: Vec<(String,)> = sqlx::query_as("SELECT location_id FROM replica_copies WHERE hash = ? AND state = 'verified' AND location_id != ?")
+        .bind(hash)
+        .bind(location)
+        .fetch_all(&st.db)
+        .await?;
+    for (other,) in others {
+        let Ok(src) = st.storage(&other) else { continue };
+        let _ = tokio::fs::remove_file(tmp).await;
+        if crate::backups::capture::fetch_verified(&src, hash, size, tmp).await.is_ok() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Makes sure the target holds a checked copy of a content, copying it from another checked copy when it doesn't.
+/// Ok(false) when it doesn't and no checked copy of it can be read.
+async fn hold(cx: &Ctx<'_>, policy: &Policy, dst: &Arc<dyn Storage>, location: &str, hash: &str, size: i64) -> AppResult<Result<bool, Stop>> {
+    let st = cx.st;
+    if held(st, hash, location).await? {
+        return Ok(Ok(true));
+    }
+    let tmp = st.tmp_dir().join(format!("replica-{}", new_id()));
+    if !from_copies(st, hash, size, location, &tmp).await? {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Ok(Ok(false));
+    }
+    let made = store(cx, policy, dst, location, hash, size, &tmp).await;
+    let _ = tokio::fs::remove_file(&tmp).await;
+    if let Err(stop) = made? {
+        return Ok(Err(stop));
+    }
+    Ok(Ok(held(st, hash, location).await?))
+}
+
 /// Copies to the target the content of the space's current records it doesn't hold: from the folder, else from
 /// another checked copy
-async fn copy_missing(cx: &Ctx<'_>, policy: &Policy, dst: &Arc<dyn Storage>, location: &str, root: Option<&Pinned>, space: &str) -> AppResult<Result<i64, Stop>> {
+#[allow(clippy::too_many_arguments)]
+async fn copy_missing(
+    cx: &Ctx<'_>,
+    policy: &Policy,
+    dst: &Arc<dyn Storage>,
+    location: &str,
+    root: Option<&Pinned>,
+    space: &str,
+    changing: &mut Changing,
+) -> AppResult<Result<i64, Stop>> {
     let st = cx.st;
     let missing = format!(
         "FROM (SELECT f.hash, MAX(f.size) AS size FROM replica_folder_files f WHERE f.drive_id = ?1 AND {MATCHES} GROUP BY f.hash) m
@@ -304,6 +487,8 @@ async fn copy_missing(cx: &Ctx<'_>, policy: &Policy, dst: &Arc<dyn Storage>, loc
             }
             let tmp = st.tmp_dir().join(format!("replica-{}", new_id()));
             let mut got = false;
+            // Why the folder didn't have it: the file moved, changed since it was read, or can't be read
+            let (mut gone, mut changed, mut failed) = (false, None, None);
             // From the folder: a file whose record has this content, if it still has it
             if let Some(root) = root {
                 let item: Option<(String,)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
@@ -314,32 +499,29 @@ async fn copy_missing(cx: &Ctx<'_>, policy: &Policy, dst: &Arc<dyn Storage>, loc
                 .fetch_optional(&st.db)
                 .await?;
                 if let Some((rel,)) = item {
-                    match read_to(cx, root, space, &rel, &rel, &tmp).await? {
-                        Ok(Some((h, _))) if h == hash => got = true,
-                        Ok(_) => {}
+                    match read_to(cx, root, space, &rel, &tmp).await {
+                        Ok(Read::Whole(h, _)) if h == hash => got = true,
+                        Ok(Read::Whole(..) | Read::Changing) => changed = Some(rel),
+                        Ok(Read::Gone) => gone = true,
+                        Ok(Read::Failed(e)) => failed = Some((rel, crate::fsops::disk_error(e).message)),
                         Err(stop) => return Ok(Err(stop)),
                     }
                 }
             }
             // Else from another checked copy
             if !got {
-                let others: Vec<(String,)> = sqlx::query_as("SELECT location_id FROM replica_copies WHERE hash = ? AND state = 'verified' AND location_id != ?")
-                    .bind(&hash)
-                    .bind(location)
-                    .fetch_all(&st.db)
-                    .await?;
-                for (other,) in others {
-                    let Ok(src) = st.storage(&other) else { continue };
-                    let _ = tokio::fs::remove_file(&tmp).await;
-                    if crate::backups::capture::fetch_verified(&src, &hash, size, &tmp).await.is_ok() {
-                        got = true;
-                        break;
-                    }
-                }
+                got = from_copies(st, &hash, size, location, &tmp).await?;
             }
             if !got {
                 let _ = tokio::fs::remove_file(&tmp).await;
-                cx.failed(space, None, format!("The content {} couldn't be read anywhere: {}", &hash[..12], crate::storage::NOT_MOUNTED));
+                match (changed, failed) {
+                    // Read again by the next sync
+                    (Some(rel), _) => changing.not_copied(cx, space, &rel),
+                    (None, Some((rel, e))) => cx.failed(space, Some(rel), e),
+                    // Moved since the check for changes: the next one finds it
+                    _ if gone => {}
+                    _ => cx.failed(space, None, format!("The content {} couldn't be read anywhere: {}", &hash[..12], crate::storage::NOT_MOUNTED)),
+                }
                 continue;
             }
             let made = store(cx, policy, dst, location, &hash, size, &tmp).await?;
@@ -414,7 +596,8 @@ async fn store(cx: &Ctx<'_>, policy: &Policy, dst: &Arc<dyn Storage>, location: 
 }
 
 /// How many items of the policy's folder spaces the target should hold, and holds: (held, wanted), counting each
-/// content once, and each item not read yet as one more wanted
+/// content as last read once (a file that kept changing counts with its copy as last read), and each item never read
+/// as one more wanted
 pub async fn coverage(st: &AppState, policy: &Policy, location: &str) -> AppResult<(i64, i64)> {
     let spaces = super::folder_scope(&mut *st.db.acquire().await?, &policy.id).await?;
     if spaces.is_empty() {
@@ -432,11 +615,9 @@ pub async fn coverage(st: &AppState, policy: &Policy, location: &str) -> AppResu
     .await?;
     let (unread,): (i64,) = sqlx::query_as(
         "SELECT (SELECT COUNT(*) FROM nodes n LEFT JOIN replica_folder_files f ON f.item_id = n.id
-                 WHERE n.drive_id IN (SELECT value FROM json_each(?1)) AND n.kind = 'file' AND n.fs_path IS NOT NULL
-                   AND (f.item_id IS NULL OR f.path IS NOT n.fs_path OR f.size IS NOT n.fs_size OR f.mtime_ns IS NOT n.fs_mtime_ns))
+                 WHERE n.drive_id IN (SELECT value FROM json_each(?1)) AND n.kind = 'file' AND n.fs_path IS NOT NULL AND f.item_id IS NULL)
               + (SELECT COUNT(*) FROM node_versions v LEFT JOIN replica_folder_files f ON f.item_id = v.id
-                 WHERE v.drive_id IN (SELECT value FROM json_each(?1)) AND v.fs_path IS NOT NULL
-                   AND (f.item_id IS NULL OR f.path IS NOT v.fs_path OR f.size IS NOT v.size))",
+                 WHERE v.drive_id IN (SELECT value FROM json_each(?1)) AND v.fs_path IS NOT NULL AND f.item_id IS NULL)",
     )
     .bind(&list)
     .fetch_one(&st.db)

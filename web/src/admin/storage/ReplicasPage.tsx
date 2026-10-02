@@ -508,8 +508,9 @@ function PolicyDetails({ p, jobs, onClose, onPromote, onChanged }: { p: ReplicaP
                   {j.failures.length > 0 && (
                     <ul className="grid gap-0.5 rounded bg-muted/50 px-2 py-1">
                       {j.failures.map((f, i) => (
-                        <li key={i} className="text-muted-foreground">
-                          {tServer(f.error)}
+                        <li key={i} className="grid">
+                          {f.item && <span className="truncate">{f.item}</span>}
+                          <span className="text-muted-foreground">{tServer(f.error)}</span>
                         </li>
                       ))}
                     </ul>
