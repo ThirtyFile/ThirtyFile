@@ -63,6 +63,10 @@ pub struct ShareInfo {
     drop_only: bool,
     /// false: files are served for previews only (no download button, no ZIP)
     allow_download: bool,
+    /// A link in someone else's personal space, listed for an administrator who may only revoke it: `id` is a handle
+    /// for deleting it (`handle`), not the link's address, and its item isn't named
+    #[sqlx(skip)]
+    private: bool,
 }
 
 /// Share link token length: 10 alphanumeric characters (62^10, about 60 bits), infeasible to guess online while keeping the URL short
@@ -120,14 +124,50 @@ fn check_max_downloads(n: Option<i64>) -> AppResult<()> {
     Ok(())
 }
 
-/// Whether the user may change or delete a link: the person who created it, a manager of the item's space or folder,
-/// the item's owner while they still have access to it, or an administrator
-async fn can_manage(conn: &mut SqliteConnection, user: &User, creator: i64, node: &Node) -> AppResult<bool> {
-    if creator == user.id || user.is_admin() {
-        return Ok(true);
+/// What the user may do with a link
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Manage {
+    /// See it, change it and delete it
+    All,
+    /// Only delete it, without seeing its address or its item: an administrator, in someone else's personal space
+    Revoke,
+}
+
+/// What the user may do with a link: everything for the person who created it, a manager of the item's space or
+/// folder, the item's owner while they still have access to it, and an administrator; in someone else's personal space
+/// an administrator without such a role may only revoke it (None: nothing)
+async fn manage(conn: &mut SqliteConnection, user: &User, creator: i64, node: &Node) -> AppResult<Option<Manage>> {
+    if creator == user.id {
+        return Ok(Some(Manage::All));
     }
     let role = tree::role_on(conn, user, node).await?;
-    Ok(role.is_some_and(|r| r >= Role::Manager) || (role.is_some() && node.owner_id == user.id))
+    if role.is_some_and(|r| r >= Role::Manager) || (role.is_some() && node.owner_id == user.id) {
+        return Ok(Some(Manage::All));
+    }
+    if !user.is_admin() {
+        return Ok(None);
+    }
+    let drive = tree::get_drive(conn, node.drive()).await?;
+    let private = drive.is_none_or(|d| d.kind == tree::SpaceKind::Personal && d.owner_id != Some(user.id));
+    Ok(Some(if private { Manage::Revoke } else { Manage::All }))
+}
+
+/// What an administrator is given instead of a link's address when they may only revoke it: `p-` and a keyed hash of
+/// the address (addresses are letters and digits only, so the two never mix)
+pub fn handle(st: &AppState, token: &str) -> String {
+    let mut mac = Hmac::<Sha256>::new_from_slice(&st.secret).expect("hmac key");
+    mac.update(b"share-handle:");
+    mac.update(token.as_bytes());
+    format!("p-{}", &hex::encode(mac.finalize().into_bytes())[..24])
+}
+
+/// The address of the link `id` names: itself, or the link a handle (`handle`) stands for (None: no such link)
+pub async fn resolve(st: &AppState, conn: &mut SqliteConnection, id: &str) -> AppResult<Option<String>> {
+    if !id.starts_with("p-") {
+        return Ok(Some(id.to_string()));
+    }
+    let tokens: Vec<(String,)> = sqlx::query_as("SELECT id FROM shares").fetch_all(&mut *conn).await?;
+    Ok(tokens.into_iter().map(|(t,)| t).find(|t| handle(st, t) == id))
 }
 
 /// Counts a visit on the share itself: the access log is archived and trimmed, the counters stay
@@ -170,7 +210,7 @@ pub async fn list(State(st): State<AppState>, user: User, Query(q): Query<ListQu
         (Some(id), _) => {
             let node = tree::get_node(&mut c, id).await?.ok_or_else(|| AppError::not_found("Item not found"))?;
             // Other people's links on the item, when the caller could manage them (-1: nobody is the creator)
-            (can_manage(&mut c, &user, -1, &node).await?, Vec::new(), Vec::new())
+            (manage(&mut c, &user, -1, &node).await?.is_some(), Vec::new(), Vec::new())
         }
         (None, Some("managed")) if user.is_admin() => (true, Vec::new(), Vec::new()),
         (None, Some("managed")) => {
@@ -203,7 +243,27 @@ pub async fn list(State(st): State<AppState>, user: User, Query(q): Query<ListQu
         .bind(now())
         .fetch_all(&mut *c)
         .await?;
-    Ok(Json(rows))
+    Ok(Json(hide_private(&st, &mut c, &user, rows).await?))
+}
+
+/// Links an administrator may only revoke (in someone else's personal space), without their address or item
+async fn hide_private(st: &AppState, conn: &mut SqliteConnection, user: &User, mut rows: Vec<ShareInfo>) -> AppResult<Vec<ShareInfo>> {
+    if !user.is_admin() {
+        return Ok(rows);
+    }
+    for s in &mut rows {
+        if s.owner_id == user.id || s.drive_kind != "personal" || s.drive_owner == user.username {
+            continue;
+        }
+        let Some(node) = tree::get_node(conn, &s.node_id).await? else { continue };
+        if manage(conn, user, s.owner_id, &node).await? == Some(Manage::Revoke) {
+            s.id = handle(st, &s.id);
+            s.node_id.clear();
+            s.node_name.clear();
+            s.private = true;
+        }
+    }
+    Ok(rows)
 }
 
 async fn share_info(conn: &mut SqliteConnection, id: &str) -> AppResult<ShareInfo> {
@@ -360,22 +420,22 @@ pub struct UpdateReq {
     allow_download: Option<bool>,
 }
 
-/// A share link (its password hash) and its item, for changing or deleting it: only people who may manage it find it
-async fn manageable_share(conn: &mut SqliteConnection, user: &User, id: &str) -> AppResult<(Option<String>, Node)> {
-    let row: Option<(i64, Option<String>, String)> =
-        sqlx::query_as("SELECT owner_id, password_hash, node_id FROM shares WHERE id = ?").bind(id).fetch_optional(&mut *conn).await?;
+/// A share link (its address and password hash) and its item, for changing or deleting it: only people who may manage
+/// it find it. `id` is its address, or the handle an administrator was given for it.
+async fn manageable_share(st: &AppState, conn: &mut SqliteConnection, user: &User, id: &str) -> AppResult<(String, Option<String>, Node, Manage)> {
     let not_found = || AppError::not_found("Share link not found");
+    let id = resolve(st, conn, id).await?.ok_or_else(not_found)?;
+    let row: Option<(i64, Option<String>, String)> =
+        sqlx::query_as("SELECT owner_id, password_hash, node_id FROM shares WHERE id = ?").bind(&id).fetch_optional(&mut *conn).await?;
     let (creator, hash, node_id) = row.ok_or_else(not_found)?;
     let node = tree::get_node(conn, &node_id).await?.ok_or_else(not_found)?;
-    if !can_manage(conn, user, creator, &node).await? {
-        return Err(not_found());
-    }
-    Ok((hash, node))
+    let manage = manage(conn, user, creator, &node).await?.ok_or_else(not_found)?;
+    Ok((id, hash, node, manage))
 }
 
-/// Whether the user may manage the link (see `can_manage`); false when it doesn't exist
+/// Whether the user may manage the link (see `manage`), revoking it included; false when it doesn't exist
 pub async fn may_manage(st: &AppState, user: &User, id: &str) -> AppResult<bool> {
-    match manageable_share(&mut *st.db.acquire().await?, user, id).await {
+    match manageable_share(st, &mut *st.db.acquire().await?, user, id).await {
         Ok(_) => Ok(true),
         Err(e) if e.status == StatusCode::NOT_FOUND => Ok(false),
         Err(e) => Err(e),
@@ -404,7 +464,10 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
     };
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    let (old_hash, node) = manageable_share(&mut tx, &user, &id).await?;
+    let (id, old_hash, node, manage) = manageable_share(&st, &mut tx, &user, &id).await?;
+    if manage != Manage::All {
+        return Err(AppError::forbidden("Links in someone else's personal space can only be deleted"));
+    }
     let (was_upload, was_drop, was_download): (bool, bool, bool) =
         sqlx::query_as("SELECT allow_upload, drop_only, allow_download FROM shares WHERE id = ?").bind(&id).fetch_one(&mut *tx).await?;
     let allow_upload = req.allow_upload.unwrap_or(was_upload);
@@ -465,7 +528,7 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
 pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    let (_, node) = manageable_share(&mut tx, &user, &id).await?;
+    let (id, _, node, _) = manageable_share(&st, &mut tx, &user, &id).await?;
     sqlx::query("DELETE FROM shares WHERE id = ?").bind(&id).execute(&mut *tx).await?;
     logs::record_activity(&mut tx, &user, Some(&node), "share_delete", &format!("/share/{id}")).await?;
     tx.commit().await?;
@@ -1048,6 +1111,54 @@ mod tests {
         assert_eq!(links(&env, &amy, ListQuery { node_id: Some(report.clone()), ..Default::default() }).await, vec![theirs.id.clone()]);
         assert_eq!(links(&env, &amy, managed()).await, vec![theirs.id.clone()]);
         let _ = remove(&env, &amy, &theirs.id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn administrators_only_revoke_links_in_other_peoples_personal_spaces() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let amy = env.user("amy", true).await;
+        let inbox = env.folder(&amy, amy.root(), "Inbox").await;
+        let _ = stored_file(&env, &amy, &inbox, "salary-2026.xlsx", b"numbers").await;
+        let req = CreateReq { password: Some(testutil::wrong_password()), allow_upload: true, drop_only: true, ..link(&inbox) };
+        let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
+
+        // The administrator is told the link exists, in whose space and by whom, but not its address or its item
+        let listed = |q: ListQuery| {
+            let (st, admin) = (env.st.clone(), admin.clone());
+            async move { super::list(State(st), admin, Query(q)).await.unwrap().0 }
+        };
+        for seen in [listed(managed()).await, listed(ListQuery { node_id: Some(inbox.clone()), ..Default::default() }).await] {
+            assert_eq!(seen.len(), 1);
+            let s = &seen[0];
+            assert!(s.private, "{s:?}");
+            assert!(!s.id.contains(&info.id) && s.node_id.is_empty() && s.node_name.is_empty(), "{s:?}");
+            assert_eq!((s.owner_name.as_str(), s.drive_owner.as_str(), s.has_password, s.drop_only), ("amy", "amy", true, true));
+        }
+        let handle = listed(managed()).await[0].id.clone();
+        assert!(may_manage(&env.st, &admin, &handle).await.unwrap());
+
+        // It can't be changed, by its address or by what the list gave
+        for id in [&info.id, &handle] {
+            let err = change(&env, &admin, id, json!({ "password": "", "drop_only": false, "max_downloads": null })).await.unwrap_err();
+            assert_eq!(err.status, StatusCode::FORBIDDEN, "{id}");
+        }
+        let (hash, drop_only): (Option<String>, bool) =
+            sqlx::query_as("SELECT password_hash, drop_only FROM shares WHERE id = ?").bind(&info.id).fetch_one(&env.st.db).await.unwrap();
+        assert!(hash.is_some() && drop_only, "the link is as amy left it");
+
+        // Amy, and an administrator she gave a role in her space, still manage it fully
+        let Json(own) = super::list(State(env.st.clone()), amy.clone(), Query(ListQuery::default())).await.unwrap();
+        assert!(!own[0].private && own[0].id == info.id && own[0].node_name == "Inbox");
+        env.grant(&inbox, &admin, "manager").await;
+        let seen = listed(managed()).await;
+        assert!(!seen[0].private && seen[0].id == info.id, "{seen:?}");
+        assert!(change(&env, &admin, &info.id, json!({ "max_downloads": 5 })).await.is_ok());
+        env.revoke(&inbox, &admin).await;
+
+        // It can be revoked
+        let _ = remove(&env, &admin, &handle).await.unwrap();
+        assert!(find_share(&env.st, &info.id).await.is_err());
     }
 
     #[tokio::test]

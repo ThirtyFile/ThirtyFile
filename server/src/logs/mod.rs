@@ -269,16 +269,76 @@ mod tests {
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
-        let rows = query_access(&env.st, &AccessQuery { share_id: Some(token.clone()), ..Default::default() }, Some(amy.id), 10).await.unwrap();
+        let rows = query_access(&env.st, &AccessQuery { share_id: Some(token.clone()), ..Default::default() }, Some(amy.id), None, 10).await.unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!((rows[0].event.as_str(), rows[0].ip.as_str(), rows[0].user_agent.as_str()), ("view", "198.51.100.7", "TestBrowser/1.0"));
         assert_eq!(rows[1].ip, "203.0.113.9");
         // Others can't see them
         let other = env.user("ben", true).await;
-        assert!(query_access(&env.st, &AccessQuery { share_id: Some(token.clone()), ..Default::default() }, Some(other.id), 10).await.unwrap().is_empty());
+        assert!(query_access(&env.st, &AccessQuery { share_id: Some(token.clone()), ..Default::default() }, Some(other.id), None, 10).await.unwrap().is_empty());
         // The share list shows the view count
         let Json(list) = crate::shares::list(State(env.st.clone()), amy.clone(), Query(serde_json::from_value(json!({})).unwrap())).await.unwrap();
         assert_eq!(serde_json::to_value(&list).unwrap()[0]["views"], 2);
+    }
+
+    #[tokio::test]
+    async fn administrators_see_visits_to_links_in_other_peoples_personal_spaces_without_names() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let amy = env.user("amy", true).await;
+        let diagnosis = env.file(&amy, amy.root(), "diagnosis.txt").await;
+        let plan = env.file(&admin, &env.st.shared_root().unwrap(), "plan.txt").await;
+        let share = |user: &User, node: &str| {
+            let (st, user, req) = (env.st.clone(), user.clone(), serde_json::from_value(json!({ "node_id": node })).unwrap());
+            async move { serde_json::to_value(crate::shares::create(State(st), user, Json(req)).await.unwrap().0).unwrap()["id"].as_str().unwrap().to_string() }
+        };
+        let (private, public) = (share(&amy, &diagnosis).await, share(&admin, &plan).await);
+        for token in [&private, &public] {
+            let from = ConnectInfo("203.0.113.9:4000".parse::<SocketAddr>().unwrap());
+            let visitor = Visitor { ip: "203.0.113.9".into(), user_agent: String::new() };
+            let _ = crate::shares::public_info(State(env.st.clone()), Path(token.clone()), from, HeaderMap::new(), visitor).await.unwrap();
+        }
+        wait_rows(&env.st, "share_access", 2).await;
+        // A visit recorded long ago, of an item and a link that are gone since
+        sqlx::query("INSERT INTO share_access (at, share_id, owner_id, node_id, node_name, event) VALUES (?, 'GoneLink01', ?, 'gone', 'old-letter.txt', 'view')")
+            .bind(now() - DAY)
+            .bind(amy.id)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        let rows = |user: &User, q: AccessQuery| {
+            let (st, user) = (env.st.clone(), user.clone());
+            async move { share_access(State(st), user, Query(q)).await.unwrap().0["items"].as_array().unwrap().clone() }
+        };
+
+        // The administrator sees each visit, but neither the name nor the address of what amy shared
+        let all = rows(&admin, AccessQuery::default()).await;
+        assert_eq!(all.len(), 3);
+        for r in &all {
+            let theirs = r["owner_name"] == "amy";
+            assert_eq!(r["private"], theirs, "{r}");
+            if theirs {
+                assert!(r["node_name"] == "" && r["share_id"] == "" && r["node_id"].is_null(), "{r}");
+            } else {
+                assert!(r["node_name"] == "plan.txt" && r["share_id"] == public.as_str(), "{r}");
+            }
+        }
+        for q in ["diagnosis", "letter", private.as_str()] {
+            assert!(rows(&admin, AccessQuery { q: Some(q.into()), ..Default::default() }).await.is_empty(), "{q}");
+        }
+        assert_eq!(rows(&admin, AccessQuery { q: Some("plan".into()), ..Default::default() }).await.len(), 1);
+        // The visits of one such link, asked for by what the list of links gives
+        let Json(links) =
+            crate::shares::list(State(env.st.clone()), admin.clone(), Query(serde_json::from_value(json!({ "scope": "managed" })).unwrap())).await.unwrap();
+        let handle = serde_json::to_value(&links).unwrap().as_array().unwrap().iter().find(|l| l["private"] == true).unwrap()["id"].as_str().unwrap().to_string();
+        let one = rows(&admin, AccessQuery { share_id: Some(handle), ..Default::default() }).await;
+        assert!(one.len() == 1 && one[0]["node_name"] == "", "{one:?}");
+
+        // Amy sees her own
+        let own = rows(&amy, AccessQuery::default()).await;
+        assert_eq!(own.len(), 2);
+        assert!(own.iter().any(|r| r["node_name"] == "diagnosis.txt" && r["share_id"] == private.as_str()));
+        assert!(own.iter().any(|r| r["node_name"] == "old-letter.txt"));
     }
 
     /// Waits until the background-written records reach the given count

@@ -105,9 +105,13 @@ export function ShareAccessLog({ shareId, admin, className }: { shareId?: string
                     <td className="px-2.5 py-1.5 whitespace-nowrap text-muted-foreground">{formatWinDate(a.at)}</td>
                     <td className={cn("px-2.5 py-1.5 whitespace-nowrap", ev?.tone)}>{ev?.label ?? a.event}</td>
                     <td className="max-w-0 truncate px-2.5 py-1.5" title={a.node_name}>
-                      {a.node_name || <span className="text-muted-foreground">—</span>}
+                      {a.private ? (
+                        <span className="text-muted-foreground italic">{t("In someone else's personal space")}</span>
+                      ) : (
+                        a.node_name || <span className="text-muted-foreground">—</span>
+                      )}
                     </td>
-                    {!shareId && <td className="truncate px-2.5 py-1.5 font-mono text-muted-foreground max-md:hidden">/share/{a.share_id}</td>}
+                    {!shareId && <td className="truncate px-2.5 py-1.5 font-mono text-muted-foreground max-md:hidden">{a.private ? "—" : `/share/${a.share_id}`}</td>}
                     {!shareId && admin && <td className="truncate px-2.5 py-1.5 text-muted-foreground max-lg:hidden">{a.owner_name ?? "—"}</td>}
                     <td className="px-2.5 py-1.5 font-mono whitespace-nowrap">
                       {a.ip ? (

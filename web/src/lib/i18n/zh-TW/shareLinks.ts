@@ -22,6 +22,7 @@ export default {
   "No share links": "沒有分享連結",
   "Links that others create in spaces you manage, or on your files, appear here.": "其他人在您管理的空間或您的檔案上建立的連結會顯示在這裡。",
   "Expired {date}": "已於 {date} 到期",
+  "In someone else's personal space": "位於他人的個人空間",
   "Access log for all share links": "所有分享連結的存取紀錄",
   "Space": "空間",
   "State": "狀態",

@@ -498,7 +498,7 @@ const ERROR_COLS: &str =
     "id, at, first_at, count, source, severity, kind, user_id, username, operation, route, resource, status, code, message, detail, request_id, client, version";
 
 pub(super) async fn query_errors(st: &AppState, q: &ErrorQuery, limit: i64) -> AppResult<Vec<ErrorRow>> {
-    let mut f = super::query::Filters::new(&format!("SELECT {ERROR_COLS} FROM error_log"));
+    let mut f = super::query::Filters::new(format!("SELECT {ERROR_COLS} FROM error_log"));
     f.one_of("source", q.source.as_deref())
         .one_of("severity", q.severity.as_deref())
         .contains(&["username"], q.user.as_deref())

@@ -23,7 +23,7 @@ pub(super) struct Filters(QueryBuilder<Sqlite>);
 
 impl Filters {
     /// `sql` selects from the log, up to (not including) its WHERE clause
-    pub(super) fn new(sql: &str) -> Self {
+    pub(super) fn new(sql: impl Into<String>) -> Self {
         let mut qb = QueryBuilder::new(sql);
         qb.push(" WHERE 1 = 1");
         Filters(qb)
@@ -231,6 +231,9 @@ pub struct AccessRow {
     pub(super) event: String,
     pub(super) ip: String,
     pub(super) user_agent: String,
+    /// A visit to a link in someone else's personal space, shown to an administrator: the link's address and the item
+    /// are left out
+    pub(super) private: bool,
 }
 
 #[derive(Deserialize, Default)]
@@ -248,14 +251,26 @@ pub struct AccessQuery {
     pub(super) limit: Option<i64>,
 }
 
-pub(super) async fn query_access(st: &AppState, q: &AccessQuery, owner_id: Option<i64>, limit: i64) -> AppResult<Vec<AccessRow>> {
-    let mut f = Filters::new(
-        "SELECT a.id, a.at, a.share_id, u.username AS owner_name, a.node_id, a.node_name, a.event, a.ip, a.user_agent
-         FROM share_access a LEFT JOIN users u ON u.id = a.owner_id",
-    );
+/// Visit records: only those of links `owner_id` created, if given. For the administrator `admin`, visits to links
+/// someone else made in someone else's personal space (or in a space that is gone) don't say which link or item they
+/// were, and the keyword search doesn't look at what they leave out.
+pub(super) async fn query_access(st: &AppState, q: &AccessQuery, owner_id: Option<i64>, admin: Option<i64>, limit: i64) -> AppResult<Vec<AccessRow>> {
+    let private = match admin {
+        Some(me) => format!("(a.owner_id IS NOT {me} AND a.private_to IS NOT NULL AND a.private_to <> {me})"),
+        None => "0".to_string(),
+    };
+    let mut f = Filters::new(format!(
+        "SELECT * FROM (
+           SELECT a.id, a.at, a.owner_id, a.share_id AS token, a.event, a.ip, a.user_agent, u.username AS owner_name, {private} AS private,
+                  CASE WHEN {private} THEN '' ELSE a.share_id END AS share_id,
+                  CASE WHEN {private} THEN NULL ELSE a.node_id END AS node_id,
+                  CASE WHEN {private} THEN '' ELSE a.node_name END AS node_name
+           FROM share_access a LEFT JOIN users u ON u.id = a.owner_id
+         ) a"
+    ));
     f.eq("a.owner_id", owner_id)
-        .eq("a.share_id", q.share_id.as_deref())
-        .contains(&["u.username"], q.owner.as_deref())
+        .eq("a.token", q.share_id.as_deref())
+        .contains(&["a.owner_name"], q.owner.as_deref())
         .one_of("a.event", q.event.as_deref())
         .contains(&["a.ip"], q.ip.as_deref())
         .contains(&["a.node_name", "a.share_id"], q.q.as_deref())
@@ -264,7 +279,12 @@ pub(super) async fn query_access(st: &AppState, q: &AccessQuery, owner_id: Optio
 }
 
 /// Share link access records: standard users only see links they created; administrators can query everything
-pub async fn share_access(State(st): State<AppState>, user: User, Query(q): Query<AccessQuery>) -> AppResult<Json<Value>> {
+pub async fn share_access(State(st): State<AppState>, user: User, Query(mut q): Query<AccessQuery>) -> AppResult<Json<Value>> {
+    // A link an administrator may only revoke is asked for by the handle they were given for it
+    if let Some(id) = &q.share_id {
+        let token = crate::shares::resolve(&st, &mut *st.db.acquire().await?, id).await?;
+        q.share_id = Some(token.unwrap_or_default());
+    }
     // Standard users can only query links they created (including records left by deleted links), and a link someone
     // else created that they may manage (a manager of its space, the owner of its item)
     let others = match &q.share_id {
@@ -273,7 +293,7 @@ pub async fn share_access(State(st): State<AppState>, user: User, Query(q): Quer
     };
     let owner = if user.is_admin() || others { None } else { Some(user.id) };
     let limit = page_size(q.limit);
-    Ok(page(query_access(&st, &q, owner, limit).await?, limit, |r| r.id))
+    Ok(page(query_access(&st, &q, owner, user.is_admin().then_some(user.id), limit).await?, limit, |r| r.id))
 }
 
 // ───────────── Sign-in log ─────────────
