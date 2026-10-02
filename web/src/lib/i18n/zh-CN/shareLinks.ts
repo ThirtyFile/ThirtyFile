@@ -83,7 +83,7 @@ export default {
   "To stop them signing in and keep everything as it is, disable the account instead.": "如果只想让该用户无法登录、其他一切保持原样，请改为停用账号。",
   "Their files": "该用户的文件",
   "Move their files to:": "将该用户的文件移到：",
-  "They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash is emptied.": "文件将放入该空间顶层一个名为“Files of {name}”的新文件夹，并计入该空间的容量。该用户的回收站将被清空。",
+  "They go into a new folder named \"{name}\" at the top of that space, and count toward its size. Their trash is emptied.": "文件将放入该空间顶层一个名为“{name}”的新文件夹，并计入该空间的容量。该用户的回收站将被清空。",
   "Delete their files permanently": "永久删除该用户的文件",
   "This can't be undone.": "此操作无法撤销。",
 };

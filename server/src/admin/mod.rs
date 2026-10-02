@@ -49,6 +49,17 @@ pub struct UserRow {
     pub personal_location: Option<String>,
     /// The storage location their personal space is waiting for, when it couldn't be created yet (personal.rs)
     pub personal_pending: Option<String>,
+    /// The folder their files go into when their personal space is removed and the files are kept ("Files of amy", in
+    /// the system default language); a number is added when the name is taken
+    #[sqlx(skip)]
+    files_folder: String,
+}
+
+impl UserRow {
+    fn named(mut self, lang: crate::i18n::Lang) -> UserRow {
+        self.files_folder = crate::i18n::tr(lang, crate::i18n::Text::FilesOf, &[("username", &self.username)]);
+        self
+    }
 }
 
 const USER_ROW_SQL: &str =
@@ -83,7 +94,8 @@ pub async fn list(State(st): State<AppState>, _: Admin, Query(q): Query<ListQuer
     let limit = q.limit.map_or(-1, |l| l.clamp(1, 1000));
     let term = q.q.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(|s| format!("%{}%", crate::util::like_escape(s)));
     let query = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(q.after.unwrap_or(0)).bind(limit).bind(term);
-    Ok(Json(query.fetch_all(&st.db).await?))
+    let lang = crate::i18n::names(&st);
+    Ok(Json(query.fetch_all(&st.db).await?.into_iter().map(|r: UserRow| r.named(lang)).collect()))
 }
 
 #[derive(Deserialize)]
@@ -127,7 +139,8 @@ fn role_label(role: UserRole) -> &'static str {
 
 pub async fn get_row(st: &AppState, id: i64) -> AppResult<UserRow> {
     let sql = format!("{USER_ROW_SQL} WHERE u.id = ?");
-    sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(id).fetch_optional(&st.db).await?.ok_or_else(|| AppError::not_found("User not found"))
+    let row: Option<UserRow> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(id).fetch_optional(&st.db).await?;
+    Ok(row.ok_or_else(|| AppError::not_found("User not found"))?.named(crate::i18n::names(st)))
 }
 
 pub async fn create(State(st): State<AppState>, Admin(me): Admin, Json(req): Json<CreateReq>) -> AppResult<Json<UserRow>> {
@@ -584,6 +597,28 @@ mod tests {
 
     async fn drive_row(env: &testutil::TestEnv, node: &str) -> (String, String) {
         sqlx::query_as("SELECT n.drive_id, n.parent_id FROM nodes n WHERE n.id = ?").bind(node).fetch_one(&env.st.db).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_folder_of_a_removed_users_files_is_named_in_the_system_default_language() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let amy = env.user("amy", true).await;
+        sized_file(&env, &amy, amy.root(), "notes.txt", 10).await;
+        let company = env.st.shared_root().unwrap();
+        let company_drive = env.drive_of(&company).await;
+        assert_eq!(get_row(&env.st, amy.id).await.unwrap().files_folder, "Files of amy");
+        // Whoever removes it, and whatever language their page is in
+        let settings = SettingsReq { default_lang: Some("zh-TW".into()), ..Default::default() };
+        let _ = update_settings(State(env.st.clone()), Admin(admin), Json(settings)).await.unwrap();
+        let name = crate::i18n::tr(crate::i18n::Lang::ZhTw, crate::i18n::Text::FilesOf, &[("username", "amy")]);
+        assert_ne!(name, "Files of amy");
+        assert_eq!(get_row(&env.st, amy.id).await.unwrap().files_folder, name);
+
+        let _ = delete_user(&env, amy.id, json!({ "move_to": company_drive })).await.unwrap();
+        let (n,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE parent_id = ? AND name = ?").bind(&company).bind(&name).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(n, 1);
     }
 
     async fn used(env: &testutil::TestEnv, drive: &str) -> i64 {

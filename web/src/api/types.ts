@@ -1212,6 +1212,9 @@ export interface UserRow {
   personal_location: string | null;
   /** The storage location their personal space waits for, when it couldn't be created yet (the location wasn't available) */
   personal_pending: string | null;
+  /** The folder their files go into when their personal space is removed and the files are kept ("Files of amy", in the
+   * system default language; a number is added when the name is taken) */
+  files_folder: string;
 }
 
 export interface SystemSettingsReq {

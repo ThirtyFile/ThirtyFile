@@ -105,6 +105,11 @@ pub fn split_name(name: &str, is_folder: bool) -> (&str, &str) {
 /// Compares names the way File Explorer sorts them: letter case is ignored in every language, and runs of digits
 /// compare by their value, so "File 2" comes before "File 10". Names that only differ in case or leading zeros still
 /// get a fixed order, so sorting is stable.
+///
+/// Other characters compare by their Unicode code point. Chinese and Japanese names therefore sort in Unicode order:
+/// hiragana, then katakana, then Han characters by code point, not by pronunciation or stroke count. The order is
+/// the same for every viewer and every language, which keeps the index of folder listings (the `natural_name`
+/// collation) and their pages stable; sorting by a viewer's language would need an index per language.
 pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     let (la, lb) = (a.to_lowercase(), b.to_lowercase());
@@ -387,6 +392,14 @@ mod tests {
         names.sort_by(|a, b| super::natural_cmp(a, b));
         assert_eq!(names, ["abc", "B", "File 1.txt", "File 02.txt", "file 2.txt", "File 10.txt", "Été", "ÉTÉ 3"]);
         assert_eq!(super::natural_cmp("a", "A"), std::cmp::Ordering::Greater);
+    }
+
+    #[test]
+    fn chinese_and_japanese_names_sort_by_code_point_whatever_the_language() {
+        // 漢字 U+6F22, 中文 U+4E2D, かな U+304B, カナ U+30AB, ファイル U+30D5…
+        let mut names = vec!["漢字", "ファイル10", "中文", "カナ", "abc", "ファイル9", "かな", "File 2"];
+        names.sort_by(|a, b| super::natural_cmp(a, b));
+        assert_eq!(names, ["abc", "File 2", "かな", "カナ", "ファイル9", "ファイル10", "中文", "漢字"]);
     }
 
     #[test]

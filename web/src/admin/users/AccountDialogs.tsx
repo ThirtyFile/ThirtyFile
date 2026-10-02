@@ -65,10 +65,10 @@ function PersonalFilesChoice({ c }: { c: ReturnType<typeof usePersonalFiles> }) 
           </NativeSelect>
           <span className="text-xs text-muted-foreground">
             {own?.mode === "folder"
-              ? t('They go into a new folder named "Files of {name}" at the top of that space, and count toward its size. Their trash stays in their folder on the server.', {
-                  name: user.username,
+              ? t('They go into a new folder named "{name}" at the top of that space, and count toward its size. Their trash stays in their folder on the server.', {
+                  name: user.files_folder,
                 })
-              : t('They go into a new folder named "Files of {name}" at the top of that space, and count toward its size. Their trash is emptied.', { name: user.username })}
+              : t('They go into a new folder named "{name}" at the top of that space, and count toward its size. Their trash is emptied.', { name: user.files_folder })}
           </span>
         </span>
       </Label>

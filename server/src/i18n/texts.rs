@@ -116,6 +116,15 @@ texts! {
     EmailChangedBody = "The email address of the account \"{username}\" on {site} was changed to {new}. Notifications and password reset links go there from now on.\n\nIf you didn't change it, change your password now or contact your administrator.\n",
     /// `new` when the address was removed
     EmailChangedNone = "(none)",
+
+    // ───── Names ThirtyFile gives what it creates in people's folders, in the system default language ─────
+    /// The folder a removed personal space's files are moved into
+    FilesOf = "Files of {username}",
+    /// The copy of a file saved while it was changed in its folder on the server; `name` without the extension, which
+    /// follows the text
+    ConflictCopy = "{name} (conflict copy)",
+    /// The folder a restore from a backup goes into, when the page names none; `date` as 2026-10-01 14.05
+    RestoredFolder = "Restored {space} {date}",
 }
 
 /// A language's translations

@@ -230,9 +230,10 @@ const LIVE: &str = "WITH RECURSIVE sub(id) AS (
        UNION ALL SELECT c.id FROM nodes c JOIN sub ON c.parent_id = sub.id WHERE c.trashed_at IS NULL
      )";
 
-/// Moves everything in a personal space into a new folder "Files of <username>" at the top of another space when one
-/// of the two is a folder space: item by item, the way the web moves items between spaces (renamed on the same disk,
-/// else copied; items keep their ids). The trash stays behind. Returns where they went (for the log).
+/// Moves everything in a personal space into a new folder "Files of <username>" (in the system default language,
+/// `i18n::names`) at the top of another space when one of the two is a folder space: item by item, the way the web
+/// moves items between spaces (renamed on the same disk, else copied; items keep their ids). The trash stays behind.
+/// Returns where they went (for the log).
 async fn move_personal_across(
     st: &AppState,
     me: &crate::auth::User,
@@ -255,7 +256,7 @@ async fn move_personal_across(
         let mut tx = crate::db::begin_write(&st.db).await?;
         check_room(&mut tx, &own.root_id, target).await?;
         let top = tree::get_node(&mut tx, &target.root_id).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
-        let wanted = format!("Files of {username}");
+        let wanted = crate::i18n::tr(crate::i18n::names(st), crate::i18n::Text::FilesOf, &[("username", username)]);
         let name = if target.is_folder() {
             crate::fsops::free_name(&mut tx, &top, &wanted, true).await?
         } else {
@@ -316,7 +317,8 @@ async fn move_personal_files(
     let target = tree::get_drive(conn, target_id).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
     check_target(&target, drive_id)?;
     let bytes = check_room(conn, root_id, &target).await?;
-    let name = tree::unique_name(conn, &target.root_id, &format!("Files of {username}"), true).await?;
+    let wanted = crate::i18n::tr(crate::i18n::names_in(conn).await?, crate::i18n::Text::FilesOf, &[("username", username)]);
+    let name = tree::unique_name(conn, &target.root_id, &wanted, true).await?;
     let folder = crate::content::create_folder(conn, me.id, &target.root_id, &name).await?;
     let sql = format!("{LIVE} UPDATE nodes SET drive_id = ?2 WHERE id IN (SELECT id FROM sub)");
     sqlx::query(sqlx::AssertSqlSafe(sql.as_str())).bind(root_id).bind(&target.id).execute(&mut *conn).await?;

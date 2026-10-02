@@ -713,6 +713,15 @@ mod tests {
         assert_eq!(std::fs::read(space.dir.join("notes.txt")).unwrap(), b"changed on the server");
         assert_eq!(std::fs::read(space.dir.join("notes (conflict copy).txt")).unwrap(), b"three");
         assert!(env.node_at(&space.drive, "notes (conflict copy).txt").await.is_some());
+
+        // The copy is named in the system default language, whoever saves
+        env.st.system.write().unwrap().default_lang = "zh-TW".into();
+        write_old(&space.dir.join("notes.txt"), b"changed on the server again");
+        let err = save(b"four", node(&env, &id).await.updated_at).await.unwrap_err();
+        assert_eq!(err.code, Some("conflict_copy"), "{}", err.message);
+        let copy = format!("{}.txt", crate::i18n::tr(crate::i18n::Lang::ZhTw, crate::i18n::Text::ConflictCopy, &[("name", "notes")]));
+        assert_ne!(copy, "notes (conflict copy).txt");
+        assert_eq!(std::fs::read(space.dir.join(&copy)).unwrap(), b"four");
     }
 
     #[tokio::test]
