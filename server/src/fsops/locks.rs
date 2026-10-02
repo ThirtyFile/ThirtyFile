@@ -121,3 +121,64 @@ pub async fn lock(st: &AppState, user: &User, ids: &[&str]) -> AppResult<SpaceLo
 pub async fn lock_space(st: &AppState, drive_id: &str) -> OwnedMutexGuard<()> {
     crate::folders::drive_lock(st, drive_id).lock_owned().await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil;
+
+    /// Renames `from` to `to` in the space's folder `root` (making the folder `made` for it first), as a change does,
+    /// and notes it in `locks`
+    fn rename(locks: &SpaceLocks, root: &Path, from: &str, to: &str, made: Option<&str>) {
+        let root = Pinned::root(root).unwrap();
+        let made = made.map(|m| {
+            std::fs::create_dir(root.as_path().join(m)).unwrap();
+            root.join(m).unwrap()
+        });
+        let (was, now) = (root.join(from).unwrap(), root.join(to).unwrap());
+        rename_new(was.as_path(), now.as_path()).unwrap();
+        locks.note(now, was, made);
+    }
+
+    #[tokio::test]
+    async fn renames_of_a_change_that_fails_are_put_back_even_when_the_disk_hangs() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let space = env.folder_space("Shared").await;
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(space.dir.join(name), name).unwrap();
+        }
+
+        // A change that fails: its renames are put back, newest first, and the folders it made removed
+        let locks = lock(&env.st, &admin, &[&space.root]).await.unwrap();
+        rename(&locks, &space.dir, "a.txt", "trash/a.txt", Some("trash"));
+        rename(&locks, &space.dir, "b.txt", "a.txt", None);
+        drop(locks);
+        assert_eq!(std::fs::read(space.dir.join("a.txt")).unwrap(), b"a.txt");
+        assert_eq!(std::fs::read(space.dir.join("b.txt")).unwrap(), b"b.txt");
+        assert!(!space.dir.join("trash").exists());
+
+        // A change that was committed keeps them
+        let locks = lock(&env.st, &admin, &[&space.root]).await.unwrap();
+        rename(&locks, &space.dir, "c.txt", "d.txt", None);
+        locks.committed();
+        drop(locks);
+        assert!(space.dir.join("d.txt").exists() && !space.dir.join("c.txt").exists());
+
+        // The disk stops answering while a change holds the lock: the change fails, and the space counts as stuck
+        let locks = lock(&env.st, &admin, &[&space.root]).await.unwrap();
+        rename(&locks, &space.dir, "d.txt", "e.txt", None);
+        let _short = testing::short_waits();
+        let hung = testing::hang(&space.drive, Duration::from_secs(2));
+        assert_eq!(ready(&env.st, &space.drive).await.unwrap_err().status, StatusCode::SERVICE_UNAVAILABLE);
+        drop(hung);
+        assert!(stuck(&space.drive));
+        // Its renames are put back on a blocking thread, which the async worker doesn't wait for…
+        let started = std::time::Instant::now();
+        drop(locks);
+        assert!(started.elapsed() < Duration::from_millis(500));
+        // …and the space stays locked until they are
+        let _turn = tokio::time::timeout(Duration::from_secs(10), lock_space(&env.st, &space.drive)).await.unwrap();
+        assert!(space.dir.join("d.txt").exists() && !space.dir.join("e.txt").exists());
+    }
+}

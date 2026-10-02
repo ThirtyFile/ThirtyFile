@@ -20,7 +20,8 @@ pub async fn stage_upload(st: &AppState, folder: &Node, tmp: &Path, size: u64) -
 pub(super) async fn stage(folder: &Node, tmp: &Path, size: u64) -> AppResult<Pinned> {
     let f = folder.clone();
     let staged = on_disk(folder.drive(), disk_wake(), move || space_root(&f)?.join(&format!("{UPLOAD_PREFIX}{}", new_id())).map_err(disk_error)).await?;
-    if tokio::fs::rename(tmp, staged.as_path()).await.is_err() {
+    // (tests can put every folder on another disk, `OTHER_DISK`)
+    if other_disk() || tokio::fs::rename(tmp, staged.as_path()).await.is_err() {
         let (from, to) = (tmp.to_path_buf(), staged.clone());
         let copied = tokio::task::spawn_blocking(move || {
             let mut src = std::fs::File::open(&from)?;
@@ -111,4 +112,51 @@ pub async fn unchanged_on_disk(conn: &mut SqliteConnection, file: &Node) -> AppR
         Ok(stat(path.as_path()).is_ok_and(|s| Some(s.size) == fs_size && Some(s.mtime_ns) == fs_mtime && Some(s.ino) == fs_ino))
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil;
+
+    /// The names ThirtyFile gives uploads in the space's folder
+    fn staged_uploads(dir: &Path) -> Vec<String> {
+        std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with(UPLOAD_PREFIX)).collect()
+    }
+
+    #[tokio::test]
+    async fn an_upload_is_copied_into_a_space_on_another_disk_and_checked() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let space = env.folder_space("Shared").await;
+        let folder = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &space.root).await.unwrap().unwrap();
+        let received = |body: &[u8]| {
+            let path = env.st.tmp_dir().join(new_id());
+            std::fs::write(&path, body).unwrap();
+            path
+        };
+        // /data and the space's folder on different mounts, as in Docker: a rename can't move the file there
+        let (whole, short) = (received(b"hello"), received(b"hell"));
+        super::super::OTHER_DISK.with(|d| d.set(true));
+        let copied = stage_upload(&env.st, &folder, &whole, 5).await;
+        // A copy that doesn't come to the size received is removed, and the upload kept for another try
+        let incomplete = stage(&folder, &short, 5).await;
+        super::super::OTHER_DISK.with(|d| d.set(false));
+
+        let err = incomplete.expect_err("an incomplete copy fails");
+        assert_eq!(err.message, "A file wasn't copied completely");
+        assert!(short.exists());
+        let staged = copied.unwrap();
+        assert!(!whole.exists(), "the upload is removed once copied");
+        assert_eq!(std::fs::read(staged.as_path()).unwrap(), b"hello");
+        assert_eq!(staged_uploads(&space.dir), [staged.name().unwrap().to_string()]);
+
+        // It is then put in place like any other upload
+        let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+        let id = place_file(&mut tx, &staged, admin.id, &folder, "hello.txt").await.unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(std::fs::read(space.dir.join("hello.txt")).unwrap(), b"hello");
+        assert_eq!(env.node_at(&space.drive, "hello.txt").await, Some((id, 5)));
+        assert!(staged_uploads(&space.dir).is_empty());
+    }
 }
