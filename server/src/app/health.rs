@@ -121,4 +121,43 @@ mod tests {
         assert_eq!((v["status"].as_str(), v["locations"]["nas"].as_str()), (Some("degraded"), Some("offline")));
         assert!(!v.to_string().contains("secret host"), "reasons stay private");
     }
+
+    /// A server on a local port that answers every request with `reply`, once per connection
+    async fn answering(reply: &'static str) -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+                let _ = sock.write_all(reply.as_bytes()).await;
+            }
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn the_probe_asks_the_local_server_and_succeeds_only_on_200() {
+        // The real endpoint, served on a local port
+        let env = crate::testutil::env().await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let app = axum::Router::new().route("/api/health", axum::routing::get(health)).with_state(env.st.clone());
+        tokio::spawn(async move { axum::serve(listener, app).await });
+        assert!(health_probe(&format!("127.0.0.1:{port}")).await);
+        // Listening on every address: the probe asks this machine
+        assert!(health_probe(&format!("0.0.0.0:{port}")).await);
+        // A name tried address by address (localhost may be ::1 first, where nothing listens)
+        assert!(health_probe(&format!("localhost:{port}")).await);
+
+        let failing = answering("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 18\r\n\r\n{\"status\":\"error\"}").await;
+        assert!(!health_probe(&format!("127.0.0.1:{failing}")).await);
+        let garbled = answering("hello").await;
+        assert!(!health_probe(&format!("127.0.0.1:{garbled}")).await);
+        // Nothing listening, and an address that isn't one
+        let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap().port();
+        assert!(!health_probe(&format!("127.0.0.1:{closed}")).await);
+        assert!(!health_probe("not an address").await);
+    }
 }

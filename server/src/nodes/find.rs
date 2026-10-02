@@ -243,3 +243,110 @@ pub async fn shared_with_me(State(st): State<AppState>, user: User) -> AppResult
             .collect(),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+
+    use super::*;
+    use crate::testutil;
+
+    fn favorite(ids: &[&str], on: bool) -> Json<FavoriteReq> {
+        Json(FavoriteReq { ids: ids.iter().map(|s| s.to_string()).collect(), favorite: on })
+    }
+
+    async fn favorite_names(env: &testutil::TestEnv, user: &User, sort: Option<&str>, order: Option<&str>) -> Vec<String> {
+        let q = ListQuery { sort: sort.map(Into::into), order: order.map(Into::into), ..Default::default() };
+        let Json(items) = favorites(State(env.st.clone()), user.clone(), Query(q)).await.unwrap();
+        assert!(items.iter().all(|l| l.node.is_favorite));
+        items.into_iter().map(|l| l.node.name).collect()
+    }
+
+    async fn trash(env: &testutil::TestEnv, id: &str) {
+        sqlx::query("UPDATE nodes SET trashed_at = ? WHERE id = ?").bind(now()).bind(id).execute(&env.st.db).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn favorites_list_what_the_person_marked_and_can_still_open() {
+        let env = testutil::env().await;
+        let (amy, ben) = (env.user("amy", true).await, env.user("ben", true).await);
+        let docs = env.folder(&amy, amy.root(), "Docs").await;
+        let (a, b) = (env.stored_file(&amy, &docs, "a.txt", b"a").await, env.stored_file(&amy, amy.root(), "b.txt", b"bb").await);
+        let shared = env.stored_file(&ben, ben.root(), "shared.txt", b"s").await;
+        env.grant(&shared, &amy, "viewer").await;
+
+        let _ = set_favorite(State(env.st.clone()), amy.clone(), favorite(&[&docs, &a, &b, &shared], true)).await.unwrap();
+        // Marking again changes nothing
+        let _ = set_favorite(State(env.st.clone()), amy.clone(), favorite(&[&a], true)).await.unwrap();
+        // Folders first, then in the order asked for
+        assert_eq!(favorite_names(&env, &amy, None, None).await, ["Docs", "a.txt", "b.txt", "shared.txt"]);
+        assert_eq!(favorite_names(&env, &amy, Some("name"), Some("desc")).await, ["Docs", "shared.txt", "b.txt", "a.txt"]);
+        assert_eq!(favorite_names(&env, &amy, Some("size"), Some("desc")).await, ["Docs", "b.txt", "a.txt", "shared.txt"]);
+        // They are the person's own: ben's list is empty
+        assert!(favorite_names(&env, &ben, None, None).await.is_empty());
+        // Where each is, as the list shows it
+        let Json(items) = favorites(State(env.st.clone()), amy.clone(), Query(ListQuery::default())).await.unwrap();
+        let a_item = items.iter().find(|l| l.node.id == a).unwrap();
+        assert_eq!(a_item.location_path, ["Docs"]);
+        assert!(items.iter().find(|l| l.node.id == shared).unwrap().location_space.is_none(), "only shared with amy");
+
+        // Unmarked, in the trash, or no longer shared: not listed
+        let _ = set_favorite(State(env.st.clone()), amy.clone(), favorite(&[&b], false)).await.unwrap();
+        trash(&env, &a).await;
+        env.revoke(&shared, &amy).await;
+        assert_eq!(favorite_names(&env, &amy, None, None).await, ["Docs"]);
+
+        // What can't be marked: nothing, too much at once, a space's top folder, or someone else's file
+        let status = |r: AppResult<Json<Value>>| r.unwrap_err().status;
+        assert_eq!(status(set_favorite(State(env.st.clone()), amy.clone(), favorite(&[], true)).await), StatusCode::BAD_REQUEST);
+        let many: Vec<String> = (0..=MAX_BATCH).map(|i| format!("n{i}")).collect();
+        let too_many = Json(FavoriteReq { ids: many, favorite: true });
+        assert_eq!(status(set_favorite(State(env.st.clone()), amy.clone(), too_many).await), StatusCode::BAD_REQUEST);
+        assert!(set_favorite(State(env.st.clone()), amy.clone(), favorite(&[amy.root()], true)).await.is_err());
+        let bens = env.stored_file(&ben, ben.root(), "private.txt", b"p").await;
+        assert!(set_favorite(State(env.st.clone()), amy.clone(), favorite(&[&bens], true)).await.is_err());
+        // A batch with one item that can't be marked marks none
+        assert!(set_favorite(State(env.st.clone()), amy.clone(), favorite(&[&b, &bens], true)).await.is_err());
+        assert_eq!(favorite_names(&env, &amy, None, None).await, ["Docs"]);
+    }
+
+    #[tokio::test]
+    async fn shared_with_me_lists_what_others_shared_with_their_role_and_name() {
+        let env = testutil::env().await;
+        let (amy, ben) = (env.user("amy", true).await, env.user("ben", true).await);
+        let plans = env.folder(&ben, ben.root(), "Plans").await;
+        let inside = env.stored_file(&ben, &plans, "inside.txt", b"i").await;
+        let notes = env.stored_file(&ben, ben.root(), "notes.txt", b"n").await;
+        let gone = env.stored_file(&ben, ben.root(), "gone.txt", b"g").await;
+        let mut c = env.st.db.acquire().await.unwrap();
+        for (node, role) in [(&plans, "editor"), (&notes, "viewer"), (&gone, "viewer")] {
+            crate::db::add_grant(&mut c, node, "user", amy.id, role, Some(ben.id), None).await.unwrap();
+        }
+        // A file in that folder, also shared on its own, is listed on its own too
+        crate::db::add_grant(&mut c, &inside, "user", amy.id, "viewer", Some(ben.id), None).await.unwrap();
+        // Something in a space amy is a member of isn't "shared with" her
+        let company = crate::tree::user_drives(&mut c, &amy).await.unwrap().into_iter().find(|(d, _)| d.kind == crate::tree::SpaceKind::Company).unwrap().0;
+        let report = env.stored_file(&env.admin().await, &company.root_id, "report.txt", b"r").await;
+        crate::db::add_grant(&mut c, &report, "user", amy.id, "editor", Some(ben.id), None).await.unwrap();
+        drop(c);
+        trash(&env, &gone).await;
+
+        let Json(items) = shared_with_me(State(env.st.clone()), amy.clone()).await.unwrap();
+        let mut got: Vec<(String, Role, String)> = items.into_iter().map(|i| (i.located.node.name, i.role, i.sharer)).collect();
+        got.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            got,
+            [
+                ("Plans".to_string(), Role::Editor, "ben".to_string()),
+                ("inside.txt".to_string(), Role::Viewer, "ben".to_string()),
+                ("notes.txt".to_string(), Role::Viewer, "ben".to_string()),
+            ]
+        );
+        // Nothing is shared with ben
+        assert!(shared_with_me(State(env.st.clone()), ben.clone()).await.unwrap().0.is_empty());
+        // Revoked: gone from the list
+        env.revoke(&notes, &amy).await;
+        let Json(items) = shared_with_me(State(env.st.clone()), amy.clone()).await.unwrap();
+        assert!(items.iter().all(|i| i.located.node.id != notes));
+    }
+}
