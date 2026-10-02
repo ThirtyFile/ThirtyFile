@@ -433,160 +433,15 @@ pub fn render(n: &Notice, zh: bool, tz_offset: i64, site: &str, base_url: &str) 
     let name = shown_name(d, zh);
     let role = role_name(d["role"].as_str().unwrap_or_default(), zh);
     let ends = d["expires_at"].as_i64().map(|t| local_time(t, tz_offset));
-    let (subject, mut body) = match (n.kind, zh) {
-        ("shared", _) => {
-            let by = d["by"].as_str().unwrap_or_default();
-            let space = d["item"].as_str() == Some("space");
-            let subject = match (space, zh) {
-                (true, false) => format!("{by} added you to the space “{name}”"),
-                (false, false) => format!("{by} shared “{name}” with you"),
-                (true, true) => format!("{by} 將你加入了空間「{name}」"),
-                (false, true) => format!("{by} 與你分享了「{name}」"),
-            };
-            let mut body = if zh { format!("{subject}。\n\n你的角色：{role}。\n") } else { format!("{subject}.\n\nYour role: {role}.\n") };
-            if let Some(ends) = &ends {
-                body.push_str(&if zh { format!("你的存取權將於 {ends} 結束。\n") } else { format!("Your access ends on {ends}.\n") });
-            }
-            (subject, body)
-        }
-        ("space_full", _) => {
-            let used = format_bytes(d["used"].as_i64().unwrap_or_default());
-            let quota = format_bytes(d["quota"].as_i64().unwrap_or_default());
-            let percent = d["percent"].as_i64().unwrap_or_default();
-            if zh {
-                (
-                    format!("空間「{name}」快滿了"),
-                    format!(
-                        "「{name}」已使用 {used}（共 {quota}，{percent}%）。空間滿了之後就無法再加入檔案。請刪除不再需要的檔案並清空垃圾桶，或請管理員加大空間。\n"
-                    ),
-                )
-            } else {
-                (
-                    format!("The space “{name}” is almost full"),
-                    format!(
-                        "“{name}” uses {used} of {quota} ({percent}%). Once it is full, no more files can be added. Delete files you no longer need and empty the trash, or ask an administrator for more space.\n"
-                    ),
-                )
-            }
-        }
-        ("backup", _) => {
-            let backup = d["name"].as_str().unwrap_or_default();
-            let error = d["error"].as_str().unwrap_or_default();
-            let since = d["since"].as_i64().map(|t| local_time(t, tz_offset));
-            let (subject, text) = match (d["state"].as_str().unwrap_or_default(), zh) {
-                ("failing", false) => (format!("The backup “{backup}” failed"), format!("The latest snapshot of “{backup}” stopped by an error: {error}\n")),
-                ("failing", true) => (format!("備份「{backup}」失敗"), format!("「{backup}」最新的快照因錯誤而停止：{error}\n")),
-                ("waiting", false) => (
-                    format!("The backup “{backup}” can't reach its location"),
-                    format!("The location of “{backup}” can't be reached: {error}\nIt is tried again every few minutes.\n"),
-                ),
-                ("waiting", true) => {
-                    (format!("備份「{backup}」無法連線到存放位置"), format!("無法連線到「{backup}」的存放位置：{error}\n每隔幾分鐘會自動再試一次。\n"))
-                }
-                ("overdue", false) => (format!("The backup “{backup}” is overdue"), format!("“{backup}” made no complete snapshot for longer than it should.\n")),
-                ("overdue", true) => (format!("備份「{backup}」逾期了"), format!("「{backup}」超過預定的時間都沒有完成快照。\n")),
-                (_, false) => (format!("The backup “{backup}” works again"), format!("“{backup}” made a complete snapshot again.\n")),
-                (_, true) => (format!("備份「{backup}」恢復正常"), format!("「{backup}」又完成了快照。\n")),
-            };
-            let mut body = text;
-            if let Some(since) = since {
-                body.push_str(&if zh { format!("\n最新的完整快照：{since}。\n") } else { format!("\nNewest complete snapshot: {since}.\n") });
-            }
-            body.push_str(if zh { "\n請到「控制台 › 備份」查看。\n" } else { "\nSee Control panel › Backups.\n" });
-            (subject, body)
-        }
-        ("replica", _) => {
-            let policy = d["name"].as_str().unwrap_or_default();
-            let error = d["error"].as_str().filter(|e| !e.is_empty());
-            let (current, wanted) = (d["current"].as_i64().unwrap_or_default(), d["wanted"].as_i64().unwrap_or_default());
-            let (subject, mut body) = match (d["state"].as_str() == Some("degraded"), zh) {
-                (true, false) => (
-                    format!("The replicas “{policy}” aren't all kept"),
-                    format!("“{policy}” keeps {current} of the {wanted} copies it should: a target can't be reached, failed, holds damaged copies or is behind.\n"),
-                ),
-                (true, true) => (
-                    format!("複本「{policy}」沒有全部保持"),
-                    format!("「{policy}」應保持 {wanted} 份複本，目前只有 {current} 份是最新的：有目標無法連線、失敗、有損毀的複本或落後。\n"),
-                ),
-                (false, false) => (format!("The replicas “{policy}” are kept again"), format!("“{policy}” keeps its copies again.\n")),
-                (false, true) => (format!("複本「{policy}」恢復正常"), format!("「{policy}」又保持了它的複本。\n")),
-            };
-            if let Some(error) = error {
-                body.push_str(&format!("\n{error}\n"));
-            }
-            body.push_str(if zh { "\n請到「控制台 › 複本」查看。\n" } else { "\nSee Control panel › Replicas.\n" });
-            (subject, body)
-        }
-        ("link_upload", _) => {
-            let file = d["file"].as_str().unwrap_or_default();
-            if zh {
-                (format!("有人透過連結把「{file}」傳到了「{name}」"), format!("有人透過你建立的收件連結，把「{file}」上傳到「{name}」。\n"))
-            } else {
-                (
-                    format!("“{file}” arrived in “{name}” through a link"),
-                    format!("Someone uploaded “{file}” to “{name}” through a link you made that accepts files.\n"),
-                )
-            }
-        }
-        ("app_password", _) => {
-            let ip = d["ip"].as_str().unwrap_or_default();
-            let (read_only, name) = (d["scope"].as_str() == Some("read"), d["name"].as_str().unwrap_or_default());
-            if zh {
-                let access = if read_only { "只能讀取檔案" } else { "可讀取及變更檔案" };
-                (
-                    format!("你的帳號建立了應用程式密碼「{name}」"),
-                    format!(
-                        "你的帳號剛建立了應用程式密碼「{name}」（{access}），來源位址 {ip}。\n\n如果不是你建立的，請在帳號選單的「應用程式密碼」中移除它，並變更你的密碼。\n"
-                    ),
-                )
-            } else {
-                let access = if read_only { "read files only" } else { "read and change files" };
-                (
-                    format!("An app password “{name}” was created for your account"),
-                    format!(
-                        "The app password “{name}” ({access}) was just created for your account, from {ip}.\n\nIf you didn't create it, remove it under App passwords in the account menu and change your password.\n"
-                    ),
-                )
-            }
-        }
-        ("sign_in_method", _) => {
-            let ip = d["ip"].as_str().unwrap_or_default();
-            let provider = d["label"].as_str().unwrap_or_default();
-            let account = d["account"].as_str().filter(|a| !a.is_empty());
-            if zh {
-                let account = account.map(|a| format!("（{a}）")).unwrap_or_default();
-                (
-                    format!("你的帳號連結了 {provider} 帳號"),
-                    format!(
-                        "你的帳號剛連結了 {provider} 帳號{account}，來源位址 {ip}。之後可以用它登入你的帳號，不需要密碼。\n\n如果不是你連結的，請在帳號選單的「登入方式」中取消連結，並變更你的密碼。\n"
-                    ),
-                )
-            } else {
-                let account = account.map(|a| format!(" ({a})")).unwrap_or_default();
-                (
-                    format!("A {provider} account was linked to your account"),
-                    format!(
-                        "A {provider} account{account} was just linked to your account, from {ip}. It can now sign in to your account without the password.\n\nIf you didn't link it, unlink it under Sign-in methods in the account menu and change your password.\n"
-                    ),
-                )
-            }
-        }
-        (_, false) => {
-            let ends = ends.unwrap_or_default();
-            (
-                format!("Your access to “{name}” ends soon"),
-                format!(
-                    "Your access to “{name}” ({role}) ends on {ends}. After that you can't open it any more. If you still need it, ask the person who shared it with you to extend it.\n"
-                ),
-            )
-        }
-        (_, true) => {
-            let ends = ends.unwrap_or_default();
-            (
-                format!("你對「{name}」的存取權即將結束"),
-                format!("你對「{name}」的存取權（{role}）將於 {ends} 結束，之後就無法再開啟。如果還需要，請分享給你的人延長期限。\n"),
-            )
-        }
+    let (subject, mut body) = match n.kind {
+        "shared" => shared_text(d, &name, role, ends.as_deref(), zh),
+        "space_full" => space_full_text(d, &name, zh),
+        "backup" => backup_text(d, tz_offset, zh),
+        "replica" => replica_text(d, zh),
+        "link_upload" => link_upload_text(d, &name, zh),
+        "app_password" => app_password_text(d, zh),
+        "sign_in_method" => sign_in_method_text(d, zh),
+        _ => expiring_text(&name, role, &ends.unwrap_or_default(), zh),
     };
     if let (Some(id), false) = (&n.node_id, base_url.is_empty()) {
         let path = if d["item"].as_str() == Some("file") { "view" } else { "files" };
@@ -599,6 +454,167 @@ pub fn render(n: &Notice, zh: bool, tz_offset: i64, site: &str, base_url: &str) 
         format!("\n—\nYou get this email because email notifications are on in {site}. To stop them, click the bell in {site} and open Notification settings.\n")
     });
     (subject, body)
+}
+
+/// Someone was given access to an item or a space
+fn shared_text(d: &Value, name: &str, role: &str, ends: Option<&str>, zh: bool) -> (String, String) {
+    let by = d["by"].as_str().unwrap_or_default();
+    let space = d["item"].as_str() == Some("space");
+    let subject = match (space, zh) {
+        (true, false) => format!("{by} added you to the space “{name}”"),
+        (false, false) => format!("{by} shared “{name}” with you"),
+        (true, true) => format!("{by} 將你加入了空間「{name}」"),
+        (false, true) => format!("{by} 與你分享了「{name}」"),
+    };
+    let mut body = if zh { format!("{subject}。\n\n你的角色：{role}。\n") } else { format!("{subject}.\n\nYour role: {role}.\n") };
+    if let Some(ends) = ends {
+        body.push_str(&if zh { format!("你的存取權將於 {ends} 結束。\n") } else { format!("Your access ends on {ends}.\n") });
+    }
+    (subject, body)
+}
+
+/// A space is almost full
+fn space_full_text(d: &Value, name: &str, zh: bool) -> (String, String) {
+    let used = format_bytes(d["used"].as_i64().unwrap_or_default());
+    let quota = format_bytes(d["quota"].as_i64().unwrap_or_default());
+    let percent = d["percent"].as_i64().unwrap_or_default();
+    if zh {
+        (
+            format!("空間「{name}」快滿了"),
+            format!("「{name}」已使用 {used}（共 {quota}，{percent}%）。空間滿了之後就無法再加入檔案。請刪除不再需要的檔案並清空垃圾桶，或請管理員加大空間。\n"),
+        )
+    } else {
+        (
+            format!("The space “{name}” is almost full"),
+            format!(
+                "“{name}” uses {used} of {quota} ({percent}%). Once it is full, no more files can be added. Delete files you no longer need and empty the trash, or ask an administrator for more space.\n"
+            ),
+        )
+    }
+}
+
+/// A backup policy fails, waits for its location or is overdue, or works again
+fn backup_text(d: &Value, tz_offset: i64, zh: bool) -> (String, String) {
+    let backup = d["name"].as_str().unwrap_or_default();
+    let error = d["error"].as_str().unwrap_or_default();
+    let since = d["since"].as_i64().map(|t| local_time(t, tz_offset));
+    let (subject, text) = match (d["state"].as_str().unwrap_or_default(), zh) {
+        ("failing", false) => (format!("The backup “{backup}” failed"), format!("The latest snapshot of “{backup}” stopped by an error: {error}\n")),
+        ("failing", true) => (format!("備份「{backup}」失敗"), format!("「{backup}」最新的快照因錯誤而停止：{error}\n")),
+        ("waiting", false) => (
+            format!("The backup “{backup}” can't reach its location"),
+            format!("The location of “{backup}” can't be reached: {error}\nIt is tried again every few minutes.\n"),
+        ),
+        ("waiting", true) => (format!("備份「{backup}」無法連線到存放位置"), format!("無法連線到「{backup}」的存放位置：{error}\n每隔幾分鐘會自動再試一次。\n")),
+        ("overdue", false) => (format!("The backup “{backup}” is overdue"), format!("“{backup}” made no complete snapshot for longer than it should.\n")),
+        ("overdue", true) => (format!("備份「{backup}」逾期了"), format!("「{backup}」超過預定的時間都沒有完成快照。\n")),
+        (_, false) => (format!("The backup “{backup}” works again"), format!("“{backup}” made a complete snapshot again.\n")),
+        (_, true) => (format!("備份「{backup}」恢復正常"), format!("「{backup}」又完成了快照。\n")),
+    };
+    let mut body = text;
+    if let Some(since) = since {
+        body.push_str(&if zh { format!("\n最新的完整快照：{since}。\n") } else { format!("\nNewest complete snapshot: {since}.\n") });
+    }
+    body.push_str(if zh { "\n請到「控制台 › 備份」查看。\n" } else { "\nSee Control panel › Backups.\n" });
+    (subject, body)
+}
+
+/// A replica policy doesn't keep all its copies, or does again
+fn replica_text(d: &Value, zh: bool) -> (String, String) {
+    let policy = d["name"].as_str().unwrap_or_default();
+    let error = d["error"].as_str().filter(|e| !e.is_empty());
+    let (current, wanted) = (d["current"].as_i64().unwrap_or_default(), d["wanted"].as_i64().unwrap_or_default());
+    let (subject, mut body) = match (d["state"].as_str() == Some("degraded"), zh) {
+        (true, false) => (
+            format!("The replicas “{policy}” aren't all kept"),
+            format!("“{policy}” keeps {current} of the {wanted} copies it should: a target can't be reached, failed, holds damaged copies or is behind.\n"),
+        ),
+        (true, true) => (
+            format!("複本「{policy}」沒有全部保持"),
+            format!("「{policy}」應保持 {wanted} 份複本，目前只有 {current} 份是最新的：有目標無法連線、失敗、有損毀的複本或落後。\n"),
+        ),
+        (false, false) => (format!("The replicas “{policy}” are kept again"), format!("“{policy}” keeps its copies again.\n")),
+        (false, true) => (format!("複本「{policy}」恢復正常"), format!("「{policy}」又保持了它的複本。\n")),
+    };
+    if let Some(error) = error {
+        body.push_str(&format!("\n{error}\n"));
+    }
+    body.push_str(if zh { "\n請到「控制台 › 複本」查看。\n" } else { "\nSee Control panel › Replicas.\n" });
+    (subject, body)
+}
+
+/// A file arrived through a link that accepts files
+fn link_upload_text(d: &Value, name: &str, zh: bool) -> (String, String) {
+    let file = d["file"].as_str().unwrap_or_default();
+    if zh {
+        (format!("有人透過連結把「{file}」傳到了「{name}」"), format!("有人透過你建立的收件連結，把「{file}」上傳到「{name}」。\n"))
+    } else {
+        (format!("“{file}” arrived in “{name}” through a link"), format!("Someone uploaded “{file}” to “{name}” through a link you made that accepts files.\n"))
+    }
+}
+
+/// An app password was created for the account
+fn app_password_text(d: &Value, zh: bool) -> (String, String) {
+    let ip = d["ip"].as_str().unwrap_or_default();
+    let (read_only, name) = (d["scope"].as_str() == Some("read"), d["name"].as_str().unwrap_or_default());
+    if zh {
+        let access = if read_only { "只能讀取檔案" } else { "可讀取及變更檔案" };
+        (
+            format!("你的帳號建立了應用程式密碼「{name}」"),
+            format!(
+                "你的帳號剛建立了應用程式密碼「{name}」（{access}），來源位址 {ip}。\n\n如果不是你建立的，請在帳號選單的「應用程式密碼」中移除它，並變更你的密碼。\n"
+            ),
+        )
+    } else {
+        let access = if read_only { "read files only" } else { "read and change files" };
+        (
+            format!("An app password “{name}” was created for your account"),
+            format!(
+                "The app password “{name}” ({access}) was just created for your account, from {ip}.\n\nIf you didn't create it, remove it under App passwords in the account menu and change your password.\n"
+            ),
+        )
+    }
+}
+
+/// A sign-in method was linked to the account
+fn sign_in_method_text(d: &Value, zh: bool) -> (String, String) {
+    let ip = d["ip"].as_str().unwrap_or_default();
+    let provider = d["label"].as_str().unwrap_or_default();
+    let account = d["account"].as_str().filter(|a| !a.is_empty());
+    if zh {
+        let account = account.map(|a| format!("（{a}）")).unwrap_or_default();
+        (
+            format!("你的帳號連結了 {provider} 帳號"),
+            format!(
+                "你的帳號剛連結了 {provider} 帳號{account}，來源位址 {ip}。之後可以用它登入你的帳號，不需要密碼。\n\n如果不是你連結的，請在帳號選單的「登入方式」中取消連結，並變更你的密碼。\n"
+            ),
+        )
+    } else {
+        let account = account.map(|a| format!(" ({a})")).unwrap_or_default();
+        (
+            format!("A {provider} account was linked to your account"),
+            format!(
+                "A {provider} account{account} was just linked to your account, from {ip}. It can now sign in to your account without the password.\n\nIf you didn't link it, unlink it under Sign-in methods in the account menu and change your password.\n"
+            ),
+        )
+    }
+}
+
+/// Access someone was given ends soon
+fn expiring_text(name: &str, role: &str, ends: &str, zh: bool) -> (String, String) {
+    if zh {
+        (
+            format!("你對「{name}」的存取權即將結束"),
+            format!("你對「{name}」的存取權（{role}）將於 {ends} 結束，之後就無法再開啟。如果還需要，請分享給你的人延長期限。\n"),
+        )
+    } else {
+        (
+            format!("Your access to “{name}” ends soon"),
+            format!(
+                "Your access to “{name}” ({role}) ends on {ends}. After that you can't open it any more. If you still need it, ask the person who shared it with you to extend it.\n"
+            ),
+        )
+    }
 }
 
 // ───────────── The bell ─────────────

@@ -203,6 +203,59 @@ enum Outcome {
 pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
     let (st, job) = (cx.st, cx.job);
     let p: Params = serde_json::from_str(&job.params).map_err(|_| AppError::internal("a restore without its space"))?;
+    let (set, dst, manifest) = open_snapshot(cx).await?;
+    let target = target_space(st, &p).await?;
+    let plan = plan(manifest.clone(), p.clone()).await?;
+    let restored: HashMap<String, String> = sqlx::query_as::<_, (String, String)>("SELECT source_id, node_id FROM backup_restored WHERE job_id = ?")
+        .bind(&job.id)
+        .fetch_all(&st.db)
+        .await?
+        .into_iter()
+        .collect();
+    cx.set_counts(0, 0, plan.files, plan.bytes);
+    cx.flush().await?;
+    // Into a new folder: made once (a restore that stopped finds it again)
+    let top = if p.original() {
+        target.root_id.clone()
+    } else {
+        match restored.get(TOP) {
+            Some(id) => id.clone(),
+            None => make_top(cx, &p, &target).await?,
+        }
+    };
+    let into = Restore { cx, set: &set.id, dst: dst.as_ref(), target: &target };
+    let mut walk = Walk { r: &into, p: &p, plan: &plan, top, places: restored, inside: HashSet::new(), roots: None, done: Done::default() };
+    let mut lines = read_lines(manifest);
+    while let Some(line) = lines.recv().await {
+        let line = line?;
+        if let Some(stop) = cx.stop() {
+            return Ok(stop);
+        }
+        if let Some(stop) = walk.line(line).await? {
+            return Ok(stop);
+        }
+    }
+    if let Some(e) = cx.failures_error() {
+        return Err(e);
+    }
+    let note = walk.done.note();
+    let _w = st.write_lock.lock().await;
+    let mut tx = crate::db::begin_write(&st.db).await?;
+    let res = async {
+        sqlx::query("DELETE FROM backup_restored WHERE job_id = ?").bind(&job.id).execute(&mut *tx).await?;
+        super::runner::finish(&mut tx, cx, Some(&note)).await?;
+        super::log(&mut tx, job, "backup_restored", &job.label).await?;
+        AppResult::Ok(())
+    }
+    .await;
+    crate::db::settle(tx, res).await?;
+    Ok(Stop::Done)
+}
+
+/// The snapshot a restore brings back, once it is complete and its location can be reached: the set, its location,
+/// and the snapshot's manifest (cached locally)
+async fn open_snapshot(cx: &Ctx<'_>) -> AppResult<(super::Set, std::sync::Arc<dyn Storage>, std::path::PathBuf)> {
+    let (st, job) = (cx.st, cx.job);
     let snapshot = job.snapshot_id.as_deref().ok_or_else(|| AppError::internal("a restore without its snapshot"))?;
     let set = super::load_set(&st.db, &job.set_id).await?;
     if set.removing {
@@ -223,146 +276,172 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
         .map_err(|e| AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("The copy's location can't be reached: {e}")))?;
     let dst = st.storage(&set.dest_location)?;
     let manifest = layout::manifest(st, dst.as_ref(), &set.id, snapshot, &sha, size as u64).await?;
-    let target = target_space(st, &p).await?;
-    let plan = plan(manifest.clone(), p.clone()).await?;
-    let restored: HashMap<String, String> = sqlx::query_as::<_, (String, String)>("SELECT source_id, node_id FROM backup_restored WHERE job_id = ?")
-        .bind(&job.id)
-        .fetch_all(&st.db)
-        .await?
-        .into_iter()
-        .collect();
-    cx.set_counts(0, 0, plan.files, plan.bytes);
-    cx.flush().await?;
-    // Into a new folder: made once (a restore that stopped finds it again)
-    let top = if p.original() {
-        target.root_id.clone()
-    } else {
-        match restored.get(TOP) {
-            Some(id) => id.clone(),
-            None => make_top(cx, &p, &target).await?,
+    Ok((set, dst, manifest))
+}
+
+/// Where a restore takes its files from and brings them: the job, the set and the location holding it, the space
+/// restored into
+struct Restore<'a> {
+    cx: &'a Ctx<'a>,
+    set: &'a str,
+    dst: &'a dyn Storage,
+    target: &'a tree::Drive,
+}
+
+/// A file of the manifest to bring back: its id there, its name, content and date
+struct Item<'a> {
+    source: &'a str,
+    name: &'a str,
+    hash: &'a str,
+    size: i64,
+    modified: i64,
+}
+
+/// How the files of a restore went, told when it is done
+#[derive(Default)]
+struct Done {
+    /// Restored under another name
+    renamed: i64,
+    /// Left out: their place was taken
+    skipped: i64,
+    /// Replaced the file in their place, which is kept as an earlier version
+    replaced: i64,
+}
+
+impl Done {
+    fn note(&self) -> String {
+        let (renamed, skipped, replaced) = (self.renamed, self.skipped, self.replaced);
+        let mut notes = Vec::new();
+        if renamed > 0 {
+            notes.push(if renamed == 1 {
+                "1 item was given a new name: its name was taken in its folder, or needed changing there".to_string()
+            } else {
+                format!("{renamed} items were given new names: their names were taken in their folders, or needed changing there")
+            });
         }
-    };
-    let mut places: HashMap<String, String> = restored;
-    let mut inside: HashSet<String> = HashSet::new();
-    let (mut renamed, mut skipped, mut replaced) = (0i64, 0i64, 0i64);
-    let mut lines = read_lines(manifest);
-    let mut roots: Option<HashSet<String>> = None;
-    while let Some(line) = lines.recv().await {
-        let line = line?;
-        if let Some(stop) = cx.stop() {
-            return Ok(stop);
+        if skipped > 0 {
+            notes.push(if skipped == 1 {
+                "1 file was skipped: its place was taken".to_string()
+            } else {
+                format!("{skipped} files were skipped: their places were taken")
+            });
         }
+        if replaced > 0 {
+            notes.push(if replaced == 1 {
+                "1 file was replaced; what it had is kept as an earlier version".to_string()
+            } else {
+                format!("{replaced} files were replaced; what they had is kept as earlier versions")
+            });
+        }
+        notes.push("Earlier versions and permissions aren't restored".to_string());
+        notes.join("\n")
+    }
+}
+
+/// Going through a manifest's lines: where each folder of the space went, which items are inside what is restored
+struct Walk<'a> {
+    r: &'a Restore<'a>,
+    p: &'a Params,
+    plan: &'a Plan,
+    /// The folder everything goes into (the space's top folder, to the original place)
+    top: String,
+    /// Where each item of the manifest went: folders by their new id, files done (recorded by a restore that stopped)
+    places: HashMap<String, String>,
+    /// The folders inside what is restored
+    inside: HashSet<String>,
+    /// The items chosen, found at the space's first folder
+    roots: Option<HashSet<String>>,
+    done: Done,
+}
+
+impl Walk<'_> {
+    /// One line of the manifest; Some(stop) when asked to stop
+    async fn line(&mut self, line: Line) -> AppResult<Option<Stop>> {
         match line {
-            Line::Folder { space, id, parent, path, trashed, .. } if space == p.space => {
-                let roots = roots.get_or_insert_with(|| chosen(&p, &id));
-                let is_root = roots.contains(&id);
-                let within = is_root || parent.as_ref().is_some_and(|pid| inside.contains(pid));
-                let on_the_way = p.original() && plan.ancestors.contains(&id);
-                if trashed.is_some() && !p.trash && !on_the_way {
-                    continue;
+            Line::Folder { space, id, parent, path, trashed, .. } if space == self.p.space => self.folder(id, parent, path, trashed).await?,
+            Line::File { space, id, parent, path, hash, size, trashed, modified, .. } if space == self.p.space => {
+                if trashed.is_some() && !self.p.trash || self.places.contains_key(&id) {
+                    return Ok(None);
                 }
-                if within {
-                    inside.insert(id.clone());
-                }
-                if !within && !on_the_way {
-                    continue;
-                }
-                if places.contains_key(&id) {
-                    continue;
-                }
-                // Where it goes: the space's top folder into itself (original place); the folder chosen into the new
-                // folder; chosen items into the new folder; anything else into where its folder went
-                let into = if parent.is_none() || (!p.original() && is_root && p.items.is_none()) {
-                    places.insert(id, top.clone());
-                    continue;
-                } else if !p.original() && is_root {
-                    top.clone()
-                } else {
-                    match parent.and_then(|pid| places.get(&pid).cloned()) {
-                        Some(into) => into,
-                        None => continue,
-                    }
-                };
-                let name = path.rsplit('/').next().unwrap_or_default().to_string();
-                match make_folder(cx, &target, &into, &name, &id, p.original()).await {
-                    Ok((node, again)) => {
-                        renamed += again as i64;
-                        places.insert(id, node);
-                    }
-                    Err(e) => cx.failed(&p.space, Some(path), e.message),
-                }
-            }
-            Line::File { space, id, parent, path, hash, size, trashed, modified, .. } if space == p.space => {
-                if trashed.is_some() && !p.trash || places.contains_key(&id) {
-                    continue;
-                }
-                let is_root = roots.as_ref().is_some_and(|r| r.contains(&id));
-                if !is_root && !inside.contains(&parent) {
-                    continue;
-                }
-                let into = if !p.original() && is_root { Some(top.clone()) } else { places.get(&parent).cloned() };
-                let Some(into) = into else { continue };
-                let name = path.rsplit('/').next().unwrap_or_default().to_string();
-                let conflict = if p.original() { p.on_conflict.as_str() } else { "keep" };
-                match restore_file(cx, &set.id, dst.as_ref(), &target, &into, &name, &id, &hash, size, modified, conflict).await {
-                    Ok(Ok(outcome)) => {
-                        match outcome {
-                            Outcome::Restored { renamed: again } => renamed += again as i64,
-                            Outcome::Replaced => replaced += 1,
-                            Outcome::Skipped => skipped += 1,
-                        }
-                        places.insert(id, String::new());
-                        cx.done(1, size).await?;
-                    }
-                    Ok(Err(stop)) => return Ok(stop),
-                    Err(e) if e.status == axum::http::StatusCode::INSUFFICIENT_STORAGE || e.status == axum::http::StatusCode::PAYLOAD_TOO_LARGE => {
-                        return Err(e);
-                    }
-                    Err(e) if e.status.is_server_error() && e.status != axum::http::StatusCode::INTERNAL_SERVER_ERROR => return Err(e),
-                    Err(e) => cx.failed(&p.space, Some(path), e.message),
-                }
+                return self.file(&id, &parent, path, &Item { source: &id, name: "", hash: &hash, size, modified }).await;
             }
             _ => {}
         }
+        Ok(None)
     }
-    if let Some(e) = cx.failures_error() {
-        return Err(e);
-    }
-    let mut notes = Vec::new();
-    if renamed > 0 {
-        notes.push(if renamed == 1 {
-            "1 item was given a new name: its name was taken in its folder, or needed changing there".to_string()
+
+    async fn folder(&mut self, id: String, parent: Option<String>, path: String, trashed: Option<i64>) -> AppResult<()> {
+        let p = self.p;
+        let roots = self.roots.get_or_insert_with(|| chosen(p, &id));
+        let is_root = roots.contains(&id);
+        let within = is_root || parent.as_ref().is_some_and(|pid| self.inside.contains(pid));
+        let on_the_way = p.original() && self.plan.ancestors.contains(&id);
+        if trashed.is_some() && !p.trash && !on_the_way {
+            return Ok(());
+        }
+        if within {
+            self.inside.insert(id.clone());
+        }
+        if !within && !on_the_way {
+            return Ok(());
+        }
+        if self.places.contains_key(&id) {
+            return Ok(());
+        }
+        // Where it goes: the space's top folder into itself (original place); the folder chosen into the new
+        // folder; chosen items into the new folder; anything else into where its folder went
+        let into = if parent.is_none() || (!p.original() && is_root && p.items.is_none()) {
+            self.places.insert(id, self.top.clone());
+            return Ok(());
+        } else if !p.original() && is_root {
+            self.top.clone()
         } else {
-            format!("{renamed} items were given new names: their names were taken in their folders, or needed changing there")
-        });
+            match parent.and_then(|pid| self.places.get(&pid).cloned()) {
+                Some(into) => into,
+                None => return Ok(()),
+            }
+        };
+        let name = path.rsplit('/').next().unwrap_or_default().to_string();
+        match make_folder(self.r.cx, self.r.target, &into, &name, &id, p.original()).await {
+            Ok((node, again)) => {
+                self.done.renamed += again as i64;
+                self.places.insert(id, node);
+            }
+            Err(e) => self.r.cx.failed(&p.space, Some(path), e.message),
+        }
+        Ok(())
     }
-    if skipped > 0 {
-        notes.push(if skipped == 1 {
-            "1 file was skipped: its place was taken".to_string()
-        } else {
-            format!("{skipped} files were skipped: their places were taken")
-        });
+
+    /// A file of the space (`item`, its name still to take from `path`) in the folder `parent` of the manifest
+    async fn file(&mut self, id: &str, parent: &str, path: String, item: &Item<'_>) -> AppResult<Option<Stop>> {
+        let p = self.p;
+        let is_root = self.roots.as_ref().is_some_and(|r| r.contains(id));
+        if !is_root && !self.inside.contains(parent) {
+            return Ok(None);
+        }
+        let into = if !p.original() && is_root { Some(self.top.clone()) } else { self.places.get(parent).cloned() };
+        let Some(into) = into else { return Ok(None) };
+        let name = path.rsplit('/').next().unwrap_or_default().to_string();
+        let conflict = if p.original() { p.on_conflict.as_str() } else { "keep" };
+        match restore_file(self.r, &into, &Item { name: &name, ..*item }, conflict).await {
+            Ok(Ok(outcome)) => {
+                match outcome {
+                    Outcome::Restored { renamed: again } => self.done.renamed += again as i64,
+                    Outcome::Replaced => self.done.replaced += 1,
+                    Outcome::Skipped => self.done.skipped += 1,
+                }
+                self.places.insert(id.to_string(), String::new());
+                self.r.cx.done(1, item.size).await?;
+            }
+            Ok(Err(stop)) => return Ok(Some(stop)),
+            Err(e) if e.status == axum::http::StatusCode::INSUFFICIENT_STORAGE || e.status == axum::http::StatusCode::PAYLOAD_TOO_LARGE => {
+                return Err(e);
+            }
+            Err(e) if e.status.is_server_error() && e.status != axum::http::StatusCode::INTERNAL_SERVER_ERROR => return Err(e),
+            Err(e) => self.r.cx.failed(&p.space, Some(path), e.message),
+        }
+        Ok(None)
     }
-    if replaced > 0 {
-        notes.push(if replaced == 1 {
-            "1 file was replaced; what it had is kept as an earlier version".to_string()
-        } else {
-            format!("{replaced} files were replaced; what they had is kept as earlier versions")
-        });
-    }
-    notes.push("Earlier versions and permissions aren't restored".to_string());
-    let note = notes.join("\n");
-    let _w = st.write_lock.lock().await;
-    let mut tx = crate::db::begin_write(&st.db).await?;
-    let res = async {
-        sqlx::query("DELETE FROM backup_restored WHERE job_id = ?").bind(&job.id).execute(&mut *tx).await?;
-        super::runner::finish(&mut tx, cx, Some(&note)).await?;
-        super::log(&mut tx, job, "backup_restored", &job.label).await?;
-        AppResult::Ok(())
-    }
-    .await;
-    crate::db::settle(tx, res).await?;
-    Ok(Stop::Done)
 }
 
 /// The lines of a manifest, read on a thread of their own and handed over a few at a time
@@ -447,24 +526,11 @@ async fn make_folder(cx: &Ctx<'_>, target: &tree::Drive, parent: &str, name: &st
 }
 
 /// Brings one file back into the folder `parent`; Ok(Err(stop)) when asked to stop
-#[allow(clippy::too_many_arguments)]
-async fn restore_file(
-    cx: &Ctx<'_>,
-    set: &str,
-    dst: &dyn Storage,
-    target: &tree::Drive,
-    parent: &str,
-    name: &str,
-    source: &str,
-    hash: &str,
-    size: i64,
-    modified: i64,
-    conflict: &str,
-) -> AppResult<Result<Outcome, Stop>> {
-    let st = cx.st;
-    let name = crate::util::validate_name(name)?;
+async fn restore_file(r: &Restore<'_>, parent: &str, item: &Item<'_>, conflict: &str) -> AppResult<Result<Outcome, Stop>> {
+    let (cx, st) = (r.cx, r.cx.st);
+    let name = crate::util::validate_name(item.name)?;
     // A manifest found on a location may have been changed: content is only ever named by a SHA-256
-    crate::storage::valid_hash(hash).map_err(|_| AppError::bad_request("The backup names content that isn't valid"))?;
+    crate::storage::valid_hash(item.hash).map_err(|_| AppError::bad_request("The backup names content that isn't valid"))?;
     // Skipped when its place is taken: nothing to read
     if conflict == "skip" {
         let mut c = st.db.acquire().await?;
@@ -473,7 +539,7 @@ async fn restore_file(
             let _w = st.write_lock.lock().await;
             sqlx::query("INSERT INTO backup_restored (job_id, source_id, node_id) VALUES (?, ?, ?)")
                 .bind(&cx.job.id)
-                .bind(source)
+                .bind(item.source)
                 .bind(&existing.id)
                 .execute(&st.db)
                 .await?;
@@ -483,14 +549,14 @@ async fn restore_file(
     let tmp = st.tmp_dir().join(format!("backup-{}", new_id()));
     // A content store that holds this content already needs no copy of it
     let held: Option<(String,)> =
-        if target.is_folder() { None } else { sqlx::query_as("SELECT location_id FROM blobs WHERE hash = ?").bind(hash).fetch_optional(&st.db).await? };
+        if r.target.is_folder() { None } else { sqlx::query_as("SELECT location_id FROM blobs WHERE hash = ?").bind(item.hash).fetch_optional(&st.db).await? };
     if held.is_none() {
-        match fetch(cx, set, dst, hash, size, &tmp).await? {
+        match fetch(cx, r.set, r.dst, item.hash, item.size, &tmp).await? {
             Ok(()) => {}
             Err(stop) => return Ok(Err(stop)),
         }
     }
-    let result = restore_into(cx, set, dst, target, parent, &name, source, hash, size, modified, &tmp, conflict).await;
+    let result = restore_into(r, parent, &Item { name: &name, ..*item }, &tmp, conflict).await;
     let _ = tokio::fs::remove_file(&tmp).await;
     result.map(Ok)
 }
@@ -523,29 +589,16 @@ async fn fetch(cx: &Ctx<'_>, set: &str, dst: &dyn Storage, hash: &str, size: i64
 
 /// Into the space: through content.rs, like an upload. A content store that holds the content already needs no copy of
 /// it; the file is recorded, or (told to replace) the file there gets it
-#[allow(clippy::too_many_arguments)]
-async fn restore_into(
-    cx: &Ctx<'_>,
-    set: &str,
-    dst: &dyn Storage,
-    target: &tree::Drive,
-    parent: &str,
-    name: &str,
-    source: &str,
-    hash: &str,
-    size: i64,
-    modified: i64,
-    tmp: &std::path::Path,
-    conflict: &str,
-) -> AppResult<Outcome> {
-    let st = cx.st;
+async fn restore_into(r: &Restore<'_>, parent: &str, item: &Item<'_>, tmp: &std::path::Path, conflict: &str) -> AppResult<Outcome> {
+    let (cx, st, target) = (r.cx, r.cx.st, r.target);
+    let (name, source, hash, size, modified) = (item.name, item.source, item.hash, item.size, item.modified);
     let folder = folder_node(st, parent).await?;
     let received = || content::Received { path: tmp.to_path_buf(), size: size as u64, hash: Some(hash.to_string()) };
     let staged = match content::stage_restored(st, &folder, received()).await {
         Ok(s) => s,
         // Registered content is missing or damaged, or its last reference disappeared: fetch the backup and retry.
         Err(_) if !target.is_folder() && tokio::fs::metadata(tmp).await.is_err() => {
-            match fetch(cx, set, dst, hash, size, tmp).await? {
+            match fetch(cx, r.set, r.dst, hash, size, tmp).await? {
                 Ok(()) => {}
                 Err(_) => return Err(AppError::internal("stopped while fetching")),
             }

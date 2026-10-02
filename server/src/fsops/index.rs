@@ -28,9 +28,17 @@ pub async fn free_name(conn: &mut SqliteConnection, parent: &Node, name: &str, i
     Err(AppError::conflict("Too many items with the same name"))
 }
 
-/// Adds an item that is now on disk at `rel` to the index
-#[allow(clippy::too_many_arguments)]
-pub(super) async fn insert_at(conn: &mut SqliteConnection, id: &str, owner: i64, parent_id: &str, drive_id: &str, name: &str, rel: &str, s: &Stat) -> AppResult<()> {
+/// Where an item goes in the index: its folder and space, its name, and its path in the space's folder
+pub(super) struct At<'a> {
+    pub parent: &'a str,
+    pub drive: &'a str,
+    pub name: &'a str,
+    pub rel: &'a str,
+}
+
+/// Adds an item that is now on disk at `at.rel` to the index
+pub(super) async fn insert_at(conn: &mut SqliteConnection, id: &str, owner: i64, at: At<'_>, s: &Stat) -> AppResult<()> {
+    let At { parent: parent_id, drive: drive_id, name, rel } = at;
     let ts = now();
     sqlx::query(
         "INSERT INTO nodes (id, owner_id, parent_id, kind, name, size, mime, drive_id, created_at, updated_at,
@@ -59,7 +67,7 @@ pub(super) async fn insert_at(conn: &mut SqliteConnection, id: &str, owner: i64,
 }
 
 pub async fn insert(conn: &mut SqliteConnection, id: &str, owner: i64, parent: &Node, name: &str, rel: &str, s: &Stat) -> AppResult<()> {
-    insert_at(conn, id, owner, &parent.id, parent.drive(), name, rel, s).await
+    insert_at(conn, id, owner, At { parent: &parent.id, drive: parent.drive(), name, rel }, s).await
 }
 
 /// Records where an item is on disk now

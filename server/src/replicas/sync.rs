@@ -137,67 +137,19 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
     let pending = if unchanged { (0, 0) } else { pending_count(st, &spaces, &location).await? };
     cx.set_counts(0, 0, recheck + pending.0, recheck_bytes + pending.1);
     cx.flush().await?;
-    let mut repaired = 0i64;
-    loop {
-        let rows: Vec<(String, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT hash, size, state FROM replica_copies WHERE location_id = ? AND state IN ('stale', 'corrupt') ORDER BY hash LIMIT {PAGE}"
-        )))
-        .bind(&location)
-        .fetch_all(&st.db)
-        .await?;
-        if rows.is_empty() {
-            break;
-        }
-        for (hash, size, state) in rows {
-            if let Some(stop) = cx.stop() {
-                return Ok(stop);
-            }
-            let whole = state == "stale" && matches!(read_back(dst.as_ref(), &hash, size).await, Ok((h, n)) if h == hash && n == size as u64);
-            if whole {
-                let _w = st.write_lock.lock().await;
-                sqlx::query("UPDATE replica_copies SET state = 'verified', verified_at = ? WHERE hash = ? AND location_id = ?")
-                    .bind(now())
-                    .bind(&hash)
-                    .bind(&location)
-                    .execute(&st.db)
-                    .await?;
-            } else {
-                // Missing or damaged: it goes (deleted like content nothing uses, never the primary), and is copied
-                // again below if the target should hold it
-                drop_copies(st, &location, vec![hash.clone()]).await?;
-                repaired += 1;
-            }
-            cx.done(1, size).await?;
-        }
-    }
+    let repaired = match recheck_copies(cx, &location, &dst).await? {
+        Ok(n) => n,
+        Err(stop) => return Ok(stop),
+    };
     // Checked: an old primary counts again from here
     for t in targets.iter_mut().filter(|t| t.location_id == location) {
         t.state = "active".into();
     }
     // 2. What the target should hold and doesn't
-    let mut copied = 0i64;
-    let mut last = String::new();
-    loop {
-        let rows: Vec<(String, i64, String)> =
-            sqlx::query_as(sqlx::AssertSqlSafe(missing_page())).bind(serde_json::to_string(&spaces).unwrap()).bind(&location).bind(&last).fetch_all(&st.db).await?;
-        let Some((h, ..)) = rows.last() else { break };
-        last = h.clone();
-        for (hash, size, primary) in rows {
-            if let Some(stop) = cx.stop() {
-                return Ok(stop);
-            }
-            // Only where the target is one of the copies the content should have
-            if !super::required(&targets, policy.copies, &primary).contains(&location.as_str()) {
-                continue;
-            }
-            match copy_one(cx, &policy, &dst, &location, &hash, size, &primary).await? {
-                Ok(true) => copied += 1,
-                Ok(false) => {}
-                Err(stop) => return Ok(stop),
-            }
-            cx.done(1, size).await?;
-        }
-    }
+    let mut copied = match copy_missing(cx, &policy, &targets, &spaces, &location, &dst).await? {
+        Ok(n) => n,
+        Err(stop) => return Ok(stop),
+    };
     // Folder spaces: read from their folder
     let changing = match super::folders::sync(cx, &policy, &targets, &location, &dst).await? {
         Ok((n, after_scan, changing)) => {
@@ -226,6 +178,112 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
         !unchanged || seqs != seqs_before || copied + repaired + released + changing.kept + changing.not_copied > 0 || target.held.is_none() || !unneeded_known;
     let counts = if recount { Some((count(st, &policy, &targets).await?, super::api::unneeded_count(st, &location).await?)) } else { None };
     // 4. Held: the target is current, and counts again after a promotion
+    let synced = Synced { copied, repaired, released, changing, counts, stamp, seqs, all };
+    finish_sync(cx, &policy, &location, &synced).await?;
+    Ok(Stop::Done)
+}
+
+/// Step 1 of a sync: the copies on the target that must be checked before they count (an old primary's, and those a
+/// check found damaged) are read back; a missing or damaged one goes, to be copied again. Returns how many went.
+async fn recheck_copies(cx: &Ctx<'_>, location: &str, dst: &Arc<dyn Storage>) -> AppResult<Result<i64, Stop>> {
+    let st = cx.st;
+    let mut repaired = 0i64;
+    loop {
+        let rows: Vec<(String, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT hash, size, state FROM replica_copies WHERE location_id = ? AND state IN ('stale', 'corrupt') ORDER BY hash LIMIT {PAGE}"
+        )))
+        .bind(location)
+        .fetch_all(&st.db)
+        .await?;
+        if rows.is_empty() {
+            break;
+        }
+        for (hash, size, state) in rows {
+            if let Some(stop) = cx.stop() {
+                return Ok(Err(stop));
+            }
+            let whole = state == "stale" && matches!(read_back(dst.as_ref(), &hash, size).await, Ok((h, n)) if h == hash && n == size as u64);
+            if whole {
+                let _w = st.write_lock.lock().await;
+                sqlx::query("UPDATE replica_copies SET state = 'verified', verified_at = ? WHERE hash = ? AND location_id = ?")
+                    .bind(now())
+                    .bind(&hash)
+                    .bind(location)
+                    .execute(&st.db)
+                    .await?;
+            } else {
+                // Missing or damaged: it goes (deleted like content nothing uses, never the primary), and is copied
+                // again below if the target should hold it
+                drop_copies(st, location, vec![hash.clone()]).await?;
+                repaired += 1;
+            }
+            cx.done(1, size).await?;
+        }
+    }
+    Ok(Ok(repaired))
+}
+
+/// Step 2 of a sync: the content of the content-store spaces the target should hold and doesn't is copied there.
+/// Returns how many were copied.
+async fn copy_missing(
+    cx: &Ctx<'_>,
+    policy: &super::Policy,
+    targets: &[Target],
+    spaces: &[String],
+    location: &str,
+    dst: &Arc<dyn Storage>,
+) -> AppResult<Result<i64, Stop>> {
+    let st = cx.st;
+    let mut copied = 0i64;
+    let mut last = String::new();
+    loop {
+        let rows: Vec<(String, i64, String)> =
+            sqlx::query_as(sqlx::AssertSqlSafe(missing_page())).bind(serde_json::to_string(spaces).unwrap()).bind(location).bind(&last).fetch_all(&st.db).await?;
+        let Some((h, ..)) = rows.last() else { break };
+        last = h.clone();
+        for (hash, size, primary) in rows {
+            if let Some(stop) = cx.stop() {
+                return Ok(Err(stop));
+            }
+            // Only where the target is one of the copies the content should have
+            if !super::required(targets, policy.copies, &primary).contains(&location) {
+                continue;
+            }
+            match copy_one(cx, policy, dst, location, &hash, size, &primary).await? {
+                Ok(true) => copied += 1,
+                Ok(false) => {}
+                Err(stop) => return Ok(Err(stop)),
+            }
+            cx.done(1, size).await?;
+        }
+    }
+    Ok(Ok(copied))
+}
+
+/// What the Replicas page shows: (contents held and wanted, by target), and (copies, bytes) no policy wants on a location
+type PageCounts = (HashMap<String, (i64, i64)>, (i64, i64));
+
+/// What a sync did, recorded when it ends (`finish_sync`)
+struct Synced {
+    copied: i64,
+    /// Missing or damaged copies that were replaced
+    repaired: i64,
+    /// Copies nothing uses any more that were let go
+    released: i64,
+    changing: super::folders::Changing,
+    /// What the Replicas page shows of the policy's targets and of the copies on the target no policy wants, when it
+    /// was worked out again, as of the policies' `stamp`
+    counts: Option<PageCounts>,
+    stamp: String,
+    /// What each space held when the sync began (a folder space: what its check for changes found)
+    seqs: Vec<(String, i64)>,
+    /// The spaces of the policy now
+    all: Vec<String>,
+}
+
+/// Step 4 of a sync: the target holds the spaces as they were, is current, and counts again after a promotion
+async fn finish_sync(cx: &Ctx<'_>, policy: &super::Policy, location: &str, s: &Synced) -> AppResult<()> {
+    let st = cx.st;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let res = async {
@@ -234,19 +292,19 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
             return Err(AppError::conflict("The replicas were promoted meanwhile"));
         }
         // Not when the policies changed meanwhile: then they are worked out again soon (policy.rs)
-        if let Some((counts, (copies, bytes))) = &counts
-            && super::stamp(&mut tx).await? == stamp
+        if let Some((counts, (copies, bytes))) = &s.counts
+            && super::stamp(&mut tx).await? == s.stamp
         {
             keep_counts(&mut tx, &policy.id, counts).await?;
-            keep_unneeded(&mut tx, &location, *copies, *bytes).await?;
+            keep_unneeded(&mut tx, location, *copies, *bytes).await?;
         }
         sqlx::query(
             "INSERT INTO replica_captured (policy_id, location_id, drive_id, seq) SELECT ?1, ?2, json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?3) WHERE true
              ON CONFLICT (policy_id, location_id, drive_id) DO UPDATE SET seq = excluded.seq",
         )
         .bind(&policy.id)
-        .bind(&location)
-        .bind(serde_json::to_string(&seqs).unwrap())
+        .bind(location)
+        .bind(serde_json::to_string(&s.seqs).unwrap())
         .execute(&mut *tx)
         .await?;
         sqlx::query(
@@ -255,7 +313,7 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
                WHERE k.policy_id = ?1 AND k.location_id = ?2 AND COALESCE(c.seq, 0) <= k.seq)",
         )
         .bind(&policy.id)
-        .bind(&location)
+        .bind(location)
         .execute(&mut *tx)
         .await?;
         // Spaces deleted, or taken out of the policy, since: never synced again, so what was recorded of them goes
@@ -264,8 +322,8 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
                 "DELETE FROM {table} WHERE policy_id = ?1 AND location_id = ?2 AND drive_id NOT IN (SELECT value FROM json_each(?3))"
             )))
             .bind(&policy.id)
-            .bind(&location)
-            .bind(serde_json::to_string(&all).unwrap())
+            .bind(location)
+            .bind(serde_json::to_string(&s.all).unwrap())
             .execute(&mut *tx)
             .await?;
         }
@@ -273,27 +331,42 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
         sqlx::query("UPDATE replica_targets SET synced_at = ?, state = 'active' WHERE policy_id = ? AND location_id = ?")
             .bind(now())
             .bind(&policy.id)
-            .bind(&location)
+            .bind(location)
             .execute(&mut *tx)
             .await?;
+        let note = s.note();
+        crate::backups::runner::finish(&mut tx, cx, note.as_deref()).await?;
+        AppResult::Ok(())
+    }
+    .await;
+    crate::db::settle(tx, res).await
+}
+
+impl Synced {
+    /// What the sync's job tells: what was copied, replaced and let go, and the files that changed while copied
+    fn note(&self) -> Option<String> {
+        let (copied, repaired, released) = (self.copied, self.repaired, self.released);
         let mut notes = Vec::new();
         if copied > 0 {
             notes.push(if copied == 1 { "1 content was copied".to_string() } else { format!("{copied} contents were copied") });
         }
         if repaired > 0 {
-            notes.push(if repaired == 1 { "1 damaged or missing copy was replaced".to_string() } else { format!("{repaired} damaged or missing copies were replaced") });
+            notes.push(if repaired == 1 {
+                "1 damaged or missing copy was replaced".to_string()
+            } else {
+                format!("{repaired} damaged or missing copies were replaced")
+            });
         }
         if released > 0 {
-            notes.push(if released == 1 { "1 copy nothing uses any more was let go".to_string() } else { format!("{released} copies nothing uses any more were let go") });
+            notes.push(if released == 1 {
+                "1 copy nothing uses any more was let go".to_string()
+            } else {
+                format!("{released} copies nothing uses any more were let go")
+            });
         }
-        notes.extend(changing.notes());
-        let note = (!notes.is_empty()).then(|| notes.join("\n"));
-        crate::backups::runner::finish(&mut tx, cx, note.as_deref()).await?;
-        AppResult::Ok(())
+        notes.extend(self.changing.notes());
+        (!notes.is_empty()).then(|| notes.join("\n"))
     }
-    .await;
-    crate::db::settle(tx, res).await?;
-    Ok(Stop::Done)
 }
 
 /// Content the spaces `?1` use that the target `?2` doesn't hold a checked copy of (a condition on `blobs b`). The
@@ -351,7 +424,44 @@ async fn copy_one(
         .execute(&st.db)
         .await?;
     }
-    // From where it is kept, else from another checked copy
+    let tmp = st.tmp_dir().join(format!("replica-{}", new_id()));
+    match fetch_from_any(cx, location, hash, size, primary, &tmp).await? {
+        Fetched::Done => {}
+        Fetched::Stop(stop) => {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Ok(Err(stop));
+        }
+        Fetched::Nowhere(last_err) => {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            let gone: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM blobs WHERE hash = ?").bind(hash).fetch_optional(&st.db).await?;
+            if gone.is_some() {
+                // No whole copy to take it from: said, never replaced by something else
+                cx.failed("", None, format!("The content {} couldn't be read anywhere: {last_err}", &hash[..12]));
+            }
+            return Ok(Ok(false));
+        }
+    }
+    let put = put_verified(cx, dst, location, hash, size, &tmp).await;
+    let _ = tokio::fs::remove_file(&tmp).await;
+    if let Err(stop) = put? {
+        return Ok(Err(stop));
+    }
+    Ok(Ok(record_copy(st, policy, location, hash, size).await?))
+}
+
+/// What reading a content to copy came to
+enum Fetched {
+    /// In the temp file, checked
+    Done,
+    Stop(Stop),
+    /// It couldn't be read anywhere: the last error
+    Nowhere(String),
+}
+
+/// Reads a content into `tmp`, checked: from where it is kept (`primary`), else from another checked copy (not on the
+/// target `location`)
+async fn fetch_from_any(cx: &Ctx<'_>, location: &str, hash: &str, size: i64, primary: &str, tmp: &std::path::Path) -> AppResult<Fetched> {
+    let st = cx.st;
     let mut sources = vec![primary.to_string()];
     let others: Vec<(String,)> = sqlx::query_as("SELECT location_id FROM replica_copies WHERE hash = ? AND state = 'verified' AND location_id NOT IN (?, ?)")
         .bind(hash)
@@ -360,47 +470,30 @@ async fn copy_one(
         .fetch_all(&st.db)
         .await?;
     sources.extend(others.into_iter().map(|(l,)| l));
-    let tmp = st.tmp_dir().join(format!("replica-{}", new_id()));
-    let mut fetched = None;
     let mut last_err = String::new();
     for source in &sources {
         let Ok(src) = st.storage(source) else { continue };
         match cx
             .tries(
                 |e: &std::io::Error| e.kind() != std::io::ErrorKind::NotFound && !(crate::hashing::unusable_kind(e) == Some(crate::hashing::Unusable::Damaged)),
-                || crate::backups::capture::fetch_verified(&src, hash, size, &tmp),
+                || crate::backups::capture::fetch_verified(&src, hash, size, tmp),
             )
             .await
         {
-            Ok(()) => {
-                fetched = Some(source.clone());
-                break;
-            }
-            Err(Ok(stop)) => {
-                let _ = tokio::fs::remove_file(&tmp).await;
-                return Ok(Err(stop));
-            }
+            Ok(()) => return Ok(Fetched::Done),
+            Err(Ok(stop)) => return Ok(Fetched::Stop(stop)),
             Err(Err(e)) => last_err = crate::locations::describe(&e),
         }
     }
-    if fetched.is_none() {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        let gone: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM blobs WHERE hash = ?").bind(hash).fetch_optional(&st.db).await?;
-        if gone.is_some() {
-            // No whole copy to take it from: said, never replaced by something else
-            cx.failed("", None, format!("The content {} couldn't be read anywhere: {last_err}", &hash[..12]));
-        }
-        return Ok(Ok(false));
-    }
-    let put = put_verified(cx, dst, location, hash, size, &tmp).await;
-    let _ = tokio::fs::remove_file(&tmp).await;
-    if let Err(stop) = put? {
-        return Ok(Err(stop));
-    }
+    Ok(Fetched::Nowhere(last_err))
+}
+
+/// Records a copy made on the target `location`: only if still wanted (the content is still used and kept elsewhere,
+/// and no promotion came meanwhile). Returns whether it was recorded.
+async fn record_copy(st: &AppState, policy: &super::Policy, location: &str, hash: &str, size: i64) -> AppResult<bool> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let res = async {
-        // Recorded only if still wanted: the content is still used and kept elsewhere, and no promotion came meanwhile
         let (epoch,): (i64,) = sqlx::query_as("SELECT epoch FROM replica_policies WHERE id = ?").bind(&policy.id).fetch_one(&mut *tx).await?;
         let current: Option<(String,)> = sqlx::query_as("SELECT location_id FROM blobs WHERE hash = ?").bind(hash).fetch_optional(&mut *tx).await?;
         match current {
@@ -442,7 +535,7 @@ async fn copy_one(
         }
     }
     .await;
-    Ok(Ok(crate::db::settle(tx, res).await?))
+    crate::db::settle(tx, res).await
 }
 
 /// Lets go of the copies on a location that nothing replicated uses any more: content deleted for good, content

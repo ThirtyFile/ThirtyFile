@@ -119,7 +119,7 @@ pub async fn place_folder(st: &AppState, user: &User, staged: Staging, dest_id: 
             None => (ids.get("").cloned().unwrap_or_default(), rel.as_str()),
         };
         let full = if rel.is_empty() { dest_rel.clone() } else { format!("{dest_rel}/{rel}") };
-        insert_at(&mut tx, &id, user.id, &parent, dest.drive(), item_name, &full, s).await?;
+        insert_at(&mut tx, &id, user.id, At { parent: &parent, drive: dest.drive(), name: item_name, rel: &full }, s).await?;
         ids.insert(rel.clone(), id);
     }
     let root = ids.get("").cloned().unwrap_or_default();

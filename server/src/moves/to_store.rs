@@ -18,6 +18,8 @@ use std::{
     sync::Arc,
 };
 
+use sqlx::SqliteConnection;
+
 use super::{Ctx, Job, Stop};
 use crate::{
     beneath::Pinned,
@@ -323,112 +325,11 @@ async fn switch(cx: &Ctx<'_>) -> AppResult<bool> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let res = async {
-        for pending in [PENDING_FILES, PENDING_VERSIONS] {
-            let row: Option<(i64,)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT 1 {pending} LIMIT 1")))
-                .bind(&job.id)
-                .bind(&job.drive_id)
-                .bind("")
-                .fetch_optional(&mut *tx)
-                .await?;
-            if row.is_some() {
-                return Ok(false);
-            }
-        }
-        // Content that was at the target when it was copied, and isn't any more: copied again
-        let gone = sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM space_move_items {NO_LONGER_THERE}")))
-            .bind(&job.id)
-            .bind(&job.to_location)
-            .execute(&mut *tx)
-            .await?
-            .rows_affected();
-        if gone > 0 {
+        if !all_copied(&mut tx, job).await? {
             return Ok(false);
         }
-        let now = now();
-        // Items named apart where only letter case tells them apart (the trash keeps its names: it has no such rule)
-        // Only the items of folders that have such names, found by the database (this holds the write lock, and the
-        // space may be large)
-        let nodes: Vec<Named> = sqlx::query_as(
-            "SELECT id, parent_id, name, kind FROM nodes WHERE drive_id = ?1 AND trashed_at IS NULL AND parent_id IN (
-               SELECT parent_id FROM nodes WHERE drive_id = ?1 AND trashed_at IS NULL GROUP BY parent_id, unicode_lower(name) HAVING COUNT(*) > 1
-             )",
-        )
-        .bind(&job.drive_id)
-        .fetch_all(&mut *tx)
-        .await?;
-        let renamed = case_apart(&nodes);
-        for (id, _) in &renamed {
-            sqlx::query("UPDATE nodes SET name = char(1) || id WHERE id = ?").bind(id).execute(&mut *tx).await?;
-        }
-        // The content of each file and version still in the space: a reference each, recorded at the target when it is
-        // new there. Only items of the space: one moved to another space meanwhile keeps what it has there.
-        sqlx::query(
-            "INSERT INTO blobs (hash, size, refcount, created_at, location_id)
-             SELECT i.hash, MAX(i.size), COUNT(*), ?3, ?2 FROM space_move_items i
-             WHERE i.move_id = ?1 AND (EXISTS (SELECT 1 FROM nodes n WHERE n.id = i.item_id AND n.drive_id = ?4 AND i.kind = 'file')
-                                       OR EXISTS (SELECT 1 FROM node_versions v WHERE v.id = i.item_id AND v.drive_id = ?4 AND i.kind = 'version'))
-             GROUP BY i.hash
-             ON CONFLICT (hash) DO UPDATE SET refcount = refcount + excluded.refcount",
-        )
-        .bind(&job.id)
-        .bind(&job.to_location)
-        .bind(now)
-        .bind(&job.drive_id)
-        .execute(&mut *tx)
-        .await?;
-        // Copies stored now that nothing uses at the target: the content was elsewhere already, or its file went
-        sqlx::query(
-            "INSERT INTO pending_blob_deletes (hash, location_id, created_at, attempts, last_error)
-             SELECT DISTINCT i.hash, ?2, ?3, 0, 'deferred' FROM space_move_items i
-             WHERE i.move_id = ?1 AND i.uploaded = 1 AND NOT EXISTS (SELECT 1 FROM blobs b WHERE b.hash = i.hash AND b.location_id = ?2)
-             ON CONFLICT (hash, location_id) DO UPDATE SET created_at = MIN(created_at, excluded.created_at)",
-        )
-        .bind(&job.id)
-        .bind(&job.to_location)
-        .bind(now + REMOVAL_GRACE)
-        .execute(&mut *tx)
-        .await?;
-        // The others are used now: the entries that would have removed them had the move stopped go
-        sqlx::query(
-            "DELETE FROM pending_blob_deletes WHERE location_id = ?2 AND last_error = 'deferred'
-               AND hash IN (SELECT i.hash FROM space_move_items i JOIN blobs b ON b.hash = i.hash AND b.location_id = ?2 WHERE i.move_id = ?1)",
-        )
-        .bind(&job.id)
-        .bind(&job.to_location)
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query(
-            "UPDATE nodes SET blob_hash = i.hash, size = i.size FROM space_move_items i
-             WHERE i.move_id = ?1 AND i.kind = 'file' AND nodes.id = i.item_id AND nodes.drive_id = ?2",
-        )
-        .bind(&job.id)
-        .bind(&job.drive_id)
-        .execute(&mut *tx)
-        .await?;
-        for (id, name) in &renamed {
-            sqlx::query("UPDATE nodes SET name = ? WHERE id = ?").bind(name).bind(id).execute(&mut *tx).await?;
-        }
-        sqlx::query("UPDATE nodes SET fs_path = NULL, fs_dev = NULL, fs_ino = NULL, fs_size = NULL, fs_mtime_ns = NULL, fs_birth_ns = NULL WHERE drive_id = ?")
-            .bind(&job.drive_id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query(
-            "UPDATE node_versions SET blob_hash = i.hash, drive_id = NULL, fs_path = NULL
-             FROM space_move_items i WHERE i.move_id = ?1 AND i.kind = 'version' AND node_versions.id = i.item_id AND node_versions.drive_id = ?2",
-        )
-        .bind(&job.id)
-        .bind(&job.drive_id)
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query(
-            "UPDATE drives SET mode = 'store', location_id = ?2, source_path = NULL, last_scan_at = NULL, scan_report = NULL,
-                               used_bytes = (SELECT COALESCE(SUM(size), 0) FROM nodes WHERE drive_id = ?1 AND kind = 'file')
-             WHERE id = ?1",
-        )
-        .bind(&job.drive_id)
-        .bind(&job.to_location)
-        .execute(&mut *tx)
-        .await?;
+        let renamed = name_apart(&mut tx, job).await?;
+        use_copies(&mut tx, job, &renamed).await?;
         let note = (!renamed.is_empty()).then(|| {
             if renamed.len() == 1 {
                 "1 item got another name: its folder had an item with the same name in other letter case".to_string()
@@ -445,6 +346,121 @@ async fn switch(cx: &Ctx<'_>) -> AppResult<bool> {
         crate::folders::spaces_changed(st);
     }
     Ok(switched)
+}
+
+/// In the switch's transaction: whether every file and version is copied as it is now. Content that was at the target
+/// when it was copied, and isn't any more, is to be copied again.
+async fn all_copied(tx: &mut SqliteConnection, job: &Job) -> AppResult<bool> {
+    for pending in [PENDING_FILES, PENDING_VERSIONS] {
+        let row: Option<(i64,)> =
+            sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT 1 {pending} LIMIT 1"))).bind(&job.id).bind(&job.drive_id).bind("").fetch_optional(&mut *tx).await?;
+        if row.is_some() {
+            return Ok(false);
+        }
+    }
+    let gone = sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM space_move_items {NO_LONGER_THERE}")))
+        .bind(&job.id)
+        .bind(&job.to_location)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    Ok(gone == 0)
+}
+
+/// In the switch's transaction: items named apart where only letter case tells them apart (the trash keeps its names:
+/// it has no such rule) get a name of their own for now; returns their ids and the names they get (`use_copies`).
+/// Only the items of folders that have such names, found by the database (this holds the write lock, and the space
+/// may be large).
+async fn name_apart(tx: &mut SqliteConnection, job: &Job) -> AppResult<Vec<(String, String)>> {
+    let nodes: Vec<Named> = sqlx::query_as(
+        "SELECT id, parent_id, name, kind FROM nodes WHERE drive_id = ?1 AND trashed_at IS NULL AND parent_id IN (
+           SELECT parent_id FROM nodes WHERE drive_id = ?1 AND trashed_at IS NULL GROUP BY parent_id, unicode_lower(name) HAVING COUNT(*) > 1
+         )",
+    )
+    .bind(&job.drive_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    let renamed = case_apart(&nodes);
+    for (id, _) in &renamed {
+        sqlx::query("UPDATE nodes SET name = char(1) || id WHERE id = ?").bind(id).execute(&mut *tx).await?;
+    }
+    Ok(renamed)
+}
+
+/// In the switch's transaction: the space's files and versions use the copies at the target, under the names
+/// `renamed` gives them, and the space keeps its files in the content store there
+async fn use_copies(tx: &mut SqliteConnection, job: &Job, renamed: &[(String, String)]) -> AppResult<()> {
+    let now = now();
+    // The content of each file and version still in the space: a reference each, recorded at the target when it is
+    // new there. Only items of the space: one moved to another space meanwhile keeps what it has there.
+    sqlx::query(
+        "INSERT INTO blobs (hash, size, refcount, created_at, location_id)
+         SELECT i.hash, MAX(i.size), COUNT(*), ?3, ?2 FROM space_move_items i
+         WHERE i.move_id = ?1 AND (EXISTS (SELECT 1 FROM nodes n WHERE n.id = i.item_id AND n.drive_id = ?4 AND i.kind = 'file')
+                                   OR EXISTS (SELECT 1 FROM node_versions v WHERE v.id = i.item_id AND v.drive_id = ?4 AND i.kind = 'version'))
+         GROUP BY i.hash
+         ON CONFLICT (hash) DO UPDATE SET refcount = refcount + excluded.refcount",
+    )
+    .bind(&job.id)
+    .bind(&job.to_location)
+    .bind(now)
+    .bind(&job.drive_id)
+    .execute(&mut *tx)
+    .await?;
+    // Copies stored now that nothing uses at the target: the content was elsewhere already, or its file went
+    sqlx::query(
+        "INSERT INTO pending_blob_deletes (hash, location_id, created_at, attempts, last_error)
+         SELECT DISTINCT i.hash, ?2, ?3, 0, 'deferred' FROM space_move_items i
+         WHERE i.move_id = ?1 AND i.uploaded = 1 AND NOT EXISTS (SELECT 1 FROM blobs b WHERE b.hash = i.hash AND b.location_id = ?2)
+         ON CONFLICT (hash, location_id) DO UPDATE SET created_at = MIN(created_at, excluded.created_at)",
+    )
+    .bind(&job.id)
+    .bind(&job.to_location)
+    .bind(now + REMOVAL_GRACE)
+    .execute(&mut *tx)
+    .await?;
+    // The others are used now: the entries that would have removed them had the move stopped go
+    sqlx::query(
+        "DELETE FROM pending_blob_deletes WHERE location_id = ?2 AND last_error = 'deferred'
+           AND hash IN (SELECT i.hash FROM space_move_items i JOIN blobs b ON b.hash = i.hash AND b.location_id = ?2 WHERE i.move_id = ?1)",
+    )
+    .bind(&job.id)
+    .bind(&job.to_location)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE nodes SET blob_hash = i.hash, size = i.size FROM space_move_items i
+         WHERE i.move_id = ?1 AND i.kind = 'file' AND nodes.id = i.item_id AND nodes.drive_id = ?2",
+    )
+    .bind(&job.id)
+    .bind(&job.drive_id)
+    .execute(&mut *tx)
+    .await?;
+    for (id, name) in renamed {
+        sqlx::query("UPDATE nodes SET name = ? WHERE id = ?").bind(name).bind(id).execute(&mut *tx).await?;
+    }
+    sqlx::query("UPDATE nodes SET fs_path = NULL, fs_dev = NULL, fs_ino = NULL, fs_size = NULL, fs_mtime_ns = NULL, fs_birth_ns = NULL WHERE drive_id = ?")
+        .bind(&job.drive_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "UPDATE node_versions SET blob_hash = i.hash, drive_id = NULL, fs_path = NULL
+         FROM space_move_items i WHERE i.move_id = ?1 AND i.kind = 'version' AND node_versions.id = i.item_id AND node_versions.drive_id = ?2",
+    )
+    .bind(&job.id)
+    .bind(&job.drive_id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE drives SET mode = 'store', location_id = ?2, source_path = NULL, last_scan_at = NULL, scan_report = NULL,
+                           used_bytes = (SELECT COALESCE(SUM(size), 0) FROM nodes WHERE drive_id = ?1 AND kind = 'file')
+         WHERE id = ?1",
+    )
+    .bind(&job.drive_id)
+    .bind(&job.to_location)
+    .execute(&mut *tx)
+    .await?;
+    Ok(())
 }
 
 #[cfg(test)]

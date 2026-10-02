@@ -70,7 +70,7 @@ pub async fn track(State(st): State<AppState>, req: Request, next: Next) -> Resp
         let route = ctx.route.lock().unwrap().clone();
         if let Some((severity, kind)) = classify(&method, &path, route.as_deref(), status) {
             let info = res.extensions().get::<ErrorInfo>().cloned();
-            record_server(&st, &ctx, &method, &path, route, status, info, severity, kind);
+            record_server(&st, &ctx, Answered { method: &method, path: &path, route, status, info }, (severity, kind));
         }
     }
     res
@@ -123,18 +123,18 @@ fn resource_of(route: Option<&str>, path: &str) -> String {
         .to_string()
 }
 
-#[allow(clippy::too_many_arguments)]
-fn record_server(
-    st: &AppState,
-    ctx: &RequestCtx,
-    method: &Method,
-    path: &str,
+/// A request answered with an error: what was asked, the route that answered it, and the answer
+struct Answered<'a> {
+    method: &'a Method,
+    path: &'a str,
     route: Option<String>,
     status: StatusCode,
     info: Option<ErrorInfo>,
-    severity: &'static str,
-    kind: &'static str,
-) {
+}
+
+/// Records a request answered with an error, as `classify` sorted it: (severity, kind)
+fn record_server(st: &AppState, ctx: &RequestCtx, answered: Answered<'_>, (severity, kind): (&'static str, &'static str)) {
+    let Answered { method, path, route, status, info } = answered;
     if !st.part::<Memory>().errors.allow_server() {
         return;
     }

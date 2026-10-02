@@ -201,7 +201,6 @@ pub async fn sync(
 }
 
 /// Reads the files and versions of a space not read as the index has them, and copies their content to the target
-#[allow(clippy::too_many_arguments)]
 async fn read_unread(
     cx: &Ctx<'_>,
     policy: &Policy,
@@ -259,7 +258,7 @@ enum Read {
 
 /// Reads a file of the folder into a temp file, again a few times while it changes as it is read. Err(stop) when the
 /// job is asked to stop meanwhile. (`space`: tests have files of it keep changing.)
-#[cfg_attr(not(test), allow(unused_variables))]
+#[cfg_attr(not(test), allow(unused_variables, reason = "`space` is for tests"))]
 async fn read_to(cx: &Ctx<'_>, root: &Pinned, space: &str, rel: &str, tmp: &Path) -> Result<Read, Stop> {
     let changed = |e: &std::io::Error| crate::hashing::unusable_kind(e) == Some(crate::hashing::Unusable::Changed);
     let read = cx
@@ -448,7 +447,6 @@ async fn hold(cx: &Ctx<'_>, policy: &Policy, dst: &Arc<dyn Storage>, location: &
 
 /// Copies to the target the content of the space's current records it doesn't hold: from the folder, else from
 /// another checked copy
-#[allow(clippy::too_many_arguments)]
 async fn copy_missing(
     cx: &Ctx<'_>,
     policy: &Policy,
