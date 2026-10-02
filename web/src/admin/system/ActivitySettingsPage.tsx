@@ -34,7 +34,7 @@ export function ActivitySettingsPage() {
     <Tabs.Tab
       value={key}
       className={cn(
-        "flex h-9 items-center gap-1.5 border-b-2 px-3 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+        "flex h-9 shrink-0 items-center gap-1.5 border-b-2 px-3 text-[13px] whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset max-sm:px-2",
         tab === key ? "border-brand font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
       )}
     >
@@ -61,7 +61,7 @@ export function ActivitySettingsPage() {
       footer={<span>{LOG_TABS[tab].footer}</span>}
     >
       <Tabs.Root value={tab} onValueChange={(v) => setTab(v as LogTab)} className="flex min-h-0 flex-1 flex-col">
-        <Tabs.List activateOnFocus aria-label={title} className="flex shrink-0 gap-1 border-b px-3">
+        <Tabs.List activateOnFocus aria-label={title} className="flex shrink-0 gap-1 overflow-x-auto border-b px-3 max-sm:px-1">
           {tabBtn("activity", t("Activity log"), ActivityIcon)}
           {tabBtn("login", t("Sign-in log"), LogInIcon)}
           {tabBtn("share", t("Share link access"), Link2Icon)}

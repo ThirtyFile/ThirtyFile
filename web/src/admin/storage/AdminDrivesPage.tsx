@@ -112,9 +112,15 @@ export function AdminDrivesPage() {
       <ToolButton icon={CirclePlusIcon} label={t("New team space")} showLabel className="h-9 px-2.5 text-[13px]" onClick={() => setDialog({ t: "create" })} />
       <ToolButton icon={FolderSyncIcon} label={t("New folder space")} showLabel className="h-9 px-2.5 text-[13px]" onClick={() => setDialog({ t: "folder" })} />
       <ToolSeparator />
-      {selected?.mode === "folder" && (
-        <ToolButton icon={RefreshCwIcon} label={t("Check for changes")} showLabel className="h-9 px-2.5 text-[13px]" disabled={scanning} onClick={() => scanNow(selected)} />
-      )}
+      {/* Always there (for a folder space only), so selecting a space doesn't move the buttons after it */}
+      <ToolButton
+        icon={RefreshCwIcon}
+        label={t("Check for changes")}
+        showLabel
+        className="h-9 px-2.5 text-[13px]"
+        disabled={selected?.mode !== "folder" || scanning}
+        onClick={() => selected?.mode === "folder" && scanNow(selected)}
+      />
       <ToolButton
         icon={TruckIcon}
         label={ticked.length > 1 ? t("Move {n} spaces to another location…", { n: ticked.length }) : t("Move to another location…")}

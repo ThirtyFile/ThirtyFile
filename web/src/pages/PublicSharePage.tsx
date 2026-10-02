@@ -307,9 +307,10 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
   return (
     <div className="flex h-fit min-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl border bg-background shadow-sm">
       <div className="flex min-h-14 flex-wrap items-center gap-2 border-b px-4 py-2">
-        <nav className="flex min-w-0 flex-1 items-center gap-0.5">
+        {/* A line of its own on a phone, where the current folder keeps its name and the ones above it give way */}
+        <nav className="flex min-w-0 flex-1 basis-full items-center gap-0.5 overflow-hidden sm:basis-0">
           {(info.data?.path ?? [{ id: root.id, name: root.name }]).map((c, i, arr) => (
-            <span key={c.id} className="flex min-w-0 items-center gap-0.5">
+            <span key={c.id} className={cn("flex min-w-0 items-center gap-0.5", i === arr.length - 1 && "max-w-full shrink-0")}>
               {i > 0 && <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />}
               {i === arr.length - 1 ? (
                 <span className="truncate px-1.5 font-semibold">{c.name}</span>

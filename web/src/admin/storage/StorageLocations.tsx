@@ -203,7 +203,7 @@ export function StorageLocations() {
                   data-row-id={l.id}
                   {...rows.itemProps(l)}
                   className={cn(
-                    "flex items-center gap-3 px-4 py-3 outline-none select-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                    "flex flex-wrap items-center gap-3 px-4 py-3 outline-none select-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:flex-nowrap",
                     selectedId === l.id && "bg-selection shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection",
                   )}
                 >
@@ -211,8 +211,8 @@ export function StorageLocations() {
                   <div role="gridcell" className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 text-sm">
                       <span className="truncate">{l.name}</span>
-                      {l.is_default && <span className="rounded bg-brand/15 px-1.5 py-px text-[11px] text-brand">{t("Default")}</span>}
-                      {l.builtin && <span className="rounded bg-muted px-1.5 py-px text-[11px] text-muted-foreground">{t("Built-in")}</span>}
+                      {l.is_default && <span className="shrink-0 rounded bg-brand/15 px-1.5 py-px text-[11px] text-blue-700 dark:text-blue-300">{t("Default")}</span>}
+                      {l.builtin && <span className="shrink-0 rounded bg-muted px-1.5 py-px text-[11px] text-muted-foreground">{t("Built-in")}</span>}
                     </div>
                     <div className="truncate text-xs text-muted-foreground">
                       {STORAGE_KIND_LABEL[l.kind]} · {describe(l)}
@@ -232,7 +232,8 @@ export function StorageLocations() {
                       </div>
                     )}
                   </div>
-                  <div role="gridcell" className="hidden w-48 shrink-0 text-right text-xs text-muted-foreground sm:block">
+                  {/* On a phone, on a line of its own below the rest */}
+                  <div role="gridcell" className="w-48 shrink-0 text-right text-xs text-muted-foreground max-sm:order-last max-sm:w-full max-sm:pl-8 max-sm:text-left">
                     <div className="tabular-nums" title={l.folder_bytes > 0 ? t("{size} in folder spaces", { size: formatBytes(l.folder_bytes) }) : undefined}>
                       {t("{size} used", { size: formatBytes(l.used_bytes) })}
                     </div>
@@ -256,7 +257,7 @@ export function StorageLocations() {
                   <span
                     role="gridcell"
                     title={l.checked_at ? t("Last checked: {time} (checked automatically every 30 seconds)", { time: formatDateTime(l.checked_at) }) : undefined}
-                    className={cn("flex w-20 shrink-0 items-center gap-1 text-xs", l.connected ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}
+                    className={cn("flex w-20 shrink-0 items-center gap-1 text-xs", l.connected ? "text-emerald-700 dark:text-emerald-400" : "text-destructive")}
                   >
                     {testing === l.id ? <Loader2Icon className="size-3.5 animate-spin" /> : l.connected ? <CheckCircle2Icon className="size-3.5" /> : <XCircleIcon className="size-3.5" />}
                     {l.connected ? t("Connected") : t("Unreachable")}
