@@ -102,7 +102,10 @@ export default {
   "Site URL: {url}": "サイトの URL：{url}",
   "Use the browser's current URL": "ブラウザーの現在の URL を使用",
   "Invalid default language": "既定の言語が無効です",
+  "Unknown language": "不明な言語です",
   "Default language: English": "既定の言語：英語",
+  "Default language: Traditional Chinese": "既定の言語：繁体字中国語",
+  "Default language: Simplified Chinese": "既定の言語：簡体字中国語",
   "Default language: Japanese": "既定の言語：日本語",
   "Default language: Follow the browser language": "既定の言語：ブラウザーの言語に従う",
   // Branding settings (branding.rs)

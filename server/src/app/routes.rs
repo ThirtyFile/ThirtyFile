@@ -12,7 +12,7 @@ use axum::{
 use tower_http::{CompressionLevel, compression::CompressionLayer, timeout::TimeoutLayer, trace::TraceLayer};
 
 use crate::{
-    admin, archive, auth, backups, branding, dav, downloads, drives, error, files, history, jobs, location_tools, locations, logs, mail, moves, nodes, notify,
+    admin, archive, auth, backups, branding, dav, downloads, drives, error, files, history, i18n, jobs, location_tools, locations, logs, mail, moves, nodes, notify,
     paths, replicas, reset, sessions, shares, signin, sso, state::AppState, thumbnails, tokens, twofactor, upload, usage, versions, web,
 };
 
@@ -144,6 +144,7 @@ fn account_api() -> Router<AppState> {
         .route("/auth/login/2fa/setup", post(twofactor::login_setup))
         .route("/auth/logout", post(signin::logout))
         .route("/auth/password", axum::routing::put(signin::change_password))
+        .route("/auth/language", put(i18n::save))
         .route("/auth/sessions", get(sessions::list))
         .route("/auth/sessions/others", post(sessions::sign_out_others))
         .route("/auth/sessions/{id}", delete(sessions::sign_out))

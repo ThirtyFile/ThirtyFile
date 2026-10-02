@@ -102,8 +102,11 @@ export default {
   "Site URL: {url}": "網站網址：{url}",
   "Use the browser's current URL": "使用瀏覽器目前的網址",
   "Invalid default language": "預設語言無效",
+  "Unknown language": "不明的語言",
   "Default language: English": "預設語言：英文",
   "Default language: Traditional Chinese": "預設語言：繁體中文",
+  "Default language: Simplified Chinese": "預設語言：簡體中文",
+  "Default language: Japanese": "預設語言：日文",
   "Default language: Follow the browser language": "預設語言：跟隨瀏覽器語言",
   // Branding settings (branding.rs)
   "Sign in to access your files": "登入以存取你的檔案",

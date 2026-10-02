@@ -117,7 +117,7 @@ pub struct SystemSettings {
     pub personal_location: String,
     /// The site's public URL (e.g. https://drive.example.com), used to build share links; blank = use the browser's current URL
     pub public_url: String,
-    /// Interface language for people who haven't picked one: "auto" (follow the browser), "en" or "zh-TW"
+    /// Interface language for people who haven't picked one: "auto" (follow the browser), or a language's code (i18n/)
     pub default_lang: String,
     /// Folder spaces are scanned for changes made outside ThirtyFile this often (minutes, 0 = only by hand)
     pub scan_minutes: i64,

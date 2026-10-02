@@ -67,8 +67,8 @@ pub async fn forgot(
     }
     let account = req.account.trim();
     // Accounts that sign in with a password (not only through single sign-on) and have somewhere to send it
-    let found: Option<(i64, String, String, String, i64)> = sqlx::query_as(
-        "SELECT id, username, email, lang, tz_offset FROM users
+    let found: Option<(i64, String, String, String, String)> = sqlx::query_as(
+        "SELECT id, username, email, chosen_lang, lang FROM users
          WHERE (username = ?1 OR (email != '' AND lower(email) = lower(?1))) AND disabled = 0 AND password_hash != ?2 AND email != ''
          ORDER BY username = ?1 DESC LIMIT 1",
     )
@@ -76,7 +76,7 @@ pub async fn forgot(
     .bind(crate::auth::NO_PASSWORD)
     .fetch_optional(&st.db)
     .await?;
-    if let Some((id, username, email, lang, _)) = found
+    if let Some((id, username, email, chosen_lang, last_lang)) = found
         && auth::begin_attempt(&st, &format!("forgot:{id}"), PER_ACCOUNT)
     {
         let token = random_token(43);
@@ -98,7 +98,9 @@ pub async fn forgot(
         logs::record_login(&st, Some(id), &username, "password_reset_requested", &ip, &headers);
         let site = st.part::<crate::branding::Memory>().settings.read().unwrap().site_name.clone();
         let link = format!("{base}/reset-password?token={token}");
-        let (subject, body) = message(lang == "zh-TW", &site, &username, &link);
+        // In the account's language, not the one of whoever asked
+        let lang = crate::i18n::recipient(&chosen_lang, &last_lang, crate::i18n::system_default(&st));
+        let (subject, body) = message(lang == crate::i18n::Lang::ZhTw, &site, &username, &link);
         // Sent after answering: how long the email server takes mustn't tell whether the account exists
         tokio::spawn(async move {
             if let Err(e) = crate::mail::send(&smtp, &site, &crate::mail::Message { to: &email, subject: &subject, body: &body }).await {

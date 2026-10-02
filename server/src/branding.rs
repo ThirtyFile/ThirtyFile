@@ -421,11 +421,10 @@ fn escape_html(s: &str) -> String {
 }
 
 /// Injects branding into index.html: title, favicon, settings (for choosing the theme and language before load) and the color stylesheet.
-/// `default_lang` is the system default interface language ("auto" = follow the browser).
-pub fn inject(html: &str, b: &Branding, default_lang: &str) -> String {
+/// `lang` is the script that tells the page its language (web.rs), run before the branding settings.
+pub fn inject(html: &str, b: &Branding, lang: &str) -> String {
     // The JSON goes inside <script>: escape < so the content can't close the tag early
     let data = public_json(b).to_string().replace('<', "\\u003c");
-    let lang = if default_lang == "auto" { String::new() } else { format!("window.__TF_DEFAULT_LANG__={};", json!(default_lang)).replace('<', "\\u003c") };
     let mut out = html.replacen("<head>", &format!("<head>\n    <script>{lang}window.__TF_BRANDING__={data}</script>"), 1);
     if let Some(start) = out.find("<title>")
         && let Some(end) = out[start..].find("</title>")
@@ -482,10 +481,10 @@ mod tests {
         let html = inject(
             "<html><head>\n<link rel=\"icon\" type=\"image/svg+xml\" href=\"/favicon.svg\" />\n<title>ThirtyFile</title>\n</head><body></body></html>",
             &b,
-            "en",
+            "window.__TF_LANG__=\"en\";",
         );
         assert!(html.contains("<title>Stellar Cloud</title>"));
-        assert!(html.contains(r#"<script>window.__TF_DEFAULT_LANG__="en";window.__TF_BRANDING__="#));
+        assert!(html.contains(r#"<script>window.__TF_LANG__="en";window.__TF_BRANDING__="#));
         assert!(html.contains("tf-brand-css"));
         assert!(!html.contains("</script><b>"), "settings content must not escape the script tag");
     }

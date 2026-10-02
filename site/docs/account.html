@@ -68,7 +68,7 @@
       </nav>
       <main id="content" class="article">
         <h1>Your account</h1>
-        <p class="lead">Your password, two-factor sign-in, the devices you're signed in on, app passwords for scripts, your sign-in history, and notifications.</p>
+        <p class="lead">Your password, two-factor sign-in, the devices you're signed in on, app passwords for scripts, your language, your sign-in history, and notifications.</p>
         <p>Everything on this page is in the <strong>account menu</strong>: click your name at the bottom of the list on the left. Its last line says which version of ThirtyFile the server runs, such as <strong>ThirtyFile 0.5.0</strong>.</p>
 
         <h2 id="password">Password</h2>
@@ -115,6 +115,9 @@ curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;fil
         <p>App passwords work for files only: browsing, searching, downloading, uploading, and organising files and folders. They can't change your password, create app passwords, link sign-in methods, share links or use the Control panel, and they never get a cookie. One that may only read files is refused for anything that changes something.</p>
         <div class="note">Changing your password removes all your app passwords, as does an administrator resetting your password or your two-factor sign-in: create new ones afterwards. Signing out devices doesn't affect them; remove the ones you no longer trust. An app password stops working when its account is disabled or deleted. Wrong app passwords count towards the same limit as wrong passwords: after 30 from one address, that address has to wait 15 minutes.</div>
 
+        <h2 id="language">Language</h2>
+        <p><strong>Language</strong> in the account menu changes the language ThirtyFile is shown in. Your choice is saved with your account, so your other computers and phones use it too once you sign in there. Until you choose one, you get the default language your administrator set, or your browser's language. The sign-in page and share links follow your browser, or the language picked in the list at their bottom.</p>
+
         <h2 id="history">Sign-in history</h2>
         <p><strong>My sign-in history</strong> shows your sign-ins, failed attempts, sign-outs, password changes, and app passwords created, removed or used with a wrong secret, with the address and browser of each.</p>
 
@@ -130,7 +133,7 @@ curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;fil
         </ul>
         <p>A number on the bell counts the ones you haven't read. Click one to open what it is about. <strong>Mark all as read</strong> and <strong>Clear all</strong> are at the bottom of the list. Notifications are kept for 90 days.</p>
         <p><strong>Notification settings</strong>, at the bottom of the bell's list or in the account menu, turns each kind on or off, in the app and by email separately. Emails go to the <strong>email address</strong> you enter there. If you sign in with single sign-on, the address that account gives is filled in the first time, and you can change it. Leave it blank to get no emails. Password reset links go to this address too, so changing it asks for your current password (and with two-factor sign-in a code; accounts without a password change it within 10 minutes of signing in), and the previous address gets an email about the change. At most five emails of one kind go to an address within 15 minutes; the notifications in the app are all kept.</p>
-        <div class="note">Emails are only sent once an administrator has set up an email server (<a href="users.html#email">Notification emails</a>). They are written in the language you last used ThirtyFile in, with times in your time zone.</div>
+        <div class="note">Emails are only sent once an administrator has set up an email server (<a href="users.html#email">Notification emails</a>). They are written in the <a href="#language">language you chose</a>; without a choice, in the default language your administrator set, or else in the language you last used ThirtyFile in. Times are in your time zone.</div>
       </main>
     </div>
     <footer class="site-footer">

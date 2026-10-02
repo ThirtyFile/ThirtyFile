@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import { leaveAfterSignOut } from "@/lib/signOut";
 import {
   BellIcon,
@@ -36,6 +37,7 @@ import { TwoFactorDialog } from "@/components/TwoFactor";
 import { NotificationSettingsDialog } from "@/components/NotificationSettingsDialog";
 import { useMe } from "@/lib/session";
 import { useTheme, type ThemeMode } from "@/lib/theme";
+import { errorMessage } from "@/lib/utils";
 import { LANGS, lang, setLang, t, type Lang } from "@/lib/i18n";
 
 /**
@@ -56,6 +58,17 @@ export function AccountMenu({ usage }: { usage: string | null }) {
   const logout = async () => {
     await api.logout().catch(() => {});
     leaveAfterSignOut(me.id);
+  };
+
+  /** Saved with the account first, so the language follows them to their other devices */
+  const chooseLanguage = async (next: Lang) => {
+    try {
+      await api.setLanguage(next);
+    } catch (e) {
+      toast.error(errorMessage(e, t("Couldn't save the language")));
+      return;
+    }
+    setLang(next);
   };
 
   return (
@@ -120,7 +133,7 @@ export function AccountMenu({ usage }: { usage: string | null }) {
               {lang !== "en" && " · Language"}
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
-              <DropdownMenuRadioGroup value={lang} onValueChange={(v) => setLang(v as Lang)}>
+              <DropdownMenuRadioGroup value={lang} onValueChange={(v) => void chooseLanguage(v as Lang)}>
                 {LANGS.map((l) => (
                   <DropdownMenuRadioItem key={l.id} value={l.id}>
                     {l.label}

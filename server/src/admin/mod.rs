@@ -498,8 +498,17 @@ mod tests {
         assert_eq!(info.default_lang, "zh-TW");
         assert_eq!(crate::settings::load_system_settings(&env.st.db).await.unwrap().default_lang, "zh-TW");
         let bad = SettingsReq { default_lang: Some("fr".into()), ..Default::default() };
-        assert!(update_settings(State(env.st.clone()), Admin(admin), Json(bad)).await.is_err());
+        assert!(update_settings(State(env.st.clone()), Admin(admin.clone()), Json(bad)).await.is_err());
         assert_eq!(env.st.system.read().unwrap().default_lang, "zh-TW");
+        // Every language the server knows, also those the Control panel doesn't offer yet
+        for lang in ["zh-CN", "ja", "en", "auto"] {
+            let settings = SettingsReq { default_lang: Some(lang.into()), ..Default::default() };
+            let Json(info) = update_settings(State(env.st.clone()), Admin(admin.clone()), Json(settings)).await.unwrap();
+            assert_eq!(info.default_lang, lang);
+        }
+        for l in crate::i18n::Lang::ALL {
+            assert!(super::LANGS.contains(&l.code()), "{}", l.code());
+        }
     }
 
     #[tokio::test]
@@ -532,7 +541,7 @@ mod tests {
             disabled: None,
         };
         assert!(super::update(State(env.st.clone()), Admin(admin), Path(amy.id), Json(update)).await.is_err());
-        let Json(me) = crate::signin::me(State(env.st.clone()), amy).await.unwrap();
+        let Json(me) = crate::signin::me(State(env.st.clone()), amy, axum::http::HeaderMap::new()).await.unwrap();
         assert_eq!(me.min_password_length, 12);
     }
 
@@ -555,7 +564,7 @@ mod tests {
         assert_eq!(info.public_url, "https://drive.example.com");
         assert_eq!(crate::settings::load_system_settings(&env.st.db).await.unwrap().public_url, "https://drive.example.com");
         let amy = env.user("amy", true).await;
-        let Json(me) = crate::signin::me(State(env.st.clone()), amy).await.unwrap();
+        let Json(me) = crate::signin::me(State(env.st.clone()), amy, axum::http::HeaderMap::new()).await.unwrap();
         assert_eq!(me.public_url, "https://drive.example.com");
     }
 

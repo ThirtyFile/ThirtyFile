@@ -2,6 +2,7 @@
 
 import type { Branding } from "@/lib/branding";
 import type { SORT_KEYS } from "@/api/files";
+import type { Lang } from "@/lib/i18n";
 
 export interface Node {
   id: string;
@@ -1055,6 +1056,13 @@ export interface Me {
   max_edit_bytes: number;
   /** The release the server runs ("dev" for a local build); only people who are signed in are told */
   version: string;
+  /** The language saved with the account; "" when they chose none */
+  lang: Lang | "";
+  /**
+   * The language pages use for them in this browser when they or the system default picked it (saved with the account,
+   * chosen in this browser, or the system default); null when the browser's languages decide
+   */
+  ui_lang: Lang | null;
 }
 
 export interface SharePolicy {
@@ -1226,7 +1234,7 @@ export interface SystemSettingsReq {
 }
 
 /** System default interface language: "auto" follows the browser */
-export type DefaultLang = "auto" | "en" | "zh-TW";
+export type DefaultLang = "auto" | Lang;
 
 export interface SystemInfo {
   shared_enabled: boolean;
