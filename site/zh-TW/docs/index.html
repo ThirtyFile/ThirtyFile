@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-TW" data-root="../.." data-page="install">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>安裝 · ThirtyFile</title>
+    <meta name="description" content="ThirtyFile 在 Docker 中執行。從下面兩種方式任選一種，都只要一分鐘左右。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要內容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="網站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="../docs/index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">語言 </span><span class="lang-name">繁體中文</span></summary>
+            <ul>
+              <li><a href="../../docs/index.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="index.html" hreflang="zh-TW" lang="zh-TW" aria-current="true">繁體中文</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>開始使用</p>
+          <a href="../docs/index.html" aria-current="page">安裝</a>
+          <a href="../docs/first-steps.html">初次設定</a>
+          <p>日常使用</p>
+          <a href="../../docs/files.html" hreflang="en">檔案操作</a>
+          <a href="../../docs/preview.html" hreflang="en">預覽與編輯</a>
+          <a href="../../docs/sharing.html" hreflang="en">分享</a>
+          <a href="../../docs/account.html" hreflang="en">你的帳號</a>
+          <a href="../../docs/webdav.html" hreflang="en">連線為網路磁碟機</a>
+          <p>管理</p>
+          <a href="../../docs/users.html" hreflang="en">使用者與空間</a>
+          <a href="../../docs/sign-in.html" hreflang="en">單一登入</a>
+          <a href="../../docs/storage.html" hreflang="en">儲存位置</a>
+          <a href="../../docs/logs.html" hreflang="en">紀錄與品牌</a>
+          <p>架設與維運</p>
+          <a href="../../docs/settings.html" hreflang="en">設定</a>
+          <a href="../../docs/internet.html" hreflang="en">從網際網路存取</a>
+          <a href="../../docs/backup.html" hreflang="en">升級與備份</a>
+          <a href="../../docs/help.html" hreflang="en">疑難排解</a>
+          <p>專案</p>
+          <a href="../../docs/contributing.html" hreflang="en">參與貢獻</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+        <h1>安裝</h1>
+        <p class="lead">ThirtyFile 在 Docker 中執行。從下面兩種方式任選一種，都只要一分鐘左右。</p>
+        <p class="lang-note">安裝與初次設定這兩篇指南有繁體中文版，其他指南目前只有英文版。</p>
+        <h2 id="before">開始之前</h2>
+        <p>在要存放檔案的電腦或伺服器上安裝 <a href="https://docs.docker.com/get-docker/">Docker</a>，不需要其他軟體。</p>
+
+        <h2 id="docker-run">方法一：docker run</h2>
+        <pre><code>docker run -d --name thirtyfile --restart unless-stopped \
+  -p 8080:8080 \
+  -v /srv/thirtyfile/data:/data \
+  -v /srv/thirtyfile/storage:/storage \
+  -e THIRTYFILE_ADMIN_PASSWORD='choose-a-password' \
+  ghcr.io/thirtyfile/thirtyfile:latest</code></pre>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>部分</th><th>作用</th></tr></thead>
+            <tbody>
+              <tr><td><code>-p 8080:8080</code></td><td>連到網站所用的連接埠。若要使用 80 埠，請寫成 <code>-p 80:8080</code></td></tr>
+              <tr><td><code>-v /srv/thirtyfile/data:/data</code></td><td>帳號與設定存放的位置，更新後仍會保留</td></tr>
+              <tr><td><code>-v /srv/thirtyfile/storage:/storage</code></td><td>檔案存放的位置。可以是另一顆磁碟，或掛載的 NAS</td></tr>
+              <tr><td><code>THIRTYFILE_ADMIN_PASSWORD</code></td><td>第一個帳號的密碼。請把 <code>choose-a-password</code> 換成你自己的密碼：沿用這個範例會被當成沒有設定。這一項可以省略：省略時會產生隨機密碼，並寫入紀錄</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="compose">方法二：Docker Compose</h2>
+        <p>把現成的 <code>compose.yaml</code> 下載到一個空資料夾，並在該資料夾中啟動：</p>
+        <pre><code>curl -fLO https://github.com/ThirtyFile/ThirtyFile/releases/latest/download/compose.yaml
+docker compose up -d</code></pre>
+        <p>帳號與設定存放在 <code>data</code> 資料夾，檔案存放在 <code>storage</code> 資料夾，兩者都在 <code>compose.yaml</code> 旁邊。裡面是一般資料夾中的一般檔案，每個空間一個資料夾（<a href="../../docs/storage.html#layout" hreflang="en">檔案存放在哪裡</a>）。若要把檔案放在另一顆磁碟或 NAS，請把 <code>compose.yaml</code> 中的 <code>./storage</code> 改成該路徑。</p>
+        <div class="note"><strong>ThirtyFile 會接管交給它的資料夾。</strong>啟動時，如果 <code>data</code> 與 <code>storage</code> 屬於其他使用者，ThirtyFile 會把資料夾連同裡面的所有內容，改為它執行時使用的使用者所有（id 1000，<code>THIRTYFILE_RUN_AS</code>）。如果你把 <code>storage</code> 指向其他程式或其他人也在使用的既有資料夾，他們的檔案擁有者也會跟著改變。請使用空資料夾，或把 <code>THIRTYFILE_RUN_AS</code> 設為該資料夾現有的擁有者。若要改用群組存取 NAS 的共用資料夾，請以 <code>--group-add 2001</code>（在 <code>compose.yaml</code> 中為 <code>group_add:</code>）加入該群組：ThirtyFile 切換使用者後仍會保留這個群組。</div>
+        <p>現成的 <code>compose.yaml</code> 會以唯讀的根檔案系統執行容器，除了移交資料夾與切換使用者所需的四項之外，移除所有 Linux capability，並設定 <code>no-new-privileges</code>。在 Kubernetes 上，或任何無法以 root 啟動容器的環境，請直接以該使用者執行（<code>--user 1000:1000</code>，或 <code>runAsUser: 1000</code> 與 <code>runAsGroup: 1000</code>），並確認磁碟區屬於這個使用者；ThirtyFile 就會略過移交的步驟。</p>
+        <p>若要自己設定管理員密碼，請在第一次啟動前，於同一個資料夾中建立名為 <code>.env</code> 的檔案，內容如下：</p>
+        <pre><code>THIRTYFILE_ADMIN_PASSWORD=choose-a-password</code></pre>
+
+        <h2 id="sign-in">登入</h2>
+        <ol>
+          <li>開啟 <code>http://localhost:8080</code>。從其他電腦連線時，請把 <code>localhost</code> 換成伺服器的位址。</li>
+          <li>在鎖定畫面上任意處按一下，再以 <strong>admin</strong> 和你設定的密碼登入。</li>
+          <li>開啟左下角的帳號選單，選擇<strong>變更密碼</strong>。</li>
+        </ol>
+        <div class="note"><strong>沒有設定密碼？</strong>系統會產生隨機密碼並寫入紀錄。可以用 <code>docker logs thirtyfile 2&gt;&amp;1 | grep password</code> 查看。</div>
+
+        <h2 id="stop">停止與啟動</h2>
+        <pre><code>docker stop thirtyfile
+docker start thirtyfile</code></pre>
+        <p>使用 Docker Compose 時，請在 <code>compose.yaml</code> 所在的資料夾執行 <code>docker compose stop</code> 與 <code>docker compose start</code>。</p>
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="../docs/index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">原始碼</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">回報問題</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 映像檔</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

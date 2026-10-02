@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-TW" data-root="../.." data-page="first-steps">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>初次設定 · ThirtyFile</title>
+    <meta name="description" content="第一次登入後要設定的四件事。全都在控制台裡，位於左側選單的最下方。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/first-steps.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/first-steps.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/first-steps.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要內容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="網站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="../docs/index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">語言 </span><span class="lang-name">繁體中文</span></summary>
+            <ul>
+              <li><a href="../../docs/first-steps.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="first-steps.html" hreflang="zh-TW" lang="zh-TW" aria-current="true">繁體中文</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>開始使用</p>
+          <a href="../docs/index.html">安裝</a>
+          <a href="../docs/first-steps.html" aria-current="page">初次設定</a>
+          <p>日常使用</p>
+          <a href="../../docs/files.html" hreflang="en">檔案操作</a>
+          <a href="../../docs/preview.html" hreflang="en">預覽與編輯</a>
+          <a href="../../docs/sharing.html" hreflang="en">分享</a>
+          <a href="../../docs/account.html" hreflang="en">你的帳號</a>
+          <a href="../../docs/webdav.html" hreflang="en">連線為網路磁碟機</a>
+          <p>管理</p>
+          <a href="../../docs/users.html" hreflang="en">使用者與空間</a>
+          <a href="../../docs/sign-in.html" hreflang="en">單一登入</a>
+          <a href="../../docs/storage.html" hreflang="en">儲存位置</a>
+          <a href="../../docs/logs.html" hreflang="en">紀錄與品牌</a>
+          <p>架設與維運</p>
+          <a href="../../docs/settings.html" hreflang="en">設定</a>
+          <a href="../../docs/internet.html" hreflang="en">從網際網路存取</a>
+          <a href="../../docs/backup.html" hreflang="en">升級與備份</a>
+          <a href="../../docs/help.html" hreflang="en">疑難排解</a>
+          <p>專案</p>
+          <a href="../../docs/contributing.html" hreflang="en">參與貢獻</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+        <h1>初次設定</h1>
+        <p class="lead">第一次登入後要設定的四件事。全都在控制台裡，位於左側選單的最下方。</p>
+        <p class="lang-note">安裝與初次設定這兩篇指南有繁體中文版，其他指南目前只有英文版。</p>
+        <h2 id="general">1. 網站網址與語言</h2>
+        <p>開啟<strong>控制台 › 一般</strong>。</p>
+        <ul>
+          <li><strong>網站網址</strong>：大家用來連到網站的位址，例如 <code>https://files.example.com</code>。分享連結是以它產生的，所以請在分享任何東西之前先設定好。</li>
+          <li><strong>預設語言</strong>：英文、繁體中文，或依照每個人的瀏覽器語言。使用英文時，日期、時間與數字會依瀏覽器設定的地區顯示：例如瀏覽器設為英文（英國）時，會顯示「日/月/年」與 24 小時制的時間。</li>
+          <li><strong>個人空間</strong>：新使用者是否擁有自己的「我的檔案」、放在哪個儲存位置，以及最多可以存放多少資料。請參閱<a href="../../docs/users.html#personal" hreflang="en">個人空間</a>。</li>
+          <li><strong>兩步驟驗證</strong>與<strong>密碼最短長度</strong>。請參閱<a href="../../docs/users.html#security" hreflang="en">登入安全性</a>。</li>
+        </ul>
+
+        <h2 id="storage">2. 檔案存放在哪裡</h2>
+        <p>除非另外指定，檔案會以一般資料夾的形式存放在 storage 資料夾中：「全部檔案」在 <code>company</code>，其他則在 <code>teams/&lt;空間名稱&gt;</code> 與 <code>users/&lt;使用者名稱&gt;</code>（請參閱<a href="../../docs/storage.html#layout" hreflang="en">檔案存放在哪裡</a>）。若要改用 NAS、S3、SFTP 或 FTP，請開啟<strong>控制台 › 儲存位置</strong>，新增位置後設為預設。</p>
+        <p>各種類型的細節，請參閱<a href="../../docs/storage.html" hreflang="en">儲存位置</a>。</p>
+
+        <h2 id="people">3. 人員</h2>
+        <p>在<strong>控制台 › 使用者</strong>建立帳號，在<strong>群組</strong>中把人員分組，例如每個部門一個群組。</p>
+        <p>如果你的組織使用 Microsoft、Google 或 GitHub 帳號，或有自己的身分識別服務（任何 OpenID Connect 服務，例如 Keycloak 或 Authentik），大家就能用這些帳號登入。請參閱<a href="../../docs/sign-in.html" hreflang="en">單一登入</a>。</p>
+
+        <h2 id="branding">4. 你的名稱與標誌</h2>
+        <p>在<strong>控制台 › 品牌</strong>設定網站名稱、標誌、色彩，以及登入畫面上的圖片。</p>
+
+        <h2 id="next">接下來</h2>
+        <ul>
+          <li>要在辦公室網路以外使用嗎？請先閱讀<a href="../../docs/internet.html" hreflang="en">從網際網路存取</a>。</li>
+          <li>在大家開始依賴它之前，先設定好<a href="../../docs/backup.html" hreflang="en">備份</a>。</li>
+        </ul>
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="../docs/index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">原始碼</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">回報問題</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 映像檔</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

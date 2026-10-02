@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-TW" data-root="..">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ThirtyFile：屬於你的檔案管理工具，在瀏覽器中使用</title>
+    <meta name="description" content="ThirtyFile 是可以自行架設的檔案管理工具，在瀏覽器中操作起來就像 Windows 檔案總管。檔案存放在你自己的儲存空間，可以預覽與編輯 Office 文件，也能用連結分享。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/" />
+    <meta property="og:title" content="ThirtyFile" />
+    <meta property="og:description" content="可以自行架設的檔案管理工具，像檔案總管一樣，在瀏覽器中使用。" />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://thirtyfile.github.io/ThirtyFile/assets/files-light-zh-TW.webp" />
+    <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要內容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="./index.html"><img src="../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="網站">
+          <a href="./index.html#features" class="hide-small">功能</a>
+          <a href="./docs/index.html">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">語言 </span><span class="lang-name">繁體中文</span></summary>
+            <ul>
+              <li><a href="../index.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="index.html" hreflang="zh-TW" lang="zh-TW" aria-current="true">繁體中文</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <main id="content">
+      <section class="hero">
+        <div class="wrap">
+          <div class="hero-text">
+            <span class="eyebrow">自行架設的檔案管理工具</span>
+            <h1>檔案放在<em>你自己</em>的伺服器，用起來就像檔案總管。</h1>
+            <p class="lead">ThirtyFile 是在瀏覽器中執行的團隊檔案管理工具。外觀與操作都和大家熟悉的檔案總管一樣，檔案則存放在由你掌控的儲存空間。</p>
+            <div class="actions">
+              <a class="button primary" href="#install">一分鐘完成安裝</a>
+              <a class="button ghost" href="docs/index.html">閱讀指南</a>
+            </div>
+          </div>
+          <div class="hero-shot">
+            <div class="window-bar" aria-hidden="true"><span></span><span></span><span></span></div>
+            <img class="only-light" src="../assets/files-light-zh-TW.webp" width="2560" height="1440" alt="ThirtyFile 的檔案清單：左側是資料夾樹狀結構，右側是資料夾與文件，上方有分頁與網址列" />
+            <img class="only-dark" src="../assets/files-dark-zh-TW.webp" width="2560" height="1440" alt="深色模式下的 ThirtyFile 檔案清單" />
+          </div>
+        </div>
+      </section>
+
+      <section id="features">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>共用磁碟該有的，這裡都有</h2>
+            <p>不需要教育訓練。會用檔案總管，就會用 ThirtyFile。</p>
+          </div>
+          <div class="grid">
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg></span>
+              <h3>第一次點開就上手</h3>
+              <p>分頁、網址列、資料夾樹狀結構、拖放、右鍵選單，還有你早已習慣的鍵盤快速鍵。也可以在電腦或手機上把它連線為網路磁碟機。</p>
+            </div>
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" /><path d="M14 3v5h5M9 13h6M9 17h4" /></svg></span>
+              <h3>Office 檔案直接在瀏覽器開啟</h3>
+              <p>不必安裝任何軟體，就能預覽 Word、PowerPoint 與 Excel。Excel 活頁簿與文字檔可以線上編輯，並保留先前的版本。</p>
+            </div>
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1" /><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" /></svg></span>
+              <h3>用連結分享</h3>
+              <p>傳送附有密碼、到期日與下載次數上限的連結。可以把資料夾分享給同事，也可以讓別人把檔案傳給你。</p>
+            </div>
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3" /><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" /></svg></span>
+              <h3>儲存位置由你決定</h3>
+              <p>本機磁碟或 NAS（檔案仍是一般的資料夾）、相容 S3 的儲存服務、SFTP 或 FTP。既有的資料夾，例如 NAS 的共用資料夾，也能直接成為一個空間。</p>
+            </div>
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8" /></svg></span>
+              <h3>每個團隊都有自己的空間</h3>
+              <p>個人、全公司與團隊空間，有檢視者、編輯者與管理者等角色，每個空間都能設定容量上限。</p>
+            </div>
+            <div class="card">
+              <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.2 7.8 8 9 4.8-1.2 8-4.5 8-9V6Z" /><path d="m9 12 2 2 4-4" /></svg></span>
+              <h3>用你習慣的方式登入</h3>
+              <p>密碼搭配兩步驟驗證，或使用 Microsoft、Google、GitHub 及任何 OpenID Connect 服務的帳號。每一次登入與檔案操作都有紀錄。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="soft">
+        <div class="wrap">
+          <div class="feature">
+            <div class="feature-text">
+              <h3>不離開瀏覽器就能編輯試算表</h3>
+              <p>開啟 Excel 活頁簿，修改需要的地方後儲存。檔案仍是一般的 Excel 檔，在任何地方都能開啟。</p>
+              <ul class="ticks">
+                <li>公式、數值格式、色彩與框線</li>
+                <li>可以和 Excel 互相複製貼上</li>
+                <li>圖表、圖片與檔案中的其他內容都會原封不動保留</li>
+              </ul>
+            </div>
+            <div class="shot"><img src="../assets/excel-edit.webp" width="2560" height="1440" loading="lazy" alt="在 ThirtyFile 中編輯的 Excel 預算表，上方有格式工具列與資料編輯列（英文介面）" /></div>
+          </div>
+
+          <div class="feature flip">
+            <div class="feature-text">
+              <h3>分享多少，由你決定</h3>
+              <p>連結可以要求輸入密碼、在一週後失效，或限制下載次數。</p>
+              <ul class="ticks">
+                <li>建立連結的人失去存取權時，連結也會跟著失效</li>
+                <li>可以看到誰在什麼時候開啟了連結</li>
+                <li>收件者不需要帳號</li>
+              </ul>
+            </div>
+            <div class="shot narrow"><img src="../assets/share-dialog.webp" width="1024" height="600" loading="lazy" alt="分享連結對話方塊：有效期限七天，設有密碼與下載次數上限（英文介面）" /></div>
+          </div>
+
+          <div class="feature">
+            <div class="feature-text">
+              <h3>白天晚上、電腦手機，都好用</h3>
+              <p>淺色與深色模式、適合手機的版面，每個人都能選擇英文或繁體中文介面。</p>
+              <ul class="ticks">
+                <li>相片有縮圖，影片、音訊與 PDF 有檢視器</li>
+                <li>連線中斷後，上傳會從中斷的地方繼續</li>
+                <li>每個頁面都能換上你自己的名稱、標誌與色彩</li>
+              </ul>
+            </div>
+            <div class="shot"><img src="../assets/photos-dark.webp" width="1920" height="1080" loading="lazy" alt="深色模式下以縮圖顯示的相片資料夾" /></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="install">
+        <div class="wrap install">
+          <div>
+            <div class="section-head">
+              <h2>一分鐘就能開始使用</h2>
+              <p>只有一個小程式，不需要另外架設資料庫或網頁伺服器。</p>
+            </div>
+            <ol class="steps">
+              <li><strong>安裝 Docker</strong>裝在要存放檔案的電腦或伺服器上。</li>
+              <li><strong>執行指令</strong>並把密碼換成你自己的。</li>
+              <li><strong>開啟網頁</strong>前往 <code>http://localhost:8080</code>，以 <code>admin</code> 登入。</li>
+            </ol>
+          </div>
+          <div>
+            <div class="tabs" role="tablist" aria-label="安裝方式">
+              <button type="button" role="tab" id="tab-run-tab" aria-controls="tab-run" data-tab="tab-run">docker run</button>
+              <button type="button" role="tab" id="tab-compose-tab" aria-controls="tab-compose" data-tab="tab-compose">Docker Compose</button>
+            </div>
+            <div id="tab-run" role="tabpanel" aria-labelledby="tab-run-tab">
+              <pre><code>docker run -d --name thirtyfile --restart unless-stopped \
+  -p 8080:8080 \
+  -v /srv/thirtyfile/data:/data \
+  -v /srv/thirtyfile/storage:/storage \
+  -e THIRTYFILE_ADMIN_PASSWORD='choose-a-password' \
+  ghcr.io/thirtyfile/thirtyfile:latest</code></pre>
+            </div>
+            <div id="tab-compose" role="tabpanel" aria-labelledby="tab-compose-tab">
+              <pre><code>curl -fLO https://github.com/ThirtyFile/ThirtyFile/releases/latest/download/compose.yaml
+docker compose up -d</code></pre>
+            </div>
+            <p style="margin: 16px 0 0; color: var(--text-soft)">下一步：<a href="docs/first-steps.html">設定使用者、儲存位置與你的標誌</a>。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="cta">
+        <div class="wrap">
+          <img src="../assets/logo.svg" alt="" width="72" height="72" />
+          <h2>讓你的團隊擁有自己的雲端硬碟</h2>
+          <p>一分鐘裝好，親自試試看。原始碼公開在 GitHub。</p>
+          <div class="actions">
+            <a class="button primary" href="docs/index.html">開始使用</a>
+            <a class="button ghost" href="https://github.com/ThirtyFile/ThirtyFile">在 GitHub 上查看</a>
+          </div>
+          <p class="lang-note">安裝與初次設定的指南有繁體中文版，其他詳細指南目前只有英文版。</p>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="./docs/index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">原始碼</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">回報問題</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 映像檔</a>
+      </div>
+    </footer>
+    <script src="../assets/site.js"></script>
+  </body>
+</html>
