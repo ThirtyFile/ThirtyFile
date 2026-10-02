@@ -59,10 +59,11 @@ function useWidth<T extends HTMLElement>() {
 /** A time as the axis and the table show it: the time of day for short ranges, the date for long ones */
 export function timeLabel(ts: number, span: number, withDate = false): string {
   const d = new Date(ts * 1000);
-  if (span >= 86400) return new Intl.DateTimeFormat(locale, { month: "2-digit", day: "2-digit" }).format(d);
-  const opts: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit", hour12: false };
-  if (withDate || span >= 3600) Object.assign(opts, { month: "2-digit", day: "2-digit" });
-  return new Intl.DateTimeFormat(locale, opts).format(d);
+  // The locale's order and clock, as everywhere else (lib/utils.ts), without the year
+  if (span >= 86400) return new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric" }).format(d);
+  const opts: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
+  if (withDate || span >= 3600) Object.assign(opts, { month: "numeric", day: "numeric" });
+  return new Intl.DateTimeFormat(locale, opts).format(d).replace(/,(?= )/, "");
 }
 
 export function UsageChart({

@@ -5,7 +5,7 @@ import { api, type ShareAccessFilter } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
-import { cn, formatWinDate } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 import { shownCount } from "@/components/logs/shown";
 import { DateRangeFilter, FilterBar, MultiSelect, SearchBox, rangeToUnix, type DateRange } from "./filters";
@@ -102,7 +102,7 @@ export function ShareAccessLog({ shareId, admin, className }: { shareId?: string
                 const ev = ACCESS_EVENTS[a.event];
                 return (
                   <tr key={a.id} className="border-b border-border/40 hover:bg-muted/50">
-                    <td className="px-2.5 py-1.5 whitespace-nowrap text-muted-foreground">{formatWinDate(a.at)}</td>
+                    <td className="px-2.5 py-1.5 whitespace-nowrap text-muted-foreground">{formatDateTime(a.at)}</td>
                     <td className={cn("px-2.5 py-1.5 whitespace-nowrap", ev?.tone)}>{ev?.label ?? a.event}</td>
                     <td className="max-w-0 truncate px-2.5 py-1.5" title={a.node_name}>
                       {a.private ? (

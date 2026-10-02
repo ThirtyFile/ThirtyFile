@@ -11,7 +11,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { t } from "@/lib/i18n";
 import { refreshFiles, saved } from "@/lib/queries";
 import { useMe } from "@/lib/session";
-import { formatBytes, formatWinDate, errorMessage } from "@/lib/utils";
+import { formatBytes, formatDateTime, errorMessage } from "@/lib/utils";
 
 /** `ready`: the selection has stayed on this file for a moment, so its versions are asked for */
 export function VersionsSection({ node, canRestore, ready = true }: { node: Node; canRestore: boolean; ready?: boolean }) {
@@ -32,11 +32,11 @@ export function VersionsSection({ node, canRestore, ready = true }: { node: Node
       description: unsaved
         ? t('"{name}" gets back the content it had on {date}. Its current content is kept as an earlier version, and the changes not saved yet in the editor are discarded.', {
             name: node.name,
-            date: formatWinDate(v.modified_at),
+            date: formatDateTime(v.modified_at),
           })
         : t('"{name}" gets back the content it had on {date}. Its current content is kept as an earlier version.', {
             name: node.name,
-            date: formatWinDate(v.modified_at),
+            date: formatDateTime(v.modified_at),
           }),
       confirmText: t("Restore"),
     });
@@ -71,7 +71,7 @@ export function VersionsSection({ node, canRestore, ready = true }: { node: Node
         <ul className="grid gap-1.5">
           {versions.data.map((v) => (
             <li key={v.id} className="grid gap-1 rounded-md border px-2 py-1.5 text-xs">
-              <div className="font-medium">{formatWinDate(v.modified_at)}</div>
+              <div className="font-medium">{formatDateTime(v.modified_at)}</div>
               <div className="text-muted-foreground [overflow-wrap:anywhere]">{[v.author_name, formatBytes(v.size)].filter(Boolean).join(" · ")}</div>
               <div className="flex flex-wrap gap-1">
                 <a className={buttonVariants({ variant: "ghost", size: "xs" })} href={api.versionUrl(node.id, v.id)} target="_blank" rel="noopener">

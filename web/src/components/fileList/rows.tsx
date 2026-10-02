@@ -4,7 +4,7 @@ import { memo, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNo
 import { ChevronDownIcon, ChevronUpIcon, StarIcon } from "lucide-react";
 import type { FileSource, SortKey } from "@/api";
 import { FileIcon, typeLabel, typeTitle } from "@/components/FileIcon";
-import { cn, formatWinDate, formatWinSize } from "@/lib/utils";
+import { cn, formatDateTime, formatWinSize } from "@/lib/utils";
 import type { ColumnId, Group } from "@/lib/listView";
 import { InlineRename } from "@/components/InlineRename";
 import { t, tc } from "@/lib/i18n";
@@ -185,13 +185,13 @@ export function Cell({ id, item, h }: { id: ColumnId; item: Item; h: HandlersRef
     case "date":
       return (
         <td role="gridcell" className={muted}>
-          {formatWinDate(h.current.dateOf(item))}
+          {formatDateTime(h.current.dateOf(item))}
         </td>
       );
     case "created":
       return (
         <td role="gridcell" className={muted}>
-          {formatWinDate(item.created_at)}
+          {formatDateTime(item.created_at)}
         </td>
       );
     case "type":

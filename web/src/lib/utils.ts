@@ -31,32 +31,45 @@ export function formatBytes(n: number): string {
   return `${v >= 100 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
 }
 
-const dateFmt = new Intl.DateTimeFormat(locale, {
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-});
-
-const winDateFmt = new Intl.DateTimeFormat(locale, {
-  year: "numeric",
-  month: "numeric",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-  // English follows the region's clock (en-GB: 24-hour)
-  hour12: locale === "zh-TW" ? true : undefined,
-});
-
 /**
- * Windows File Explorer format: 9/3/2026 10:15 PM, 03/09/2026 22:15 in en-GB
- * (zh-TW: 2026/9/3 with the Chinese PM marker before 10:15)
+ * Dates and times are written one way everywhere: numbers, in the order and with the clock of the interface's locale,
+ * as File Explorer lists them. en-US: 10/2/2026 2:44 PM; en-GB: 02/10/2026 14:44; zh-TW: 2026/10/2, then the PM marker, then 2:44
  */
-export function formatWinDate(ts: number): string {
-  const s = winDateFmt.format(new Date(ts * 1000));
-  return locale === "zh-TW" ? s.replace(/\s*(上午|下午)\s*/, " $1 ") : s.replace(",", ""); // i18n-ignore: tidies the Chinese AM/PM markers in formatted dates
+const DATE: Intl.DateTimeFormatOptions = { year: "numeric", month: "numeric", day: "numeric" };
+const TIME: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
+
+const formats = new Map<string, Intl.DateTimeFormat>();
+/** A formatter for the interface's locale, made once per set of options (and time zone) */
+function dateFormat(options: Intl.DateTimeFormatOptions, timeZone?: string): Intl.DateTimeFormat {
+  const key = JSON.stringify([options, timeZone]);
+  let f = formats.get(key);
+  if (!f) {
+    f = new Intl.DateTimeFormat(locale, { ...options, timeZone });
+    formats.set(key, f);
+  }
+  return f;
+}
+
+/** No comma between the date and the time, as File Explorer writes them; the Chinese AM/PM marker set apart */
+const tidy = (s: string) =>
+  s
+    .replace(/,(?= )/, "")
+    .replace(/\s*(上午|下午)\s*/, " $1 ") // i18n-ignore: tidies the Chinese AM/PM markers in formatted dates
+    .trim();
+
+/** A date and time: 10/2/2026 2:44 PM. `timeZone` writes it as the clock there shows it (default: the browser's) */
+export function formatDateTime(ts: number, timeZone?: string): string {
+  return tidy(dateFormat({ ...DATE, ...TIME }, timeZone).format(new Date(ts * 1000)));
+}
+
+/** A date: 10/2/2026 */
+export function formatDate(ts: number): string {
+  return dateFormat(DATE).format(new Date(ts * 1000));
+}
+
+/** A time of day: 2:44 PM */
+export function formatClock(ts: number): string {
+  return tidy(dateFormat(TIME).format(new Date(ts * 1000)));
 }
 
 /** Windows File Explorer format: always shown in KB, e.g. 4,032 KB */
@@ -64,23 +77,14 @@ export function formatWinSize(n: number): string {
   return `${(n === 0 ? 0 : Math.max(1, Math.ceil(n / 1024))).toLocaleString(locale)} KB`;
 }
 
-/** 2026/09/25 14:48 */
-export function formatDateTime(ts: number): string {
-  return dateFmt.format(new Date(ts * 1000));
-}
-
-/** A recent time in words ("Just now", "5 minutes ago", "Today 14:05"), otherwise the date */
+/** A recent time in words ("Just now", "5 minutes ago", "Today 2:05 PM"), otherwise the date and time */
 export function formatTime(ts: number): string {
   const d = new Date(ts * 1000);
   const diff = Date.now() / 1000 - ts;
   if (diff < 60) return t("Just now");
   if (diff < 3600) return t("{n} minute ago|{n} minutes ago", { n: Math.floor(diff / 60) });
-  if (diff < 86400 && new Date().getDate() === d.getDate()) return t("Today {time}", { time: d.toTimeString().slice(0, 5) });
-  return dateFmt.format(d);
-}
-
-export function formatDate(ts: number): string {
-  return new Intl.DateTimeFormat(locale, { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ts * 1000));
+  if (diff < 86400 && new Date().getDate() === d.getDate()) return t("Today {time}", { time: formatClock(ts) });
+  return formatDateTime(ts);
 }
 
 /** Sorts names the way File Explorer does: "File 2" before "File 10", letter case ignored (the server sorts the same way) */

@@ -6,7 +6,7 @@ import { keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
 import { ACTION_GROUPS, actionLabel } from "@/components/logs/actions";
-import { cn, formatWinDate } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
 import { t, tServer } from "@/lib/i18n";
 import { shownCount } from "@/components/logs/shown";
 import { ExportCsvButton, csvTime, type CsvColumn } from "@/components/logs/exportCsv";
@@ -83,7 +83,7 @@ export function ActivityLog({ driveId, className, compact }: { driveId?: string;
                 const detail = tServer(a.detail);
                 return (
                   <tr key={a.id} className="border-b border-border/40 hover:bg-muted/50">
-                    <td className="px-2.5 py-1.5 whitespace-nowrap text-muted-foreground">{formatWinDate(a.at)}</td>
+                    <td className="px-2.5 py-1.5 whitespace-nowrap text-muted-foreground">{formatDateTime(a.at)}</td>
                     <td className="truncate px-2.5 py-1.5">
                       <button type="button" className="hover:text-brand hover:underline" title={t("Show only this user")} onClick={() => setUser(a.username)}>
                         {a.username}

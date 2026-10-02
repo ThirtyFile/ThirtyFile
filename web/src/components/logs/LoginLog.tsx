@@ -6,7 +6,7 @@ import { keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { cn, formatWinDate } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
 import { DateRangeFilter, FilterBar, MultiSelect, SearchBox, rangeToUnix, type DateRange } from "./filters";
 import { describeAgent } from "./ShareAccessLog";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
@@ -138,7 +138,7 @@ export function LoginLog({ userId, admin, className }: { userId?: number; admin?
                 const ev = LOGIN_EVENTS[r.event];
                 return (
                   <tr key={r.id} className="border-b border-border/40 hover:bg-muted/50">
-                    <td className="px-2.5 py-1.5 whitespace-nowrap text-muted-foreground">{formatWinDate(r.at)}</td>
+                    <td className="px-2.5 py-1.5 whitespace-nowrap text-muted-foreground">{formatDateTime(r.at)}</td>
                     {showUser && (
                       <td className="max-w-0 truncate px-2.5 py-1.5">
                         <button

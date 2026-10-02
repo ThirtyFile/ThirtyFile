@@ -13,8 +13,8 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { ErrorText } from "@/components/dialogs";
 import { locationLabel } from "@/components/LocationSelect";
 import { DRIVE_ICON } from "@/lib/drives";
-import { t, tServer } from "@/lib/i18n";
-import { cn, errorMessage } from "@/lib/utils";
+import { locale, t, tServer } from "@/lib/i18n";
+import { cn, errorMessage, formatDateTime } from "@/lib/utils";
 import { useSubmit } from "@/lib/useSubmit";
 
 /** The browser's time zone, the default of a new policy */
@@ -35,18 +35,18 @@ export const zones = (): string[] => {
   }
 };
 
-/** A time in a time zone, as the settings show the next snapshots */
+/** A time in a time zone, as the settings show the next snapshots; in the browser's own zone when that one is unknown */
 export function zonedTime(t: number, tz: string) {
   try {
-    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", timeZone: tz }).format(new Date(t * 1000));
+    return formatDateTime(t, tz);
   } catch {
-    return new Date(t * 1000).toLocaleString();
+    return formatDateTime(t);
   }
 }
 
 const DAYS = [1, 2, 3, 4, 5, 6, 7];
-/** Monday is 1: named in the browser's language (1 January 2024 was a Monday) */
-const dayName = (d: number) => new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(new Date(2024, 0, d));
+/** Monday is 1: named in the interface's language (1 January 2024 was a Monday) */
+const dayName = (d: number) => new Intl.DateTimeFormat(locale, { weekday: "short" }).format(new Date(2024, 0, d));
 
 type Kind = "every" | "daily" | "weekly";
 

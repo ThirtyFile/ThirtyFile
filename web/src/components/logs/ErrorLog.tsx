@@ -5,7 +5,7 @@ import { api, type ErrorEntry, type ErrorFilter } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
-import { cn, formatWinDate } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
 import { t, tServer } from "@/lib/i18n";
 import { shownCount } from "@/components/logs/shown";
 import { ExportCsvButton, csvTime, type CsvColumn } from "@/components/logs/exportCsv";
@@ -142,7 +142,7 @@ export function ErrorLog({ className }: { className?: string }) {
                           onClick={() => setOpen(expanded ? null : r.id)}
                         >
                           <ChevronRightIcon className={cn("size-3.5 transition-transform", expanded && "rotate-90")} />
-                          {formatWinDate(r.at)}
+                          {formatDateTime(r.at)}
                         </button>
                       </td>
                       <td className="max-w-0 truncate px-2.5 py-1.5">
@@ -207,8 +207,8 @@ function ErrorDetails({ entry: r, message }: { entry: ErrorEntry; message: strin
     [t("Status"), r.status === null ? "" : String(r.status)],
     [t("Error code"), r.code],
     [t("Request ID"), r.request_id ?? ""],
-    [t("First seen"), formatWinDate(r.first_at)],
-    [t("Last seen"), r.count > 1 ? formatWinDate(r.at) : ""],
+    [t("First seen"), formatDateTime(r.first_at)],
+    [t("Last seen"), r.count > 1 ? formatDateTime(r.at) : ""],
     [t("Occurrences"), String(r.count)],
     [t("Version"), r.version],
     [t("Reported by the page"), r.client],
