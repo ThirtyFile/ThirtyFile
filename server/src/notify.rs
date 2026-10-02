@@ -64,6 +64,8 @@ pub struct Notice {
 #[derive(Debug)]
 pub struct Outgoing {
     to: String,
+    /// The recipient's saved language and the one they last used (`i18n::recipient`)
+    chosen_lang: String,
     lang: String,
     tz_offset: i64,
     notice: Notice,
@@ -79,13 +81,14 @@ pub async fn add(conn: &mut SqliteConnection, users: &[i64], notice: &Notice) ->
     struct Row {
         id: i64,
         email: String,
+        chosen_lang: String,
         lang: String,
         tz_offset: i64,
         in_app: bool,
         by_email: bool,
     }
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT u.id, u.email, u.lang, u.tz_offset, COALESCE(p.in_app, 1) AS in_app, COALESCE(p.email, 1) AS by_email
+        "SELECT u.id, u.email, u.chosen_lang, u.lang, u.tz_offset, COALESCE(p.in_app, 1) AS in_app, COALESCE(p.email, 1) AS by_email
          FROM users u LEFT JOIN notification_prefs p ON p.user_id = u.id AND p.kind = ?2
          WHERE u.id IN (SELECT value FROM json_each(?1)) AND u.disabled = 0",
     )
@@ -107,7 +110,7 @@ pub async fn add(conn: &mut SqliteConnection, users: &[i64], notice: &Notice) ->
                 .await?;
         }
         if r.by_email && !r.email.is_empty() {
-            emails.push(Outgoing { to: r.email, lang: r.lang, tz_offset: r.tz_offset, notice: notice.clone() });
+            emails.push(Outgoing { to: r.email, chosen_lang: r.chosen_lang, lang: r.lang, tz_offset: r.tz_offset, notice: notice.clone() });
         }
     }
     Ok(emails)
@@ -363,16 +366,10 @@ pub fn send_later(st: &AppState, mut emails: Vec<Outgoing>) {
             return;
         }
         let site = st.part::<crate::branding::Memory>().settings.read().unwrap().site_name.clone();
-        let (base, default_lang) = {
-            let s = st.system.read().unwrap();
-            (s.public_url.clone(), s.default_lang.clone())
-        };
+        let base = st.system.read().unwrap().public_url.clone();
+        let default = crate::i18n::system_default(&st);
         for e in emails {
-            let zh = match e.lang.as_str() {
-                "zh-TW" => true,
-                "en" => false,
-                _ => default_lang == "zh-TW",
-            };
+            let zh = crate::i18n::recipient(&e.chosen_lang, &e.lang, default) == crate::i18n::Lang::ZhTw;
             let (subject, body) = render(&e.notice, zh, e.tz_offset, &site, &base);
             if let Err(err) = crate::mail::send(&cfg, &site, &crate::mail::Message { to: &e.to, subject: &subject, body: &body }).await {
                 tracing::warn!("Couldn't send a notification email to {}: {err}", e.to);
@@ -651,7 +648,7 @@ pub async fn list(State(st): State<AppState>, user: User, headers: HeaderMap, Qu
             .fetch_one(&mut *c)
             .await?;
     drop(c);
-    let used_lang = get_cookie(&headers, "tf_lang").filter(|l| matches!(*l, "en" | "zh-TW")).unwrap_or(&lang).to_string();
+    let used_lang = get_cookie(&headers, "tf_lang").filter(|l| crate::i18n::Lang::parse(l).is_some()).unwrap_or(&lang).to_string();
     let used_tz = q.tz.map_or(tz_offset, |t| t.clamp(-14 * 60, 14 * 60));
     if used_lang != lang || used_tz != tz_offset {
         let _w = st.write_lock.lock().await;
@@ -748,8 +745,9 @@ pub async fn update_settings(State(st): State<AppState>, user: User, Json(req): 
     if req.kinds.keys().any(|k| !KINDS.contains(&k.as_str())) {
         return Err(AppError::bad_request("Unknown kind of notification"));
     }
-    let (old, username, lang): (String, String, String) =
-        sqlx::query_as("SELECT email, username, lang FROM users WHERE id = ?").bind(user.id).fetch_one(&st.db).await?;
+    let (old, username, chosen_lang, last_lang): (String, String, String, String) =
+        sqlx::query_as("SELECT email, username, chosen_lang, lang FROM users WHERE id = ?").bind(user.id).fetch_one(&st.db).await?;
+    let lang = crate::i18n::recipient(&chosen_lang, &last_lang, crate::i18n::system_default(&st));
     let email = email.filter(|e| *e != old);
     // Password reset links and every notice go to this address, so changing it asks who it is again, like the
     // password itself
@@ -784,28 +782,23 @@ pub async fn update_settings(State(st): State<AppState>, user: User, Json(req): 
         tx.commit().await?;
     }
     if let Some(new) = email.filter(|_| !old.is_empty()) {
-        tell_old_address(&st, old, &username, &lang, &new);
+        tell_old_address(&st, old, &username, lang, &new);
     }
     Ok(Json(settings_of(&st, user.id).await?))
 }
 
 /// Tells the address an account used to have that it was replaced (whatever the notification settings say), so a
 /// change the owner didn't make doesn't go unnoticed
-fn tell_old_address(st: &AppState, old: String, username: &str, lang: &str, new: &str) {
+fn tell_old_address(st: &AppState, old: String, username: &str, lang: crate::i18n::Lang, new: &str) {
     let st = st.clone();
-    let (username, lang, new) = (username.to_string(), lang.to_string(), new.to_string());
+    let (username, new) = (username.to_string(), new.to_string());
     tokio::spawn(async move {
         let cfg = crate::mail::load(&st.db).await;
         if !cfg.ready() {
             return;
         }
         let site = st.part::<crate::branding::Memory>().settings.read().unwrap().site_name.clone();
-        let zh = match lang.as_str() {
-            "zh-TW" => true,
-            "en" => false,
-            _ => st.system.read().unwrap().default_lang == "zh-TW",
-        };
-        let (subject, body) = email_changed(zh, &site, &username, &new);
+        let (subject, body) = email_changed(lang == crate::i18n::Lang::ZhTw, &site, &username, &new);
         if let Err(e) = crate::mail::send(&cfg, &site, &crate::mail::Message { to: &old, subject: &subject, body: &body }).await {
             tracing::warn!("Couldn't tell {old} that the email address of {username} changed: {e}");
         }

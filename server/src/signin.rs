@@ -46,9 +46,12 @@ pub struct Me {
     pub max_edit_bytes: usize,
     /// The release this server runs (`dev` for a local build). Only people who are signed in get it.
     pub version: &'static str,
+    /// Their language: the one saved with the account, and the one pages use for them (i18n/)
+    #[serde(flatten)]
+    pub lang: crate::i18n::MeLang,
 }
 
-async fn me_of(st: &AppState, user: User) -> AppResult<Me> {
+async fn me_of(st: &AppState, user: User, headers: &HeaderMap) -> AppResult<Me> {
     let used_bytes = tree::used_bytes(&st.db, user.id).await?;
     let (personal_pending,): (bool,) =
         sqlx::query_as("SELECT personal_pending IS NOT NULL FROM users WHERE id = ?").bind(user.id).fetch_optional(&st.db).await?.unwrap_or((false,));
@@ -57,6 +60,7 @@ async fn me_of(st: &AppState, user: User) -> AppResult<Me> {
         (user.is_admin() || s.allow_user_drives, s.public_url.clone(), s.min_password_length, s.version_keep)
     };
     let share_policy = crate::shares::policy(st);
+    let lang = crate::i18n::me_lang(st, user.id, headers).await?;
     Ok(Me {
         user,
         used_bytes,
@@ -69,6 +73,7 @@ async fn me_of(st: &AppState, user: User) -> AppResult<Me> {
         version_keep,
         max_edit_bytes: crate::files::MAX_EDIT_BYTES,
         version: crate::VERSION,
+        lang,
     })
 }
 
@@ -167,7 +172,7 @@ pub async fn finish_login(st: &AppState, id: i64, username: &str, ip: &str, head
     let sql = format!("SELECT {USER_COLS} FROM users u WHERE u.id = ?");
     let mut user: User = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(id).fetch_one(&st.db).await?;
     user.shared_root = st.shared_root();
-    let mut body = serde_json::to_value(me_of(st, user).await?).map_err(AppError::internal)?;
+    let mut body = serde_json::to_value(me_of(st, user, headers).await?).map_err(AppError::internal)?;
     if let Some(codes) = recovery_codes {
         body["recovery_codes"] = serde_json::json!(codes);
     }
@@ -224,8 +229,8 @@ pub async fn logout(State(st): State<AppState>, ConnectInfo(addr): ConnectInfo<s
     Ok(([(header::SET_COOKIE, cookie), (header::HeaderName::from_static("clear-site-data"), "\"cache\"".to_string())], Json(serde_json::json!({ "ok": true }))))
 }
 
-pub async fn me(State(st): State<AppState>, user: User) -> AppResult<Json<Me>> {
-    Ok(Json(me_of(&st, user).await?))
+pub async fn me(State(st): State<AppState>, user: User, headers: HeaderMap) -> AppResult<Json<Me>> {
+    Ok(Json(me_of(&st, user, &headers).await?))
 }
 
 #[derive(Deserialize)]

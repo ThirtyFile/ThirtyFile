@@ -695,6 +695,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn accounts_from_0_4_0_keep_the_language_they_last_used_and_have_none_chosen() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-040-languages-{}", crate::util::new_id()));
+        let path = dir.join("drive.db");
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO users (id, username, password_hash, created_at, lang) VALUES (1, 'amy', 'x', 0, 'zh-TW')").execute(&db).await.unwrap();
+        db.close().await;
+
+        let db = connect(&path, 16).await.unwrap();
+        let (chosen, last): (String, String) = sqlx::query_as("SELECT chosen_lang, lang FROM users WHERE id = 1").fetch_one(&db).await.unwrap();
+        assert_eq!((chosen.as_str(), last.as_str()), ("", "zh-TW"));
+        sqlx::query("UPDATE users SET chosen_lang = 'ja' WHERE id = 1").execute(&db).await.unwrap();
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn a_database_from_0_4_0_keeps_what_the_replicas_page_shows() {
         let dir = std::env::temp_dir().join(format!("thirtyfile-040-replica-counts-{}", crate::util::new_id()));
         let path = dir.join("drive.db");

@@ -7,6 +7,7 @@ export default {
   "Shared with me": "与我共享",
   "Request failed ({status})": "请求失败（{status}）",
   "Language": "语言",
+  "Couldn't save the language": "无法保存语言",
   "Just now": "刚刚",
   "Today {time}": "今天 {time}",
   "Couldn't create ({status})": "创建失败（{status}）",

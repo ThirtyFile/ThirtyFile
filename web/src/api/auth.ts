@@ -1,5 +1,6 @@
-import { request, get, post, enc, qs } from "@/api/client";
+import { request, get, post, enc, qs, send } from "@/api/client";
 import type { SsoProvider, LinkedIdentity, Me, TwoFactorPending, TwoFactorSetup, TwoFactorStatus, Device, AppPassword } from "@/api/types";
+import type { Lang } from "@/lib/i18n";
 
 /** Signing in, two-factor sign-in, devices, app passwords and linked sign-in methods */
 export const authApi = {
@@ -17,6 +18,17 @@ export const authApi = {
   resetTwoFactor: (userId: number) => request("DELETE", `/admin/users/${userId}/2fa`),
   logout: () => post("/auth/logout"),
   changePassword: (current: string, next: string) => request("PUT", "/auth/password", { current, new: next }),
+  /** Saves the language the person chose with their account (`""` forgets it), so it follows them to other devices */
+  setLanguage: (lang: Lang | "") => request("PUT", "/auth/language", { lang }),
+  /**
+   * The same where it isn't known whether someone is signed in (the sign-in page, share links): saved when they are;
+   * nothing happens, and nobody is sent to sign in, when they aren't
+   */
+  setLanguageIfSignedIn: (lang: Lang) =>
+    send("/api/auth/language", { method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lang }) }).then(
+      () => undefined,
+      () => undefined,
+    ),
   authOptions: () => get<{ password_reset: boolean }>("/auth/options"),
   forgotPassword: (account: string) => post("/auth/forgot", { account }),
   resetPassword: (token: string, next: string) => post("/auth/reset", { token, new: next }),

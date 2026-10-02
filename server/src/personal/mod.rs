@@ -291,7 +291,7 @@ mod tests {
         let err = crate::nodes::get(State(env.st.clone()), amy.clone(), Path("root".into())).await.map(|_| ()).unwrap_err();
         assert_eq!((err.status, err.message.as_str()), (axum::http::StatusCode::NOT_FOUND, "You don't have a personal space"));
         // The page says so, and she still reaches the company space; her usage is 0
-        let Json(me) = crate::signin::me(State(env.st.clone()), amy.clone()).await.unwrap();
+        let Json(me) = crate::signin::me(State(env.st.clone()), amy.clone(), axum::http::HeaderMap::new()).await.unwrap();
         let me = serde_json::to_value(&me).unwrap();
         assert_eq!((me["root_id"].clone(), me["personal_pending"].clone(), me["used_bytes"].clone()), (Value::Null, json!(false), json!(0)));
         let Json(drives) = crate::drives::list(State(env.st.clone()), amy.clone()).await.unwrap();
@@ -392,7 +392,7 @@ mod tests {
         let mut c = env.st.db.acquire().await.unwrap();
         let amy = crate::auth::user_by_id(&env.st, &mut c, row.id).await.unwrap().unwrap();
         drop(c);
-        let Json(me) = crate::signin::me(State(env.st.clone()), amy.clone()).await.unwrap();
+        let Json(me) = crate::signin::me(State(env.st.clone()), amy.clone(), axum::http::HeaderMap::new()).await.unwrap();
         assert!(me.personal_pending);
         // An empty mount point isn't the location's folder either
         std::fs::create_dir(&nas).unwrap();
