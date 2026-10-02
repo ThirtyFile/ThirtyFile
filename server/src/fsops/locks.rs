@@ -76,7 +76,12 @@ impl Drop for SpaceLocks {
             });
             return;
         }
-        put_back(renamed);
+        // Else put back before the change reports its failure, the async worker handing its other tasks to another
+        // thread meanwhile (the server's runtime; tests run on one thread)
+        match tokio::runtime::Handle::try_current().map(|h| h.runtime_flavor()) {
+            Ok(tokio::runtime::RuntimeFlavor::MultiThread) => tokio::task::block_in_place(|| put_back(renamed)),
+            _ => put_back(renamed),
+        }
     }
 }
 

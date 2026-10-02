@@ -806,6 +806,11 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(mut req
     .fetch_one(&st.db)
     .await?;
     check_room(&st, &target, bytes).await?;
+    // The folder of a folder space must be there: a disk that isn't mounted mustn't look like an empty space. Looked
+    // at before the write lock is taken, on a blocking thread that is given up should the disk not answer.
+    for drive_id in &req.drive_ids {
+        crate::fsops::ready(&st, drive_id).await?;
+    }
 
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
@@ -848,15 +853,8 @@ async fn queue(conn: &mut SqliteConnection, user: &crate::auth::User, drive_id: 
     if drive_busy(conn, drive_id).await? {
         return Err(AppError::conflict(format!("\"{shown}\" is already being moved")));
     }
+    // Its folder was found there before the write lock was taken (`create`)
     let from_path = space.source_path.clone().filter(|_| space.mode == SpaceMode::Folder);
-    if let Some(path) = &from_path {
-        // Its folder must be there: a disk that isn't mounted mustn't look like an empty space
-        let root = crate::beneath::Pinned::root(std::path::Path::new(path));
-        let marked = root.and_then(|r| crate::folders::space_marker(&r)).ok().flatten();
-        if marked.as_deref() != Some(drive_id) {
-            return Err(AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, crate::storage::NOT_MOUNTED));
-        }
-    }
     // Already there: only content still kept elsewhere (from an earlier move, say) is gathered there
     if space.location_id.as_deref() == Some(target) && space.mode == to_mode && !store::scattered(conn, drive_id, target).await? {
         return Err(AppError::bad_request(format!("\"{shown}\" is already on this location")));

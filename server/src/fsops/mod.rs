@@ -831,6 +831,22 @@ mod tests {
         assert!(dir.join("Docs/a.txt").is_file() && dir.join("Docs/b.txt").is_file());
     }
 
+    /// On the server's runtime (one async worker), the renames of a failed change are put back off the worker, before
+    /// the change reports its failure
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn a_failed_change_puts_its_renames_back_before_it_answers_on_the_servers_runtime() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        write_old(&space.dir.join("a.txt"), b"a");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (a, _) = env.node_at(&space.drive, "a.txt").await.unwrap();
+        let res = crate::nodes::trash(State(env.st.clone()), admin.clone(), req(json!({ "ids": [a, space.root] }))).await;
+        assert!(res.is_err());
+        assert!(space.dir.join("a.txt").is_file());
+        assert!(node(&env, &a).await.trashed_at.is_none());
+    }
+
     #[tokio::test]
     async fn a_folder_that_looks_empty_or_cant_be_read_keeps_its_items() {
         let env = testutil::env().await;
