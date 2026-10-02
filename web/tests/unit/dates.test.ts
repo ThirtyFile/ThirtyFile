@@ -1,19 +1,19 @@
 // Dates and times (lib/utils.ts) are written one way everywhere, in the order and with the clock of the interface's
 // locale. The language is decided when the modules load, so each test imports fresh copies after choosing it.
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { ZH } from "@/lib/i18n/zh-TW";
+import { DICT as ZH } from "@/lib/i18n/zh-TW";
 
 async function load(lang: "en" | "zh-TW", browser = "en-US") {
   vi.resetModules();
   localStorage.setItem("tf-lang", lang);
-  window.__TF_ZH__ = lang === "zh-TW" ? { ZH } : undefined;
+  window.__TF_DICT__ = lang === "zh-TW" ? { LANG: "zh-TW", DICT: ZH } : undefined;
   vi.spyOn(navigator, "languages", "get").mockReturnValue([browser]);
   return import("@/lib/utils");
 }
 
 afterEach(() => {
   localStorage.clear();
-  window.__TF_ZH__ = undefined;
+  window.__TF_DICT__ = undefined;
   vi.restoreAllMocks();
 });
 

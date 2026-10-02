@@ -117,7 +117,7 @@ export function AccountMenu({ usage }: { usage: string | null }) {
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
               <LanguagesIcon /> {t("Language")}
-              {lang === "zh-TW" && " · Language"}
+              {lang !== "en" && " · Language"}
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
               <DropdownMenuRadioGroup value={lang} onValueChange={(v) => setLang(v as Lang)}>

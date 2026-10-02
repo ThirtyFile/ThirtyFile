@@ -1,12 +1,13 @@
 // The language is decided when the module loads, so each test imports a fresh copy after choosing it.
 // Expected Chinese text is taken from the dictionary itself (no Chinese in the tests).
+import { readdirSync } from "node:fs";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { ZH } from "@/lib/i18n/zh-TW";
+import { DICT as ZH } from "@/lib/i18n/zh-TW";
 
 async function load(lang: "en" | "zh-TW") {
   vi.resetModules();
   localStorage.setItem("tf-lang", lang);
-  window.__TF_ZH__ = lang === "zh-TW" ? { ZH } : undefined;
+  window.__TF_DICT__ = lang === "zh-TW" ? { LANG: "zh-TW", DICT: ZH } : undefined;
   return import("@/lib/i18n");
 }
 
@@ -14,7 +15,7 @@ const fill = (s: string, vars: Record<string, string>) => s.replace(/\{(\w+)\}/g
 
 afterEach(() => {
   localStorage.clear();
-  window.__TF_ZH__ = undefined;
+  window.__TF_DICT__ = undefined;
 });
 
 describe("English", () => {
@@ -77,5 +78,44 @@ describe("Traditional Chinese", () => {
     expect(tMadeName("Upload")).toBe("Upload");
     expect(tServer("Backup of Local disk: Local disk → NAS")).toBe(fill(ZH["{name}: {source} → {dest}"], { name: backup, source: ZH["Local disk"], dest: "NAS" }));
     expect(tServer("The backup “Backup of Local disk” can't reach its location")).toBe(fill(ZH["The backup “{name}” can't reach its location"], { name: backup }));
+  });
+});
+
+describe("dictionaries", () => {
+  /** A fresh copy of the module with these settings */
+  async function fresh(settings: { saved?: string; preview?: boolean; dict?: { LANG: string; DICT: Record<string, string> } }) {
+    vi.resetModules();
+    if (settings.saved) localStorage.setItem("tf-lang", settings.saved);
+    if (settings.preview) localStorage.setItem("tf-lang-preview", "1");
+    window.__TF_DICT__ = settings.dict;
+    return import("@/lib/i18n");
+  }
+
+  test("every language has the same dictionary files", () => {
+    const files = (lang: string) => readdirSync(`src/lib/i18n/${lang}`).sort();
+    for (const lang of ["zh-CN", "ja"]) expect(files(lang)).toEqual(files("zh-TW"));
+  });
+
+  test("a language that isn't ready is neither offered nor used, unless previewing", async () => {
+    const hidden = await fresh({ saved: "ja" });
+    expect(hidden.LANGS.map((l) => l.id)).toEqual(hidden.LANGUAGES.filter((l) => l.ready).map((l) => l.id));
+    expect(hidden.lang).not.toBe("ja");
+    localStorage.clear();
+    const shown = await fresh({ saved: "ja", preview: true });
+    expect(shown.LANGS.map((l) => l.id)).toEqual(["en", "zh-TW", "zh-CN", "ja"]);
+    expect(shown.lang).toBe("ja");
+  });
+
+  test("the page's own dictionary is loaded when the server added another one", async () => {
+    const { DICT: JA } = await import("@/lib/i18n/ja");
+    const i18n = await fresh({ saved: "ja", preview: true, dict: { LANG: "zh-TW", DICT: ZH } });
+    expect(i18n.t("Request failed ({status})", { status: 500 })).toBe("Request failed (500)");
+    await i18n.loadDictionary();
+    expect(i18n.t("My files")).toBe(JA["My files"]);
+  });
+
+  test("the dictionary the server added is used at once", async () => {
+    const i18n = await fresh({ saved: "zh-TW", dict: { LANG: "zh-TW", DICT: ZH } });
+    expect(i18n.t("My files")).toBe(ZH["My files"]);
   });
 });

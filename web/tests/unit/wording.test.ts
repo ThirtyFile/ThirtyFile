@@ -3,7 +3,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { ZH } from "@/lib/i18n/zh-TW";
+import { DICT as ZH } from "@/lib/i18n/zh-TW";
 
 /** The tests run in web/ */
 const repo = join(process.cwd(), "..");
@@ -19,7 +19,7 @@ function files(dir: string, ext: RegExp, out: string[] = []): string[] {
 
 /** Every place with text people read: the interface's English, the server, the guides and the README */
 const sources = () => [
-  ...files(join(repo, "web", "src"), /\.tsx?$/).filter((f) => !f.includes(join("i18n", "zh-TW"))),
+  ...files(join(repo, "web", "src"), /\.tsx?$/).filter((f) => !/[\\/]i18n[\\/][^\\/]+[\\/]/.test(f)),
   ...files(join(repo, "server", "src"), /\.rs$/),
   ...files(join(repo, "site"), /\.html$/),
   join(repo, "README.md"),

@@ -84,7 +84,8 @@ for (const [f, r] of files) {
   const rel = r.replace(/\\/g, "/");
   if (only && !only.some((o) => rel === o || rel.endsWith(o))) continue;
   const src = readFileSync(f, "utf8");
-  const isDict = rel.startsWith("lib/i18n/zh-TW/");
+  // Every language's dictionary folder (lib/i18n/<lang>/); only zh-TW is checked for completeness so far
+  const isDict = /^lib\/i18n\/[^/]+\//.test(rel);
   if (!isDict && /\.(ts|tsx)$/.test(rel)) {
     corpus.push(src);
     const lineOf = (i) => src.slice(0, i).split("\n").length;

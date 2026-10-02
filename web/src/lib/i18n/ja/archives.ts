@@ -1,0 +1,26 @@
+/** Japanese translations (English source text → Japanese): Markdown view, moving through a folder's files, ZIP compression and extraction */
+export default {
+  "Markdown preview": "Markdown preview",
+  "Source": "Source",
+  "{n} of {total}": "{n} of {total}",
+  "In an open file: the previous or next file of its folder": "In an open file: the previous or next file of its folder",
+  "Compress to ZIP file": "Compress to ZIP file",
+  "Extract all": "Extract all",
+  "Compress to ZIP": "Compress to ZIP",
+  "Extract": "Extract",
+  "Compressing to ZIP…": "Compressing to ZIP…",
+  "Extracting…": "Extracting…",
+  "Created \"{name}\"": "Created \"{name}\"",
+  "Extracted to \"{name}\"": "Extracted to \"{name}\"",
+  "Couldn't compress to ZIP": "Couldn't compress to ZIP",
+  "Couldn't extract": "Couldn't extract",
+  // Other changes that run on the server as tasks (lib/jobs.tsx)
+  "Moving…": "Moving…",
+  "Copying…": "Copying…",
+  "Deleting permanently…": "Deleting permanently…",
+  "Emptying the trash…": "Emptying the trash…",
+  "Checking the folder for changes…": "Checking the folder for changes…",
+  "Deleting the user…": "Deleting the user…",
+  "Removing \"My files\"…": "Removing \"My files\"…",
+  "Working…": "Working…",
+} satisfies Record<string, string>;

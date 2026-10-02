@@ -37,26 +37,35 @@ fn content_security_policy(html: &str) -> String {
     )
 }
 
-/// Whether the page should carry the Traditional Chinese dictionary: the visitor's saved language, else the system
-/// default, else the browser's preferred language. The frontend decides the same way, so this only saves a round trip
-fn wants_chinese(headers: &HeaderMap, default_lang: &str) -> bool {
+/// The languages with a dictionary script (web/dist/<lang>.js, from web/src/lib/i18n/<lang>/). English is the source
+/// text and has none
+const DICTIONARIES: [&str; 3] = ["zh-TW", "zh-CN", "ja"];
+
+/// The dictionary script the page should carry (`<lang>.js`), if any: the visitor's saved language, else the system
+/// default, else the browser's preferred language. The frontend decides the same way and loads its dictionary itself
+/// when this guessed wrong, so this only saves a round trip
+fn page_dictionary(headers: &HeaderMap, default_lang: &str) -> Option<&'static str> {
+    let known = |lang: &str| DICTIONARIES.iter().copied().find(|d| *d == lang);
     let cookie = crate::auth::get_cookie(headers, "tf_lang");
     // `tf_lang_chosen` is set only when the person picked a language themselves; without it `tf_lang` just mirrors
     // what the page last decided, so the system default (when fixed) takes precedence, like in the frontend
     if crate::auth::get_cookie(headers, "tf_lang_chosen").is_some()
         && let Some(saved) = cookie
     {
-        return saved == "zh-TW";
+        return known(saved);
     }
     match default_lang {
-        "zh-TW" => true,
-        "en" => false,
-        _ if cookie.is_some() => cookie == Some("zh-TW"),
-        _ => headers
-            .get(header::ACCEPT_LANGUAGE)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.split(',').next())
-            .is_some_and(|first| first.trim().to_ascii_lowercase().starts_with("zh")),
+        "auto" => match cookie {
+            Some(used) => known(used),
+            // The server doesn't match the other languages' browsers yet: a Chinese one gets Traditional Chinese
+            None => headers
+                .get(header::ACCEPT_LANGUAGE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.split(',').next())
+                .is_some_and(|first| first.trim().to_ascii_lowercase().starts_with("zh"))
+                .then_some("zh-TW"),
+        },
+        fixed => known(fixed),
     }
 }
 
@@ -149,8 +158,10 @@ pub async fn serve(State(st): State<crate::state::AppState>, uri: Uri, headers: 
             // Inject branding (title, favicon, colors) so the default styling doesn't flash while loading
             let lang = st.system.read().unwrap().default_lang.clone();
             let mut html = crate::branding::inject(&String::from_utf8_lossy(&index.data), &st.part::<crate::branding::Memory>().settings.read().unwrap(), &lang);
-            if wants_chinese(&headers, &lang) && Assets::get("zh-TW.js").is_some() {
-                html = html.replacen("</head>", "  <script src=\"/zh-TW.js\"></script>\n  </head>", 1);
+            if let Some(dict) = page_dictionary(&headers, &lang)
+                && Assets::get(&format!("{dict}.js")).is_some()
+            {
+                html = html.replacen("</head>", &format!("  <script src=\"/{dict}.js\"></script>\n  </head>"), 1);
             }
             let csp = content_security_policy(&html);
             ([(header::CACHE_CONTROL, "no-cache".to_string()), (header::CONTENT_SECURITY_POLICY, csp)], SECURITY_HEADERS, Html(html)).into_response()
@@ -190,15 +201,30 @@ mod tests {
             h
         };
         // No fixed default: the browser decides, or the language the page last used
-        assert!(wants_chinese(&with(&[("accept-language", "zh-TW,zh;q=0.9")]), "auto"));
-        assert!(!wants_chinese(&with(&[("accept-language", "en-US")]), "auto"));
-        assert!(wants_chinese(&with(&[("accept-language", "en-US"), ("cookie", "tf_lang=zh-TW")]), "auto"));
+        assert_eq!(page_dictionary(&with(&[("accept-language", "zh-TW,zh;q=0.9")]), "auto"), Some("zh-TW"));
+        assert_eq!(page_dictionary(&with(&[("accept-language", "en-US")]), "auto"), None);
+        assert_eq!(page_dictionary(&with(&[("accept-language", "en-US"), ("cookie", "tf_lang=zh-TW")]), "auto"), Some("zh-TW"));
+        assert_eq!(page_dictionary(&with(&[("accept-language", "zh-TW"), ("cookie", "tf_lang=ja")]), "auto"), Some("ja"));
         // A fixed default wins over what the page mirrored into tf_lang…
-        assert!(!wants_chinese(&with(&[("accept-language", "zh-TW"), ("cookie", "tf_lang=zh-TW")]), "en"));
-        assert!(wants_chinese(&with(&[("cookie", "tf_lang=en")]), "zh-TW"));
+        assert_eq!(page_dictionary(&with(&[("accept-language", "zh-TW"), ("cookie", "tf_lang=zh-TW")]), "en"), None);
+        assert_eq!(page_dictionary(&with(&[("cookie", "tf_lang=en")]), "zh-TW"), Some("zh-TW"));
         // …but not over a language the person picked themselves
-        assert!(wants_chinese(&with(&[("cookie", "tf_lang=zh-TW; tf_lang_chosen=1")]), "en"));
-        assert!(!wants_chinese(&with(&[("cookie", "tf_lang_chosen=1; tf_lang=en")]), "zh-TW"));
+        assert_eq!(page_dictionary(&with(&[("cookie", "tf_lang=zh-TW; tf_lang_chosen=1")]), "en"), Some("zh-TW"));
+        assert_eq!(page_dictionary(&with(&[("cookie", "tf_lang=zh-CN; tf_lang_chosen=1")]), "en"), Some("zh-CN"));
+        assert_eq!(page_dictionary(&with(&[("cookie", "tf_lang_chosen=1; tf_lang=en")]), "zh-TW"), None);
+    }
+
+    #[test]
+    fn only_known_dictionaries_are_put_on_the_page() {
+        // The cookie is the visitor's own text: anything but a known language name adds no script
+        let h = |cookie: &str| {
+            let mut h = HeaderMap::new();
+            h.insert(header::COOKIE, cookie.parse().unwrap());
+            h
+        };
+        assert_eq!(page_dictionary(&h("tf_lang=\"><script>x</script>; tf_lang_chosen=1"), "auto"), None);
+        assert_eq!(page_dictionary(&h("tf_lang=../index.html"), "auto"), None);
+        assert_eq!(page_dictionary(&h("tf_lang=fr"), "auto"), None);
     }
 
     #[test]

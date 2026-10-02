@@ -15,7 +15,7 @@
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build && vite build -c vite.frame.config.ts && vite build -c vite.dict.config.ts",
+    "build": "tsc --noEmit && vite build && vite build -c vite.frame.config.ts && node scripts/build-dictionaries.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "lint": "oxlint --deny-warnings",
     "format": "oxfmt src tests scripts",
