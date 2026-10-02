@@ -65,13 +65,13 @@ pub async fn target(cx: &Ctx<'_>) -> AppResult<PathBuf> {
     if crate::storage::marker_of(&root).await.ok().flatten().as_deref() != Some(job.to_location.as_str()) {
         return Err(not_mounted());
     }
-    let (name, kind, owner): (String, String, String) =
+    let (name, kind, owner): (String, crate::tree::SpaceKind, String) =
         sqlx::query_as("SELECT d.name, d.kind, COALESCE((SELECT username FROM users WHERE id = d.owner_id), '') FROM drives d WHERE d.id = ?")
             .bind(&job.drive_id)
             .fetch_optional(&mut *c)
             .await?
             .ok_or_else(|| AppError::not_found("Space not found"))?;
-    let (parent, wanted) = crate::space_folders::place(&root, &kind, &name, &owner, &job.drive_id);
+    let (parent, wanted) = crate::space_folders::place(&root, kind, &name, &owner, &job.drive_id);
     std::fs::create_dir_all(&parent).map_err(disk_error)?;
     let mut folder = None;
     for n in 1..10_000u32 {

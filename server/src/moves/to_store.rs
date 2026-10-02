@@ -26,7 +26,7 @@ use crate::{
     fsops::disk_error,
     state::AppState,
     storage::Storage,
-    tree::{self, REMOVAL_GRACE},
+    tree::{self, REMOVAL_GRACE, SpaceKind},
     util::{new_id, now, numbered_name},
 };
 
@@ -502,7 +502,7 @@ pub async fn cleanup(st: &AppState, job: &Job) -> AppResult<()> {
     let note = match (left, rest.len()) {
         (0, 0) => None,
         // Administrators read the note: a personal space's file names stay private, only how many is told
-        (_, n) if job.space_kind == "personal" => Some(match n.max(left) {
+        (_, n) if job.space_kind == SpaceKind::Personal => Some(match n.max(left) {
             1 => format!("1 item was left in the old folder {old}"),
             n => format!("{n} items were left in the old folder {old}"),
         }),

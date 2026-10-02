@@ -16,7 +16,7 @@ use crate::{
     error::{AppError, AppResult},
     logs,
     state::AppState,
-    tree::{self, DRIVE_COLS, Drive, Node, Role},
+    tree::{self, DRIVE_COLS, Drive, Node, PrincipalType, Role},
     util::{now, validate_name},
 };
 
@@ -386,10 +386,10 @@ pub async fn admin_list(State(st): State<AppState>, Admin(user): Admin) -> AppRe
 pub struct GrantInfo {
     id: i64,
     node_id: String,
-    principal_type: String,
+    principal_type: PrincipalType,
     principal_id: i64,
     principal_name: String,
-    role: String,
+    role: Role,
     expires_at: Option<i64>,
     granted_by_name: String,
     created_at: i64,
@@ -419,7 +419,7 @@ pub struct AccessInfo {
 
 /// Whether the user can manage access to a node
 /// Refuses when no owner other than the given principal would remain (owners whose access has expired don't count)
-async fn require_other_owner(conn: &mut SqliteConnection, node_id: &str, principal_type: &str, principal_id: i64) -> AppResult<()> {
+async fn require_other_owner(conn: &mut SqliteConnection, node_id: &str, principal_type: PrincipalType, principal_id: i64) -> AppResult<()> {
     let (others,): (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM grants WHERE node_id = ? AND role = 'owner' AND NOT (principal_type = ? AND principal_id = ?)
          AND (expires_at IS NULL OR expires_at > ?)",
@@ -494,9 +494,7 @@ pub struct GrantReq {
 
 pub async fn grant(State(st): State<AppState>, user: User, Path(id): Path<String>, Json(req): Json<GrantReq>) -> AppResult<Json<Value>> {
     let role = Role::parse(&req.role).ok_or_else(|| AppError::bad_request("Invalid role"))?;
-    if !matches!(req.principal_type.as_str(), "user" | "group" | "everyone") {
-        return Err(AppError::bad_request("Invalid user or group"));
-    }
+    let principal_type = PrincipalType::parse(&req.principal_type).ok_or_else(|| AppError::bad_request("Invalid user or group"))?;
     if matches!(req.expires_at, Some(t) if t <= now()) {
         return Err(AppError::bad_request("The expiration time must be in the future"));
     }
@@ -520,39 +518,39 @@ pub async fn grant(State(st): State<AppState>, user: User, Path(id): Path<String
     if !user.is_admin() && my_role.is_some_and(|r| role > r) {
         return Err(AppError::forbidden("You can't grant a role higher than your own"));
     }
-    let principal_id = if req.principal_type == "everyone" { 0 } else { req.principal_id };
-    let name = principal_name(&mut tx, &req.principal_type, principal_id).await?.ok_or_else(|| AppError::bad_request("User or group not found"))?;
+    let principal_id = if principal_type == PrincipalType::Everyone { 0 } else { req.principal_id };
+    let name = principal_name(&mut tx, principal_type, principal_id).await?.ok_or_else(|| AppError::bad_request("User or group not found"))?;
     // Someone who manages this only until a given time can't give access that includes themselves beyond it
     if !user.is_admin()
         && let Some(until) = tree::manages_until(&mut tx, &user, &node).await?
         && req.expires_at.is_none_or(|t| t > until)
-        && tree::grant_applies_to(&mut tx, &user, &req.principal_type, principal_id).await?
+        && tree::grant_applies_to(&mut tx, &user, principal_type, principal_id).await?
     {
         return Err(AppError::forbidden("Your access here ends at a set time, so you can't give yourself access that lasts longer"));
     }
     // The grant replaced by this one: only someone with at least that role may change it, and an owner may only be
     // lowered or given an expiry while another owner remains
-    let existing: Option<(String,)> = sqlx::query_as("SELECT role FROM grants WHERE node_id = ? AND principal_type = ? AND principal_id = ?")
+    let existing: Option<(Role,)> = sqlx::query_as("SELECT role FROM grants WHERE node_id = ? AND principal_type = ? AND principal_id = ?")
         .bind(&node.id)
-        .bind(&req.principal_type)
+        .bind(principal_type)
         .bind(principal_id)
         .fetch_optional(&mut *tx)
         .await?;
     let is_new = existing.is_none();
-    if let Some(old) = existing.and_then(|(r,)| Role::parse(&r)) {
+    if let Some((old,)) = existing {
         if !user.is_admin() && my_role.is_some_and(|r| old > r) {
             return Err(AppError::forbidden("You can't change the access of someone whose role is higher than yours"));
         }
         if old == Role::Owner && (role != Role::Owner || req.expires_at.is_some()) {
-            require_other_owner(&mut tx, &node.id, &req.principal_type, principal_id).await?;
+            require_other_owner(&mut tx, &node.id, principal_type, principal_id).await?;
         }
     }
-    add_grant(&mut tx, &node.id, &req.principal_type, principal_id, role.as_str(), Some(user.id), req.expires_at).await?;
+    add_grant(&mut tx, &node.id, principal_type.as_str(), principal_id, role.as_str(), Some(user.id), req.expires_at).await?;
     // New access is announced to the people it is for; a changed role or expiry isn't
     let emails = if is_new {
         let (grant_id,): (i64,) = sqlx::query_as("SELECT id FROM grants WHERE node_id = ? AND principal_type = ? AND principal_id = ?")
             .bind(&node.id)
-            .bind(&req.principal_type)
+            .bind(principal_type)
             .bind(principal_id)
             .fetch_one(&mut *tx)
             .await?;
@@ -569,7 +567,7 @@ pub async fn grant(State(st): State<AppState>, user: User, Path(id): Path<String
 pub async fn revoke(State(st): State<AppState>, user: User, Path(grant_id): Path<i64>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    let (node_id, principal_type, principal_id, role): (String, String, i64, String) =
+    let (node_id, principal_type, principal_id, role): (String, PrincipalType, i64, Role) =
         sqlx::query_as("SELECT node_id, principal_type, principal_id, role FROM grants WHERE id = ?")
             .bind(grant_id)
             .fetch_optional(&mut *tx)
@@ -578,34 +576,34 @@ pub async fn revoke(State(st): State<AppState>, user: User, Path(grant_id): Path
     let node = tree::get_node(&mut tx, &node_id).await?.ok_or_else(|| AppError::not_found("Item not found"))?;
     let drive = tree::get_drive(&mut tx, node.drive()).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
     // Users can leave items others shared with them
-    let leaving = principal_type == "user" && principal_id == user.id && role != "owner";
+    let leaving = principal_type == PrincipalType::User && principal_id == user.id && role != Role::Owner;
     if !leaving {
         let (can_manage, my_role) = can_manage_node(&mut tx, &user, &node, &drive).await?;
         if !can_manage {
             return Err(AppError::forbidden("You don't have permission to manage access"));
         }
-        if !user.is_admin() && my_role.is_some_and(|mine| Role::parse(&role).is_some_and(|r| r > mine)) {
+        if !user.is_admin() && my_role.is_some_and(|mine| role > mine) {
             return Err(AppError::forbidden("You can't change the access of someone whose role is higher than yours"));
         }
     }
     if drive.kind == tree::SpaceKind::Personal && node.parent_id.is_none() {
         return Err(AppError::bad_request("The owner of a personal space can't be removed"));
     }
-    if role == "owner" {
-        require_other_owner(&mut tx, &node_id, &principal_type, principal_id).await?;
+    if role == Role::Owner {
+        require_other_owner(&mut tx, &node_id, principal_type, principal_id).await?;
     }
-    let name = principal_name(&mut tx, &principal_type, principal_id).await?.unwrap_or_default();
+    let name = principal_name(&mut tx, principal_type, principal_id).await?.unwrap_or_default();
     sqlx::query("DELETE FROM grants WHERE id = ?").bind(grant_id).execute(&mut *tx).await?;
     logs::record_activity(&mut tx, &user, Some(&node), "revoke", &name).await?;
     tx.commit().await?;
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn principal_name(conn: &mut SqliteConnection, kind: &str, id: i64) -> AppResult<Option<String>> {
+async fn principal_name(conn: &mut SqliteConnection, kind: PrincipalType, id: i64) -> AppResult<Option<String>> {
     Ok(match kind {
-        "user" => sqlx::query_as::<_, (String,)>("SELECT username FROM users WHERE id = ?").bind(id).fetch_optional(conn).await?.map(|r| r.0),
-        "group" => sqlx::query_as::<_, (String,)>("SELECT name FROM groups WHERE id = ?").bind(id).fetch_optional(conn).await?.map(|r| r.0),
-        _ => Some("Everyone".into()),
+        PrincipalType::User => sqlx::query_as::<_, (String,)>("SELECT username FROM users WHERE id = ?").bind(id).fetch_optional(conn).await?.map(|r| r.0),
+        PrincipalType::Group => sqlx::query_as::<_, (String,)>("SELECT name FROM groups WHERE id = ?").bind(id).fetch_optional(conn).await?.map(|r| r.0),
+        PrincipalType::Everyone => Some("Everyone".into()),
     })
 }
 
@@ -622,7 +620,7 @@ fn role_label(r: Role) -> &'static str {
 
 #[derive(Serialize, sqlx::FromRow)]
 pub struct Principal {
-    principal_type: String,
+    principal_type: PrincipalType,
     principal_id: i64,
     name: String,
     detail: String,
@@ -739,7 +737,7 @@ pub async fn update_group(State(st): State<AppState>, Admin(user): Admin, Path(i
     if let Some(m) = &req.members {
         set_members(&mut tx, id, m).await?;
     }
-    let name = principal_name(&mut tx, "group", id).await?.unwrap_or_default();
+    let name = principal_name(&mut tx, PrincipalType::Group, id).await?.unwrap_or_default();
     logs::record_activity(&mut tx, &user, None, "group_update", &name).await?;
     tx.commit().await?;
     Ok(Json(json!({ "ok": true })))
@@ -748,7 +746,7 @@ pub async fn update_group(State(st): State<AppState>, Admin(user): Admin, Path(i
 pub async fn delete_group(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<i64>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    let name = principal_name(&mut tx, "group", id).await?.unwrap_or_default();
+    let name = principal_name(&mut tx, PrincipalType::Group, id).await?.unwrap_or_default();
     sqlx::query("DELETE FROM grants WHERE principal_type = 'group' AND principal_id = ?").bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM groups WHERE id = ?").bind(id).execute(&mut *tx).await?;
     // Accounts created by single sign-on must no longer be added to it

@@ -12,9 +12,10 @@ use crate::{
     util::now,
 };
 
-/// Role on a space or folder, from lowest to highest
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+/// Role on a space or folder, from lowest to highest (`grants.role`)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "lowercase")]
+#[sqlx(rename_all = "lowercase")]
 pub enum Role {
     Viewer,
     Editor,
@@ -38,6 +39,37 @@ impl Role {
             Role::Editor => "editor",
             Role::Manager => "manager",
             Role::Owner => "owner",
+        }
+    }
+}
+
+/// Who a grant gives access to (`grants.principal_type`)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, sqlx::Type)]
+#[serde(rename_all = "lowercase")]
+#[sqlx(rename_all = "lowercase")]
+pub enum PrincipalType {
+    /// One person (`principal_id`)
+    User,
+    /// The members of a group (`principal_id`)
+    Group,
+    /// Everyone who can sign in (`principal_id` 0)
+    Everyone,
+}
+
+impl PrincipalType {
+    pub fn parse(s: &str) -> Option<PrincipalType> {
+        match s {
+            "user" => Some(PrincipalType::User),
+            "group" => Some(PrincipalType::Group),
+            "everyone" => Some(PrincipalType::Everyone),
+            _ => None,
+        }
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PrincipalType::User => "user",
+            PrincipalType::Group => "group",
+            PrincipalType::Everyone => "everyone",
         }
     }
 }
@@ -100,9 +132,9 @@ pub async fn role_on(conn: &mut SqliteConnection, user: &User, node: &Node) -> A
          SELECT g.role FROM grants g JOIN up ON g.node_id = up.id WHERE {}",
         principal_match(2, 3)
     );
-    let rows: Vec<(String,)> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).bind(user.id).bind(now()).fetch_all(conn).await?;
+    let rows: Vec<(Role,)> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).bind(user.id).bind(now()).fetch_all(conn).await?;
     for (r,) in rows {
-        best = best.max(Role::parse(&r));
+        best = best.max(Some(r));
     }
     Ok(best)
 }
@@ -124,16 +156,15 @@ pub async fn manages_until(conn: &mut SqliteConnection, user: &User, node: &Node
 }
 
 /// Whether a grant to this principal gives the user access: it names them, a group of theirs, or everyone
-pub async fn grant_applies_to(conn: &mut SqliteConnection, user: &User, principal_type: &str, principal_id: i64) -> AppResult<bool> {
+pub async fn grant_applies_to(conn: &mut SqliteConnection, user: &User, principal_type: PrincipalType, principal_id: i64) -> AppResult<bool> {
     Ok(match principal_type {
-        "everyone" => true,
-        "user" => principal_id == user.id,
-        "group" => {
+        PrincipalType::Everyone => true,
+        PrincipalType::User => principal_id == user.id,
+        PrincipalType::Group => {
             let (n,): (i64,) =
                 sqlx::query_as("SELECT COUNT(*) FROM group_members WHERE group_id = ? AND user_id = ?").bind(principal_id).bind(user.id).fetch_one(conn).await?;
             n > 0
         }
-        _ => false,
     })
 }
 
@@ -193,7 +224,7 @@ pub async fn user_drives(conn: &mut SqliteConnection, user: &User) -> AppResult<
     struct Row {
         #[sqlx(flatten)]
         drive: Drive,
-        role: String,
+        role: Role,
     }
     let sql = format!(
         "SELECT {DRIVE_COLS}, g.role FROM drives d JOIN grants g ON g.node_id = d.root_id
@@ -203,7 +234,7 @@ pub async fn user_drives(conn: &mut SqliteConnection, user: &User) -> AppResult<
     let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(user.id).bind(now()).fetch_all(&mut *conn).await?;
     let mut map: HashMap<String, (Drive, Role)> = HashMap::new();
     for r in rows {
-        let Some(role) = Role::parse(&r.role) else { continue };
+        let role = r.role;
         map.entry(r.drive.id.clone()).and_modify(|e| e.1 = e.1.max(role)).or_insert((r.drive, role));
     }
     if user.is_admin() {
@@ -246,7 +277,7 @@ pub async fn shared_with_me_outside(conn: &mut SqliteConnection, user: &User, me
     struct Row {
         #[sqlx(flatten)]
         node: Node,
-        role: String,
+        role: Role,
         sharer: String,
     }
     let sql = format!(
@@ -259,7 +290,7 @@ pub async fn shared_with_me_outside(conn: &mut SqliteConnection, user: &User, me
     let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(user.id).bind(now()).fetch_all(&mut *conn).await?;
     let mut map: HashMap<String, (Node, Role, String)> = HashMap::new();
     for r in rows {
-        let Some(role) = Role::parse(&r.role) else { continue };
+        let role = r.role;
         if member_of.iter().any(|d| d == r.node.drive()) {
             continue;
         }

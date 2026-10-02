@@ -12,7 +12,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    auth::{Admin, hash_password, min_password, validate_password},
+    auth::{Admin, UserRole, hash_password, min_password, validate_password},
     db::{add_grant, set_setting},
     error::{AppError, AppResult},
     logs,
@@ -26,7 +26,7 @@ pub struct UserRow {
     pub id: i64,
     pub username: String,
     display_name: String,
-    role: String,
+    role: UserRole,
     can_write: bool,
     can_delete: bool,
     can_share: bool,
@@ -86,10 +86,6 @@ pub async fn list(State(st): State<AppState>, _: Admin, Query(q): Query<ListQuer
     Ok(Json(query.fetch_all(&st.db).await?))
 }
 
-fn validate_role(role: &str) -> AppResult<()> {
-    if role == "admin" || role == "user" { Ok(()) } else { Err(AppError::bad_request("Invalid role")) }
-}
-
 #[derive(Deserialize)]
 pub struct CreateReq {
     username: String,
@@ -122,6 +118,13 @@ fn yes() -> bool {
     true
 }
 
+fn role_label(role: UserRole) -> &'static str {
+    match role {
+        UserRole::Admin => "administrator",
+        UserRole::User => "standard user",
+    }
+}
+
 pub async fn get_row(st: &AppState, id: i64) -> AppResult<UserRow> {
     let sql = format!("{USER_ROW_SQL} WHERE u.id = ?");
     sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(id).fetch_optional(&st.db).await?.ok_or_else(|| AppError::not_found("User not found"))
@@ -131,7 +134,7 @@ pub async fn create(State(st): State<AppState>, Admin(me): Admin, Json(req): Jso
     let username = req.username.trim();
     validate_username(username)?;
     validate_password(&req.password, min_password(&st))?;
-    validate_role(&req.role)?;
+    let role = UserRole::parse(&req.role)?;
     let display_name = validate_display_name(&req.display_name)?.to_string();
     let password_hash = hash_password(req.password.clone()).await?;
     crate::personal::check_ahead(&st, req.personal_space, req.personal_location.as_deref()).await;
@@ -144,7 +147,7 @@ pub async fn create(State(st): State<AppState>, Admin(me): Admin, Json(req): Jso
             NewUser {
                 username,
                 password_hash: &password_hash,
-                role: &req.role,
+                role,
                 can_write: req.can_write,
                 can_delete: req.can_delete,
                 can_share: req.can_share,
@@ -162,8 +165,7 @@ pub async fn create(State(st): State<AppState>, Admin(me): Admin, Json(req): Jso
         }
         // The first password is the administrator's: the person chooses their own when signing in
         sqlx::query("UPDATE users SET must_change_password = 1 WHERE id = ?").bind(id).execute(&mut *tx).await?;
-        logs::record_activity(&mut tx, &me, None, "user_create", &format!("{username} ({})", if req.role == "admin" { "administrator" } else { "standard user" }))
-            .await?;
+        logs::record_activity(&mut tx, &me, None, "user_create", &format!("{username} ({})", role_label(role))).await?;
         tx.commit().await?;
         crate::folders::spaces_changed(&st);
         id
@@ -184,11 +186,9 @@ pub struct UpdateReq {
 }
 
 pub async fn update(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<i64>, Json(req): Json<UpdateReq>) -> AppResult<Json<UserRow>> {
-    if id == me.id && (req.role.as_deref().is_some_and(|r| r != "admin") || req.disabled == Some(true)) {
+    let role = req.role.as_deref().map(UserRole::parse).transpose()?;
+    if id == me.id && (role.is_some_and(|r| r != UserRole::Admin) || req.disabled == Some(true)) {
         return Err(AppError::bad_request("You can't disable your own account or remove your own administrator rights"));
-    }
-    if let Some(r) = &req.role {
-        validate_role(r)?;
     }
     let password_hash = match &req.password {
         Some(p) => {
@@ -206,8 +206,14 @@ pub async fn update(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     if let Some(n) = display_name.as_deref().filter(|n| *n != target.display_name) {
         changes.push(if n.is_empty() { "cleared display name".to_string() } else { format!("display name {n}") });
     }
-    if let Some(r) = req.role.as_deref().filter(|r| *r != target.role) {
-        changes.push(if r == "admin" { "made administrator" } else { "changed to standard user" }.to_string());
+    if let Some(r) = role.filter(|r| *r != target.role) {
+        changes.push(
+            match r {
+                UserRole::Admin => "made administrator",
+                UserRole::User => "changed to standard user",
+            }
+            .to_string(),
+        );
     }
     for (label, v, old) in [("edit", req.can_write, target.can_write), ("delete", req.can_delete, target.can_delete), ("share", req.can_share, target.can_share)] {
         if let Some(v) = v.filter(|v| *v != old) {
@@ -241,7 +247,7 @@ pub async fn update(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
         )
         .bind(&password_hash)
         .bind(&display_name)
-        .bind(&req.role)
+        .bind(role)
         .bind(req.can_write)
         .bind(req.can_delete)
         .bind(req.can_share)
@@ -307,8 +313,8 @@ async fn delete_user(st: &AppState, me: &crate::auth::User, id: i64, username: &
 /// Two administrators demoting, disabling or deleting each other at the same moment were both allowed when signing in
 /// was all that was checked, leaving no administrator; now the second change finds it no longer may.
 async fn still_admin(tx: &mut sqlx::SqliteConnection, me: i64) -> AppResult<()> {
-    let row: Option<(String, bool)> = sqlx::query_as("SELECT role, disabled FROM users WHERE id = ?").bind(me).fetch_optional(&mut *tx).await?;
-    if !matches!(row, Some((role, false)) if role == "admin") {
+    let row: Option<(UserRole, bool)> = sqlx::query_as("SELECT role, disabled FROM users WHERE id = ?").bind(me).fetch_optional(&mut *tx).await?;
+    if row != Some((UserRole::Admin, false)) {
         return Err(AppError::forbidden("Administrator permission required"));
     }
     Ok(())

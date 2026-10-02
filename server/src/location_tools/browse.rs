@@ -29,7 +29,7 @@ use crate::{
     locations::describe,
     state::AppState,
     storage::{self, Entry, EntryKind},
-    tree,
+    tree::{self, SpaceKind},
 };
 
 /// Items per page unless asked otherwise, and at most
@@ -51,8 +51,8 @@ pub struct BrowseQuery {
 pub struct SpaceRef {
     pub id: String,
     pub name: String,
-    /// personal, company or team
-    pub kind: String,
+    /// What the space is
+    pub kind: SpaceKind,
     /// The owner's username (personal spaces)
     pub owner: String,
     /// Someone else's personal space: its files aren't shown
@@ -211,7 +211,7 @@ struct SpaceFolder {
 /// copied into (`to_path`) and the one it leaves (`from_path`), which may still hold files after the move is done.
 /// The space's own folder comes first.
 async fn folder_spaces(c: &mut SqliteConnection, me: i64, location: &str, folder: &FsPath) -> AppResult<Vec<SpaceFolder>> {
-    let rows: Vec<(String, String, String, Option<i64>, String, String)> = sqlx::query_as(
+    let rows: Vec<(String, String, SpaceKind, Option<i64>, String, String)> = sqlx::query_as(
         "SELECT id, name, kind, owner_id, owner, path FROM (
            SELECT 0 AS o, d.id, d.name, d.kind, d.owner_id, COALESCE(u.username, '') AS owner, d.source_path AS path
            FROM drives d LEFT JOIN users u ON u.id = d.owner_id
@@ -242,7 +242,7 @@ async fn folder_spaces(c: &mut SqliteConnection, me: i64, location: &str, folder
         if out.iter().any(|f| f.space.id == id && f.path == path) {
             continue;
         }
-        let private = kind == "personal" && owner_id != Some(me);
+        let private = kind == SpaceKind::Personal && owner_id != Some(me);
         let found = source.clone();
         let fid = tokio::task::spawn_blocking(move || folder_id(&found)).await.ok().flatten();
         out.push(SpaceFolder { path, id: fid, space: SpaceRef { id, name, kind, owner, private } });
@@ -452,7 +452,7 @@ pub async fn usage_of(c: &mut SqliteConnection, me: i64, location: &str, hashes:
 }
 
 async fn spaces_by_id(c: &mut SqliteConnection, me: i64, ids: &[&str]) -> AppResult<HashMap<String, SpaceRef>> {
-    let rows: Vec<(String, String, String, Option<i64>, String)> = sqlx::query_as(
+    let rows: Vec<(String, String, SpaceKind, Option<i64>, String)> = sqlx::query_as(
         "SELECT d.id, d.name, d.kind, d.owner_id, COALESCE(u.username, '')
          FROM drives d LEFT JOIN users u ON u.id = d.owner_id WHERE d.id IN (SELECT value FROM json_each(?))",
     )
@@ -462,7 +462,7 @@ async fn spaces_by_id(c: &mut SqliteConnection, me: i64, ids: &[&str]) -> AppRes
     Ok(rows
         .into_iter()
         .map(|(id, name, kind, owner_id, owner)| {
-            let private = kind == "personal" && owner_id != Some(me);
+            let private = kind == SpaceKind::Personal && owner_id != Some(me);
             (id.clone(), SpaceRef { id, name, kind, owner, private })
         })
         .collect())
@@ -670,7 +670,7 @@ mod tests {
         let hers = usage_for(b"amy's diary").await;
         assert_eq!(hers.status, "used");
         let space = hers.space.unwrap();
-        assert!(space.private && space.owner == "amy" && space.kind == "personal");
+        assert!(space.private && space.owner == "amy" && space.kind == SpaceKind::Personal);
         assert_eq!(hers.file, None, "no file names from someone else's personal space");
         assert_eq!(usage_for(b"orphan").await.status, "unused");
 

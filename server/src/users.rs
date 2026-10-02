@@ -24,7 +24,7 @@ pub struct NewUser<'a> {
     pub username: &'a str,
     /// Argon2 hash (see `auth::hash_password`); hashed by the caller before taking the write lock, as it takes ~100 ms
     pub password_hash: &'a str,
-    pub role: &'a str,
+    pub role: crate::auth::UserRole,
     pub can_write: bool,
     pub can_delete: bool,
     pub can_share: bool,

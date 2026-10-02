@@ -34,6 +34,7 @@ use crate::{
     folders::ignored,
     state::AppState,
     storage::LocalConfig,
+    tree::SpaceKind,
     util::split_name,
 };
 
@@ -91,11 +92,11 @@ fn folder_name(name: &str, id: &str) -> String {
 
 /// Where a space's folder goes in the folder of its location, before numbering: (the folder it goes in, its name).
 /// `name`: the space's name, `owner`: its owner's user name (personal spaces are named after it).
-pub fn place(root: &Path, kind: &str, name: &str, owner: &str, id: &str) -> (PathBuf, String) {
+pub fn place(root: &Path, kind: SpaceKind, name: &str, owner: &str, id: &str) -> (PathBuf, String) {
     match kind {
-        "company" => (root.to_path_buf(), "company".to_string()),
-        "team" => (root.join("teams"), folder_name(name, id)),
-        _ => (root.join("users"), folder_name(if owner.is_empty() { name } else { owner }, id)),
+        SpaceKind::Company => (root.to_path_buf(), "company".to_string()),
+        SpaceKind::Team => (root.join("teams"), folder_name(name, id)),
+        SpaceKind::Personal => (root.join("users"), folder_name(if owner.is_empty() { name } else { owner }, id)),
     }
 }
 
@@ -180,7 +181,7 @@ pub(crate) async fn location_folder(conn: &mut SqliteConnection, builtin: &Path,
 /// found the location's folder unavailable just before.
 pub async fn make_folder_space(conn: &mut SqliteConnection, builtin: Option<&Path>, drive_id: &str) -> AppResult<Option<PathBuf>> {
     let Some(builtin) = builtin else { return Ok(None) };
-    let (name, kind, root_id, location, owner): (String, String, String, Option<String>, String) = sqlx::query_as(
+    let (name, kind, root_id, location, owner): (String, SpaceKind, String, Option<String>, String) = sqlx::query_as(
         "SELECT d.name, d.kind, d.root_id, d.location_id, COALESCE((SELECT username FROM users WHERE id = d.owner_id), '')
          FROM drives d WHERE d.id = ?",
     )
@@ -198,7 +199,7 @@ pub async fn make_folder_space(conn: &mut SqliteConnection, builtin: Option<&Pat
     if checked_unavailable || read_marker(&root).await.as_deref() != Some(location.as_str()) {
         return Err(unavailable());
     }
-    let (parent, wanted) = place(&root, &kind, &name, &owner, drive_id);
+    let (parent, wanted) = place(&root, kind, &name, &owner, drive_id);
     let taken: Vec<(String,)> = sqlx::query_as("SELECT source_path FROM drives WHERE source_path IS NOT NULL").fetch_all(&mut *conn).await?;
     let taken: HashSet<String> = taken.into_iter().map(|(p,)| p).collect();
     let task = {
@@ -490,14 +491,14 @@ mod tests {
     #[test]
     fn space_names_become_folder_names() {
         let root = Path::new("/storage");
-        assert_eq!(place(root, "company", "All files", "admin", "id1"), (root.to_path_buf(), "company".into()));
-        assert_eq!(place(root, "team", "Sales / EU", "amy", "id2"), (root.join("teams"), "Sales _ EU".into()));
-        assert_eq!(place(root, "personal", "My files", "amy", "id3"), (root.join("users"), "amy".into()));
+        assert_eq!(place(root, SpaceKind::Company, "All files", "admin", "id1"), (root.to_path_buf(), "company".into()));
+        assert_eq!(place(root, SpaceKind::Team, "Sales / EU", "amy", "id2"), (root.join("teams"), "Sales _ EU".into()));
+        assert_eq!(place(root, SpaceKind::Personal, "My files", "amy", "id3"), (root.join("users"), "amy".into()));
         // Nothing usable left, or names Windows can't keep: the id, or the name without the dots at the end
-        assert_eq!(place(root, "team", "...", "amy", "id4").1, "id4");
-        assert_eq!(place(root, "team", "Plans...", "amy", "id5").1, "Plans");
-        assert_eq!(place(root, "team", "Thumbs.db", "amy", "id6").1, "_Thumbs.db");
+        assert_eq!(place(root, SpaceKind::Team, "...", "amy", "id4").1, "id4");
+        assert_eq!(place(root, SpaceKind::Team, "Plans...", "amy", "id5").1, "Plans");
+        assert_eq!(place(root, SpaceKind::Team, "Thumbs.db", "amy", "id6").1, "_Thumbs.db");
         let long = "x".repeat(300);
-        assert!(place(root, "team", &long, "amy", "id7").1.len() <= MAX_NAME_BYTES);
+        assert!(place(root, SpaceKind::Team, &long, "amy", "id7").1.len() <= MAX_NAME_BYTES);
     }
 }

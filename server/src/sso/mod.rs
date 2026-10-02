@@ -1106,7 +1106,7 @@ mod tests {
                 NewUser {
                     username: &format!("bulk{i}@example.com"),
                     password_hash: &hash,
-                    role: "user",
+                    role: crate::auth::UserRole::User,
                     can_write: true,
                     can_delete: true,
                     can_share: true,

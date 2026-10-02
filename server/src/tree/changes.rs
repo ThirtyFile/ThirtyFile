@@ -58,10 +58,24 @@ pub fn small_batches(n: i64) -> impl Drop {
 /// Hides items from the trash listing (and from Delete forever, Restore and Empty trash) while they are deleted
 pub const NOT_PURGING: &str = "NOT EXISTS (SELECT 1 FROM tree_changes c WHERE c.node_id = n.id AND c.kind = 'purge')";
 
+/// What a change does (`tree_changes.kind`)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
+#[sqlx(rename_all = "lowercase")]
+pub(crate) enum ChangeKind {
+    /// Paths below a folder of a folder space that was renamed or moved
+    Repath,
+    /// A folder's items, moved to the trash with it
+    Trash,
+    /// A folder's items, back from the trash with it
+    Restore,
+    /// An item and everything in it, deleted for good
+    Purge,
+}
+
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct Change {
     id: String,
-    kind: String,
+    kind: ChangeKind,
     node_id: String,
     drive_id: Option<String>,
     trash_id: Option<String>,
@@ -92,7 +106,7 @@ async fn record(conn: &mut SqliteConnection, c: &Change) -> AppResult<()> {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&c.id)
-    .bind(&c.kind)
+    .bind(c.kind)
     .bind(&c.node_id)
     .bind(&c.drive_id)
     .bind(&c.trash_id)
@@ -105,8 +119,8 @@ async fn record(conn: &mut SqliteConnection, c: &Change) -> AppResult<()> {
     Ok(())
 }
 
-fn change(kind: &str, node_id: &str) -> Change {
-    Change { id: new_id(), kind: kind.into(), node_id: node_id.into(), drive_id: None, trash_id: None, trashed_at: None, old_path: None, new_path: None }
+fn change(kind: ChangeKind, node_id: &str) -> Change {
+    Change { id: new_id(), kind, node_id: node_id.into(), drive_id: None, trash_id: None, trashed_at: None, old_path: None, new_path: None }
 }
 
 /// Refuses a change to an item whose own change, one of an item it is in, or one of an item inside it, isn't finished
@@ -139,7 +153,7 @@ pub async fn repath(conn: &mut SqliteConnection, node_id: &str, drive_id: &str, 
     if done {
         return Ok(None);
     }
-    let c = Change { drive_id: Some(drive_id.into()), old_path: Some(old.into()), new_path: Some(new.into()), ..change("repath", node_id) };
+    let c = Change { drive_id: Some(drive_id.into()), old_path: Some(old.into()), new_path: Some(new.into()), ..change(ChangeKind::Repath, node_id) };
     record(conn, &c).await?;
     Ok(Some(Unfinished { id: c.id, frontier: None }))
 }
@@ -152,7 +166,7 @@ pub async fn trash(conn: &mut SqliteConnection, node_id: &str, trash_id: &str, a
     if done {
         return Ok(None);
     }
-    let c = Change { trash_id: Some(trash_id.into()), trashed_at: Some(at), ..change("trash", node_id) };
+    let c = Change { trash_id: Some(trash_id.into()), trashed_at: Some(at), ..change(ChangeKind::Trash, node_id) };
     record(conn, &c).await?;
     Ok(Some(Unfinished { id: c.id, frontier: Some(frontier) }))
 }
@@ -163,7 +177,7 @@ pub async fn restore(conn: &mut SqliteConnection, node_id: &str, trash_id: &str)
     if done {
         return Ok(None);
     }
-    let c = Change { trash_id: Some(trash_id.into()), ..change("restore", node_id) };
+    let c = Change { trash_id: Some(trash_id.into()), ..change(ChangeKind::Restore, node_id) };
     record(conn, &c).await?;
     Ok(Some(Unfinished { id: c.id, frontier: None }))
 }
@@ -171,7 +185,7 @@ pub async fn restore(conn: &mut SqliteConnection, node_id: &str, trash_id: &str)
 /// Starts deleting an item in the trash, and everything in it, for good: the trash no longer lists it. The deleting
 /// itself is `run`, after the transaction.
 pub async fn purge(conn: &mut SqliteConnection, node_id: &str) -> AppResult<Unfinished> {
-    let c = change("purge", node_id);
+    let c = change(ChangeKind::Purge, node_id);
     record(conn, &c).await?;
     Ok(Unfinished { id: c.id, frontier: None })
 }
@@ -345,12 +359,12 @@ async fn purge_batch(conn: &mut SqliteConnection, top: &str, stack: &mut VecDequ
 
 /// One batch of `c`; returns how many items it changed and whether it is finished
 async fn step(conn: &mut SqliteConnection, c: &Change, frontier: &mut Option<VecDeque<String>>, limit: i64, out: &mut Leftovers) -> AppResult<(i64, bool)> {
-    match c.kind.as_str() {
-        "repath" => {
+    match c.kind {
+        ChangeKind::Repath => {
             let (Some(drive), Some(old), Some(new)) = (&c.drive_id, &c.old_path, &c.new_path) else { return Ok((0, true)) };
             repath_batch(conn, drive, old, new, limit).await
         }
-        "trash" => {
+        ChangeKind::Trash => {
             let (Some(trash_id), Some(at)) = (&c.trash_id, c.trashed_at) else { return Ok((0, true)) };
             // After a stop, the folders to go through are found again: those already marked, whose items may not be
             let frontier = match frontier {
@@ -363,12 +377,11 @@ async fn step(conn: &mut SqliteConnection, c: &Change, frontier: &mut Option<Vec
             };
             trash_batch(conn, frontier, trash_id, at, limit).await
         }
-        "restore" => {
+        ChangeKind::Restore => {
             let Some(trash_id) = &c.trash_id else { return Ok((0, true)) };
             restore_batch(conn, trash_id, limit).await
         }
-        "purge" => purge_batch(conn, &c.node_id, frontier.get_or_insert_with(VecDeque::new), limit, out).await,
-        _ => Ok((0, true)),
+        ChangeKind::Purge => purge_batch(conn, &c.node_id, frontier.get_or_insert_with(VecDeque::new), limit, out).await,
     }
 }
 
