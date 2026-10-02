@@ -47,9 +47,9 @@ export default {
   "Turn off public share links?": "Turn off public share links?",
   "All existing links stop working right away, and no one can create new ones. The links aren't deleted: allow public links again and they work as before.": "All existing links stop working right away, and no one can create new ones. The links aren't deleted: allow public links again and they work as before.",
   // Links that accept files, and links for viewing only
-  "Only accepts files": "Only accepts files",
-  "Accepts files": "Accepts files",
-  "Preview only": "Preview only",
+  "Only accepts files": "ファイルの受け取り専用",
+  "Accepts files": "ファイルのアップロード可",
+  "Preview only": "プレビューのみ",
   "Visitors can": "Visitors can",
   "Visitors can only preview files. A preview still sends the whole file to their browser, so this hides the download buttons but can't stop someone from saving a file.": "Visitors can only preview files. A preview still sends the whole file to their browser, so this hides the download buttons but can't stop someone from saving a file.",
   "Uploaded files are yours and count toward the space's size. A file with a name that is taken gets a number.": "Uploaded files are yours and count toward the space's size. A file with a name that is taken gets a number.",
