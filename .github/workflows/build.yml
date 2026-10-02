@@ -172,7 +172,9 @@ jobs:
           # folder, which has no CACHEDIR.TAG)
           find "$CARGO_LLVM_COV_TARGET_DIR" -maxdepth 1 -name '*.profraw' -delete 2>/dev/null || true
           bash ../scripts/check.sh server
-          bash ../scripts/check.sh e2e
+          # The end-to-end server keeps its data in the temporary folder: in memory here (tmpfs), since the tests' large
+          # changes write a journal entry and wait for the disk (fsync) for every item, which took most of their time
+          TMPDIR=/dev/shm bash ../scripts/check.sh e2e
           {
             echo "### Backend coverage (tests and the browser test)"
             echo '```'
