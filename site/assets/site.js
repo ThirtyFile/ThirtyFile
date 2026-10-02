@@ -16,7 +16,7 @@
   // language's folder (English is at the root, the others in site/<code>/). Every other page is in English only.
   // scripts/check-site.mjs reads both lists (keep each on one line): it fails when a page below is missing in a
   // language, or when the language links of the pages don't match.
-  const LANGUAGES = [["en", "English"], ["zh-TW", "繁體中文"], ["zh-CN", "简体中文"]];
+  const LANGUAGES = [["en", "English"], ["zh-TW", "繁體中文"], ["zh-CN", "简体中文"], ["ja", "日本語"]];
   const TRANSLATED = ["index.html", "docs/index.html", "docs/first-steps.html"];
 
   const GUIDES = [
@@ -134,6 +134,48 @@
       "Copy": "复制",
       "Copied": "已复制",
       "Select and copy": "请选中后复制",
+    },
+    "ja": {
+      "Site": "サイト",
+      "Features": "機能",
+      "Guides": "ガイド",
+      "Language": "言語",
+      "Skip to content": "本文へスキップ",
+      "Switch between light and dark": "ライト/ダークを切り替え",
+      "This page is also available in English.": "このページは日本語でもご覧いただけます。",
+      "Read it in English": "日本語で表示",
+      "Close": "閉じる",
+      "All guides": "すべてのガイド",
+      "Get started": "はじめに",
+      "Install": "インストール",
+      "First steps": "初期設定",
+      "Everyday use": "日常の操作",
+      "Working with files": "ファイルの操作",
+      "Preview and editing": "プレビューと編集",
+      "Sharing": "共有",
+      "Your account": "アカウント",
+      "Mapping it as a drive": "ネットワークドライブとして割り当て",
+      "Administration": "管理",
+      "Users and spaces": "ユーザーとスペース",
+      "Single sign-on": "シングルサインオン",
+      "Storage locations": "保存場所",
+      "Logs and branding": "ログとブランド設定",
+      "Running it": "運用",
+      "Settings": "設定",
+      "Putting it on the internet": "インターネットに公開",
+      "Upgrade and backup": "アップグレードとバックアップ",
+      "Troubleshooting": "トラブルシューティング",
+      "The project": "プロジェクト",
+      "Contributing": "開発への参加",
+      "Previous": "前へ",
+      "Next": "次へ",
+      "More guides": "その他のガイド",
+      "Source code": "ソースコード",
+      "Report a problem": "問題を報告",
+      "Docker image": "Docker イメージ",
+      "Copy": "コピー",
+      "Copied": "コピーしました",
+      "Select and copy": "選択してコピーしてください",
     },
   };
 
