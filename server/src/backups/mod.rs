@@ -96,6 +96,14 @@ pub async fn load_set(db: &SqlitePool, id: &str) -> AppResult<Set> {
         .ok_or_else(|| AppError::not_found("This copy no longer exists"))
 }
 
+/// Content recorded by a snapshot that is being made and hasn't copied it yet (`pinned`): kept until it has, or has
+/// ended. Background deletion looks at it again in an hour.
+pub const KEEPER: crate::tree::Keeper = crate::tree::Keeper { what: "being copied", holds, refuses: None };
+
+fn holds<'a>(db: &'a SqlitePool, hash: &'a str, _location: &'a str) -> futures_util::future::BoxFuture<'a, Result<crate::tree::Hold, sqlx::Error>> {
+    Box::pin(async move { Ok(if pinned(db, hash).await? { crate::tree::Hold::ForNow } else { crate::tree::Hold::No }) })
+}
+
 /// Content that a snapshot job which isn't over still has to copy: background deletion leaves it alone until then
 /// (tree::claim_for_deletion), so the snapshot can hold what its manifest records
 pub async fn pinned(db: &SqlitePool, hash: &str) -> Result<bool, sqlx::Error> {

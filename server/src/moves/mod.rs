@@ -38,6 +38,7 @@ use axum::{
     Json,
     extract::{Path, State},
 };
+use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{SqliteConnection, SqlitePool};
@@ -46,7 +47,7 @@ use crate::{
     auth::Admin,
     error::{AppError, AppResult},
     state::AppState,
-    tree::SpaceMode,
+    tree::{self, SpaceMode},
     util::{new_id, now},
 };
 
@@ -283,6 +284,14 @@ impl Ctx<'_> {
             }
         }
     }
+}
+
+/// Content copied to a location by a move that hasn't ended: the move is about to use it, or removes it itself when
+/// cancelled. Background deletion looks at it again in an hour.
+pub const KEEPER: tree::Keeper = tree::Keeper { what: "being moved", holds, refuses: None };
+
+fn holds<'a>(db: &'a SqlitePool, hash: &'a str, location: &'a str) -> BoxFuture<'a, Result<tree::Hold, sqlx::Error>> {
+    Box::pin(async move { Ok(if copied_for_move(db, hash, location).await? { tree::Hold::ForNow } else { tree::Hold::No }) })
 }
 
 /// Content copied to `location` by a move that hasn't ended: the move uses it once the space switches over, or removes

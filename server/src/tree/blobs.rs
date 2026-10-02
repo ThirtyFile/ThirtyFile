@@ -6,7 +6,8 @@
 
 use std::collections::HashMap;
 
-use sqlx::SqliteConnection;
+use futures_util::future::BoxFuture;
+use sqlx::{SqliteConnection, SqlitePool};
 
 use super::{Node, adjust_usage};
 use crate::{
@@ -21,6 +22,47 @@ pub struct Memory {
     pub blob_guard: std::sync::Mutex<BlobGuard>,
     /// Purge of deleted spaces' content: (running, asked to run again)
     pub detached_purge: (std::sync::atomic::AtomicBool, std::sync::atomic::AtomicBool),
+}
+
+/// Whether a feature still needs content (a hash on a location) that nothing in the tree refers to any more
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hold {
+    /// It doesn't: the content may be deleted
+    No,
+    /// For a while: background deletion looks at it again in an hour
+    ForNow,
+    /// It keeps the content and deletes it itself: background deletion forgets it
+    ForGood,
+}
+
+/// A feature that keeps content of its own (moves, replicas, backups), asked before background deletion removes
+/// content and before new content is kept on a location. The features join in `app::startup::parts` (`Keepers`), so
+/// the tree needn't know them.
+pub struct Keeper {
+    /// What the content is used for, in the warning when asking fails ("being moved")
+    pub what: &'static str,
+    /// Whether the feature needs `hash` on `location`
+    pub holds: for<'a> fn(&'a SqlitePool, &'a str, &'a str) -> BoxFuture<'a, Result<Hold, sqlx::Error>>,
+    /// Whether `location` takes no new content now
+    pub refuses: Option<Refuses>,
+}
+
+/// `Keeper::refuses`
+pub type Refuses = for<'a> fn(&'a mut SqliteConnection, &'a str) -> BoxFuture<'a, Result<bool, sqlx::Error>>;
+
+/// The features that keep content, in the order they are asked (a part of `AppState`)
+pub struct Keepers(pub Vec<Keeper>);
+
+/// Whether a feature keeps new content off `location` now (`Keeper::refuses`)
+async fn refused(st: &AppState, conn: &mut SqliteConnection, location: &str) -> Result<bool, sqlx::Error> {
+    for keeper in &st.part::<Keepers>().0 {
+        if let Some(refuses) = keeper.refuses
+            && refuses(conn, location).await?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// "Staging / deleting" registry for physical files, so background deletion doesn't need the global write lock and never deletes by mistake:
@@ -301,52 +343,27 @@ async fn claim_for_deletion(st: &AppState, hash: &str, location: &str) -> Option
         let _ = forget_pending(st, hash, location).await;
         return None;
     }
-    // Copied there by a move that hasn't ended: the move is about to use it, or removes it itself when cancelled.
-    // Looked at again in an hour.
-    match crate::moves::copied_for_move(&st.db, hash, location).await {
-        Ok(false) => {}
-        Ok(true) => {
-            let _ = sqlx::query("UPDATE pending_blob_deletes SET created_at = ? WHERE hash = ? AND location_id = ?")
-                .bind(now() + 3600)
-                .bind(hash)
-                .bind(location)
-                .execute(&st.db)
-                .await;
-            return None;
-        }
-        Err(e) => {
-            tracing::warn!("Failed to check whether physical file {hash} is being moved: {e}");
-            return None;
-        }
-    }
-    // A replica ThirtyFile keeps there (replicas/): it goes only once its record went first
-    match crate::replicas::kept(&st.db, hash, location).await {
-        Ok(false) => {}
-        Ok(true) => {
-            let _ = forget_pending(st, hash, location).await;
-            return None;
-        }
-        Err(e) => {
-            tracing::warn!("Failed to check whether physical file {hash} is a replica: {e}");
-            return None;
-        }
-    }
-    // Recorded by a snapshot that is being made and hasn't copied it yet (backups/): kept until it has, or has ended.
-    // Looked at again in an hour.
-    match crate::backups::pinned(&st.db, hash).await {
-        Ok(false) => {}
-        Ok(true) => {
-            let _ = sqlx::query("UPDATE pending_blob_deletes SET created_at = ? WHERE hash = ? AND location_id = ?")
-                .bind(now() + 3600)
-                .bind(hash)
-                .bind(location)
-                .execute(&st.db)
-                .await;
-            return None;
-        }
-        Err(e) => {
-            tracing::warn!("Failed to check whether physical file {hash} is being copied: {e}");
-            return None;
+    // Features that keep content of their own: a move that copied it there, a replica, a snapshot being made
+    for keeper in &st.part::<Keepers>().0 {
+        match (keeper.holds)(&st.db, hash, location).await {
+            Ok(Hold::No) => {}
+            Ok(Hold::ForNow) => {
+                let _ = sqlx::query("UPDATE pending_blob_deletes SET created_at = ? WHERE hash = ? AND location_id = ?")
+                    .bind(now() + 3600)
+                    .bind(hash)
+                    .bind(location)
+                    .execute(&st.db)
+                    .await;
+                return None;
+            }
+            Ok(Hold::ForGood) => {
+                let _ = forget_pending(st, hash, location).await;
+                return None;
+            }
+            Err(e) => {
+                tracing::warn!("Failed to check whether physical file {hash} is {}: {e}", keeper.what);
+                return None;
+            }
         }
     }
     let mut g = st.part::<Memory>().blob_guard.lock().unwrap();
@@ -576,7 +593,7 @@ pub async fn commit_blob(conn: &mut SqliteConnection, staged: &StagedBlob) -> Ap
     }
     let current: Option<(String,)> = sqlx::query_as("SELECT location_id FROM blobs WHERE hash = ?").bind(&staged.hash).fetch_optional(&mut *conn).await?;
     if let (Some(old), Some((loc,)), Some(new)) = (&staged.repair_from, &current, &staged.uploaded_to) {
-        if loc != old || crate::replicas::fenced(conn, new).await? {
+        if loc != old || refused(&staged.guard.st, conn, new).await? {
             return Err(AppError::conflict("Something changed at the same time. Try again."));
         }
         sqlx::query("UPDATE blobs SET location_id = ? WHERE hash = ?").bind(new).bind(&staged.hash).execute(&mut *conn).await?;
@@ -595,7 +612,7 @@ pub async fn commit_blob(conn: &mut SqliteConnection, staged: &StagedBlob) -> Ap
         }
         (None, Some(loc)) => {
             // A location a replica took over from, not checked since: new content isn't kept there (replicas/)
-            if crate::replicas::fenced(conn, loc).await? {
+            if refused(&staged.guard.st, conn, loc).await? {
                 return Err(AppError::conflict("Something changed at the same time. Try again."));
             }
             add_blob_ref(conn, &staged.hash, staged.size, loc).await?;
@@ -655,6 +672,57 @@ mod tests {
         fn check(&self) -> futures_util::future::BoxFuture<'_, std::io::Result<()>> {
             self.inner.check()
         }
+    }
+
+    #[tokio::test]
+    async fn content_moves_replicas_and_backups_keep_is_left_to_them() {
+        let env = testutil::env().await;
+        let st = &env.st;
+        // They are asked in this order, each about its own content
+        let keepers: Vec<&str> = st.part::<Keepers>().0.iter().map(|k| k.what).collect();
+        assert_eq!(keepers, ["being moved", "a replica", "being copied"]);
+
+        let hash = "ab".repeat(32);
+        let tmp = env.dir.join("orphan");
+        std::fs::write(&tmp, b"orphan").unwrap();
+        st.storage("local").unwrap().put_file(&hash, &tmp).await.unwrap();
+        let blob = env.dir.join("blobs").join("ab").join("ab").join(&hash);
+        assert!(blob.exists());
+        let queued = || async {
+            sqlx::query("INSERT OR REPLACE INTO pending_blob_deletes (hash, location_id, created_at) VALUES (?, 'local', 0)")
+                .bind(&hash)
+                .execute(&st.db)
+                .await
+                .unwrap();
+        };
+        let pending = || async {
+            sqlx::query_as::<_, (i64,)>("SELECT created_at FROM pending_blob_deletes WHERE hash = ?").bind(&hash).fetch_optional(&st.db).await.unwrap().map(|(t,)| t)
+        };
+
+        // A replica: the replica deletes it itself, so the deletion is forgotten
+        queued().await;
+        sqlx::query("INSERT INTO replica_copies (hash, location_id, size, created_at) VALUES (?, 'local', 6, 0)").bind(&hash).execute(&st.db).await.unwrap();
+        remove_unreferenced(st, vec![(hash.clone(), "local".into())]).await;
+        assert!(blob.exists());
+        assert_eq!(pending().await, None);
+        sqlx::query("DELETE FROM replica_copies").execute(&st.db).await.unwrap();
+
+        // A snapshot being made that hasn't copied it yet: looked at again in an hour
+        queued().await;
+        sqlx::query("INSERT INTO backup_jobs (id, kind, set_id, state, created_at) VALUES ('job-1', 'snapshot', 'set-1', 'running', 0)")
+            .execute(&st.db)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO backup_pending (job_id, hash, size, location) VALUES ('job-1', ?, 6, 'local')").bind(&hash).execute(&st.db).await.unwrap();
+        remove_unreferenced(st, vec![(hash.clone(), "local".into())]).await;
+        assert!(blob.exists());
+        assert!(pending().await.is_some_and(|t| t > now()), "looked at again later");
+
+        // Once the snapshot is over, nothing keeps it
+        sqlx::query("UPDATE backup_jobs SET state = 'done'").execute(&st.db).await.unwrap();
+        remove_unreferenced(st, vec![(hash.clone(), "local".into())]).await;
+        assert!(!blob.exists());
+        assert_eq!(pending().await, None);
     }
 
     #[tokio::test]
