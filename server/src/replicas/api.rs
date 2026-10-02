@@ -780,41 +780,7 @@ pub async fn promote(State(st): State<AppState>, Admin(user): Admin, Path(id): P
             if epoch != p.epoch || source != p.source_location {
                 return Err(AppError::conflict("The replicas were promoted meanwhile"));
             }
-            let spaces = super::store_scope(&mut tx, &id).await?;
-            let list = serde_json::to_string(&spaces).unwrap();
-            let moved: Vec<(String, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                "UPDATE blobs SET location_id = ?2 WHERE location_id = ?3 AND hash IN ({SCOPE_HASHES})
-                   AND EXISTS (SELECT 1 FROM replica_copies c WHERE c.hash = blobs.hash AND c.location_id = ?2 AND c.state = 'verified')
-                 RETURNING hash, size"
-            )))
-            .bind(&list)
-            .bind(&target)
-            .bind(&source)
-            .fetch_all(&mut *tx)
-            .await?;
-            let moved_list = serde_json::to_string(&moved).unwrap();
-            // The copies there are the content now; the old location's become copies, not counted until checked
-            sqlx::query("DELETE FROM replica_copies WHERE location_id = ?1 AND hash IN (SELECT json_extract(value, '$[0]') FROM json_each(?2))")
-                .bind(&target)
-                .bind(&moved_list)
-                .execute(&mut *tx)
-                .await?;
-            sqlx::query(
-                "INSERT OR REPLACE INTO replica_copies (hash, location_id, size, state, created_at)
-                 SELECT json_extract(value, '$[0]'), ?1, json_extract(value, '$[1]'), 'stale', ?3 FROM json_each(?2)",
-            )
-            .bind(&source)
-            .bind(&moved_list)
-            .bind(now())
-            .execute(&mut *tx)
-            .await?;
-            let (missing,): (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM blobs WHERE location_id = ?2 AND hash IN ({SCOPE_HASHES})")))
-                .bind(&list)
-                .bind(&source)
-                .fetch_one(&mut *tx)
-                .await?;
-            // New files of the spaces go to the new location
-            sqlx::query("UPDATE drives SET location_id = ?1 WHERE id IN (SELECT value FROM json_each(?2))").bind(&target).bind(&list).execute(&mut *tx).await?;
+            let (moved, missing) = take_over_content(&mut tx, &id, &target, &source).await?;
             // Folder spaces wholly there become content-store spaces there; the others stay where they are
             let mut converted = 0;
             let mut staying = 0i64;
@@ -832,45 +798,17 @@ pub async fn promote(State(st): State<AppState>, Admin(user): Admin, Path(id): P
             if missing != check.missing || (missing > 0 && (check.source_reachable || !req.accept_missing)) {
                 return Err(AppError::conflict("Something changed at the same time. Try again."));
             }
-            // The policy: its location, a new epoch (jobs asked for before are refused), the old location as a target
-            // checked before it counts
-            sqlx::query("UPDATE replica_policies SET source_location = ?, epoch = epoch + 1, updated_at = ? WHERE id = ?")
-                .bind(&target)
-                .bind(now())
-                .bind(&id)
-                .execute(&mut *tx)
-                .await?;
-            sqlx::query("DELETE FROM replica_targets WHERE policy_id = ? AND location_id = ?").bind(&id).bind(&target).execute(&mut *tx).await?;
-            sqlx::query(
-                "INSERT INTO replica_targets (policy_id, location_id, priority, mode, state)
-                 VALUES (?1, ?2, (SELECT COALESCE(MAX(priority), 0) + 1 FROM replica_targets WHERE policy_id = ?1), 'realtime', 'stale')
-                 ON CONFLICT (policy_id, location_id) DO UPDATE SET state = 'stale'",
-            )
-            .bind(&id)
-            .bind(&source)
-            .execute(&mut *tx)
-            .await?;
-            sqlx::query("DELETE FROM replica_captured WHERE policy_id = ?").bind(&id).execute(&mut *tx).await?;
-            // Content of every policy may be kept elsewhere now
-            super::forget_counts(&mut tx, None).await?;
-            sqlx::query("DELETE FROM replica_dirty WHERE policy_id = ?").bind(&id).execute(&mut *tx).await?;
-            sqlx::query(sqlx::AssertSqlSafe(format!(
-                "UPDATE replica_jobs SET state = 'cancelled', finished_at = ? WHERE policy_id = ? AND state IN {ACTIVE} AND state != 'running'"
-            )))
-            .bind(now())
-            .bind(&id)
-            .execute(&mut *tx)
-            .await?;
+            switch_policy(&mut tx, &id, &target, &source).await?;
             let detail = format!(
                 "{}: {} → {} ({} moved{})",
                 p.name,
                 check.source_name,
                 check.target_name,
-                moved.len(),
+                moved,
                 if missing > 0 { format!(", {missing} not on {} and still on {}", check.target_name, check.source_name) } else { String::new() }
             );
             crate::logs::record_activity(&mut tx, &user, None, "replica_promote", &detail).await?;
-            AppResult::Ok((moved.len(), missing, converted))
+            AppResult::Ok((moved, missing, converted))
         }
         .await;
         crate::db::settle(tx, res).await?
@@ -890,4 +828,79 @@ pub async fn promote(State(st): State<AppState>, Admin(user): Admin, Path(id): P
     }
     st.part::<Memory>().queue.policies.notify_one();
     Ok(Json(json!({ "moved": moved, "missing": missing })))
+}
+
+/// In the transaction of a promotion: content of the policy's content-store spaces with a checked copy on `target` is
+/// read from there now, and its copies on the old location (`source`) become copies, not counted until checked.
+/// Returns how many contents moved, and how many stay on the old location.
+async fn take_over_content(tx: &mut SqliteConnection, policy: &str, target: &str, source: &str) -> AppResult<(usize, i64)> {
+    let spaces = super::store_scope(tx, policy).await?;
+    let list = serde_json::to_string(&spaces).unwrap();
+    let moved: Vec<(String, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "UPDATE blobs SET location_id = ?2 WHERE location_id = ?3 AND hash IN ({SCOPE_HASHES})
+           AND EXISTS (SELECT 1 FROM replica_copies c WHERE c.hash = blobs.hash AND c.location_id = ?2 AND c.state = 'verified')
+         RETURNING hash, size"
+    )))
+    .bind(&list)
+    .bind(target)
+    .bind(source)
+    .fetch_all(&mut *tx)
+    .await?;
+    let moved_list = serde_json::to_string(&moved).unwrap();
+    // The copies there are the content now; the old location's become copies, not counted until checked
+    sqlx::query("DELETE FROM replica_copies WHERE location_id = ?1 AND hash IN (SELECT json_extract(value, '$[0]') FROM json_each(?2))")
+        .bind(target)
+        .bind(&moved_list)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "INSERT OR REPLACE INTO replica_copies (hash, location_id, size, state, created_at)
+         SELECT json_extract(value, '$[0]'), ?1, json_extract(value, '$[1]'), 'stale', ?3 FROM json_each(?2)",
+    )
+    .bind(source)
+    .bind(&moved_list)
+    .bind(now())
+    .execute(&mut *tx)
+    .await?;
+    let (missing,): (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM blobs WHERE location_id = ?2 AND hash IN ({SCOPE_HASHES})")))
+        .bind(&list)
+        .bind(source)
+        .fetch_one(&mut *tx)
+        .await?;
+    // New files of the spaces go to the new location
+    sqlx::query("UPDATE drives SET location_id = ?1 WHERE id IN (SELECT value FROM json_each(?2))").bind(target).bind(&list).execute(&mut *tx).await?;
+    Ok((moved.len(), missing))
+}
+
+/// In the transaction of a promotion: the policy's location is `target`, with a new epoch (jobs asked for before are
+/// refused), and the old location (`source`) a target checked before it counts
+async fn switch_policy(tx: &mut SqliteConnection, policy: &str, target: &str, source: &str) -> AppResult<()> {
+    sqlx::query("UPDATE replica_policies SET source_location = ?, epoch = epoch + 1, updated_at = ? WHERE id = ?")
+        .bind(target)
+        .bind(now())
+        .bind(policy)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM replica_targets WHERE policy_id = ? AND location_id = ?").bind(policy).bind(target).execute(&mut *tx).await?;
+    sqlx::query(
+        "INSERT INTO replica_targets (policy_id, location_id, priority, mode, state)
+         VALUES (?1, ?2, (SELECT COALESCE(MAX(priority), 0) + 1 FROM replica_targets WHERE policy_id = ?1), 'realtime', 'stale')
+         ON CONFLICT (policy_id, location_id) DO UPDATE SET state = 'stale'",
+    )
+    .bind(policy)
+    .bind(source)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM replica_captured WHERE policy_id = ?").bind(policy).execute(&mut *tx).await?;
+    // Content of every policy may be kept elsewhere now
+    super::forget_counts(tx, None).await?;
+    sqlx::query("DELETE FROM replica_dirty WHERE policy_id = ?").bind(policy).execute(&mut *tx).await?;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "UPDATE replica_jobs SET state = 'cancelled', finished_at = ? WHERE policy_id = ? AND state IN {ACTIVE} AND state != 'running'"
+    )))
+    .bind(now())
+    .bind(policy)
+    .execute(&mut *tx)
+    .await?;
+    Ok(())
 }

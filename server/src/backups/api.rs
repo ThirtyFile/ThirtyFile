@@ -380,7 +380,7 @@ pub async fn copy(State(st): State<AppState>, Admin(user): Admin, Json(req): Jso
             .bind(now())
             .execute(&mut *tx)
             .await?;
-            insert_job(&mut tx, &user, &job_id, "snapshot", &set_id, None, &params, &name).await?;
+            insert_job(&mut tx, &user, NewJob { id: &job_id, kind: "snapshot", set: &set_id, snapshot: None, params: &params, label: &name }).await?;
             crate::logs::record_activity(&mut tx, &user, None, "backup_copy", &format!("{name}: {source_name} → {dest_name}")).await?;
             AppResult::Ok(())
         }
@@ -391,17 +391,18 @@ pub async fn copy(State(st): State<AppState>, Admin(user): Admin, Json(req): Jso
     Ok(Json(json!({ "set_id": set_id, "job_id": job_id })))
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn insert_job(
-    conn: &mut SqliteConnection,
-    user: &User,
-    id: &str,
-    kind: &str,
-    set: &str,
-    snapshot: Option<&str>,
-    params: &Value,
-    label: &str,
-) -> AppResult<()> {
+/// A job to queue: its id and kind, the set (and snapshot) it works on, what it is given, and its label
+struct NewJob<'a> {
+    id: &'a str,
+    kind: &'a str,
+    set: &'a str,
+    snapshot: Option<&'a str>,
+    params: &'a Value,
+    label: &'a str,
+}
+
+async fn insert_job(conn: &mut SqliteConnection, user: &User, job: NewJob<'_>) -> AppResult<()> {
+    let NewJob { id, kind, set, snapshot, params, label } = job;
     sqlx::query(
         "INSERT INTO backup_jobs (id, kind, set_id, snapshot_id, params, label, created_by, created_by_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
@@ -824,7 +825,7 @@ pub async fn verify(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
             if complete == 0 {
                 return Err(AppError::conflict("This copy isn't complete: there is nothing to check yet"));
             }
-            insert_job(&mut tx, &user, &job_id, "verify", &id, None, &json!({}), &set.name).await
+            insert_job(&mut tx, &user, NewJob { id: &job_id, kind: "verify", set: &id, snapshot: None, params: &json!({}), label: &set.name }).await
         }
         .await;
         crate::db::settle(tx, res).await?;
@@ -941,7 +942,8 @@ pub async fn import(State(st): State<AppState>, Admin(user): Admin, Json(req): J
                 .execute(&mut *tx)
                 .await?;
             }
-            insert_job(&mut tx, &user, &new_id(), "verify", &set_id, None, &json!({ "rebuild": true }), &info.name).await?;
+            insert_job(&mut tx, &user, NewJob { id: &new_id(), kind: "verify", set: &set_id, snapshot: None, params: &json!({ "rebuild": true }), label: &info.name })
+                .await?;
             crate::logs::record_activity(&mut tx, &user, None, "backup_import", &format!("{}: {location_name}", info.name)).await?;
             AppResult::Ok(())
         }
@@ -1162,7 +1164,8 @@ pub async fn restore(State(st): State<AppState>, Admin(user): Admin, Path(id): P
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let res = async {
-            insert_job(&mut tx, &user, &job_id, "restore", &set.id, Some(&id), &serde_json::to_value(&params).unwrap(), &label).await?;
+            let params = serde_json::to_value(&params).unwrap();
+            insert_job(&mut tx, &user, NewJob { id: &job_id, kind: "restore", set: &set.id, snapshot: Some(&id), params: &params, label: &label }).await?;
             crate::logs::record_activity(&mut tx, &user, None, "backup_restore", &format!("{label} ({})", set.name)).await?;
             AppResult::Ok(())
         }

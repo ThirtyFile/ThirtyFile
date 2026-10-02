@@ -498,42 +498,14 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
         }
     };
     report.read_ms = started.elapsed().as_millis() as u64;
-    // An empty folder where the index has items is what a disk or share that isn't mounted looks like (its mount
-    // point is an empty folder): only a folder that has the marker is really empty
-    if compared.marker.as_ref().is_some_and(|id| *id != drive.id) {
-        // Another space's folder: a different disk mounted at the same place, say
-        report.error = Some(format!(
-            "{} holds another space's .thirtyfile-space file: if a different disk is mounted there, mount the right one and check again.",
-            root.display()
-        ));
+    if let Some(e) = not_the_spaces(st, &drive, &root, &compared).await? {
+        report.error = Some(e);
         save_report(st, &drive, &report).await?;
         return Ok(report);
     }
-    let marked = compared.marker.is_some();
-    let (has_items,): (bool,) =
-        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM nodes WHERE drive_id = ? AND trashed_at IS NULL AND fs_path IS NOT NULL AND fs_path <> '')")
-            .bind(&drive.id)
-            .fetch_one(&st.db)
-            .await?;
-    if compared.root_empty && has_items && !marked {
-        report.error = Some(format!(
-            "{} is empty, but the space still has items: if it is on a disk or network share that isn't mounted, mount it and check again. To empty the space, delete its items in ThirtyFile.",
-            root.display()
-        ));
-        save_report(st, &drive, &report).await?;
-        return Ok(report);
-    }
-    // Without its marker, the folder is taken for the space's only when it holds an item the index knows by its
-    // identity (the marker was deleted, say): another folder put in its place (a link elsewhere) is never indexed
-    if has_items && !marked && !compared.same_folder {
-        report.error = Some(format!(
-            "{} doesn't hold this space's .thirtyfile-space file, nor the items the space has: if another folder or disk is there now, put the right one back and check again.",
-            root.display()
-        ));
-        save_report(st, &drive, &report).await?;
-        return Ok(report);
-    }
-    if !marked && let Err(e) = compared.root.join(MARKER).and_then(|m| crate::beneath::write_new(&m, drive.id.as_bytes())) {
+    if compared.marker.is_none()
+        && let Err(e) = compared.root.join(MARKER).and_then(|m| crate::beneath::write_new(&m, drive.id.as_bytes()))
+    {
         tracing::debug!("Couldn't write the marker file in {}: {e}", root.display());
     }
 
@@ -572,6 +544,40 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     }
     finish(st, &drive, &report).await?;
     Ok(report)
+}
+
+/// Why the folder read isn't the space's, so the index is kept as it is: None when it is. An empty folder where the
+/// index has items is what a disk or share that isn't mounted looks like (its mount point is an empty folder): only a
+/// folder that has the marker is really empty.
+async fn not_the_spaces(st: &AppState, drive: &Drive, root: &Path, compared: &Compared) -> AppResult<Option<String>> {
+    if compared.marker.as_ref().is_some_and(|id| *id != drive.id) {
+        // Another space's folder: a different disk mounted at the same place, say
+        return Ok(Some(format!(
+            "{} holds another space's .thirtyfile-space file: if a different disk is mounted there, mount the right one and check again.",
+            root.display()
+        )));
+    }
+    let marked = compared.marker.is_some();
+    let (has_items,): (bool,) =
+        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM nodes WHERE drive_id = ? AND trashed_at IS NULL AND fs_path IS NOT NULL AND fs_path <> '')")
+            .bind(&drive.id)
+            .fetch_one(&st.db)
+            .await?;
+    if compared.root_empty && has_items && !marked {
+        return Ok(Some(format!(
+            "{} is empty, but the space still has items: if it is on a disk or network share that isn't mounted, mount it and check again. To empty the space, delete its items in ThirtyFile.",
+            root.display()
+        )));
+    }
+    // Without its marker, the folder is taken for the space's only when it holds an item the index knows by its
+    // identity (the marker was deleted, say): another folder put in its place (a link elsewhere) is never indexed
+    if has_items && !marked && !compared.same_folder {
+        return Ok(Some(format!(
+            "{} doesn't hold this space's .thirtyfile-space file, nor the items the space has: if another folder or disk is there now, put the right one back and check again.",
+            root.display()
+        )));
+    }
+    Ok(None)
 }
 
 /// What reading the whole folder found (`compare`)
@@ -763,41 +769,9 @@ async fn reconcile(
         }
     }
     // New items that the index has elsewhere by their identity: moved here, when their old path is gone
-    let mut moves: HashMap<String, Indexed> = HashMap::new();
     let new: Vec<&Entry> =
         items.iter().filter(|e| may_move && !e.settling && e.ino != 0 && by_path.get(e.rel.as_str()).is_none_or(|n| kind_changed.contains(&n.id))).collect();
-    for e in &new {
-        let found: Vec<Indexed> = sqlx::query_as(
-            "SELECT id, parent_id, kind, fs_path, fs_dev, fs_ino, fs_size, fs_mtime_ns, fs_birth_ns FROM nodes
-             WHERE fs_dev = ? AND fs_ino = ? AND drive_id = ? AND trashed_at IS NULL",
-        )
-        .bind(e.dev)
-        .bind(e.ino)
-        .bind(&drive.id)
-        .fetch_all(&st.db)
-        .await?;
-        if let Some(n) =
-            found.into_iter().find(|n| n.kind == e.kind() && same_item(n, e) && n.fs_path.as_deref().is_some_and(|p| p != e.rel && !present.contains_key(p)))
-        {
-            moves.insert(e.rel.clone(), n);
-        }
-    }
-    // Only those whose old path is gone: an item at two paths (a hard link) stays where it is
-    if !moves.is_empty() {
-        let root = drive.source_path.clone().unwrap_or_default();
-        let old: Vec<(String, String, i64, i64)> =
-            moves.iter().map(|(rel, n)| (rel.clone(), n.fs_path.clone().unwrap_or_default(), n.fs_dev.unwrap_or(0), n.fs_ino.unwrap_or(0))).collect();
-        let still: HashSet<String> = tokio::task::spawn_blocking(move || {
-            let Ok(top) = crate::beneath::Pinned::root(Path::new(&root)) else { return HashSet::new() };
-            old.into_iter()
-                .filter(|(_, path, dev, ino)| top.join(path).ok().and_then(|p| crate::fsops::stat(p.as_path()).ok()).is_some_and(|s| (s.dev, s.ino) == (*dev, *ino)))
-                .map(|(rel, ..)| rel)
-                .collect()
-        })
-        .await
-        .map_err(AppError::internal)?;
-        moves.retain(|rel, _| !still.contains(rel));
-    }
+    let mut moves = moved_here(st, drive, &new, &present).await?;
     let mut moved = HashSet::new();
     for e in items {
         match by_path.get(e.rel.as_str()) {
@@ -841,6 +815,45 @@ async fn reconcile(
         .filter_map(|n| n.fs_path.filter(|p| !p.is_empty() && !present.contains_key(p.as_str())).map(|p| (n.id, p)))
         .collect();
     Ok((ops, gone))
+}
+
+/// Of the items `new` in a folder, those the index has elsewhere by their identity, whose old path is gone (not in
+/// `present`, the folder read, nor on the disk any more): moved here, by their path here. An item at two paths (a hard
+/// link) stays where it is.
+async fn moved_here(st: &AppState, drive: &Drive, new: &[&Entry], present: &HashMap<String, &'static str>) -> AppResult<HashMap<String, Indexed>> {
+    let mut moves: HashMap<String, Indexed> = HashMap::new();
+    for e in new {
+        let found: Vec<Indexed> = sqlx::query_as(
+            "SELECT id, parent_id, kind, fs_path, fs_dev, fs_ino, fs_size, fs_mtime_ns, fs_birth_ns FROM nodes
+             WHERE fs_dev = ? AND fs_ino = ? AND drive_id = ? AND trashed_at IS NULL",
+        )
+        .bind(e.dev)
+        .bind(e.ino)
+        .bind(&drive.id)
+        .fetch_all(&st.db)
+        .await?;
+        if let Some(n) =
+            found.into_iter().find(|n| n.kind == e.kind() && same_item(n, e) && n.fs_path.as_deref().is_some_and(|p| p != e.rel && !present.contains_key(p)))
+        {
+            moves.insert(e.rel.clone(), n);
+        }
+    }
+    if !moves.is_empty() {
+        let root = drive.source_path.clone().unwrap_or_default();
+        let old: Vec<(String, String, i64, i64)> =
+            moves.iter().map(|(rel, n)| (rel.clone(), n.fs_path.clone().unwrap_or_default(), n.fs_dev.unwrap_or(0), n.fs_ino.unwrap_or(0))).collect();
+        let still: HashSet<String> = tokio::task::spawn_blocking(move || {
+            let Ok(top) = crate::beneath::Pinned::root(Path::new(&root)) else { return HashSet::new() };
+            old.into_iter()
+                .filter(|(_, path, dev, ino)| top.join(path).ok().and_then(|p| crate::fsops::stat(p.as_path()).ok()).is_some_and(|s| (s.dev, s.ino) == (*dev, *ino)))
+                .map(|(rel, ..)| rel)
+                .collect()
+        })
+        .await
+        .map_err(AppError::internal)?;
+        moves.retain(|rel, _| !still.contains(rel));
+    }
+    Ok(moves)
 }
 
 /// Removes what was gone from its folder and wasn't found elsewhere by then: still at its old path in the index, and
@@ -1113,25 +1126,7 @@ fn plan(drive: &Drive, indexed: &[Indexed], entries: &[Entry], full: bool, repor
     // Path → kind of what the folder holds now (a map: looking entries up one by one made unchanged scans of large
     // folders quadratic, over five minutes for 200,000 items)
     let present: HashMap<&str, &str> = entries.iter().map(|e| (e.rel.as_str(), e.kind())).collect();
-    // Indexed items whose path is gone (or now holds the other kind): candidates for a move, else removed
-    let mut missing: HashMap<(i64, i64), &Indexed> = HashMap::new();
-    let mut kind_changed = HashSet::new();
-    for n in indexed {
-        let Some(path) = n.fs_path.as_deref() else { continue };
-        if path.is_empty() {
-            continue;
-        }
-        let kind_differs = present.get(path).is_some_and(|k| *k != n.kind);
-        if kind_differs {
-            kind_changed.insert(n.id.clone());
-        }
-        if (!present.contains_key(path) || kind_differs)
-            && let (Some(dev), Some(ino)) = (n.fs_dev, n.fs_ino)
-            && ino != 0
-        {
-            missing.insert((dev, ino), n);
-        }
-    }
+    let (mut missing, kind_changed) = gone_or_changed(indexed, &present);
 
     let mut ids: HashMap<String, String> = HashMap::new();
     ids.insert(String::new(), drive.root_id.clone());
@@ -1190,29 +1185,9 @@ fn plan(drive: &Drive, indexed: &[Indexed], entries: &[Entry], full: bool, repor
             }
         }
     }
+    let gone = Gone { present: &present, moved: &moved, kind_changed: &kind_changed };
     if full {
-        let by_id: HashMap<&str, &Indexed> = indexed.iter().map(|n| (n.id.as_str(), n)).collect();
-        // Settling files keep their node: they are still there
-        for n in indexed {
-            let Some(path) = n.fs_path.as_deref() else { continue };
-            if path.is_empty() || present.contains_key(path) || moved.contains(&n.id) || kind_changed.contains(&n.id) {
-                continue;
-            }
-            // In a folder that couldn't be read: still there, as far as anyone can tell
-            if report.unreadable.iter().any(|d| path.strip_prefix(d.as_str()).is_some_and(|rest| rest.starts_with('/'))) {
-                continue;
-            }
-            // Only the topmost removed item: its contents go with it
-            let parent_gone = n
-                .parent_id
-                .as_ref()
-                .and_then(|p| by_id.get(p.as_str()))
-                .is_some_and(|x| x.fs_path.as_deref().is_some_and(|pp| !pp.is_empty() && !present.contains_key(pp) && !moved.contains(&x.id)));
-            if !parent_gone {
-                ops.push(Op::Remove { id: n.id.clone() });
-            }
-            report.removed += 1;
-        }
+        removed_in_full(indexed, &gone, &mut ops, report);
     } else {
         for n in indexed {
             if let Some(path) = n.fs_path.as_deref()
@@ -1227,6 +1202,65 @@ fn plan(drive: &Drive, indexed: &[Indexed], entries: &[Entry], full: bool, repor
     // Moves first leave their place with a name nobody has, so the order of the moves doesn't matter
     parks.extend(ops);
     parks
+}
+
+/// Indexed items whose path is gone (or now holds the other kind), by device and inode: candidates for a move, else
+/// removed; and the ids of those whose path holds the other kind now
+fn gone_or_changed<'a>(indexed: &'a [Indexed], present: &HashMap<&str, &str>) -> (HashMap<(i64, i64), &'a Indexed>, HashSet<String>) {
+    let mut missing: HashMap<(i64, i64), &Indexed> = HashMap::new();
+    let mut kind_changed = HashSet::new();
+    for n in indexed {
+        let Some(path) = n.fs_path.as_deref() else { continue };
+        if path.is_empty() {
+            continue;
+        }
+        let kind_differs = present.get(path).is_some_and(|k| *k != n.kind);
+        if kind_differs {
+            kind_changed.insert(n.id.clone());
+        }
+        if (!present.contains_key(path) || kind_differs)
+            && let (Some(dev), Some(ino)) = (n.fs_dev, n.fs_ino)
+            && ino != 0
+        {
+            missing.insert((dev, ino), n);
+        }
+    }
+    (missing, kind_changed)
+}
+
+/// What a plan knows of the items that aren't where the index has them: the paths there are now, the items found
+/// elsewhere, and those whose path holds the other kind now
+struct Gone<'a> {
+    present: &'a HashMap<&'a str, &'a str>,
+    moved: &'a HashSet<String>,
+    kind_changed: &'a HashSet<String>,
+}
+
+/// A scan of the whole folder: indexed items it didn't find were removed. Only the topmost of them is removed (its
+/// contents go with it).
+fn removed_in_full(indexed: &[Indexed], gone: &Gone<'_>, ops: &mut Vec<Op>, report: &mut ScanReport) {
+    let by_id: HashMap<&str, &Indexed> = indexed.iter().map(|n| (n.id.as_str(), n)).collect();
+    // Settling files keep their node: they are still there
+    for n in indexed {
+        let Some(path) = n.fs_path.as_deref() else { continue };
+        if path.is_empty() || gone.present.contains_key(path) || gone.moved.contains(&n.id) || gone.kind_changed.contains(&n.id) {
+            continue;
+        }
+        // In a folder that couldn't be read: still there, as far as anyone can tell
+        if report.unreadable.iter().any(|d| path.strip_prefix(d.as_str()).is_some_and(|rest| rest.starts_with('/'))) {
+            continue;
+        }
+        // Only the topmost removed item: its contents go with it
+        let parent_gone = n
+            .parent_id
+            .as_ref()
+            .and_then(|p| by_id.get(p.as_str()))
+            .is_some_and(|x| x.fs_path.as_deref().is_some_and(|pp| !pp.is_empty() && !gone.present.contains_key(pp) && !gone.moved.contains(&x.id)));
+        if !parent_gone {
+            ops.push(Op::Remove { id: n.id.clone() });
+        }
+        report.removed += 1;
+    }
 }
 
 /// Whether an item found at a new path is the indexed one whose path is gone, rather than a new item that got its inode

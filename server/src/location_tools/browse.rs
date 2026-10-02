@@ -328,73 +328,13 @@ pub async fn usage_of(c: &mut SqliteConnection, me: i64, location: &str, hashes:
         return Ok(out);
     }
     let list = serde_json::to_string(hashes).unwrap();
-    let here: HashSet<String> = sqlx::query_as::<_, (String,)>("SELECT hash FROM blobs WHERE location_id = ?2 AND hash IN (SELECT value FROM json_each(?1))")
-        .bind(&list)
-        .bind(location)
-        .fetch_all(&mut *c)
-        .await?
-        .into_iter()
-        .map(|r| r.0)
-        .collect();
-    let pending: HashSet<String> =
-        sqlx::query_as::<_, (String,)>("SELECT hash FROM pending_blob_deletes WHERE location_id = ?2 AND hash IN (SELECT value FROM json_each(?1))")
-            .bind(&list)
-            .bind(location)
-            .fetch_all(&mut *c)
-            .await?
-            .into_iter()
-            .map(|r| r.0)
-            .collect();
+    let here = listed(c, "SELECT hash FROM blobs WHERE location_id = ?2 AND hash IN (SELECT value FROM json_each(?1))", &list, location).await?;
+    let pending = listed(c, "SELECT hash FROM pending_blob_deletes WHERE location_id = ?2 AND hash IN (SELECT value FROM json_each(?1))", &list, location).await?;
     // Replicas kept here of content kept elsewhere (replicas/)
-    let replicas: HashSet<String> =
-        sqlx::query_as::<_, (String,)>("SELECT hash FROM replica_copies WHERE location_id = ?2 AND hash IN (SELECT value FROM json_each(?1))")
-            .bind(&list)
-            .bind(location)
-            .fetch_all(&mut *c)
-            .await?
-            .into_iter()
-            .map(|r| r.0)
-            .collect();
-    // One file per content: one outside the trash first, then one the administrator may see; and how many use it
-    let private = "EXISTS (SELECT 1 FROM drives d WHERE d.id = n.drive_id AND d.kind = 'personal' AND d.owner_id IS NOT ?2)";
-    let files: Vec<(String, String, Option<String>, bool, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT blob_hash, id, drive_id, trashed, uses FROM (
-           SELECT n.blob_hash, n.id, n.drive_id, n.trashed_at IS NOT NULL AS trashed, COUNT(*) OVER (PARTITION BY n.blob_hash) AS uses,
-                  ROW_NUMBER() OVER (PARTITION BY n.blob_hash ORDER BY n.trashed_at IS NOT NULL, {private}, n.id) AS rn
-           FROM nodes n WHERE n.blob_hash IN (SELECT value FROM json_each(?1))
-         ) WHERE rn = 1"
-    )))
-    .bind(&list)
-    .bind(me)
-    .fetch_all(&mut *c)
-    .await?;
-    let versions: Vec<(String, String, Option<String>, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT blob_hash, node_id, drive_id, uses FROM (
-           SELECT v.blob_hash, v.node_id, n.drive_id, COUNT(*) OVER (PARTITION BY v.blob_hash) AS uses,
-                  ROW_NUMBER() OVER (PARTITION BY v.blob_hash ORDER BY {private}, v.id) AS rn
-           FROM node_versions v JOIN nodes n ON n.id = v.node_id WHERE v.blob_hash IN (SELECT value FROM json_each(?1))
-         ) WHERE rn = 1"
-    )))
-    .bind(&list)
-    .bind(me)
-    .fetch_all(&mut *c)
-    .await?;
-
-    // Replicas of what someone else's personal space holds (its files, their earlier versions, or the files of its
-    // folder as a sync read them) are shown as that space's, so they stay closed like its files
-    let private_replicas: HashMap<String, String> = sqlx::query_as::<_, (String, String)>(
-        "SELECT u.hash, MIN(u.drive_id) FROM (
-           SELECT n.blob_hash AS hash, n.drive_id FROM nodes n WHERE n.blob_hash IN (SELECT value FROM json_each(?1))
-           UNION ALL SELECT v.blob_hash, n.drive_id FROM node_versions v JOIN nodes n ON n.id = v.node_id WHERE v.blob_hash IN (SELECT value FROM json_each(?1))
-           UNION ALL SELECT f.hash, f.drive_id FROM replica_folder_files f WHERE f.hash IN (SELECT value FROM json_each(?1))
-         ) u JOIN drives d ON d.id = u.drive_id WHERE d.kind = 'personal' AND d.owner_id IS NOT ?2 GROUP BY u.hash",
-    )
-    .bind(serde_json::to_string(&hashes.iter().filter(|h| replicas.contains(*h) && !here.contains(*h)).collect::<Vec<_>>()).unwrap())
-    .bind(me)
-    .fetch_all(&mut *c)
-    .await?
-    .into_iter()
-    .collect();
+    let replicas = listed(c, "SELECT hash FROM replica_copies WHERE location_id = ?2 AND hash IN (SELECT value FROM json_each(?1))", &list, location).await?;
+    let (files, versions) = first_users(c, me, &list).await?;
+    let elsewhere: Vec<&String> = hashes.iter().filter(|h| replicas.contains(*h) && !here.contains(*h)).collect();
+    let private_replicas = private_replicas(c, me, &elsewhere).await?;
 
     let drive_ids: Vec<&str> = files
         .iter()
@@ -449,6 +389,64 @@ pub async fn usage_of(c: &mut SqliteConnection, me: i64, location: &str, hashes:
         out.insert(hash.to_string(), Usage { status, space, file, uses });
     }
     Ok(out)
+}
+
+/// The hashes `sql` finds among the `list` (`?1`, JSON) at `location` (`?2`)
+async fn listed(c: &mut SqliteConnection, sql: &'static str, list: &str, location: &str) -> AppResult<HashSet<String>> {
+    Ok(sqlx::query_as::<_, (String,)>(sql).bind(list).bind(location).fetch_all(&mut *c).await?.into_iter().map(|r| r.0).collect())
+}
+
+/// A file using a content: (content, file, space, in the trash, how many files use it)
+type FileUse = (String, String, Option<String>, bool, i64);
+/// An earlier version using a content: (content, its file, space, how many versions use it)
+type VersionUse = (String, String, Option<String>, i64);
+
+/// One file per content of the `list` (JSON): one outside the trash first, then one user `me` may see; and how many use
+/// it. The same for earlier versions.
+async fn first_users(c: &mut SqliteConnection, me: i64, list: &str) -> AppResult<(Vec<FileUse>, Vec<VersionUse>)> {
+    let private = "EXISTS (SELECT 1 FROM drives d WHERE d.id = n.drive_id AND d.kind = 'personal' AND d.owner_id IS NOT ?2)";
+    let files: Vec<FileUse> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT blob_hash, id, drive_id, trashed, uses FROM (
+           SELECT n.blob_hash, n.id, n.drive_id, n.trashed_at IS NOT NULL AS trashed, COUNT(*) OVER (PARTITION BY n.blob_hash) AS uses,
+                  ROW_NUMBER() OVER (PARTITION BY n.blob_hash ORDER BY n.trashed_at IS NOT NULL, {private}, n.id) AS rn
+           FROM nodes n WHERE n.blob_hash IN (SELECT value FROM json_each(?1))
+         ) WHERE rn = 1"
+    )))
+    .bind(list)
+    .bind(me)
+    .fetch_all(&mut *c)
+    .await?;
+    let versions: Vec<VersionUse> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT blob_hash, node_id, drive_id, uses FROM (
+           SELECT v.blob_hash, v.node_id, n.drive_id, COUNT(*) OVER (PARTITION BY v.blob_hash) AS uses,
+                  ROW_NUMBER() OVER (PARTITION BY v.blob_hash ORDER BY {private}, v.id) AS rn
+           FROM node_versions v JOIN nodes n ON n.id = v.node_id WHERE v.blob_hash IN (SELECT value FROM json_each(?1))
+         ) WHERE rn = 1"
+    )))
+    .bind(list)
+    .bind(me)
+    .fetch_all(&mut *c)
+    .await?;
+    Ok((files, versions))
+}
+
+/// Replicas (of the `hashes`) of what someone else's personal space holds (its files, their earlier versions, or the
+/// files of its folder as a sync read them) are shown as that space's, so they stay closed like its files: content →
+/// space
+async fn private_replicas(c: &mut SqliteConnection, me: i64, hashes: &[&String]) -> AppResult<HashMap<String, String>> {
+    Ok(sqlx::query_as::<_, (String, String)>(
+        "SELECT u.hash, MIN(u.drive_id) FROM (
+           SELECT n.blob_hash AS hash, n.drive_id FROM nodes n WHERE n.blob_hash IN (SELECT value FROM json_each(?1))
+           UNION ALL SELECT v.blob_hash, n.drive_id FROM node_versions v JOIN nodes n ON n.id = v.node_id WHERE v.blob_hash IN (SELECT value FROM json_each(?1))
+           UNION ALL SELECT f.hash, f.drive_id FROM replica_folder_files f WHERE f.hash IN (SELECT value FROM json_each(?1))
+         ) u JOIN drives d ON d.id = u.drive_id WHERE d.kind = 'personal' AND d.owner_id IS NOT ?2 GROUP BY u.hash",
+    )
+    .bind(serde_json::to_string(hashes).unwrap())
+    .bind(me)
+    .fetch_all(&mut *c)
+    .await?
+    .into_iter()
+    .collect())
 }
 
 async fn spaces_by_id(c: &mut SqliteConnection, me: i64, ids: &[&str]) -> AppResult<HashMap<String, SpaceRef>> {

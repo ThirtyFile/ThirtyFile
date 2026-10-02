@@ -1,6 +1,11 @@
 //! ThirtyFile's server. The program (main.rs) only calls `cli::main`; tests in `tests/` start a server with
 //! `app::startup`. The other modules stay private, so the compiler still reports code nothing uses.
 
+// Functions stay short enough to read (split along their steps, with a struct for what they share), and every
+// `allow` says why. Tests may be longer.
+#![cfg_attr(not(test), warn(clippy::too_many_lines))]
+#![warn(clippy::allow_attributes_without_reason)]
+
 mod admin;
 pub mod app;
 mod archive;

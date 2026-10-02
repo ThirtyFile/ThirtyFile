@@ -22,6 +22,7 @@ use std::{collections::HashMap, path::Path, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use sqlx::SqliteConnection;
 use tokio::io::AsyncWriteExt;
 
 use super::{
@@ -260,7 +261,7 @@ async fn read_folder_spaces(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, p: 
                         return Ok(Some(stop));
                     }
                     let shown = if kind == "version" { format!("{name} (an earlier version)") } else { rel.clone() };
-                    if let Some(stop) = read_one(cx, set, dst, &root, &space.id, &item, &rel, &shown).await? {
+                    if let Some(stop) = read_one(cx, set, dst, &root, FolderItem { space: &space.id, item: &item, rel: &rel, shown: &shown }).await? {
                         return Ok(Some(stop));
                     }
                 }
@@ -270,9 +271,18 @@ async fn read_folder_spaces(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, p: 
     Ok(None)
 }
 
+/// A file or version of a folder space to read: its space, its id (the file's, or the version's), its path in the
+/// space's folder, and how it is named in failures
+struct FolderItem<'a> {
+    space: &'a str,
+    item: &'a str,
+    rel: &'a str,
+    shown: &'a str,
+}
+
 /// Reads one file or version of a folder space and records it
-#[allow(clippy::too_many_arguments)]
-async fn read_one(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, root: &Pinned, space: &str, item: &str, rel: &str, shown: &str) -> AppResult<Option<Stop>> {
+async fn read_one(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, root: &Pinned, one: FolderItem<'_>) -> AppResult<Option<Stop>> {
+    let FolderItem { space, item, rel, shown } = one;
     let st = cx.st;
     let tmp = st.tmp_dir().join(format!("backup-{}", new_id()));
     let read = cx
@@ -569,21 +579,26 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params, set
     tokio::fs::create_dir_all(layout::cache_dir(st)).await?;
     let path = layout::cache_dir(st).join(format!("{snapshot}.jsonl.partial"));
     let file = tokio::fs::File::create(&path).await?;
-    let mut w = Writer { out: tokio::io::BufWriter::new(file), hash: Sha256::new(), size: 0 };
-    let mut pins = Pins { st, job: &cx.job.id, batch: Vec::new() };
-    let mut m = Manifest {
-        path: path.clone(),
-        sha256: String::new(),
-        size: 0,
-        cutoff: now(),
-        folders: 0,
-        files: 0,
-        versions: 0,
-        logical_bytes: 0,
-        spaces: Vec::new(),
-        stale: 0,
-        changing: Vec::new(),
-        changes: HashMap::new(),
+    let mut out = Writing {
+        set,
+        p,
+        settle,
+        w: Writer { out: tokio::io::BufWriter::new(file), hash: Sha256::new(), size: 0 },
+        pins: Pins { st, job: &cx.job.id, batch: Vec::new() },
+        m: Manifest {
+            path: path.clone(),
+            sha256: String::new(),
+            size: 0,
+            cutoff: now(),
+            folders: 0,
+            files: 0,
+            versions: 0,
+            logical_bytes: 0,
+            spaces: Vec::new(),
+            stale: 0,
+            changing: Vec::new(),
+            changes: HashMap::new(),
+        },
     };
     let mut conn = st.db.acquire().await?;
     // Read-only: one consistent view of every space for the whole manifest, while changes go on
@@ -597,36 +612,66 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params, set
     .bind(serde_json::to_string(&p.spaces).unwrap())
     .fetch_all(&mut *tx)
     .await?;
-    m.cutoff = now();
+    out.m.cutoff = now();
     // The changes this view holds, for backups made after changes (policy.rs)
     let seqs: Vec<(String, i64)> = sqlx::query_as("SELECT d.value, COALESCE((SELECT seq FROM space_changes WHERE drive_id = d.value), 0) FROM json_each(?) d")
         .bind(serde_json::to_string(&p.spaces).unwrap())
         .fetch_all(&mut *tx)
         .await?;
-    m.changes = seqs.into_iter().collect();
-    w.line(&Line::Header {
-        format: layout::FORMAT,
-        app: crate::VERSION.to_string(),
-        set: set.id.clone(),
-        snapshot: snapshot.to_string(),
-        created_at: now(),
-        cutoff: m.cutoff,
-        consistency: CONSISTENCY.to_string(),
-    })
-    .await?;
-    for s in &spaces {
-        w.line(&Line::Space {
-            id: s.id.clone(),
-            name: s.name.clone(),
-            kind: s.kind.clone(),
-            owner: s.owner.clone(),
-            owner_id: s.owner_id.filter(|_| s.kind == "personal"),
-            mode: s.mode.clone(),
-            quota: s.quota_bytes,
+    out.m.changes = seqs.into_iter().collect();
+    out.w
+        .line(&Line::Header {
+            format: layout::FORMAT,
+            app: crate::VERSION.to_string(),
+            set: set.id.clone(),
+            snapshot: snapshot.to_string(),
+            created_at: now(),
+            cutoff: out.m.cutoff,
+            consistency: CONSISTENCY.to_string(),
         })
         .await?;
+    for s in &spaces {
+        out.w
+            .line(&Line::Space {
+                id: s.id.clone(),
+                name: s.name.clone(),
+                kind: s.kind.clone(),
+                owner: s.owner.clone(),
+                owner_id: s.owner_id.filter(|_| s.kind == "personal"),
+                mode: s.mode.clone(),
+                quota: s.quota_bytes,
+            })
+            .await?;
     }
     for s in &spaces {
+        let info = out.space(&mut tx, s).await?;
+        out.m.spaces.push(info);
+    }
+    tx.rollback().await?;
+    drop(conn);
+    let Writing { mut w, mut pins, mut m, .. } = out;
+    pins.flush().await?;
+    w.out.flush().await?;
+    w.out.get_mut().sync_all().await?;
+    m.sha256 = hex::encode(w.hash.finalize());
+    m.size = w.size;
+    Ok(m)
+}
+
+/// A manifest being written: where it goes, the content it pins, and what it holds so far
+struct Writing<'a> {
+    set: &'a Set,
+    p: &'a Params,
+    /// See `write_manifest`
+    settle: bool,
+    w: Writer,
+    pins: Pins<'a>,
+    m: Manifest,
+}
+
+impl Writing<'_> {
+    /// One space: its folders, files, earlier versions and grants
+    async fn space(&mut self, tx: &mut SqliteConnection, s: &SpaceRow) -> AppResult<SpaceInfo> {
         let mut info = SpaceInfo {
             id: s.id.clone(),
             name: s.name.clone(),
@@ -637,34 +682,50 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params, set
             files: 0,
             bytes: 0,
         };
+        let placed = self.folders(tx, s).await?;
+        self.files(tx, s, &placed, &mut info).await?;
+        if self.p.versions {
+            self.versions(tx, s, &placed, &mut info).await?;
+        }
+        self.grants(tx, s, &placed).await?;
+        Ok(info)
+    }
+
+    /// The space's folders, with their paths; returns where each is
+    async fn folders(&mut self, tx: &mut SqliteConnection, s: &SpaceRow) -> AppResult<HashMap<String, Place>> {
         let folders: Vec<FolderRow> = sqlx::query_as("SELECT id, parent_id, name, updated_at, trashed_at FROM nodes WHERE drive_id = ? AND kind = 'folder'")
             .bind(&s.id)
             .fetch_all(&mut *tx)
             .await?;
         let placed = places(&s.root_id, &folders);
         let mut listed: Vec<(&String, &Place, i64)> =
-            folders.iter().filter_map(|f| placed.get(&f.0).map(|pl| (&f.0, pl, f.3))).filter(|(_, pl, _)| p.trash || pl.trashed.is_none()).collect();
+            folders.iter().filter_map(|f| placed.get(&f.0).map(|pl| (&f.0, pl, f.3))).filter(|(_, pl, _)| self.p.trash || pl.trashed.is_none()).collect();
         listed.sort_by(|a, b| a.1.path.cmp(&b.1.path));
         let root_modified: Option<(i64,)> = sqlx::query_as("SELECT updated_at FROM nodes WHERE id = ?").bind(&s.root_id).fetch_optional(&mut *tx).await?;
-        w.line(&Line::Folder {
-            space: s.id.clone(),
-            id: s.root_id.clone(),
-            parent: None,
-            path: String::new(),
-            modified: root_modified.map_or(0, |r| r.0),
-            trashed: None,
-        })
-        .await?;
+        self.w
+            .line(&Line::Folder {
+                space: s.id.clone(),
+                id: s.root_id.clone(),
+                parent: None,
+                path: String::new(),
+                modified: root_modified.map_or(0, |r| r.0),
+                trashed: None,
+            })
+            .await?;
         let parent_of: HashMap<&str, Option<&str>> = folders.iter().map(|f| (f.0.as_str(), f.1.as_deref())).collect();
         for (id, pl, modified) in &listed {
             if **id == s.root_id {
                 continue;
             }
             let parent = parent_of.get(id.as_str()).copied().flatten().map(str::to_string);
-            w.line(&Line::Folder { space: s.id.clone(), id: (*id).clone(), parent, path: pl.path.clone(), modified: *modified, trashed: pl.trashed }).await?;
-            m.folders += 1;
+            self.w.line(&Line::Folder { space: s.id.clone(), id: (*id).clone(), parent, path: pl.path.clone(), modified: *modified, trashed: pl.trashed }).await?;
+            self.m.folders += 1;
         }
-        // Files, a page at a time within the same view
+        Ok(placed)
+    }
+
+    /// The space's files, a page at a time within the same view
+    async fn files(&mut self, tx: &mut SqliteConnection, s: &SpaceRow, placed: &HashMap<String, Place>, info: &mut SpaceInfo) -> AppResult<()> {
         let mut last = String::new();
         loop {
             let rows: Vec<FileRow> = sqlx::query_as(
@@ -676,7 +737,7 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params, set
                  FROM nodes n LEFT JOIN backup_folder_files f ON f.set_id = ?1 AND f.item_id = n.id
                  WHERE n.drive_id = ?2 AND n.kind = 'file' AND n.id > ?3 ORDER BY n.id LIMIT 1000",
             )
-            .bind(&set.id)
+            .bind(&self.set.id)
             .bind(&s.id)
             .bind(&last)
             .fetch_all(&mut *tx)
@@ -686,7 +747,7 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params, set
             for r in rows {
                 let Some(parent) = r.parent_id.as_deref().and_then(|id| placed.get(id)) else { continue };
                 let trashed = r.trashed_at.or(parent.trashed);
-                if trashed.is_some() && !p.trash {
+                if trashed.is_some() && !self.p.trash {
                     continue;
                 }
                 let path = if parent.path.is_empty() { r.name.clone() } else { format!("{}/{}", parent.path, r.name) };
@@ -695,94 +756,99 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params, set
                         let current = r.f_path.as_deref() == Some(fs_path.as_str()) && r.f_size == r.fs_size && r.f_mtime_ns == r.fs_mtime_ns;
                         match (current, r.f_hash) {
                             (true, Some(h)) => (h, r.f_size.unwrap_or(r.size)),
-                            (false, Some(h)) if settle && r.f_held => {
-                                m.changing.push(Changing { space: s.id.clone(), path: path.clone(), kept: true, personal: s.kind == "personal" });
+                            (false, Some(h)) if self.settle && r.f_held => {
+                                self.m.changing.push(Changing { space: s.id.clone(), path: path.clone(), kept: true, personal: s.kind == "personal" });
                                 (h, r.f_size.unwrap_or(r.size))
                             }
-                            _ if settle => {
-                                m.changing.push(Changing { space: s.id.clone(), path, kept: false, personal: s.kind == "personal" });
+                            _ if self.settle => {
+                                self.m.changing.push(Changing { space: s.id.clone(), path, kept: false, personal: s.kind == "personal" });
                                 continue;
                             }
                             _ => {
-                                m.stale += 1;
+                                self.m.stale += 1;
                                 continue;
                             }
                         }
                     }
                     (None, Some(h)) => {
                         if !r.held {
-                            pins.add(h, r.size, r.location.as_deref().unwrap_or_default()).await?;
+                            self.pins.add(h, r.size, r.location.as_deref().unwrap_or_default()).await?;
                         }
                         (h.clone(), r.size)
                     }
                     (None, None) => continue,
                 };
-                w.line(&Line::File {
-                    space: s.id.clone(),
-                    id: r.id.clone(),
-                    parent: r.parent_id.clone().unwrap_or_default(),
-                    path,
-                    hash,
-                    size,
-                    mime: r.mime,
-                    modified: r.updated_at,
-                    trashed,
-                })
-                .await?;
-                m.files += 1;
-                m.logical_bytes += size;
+                self.w
+                    .line(&Line::File {
+                        space: s.id.clone(),
+                        id: r.id.clone(),
+                        parent: r.parent_id.clone().unwrap_or_default(),
+                        path,
+                        hash,
+                        size,
+                        mime: r.mime,
+                        modified: r.updated_at,
+                        trashed,
+                    })
+                    .await?;
+                self.m.files += 1;
+                self.m.logical_bytes += size;
                 info.files += 1;
                 info.bytes += size;
             }
         }
-        if p.versions {
-            // A page at a time by file, then version: the space's files in id order from where the last page ended
-            // (never every version of every space)
-            let (mut last_file, mut last) = (String::new(), String::new());
-            loop {
-                let rows: Vec<VersionRow> = sqlx::query_as(VERSIONS_PAGE).bind(&set.id).bind(&s.id).bind(&last_file).bind(&last).fetch_all(&mut *tx).await?;
-                let Some(r) = rows.last() else { break };
-                (last_file, last) = (r.node_id.clone(), r.id.clone());
-                for r in rows {
-                    let Some(parent) = r.parent_id.as_deref().and_then(|id| placed.get(id)) else { continue };
-                    if r.trashed_at.or(parent.trashed).is_some() && !p.trash {
-                        continue;
-                    }
-                    let hash = match (&r.fs_path, &r.blob_hash) {
-                        (Some(fs_path), _) => match (r.f_path.as_deref() == Some(fs_path.as_str()) && r.f_size == Some(r.size), r.f_hash) {
-                            (true, Some(h)) => h,
-                            (false, Some(h)) if settle && r.f_held && r.f_size == Some(r.size) => {
-                                m.changing.push(Changing {
-                                    space: s.id.clone(),
-                                    path: format!("{} (an earlier version)", r.name),
-                                    kept: true,
-                                    personal: s.kind == "personal",
-                                });
-                                h
-                            }
-                            _ if settle => {
-                                m.changing.push(Changing {
-                                    space: s.id.clone(),
-                                    path: format!("{} (an earlier version)", r.name),
-                                    kept: false,
-                                    personal: s.kind == "personal",
-                                });
-                                continue;
-                            }
-                            _ => {
-                                m.stale += 1;
-                                continue;
-                            }
-                        },
-                        (None, Some(h)) => {
-                            if !r.held {
-                                pins.add(h, r.size, r.location.as_deref().unwrap_or_default()).await?;
-                            }
-                            h.clone()
+        Ok(())
+    }
+
+    /// The earlier versions of the space's files: a page at a time by file, then version, the space's files in id
+    /// order from where the last page ended (never every version of every space)
+    async fn versions(&mut self, tx: &mut SqliteConnection, s: &SpaceRow, placed: &HashMap<String, Place>, info: &mut SpaceInfo) -> AppResult<()> {
+        let (mut last_file, mut last) = (String::new(), String::new());
+        loop {
+            let rows: Vec<VersionRow> = sqlx::query_as(VERSIONS_PAGE).bind(&self.set.id).bind(&s.id).bind(&last_file).bind(&last).fetch_all(&mut *tx).await?;
+            let Some(r) = rows.last() else { break };
+            (last_file, last) = (r.node_id.clone(), r.id.clone());
+            for r in rows {
+                let Some(parent) = r.parent_id.as_deref().and_then(|id| placed.get(id)) else { continue };
+                if r.trashed_at.or(parent.trashed).is_some() && !self.p.trash {
+                    continue;
+                }
+                let hash = match (&r.fs_path, &r.blob_hash) {
+                    (Some(fs_path), _) => match (r.f_path.as_deref() == Some(fs_path.as_str()) && r.f_size == Some(r.size), r.f_hash) {
+                        (true, Some(h)) => h,
+                        (false, Some(h)) if self.settle && r.f_held && r.f_size == Some(r.size) => {
+                            self.m.changing.push(Changing {
+                                space: s.id.clone(),
+                                path: format!("{} (an earlier version)", r.name),
+                                kept: true,
+                                personal: s.kind == "personal",
+                            });
+                            h
                         }
-                        (None, None) => continue,
-                    };
-                    w.line(&Line::Version {
+                        _ if self.settle => {
+                            self.m.changing.push(Changing {
+                                space: s.id.clone(),
+                                path: format!("{} (an earlier version)", r.name),
+                                kept: false,
+                                personal: s.kind == "personal",
+                            });
+                            continue;
+                        }
+                        _ => {
+                            self.m.stale += 1;
+                            continue;
+                        }
+                    },
+                    (None, Some(h)) => {
+                        if !r.held {
+                            self.pins.add(h, r.size, r.location.as_deref().unwrap_or_default()).await?;
+                        }
+                        h.clone()
+                    }
+                    (None, None) => continue,
+                };
+                self.w
+                    .line(&Line::Version {
                         space: s.id.clone(),
                         file: r.node_id,
                         id: r.id,
@@ -793,13 +859,16 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params, set
                         author: r.author_name,
                     })
                     .await?;
-                    m.versions += 1;
-                    m.logical_bytes += r.size;
-                    info.bytes += r.size;
-                }
+                self.m.versions += 1;
+                self.m.logical_bytes += r.size;
+                info.bytes += r.size;
             }
         }
-        // Who had access (for the record: restores don't give it again)
+        Ok(())
+    }
+
+    /// Who had access (for the record: restores don't give it again)
+    async fn grants(&mut self, tx: &mut SqliteConnection, s: &SpaceRow, placed: &HashMap<String, Place>) -> AppResult<()> {
         let grants: Vec<(String, String, String, String)> = sqlx::query_as(
             "SELECT g.node_id, g.principal_type,
                     CASE g.principal_type WHEN 'user' THEN COALESCE((SELECT username FROM users WHERE id = g.principal_id), '')
@@ -812,19 +881,11 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params, set
         .await?;
         for (node, principal, name, role) in grants {
             if placed.contains_key(&node) {
-                w.line(&Line::Grant { space: s.id.clone(), node, principal, name, role }).await?;
+                self.w.line(&Line::Grant { space: s.id.clone(), node, principal, name, role }).await?;
             }
         }
-        m.spaces.push(info);
+        Ok(())
     }
-    tx.rollback().await?;
-    drop(conn);
-    pins.flush().await?;
-    w.out.flush().await?;
-    w.out.get_mut().sync_all().await?;
-    m.sha256 = hex::encode(w.hash.finalize());
-    m.size = w.size;
-    Ok(m)
 }
 
 // ───────────── Content of content-store spaces ─────────────

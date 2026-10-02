@@ -542,7 +542,7 @@ pub(super) async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: 
                 }
                 let id = new_id();
                 let full = if rel.is_empty() { dest_rel.clone() } else { format!("{dest_rel}/{rel}") };
-                insert_at(&mut tx, &id, user.id, &parent, dest.drive(), if i == 0 { &name } else { &n.name }, &full, &s).await?;
+                insert_at(&mut tx, &id, user.id, At { parent: &parent, drive: dest.drive(), name: if i == 0 { &name } else { &n.name }, rel: &full }, &s).await?;
                 bytes += s.size;
                 ids.insert(n.id.as_str(), id);
             }

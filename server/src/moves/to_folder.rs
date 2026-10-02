@@ -17,6 +17,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use sqlx::SqliteConnection;
 use tokio::io::AsyncWriteExt;
 
 use super::{
@@ -524,24 +525,12 @@ pub static FINISHED_ON: std::sync::Mutex<Vec<std::thread::ThreadId>> = std::sync
 /// Switches the space to its folder in one transaction. False when an item isn't planned or copied yet.
 async fn switch(cx: &Ctx<'_>, folder: &Path) -> AppResult<bool> {
     let (st, job) = (cx.st, cx.job);
-    let (gone, renamed, switched) = {
+    let (gone, switched) = {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let res = async {
-            let pending: Option<(i64,)> = sqlx::query_as(
-                "SELECT 1 FROM nodes n LEFT JOIN space_move_items i ON i.move_id = ?1 AND i.item_id = n.id
-                 WHERE n.drive_id = ?2 AND (i.item_id IS NULL OR i.done = 0)
-                 UNION ALL
-                 SELECT 1 FROM node_versions v JOIN nodes n ON n.id = v.node_id LEFT JOIN space_move_items i ON i.move_id = ?1 AND i.item_id = v.id
-                 WHERE n.drive_id = ?2 AND v.blob_hash IS NOT NULL AND (i.item_id IS NULL OR i.done = 0)
-                 LIMIT 1",
-            )
-            .bind(&job.id)
-            .bind(&job.drive_id)
-            .fetch_optional(&mut *tx)
-            .await?;
-            if pending.is_some() {
-                return Ok((Vec::new(), 0, false));
+            if !all_copied(&mut tx, job).await? {
+                return Ok((Vec::new(), false));
             }
             // Copies whose item went meanwhile (a version no longer kept, say, or an item moved to another space):
             // removed from the folder afterwards. Everything below joins on the item and the space, so an item that
@@ -556,94 +545,117 @@ async fn switch(cx: &Ctx<'_>, folder: &Path) -> AppResult<bool> {
             .bind(&job.drive_id)
             .fetch_all(&mut *tx)
             .await?;
-            // The content store lets go of the content of the space's files and versions: counted in the database (a
-            // list of it all would be as large as the space), before the files forget it below
-            sqlx::query(
-                "UPDATE blobs SET refcount = refcount - d.n FROM (
-                   SELECT h, COUNT(*) AS n FROM (
-                     SELECT blob_hash AS h FROM nodes WHERE drive_id = ?1 AND blob_hash IS NOT NULL
-                     UNION ALL
-                     SELECT v.blob_hash FROM node_versions v JOIN nodes x ON x.id = v.node_id WHERE x.drive_id = ?1 AND v.blob_hash IS NOT NULL
-                   ) GROUP BY h
-                 ) d WHERE blobs.hash = d.h",
-            )
-            .bind(&job.drive_id)
-            .execute(&mut *tx)
-            .await?;
-            let renamed: Vec<(String, String)> = sqlx::query_as(
-                "SELECT i.item_id, i.name FROM space_move_items i JOIN nodes n ON n.id = i.item_id AND n.drive_id = ?2 WHERE i.move_id = ?1 AND i.name IS NOT NULL",
-            )
-            .bind(&job.id)
-            .bind(&job.drive_id)
-            .fetch_all(&mut *tx)
-            .await?;
-            for (id, _) in &renamed {
-                sqlx::query("UPDATE nodes SET name = char(1) || id WHERE id = ?").bind(id).execute(&mut *tx).await?;
-            }
-            sqlx::query(
-                "UPDATE nodes SET fs_path = i.path, fs_dev = i.dst_dev, fs_ino = i.dst_ino, fs_mtime_ns = i.dst_mtime_ns, fs_birth_ns = NULL,
-                                  fs_size = CASE WHEN nodes.kind = 'file' THEN i.size ELSE 0 END, blob_hash = NULL
-                 FROM space_move_items i WHERE i.move_id = ?1 AND i.item_id = nodes.id AND nodes.drive_id = ?2 AND i.kind IN ('file', 'folder')",
-            )
-            .bind(&job.id)
-            .bind(&job.drive_id)
-            .execute(&mut *tx)
-            .await?;
-            for (id, name) in &renamed {
-                sqlx::query("UPDATE nodes SET name = ? WHERE id = ?").bind(name).bind(id).execute(&mut *tx).await?;
-            }
-            sqlx::query(
-                "UPDATE node_versions SET drive_id = ?2, fs_path = i.path, blob_hash = NULL
-                 FROM space_move_items i WHERE i.move_id = ?1 AND i.kind = 'version' AND node_versions.id = i.item_id
-                   AND node_versions.node_id IN (SELECT id FROM nodes WHERE drive_id = ?2)",
-            )
-            .bind(&job.id)
-            .bind(&job.drive_id)
-            .execute(&mut *tx)
-            .await?;
-            // The content store lets go of the content: what nothing else uses is deleted a minute later
-            let released: Vec<(String, String)> = sqlx::query_as(
-                "DELETE FROM blobs WHERE refcount <= 0 AND NOT EXISTS (SELECT 1 FROM nodes WHERE blob_hash = blobs.hash)
-                   AND NOT EXISTS (SELECT 1 FROM node_versions WHERE blob_hash = blobs.hash)
-                 RETURNING hash, location_id",
-            )
-            .fetch_all(&mut *tx)
-            .await?;
-            for (hash, location) in released {
-                sqlx::query(
-                    "INSERT INTO pending_blob_deletes (hash, location_id, created_at, attempts, last_error) VALUES (?, ?, ?, 0, 'deferred')
-                     ON CONFLICT (hash, location_id) DO UPDATE SET created_at = MIN(created_at, excluded.created_at)",
-                )
-                .bind(&hash)
-                .bind(&location)
-                .bind(now() + REMOVAL_GRACE)
-                .execute(&mut *tx)
-                .await?;
-            }
-            sqlx::query("UPDATE drives SET mode = 'folder', location_id = ?2, source_path = ?3, last_scan_at = NULL, scan_report = NULL WHERE id = ?1")
-                .bind(&job.drive_id)
-                .bind(&job.to_location)
-                .bind(folder.to_string_lossy())
-                .execute(&mut *tx)
-                .await?;
-            let note = match renamed.len() {
+            let renamed = use_folder(&mut tx, job, folder).await?;
+            let note = match renamed {
                 0 => None,
                 1 => Some("1 item got another name in the folder: a folder can't hold its name as it was".to_string()),
                 n => Some(format!("{n} items got another name in the folder: a folder can't hold their names as they were")),
             };
             super::finish(&mut tx, cx, false, note.as_deref()).await?;
-            Ok((gone, renamed.len(), true))
+            Ok((gone, true))
         }
         .await;
         crate::db::settle(tx, res).await?
     };
-    let _ = renamed;
     if switched {
         crate::fsops::remove_below_later(gone.into_iter().map(|(p,)| crate::folders::Below::new(folder, &job.drive_id, p)).collect());
         crate::folders::spaces_changed(st);
         crate::folders::scan_later(st, &job.drive_id);
     }
     Ok(switched)
+}
+
+/// In the switch's transaction: whether every item and version of the space is planned and copied
+async fn all_copied(tx: &mut SqliteConnection, job: &Job) -> AppResult<bool> {
+    let pending: Option<(i64,)> = sqlx::query_as(
+        "SELECT 1 FROM nodes n LEFT JOIN space_move_items i ON i.move_id = ?1 AND i.item_id = n.id
+         WHERE n.drive_id = ?2 AND (i.item_id IS NULL OR i.done = 0)
+         UNION ALL
+         SELECT 1 FROM node_versions v JOIN nodes n ON n.id = v.node_id LEFT JOIN space_move_items i ON i.move_id = ?1 AND i.item_id = v.id
+         WHERE n.drive_id = ?2 AND v.blob_hash IS NOT NULL AND (i.item_id IS NULL OR i.done = 0)
+         LIMIT 1",
+    )
+    .bind(&job.id)
+    .bind(&job.drive_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    Ok(pending.is_none())
+}
+
+/// In the switch's transaction: the space's files and versions are the copies in `folder`, under the names they got
+/// there, and the content store lets go of what they had. Returns how many items got another name.
+async fn use_folder(tx: &mut SqliteConnection, job: &Job, folder: &Path) -> AppResult<usize> {
+    // The content store lets go of the content of the space's files and versions: counted in the database (a list of
+    // it all would be as large as the space), before the files forget it below
+    sqlx::query(
+        "UPDATE blobs SET refcount = refcount - d.n FROM (
+           SELECT h, COUNT(*) AS n FROM (
+             SELECT blob_hash AS h FROM nodes WHERE drive_id = ?1 AND blob_hash IS NOT NULL
+             UNION ALL
+             SELECT v.blob_hash FROM node_versions v JOIN nodes x ON x.id = v.node_id WHERE x.drive_id = ?1 AND v.blob_hash IS NOT NULL
+           ) GROUP BY h
+         ) d WHERE blobs.hash = d.h",
+    )
+    .bind(&job.drive_id)
+    .execute(&mut *tx)
+    .await?;
+    let renamed: Vec<(String, String)> = sqlx::query_as(
+        "SELECT i.item_id, i.name FROM space_move_items i JOIN nodes n ON n.id = i.item_id AND n.drive_id = ?2 WHERE i.move_id = ?1 AND i.name IS NOT NULL",
+    )
+    .bind(&job.id)
+    .bind(&job.drive_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    for (id, _) in &renamed {
+        sqlx::query("UPDATE nodes SET name = char(1) || id WHERE id = ?").bind(id).execute(&mut *tx).await?;
+    }
+    sqlx::query(
+        "UPDATE nodes SET fs_path = i.path, fs_dev = i.dst_dev, fs_ino = i.dst_ino, fs_mtime_ns = i.dst_mtime_ns, fs_birth_ns = NULL,
+                          fs_size = CASE WHEN nodes.kind = 'file' THEN i.size ELSE 0 END, blob_hash = NULL
+         FROM space_move_items i WHERE i.move_id = ?1 AND i.item_id = nodes.id AND nodes.drive_id = ?2 AND i.kind IN ('file', 'folder')",
+    )
+    .bind(&job.id)
+    .bind(&job.drive_id)
+    .execute(&mut *tx)
+    .await?;
+    for (id, name) in &renamed {
+        sqlx::query("UPDATE nodes SET name = ? WHERE id = ?").bind(name).bind(id).execute(&mut *tx).await?;
+    }
+    sqlx::query(
+        "UPDATE node_versions SET drive_id = ?2, fs_path = i.path, blob_hash = NULL
+         FROM space_move_items i WHERE i.move_id = ?1 AND i.kind = 'version' AND node_versions.id = i.item_id
+           AND node_versions.node_id IN (SELECT id FROM nodes WHERE drive_id = ?2)",
+    )
+    .bind(&job.id)
+    .bind(&job.drive_id)
+    .execute(&mut *tx)
+    .await?;
+    // The content store lets go of the content: what nothing else uses is deleted a minute later
+    let released: Vec<(String, String)> = sqlx::query_as(
+        "DELETE FROM blobs WHERE refcount <= 0 AND NOT EXISTS (SELECT 1 FROM nodes WHERE blob_hash = blobs.hash)
+           AND NOT EXISTS (SELECT 1 FROM node_versions WHERE blob_hash = blobs.hash)
+         RETURNING hash, location_id",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    for (hash, location) in released {
+        sqlx::query(
+            "INSERT INTO pending_blob_deletes (hash, location_id, created_at, attempts, last_error) VALUES (?, ?, ?, 0, 'deferred')
+             ON CONFLICT (hash, location_id) DO UPDATE SET created_at = MIN(created_at, excluded.created_at)",
+        )
+        .bind(&hash)
+        .bind(&location)
+        .bind(now() + REMOVAL_GRACE)
+        .execute(&mut *tx)
+        .await?;
+    }
+    sqlx::query("UPDATE drives SET mode = 'folder', location_id = ?2, source_path = ?3, last_scan_at = NULL, scan_report = NULL WHERE id = ?1")
+        .bind(&job.drive_id)
+        .bind(&job.to_location)
+        .bind(folder.to_string_lossy())
+        .execute(&mut *tx)
+        .await?;
+    Ok(renamed.len())
 }
 
 /// A cancelled move into a folder: the folder it made goes, with what was copied into it. Only a folder holding the

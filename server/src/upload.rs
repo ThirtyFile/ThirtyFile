@@ -392,32 +392,7 @@ pub async fn patch_as(st: &AppState, up: &Uploader, id: &str, headers: &HeaderMa
     let mut file = tokio::fs::OpenOptions::new().write(true).open(upload_path(&st, &id)).await?;
     file.set_len(offset).await?;
     file.seek(SeekFrom::Start(offset)).await?;
-
-    let mut stream = body.into_data_stream();
-    let mut failure: Option<AppError> = None;
-    while let Some(chunk) = stream.next().await {
-        match chunk {
-            Ok(bytes) => {
-                if offset + bytes.len() as u64 > size {
-                    failure = Some(AppError::bad_request("The uploaded data exceeds the declared file size"));
-                    break;
-                }
-                if let Err(e) = file.write_all(&bytes).await {
-                    failure = Some(e.into());
-                    break;
-                }
-                if let Some(h) = &mut hasher {
-                    h.update(&bytes);
-                }
-                offset += bytes.len() as u64;
-            }
-            Err(_) => {
-                // Connection interrupted: keep what was received so the upload can resume later
-                failure = Some(AppError::bad_request("Connection interrupted"));
-                break;
-            }
-        }
-    }
+    let failure = receive(&mut file, body, &mut offset, size, &mut hasher).await;
     file.flush().await?;
     file.sync_data().await?;
     drop(file);
@@ -450,6 +425,32 @@ pub async fn patch_as(st: &AppState, up: &Uploader, id: &str, headers: &HeaderMa
     tus(&mut res);
     res.headers_mut().insert("upload-offset", offset.into());
     Ok(res)
+}
+
+/// Writes what the request's body brings into the upload's file at `offset`, up to its declared `size`, hashing it as
+/// it arrives (`hasher`, content-store uploads); moves `offset` past what was written. Returns why it stopped before
+/// the body ended, if it did: what was received is kept, so the upload can resume.
+async fn receive(file: &mut tokio::fs::File, body: Body, offset: &mut u64, size: u64, hasher: &mut Option<Sha256>) -> Option<AppError> {
+    let mut stream = body.into_data_stream();
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(bytes) => {
+                if *offset + bytes.len() as u64 > size {
+                    return Some(AppError::bad_request("The uploaded data exceeds the declared file size"));
+                }
+                if let Err(e) = file.write_all(&bytes).await {
+                    return Some(e.into());
+                }
+                if let Some(h) = hasher {
+                    h.update(&bytes);
+                }
+                *offset += bytes.len() as u64;
+            }
+            // Connection interrupted: keep what was received so the upload can resume later
+            Err(_) => return Some(AppError::bad_request("Connection interrupted")),
+        }
+    }
+    None
 }
 
 /// Finishes an upload in a task of its own: storing the content and creating the file must not stop halfway when the

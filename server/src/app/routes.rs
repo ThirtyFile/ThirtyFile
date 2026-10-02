@@ -123,6 +123,19 @@ fn file_api() -> Router<AppState> {
 fn api() -> Router<AppState> {
     Router::new()
         .route("/health", get(health))
+        .merge(file_api())
+        .merge(account_api())
+        .merge(sharing_api())
+        .merge(site_api())
+        .merge(admin_api())
+        .merge(storage_api())
+        .fallback(|| async { error::AppError::not_found("API not found") })
+}
+
+/// Signing in and out, and the account's own settings: password, devices, app passwords, two-factor sign-in, sign-in
+/// methods
+fn account_api() -> Router<AppState> {
+    Router::new()
         .route("/auth/login", post(signin::login))
         .route("/auth/options", get(reset::options))
         .route("/auth/forgot", post(reset::forgot))
@@ -130,7 +143,6 @@ fn api() -> Router<AppState> {
         .route("/auth/login/2fa", post(twofactor::login_code))
         .route("/auth/login/2fa/setup", post(twofactor::login_setup))
         .route("/auth/logout", post(signin::logout))
-        .merge(file_api())
         .route("/auth/password", axum::routing::put(signin::change_password))
         .route("/auth/sessions", get(sessions::list))
         .route("/auth/sessions/others", post(sessions::sign_out_others))
@@ -142,7 +154,18 @@ fn api() -> Router<AppState> {
         .route("/auth/2fa/enable", post(twofactor::enable))
         .route("/auth/2fa/disable", post(twofactor::disable))
         .route("/auth/2fa/recovery-codes", post(twofactor::new_recovery_codes_for_me))
-        // Spaces and access (listing the spaces works with an app password too)
+        .route("/auth/sso/providers", get(sso::providers))
+        .route("/auth/sso/{provider}/start", get(sso::start))
+        .route("/auth/sso/{provider}/link", post(sso::start_link))
+        .route("/auth/sso/{provider}/callback", get(sso::callback))
+        .route("/auth/identities", get(sso::my_identities))
+        .route("/auth/identities/{provider}", delete(sso::unlink))
+}
+
+/// Spaces, who has access, what happened in them, and share links (with what visitors of a link reach)
+fn sharing_api() -> Router<AppState> {
+    Router::new()
+        // Listing the spaces works with an app password too
         .route("/drives", get(drives::list).layer(middleware::from_fn(auth::app_passwords::allow)).post(drives::create))
         .route("/drives/{id}", patch(drives::update).delete(drives::delete))
         .route("/nodes/{id}/access", get(drives::access).post(drives::grant))
@@ -152,13 +175,20 @@ fn api() -> Router<AppState> {
         .route("/activity/export", get(history::export_activity))
         .route("/nodes/{id}/activity", get(history::node_history))
         .route("/share-access", get(history::share_access))
-        .route("/auth/sso/providers", get(sso::providers))
-        .route("/auth/sso/{provider}/start", get(sso::start))
-        .route("/auth/sso/{provider}/link", post(sso::start_link))
-        .route("/auth/sso/{provider}/callback", get(sso::callback))
-        .route("/auth/identities", get(sso::my_identities))
-        .route("/auth/identities/{provider}", delete(sso::unlink))
-        .route("/admin/sso", get(sso::get_settings).put(sso::update_settings))
+        .route("/shares", get(shares::list).post(shares::create))
+        .route("/shares/{id}", patch(shares::update).delete(shares::delete))
+        .route("/public/shares/{token}", get(shares::public_info))
+        .route("/public/shares/{token}/unlock", post(shares::unlock))
+        .route("/public/shares/{token}/download", get(shares::public_download).post(shares::create_public_download_link))
+        .route("/public/shares/{token}/download/{link}", get(shares::public_download_by_link))
+        .route("/public/shares/{token}/nodes/{id}", get(shares::public_node))
+        .route("/public/shares/{token}/nodes/{id}/children", get(shares::public_children))
+        .route("/public/shares/{token}/nodes/{id}/content", get(shares::public_content))
+}
+
+/// The site: its look, notifications, the logs, and email
+fn site_api() -> Router<AppState> {
+    Router::new()
         .route("/admin/email", get(mail::get_settings).put(mail::update_settings))
         .route("/admin/email/test", post(mail::test))
         .route("/notifications", get(notify::list).delete(notify::clear))
@@ -180,24 +210,21 @@ fn api() -> Router<AppState> {
         .route("/admin/logs", get(logs::get_status).put(logs::update_settings))
         .route("/admin/logs/archive", post(logs::archive_now))
         .route("/admin/logs/archives/{id}", get(logs::download_archive).delete(logs::delete_archive))
-        // Sharing
-        .route("/shares", get(shares::list).post(shares::create))
-        .route("/shares/{id}", patch(shares::update).delete(shares::delete))
-        .route("/public/shares/{token}", get(shares::public_info))
-        .route("/public/shares/{token}/unlock", post(shares::unlock))
-        .route("/public/shares/{token}/download", get(shares::public_download).post(shares::create_public_download_link))
-        .route("/public/shares/{token}/download/{link}", get(shares::public_download_by_link))
-        .route("/public/shares/{token}/nodes/{id}", get(shares::public_node))
-        .route("/public/shares/{token}/nodes/{id}/children", get(shares::public_children))
-        .route("/public/shares/{token}/nodes/{id}/content", get(shares::public_content))
-        // Administration
+}
+
+/// Administration: accounts and groups, settings, Storage usage, spaces and their moves, backups and replicas
+fn admin_api() -> Router<AppState> {
+    Router::new()
         .route("/admin/users", get(admin::list).post(admin::create))
         .route("/admin/users/{id}", patch(admin::update).delete(admin::delete))
         .route("/admin/users/{id}/sessions", get(sessions::admin_list).delete(sessions::admin_sign_out_all))
         .route("/admin/users/{id}/sessions/{session}", delete(sessions::admin_sign_out))
         .route("/admin/users/{id}/2fa", delete(twofactor::admin_reset))
         .route("/admin/users/{id}/personal-space", post(admin::personal::add).delete(admin::personal::remove))
+        .route("/admin/groups", get(drives::list_groups).post(drives::create_group))
+        .route("/admin/groups/{id}", patch(drives::update_group).delete(drives::delete_group))
         .route("/admin/settings", get(admin::get_settings).patch(admin::update_settings))
+        .route("/admin/sso", get(sso::get_settings).put(sso::update_settings))
         .route("/admin/usage", get(usage::api::overview))
         .route("/admin/usage/history", get(usage::api::history))
         .route("/admin/usage/thresholds", put(usage::api::set_thresholds))
@@ -233,6 +260,11 @@ fn api() -> Router<AppState> {
         .route("/admin/replicas/{id}/sync", post(replicas::api::sync))
         .route("/admin/replicas/{id}/verify", post(replicas::api::verify))
         .route("/admin/replicas/{id}/promote", get(replicas::api::promote_preview).post(replicas::api::promote))
+}
+
+/// Administration of the storage locations, and what can be done with one
+fn storage_api() -> Router<AppState> {
+    Router::new()
         .route("/admin/storage", get(locations::list).post(locations::create))
         .route("/admin/storage/test", post(locations::test))
         .route("/admin/storage/{id}", patch(locations::update).delete(locations::delete))
@@ -243,9 +275,6 @@ fn api() -> Router<AppState> {
         .route("/admin/storage/{id}/browse", get(location_tools::browse))
         .route("/admin/storage/{id}/unused", get(location_tools::unused_status).post(location_tools::find_unused))
         .route("/admin/storage/{id}/unused/remove", post(location_tools::remove_unused))
-        .route("/admin/groups", get(drives::list_groups).post(drives::create_group))
-        .route("/admin/groups/{id}", patch(drives::update_group).delete(drives::delete_group))
-        .fallback(|| async { error::AppError::not_found("API not found") })
 }
 
 #[cfg(test)]
