@@ -81,6 +81,83 @@ describe("Traditional Chinese", () => {
   });
 });
 
+describe("choosing the language", () => {
+  test("browser language tags match the four languages leniently", async () => {
+    const { matchLanguage } = await load("en");
+    const cases: [string, string | undefined][] = [
+      ["en-US", "en"],
+      ["en", "en"],
+      ["zh-TW", "zh-TW"],
+      ["zh-Hant", "zh-TW"],
+      ["zh-HK", "zh-TW"],
+      ["zh-MO", "zh-TW"],
+      ["zh-Hant-HK", "zh-TW"],
+      ["zh", "zh-CN"],
+      ["zh-CN", "zh-CN"],
+      ["zh-Hans", "zh-CN"],
+      ["zh-SG", "zh-CN"],
+      ["zh-Hans-HK", "zh-CN"],
+      ["zh_tw", "zh-TW"],
+      ["ja", "ja"],
+      ["ja-JP", "ja"],
+      ["fr-FR", undefined],
+      ["", undefined],
+    ];
+    for (const [tag, want] of cases) expect([tag, matchLanguage(tag)]).toEqual([tag, want]);
+  });
+
+  test("the browser's first language that can be used wins", async () => {
+    const { browserLanguage } = await load("en");
+    const all = () => true;
+    expect(browserLanguage(["fr", "ja-JP", "en"], all)).toBe("ja");
+    expect(browserLanguage(["zh-CN", "en"], all)).toBe("zh-CN");
+    expect(browserLanguage(["fr", "de"], all)).toBe("en");
+    expect(browserLanguage([], all)).toBe("en");
+  });
+
+  test("while Simplified Chinese and Japanese aren't ready, Chinese browsers get Traditional Chinese and Japanese ones the next language", async () => {
+    const { browserLanguage } = await load("en");
+    const ready = (l: string) => l === "en" || l === "zh-TW";
+    expect(browserLanguage(["zh-CN"], ready)).toBe("zh-TW");
+    expect(browserLanguage(["ja-JP"], ready)).toBe("en");
+    expect(browserLanguage(["ja-JP", "zh-TW"], ready)).toBe("zh-TW");
+  });
+
+  test("a saved choice comes first, then the system default, then the browser", async () => {
+    vi.resetModules();
+    vi.stubGlobal("navigator", { ...navigator, languages: ["zh-HK", "en"] });
+    try {
+      expect((await import("@/lib/i18n")).lang).toBe("zh-TW");
+      vi.resetModules();
+      window.__TF_DEFAULT_LANG__ = "en";
+      expect((await import("@/lib/i18n")).lang).toBe("en");
+      vi.resetModules();
+      localStorage.setItem("tf-lang", "zh-TW");
+      expect((await import("@/lib/i18n")).lang).toBe("zh-TW");
+    } finally {
+      vi.unstubAllGlobals();
+      window.__TF_DEFAULT_LANG__ = undefined;
+    }
+  });
+
+  test("<html lang> names the script, so fonts draw the characters the language's way", async () => {
+    vi.resetModules();
+    localStorage.setItem("tf-lang-preview", "1");
+    for (const [chosen, tag] of [
+      ["en", "en"],
+      ["zh-TW", "zh-Hant"],
+      ["zh-CN", "zh-Hans"],
+      ["ja", "ja"],
+    ]) {
+      vi.resetModules();
+      localStorage.setItem("tf-lang", chosen);
+      const { htmlLang } = await import("@/lib/i18n");
+      expect(htmlLang).toBe(tag);
+      expect(document.documentElement.lang).toBe(tag);
+    }
+  });
+});
+
 describe("dictionaries", () => {
   /** A fresh copy of the module with these settings */
   async function fresh(settings: { saved?: string; preview?: boolean; dict?: { LANG: string; DICT: Record<string, string> } }) {

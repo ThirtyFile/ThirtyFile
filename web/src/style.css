@@ -6,7 +6,7 @@
 
 @theme inline {
   --font-heading: var(--font-sans);
-  --font-sans: "Geist Variable", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --font-sans: "Geist Variable", var(--font-cjk), sans-serif;
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -34,6 +34,22 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) * 1.4);
   --radius-2xl: calc(var(--radius) * 1.8);
+}
+
+/*
+ * Fonts for Chinese and Japanese text, which Geist doesn't have, after the page's language (<html lang>, lib/i18n.ts):
+ * the same characters are drawn differently in Traditional Chinese, Simplified Chinese and Japanese. Each list has the
+ * fonts of Linux (Noto), macOS (PingFang, Hiragino) and Windows (Microsoft JhengHei, Microsoft YaHei, Yu Gothic UI,
+ * Meiryo). English keeps the Traditional Chinese fonts for names written in Chinese.
+ */
+:root {
+  --font-cjk: "Noto Sans TC", "Noto Sans CJK TC", "PingFang TC", "Microsoft JhengHei";
+}
+:root:lang(zh-Hans) {
+  --font-cjk: "Noto Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei";
+}
+:root:lang(ja) {
+  --font-cjk: "Noto Sans JP", "Noto Sans CJK JP", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo";
 }
 
 :root {
