@@ -27,4 +27,8 @@ export default {
   "Renamed to \"{name}\"": "已重新命名為「{name}」",
   "Renamed back": "已改回原名稱",
   "Moved back": "已移回原位置",
+  // The menu item that takes the last action back (components/explorer/menus.tsx)
+  "Undo delete": "復原刪除",
+  "Undo rename": "復原重新命名",
+  "Undo move": "復原移動",
 } satisfies Record<string, string>;

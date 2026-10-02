@@ -3,22 +3,32 @@ import { api } from "@/api";
 import { t } from "@/lib/i18n";
 import { waitForJob } from "@/lib/jobs";
 import type { FileChange } from "@/lib/queries";
+import { createStore, useStore } from "@/lib/store";
 
 /** How long a message with an Undo button stays: long enough to read it and reach the button */
 export const UNDO_MS = 8000;
 
-/** The last action that can be undone, for Ctrl+Z; taking it back (either way) clears it */
-let last: { run(): void; toast: string | number } | null = null;
+interface Undoable {
+  run(): void;
+  toast: string | number;
+  /** What taking it back is called in a menu, e.g. "Undo delete" */
+  label: string;
+}
+
+/** The last action that can be undone, for Ctrl+Z and the menus; taking it back (either way) clears it */
+const last = createStore<Undoable | null>(null);
 
 /**
  * Success message with an Undo button. `undo` takes the action back; `undoneText` is shown once it has, and `after`
  * runs then (e.g. to refresh the lists). Taking it back can fail (e.g. the name is taken meanwhile): the reason is shown.
- * Ctrl+Z in the file list takes back the last of these actions too, also after the message has gone.
+ * Ctrl+Z in the file list takes back the last of these actions too, also after the message has gone; a menu offers it
+ * as `label` (e.g. "Undo delete").
  */
-export function toastWithUndo(message: string, opts: { undo(): Promise<unknown>; undoneText: string; after?(): void }) {
-  const entry = {
+export function toastWithUndo(message: string, opts: { undo(): Promise<unknown>; undoneText: string; label: string; after?(): void }) {
+  const entry: Undoable = {
+    label: opts.label,
     run: () => {
-      if (last === entry) last = null;
+      if (last.get() === entry) last.set(null);
       opts
         .undo()
         .then(() => {
@@ -29,12 +39,17 @@ export function toastWithUndo(message: string, opts: { undo(): Promise<unknown>;
     },
     toast: toast.success(message, { duration: UNDO_MS, action: { label: t("Undo"), onClick: () => entry.run() } }),
   };
-  last = entry;
+  last.set(entry);
+}
+
+/** What the last action that can be taken back is called in a menu ("Undo delete"), or null when there is none */
+export function useUndoLabel() {
+  return useStore(last)?.label ?? null;
 }
 
 /** Take back the last move, rename or delete (Ctrl+Z); false when there's nothing to take back */
 export function undoLast() {
-  const entry = last;
+  const entry = last.get();
   if (!entry) return false;
   toast.dismiss(entry.toast);
   entry.run();

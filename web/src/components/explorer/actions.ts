@@ -19,6 +19,7 @@ import { type Item, isTyping } from "./types";
 import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
 import { errorMessage } from "@/lib/utils";
+import { isMenuKey, menuPointOf, menusClosed, openMenuByKey } from "@/lib/contextMenus";
 
 /** The most items a download or a ZIP file takes at once (the server's limit, which it words when there are more) */
 const MAX_AT_ONCE = 10_000;
@@ -54,6 +55,8 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       // Only after the list reloads does the new item have a place to edit its name; if it didn't reload, don't start
       // renaming a row that isn't there (that would leave the shortcuts turned off)
       await changed({ folders: [p.folderId], contents: true, recent: kind === "file" });
+      // Chosen in a menu: the rename box takes the focus once the menu has given it back
+      await menusClosed();
       // The folder's pages, and the folder tree's list of subfolders
       const listed = qc.getQueriesData({ queryKey: keys.children(p.folderId) }).some(([, d]) => rowsOf(d)?.some((n) => n.id === id));
       if (!listed) {
@@ -130,6 +133,32 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
   };
   const uploadInto = (dt: DataTransfer, folder: Node) => void dropFiles(dt, folder);
 
+  /**
+   * Shift+F10 or the Menu key with the focus outside the list's items (a row opens its own menu): the selected items'
+   * menu, or with nothing selected, the menu of the empty space
+   */
+  const openMenu = () => {
+    const area = s.area.current;
+    if (!area) return;
+    const row = () => area.querySelector<HTMLElement>("[data-node-id][aria-selected=true]");
+    const at = s.count ? row() : null;
+    if (at) {
+      at.focus({ preventScroll: true });
+      openMenuByKey(at, menuPointOf(at));
+    } else if (s.count) {
+      // The selected items are out of view: the first is brought into view, then its menu opens
+      if (s.listNav.current?.focusStart())
+        setTimeout(() => {
+          const shown = row();
+          if (shown) openMenuByKey(shown, menuPointOf(shown));
+        }, 50);
+    } else {
+      const r = area.getBoundingClientRect();
+      const back = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
+      openMenuByKey(area, { x: r.left + 24, y: r.top + 24 }, back);
+    }
+  };
+
   const cut = () => {
     if (!s.count || !caps.write) return;
     setClipboard({ mode: "cut", ids: selectedIds, span: s.span, count: s.count, origins: originsOf(selectedNodes, selectedIds, "") });
@@ -203,6 +232,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     toastWithUndo(t("Moved to trash"), {
       undo: () => api.restore(picked.ids),
       undoneText: t("Restored"),
+      label: t("Undo delete"),
       after: () => changed({ folders: parents, trash: true, contents: true, usage: true }),
     });
     // The rows go at once; the lists aren't loaded again for it
@@ -244,6 +274,9 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         setDialog({ t: "rename", node: single });
       } else if (e.key === "Enter" && single) {
         open(single, true);
+      } else if (isMenuKey(e)) {
+        e.preventDefault();
+        openMenu();
       } else if (e.key === "Escape") {
         setSelected(new Set());
       } else if (e.key.length === 1 && e.key !== " " && e.key !== "?" && !mod && !e.altKey) {

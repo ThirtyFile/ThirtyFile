@@ -56,7 +56,7 @@ export async function transferItems(
   if (count) {
     const origins =
       mode === "move" && !span ? new Map([...(o.origins ?? originsOf(o.items ?? [], sent, dest))].filter(([id, parent]) => sent.includes(id) && parent !== dest)) : new Map<string, string>();
-    if (origins.size) toastWithUndo(o.done(count), { undo: () => moveBack(origins), undoneText: t("Moved back"), after: () => refreshFiles(qc, movedBack(origins)) });
+    if (origins.size) toastWithUndo(o.done(count), { undo: () => moveBack(origins), undoneText: t("Moved back"), label: t("Undo move"), after: () => refreshFiles(qc, movedBack(origins)) });
     else toast.success(o.done(count));
   }
   void refreshFiles(
