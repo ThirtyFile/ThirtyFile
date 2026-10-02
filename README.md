@@ -86,7 +86,7 @@ scripts/check.sh web        # or one part: web, server, e2e or site
 | Folder | Contents |
 | --- | --- |
 | `server/` | Backend (Rust) |
-| `web/` | Frontend (React). Traditional Chinese translations are in `web/src/lib/i18n/zh-TW/` |
+| `web/` | Frontend (React). Translations are in `web/src/lib/i18n/`, one folder per language |
 | `site/` | The website and guides, published to GitHub Pages |
 
 Changes go through pull requests: see [Contributing](https://thirtyfile.github.io/ThirtyFile/docs/contributing.html). Releases are made by hand from `main` and published as `ghcr.io/thirtyfile/thirtyfile:latest`, by major version (`1`, from 1.0.0 on: the safe tag for automatic updates) and by version number; the [releases](https://github.com/ThirtyFile/ThirtyFile/releases) also carry the server as a single program for Linux (amd64, arm64) and `compose.yaml`.

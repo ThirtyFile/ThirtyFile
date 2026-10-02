@@ -154,9 +154,9 @@ function ordinalSuffix(n: number) {
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 const AIUEO = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜｦﾝ"; // i18n-ignore: half-width katakana numbering glyphs
-const AIUEO_FULL = "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン";
+const AIUEO_FULL = "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン"; // i18n-ignore: Japanese numbering sequences of Word number formats
 const IROHA = "ｲﾛﾊﾆﾎﾍﾄﾁﾘﾇﾙｦﾜｶﾖﾀﾚｿﾂﾈﾅﾗﾑｳヰﾉｵｸﾔﾏｹﾌｺｴﾃｱｻｷﾕﾒﾐｼヱﾋﾓｾｽ"; // i18n-ignore: half-width katakana numbering glyphs
-const IROHA_FULL = "イロハニホヘトチリヌルヲワカヨタレソツネナラムウヰノオクヤマケフコエテアサキユメミシヱヒモセス";
+const IROHA_FULL = "イロハニホヘトチリヌルヲワカヨタレソツネナラムウヰノオクヤマケフコエテアサキユメミシヱヒモセス"; // i18n-ignore: Japanese numbering sequences of Word number formats
 const GANADA = "\uac00나다라마바사아자차카타파하";
 const CHOSUNG = "ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎ";
 const RU_LOWER = Array.from("абвгдежзиклмнопрстуфхцчшщэюя");
