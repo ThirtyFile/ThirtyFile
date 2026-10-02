@@ -39,10 +39,11 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     admin::{NewUser, create_user},
-    auth::{Admin, User, client_ip, open_session},
+    auth::{Admin, NO_PASSWORD, User, client_ip},
     db::{get_setting, set_setting},
     error::{AppError, AppResult},
     logs::{self, record_login_via},
+    signin::open_session,
     state::AppState,
     util::{now, random_token},
 };
@@ -51,9 +52,6 @@ use crate::{
 pub const PROVIDERS: [&str; 4] = ["microsoft", "google", "github", "oidc"];
 const PENDING_TTL: Duration = Duration::from_secs(600);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
-
-/// Stored instead of a password hash for accounts that sign in through a provider only (it isn't a valid hash, so nothing matches it)
-pub const NO_PASSWORD: &str = "!";
 
 pub fn label(provider: &str) -> &'static str {
     match provider {

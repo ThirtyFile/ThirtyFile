@@ -73,7 +73,7 @@ pub async fn forgot(
          ORDER BY username = ?1 DESC LIMIT 1",
     )
     .bind(account)
-    .bind(crate::sso::NO_PASSWORD)
+    .bind(crate::auth::NO_PASSWORD)
     .fetch_optional(&st.db)
     .await?;
     if let Some((id, username, email, lang, _)) = found
@@ -313,7 +313,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(axum::http::header::COOKIE, cookie.parse().unwrap());
         let req = serde_json::from_value(json!({ "current": testutil::password(), "new": random_token(20) })).unwrap();
-        let _ = auth::change_password(State(env.st.clone()), addr(), headers, amy.clone(), Json(req)).await.unwrap();
+        let _ = crate::signin::change_password(State(env.st.clone()), addr(), headers, amy.clone(), Json(req)).await.unwrap();
         assert!(reset_req(&env, &token, &random_token(20)).await.is_err(), "a link asked for before the change");
 
         // The same when an administrator resets the password
@@ -330,8 +330,8 @@ mod tests {
         let (amy, token) = amy_with_link(&env).await;
         env.st.system.write().unwrap().require_two_factor = true;
         let login = |password: &str| {
-            let req = auth::LoginReq { username: "amy".into(), password: password.into() };
-            auth::login(State(env.st.clone()), addr(), HeaderMap::new(), Json(req))
+            let req = crate::signin::LoginReq { username: "amy".into(), password: password.into() };
+            crate::signin::login(State(env.st.clone()), addr(), HeaderMap::new(), Json(req))
         };
         let body = |res: axum::response::Response| async move {
             let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
@@ -372,7 +372,7 @@ mod tests {
         headers.insert(axum::http::header::COOKIE, cookie.parse().unwrap());
         let me = env.request_user(request("/api/auth/password")).await.unwrap();
         let req = serde_json::from_value(json!({ "current": first, "new": own })).unwrap();
-        let _ = auth::change_password(State(env.st.clone()), addr(), headers, me, Json(req)).await.unwrap();
+        let _ = crate::signin::change_password(State(env.st.clone()), addr(), headers, me, Json(req)).await.unwrap();
         assert!(env.request_user(request("/api/nodes/root/children")).await.is_some());
     }
 }

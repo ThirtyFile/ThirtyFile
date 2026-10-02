@@ -13,7 +13,7 @@ use tower_http::{CompressionLevel, compression::CompressionLayer, timeout::Timeo
 
 use crate::{
     admin, archive, auth, backups, branding, dav, downloads, drives, error, files, jobs, location_tools, locations, logs, mail, moves, nodes, notify, paths,
-    personal, replicas, reset, sessions, shares, sso, state::AppState, thumbnails, tokens, twofactor, upload, usage, versions, web,
+    personal, replicas, reset, sessions, shares, signin, sso, state::AppState, thumbnails, tokens, twofactor, upload, usage, versions, web,
 };
 
 use super::{
@@ -65,7 +65,7 @@ fn untimed() -> Router<AppState> {
         .route("/files/{id}/versions/{version}/restore", post(versions::restore))
         .route("/uploads", post(upload::create).options(upload::options))
         .route("/uploads/{id}", head(upload::head).patch(upload::patch).delete(upload::delete).layer(DefaultBodyLimit::disable()))
-        .route_layer(middleware::from_fn(tokens::allow));
+        .route_layer(middleware::from_fn(auth::app_passwords::allow));
     Router::new()
         .merge(files)
         .route("/public/shares/{token}/nodes/{id}/thumbnail", get(shares::public_thumbnail))
@@ -88,7 +88,7 @@ fn untimed() -> Router<AppState> {
 /// Everything else (the account itself, sign-in methods, sharing, logs and administration) needs a browser session.
 fn file_api() -> Router<AppState> {
     Router::new()
-        .route("/auth/me", get(auth::me))
+        .route("/auth/me", get(signin::me))
         .route("/nodes/{id}", get(nodes::get).patch(nodes::rename))
         .route("/nodes/{id}/children", get(nodes::children))
         .route("/nodes/{id}/position", get(nodes::position))
@@ -117,21 +117,21 @@ fn file_api() -> Router<AppState> {
         .route("/archive/compress", post(archive::compress))
         .route("/archive/extract", post(archive::extract))
         .route("/jobs/{id}", get(jobs::get))
-        .route_layer(middleware::from_fn(tokens::allow))
+        .route_layer(middleware::from_fn(auth::app_passwords::allow))
 }
 
 fn api() -> Router<AppState> {
     Router::new()
         .route("/health", get(health))
-        .route("/auth/login", post(auth::login))
+        .route("/auth/login", post(signin::login))
         .route("/auth/options", get(reset::options))
         .route("/auth/forgot", post(reset::forgot))
         .route("/auth/reset", post(reset::reset))
         .route("/auth/login/2fa", post(twofactor::login_code))
         .route("/auth/login/2fa/setup", post(twofactor::login_setup))
-        .route("/auth/logout", post(auth::logout))
+        .route("/auth/logout", post(signin::logout))
         .merge(file_api())
-        .route("/auth/password", axum::routing::put(auth::change_password))
+        .route("/auth/password", axum::routing::put(signin::change_password))
         .route("/auth/sessions", get(sessions::list))
         .route("/auth/sessions/others", post(sessions::sign_out_others))
         .route("/auth/sessions/{id}", delete(sessions::sign_out))
@@ -143,7 +143,7 @@ fn api() -> Router<AppState> {
         .route("/auth/2fa/disable", post(twofactor::disable))
         .route("/auth/2fa/recovery-codes", post(twofactor::new_recovery_codes_for_me))
         // Spaces and access (listing the spaces works with an app password too)
-        .route("/drives", get(drives::list).layer(middleware::from_fn(tokens::allow)).post(drives::create))
+        .route("/drives", get(drives::list).layer(middleware::from_fn(auth::app_passwords::allow)).post(drives::create))
         .route("/drives/{id}", patch(drives::update).delete(drives::delete))
         .route("/nodes/{id}/access", get(drives::access).post(drives::grant))
         .route("/grants/{id}", delete(drives::revoke))

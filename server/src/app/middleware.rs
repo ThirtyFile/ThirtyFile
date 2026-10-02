@@ -9,7 +9,7 @@ use axum::{
 };
 use tower_http::compression::predicate::Predicate;
 
-use crate::{auth, dav, state::AppState, tokens};
+use crate::{auth, dav, state::AppState};
 
 /// Which responses to compress: text-like bodies of at least 1 KB. File downloads (octet-stream, images, video, zip)
 /// are already compressed or served with Range requests, and compressing them would break Content-Length and resumable downloads.
@@ -66,8 +66,9 @@ pub async fn forwarding(axum::extract::State(st): axum::extract::State<AppState>
 pub async fn same_origin(axum::extract::State(st): axum::extract::State<AppState>, req: Request, next: Next) -> Response {
     let path = req.uri().path();
     let dav = path == dav::PREFIX || path.starts_with("/dav/");
-    let app_password_only =
-        !dav && matches!(tokens::credential(req.headers()), Some(tokens::Credential::Bearer(_))) && auth::get_cookie(req.headers(), auth::SESSION_COOKIE).is_none();
+    let app_password_only = !dav
+        && matches!(auth::app_passwords::credential(req.headers()), Some(auth::app_passwords::Credential::Bearer(_)))
+        && auth::get_cookie(req.headers(), auth::SESSION_COOKIE).is_none();
     if !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS)
         && !app_password_only
         && let Some(origin) = req.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok())

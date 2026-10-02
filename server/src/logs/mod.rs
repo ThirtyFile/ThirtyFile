@@ -424,7 +424,7 @@ mod tests {
         headers.insert(header::USER_AGENT, HeaderValue::from_static("TestBrowser/2.0"));
         let login = |user: &str, pw: &str| {
             let req = serde_json::from_value(json!({ "username": user, "password": pw })).unwrap();
-            crate::auth::login(State(env.st.clone()), ConnectInfo(addr), headers.clone(), Json(req))
+            crate::signin::login(State(env.st.clone()), ConnectInfo(addr), headers.clone(), Json(req))
         };
 
         assert!(login("amy", crate::testutil::password()).await.is_ok());
