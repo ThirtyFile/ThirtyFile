@@ -78,12 +78,12 @@ pub async fn claim_place(st: &AppState, id: &str, s: &dyn Storage) -> AppResult<
     match marker_state(st, Some(id), s).await? {
         Marker::Taken => Err(AppError::conflict(storage::PLACE_TAKEN)),
         Marker::Ours if read_marker(s).await.ok().flatten().is_some_and(|(_, install)| !install.is_empty()) => {
-            st.location_marked.lock().unwrap().insert(id.to_string());
+            st.part::<Memory>().marked.lock().unwrap().insert(id.to_string());
             Ok(false)
         }
         _ => {
             write_marker(st, id, s).await?;
-            st.location_marked.lock().unwrap().insert(id.to_string());
+            st.part::<Memory>().marked.lock().unwrap().insert(id.to_string());
             Ok(true)
         }
     }
@@ -92,7 +92,7 @@ pub async fn claim_place(st: &AppState, id: &str, s: &dyn Storage) -> AppResult<
 /// Removes the marker of the location `id` from the place of `s`, when it holds that one (the location is deleted,
 /// adding it failed, or it moved to another place)
 pub(super) async fn release_place(st: &AppState, id: &str, s: &dyn Storage) {
-    st.location_marked.lock().unwrap().remove(id);
+    st.part::<Memory>().marked.lock().unwrap().remove(id);
     if matches!(marker_state(st, Some(id), s).await, Ok(Marker::Ours))
         && let Err(e) = s.delete_at(storage::LOCATION_MARKER).await
     {
@@ -111,7 +111,7 @@ pub async fn require_own_place(st: &AppState, id: &str, kind: &str, s: &dyn Stor
 
 /// After a successful health check: an S3, SFTP or FTP location added before markers were written gets one
 pub(super) async fn mark_after_check(st: &AppState, id: &str, s: &dyn Storage) {
-    if st.location_marked.lock().unwrap().contains(id) {
+    if st.part::<Memory>().marked.lock().unwrap().contains(id) {
         return;
     }
     let kind: Option<(String,)> = sqlx::query_as("SELECT kind FROM storage_locations WHERE id = ?").bind(id).fetch_optional(&st.db).await.ok().flatten();
@@ -122,7 +122,7 @@ pub(super) async fn mark_after_check(st: &AppState, id: &str, s: &dyn Storage) {
             Err(e) => tracing::warn!("Storage location {id}: {}", e.message),
         },
         _ => {
-            st.location_marked.lock().unwrap().insert(id.to_string());
+            st.part::<Memory>().marked.lock().unwrap().insert(id.to_string());
         }
     }
 }

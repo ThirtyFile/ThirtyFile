@@ -19,6 +19,15 @@ use std::{
 
 use crate::state::AppState;
 
+/// What file system watching keeps in memory (a part of `AppState`)
+#[derive(Default)]
+pub struct Memory {
+    /// Folder spaces were added, changed or removed: watching follows
+    pub spaces_changed: tokio::sync::Notify,
+    /// The folder spaces whose every folder is watched for changes now
+    pub watched: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+}
+
 /// A folder is checked this long after its last change (a little longer than files are left to settle)
 const QUIET: Duration = Duration::from_secs(12);
 /// More changed folders than this at once: one full scan instead
@@ -29,7 +38,7 @@ const WATCH_MASK: u32 =
 
 /// A folder space was added, changed or removed: the watchers are updated right away
 pub fn spaces_changed(st: &AppState) {
-    st.spaces_changed.notify_one();
+    st.part::<Memory>().spaces_changed.notify_one();
 }
 
 /// What the watching thread is told: the folder spaces to watch now (id → folder)
@@ -38,7 +47,7 @@ type Spaces = HashMap<String, PathBuf>;
 /// Whether every folder of the space is watched now: changes there show up by themselves, so the regular scan of it
 /// runs less often (folders.rs)
 pub fn is_watched(st: &AppState, drive_id: &str) -> bool {
-    st.watched_spaces.lock().unwrap().contains(drive_id)
+    st.part::<Memory>().watched.lock().unwrap().contains(drive_id)
 }
 
 /// Watches every folder space from one thread with one inotify instance, since every user has a folder space and
@@ -66,7 +75,7 @@ pub fn spawn_watchers(st: AppState) {
             }
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(60)) => {}
-                _ = st.spaces_changed.notified() => {}
+                _ = st.part::<Memory>().spaces_changed.notified() => {}
             }
         }
     });
@@ -100,7 +109,7 @@ struct Watcher {
     limited: bool,
     /// Spaces on network file systems, left to the regular scan (told in the log once)
     skipped: HashSet<String>,
-    /// Where the fully watched spaces are told (`Inner::watched_spaces`)
+    /// Where the fully watched spaces are told (`Memory::watched`)
     published: std::sync::Arc<std::sync::Mutex<HashSet<String>>>,
 }
 
@@ -261,7 +270,7 @@ fn watch(st: AppState, handle: tokio::runtime::Handle, rx: std::sync::mpsc::Rece
         tracing::warn!("Can't watch folder spaces for changes: {}", std::io::Error::last_os_error());
         return;
     }
-    let mut w = Watcher { fd, dirs: HashMap::new(), roots: HashMap::new(), limited: false, skipped: HashSet::new(), published: st.watched_spaces.clone() };
+    let mut w = Watcher { fd, dirs: HashMap::new(), roots: HashMap::new(), limited: false, skipped: HashSet::new(), published: st.part::<Memory>().watched.clone() };
     // (space, folder) → last change
     let mut changed: HashMap<(String, String), Instant> = HashMap::new();
     let mut overflow = false;

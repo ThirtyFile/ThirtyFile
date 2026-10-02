@@ -3,7 +3,7 @@
 use super::*;
 
 pub async fn providers(State(st): State<AppState>) -> Json<Value> {
-    let cfg = st.sso.read().unwrap().clone();
+    let cfg = st.part::<Memory>().settings.read().unwrap().clone();
     let list: Vec<Value> = PROVIDERS
         .iter()
         .filter(|p| cfg.provider(p).is_some_and(ProviderConfig::ready))
@@ -37,13 +37,13 @@ pub struct LinkReq {
 /// A linked account signs in without the password, and keeps working after the password changes, so linking asks
 /// for the password (and a two-factor code) first, as creating an app password does.
 pub async fn start_link(State(st): State<AppState>, user: User, Path(provider): Path<String>, Json(req): Json<LinkReq>) -> AppResult<Json<Value>> {
-    if st.sso.read().unwrap().provider(&provider).filter(|c| c.ready()).is_none() {
+    if st.part::<Memory>().settings.read().unwrap().provider(&provider).filter(|c| c.ready()).is_none() {
         return Err(AppError::bad_request("This sign-in method isn't enabled"));
     }
     crate::tokens::confirm_identity(&st, &user, req.password, req.code.as_deref(), "Sign out and sign in again, then link the account within 10 minutes").await?;
     let ticket = random_token(32);
     {
-        let mut tickets = st.sso_link_tickets.lock().unwrap();
+        let mut tickets = st.part::<Memory>().link_tickets.lock().unwrap();
         tickets.retain(|_, (_, created)| created.elapsed() < LINK_TICKET_TTL);
         tickets.insert(ticket.clone(), (user.id, Instant::now()));
     }
@@ -81,14 +81,14 @@ pub async fn start(
     user: Result<User, AppError>,
 ) -> Response {
     let next = safe_next(q.next.as_deref());
-    let cfg = st.sso.read().unwrap().provider(&provider).cloned();
+    let cfg = st.part::<Memory>().settings.read().unwrap().provider(&provider).cloned();
     let Some(cfg) = cfg.filter(ProviderConfig::ready) else {
         return login_error(&st, "This sign-in method isn't enabled", None);
     };
     let link_user = match q.link.as_deref() {
         Some(ticket) => {
             let Ok(u) = user else { return login_error(&st, "Sign in before linking an external account", None) };
-            let issued = st.sso_link_tickets.lock().unwrap().remove(ticket);
+            let issued = st.part::<Memory>().link_tickets.lock().unwrap().remove(ticket);
             match issued {
                 Some((id, created)) if id == u.id && created.elapsed() < LINK_TICKET_TTL => Some(u.id),
                 _ => return login_error(&st, "The link request has expired. Try again.", Some(&next)),
@@ -117,7 +117,7 @@ pub async fn start(
     let url = format!("{}?{}", ep.authorize, encode(&params));
     {
         let ip = client_ip(&st, addr, &headers);
-        let mut pending = st.sso_pending.lock().unwrap();
+        let mut pending = st.part::<Memory>().pending.lock().unwrap();
         pending.retain(|_, p| p.created.elapsed() < PENDING_TTL);
         // One address (an office behind NAT, or an attacker) keeps at most MAX_PENDING_PER_IP sign-ins in flight:
         // beyond that its oldest one is dropped, so nobody gets locked out by colleagues who closed the provider's page
@@ -191,7 +191,7 @@ pub async fn callback(
         return login_error(&st, &msg, link_next.as_deref());
     }
     let Some(code) = q.code else { return login_error(&st, "Sign-in failed: no authorization code was received", link_next.as_deref()) };
-    let cfg = st.sso.read().unwrap().provider(&provider).cloned().filter(ProviderConfig::ready);
+    let cfg = st.part::<Memory>().settings.read().unwrap().provider(&provider).cloned().filter(ProviderConfig::ready);
     let Some(cfg) = cfg else { return login_error(&st, "This sign-in method isn't enabled", link_next.as_deref()) };
 
     let ident = match fetch_identity(&provider, &cfg, &code, &pending).await {
@@ -220,7 +220,7 @@ pub async fn callback(
 pub(super) fn take_pending(st: &AppState, provider: &str, state: Option<&str>, headers: &HeaderMap, user: &Result<User, AppError>) -> Result<Pending, &'static str> {
     // The returned state must match the one this browser recorded when starting the sign-in
     let same_browser = state.is_some_and(|s| crate::auth::get_cookie(headers, STATE_COOKIE) == Some(s));
-    let pending = state.and_then(|s| st.sso_pending.lock().unwrap().remove(s));
+    let pending = state.and_then(|s| st.part::<Memory>().pending.lock().unwrap().remove(s));
     let Some(pending) = pending.filter(|p| same_browser && p.provider == provider && p.created.elapsed() < PENDING_TTL) else {
         return Err("The sign-in timed out or the link was already used. Sign in again.");
     };

@@ -16,7 +16,7 @@ pub async fn my_identities(State(st): State<AppState>, user: User) -> AppResult<
         .bind(user.id)
         .fetch_all(&st.db)
         .await?;
-    let cfg = st.sso.read().unwrap().clone();
+    let cfg = st.part::<Memory>().settings.read().unwrap().clone();
     let available: Vec<&str> = PROVIDERS.iter().copied().filter(|p| cfg.provider(p).is_some_and(ProviderConfig::ready)).collect();
     Ok(Json(json!({ "linked": rows, "available": available })))
 }

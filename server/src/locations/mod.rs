@@ -31,6 +31,15 @@ use crate::{
 /// The id of the built-in location
 pub use crate::storage::BUILTIN;
 
+/// What storage locations keep in memory (a part of `AppState`)
+#[derive(Default)]
+pub struct Memory {
+    /// Storage locations whose marker was found or written since the server started (locations/markers.rs)
+    pub marked: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    /// Storage locations whose failed deletions are being retried now (locations/health.rs)
+    pub retries: std::sync::Mutex<std::collections::BTreeSet<String>>,
+}
+
 #[derive(sqlx::FromRow)]
 struct LocationRow {
     id: String,

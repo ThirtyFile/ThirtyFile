@@ -38,6 +38,18 @@ use sqlx::{SqliteConnection, SqlitePool};
 use runner::{ACTIVE, Job};
 pub use runner::{Queue, spawn_runner};
 
+/// What backups keep in memory (a part of `AppState`)
+pub struct Memory {
+    /// Backup jobs running now
+    pub queue: Queue,
+}
+
+impl Default for Memory {
+    fn default() -> Memory {
+        Memory { queue: Queue::backups() }
+    }
+}
+
 use crate::{
     error::{AppError, AppResult},
     state::AppState,
@@ -182,7 +194,7 @@ pub(crate) async fn cancelled(st: &AppState, job: &Job) -> AppResult<()> {
         }
     }
     if remove_set {
-        st.backups.wake.notify_one();
+        st.part::<Memory>().queue.wake.notify_one();
     }
     Ok(())
 }

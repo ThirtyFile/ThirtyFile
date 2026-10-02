@@ -30,6 +30,7 @@ use super::{
     runner::{Ctx, Stop},
 };
 use crate::{
+    backups::Memory,
     beneath::Pinned,
     error::{AppError, AppResult},
     state::AppState,
@@ -131,7 +132,7 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
             if let Err(e) = super::policy::prune(st, &set).await {
                 tracing::warn!("Backup {}: old snapshots couldn't be deleted now, tried again next time: {}", set.name, e.message);
             }
-            st.backups.policies.notify_one();
+            st.part::<Memory>().queue.policies.notify_one();
         }
         return Ok(Stop::Done);
     }

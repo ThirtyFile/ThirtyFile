@@ -164,6 +164,19 @@ pub enum ScanPhase {
     Indexing,
 }
 
+/// What folder spaces keep in memory (a part of `AppState`)
+#[derive(Default)]
+pub struct Memory {
+    /// Scans of folder spaces running now, by space
+    pub scans: std::sync::Mutex<std::collections::HashMap<String, ScanProgress>>,
+    /// When each folder of a folder space was last read from disk, by id
+    pub reads: std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
+    /// Per folder space: the lock a change to it and the index update of a scan take turns with, and the lock scans
+    /// of it take one at a time
+    pub space_locks: std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+    pub scan_locks: std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+}
+
 /// A scan in progress, shown in the Control panel
 #[derive(Debug, Clone, Serialize)]
 pub struct ScanProgress {
@@ -178,11 +191,11 @@ pub struct ScanProgress {
 
 /// The scan of this space running now, if any
 pub fn progress(st: &AppState, drive_id: &str) -> Option<ScanProgress> {
-    st.scans.lock().unwrap().get(drive_id).cloned()
+    st.part::<Memory>().scans.lock().unwrap().get(drive_id).cloned()
 }
 
 fn set_progress(st: &AppState, drive_id: &str, f: impl FnOnce(&mut ScanProgress)) {
-    let mut map = st.scans.lock().unwrap();
+    let mut map = st.part::<Memory>().scans.lock().unwrap();
     let p = map.entry(drive_id.to_string()).or_insert_with(|| ScanProgress { phase: ScanPhase::Reading, found: 0, done: 0, total: 0, started_at: now() });
     f(p);
 }
@@ -192,7 +205,7 @@ struct ProgressGuard(AppState, String);
 
 impl Drop for ProgressGuard {
     fn drop(&mut self) {
-        self.0.scans.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.1);
+        self.0.part::<Memory>().scans.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.1);
     }
 }
 
@@ -872,7 +885,7 @@ const SYNC_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 /// Tests: every folder counts as not read for a while
 #[cfg(test)]
 pub fn forget_reads(st: &AppState) {
-    st.folder_reads.lock().unwrap().clear();
+    st.part::<Memory>().reads.lock().unwrap().clear();
 }
 
 /// A folder of a folder space is opened (listed on the web, or over WebDAV): new and changed items on the server show
@@ -881,7 +894,7 @@ pub fn forget_reads(st: &AppState) {
 /// copy of a large folder into it, say), or when its disk doesn't answer within a few seconds: the listing then shows
 /// the index as it is.
 pub async fn sync_opened(st: &AppState, folder: &Node) {
-    if watched(st, folder.drive()) || st.folder_reads.lock().unwrap().get(&folder.id).is_some_and(|t| t.elapsed() < REREAD_AFTER) {
+    if watched(st, folder.drive()) || st.part::<Memory>().reads.lock().unwrap().get(&folder.id).is_some_and(|t| t.elapsed() < REREAD_AFTER) {
         return;
     }
     if let Err(e) = try_sync_folder(st, folder, false).await {
@@ -981,7 +994,7 @@ async fn try_sync_folder(st: &AppState, folder: &Node, wait: bool) -> AppResult<
     }
     drop(_scanning);
     {
-        let mut reads = st.folder_reads.lock().unwrap();
+        let mut reads = st.part::<Memory>().reads.lock().unwrap();
         reads.retain(|_, t| t.elapsed() < REREAD_AFTER);
         reads.insert(folder.id.clone(), read_at);
     }
@@ -1061,7 +1074,7 @@ pub fn spawn_scanner(st: AppState) {
 
 /// The lock a change to a folder space and the index update of a scan or sync take turns with
 pub(crate) fn drive_lock(st: &AppState, drive_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-    st.space_locks.lock().unwrap().entry(drive_id.to_string()).or_default().clone()
+    st.part::<Memory>().space_locks.lock().unwrap().entry(drive_id.to_string()).or_default().clone()
 }
 
 /// Holds a folder space still while a move switches it over (moves/): no scan updates its index and no change from the
@@ -1074,7 +1087,7 @@ pub(crate) async fn hold(st: &AppState, drive_id: &str) -> (tokio::sync::OwnedMu
 
 /// Scans of a space, one at a time (a scan asked for while one runs waits for it, `scan_later` skips)
 fn scan_lock(st: &AppState, drive_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-    st.scan_locks.lock().unwrap().entry(drive_id.to_string()).or_default().clone()
+    st.part::<Memory>().scan_locks.lock().unwrap().entry(drive_id.to_string()).or_default().clone()
 }
 
 /// Why the storage location a folder space is on can't be used now (its folder isn't there, or holds another

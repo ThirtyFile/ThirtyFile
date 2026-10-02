@@ -36,6 +36,15 @@ use crate::{
     util::{now, random_token, sha256_hex},
 };
 
+/// What two-factor sign-in keeps in memory (a part of `AppState`)
+#[derive(Default)]
+pub struct Memory {
+    /// Two-factor sign-in being set up from the account menu
+    pub setups: SetupMap,
+    /// Sign-ins waiting for their second factor
+    pub logins: Logins,
+}
+
 const STEP: i64 = 30;
 /// How long the ticket from a correct password stays valid
 const TICKET_TTL: Duration = Duration::from_secs(5 * 60);
@@ -92,7 +101,7 @@ fn digits(code: &str) -> String {
 
 /// What an authenticator app needs: the secret as text, the otpauth:// link and a QR code of it (SVG)
 fn setup_view(st: &AppState, username: &str, secret: &str) -> AppResult<Value> {
-    let issuer = st.branding.read().unwrap().site_name.trim().to_string();
+    let issuer = st.part::<crate::branding::Memory>().settings.read().unwrap().site_name.trim().to_string();
     let issuer = if issuer.is_empty() { "ThirtyFile".to_string() } else { issuer };
     let enc = |s: &str| utf8_percent_encode(s, NON_ALPHANUMERIC).to_string();
     let uri = format!("otpauth://totp/{}:{}?secret={secret}&issuer={}&algorithm=SHA1&digits=6&period=30", enc(&issuer), enc(username), enc(&issuer));
@@ -291,7 +300,7 @@ pub async fn after_password(st: &AppState, user_id: i64) -> AppResult<Option<Val
     let Some(credential) = credential(st, user_id).await? else { return Err(expired()) };
     let ticket = random_token(43);
     {
-        let mut map = st.twofactor_logins.lock().unwrap();
+        let mut map = st.part::<Memory>().logins.lock().unwrap();
         map.retain(|_, p| p.created.elapsed() < TICKET_TTL);
         while map.len() >= MAX_PENDING {
             let Some(oldest) = map.iter().min_by_key(|(_, p)| p.created).map(|(k, _)| k.clone()) else { break };
@@ -310,7 +319,7 @@ fn expired() -> AppError {
 /// password (a password changed or reset since, e.g. to lock someone out, ends the sign-ins it started)
 async fn ticket(st: &AppState, hash: &str) -> AppResult<(i64, Step, String)> {
     let found = {
-        let mut map = st.twofactor_logins.lock().unwrap();
+        let mut map = st.part::<Memory>().logins.lock().unwrap();
         match map.get(hash) {
             Some(p) if p.created.elapsed() < TICKET_TTL => Some((p.user_id, p.step.clone(), p.credential.clone())),
             _ => {
@@ -321,7 +330,7 @@ async fn ticket(st: &AppState, hash: &str) -> AppResult<(i64, Step, String)> {
     };
     let Some((user_id, step, cred)) = found else { return Err(expired()) };
     if !still_valid(st, user_id, &cred).await? {
-        st.twofactor_logins.lock().unwrap().remove(hash);
+        st.part::<Memory>().logins.lock().unwrap().remove(hash);
         return Err(expired());
     }
     Ok((user_id, step, cred))
@@ -346,7 +355,7 @@ pub async fn login_setup(State(st): State<AppState>, Json(req): Json<TicketReq>)
         Some(s) => s,
         None => {
             let s = new_secret();
-            if let Some(p) = st.twofactor_logins.lock().unwrap().get_mut(&hash) {
+            if let Some(p) = st.part::<Memory>().logins.lock().unwrap().get_mut(&hash) {
                 p.step = Step::Setup(Some(s.clone()));
             }
             s
@@ -375,7 +384,7 @@ pub async fn login_code(
     let (user_id, step, cred) = ticket(&st, &hash).await?;
     let row: Option<(String, bool)> = sqlx::query_as("SELECT username, disabled FROM users WHERE id = ?").bind(user_id).fetch_optional(&st.db).await?;
     let Some((username, false)) = row else {
-        st.twofactor_logins.lock().unwrap().remove(&hash);
+        st.part::<Memory>().logins.lock().unwrap().remove(&hash);
         return Err(expired());
     };
     // Counted before the check, like passwords; a right code takes it back
@@ -396,7 +405,7 @@ pub async fn login_code(
     };
     let Some(accepted) = accepted else {
         let ticket_used_up = {
-            let mut map = st.twofactor_logins.lock().unwrap();
+            let mut map = st.part::<Memory>().logins.lock().unwrap();
             let used_up = map.get_mut(&hash).is_none_or(|p| {
                 p.tries += 1;
                 p.tries >= TICKET_TRIES
@@ -418,7 +427,7 @@ pub async fn login_code(
     };
     auth::attempt_succeeded(&st, &key);
     // A ticket signs in once
-    if st.twofactor_logins.lock().unwrap().remove(&hash).is_none() {
+    if st.part::<Memory>().logins.lock().unwrap().remove(&hash).is_none() {
         return Err(expired());
     }
     // The password may have changed while the code was checked
@@ -485,7 +494,7 @@ pub async fn start_setup(State(st): State<AppState>, user: User, Json(req): Json
     confirm_code(&st, user.id, req.code.as_deref()).await?;
     let secret = new_secret();
     {
-        let mut map = st.twofactor_setups.lock().unwrap();
+        let mut map = st.part::<Memory>().setups.lock().unwrap();
         map.retain(|_, (_, at)| at.elapsed() < SETUP_TTL);
         map.insert(user.id, (secret.clone(), Instant::now()));
     }
@@ -505,7 +514,7 @@ pub async fn enable(
     headers: HeaderMap,
     Json(req): Json<EnableReq>,
 ) -> AppResult<Json<Value>> {
-    let secret = st.twofactor_setups.lock().unwrap().get(&user.id).filter(|(_, at)| at.elapsed() < SETUP_TTL).map(|(s, _)| s.clone());
+    let secret = st.part::<Memory>().setups.lock().unwrap().get(&user.id).filter(|(_, at)| at.elapsed() < SETUP_TTL).map(|(s, _)| s.clone());
     let Some(secret) = secret else { return Err(AppError::bad_request("The setup has expired. Start again.")) };
     let key = format!("2fa:{}", user.id);
     if !auth::begin_attempt(&st, &key, ACCOUNT_LIMIT) {
@@ -515,7 +524,7 @@ pub async fn enable(
         return Err(AppError::bad_request("Wrong code. Check that the time on your phone is right, and try again."));
     };
     auth::attempt_succeeded(&st, &key);
-    st.twofactor_setups.lock().unwrap().remove(&user.id);
+    st.part::<Memory>().setups.lock().unwrap().remove(&user.id);
     let codes = turn_on(&st, user.id, &secret, step).await?;
     logs::record_login(&st, Some(user.id), &user.username, "2fa_enabled", &client_ip(&st, addr, &headers), &headers);
     Ok(Json(json!({ "recovery_codes": codes })))

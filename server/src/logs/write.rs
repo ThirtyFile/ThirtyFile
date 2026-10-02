@@ -5,6 +5,7 @@ use axum::http::HeaderMap;
 use sqlx::SqliteConnection;
 
 use super::Visitor;
+use crate::logs::Memory;
 use crate::{auth::User, error::AppResult, state::AppState, tree::Node, util::now};
 
 // ───────────── Background log writer ─────────────
@@ -122,7 +123,7 @@ async fn write_batch(st: &AppState, batch: &[LogEvent]) {
 
 pub(super) fn enqueue(st: &AppState, event: LogEvent) {
     static DROPPED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    if st.log_tx.try_send(event).is_err() {
+    if st.part::<Memory>().queue.try_send(event).is_err() {
         let n = DROPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         if n == 1 || n.is_multiple_of(1000) {
             tracing::warn!("Log queue full: {n} events dropped so far");
@@ -141,7 +142,7 @@ const MAX_SHARE_VIEWS: usize = 10_000;
 /// remembered within the interval, new ones aren't logged, so a flood of addresses can't grow the record or queue a
 /// log entry each.
 pub fn first_view_in_a_while(st: &AppState, share_id: &str, ip: &str) -> bool {
-    let mut views = st.share_views.lock().unwrap();
+    let mut views = st.part::<Memory>().share_views.lock().unwrap();
     let t = now();
     let key = format!("{share_id}|{}", crate::auth::limit_key_ip(ip));
     match views.get(&key) {
@@ -166,7 +167,7 @@ pub fn first_view_in_a_while(st: &AppState, share_id: &str, ip: &str) -> bool {
 /// Drops the view records that no longer suppress anything (hourly, so the map can't grow without bound)
 pub fn prune_share_views(st: &AppState) {
     let cutoff = now() - VIEW_INTERVAL;
-    st.share_views.lock().unwrap().retain(|_, t| *t > cutoff);
+    st.part::<Memory>().share_views.lock().unwrap().retain(|_, t| *t > cutoff);
 }
 
 /// Records one access to a share link (queued; downloads aren't slowed down)
@@ -243,9 +244,9 @@ mod tests {
         for i in 0..MAX_SHARE_VIEWS + 100 {
             first_view_in_a_while(st, "s1", &format!("198.51.{}.{}", i / 250, i % 250));
         }
-        assert!(st.share_views.lock().unwrap().len() <= MAX_SHARE_VIEWS);
+        assert!(st.part::<Memory>().share_views.lock().unwrap().len() <= MAX_SHARE_VIEWS);
         // Views that no longer suppress anything make way for new ones
-        st.share_views.lock().unwrap().values_mut().for_each(|t| *t -= VIEW_INTERVAL);
+        st.part::<Memory>().share_views.lock().unwrap().values_mut().for_each(|t| *t -= VIEW_INTERVAL);
         assert!(first_view_in_a_while(st, "s3", "203.0.113.1"));
     }
 }

@@ -47,14 +47,14 @@ pub async fn probe(st: &AppState, id: &str) -> Result<(), String> {
 /// Retries a location's failed deletions in a task of its own, so a long batch (a slow or refusing storage service)
 /// doesn't hold up the health checks of the other locations. At most one batch per location runs at a time.
 pub(super) fn retry_in_background(st: &AppState, id: &str) {
-    if !st.location_retries.lock().unwrap().insert(id.to_string()) {
+    if !st.part::<crate::locations::Memory>().retries.lock().unwrap().insert(id.to_string()) {
         return;
     }
     // Released when the task ends, also if it panics
     struct Running(AppState, String);
     impl Drop for Running {
         fn drop(&mut self) {
-            self.0.location_retries.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.1);
+            self.0.part::<super::Memory>().retries.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.1);
         }
     }
     let (st, running) = (st.clone(), Running(st.clone(), id.to_string()));
@@ -353,7 +353,7 @@ pub async fn update(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
         // An S3, SFTP or FTP location moved to another place: the old one is free again
         if place_moved && let Some(old) = old {
             release_place(&st, &id, old.as_ref()).await;
-            st.location_marked.lock().unwrap().insert(id.clone());
+            st.part::<crate::locations::Memory>().marked.lock().unwrap().insert(id.clone());
         }
     }
     Ok(Json(json!({ "ok": true })))

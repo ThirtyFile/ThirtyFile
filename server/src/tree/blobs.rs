@@ -15,6 +15,23 @@ use crate::{
     util::now,
 };
 
+/// What content deletion keeps in memory (a part of `AppState`)
+#[derive(Default)]
+pub struct Memory {
+    pub blob_guard: std::sync::Mutex<BlobGuard>,
+    /// Purge of deleted spaces' content: (running, asked to run again)
+    pub detached_purge: (std::sync::atomic::AtomicBool, std::sync::atomic::AtomicBool),
+}
+
+/// "Staging / deleting" registry for physical files, so background deletion doesn't need the global write lock and never deletes by mistake:
+/// - Hashes being staged (uploaded, references not yet recorded) are skipped by background deletion
+/// - For hashes being deleted, new staging waits until the deletion finishes before uploading
+#[derive(Default)]
+pub struct BlobGuard {
+    pub staging: std::collections::HashMap<String, u32>,
+    pub deleting: std::collections::HashMap<String, u32>,
+}
+
 /// Physical file (blob): represented as (hash, storage location)
 pub type BlobRef = (String, String);
 
@@ -169,14 +186,14 @@ const DETACHED_BATCH: i64 = 2000;
 pub fn purge_detached_later(st: &AppState) {
     use std::sync::atomic::Ordering::SeqCst;
     // One purge at a time; a request while it runs makes it look again when it's done
-    let (running, again) = &st.detached_purge;
+    let (running, again) = &st.part::<Memory>().detached_purge;
     again.store(true, SeqCst);
     if running.swap(true, SeqCst) {
         return;
     }
     let st = st.clone();
     tokio::spawn(async move {
-        let (running, again) = &st.detached_purge;
+        let (running, again) = &st.part::<Memory>().detached_purge;
         while again.swap(false, SeqCst) {
             if let Err(e) = purge_detached(&st).await {
                 tracing::warn!("Failed to delete the content of deleted spaces, will retry at the next start: {e:?}");
@@ -332,7 +349,7 @@ async fn claim_for_deletion(st: &AppState, hash: &str, location: &str) -> Option
             return None;
         }
     }
-    let mut g = st.blob_guard.lock().unwrap();
+    let mut g = st.part::<Memory>().blob_guard.lock().unwrap();
     if g.staging.contains_key(hash) {
         return None;
     }
@@ -386,7 +403,7 @@ pub struct BlobMark {
 
 impl Drop for BlobMark {
     fn drop(&mut self) {
-        let mut g = self.st.blob_guard.lock().unwrap();
+        let mut g = self.st.part::<Memory>().blob_guard.lock().unwrap();
         let marks = if self.deleting { &mut g.deleting } else { &mut g.staging };
         if let Some(n) = marks.get_mut(&self.hash) {
             *n -= 1;
@@ -470,7 +487,7 @@ pub struct StagedBlob {
 pub async fn stage_guard(st: &AppState, hash: &str) -> BlobMark {
     loop {
         {
-            let mut g = st.blob_guard.lock().unwrap();
+            let mut g = st.part::<Memory>().blob_guard.lock().unwrap();
             if !g.deleting.contains_key(hash) {
                 *g.staging.entry(hash.to_string()).or_default() += 1;
                 break;

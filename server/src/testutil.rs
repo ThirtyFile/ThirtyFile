@@ -101,15 +101,17 @@ async fn make_env(space_folders: bool) -> TestEnv {
         secret: vec![7; 32],
         secure_cookie: false,
         trash_days: 30,
-        trust_proxy: Default::default(),
         max_upload: 0,
-        thumb_jobs: 2,
-        thumb_decode_bytes: crate::thumbnails::MAX_THUMB_DECODE_BYTES,
         system,
-        logs: Default::default(),
-        branding: Default::default(),
-        sso: Default::default(),
-        log_tx,
+        parts: crate::app::startup::parts(crate::app::startup::Loaded {
+            trust_proxy: Default::default(),
+            thumb_jobs: 2,
+            thumb_decode_bytes: crate::thumbnails::MAX_THUMB_DECODE_BYTES,
+            logs: Default::default(),
+            log_tx,
+            branding: Default::default(),
+            sso: Default::default(),
+        }),
     });
     let _writer = crate::logs::spawn_writer(st.clone(), log_rx);
     TestEnv { st, dir }

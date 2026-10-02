@@ -127,7 +127,7 @@ pub async fn login(
     if !password_ok || id == 0 || disabled {
         // The attempt was already counted; the lockout begins when this failure was the last one allowed
         let locked = {
-            let map = st.login_failures.lock().unwrap();
+            let map = st.part::<crate::auth::Memory>().login_failures.lock().unwrap();
             map.get(&key).is_some_and(|l| l.len() == FAIL_LIMIT) || map.get(&ip_key).is_some_and(|l| l.len() == IP_FAIL_LIMIT)
         };
         let event = if id == 0 {
@@ -146,7 +146,7 @@ pub async fn login(
         return Err(AppError::new(axum::http::StatusCode::UNAUTHORIZED, "Incorrect username or password"));
     }
     {
-        let mut map = st.login_failures.lock().unwrap();
+        let mut map = st.part::<crate::auth::Memory>().login_failures.lock().unwrap();
         map.remove(&key);
         map.remove(&account_key);
     }
@@ -270,10 +270,10 @@ mod attempt_tests {
         let req = LoginReq { username: "x".repeat(100_000), password: testutil::wrong_password() };
         let err = login(State(env.st.clone()), ConnectInfo(addr), HeaderMap::new(), Json(req)).await.map(|_| ()).unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::UNAUTHORIZED);
-        let longest = env.st.login_failures.lock().unwrap().keys().map(String::len).max().unwrap_or(0);
+        let longest = env.st.part::<crate::auth::Memory>().login_failures.lock().unwrap().keys().map(String::len).max().unwrap_or(0);
         assert!(longest < 300, "a key of {longest} bytes was kept");
         // It still counts toward the address's limit
-        assert!(env.st.login_failures.lock().unwrap().contains_key("ip:203.0.113.20"));
+        assert!(env.st.part::<crate::auth::Memory>().login_failures.lock().unwrap().contains_key("ip:203.0.113.20"));
     }
 
     #[tokio::test]
@@ -295,18 +295,18 @@ mod attempt_tests {
         // Every address counted against the one account; the next attempt right away has to wait (hashing may be slow
         // on a busy test machine, so the last failure is dated now rather than relying on timing)
         {
-            let mut map = env.st.login_failures.lock().unwrap();
+            let mut map = env.st.part::<crate::auth::Memory>().login_failures.lock().unwrap();
             let list = map.get_mut("a:amy").unwrap();
             assert_eq!(list.len(), ACCOUNT_FREE_FAILURES);
             *list.last_mut().unwrap() = now();
         }
         assert_eq!(wrong(100).await, axum::http::StatusCode::TOO_MANY_REQUESTS);
         // After the wait, the right password works and the count starts over
-        env.st.login_failures.lock().unwrap().get_mut("a:amy").unwrap().iter_mut().for_each(|t| *t -= ACCOUNT_MAX_DELAY);
+        env.st.part::<crate::auth::Memory>().login_failures.lock().unwrap().get_mut("a:amy").unwrap().iter_mut().for_each(|t| *t -= ACCOUNT_MAX_DELAY);
         let addr: std::net::SocketAddr = "198.51.100.1:5000".parse().unwrap();
         let req = LoginReq { username: "amy".into(), password: testutil::password().into() };
         assert!(login(State(env.st.clone()), ConnectInfo(addr), HeaderMap::new(), Json(req)).await.is_ok());
-        assert!(!env.st.login_failures.lock().unwrap().contains_key("a:amy"));
+        assert!(!env.st.part::<crate::auth::Memory>().login_failures.lock().unwrap().contains_key("a:amy"));
     }
 
     #[tokio::test]
@@ -346,7 +346,7 @@ mod attempt_tests {
         let other: std::net::SocketAddr = "10.0.0.2:5000".parse().unwrap();
         let req = LoginReq { username: "amy".into(), password: testutil::password().into() };
         assert!(login(State(env.st.clone()), ConnectInfo(other), HeaderMap::new(), Json(req)).await.is_ok());
-        let map = env.st.login_failures.lock().unwrap();
+        let map = env.st.part::<crate::auth::Memory>().login_failures.lock().unwrap();
         assert!(map.get("u:amy|10.0.0.2").is_none() && map.get("ip:10.0.0.2").is_none(), "{:?}", map.keys().collect::<Vec<_>>());
     }
 }

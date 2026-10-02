@@ -28,6 +28,13 @@ use crate::{
     util::{new_id, now, validate_name},
 };
 
+/// What uploads keep in memory (a part of `AppState`)
+#[derive(Default)]
+pub struct Memory {
+    /// Uploads currently receiving a PATCH, so the same upload isn't written concurrently.
+    pub active: std::sync::Mutex<std::collections::HashSet<String>>,
+}
+
 const TUS_VERSION: &str = "1.0.0";
 pub use crate::tree::UPLOAD_TTL;
 const MAX_UPLOAD_LENGTH: u64 = 1 << 50;
@@ -327,13 +334,13 @@ struct ActiveGuard {
 
 impl ActiveGuard {
     fn claim(st: &AppState, id: &str) -> Option<ActiveGuard> {
-        st.active_uploads.lock().unwrap().insert(id.to_string()).then(|| ActiveGuard { st: st.clone(), id: id.to_string() })
+        st.part::<Memory>().active.lock().unwrap().insert(id.to_string()).then(|| ActiveGuard { st: st.clone(), id: id.to_string() })
     }
 }
 
 impl Drop for ActiveGuard {
     fn drop(&mut self) {
-        self.st.active_uploads.lock().unwrap().remove(&self.id);
+        self.st.part::<Memory>().active.lock().unwrap().remove(&self.id);
     }
 }
 
@@ -718,7 +725,7 @@ pub async fn purge_expired(st: &AppState) -> AppResult<usize> {
                 .bind(LINK_UPLOAD_IDLE)
                 .fetch_all(&st.db)
                 .await?;
-        let active = st.active_uploads.lock().unwrap().clone();
+        let active = st.part::<Memory>().active.lock().unwrap().clone();
         let ids: Vec<(String,)> = expired.into_iter().filter(|(id,)| !active.contains(id)).collect();
         let list = serde_json::to_string(&ids.iter().map(|(id,)| id).collect::<Vec<_>>()).unwrap();
         sqlx::query("DELETE FROM uploads WHERE id IN (SELECT value FROM json_each(?))").bind(list).execute(&st.db).await?;
