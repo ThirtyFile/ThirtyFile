@@ -5,7 +5,7 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 import { DICT as ZH_TW } from "../../src/lib/i18n/zh-TW";
 import { DICT as JA } from "../../src/lib/i18n/ja";
 import { DICT as ZH_CN } from "../../src/lib/i18n/zh-CN";
-import { signIn } from "./helpers";
+import { answer, makeUser, signIn, USER_PASSWORD } from "./helpers";
 
 const htmlLang = (page: Page) => page.locator("html").getAttribute("lang");
 
@@ -74,11 +74,11 @@ test("a visitor gets the language of the browser: Japanese, Simplified Chinese o
  */
 async function newUser(browser: Browser, baseURL: string | undefined): Promise<{ username: string; password: string }> {
   const admin = await browser.newContext({ baseURL });
-  await signIn(await admin.newPage());
-  const username = `lang-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  const chosen = "a-long-test-password-1";
+  const page = await admin.newPage();
+  await signIn(page);
+  const username = await makeUser(page, "lang");
+  const chosen = USER_PASSWORD;
   const password = "another-long-test-password-2";
-  expect((await admin.request.post("/api/admin/users", { data: { username, password: chosen } })).ok()).toBe(true);
   await admin.close();
   const own = await browser.newContext({ baseURL });
   expect((await own.request.post("/api/auth/login", { data: { username, password: chosen } })).ok()).toBe(true);
@@ -109,7 +109,10 @@ test("the language chosen in the account menu is kept after signing out and in a
   // The languages in the order of the switch: English, then Traditional Chinese
   const choices = page.getByRole("menuitemradio");
   await expect(choices).toHaveCount(4);
+  // Saved with the account first, then the page loads again in it: saving may wait its turn behind other tests' changes
+  const saved = answer(page, "PUT", "/api/auth/language");
   await choices.nth(1).click();
+  expect((await saved).ok()).toBe(true);
   await expect(page.locator("html")).toHaveAttribute("lang", "zh-Hant");
 
   await menu.click();
@@ -130,7 +133,9 @@ test("the language saved with the account follows the person to another browser"
   await signInAs(page, who);
   await page.getByRole("button", { name: new RegExp(`${who.username}$`) }).click();
   await page.getByRole("menuitem", { name: /Language/ }).click();
+  const saved = answer(page, "PUT", "/api/auth/language");
   await page.getByRole("menuitemradio").nth(1).click();
+  expect((await saved).ok()).toBe(true);
   await expect(page.locator("html")).toHaveAttribute("lang", "zh-Hant");
   const me = await (await page.request.get("/api/auth/me")).json();
   expect([me.lang, me.ui_lang]).toEqual(["zh-TW", "zh-TW"]);
