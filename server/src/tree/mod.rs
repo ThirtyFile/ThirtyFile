@@ -402,6 +402,42 @@ mod tests {
     use super::*;
     use crate::testutil;
 
+    /// The values the schema allows in a column (`CHECK (column IN ('a', 'b'))`)
+    async fn allowed(db: &sqlx::SqlitePool, table: &str, column: &str) -> Vec<String> {
+        let (sql,): (String,) = sqlx::query_as("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").bind(table).fetch_one(db).await.unwrap();
+        let start = sql.find(&format!("CHECK ({column} IN (")).unwrap_or_else(|| panic!("{table}.{column} has no list of values")) + column.len() + 12;
+        sql[start..start + sql[start..].find(')').unwrap()].split(',').map(|v| v.trim().trim_matches('\'').to_string()).collect()
+    }
+
+    /// Reads each value the schema allows as `T`, and checks that anything else is refused rather than taken for one
+    async fn read_all<T>(db: &sqlx::SqlitePool, table: &str, column: &str) -> Vec<T>
+    where
+        T: for<'r> sqlx::Decode<'r, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send + Unpin,
+    {
+        let mut out = Vec::new();
+        for value in allowed(db, table, column).await {
+            out.push(sqlx::query_as::<_, (T,)>("SELECT ?").bind(&value).fetch_one(db).await.unwrap_or_else(|e| panic!("{table}.{column} = {value}: {e}")).0);
+        }
+        assert!(sqlx::query_as::<_, (T,)>("SELECT 'something else'").fetch_one(db).await.is_err(), "{table}.{column}: an unknown value is refused");
+        out
+    }
+
+    #[tokio::test]
+    async fn closed_sets_of_values_are_read_as_their_enums_and_nothing_else() {
+        let env = testutil::env().await;
+        let db = &env.st.db;
+        assert_eq!(read_all::<SpaceKind>(db, "drives", "kind").await, [SpaceKind::Personal, SpaceKind::Company, SpaceKind::Team]);
+        assert_eq!(read_all::<SpaceMode>(db, "drives", "mode").await.len(), 2);
+        assert_eq!(read_all::<Role>(db, "grants", "role").await, [Role::Viewer, Role::Editor, Role::Manager, Role::Owner]);
+        let types = read_all::<PrincipalType>(db, "grants", "principal_type").await;
+        assert_eq!(types, [PrincipalType::User, PrincipalType::Group, PrincipalType::Everyone]);
+        assert!(types.iter().all(|t| PrincipalType::parse(t.as_str()) == Some(*t)));
+        assert_eq!(read_all::<crate::auth::UserRole>(db, "users", "role").await, [crate::auth::UserRole::Admin, crate::auth::UserRole::User]);
+        assert_eq!(read_all::<changes::ChangeKind>(db, "tree_changes", "kind").await.len(), 4);
+        assert_eq!(read_all::<crate::backups::runner::JobState>(db, "backup_jobs", "state").await.len(), 7);
+        assert_eq!(read_all::<crate::backups::runner::JobState>(db, "replica_jobs", "state").await.len(), 7);
+    }
+
     #[tokio::test]
     async fn files_of_one_uploaded_folder_stay_together_when_a_file_has_its_name() {
         let env = testutil::env().await;

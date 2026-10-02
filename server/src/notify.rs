@@ -34,6 +34,7 @@ use crate::{
     error::{AppError, AppResult},
     logs::format_time,
     state::AppState,
+    tree::{PrincipalType, Role},
     util::{format_bytes, now},
 };
 
@@ -113,17 +114,17 @@ pub async fn add(conn: &mut SqliteConnection, users: &[i64], notice: &Notice) ->
 }
 
 /// The people a grant gives access to: the user, or the members of the group (access for everyone isn't announced)
-pub async fn grantees(conn: &mut SqliteConnection, principal_type: &str, principal_id: i64) -> AppResult<Vec<i64>> {
+pub async fn grantees(conn: &mut SqliteConnection, principal_type: PrincipalType, principal_id: i64) -> AppResult<Vec<i64>> {
     Ok(match principal_type {
-        "user" => vec![principal_id],
-        "group" => sqlx::query_as::<_, (i64,)>("SELECT user_id FROM group_members WHERE group_id = ?")
+        PrincipalType::User => vec![principal_id],
+        PrincipalType::Group => sqlx::query_as::<_, (i64,)>("SELECT user_id FROM group_members WHERE group_id = ?")
             .bind(principal_id)
             .fetch_all(conn)
             .await?
             .into_iter()
             .map(|(id,)| id)
             .collect(),
-        _ => Vec::new(),
+        PrincipalType::Everyone => Vec::new(),
     })
 }
 
@@ -139,9 +140,9 @@ async fn set_mark(conn: &mut SqliteConnection, key: &str) -> AppResult<()> {
 /// A share: tells the people a new grant gives access to (except the person who shared). Called in the grant's
 /// transaction; the caller sends the returned emails after committing.
 pub async fn shared(conn: &mut SqliteConnection, by: &User, node: &crate::tree::Node, drive: &crate::tree::Drive, grant_id: i64) -> AppResult<Vec<Outgoing>> {
-    let (principal_type, principal_id, role, expires_at): (String, i64, String, Option<i64>) =
+    let (principal_type, principal_id, role, expires_at): (PrincipalType, i64, Role, Option<i64>) =
         sqlx::query_as("SELECT principal_type, principal_id, role, expires_at FROM grants WHERE id = ?").bind(grant_id).fetch_one(&mut *conn).await?;
-    let mut users = grantees(conn, &principal_type, principal_id).await?;
+    let mut users = grantees(conn, principal_type, principal_id).await?;
     users.retain(|id| *id != by.id);
     // Access that ends soon: the share itself says when, so the hourly check needn't say it again
     if let Some(t) = expires_at.filter(|t| *t <= now() + EXPIRY_NOTICE) {
@@ -243,9 +244,9 @@ async fn check_expiring(conn: &mut SqliteConnection, emails: &mut Vec<Outgoing>)
     struct Row {
         id: i64,
         node_id: String,
-        principal_type: String,
+        principal_type: PrincipalType,
         principal_id: i64,
-        role: String,
+        role: Role,
         expires_at: i64,
         name: String,
         kind: String,
@@ -268,7 +269,7 @@ async fn check_expiring(conn: &mut SqliteConnection, emails: &mut Vec<Outgoing>)
     .await?;
     let told = rows.len();
     for g in rows {
-        let users = grantees(conn, &g.principal_type, g.principal_id).await?;
+        let users = grantees(conn, g.principal_type, g.principal_id).await?;
         let data = json!({
             "name": if g.is_root { &g.drive_name } else { &g.name },
             "item": if g.is_root { "space" } else { g.kind.as_str() },

@@ -408,7 +408,7 @@ pub async fn health(conn: &mut SqliteConnection, p: &Policy, t: i64) -> AppResul
     let spaces = scope(conn, &p.set_id).await?;
     let behind_since = behind_since(conn, &p.set_id, &spaces).await?;
     let changed_spaces = changed(conn, &p.set_id, &spaces).await?.len() as i64;
-    let job: Option<(String, Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+    let job: Option<(JobState, Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT state, error FROM backup_jobs WHERE set_id = ? AND kind = 'snapshot' AND state IN {ACTIVE} ORDER BY created_at DESC LIMIT 1"
     )))
     .bind(&p.set_id)
@@ -417,8 +417,8 @@ pub async fn health(conn: &mut SqliteConnection, p: &Policy, t: i64) -> AppResul
     let overdue = p.alert_hours > 0 && t - protected_through.unwrap_or(p.created_at) > p.alert_hours * 3600;
     let state = match (&job, p.enabled) {
         (_, false) => "paused",
-        (Some((s, _)), _) if s == "failed" => "failing",
-        (Some((s, _)), _) if s == "waiting" => "waiting",
+        (Some((JobState::Failed, _)), _) => "failing",
+        (Some((JobState::Waiting, _)), _) => "waiting",
         _ if overdue => "overdue",
         (Some(_), _) => "running",
         _ if protected_through.is_none() => "never",

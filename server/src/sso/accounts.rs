@@ -214,7 +214,7 @@ pub(super) async fn create_sso_user(st: &AppState, provider: &str, cfg: &Provide
         NewUser {
             username: &username,
             password_hash: &password_hash,
-            role: "user",
+            role: crate::auth::UserRole::User,
             can_write: perms.0,
             can_delete: perms.1,
             can_share: perms.2,

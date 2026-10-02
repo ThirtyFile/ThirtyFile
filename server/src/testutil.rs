@@ -128,7 +128,7 @@ impl TestEnv {
             NewUser {
                 username: name,
                 password_hash: &password_hash,
-                role: "user",
+                role: crate::auth::UserRole::User,
                 can_write: true,
                 can_delete: true,
                 can_share,

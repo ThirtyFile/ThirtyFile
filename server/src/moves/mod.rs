@@ -42,7 +42,7 @@ use crate::{
     backups::runner::{self, Engine, Failure, Queue, QueueJob},
     error::{AppError, AppResult},
     state::AppState,
-    tree::{self, SpaceMode},
+    tree::{self, SpaceKind, SpaceMode},
     util::{new_id, now},
 };
 
@@ -88,7 +88,7 @@ pub struct Job {
     pub id: String,
     pub drive_id: String,
     pub space_name: String,
-    pub space_kind: String,
+    pub space_kind: SpaceKind,
     pub from_location: Option<String>,
     pub from_name: String,
     pub from_mode: SpaceMode,
@@ -170,7 +170,7 @@ impl Engine for MoveEngine {
 
     /// A personal space's items aren't named in the failures
     fn private<'a>(&'a self, _st: &'a AppState, job: &'a Job) -> BoxFuture<'a, AppResult<HashSet<String>>> {
-        Box::pin(async move { Ok(HashSet::from_iter((job.space_kind == "personal").then(|| job.drive_id.clone()))) })
+        Box::pin(async move { Ok(HashSet::from_iter((job.space_kind == SpaceKind::Personal).then(|| job.drive_id.clone()))) })
     }
 
     fn log_failure<'a>(&'a self, conn: &'a mut SqliteConnection, job: &'a Job, error: &'a str) -> BoxFuture<'a, AppResult<()>> {
@@ -476,7 +476,7 @@ pub struct MoveInfo {
     id: String,
     drive_id: String,
     space_name: String,
-    space_kind: String,
+    space_kind: SpaceKind,
     owner_name: String,
     from_location: Option<String>,
     from_name: String,
@@ -592,7 +592,7 @@ async fn queue(conn: &mut SqliteConnection, user: &crate::auth::User, drive_id: 
     #[derive(sqlx::FromRow)]
     struct Space {
         name: String,
-        kind: String,
+        kind: SpaceKind,
         owner_name: String,
         location_id: Option<String>,
         location_name: String,
@@ -609,7 +609,8 @@ async fn queue(conn: &mut SqliteConnection, user: &crate::auth::User, drive_id: 
     .fetch_optional(&mut *conn)
     .await?
     .ok_or_else(|| AppError::not_found("Space not found"))?;
-    let shown = if space.kind == "personal" && !space.owner_name.is_empty() { format!("{} · {}", space.name, space.owner_name) } else { space.name.clone() };
+    let shown =
+        if space.kind == SpaceKind::Personal && !space.owner_name.is_empty() { format!("{} · {}", space.name, space.owner_name) } else { space.name.clone() };
     if drive_busy(conn, drive_id).await? {
         return Err(AppError::conflict(format!("\"{shown}\" is already being moved")));
     }
@@ -628,7 +629,7 @@ async fn queue(conn: &mut SqliteConnection, user: &crate::auth::User, drive_id: 
     .bind(&id)
     .bind(drive_id)
     .bind(&space.name)
-    .bind(&space.kind)
+    .bind(space.kind)
     .bind(&space.owner_name)
     .bind(&space.location_id)
     .bind(&space.location_name)

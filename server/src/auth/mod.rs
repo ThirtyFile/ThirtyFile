@@ -112,6 +112,17 @@ pub enum UserRole {
     User,
 }
 
+impl UserRole {
+    /// A role as a request names it ("admin", "user")
+    pub fn parse(s: &str) -> AppResult<UserRole> {
+        match s {
+            "admin" => Ok(UserRole::Admin),
+            "user" => Ok(UserRole::User),
+            _ => Err(AppError::bad_request("Invalid role")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 pub struct User {
     pub id: i64,

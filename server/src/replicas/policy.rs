@@ -367,7 +367,7 @@ pub async fn health(st: &AppState, p: &Policy, targets: &[Target], t: i64) -> Ap
         let l = &target.location_id;
         let behind_since = behind_since(st, &p.id, l, &spaces).await?;
         let (damaged,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM replica_copies WHERE location_id = ? AND state = 'corrupt'").bind(l).fetch_one(&st.db).await?;
-        let job: Option<(String, Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        let job: Option<(JobState, Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT state, error FROM replica_jobs WHERE policy_id = ? AND location_id = ? AND kind = 'sync' AND state IN {ACTIVE} ORDER BY created_at DESC LIMIT 1"
         )))
         .bind(&p.id)
@@ -380,10 +380,10 @@ pub async fn health(st: &AppState, p: &Policy, targets: &[Target], t: i64) -> Ap
             _ if !p.enabled => "paused",
             _ if offline => "offline",
             (_, "stale") => "stale",
-            (Some((s, _)), _) if s == "failed" => "failed",
-            (Some((s, _)), _) if s == "waiting" => "offline",
+            (Some((JobState::Failed, _)), _) => "failed",
+            (Some((JobState::Waiting, _)), _) => "offline",
             _ if damaged > 0 => "corrupt",
-            (Some((s, _)), _) if s == "running" && target.synced_at.is_none() => "initializing",
+            (Some((JobState::Running, _)), _) if target.synced_at.is_none() => "initializing",
             _ if target.synced_at.is_none() => "initializing",
             _ if held.zip(wanted).is_some_and(|(h, w)| h < w) || behind_since.is_some() => "behind",
             _ => "current",
