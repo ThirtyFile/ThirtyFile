@@ -13,7 +13,7 @@ import { wantsCopy } from "@/lib/keys";
 import { inSpan, spanCount, type ListSpan } from "@/lib/span";
 import { type ViewMode, type Item, HEAD, GROUP_ROW, PAD, GROUP_H, offsetIn, touching } from "@/components/fileList/layout";
 import { useListLayout } from "@/components/fileList/useListLayout";
-import { th, Head, type Handlers, type RowProps, COLUMN_CLASS, ListRow, Tile, GroupHeading, PlaceholderRow } from "@/components/fileList/rows";
+import { th, Head, type Handlers, type RowProps, COLUMN_CLASS, fitsScreen, ListRow, Tile, GroupHeading, PlaceholderRow } from "@/components/fileList/rows";
 import { listColumns, ColumnChoices } from "@/components/fileList/columns";
 import { useListKeyboard } from "@/components/fileList/useListKeyboard";
 
@@ -444,7 +444,9 @@ export function FileList(p: FileListProps) {
   const filler = nameWidth !== undefined;
   // ...and the other columns can't squeeze it below its smallest width
   const minWidth = wide && !filler ? columns.filter((c) => large || c.id !== "location").reduce((sum, c) => sum + widthOf(c.id), MIN_NAME + (p.showCheckboxes ? 30 : 0)) : undefined;
-  const cellCount = 1 + columns.length + (p.showCheckboxes ? 1 : 0) + (filler ? 1 : 0);
+  // Cells spanning the row span the columns shown: counting those the screen width hides (COLUMN_CLASS) would add
+  // empty columns to the table, which take their share of the name's width
+  const cellCount = 1 + columns.filter((c) => fitsScreen(c.id, wide, large)).length + (p.showCheckboxes ? 1 : 0) + (filler ? 1 : 0);
   const spacer = (height: number) => (
     <tr aria-hidden>
       <td colSpan={cellCount} style={{ height, padding: 0 }} />

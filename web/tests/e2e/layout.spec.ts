@@ -1,5 +1,5 @@
 // The file explorer's layout on a phone and on a desktop, and the arrows of the navigation pane.
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { signIn } from "./helpers";
 
 /** A folder in My files (unique name) holding a folder with a folder in it, a folder without, and a few files */
@@ -61,4 +61,51 @@ test("only folders with folders in them have an arrow in the navigation pane", a
   const without = tree.getByRole("treeitem", { name: "Without folder" });
   await expect(without).toBeVisible();
   expect(await without.getAttribute("aria-expanded")).toBeNull();
+});
+
+test("on a phone the Name column keeps the width the size leaves it in a list longer than the screen", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await signIn(page);
+  const me = await (await page.request.get("/api/auth/me")).json();
+  const top = (await (await page.request.post("/api/folders", { data: { parent_id: me.root_id, name: `Long list ${Date.now().toString(36)}` } })).json()).id;
+  for (let i = 0; i < 60; i += 20) await Promise.all(Array.from({ length: 20 }, (_, k) => page.request.post("/api/folders", { data: { parent_id: top, name: `Folder ${i + k}` } })));
+  await page.evaluate(() => localStorage.setItem("tf-view", JSON.stringify("list")));
+  await page.goto(`/files/${top}`);
+  await expect(page.locator("[data-node-id]").first()).toBeVisible();
+  const name = page.getByRole("columnheader", { name: "Name" });
+  const size = page.getByRole("columnheader", { name: "Size" });
+  const widths = async () => [(await name.boundingBox())!.width, (await size.boundingBox())!.width];
+  const [nameWidth, sizeWidth] = await widths();
+  expect(nameWidth).toBeGreaterThan(375 - sizeWidth - 40);
+  // Further down, where the rows above are left out
+  await page.locator("[data-node-id]").first().hover();
+  await page.mouse.wheel(0, 1000);
+  await expect(page.locator("[data-node-id]").filter({ hasText: "Folder 59" })).toBeVisible();
+  expect((await widths())[0]).toBe(nameWidth);
+});
+
+/** A dialog's box is in the window, and `last` (its last button) can be scrolled to */
+async function fitsTheWindow(page: Page, dialog: Locator, last: Locator) {
+  const box = (await dialog.boundingBox())!;
+  const view = page.viewportSize()!;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(view.height);
+  await last.scrollIntoViewIfNeeded();
+  await expect(last).toBeInViewport({ ratio: 1 });
+}
+
+test("dialogs taller than the window scroll: notification settings on a phone, adding a user in landscape", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await signIn(page);
+  await page.getByRole("button", { name: "Notifications", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Notification settings" }).click();
+  const notifications = page.getByRole("dialog", { name: "Notification settings" });
+  await fitsTheWindow(page, notifications, notifications.getByRole("button", { name: "Cancel" }));
+  await page.keyboard.press("Escape");
+
+  await page.setViewportSize({ width: 812, height: 375 });
+  await page.goto("/admin/users");
+  await page.getByRole("button", { name: "Add user" }).first().click();
+  const add = page.getByRole("dialog", { name: "Add user" });
+  await fitsTheWindow(page, add, add.getByRole("button", { name: "Cancel" }));
 });

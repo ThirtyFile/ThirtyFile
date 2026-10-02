@@ -168,6 +168,11 @@ export const COLUMN_CLASS: Record<ColumnId, string> = {
   extra: "max-md:hidden",
 };
 
+/** Whether COLUMN_CLASS shows a column: `wide` at least 48rem (md), `large` at least 64rem (lg) */
+export function fitsScreen(id: ColumnId, wide: boolean, large: boolean) {
+  return id === "size" || (id === "location" ? large : wide);
+}
+
 export function Cell({ id, item, h }: { id: ColumnId; item: Item; h: HandlersRef }) {
   const muted = cn(td, "text-muted-foreground", COLUMN_CLASS[id]);
   switch (id) {
