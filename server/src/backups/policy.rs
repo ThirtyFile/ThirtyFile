@@ -345,11 +345,12 @@ async fn look_at(st: &AppState, p: &Policy, t: i64) -> AppResult<()> {
             self::trigger(st, set, trigger, None).await?;
         } else {
             // A snapshot that failed, or waits for a location, is tried again now and then
-            let stuck: Option<(String,)> =
-                sqlx::query_as("SELECT state FROM backup_jobs WHERE set_id = ? AND kind = 'snapshot' AND state IN ('failed', 'waiting') LIMIT 1")
-                    .bind(set)
-                    .fetch_optional(&st.db)
-                    .await?;
+            let stuck: Option<(String,)> = sqlx::query_as(
+                "SELECT state FROM backup_jobs WHERE set_id = ? AND kind = 'snapshot' AND state IN ('failed', 'waiting') ORDER BY created_at DESC LIMIT 1",
+            )
+            .bind(set)
+            .fetch_optional(&st.db)
+            .await?;
             if stuck.is_some() {
                 self::trigger(st, set, "retry", None).await?;
             }

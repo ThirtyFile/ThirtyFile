@@ -1,8 +1,9 @@
-//! The hourly maintenance: the trash, earlier versions, expired uploads, notifications and the logs.
+//! The hourly maintenance: the trash, earlier versions, the history of background jobs, expired uploads, notifications
+//! and the logs.
 
 use std::time::Duration;
 
-use crate::{auth, db, logs, nodes, notify, state::AppState, tree, upload, util, versions};
+use crate::{auth, backups, db, logs, nodes, notify, state::AppState, tree, upload, util, versions};
 
 pub fn spawn_maintenance(st: AppState, trash_days: i64) {
     // Content of spaces deleted while the server stopped before it was all removed
@@ -36,6 +37,12 @@ pub fn spawn_maintenance(st: AppState, trash_days: i64) {
             match versions::prune(&st).await {
                 Ok(n) if n > 0 => tracing::info!("Removed {n} earlier versions of files that are no longer kept"),
                 Err(e) => tracing::warn!("Couldn't remove earlier versions of files: {}", e.message),
+                _ => {}
+            }
+            // The history of backup, replica and move jobs
+            match backups::runner::trim_histories(&st).await {
+                Ok(n) if n > 0 => tracing::info!("Removed {n} finished jobs past the history kept"),
+                Err(e) => tracing::warn!("Couldn't remove old finished jobs: {}", e.message),
                 _ => {}
             }
             if let Err(e) = upload::purge_expired(&st).await {

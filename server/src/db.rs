@@ -625,6 +625,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_database_from_0_4_0_finds_the_jobs_of_a_policy_by_their_state() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-040-jobs-{}", crate::util::new_id()));
+        let path = dir.join("drive.db");
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO storage_locations (id, name, kind, config, created_at) VALUES ('nas', 'NAS', 'local', '{}', 0)").execute(&db).await.unwrap();
+        db.close().await;
+
+        let db = connect(&path, 16).await.unwrap();
+        sqlx::query("INSERT INTO backup_sets (id, kind, name, dest_location, created_at) VALUES ('s', 'policy', 'Nightly', 'nas', 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO backup_jobs (id, kind, set_id, created_at) VALUES ('j', 'snapshot', 's', 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO replica_jobs (id, kind, policy_id, location_id, created_at) VALUES ('r', 'sync', 'p', 'nas', 0)").execute(&db).await.unwrap();
+        // The schedulers' questions are answered from an index, not by reading every job
+        let plan = |sql: &'static str| {
+            let db = db.clone();
+            async move {
+                sqlx::query_as::<_, (i64, i64, i64, String)>(sqlx::AssertSqlSafe(format!("EXPLAIN QUERY PLAN {sql}")))
+                    .fetch_all(&db)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| r.3)
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            }
+        };
+        let backup =
+            plan("SELECT id FROM backup_jobs WHERE set_id = 's' AND kind = 'snapshot' AND state IN ('queued', 'failed') ORDER BY created_at DESC LIMIT 1").await;
+        assert!(backup.contains("USING INDEX backup_jobs_set (set_id=? AND state=?)"), "{backup}");
+        let replica =
+            plan("SELECT id FROM replica_jobs WHERE policy_id = 'p' AND location_id = 'nas' AND state IN ('queued', 'failed') ORDER BY created_at DESC LIMIT 1")
+                .await;
+        assert!(replica.contains("USING INDEX replica_jobs_target (policy_id=? AND location_id=? AND state=?)"), "{replica}");
+        let (state,): (String,) = sqlx::query_as("SELECT state FROM backup_jobs WHERE id = 'j'").fetch_one(&db).await.unwrap();
+        assert_eq!(state, "queued");
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn the_database_is_only_copied_on_request_when_it_is_up_to_date() {
         let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));
         std::fs::create_dir_all(&dir).unwrap();
