@@ -13,7 +13,7 @@ use crate::{
     auth::User,
     error::{AppError, AppResult},
     state::AppState,
-    tree::{self, NODE_COLS, Node},
+    tree::{self, Node},
     util::numbered_name,
 };
 
@@ -90,11 +90,7 @@ pub struct Found {
 
 /// The item in a folder with this name (not in the trash): any letter case in the content store, exact in folder spaces
 pub async fn child_named(conn: &mut SqliteConnection, parent_id: &str, name: &str) -> AppResult<Option<Node>> {
-    let sql = format!(
-        "SELECT {NODE_COLS} FROM nodes n WHERE n.parent_id = ?1 AND n.trashed_at IS NULL
-         AND n.name_key = CASE WHEN n.fs_path IS NULL THEN unicode_lower(?2) ELSE ?2 END LIMIT 1"
-    );
-    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(parent_id).bind(name).fetch_optional(conn).await?)
+    tree::find_child(conn, parent_id, name).await
 }
 
 /// Finds what a path names; None when it doesn't exist or the user has no access to it

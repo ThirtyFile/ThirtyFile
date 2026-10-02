@@ -309,17 +309,30 @@ pub async fn live_subtree_ids(conn: &mut SqliteConnection, id: &str) -> AppResul
     Ok(rows.into_iter().map(|(id,)| id).collect())
 }
 
-/// Whether the folder has an item with this name: regardless of letter case in the content store, exactly in folder
-/// spaces (a folder on disk can hold both "A.txt" and "a.txt")
+/// An item (of the folder `?1`, not in the trash) named `?2`: regardless of letter case in the content store, exactly in
+/// folder spaces (a folder on disk can hold both "A.txt" and "a.txt").
+///
+/// Which key a name has depends on the item (`name_key`), so the `CASE` alone can't be looked up in `nodes_name_uq`:
+/// it reads every item of the folder, 50,000 for every name in a large one. The `IN` looks up the two keys the name can
+/// have in the index, and the `CASE` keeps the item whose key it is.
+pub const NAMED: &str = "parent_id = ?1 AND trashed_at IS NULL AND name_key IN (unicode_lower(?2), ?2)
+     AND name_key = CASE WHEN fs_path IS NULL THEN unicode_lower(?2) ELSE ?2 END";
+
+/// Whether the folder has an item with this name (`NAMED`)
 pub async fn name_taken(conn: &mut SqliteConnection, parent_id: &str, name: &str) -> AppResult<bool> {
-    let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM nodes WHERE parent_id = ?1 AND name_key = CASE WHEN fs_path IS NULL THEN unicode_lower(?2) ELSE ?2 END AND trashed_at IS NULL LIMIT 1",
-    )
-    .bind(parent_id)
-    .bind(name)
-    .fetch_optional(conn)
-    .await?;
+    let row: Option<(i64,)> =
+        sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT 1 FROM nodes WHERE {NAMED} LIMIT 1"))).bind(parent_id).bind(name).fetch_optional(conn).await?;
     Ok(row.is_some())
+}
+
+/// `find_children`: every name of the JSON array `?2` (the outer loop, which CROSS JOIN keeps), looked up as `NAMED`
+fn children_named_sql() -> String {
+    format!(
+        "SELECT j.value AS asked, {NODE_COLS} FROM json_each(?2) j
+         CROSS JOIN nodes n ON n.parent_id = ?1 AND n.trashed_at IS NULL AND n.name_key IN (unicode_lower(j.value), j.value)
+                           AND n.name_key = CASE WHEN n.fs_path IS NULL THEN unicode_lower(j.value) ELSE j.value END
+         ORDER BY j.key"
+    )
 }
 
 /// The items of a folder (not in the trash) that have one of these names, matched the way `name_taken` matches:
@@ -334,12 +347,7 @@ pub async fn find_children(conn: &mut SqliteConnection, parent_id: &str, names: 
     if names.is_empty() {
         return Ok(Vec::new());
     }
-    let sql = format!(
-        "SELECT j.value AS asked, {NODE_COLS} FROM json_each(?2) j
-         JOIN nodes n ON n.parent_id = ?1 AND n.trashed_at IS NULL
-                     AND n.name_key = CASE WHEN n.fs_path IS NULL THEN unicode_lower(j.value) ELSE j.value END
-         ORDER BY j.key"
-    );
+    let sql = children_named_sql();
     let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(parent_id).bind(serde_json::to_string(names).unwrap()).fetch_all(conn).await?;
     Ok(rows.into_iter().map(|r| (r.asked, r.node)).collect())
 }
@@ -403,6 +411,38 @@ mod tests {
         let other = crate::content::ensure_folders(&mut c, amy.id, amy.root(), "Photos", "b2").await.unwrap();
         let none = crate::content::ensure_folders(&mut c, amy.id, amy.root(), "Photos", "").await.unwrap();
         assert!(other != a && none != a && none != other);
+    }
+
+    #[tokio::test]
+    async fn names_are_looked_up_in_the_index_without_reading_the_whole_folder() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        env.file(&amy, amy.root(), "Été.txt").await;
+        let space = env.folder_space("Disk").await;
+        let admin = env.admin().await;
+        env.file(&admin, &space.root, "A.txt").await;
+        sqlx::query("UPDATE nodes SET fs_path = name WHERE parent_id = ?").bind(&space.root).execute(&env.st.db).await.unwrap();
+        let mut c = env.st.db.acquire().await.unwrap();
+        // Any letter case in the content store, exactly in folder spaces
+        assert!(name_taken(&mut c, amy.root(), "éTÉ.txt").await.unwrap());
+        assert!(name_taken(&mut c, &space.root, "A.txt").await.unwrap());
+        assert!(!name_taken(&mut c, &space.root, "a.txt").await.unwrap());
+        let names = ["a.txt", "ÉTÉ.TXT", "A.txt"].map(String::from);
+        let found = find_children(&mut c, amy.root(), &names).await.unwrap();
+        assert_eq!(found.iter().map(|(asked, n)| (asked.as_str(), n.name.as_str())).collect::<Vec<_>>(), [("ÉTÉ.TXT", "Été.txt")]);
+        let found = find_children(&mut c, &space.root, &names).await.unwrap();
+        assert_eq!(found.iter().map(|(asked, n)| (asked.as_str(), n.name.as_str())).collect::<Vec<_>>(), [("A.txt", "A.txt")]);
+
+        // Each name is a lookup in the index: before, every item of the folder was read for every name
+        let plan = async |c: &mut SqliteConnection, sql: &str| -> String {
+            let rows: Vec<(i64, i64, i64, String)> =
+                sqlx::query_as(sqlx::AssertSqlSafe(format!("EXPLAIN QUERY PLAN {sql}"))).bind("p").bind(r#"["a"]"#).fetch_all(c).await.unwrap();
+            rows.into_iter().map(|r| r.3).collect::<Vec<_>>().join("; ")
+        };
+        let one = plan(&mut c, &format!("SELECT 1 FROM nodes WHERE {NAMED} LIMIT 1")).await;
+        assert!(one.contains("USING INDEX nodes_name_uq (parent_id=? AND name_key=?)"), "{one}");
+        let many = plan(&mut c, &children_named_sql()).await;
+        assert!(many.contains("SCAN j") && many.contains("USING INDEX nodes_name_uq (parent_id=? AND name_key=?)"), "{many}");
     }
 
     #[tokio::test]

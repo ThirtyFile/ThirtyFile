@@ -288,6 +288,21 @@ mod tests {
         assert_eq!(list("type").await, ["README", "File 1.docx", "b.pdf", "file 2.txt", "File 10.txt"]);
     }
 
+    #[tokio::test]
+    async fn a_page_in_the_default_order_is_read_from_an_index_without_sorting_the_folder() {
+        let env = testutil::env().await;
+        let plan = async |order: &str| -> String {
+            let sql = format!("EXPLAIN QUERY PLAN SELECT n.id FROM nodes n WHERE n.parent_id = ?1 AND n.trashed_at IS NULL {order} LIMIT 200");
+            let rows: Vec<(i64, i64, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(sql)).bind("p").fetch_all(&env.st.db).await.unwrap();
+            rows.into_iter().map(|r| r.3).collect::<Vec<_>>().join("; ")
+        };
+        let by_name = plan(&order_clause(None, None)).await;
+        assert!(by_name.contains("USING INDEX nodes_listed") && !by_name.contains("TEMP B-TREE"), "{by_name}");
+        // Other orders still sort
+        let by_size = plan(&order_clause(Some("size"), None)).await;
+        assert!(by_size.contains("TEMP B-TREE"), "{by_size}");
+    }
+
     /// Lists a folder page by page (`limit` items each) until the end
     async fn all_pages(env: &testutil::TestEnv, user: &User, folder: &str, sort: &str, order: &str, limit: i64) -> Vec<String> {
         let (mut names, mut after) = (Vec::new(), None);
