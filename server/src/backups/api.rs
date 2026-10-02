@@ -1055,11 +1055,12 @@ async fn targets_for(st: &AppState, set: &super::Set, space: &SpaceInfo) -> AppR
     })
 }
 
-fn folder_name(space: &SpaceInfo, cutoff: i64, tz: i64) -> String {
+/// The new folder of a restore the page named none for, in the system default language (`i18n::names`)
+fn folder_name(lang: crate::i18n::Lang, space: &SpaceInfo, cutoff: i64, tz: i64) -> String {
     let when = crate::logs::format_time(cutoff, -tz.clamp(-14 * 60, 14 * 60) * 60);
     // "2026-10-01 14:05:00" → "2026-10-01 14.05" (names can't hold a colon)
     let when = when.get(..16).unwrap_or(&when).replace(':', ".");
-    format!("Restored {} {when}", space.name)
+    crate::i18n::tr(lang, crate::i18n::Text::RestoredFolder, &[("space", &space.name), ("date", &when)])
 }
 
 /// What a restore would do, and the parameters of its job
@@ -1097,7 +1098,7 @@ async fn restore_plan(st: &AppState, snapshot: &str, req: &RestoreReq) -> AppRes
     };
     let folder_name = match req.folder_name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
         Some(n) => crate::util::validate_name(n)?,
-        None => folder_name(&space, cutoff.unwrap_or_default(), req.tz),
+        None => folder_name(crate::i18n::names(st), &space, cutoff.unwrap_or_default(), req.tz),
     };
     let params = super::restore::Params {
         space: space.id.clone(),
@@ -1258,4 +1259,20 @@ pub async fn browse(
     .await
     .map_err(|e| AppError::internal(e.to_string()))??;
     Ok(Json(page))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::{Lang, Text, tr};
+
+    #[test]
+    fn a_restore_folder_the_page_named_none_for_is_named_in_the_language_given() {
+        let space =
+            SpaceInfo { id: "d".into(), name: "Sales".into(), kind: "team".into(), owner: String::new(), owner_id: None, mode: "store".into(), files: 0, bytes: 0 };
+        // 2026-10-01 06:05 UTC, for a browser at UTC+8
+        let at = 1_790_834_700;
+        assert_eq!(folder_name(Lang::En, &space, at, -480), "Restored Sales 2026-10-01 14.05");
+        assert_eq!(folder_name(Lang::ZhTw, &space, at, -480), tr(Lang::ZhTw, Text::RestoredFolder, &[("space", "Sales"), ("date", "2026-10-01 14.05")]));
+    }
 }

@@ -1,6 +1,6 @@
 /** Simplified Chinese translations (English source text → Simplified Chinese): new spaces as folders on the server (deleting a space or a user keeps the folder) */
 export default {
-  "They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash stays in their folder on the server.": "这些文件会放进该空间顶层一个名为“Files of {name}”的新文件夹，并计入该空间的容量。该用户的回收站仍保留在服务器上其文件夹中。",
+  "They go into a new folder named \"{name}\" at the top of that space, and count toward its size. Their trash stays in their folder on the server.": "这些文件会放进该空间顶层一个名为“{name}”的新文件夹，并计入该空间的容量。该用户的回收站仍保留在服务器上其文件夹中。",
   "Remove their files from ThirtyFile": "从 ThirtyFile 移除该用户的文件",
   "Their folder on the server, {path}, is kept with the files in it: delete it there when it's no longer needed.": "服务器上的文件夹 {path} 会连同其中的文件一起保留，不再需要时请在服务器上删除。",
   "Their folder on the server is kept with the files in it: delete it there when it's no longer needed.": "服务器上的文件夹会连同其中的文件一起保留，不再需要时请在服务器上删除。",

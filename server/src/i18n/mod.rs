@@ -145,6 +145,19 @@ pub fn system_default(st: &AppState) -> Option<Lang> {
     Lang::parse(&st.system.read().unwrap().default_lang)
 }
 
+/// The language of the names ThirtyFile gives what it creates in people's folders ("Files of amy", "report (conflict
+/// copy).docx"): the system default, English when it follows the browser. Never the language of whoever caused it, so
+/// a name is the same whoever does the same thing
+pub fn names(st: &AppState) -> Lang {
+    system_default(st).unwrap_or(Lang::En)
+}
+
+/// [`names`], read from the settings in the database, for code that has only a connection
+pub async fn names_in(conn: &mut sqlx::SqliteConnection) -> AppResult<Lang> {
+    let set: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = 'default_lang'").fetch_optional(conn).await?;
+    Ok(set.and_then(|(v,)| Lang::parse(&v)).unwrap_or(Lang::En))
+}
+
 /// Who a request comes from, as far as its language goes
 #[derive(Debug, Clone, Copy)]
 pub enum Visitor {

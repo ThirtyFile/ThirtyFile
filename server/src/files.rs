@@ -300,8 +300,8 @@ fn edit_conflict() -> AppError {
 }
 
 /// Gives the file `before` the saved content (content.rs). A file of a folder space changed on the server since it was
-/// indexed (or removed there) isn't overwritten: the new content is saved next to it as "name (conflict copy)" and the
-/// save reports a conflict.
+/// indexed (or removed there) isn't overwritten: the new content is saved next to it as "name (conflict copy)", in the
+/// system default language (`i18n::names`), and the save reports a conflict.
 async fn store_content(st: AppState, user: User, before: Node, body: Bytes, hash: Option<String>, base: Option<i64>) -> AppResult<Json<Node>> {
     let tmp = st.tmp_dir().join(new_id());
     let received = async {
@@ -333,7 +333,8 @@ async fn store_content(st: AppState, user: User, before: Node, body: Bytes, hash
             tree::check_quota(&mut tx, node.drive(), size).await?;
             let parent = tree::get_node(&mut tx, node.parent_id.as_deref().unwrap_or_default()).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
             let (stem, ext) = split_name(&node.name, false);
-            let name = content::free_name(&mut tx, &parent, &format!("{stem} (conflict copy){ext}")).await?;
+            let copy_stem = crate::i18n::tr(crate::i18n::names(&st), crate::i18n::Text::ConflictCopy, &[("name", stem)]);
+            let name = content::free_name(&mut tx, &parent, &format!("{copy_stem}{ext}")).await?;
             let (copy_id, written) = content::create(&mut tx, &staged, user.id, &parent, &name, None).await?;
             let copy = tree::get_node(&mut tx, &copy_id).await?;
             logs::record_activity(&mut tx, &user, copy.as_ref().map(|n| n as _), "upload", "").await?;

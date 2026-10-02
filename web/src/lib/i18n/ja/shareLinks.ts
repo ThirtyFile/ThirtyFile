@@ -83,7 +83,7 @@ export default {
   "To stop them signing in and keep everything as it is, disable the account instead.": "サインインできないようにするだけで他はそのままにしたい場合は、代わりにアカウントを無効にしてください。",
   "Their files": "このユーザーのファイル",
   "Move their files to:": "このユーザーのファイルの移動先：",
-  "They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash is emptied.": "ファイルはそのスペースの最上位にある「Files of {name}」という名前の新しいフォルダーに移動され、そのスペースの容量に含まれます。このユーザーのごみ箱は空になります。",
+  "They go into a new folder named \"{name}\" at the top of that space, and count toward its size. Their trash is emptied.": "ファイルはそのスペースの最上位にある「{name}」という名前の新しいフォルダーに移動され、そのスペースの容量に含まれます。このユーザーのごみ箱は空になります。",
   "Delete their files permanently": "このユーザーのファイルを完全に削除",
   "This can't be undone.": "この操作は元に戻せません。",
 };

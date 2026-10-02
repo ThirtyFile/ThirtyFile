@@ -75,4 +75,8 @@ pub(super) const TEXTS: &[(Text, &str)] = &[
         "{site} 帳號「{username}」的電子郵件地址已改為 {new}，之後的通知與重設密碼連結都會寄到那裡。\n\n如果不是你變更的，請立即變更密碼，或聯絡管理員。\n",
     ),
     (EmailChangedNone, "（空白）"),
+    // Names given to what ThirtyFile creates
+    (FilesOf, "{username} 的檔案"),
+    (ConflictCopy, "{name}（衝突副本）"),
+    (RestoredFolder, "還原 {space} {date}"),
 ];

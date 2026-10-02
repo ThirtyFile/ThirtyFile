@@ -1,6 +1,6 @@
 /** Japanese translations (English source text → Japanese): new spaces as folders on the server (deleting a space or a user keeps the folder) */
 export default {
-  "They go into a new folder named \"Files of {name}\" at the top of that space, and count toward its size. Their trash stays in their folder on the server.": "ファイルは、そのスペースの最上位に作成される「Files of {name}」という新しいフォルダーに移され、そのスペースの容量に加算されます。このユーザーのごみ箱は、サーバー上のユーザーのフォルダーに残ります。",
+  "They go into a new folder named \"{name}\" at the top of that space, and count toward its size. Their trash stays in their folder on the server.": "ファイルは、そのスペースの最上位に作成される「{name}」という新しいフォルダーに移され、そのスペースの容量に加算されます。このユーザーのごみ箱は、サーバー上のユーザーのフォルダーに残ります。",
   "Remove their files from ThirtyFile": "このユーザーのファイルを ThirtyFile から削除",
   "Their folder on the server, {path}, is kept with the files in it: delete it there when it's no longer needed.": "サーバー上のフォルダー {path} は、中のファイルごと保持されます。不要になったらサーバー上で削除してください。",
   "Their folder on the server is kept with the files in it: delete it there when it's no longer needed.": "サーバー上のフォルダーは、中のファイルごと保持されます。不要になったらサーバー上で削除してください。",
