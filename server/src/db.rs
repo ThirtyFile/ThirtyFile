@@ -161,8 +161,7 @@ const FREE_PAGES_GIVEN_BACK: i64 = 100_000;
 /// unless a read still needs it (it is cut back to JOURNAL_SIZE_LIMIT later).
 pub async fn shrink(pool: &SqlitePool, write_lock: &tokio::sync::Mutex<()>) {
     let free = async {
-        let (mode,): (i64,) = sqlx::query_as("PRAGMA auto_vacuum").fetch_one(pool).await?;
-        let (free,): (i64,) = sqlx::query_as("PRAGMA freelist_count").fetch_one(pool).await?;
+        let (mode, free) = free_pages(&mut *pool.acquire().await?).await?;
         if mode == 2 && free > FREE_PAGES_KEPT {
             let _w = write_lock.lock().await;
             let pages = (free - FREE_PAGES_KEPT).min(FREE_PAGES_GIVEN_BACK);
@@ -176,6 +175,15 @@ pub async fn shrink(pool: &SqlitePool, write_lock: &tokio::sync::Mutex<()>) {
     if let Err(e) = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)").execute(pool).await {
         tracing::warn!("Couldn't empty the WAL file of the database: {e}");
     }
+}
+
+/// The database's auto-vacuum mode (2: incremental) and its free pages. Read on one connection, the free pages first:
+/// that read looks at the database file, which the mode alone doesn't, so a connection that last looked before the
+/// mode changed (`compact`) would still say the old one.
+async fn free_pages(c: &mut SqliteConnection) -> Result<(i64, i64), sqlx::Error> {
+    let (free,): (i64,) = sqlx::query_as("PRAGMA freelist_count").fetch_one(&mut *c).await?;
+    let (mode,): (i64,) = sqlx::query_as("PRAGMA auto_vacuum").fetch_one(&mut *c).await?;
+    Ok((mode, free))
 }
 
 /// `thirtyfile compact`, with ThirtyFile stopped: rewrites the database to the size of what it holds, keeping track
@@ -798,7 +806,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("drive.db");
         let db = connect(&path, 16).await.unwrap();
-        let (mode,): (i64,) = sqlx::query_as("PRAGMA auto_vacuum").fetch_one(&db).await.unwrap();
+        let (mode, _) = free_pages(&mut db.acquire().await.unwrap()).await.unwrap();
         let (limit,): (i64,) = sqlx::query_as("PRAGMA journal_size_limit").fetch_one(&db).await.unwrap();
         assert_eq!((mode, limit as u64), (2, JOURNAL_SIZE_LIMIT), "a new database keeps track of its free pages");
         // 40 MB written, then deleted
@@ -832,15 +840,26 @@ mod tests {
         sqlx::Connection::close(c).await.unwrap();
 
         let db = connect(&path, 16).await.unwrap();
-        let mode = async || sqlx::query_as::<_, (i64,)>("PRAGMA auto_vacuum").fetch_one(&db).await.unwrap().0;
-        assert_eq!(mode().await, 0);
+        // Asked on several connections at once: also on others than the one that rewrote the database
+        let modes = async || {
+            let mut held = Vec::new();
+            for _ in 0..3 {
+                held.push(db.acquire().await.unwrap());
+            }
+            let mut modes = Vec::new();
+            for c in &mut held {
+                modes.push(free_pages(c).await.unwrap().0);
+            }
+            modes
+        };
+        assert_eq!(modes().await, [0, 0, 0]);
         let lock = tokio::sync::Mutex::new(());
         shrink(&db, &lock).await;
         let (free,): (i64,) = sqlx::query_as("PRAGMA freelist_count").fetch_one(&db).await.unwrap();
         assert!(free > FREE_PAGES_KEPT, "left as it is: {free}");
         let (before, after) = compact(&db).await.unwrap();
         assert!(before > 8 << 20 && after < 4 << 20, "{before} → {after}");
-        assert_eq!(mode().await, 2);
+        assert_eq!(modes().await, [2, 2, 2]);
         db.close().await;
         let _ = std::fs::remove_dir_all(&dir);
     }
