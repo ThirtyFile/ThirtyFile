@@ -936,6 +936,8 @@ export interface ShareAccess {
   event: string;
   ip: string;
   user_agent: string;
+  /** A visit to a link in someone else's personal space, for an administrator: the link and the item aren't named */
+  private?: boolean;
 }
 
 export interface ShareAccessFilter {
@@ -1136,6 +1138,9 @@ export interface ShareInfo {
   drop_only: boolean;
   /** false: previews only, no download or ZIP */
   allow_download: boolean;
+  /** In someone else's personal space, for an administrator who may only delete it: `id` is a handle for deleting
+   * it, not the link's address, and the item isn't named */
+  private?: boolean;
 }
 
 export interface ShareFilter {

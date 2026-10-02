@@ -380,7 +380,28 @@ pub async fn usage_of(c: &mut SqliteConnection, me: i64, location: &str, hashes:
     .fetch_all(&mut *c)
     .await?;
 
-    let drive_ids: Vec<&str> = files.iter().filter_map(|f| f.2.as_deref()).chain(versions.iter().filter_map(|v| v.2.as_deref())).collect();
+    // Replicas of what someone else's personal space holds (its files, their earlier versions, or the files of its
+    // folder as a sync read them) are shown as that space's, so they stay closed like its files
+    let private_replicas: HashMap<String, String> = sqlx::query_as::<_, (String, String)>(
+        "SELECT u.hash, MIN(u.drive_id) FROM (
+           SELECT n.blob_hash AS hash, n.drive_id FROM nodes n WHERE n.blob_hash IN (SELECT value FROM json_each(?1))
+           UNION ALL SELECT v.blob_hash, n.drive_id FROM node_versions v JOIN nodes n ON n.id = v.node_id WHERE v.blob_hash IN (SELECT value FROM json_each(?1))
+           UNION ALL SELECT f.hash, f.drive_id FROM replica_folder_files f WHERE f.hash IN (SELECT value FROM json_each(?1))
+         ) u JOIN drives d ON d.id = u.drive_id WHERE d.kind = 'personal' AND d.owner_id IS NOT ?2 GROUP BY u.hash",
+    )
+    .bind(serde_json::to_string(&hashes.iter().filter(|h| replicas.contains(*h) && !here.contains(*h)).collect::<Vec<_>>()).unwrap())
+    .bind(me)
+    .fetch_all(&mut *c)
+    .await?
+    .into_iter()
+    .collect();
+
+    let drive_ids: Vec<&str> = files
+        .iter()
+        .filter_map(|f| f.2.as_deref())
+        .chain(versions.iter().filter_map(|v| v.2.as_deref()))
+        .chain(private_replicas.values().map(String::as_str))
+        .collect();
     let drives = spaces_by_id(c, me, &drive_ids).await?;
     let files: HashMap<&str, _> = files.iter().map(|f| (f.0.as_str(), f)).collect();
     let versions: HashMap<&str, _> = versions.iter().map(|v| (v.0.as_str(), v)).collect();
@@ -407,7 +428,7 @@ pub async fn usage_of(c: &mut SqliteConnection, me: i64, location: &str, hashes:
                 (None, None) => ("unused", None, None),
             }
         } else if replicas.contains(hash) {
-            ("replica", None, None)
+            ("replica", None, private_replicas.get(hash).map(String::as_str))
         } else if pending.contains(hash) {
             ("pending", None, None)
         } else {
@@ -447,8 +468,10 @@ async fn spaces_by_id(c: &mut SqliteConnection, me: i64, ids: &[&str]) -> AppRes
         .collect())
 }
 
-/// Whether a content is used in someone else's personal space (by a file or an earlier version), or was copied for
-/// a move of one that hasn't cleaned up yet (into a content store, it is the space's only once the move switches)
+/// Whether a content is used in someone else's personal space (by a file or an earlier version), was copied for
+/// a move of one that hasn't cleaned up yet (into a content store, it is the space's only once the move switches), or
+/// was read from a file of one kept in a folder (a folder space's files have no content of their own: their replicas
+/// are named by what `replica_folder_files` recorded)
 async fn in_private_space(c: &mut SqliteConnection, me: i64, hash: &str) -> AppResult<bool> {
     let (found,): (bool,) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM nodes n JOIN drives d ON d.id = n.drive_id
@@ -456,7 +479,9 @@ async fn in_private_space(c: &mut SqliteConnection, me: i64, hash: &str) -> AppR
              OR EXISTS (SELECT 1 FROM node_versions v JOIN nodes n ON n.id = v.node_id JOIN drives d ON d.id = n.drive_id
                         WHERE v.blob_hash = ?1 AND d.kind = 'personal' AND d.owner_id IS NOT ?2)
              OR EXISTS (SELECT 1 FROM space_move_items i JOIN space_moves m ON m.id = i.move_id JOIN drives d ON d.id = m.drive_id
-                        WHERE i.hash = ?1 AND d.kind = 'personal' AND d.owner_id IS NOT ?2)",
+                        WHERE i.hash = ?1 AND d.kind = 'personal' AND d.owner_id IS NOT ?2)
+             OR EXISTS (SELECT 1 FROM replica_folder_files f JOIN drives d ON d.id = f.drive_id
+                        WHERE f.hash = ?1 AND d.kind = 'personal' AND d.owner_id IS NOT ?2)",
     )
     .bind(hash)
     .bind(me)
@@ -794,5 +819,58 @@ mod tests {
             .unwrap();
         let key = format!("{}/{}/{copied}", &copied[0..2], &copied[2..4]);
         assert_eq!(get(&env, &admin, &key).await.unwrap_err().status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn replicas_of_the_files_of_someone_elses_personal_folder_stay_closed() {
+        let env = testutil::folders_env().await;
+        let admin = env.admin().await;
+        let amy = env.user("amy", false).await;
+        let company = env.st.shared_root().unwrap();
+        let drive = env.drive_of(amy.root()).await;
+        let theirs = env.upload(&amy, amy.root(), "diagnosis.txt", b"amy's result").await;
+        let ours = env.upload(&admin, &company, "plan.txt", b"company plan").await;
+        let company_drive = env.drive_of(&company).await;
+        // A replica policy's sync read both files and keeps their copies where content goes, named by their content
+        let local = env.st.storage("local").unwrap();
+        let mut keys = Vec::new();
+        for (item, space, content) in [(&theirs, &drive, &b"amy's result"[..]), (&ours, &company_drive, &b"company plan"[..])] {
+            let hash = crate::util::sha256_hex(content);
+            let tmp = env.dir.join("tmp").join(crate::util::new_id());
+            std::fs::write(&tmp, content).unwrap();
+            local.put_file(&hash, &tmp).await.unwrap();
+            sqlx::query("INSERT INTO replica_copies (hash, location_id, size, created_at) VALUES (?, 'local', ?, 0)")
+                .bind(&hash)
+                .bind(content.len() as i64)
+                .execute(&env.st.db)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO replica_folder_files (item_id, drive_id, path, size, hash, read_at) VALUES (?, ?, 'x', ?, ?, 0)")
+                .bind(item)
+                .bind(space)
+                .bind(content.len() as i64)
+                .bind(&hash)
+                .execute(&env.st.db)
+                .await
+                .unwrap();
+            keys.push((format!("{}/{}", &hash[0..2], &hash[2..4]), hash));
+        }
+
+        // Amy's is listed as a replica of her space, which can't be opened, and can't be downloaded
+        let (dir, hash) = &keys[0];
+        let p = page(&env, &admin, dir, None, 100).await.unwrap();
+        let usage = p.items.iter().find(|i| &i.entry.name == hash).unwrap().usage.as_ref().unwrap();
+        assert_eq!((usage.status, usage.file.as_deref()), ("replica", None));
+        assert!(usage.space.as_ref().is_some_and(|s| s.private && s.owner == "amy"), "{usage:?}");
+        assert_eq!(get(&env, &admin, &format!("{dir}/{hash}")).await.unwrap_err().status, StatusCode::FORBIDDEN);
+        assert_eq!(get(&env, &admin, &format!("{dir}/{hash}").to_uppercase()).await.unwrap_err().status, StatusCode::FORBIDDEN);
+
+        // The company space's is not
+        let (dir, hash) = &keys[1];
+        let p = page(&env, &admin, dir, None, 100).await.unwrap();
+        let usage = p.items.iter().find(|i| &i.entry.name == hash).unwrap().usage.as_ref().unwrap();
+        assert!(usage.status == "replica" && usage.space.is_none(), "{usage:?}");
+        let res = get(&env, &admin, &format!("{dir}/{hash}")).await.unwrap();
+        assert_eq!(axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap().as_ref(), b"company plan");
     }
 }

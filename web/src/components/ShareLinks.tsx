@@ -17,6 +17,11 @@ import { ShareAccessLog } from "@/components/logs/ShareAccessLog";
 import { useMe } from "@/lib/session";
 import { t, tc } from "@/lib/i18n";
 
+/** What a link in someone else's personal space shows instead of its item's name (administrators only delete them) */
+const privateItem = () => t("In someone else's personal space");
+
+const linkName = (s?: ShareInfo) => (s?.private ? privateItem() : s?.node_name);
+
 /** A table of share links with copy, open, edit, delete and the access log */
 export function ShareLinks({
   filter,
@@ -43,6 +48,8 @@ export function ShareLinks({
   const [accessOf, setAccessOf] = useState<string | null>(null);
   const items = q.data ?? [];
   const current = items.find((s) => s.id === selected);
+  // A link in someone else's personal space, listed for an administrator: it can only be deleted
+  const usable = current && !current.private ? current : undefined;
   // The item can only be opened by people who can reach it; administrators can't open personal spaces
   const canOpenItem = (s: ShareInfo) => s.owner_id === me.id || !(admin && s.drive_kind === "personal" && s.drive_owner !== me.username);
 
@@ -66,9 +73,9 @@ export function ShareLinks({
 
   const toolbar = (
     <>
-      <ToolButton icon={CopyIcon} label={t("Copy link")} showLabel disabled={!current} onClick={() => current && copy(current.id)} />
-      <ToolButton icon={ExternalLinkIcon} label={t("Open")} showLabel disabled={!current} onClick={() => current && window.open(sharePath(current.id), "_blank", "noopener")} />
-      <ToolButton icon={PencilIcon} label={t("Edit")} showLabel disabled={!current} onClick={() => current && setEditing(current)} />
+      <ToolButton icon={CopyIcon} label={t("Copy link")} showLabel disabled={!usable} onClick={() => usable && copy(usable.id)} />
+      <ToolButton icon={ExternalLinkIcon} label={t("Open")} showLabel disabled={!usable} onClick={() => usable && window.open(sharePath(usable.id), "_blank", "noopener")} />
+      <ToolButton icon={PencilIcon} label={t("Edit")} showLabel disabled={!usable} onClick={() => usable && setEditing(usable)} />
       <ToolButton icon={Trash2Icon} label={t("Delete link")} showLabel disabled={!current} onClick={() => current && askRemove(current.id)} />
       <ToolSeparator />
       <ToolButton
@@ -88,7 +95,7 @@ export function ShareLinks({
       cell: (s) => (
         <div className="flex max-w-[360px] items-center gap-[7px]">
           <FileIcon node={{ kind: s.node_kind, name: s.node_name, mime: "" }} className="size-4" />
-          <span className="truncate">{s.node_name}</span>
+          {s.private ? <span className="truncate text-muted-foreground italic">{privateItem()}</span> : <span className="truncate">{s.node_name}</span>}
         </div>
       ),
     },
@@ -101,7 +108,7 @@ export function ShareLinks({
     {
       header: t("Link"),
       cellClassName: "font-mono text-muted-foreground",
-      cell: (s) => sharePath(s.id),
+      cell: (s) => (s.private ? "—" : sharePath(s.id)),
     },
     {
       header: t("Date created"),
@@ -158,25 +165,31 @@ export function ShareLinks({
         onRetry={() => q.refetch()}
         selectedKey={selected}
         onSelect={setSelected}
-        onOpen={(s) => copy(s.id)}
+        onOpen={(s) => !s.private && copy(s.id)}
         empty={empty}
         menu={() =>
           current ? (
             <>
-              <DropdownMenuItem onClick={() => copy(current.id)}>
-                <CopyIcon /> {t("Copy link")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => window.open(sharePath(current.id), "_blank", "noopener")}>
-                <ExternalLinkIcon /> {t("Open share page")}
-              </DropdownMenuItem>
-              {canOpenItem(current) && (
+              {usable && (
+                <>
+                  <DropdownMenuItem onClick={() => copy(usable.id)}>
+                    <CopyIcon /> {t("Copy link")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => window.open(sharePath(usable.id), "_blank", "noopener")}>
+                    <ExternalLinkIcon /> {t("Open share page")}
+                  </DropdownMenuItem>
+                </>
+              )}
+              {usable && canOpenItem(usable) && (
                 <DropdownMenuItem onClick={() => navigate(current.node_kind === "folder" ? `/files/${current.node_id}` : `/view/${current.node_id}`)}>
                   <FolderOpenIcon /> {current.node_kind === "folder" ? t("Open folder") : t("Open file")}
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem onClick={() => setEditing(current)}>
-                <PencilIcon /> {t("Edit link")}
-              </DropdownMenuItem>
+              {usable && (
+                <DropdownMenuItem onClick={() => setEditing(usable)}>
+                  <PencilIcon /> {t("Edit link")}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={() => setAccessOf(current.id)}>
                 <HistoryIcon /> {t("Access log")}
               </DropdownMenuItem>
@@ -209,7 +222,7 @@ export function ShareLinks({
                   ? admin && showOwner
                     ? t("Access log for all share links")
                     : t("Access log for my share links")
-                  : t("Access log: {name}", { name: items.find((s) => s.id === accessOf)?.node_name ?? sharePath(accessOf) })}
+                  : t("Access log: {name}", { name: linkName(items.find((s) => s.id === accessOf)) ?? sharePath(accessOf) })}
               </DialogTitle>
             </DialogHeader>
             <ShareAccessLog shareId={accessOf === "all" ? undefined : accessOf} className="min-h-0 flex-1" />

@@ -225,6 +225,7 @@ export default {
   "The download limit must be greater than 0": "下載次數上限必須大於 0",
   "The root folder can't be shared": "無法分享根資料夾",
   "Share link not found": "找不到分享連結",
+  "Links in someone else's personal space can only be deleted": "他人個人空間中的連結只能刪除",
   "This share link doesn't exist or has expired": "分享連結不存在或已失效",
   "This share requires a password": "這個分享需要密碼",
   "The download limit has been reached": "已達下載次數上限",
