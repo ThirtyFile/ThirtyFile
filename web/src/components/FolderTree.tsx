@@ -1,11 +1,18 @@
-import { createContext, useContext, useEffect, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react";
 import { Link, NavLink } from "react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRightIcon, ChevronsDownUpIcon, CloudOffIcon, FolderIcon, FolderOpenIcon, LayersIcon, LocateFixedIcon, type LucideIcon } from "lucide-react";
 import { api, type Node, type NodeInfo } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { useFolderDrop } from "@/lib/dnd";
 import { NavMenu } from "@/components/NavMenu";
+import { InlineRename } from "@/components/InlineRename";
+import { useClickToRename } from "@/lib/clickToRename";
+import { capsOf } from "@/lib/drives";
+import { refreshFiles, renamed } from "@/lib/queries";
+import { useMe } from "@/lib/session";
+import { toastWithUndo } from "@/lib/undo";
+import { useWindowsBehaviour } from "@/lib/windowsBehaviour";
 import { ToolButton } from "@/components/frame/ToolButton";
 import { DRIVE_ICON, useDrives } from "@/lib/drives";
 import { t, tServer } from "@/lib/i18n";
@@ -152,6 +159,32 @@ function Subfolders({ parentId, folders, depth, activeId }: { parentId: string; 
   );
 }
 
+/** The folder whose name is being edited in the tree (clicking the open folder's name, as in File Explorer) */
+const treeRenaming = createStore<string | null>(null);
+
+/** The name box of a folder renamed in the tree; Enter or Esc puts the focus back on the folder */
+function TreeRename({ id, name }: { id: string; name: string }) {
+  const qc = useQueryClient();
+  return (
+    <InlineRename
+      initial={name}
+      selectAll
+      onSubmit={async (next) => {
+        void refreshFiles(qc, renamed(await api.rename(id, next)));
+        toastWithUndo(t('Renamed to "{name}"', { name: next }), {
+          undo: async () => void refreshFiles(qc, renamed(await api.rename(id, name))),
+          undoneText: t("Renamed back"),
+          label: t("Undo rename"),
+        });
+      }}
+      onDone={(byKey) => {
+        treeRenaming.set(null);
+        if (byKey) requestAnimationFrame(() => document.querySelector<HTMLElement>(`[role="tree"] [data-tree-id="${CSS.escape(id)}"]`)?.focus());
+      }}
+    />
+  );
+}
+
 function TreeFolder({
   id,
   name,
@@ -181,6 +214,8 @@ function TreeFolder({
   const item = useTreeItem(id, depth + 1, pos, size);
   const { dropping, dropProps } = useFolderDrop({ id, name });
   useExpandOnHover(id, dropping, open);
+  const renaming = useStore(treeRenaming) === id;
+  const icon = open ? <FolderOpenIcon className="size-[15px] shrink-0" /> : <FolderIcon className="size-[15px] shrink-0" />;
   return (
     <>
       <NavMenu to={`/files/${id}`} nodeId={id}>
@@ -190,17 +225,26 @@ function TreeFolder({
           style={{ paddingLeft: depth * 12 }}
         >
           <Expander id={id} open={open} hidden={empty} />
-          <Link
-            to={`/files/${id}`}
-            {...item}
-            aria-expanded={empty ? undefined : open}
-            aria-current={activeId === id ? "page" : undefined}
-            className="flex h-full min-w-0 flex-1 items-center gap-[7px] pr-2 outline-none"
-            title={name}
-          >
-            {open ? <FolderOpenIcon className="size-[15px] shrink-0" /> : <FolderIcon className="size-[15px] shrink-0" />}
-            <span className="truncate">{name}</span>
-          </Link>
+          {renaming ? (
+            <div className="flex h-full min-w-0 flex-1 items-center gap-[7px] pr-2">
+              {icon}
+              <TreeRename id={id} name={name} />
+            </div>
+          ) : (
+            <Link
+              to={`/files/${id}`}
+              {...item}
+              aria-expanded={empty ? undefined : open}
+              aria-current={activeId === id ? "page" : undefined}
+              className="flex h-full min-w-0 flex-1 items-center gap-[7px] pr-2 outline-none"
+              title={name}
+            >
+              {icon}
+              <span data-name className="truncate">
+                {name}
+              </span>
+            </Link>
+          )}
         </div>
       </NavMenu>
       {open && children.data && <Subfolders parentId={id} folders={children.data} depth={depth} activeId={activeId} />}
@@ -323,6 +367,23 @@ function ThisPc({ activeId }: { activeId?: string }) {
  */
 export function FolderTree({ activeId }: { activeId?: string }) {
   const [tabKey, setTabKey] = useState(ROOT);
+  const tree = useRef<HTMLDivElement>(null);
+
+  // Clicking the open folder's name renames it (the Windows style), where the person may: not a space's top folder.
+  // Its details are the folder page's, which usually has them already
+  const behaviour = useWindowsBehaviour();
+  const me = useMe();
+  const info = useQuery({ queryKey: keys.node(activeId), queryFn: () => api.node(activeId!), enabled: !!activeId && behaviour.clickToRename });
+  const active = info.data?.node.id === activeId ? info.data : undefined;
+  const canRename = !!active?.node.parent_id && capsOf(active.role, me, active.read_only).write;
+  useClickToRename({
+    enabled: behaviour.clickToRename && canRename,
+    root: tree,
+    itemOf: (el) => el.closest<HTMLElement>("[data-tree-id]")?.dataset.treeId ?? null,
+    selectedAlone: (id) => id === activeId,
+    canRename: (id) => id === activeId && canRename,
+    start: (id) => treeRenaming.set(id),
+  });
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const item = (e.target as HTMLElement).closest<HTMLElement>('[role="treeitem"]');
@@ -350,7 +411,7 @@ export function FolderTree({ activeId }: { activeId?: string }) {
 
   return (
     <TabStop.Provider value={{ key: tabKey, setKey: setTabKey }}>
-      <div role="tree" aria-label={t("Folders")} onKeyDown={onKeyDown}>
+      <div ref={tree} role="tree" aria-label={t("Folders")} onKeyDown={onKeyDown}>
         <ThisPc activeId={activeId} />
       </div>
     </TabStop.Provider>

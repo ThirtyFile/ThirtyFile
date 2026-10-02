@@ -255,7 +255,9 @@ export const ListRow = memo(function ListRow(r: RowProps & { checkboxes: boolean
             renameBox(r)
           ) : (
             <>
-              <span className="truncate">{item.name}</span>
+              <span data-name className="truncate">
+                {item.name}
+              </span>
               {item.is_favorite && <StarIcon className="size-[11px] shrink-0 fill-amber-400 text-amber-400" aria-label={tc("state", "Favorite")} />}
             </>
           )}
@@ -292,7 +294,13 @@ export const Tile = memo(function Tile(r: RowProps & { view: Exclude<ViewMode, "
       <>
         {checkbox}
         <FileIcon node={item} className="size-4" />
-        {r.renaming ? renameBox(r) : <span className="truncate">{item.name}</span>}
+        {r.renaming ? (
+          renameBox(r)
+        ) : (
+          <span data-name className="truncate">
+            {item.name}
+          </span>
+        )}
         {star}
       </>
     );
@@ -304,7 +312,13 @@ export const Tile = memo(function Tile(r: RowProps & { view: Exclude<ViewMode, "
           <Thumb node={item} source={r.source} className="max-h-12 max-w-12 rounded" iconClass="size-8" />
         </div>
         <div className="grid min-w-0 flex-1 text-left leading-[18px]">
-          {r.renaming ? renameBox(r) : <span className="truncate text-[13px]">{item.name}</span>}
+          {r.renaming ? (
+            renameBox(r)
+          ) : (
+            <span data-name className="truncate text-[13px]">
+              {item.name}
+            </span>
+          )}
           <span className="truncate text-xs text-muted-foreground">{typeLabel(item)}</span>
           {item.kind === "file" && <span className="truncate text-xs text-muted-foreground tabular-nums">{formatWinSize(item.size)}</span>}
         </div>
@@ -320,7 +334,13 @@ export const Tile = memo(function Tile(r: RowProps & { view: Exclude<ViewMode, "
         <div className={cn("flex items-center justify-center", medium ? "h-14" : "h-[88px]")}>
           <Thumb node={item} source={r.source} className={cn("w-full rounded", medium ? "max-h-14" : "max-h-[88px]")} iconClass={medium ? "size-8" : "size-[42px]"} />
         </div>
-        {r.renaming ? renameBox(r, true) : <span className="line-clamp-2 pt-1.5 text-xs leading-[18px] break-all">{item.name}</span>}
+        {r.renaming ? (
+          renameBox(r, true)
+        ) : (
+          <span data-name className="line-clamp-2 pt-1.5 text-xs leading-[18px] break-all">
+            {item.name}
+          </span>
+        )}
         {star && <span className="absolute top-1.5 right-1.5 flex">{star}</span>}
         {checkbox}
       </>
