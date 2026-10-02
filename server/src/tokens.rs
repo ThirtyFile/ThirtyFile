@@ -158,7 +158,7 @@ pub async fn authenticate(parts: &Parts, st: &AppState, credential: Credential) 
 }
 
 /// Methods that change nothing: all a read-only app password may use (OPTIONS and PROPFIND are WebDAV's way of
-/// asking what is there, see dav.rs)
+/// asking what is there, see dav/)
 pub fn reads_only(method: &Method) -> bool {
     matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS) || method.as_str() == "PROPFIND"
 }

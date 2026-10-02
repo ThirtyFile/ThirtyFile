@@ -94,7 +94,7 @@ pub fn spawn_health_monitor(st: AppState) {
     });
 }
 
-/// What connecting does with a Local folder location's folder (storage.rs, `LOCATION_MARKER`)
+/// What connecting does with a Local folder location's folder (storage/markers.rs, `LOCATION_MARKER`)
 #[derive(Clone, Copy)]
 pub(super) enum Folder<'a> {
     /// Used as it is: it must hold the marker of the location with this id

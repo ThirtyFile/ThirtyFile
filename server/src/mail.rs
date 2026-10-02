@@ -139,7 +139,7 @@ pub struct SettingsReq {
 
 /// The settings asked for, checked; a blank password keeps the saved one (and there is none without a username), but
 /// only for the same server and account: otherwise it would be sent to wherever the new settings point, and anyone
-/// able to change them could collect it (as for storage locations, locations.rs)
+/// able to change them could collect it (as for storage locations, locations/)
 fn settings_from(req: SettingsReq, saved: &SmtpSettings) -> AppResult<SmtpSettings> {
     let host = req.host.trim().to_string();
     let from = req.from.trim().to_string();

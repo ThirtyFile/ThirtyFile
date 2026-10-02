@@ -3,7 +3,7 @@
 //! Whether a new user gets one, and on which storage location, follows the policy in Control panel › General
 //! (`personal_spaces`, `personal_location`). The new user dialog and single sign-on domain rules can choose
 //! otherwise, and an administrator can add one to an existing user later, or remove it: its files then move into
-//! another space or are deleted, as when the user is deleted (admin.rs).
+//! another space or are deleted, as when the user is deleted (admin/).
 //!
 //! A user without a personal space has `users.root_id` NULL: the "root" alias answers 404, and the web interface
 //! starts in the first space they can use.
