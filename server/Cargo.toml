@@ -87,5 +87,12 @@ lto = "thin"
 codegen-units = 1
 strip = true
 
+# Every test that creates an account hashes its password with Argon2 (19 MiB, two passes). Unoptimized, a hash is
+# slow enough to take most of the time cargo test runs; optimizing only the hashing crates keeps the rest debuggable.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+
 [dev-dependencies]
 rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs"] }
