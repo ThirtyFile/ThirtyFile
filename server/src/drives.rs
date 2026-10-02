@@ -57,13 +57,20 @@ pub struct DriveInfo {
 }
 
 async fn drive_info(st: &AppState, conn: &mut SqliteConnection, d: Drive, role: Option<Role>, admin: bool) -> AppResult<DriveInfo> {
-    Ok(drive_infos(st, conn, vec![(d, role)], false, admin).await?.pop().expect("one space in, one out"))
+    Ok(drive_infos(st, conn, vec![(d, role)], None, admin).await?.pop().expect("one space in, one out"))
 }
 
 /// What the space cards show, for many spaces in one query (the lists don't run a query per space). With
-/// `scan_details`, folder spaces also report their folder and last scan (administrators). `admin`: the person asking is
+/// `scan_details` (the administrator asking), folder spaces also report their folder and last scan; of someone else's
+/// personal space only what the scan did, not its folder or the names of what it skipped. `admin`: the person asking is
 /// an administrator, who is told why a storage location is offline.
-async fn drive_infos(st: &AppState, conn: &mut SqliteConnection, drives: Vec<(Drive, Option<Role>)>, scan_details: bool, admin: bool) -> AppResult<Vec<DriveInfo>> {
+async fn drive_infos(
+    st: &AppState,
+    conn: &mut SqliteConnection,
+    drives: Vec<(Drive, Option<Role>)>,
+    scan_details: Option<i64>,
+    admin: bool,
+) -> AppResult<Vec<DriveInfo>> {
     #[derive(sqlx::FromRow)]
     struct Row {
         id: String,
@@ -96,13 +103,14 @@ async fn drive_infos(st: &AppState, conn: &mut SqliteConnection, drives: Vec<(Dr
         // A folder space on a location (the built-in one, or a Local folder location) is offline with it: its
         // disk may not be mounted. A folder an administrator chose is on no location.
         let offline = r.location_id.as_deref().and_then(|location| st.location_offline_for(location, admin));
-        let details = scan_details && d.is_folder();
+        let details = scan_details.is_some() && d.is_folder();
+        let private = d.kind == tree::SpaceKind::Personal && d.owner_id != scan_details;
         out.push(DriveInfo {
             mode: d.mode,
             read_only: d.read_only,
-            source_path: d.source_path.clone().filter(|_| details),
+            source_path: d.source_path.clone().filter(|_| details && !private),
             last_scan_at: r.last_scan_at.filter(|_| details),
-            scan_report: r.scan_report.filter(|_| details).and_then(|r| serde_json::from_str(&r).ok()),
+            scan_report: r.scan_report.filter(|_| details).and_then(|r| serde_json::from_str(&r).ok()).map(|r| crate::folders::report_for(r, private)),
             scanning: if details { crate::folders::progress(st, &d.id) } else { None },
             used_bytes: d.used_bytes,
             id: d.id,
@@ -126,7 +134,7 @@ async fn drive_infos(st: &AppState, conn: &mut SqliteConnection, drives: Vec<(Dr
 pub async fn list(State(st): State<AppState>, user: User) -> AppResult<Json<Vec<DriveInfo>>> {
     let mut c = st.db.acquire().await?;
     let drives = tree::user_drives(&mut c, &user).await?.into_iter().map(|(d, role)| (d, Some(role))).collect();
-    Ok(Json(drive_infos(&st, &mut c, drives, false, user.is_admin()).await?))
+    Ok(Json(drive_infos(&st, &mut c, drives, None, user.is_admin()).await?))
 }
 
 fn can_create_drive(st: &AppState, user: &User) -> bool {
@@ -237,6 +245,8 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
 /// Scans a folder space now (Control panel › Spaces › Check for changes). A large folder takes a while: the scan runs
 /// as a job (jobs.rs), whose result is the scan's report
 pub async fn scan(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>) -> AppResult<Json<crate::jobs::Job>> {
+    let drive = tree::get_drive(&mut *st.db.acquire().await?, &id).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
+    let private = drive.kind == tree::SpaceKind::Personal && drive.owner_id != Some(user.id);
     let job = crate::jobs::run(&st.clone(), &user, "scan", crate::jobs::Limit::Changes, crate::jobs::wait(), move |t| async move {
         let scan = crate::folders::scan(&st, &id);
         tokio::pin!(scan);
@@ -251,7 +261,8 @@ pub async fn scan(State(st): State<AppState>, Admin(user): Admin, Path(id): Path
                 }
             }
         };
-        Ok(crate::jobs::Outcome { result: Some(serde_json::to_value(&report).map_err(AppError::internal)?), ..Default::default() })
+        let report = crate::folders::report_for(serde_json::to_value(&report).map_err(AppError::internal)?, private);
+        Ok(crate::jobs::Outcome { result: Some(report), ..Default::default() })
     })
     .await?;
     Ok(Json(job))
@@ -366,7 +377,7 @@ pub async fn admin_list(State(st): State<AppState>, Admin(user): Admin) -> AppRe
         let role = roles.get(&d.id).copied();
         (d, role)
     });
-    Ok(Json(drive_infos(&st, &mut c, drives.collect(), true, true).await?))
+    Ok(Json(drive_infos(&st, &mut c, drives.collect(), Some(user.id), true).await?))
 }
 
 // ───────────── Access (space members / folder sharing) ─────────────
@@ -777,6 +788,57 @@ mod tests {
         drop(held);
         let job = crate::jobs::wait_for(&env.st, &job.id).await;
         assert_eq!(job.result.unwrap()["added"], 1);
+    }
+
+    #[tokio::test]
+    async fn checks_of_other_peoples_personal_folders_report_counts_but_no_names() {
+        let env = testutil::folders_env().await;
+        let admin = env.admin().await;
+        let amy = env.user("amy", true).await;
+        let theirs = env.drive_of(amy.root()).await;
+        let own = env.drive_of(admin.root()).await;
+        let report = json!({ "at": 1, "added": 2, "changed": 0, "moved": 0, "removed": 0, "skipped": ["Medical/test-result.pdf: a symbolic link"], "error": null });
+        sqlx::query("UPDATE drives SET scan_report = ?, last_scan_at = 1 WHERE id IN (?, ?)")
+            .bind(report.to_string())
+            .bind(&theirs)
+            .bind(&own)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        let Json(spaces) = admin_list(State(env.st.clone()), Admin(admin.clone())).await.unwrap();
+        let space = |id: &str| serde_json::to_value(spaces.iter().find(|s| s.id == id).unwrap()).unwrap();
+
+        // Amy's: what the check did, and how many items it skipped, but not which, nor her folder on the server
+        let amys = space(&theirs);
+        assert!(amys.get("source_path").is_none(), "{amys}");
+        assert_eq!((amys["scan_report"]["added"].as_i64(), amys["scan_report"]["skipped_count"].as_i64()), (Some(2), Some(1)));
+        assert!(!amys.to_string().contains("Medical"), "{amys}");
+        // The administrator's own: everything
+        let mine = space(&own);
+        assert!(mine["source_path"].is_string() && mine["scan_report"]["skipped"][0].as_str().unwrap().starts_with("Medical/"), "{mine}");
+        // The list of a storage location's spaces doesn't say where amy's is kept either
+        let Json(on_location) = crate::locations::spaces(State(env.st.clone()), Admin(admin.clone()), Path("local".into())).await.unwrap();
+        let on_location = serde_json::to_value(&on_location).unwrap();
+        let path_of = |owner: &str| on_location.as_array().unwrap().iter().find(|s| s["owner_name"] == owner).unwrap()["source_path"].clone();
+        assert!(path_of("amy").is_null() && path_of("admin").is_string(), "{on_location}");
+
+        // Checking amy's folder now answers the same way
+        #[cfg(unix)]
+        {
+            let dir = std::path::PathBuf::from(amys_folder(&env, &theirs).await);
+            std::fs::create_dir_all(dir.join("Medical")).unwrap();
+            std::os::unix::fs::symlink("/etc/hostname", dir.join("Medical/test-result.pdf")).unwrap();
+            let Json(job) = scan(State(env.st.clone()), Admin(admin.clone()), Path(theirs.clone())).await.unwrap();
+            let result = job.result.unwrap();
+            assert!(result["skipped_count"].as_u64() >= Some(1) && result["skipped"] == json!([]), "{result}");
+            assert!(!result.to_string().contains("Medical"), "{result}");
+        }
+    }
+
+    #[cfg(unix)]
+    async fn amys_folder(env: &testutil::TestEnv, drive: &str) -> String {
+        let (path,): (String,) = sqlx::query_as("SELECT source_path FROM drives WHERE id = ?").bind(drive).fetch_one(&env.st.db).await.unwrap();
+        path
     }
 
     #[tokio::test]

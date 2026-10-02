@@ -93,10 +93,14 @@ export function ActivityLog({ driveId, className, compact }: { driveId?: string;
                       </button>
                     </td>
                     <td className="px-2.5 py-1.5 whitespace-nowrap">{actionLabel(a.action)}</td>
-                    <td className="max-w-0 truncate px-2.5 py-1.5" title={`${a.node_name} ${detail}`}>
-                      {a.node_name || (a.node_id ? defaultName(a.drive_name) : "")}
-                      {detail && <span className="ml-1.5 text-muted-foreground">{detail}</span>}
-                    </td>
+                    {a.private ? (
+                      <td className="max-w-0 truncate px-2.5 py-1.5 text-muted-foreground italic">{t("In someone else's personal space")}</td>
+                    ) : (
+                      <td className="max-w-0 truncate px-2.5 py-1.5" title={`${a.node_name} ${detail}`}>
+                        {a.node_name || (a.node_id ? defaultName(a.drive_name) : "")}
+                        {detail && <span className="ml-1.5 text-muted-foreground">{detail}</span>}
+                      </td>
+                    )}
                     {!driveId && <td className="truncate px-2.5 py-1.5 text-muted-foreground max-md:hidden">{a.drive_name === null ? "—" : defaultName(a.drive_name)}</td>}
                   </tr>
                 );

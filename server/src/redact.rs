@@ -3,8 +3,8 @@
 /// Keys whose values are secrets wherever they appear as `key=value`
 const SECRET_KEYS: [&str; 10] = ["token", "password", "passwd", "secret", "key", "code", "ticket", "sig", "session", "auth"];
 
-/// Leaves out of a message what could name something in a space or let someone in: text in double or curly quotes
-/// ("…"), the values of secret-looking `key=value` pairs, share link tokens and `Bearer` credentials
+/// Leaves out of a message what could name something in a space or let someone in: text in quotes ("…", “…”, ‘…’,
+/// and 「…」 or 『…』 as Chinese text quotes names), the values of secret-looking `key=value` pairs, share link tokens and `Bearer` credentials
 pub fn redact(s: &str) -> String {
     let quoted = redact_quotes(s);
     let mut out = String::with_capacity(quoted.len());
@@ -48,6 +48,10 @@ fn redact_quotes(s: &str) -> String {
         let close = match c {
             '"' => '"',
             '“' => '”',
+            '‘' => '’',
+            // The quotes of Chinese and Japanese text
+            '「' => '」',
+            '『' => '』',
             _ => {
                 out.push(c);
                 continue;
@@ -100,6 +104,9 @@ mod tests {
     fn names_tokens_and_secrets_are_left_out() {
         assert_eq!(redact(r#"An item named "Salaries 2026.xlsx" already exists"#), r#"An item named "…" already exists"#);
         assert_eq!(redact("“Budget” changed while it was being moved"), "“…” changed while it was being moved");
+        assert_eq!(redact("「Secret plan.docx」已存在"), "「…」已存在");
+        assert_eq!(redact("無法把『病歷 2026』移到「醫療」"), "無法把『…』移到「…」");
+        assert_eq!(redact("‘Diary.txt’ is locked, but it’s fine"), "‘…’ is locked, but it’s fine");
         assert_eq!(redact("GET /api/x?token=abc123&page=2 failed"), "GET /api/x?token=…&page=2 failed");
         assert_eq!(redact("password=hunter2, reset_key=xyz"), "password=…, reset_key=…");
         assert_eq!(redact("Authorization: Bearer abc.def"), "Authorization: Bearer …");

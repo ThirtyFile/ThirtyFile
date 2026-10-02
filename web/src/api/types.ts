@@ -112,7 +112,9 @@ export interface ScanReport {
   changed: number;
   moved: number;
   removed: number;
+  /** Items that couldn't be indexed, with the reason; empty in someone else's personal space, which has `skipped_count` */
   skipped: string[];
+  skipped_count?: number;
   error: string | null;
 }
 
@@ -684,10 +686,12 @@ export interface Activity {
   node_name: string;
   action: string;
   detail: string;
+  /** About someone else's personal space: the item and the details are left out */
+  private?: boolean;
 }
 
 /** An entry of an item's history (Details pane): the item itself, or something inside the folder */
-export type HistoryEntry = Omit<Activity, "drive_id" | "drive_name">;
+export type HistoryEntry = Omit<Activity, "drive_id" | "drive_name" | "private">;
 
 /** Activity log filters (times are Unix seconds, start inclusive, end exclusive) */
 export interface ActivityFilter {

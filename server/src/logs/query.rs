@@ -115,6 +115,8 @@ pub struct ActivityRow {
     pub(super) node_name: String,
     pub(super) action: String,
     pub(super) detail: String,
+    /// An entry about someone else's personal space: the item and the details are left out
+    pub(super) private: bool,
 }
 
 #[derive(Deserialize, Default)]
@@ -147,11 +149,20 @@ pub(super) async fn authorize_activity(st: &AppState, user: &User, q: &ActivityQ
     }
 }
 
-pub(super) async fn query_activity(st: &AppState, q: &ActivityQuery, limit: i64) -> AppResult<Vec<ActivityRow>> {
-    let mut f = Filters::new(
-        "SELECT a.id, a.at, a.username, a.drive_id, d.name AS drive_name, a.node_id, a.node_name, a.action, a.detail
-         FROM activity a LEFT JOIN drives d ON d.id = a.drive_id",
-    );
+/// Entries as user `me` is shown them: those about someone else's personal space (or a space that is gone) say who did
+/// what there and when, but not to what (the item, the details), and the keyword search doesn't look at what they leave
+/// out. Administrators read the log without a space, so this keeps the names in personal spaces from them.
+pub(super) async fn query_activity(st: &AppState, q: &ActivityQuery, me: i64, limit: i64) -> AppResult<Vec<ActivityRow>> {
+    let private = format!("(a.private_to IS NOT NULL AND a.private_to <> {me})");
+    let mut f = Filters::new(format!(
+        "SELECT * FROM (
+           SELECT a.id, a.at, a.username, a.drive_id, d.name AS drive_name, a.action, {private} AS private,
+                  CASE WHEN {private} THEN NULL ELSE a.node_id END AS node_id,
+                  CASE WHEN {private} THEN '' ELSE a.node_name END AS node_name,
+                  CASE WHEN {private} THEN '' ELSE a.detail END AS detail
+           FROM activity a LEFT JOIN drives d ON d.id = a.drive_id
+         ) a"
+    ));
     f.eq("a.drive_id", q.drive_id.as_deref())
         .contains(&["a.username"], q.user.as_deref())
         .one_of("a.action", q.action.as_deref())
@@ -164,7 +175,7 @@ pub(super) async fn query_activity(st: &AppState, q: &ActivityQuery, limit: i64)
 pub async fn activity(State(st): State<AppState>, user: User, Query(q): Query<ActivityQuery>) -> AppResult<Json<Value>> {
     authorize_activity(&st, &user, &q).await?;
     let limit = page_size(q.limit);
-    Ok(page(query_activity(&st, &q, limit).await?, limit, |r| r.id))
+    Ok(page(query_activity(&st, &q, user.id, limit).await?, limit, |r| r.id))
 }
 
 // ───────────── An item's history (Details pane) ─────────────

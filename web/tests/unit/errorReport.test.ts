@@ -2,6 +2,7 @@
 // bounded and out of the way
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ApiError } from "@/api";
+import { errorFromBody } from "@/api/client";
 import { describe as describeError, pageRoute, report, reportShown, resetErrorReporting, worthReporting, type ErrorReport } from "@/lib/errorReport";
 
 const sent: ErrorReport[] = [];
@@ -32,6 +33,17 @@ describe("a report", () => {
   test("of a failed request carries its status, code and request id", () => {
     const r = describeError("handled", new ApiError("No permission", 403, "forbidden", "abc123"), "upload", "node1");
     expect(r).toMatchObject({ kind: "handled", operation: "upload", message: "No permission", status: 403, code: "forbidden", request_id: "abc123", resource: "node1" });
+  });
+
+  test("of a failed request has the server's own message, not the one translated for the page", () => {
+    // The server's message is kept with the error
+    const failed = errorFromBody(409, JSON.stringify({ error: '"Secret plan.docx" already exists' }), "/api/nodes/x/rename", "failed");
+    expect(failed.serverMessage).toBe('"Secret plan.docx" already exists');
+    // and reported instead of what a Traditional Chinese page shows, whose quotes the server doesn't know
+    const shown = new ApiError("「Secret plan.docx」已存在", 409, undefined, undefined, '"Secret plan.docx" already exists');
+    const r = describeError("handled", shown, "rename");
+    expect(r.message).toBe('"Secret plan.docx" already exists');
+    expect(r.stack ?? "").not.toContain("已存在");
   });
 
   test("leaves the query and a share link's token out of the page's path, and shortens long text", () => {

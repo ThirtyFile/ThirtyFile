@@ -138,19 +138,22 @@ pub struct LocationSpace {
 }
 
 /// The spaces on a storage location (Control panel › Storage locations)
-pub async fn spaces(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Vec<LocationSpace>>> {
+pub async fn spaces(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<String>) -> AppResult<Json<Vec<LocationSpace>>> {
     let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM storage_locations WHERE id = ?").bind(&id).fetch_optional(&st.db).await?;
     if exists.is_none() {
         return Err(AppError::not_found("Storage location not found"));
     }
     let list: Vec<LocationSpace> = sqlx::query_as(
         "SELECT d.id, d.name, d.kind, d.mode, CASE WHEN d.kind = 'personal' THEN COALESCE(u.username, '') ELSE '' END AS owner_name,
-                d.used_bytes, CASE WHEN d.mode = 'folder' THEN d.source_path END AS source_path
+                d.used_bytes,
+                -- Not where someone else's personal space is kept (as in Control panel › Spaces)
+                CASE WHEN d.mode = 'folder' AND NOT (d.kind = 'personal' AND d.owner_id IS NOT ?2) THEN d.source_path END AS source_path
          FROM drives d LEFT JOIN users u ON u.id = d.owner_id
-         WHERE d.location_id = ?
+         WHERE d.location_id = ?1
          ORDER BY CASE d.kind WHEN 'company' THEN 0 WHEN 'team' THEN 1 ELSE 2 END, d.name, owner_name",
     )
     .bind(&id)
+    .bind(me.id)
     .fetch_all(&st.db)
     .await?;
     Ok(Json(list))

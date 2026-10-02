@@ -143,6 +143,17 @@ pub struct ScanReport {
     leftovers: Vec<String>,
 }
 
+/// A scan's report (as JSON) as an administrator is shown it: of someone else's personal space (`private`), what the
+/// scan did and how many items it skipped (`skipped_count`), but not which
+pub fn report_for(mut report: serde_json::Value, private: bool) -> serde_json::Value {
+    if private && let Some(skipped) = report.get_mut("skipped").and_then(|s| s.as_array_mut()) {
+        let count = skipped.len();
+        skipped.clear();
+        report["skipped_count"] = count.into();
+    }
+    report
+}
+
 /// What a scan is doing
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
