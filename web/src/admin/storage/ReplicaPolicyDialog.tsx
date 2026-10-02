@@ -83,10 +83,12 @@ export function ReplicaPolicyDialog({ policy: p, source: preset, onClose, onDone
       rate_limit: Math.round(rate * 1_000_000),
     };
     if (p) {
-      await api.updateReplicaPolicy(p.id, { ...settings, name: name.trim() || undefined });
+      // The name shown may be a translation of the one ThirtyFile gave it: it is sent only when changed
+      await api.updateReplicaPolicy(p.id, { ...settings, name: name.trim() && name.trim() !== p.name ? name.trim() : undefined });
       toast.success(t('"{name}" was changed', { name: name.trim() || p.name }));
     } else {
-      await api.createReplicaPolicy({ ...settings, name: name.trim() || defaultName, source });
+      // Left empty, the server names it "Replicas of <location>", shown in each person's language
+      await api.createReplicaPolicy({ ...settings, name: name.trim() || undefined, source });
       toast.success(t('"{name}" was made; the first copies are being made in the background', { name: name.trim() || defaultName }));
     }
     onDone();

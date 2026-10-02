@@ -26,7 +26,9 @@ export function CopyEverythingDialog({ location, onClose }: { location: StorageL
   const locations = useQuery(queries.storageLocations);
   const targets = (locations.data ?? []).filter((l) => l.id !== location.id);
   const [dest, setDest] = useState("");
-  const [name, setName] = useState(() => t("Copy of {name}", { name: location.name }));
+  // Left empty, the server names it "Copy of <location>", shown in each person's language
+  const [name, setName] = useState("");
+  const defaultName = t("Copy of {name}", { name: location.name });
   const preview = useQuery({
     queryKey: keys.copyPreview(location.id, dest),
     queryFn: () => api.copyPreview(location.id, dest),
@@ -38,8 +40,8 @@ export function CopyEverythingDialog({ location, onClose }: { location: StorageL
   const destName = targets.find((l) => l.id === dest)?.name ?? "";
   const { busy, error, run } = useSubmit(async () => {
     if (!dest) return;
-    await api.startCopy(location.id, dest, name.trim());
-    toast.success(t('"{name}" is being made in the background', { name: name.trim() }), {
+    await api.startCopy(location.id, dest, name.trim() || undefined);
+    toast.success(t('"{name}" is being made in the background', { name: name.trim() || defaultName }), {
       action: { label: t("Show copies"), onClick: () => navigate("/admin/backups") },
     });
     onClose();
@@ -74,7 +76,7 @@ export function CopyEverythingDialog({ location, onClose }: { location: StorageL
           </div>
           <div className="grid gap-2">
             <Label htmlFor="copy-name">{t("Name of the copy")}</Label>
-            <Input id="copy-name" value={name} maxLength={200} onChange={(e) => setName(e.target.value)} />
+            <Input id="copy-name" value={name} placeholder={defaultName} maxLength={200} onChange={(e) => setName(e.target.value)} />
           </div>
           {dest && preview.isLoading && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -147,7 +149,7 @@ export function CopyEverythingDialog({ location, onClose }: { location: StorageL
             <Button type="button" variant="outline" onClick={onClose}>
               {t("Cancel")}
             </Button>
-            <Button type="submit" disabled={busy || !p || !!p.problem || tooSmall || !name.trim() || p.spaces.length === 0}>
+            <Button type="submit" disabled={busy || !p || !!p.problem || tooSmall || p.spaces.length === 0}>
               {busy && <Loader2Icon className="animate-spin" />}
               {t("Start copying")}
             </Button>

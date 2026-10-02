@@ -1,5 +1,6 @@
 import { request, get, post, enc, qs } from "@/api/client";
 import { locationName } from "@/api/names";
+import { tMadeName } from "@/lib/i18n";
 import type { ReplicasOverview, ReplicaPolicyRequest, PromotePreflight } from "@/api/types";
 
 /** Replicas of storage locations, and promoting one (administrators) */
@@ -9,6 +10,7 @@ export const replicasApi = {
       ...o,
       policies: o.policies.map((p) => ({
         ...p,
+        name: tMadeName(p.name),
         source_name: locationName(p.source_location, p.source_name),
         targets: p.targets.map((t) => ({ ...t, name: locationName(t.location_id, t.name) })),
       })),

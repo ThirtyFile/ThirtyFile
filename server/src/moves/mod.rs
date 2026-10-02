@@ -346,6 +346,7 @@ async fn mode_on(st: &AppState, conn: &mut SqliteConnection, location: &str) -> 
 
 /// Writes an activity log entry about a move, as done by whoever asked for it
 async fn log(conn: &mut SqliteConnection, job: &Job, action: &str, detail: &str) -> Result<(), sqlx::Error> {
+    debug_assert!(crate::logs::known_action(action), "{action} isn't in logs::ACTIONS");
     sqlx::query(
         "INSERT INTO activity (at, user_id, username, drive_id, node_id, node_name, action, detail)
          SELECT ?, ?, ?, d.id, d.root_id, COALESCE((SELECT name FROM nodes WHERE id = d.root_id), ''), ?, ? FROM drives d WHERE d.id = ?",

@@ -123,6 +123,7 @@ pub async fn bytes_by_location(db: &SqlitePool) -> Result<Vec<(String, i64)>, sq
 
 /// Writes an activity log entry about a job, as done by whoever asked for it
 async fn log(conn: &mut SqliteConnection, job: &Job, action: &str, detail: &str) -> Result<(), sqlx::Error> {
+    debug_assert!(crate::logs::known_action(action), "{action} isn't in logs::ACTIONS");
     sqlx::query("INSERT INTO activity (at, user_id, username, action, detail) VALUES (?, ?, ?, ?, ?)")
         .bind(now())
         .bind(job.created_by)

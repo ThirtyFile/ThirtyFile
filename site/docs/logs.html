@@ -73,7 +73,7 @@
             </tbody>
           </table>
         </div>
-        <p>Filter by person, action and date, and export the result as a CSV file that opens in Excel.</p>
+        <p>Filter by person, action and date, and export the result as a CSV file that opens in Excel. The file uses the names and the language you see on the page, and your time zone.</p>
         <p>The activity log is for administrators, and for space managers in the space's properties (<strong>This PC</strong>). Everyone else sees the recent activity of a file or folder they can open in its <a href="files.html#details">details pane</a>.</p>
         <p>Entries about other people's personal spaces say who did what and when, but not to which file or folder: the item and the details are left out (<a href="users.html#privacy">What administrators can see</a>). The search and the CSV export leave them out too, and so do the share link access log for links in those spaces, and archive files.</p>
         <p>Everyone can see their own sign-in history and signed-in devices from the account menu. See <a href="account.html">Your account</a>.</p>
@@ -92,7 +92,7 @@
         <p>Under <strong>Control panel › Log settings</strong>:</p>
         <ul>
           <li>Activity and share link access are kept for 180 days, sign-ins for 365 days. Errors are kept as long as activity.</li>
-          <li>Older entries are moved to compressed archive files, which are kept for 3 years and can be downloaded from the same page.</li>
+          <li>Older entries are moved to compressed archive files, which are kept for 3 years and can be downloaded from the same page. An archive has one JSON entry per line, with the codes the log keeps (<code>upload</code>, <code>bad_password</code>) and times in seconds since 1970 (UTC), the same in every language.</li>
           <li>Recording visitors' IP addresses and browsers can be switched off.</li>
         </ul>
         <div class="note">Logs contain IP addresses, which are personal data in many countries. Keep and delete them according to your privacy policy.</div>

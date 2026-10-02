@@ -184,6 +184,11 @@ export default {
   "External accounts": "外部帳號",
   "Export records that match the filters (up to 100,000)": "匯出符合篩選條件的紀錄（最多 10 萬筆）",
   "Export CSV": "匯出 CSV",
+  "Export failed": "匯出失敗",
+  // Names of exported files, before the date
+  "activity-log": "活動紀錄",
+  "login-log": "登入紀錄",
+  "error-log": "錯誤紀錄",
   "Event": "事件",
   "No matching records": "沒有符合條件的紀錄",
   "No sign-in records yet": "還沒有登入紀錄",

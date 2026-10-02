@@ -1,5 +1,6 @@
 import { request, get, post, enc, qs } from "@/api/client";
 import { driveName, locationName } from "@/api/names";
+import { tMadeName } from "@/lib/i18n";
 import type { BackupSchedule, BackupPolicySettings, BackupsOverview, CopyPreview, RestorePreview, RestoreRequest, SnapshotItem, BackupJob } from "@/api/types";
 
 /** Whether a backup job isn't over */
@@ -12,17 +13,22 @@ export const backupsApi = {
       ...o,
       sets: o.sets.map((s) => ({
         ...s,
+        name: tMadeName(s.name),
         source_name: s.source_location ? locationName(s.source_location, s.source_name) : s.source_name,
         dest_name: locationName(s.dest_location, s.dest_name),
         snapshots: s.snapshots.map((n) => ({ ...n, spaces: n.spaces.map((sp) => ({ ...sp, name: driveName(sp) })) })),
       })),
+      jobs: o.jobs.map((j) => ({ ...j, label: tMadeName(j.label) })),
     })),
   copyPreview: (source: string, dest: string) =>
     post<CopyPreview>("/admin/backups/copies/preview", { source, dest }).then((p) => ({
       ...p,
+      source_name: locationName(source, p.source_name),
+      dest_name: locationName(dest, p.dest_name),
       spaces: p.spaces.map((s) => ({ ...s, name: driveName(s) })),
     })),
-  startCopy: (source: string, dest: string, name: string) => post<{ set_id: string; job_id: string }>("/admin/backups/copies", { source, dest, name }),
+  /** Without a name, the server names the copy "Copy of <location>", shown in the interface's language */
+  startCopy: (source: string, dest: string, name?: string) => post<{ set_id: string; job_id: string }>("/admin/backups/copies", { source, dest, name }),
   pauseBackupJob: (id: string) => post(enc`/admin/backups/jobs/${id}/pause`),
   resumeBackupJob: (id: string) => post(enc`/admin/backups/jobs/${id}/resume`),
   cancelBackupJob: (id: string) => post(enc`/admin/backups/jobs/${id}/cancel`),
@@ -37,7 +43,7 @@ export const backupsApi = {
   restoreBackup: (snapshot: string, req: RestoreRequest) => post<{ job_id: string }>(enc`/admin/backups/snapshots/${snapshot}/restore`, req),
   browseSnapshot: (snapshot: string, space: string, folder?: string | null) =>
     get<{ path: [string, string][]; items: SnapshotItem[] }>(enc`/admin/backups/snapshots/${snapshot}/browse` + qs({ space, folder: folder ?? undefined })),
-  createBackupPolicy: (req: Partial<BackupPolicySettings> & { name: string; source: string; dest: string }) => post<{ set_id: string }>("/admin/backups/policies", req),
+  createBackupPolicy: (req: Partial<BackupPolicySettings> & { name?: string; source: string; dest: string }) => post<{ set_id: string }>("/admin/backups/policies", req),
   updateBackupPolicy: (id: string, req: Partial<BackupPolicySettings> & { name?: string }) => request("PATCH", enc`/admin/backups/policies/${id}`, req),
   runBackupPolicy: (id: string) => post<{ job_id: string | null }>(enc`/admin/backups/policies/${id}/run`),
   backupNextRuns: (schedule: BackupSchedule, tz: string) => post<number[]>("/admin/backups/policies/next-runs", { schedule, tz }),

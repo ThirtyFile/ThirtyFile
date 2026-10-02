@@ -4,13 +4,13 @@ import type { Activity, ActivityFilter, ErrorEntry, ErrorFilter, Page, ShareAcce
 /** Activity, share link, sign-in and error logs, and how long they are kept */
 export const logsApi = {
   activity: (f: ActivityFilter & { before?: number; limit?: number }) => get<Page<Activity>>(`/activity${qs(toParams(f))}`),
-  /** CSV export URL (tz: browser time zone; exported times are shown in local time) */
-  activityExportUrl: (f: ActivityFilter) => `/api/activity/export${qs(toParams({ ...f, tz: new Date().getTimezoneOffset() }))}`,
+  /** The records to export (up to 100,000), which the page writes as CSV (components/logs/exportCsv.tsx) */
+  activityExport: (f: ActivityFilter) => get<Activity[]>(`/activity/export${qs(toParams(f))}`),
   shareAccess: (f: ShareAccessFilter & { before?: number; limit?: number }) => get<Page<ShareAccess>>(`/share-access${qs(toParams(f))}`),
   loginLog: (f: LoginFilter & { before?: number; limit?: number }) => get<Page<LoginRecord>>(`/login-log${qs(toParams(f))}`),
   errorLog: (f: ErrorFilter & { before?: number; limit?: number }) => get<Page<ErrorEntry>>(`/admin/errors${qs(toParams(f))}`),
-  errorLogExportUrl: (f: ErrorFilter) => `/api/admin/errors/export${qs(toParams({ ...f, tz: new Date().getTimezoneOffset() }))}`,
-  loginLogExportUrl: (f: LoginFilter) => `/api/login-log/export${qs(toParams({ ...f, tz: new Date().getTimezoneOffset() }))}`,
+  errorLogExport: (f: ErrorFilter) => get<ErrorEntry[]>(`/admin/errors/export${qs(toParams(f))}`),
+  loginLogExport: (f: LoginFilter) => get<LoginRecord[]>(`/login-log/export${qs(toParams(f))}`),
   logStatus: () => get<LogStatus>("/admin/logs"),
   updateLogSettings: (s: LogSettings) => request<LogStatus>("PUT", "/admin/logs", s),
   archiveLogsNow: () => post<LogStatus>("/admin/logs/archive"),

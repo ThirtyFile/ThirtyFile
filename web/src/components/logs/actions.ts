@@ -1,4 +1,5 @@
-//! The activity log's actions: what each is called, and the groups its filter offers
+//! The activity log's actions: what each is called, and the groups its filter offers. Every action the server records
+//! (server/src/logs/actions.rs) has a name and a group here: tests/unit/exportCsv.test.ts checks it
 
 import { t } from "@/lib/i18n";
 
@@ -70,7 +71,7 @@ const ACTION_LABEL: Record<string, string> = {
 export const ACTION_GROUPS: { label: string; actions: string[] }[] = [
   { label: t("Files"), actions: ["upload", "create_folder", "edit", "rename", "move", "copy", "compress", "extract", "trash", "restore", "delete", "empty_trash"] },
   { label: t("Sharing and permissions"), actions: ["share_create", "share_update", "share_delete", "grant", "revoke"] },
-  { label: t("Spaces"), actions: ["drive_create", "drive_update", "drive_delete", "move_start", "move_done", "move_failed", "move_cancel"] },
+  { label: t("Spaces"), actions: ["drive_create", "drive_update", "drive_delete", "scan", "move_start", "move_done", "move_failed", "move_cancel"] },
   { label: t("Users and groups"), actions: ["user_create", "user_update", "user_delete", "group_create", "group_update", "group_delete"] },
   {
     label: t("System"),

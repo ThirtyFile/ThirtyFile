@@ -92,7 +92,8 @@ export function filenameFrom(res: Response, fallback: string) {
   return /filename\s*=\s*"?([^";]+)"?/i.exec(cd)?.[1] ?? fallback;
 }
 
-function save(blob: Blob, name: string) {
+/** Saves what the page made (a file it generated, or a download it read) under this name */
+export function saveBlob(blob: Blob, name: string) {
   const href = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = href;
@@ -188,7 +189,7 @@ export async function download(source: DownloadSource, opts: { zip?: boolean; na
     }
     if (total && received !== total) throw new Error(t("Download incomplete. Please try again."));
     update(id, { received, status: "done" });
-    save(new Blob([...parts, ...(chunks as BlobPart[])], { type: res.headers.get("content-type") ?? "application/octet-stream" }), name);
+    saveBlob(new Blob([...parts, ...(chunks as BlobPart[])], { type: res.headers.get("content-type") ?? "application/octet-stream" }), name);
   } catch (e) {
     if (controller.signal.aborted) {
       update(id, { status: "canceled" });

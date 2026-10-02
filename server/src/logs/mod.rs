@@ -1,16 +1,18 @@
 //! Logs: the activity log, share link visit log, sign-in log and error log, and their settings. Split into writing
-//! (`write`), querying (`query`), CSV export (`export`), periodic compressed archiving (`archive`) and the error log
+//! (`write`), querying (`query`), export (`export`: the records a CSV file is made of, on the page), periodic compressed archiving (`archive`) and the error log
 //! (`errors`).
 //!
 //! The database keeps only recent records (180 days by default); older ones are compressed daily into `data/archives/*.jsonl.gz`
 //! (one JSON record per line, importable with any text tool or spreadsheet). Archive files have their own retention period, so data doesn't grow forever.
 
+mod actions;
 mod archive;
 mod errors;
 mod export;
 mod query;
 mod write;
 
+pub use actions::*;
 pub use archive::*;
 pub use errors::*;
 pub use export::*;
@@ -227,7 +229,7 @@ mod tests {
 
         // Downloading it announces its length
         let (id,): (i64,) = sqlx::query_as("SELECT id FROM log_archives WHERE kind = 'activity'").fetch_one(&env.st.db).await.unwrap();
-        let res = download_archive(State(env.st.clone()), Admin(env.admin().await), HeaderMap::new(), Path(id)).await.unwrap();
+        let res = download_archive(State(env.st.clone()), Admin(env.admin().await), Path(id)).await.unwrap();
         let len = std::fs::metadata(env.dir.join("archives").join(&file)).unwrap().len();
         assert_eq!(res.headers()[header::CONTENT_LENGTH], len.to_string().as_str());
 
@@ -313,9 +315,8 @@ mod tests {
         assert_eq!(found.len(), 1, "{found:?}");
         assert!(rows(&admin, ActivityQuery { q: Some("old resignation".into()), ..Default::default() }).await.is_empty());
         // Nor the export
-        let res = export_activity(State(env.st.clone()), admin.clone(), HeaderMap::new(), Query(ActivityQuery::default())).await.unwrap();
-        let csv = String::from_utf8(axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
-        assert!(csv.contains("resignation-plan.docx") && !csv.contains("letter"), "{csv}");
+        let exported = serde_json::to_string(&export_activity(State(env.st.clone()), admin.clone(), Query(ActivityQuery::default())).await.unwrap().0).unwrap();
+        assert!(exported.contains("resignation-plan.docx") && !exported.contains("letter"), "{exported}");
 
         // Amy reads her own space's log in full
         let drive = env.drive_of(amy.root()).await;
@@ -474,19 +475,6 @@ mod tests {
     fn old_settings_without_login_days_use_default() {
         let s: LogSettings = serde_json::from_str(r#"{"activity_days":30,"share_days":60,"archive":false,"archive_keep_days":0,"record_visitor":false}"#).unwrap();
         assert_eq!((s.activity_days, s.login_days, s.archive), (30, 365, false));
-    }
-
-    #[test]
-    fn time_and_csv_formatting() {
-        assert_eq!(format_time(0, 0), "1970-01-01 00:00:00");
-        assert_eq!(format_time(1_790_341_830, 8 * 3600), "2026-09-25 21:10:30");
-        assert_eq!(format_time(951_782_400, 0), "2000-02-29 00:00:00");
-        assert_eq!(csv_field("=HYPERLINK(\"x\")"), "\"'=HYPERLINK(\"\"x\"\")\"");
-        assert_eq!(csv_field("a,b"), "\"a,b\"");
-        assert_eq!(csv_field("plain text"), "plain text");
-        // A tab or carriage return before a formula doesn't hide it from spreadsheets
-        assert_eq!(csv_field("\t=1+1"), "'\t=1+1");
-        assert_eq!(csv_field("\r=1+1"), "\"'\r=1+1\"");
     }
 
     #[tokio::test]

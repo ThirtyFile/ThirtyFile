@@ -6,13 +6,13 @@ use axum::{
     Json,
     body::Body,
     extract::{Path, State},
-    http::{HeaderMap, HeaderValue, header},
+    http::{HeaderValue, header},
     response::Response,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use super::{DAY, LogSettings, english, format_time, localize, record_activity};
+use super::{DAY, LogSettings, format_time, record_activity};
 use crate::{
     auth::Admin,
     db::{get_setting, set_setting},
@@ -107,7 +107,9 @@ pub async fn archive_now(State(st): State<AppState>, Admin(user): Admin) -> AppR
     Ok(Json(v))
 }
 
-pub async fn download_archive(State(st): State<AppState>, _: Admin, headers: HeaderMap, Path(id): Path<i64>) -> AppResult<Response> {
+/// An archive file, named after its log and the days it covers. The name is the same in every language, like what is in it
+/// (one JSON record per line, with the codes the database keeps)
+pub async fn download_archive(State(st): State<AppState>, _: Admin, Path(id): Path<i64>) -> AppResult<Response> {
     let (kind, file, from_at, to_at): (String, String, i64, i64) = sqlx::query_as("SELECT kind, file, from_at, to_at FROM log_archives WHERE id = ?")
         .bind(id)
         .fetch_optional(&st.db)
@@ -121,8 +123,7 @@ pub async fn download_archive(State(st): State<AppState>, _: Admin, headers: Hea
         "error_log" => "error-log",
         _ => "login-log",
     };
-    let label = localize(slug, english(&headers));
-    let name = format!("{label}-{}-{}.jsonl.gz", &format_time(from_at, 0)[..10], &format_time(to_at, 0)[..10]);
+    let name = format!("{slug}-{}-{}.jsonl.gz", &format_time(from_at, 0)[..10], &format_time(to_at, 0)[..10]);
     // The length up front lets the page show progress, and hand a large archive to the browser before downloading it
     let len = f.metadata().await.map_err(AppError::internal)?.len();
     let mut res = Response::new(Body::from_stream(tokio_util::io::ReaderStream::new(f)));
@@ -436,12 +437,6 @@ mod tests {
         sqlx::query_scalar("SELECT detail FROM activity WHERE action = ? ORDER BY id").bind(action).fetch_all(&env.st.db).await.unwrap()
     }
 
-    fn english() -> HeaderMap {
-        let mut h = HeaderMap::new();
-        h.insert(header::COOKIE, HeaderValue::from_static("tf_lang=en"));
-        h
-    }
-
     fn file_name(res: &Response) -> String {
         let d = res.headers()[header::CONTENT_DISPOSITION].to_str().unwrap();
         percent_encoding::percent_decode_str(d.split("filename*=UTF-8''").nth(1).unwrap()).decode_utf8().unwrap().into_owned()
@@ -469,14 +464,12 @@ mod tests {
         let Json(again) = archive_now(State(env.st.clone()), Admin(admin.clone())).await.unwrap();
         assert_eq!(again["summary"], "No logs needed archiving");
 
-        // Downloaded under a name in the interface language
+        // Downloaded under the name of its log and its days
         let (id, file): (i64, String) = sqlx::query_as("SELECT id, file FROM log_archives WHERE kind = 'login_log'").fetch_one(&env.st.db).await.unwrap();
         let day = format_time(now() - 400 * DAY, 0)[..10].to_string();
-        let res = download_archive(State(env.st.clone()), Admin(admin.clone()), english(), Path(id)).await.unwrap();
+        let res = download_archive(State(env.st.clone()), Admin(admin.clone()), Path(id)).await.unwrap();
         assert_eq!(res.headers()[header::CONTENT_TYPE], "application/gzip");
         assert_eq!(file_name(&res), format!("login-log-{day}-{day}.jsonl.gz"));
-        let res = download_archive(State(env.st.clone()), Admin(admin.clone()), HeaderMap::new(), Path(id)).await.unwrap();
-        assert_eq!(file_name(&res), format!("登入紀錄-{day}-{day}.jsonl.gz"));
 
         // Deleted: the file goes, and so does the row; the deletion is logged
         let Json(ok) = delete_archive(State(env.st.clone()), Admin(admin.clone()), Path(id)).await.unwrap();
@@ -484,13 +477,13 @@ mod tests {
         assert!(!env.dir.join("archives").join(&file).exists());
         assert_eq!(logged(&env, "log_archive_delete").await, [format!("{file} (2 records)")]);
         let missing = |r: AppResult<Response>| r.unwrap_err().status;
-        assert_eq!(missing(download_archive(State(env.st.clone()), Admin(admin.clone()), HeaderMap::new(), Path(id)).await), StatusCode::NOT_FOUND);
+        assert_eq!(missing(download_archive(State(env.st.clone()), Admin(admin.clone()), Path(id)).await), StatusCode::NOT_FOUND);
         assert_eq!(delete_archive(State(env.st.clone()), Admin(admin.clone()), Path(id)).await.unwrap_err().status, StatusCode::NOT_FOUND);
 
         // A row whose file was removed by hand says so
         let (id, file): (i64, String) = sqlx::query_as("SELECT id, file FROM log_archives WHERE kind = 'activity'").fetch_one(&env.st.db).await.unwrap();
         std::fs::remove_file(env.dir.join("archives").join(&file)).unwrap();
-        let err = download_archive(State(env.st.clone()), Admin(admin), HeaderMap::new(), Path(id)).await.unwrap_err();
+        let err = download_archive(State(env.st.clone()), Admin(admin), Path(id)).await.unwrap_err();
         assert_eq!((err.status, err.message.as_str()), (StatusCode::NOT_FOUND, "The archive file no longer exists"));
     }
 
