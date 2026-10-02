@@ -1,13 +1,16 @@
 //! Renames a change makes on disk before its transaction commits, written down first.
 //!
-//! Moving an item to the trash, and keeping a file as an earlier version before new content takes its name, rename it
-//! on disk within the change's transaction. Should ThirtyFile stop after such a rename and before the commit (or the
-//! transaction fail), the index still has the item where it was: the next scan would take it for removed, dropping it
-//! with its links, access and versions, and the trash or versions folder would later delete what is now its only copy.
+//! Renaming an item, moving it to another folder of its space, moving it to the trash or out of it, and keeping a file
+//! as an earlier version before new content takes its name rename it on disk within the change's transaction. Should
+//! ThirtyFile stop after such a rename and before the commit (or the transaction fail), the index still has the item
+//! where it was: the next scan would take it for removed, dropping it with its links, access and versions, and the
+//! trash or versions folder would later delete what is now its only copy.
 //! So each such rename is first written into the space's journal (`.thirtyfile-journal/<id>`, on disk before the
 //! rename), and the entry goes once the change is committed, or undone. An entry still there was left by a change that
 //! didn't finish: the next scan, holding the space's lock (so no change is under way), looks in the index to tell
-//! whether it was committed, and puts back what it left (`recover`) before it reads the folders that differ.
+//! whether it was committed, and puts back what it left (`recover`) before it reads the folders that differ. Without
+//! that, an item renamed or moved could only be told from one removed and another added by its identity on disk: on
+//! Windows and exFAT, which don't give one, it would lose its id, and with it its links, access and versions.
 
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +28,8 @@ pub enum Intent {
     Version { node: String, version: String, from: String, to: String },
     /// The item `node` at `from` moved into the trash, to `to`
     Trash { node: String, from: String, to: String },
+    /// The item `node` at `from` renamed, or moved to another folder of the space (out of the trash too), to `to`
+    Move { node: String, from: String, to: String },
 }
 
 /// An entry in a space's journal
@@ -128,6 +133,7 @@ pub async fn recover(st: &AppState, drive: &str, root: &Pinned) -> AppResult<()>
         let done = match intent {
             None => Ok(()),
             Some(Intent::Trash { node, from, to }) => recover_trash(st, drive, root, &node, &from, &to).await?,
+            Some(Intent::Move { node, from, to }) => recover_move(st, drive, root, &node, &from, &to).await?,
             Some(Intent::Version { node, version, from, to }) => recover_version(st, drive, root, &node, &version, &from, &to).await?,
         };
         match done {
@@ -166,6 +172,99 @@ async fn recover_trash(st: &AppState, drive: &str, root: &Pinned, node: &str, fr
     })
     .await
     .map_err(AppError::internal)
+}
+
+/// What was found of an item a change that didn't finish renamed or moved
+enum Moved {
+    /// Nothing left to do: it is where the index has it, or gone
+    Done,
+    /// It couldn't go back: something else has its name there now, or its folder is gone
+    Stays,
+}
+
+/// The item `node` (in the index at `from`, unless the change was committed) renamed or moved to `to`. It goes back
+/// where the index has it; when it can't (its old name was taken meanwhile, say), the index follows it instead, so it
+/// keeps its id either way.
+async fn recover_move(st: &AppState, drive: &str, root: &Pinned, node: &str, from: &str, to: &str) -> AppResult<io::Result<()>> {
+    let at: Option<(Option<String>, Option<i64>)> =
+        sqlx::query_as("SELECT fs_path, trashed_at FROM nodes WHERE id = ? AND drive_id = ?").bind(node).bind(drive).fetch_optional(&st.db).await?;
+    // Committed (the index has it at `to`, or anywhere else since), or gone
+    let Some((Some(indexed), trashed)) = at else { return Ok(Ok(())) };
+    if indexed != from {
+        return Ok(Ok(()));
+    }
+    let (r, from_rel, to_rel) = (root.clone(), from.to_string(), to.to_string());
+    let found = tokio::task::spawn_blocking(move || -> io::Result<Moved> {
+        let item = r.join(&to_rel)?;
+        if std::fs::symlink_metadata(item.as_path()).is_err() {
+            return Ok(Moved::Done);
+        }
+        let (up, name) = from_rel.rsplit_once('/').unwrap_or(("", from_rel.as_str()));
+        let dir = if up.is_empty() { Ok(r.clone()) } else { r.join(up).and_then(|d| d.dir()) };
+        let dir = match dir {
+            Ok(d) => d,
+            Err(e) if matches!(e.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => return Ok(Moved::Stays),
+            Err(e) => return Err(e),
+        };
+        match dir.join(name).and_then(|back| rename_new(item.as_path(), back.as_path())) {
+            Ok(()) => {
+                tracing::warn!("Put back {name:?}: it was being renamed or moved when ThirtyFile stopped");
+                Ok(Moved::Done)
+            }
+            Err(e) if matches!(e.kind(), io::ErrorKind::AlreadyExists | io::ErrorKind::NotFound) => Ok(Moved::Stays),
+            Err(e) => Err(e),
+        }
+    })
+    .await
+    .map_err(AppError::internal)?;
+    match found {
+        Ok(Moved::Done) => return Ok(Ok(())),
+        Ok(Moved::Stays) => {}
+        Err(e) => return Ok(Err(e)),
+    }
+    // Out of the trash, the item's trash would have to be undone too: that is left to the scan
+    if trashed.is_some() {
+        tracing::warn!("An item was being taken out of the trash when ThirtyFile stopped, and couldn't go back: the check of the folder finds it");
+        return Ok(Ok(()));
+    }
+    let (up, name) = to.rsplit_once('/').unwrap_or(("", to));
+    let parent: Option<(String,)> = if up.is_empty() {
+        sqlx::query_as("SELECT root_id FROM drives WHERE id = ?").bind(drive).fetch_optional(&st.db).await?
+    } else {
+        sqlx::query_as("SELECT id FROM nodes WHERE drive_id = ? AND fs_path = ? AND kind = 'folder' AND trashed_at IS NULL")
+            .bind(drive)
+            .bind(up)
+            .fetch_optional(&st.db)
+            .await?
+    };
+    let Some((parent,)) = parent else {
+        tracing::warn!("An item was being moved when ThirtyFile stopped, into a folder that is gone: the check of the folder finds it");
+        return Ok(Ok(()));
+    };
+    let recorded = {
+        let _w = st.write_lock.lock().await;
+        let mut tx = crate::db::begin_write(&st.db).await?;
+        let res = async {
+            sqlx::query("UPDATE nodes SET parent_id = ?, name = ?, mime = CASE WHEN kind = 'file' THEN ? ELSE mime END WHERE id = ?")
+                .bind(&parent)
+                .bind(name)
+                .bind(guess_mime(name))
+                .bind(node)
+                .execute(&mut *tx)
+                .await?;
+            AppResult::Ok(())
+        }
+        .await;
+        crate::db::settle(tx, res).await
+    };
+    if let Err(e) = recorded {
+        // Another item has that name in the index: the check of the folder sorts it out
+        tracing::warn!("Couldn't record an item moved when ThirtyFile stopped: {}", e.message);
+        return Ok(Ok(()));
+    }
+    changes::repath_now(st, drive, from, to).await?;
+    tracing::warn!("Kept {name:?} where it was renamed or moved to when ThirtyFile stopped");
+    Ok(Ok(()))
 }
 
 /// The file `node` at `from` kept as its version `version` at `to`, before new content was to take its name
@@ -331,5 +430,123 @@ mod tests {
         let (grants,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM grants WHERE node_id = ?").bind(&docs).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(grants, 1);
         assert_eq!(files_in(&space.dir.join(JOURNAL_DIR)), 0);
+    }
+
+    async fn rename(env: &TestEnv, user: &User, id: &str, name: &str) -> AppResult<()> {
+        let req = Json(serde_json::from_value(serde_json::json!({ "name": name })).unwrap());
+        crate::nodes::rename(State(env.st.clone()), user.clone(), UrlPath(id.to_string()), req).await.map(|_| ())
+    }
+
+    async fn move_into(env: &TestEnv, user: &User, id: &str, dest: &str) -> AppResult<()> {
+        let req = Json(serde_json::from_value(serde_json::json!({ "ids": [id], "dest_id": dest })).unwrap());
+        crate::nodes::move_nodes(State(env.st.clone()), user.clone(), req).await.map(|_| ())
+    }
+
+    #[tokio::test]
+    async fn a_rename_or_move_that_stops_before_it_is_committed_leaves_the_item_where_it_was() {
+        // Where the disk tells items apart by identity (Linux), and where it doesn't (Windows, exFAT): the item keeps its
+        // id, and what is attached to it, either way
+        for identities in [true, false] {
+            let env = testutil::env().await;
+            let space = env.folder_space("Shared").await;
+            let admin = env.admin().await;
+            let ben = env.user("ben", true).await;
+            let _hidden = (!identities).then(|| testing::no_identities(&space.dir));
+            write_old(&space.dir.join("Docs/a.txt"), b"alpha");
+            std::fs::create_dir_all(space.dir.join("Other")).unwrap();
+            crate::folders::scan(&env.st, &space.drive).await.unwrap();
+            let (docs, _) = env.node_at(&space.drive, "Docs").await.unwrap();
+            let (a, _) = env.node_at(&space.drive, "Docs/a.txt").await.unwrap();
+            let (other, _) = env.node_at(&space.drive, "Other").await.unwrap();
+            env.grant(&docs, &ben, "viewer").await;
+            let unchanged = async || {
+                assert_eq!(std::fs::read(space.dir.join("Docs/a.txt")).unwrap(), b"alpha", "identities: {identities}");
+                assert_eq!(env.node_at(&space.drive, "Docs").await.map(|n| n.0), Some(docs.clone()), "identities: {identities}");
+                assert_eq!(env.node_at(&space.drive, "Docs/a.txt").await.map(|n| n.0), Some(a.clone()), "identities: {identities}");
+                let (grants,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM grants WHERE node_id = ?").bind(&docs).fetch_one(&env.st.db).await.unwrap();
+                assert_eq!(grants, 1);
+                assert_eq!(files_in(&space.dir.join(JOURNAL_DIR)), 0);
+            };
+
+            // A folder renamed on disk, and ThirtyFile stops before the change is committed: the next scan puts it back
+            let stop = testing::stop_at(&space.drive, Stop::Moved);
+            assert!(rename(&env, &admin, &docs, "Papers").await.is_err());
+            drop(stop);
+            assert!(space.dir.join("Papers/a.txt").is_file());
+            crate::folders::scan(&env.st, &space.drive).await.unwrap();
+            assert!(!space.dir.join("Papers").exists());
+            unchanged().await;
+
+            // A file moved to another folder
+            let stop = testing::stop_at(&space.drive, Stop::Moved);
+            assert!(move_into(&env, &admin, &a, &other).await.is_err());
+            drop(stop);
+            assert!(space.dir.join("Other/a.txt").is_file());
+            crate::folders::scan(&env.st, &space.drive).await.unwrap();
+            assert!(!space.dir.join("Other/a.txt").exists());
+            unchanged().await;
+
+            // Taken out of the trash: it goes back into the trash
+            let req = Json(serde_json::from_value(serde_json::json!({ "ids": [a] })).unwrap());
+            let _ = crate::nodes::trash(State(env.st.clone()), admin.clone(), req).await.unwrap();
+            let stop = testing::stop_at(&space.drive, Stop::Moved);
+            let req = Json(serde_json::from_value(serde_json::json!({ "ids": [a] })).unwrap());
+            assert!(crate::nodes::restore(State(env.st.clone()), admin.clone(), req).await.is_err());
+            drop(stop);
+            assert!(space.dir.join("Docs/a.txt").is_file());
+            crate::folders::scan(&env.st, &space.drive).await.unwrap();
+            assert!(!space.dir.join("Docs/a.txt").exists());
+            let in_trash = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &a).await.unwrap().unwrap();
+            assert!(in_trash.trashed_at.is_some() && in_trash.fs_file().unwrap().is_file(), "identities: {identities}");
+            assert_eq!(files_in(&space.dir.join(JOURNAL_DIR)), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn an_item_whose_old_name_was_taken_meanwhile_is_kept_where_it_was_moved() {
+        for identities in [true, false] {
+            let env = testutil::env().await;
+            let space = env.folder_space("Shared").await;
+            let admin = env.admin().await;
+            let _hidden = (!identities).then(|| testing::no_identities(&space.dir));
+            write_old(&space.dir.join("Docs/a.txt"), b"alpha");
+            crate::folders::scan(&env.st, &space.drive).await.unwrap();
+            let (a, _) = env.node_at(&space.drive, "Docs/a.txt").await.unwrap();
+            let stop = testing::stop_at(&space.drive, Stop::Moved);
+            assert!(rename(&env, &admin, &a, "b.txt").await.is_err());
+            drop(stop);
+            // Before the next scan, another program puts a file under the old name
+            write_old(&space.dir.join("Docs/a.txt"), b"another");
+
+            // The index follows the item instead: it keeps its id under its new name, and the other file is new
+            crate::folders::scan(&env.st, &space.drive).await.unwrap();
+            assert_eq!(std::fs::read(space.dir.join("Docs/b.txt")).unwrap(), b"alpha");
+            assert_eq!(env.node_at(&space.drive, "Docs/b.txt").await.map(|n| n.0), Some(a.clone()), "identities: {identities}");
+            let other = env.node_at(&space.drive, "Docs/a.txt").await.unwrap().0;
+            assert_ne!(other, a);
+            let node = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &a).await.unwrap().unwrap();
+            assert_eq!(node.name, "b.txt");
+            assert_eq!(files_in(&space.dir.join(JOURNAL_DIR)), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn renames_and_moves_that_are_committed_leave_nothing_in_the_journal() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        write_old(&space.dir.join("Docs/a.txt"), b"alpha");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (a, _) = env.node_at(&space.drive, "Docs/a.txt").await.unwrap();
+        rename(&env, &admin, &a, "b.txt").await.unwrap();
+        move_into(&env, &admin, &a, &space.root).await.unwrap();
+        assert!(space.dir.join("b.txt").is_file());
+        for _ in 0..100 {
+            if files_in(&space.dir.join(JOURNAL_DIR)) == 0 {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("entries stayed in the journal");
     }
 }
