@@ -57,7 +57,9 @@ export function DataTable<T>(p: {
   });
   return (
     <RowMenuArea
-      className="min-h-0 flex-1 overflow-auto"
+      className="min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      // Without rows to focus, a message taller than the window (a phone held sideways) is scrolled from the area itself
+      tabIndex={!p.loading && p.rows.length === 0 ? 0 : undefined}
       onTarget={p.onSelect}
       onClick={(e) => !(e.target as HTMLElement).closest("[data-row-id]") && p.onSelect(null)}
       menu={p.menu(selected)}

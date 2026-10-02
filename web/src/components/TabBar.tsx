@@ -113,7 +113,7 @@ function TabItem({ tab, active, onlyOne }: { tab: Tab; active: boolean; onlyOne:
             }
           }}
           className={cn(
-            "group relative flex h-8 max-w-[220px] min-w-[72px] flex-1 cursor-default items-center gap-2 rounded-t-lg pr-1.5 pl-3 text-xs select-none",
+            "group relative flex h-8 min-w-[72px] flex-[0_1_220px] cursor-default items-center gap-2 rounded-t-lg pr-1.5 pl-3 text-xs select-none",
             active
               ? "bg-background text-foreground shadow-[0_-1px_0_var(--border),1px_0_0_var(--border),-1px_0_0_var(--border)]"
               : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
@@ -127,11 +127,9 @@ function TabItem({ tab, active, onlyOne }: { tab: Tab; active: boolean; onlyOne:
             <Icon className={cn("size-3.5 shrink-0", Icon === FolderIcon || Icon === FolderOpenIcon ? "text-[#d8b66c]" : "")} />
           )}
           <span className="min-w-0 flex-1 truncate">{title}</span>
-          {/* For the mouse: the keyboard closes the focused tab with Delete, so the button isn't a Tab stop (hidden on
-              other tabs until pointed at, it would be an invisible one) and isn't read out inside the tab's name */}
-          <button
-            type="button"
-            tabIndex={-1}
+          {/* For the mouse: the keyboard closes the focused tab with Delete (and the context menu has Close tab), so
+              it isn't a control inside the tab, nor read out with the tab's name */}
+          <span
             aria-hidden
             title={unsaved ? t("Unsaved changes") : t("Close tab")}
             onMouseDown={(e) => e.stopPropagation()}
@@ -150,7 +148,7 @@ function TabItem({ tab, active, onlyOne }: { tab: Tab; active: boolean; onlyOne:
             ) : (
               <XIcon className="size-3" />
             )}
-          </button>
+          </span>
           {/* Separator between unselected tabs */}
           {!active && <span className="absolute top-2 right-0 bottom-2 w-px bg-border group-hover:opacity-0" />}
         </ContextMenuTrigger>
@@ -199,17 +197,14 @@ export function TabBar() {
     const items = e.currentTarget.querySelectorAll<HTMLElement>("[role=tab]");
     items[next]?.focus();
   };
+  // The tabs take up to 220px each and shrink together; "New tab" follows them, outside the list of tabs
   return (
-    <div
-      role="tablist"
-      aria-label={t("Tabs")}
-      className="flex h-10 shrink-0 items-end gap-0.5 overflow-x-auto bg-sidebar px-2 pt-2"
-      onKeyDown={onKeyDown}
-      onDoubleClick={(e) => e.target === e.currentTarget && open()}
-    >
-      {tabs.map((tab) => (
-        <TabItem key={tab.id} tab={tab} active={tab.id === active} onlyOne={tabs.length === 1} />
-      ))}
+    <div className="flex h-10 shrink-0 items-end overflow-x-auto bg-sidebar px-2 pt-2" onDoubleClick={(e) => e.target === e.currentTarget && open()}>
+      <div role="tablist" aria-label={t("Tabs")} className="flex h-full items-end gap-0.5" onKeyDown={onKeyDown} onDoubleClick={(e) => e.target === e.currentTarget && open()}>
+        {tabs.map((tab) => (
+          <TabItem key={tab.id} tab={tab} active={tab.id === active} onlyOne={tabs.length === 1} />
+        ))}
+      </div>
       <button
         type="button"
         aria-label={t("New tab")}

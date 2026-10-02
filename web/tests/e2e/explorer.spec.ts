@@ -123,3 +123,25 @@ test("search waits for an input method to finish composing", async ({ page }) =>
   await page.waitForURL(/\/search\?q=/);
   expect(new URL(page.url()).searchParams.get("q")).toBe("中");
 });
+
+test("Alt+Up goes up a folder also from a menu button, and a resize handle shows it has the focus", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await signIn(page);
+  const me = await (await page.request.get("/api/auth/me")).json();
+  const sub = (await (await page.request.post("/api/folders", { data: { parent_id: me.root_id, name: `Up ${Date.now().toString(36)}` } })).json()).id;
+  await page.evaluate(() => localStorage.setItem("tf-view", JSON.stringify("list")));
+  await page.goto(`/files/${sub}`);
+  const newMenu = page.getByRole("button", { name: "New", exact: true });
+  await newMenu.focus();
+  await page.keyboard.press("Alt+ArrowUp");
+  await page.waitForURL(`**/files/${me.root_id}`);
+  await expect(page.getByRole("menu")).toHaveCount(0);
+
+  // A column's resize handle, reached with Tab, is drawn
+  const handle = page.getByRole("separator", { name: 'Resize the "Name" column' });
+  await handle.focus();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(handle).toBeFocused();
+  expect(await handle.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
+});

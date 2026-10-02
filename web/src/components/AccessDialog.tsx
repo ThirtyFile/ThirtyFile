@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { GlobeIcon, Loader2Icon, UserIcon, UsersIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -35,6 +35,18 @@ function PrincipalPicker(props: { value: Principal | null; onChange(p: Principal
   const [q, setQ] = useState("");
   const [debounced, setDebounced] = useState("");
   const [open, setOpen] = useState(false);
+  /** The option the arrows are on */
+  const [active, setActive] = useState(0);
+  const listId = useId();
+  /** Where the focus goes once the box or the choice in its place is shown */
+  const refocus = useRef<"next" | "box" | null>(null);
+  const place = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const to = refocus.current;
+    refocus.current = null;
+    if (to === "next") place.current?.parentElement?.querySelector("select")?.focus();
+    else if (to === "box") place.current?.querySelector("input")?.focus();
+  }, [props.value]);
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(q), 200);
     return () => clearTimeout(timer);
@@ -50,48 +62,99 @@ function PrincipalPicker(props: { value: Principal | null; onChange(p: Principal
   if (props.value) {
     const Icon = PRINCIPAL_ICON[props.value.principal_type];
     return (
-      <div className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md border bg-muted/50 px-2 text-sm">
+      <div ref={place} className="flex h-8 min-w-0 flex-1 basis-full items-center gap-2 rounded-md border bg-muted/50 px-2 text-sm sm:basis-0">
         <Icon className="size-4 shrink-0 text-muted-foreground" />
         <span className="truncate">{props.value.name}</span>
-        <button type="button" className="ml-auto text-muted-foreground hover:text-foreground" aria-label={t("Choose again")} onClick={() => props.onChange(null)}>
+        <button
+          type="button"
+          className="ml-auto text-muted-foreground hover:text-foreground"
+          aria-label={t("Choose again")}
+          onClick={() => {
+            refocus.current = "box";
+            props.onChange(null);
+          }}
+        >
           <XIcon className="size-3.5" />
         </button>
       </div>
     );
   }
+  const shown = open && options.length > 0;
+  const current = Math.min(active, options.length - 1);
+  const pick = (o: Principal) => {
+    // The box goes: the focus moves on to the role
+    refocus.current = "next";
+    props.onChange(o);
+    setQ("");
+    setOpen(false);
+  };
+  // A combobox: the focus stays in the box, the arrows go through the people and groups found, Enter picks one,
+  // Escape closes the list (a second Escape, the dialog)
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!shown) {
+        setOpen(true);
+        setActive(e.key === "ArrowDown" ? 0 : options.length - 1);
+      } else setActive((current + (e.key === "ArrowDown" ? 1 : -1) + options.length) % options.length);
+    } else if (e.key === "Enter" && shown && current >= 0) {
+      e.preventDefault();
+      pick(options[current]);
+    } else if (e.key === "Escape" && shown) {
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+    }
+  };
+  const optionId = (i: number) => `${listId}-${i}`;
   return (
-    <div className="relative min-w-0 flex-1">
+    <div ref={place} className="min-w-0 flex-1 basis-full sm:basis-0">
       <Input
+        role="combobox"
+        aria-label={t("Username or group name")}
+        aria-expanded={shown}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        aria-activedescendant={shown && current >= 0 ? optionId(current) : undefined}
         value={q}
-        onChange={(e) => setQ(e.target.value)}
+        onChange={(e) => {
+          setQ(e.target.value);
+          setOpen(true);
+          setActive(0);
+        }}
         onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={onKeyDown}
         placeholder={t("Enter a username or group name")}
         className="h-8 text-sm"
       />
-      {open && options.length > 0 && (
-        <div className="absolute top-9 right-0 left-0 z-50 max-h-56 overflow-y-auto rounded-md border bg-popover p-1 shadow-md">
-          {options.map((o) => {
+      {/* In the dialog's flow (not over it), so a dialog that scrolls doesn't cut it off */}
+      <div id={listId} role="listbox" aria-label={t("People and groups")} hidden={!shown} className="mt-1 max-h-56 overflow-y-auto rounded-md border bg-popover p-1 shadow-md">
+        {shown &&
+          options.map((o, i) => {
             const Icon = PRINCIPAL_ICON[o.principal_type];
             return (
-              <button
+              <div
                 key={`${o.principal_type}-${o.principal_id}`}
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  props.onChange(o);
-                  setQ("");
+                id={optionId(i)}
+                role="option"
+                aria-selected={i === current}
+                ref={(el) => {
+                  if (el && i === current) el.scrollIntoView({ block: "nearest" });
                 }}
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
+                // The focus stays in the box
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseMove={() => setActive(i)}
+                onClick={() => pick(o)}
+                className={cn("flex w-full cursor-default items-center gap-2 rounded px-2 py-1.5 text-left text-sm", i === current && "bg-accent")}
               >
                 <Icon className="size-4 shrink-0 text-muted-foreground" />
                 <span className="truncate">{o.name}</span>
                 <span className="ml-auto shrink-0 text-xs text-muted-foreground">{o.principal_type === "group" ? `${t("Groups")} · ${tServer(o.detail)}` : roleDetail(o.detail)}</span>
-              </button>
+              </div>
             );
           })}
-        </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -235,7 +298,8 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
                   });
                 }}
               >
-                <div className="flex gap-2">
+                {/* On a phone, the person or group on a line of its own */}
+                <div className="flex flex-wrap items-start gap-2 sm:flex-nowrap">
                   <PrincipalPicker value={principal} onChange={setPrincipal} allowEveryone={info.drive.kind !== "personal"} />
                   <NativeSelect size="sm" value={role} onChange={(e) => setRole(e.target.value as Role)} aria-label={t("Role")}>
                     {roles.map((r) => (

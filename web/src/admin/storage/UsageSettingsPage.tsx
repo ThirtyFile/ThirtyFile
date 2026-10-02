@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { Fragment, useState, type FormEvent } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleCheckIcon, CircleXIcon, ClockIcon, DownloadIcon, TriangleAlertIcon } from "lucide-react";
 import { Link } from "react-router";
@@ -248,9 +248,7 @@ function Recent({ list, span }: { list: OpSummary[]; span: number }) {
   return (
     <>
       {people.map((s) => (
-        <div key={s.op} className="contents">
-          {line(opLabel(s.op), s, true)}
-        </div>
+        <Fragment key={s.op}>{line(opLabel(s.op), s, true)}</Fragment>
       ))}
       {others && line(t("Background work and checks"), others, false)}
     </>

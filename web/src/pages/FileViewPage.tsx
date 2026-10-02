@@ -176,6 +176,8 @@ export function FileViewPage() {
         variant={detailsOpen ? "secondary" : "ghost"}
         className="h-9 gap-1.5 px-2.5 text-[13px] [&_svg]:size-[18px]"
         aria-pressed={detailsOpen}
+        // Its name, also where the words don't fit (a phone)
+        aria-label={t("Details pane")}
         onClick={() => setDetailsOpen(!detailsOpen)}
       >
         <PanelRightIcon />
