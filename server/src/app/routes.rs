@@ -32,7 +32,7 @@ pub fn router(state: AppState) -> Router {
                 // The error log records the route that answered, not the path asked for (logs/errors.rs)
                 .route_layer(middleware::from_fn(error::note_route)),
         )
-        // WebDAV (dav.rs): outside the request timeout too, as it receives and sends whole files
+        // WebDAV (dav/): outside the request timeout too, as it receives and sends whole files
         .route(dav::PREFIX, any(dav::handle))
         .route("/dav/", any(dav::handle))
         .route("/dav/{*path}", any(dav::handle))

@@ -32,7 +32,6 @@ pub const NODE_COLS: &str = "n.id, n.owner_id, n.parent_id, n.kind, n.name, n.bl
 pub struct Node {
     pub id: String,
     #[serde(skip)]
-    #[allow(dead_code)]
     pub owner_id: i64,
     pub parent_id: Option<String>,
     pub kind: String,

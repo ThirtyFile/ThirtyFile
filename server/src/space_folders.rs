@@ -17,7 +17,7 @@
 //! - deleting the space or the user doesn't delete the folder: the files stay on the disk, for an administrator to
 //!   remove or keep (as with any folder space)
 //!
-//! Spaces on S3, SFTP and FTP keep their files in the content store (storage.rs): renaming a folder there would copy
+//! Spaces on S3, SFTP and FTP keep their files in the content store (storage/): renaming a folder there would copy
 //! every file in it.
 
 use std::{
@@ -117,7 +117,7 @@ fn new_folder(parent: &Path, name: &str, taken: &HashSet<String>) -> std::io::Re
     Ok(None)
 }
 
-/// The location id in the marker of the folder `root` (storage.rs, `LOCATION_MARKER`); None when it isn't there, or
+/// The location id in the marker of the folder `root` (storage/markers.rs, `LOCATION_MARKER`); None when it isn't there, or
 /// the disk doesn't answer within `DISK_TIMEOUT`
 async fn read_marker(root: &Path) -> Option<String> {
     let read = async {
@@ -190,7 +190,7 @@ pub async fn make_folder_space(conn: &mut SqliteConnection, builtin: Option<&Pat
     let Some(location) = location else { return Ok(None) };
     let Some(root) = location_folder(conn, builtin, &location).await? else { return Ok(None) };
     let root = std::path::absolute(&root).unwrap_or(root);
-    // The location's folder must be there with the location's marker (storage.rs, `LOCATION_MARKER`): a disk or
+    // The location's folder must be there with the location's marker (storage/markers.rs, `LOCATION_MARKER`): a disk or
     // share that isn't mounted must not get the space's folder on the disk below its mount point
     let unavailable =
         || AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("The folder of the storage location ({}) isn't available", root.display()));

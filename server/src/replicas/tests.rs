@@ -456,7 +456,7 @@ async fn a_removed_target_keeps_its_copies_until_they_are_removed_as_not_needed(
     let _ = bucket_dir;
 }
 
-/// Replicas on SFTP and FTP locations (the test servers of sftp.rs and ftp.rs), read back when copied and checked
+/// Replicas on SFTP and FTP locations (the test servers of storage/sftp.rs and storage/ftp.rs), read back when copied and checked
 #[tokio::test]
 async fn replicas_on_sftp_and_ftp_are_checked_and_read_when_the_primary_fails() {
     let env = testutil::env().await;

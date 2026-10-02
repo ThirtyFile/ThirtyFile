@@ -34,7 +34,7 @@ const BATCH: usize = 500;
 const MAX_REPORTED: usize = 200;
 /// A file in the folder of every folder space, holding the space's id: written when the space is created (and by a scan
 /// when it is missing). A folder without it that is suddenly empty is a disk or share that isn't mounted, not one whose
-/// items were all deleted; and nothing is written into a space's folder unless it holds this space's (fsops.rs), so
+/// items were all deleted; and nothing is written into a space's folder unless it holds this space's (fsops/), so
 /// another disk mounted at the same place, with a folder of the same name, is left alone.
 pub const MARKER: &str = ".thirtyfile-space";
 
@@ -463,7 +463,7 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
     let drive = folder_drive(st, drive_id).await?;
     let root = PathBuf::from(drive.source_path.clone().unwrap_or_default());
     let mut report = ScanReport { at: now(), ..Default::default() };
-    // A space on a location: the location's folder must be its own (storage.rs, `LOCATION_MARKER`). Another disk
+    // A space on a location: the location's folder must be its own (storage/markers.rs, `LOCATION_MARKER`). Another disk
     // mounted there, with a folder at the same place, would make every item look deleted.
     if let Some(e) = location_unavailable(st, drive_id).await? {
         report.error = Some(e);

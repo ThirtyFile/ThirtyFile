@@ -355,7 +355,7 @@ pub async fn begin_write(pool: &SqlitePool) -> Result<sqlx::Transaction<'static,
 }
 
 /// Writes saved so far, by any connection and any code (`count_writes`): what was read after taking this count is out
-/// of date only once it changes (shares.rs keeps a link's details for a moment, as long as nothing was changed
+/// of date only once it changes (shares/public.rs keeps a link's details for a moment, as long as nothing was changed
 /// meanwhile).
 ///
 /// Counted when a write is saved, not when its transaction begins: a read between the two would see the database as
@@ -394,7 +394,7 @@ pub async fn check_location(conn: &mut SqliteConnection, id: &str) -> AppResult<
 }
 
 /// Creates a space and its root folder on the storage location `location_id`, returning (space id, root folder id).
-/// The space records the location for good (only a move changes it, locations.rs): its files go there, or its folder
+/// The space records the location for good (only a move changes it, moves/): its files go there, or its folder
 /// once `space_folders::make_folder_space` makes it a folder space. The caller creates the access grants separately.
 pub async fn create_drive(
     conn: &mut SqliteConnection,

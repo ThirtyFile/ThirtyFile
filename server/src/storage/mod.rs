@@ -62,7 +62,7 @@ pub trait Storage: Send + Sync {
     }
 
     // Items by their path in the location (its folder, or its prefix in a bucket): the step-by-step test, browsing
-    // and finding unused content (location_tools.rs). Paths are checked with `key_parts`.
+    // and finding unused content (location_tools/). Paths are checked with `key_parts`.
 
     /// Where content is kept, relative to the location's folder or prefix: `ab/cd/<hash>` below it
     fn content_dir(&self) -> &'static str {

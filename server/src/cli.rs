@@ -24,7 +24,7 @@ pub struct Config {
     pub server: Settings,
     /// When started as root: give the data directory to this user (`uid` or `uid:gid`) and run as that user (set in the Docker image)
     #[arg(long, env = "THIRTYFILE_RUN_AS")]
-    #[cfg_attr(not(unix), allow(dead_code))]
+    #[cfg_attr(not(unix), allow(dead_code, reason = "only Unix switches users"))]
     pub run_as: Option<String>,
     #[command(subcommand)]
     pub command: Option<Command>,

@@ -586,7 +586,7 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params, set
     };
     let mut conn = st.db.acquire().await?;
     // Read-only: one consistent view of every space for the whole manifest, while changes go on
-    #[allow(clippy::disallowed_methods)]
+    #[allow(clippy::disallowed_methods, reason = "a read-only transaction for one consistent view; it never writes")]
     let mut tx = sqlx::Acquire::begin(&mut *conn).await?;
     let spaces: Vec<SpaceRow> = sqlx::query_as(
         "SELECT d.id, d.name, d.kind, d.owner_id, CASE WHEN d.kind = 'personal' THEN COALESCE(u.username, '') ELSE '' END AS owner, d.mode, d.quota_bytes,

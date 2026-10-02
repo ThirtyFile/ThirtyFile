@@ -80,7 +80,7 @@ fn network_fs(path: &Path) -> Option<&'static str> {
     if unsafe { libc::statfs(c.as_ptr(), &mut st) } != 0 {
         return None;
     }
-    #[allow(clippy::unnecessary_cast)]
+    #[allow(clippy::unnecessary_cast, reason = "f_type is i64 on some targets and not on others")]
     match st.f_type as i64 {
         0x6969 => Some("NFS"),
         0x517B => Some("SMB"),

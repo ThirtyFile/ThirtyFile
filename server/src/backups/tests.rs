@@ -730,7 +730,7 @@ async fn a_snapshot_reads_the_versions_of_a_space_by_its_files_and_keeps_every_o
     assert!(plan.starts_with("SEARCH n USING INDEX nodes_drive_kind_id (drive_id=? AND kind=? AND id>?)"), "{plan}");
 }
 
-/// Copies to and from S3, SFTP and FTP locations (the in-memory bucket and the test servers of sftp.rs and ftp.rs)
+/// Copies to and from S3, SFTP and FTP locations (the in-memory bucket and the test servers of storage/sftp.rs and storage/ftp.rs)
 #[tokio::test]
 async fn copies_go_to_s3_sftp_and_ftp_locations_and_come_back_from_them() {
     let env = testutil::env().await;
