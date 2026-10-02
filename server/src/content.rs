@@ -293,13 +293,17 @@ pub async fn ensure_folders(conn: &mut SqliteConnection, owner_id: i64, parent_i
     Ok(current)
 }
 
-/// Creates a folder; in a folder space it is made on the disk first
+/// Creates a folder; in a folder space it is made on the disk first. A folder already there on disk is used as it is,
+/// with the item the index has for it: on a disk that ignores letter case, "Photos" is the folder "photos" already there.
 pub async fn create_folder(conn: &mut SqliteConnection, owner_id: i64, parent_id: &str, name: &str) -> AppResult<String> {
     let id = crate::util::new_id();
     let ts = now();
     if let Some(parent) = tree::get_node(conn, parent_id).await?.filter(|p| p.in_folder_space()) {
-        let (rel, stat) = fsops::make_dir(&parent, name).await?;
-        fsops::insert(conn, &id, owner_id, &parent, name, &rel, &stat).await?;
+        let made = fsops::make_dir(&parent, name).await?;
+        if let Some(known) = fsops::indexed_dir(conn, &parent, &made).await? {
+            return Ok(known);
+        }
+        fsops::insert(conn, &id, owner_id, &parent, &made.name, &made.rel, &made.stat).await?;
         tree::touch(conn, parent_id).await?;
         return Ok(id);
     }
@@ -338,6 +342,55 @@ mod tests {
 
     async fn used(env: &TestEnv, drive: &str) -> i64 {
         sqlx::query_scalar("SELECT used_bytes FROM drives WHERE id = ?").bind(drive).fetch_one(&env.st.db).await.unwrap()
+    }
+
+    /// Whether the disk of `dir` takes names in other letter case for the same name (Windows and macOS do, Linux
+    /// doesn't)
+    fn ignores_case(dir: &std::path::Path) -> bool {
+        let probe = dir.join(format!("Probe-{}", new_id()));
+        std::fs::create_dir(&probe).unwrap();
+        let lower = dir.join(probe.file_name().unwrap().to_string_lossy().to_lowercase());
+        let ignores = lower.exists();
+        std::fs::remove_dir(&probe).unwrap();
+        ignores
+    }
+
+    #[tokio::test]
+    async fn a_folder_named_in_other_letter_case_on_a_disk_that_ignores_it_is_the_folder_already_there() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        // Elsewhere "photos" and "Photos" are two folders
+        if !ignores_case(&space.dir) {
+            return;
+        }
+        let admin = env.admin().await;
+        let new_folder = |name: &str| {
+            let req = axum::Json(serde_json::from_value(serde_json::json!({ "parent_id": space.root, "name": name })).unwrap());
+            crate::nodes::create_folder(axum::extract::State(env.st.clone()), admin.clone(), req)
+        };
+        let axum::Json(photos) = new_folder("photos").await.unwrap();
+        let folders = || async {
+            let (n,): (i64,) =
+                sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE parent_id = ? AND kind = 'folder'").bind(&space.root).fetch_one(&env.st.db).await.unwrap();
+            n
+        };
+
+        // A file of an uploaded folder "Photos" goes into "photos", not into a second item for the same folder
+        let b64 = |s: &str| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, s);
+        let mut h = axum::http::HeaderMap::new();
+        h.insert("upload-length", "0".parse().unwrap());
+        h.insert("upload-metadata", format!("filename {},parentId {},relativePath {}", b64("a.txt"), b64(&space.root), b64("Photos")).parse().unwrap());
+        let res = crate::upload::create(axum::extract::State(env.st.clone()), admin.clone(), h).await.unwrap();
+        let file = node(&env, res.headers()["x-node-id"].to_str().unwrap()).await;
+        assert_eq!(file.parent_id.as_deref(), Some(photos.id.as_str()));
+        assert_eq!(file.fs_path.as_deref(), Some("photos/a.txt"));
+        assert_eq!(folders().await, 1);
+
+        // New folder "Photos": it is there already
+        assert_eq!(new_folder("Photos").await.unwrap_err().status, StatusCode::CONFLICT);
+        assert_eq!(folders().await, 1);
+        let r = crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        assert_eq!((r.added, r.removed), (0, 0), "{r:?}");
     }
 
     #[tokio::test]

@@ -2,16 +2,78 @@
 
 use super::*;
 
-/// Makes a folder on disk; one that was made on the server meanwhile is used as it is
-pub async fn make_dir(parent: &Node, name: &str) -> AppResult<(String, Stat)> {
+/// A folder `make_dir` made, or found there already
+pub struct MadeDir {
+    /// Its name on disk: on a disk that ignores letter case, a folder already there may have its name in other case
+    pub name: String,
+    /// Its path below the space's folder
+    pub rel: String,
+    pub stat: Stat,
+    /// It was there already (made on the server meanwhile, or the same folder by a name in other letter case)
+    pub existed: bool,
+}
+
+/// Makes a folder on disk; one that is there already is used as it is
+pub async fn make_dir(parent: &Node, name: &str) -> AppResult<MadeDir> {
     check_name(name)?;
     let (dir, name) = (parent.clone(), name.to_string());
     on_disk(parent.drive(), disk_wait(), move || {
-        let path = abs(&dir)?.join(&name).map_err(gone_or_disk_error)?;
-        ensure_dir(&path).map_err(disk_error)?;
-        Ok((child_rel(rel_of(&dir), &name), stat(path.as_path()).map_err(disk_error)?))
+        let inside = abs(&dir)?.dir().map_err(gone_or_disk_error)?;
+        let path = inside.join(&name).map_err(gone_or_disk_error)?;
+        let existed = match std::fs::create_dir(path.as_path()) {
+            Ok(()) => false,
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists && std::fs::symlink_metadata(path.as_path()).is_ok_and(|m| m.is_dir()) => true,
+            Err(e) => return Err(disk_error(e)),
+        };
+        let name = if existed { name_on_disk(&inside, &name, &path) } else { name };
+        Ok(MadeDir { rel: child_rel(rel_of(&dir), &name), stat: stat(path.as_path()).map_err(disk_error)?, name, existed })
     })
     .await
+}
+
+/// The item the index has in `parent` for a folder `make_dir` found there already, if any: by its path on disk, or by
+/// its identity where the system tells it
+pub async fn indexed_dir(conn: &mut SqliteConnection, parent: &Node, made: &MadeDir) -> AppResult<Option<String>> {
+    if !made.existed {
+        return Ok(None);
+    }
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT id FROM nodes WHERE parent_id = ?1 AND kind = 'folder' AND trashed_at IS NULL
+           AND (fs_path = ?2 OR (?4 <> 0 AND fs_dev = ?3 AND fs_ino = ?4))
+         ORDER BY fs_path = ?2 DESC LIMIT 1",
+    )
+    .bind(&parent.id)
+    .bind(&made.rel)
+    .bind(made.stat.dev)
+    .bind(made.stat.ino)
+    .fetch_optional(conn)
+    .await?;
+    Ok(row.map(|(id,)| id))
+}
+
+/// The name the item `path` (found in the folder `dir` by `name`) has there: `name` itself, or, on a disk that ignores
+/// letter case, the name in other case it was made with
+fn name_on_disk(dir: &Pinned, name: &str, path: &Pinned) -> String {
+    let Ok(read) = std::fs::read_dir(dir.as_path()) else { return name.to_string() };
+    let lower = name.to_lowercase();
+    let wanted = stat(path.as_path()).ok();
+    // Where the system tells items apart by identity, the one with the same; elsewhere the disk ignoring letter case
+    // is what found it
+    let same = |p: &Pinned| match (wanted, stat(p.as_path())) {
+        (Some(w), Ok(s)) if w.ino != 0 => (w.dev, w.ino) == (s.dev, s.ino),
+        (_, s) => s.is_ok(),
+    };
+    let mut alike = None;
+    for entry in read.flatten() {
+        let Ok(found) = entry.file_name().into_string() else { continue };
+        if found == name {
+            return found;
+        }
+        if alike.is_none() && found.to_lowercase() == lower && dir.join(&found).is_ok_and(|p| same(&p)) {
+            alike = Some(found);
+        }
+    }
+    alike.unwrap_or_else(|| name.to_string())
 }
 
 /// Renames `node` to `name` in the folder `dest` on disk; returns where it is now and where it was

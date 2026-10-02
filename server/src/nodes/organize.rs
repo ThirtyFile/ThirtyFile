@@ -20,6 +20,10 @@ pub async fn create_folder(State(st): State<AppState>, user: User, Json(req): Js
     }
     let id = crate::content::create_folder(&mut tx, user.id, &parent.id, &name).await?;
     let node = tree::get_node(&mut tx, &id).await?.unwrap();
+    // On a disk that ignores letter case, the folder is there already by a name in other case
+    if node.name != name {
+        return Err(AppError::conflict(format!("\"{}\" already exists", node.name)));
+    }
     logs::record_activity(&mut tx, &user, Some(&node), "create_folder", "").await?;
     tx.commit().await?;
     Ok(Json(node))
