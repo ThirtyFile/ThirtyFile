@@ -21,9 +21,9 @@ export default {
   "Sign-in methods": "Sign-in methods",
   "My sign-in history": "My sign-in history",
   "Appearance": "Appearance",
-  "Use system setting": "Use system setting",
-  "Light": "Light",
-  "Dark": "Dark",
+  "Use system setting": "システム設定を使用",
+  "Light": "ライト",
+  "Dark": "ダーク",
   "Sign out": "Sign out",
   // The release that runs: the account menu, and the Control panel's status bar (admin/ControlPanelPage.tsx)
   "ThirtyFile {version}": "ThirtyFile {version}",
@@ -114,7 +114,7 @@ export default {
   "Moved to trash": "Moved to trash",
   "Undo": "Undo",
   // components/Explorer.tsx, FileList.tsx
-  "{n} item|{n} items": "{n} items",
+  "{n} item|{n} items": "{n} 個の項目",
   "{n} item selected|{n} items selected": "{n} items selected",
   "Clipboard: {n} item cut|Clipboard: {n} items cut": "Clipboard: {n} items cut",
   "Clipboard: {n} item copied|Clipboard: {n} items copied": "Clipboard: {n} items copied",
