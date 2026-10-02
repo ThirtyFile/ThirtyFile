@@ -14,13 +14,14 @@ use std::{
     io::{Read, Write},
     path::PathBuf,
     pin::Pin,
-    task::{Context, Poll},
+    sync::{Arc, Mutex},
+    task::{Context, Poll, ready},
 };
 
 use axum::{Json, extract::State};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncRead, AsyncWriteExt, ReadBuf};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 
 use crate::{
     auth::User,
@@ -68,6 +69,102 @@ impl<R: AsyncRead + Unpin> AsyncRead for Counting<R> {
 }
 
 // ───────────── Compress to ZIP ─────────────
+
+/// Free space a ZIP file being written leaves on the data disk, which also holds the database
+const DISK_RESERVE: u64 = 64 * 1024 * 1024;
+/// How often (in bytes written) the data disk's free space is looked at again while a ZIP file is written
+const DISK_CHECK_EVERY: u64 = 64 * 1024 * 1024;
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: the data disk's free space (None: what the disk says)
+    static FREE_SPACE: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+/// Free space on the disk holding `dir`, when it can be told
+async fn free_space(dir: PathBuf) -> Option<u64> {
+    #[cfg(test)]
+    if let Some(free) = FREE_SPACE.with(|f| f.get()) {
+        return Some(free);
+    }
+    crate::util::disk_space_soon(&dir).await.map(|(free, _)| free)
+}
+
+/// The limit a ZIP file being written went past
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Over {
+    Quota,
+    Disk,
+}
+
+/// The temporary ZIP file, which stops growing past the room left in the destination space or on the data disk (less
+/// DISK_RESERVE). The selection was checked against both before writing, but deflating adds a little, files may grow
+/// meanwhile, and uploads and other jobs use the disk too: its free space is looked at again every `every` bytes.
+struct Capped<W> {
+    inner: W,
+    written: u64,
+    quota: Option<u64>,
+    /// The size the file may reach as of the last look at the disk (None: the disk can't tell)
+    disk: Option<u64>,
+    dir: PathBuf,
+    every: u64,
+    next_check: u64,
+    checking: Option<Pin<Box<dyn Future<Output = Option<u64>> + Send>>>,
+    /// Which limit stopped the writing (the error the writer returns only says that it stopped)
+    over: Arc<Mutex<Option<Over>>>,
+}
+
+impl<W> Capped<W> {
+    fn new(inner: W, quota: Option<u64>, disk: Option<u64>, dir: PathBuf, over: Arc<Mutex<Option<Over>>>) -> Self {
+        Capped { inner, written: 0, quota, disk, dir, every: DISK_CHECK_EVERY, next_check: DISK_CHECK_EVERY, checking: None, over }
+    }
+}
+
+impl<W: AsyncWrite + Unpin> AsyncWrite for Capped<W> {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+        let this = &mut *self;
+        if this.checking.is_none() && this.written >= this.next_check {
+            this.checking = Some(Box::pin(free_space(this.dir.clone())));
+        }
+        if let Some(check) = this.checking.as_mut() {
+            let free = ready!(check.as_mut().poll(cx));
+            this.checking = None;
+            this.disk = free.map(|f| this.written + f.saturating_sub(DISK_RESERVE));
+            this.next_check = this.written + this.every;
+        }
+        let end = this.written + buf.len() as u64;
+        let over = if this.quota.is_some_and(|q| end > q) {
+            Some(Over::Quota)
+        } else if this.disk.is_some_and(|d| end > d) {
+            Some(Over::Disk)
+        } else {
+            None
+        };
+        if let Some(over) = over {
+            *this.over.lock().unwrap() = Some(over);
+            return Poll::Ready(Err(std::io::Error::other("the ZIP file doesn't fit")));
+        }
+        let n = ready!(Pin::new(&mut this.inner).poll_write(cx, buf))?;
+        this.written += n as u64;
+        Poll::Ready(Ok(n))
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
+fn disk_error(needed: u64, free: u64) -> AppError {
+    AppError::bad_request(format!(
+        "There isn't enough free space in ThirtyFile's data folder to compress these items: {needed} is needed, {free} is free",
+        needed = format_bytes_u64(needed),
+        free = format_bytes_u64(free)
+    ))
+}
 
 #[derive(Deserialize)]
 pub struct CompressReq {
@@ -120,9 +217,31 @@ async fn run_compress(st: AppState, user: User, progress: Tracker, roots: Vec<No
     let name = zip_name(&plan, &roots);
     progress.set_total(plan.bytes);
 
+    // Before writing: what is selected, as it is, must fit in the space and on the data disk, where the temporary file
+    // goes (the ZIP is usually smaller, but how much smaller isn't known until it is written)
+    let room = {
+        let mut c = st.db.acquire().await?;
+        let dest = tree::folder_for(&mut c, &user, &dest_id, Need::Write).await?;
+        tree::room_left(&mut c, dest.drive(), None).await?
+    };
+    if let Some((left, drive)) = &room
+        && plan.bytes > (*left).max(0) as u64
+    {
+        return Err(tree::quota_error(drive));
+    }
+    let free = free_space(st.tmp_dir()).await;
+    if let Some(free) = free
+        && plan.bytes.saturating_add(DISK_RESERVE) > free
+    {
+        return Err(disk_error(plan.bytes, free.saturating_sub(DISK_RESERVE)));
+    }
+
     let tmp = st.tmp_dir().join(format!("zip-{}", new_id()));
+    let over = Arc::new(Mutex::new(None));
     let written = async {
         let file = tokio::fs::File::create(&tmp).await?;
+        let quota = room.as_ref().map(|(left, _)| (*left).max(0) as u64);
+        let file = Capped::new(file, quota, free.map(|f| f.saturating_sub(DISK_RESERVE)), st.tmp_dir(), over.clone());
         let mut zip = ZipWriter::deflating(tokio::io::BufWriter::with_capacity(256 * 1024, file));
         let mut walk = plan.walk();
         while let Some(item) = walk.next(&st).await? {
@@ -136,13 +255,18 @@ async fn run_compress(st: AppState, user: User, progress: Tracker, roots: Vec<No
         }
         let mut out = zip.finish().await?;
         out.flush().await?;
-        out.into_inner().sync_all().await?;
+        out.into_inner().inner.sync_all().await?;
         Ok::<_, AppError>(())
     }
     .await;
     if let Err(e) = written {
         let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(e);
+        let over = *over.lock().unwrap();
+        return Err(match (over, &room) {
+            (Some(Over::Quota), Some((_, drive))) => tree::quota_error(drive),
+            (Some(Over::Disk), _) => AppError::bad_request("Compressing stopped because ThirtyFile's data folder is running out of free space"),
+            _ => e,
+        });
     }
     let result = store_new_file(&st, &user, &dest_id, &name, &tmp, "compress").await;
     let _ = tokio::fs::remove_file(&tmp).await;
@@ -692,6 +816,62 @@ mod tests {
         assert!(job.error.as_deref().unwrap_or_default().starts_with("Not enough storage space"), "{job:?}");
         assert!(!space.dir.join("page.zip").exists());
         assert!(env.node_at(&space.drive, "page.zip").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn compressing_checks_the_room_left_before_writing_anything() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        // Deflates to a few hundred bytes
+        let text = "All work and no play. ".repeat(3000);
+        let a = env.stored_file(&amy, amy.root(), "a.txt", text.as_bytes()).await;
+        let zips = || std::fs::read_dir(env.st.tmp_dir()).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().starts_with("zip-")).count();
+
+        // The selection is larger than the room left in the space: refused before anything is read or written, even
+        // though it would compress well
+        let (used,): (i64,) = sqlx::query_as("SELECT used_bytes FROM drives WHERE id = ?").bind(env.drive_of(&a).await).fetch_one(&env.st.db).await.unwrap();
+        sqlx::query("UPDATE users SET quota_bytes = ? WHERE id = ?").bind(used + text.len() as i64 / 2).bind(amy.id).execute(&env.st.db).await.unwrap();
+        let job = compress_now(&env, &amy, &[&a], amy.root()).await.unwrap();
+        assert!(job.error.as_deref().unwrap_or_default().starts_with("Not enough storage space"), "{job:?}");
+        assert_eq!(job.done, 0);
+        sqlx::query("UPDATE users SET quota_bytes = 0 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+
+        // The temporary file is written to the data disk, which holds the database: it must fit there too, with room to spare
+        FREE_SPACE.set(Some(text.len() as u64 + DISK_RESERVE - 1));
+        let job = compress_now(&env, &amy, &[&a], amy.root()).await.unwrap();
+        assert!(job.error.as_deref().unwrap_or_default().contains("free space in ThirtyFile's data folder"), "{job:?}");
+        assert_eq!(job.done, 0);
+        FREE_SPACE.set(Some(text.len() as u64 + DISK_RESERVE));
+        let job = compress_now(&env, &amy, &[&a], amy.root()).await.unwrap();
+        assert_eq!((job.state, job.name.as_deref()), ("done", Some("a.zip")), "{job:?}");
+        FREE_SPACE.set(None);
+        assert_eq!(zips(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_zip_file_stops_growing_past_the_room_left() {
+        let dir = std::env::temp_dir();
+        let chunk = [7u8; 100];
+        // The space's room
+        let over = Arc::new(Mutex::new(None));
+        let mut zip = Capped::new(Vec::new(), Some(250), None, dir.clone(), over.clone());
+        zip.write_all(&chunk).await.unwrap();
+        zip.write_all(&chunk).await.unwrap();
+        assert!(zip.write_all(&chunk).await.is_err());
+        assert_eq!((*over.lock().unwrap(), zip.inner.len()), (Some(Over::Quota), 200));
+
+        // The data disk's free space, looked at again as the file grows (uploads and other jobs use the disk too)
+        let over = Arc::new(Mutex::new(None));
+        let mut zip = Capped::new(Vec::new(), None, Some(u64::MAX), dir, over.clone());
+        zip.every = 100;
+        zip.next_check = 100;
+        FREE_SPACE.set(Some(DISK_RESERVE + 1000));
+        zip.write_all(&chunk).await.unwrap();
+        zip.write_all(&chunk).await.unwrap();
+        FREE_SPACE.set(Some(DISK_RESERVE + 50));
+        assert!(zip.write_all(&chunk).await.is_err());
+        assert_eq!((*over.lock().unwrap(), zip.inner.len()), (Some(Over::Disk), 200));
+        FREE_SPACE.set(None);
     }
 
     #[tokio::test]
