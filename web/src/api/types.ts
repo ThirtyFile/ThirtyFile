@@ -553,8 +553,9 @@ export interface ReplicaPolicy {
       behind_since: number | null;
       synced_at: number | null;
       last_verify_at: number | null;
-      held: number;
-      wanted: number;
+      /** Contents it holds of those it should, as last worked out (by its syncs); null until then */
+      held: number | null;
+      wanted: number | null;
       damaged: number;
       error: string | null;
     }[];

@@ -40,12 +40,54 @@ pub fn spawn_scheduler(st: AppState) {
 /// One look at every policy, as of `t`
 pub async fn tick(st: &AppState, t: i64) -> AppResult<()> {
     let policies: Vec<Policy> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {} FROM replica_policies", super::POLICY_COLS))).fetch_all(&st.db).await?;
-    for p in policies {
-        if let Err(e) = look_at(st, &p, t).await {
+    for p in &policies {
+        if let Err(e) = look_at(st, p, t).await {
             tracing::warn!("Replica policy {}: {}", p.name, e.message);
         }
     }
+    recount(st, &policies).await
+}
+
+/// Works out what the Replicas page shows where it isn't known (a new target or policy, a policy changed or deleted, a
+/// promotion, a space that left a policy, an upgrade): how many contents each target holds of those it should, and the
+/// copies on each location no policy wants. Each reads every content of the spaces, so it is kept, and worked out again
+/// only when it may have changed (also by the syncs).
+async fn recount(st: &AppState, policies: &[Policy]) -> AppResult<()> {
+    for p in policies {
+        let targets = super::targets(&mut *st.db.acquire().await?, &p.id).await?;
+        if targets.iter().all(|t| t.held.is_some()) {
+            continue;
+        }
+        let stamp = super::stamp(&mut *st.db.acquire().await?).await?;
+        let counts = super::sync::count(st, p, &targets).await?;
+        keep(st, &stamp, async |tx| super::sync::keep_counts(tx, &p.id, &counts).await).await?;
+    }
+    let locations: Vec<(String,)> = sqlx::query_as(
+        "SELECT l.id FROM storage_locations l
+         WHERE EXISTS (SELECT 1 FROM replica_copies c WHERE c.location_id = l.id) AND NOT EXISTS (SELECT 1 FROM replica_unneeded u WHERE u.location_id = l.id)",
+    )
+    .fetch_all(&st.db)
+    .await?;
+    for (l,) in locations {
+        let stamp = super::stamp(&mut *st.db.acquire().await?).await?;
+        let (copies, bytes) = super::api::unneeded_count(st, &l).await?;
+        keep(st, &stamp, async |tx| super::sync::keep_unneeded(tx, &l, copies, bytes).await).await?;
+    }
     Ok(())
+}
+
+/// Keeps what was worked out, unless the policies changed since `stamp` (it is worked out again then)
+async fn keep(st: &AppState, stamp: &str, write: impl AsyncFnOnce(&mut sqlx::SqliteConnection) -> AppResult<()>) -> AppResult<()> {
+    let _w = st.write_lock.lock().await;
+    let mut tx = crate::db::begin_write(&st.db).await?;
+    let res = async {
+        if super::stamp(&mut tx).await? == stamp {
+            write(&mut tx).await?;
+        }
+        AppResult::Ok(())
+    }
+    .await;
+    crate::db::settle(tx, res).await
 }
 
 /// Spaces of the policy with changes a target's last sync doesn't hold (spaces never synced included)
@@ -70,6 +112,7 @@ async fn look_at(st: &AppState, p: &Policy, t: i64) -> AppResult<()> {
     let targets = super::targets(&mut *st.db.acquire().await?, &p.id).await?;
     if p.enabled {
         let spaces = super::scope(&mut *st.db.acquire().await?, &p.id).await?;
+        left_scope(st, p, &spaces).await?;
         for target in &targets {
             let l = &target.location_id;
             let changed = changed(st, p, l, &spaces).await?;
@@ -137,6 +180,36 @@ async fn look_at(st: &AppState, p: &Policy, t: i64) -> AppResult<()> {
         }
     }
     alert(st, p, &targets, t).await
+}
+
+/// Spaces deleted, or taken out of the policy, since a target's sync: never synced again, so what was recorded of them
+/// goes (as the next sync would do), and what the page shows is worked out again. Looked for first without the write
+/// lock: usually there are none.
+async fn left_scope(st: &AppState, p: &Policy, spaces: &[String]) -> AppResult<()> {
+    let list = serde_json::to_string(spaces).unwrap();
+    let gone: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM replica_captured WHERE policy_id = ? AND drive_id NOT IN (SELECT value FROM json_each(?)) LIMIT 1")
+        .bind(&p.id)
+        .bind(&list)
+        .fetch_optional(&st.db)
+        .await?;
+    if gone.is_none() {
+        return Ok(());
+    }
+    let _w = st.write_lock.lock().await;
+    let mut tx = crate::db::begin_write(&st.db).await?;
+    let res = async {
+        for table in ["replica_dirty", "replica_captured"] {
+            sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table} WHERE policy_id = ?1 AND drive_id NOT IN (SELECT value FROM json_each(?2))")))
+                .bind(&p.id)
+                .bind(&list)
+                .execute(&mut *tx)
+                .await?;
+        }
+        super::forget_counts(&mut tx, Some(&p.id)).await?;
+        AppResult::Ok(())
+    }
+    .await;
+    crate::db::settle(tx, res).await
 }
 
 async fn set_next(st: &AppState, policy: &str, location: &str, next: Option<i64>) -> AppResult<()> {
@@ -277,9 +350,9 @@ pub struct TargetHealth {
     pub behind_since: Option<i64>,
     pub synced_at: Option<i64>,
     pub last_verify_at: Option<i64>,
-    /// Copies of the policy's content the target holds, and should hold
-    pub held: i64,
-    pub wanted: i64,
+    /// Contents of the policy the target holds, and should hold, as last worked out (None: not yet)
+    pub held: Option<i64>,
+    pub wanted: Option<i64>,
     pub damaged: i64,
     pub error: Option<String>,
 }
@@ -312,15 +385,8 @@ async fn behind_since(st: &AppState, policy: &str, location: &str, spaces: &[Str
     Ok(since)
 }
 
+/// How a policy is doing, with the contents each target holds and should hold as last worked out (`recount`)
 pub async fn health(st: &AppState, p: &Policy, targets: &[Target], t: i64) -> AppResult<Health> {
-    health_of(st, p, targets, t, true).await
-}
-
-/// How a policy is doing; `counts`: with the copies each target holds and should hold (they read every content of the
-/// spaces). Without them, a target that holds fewer copies than it should and has no changes waiting shows as current:
-/// whether the policy is degraded doesn't depend on them.
-async fn health_of(st: &AppState, p: &Policy, targets: &[Target], t: i64, counts: bool) -> AppResult<Health> {
-    let coverage = if counts { super::sync::coverage(st, p, targets).await? } else { Default::default() };
     let spaces = super::scope(&mut *st.db.acquire().await?, &p.id).await?;
     let mut out = Vec::new();
     for target in targets {
@@ -334,7 +400,7 @@ async fn health_of(st: &AppState, p: &Policy, targets: &[Target], t: i64, counts
         .bind(l)
         .fetch_optional(&st.db)
         .await?;
-        let (held, wanted) = coverage.get(l).copied().unwrap_or_default();
+        let (held, wanted) = (target.held, target.wanted);
         let offline = st.location_offline(l).is_some();
         let state = match (&job, target.state.as_str()) {
             _ if !p.enabled => "paused",
@@ -345,7 +411,7 @@ async fn health_of(st: &AppState, p: &Policy, targets: &[Target], t: i64, counts
             _ if damaged > 0 => "corrupt",
             (Some((s, _)), _) if s == "running" && target.synced_at.is_none() => "initializing",
             _ if target.synced_at.is_none() => "initializing",
-            _ if held < wanted || behind_since.is_some() => "behind",
+            _ if held.zip(wanted).is_some_and(|(h, w)| h < w) || behind_since.is_some() => "behind",
             _ => "current",
         };
         out.push(TargetHealth {
@@ -382,14 +448,11 @@ async fn health_of(st: &AppState, p: &Policy, targets: &[Target], t: i64, counts
 /// Tells administrators once when a policy stops keeping its copies (a target not working, damaged copies, too few
 /// targets, or behind for longer than it allows), and once when it does again
 async fn alert(st: &AppState, p: &Policy, targets: &[Target], t: i64) -> AppResult<()> {
-    // Every few seconds: without the counts, which don't change whether it is degraded
-    let h = health_of(st, p, targets, t, false).await?;
+    let h = health(st, p, targets, t).await?;
     let now_state = if h.state == "degraded" { "degraded" } else { "" };
     if now_state == p.alerted {
         return Ok(());
     }
-    // Told: with the counts, for how many targets are current
-    let h = health_of(st, p, targets, t, true).await?;
     let error = h.source_offline.clone().or_else(|| h.targets.iter().find_map(|x| x.error.clone()));
     let emails = {
         let _w = st.write_lock.lock().await;

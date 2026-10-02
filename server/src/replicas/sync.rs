@@ -14,6 +14,8 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use sqlx::Row;
+
 use super::{SCOPE_HASHES, Target, in_scope};
 use crate::{
     backups::runner::{Ctx, Stop},
@@ -122,6 +124,7 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
         .bind(serde_json::to_string(&all).unwrap())
         .fetch_all(&st.db)
         .await?;
+    let seqs_before = seqs.clone();
     // 1. Copies that must be checked before they count: an old primary's, and those a check found damaged
     let (recheck, recheck_bytes): (i64, i64) =
         sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM replica_copies WHERE location_id = ? AND state IN ('stale', 'corrupt')")
@@ -214,6 +217,14 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
     }
     // 3. Copies of content nothing replicated uses any more
     let released = release(st, &location).await?;
+    // What the Replicas page shows of the target, and of the copies there no policy wants: each reads every content of
+    // the spaces, so it is worked out again only when the sync may have changed it, and kept
+    let stamp = super::stamp(&mut *st.db.acquire().await?).await?;
+    let (unneeded_known,): (bool,) =
+        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM replica_unneeded WHERE location_id = ?)").bind(&location).fetch_one(&st.db).await?;
+    let recount =
+        !unchanged || seqs != seqs_before || copied + repaired + released + changing.kept + changing.not_copied > 0 || target.held.is_none() || !unneeded_known;
+    let counts = if recount { Some((count(st, &policy, &targets).await?, super::api::unneeded_count(st, &location).await?)) } else { None };
     // 4. Held: the target is current, and counts again after a promotion
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
@@ -221,6 +232,13 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
         let (epoch,): (i64,) = sqlx::query_as("SELECT epoch FROM replica_policies WHERE id = ?").bind(&policy.id).fetch_one(&mut *tx).await?;
         if epoch != policy.epoch {
             return Err(AppError::conflict("The replicas were promoted meanwhile"));
+        }
+        // Not when the policies changed meanwhile: then they are worked out again soon (policy.rs)
+        if let Some((counts, (copies, bytes))) = &counts
+            && super::stamp(&mut tx).await? == stamp
+        {
+            keep_counts(&mut tx, &policy.id, counts).await?;
+            keep_unneeded(&mut tx, &location, *copies, *bytes).await?;
         }
         sqlx::query(
             "INSERT INTO replica_captured (policy_id, location_id, drive_id, seq) SELECT ?1, ?2, json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?3) WHERE true
@@ -574,36 +592,62 @@ pub async fn verify(cx: &Ctx<'_>) -> AppResult<Stop> {
     Ok(Stop::Done)
 }
 
-/// How many copies of the policy's content each target holds, and how many it should: (location, held, wanted)
-pub async fn coverage(st: &AppState, policy: &super::Policy, targets: &[Target]) -> AppResult<HashMap<String, (i64, i64)>> {
+/// How many contents of the policy each of its targets holds of those it should hold: (held, wanted) by location, each
+/// content counted once. It reads every content of the spaces, so it is worked out when it may have changed and kept with
+/// the targets (`replica_targets.held`, `wanted`), never each time the Replicas page is looked at.
+pub async fn count(st: &AppState, policy: &super::Policy, targets: &[Target]) -> AppResult<HashMap<String, (i64, i64)>> {
     let spaces = super::store_scope(&mut *st.db.acquire().await?, &policy.id).await?;
-    let rows: Vec<(String, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT b.hash, b.location_id FROM blobs b WHERE b.hash IN ({SCOPE_HASHES})")))
-        .bind(serde_json::to_string(&spaces).unwrap())
-        .fetch_all(&st.db)
-        .await?;
-    let held: std::collections::HashSet<(String, String)> = sqlx::query_as::<_, (String, String)>(
-        "SELECT hash, location_id FROM replica_copies WHERE state = 'verified' AND location_id IN (SELECT location_id FROM replica_targets WHERE policy_id = ?)",
-    )
-    .bind(&policy.id)
-    .fetch_all(&st.db)
-    .await?
-    .into_iter()
-    .collect();
+    // Content-store spaces: their content by where it is kept, and how much of it has a checked copy on each target
+    let held: String = (0..targets.len())
+        .map(|i| format!(", SUM(EXISTS (SELECT 1 FROM replica_copies c WHERE c.hash = b.hash AND c.location_id = ?{} AND c.state = 'verified'))", i + 2))
+        .collect();
+    let sql = format!("SELECT b.location_id, COUNT(*){held} FROM blobs b WHERE b.hash IN ({SCOPE_HASHES}) GROUP BY b.location_id");
+    let mut q = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(serde_json::to_string(&spaces).unwrap());
+    for t in targets {
+        q = q.bind(&t.location_id);
+    }
+    let rows = q.fetch_all(&st.db).await?;
     let mut out: HashMap<String, (i64, i64)> = targets.iter().map(|t| (t.location_id.clone(), (0, 0))).collect();
-    for (hash, primary) in rows {
-        for l in super::required(targets, policy.copies, &primary) {
-            let e = out.entry(l.to_string()).or_default();
-            e.1 += 1;
-            if held.contains(&(hash.clone(), l.to_string())) {
-                e.0 += 1;
+    for row in rows {
+        let (primary, n): (String, i64) = (row.try_get(0)?, row.try_get(1)?);
+        let required = super::required(targets, policy.copies, &primary);
+        for (i, t) in targets.iter().enumerate() {
+            if required.contains(&t.location_id.as_str()) {
+                let e = out.entry(t.location_id.clone()).or_default();
+                (e.0, e.1) = (e.0 + row.try_get::<i64, _>(i + 2)?, e.1 + n);
             }
         }
     }
-    // Folder spaces: their content, and what isn't read yet
+    // Folder spaces: their content as last read, and what isn't read yet
     for l in super::required(targets, policy.copies, &policy.source_location) {
         let (held, wanted) = super::folders::coverage(st, policy, l).await?;
         let e = out.entry(l.to_string()).or_default();
         (e.0, e.1) = (e.0 + held, e.1 + wanted);
     }
     Ok(out)
+}
+
+/// Keeps the counts of a policy's targets (`count`) with them
+pub(super) async fn keep_counts(conn: &mut sqlx::SqliteConnection, policy: &str, counts: &HashMap<String, (i64, i64)>) -> AppResult<()> {
+    for (location, (held, wanted)) in counts {
+        sqlx::query("UPDATE replica_targets SET held = ?, wanted = ? WHERE policy_id = ? AND location_id = ?")
+            .bind(held)
+            .bind(wanted)
+            .bind(policy)
+            .bind(location)
+            .execute(&mut *conn)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Keeps how many copies on a location no policy wants (`api::unneeded_on`), and their bytes
+pub(super) async fn keep_unneeded(conn: &mut sqlx::SqliteConnection, location: &str, copies: i64, bytes: i64) -> AppResult<()> {
+    sqlx::query("INSERT OR REPLACE INTO replica_unneeded (location_id, copies, bytes) VALUES (?, ?, ?)")
+        .bind(location)
+        .bind(copies)
+        .bind(bytes)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
 }

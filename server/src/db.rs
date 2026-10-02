@@ -695,6 +695,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_database_from_0_4_0_keeps_what_the_replicas_page_shows() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-040-replica-counts-{}", crate::util::new_id()));
+        let path = dir.join("drive.db");
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO storage_locations (id, name, kind, config, created_at) VALUES ('nas', 'NAS', 'local', '{}', 0)").execute(&db).await.unwrap();
+        db.close().await;
+
+        let db = connect(&path, 16).await.unwrap();
+        sqlx::query("INSERT INTO replica_policies (id, name, source_location, created_at, updated_at) VALUES ('p', 'Mirror', 'local', 0, 0)")
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO replica_targets (policy_id, location_id, priority) VALUES ('p', 'nas', 0)").execute(&db).await.unwrap();
+        // A target's counts aren't worked out until the scheduler or a sync does it
+        let (held, wanted): (Option<i64>, Option<i64>) = sqlx::query_as("SELECT held, wanted FROM replica_targets").fetch_one(&db).await.unwrap();
+        assert_eq!((held, wanted), (None, None));
+        sqlx::query("UPDATE replica_targets SET held = 3, wanted = 4").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO replica_unneeded (location_id, copies, bytes) VALUES ('nas', 2, 100)").execute(&db).await.unwrap();
+        let (held, copies): (i64, i64) =
+            sqlx::query_as("SELECT t.held, u.copies FROM replica_targets t JOIN replica_unneeded u ON u.location_id = t.location_id").fetch_one(&db).await.unwrap();
+        assert_eq!((held, copies), (3, 2));
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn items_from_0_4_0_keep_their_uploader() {
         let dir = std::env::temp_dir().join(format!("thirtyfile-040-found-{}", crate::util::new_id()));
         let path = dir.join("drive.db");
