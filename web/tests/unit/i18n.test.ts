@@ -140,8 +140,8 @@ describe("choosing the language", () => {
       // Saved with the account, chosen in this browser, or (signed in) the system default: the server says which
       window.__TF_LANG__ = "zh-TW";
       expect(await detected(["en"])).toBe("zh-TW");
-      // …unless this page doesn't offer it
-      window.__TF_LANG__ = "ja";
+      // …unless this page doesn't offer it (a language it doesn't know)
+      window.__TF_LANG__ = "ko";
       expect(await detected(["fr"])).toBe("en");
     } finally {
       vi.unstubAllGlobals();
@@ -157,7 +157,7 @@ describe("choosing the language", () => {
     try {
       expect(languageToAdopt(null)).toBeUndefined();
       expect(languageToAdopt("en")).toBeUndefined();
-      expect(languageToAdopt("ja")).toBeUndefined(); // not offered here
+      expect(languageToAdopt("ko")).toBeUndefined(); // not offered here
       expect(languageToAdopt("zh-TW")).toBe("zh-TW");
       adoptLanguage("zh-TW");
       expect(reload).toHaveBeenCalledTimes(1);
@@ -187,6 +187,30 @@ describe("choosing the language", () => {
   });
 });
 
+describe("Simplified Chinese and Japanese", () => {
+  test("t and tServer use the language's own translations, in nested messages too", async () => {
+    const inner = 'The destination folder already contains "a"';
+    for (const [lang, dictionary] of [
+      ["zh-CN", () => import("@/lib/i18n/zh-CN")],
+      ["ja", () => import("@/lib/i18n/ja")],
+    ] as const) {
+      const { DICT } = await dictionary();
+      vi.resetModules();
+      localStorage.setItem("tf-lang", lang);
+      window.__TF_DICT__ = { LANG: lang, DICT };
+      const i18n = await import("@/lib/i18n");
+      expect(i18n.lang).toBe(lang);
+      // Translated, not the placeholder (the Traditional Chinese or the English text)
+      expect(DICT["My files"]).not.toBe(ZH["My files"]);
+      expect(DICT["My files"]).not.toBe("My files");
+      expect(i18n.t("My files")).toBe(DICT["My files"]);
+      expect(i18n.tServer(`Connection test failed: ${inner}`)).toBe(
+        fill(DICT["Connection test failed: {error}"], { error: fill(DICT['The destination folder already contains "{name}"'], { name: "a" }) }),
+      );
+    }
+  });
+});
+
 describe("dictionaries", () => {
   /** A fresh copy of the module with these settings */
   async function fresh(settings: { saved?: string; preview?: boolean; dict?: { LANG: string; DICT: Record<string, string> } }) {
@@ -202,14 +226,14 @@ describe("dictionaries", () => {
     for (const lang of ["zh-CN", "ja"]) expect(files(lang)).toEqual(files("zh-TW"));
   });
 
-  test("a language that isn't ready is neither offered nor used, unless previewing", async () => {
-    const hidden = await fresh({ saved: "ja" });
-    expect(hidden.LANGS.map((l) => l.id)).toEqual(hidden.LANGUAGES.filter((l) => l.ready).map((l) => l.id));
-    expect(hidden.lang).not.toBe("ja");
-    localStorage.clear();
-    const shown = await fresh({ saved: "ja", preview: true });
-    expect(shown.LANGS.map((l) => l.id)).toEqual(["en", "zh-TW", "zh-CN", "ja"]);
-    expect(shown.lang).toBe("ja");
+  test("every language is translated, offered and used when chosen", async () => {
+    for (const saved of ["zh-CN", "ja"]) {
+      localStorage.clear();
+      const i18n = await fresh({ saved });
+      expect(i18n.LANGUAGES.every((l) => l.ready)).toBe(true);
+      expect(i18n.LANGS.map((l) => l.id)).toEqual(["en", "zh-TW", "zh-CN", "ja"]);
+      expect(i18n.lang).toBe(saved);
+    }
   });
 
   test("the page's own dictionary is loaded when the server added another one", async () => {

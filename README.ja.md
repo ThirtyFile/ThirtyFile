@@ -21,7 +21,7 @@ Windows のエクスプローラーと同じ見た目と操作で、ブラウザ
 - ファイルはローカルディスクや NAS に普通のフォルダーとして保存。S3 互換ストレージ、SFTP、FTP も使えます。既存のフォルダーをスペースにすることもできます
 - 個人用、全社用、チーム用のスペースと、ロール、容量の上限
 - パスワードと 2 段階認証、または Microsoft、Google、GitHub、任意の OpenID Connect プロバイダーのアカウントでサインイン
-- 英語と繁体字中国語の画面、ダークモード、スマートフォン対応
+- 英語、繁体字中国語、簡体字中国語、日本語の画面、ダークモード、スマートフォン対応
 
 ## インストール
 
@@ -86,7 +86,7 @@ scripts/check.sh web        # または一部だけ：web、server、e2e、site
 | フォルダー | 内容 |
 | --- | --- |
 | `server/` | バックエンド（Rust） |
-| `web/` | フロントエンド（React）。繁体字中国語の翻訳は `web/src/lib/i18n/zh-TW/` にあります |
+| `web/` | フロントエンド（React）。翻訳は `web/src/lib/i18n/` に言語ごとのフォルダーで置かれています |
 | `site/` | Web サイトとガイド。GitHub Pages で公開しています |
 
 変更はすべて pull request で行います。[Contributing](https://thirtyfile.github.io/ThirtyFile/docs/contributing.html)（英語）をご覧ください。リリースは `main` から手動で行い、`ghcr.io/thirtyfile/thirtyfile:latest`、メジャーバージョン（`1`。1.0.0 以降、自動更新に安全なタグ）、バージョン番号のタグで公開します。各 [release](https://github.com/ThirtyFile/ThirtyFile/releases) には、Linux（amd64、arm64）向けの単一実行ファイルのサーバーと `compose.yaml` も付いています。

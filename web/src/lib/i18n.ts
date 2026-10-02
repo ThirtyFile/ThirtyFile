@@ -29,8 +29,8 @@ interface Language {
 export const LANGUAGES: Language[] = [
   { id: "en", label: "English", ready: true },
   { id: "zh-TW", label: "繁體中文", ready: true }, // i18n-ignore: language name shown in its own language
-  { id: "zh-CN", label: "简体中文", ready: false }, // i18n-ignore: language name shown in its own language
-  { id: "ja", label: "日本語", ready: false }, // i18n-ignore: language name shown in its own language
+  { id: "zh-CN", label: "简体中文", ready: true }, // i18n-ignore: language name shown in its own language
+  { id: "ja", label: "日本語", ready: true }, // i18n-ignore: language name shown in its own language
 ];
 
 /** `localStorage[PREVIEW_KEY] = "1"` also offers the languages that aren't ready, to check their translations */
