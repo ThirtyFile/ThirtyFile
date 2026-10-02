@@ -302,7 +302,8 @@ async function endSession(key: string, url: unknown) {
   }
   // Same origin only: the address comes from this site's own records
   if (typeof url !== "string" || (!url.startsWith("/") && !url.startsWith(location.origin))) return;
-  await fetch(url, { method: "DELETE", credentials: "same-origin", headers: { "Tus-Resumable": "1.0.0" } }).catch(() => {});
+  // Kept alive: the address is forgotten already, so the request must reach the server even when the page goes away
+  await fetch(url, { method: "DELETE", credentials: "same-origin", headers: { "Tus-Resumable": "1.0.0" }, keepalive: true }).catch(() => {});
 }
 
 /** What the server says about an upload it may have (a HEAD request, as tus-js-client makes before continuing) */
