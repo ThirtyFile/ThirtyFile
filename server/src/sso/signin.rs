@@ -235,7 +235,7 @@ pub(super) fn take_pending(st: &AppState, provider: &str, state: Option<&str>, h
 
 /// Signs in the account the identity belongs to (created first when the provider's policy allows) and goes on to `next`
 pub(super) async fn sign_in(st: &AppState, provider: &str, ident: &Identity, next: &str, ip: &str, headers: &HeaderMap) -> Response {
-    match resolve_user(st, provider, ident).await {
+    match resolve_user(st, provider, ident, ip).await {
         Ok((user_id, username, created)) => {
             if created {
                 record_login_via(st, Some(user_id), &username, "sso_provisioned", provider, ip, headers);

@@ -88,7 +88,7 @@
             <thead><tr><th>Rule</th><th>What happens</th></tr></thead>
             <tbody>
               <tr><td><strong>Linked accounts only</strong></td><td>Only people who linked the account themselves, from their account menu</td></tr>
-              <tr><td><strong>Match existing users by email</strong></td><td>People whose email is the username of an account an administrator created, or of an account single sign-on created for that same email</td></tr>
+              <tr><td><strong>Match existing users by email</strong></td><td>People whose email is the username of an account without a password or two-factor sign-in, such as one single sign-on created for that same email. An account that has either, like one an administrator created, isn't matched, because signing in through the provider would skip them: its owner signs in with the password once and <a href="#link">links the account</a></td></tr>
               <tr><td><strong>Create accounts automatically</strong></td><td>Anyone from an allowed email domain gets a new account</td></tr>
             </tbody>
           </table>
@@ -100,12 +100,13 @@
         <p>A rule can also decide whether new accounts get a <a href="users.html#personal">personal space</a>, <strong>My files</strong>, and on which storage location. Left as <strong>As in the system settings</strong>, they follow <strong>Control panel › General</strong>. When the location's folder isn't available, the person still gets in, and their "My files" is created there once it is back.</p>
 
         <h2 id="link">Linking an account yourself</h2>
-        <p>Anyone can link or unlink an account of each provider set up here (Microsoft, Google, GitHub or OpenID Connect) under <strong>Account menu › Sign-in methods</strong>. A linked account signs in without the password, so linking asks for the current password first, and with two-factor sign-in a code; accounts without a password link within 10 minutes of signing in. The person gets a notification for every account linked to theirs.</p>
+        <p>Anyone can link or unlink an account of each provider set up here (Microsoft, Google, GitHub or OpenID Connect) under <strong>Account menu › Sign-in methods</strong>. A linked account signs in without the password, so linking asks for the current password first, and with two-factor sign-in a code; accounts without a password link within 10 minutes of signing in. The person gets a notification, in the app and by email, for every account linked to theirs, including one matched by email.</p>
         <p>When a list of allowed domains is set, only an account whose email address the provider verified, in one of those domains, can be linked. Only verified addresses are kept with a linked account.</p>
         <div class="note">An account created by single sign-on has no password. Its last linked account can only be removed after an administrator gave it a password. When an administrator sets a new password for someone, their linked accounts are removed too: they link them again after signing in.</div>
 
         <h2 id="guests">Microsoft tenants with guests</h2>
-        <p>If your Microsoft tenant has guests from other organisations, leave the tenant ID empty. People then link their Microsoft account themselves after signing in with a password, instead of being matched by email.</p>
+        <p>With a tenant ID set, the members of your tenant are matched by email. Guests from other organisations sign in through your tenant too, but their email address comes from their own organisation, which can enter any address. So a guest's email doesn't match or create an account: guests sign in with a password and link their Microsoft account themselves.</p>
+        <p>To match guests by email as well, add the optional claim <code>xms_edov</code> to the ID token: in the app registration, <strong>Token configuration › Add optional claim › ID › xms_edov</strong>. Microsoft then says when the domain of a guest's email address belongs to their organisation, and only those guests are matched.</p>
       </main>
     </div>
     <footer class="site-footer">

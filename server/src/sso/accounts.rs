@@ -52,9 +52,21 @@ pub(super) fn domain_allowed(settings: &SsoSettings, cfg: &ProviderConfig, email
 pub(super) const MATCHING_USER: &str = "u.username = ?1
      AND (u.source = 'password' OR EXISTS (SELECT 1 FROM user_identities i WHERE i.user_id = u.id AND lower(i.email) = lower(?1)))";
 
+/// Whether an existing account may be linked by its email alone (`MATCHING_USER`): not when it has a password or
+/// two-factor sign-in, which a linked account signs in without. Its owner links it from the account menu instead,
+/// which asks for both (`start_link`).
+const LINKABLE_BY_EMAIL: &str = "SELECT password_hash = ? AND totp_secret IS NULL FROM users WHERE id = ?";
+
+/// The notice that tells a person an external account was linked to theirs, in the app and by email
+fn linked_notice(settings: &SsoSettings, provider: &str, ident: &Identity, ip: &str) -> crate::notify::Notice {
+    let shown = if provider == "oidc" { settings.provider(provider).map(shown_name).unwrap_or_default() } else { label(provider).to_string() };
+    let account = if ident.email.is_empty() { ident.name.as_str() } else { ident.email.as_str() };
+    crate::notify::Notice { kind: "sign_in_method", node_id: None, data: json!({ "provider": provider, "label": shown, "account": account, "ip": ip }) }
+}
+
 /// Finds (or creates) the user to sign in, per the provider's policy: already linked → existing user whose username is the email → create automatically.
 /// Returns (user id, username, whether the account was just created)
-pub(super) async fn resolve_user(st: &AppState, provider: &str, ident: &Identity) -> AppResult<(i64, String, bool)> {
+pub(super) async fn resolve_user(st: &AppState, provider: &str, ident: &Identity, ip: &str) -> AppResult<(i64, String, bool)> {
     let settings = st.sso.read().unwrap().clone();
     let cfg = settings.provider(provider).cloned().unwrap_or_default();
     let linked: Option<(i64, String, bool)> =
@@ -89,31 +101,51 @@ pub(super) async fn resolve_user(st: &AppState, provider: &str, ident: &Identity
         .bind(&ident.email)
         .fetch_optional(&st.db)
         .await?;
-    let mut created = false;
-    let (id, username) = match existing {
+    let (id, username, created) = match existing {
         Some((_, _, true)) => return Err(AppError::forbidden("This account is disabled. Contact your administrator.")),
-        Some((id, username, false)) => (id, username),
-        None if cfg.provisioning == Provisioning::Create => {
-            created = true;
-            create_sso_user(st, provider, &cfg, ident).await?
-        }
+        Some((id, username, false)) => (id, username, false),
+        None if cfg.provisioning == Provisioning::Create => create_sso_user(st, provider, &cfg, ident).await?,
         None => {
             return Err(AppError::forbidden(format!(
-                "{} doesn't have an account on this site. Ask your administrator to create one (using your email as the username links it automatically).",
+                "{} doesn't have an account on this site. Ask your administrator to create one, then link this external account in \"My account › Sign-in methods\".",
                 ident.email
             )));
         }
     };
     let _w = st.write_lock.lock().await;
-    sqlx::query("INSERT OR IGNORE INTO user_identities (provider, subject, user_id, email, name, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+    let mut tx = crate::db::begin_write(&st.db).await?;
+    // Checked under the lock: a sign-in of the same person at the same time may have linked it already
+    let already: Option<(i64,)> = sqlx::query_as("SELECT user_id FROM user_identities WHERE provider = ? AND subject = ?")
+        .bind(provider)
+        .bind(&ident.subject)
+        .fetch_optional(&mut *tx)
+        .await?;
+    match already {
+        Some((linked,)) if linked == id => return Ok((id, username, created)),
+        Some(_) => return Err(AppError::conflict(format!("This {} account is already linked to another user", label(provider)))),
+        None => {}
+    }
+    if !created {
+        let (linkable,): (bool,) = sqlx::query_as(LINKABLE_BY_EMAIL).bind(NO_PASSWORD).bind(id).fetch_one(&mut *tx).await?;
+        if !linkable {
+            return Err(AppError::forbidden(
+                "This account has a password or two-factor sign-in, so it isn't linked automatically. Sign in with your username and password, then link this external account in \"My account › Sign-in methods\".",
+            ));
+        }
+    }
+    sqlx::query("INSERT INTO user_identities (provider, subject, user_id, email, name, created_at) VALUES (?, ?, ?, ?, ?, ?)")
         .bind(provider)
         .bind(&ident.subject)
         .bind(id)
         .bind(&ident.email)
         .bind(&ident.name)
         .bind(now())
-        .execute(&st.db)
+        .execute(&mut *tx)
         .await?;
+    // An existing account was linked: its owner is told, as when they link one themselves
+    let emails = if created { Vec::new() } else { crate::notify::add(&mut tx, &[id], &linked_notice(&settings, provider, ident, ip)).await? };
+    tx.commit().await?;
+    crate::notify::send_later(st, emails);
     Ok((id, username, created))
 }
 
@@ -126,7 +158,9 @@ pub(super) fn sso_username(email: &str) -> String {
     if base.chars().count() < 2 { format!("user{base}") } else { base }
 }
 
-pub(super) async fn create_sso_user(st: &AppState, provider: &str, cfg: &ProviderConfig, ident: &Identity) -> AppResult<(i64, String)> {
+/// Returns (user id, username, whether it was created): a sign-in of the same person at the same time, or an account
+/// created for the email meanwhile, is found instead
+pub(super) async fn create_sso_user(st: &AppState, provider: &str, cfg: &ProviderConfig, ident: &Identity) -> AppResult<(i64, String, bool)> {
     let base = sso_username(&ident.email);
     // Settings for the new account: the rule for the email's domain, otherwise the provider's defaults
     let rule = st.sso.read().unwrap().domain_rule(&ident.email).cloned();
@@ -148,13 +182,13 @@ pub(super) async fn create_sso_user(st: &AppState, provider: &str, cfg: &Provide
             .bind(&ident.subject)
             .fetch_optional(&mut *tx)
             .await?;
-    if let Some(found) = linked {
-        return Ok(found);
+    if let Some((id, username)) = linked {
+        return Ok((id, username, false));
     }
     let existing: Option<(i64, String)> =
         sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT id, username FROM users u WHERE {MATCHING_USER}"))).bind(&ident.email).fetch_optional(&mut *tx).await?;
-    if let Some(found) = existing {
-        return Ok(found);
+    if let Some((id, username)) = existing {
+        return Ok((id, username, false));
     }
     // A misconfigured tenant or domain list must not fill the user list: at most MAX_CREATED_PER_HOUR new accounts per provider
     let (recent,): (i64,) =
@@ -218,16 +252,12 @@ pub(super) async fn create_sso_user(st: &AppState, provider: &str, cfg: &Provide
     tx.commit().await?;
     crate::folders::spaces_changed(st);
     tracing::info!("Automatically created account {username} via {} sign-in", label(provider));
-    Ok((id, username))
+    Ok((id, username, true))
 }
 
 pub(super) async fn link(st: &AppState, provider: &str, ident: &Identity, user_id: i64, ip: &str) -> AppResult<String> {
     // The allowed domains apply to linked accounts too: with a list, only a verified email in it
-    let (settings, shown) = {
-        let s = st.sso.read().unwrap().clone();
-        let shown = if provider == "oidc" { s.provider(provider).map(shown_name).unwrap_or_default() } else { label(provider).to_string() };
-        (s, shown)
-    };
+    let settings = st.sso.read().unwrap().clone();
     let cfg = settings.provider(provider).cloned().unwrap_or_default();
     let restricted = !settings.allowed_domains.is_empty() || !cfg.allowed_domains.is_empty();
     if restricted && !(ident.email_verified && domain_allowed(&settings, &cfg, &ident.email)) {
@@ -258,10 +288,7 @@ pub(super) async fn link(st: &AppState, provider: &str, ident: &Identity, user_i
             _ => AppError::from(e),
         })?;
     // Told in the app and by email, so an account linked by someone else doesn't go unnoticed
-    let account = if ident.email.is_empty() { ident.name.as_str() } else { ident.email.as_str() };
-    let notice =
-        crate::notify::Notice { kind: "sign_in_method", node_id: None, data: json!({ "provider": provider, "label": shown, "account": account, "ip": ip }) };
-    let emails = crate::notify::add(&mut tx, &[user_id], &notice).await?;
+    let emails = crate::notify::add(&mut tx, &[user_id], &linked_notice(&settings, provider, ident, ip)).await?;
     tx.commit().await?;
     crate::notify::send_later(st, emails);
     Ok(username)

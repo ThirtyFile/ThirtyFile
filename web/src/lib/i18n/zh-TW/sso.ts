@@ -3,7 +3,7 @@ export default {
   "Linked accounts only": "只有已連結的帳號",
   "People sign in with their password first and link the account under \"Sign-in methods\".": "使用者先用密碼登入，再到「登入方式」連結外部帳號。",
   "Match existing users by email": "以 email 對應既有使用者",
-  "Users whose username is their verified email sign in directly; nobody else.": "帳號名稱就是已驗證 email 的使用者可直接登入，其他人不行。",
+  "Accounts whose username is the verified email sign in directly, unless they have a password or two-factor sign-in: their owner links them once under \"Sign-in methods\". Nobody else.": "帳號名稱就是已驗證 email 的帳號可直接登入；有密碼或兩步驟驗證的帳號，要由本人先在「登入方式」連結一次。其他人不行。",
   "Create accounts automatically": "自動建立帳號",
   "Like the above, and people without an account get one on first sign-in, with the settings below.": "同上，且沒有帳號的人第一次登入時會依下方設定自動建立帳號。",
   "Enter your company domain to prevent personal Google or GitHub accounts from signing in or being created automatically. Already linked accounts aren't affected. A provider with its own domain list below uses that list instead.": "填入公司網域，避免個人的 Google 或 GitHub 帳號登入或被自動建立；已連結的帳號不受影響。下方有自己網域清單的供應商會改用該清單。",

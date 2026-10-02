@@ -585,6 +585,16 @@ mod tests {
         json!({ "iss": "https://accounts.google.com", "aud": "google-client", "exp": now() + 600, "nonce": nonce, "sub": sub, "email": email, "email_verified": verified, "name": "Test" })
     }
 
+    /// An account that signs in only through single sign-on, as one it created
+    async fn without_password(env: &testutil::TestEnv, user: &User) {
+        sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?").bind(NO_PASSWORD).bind(user.id).execute(&env.st.db).await.unwrap();
+    }
+
+    async fn identities_of(env: &testutil::TestEnv, user: &User) -> i64 {
+        let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM user_identities WHERE user_id = ?").bind(user.id).fetch_one(&env.st.db).await.unwrap();
+        n
+    }
+
     /// Tests share MOCK_BASE: only one runs at a time
     static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -724,7 +734,8 @@ mod tests {
         let (m, base) = mock_server().await;
         *MOCK_BASE.lock().unwrap() = Some(base);
         enable(&env, |_| {});
-        env.user("amy@example.com", true).await;
+        let amy = env.user("amy@example.com", true).await;
+        without_password(&env, &amy).await;
 
         // The username is the email: link automatically, sign in, and go back to the originally requested page
         let r = login(&env, &m, "google", None, |n| google(n, "g-1", "Amy@Example.com", true)).await;
@@ -857,7 +868,8 @@ mod tests {
         let env = testutil::env().await;
         let (m, base) = mock_server().await;
         *MOCK_BASE.lock().unwrap() = Some(base);
-        env.user("amy@example.com", true).await;
+        let amy = env.user("amy@example.com", true).await;
+        without_password(&env, &amy).await;
         let ms = |n: &str| json!({ "iss": "https://login.microsoftonline.com/t1/v2.0", "aud": "microsoft-client", "exp": now() + 600, "nonce": n, "tid": "t1", "oid": "o1", "preferred_username": "amy@example.com" });
 
         // "Any organization": other tenants can fill in the email themselves, so it can't be used to match accounts
@@ -870,6 +882,103 @@ mod tests {
         assert_eq!(location(&r), "/files/abc");
         let (subject,): (String,) = sqlx::query_as("SELECT subject FROM user_identities WHERE provider = 'microsoft'").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(subject, "t1:o1");
+        *MOCK_BASE.lock().unwrap() = None;
+    }
+
+    #[tokio::test]
+    async fn accounts_with_a_password_or_second_factor_are_linked_only_by_their_owner() {
+        let _g = SERIAL.lock().await;
+        let env = testutil::env().await;
+        let (m, base) = mock_server().await;
+        *MOCK_BASE.lock().unwrap() = Some(base);
+        enable(&env, |_| {});
+
+        // The username is the verified email, but signing in through the provider would skip the account's password
+        let amy = env.user("amy@example.com", true).await;
+        let r = login(&env, &m, "google", None, |n| google(n, "g-40", "amy@example.com", true)).await;
+        assert!(location(&r).contains("sso_error"), "{}", location(&r));
+        assert!(r.headers().get_all(header::SET_COOKIE).iter().all(|c| !c.to_str().unwrap().starts_with(crate::auth::SESSION_COOKIE)));
+        assert_eq!(identities_of(&env, &amy).await, 0);
+        // Its owner links it from the account menu, with the password, and then it signs in
+        let r = login(&env, &m, "google", Some(amy.clone()), |n| google(n, "g-40", "amy@example.com", true)).await;
+        assert_eq!(location(&r), "/files/abc?sso_linked=google");
+        let r = login(&env, &m, "google", None, |n| google(n, "g-40", "amy@example.com", true)).await;
+        assert_eq!(location(&r), "/files/abc");
+
+        // Nor an account with two-factor sign-in
+        let ben = env.user("ben@example.com", true).await;
+        without_password(&env, &ben).await;
+        sqlx::query("UPDATE users SET totp_secret = 'sealed' WHERE id = ?").bind(ben.id).execute(&env.st.db).await.unwrap();
+        let r = login(&env, &m, "google", None, |n| google(n, "g-41", "ben@example.com", true)).await;
+        assert!(location(&r).contains("sso_error"), "{}", location(&r));
+        assert_eq!(identities_of(&env, &ben).await, 0);
+
+        // An account with neither is linked by its email, and its owner is told, as when they link one themselves
+        let cat = env.user("cat@example.com", true).await;
+        without_password(&env, &cat).await;
+        let r = login(&env, &m, "google", None, |n| google(n, "g-42", "cat@example.com", true)).await;
+        assert_eq!(location(&r), "/files/abc");
+        assert_eq!(identities_of(&env, &cat).await, 1);
+        let (kind, data): (String, String) =
+            sqlx::query_as("SELECT kind, data FROM notifications WHERE user_id = ?").bind(cat.id).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(kind, "sign_in_method");
+        let data: Value = serde_json::from_str(&data).unwrap();
+        assert_eq!((data["provider"].as_str(), data["account"].as_str()), (Some("google"), Some("cat@example.com")));
+        // Signing in again with it isn't news
+        let r = login(&env, &m, "google", None, |n| google(n, "g-42", "cat@example.com", true)).await;
+        assert_eq!(location(&r), "/files/abc");
+        let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM notifications WHERE user_id = ?").bind(cat.id).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(n, 1);
+        // Nor is an account created for the person
+        enable(&env, |s| s.google.provisioning = Provisioning::Create);
+        let r = login(&env, &m, "google", None, |n| google(n, "g-43", "dan@example.com", true)).await;
+        assert_eq!(location(&r), "/files/abc");
+        let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM notifications n JOIN users u ON u.id = n.user_id WHERE u.username = 'dan@example.com'")
+            .fetch_one(&env.st.db)
+            .await
+            .unwrap();
+        assert_eq!(n, 0);
+        *MOCK_BASE.lock().unwrap() = None;
+    }
+
+    #[tokio::test]
+    async fn microsoft_guests_are_matched_by_email_only_when_its_domain_is_verified() {
+        let _g = SERIAL.lock().await;
+        let env = testutil::env().await;
+        let (m, base) = mock_server().await;
+        *MOCK_BASE.lock().unwrap() = Some(base);
+        let amy = env.user("amy@example.com", true).await;
+        without_password(&env, &amy).await;
+        enable(&env, |s| s.microsoft.tenant = "t1".into());
+        let ms = |oid: &str, extra: Value| {
+            let oid = oid.to_string();
+            move |n: &str| {
+                let mut v = json!({ "iss": "https://login.microsoftonline.com/t1/v2.0", "aud": "microsoft-client", "exp": now() + 600, "nonce": n, "tid": "t1", "oid": oid, "email": "amy@example.com" });
+                v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+                v
+            }
+        };
+
+        // A guest signs in through this tenant, but the email comes from their own organization
+        for guest in [
+            json!({ "idp": "https://sts.windows.net/t2/" }),
+            json!({ "idp": "live.com" }),
+            json!({ "acct": 1 }),
+            json!({ "idp": "https://sts.windows.net/t2/", "xms_edov": false }),
+        ] {
+            let r = login(&env, &m, "microsoft", None, ms("o1", guest.clone())).await;
+            assert!(location(&r).contains("sso_error"), "{guest}: {}", location(&r));
+            assert_eq!(identities_of(&env, &amy).await, 0, "{guest}");
+        }
+        // Unless Microsoft says the owner of the email's domain is verified (the optional claim xms_edov)
+        let r = login(&env, &m, "microsoft", None, ms("o1", json!({ "idp": "https://sts.windows.net/t2/", "xms_edov": true }))).await;
+        assert_eq!(location(&r), "/files/abc");
+        assert_eq!(identities_of(&env, &amy).await, 1);
+        sqlx::query("DELETE FROM user_identities").execute(&env.st.db).await.unwrap();
+        // Members of the tenant are matched as before
+        let r = login(&env, &m, "microsoft", None, ms("o2", json!({ "idp": "https://sts.windows.net/t1/", "acct": 0 }))).await;
+        assert_eq!(location(&r), "/files/abc");
+        assert_eq!(identities_of(&env, &amy).await, 1);
         *MOCK_BASE.lock().unwrap() = None;
     }
 
