@@ -111,6 +111,18 @@ pub fn spawn_runner(st: AppState) {
     crate::backups::runner::spawn(st, &REPLICAS);
 }
 
+/// A replica ThirtyFile keeps on a location: it goes only once its record went first, so background deletion forgets
+/// it. And a location a replica took over from, not checked since, takes no new content (`fenced`).
+pub const KEEPER: crate::tree::Keeper = crate::tree::Keeper { what: "a replica", holds, refuses: Some(refuses) };
+
+fn holds<'a>(db: &'a SqlitePool, hash: &'a str, location: &'a str) -> BoxFuture<'a, Result<crate::tree::Hold, sqlx::Error>> {
+    Box::pin(async move { Ok(if kept(db, hash, location).await? { crate::tree::Hold::ForGood } else { crate::tree::Hold::No }) })
+}
+
+fn refuses<'a>(conn: &'a mut SqliteConnection, location: &'a str) -> BoxFuture<'a, Result<bool, sqlx::Error>> {
+    Box::pin(fenced(conn, location))
+}
+
 /// Whether ThirtyFile keeps a copy of this content on this location as a replica: it isn't deleted meanwhile
 pub async fn kept(db: &SqlitePool, hash: &str, location: &str) -> Result<bool, sqlx::Error> {
     let row: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM replica_copies WHERE hash = ? AND location_id = ?").bind(hash).bind(location).fetch_optional(db).await?;

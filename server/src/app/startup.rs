@@ -217,6 +217,8 @@ pub fn parts(l: Loaded) -> Parts {
         .with(downloads::Memory::default())
         .with(jobs::Memory::default())
         .with(tree::Memory::default())
+        // Moves, replicas and backups keep content the tree no longer refers to
+        .with(tree::Keepers(vec![moves::KEEPER, replicas::KEEPER, backups::KEEPER]))
         .with(usage::Memory::default())
         .with(locations::Memory::default())
         .with(folders::Memory::default())
