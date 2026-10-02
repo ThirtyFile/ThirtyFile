@@ -294,7 +294,11 @@ async fn archive_batch(st: &AppState, kind: &str, cutoff: i64) -> AppResult<i64>
         "activity" => {
             fetch_batch::<ActivityArchive>(
                 st,
-                "SELECT id, at, user_id, username, drive_id, node_id, node_name, action, detail FROM activity WHERE at < ? ORDER BY id LIMIT ?",
+                // Archives are for administrators: entries about personal spaces keep who did what there, not to what
+                "SELECT id, at, user_id, username, drive_id, CASE WHEN private_to IS NULL THEN node_id END AS node_id,
+                   CASE WHEN private_to IS NULL THEN node_name ELSE '' END AS node_name, action,
+                   CASE WHEN private_to IS NULL THEN detail ELSE '' END AS detail
+                 FROM activity WHERE at < ? ORDER BY id LIMIT ?",
                 cutoff,
                 |r| r.id,
                 |r| r.at,
@@ -304,7 +308,11 @@ async fn archive_batch(st: &AppState, kind: &str, cutoff: i64) -> AppResult<i64>
         "share_access" => {
             fetch_batch::<AccessArchive>(
                 st,
-                "SELECT id, at, share_id, owner_id, node_id, node_name, event, ip, user_agent FROM share_access WHERE at < ? ORDER BY id LIMIT ?",
+                // Nor visits to links in personal spaces which link or item they were
+                "SELECT id, at, CASE WHEN private_to IS NULL THEN share_id ELSE '' END AS share_id, owner_id,
+                   CASE WHEN private_to IS NULL THEN node_id END AS node_id, CASE WHEN private_to IS NULL THEN node_name ELSE '' END AS node_name,
+                   event, ip, user_agent
+                 FROM share_access WHERE at < ? ORDER BY id LIMIT ?",
                 cutoff,
                 |r| r.id,
                 |r| r.at,

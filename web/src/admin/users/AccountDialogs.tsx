@@ -78,7 +78,10 @@ function PersonalFilesChoice({ c }: { c: ReturnType<typeof usePersonalFiles> }) 
           <span className="min-w-0">
             {t("Remove their files from ThirtyFile")}
             <span className="block text-xs break-words text-muted-foreground">
-              {t("Their folder on the server, {path}, is kept with the files in it: delete it there when it's no longer needed.", { path: own.source_path ?? "" })}
+              {own.source_path
+                ? t("Their folder on the server, {path}, is kept with the files in it: delete it there when it's no longer needed.", { path: own.source_path })
+                : // Administrators aren't told where someone else's personal space is kept
+                  t("Their folder on the server is kept with the files in it: delete it there when it's no longer needed.")}
             </span>
           </span>
         ) : (

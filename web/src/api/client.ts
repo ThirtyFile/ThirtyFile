@@ -9,6 +9,9 @@ export class ApiError extends Error {
     public code?: string,
     /** The server's id of the failed request (X-Request-Id), which ties an error report to the server's record of it */
     public requestId?: string,
+    /** The server's own message, before it was translated for the page: error reports send this one (the server
+     * knows how to leave the names out of it) */
+    public serverMessage?: string,
   ) {
     super(message);
   }
@@ -36,10 +39,14 @@ export async function request<T>(method: string, path: string, body?: unknown, r
 export function errorFromBody(status: number, body: string, url: string, fallback: string, requestId?: string): ApiError {
   let message = fallback;
   let code: string | undefined;
+  let serverMessage: string | undefined;
   try {
     const data = JSON.parse(body);
     // Server messages are English: translate them to the UI language
-    if (data.error) message = tServer(data.error);
+    if (typeof data.error === "string" && data.error) {
+      serverMessage = data.error;
+      message = tServer(data.error);
+    }
     code = data.code;
   } catch {
     // Non-JSON error
@@ -47,7 +54,7 @@ export function errorFromBody(status: number, body: string, url: string, fallbac
   if (status === 401 && code === undefined && !url.startsWith("/api/auth/login") && !url.startsWith("/api/public/")) {
     window.dispatchEvent(new Event("tf:unauthorized"));
   }
-  return new ApiError(message, status, code, requestId);
+  return new ApiError(message, status, code, requestId, serverMessage);
 }
 
 export async function responseError(res: Response, url: string, fallback: string): Promise<ApiError> {

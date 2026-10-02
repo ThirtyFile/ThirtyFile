@@ -75,6 +75,7 @@
         </div>
         <p>Filter by person, action and date, and export the result as a CSV file that opens in Excel.</p>
         <p>The activity log is for administrators, and for space managers in the space's properties (<strong>This PC</strong>). Everyone else sees the recent activity of a file or folder they can open in its <a href="files.html#details">details pane</a>.</p>
+        <p>Entries about other people's personal spaces say who did what and when, but not to which file or folder: the item and the details are left out (<a href="users.html#privacy">What administrators can see</a>). The search and the CSV export leave them out too, and so do the share link access log for links in those spaces, and archive files.</p>
         <p>Everyone can see their own sign-in history and signed-in devices from the account menu. See <a href="account.html">Your account</a>.</p>
 
         <h3 id="errors">Errors</h3>
@@ -84,7 +85,7 @@
           <li><strong>Web page</strong> entries are sent by the page: a page that broke, an uncaught script error, and failures it showed during uploads, previews, saving and file operations.</li>
           <li>When the page reports a failed request the server already recorded, the two are joined by the request ID into one entry, with what the page showed under <strong>Reported by the page</strong>.</li>
           <li>The same error again within 10 minutes adds to the entry's count instead of adding another entry. Reports are limited per person and per minute, so a page stuck in a loop can't fill the log.</li>
-          <li>Names of files and folders are left out: text in quotes is replaced with <code>"…"</code>, and requests are recorded by their route (<code>PATCH /api/nodes/{id}</code>), never by the path asked for. Passwords, cookies, share link tokens and file contents are never recorded. The full text of a server failure is in the server's log (<code>docker logs</code>), under the same request ID.</li>
+          <li>Names of files and folders are left out: text in quotes is replaced with <code>"…"</code> (or <code>「…」</code>), the page reports the server's English message rather than its translation, and requests are recorded by their route (<code>PATCH /api/nodes/{id}</code>), never by the path asked for. Passwords, cookies, share link tokens and file contents are never recorded. The full text of a server failure is in the server's log (<code>docker logs</code>), under the same request ID.</li>
         </ul>
 
         <h2 id="keep">How long logs are kept</h2>

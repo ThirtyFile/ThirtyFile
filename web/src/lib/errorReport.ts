@@ -57,15 +57,21 @@ export function pageRoute(path: string): string {
 
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max)}…` : s);
 
-/** Builds the report of an error: its message and stack, and for a failed request, its status and request id */
+/**
+ * Builds the report of an error: its message and stack, and for a failed request, its status and request id. A failed
+ * request reports the server's own (English) message rather than its translation: the server leaves the quoted names
+ * out of its messages, and a translation may quote them differently.
+ */
 export function describe(kind: ErrorKind, error: unknown, operation?: string, resource?: string): ErrorReport {
   const e = error instanceof Error ? error : null;
-  const message = e ? e.message || e.name : typeof error === "string" ? error : String(error);
+  const original = error instanceof ApiError ? error.serverMessage : undefined;
+  const message = original || (e ? e.message || e.name : typeof error === "string" ? error : String(error));
+  const stack = e?.stack && original && e.message ? e.stack.replaceAll(e.message, original) : e?.stack;
   const report: ErrorReport = {
     kind,
     operation,
     message: clip(message, MAX_MESSAGE),
-    stack: e?.stack ? clip(e.stack, MAX_STACK) : undefined,
+    stack: stack ? clip(stack, MAX_STACK) : undefined,
     route: pageRoute(location.pathname),
     resource,
     build: BUILD,

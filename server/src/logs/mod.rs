@@ -105,7 +105,7 @@ mod tests {
     use std::io::Read;
 
     async fn names(st: &AppState, f: impl FnOnce(&mut ActivityQuery)) -> Vec<String> {
-        query_activity(st, &q(f), 100).await.unwrap().into_iter().map(|r| r.node_name).collect()
+        query_activity(st, &q(f), 0, 100).await.unwrap().into_iter().map(|r| r.node_name).collect()
     }
 
     async fn insert_activity(env: &testutil::TestEnv, user: &User, at: i64, action: &str, name: &str) {
@@ -177,8 +177,8 @@ mod tests {
         );
 
         // Paging: 2 per page, continuing with before
-        let page1 = query_activity(&env.st, &q(|_| {}), 2).await.unwrap();
-        let page2 = query_activity(&env.st, &q(|q| q.before = Some(page1[1].id)), 2).await.unwrap();
+        let page1 = query_activity(&env.st, &q(|_| {}), 0, 2).await.unwrap();
+        let page2 = query_activity(&env.st, &q(|q| q.before = Some(page1[1].id)), 0, 2).await.unwrap();
         assert_eq!(page1.len() + page2.len(), 4);
         assert!(page2[0].id < page1[1].id);
     }
@@ -282,6 +282,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_activity_log_doesnt_name_what_is_in_other_peoples_personal_spaces() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let amy = env.user("amy", true).await;
+        let letter = env.file(&amy, amy.root(), "resignation-letter.docx").await;
+        let plan = env.file(&admin, &env.st.shared_root().unwrap(), "resignation-plan.docx").await;
+        for (who, id, action, detail) in
+            [(&amy, &letter, "upload", ""), (&amy, &letter, "rename", "old resignation.docx → resignation-letter.docx"), (&admin, &plan, "upload", "")]
+        {
+            let mut c = env.st.db.acquire().await.unwrap();
+            let node = tree::get_node(&mut c, id).await.unwrap().unwrap();
+            record_activity(&mut c, who, Some(&node), action, detail).await.unwrap();
+        }
+        let rows = |user: &User, q: ActivityQuery| {
+            let (st, user) = (env.st.clone(), user.clone());
+            async move { activity(State(st), user, Query(q)).await.unwrap().0["items"].as_array().unwrap().clone() }
+        };
+
+        // Without a space: amy's entries say who did what in which space, but name nothing in it
+        let all = rows(&admin, ActivityQuery::default()).await;
+        assert_eq!(all.len(), 3);
+        for r in all.iter().filter(|r| r["username"] == "amy") {
+            assert!(r["private"] == true && r["node_name"] == "" && r["detail"] == "" && r["node_id"].is_null(), "{r}");
+            assert!(r["action"].as_str().is_some());
+        }
+        assert!(all.iter().any(|r| r["node_name"] == "resignation-plan.docx" && r["private"] == false));
+        // The keyword search doesn't find them either
+        let found = rows(&admin, ActivityQuery { q: Some("resignation".into()), ..Default::default() }).await;
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(rows(&admin, ActivityQuery { q: Some("old resignation".into()), ..Default::default() }).await.is_empty());
+        // Nor the export
+        let res = export_activity(State(env.st.clone()), admin.clone(), HeaderMap::new(), Query(ActivityQuery::default())).await.unwrap();
+        let csv = String::from_utf8(axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+        assert!(csv.contains("resignation-plan.docx") && !csv.contains("letter"), "{csv}");
+
+        // Amy reads her own space's log in full
+        let drive = env.drive_of(amy.root()).await;
+        let own = rows(&amy, ActivityQuery { drive_id: Some(drive), q: Some("resignation".into()), ..Default::default() }).await;
+        assert_eq!(own.len(), 2);
+        assert!(own.iter().all(|r| r["private"] == false) && own.iter().any(|r| r["detail"].as_str().unwrap().contains("old resignation")));
+
+        // Archived entries don't name them either
+        sqlx::query("UPDATE activity SET at = at - 400 * 86400").execute(&env.st.db).await.unwrap();
+        let _ = run_archive(&env.st).await.unwrap();
+        let (file,): (String,) = sqlx::query_as("SELECT file FROM log_archives WHERE kind = 'activity'").fetch_one(&env.st.db).await.unwrap();
+        let mut text = String::new();
+        flate2::read::GzDecoder::new(std::fs::File::open(env.dir.join("archives").join(&file)).unwrap()).read_to_string(&mut text).unwrap();
+        assert!(text.contains("resignation-plan.docx") && !text.contains("letter"), "{text}");
+    }
+
+    #[tokio::test]
     async fn administrators_see_visits_to_links_in_other_peoples_personal_spaces_without_names() {
         let env = testutil::env().await;
         let admin = env.admin().await;
@@ -339,6 +390,15 @@ mod tests {
         assert_eq!(own.len(), 2);
         assert!(own.iter().any(|r| r["node_name"] == "diagnosis.txt" && r["share_id"] == private.as_str()));
         assert!(own.iter().any(|r| r["node_name"] == "old-letter.txt"));
+
+        // Archived visits don't name them either
+        sqlx::query("UPDATE share_access SET at = at - 400 * 86400").execute(&env.st.db).await.unwrap();
+        let _ = run_archive(&env.st).await.unwrap();
+        let (file,): (String,) = sqlx::query_as("SELECT file FROM log_archives WHERE kind = 'share_access'").fetch_one(&env.st.db).await.unwrap();
+        let mut text = String::new();
+        flate2::read::GzDecoder::new(std::fs::File::open(env.dir.join("archives").join(&file)).unwrap()).read_to_string(&mut text).unwrap();
+        assert!(text.contains("plan.txt") && text.contains(&public), "{text}");
+        assert!(!text.contains("diagnosis") && !text.contains("letter") && !text.contains(&private), "{text}");
     }
 
     /// Waits until the background-written records reach the given count

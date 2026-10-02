@@ -440,7 +440,9 @@ function scanSummary(r: ScanReport) {
     moved: r.moved,
     removed: r.removed,
   });
-  return r.skipped.length ? `${main} · ${t("{n} item skipped|{n} items skipped", { n: r.skipped.length })}` : main;
+  // Someone else's personal space reports how many, not which
+  const skipped = r.skipped_count ?? r.skipped.length;
+  return skipped ? `${main} · ${t("{n} item skipped|{n} items skipped", { n: skipped })}` : main;
 }
 
 /** A folder space's folder and its last check (and a move that stopped) */

@@ -134,7 +134,7 @@ pub(super) fn localize(s: &str, en: bool) -> &str {
 pub async fn export_activity(State(st): State<AppState>, user: User, headers: HeaderMap, Query(q): Query<ActivityQuery>) -> AppResult<Response> {
     let en = english(&headers);
     authorize_activity(&st, &user, &q).await?;
-    let rows = query_activity(&st, &q, EXPORT_LIMIT).await?;
+    let rows = query_activity(&st, &q, user.id, EXPORT_LIMIT).await?;
     Ok(csv_file(en, q.tz, "activity-log", &["Time", "User", "Action", "Item", "Details", "Space"], rows, |r, offset| {
         let action = localize(action_label(&r.action), en).to_string();
         vec![format_time(r.at, offset), r.username, action, r.node_name, r.detail, r.drive_name.unwrap_or_default()]
