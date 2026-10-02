@@ -499,9 +499,12 @@ fn content_or_copy<'a>(key: &'a str, content_dir: &str) -> Option<(&'a str, bool
     let (dir, name) = key.rsplit_once('/')?;
     let hash = name.get(..64)?;
     let rest = &name[64..];
-    let hex = hash.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'));
+    // Before its first characters are cut out: a name of other letters may not split there
+    if !hash.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')) {
+        return None;
+    }
     let expected = if content_dir.is_empty() { format!("{}/{}", &hash[0..2], &hash[2..4]) } else { format!("{content_dir}/{}/{}", &hash[0..2], &hash[2..4]) };
-    (hex && rest.starts_with('.') && dir == expected).then_some((hash, false))
+    (rest.starts_with('.') && dir == expected).then_some((hash, false))
 }
 
 #[derive(Deserialize)]
@@ -565,6 +568,16 @@ pub async fn download(State(st): State<AppState>, Admin(me): Admin, Path(id): Pa
 mod tests {
     use super::*;
     use crate::testutil;
+
+    #[test]
+    fn long_names_of_other_letters_are_neither_contents_nor_copies() {
+        // 64 bytes long at a character boundary, with the 2nd and 4th bytes inside a character
+        let name = format!("a{}.txt", "é".repeat(31) + "b");
+        assert_eq!(name.len(), 68);
+        assert_eq!(content_or_copy(&format!("ab/cd/{name}"), ""), None);
+        let hash = "ab".repeat(32);
+        assert_eq!(content_or_copy(&format!("ab/ab/{hash}.part-1"), ""), Some((hash.as_str(), false)));
+    }
 
     async fn page(env: &testutil::TestEnv, admin: &crate::auth::User, path: &str, after: Option<&str>, limit: usize) -> AppResult<Page> {
         let q = BrowseQuery { path: path.into(), after: after.map(str::to_string), limit: Some(limit) };

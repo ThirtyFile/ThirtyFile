@@ -56,8 +56,11 @@ describe("after a session expired", () => {
     const { leaveAfterSignOut } = await freshPage();
     const assign = vi.fn<(url: string) => void>();
     vi.stubGlobal("location", { ...window.location, assign });
+    localStorage.setItem("tf-last-user", "amy");
     leaveAfterSignOut(1);
     expect(Object.keys(localStorage).filter((k) => k.startsWith("tf-upload-tasks-") || k.startsWith("tus::"))).toEqual([]);
+    // The sign-in screen asks for the account again
+    expect(localStorage.getItem("tf-last-user")).toBeNull();
     expect(assign).toHaveBeenCalledWith("/login");
     vi.unstubAllGlobals();
   });

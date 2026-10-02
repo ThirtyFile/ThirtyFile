@@ -22,7 +22,7 @@ use crate::{
 };
 
 pub const NODE_COLS: &str = "n.id, n.owner_id, n.parent_id, n.kind, n.name, n.blob_hash, n.size, n.mime, n.created_at, n.updated_at, n.trashed_at, n.drive_id,
-     COALESCE((SELECT username FROM users WHERE id = n.owner_id), '') AS owner_name,
+     CASE WHEN n.found THEN '' ELSE COALESCE((SELECT username FROM users WHERE id = n.owner_id), '') END AS owner_name,
      (SELECT location_id FROM blobs WHERE hash = n.blob_hash) AS blob_location,
      n.fs_path, (SELECT source_path FROM drives WHERE id = n.drive_id AND mode = 'folder') AS fs_root,
      (SELECT read_only OR moving FROM drives WHERE id = n.drive_id) AS space_read_only,
@@ -49,7 +49,7 @@ pub struct Node {
     pub trashed_at: Option<i64>,
     /// The space it belongs to
     pub drive_id: Option<String>,
-    /// Uploader / creator
+    /// Uploader / creator; empty for an item the check of a folder space found on its disk
     pub owner_name: String,
     /// Whether the current user has favorited it; filled in by mark_favorites
     #[sqlx(default)]

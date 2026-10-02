@@ -33,3 +33,41 @@ test("a value typed into a workbook is saved into the file, which keeps the rest
   // A part the editor doesn't know comes back as it was
   expect(await saved.file(UNKNOWN_PART)!.async("string")).toBe(UNKNOWN_CONTENT);
 });
+
+test("restoring an earlier version while the workbook is open for editing shows it there, and the next save goes through", async ({ page }) => {
+  await signIn(page);
+  const dir = await makeFolder(page, "Sheet restore");
+  const xlsx = Buffer.from(await buildWorkbook([{ name: "Budget", rows: '<row r="1"><c r="B1"><v>1234</v></c></row>' }], []));
+  const id = await uploadFile(page, dir, "restore.xlsx", xlsx);
+  await page.goto(`/view/${id}`);
+  await page.getByRole("button", { name: "Edit workbook" }).click();
+  const nameBox = page.getByLabel("Name box");
+  const go = async (cell: string) => {
+    await nameBox.fill(cell);
+    await nameBox.press("Enter");
+  };
+  await go("C1");
+  await page.keyboard.type("42");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByText("Saved (1 cell)")).toBeVisible();
+
+  // The version from before the save, restored from the details pane
+  await page.getByRole("button", { name: "Details pane" }).click();
+  await page.getByRole("region", { name: "Versions" }).getByRole("button", { name: "Restore" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Restore" }).click();
+  await expect(page.getByText("Version restored")).toBeVisible();
+  await go("C1");
+  await expect(page.getByLabel("Formula bar")).toHaveValue("");
+
+  // Saved over the restored content, not refused as someone else's change
+  await go("D1");
+  await page.keyboard.type("7");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByText("Saved (1 cell)").last()).toBeVisible();
+  const saved = await JSZip.loadAsync(await (await page.request.get(`/api/files/${id}/content`)).body());
+  const sheet = await saved.file("xl/worksheets/sheet1.xml")!.async("string");
+  expect(sheet).toMatch(/<c r="D1"[^>]*><v>7<\/v><\/c>/);
+  expect(sheet).not.toMatch(/<c r="C1"/);
+});

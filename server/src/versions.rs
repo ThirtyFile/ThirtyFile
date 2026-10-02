@@ -68,10 +68,12 @@ impl Removed {
     }
 }
 
-/// Who wrote a file's current content: whoever last gave it new content, else whoever created it
+/// Who wrote a file's current content: whoever last gave it new content, else whoever created it (no name for a file
+/// the check of a folder space found on its disk)
 pub async fn content_author(conn: &mut SqliteConnection, node: &Node) -> AppResult<(i64, String)> {
     let row: (i64, String) = sqlx::query_as(
-        "SELECT COALESCE(n.content_by, n.owner_id), COALESCE((SELECT username FROM users WHERE id = COALESCE(n.content_by, n.owner_id)), '')
+        "SELECT COALESCE(n.content_by, n.owner_id),
+                CASE WHEN n.content_by IS NULL AND n.found THEN '' ELSE COALESCE((SELECT username FROM users WHERE id = COALESCE(n.content_by, n.owner_id)), '') END
          FROM nodes n WHERE n.id = ?",
     )
     .bind(&node.id)

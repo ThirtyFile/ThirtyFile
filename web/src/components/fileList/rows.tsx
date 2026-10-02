@@ -204,7 +204,7 @@ export function Cell({ id, item, h }: { id: ColumnId; item: Item; h: HandlersRef
     case "owner":
       return (
         <td role="gridcell" className={muted}>
-          {item.owner_name}
+          {item.owner_name || "—"}
         </td>
       );
     case "extra":

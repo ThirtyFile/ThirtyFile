@@ -10,6 +10,14 @@ pub fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
+/// The last second dates are written with (HTTP headers and WebDAV take years up to 9999): 9999-12-31 23:59:59 UTC
+pub const LAST_TIME: i64 = 253_402_300_799;
+
+/// A file's time in seconds since 1970, kept between 1970 and the end of 9999 (a disk or a backup can say anything)
+pub fn file_time(t: i64) -> i64 {
+    t.clamp(0, LAST_TIME)
+}
+
 pub fn new_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }

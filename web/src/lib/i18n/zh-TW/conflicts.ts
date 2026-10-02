@@ -24,6 +24,8 @@ export default {
   "Versions": "版本",
   "Restore this version?": "要還原這個版本嗎？",
   "\"{name}\" gets back the content it had on {date}. Its current content is kept as an earlier version.": "「{name}」會回到 {date} 時的內容，目前的內容會保留為較早的版本。",
+  "\"{name}\" gets back the content it had on {date}. Its current content is kept as an earlier version, and the changes not saved yet in the editor are discarded.":
+    "「{name}」會回到 {date} 時的內容，目前的內容會保留為較早的版本，編輯器中尚未儲存的變更則會捨棄。",
   "Version restored": "已還原版本",
   "No earlier versions. Saving over this file keeps the content it had.": "沒有較早的版本。之後儲存或取代這個檔案時，會保留原本的內容。",
   "Earlier versions aren't kept on this server.": "這台伺服器不保留較早的版本。",

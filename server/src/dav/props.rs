@@ -106,11 +106,12 @@ pub(super) async fn read_xml(body: Body) -> AppResult<Parsed> {
 
 /// Seconds since 1970 in the format of HTTP headers (RFC 1123): "Sun, 06 Nov 1994 08:49:37 GMT"
 pub(super) fn http_date(t: i64) -> String {
-    httpdate::fmt_http_date(UNIX_EPOCH + Duration::from_secs(t.max(0) as u64))
+    httpdate::fmt_http_date(UNIX_EPOCH + Duration::from_secs(crate::util::file_time(t) as u64))
 }
 
 /// Seconds since 1970 as RFC 3339 in UTC: "1994-11-06T08:49:37Z"
 pub(super) fn rfc3339(t: i64) -> String {
+    let t = crate::util::file_time(t);
     let (days, secs) = (t.div_euclid(86400), t.rem_euclid(86400));
     // Days to a civil date (Howard Hinnant's algorithm)
     let z = days + 719_468;

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { api, type FileVersion, type Node } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { confirm } from "@/lib/confirm";
+import { getDraft, setDraft } from "@/lib/drafts";
 import { ErrorState } from "@/components/ErrorState";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { t } from "@/lib/i18n";
@@ -24,17 +25,26 @@ export function VersionsSection({ node, canRestore, ready = true }: { node: Node
   });
 
   const restore = async (v: FileVersion) => {
+    // Changes not saved yet in the spreadsheet editor would be saved over the restored content
+    const unsaved = !!getDraft(node.id, "sheet");
     const ok = await confirm({
       title: t("Restore this version?"),
-      description: t('"{name}" gets back the content it had on {date}. Its current content is kept as an earlier version.', {
-        name: node.name,
-        date: formatWinDate(v.modified_at),
-      }),
+      description: unsaved
+        ? t('"{name}" gets back the content it had on {date}. Its current content is kept as an earlier version, and the changes not saved yet in the editor are discarded.', {
+            name: node.name,
+            date: formatWinDate(v.modified_at),
+          })
+        : t('"{name}" gets back the content it had on {date}. Its current content is kept as an earlier version.', {
+            name: node.name,
+            date: formatWinDate(v.modified_at),
+          }),
       confirmText: t("Restore"),
     });
     if (!ok) return;
     try {
       const restored = await api.restoreVersion(node.id, v.id);
+      // The editor then shows the restored content
+      if (unsaved) setDraft(node.id, null);
       toast.success(t("Version restored"));
       // The file's row, its details and history, and the folder it is in (sorted by size or date, it can move)
       await refreshFiles(qc, { ...saved(restored), nodes: [node.id] });

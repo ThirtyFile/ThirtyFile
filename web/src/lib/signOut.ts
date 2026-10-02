@@ -2,6 +2,9 @@ import { clearDownloads } from "@/downloads";
 import { cancelAll } from "@/uploads";
 import { forgetRecords, setRecoveryUser } from "@/lib/uploadRecovery";
 
+/** Account last used for a password sign-in, which the sign-in screen offers (pages/LoginPage.tsx) */
+export const LAST_USER = "tf-last-user";
+
 /** The start of the keys of the tree's expanded folders (earlier versions kept one for everyone, under this key alone) */
 const TREE_STORAGE_PREFIX = "tf-tree-expanded";
 
@@ -10,7 +13,8 @@ export const treeStorageKey = (userId: number) => `${TREE_STORAGE_PREFIX}-${user
 
 /**
  * Signs out without leaving anything of the user in this browser tab for the next person: transfers stop, the upload
- * resume records, the saved tabs of this user and the expanded folders of the tree are removed, and the sign-in page is loaded afresh, so nothing kept
+ * resume records, the saved tabs of this user, the expanded folders of the tree and the account name the sign-in screen
+ * offers are removed, and the sign-in page is loaded afresh, so nothing kept
  * in memory (unsaved drafts, open workbooks, the clipboard, file names in the transfer lists) survives.
  */
 export function leaveAfterSignOut(userId: number) {
@@ -25,6 +29,8 @@ export function leaveAfterSignOut(userId: number) {
     localStorage.removeItem(`tf-tabs-${userId}`);
     localStorage.removeItem(treeStorageKey(userId));
     sessionStorage.removeItem(`tf-tabs-${userId}`);
+    // The next person isn't shown who was here
+    localStorage.removeItem(LAST_USER);
   } catch {
     // Storage blocked by the browser: nothing was kept there either
   }

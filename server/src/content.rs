@@ -194,7 +194,7 @@ pub async fn create(conn: &mut SqliteConnection, staged: &Staged, owner: i64, fo
             .bind(blob.size)
             .bind(guess_mime(name))
             .bind(now())
-            .bind(modified.unwrap_or_else(now))
+            .bind(modified.map(crate::util::file_time).unwrap_or_else(now))
             .execute(&mut *conn)
             .await?;
             tree::adjust_usage(conn, folder.drive(), blob.size).await?;
@@ -364,6 +364,24 @@ mod tests {
         staged.abandon(&env.st).await;
         // Nothing is left in the space's folder
         assert!(!std::fs::read_dir(&space.dir).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with(".thirtyfile-upload-")));
+    }
+
+    #[tokio::test]
+    async fn a_restored_date_dates_cant_be_written_with_is_kept_within_1970_to_9999() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let folder = node(&env, amy.root()).await;
+        for (modified, kept) in [(i64::MAX, crate::util::LAST_TIME), (-1, 0), (784_111_777, 784_111_777)] {
+            let staged = stage_restored(&env.st, &folder, received(&env, b"old")).await.unwrap();
+            let turn = staged.turn(&env.st).await;
+            let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+            let name = free_name(&mut tx, &folder, "restored.txt").await.unwrap();
+            let (id, written) = create(&mut tx, &staged, amy.id, &folder, &name, Some(modified)).await.unwrap();
+            tx.commit().await.unwrap();
+            drop(turn);
+            staged.finish(&env.st, written).await;
+            assert_eq!(node(&env, &id).await.updated_at, kept);
+        }
     }
 
     #[tokio::test]
