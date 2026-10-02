@@ -685,3 +685,55 @@ async fn a_promotion_refuses_content_missing_since_its_preflight() {
     assert_eq!((source.as_str(), epoch), ("local", 1));
     assert_eq!(read(&env, &amy, &late).await.unwrap(), b"concurrent upload, not on target");
 }
+
+/// A copy on a target is replaced in one step, never deleted first: the target may have become where the content is
+/// kept meanwhile (a promotion), and deleting it there would lose it
+#[tokio::test]
+async fn a_copy_of_another_length_is_replaced_without_deleting_what_is_there_first() {
+    use futures_util::future::BoxFuture;
+    struct Watched {
+        inner: Arc<dyn Storage>,
+        deletes: Arc<std::sync::atomic::AtomicUsize>,
+    }
+    impl Storage for Watched {
+        fn put_file<'a>(&'a self, h: &'a str, p: &'a std::path::Path) -> BoxFuture<'a, std::io::Result<()>> {
+            self.inner.put_file(h, p)
+        }
+        fn open<'a>(&'a self, h: &'a str, s: u64, n: u64) -> BoxFuture<'a, std::io::Result<storage::BoxReader>> {
+            self.inner.open(h, s, n)
+        }
+        fn delete<'a>(&'a self, h: &'a str) -> BoxFuture<'a, std::io::Result<()>> {
+            self.deletes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.delete(h)
+        }
+        fn check(&self) -> BoxFuture<'_, std::io::Result<()>> {
+            self.inner.check()
+        }
+        fn ping(&self) -> BoxFuture<'_, std::io::Result<()>> {
+            self.inner.ping()
+        }
+        fn content_dir(&self) -> &'static str {
+            self.inner.content_dir()
+        }
+        fn stat<'a>(&'a self, key: &'a str) -> BoxFuture<'a, std::io::Result<Option<storage::Entry>>> {
+            self.inner.stat(key)
+        }
+        fn put_at<'a>(&'a self, key: &'a str, src: &'a std::path::Path) -> BoxFuture<'a, std::io::Result<()>> {
+            self.inner.put_at(key, src)
+        }
+    }
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    env.upload(&amy, amy.root(), "a.txt", b"the content").await;
+    let nas = add_nas(&env, "nas").await;
+    // Left there by a copy that stopped halfway
+    std::fs::create_dir_all(stored(&nas, b"the content").parent().unwrap()).unwrap();
+    std::fs::write(stored(&nas, b"the content"), b"the cont").unwrap();
+    let deletes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let inner = env.st.storage("nas").unwrap();
+    env.st.storages.write().unwrap().insert("nas".into(), Arc::new(Watched { inner, deletes: deletes.clone() }));
+    let id = make(&env, json!({ "source": "local", "targets": [{ "location": "nas" }] })).await;
+    assert_eq!(settle(&env, &id).await, ["done"]);
+    assert_eq!(std::fs::read(stored(&nas, b"the content")).unwrap(), b"the content");
+    assert_eq!(deletes.load(std::sync::atomic::Ordering::SeqCst), 0);
+}

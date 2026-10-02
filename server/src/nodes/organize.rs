@@ -208,7 +208,7 @@ pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
                     return Err(AppError::bad_request("Move at most 20,000 items at once to or from a folder on the server"));
                 }
                 let subtree = tree::subtree(&mut tx, &node.id).await?;
-                let mut nodes: Vec<Node> = subtree.into_iter().map(|(n, _)| n).filter(|n| n.trashed_at.is_none()).collect();
+                let mut nodes = live_items(subtree);
                 // The first one is the item itself: it goes in under its name in the destination
                 nodes[0].name = name;
                 across.push(nodes);
@@ -236,6 +236,21 @@ pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
     tx.commit().await?;
     locks.committed();
     Ok(fsops::Across::new(dest, across, true))
+}
+
+/// The items of a subtree (sorted by depth, the item itself first) that aren't in the trash, nor inside a folder that
+/// is: what is in a folder that went to the trash goes with it, even before the change has marked all of it
+pub(super) fn live_items(subtree: Vec<(Node, i64)>) -> Vec<Node> {
+    let mut kept: HashSet<String> = HashSet::new();
+    let mut out = Vec::with_capacity(subtree.len());
+    for (i, (n, _)) in subtree.into_iter().enumerate() {
+        if n.trashed_at.is_some() || (i > 0 && !n.parent_id.as_ref().is_some_and(|p| kept.contains(p))) {
+            continue;
+        }
+        kept.insert(n.id.clone());
+        out.push(n);
+    }
+    out
 }
 
 /// The items a move or copy touches, for locking their folder spaces
@@ -279,7 +294,7 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
         if items > MAX_COPY_ITEMS {
             return Err(AppError::bad_request("Copy at most 20,000 items at once"));
         }
-        let nodes: Vec<Node> = tree::subtree(&mut tx, &node.id).await?.into_iter().map(|(n, _)| n).filter(|n| n.trashed_at.is_none()).collect();
+        let nodes = live_items(tree::subtree(&mut tx, &node.id).await?);
         total += nodes.iter().map(|n| n.size).sum::<i64>();
         plans.push(nodes);
     }
@@ -298,8 +313,9 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
             let (parent, name) = if i == 0 {
                 (dest.id.clone(), tree::unique_name(&mut tx, &dest.id, &n.name, n.is_folder()).await?)
             } else {
-                // The subtree is sorted by depth, so parents have always been copied already
-                (ids[n.parent_id.as_ref().unwrap()].clone(), n.name.clone())
+                // The subtree is sorted by depth, so parents have always been copied already (`live_items`)
+                let Some(parent) = n.parent_id.as_ref().and_then(|p| ids.get(p)) else { continue };
+                (parent.clone(), n.name.clone())
             };
             rows.push(json!([new_id, parent, n.kind, name, n.blob_hash, n.size, n.mime]));
             if let Some(hash) = &n.blob_hash {

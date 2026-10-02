@@ -66,16 +66,26 @@ pub async fn write_probe(dir: &Path) -> io::Result<()> {
     deleted.map_err(|e| delete_failed(e, CANT_DELETE_LOCAL))
 }
 
+/// Puts a temp file's content on disk before it takes the content's name: after a power loss, a name never leads to
+/// part of it
+async fn sync_temp(path: &Path) -> io::Result<()> {
+    // Opened for writing: Windows syncs only a file opened so
+    tokio::fs::OpenOptions::new().write(true).open(path).await?.sync_all().await?;
+    #[cfg(test)]
+    crate::fsops::testing::synced(path);
+    Ok(())
+}
+
 /// Moves a temp file to `dest` (the temp file is gone on success)
 async fn move_into(src: &Path, dest: &Path) -> io::Result<()> {
+    sync_temp(src).await?;
     if tokio::fs::rename(src, dest).await.is_err() {
         // Copy instead when the temp directory and storage are on different volumes. The copy gets a name of
         // its own, so two uploads of the same content can't write into one file, and is removed if it fails
         let tmp = dest.with_extension(format!("partial-{}", uuid::Uuid::new_v4().simple()));
         let copied = async {
             tokio::fs::copy(src, &tmp).await?;
-            // On the disk before it takes the content's name: after a power loss, a name never leads to part of it
-            tokio::fs::File::open(&tmp).await?.sync_all().await?;
+            sync_temp(&tmp).await?;
             tokio::fs::rename(&tmp, dest).await
         }
         .await;
@@ -365,6 +375,21 @@ mod tests {
         )
         .unwrap();
         s.ping().await.unwrap();
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn stored_content_is_on_disk_before_it_takes_its_name() {
+        let base = std::env::temp_dir().join(format!("thirtyfile-local-{}", crate::util::new_id()));
+        let root = base.join("nas");
+        claim_folder(&root, "nas").unwrap();
+        let s = LocalStorage::new(root.clone(), "nas");
+        let tmp = base.join("tmp");
+        std::fs::write(&tmp, b"x").unwrap();
+        let hash = crate::util::sha256_hex(b"x");
+        s.put_file(&hash, &tmp).await.unwrap();
+        assert!(root.join(&hash[0..2]).join(&hash[2..4]).join(&hash).is_file());
+        assert!(crate::fsops::testing::was_synced(&tmp));
         let _ = std::fs::remove_dir_all(&base);
     }
 }

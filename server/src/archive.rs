@@ -464,7 +464,9 @@ fn extract_entry(archive: &std::path::Path, entry: &ReadEntry, tmp: PathBuf, pro
         if size != entry.size || crc.finalize() != entry.crc {
             return Err(damaged());
         }
-        out.flush()?;
+        // On disk before it is stored under its hash or renamed into a folder
+        let file = out.into_inner().map_err(|e| e.into_error())?;
+        crate::fsops::sync_file(&file, &tmp)?;
         Ok(())
     })();
     if let Err(e) = result {
@@ -697,6 +699,18 @@ mod tests {
             }
         }
         zip.finish().await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn extracted_files_are_on_disk_before_they_take_their_name() {
+        let env = testutil::env().await;
+        let archive = env.st.tmp_dir().join(format!("in-{}", new_id()));
+        std::fs::write(&archive, zip_of(&[("a.txt", b"alpha")], true).await).unwrap();
+        let entries = crate::zip::read_entries(&mut std::io::BufReader::new(std::fs::File::open(&archive).unwrap()), 10, 1 << 20).unwrap();
+        let tmp = env.st.tmp_dir().join(format!("unzip-{}", new_id()));
+        let x = extract_entry(&archive, &entries[0], tmp.clone(), &|_| {}).unwrap();
+        assert_eq!(std::fs::read(&x.tmp).unwrap(), b"alpha");
+        assert!(crate::fsops::testing::was_synced(&tmp));
     }
 
     #[tokio::test]

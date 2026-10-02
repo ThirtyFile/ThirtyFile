@@ -342,6 +342,8 @@ pub(crate) mod testing {
         Replaced,
         /// Moving to the trash: the item is in the trash folder, the change isn't committed
         Trashed,
+        /// Moving or copying to a folder space: the content is in place under its name, the index hasn't followed
+        Placed,
     }
 
     static STOPS: Mutex<Vec<(String, Stop)>> = Mutex::new(Vec::new());
@@ -370,6 +372,17 @@ pub(crate) mod testing {
     /// The error of a change that stopped
     pub fn stopped() -> crate::error::AppError {
         crate::error::AppError::internal("stopped (test)")
+    }
+
+    static SYNCED: Mutex<Vec<std::path::PathBuf>> = Mutex::new(Vec::new());
+
+    /// A file at `path` was put on disk (`sync_file`)
+    pub fn synced(path: &std::path::Path) {
+        SYNCED.lock().unwrap().push(path.to_path_buf());
+    }
+
+    pub fn was_synced(path: &std::path::Path) -> bool {
+        SYNCED.lock().unwrap().iter().any(|p| p == path)
     }
 
     /// A call to the disk of `drive`
