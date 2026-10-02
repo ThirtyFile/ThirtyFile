@@ -8,7 +8,6 @@ export default {
   "Request failed ({status})": "Request failed ({status})",
   "Language": "Language",
   "Just now": "Just now",
-  "{n} minute ago|{n} minutes ago": "{n} minutes ago",
   "Today {time}": "Today {time}",
   "Couldn't create ({status})": "Couldn't create ({status})",
   // Shared terms used across many pages

@@ -19,8 +19,17 @@ export function errorMessage(e: unknown, fallback: string): string {
   return e instanceof Error ? e.message : fallback;
 }
 
+const numberFormats = new Map<number, Intl.NumberFormat>();
+/** A number in the interface's locale (digit grouping and decimal mark), with exactly `decimals` decimals */
+function formatFixed(n: number, decimals: number) {
+  let f = numberFormats.get(decimals);
+  if (!f) numberFormats.set(decimals, (f = new Intl.NumberFormat(locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })));
+  return f.format(n);
+}
+
+/** A size in bytes, KB, MB, GB or TB as File Explorer writes them (the units in its letters), the number in the locale's way: 1.5 MB */
 export function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
+  if (n < 1024) return `${formatFixed(n, 0)} B`;
   const units = ["KB", "MB", "GB", "TB"];
   let v = n / 1024;
   let i = 0;
@@ -28,7 +37,19 @@ export function formatBytes(n: number): string {
     v /= 1024;
     i++;
   }
-  return `${v >= 100 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
+  return `${formatFixed(v, v >= 100 ? 0 : 1)} ${units[i]}`;
+}
+
+/** A list of names in a sentence, joined the language's way (Intl.ListFormat): "A, B, and C" in English */
+export function formatList(items: readonly string[]): string {
+  return new Intl.ListFormat(locale, { type: "conjunction" }).format(items);
+}
+
+/** About how long `seconds` is, in the largest unit that fits: 45 sec, 5 min, 3 hr, 2 days (in the locale's words) */
+export function formatAge(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  const [value, unit] = s < 90 ? [s, "second"] : s < 5400 ? [Math.round(s / 60), "minute"] : s < 172_800 ? [Math.round(s / 3600), "hour"] : [Math.round(s / 86400), "day"];
+  return new Intl.NumberFormat(locale, { style: "unit", unit, unitDisplay: unit === "day" ? "long" : "short" }).format(value);
 }
 
 /**
@@ -82,7 +103,7 @@ export function formatTime(ts: number): string {
   const d = new Date(ts * 1000);
   const diff = Date.now() / 1000 - ts;
   if (diff < 60) return t("Just now");
-  if (diff < 3600) return t("{n} minute ago|{n} minutes ago", { n: Math.floor(diff / 60) });
+  if (diff < 3600) return new Intl.RelativeTimeFormat(locale, { numeric: "always" }).format(-Math.floor(diff / 60), "minute");
   if (diff < 86400 && new Date().getDate() === d.getDate()) return t("Today {time}", { time: formatClock(ts) });
   return formatDateTime(ts);
 }

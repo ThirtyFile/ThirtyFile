@@ -16,6 +16,7 @@ import { localZone, zones } from "@/admin/storage/BackupPolicyDialog";
 import { DRIVE_ICON } from "@/lib/drives";
 import { t } from "@/lib/i18n";
 import { useSubmit } from "@/lib/useSubmit";
+import { formatList } from "@/lib/utils";
 
 /** When a target is brought up to date: soon after changes, every few hours, or once a day */
 type When = "realtime" | "every" | "daily";
@@ -183,7 +184,7 @@ export function ReplicaPolicyDialog({ policy: p, source: preset, onClose, onDone
             </div>
             {stale.length > 0 && (
               <p className="text-xs text-muted-foreground">
-                {t("{names} held the spaces before a promotion: they are checked, and count as a copy again once they are current.", { names: stale.map((x) => x.name).join(", ") })}
+                {t("{names} held the spaces before a promotion: they are checked, and count as a copy again once they are current.", { names: formatList(stale.map((x) => x.name)) })}
               </p>
             )}
             <label className="flex flex-wrap items-center gap-2 text-sm">

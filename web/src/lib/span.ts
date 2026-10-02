@@ -95,7 +95,7 @@ export async function eachBatch(picked: Picked, title: string, change: (ids: str
   let done = 0;
   try {
     for await (const ids of batchesOf(picked)) {
-      if (many) toast.loading(t("{title} {done} of {total}", { title, done: done.toLocaleString(), total: picked.count.toLocaleString() }), { id, duration: Infinity });
+      if (many) toast.loading(t("{title} {done} of {total}", { title, done, total: picked.count }), { id, duration: Infinity });
       await change(ids);
       done += ids.length;
     }

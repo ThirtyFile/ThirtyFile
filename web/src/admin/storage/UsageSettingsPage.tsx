@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { UsageChart } from "@/admin/storage/UsageChart";
-import { cn, formatBytes, formatDateTime, formatTime } from "@/lib/utils";
+import { cn, formatBytes, formatDateTime, formatList, formatTime } from "@/lib/utils";
 import { locale, t, tServer } from "@/lib/i18n";
 import {
   alignSeries,
@@ -295,7 +295,7 @@ function LocationCard({ l, overview }: { l: LocationUsage; overview: UsageOvervi
             <Disk c={c} remote={l.kind !== "local"} threshold={overview.thresholds.disk_percent} />
             {l.same_disk_as.length > 0 && (
               <dd className="text-[11px] text-muted-foreground">
-                {t("Same disk as {names}: its size is counted once", { names: l.same_disk_as.map((id) => nameOf(overview, id)).join(", ") })}
+                {t("Same disk as {names}: its size is counted once", { names: formatList(l.same_disk_as.map((id) => nameOf(overview, id))) })}
               </dd>
             )}
           </div>

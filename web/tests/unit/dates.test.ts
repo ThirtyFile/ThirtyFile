@@ -3,9 +3,11 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { DICT as ZH } from "@/lib/i18n/zh-TW";
 
-async function load(lang: "en" | "zh-TW", browser = "en-US") {
+async function load(lang: "en" | "zh-TW" | "zh-CN" | "ja", browser = "en-US") {
   vi.resetModules();
   localStorage.setItem("tf-lang", lang);
+  // Simplified Chinese and Japanese aren't offered yet
+  localStorage.setItem("tf-lang-preview", "1");
   window.__TF_DICT__ = lang === "zh-TW" ? { LANG: "zh-TW", DICT: ZH } : undefined;
   vi.spyOn(navigator, "languages", "get").mockReturnValue([browser]);
   return import("@/lib/utils");
@@ -40,6 +42,15 @@ describe("dates and times", () => {
     expect(u.formatDateTime(at).replace(/\s+/g, "")).toBe(expected.replace(/\s+/g, ""));
     expect(u.formatDateTime(at)).toMatch(/^2026\/10\/2 \S+ 2:44$/);
     expect(u.formatDate(at)).toBe("2026/10/2");
+  });
+
+  test("zh-CN and ja: year first and the 24-hour clock", async () => {
+    for (const lang of ["zh-CN", "ja"] as const) {
+      const u = await load(lang);
+      expect(u.formatDateTime(at)).toBe("2026/10/2 14:44");
+      expect(u.formatDate(at)).toBe("2026/10/2");
+      expect(u.formatClock(at)).toBe("14:44");
+    }
   });
 
   test("a time zone writes the time as the clock there shows it", async () => {

@@ -26,7 +26,7 @@ import { locale, t } from "@/lib/i18n";
 import { followJob } from "@/lib/jobs";
 import { useAllPages } from "@/lib/pages";
 import { refreshFiles, type FileChange } from "@/lib/queries";
-import { trashHint, errorMessage } from "@/lib/utils";
+import { trashHint, errorMessage, formatList } from "@/lib/utils";
 
 export function TrashPage() {
   const me = useMe();
@@ -207,7 +207,7 @@ export function TrashPage() {
           description={
             confirm === "empty"
               ? t("Empties the trash of: {spaces}. Permanently deleted items can't be recovered.", {
-                  spaces: (emptyable.data ?? []).map((s) => `${driveName(s)} (${s.items.toLocaleString(locale)})`).join(", "),
+                  spaces: formatList((emptyable.data ?? []).map((s) => `${driveName(s)} (${s.items.toLocaleString(locale)})`)),
                 })
               : t("Permanently deleted items can't be recovered.")
           }
