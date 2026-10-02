@@ -330,10 +330,13 @@ pub async fn move_across(st: &AppState, user: &User, dest: &Node, items: Vec<Vec
                     tokio::task::spawn_blocking(move || remove_copied(copied));
                 }
                 // Stored in the content store: the originals go, each file only if it is still what was stored
-                if !remove.is_empty()
-                    && let Ok(top) = space_root(&nodes[0])
-                {
-                    tokio::task::spawn_blocking(move || remove_copied(CopiedTree { top, items: remove }));
+                if !remove.is_empty() {
+                    let from = nodes[0].clone();
+                    tokio::task::spawn_blocking(move || {
+                        if let Ok(top) = space_root(&from) {
+                            remove_copied(CopiedTree { top, items: remove });
+                        }
+                    });
                 }
             }
             Err(e) => {

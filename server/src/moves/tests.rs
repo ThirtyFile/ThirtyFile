@@ -837,6 +837,25 @@ async fn a_folder_that_isnt_there_is_never_moved_as_an_empty_space() {
     assert_eq!(read(&env, &admin, &a).await, b"still here");
 }
 
+#[tokio::test]
+async fn the_folder_of_a_space_is_looked_at_before_the_write_lock_and_given_up_when_its_disk_doesnt_answer() {
+    let env = testutil::folders_env().await;
+    add_bucket(&env, "bucket").await;
+    let all = env.drive_of(&env.st.shared_root().unwrap()).await;
+    let _short = crate::fsops::testing::short_waits();
+    let _hung = crate::fsops::testing::hang(&all, std::time::Duration::from_secs(3));
+    let spaces = [all.as_str()];
+    let (asked, writing) = tokio::join!(move_to(&env, &spaces, "bucket"), async {
+        // Other changes go on meanwhile
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        tokio::time::timeout(std::time::Duration::from_millis(500), env.st.write_lock.lock()).await.is_ok()
+    });
+    assert!(writing, "the write lock was held while the disk was looked at");
+    assert_eq!(asked.unwrap_err().status, axum::http::StatusCode::SERVICE_UNAVAILABLE);
+    let (moves,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM space_moves").fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(moves, 0);
+}
+
 // ───────────── Into folders ─────────────
 
 /// A Local folder location (a NAS, say) with its folder in the test's folder

@@ -627,11 +627,12 @@ async fn extract_into_folder(
         if p.dirs.iter().chain(&p.file).any(|n| crate::folders::ignored(n)) {
             continue;
         }
-        let dir = fsops::make_dirs(&staged.top, &p.dirs).map_err(fsops::disk_error)?;
-        let Some(file) = &p.file else { continue };
         let (archive, entry, tmp) = (archive.to_path_buf(), p.entry.clone(), st.tmp_dir().join(format!("unzip-{}", new_id())));
-        let (p, file) = (progress.clone(), file.clone());
+        let (top, dirs, file, p) = (staged.top.clone(), p.dirs.clone(), p.file.clone(), progress.clone());
+        // On the disk of the folder space: on a blocking thread
         tokio::task::spawn_blocking(move || -> AppResult<()> {
+            let dir = fsops::make_dirs(&top, &dirs).map_err(fsops::disk_error)?;
+            let Some(file) = file else { return Ok(()) };
             let x = extract_entry(&archive, &entry, tmp, &|n| p.add(n))?;
             let moved = fsops::move_in(&x.tmp, &dir, &file);
             if moved.is_err() {

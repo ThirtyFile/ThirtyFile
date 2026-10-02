@@ -6,13 +6,35 @@ pub struct LocalStorage {
     root: PathBuf,
     /// The location's id, which its folder's marker must hold
     id: String,
+    /// How long a step on the folder's disk may take (`on_disk`)
+    wait: Duration,
+    /// Tests: every step on the disk takes this long first (a disk that doesn't answer)
+    #[cfg(test)]
+    hang: Option<Duration>,
+}
+
+/// How long a step on the disk of a Local folder location may take before it is given up: long enough for a disk to
+/// spin up
+const DISK_WAIT: Duration = Duration::from_secs(60);
+
+/// The folders of Local folder locations with a step on their disk that was given up and hasn't returned yet
+static STUCK: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+fn not_answering(root: &Path) -> io::Error {
+    io::Error::other(StorageError { message: UNAVAILABLE, detail: format!("{} doesn't answer", root.display()) })
 }
 
 impl LocalStorage {
     /// The location `id` in the folder `root`. Nothing on the disk is touched: the folder is checked before every
     /// write (`verify`).
     pub fn new(root: PathBuf, id: &str) -> Self {
-        Self { root, id: id.to_string() }
+        Self {
+            root,
+            id: id.to_string(),
+            wait: DISK_WAIT,
+            #[cfg(test)]
+            hang: None,
+        }
     }
 
     /// Claims `root` for the location `id` (`claim_folder`) and uses it (tests: a location added in the database)
@@ -22,24 +44,63 @@ impl LocalStorage {
         Ok(Self::new(root, id))
     }
 
-    /// The folder is there and holds this location's marker: one small read, so health checks can run it often
-    async fn verify(&self) -> io::Result<()> {
-        match marker_of(&self.root).await? {
-            Some(id) if id == self.id => Ok(()),
-            Some(_) => {
-                Err(io::Error::other(StorageError { message: NOT_MOUNTED, detail: format!("{} holds another location's {LOCATION_MARKER}", self.root.display()) }))
+    /// Runs a step on the folder's disk on a blocking thread, giving it `wait` to answer: a disk or network share that
+    /// stops answering (its server went away) never holds up the server's async worker, of which a server with one
+    /// processor has one. Until a step that was given up returns, the next ones fail at once instead of piling up
+    /// threads that wait for it too.
+    async fn on_disk<T: Send + 'static>(&self, step: impl FnOnce() -> io::Result<T> + Send + 'static) -> io::Result<T> {
+        if STUCK.lock().unwrap_or_else(|e| e.into_inner()).contains(&self.root) {
+            return Err(not_answering(&self.root));
+        }
+        #[cfg(test)]
+        let hang = self.hang;
+        let mut task = tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(d) = hang {
+                std::thread::sleep(d);
             }
-            None => {
-                // A folder with items but no marker: say which file is missing and what it must hold. A missing or
-                // empty folder is a disk that isn't mounted.
+            step()
+        });
+        match tokio::time::timeout(self.wait, &mut task).await {
+            Ok(done) => done.map_err(io::Error::other)?,
+            Err(_) => {
+                tracing::warn!("The folder {} of a storage location didn't answer within {} s", self.root.display(), self.wait.as_secs());
+                STUCK.lock().unwrap_or_else(|e| e.into_inner()).push(self.root.clone());
+                // Let go once the step returns at last
                 let root = self.root.clone();
-                let has_items = tokio::task::spawn_blocking(move || nothing_but_system_entries(&root).map(|empty| !empty)).await.map_err(io::Error::other)?;
-                Err(io::Error::other(match has_items {
-                    Ok(true) => StorageError { message: MARKER_MISSING, detail: self.id.clone() },
-                    _ => StorageError { message: NOT_MOUNTED, detail: format!("{} or its {LOCATION_MARKER} isn't there", self.root.display()) },
-                }))
+                tokio::spawn(async move {
+                    let _ = task.await;
+                    STUCK.lock().unwrap_or_else(|e| e.into_inner()).retain(|r| *r != root);
+                    tracing::info!("The folder {} of a storage location answers again", root.display());
+                });
+                Err(not_answering(&self.root))
             }
         }
+    }
+
+    /// The folder is there and holds this location's marker: one small read, so health checks can run it often
+    async fn verify(&self) -> io::Result<()> {
+        let (root, id) = (self.root.clone(), self.id.clone());
+        self.on_disk(move || {
+            let marker = match std::fs::read(root.join(LOCATION_MARKER)) {
+                Ok(b) => Some(marker_location(&b)),
+                Err(e) if matches!(e.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => None,
+                Err(e) => return Err(e),
+            };
+            match marker {
+                Some(m) if m == id => Ok(()),
+                Some(_) => {
+                    Err(io::Error::other(StorageError { message: NOT_MOUNTED, detail: format!("{} holds another location's {LOCATION_MARKER}", root.display()) }))
+                }
+                // A folder with items but no marker: say which file is missing and what it must hold. A missing or
+                // empty folder is a disk that isn't mounted.
+                None => Err(io::Error::other(match nothing_but_system_entries(&root) {
+                    Ok(false) => StorageError { message: MARKER_MISSING, detail: id },
+                    _ => StorageError { message: NOT_MOUNTED, detail: format!("{} or its {LOCATION_MARKER} isn't there", root.display()) },
+                })),
+            }
+        })
+        .await
     }
 
     fn path(&self, hash: &str) -> io::Result<PathBuf> {
@@ -47,10 +108,10 @@ impl LocalStorage {
         Ok(self.root.join(&hash[0..2]).join(&hash[2..4]).join(hash))
     }
 
-    /// `key` in the folder, reached without following a symbolic link on the way
-    fn pinned(&self, key: &str) -> io::Result<crate::beneath::Pinned> {
+    /// `key` in the folder, reached without following a symbolic link on the way (a blocking step on the disk)
+    fn pinned(root: &Path, key: &str) -> io::Result<crate::beneath::Pinned> {
         key_parts(key)?;
-        crate::beneath::Pinned::root(&self.root)?.join(key)
+        crate::beneath::Pinned::root(root)?.join(key)
     }
 }
 
@@ -139,7 +200,8 @@ impl Storage for LocalStorage {
         Box::pin(async move {
             // An empty mount point would look like a location that holds nothing
             self.verify().await?;
-            let at = self.pinned(dir)?.dir()?;
+            let (root, dir) = (self.root.clone(), dir.to_string());
+            let at = self.on_disk(move || Self::pinned(&root, &dir)?.dir()).await?;
             tokio::task::spawn_blocking(move || {
                 let mut out = Vec::new();
                 for e in std::fs::read_dir(at.as_path())? {
@@ -157,10 +219,14 @@ impl Storage for LocalStorage {
 
     fn stat<'a>(&'a self, key: &'a str) -> BoxFuture<'a, io::Result<Option<Entry>>> {
         Box::pin(async move {
-            let found = self.pinned(key).and_then(|p| {
-                let meta = std::fs::symlink_metadata(p.as_path())?;
-                Ok(local_entry(p.name().unwrap_or_default().to_string(), &meta))
-            });
+            let (root, key) = (self.root.clone(), key.to_string());
+            let found = self
+                .on_disk(move || {
+                    let p = Self::pinned(&root, &key)?;
+                    let meta = std::fs::symlink_metadata(p.as_path())?;
+                    Ok(local_entry(p.name().unwrap_or_default().to_string(), &meta))
+                })
+                .await;
             match found {
                 Ok(e) => Ok(Some(e)),
                 Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
@@ -171,32 +237,38 @@ impl Storage for LocalStorage {
 
     fn put_at<'a>(&'a self, key: &'a str, src: &'a Path) -> BoxFuture<'a, io::Result<()>> {
         Box::pin(async move {
-            let parts = key_parts(key)?;
+            let parts: Vec<String> = key_parts(key)?.into_iter().map(String::from).collect();
             let (last, dirs) = parts.split_last().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
             self.verify().await?;
-            // Folders on the way are made one by one, never through a link
-            let mut at = crate::beneath::Pinned::root(&self.root)?;
-            for d in dirs {
-                let next = at.join(d)?;
-                match std::fs::symlink_metadata(next.as_path()) {
-                    Ok(m) if m.is_dir() => {}
-                    Ok(_) => return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{d} isn't a folder"))),
-                    Err(e) if e.kind() == io::ErrorKind::NotFound => match std::fs::create_dir(next.as_path()) {
-                        Err(e) if e.kind() != io::ErrorKind::AlreadyExists => return Err(e),
-                        _ => {}
-                    },
-                    Err(e) => return Err(e),
-                }
-                at = next.dir()?;
-            }
-            let dest = at.join(last)?;
+            let (root, last, dirs) = (self.root.clone(), last.clone(), dirs.to_vec());
+            let dest = self
+                .on_disk(move || {
+                    // Folders on the way are made one by one, never through a link
+                    let mut at = crate::beneath::Pinned::root(&root)?;
+                    for d in &dirs {
+                        let next = at.join(d)?;
+                        match std::fs::symlink_metadata(next.as_path()) {
+                            Ok(m) if m.is_dir() => {}
+                            Ok(_) => return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{d} isn't a folder"))),
+                            Err(e) if e.kind() == io::ErrorKind::NotFound => match std::fs::create_dir(next.as_path()) {
+                                Err(e) if e.kind() != io::ErrorKind::AlreadyExists => return Err(e),
+                                _ => {}
+                            },
+                            Err(e) => return Err(e),
+                        }
+                        at = next.dir()?;
+                    }
+                    at.join(&last)
+                })
+                .await?;
             move_into(src, dest.as_path()).await
         })
     }
 
     fn open_at<'a>(&'a self, key: &'a str, start: u64, len: u64) -> BoxFuture<'a, io::Result<BoxReader>> {
         Box::pin(async move {
-            let mut f = tokio::fs::File::from_std(self.pinned(key)?.open_file()?);
+            let (root, key) = (self.root.clone(), key.to_string());
+            let mut f = tokio::fs::File::from_std(self.on_disk(move || Self::pinned(&root, &key)?.open_file()).await?);
             if start > 0 {
                 f.seek(SeekFrom::Start(start)).await?;
             }
@@ -208,11 +280,9 @@ impl Storage for LocalStorage {
         Box::pin(async move {
             // A file that isn't there counts as deleted: only true when the folder is really there
             self.verify().await?;
-            let removed = match self.pinned(key) {
-                // A link is removed itself, never what it points to
-                Ok(p) => tokio::fs::remove_file(p.as_path()).await,
-                Err(e) => Err(e),
-            };
+            let (root, key) = (self.root.clone(), key.to_string());
+            // A link is removed itself, never what it points to
+            let removed = self.on_disk(move || std::fs::remove_file(Self::pinned(&root, &key)?.as_path())).await;
             match removed {
                 Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
                 _ => Ok(()),
@@ -328,6 +398,43 @@ mod tests {
         s.check().await.unwrap();
         s.put_file(&hash, &tmp).await.unwrap();
         assert!(root.join(&hash[0..2]).join(&hash[2..4]).join(&hash).is_file());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn a_folder_whose_disk_stops_answering_is_given_up_without_holding_up_the_server() {
+        let base = std::env::temp_dir().join(format!("thirtyfile-hung-{}", crate::util::new_id()));
+        let root = base.join("nas");
+        claim_folder(&root, "nas").unwrap();
+        let mut s = LocalStorage::new(root.clone(), "nas");
+        s.wait = Duration::from_millis(300);
+        s.hang = Some(Duration::from_secs(2));
+        let unavailable = |e: io::Error| e.get_ref().and_then(|i| i.downcast_ref::<StorageError>()).map(|se| se.message);
+        // The async worker (the only one here) goes on meanwhile, and the step is given up after `wait`
+        let started = std::time::Instant::now();
+        let (checked, ticked) = tokio::join!(s.ping(), async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            started.elapsed()
+        });
+        assert_eq!(unavailable(checked.unwrap_err()), Some(UNAVAILABLE));
+        assert!(ticked < Duration::from_millis(250), "{ticked:?}");
+        assert!(started.elapsed() < Duration::from_millis(1500));
+        // Until the step returns, the next ones fail at once
+        let started = std::time::Instant::now();
+        assert_eq!(unavailable(s.stat("a.txt").await.unwrap_err()), Some(UNAVAILABLE));
+        assert_eq!(unavailable(s.open_at("a.txt", 0, 1).await.err().unwrap()), Some(UNAVAILABLE));
+        assert!(started.elapsed() < Duration::from_millis(200));
+        // Then the folder is used again
+        s.hang = None;
+        let mut answered = false;
+        for _ in 0..50 {
+            if s.ping().await.is_ok() {
+                answered = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(answered);
         let _ = std::fs::remove_dir_all(&base);
     }
 

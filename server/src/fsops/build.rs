@@ -12,9 +12,8 @@ pub struct Staging {
 
 impl Drop for Staging {
     fn drop(&mut self) {
-        if std::fs::symlink_metadata(self.wrap.as_path()).is_ok() {
-            remove_later(vec![self.wrap.clone()]);
-        }
+        // On a blocking thread (a folder already gone is left as it is)
+        remove_later(vec![self.wrap.clone()]);
     }
 }
 
@@ -95,7 +94,7 @@ pub async fn place_folder(st: &AppState, user: &User, staged: Staging, dest_id: 
     let items = tokio::task::spawn_blocking(move || list_tree(&top)).await?.map_err(disk_error)?;
     let bytes: i64 = items.iter().filter(|(_, s)| !s.is_dir).map(|(_, s)| s.size).sum();
     let locks = lock(st, user, &[dest_id]).await?;
-    let _w = st.write_lock.lock().await;
+    let w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let dest = tree::folder_for(&mut tx, user, dest_id, Need::Write).await?;
     locks.check(&dest)?;
@@ -130,8 +129,14 @@ pub async fn place_folder(st: &AppState, user: &User, staged: Staging, dest_id: 
     logs::record_activity(&mut tx, user, node.as_ref(), action, detail).await?;
     tx.commit().await?;
     locks.committed();
+    drop(w);
     // The folder that held it is empty now: removed before the change is reported done, so nothing half-made is left
     // behind once it is (should the change fail instead, the renames are undone and `Staging` removes it all)
-    let _ = std::fs::remove_dir(staged.wrap.as_path());
+    let wrap = staged.wrap.clone();
+    let _ = on_disk(dest.drive(), disk_wait(), move || {
+        let _ = std::fs::remove_dir(wrap.as_path());
+        Ok(())
+    })
+    .await;
     Ok((root, name))
 }
