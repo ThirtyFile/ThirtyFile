@@ -78,7 +78,8 @@ pub struct Unfinished {
     frontier: Option<VecDeque<String>>,
 }
 
-/// What batches leave to do after their commit: content no longer used, and trash folders of folder spaces to remove
+/// What batches leave to do after their commit: content no longer used, and trash folders and versions' files of
+/// folder spaces to remove
 #[derive(Default)]
 struct Leftovers {
     blobs: Vec<BlobRef>,
@@ -325,7 +326,9 @@ async fn purge_batch(conn: &mut SqliteConnection, top: &str, stack: &mut VecDequ
             hashes.extend(hash);
             ids.push(id);
         }
-        out.blobs.extend(crate::versions::purge_nodes(conn, &serde_json::to_string(&files).unwrap()).await?);
+        let versions = crate::versions::purge_nodes(conn, &serde_json::to_string(&files).unwrap()).await?;
+        out.blobs.extend(versions.blobs);
+        out.on_disk.extend(versions.files);
         sqlx::query("DELETE FROM nodes WHERE id IN (SELECT value FROM json_each(?))").bind(serde_json::to_string(&ids).unwrap()).execute(&mut *conn).await?;
         deleted += ids.len() as i64;
         work += ids.len() as i64;
@@ -433,6 +436,7 @@ pub async fn purge_now(st: &AppState, id: &str) -> AppResult<usize> {
             done
         };
         schedule_blob_removal(st, out.blobs);
+        crate::fsops::remove_below_later(out.on_disk);
         if done {
             return Ok(deleted);
         }

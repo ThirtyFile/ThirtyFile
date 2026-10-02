@@ -81,11 +81,19 @@ pub(super) async fn replace_on_disk(policy: versions::Policy, existing: &Node, s
         let to = abs(&n)?;
         let _ = crate::beneath::copy_permissions(&to, &staged);
         let kept = versions::keep_on_disk(policy, &n, &to).map_err(disk_error)?;
+        #[cfg(test)]
+        if testing::stops(n.drive(), testing::Stop::VersionKept) {
+            return Err(testing::stopped());
+        }
         if let Err(e) = std::fs::rename(staged.as_path(), to.as_path()) {
             if let Some(k) = kept {
                 k.undo();
             }
             return Err(disk_error(e));
+        }
+        #[cfg(test)]
+        if testing::stops(n.drive(), testing::Stop::Replaced) {
+            return Err(testing::stopped());
         }
         Ok((stat(to.as_path()).map_err(disk_error)?, kept))
     })

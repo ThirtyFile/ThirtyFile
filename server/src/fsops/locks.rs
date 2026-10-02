@@ -9,6 +9,8 @@ pub(super) struct Renamed {
     pub(super) was: Pinned,
     /// A folder made for the rename (a trash folder), removed again when undoing
     pub(super) made: Option<Pinned>,
+    /// Its entry in the space's journal, removed once the change is committed or the rename undone
+    pub(super) journal: Option<Entry>,
 }
 
 /// Scan locks of the folder spaces a change touches, held until it is done. They also keep the renames the change
@@ -33,7 +35,12 @@ impl SpaceLocks {
     }
 
     pub(super) fn note(&self, now: Pinned, was: Pinned, made: Option<Pinned>) {
-        self.renamed.lock().unwrap_or_else(|e| e.into_inner()).push(Renamed { now, was, made });
+        self.note_journaled(now, was, made, None);
+    }
+
+    /// `note`, for a rename written into the space's journal (`journal`)
+    pub(super) fn note_journaled(&self, now: Pinned, was: Pinned, made: Option<Pinned>, journal: Option<Entry>) {
+        self.renamed.lock().unwrap_or_else(|e| e.into_inner()).push(Renamed { now, was, made, journal });
     }
 
     /// What the change leaves to finish after its transaction, if anything
@@ -43,7 +50,8 @@ impl SpaceLocks {
 
     /// The change is in the index: its renames stay, and what it left to finish is finished once the locks go
     pub fn committed(&self) {
-        self.renamed.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        let renamed = std::mem::take(&mut *self.renamed.lock().unwrap_or_else(|e| e.into_inner()));
+        remove_entries_later(renamed.into_iter().filter_map(|r| r.journal).collect());
         self.committed.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
@@ -78,6 +86,9 @@ pub(super) fn put_back(renamed: Vec<Renamed>) {
             Ok(()) => {
                 if let Some(made) = r.made {
                     let _ = std::fs::remove_dir(made.as_path());
+                }
+                if let Some(entry) = r.journal {
+                    entry.remove();
                 }
             }
             Err(e) => tracing::error!("Couldn't put {:?} back after a failed change: {e}", r.was.name().unwrap_or_default()),
