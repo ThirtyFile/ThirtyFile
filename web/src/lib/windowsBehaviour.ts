@@ -5,9 +5,11 @@
 export interface WindowsBehaviour {
   /** Windows 11 context menus: View, Sort by, Group by, New and Upload as submenus on empty space; a row of icon buttons on items */
   menus: boolean;
+  /** Clicking the name of the item already selected on its own renames it, in the list and the folder tree (lib/clickToRename) */
+  clickToRename: boolean;
 }
 
-const WINDOWS: WindowsBehaviour = { menus: true };
+const WINDOWS: WindowsBehaviour = { menus: true, clickToRename: true };
 
 /** The conventions the explorer follows: the Windows style's (the only style so far) */
 export function useWindowsBehaviour(): WindowsBehaviour {

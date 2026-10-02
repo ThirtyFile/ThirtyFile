@@ -16,6 +16,7 @@ import { useListLayout } from "@/components/fileList/useListLayout";
 import { th, Head, type Handlers, type RowProps, COLUMN_CLASS, fitsScreen, ListRow, Tile, GroupHeading, PlaceholderRow } from "@/components/fileList/rows";
 import { listColumns, ColumnChoices } from "@/components/fileList/columns";
 import { useListKeyboard } from "@/components/fileList/useListKeyboard";
+import { useClickToRename } from "@/lib/clickToRename";
 
 /** What the explorer's keyboard handling asks of the list */
 export interface ListNav {
@@ -76,6 +77,11 @@ export interface FileListProps {
   renamingId?: string | null;
   onRename?(item: Item, name: string): Promise<void>;
   onRenameDone?(): void;
+  /**
+   * Clicking the name of the item already selected on its own starts renaming it, as in File Explorer (the Windows
+   * style; lib/clickToRename): left out where items can't be renamed
+   */
+  onClickRename?(item: Item): void;
   /** Accessible name of the list (defaults to "Items") */
   label?: string;
   /** Receives the list's geometry for marquee selection (useMarquee's `measure`): only the rows in view are rendered */
@@ -176,6 +182,21 @@ export function FileList(p: FileListProps) {
     focusId,
     setFocusId,
     tabStop,
+  });
+
+  // Click the name of the item selected on its own to rename it (not on touch screens, where a long press selects)
+  const onClickRename = p.onClickRename;
+  useClickToRename({
+    enabled: !!onClickRename && !!p.onRename && !coarse,
+    root,
+    itemOf: (el) => el.closest<HTMLElement>("[data-node-id]")?.dataset.nodeId ?? null,
+    selectedAlone: (id) => !span && p.selected.size === 1 && p.selected.has(id) && p.renamingId !== id,
+    canRename: () => true,
+    start: (id) => {
+      const at = indexOf.get(id);
+      const item = at === undefined ? undefined : items[at];
+      if (item) onClickRename?.(item);
+    },
   });
 
   /** A finger resting on an item: selected once it has stayed long enough */

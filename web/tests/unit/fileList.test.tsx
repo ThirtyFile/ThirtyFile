@@ -26,7 +26,7 @@ const ITEMS = ["Budget.xlsx", "Contracts", "Minutes.docx", "Notes.txt", "Photos"
 const source: FileSource = { contentUrl: () => "", thumbUrl: () => "", downloadLink: () => Promise.resolve("") };
 
 /** The list with its selection kept like the explorer keeps it */
-function Harness({ onOpen, navRef }: { onOpen(n: Node, byKey?: boolean): void; navRef?: { current: ListNav | null } }) {
+function Harness({ onOpen, navRef, onClickRename }: { onOpen(n: Node, byKey?: boolean): void; navRef?: { current: ListNav | null }; onClickRename?(n: Node): void }) {
   const [selected, setSelected] = useState(new Set<string>());
   const [anchor, setAnchor] = useState<string | null>(null);
   const [span, setSpan] = useState<ListSpan | null>(null);
@@ -47,6 +47,8 @@ function Harness({ onOpen, navRef }: { onOpen(n: Node, byKey?: boolean): void; n
       }}
       onOpen={onOpen}
       navRef={navRef ?? nav}
+      onRename={() => Promise.resolve()}
+      onClickRename={onClickRename}
     />
   );
 }
@@ -129,6 +131,64 @@ describe("file list", () => {
     expect(onOpen).toHaveBeenLastCalledWith(expect.objectContaining({ id: "Contracts" }), true);
     act(() => void row("Notes.txt").dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
     expect(onOpen).toHaveBeenLastCalledWith(expect.objectContaining({ id: "Notes.txt" }));
+  });
+
+  test("clicking the name of the item already selected renames it once the double-click time is over; a double-click opens it", () => {
+    vi.useFakeTimers();
+    try {
+      const onClickRename = vi.fn<(n: Node) => void>();
+      const onOpen = vi.fn<(n: Node) => void>();
+      mount({ onOpen, onClickRename });
+      const name = (id: string) => row(id).querySelector<HTMLElement>("[data-name]")!;
+      const press = (el: HTMLElement, detail = 1, mods: MouseEventInit = {}) =>
+        act(() => {
+          el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, detail, ...mods }));
+          el.dispatchEvent(new MouseEvent("click", { bubbles: true, detail, ...mods }));
+        });
+      const wait = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
+
+      // The click that selects the item doesn't rename it
+      press(name("Notes.txt"));
+      wait(1000);
+      expect(onClickRename).not.toHaveBeenCalled();
+      // A click on its name now: renamed once no second click came
+      press(name("Notes.txt"));
+      wait(450);
+      expect(onClickRename).not.toHaveBeenCalled();
+      wait(100);
+      expect(onClickRename).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: "Notes.txt" }));
+
+      // A second click in time is a double-click: it opens the item, and doesn't rename it
+      onClickRename.mockClear();
+      press(name("Notes.txt"));
+      wait(200);
+      press(name("Notes.txt"), 2);
+      act(() => void name("Notes.txt").dispatchEvent(new MouseEvent("dblclick", { bubbles: true, detail: 2 })));
+      wait(1000);
+      expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: "Notes.txt" }));
+      expect(onClickRename).not.toHaveBeenCalled();
+
+      // Not the rest of the row, not with Ctrl, and not cancelled ones: a key, or another item clicked meanwhile
+      press(row("Notes.txt").querySelectorAll<HTMLElement>("td")[1]);
+      press(name("Notes.txt"), 1, { ctrlKey: true });
+      press(name("Notes.txt"), 1, { ctrlKey: true });
+      wait(1000);
+      press(name("Notes.txt"));
+      key(row("Notes.txt"), "Shift");
+      wait(1000);
+      press(name("Notes.txt"));
+      press(name("Photos"));
+      wait(1000);
+      expect(onClickRename).not.toHaveBeenCalled();
+
+      // A click that brings the focus to the list from elsewhere doesn't rename either
+      act(() => (document.activeElement as HTMLElement).blur());
+      press(name("Photos"));
+      wait(1000);
+      expect(onClickRename).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("typing letters goes to the next item starting with them", () => {

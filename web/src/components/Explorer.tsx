@@ -227,6 +227,7 @@ export function Explorer(p: ExplorerProps) {
                     });
                 }}
                 onRenameDone={() => setDialog(null)}
+                onClickRename={s.behaviour.clickToRename && caps.write ? (n) => setDialog({ t: "rename", node: n }) : undefined}
                 empty={
                   p.empty ?? (
                     <div className="flex min-h-52 flex-col items-center justify-center gap-2 py-10 text-muted-foreground">
