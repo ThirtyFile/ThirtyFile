@@ -65,9 +65,11 @@ test("restoring an earlier version while the workbook is open for editing shows 
   await page.keyboard.type("7");
   await page.keyboard.press("Enter");
   await page.keyboard.press("ControlOrMeta+s");
-  await expect(page.getByText("Saved (1 cell)").last()).toBeVisible();
-  const saved = await JSZip.loadAsync(await (await page.request.get(`/api/files/${id}/content`)).body());
-  const sheet = await saved.file("xl/worksheets/sheet1.xml")!.async("string");
-  expect(sheet).toMatch(/<c r="D1"[^>]*><v>7<\/v><\/c>/);
-  expect(sheet).not.toMatch(/<c r="C1"/);
+  const sheet = async () => {
+    const saved = await JSZip.loadAsync(await (await page.request.get(`/api/files/${id}/content`)).body());
+    return saved.file("xl/worksheets/sheet1.xml")!.async("string");
+  };
+  await expect.poll(sheet).toMatch(/<c r="D1"[^>]*><v>7<\/v><\/c>/);
+  expect(await sheet()).not.toMatch(/<c r="C1"/);
+  await expect(page.getByText(/someone else|changed since/i)).toHaveCount(0);
 });
