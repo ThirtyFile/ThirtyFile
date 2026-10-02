@@ -72,7 +72,7 @@ jobs:
           changed=$(git diff --name-only "$BASE" HEAD)
           echo "$changed"
           # Everything except the website, the documentation, the community files and the issue / pull request forms is code
-          if echo "$changed" | grep -qvE '^(site/|README\.md$|LICENSE$|\.github/(ISSUE_TEMPLATE/|pull_request_template\.md$|CONTRIBUTING\.md$|CODE_OF_CONDUCT\.md$|SECURITY\.md$|release\.yml$|dependabot\.yml$|workflows/(pages|codeql|scan)\.yml$))'; then
+          if echo "$changed" | grep -qvE '^(site/|README(\.[a-zA-Z-]+)?\.md$|LICENSE$|\.github/(ISSUE_TEMPLATE/|pull_request_template\.md$|CONTRIBUTING\.md$|CODE_OF_CONDUCT\.md$|SECURITY\.md$|release\.yml$|dependabot\.yml$|workflows/(pages|codeql|scan)\.yml$))'; then
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
             echo "code=false" >> "$GITHUB_OUTPUT"
