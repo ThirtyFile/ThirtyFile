@@ -74,7 +74,14 @@ export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, 
     const next = new Set(keep);
     for (let i = lo; i <= hi; i++) {
       const item = items[i];
-      if (!item) return { selected: new Set(keep), span: { from: { id: items[lo]!.id, index: lo }, to: { id: items[hi]!.id, index: hi }, except: new Set() } };
+      if (!item) {
+        // The span holds every item from one end to the other: those kept that it covers (the anchor, at least) would count twice
+        const outside = [...(keep ?? [])].filter((id) => {
+          const at = indexOf.get(id);
+          return at === undefined || at < lo || at > hi;
+        });
+        return { selected: new Set(outside), span: { from: { id: items[lo]!.id, index: lo }, to: { id: items[hi]!.id, index: hi }, except: new Set() } };
+      }
       next.add(item.id);
     }
     return { selected: next, span: null };

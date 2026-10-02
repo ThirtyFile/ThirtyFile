@@ -360,13 +360,18 @@ pub async fn select(State(st): State<AppState>, user: User, Path(id): Path<Strin
     let ext = if sort == SortCol::Type { sort.expr() } else { "NULL" };
     let sql = format!(
         "SELECT {NODE_COLS}, {ext} AS ext FROM nodes n
-         WHERE n.parent_id = ?1 AND n.trashed_at IS NULL AND n.id NOT IN (SELECT value FROM json_each(?2)) {} {} LIMIT {limit}",
+         WHERE n.parent_id = ?1 AND n.trashed_at IS NULL AND n.id NOT IN (SELECT value FROM json_each(?2)) {} {} LIMIT {}",
         conditions.iter().map(|w| format!("AND {w}")).collect::<String>(),
         order_clause(req.sort.as_deref(), req.order.as_deref()),
+        limit + 1,
     );
-    let rows: Vec<SortRow> = bind_all(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())), args).fetch_all(&mut *c).await?;
+    // One row more than asked for says whether there are more: a full last batch has no `next`, since asking again
+    // after its items have changed would find the span's last item gone
+    let mut rows: Vec<SortRow> = bind_all(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())), args).fetch_all(&mut *c).await?;
+    let more = rows.len() as i64 > limit;
+    rows.truncate(limit as usize);
     let next = match rows.last() {
-        Some(last) if rows.len() as i64 == limit => Some(encode_cursor(&last.cursor(sort))),
+        Some(last) if more => Some(encode_cursor(&last.cursor(sort))),
         _ => None,
     };
     Ok(Json(Selected { ids: rows.into_iter().map(|r| r.node.id).collect(), next }))

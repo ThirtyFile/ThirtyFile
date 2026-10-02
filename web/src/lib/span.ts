@@ -51,8 +51,11 @@ export function spanCount(span: ListSpan, total: number) {
   return Math.max(0, hi - lo + 1 - span.except.size);
 }
 
+/** The most ids one change takes, and one answer of the server's /select holds */
+export const SELECT_BATCH = 1000;
+
 /** Batches of at most `size` ids */
-export function chunks(ids: readonly string[], size = 1000): string[][] {
+export function chunks(ids: readonly string[], size = SELECT_BATCH): string[][] {
   const out: string[][] = [];
   for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
   return out;
@@ -63,6 +66,8 @@ export async function* batchesOf(picked: Picked): AsyncGenerator<string[]> {
   yield* chunks(picked.ids);
   const span = picked.span;
   if (!span) return;
+  // An item picked one by one that the span holds too was already changed with its batch
+  const done = new Set(picked.ids);
   let after: string | undefined;
   do {
     const page = await api.selection(span.folder, {
@@ -73,7 +78,8 @@ export async function* batchesOf(picked: Picked): AsyncGenerator<string[]> {
       except: [...span.except],
       after,
     });
-    if (page.ids.length) yield page.ids;
+    const ids = done.size ? page.ids.filter((id) => !done.has(id)) : page.ids;
+    if (ids.length) yield ids;
     after = page.next ?? undefined;
   } while (after);
 }
@@ -84,7 +90,7 @@ export async function* batchesOf(picked: Picked): AsyncGenerator<string[]> {
  * batch threw (the batches before it are done).
  */
 export async function eachBatch(picked: Picked, title: string, change: (ids: string[]) => Promise<unknown>): Promise<number> {
-  const many = picked.count > 1000;
+  const many = picked.count > SELECT_BATCH;
   const id = `batch-${Math.random()}`;
   let done = 0;
   try {
