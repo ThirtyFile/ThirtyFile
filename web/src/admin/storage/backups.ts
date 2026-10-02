@@ -57,7 +57,7 @@ export const completeSnapshot = (s: BackupSet) => s.snapshots.find((n) => n.stat
 export const activeJob = (s: BackupSet, jobs: BackupJob[]) => jobs.find((j) => j.set_id === s.id && backupJobActive(j)) ?? null;
 
 export const BACKUP_JOB_KIND_LABEL: Record<BackupJob["kind"], string> = {
-  snapshot: t("Copying"),
+  snapshot: t("Snapshot"),
   restore: t("Restoring"),
   verify: t("Checking"),
   remove: t("Deleting"),

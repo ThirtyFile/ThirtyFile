@@ -139,7 +139,7 @@ export default {
   "The space is read-only while its files are copied: people can open, download and share files, but not change them. It switches to the new location once all of them are there.": "複製檔案期間空間是唯讀的：大家可以開啟、下載和分享檔案，但不能變更。全部複製完成後才切換到新位置。",
   "Changes made in its folder from outside ThirtyFile meanwhile are copied too. Afterwards the folder {path} is removed, apart from anything that changed at the last moment.": "這段期間在 ThirtyFile 以外對它的資料夾所做的變更也會一起複製。完成後會移除資料夾 {path}，只留下最後一刻才變更的項目。",
   "There it gets a folder of its own, like a new space's, with its files as ordinary files.": "它在那裡會有自己的資料夾（和新空間一樣），檔案都是一般的檔案。",
-  "The space stays usable while its files are copied, and switches to the new location once all of them are there. The copies are checked before the old files are removed.": "複製檔案期間空間仍可正常使用，全部複製完成後才切換到新位置。舊檔案會在確認複本無誤後才移除。",
+  "The space stays usable while its files are copied, and switches to the new location once all of them are there. The copies are checked before the old files are removed.": "複製檔案期間空間仍可正常使用，全部複製完成後才切換到新位置。舊檔案會在確認新位置的檔案無誤後才移除。",
   "{name} ({kind})": "{name}（{kind}）",
   "{name} ({kind}) — can't connect": "{name}（{kind}） — 無法連線",
   "S3-compatible": "S3 相容",
