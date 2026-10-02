@@ -5,14 +5,18 @@
 #
 # Changes to how the image is built or started (Dockerfile, .dockerignore, the lock files, cargo about's settings,
 # compose.yaml, the smoke test, this file) also build the image for both platforms, once the tests have passed, without
-# pushing it. Each platform's image is started with the shipped compose.yaml on bind-mounted folders, first the latest
+# pushing it, with the quicker `ci` Cargo profile (server/Cargo.toml). Each platform's image is started with the shipped compose.yaml on bind-mounted folders, first the latest
 # release and then the new image on its data, and restarted (.github/scripts/smoke-test.sh): amd64 natively, arm64
 # under QEMU.
 #
 # The Release workflow (release.yml) calls this workflow with a version number: the same happens, and only then is the
 # image pushed for both platforms, by its digest and without a tag, from the same build (a step checks that the pushed
 # images are the ones that were started). release.yml gives it its tags. So a release whose tests or image fail leaves
-# nothing behind in the registry.
+# nothing behind in the registry. Releases build with the `release` profile.
+#
+# The caches (compiled Rust dependencies, the image's cache mounts, QEMU) are saved from main only, by merges and
+# releases; pull requests restore them without saving their own, which would push main's out of the 10 GB the
+# repository gets.
 #
 # The required check is "Checks passed" at the end: it passes when every job passed or was skipped, and fails when any
 # failed or was cancelled.
@@ -155,6 +159,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: server
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # The backend's formatting (rustfmt, server/rustfmt.toml), then its tests (cargo test), clippy, and the end-to-end
       # test in a real browser (sign in, upload, preview, download) run against one build instrumented for coverage (cargo llvm-cov show-env): the dependencies are
@@ -211,6 +216,8 @@ jobs:
       digest: ${{ steps.push.outputs.digest }}
     env:
       VERSION: ${{ inputs.release_version || 'dev' }}
+      # The images people run use `release`; the ones only started here compile ThirtyFile several times faster
+      CARGO_PROFILE: ${{ inputs.release_version && 'release' || 'ci' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -222,22 +229,32 @@ jobs:
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
           platforms: arm64
+          cache-image: ${{ github.ref == 'refs/heads/main' }}
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         id: buildx
 
       # The Dockerfile's cache mounts (compiled Rust dependencies, downloaded crates and pnpm packages) only
       # live inside the builder, which is new on every run. Keep them in the Actions cache, so that a change
       # to the backend recompiles ThirtyFile itself and not every dependency. The key changes with the
-      # lock files; in between, the saved dependencies stay valid and the cache is only restored.
+      # lock files; in between, the saved dependencies stay valid and the cache is only restored. Each profile has
+      # its own, since the dependencies are compiled for it.
       # This is the image's only cache: a layer cache (cache-to: type=gha) would store much the same again, and
-      # the two would push each other out of the 10 GB the repository gets.
+      # the two would push each other out of the 10 GB the repository gets. Saved from main only (see the top)
       - id: mounts
+        if: github.ref == 'refs/heads/main'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: cache-mount
-          key: buildkit-multi-${{ hashFiles('server/Cargo.lock', 'web/pnpm-lock.yaml', 'Dockerfile') }}
+          key: buildkit-${{ env.CARGO_PROFILE }}-${{ hashFiles('server/Cargo.lock', 'web/pnpm-lock.yaml', 'Dockerfile') }}
           restore-keys: |
-            buildkit-multi-
+            buildkit-${{ env.CARGO_PROFILE }}-
+      - if: github.ref != 'refs/heads/main'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: cache-mount
+          key: buildkit-${{ env.CARGO_PROFILE }}-${{ hashFiles('server/Cargo.lock', 'web/pnpm-lock.yaml', 'Dockerfile') }}
+          restore-keys: |
+            buildkit-${{ env.CARGO_PROFILE }}-
 
       - uses: reproducible-containers/buildkit-cache-dance@5422eac04292c961a382e0f584ea0f03ad9da723 # v3.4.0
         with:
@@ -249,7 +266,8 @@ jobs:
               "cache-mount/target-amd64": { "target": "/src/server/target", "id": "thirtyfile-target-amd64" },
               "cache-mount/target-arm64": { "target": "/src/server/target", "id": "thirtyfile-target-arm64" }
             }
-          skip-extraction: ${{ steps.mounts.outputs.cache-hit }}
+          # Taken out of the builder only to be saved
+          skip-extraction: ${{ github.ref != 'refs/heads/main' || steps.mounts.outputs.cache-hit == 'true' }}
 
       # Standard image labels (source, revision, creation time…) with the version
       - id: meta
@@ -268,7 +286,9 @@ jobs:
           load: true
           tags: thirtyfile:amd64
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=${{ env.VERSION }}
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            CARGO_PROFILE=${{ env.CARGO_PROFILE }}
           sbom: false
           provenance: false
       - name: Start the amd64 image
@@ -281,7 +301,9 @@ jobs:
           load: true
           tags: thirtyfile:arm64
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=${{ env.VERSION }}
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            CARGO_PROFILE=${{ env.CARGO_PROFILE }}
           sbom: false
           provenance: false
       - name: Start the arm64 image (QEMU)
@@ -308,7 +330,9 @@ jobs:
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
           tags: ${{ env.IMAGE }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=${{ env.VERSION }}
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            CARGO_PROFILE=${{ env.CARGO_PROFILE }}
           sbom: true
           provenance: mode=max
       # Each platform's image in the pushed index is the one started above: its image id is the pushed manifest's

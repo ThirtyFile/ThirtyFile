@@ -87,5 +87,12 @@ lto = "thin"
 codegen-units = 1
 strip = true
 
+# The images that pull requests and main build to start them (build.yml): the same code as `release`, compiled in
+# parallel and without link-time optimisation. Slower and larger at run time; releases always use `release`
+[profile.ci]
+inherits = "release"
+lto = false
+codegen-units = 16
+
 [dev-dependencies]
 rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs"] }
