@@ -329,6 +329,98 @@ mod tests {
         assert!(virtual_hosted_endpoint("s3.example.com", "b").is_err());
     }
 
+    async fn read_all(r: io::Result<BoxReader>) -> Vec<u8> {
+        let mut out = Vec::new();
+        r.unwrap().read_to_end(&mut out).await.unwrap();
+        out
+    }
+
+    #[tokio::test]
+    async fn files_over_16_mib_go_up_in_parts_and_come_back_whole() {
+        let s3 = S3Storage::in_memory("tf");
+        let dir = std::env::temp_dir().join(format!("thirtyfile-s3-{}", crate::util::new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // 17 MB: over the threshold, so a multipart upload of two full parts and a short last one
+        let big: Vec<u8> = (0..17_000_000u32).map(|i| (i % 251) as u8).collect();
+        assert!(big.len() as u64 > MULTIPART_THRESHOLD);
+        let hash = crate::util::sha256_hex(&big);
+        let src = dir.join("big");
+        std::fs::write(&src, &big).unwrap();
+        s3.put_file(&hash, &src).await.unwrap();
+        assert!(!src.exists(), "the temp file is removed once stored");
+
+        assert_eq!(s3.size(&hash).await.unwrap(), Some(big.len() as u64));
+        let back = read_all(s3.open(&hash, 0, big.len() as u64).await).await;
+        assert!(back == big, "the content comes back whole");
+        // A range across the boundary between the first two parts
+        let at = MULTIPART_CHUNK as u64 - 10;
+        assert_eq!(read_all(s3.open(&hash, at, 20).await).await, big[at as usize..at as usize + 20]);
+        assert!(read_all(s3.open(&hash, 5, 0).await).await.is_empty());
+
+        // A small file goes up in one request
+        let small_hash = crate::util::sha256_hex(b"small");
+        std::fs::write(&src, b"small").unwrap();
+        s3.put_file(&small_hash, &src).await.unwrap();
+        assert_eq!(read_all(s3.open(&small_hash, 0, 5).await).await, b"small");
+
+        // Listings find both under blobs/, in the folders their hash names
+        let mut listed = s3.list().await.unwrap();
+        listed.sort();
+        let mut expected = vec![hash.clone(), small_hash.clone()];
+        expected.sort();
+        assert_eq!(listed, expected);
+        let seen = std::sync::atomic::AtomicU64::new(0);
+        let content = s3.list_content(&|n| seen.store(n, std::sync::atomic::Ordering::SeqCst)).await.unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert!(content.iter().any(|e| e.name == hash && e.size == big.len() as u64 && e.kind == EntryKind::File));
+        let top = s3.list_dir("").await.unwrap();
+        assert!(top.iter().any(|e| e.name == "blobs" && e.kind == EntryKind::Folder), "{:?}", top.iter().map(|e| &e.name).collect::<Vec<_>>());
+        let level = s3.list_dir(&format!("blobs/{}/{}", &hash[0..2], &hash[2..4])).await.unwrap();
+        assert!(level.iter().any(|e| e.name == hash && e.kind == EntryKind::File));
+
+        // Deleting, and deleting what is already gone
+        s3.delete(&hash).await.unwrap();
+        s3.delete(&hash).await.unwrap();
+        assert_eq!(s3.size(&hash).await.unwrap(), None);
+        assert_eq!(s3.open(&hash, 0, 1).await.err().map(|e| e.kind()), Some(io::ErrorKind::NotFound));
+        assert_eq!(s3.list().await.unwrap(), vec![small_hash]);
+        assert!(s3.size("not-a-hash").await.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn paths_in_a_bucket_and_the_connection_checks() {
+        let s3 = S3Storage::in_memory("tf");
+        s3.ping().await.unwrap();
+        s3.check().await.unwrap();
+        // The check leaves nothing behind
+        assert!(s3.stat(".thirtyfile-check").await.unwrap().is_none());
+        assert!(s3.list_dir(".thirtyfile-check").await.unwrap().is_empty());
+
+        let dir = std::env::temp_dir().join(format!("thirtyfile-s3-{}", crate::util::new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("f");
+        std::fs::write(&src, b"hello world").unwrap();
+        s3.put_at("backups/one/a.txt", &src).await.unwrap();
+        assert!(!src.exists());
+        let entry = s3.stat("backups/one/a.txt").await.unwrap().unwrap();
+        assert_eq!((entry.name.as_str(), entry.size, entry.kind), ("a.txt", 11, EntryKind::File));
+        assert!(entry.modified.is_some());
+        assert!(s3.stat("backups/one/b.txt").await.unwrap().is_none());
+        assert_eq!(read_all(s3.open_at("backups/one/a.txt", 6, 5).await).await, b"world");
+        let listed = s3.list_dir("backups").await.unwrap();
+        assert_eq!(listed.iter().map(|e| (e.name.as_str(), e.kind)).collect::<Vec<_>>(), [("one", EntryKind::Folder)]);
+        // Kept under the location's prefix, and nothing outside it can be reached
+        assert!(s3.store.head(&ObjectPath::from("tf/backups/one/a.txt")).await.is_ok());
+        assert!(s3.stat("../a.txt").await.is_err());
+        assert!(s3.put_at("a/../../b", &src).await.is_err());
+        s3.delete_at("backups/one/a.txt").await.unwrap();
+        s3.delete_at("backups/one/a.txt").await.unwrap();
+        assert!(s3.stat("backups/one/a.txt").await.unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn part_sizes_stay_under_10000_parts() {
         assert_eq!(part_size(40 << 20), MULTIPART_CHUNK);
