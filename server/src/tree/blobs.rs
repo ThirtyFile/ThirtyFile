@@ -98,7 +98,7 @@ pub async fn add_blob_refs(conn: &mut SqliteConnection, blobs: &[(String, i64, S
 }
 
 /// Permanently deletes a subtree (including share links and earlier versions of its files), returning the physical
-/// files to delete. Versions kept in a folder space's folder are removed from disk by its next scan.
+/// files to delete. Versions kept in a folder space's folder are removed from disk by its scans (`clean_folder`).
 pub async fn purge_subtree(conn: &mut SqliteConnection, id: &str) -> AppResult<Vec<BlobRef>> {
     // Only the columns needed: which content the files use, and how much space they free per space
     // (id, space, kind, size, content)
@@ -122,7 +122,7 @@ pub async fn purge_subtree(conn: &mut SqliteConnection, id: &str) -> AppResult<V
         }
         hashes.extend(hash);
     }
-    let mut orphans = crate::versions::purge_nodes(conn, &serde_json::to_string(&files).unwrap()).await?;
+    let mut orphans = crate::versions::purge_nodes(conn, &serde_json::to_string(&files).unwrap()).await?.blobs;
     for (drive, bytes) in freed {
         adjust_usage(conn, &drive, -bytes).await?;
     }
@@ -191,7 +191,7 @@ async fn purge_detached(st: &AppState) -> AppResult<()> {
             }
             total += deleted.len();
             let ids: Vec<&str> = deleted.iter().map(|(id, _)| id.as_str()).collect();
-            let mut orphans = crate::versions::purge_nodes(&mut tx, &serde_json::to_string(&ids).unwrap()).await?;
+            let mut orphans = crate::versions::purge_nodes(&mut tx, &serde_json::to_string(&ids).unwrap()).await?.blobs;
             let hashes: Vec<String> = deleted.into_iter().filter_map(|(_, h)| h).collect();
             orphans.extend(release_blobs(&mut tx, &hashes).await?);
             tx.commit().await?;

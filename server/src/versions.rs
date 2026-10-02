@@ -111,13 +111,17 @@ pub struct KeptFile {
     at: Pinned,
     /// Where it was, when it was moved there rather than linked
     moved_from: Option<Pinned>,
+    /// The entry written into the space's journal before it was kept (fsops/journal.rs)
+    journal: fsops::Entry,
 }
 
 /// Before the file of a folder space at `path` is replaced (renamed over): it is kept as a version, hard-linked into
 /// the space's versions folder. Where the disk has no hard links, it is moved there instead (the replacement takes its
 /// name right after): copying it would take long for a large file, while the change holds the write lock. The rename
 /// that follows gives the name new content, so the version is the only name left for the old file, and writing to the
-/// file in place later can't change it. None when versions are off, or there is no file. A blocking disk step.
+/// file in place later can't change it. Written into the space's journal first: should the change not be committed,
+/// the next scan puts the file back, or records the version. None when versions are off, or there is no file. A
+/// blocking disk step.
 pub fn keep_on_disk(policy: Policy, node: &Node, path: &Pinned) -> std::io::Result<Option<KeptFile>> {
     if policy.keep <= 0 {
         return Ok(None);
@@ -128,7 +132,11 @@ pub fn keep_on_disk(policy: Policy, node: &Node, path: &Pinned) -> std::io::Resu
         return Ok(None);
     }
     let id = new_id();
-    let at = version_file(Path::new(root), node.drive(), &node.id, &id)?;
+    let space = crate::folders::open_space(Path::new(root), node.drive(), false)?;
+    let at = version_file(&space, &node.id, &id)?;
+    let rel = format!("{VERSIONS_DIR}/{}/{id}", node.id);
+    let intent = fsops::Intent::Version { node: node.id.clone(), version: id.clone(), from: node.fs_path.clone().unwrap_or_default(), to: rel.clone() };
+    let journal = fsops::write(&space, &intent)?;
     // A hard link never follows a symbolic link (on Linux)
     #[cfg(test)]
     let linked =
@@ -137,43 +145,54 @@ pub fn keep_on_disk(policy: Policy, node: &Node, path: &Pinned) -> std::io::Resu
     let linked = std::fs::hard_link(path.as_path(), at.as_path());
     let moved_from = match linked {
         Ok(()) => None,
-        Err(_) => {
-            fsops::rename_new(path.as_path(), at.as_path())?;
-            Some(path.clone())
-        }
+        Err(_) => match fsops::rename_new(path.as_path(), at.as_path()) {
+            Ok(()) => Some(path.clone()),
+            Err(e) => {
+                journal.remove();
+                return Err(e);
+            }
+        },
     };
-    Ok(Some(KeptFile { rel: format!("{VERSIONS_DIR}/{}/{id}", node.id), id, size: meta.len() as i64, at, moved_from }))
+    Ok(Some(KeptFile { rel, id, size: meta.len() as i64, at, moved_from, journal }))
 }
 
 impl KeptFile {
     /// The replacement couldn't take the file's place: it is put back as it was
     pub fn undo(self) {
-        match &self.moved_from {
+        let undone = match &self.moved_from {
             Some(from) => {
-                if let Err(e) = fsops::rename_new(self.at.as_path(), from.as_path()) {
-                    tracing::error!("Couldn't put a file back after it couldn't be replaced: {e}");
-                }
+                fsops::rename_new(self.at.as_path(), from.as_path()).inspect_err(|e| tracing::error!("Couldn't put a file back after it couldn't be replaced: {e}"))
             }
-            None => {
-                let _ = std::fs::remove_file(self.at.as_path());
-            }
+            None => std::fs::remove_file(self.at.as_path()),
+        };
+        // Else the next scan finishes it
+        if undone.is_ok() {
+            self.journal.remove();
         }
     }
 }
 
-/// Records a file `keep_on_disk` kept, as an earlier version of `node`
+/// Records a file `keep_on_disk` kept, as an earlier version of `node`; its entry in the journal goes after the commit
 pub async fn record_kept(conn: &mut SqliteConnection, policy: Policy, node: &Node, kept: Option<KeptFile>) -> AppResult<Removed> {
     let Some(kept) = kept else { return Ok(Removed::default()) };
+    let mut removed = record_found(conn, policy, node, &kept.id, &kept.rel, kept.size).await?;
+    removed.files.extend(node.fs_root.as_deref().map(|root| Below::new(root, node.drive(), kept.journal.rel.clone())));
+    Ok(removed)
+}
+
+/// Records the file `rel` of the space's versions folder as the version `id` of `node`: one `keep_on_disk` kept, or one
+/// a change that didn't finish kept (fsops/journal.rs)
+pub async fn record_found(conn: &mut SqliteConnection, policy: Policy, node: &Node, id: &str, rel: &str, size: i64) -> AppResult<Removed> {
     let (author_id, author_name) = content_author(conn, node).await?;
     sqlx::query(
         "INSERT INTO node_versions (id, node_id, drive_id, fs_path, size, author_id, author_name, modified_at, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
-    .bind(&kept.id)
+    .bind(id)
     .bind(&node.id)
     .bind(node.drive())
-    .bind(&kept.rel)
-    .bind(kept.size)
+    .bind(rel)
+    .bind(size)
     .bind(author_id)
     .bind(author_name)
     .bind(node.updated_at)
@@ -217,10 +236,10 @@ fn version_path(root: Option<&str>, drive: &str, rel: Option<&str>) -> Option<Be
     Some(Below::new(root, drive, rel))
 }
 
-/// Where a new version of the file `node_id` goes: `.thirtyfile-versions/<node id>/<id>` in the folder of the space
-/// `drive`, making the folders
-fn version_file(root: &Path, drive: &str, node_id: &str, id: &str) -> std::io::Result<Pinned> {
-    let folder = crate::folders::open_space(root, drive, false)?.join(VERSIONS_DIR)?;
+/// Where a new version of the file `node_id` goes: `.thirtyfile-versions/<node id>/<id>` in the space's folder `space`,
+/// making the folders
+fn version_file(space: &Pinned, node_id: &str, id: &str) -> std::io::Result<Pinned> {
+    let folder = space.join(VERSIONS_DIR)?;
     fsops::ensure_dir(&folder)?;
     let folder = folder.join(node_id)?;
     fsops::ensure_dir(&folder)?;
@@ -241,13 +260,15 @@ async fn prune_node(conn: &mut SqliteConnection, node_id: &str, policy: Policy) 
     released(conn, rows).await
 }
 
-/// Deletes the versions of files deleted for good (`ids`, a JSON array); their files in folder spaces are left to
-/// `clean_folder`, as the transaction may still fail
-pub async fn purge_nodes(conn: &mut SqliteConnection, ids: &str) -> AppResult<Vec<BlobRef>> {
-    let rows: Vec<(Option<String>,)> =
-        sqlx::query_as("DELETE FROM node_versions WHERE node_id IN (SELECT value FROM json_each(?)) RETURNING blob_hash").bind(ids).fetch_all(&mut *conn).await?;
-    let hashes: Vec<String> = rows.into_iter().filter_map(|(h,)| h).collect();
-    tree::release_blobs(conn, &hashes).await
+/// Deletes the versions of files deleted for good (`ids`, a JSON array): their content no longer used, and their files
+/// in folder spaces, go after the commit
+pub async fn purge_nodes(conn: &mut SqliteConnection, ids: &str) -> AppResult<Removed> {
+    let rows: Vec<(Option<String>, Option<String>, Option<String>)> =
+        sqlx::query_as("DELETE FROM node_versions WHERE node_id IN (SELECT value FROM json_each(?)) RETURNING blob_hash, drive_id, fs_path")
+            .bind(ids)
+            .fetch_all(&mut *conn)
+            .await?;
+    released(conn, rows).await
 }
 
 /// The maintenance loop: removes versions no longer kept (too many, too old, or turned off since) and those of files
@@ -286,11 +307,36 @@ pub async fn prune(st: &AppState) -> AppResult<usize> {
     Ok(n)
 }
 
+/// Files in a versions folder that no version refers to are removed only once they have been there this long: a change
+/// that isn't committed yet may have just put one there
+pub const UNKNOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
+/// Whether the file `file`, in the folder `folder`, has been there for `age`: by its time of change where the system
+/// keeps one (on Unix, linking or renaming a file sets it), else by the last change of its folder (a file keeps its
+/// own times when it is renamed)
+fn there_for(file: &std::fs::Metadata, folder: &std::fs::Metadata, age: std::time::Duration) -> bool {
+    #[cfg(unix)]
+    {
+        let _ = folder;
+        let changed = std::time::UNIX_EPOCH + std::time::Duration::from_secs(std::os::unix::fs::MetadataExt::ctime(file).max(0) as u64);
+        changed.elapsed().is_ok_and(|a| a >= age)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = file;
+        folder.modified().is_ok_and(|t| t.elapsed().is_ok_and(|a| a >= age))
+    }
+}
+
 /// Removes files in a folder space's versions folder that no version refers to any more (the file was deleted for
-/// good, or removing it failed earlier). Run with each scan of the space. Only what ThirtyFile named there is looked
-/// at: folders named by a file's id, holding files named by a version's id.
+/// good, or removing it failed earlier), once they are old enough (`UNKNOWN_GRACE`). Run with each scan of the space.
+/// Only what ThirtyFile named there is looked at: folders named by a file's id, holding files named by a version's id.
 pub async fn clean_folder(st: &AppState, drive_id: &str, root: &Path) -> AppResult<()> {
     let top = root.to_path_buf();
+    #[cfg(test)]
+    let grace = if fsops::testing::versions_grace(drive_id) { UNKNOWN_GRACE } else { std::time::Duration::ZERO };
+    #[cfg(not(test))]
+    let grace = UNKNOWN_GRACE;
     let found = tokio::task::spawn_blocking(move || -> Vec<String> {
         let Ok(dir) = Pinned::root(&top).and_then(|r| r.join(VERSIONS_DIR)).and_then(|d| d.dir()) else { return Vec::new() };
         let Ok(read) = std::fs::read_dir(dir.as_path()) else { return Vec::new() };
@@ -307,7 +353,9 @@ pub async fn clean_folder(st: &AppState, drive_id: &str, root: &Path) -> AppResu
             if all.is_empty() {
                 let _ = std::fs::remove_dir(node_dir.as_path());
             }
-            let names: Vec<String> = all.into_iter().filter(|n| crate::util::is_new_id(n)).collect();
+            let Ok(folder) = std::fs::symlink_metadata(inside.as_path()) else { continue };
+            let old = |name: &str| inside.join(name).and_then(|f| std::fs::symlink_metadata(f.as_path())).is_ok_and(|file| there_for(&file, &folder, grace));
+            let names: Vec<String> = all.into_iter().filter(|n| crate::util::is_new_id(n) && old(n)).collect();
             found.extend(names.into_iter().map(|n| format!("{VERSIONS_DIR}/{node}/{n}")));
         }
         found
@@ -655,5 +703,32 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
         panic!("the version's file stayed");
+    }
+
+    #[tokio::test]
+    async fn files_no_version_has_stay_in_the_versions_folder_until_they_are_old() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        testutil::write_old(&space.dir.join("notes.txt"), b"one");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (id, _) = env.node_at(&space.drive, "notes.txt").await.unwrap();
+        // Just put there (by a change that isn't committed yet, say)
+        let unknown = space.dir.join(VERSIONS_DIR).join(&id).join(new_id());
+        std::fs::create_dir_all(unknown.parent().unwrap()).unwrap();
+        std::fs::write(&unknown, b"zero").unwrap();
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(unknown.exists(), "removed at once");
+
+        // Old enough: removed
+        let _old = fsops::testing::no_versions_grace(&space.drive);
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        for _ in 0..100 {
+            if !unknown.exists() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("the file stayed");
     }
 }

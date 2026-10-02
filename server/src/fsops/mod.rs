@@ -14,6 +14,7 @@ mod across;
 mod build;
 mod disk;
 mod index;
+mod journal;
 mod locks;
 mod organize;
 mod save;
@@ -22,6 +23,7 @@ pub use across::*;
 pub use build::*;
 pub use disk::*;
 pub use index::*;
+pub use journal::*;
 pub use locks::*;
 pub use organize::*;
 pub use save::*;
@@ -311,6 +313,63 @@ pub(crate) mod testing {
         }
         super::TEST_WAIT.with(|w| w.set(Some(Duration::from_secs(1))));
         Reset
+    }
+
+    static NO_GRACE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    /// Files in the versions folder of `drive` that no version has count as old at once, until the guard is dropped
+    pub fn no_versions_grace(drive: &str) -> impl Drop {
+        struct Grace(String);
+        impl Drop for Grace {
+            fn drop(&mut self) {
+                NO_GRACE.lock().unwrap().retain(|d| *d != self.0);
+            }
+        }
+        NO_GRACE.lock().unwrap().push(drive.to_string());
+        Grace(drive.to_string())
+    }
+
+    pub fn versions_grace(drive: &str) -> bool {
+        !NO_GRACE.lock().unwrap().iter().any(|d| d == drive)
+    }
+
+    /// Where a change can stop as if ThirtyFile stopped there (`stop_at`)
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum Stop {
+        /// Saving: the file was kept as a version (linked or moved), its new content isn't in place yet
+        VersionKept,
+        /// Saving: the new content is in place, the change isn't committed
+        Replaced,
+        /// Moving to the trash: the item is in the trash folder, the change isn't committed
+        Trashed,
+    }
+
+    static STOPS: Mutex<Vec<(String, Stop)>> = Mutex::new(Vec::new());
+
+    /// The next change to the folder space `drive` that reaches `at` stops there, as ThirtyFile would if it stopped
+    /// there (a power cut, say): it fails, and nothing it did on disk is undone
+    pub fn stop_at(drive: &str, at: Stop) -> impl Drop {
+        struct Reset(String);
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                STOPS.lock().unwrap().retain(|(d, _)| *d != self.0);
+            }
+        }
+        STOPS.lock().unwrap().push((drive.to_string(), at));
+        Reset(drive.to_string())
+    }
+
+    /// Whether a change to `drive` stops at `at` (once)
+    pub fn stops(drive: &str, at: Stop) -> bool {
+        let mut stops = STOPS.lock().unwrap();
+        let Some(i) = stops.iter().position(|(d, s)| d == drive && *s == at) else { return false };
+        stops.remove(i);
+        true
+    }
+
+    /// The error of a change that stopped
+    pub fn stopped() -> crate::error::AppError {
+        crate::error::AppError::internal("stopped (test)")
     }
 
     /// A call to the disk of `drive`

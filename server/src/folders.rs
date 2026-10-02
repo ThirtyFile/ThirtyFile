@@ -506,11 +506,21 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
         tracing::debug!("Couldn't write the marker file in {}: {e}", root.display());
     }
 
-    // 2. The index brought up to date, folder by folder
+    // 2. The index brought up to date, folder by folder; first, what changes that didn't finish left on disk is put
+    // back (fsops/journal.rs), so it isn't taken for removed
     let indexing = std::time::Instant::now();
-    if !compared.differing.is_empty() {
+    let journal = {
+        let root = compared.root.clone();
+        tokio::task::spawn_blocking(move || crate::fsops::journal_pending(&root)).await.map_err(AppError::internal)?
+    };
+    if !compared.differing.is_empty() || journal {
         let _changing = drive_lock(st, &drive.id).lock_owned().await;
-        update_index(st, &drive, &root, compared.differing, compared.any_gone, &mut report).await?;
+        if journal {
+            crate::fsops::recover(st, &drive.id, &compared.root).await?;
+        }
+        if !compared.differing.is_empty() {
+            update_index(st, &drive, &root, compared.differing, compared.any_gone, &mut report).await?;
+        }
     }
     crate::fsops::clean_trash(st, &drive.id, &root).await?;
     // In the folder read (whose marker was checked)

@@ -35,7 +35,8 @@ pub async fn rename(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node
     Ok(())
 }
 
-/// Moves an item to the space's trash folder, where it can be restored from
+/// Moves an item to the space's trash folder, where it can be restored from. The move is written into the space's
+/// journal first (journal.rs), so should the change not be committed, the item is put back.
 pub async fn trash(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node, trash_id: &str) -> AppResult<()> {
     let (n, id) = (node.clone(), trash_id.to_string());
     let moved = on_disk(node.drive(), disk_wait(), move || {
@@ -45,19 +46,33 @@ pub async fn trash(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node,
         let dir = root.join(&format!("{TRASH_DIR}/{id}")).map_err(disk_error)?;
         std::fs::create_dir(dir.as_path()).map_err(disk_error)?;
         let to = dir.join(&n.name).map_err(disk_error)?;
-        match rename_new(from.as_path(), to.as_path()) {
-            Ok(()) => Ok(Some((to, from, dir))),
-            // Already gone from the server: only the index still had it
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        let intent = Intent::Trash { node: n.id.clone(), from: rel_of(&n).to_string(), to: format!("{TRASH_DIR}/{id}/{}", n.name) };
+        let entry = match write(&root, &intent) {
+            Ok(entry) => entry,
             Err(e) => {
+                let _ = std::fs::remove_dir(dir.as_path());
+                return Err(disk_error(e));
+            }
+        };
+        match rename_new(from.as_path(), to.as_path()) {
+            #[cfg(test)]
+            Ok(()) if testing::stops(n.drive(), testing::Stop::Trashed) => Err(testing::stopped()),
+            Ok(()) => Ok(Some((to, from, dir, entry))),
+            // Already gone from the server: only the index still had it
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                entry.remove();
+                Ok(None)
+            }
+            Err(e) => {
+                entry.remove();
                 let _ = std::fs::remove_dir(dir.as_path());
                 Err(disk_error(e))
             }
         }
     })
     .await?;
-    if let Some((to, from, dir)) = moved {
-        locks.note(to, from, Some(dir));
+    if let Some((to, from, dir, entry)) = moved {
+        locks.note_journaled(to, from, Some(dir), Some(entry));
     }
     locks.later(changes::repath(conn, &node.id, node.drive(), rel_of(node), &format!("{TRASH_DIR}/{trash_id}/{}", node.name)).await?);
     Ok(())
@@ -137,14 +152,7 @@ pub fn clean_leftovers(paths: Vec<Pinned>, age: std::time::Duration) {
             let Ok(item_name) = item.file_name().into_string() else { continue };
             let Ok(from) = inside.join(&item_name) else { continue };
             let is_dir = item.file_type().is_ok_and(|t| t.is_dir());
-            let back = (0..10_000u32).map(|n| if n == 0 { item_name.clone() } else { numbered_name(&item_name, n, is_dir) }).find_map(|candidate| {
-                match dir.join(&candidate).and_then(|to| rename_new(from.as_path(), to.as_path())) {
-                    Ok(()) => Some(Ok(candidate)),
-                    Err(e) if e.kind() == io::ErrorKind::AlreadyExists => None,
-                    Err(e) => Some(Err(e)),
-                }
-            });
-            match back {
+            match put_back_into(&from, &dir, &item_name, is_dir) {
                 Some(Ok(n)) => tracing::warn!("Put back {n:?}: it was being moved when ThirtyFile stopped"),
                 Some(Err(e)) => tracing::warn!("Couldn't put back {item_name:?}: {e}"),
                 None => {}
