@@ -17,7 +17,16 @@ pub struct ListQuery {
 }
 
 /// Largest page of a folder or trash listing
-pub(super) const MAX_PAGE: i64 = 5000;
+pub const MAX_PAGE: i64 = 5000;
+
+impl ListQuery {
+    /// For listings anyone with a link can ask for: one page of at most MAX_PAGE items when no page size was given,
+    /// so a single request can't make the server send a whole large folder
+    pub fn paged(mut self) -> Self {
+        self.limit = Some(self.limit.unwrap_or(MAX_PAGE));
+        self
+    }
+}
 
 /// A whole listing, or one page of it when the request gave a `limit`
 #[derive(Serialize, Debug)]

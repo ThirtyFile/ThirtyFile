@@ -358,7 +358,7 @@ pub async fn public_children(
     if !node.is_folder() {
         return Err(AppError::bad_request("This isn't a folder"));
     }
-    let children = list_children(&mut *st.db.acquire().await?, &node.id, &q).await?;
+    let children = list_children(&mut *st.db.acquire().await?, &node.id, &q.paged()).await?;
     Ok(Json(children.map(|nodes| nodes.iter().map(public_node_json).collect())))
 }
 
@@ -517,4 +517,42 @@ pub(super) async fn serve_public_download(
         }
     }
     Ok(res)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil;
+
+    #[tokio::test]
+    async fn a_folder_link_lists_a_page_at_a_time_even_when_no_page_size_is_asked_for() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let big = env.folder(&amy, amy.root(), "Big").await;
+        let drive = env.drive_of(&big).await;
+        let count = crate::nodes::MAX_PAGE + 1;
+        sqlx::query(
+            "WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM c WHERE i < ?1)
+             INSERT INTO nodes (id, owner_id, parent_id, kind, name, created_at, updated_at, drive_id)
+             SELECT 'sub-' || i, ?2, ?3, 'folder', 'Folder ' || i, 0, 0, ?4 FROM c",
+        )
+        .bind(count)
+        .bind(amy.id)
+        .bind(&big)
+        .bind(&drive)
+        .execute(&env.st.db)
+        .await
+        .unwrap();
+        let req =
+            CreateReq { node_id: big.clone(), password: None, expires_at: None, max_downloads: None, allow_upload: false, drop_only: false, allow_download: true };
+        let Json(link) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
+        let list = |q: ChildrenQuery| public_children(State(env.st.clone()), Path((link.id.clone(), big.clone())), Query(q), HeaderMap::new());
+        let Json(listing) = list(ChildrenQuery::default()).await.unwrap();
+        let Listing::Page { items, next: Some(next), .. } = listing else { panic!("the whole folder came at once") };
+        assert_eq!(items.len() as i64, crate::nodes::MAX_PAGE);
+        // The rest comes with the next page
+        let q: ChildrenQuery = serde_json::from_value(json!({ "after": next, "limit": crate::nodes::MAX_PAGE })).unwrap();
+        let Json(rest) = list(q).await.unwrap();
+        assert_eq!(rest.into_items().len(), 1);
+    }
 }

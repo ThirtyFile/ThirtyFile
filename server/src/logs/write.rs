@@ -133,14 +133,30 @@ pub(super) fn enqueue(st: &AppState, event: LogEvent) {
 /// Page views of a link from one address closer together than this (seconds) are logged once
 const VIEW_INTERVAL: i64 = 60;
 
-/// Whether a page view of `share_id` from `ip` should be logged: the first one, or the first after a minute of quiet
+/// Most link views remembered at once
+const MAX_SHARE_VIEWS: usize = 10_000;
+
+/// Whether a page view of `share_id` from `ip` should be logged: the first one, or the first after a minute of quiet.
+/// An IPv6 visitor counts per /64, as for every other limit (`limit_key_ip`). When MAX_SHARE_VIEWS views are
+/// remembered within the interval, new ones aren't logged, so a flood of addresses can't grow the record or queue a
+/// log entry each.
 pub fn first_view_in_a_while(st: &AppState, share_id: &str, ip: &str) -> bool {
     let mut views = st.share_views.lock().unwrap();
     let t = now();
-    let key = format!("{share_id}|{ip}");
+    let key = format!("{share_id}|{}", crate::auth::limit_key_ip(ip));
     match views.get(&key) {
         Some(last) if t - *last < VIEW_INTERVAL => false,
-        _ => {
+        Some(_) => {
+            views.insert(key, t);
+            true
+        }
+        None => {
+            if views.len() >= MAX_SHARE_VIEWS {
+                views.retain(|_, last| t - *last < VIEW_INTERVAL);
+                if views.len() >= MAX_SHARE_VIEWS {
+                    return false;
+                }
+            }
             views.insert(key, t);
             true
         }
@@ -206,4 +222,29 @@ pub fn record_login_via(st: &AppState, user_id: Option<i64>, username: &str, eve
             user_agent,
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil;
+
+    #[tokio::test]
+    async fn link_views_are_remembered_per_address_block_in_a_record_of_limited_size() {
+        let env = testutil::env().await;
+        let st = &env.st;
+        assert!(first_view_in_a_while(st, "s1", "2001:db8:1:2::1"));
+        // Another address of the same IPv6 /64 is the same visitor, as for every other limit
+        assert!(!first_view_in_a_while(st, "s1", "2001:db8:1:2:aaaa::9"));
+        assert!(first_view_in_a_while(st, "s1", "2001:db8:1:3::1"));
+        assert!(first_view_in_a_while(st, "s2", "2001:db8:1:2::1"));
+        // However many addresses visit at once, the record keeps at most MAX_SHARE_VIEWS
+        for i in 0..MAX_SHARE_VIEWS + 100 {
+            first_view_in_a_while(st, "s1", &format!("198.51.{}.{}", i / 250, i % 250));
+        }
+        assert!(st.share_views.lock().unwrap().len() <= MAX_SHARE_VIEWS);
+        // Views that no longer suppress anything make way for new ones
+        st.share_views.lock().unwrap().values_mut().for_each(|t| *t -= VIEW_INTERVAL);
+        assert!(first_view_in_a_while(st, "s3", "203.0.113.1"));
+    }
 }

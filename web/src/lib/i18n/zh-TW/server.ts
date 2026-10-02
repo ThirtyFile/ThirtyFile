@@ -331,6 +331,8 @@ export default {
   "This move isn't possible": "無法這樣搬移",
   "There isn't enough free space on {name}: {needed} is needed, {free} is free": "{name} 的可用空間不足：需要 {needed}，只剩 {free}",
   "There isn't enough free space in ThirtyFile's data folder for the largest file: {needed} is needed, {free} is free": "ThirtyFile 資料資料夾的可用空間放不下最大的檔案：需要 {needed}，只剩 {free}",
+  "There isn't enough free space in ThirtyFile's data folder to compress these items: {needed} is needed, {free} is free": "ThirtyFile 資料資料夾的可用空間不夠壓縮這些項目：需要 {needed}，只剩 {free}",
+  "Compressing stopped because ThirtyFile's data folder is running out of free space": "ThirtyFile 資料資料夾的可用空間快用完了，已停止壓縮",
   "The file isn't in the folder": "資料夾中找不到這個檔案",
   "The file changed while it was being copied": "檔案在複製時被變更了",
   "Another item in its folder has the same name in other letter case, which the new folder can't tell apart. Rename one of them, then resume the move.": "同一個資料夾中有另一個只差在大小寫的同名項目，新資料夾無法區分它們。請先把其中一個改名，再繼續搬移",
