@@ -100,6 +100,24 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/* Chinese and Japanese share characters drawn differently: each language gets fonts with its own glyphs. An element
+   in another language than its page (a name in the language switch) picks its own fonts too */
+:lang(zh-TW) {
+  --font: "Geist", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+:lang(zh-CN) {
+  --font: "Geist", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+:lang(ja) {
+  --font: "Geist", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", "Meiryo", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+[lang] {
+  font-family: var(--font);
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -235,6 +253,127 @@ a:hover {
   }
 }
 
+/* ── Language switch: a list of links in a <details>, so it works without JavaScript ── */
+
+.lang-menu {
+  position: relative;
+}
+
+.lang-menu summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  color: var(--text-soft);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  list-style: none;
+}
+
+.lang-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.lang-menu summary:hover,
+.lang-menu[open] summary {
+  background: var(--bg-soft);
+  color: var(--text);
+}
+
+.lang-menu summary svg {
+  width: 18px;
+  height: 18px;
+}
+
+.lang-menu ul {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 25;
+  min-width: 168px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+
+.site-nav .lang-menu a {
+  display: flex;
+}
+
+.site-nav .lang-menu a[aria-current="true"] {
+  color: var(--brand);
+  font-weight: 600;
+}
+
+@media (max-width: 560px) {
+  .lang-menu .lang-name {
+    display: none;
+  }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The browser's language, offered once under the header (assets/site.js) */
+.lang-offer {
+  background: var(--bg-tint);
+  border-bottom: 1px solid var(--line);
+  font-size: 15px;
+}
+
+.lang-offer .wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 10px 0;
+}
+
+.lang-offer p {
+  margin: 0;
+  color: var(--text-soft);
+}
+
+.lang-offer a {
+  font-weight: 600;
+}
+
+.lang-offer button {
+  display: inline-grid;
+  place-items: center;
+  margin-left: auto;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-soft);
+  cursor: pointer;
+}
+
+.lang-offer button:hover {
+  background: var(--bg-soft);
+  color: var(--text);
+}
+
+.lang-offer button svg {
+  width: 18px;
+  height: 18px;
+}
+
 /* ── Buttons ── */
 
 .button {
@@ -308,6 +447,20 @@ h1 {
   letter-spacing: -0.035em;
   font-weight: 700;
   text-wrap: balance;
+}
+
+/* The tight spacing of the Latin headings would crowd Chinese and Japanese characters; Japanese headings break
+   between phrases rather than inside words */
+:root:is(:lang(zh), :lang(ja)) :is(h1, h2, h3) {
+  letter-spacing: 0;
+}
+
+:root:is(:lang(zh), :lang(ja)) h1 {
+  line-height: 1.2;
+}
+
+:root:lang(ja) :is(h1, h2, h3) {
+  word-break: auto-phrase;
 }
 
 h1 em {
@@ -773,6 +926,17 @@ code {
 
 .docs-nav p {
   padding-left: 12px;
+}
+
+/* On a translated guide: the other guides are in English */
+.docs-nav .docs-note {
+  margin: 4px 0 0;
+  padding: 8px 12px;
+  border-radius: 9px;
+  background: var(--bg-soft);
+  color: var(--text-soft);
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .docs-nav a {

@@ -1,6 +1,7 @@
 # Checks every pull request, and main after every merge (the ruleset doesn't require branches to be up to date, so
-# two pull requests that pass on their own can still fail together): the tests, and that released migrations are
-# unchanged. Changes that only touch the website or the documentation skip the tests.
+# two pull requests that pass on their own can still fail together): the tests, that released migrations are
+# unchanged, and the website's languages and links. Changes that only touch the website or the documentation skip the
+# tests, not the website's check.
 #
 # Changes to how the image is built or started (Dockerfile, .dockerignore, the lock files, cargo about's settings,
 # compose.yaml, the smoke test, this file) also build the image for both platforms, once the tests have passed, without
@@ -108,6 +109,18 @@ jobs:
             done
           done
           exit "$failed"
+
+  # The website: every translated page exists in each language with matching language links, and the links inside
+  # it resolve. Quick, so it runs on every change, the website's own included
+  site:
+    name: Website
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: bash scripts/check.sh site
 
   check:
     name: Tests
@@ -322,14 +335,14 @@ jobs:
   result:
     name: Checks passed
     timeout-minutes: 5
-    needs: [changes, migrations, check, image]
+    needs: [changes, migrations, site, check, image]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          echo "changes, migrations, tests, image: $RESULTS"
+          echo "changes, migrations, website, tests, image: $RESULTS"
           case " $RESULTS " in
             *" failure "* | *" cancelled "*) exit 1 ;;
           esac
