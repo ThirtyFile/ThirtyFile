@@ -224,10 +224,15 @@ export function AddressBar({
 
   // A long path doesn't fit on a phone: show its end, the folder you're in (like File Explorer), scrolling back for the rest
   const trailKey = crumbs.map((c) => c.label).join("/");
+  /** The path is wider than its place: the keyboard can reach it to scroll it (arrows) */
+  const [trailScrolls, setTrailScrolls] = useState(false);
   useLayoutEffect(() => {
     const el = trail.current;
     if (!el) return;
-    const toEnd = () => (el.scrollLeft = el.scrollWidth);
+    const toEnd = () => {
+      el.scrollLeft = el.scrollWidth;
+      setTrailScrolls(el.scrollWidth > el.clientWidth);
+    };
     toEnd();
     const ro = new ResizeObserver(toEnd);
     ro.observe(el);
@@ -254,10 +259,8 @@ export function AddressBar({
       }
       if (isTyping(e.target) || document.querySelector("[role=dialog]") || (e.target as HTMLElement | null)?.closest?.("[role=menu], [role=menuitem]")) return;
       const alt = e.altKey && !mod;
-      if (alt && e.key === "ArrowUp") {
-        if (upTo) navigate(upTo);
-      } else if ((alt && e.key === "ArrowLeft") || (e.key === "Backspace" && !mod && !e.altKey)) back();
-      else if (alt && e.key === "ArrowRight") forward();
+      // (Alt+arrows: onAltArrow)
+      if (e.key === "Backspace" && !mod && !e.altKey) back();
       else if ((mod && !e.altKey && e.key.toLowerCase() === "f") || (e.key === "F3" && !mod && !e.altKey)) {
         searchRef.current?.focus();
         searchRef.current?.select();
@@ -266,8 +269,25 @@ export function AddressBar({
       else return;
       e.preventDefault();
     };
+    // Alt+arrows move around folders wherever the focus is: before a focused menu button takes Alt+↑ or Alt+↓ to open
+    // its menu
+    const onAltArrow = (e: KeyboardEvent) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || !["ArrowUp", "ArrowLeft", "ArrowRight"].includes(e.key)) return;
+      const at = e.target as HTMLElement | null;
+      if (isTyping(at) || at?.tagName === "SELECT" || document.querySelector("[role=dialog]") || at?.closest?.("[role=menu]")) return;
+      if (e.key === "ArrowUp") {
+        if (upTo) navigate(upTo);
+      } else if (e.key === "ArrowLeft") back();
+      else forward();
+      e.preventDefault();
+      e.stopPropagation();
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onAltArrow, true);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onAltArrow, true);
+    };
   });
 
   const nav = "size-8 rounded-md [&_svg]:size-[18px]";
@@ -308,8 +328,9 @@ export function AddressBar({
             <nav
               ref={trail}
               aria-label={t("File path")}
+              tabIndex={trailScrolls ? 0 : undefined}
               // Scrolls sideways (to the end at first) without a scroll bar inside the address bar
-              className="flex min-w-0 flex-1 items-center overflow-x-auto text-[13px] whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="flex min-w-0 flex-1 items-center overflow-x-auto rounded-sm text-[13px] whitespace-nowrap outline-none [scrollbar-width:none] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset [&::-webkit-scrollbar]:hidden"
             >
               {crumbs.map((c, i) => (
                 <CrumbItem key={i} crumb={c} last={i === crumbs.length - 1} path={crumbPath(crumbs.slice(0, i + 1))} />

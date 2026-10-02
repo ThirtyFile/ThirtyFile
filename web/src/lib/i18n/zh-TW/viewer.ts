@@ -109,6 +109,7 @@ export default {
   "Unknown encoding: opened read-only so the file isn't damaged": "無法辨識的編碼：以唯讀開啟，避免損壞檔案",
   "This file doesn't look like text: opened read-only so it isn't damaged": "這個檔案看起來不是文字：以唯讀開啟，避免損壞檔案",
   "Read-only": "唯讀",
+  "Text of \"{name}\"": "「{name}」的文字",
   "Unsaved changes": "尚未儲存",
   "Save": "儲存",
   "Close (Esc)": "關閉 (Esc)",

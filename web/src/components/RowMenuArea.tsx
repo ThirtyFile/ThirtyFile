@@ -5,11 +5,12 @@ import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/component
  * Context menu for a list / table area: right-clicking a row with `data-row-id` first reports that row (usually to select it),
  * right-clicking empty space reports null. The menu contents depend on the current selection.
  */
-export function RowMenuArea(props: { className?: string; onTarget(id: string | null): void; menu: ReactNode; children: ReactNode; onClick?(e: React.MouseEvent): void }) {
+export function RowMenuArea(props: { className?: string; tabIndex?: number; onTarget(id: string | null): void; menu: ReactNode; children: ReactNode; onClick?(e: React.MouseEvent): void }) {
   return (
     <ContextMenu>
       <ContextMenuTrigger
         className={props.className}
+        tabIndex={props.tabIndex}
         onClick={props.onClick}
         onContextMenuCapture={(e) => {
           const row = (e.target as HTMLElement).closest<HTMLElement>("[data-row-id]");

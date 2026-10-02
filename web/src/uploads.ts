@@ -282,13 +282,14 @@ export async function resumeRecovered(endpoint: string, records: UploadRecord[],
 
 /** Drops interrupted uploads: their records, and what the server received of them */
 export async function discardRecovered(endpoint: string, records: UploadRecord[]) {
+  // The server first: once the list no longer shows them, what it received is gone too
+  for (const r of records) await forgetSessions(fingerprintOf(endpoint, r.id));
   const scope = scopeOf(endpoint);
   if (scope)
     removeRecords(
       scope,
       records.map((r) => r.id),
     );
-  for (const r of records) await forgetSessions(fingerprintOf(endpoint, r.id));
 }
 
 /** Show changes: right away after something the user did, otherwise at most every EMIT_MS */

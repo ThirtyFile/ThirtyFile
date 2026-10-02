@@ -149,7 +149,17 @@ export default function TextEditor(props: {
     }
   };
 
-  const extensions = useMemo(() => [EditorView.lineWrapping, keymap.of([{ key: "Mod-s", preventDefault: true, run: () => (saveRef.current(), true) }]), ...(lang ? [lang] : [])], [lang]);
+  const name = props.node.name;
+  const extensions = useMemo(
+    () => [
+      EditorView.lineWrapping,
+      // What a screen reader calls the text box
+      EditorView.contentAttributes.of({ "aria-label": t('Text of "{name}"', { name }) }),
+      keymap.of([{ key: "Mod-s", preventDefault: true, run: () => (saveRef.current(), true) }]),
+      ...(lang ? [lang] : []),
+    ],
+    [lang, name],
+  );
 
   const muted = props.embedded ? "text-muted-foreground" : "text-white/70";
   if (error) return <div className={`flex h-full items-center justify-center text-sm ${muted}`}>{error}</div>;

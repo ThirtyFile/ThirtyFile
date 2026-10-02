@@ -380,9 +380,9 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
               </div>
             )}
             <div className="grid gap-1.5">
-              <Label>{t("Redirect URI")}</Label>
+              <Label htmlFor={`sso-${id}-redirect`}>{t("Redirect URI")}</Label>
               <div className="flex gap-2">
-                <Input readOnly value={saved[id].redirect_uri} className="font-mono text-xs" onFocus={(e) => e.target.select()} />
+                <Input id={`sso-${id}-redirect`} readOnly value={saved[id].redirect_uri} className="font-mono text-xs" onFocus={(e) => e.target.select()} />
                 <Button
                   type="button"
                   variant="outline"

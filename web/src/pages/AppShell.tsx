@@ -86,7 +86,8 @@ export function AppShell() {
       >
         {t("Skip to main content")}
       </a>
-      <div className="flex shrink-0 bg-sidebar">
+      {/* The page's banner: its tabs and notifications */}
+      <header className="flex shrink-0 bg-sidebar">
         <div className="min-w-0 flex-1">
           <ErrorBoundary>
             <TabBar />
@@ -95,7 +96,7 @@ export function AppShell() {
         <ErrorBoundary>
           <NotificationBell />
         </ErrorBoundary>
-      </div>
+      </header>
       <div className="min-h-0 flex-1">
         {/* An error in one page only affects the content area; the tab bar and upload panel keep working */}
         <ErrorBoundary resetKey={location.pathname}>

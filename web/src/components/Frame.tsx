@@ -51,7 +51,7 @@ export function Frame(p: FrameProps) {
     document.title = title ? `${title} - ${siteName}` : siteName;
   }, [title, siteName]);
   return (
-    <section className="flex h-full min-h-0 flex-col bg-background text-[13px]" aria-label={t("File Explorer")}>
+    <main className="flex h-full min-h-0 flex-col bg-background text-[13px]" aria-label={t("File Explorer")}>
       <h1 className="sr-only">{title}</h1>
       <AddressBar
         crumbs={p.crumbs}
@@ -64,7 +64,7 @@ export function Frame(p: FrameProps) {
         keys={p.keys}
       />
       <div className="flex min-h-12 shrink-0 flex-wrap items-center gap-1 border-y px-3 py-1.5 max-lg:px-2">
-        <ToolButton icon={PanelLeftIcon} label={t("Location")} showLabel className="md:hidden" aria-expanded={navOpen} onClick={() => setNavOpen(!navOpen)} />
+        <ToolButton icon={PanelLeftIcon} label={t("Navigation pane")} showLabel className="md:hidden" aria-expanded={navOpen} onClick={() => setNavOpen(!navOpen)} />
         {p.toolbar}
       </div>
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
@@ -87,6 +87,6 @@ export function Frame(p: FrameProps) {
         {p.footerRight}
       </footer>
       {p.keys && <ShortcutsHost />}
-    </section>
+    </main>
   );
 }

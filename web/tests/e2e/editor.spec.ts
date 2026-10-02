@@ -34,8 +34,8 @@ test("edits typed while a text file is being saved stay unsaved, and survive swi
   await page.goto(`/view/${id}`);
   const editor = page.locator(".cm-content");
   const tab = page.getByRole("tab", { name: "notes.txt" });
-  // The tab's close button (for the mouse; the keyboard closes a tab with Delete)
-  const closeButton = tab.locator("button");
+  // The tab's close mark (for the mouse; the keyboard closes a tab with Delete)
+  const closeButton = tab.locator("span[title]");
   await editor.click();
   await page.keyboard.type("A");
   await page.keyboard.press("Control+s");

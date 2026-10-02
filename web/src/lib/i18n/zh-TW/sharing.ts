@@ -41,6 +41,8 @@ export default {
   "All users": "所有使用者",
   "Choose again": "重新選擇",
   "Enter a username or group name": "輸入帳號或群組名稱",
+  "Username or group name": "帳號或群組名稱",
+  "People and groups": "使用者與群組",
   "Inherited from “{name}”": "繼承自「{name}」",
   "Granted by {name}": "由 {name} 授予",
   "System default": "系統預設",

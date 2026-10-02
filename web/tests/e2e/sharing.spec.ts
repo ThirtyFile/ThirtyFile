@@ -65,3 +65,41 @@ test("a link to one file shows it to a visitor on a phone, who can download it",
   expect(await readFile(await download.path(), "utf8")).toBe("Just this file");
   await visitor.close();
 });
+
+test("Share with… picks a person with the keyboard alone", async ({ page }) => {
+  await signIn(page);
+  const kim = `kim-${Date.now().toString(36)}`;
+  expect((await page.request.post("/api/admin/users", { data: { username: kim, password: "a-long-test-password-1" } })).ok()).toBe(true);
+  // In a folder of its own: My files holds the other tests' folders too
+  const parent = await makeFolder(page, "Sharing by keyboard");
+  const dir = await makeFolder(page, "Shared with Kim", parent);
+  await page.goto(`/files/${parent}`);
+  await page.locator("[data-node-id]").filter({ hasText: "Shared with Kim" }).first().click();
+  await page.getByRole("button", { name: "Share with…" }).click();
+  const dialog = page.getByRole("dialog");
+  const box = dialog.getByRole("combobox", { name: "Username or group name" });
+  await box.focus();
+  await page.keyboard.type(kim);
+  await expect(box).toHaveAttribute("aria-expanded", "true");
+  const option = dialog.getByRole("option", { name: new RegExp(kim) });
+  await expect(option).toBeVisible();
+  // The arrows go through what was found; the box keeps the focus and says which one they are on
+  await page.keyboard.press("ArrowDown");
+  await expect(box).toBeFocused();
+  await expect(option).toHaveAttribute("aria-selected", "true");
+  await expect(box).toHaveAttribute("aria-activedescendant", (await option.getAttribute("id"))!);
+  // Escape closes the list, not the dialog
+  await page.keyboard.press("Escape");
+  await expect(box).toHaveAttribute("aria-expanded", "false");
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("ArrowDown");
+  await expect(option).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Enter");
+  // Picked: the focus moves on to the role, then Add
+  await expect(dialog.getByRole("combobox", { name: "Role" }).first()).toBeFocused();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(dialog.getByRole("button", { name: "Add" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect.poll(async () => JSON.stringify(await (await page.request.get(`/api/nodes/${dir}/access`)).json())).toContain(kim);
+});

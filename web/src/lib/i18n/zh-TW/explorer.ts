@@ -60,6 +60,7 @@ export default {
   "Large icons": "大圖示",
   "Details": "詳細資料",
   "Details pane": "詳細資料窗格",
+  "Navigation pane": "瀏覽窗格",
   "Item check boxes": "項目核取方塊",
   "See more": "查看更多",
   "Download": "下載",

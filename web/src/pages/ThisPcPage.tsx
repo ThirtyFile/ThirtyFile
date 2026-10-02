@@ -92,7 +92,7 @@ function RoleBadge({ role }: { role: string | null }) {
   if (!role) return null;
   const cls =
     role === "owner"
-      ? "bg-brand/15 text-brand"
+      ? "bg-brand/15 text-blue-700 dark:text-blue-300"
       : role === "manager"
         ? "bg-violet-500/15 text-violet-600 dark:text-violet-300"
         : role === "editor"
