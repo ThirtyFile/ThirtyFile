@@ -26,8 +26,8 @@ const queryClient: QueryClient = new QueryClient({
     queries: {
       refetchOnWindowFocus: false,
       staleTime: 5_000,
-      // 4xx errors don't need a retry
-      retry: (count, err) => !(err instanceof ApiError && err.status < 500) && count < 2,
+      // 4xx errors don't need a retry; a server that couldn't be reached (status 0) may be back a moment later
+      retry: (count, err) => !(err instanceof ApiError && err.code !== "unreachable" && err.status < 500) && count < 2,
     },
   },
 });

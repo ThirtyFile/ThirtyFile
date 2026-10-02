@@ -13,4 +13,11 @@ export default {
   "\"{name}\" disabled": "「{name}」已停用",
   // components/ErrorState.tsx
   "Try again": "再試一次",
+  "This folder can't be found": "找不到這個資料夾",
+  "This file can't be found": "找不到這個檔案",
+  "You don't have access to this folder": "你沒有這個資料夾的存取權",
+  "You don't have access to this file": "你沒有這個檔案的存取權",
+  "It may have been deleted or moved, or you may no longer have access to it.": "它可能已被刪除或移動，或你已經沒有存取權。",
+  "Ask the person who shared it with you, or a manager of its space, for access.": "請向分享給你的人，或它所在空間的管理者要求存取權。",
+  "Go to All spaces": "前往所有空間",
 } satisfies Record<string, string>;

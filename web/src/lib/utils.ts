@@ -2,8 +2,20 @@ export { cn } from "cn";
 import { toast } from "sonner";
 import { locale, t } from "@/lib/i18n";
 
+/**
+ * Whether a request failed because the server couldn't be reached: fetch() then throws a TypeError whose message
+ * depends on the browser ("Failed to fetch", "NetworkError when attempting to fetch resource.", "Load failed")
+ */
+export function isNetworkError(e: unknown): boolean {
+  return e instanceof TypeError && /fetch|network|load failed/i.test(e.message);
+}
+
+/** What a request that couldn't reach the server says, in place of the browser's own English message */
+export const unreachable = () => t("Can't reach the server. Check your connection and try again.");
+
 /** What went wrong, to show: an error's message, or `fallback` for anything else thrown */
 export function errorMessage(e: unknown, fallback: string): string {
+  if (isNetworkError(e)) return unreachable();
   return e instanceof Error ? e.message : fallback;
 }
 

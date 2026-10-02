@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DetailsPane } from "@/components/DetailsPane";
-import { ErrorState } from "@/components/ErrorState";
+import { ItemError } from "@/components/ErrorState";
 import { FileList } from "@/components/FileList";
 import { MarqueeBox, useMarquee, type MeasureHits } from "@/components/useMarquee";
 import { Frame, type Crumb } from "@/components/Frame";
@@ -178,7 +178,7 @@ export function Explorer(p: ExplorerProps) {
                 ))}
               </div>
             ) : p.error ? (
-              <ErrorState message={p.error.message} onRetry={a.refresh} />
+              <ItemError error={p.error} kind="folder" onRetry={a.refresh} />
             ) : (
               <FileList
                 items={p.list?.at ?? p.items}

@@ -1,6 +1,6 @@
 import { t } from "@/lib/i18n";
 import type { Resolution } from "@/lib/conflicts";
-import { request, get, post, enc, qs, toParams, responseError } from "@/api/client";
+import { request, get, post, enc, qs, toParams, responseError, send } from "@/api/client";
 import { driveName, localizeLocated } from "@/api/names";
 import type {
   Node,
@@ -83,7 +83,7 @@ export const filesApi = {
   /** Create an empty file (a zero-length tus upload completes immediately); returns the new node id */
   createEmptyFile: async (parentId: string, name: string) => {
     const b64 = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
-    const res = await fetch("/api/uploads", {
+    const res = await send("/api/uploads", {
       method: "POST",
       headers: {
         "Tus-Resumable": "1.0.0",
