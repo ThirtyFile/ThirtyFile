@@ -131,7 +131,7 @@ cd web &amp;&amp; pnpm format</code></pre>
         <p>Every pull request runs the tests, and so does every merge into <code>main</code>. A change that only touches the website or the guides skips them. A change to how the image is built or started (the <code>Dockerfile</code>, the lock files, <code>compose.yaml</code>…) also builds the image for amd64 and arm64, without publishing it, and starts each with <code>compose.yaml</code> on data made by the latest release. CodeQL scans <code>main</code> every week and before each release. Merging into <code>main</code> publishes nothing, not even the website: the guides are published with each release, so they describe what people can install. A fix to the guides that is true of the released version too can be published by hand: <strong>Actions › Website › Run workflow</strong> with <code>main</code> as the branch or tag to publish.</p>
 
         <h2 id="translations">The website in other languages</h2>
-        <p>The website is in English, with a few pages also in other languages. Those are the pages a newcomer needs to decide and get started:</p>
+        <p>The website is in English, with a few pages also in Traditional Chinese, Simplified Chinese and Japanese. Those are the pages a newcomer needs to decide and get started:</p>
         <div class="table-scroll">
           <table>
             <thead><tr><th>Page</th><th>English</th><th>Other languages</th></tr></thead>
@@ -142,7 +142,7 @@ cd web &amp;&amp; pnpm format</code></pre>
             </tbody>
           </table>
         </div>
-        <p>The other guides are in English only; the translated pages link to them and say so.</p>
+        <p>The other guides are in English only; the translated pages link to them and say so. The README is translated too: <code>README.md</code>, with <code>README.zh-TW.md</code>, <code>README.zh-CN.md</code> and <code>README.ja.md</code> next to it, each linking to the website in its language.</p>
         <ul>
           <li><strong>Changing a translated page means changing it in every language</strong>, in the same pull request. If you can't write one of the languages, say so in the pull request, and a maintainer will find someone who can.</li>
           <li>Each version has <code>&lt;html lang&gt;</code>, its own title and description, and a <code>&lt;link rel="alternate" hreflang&gt;</code> to every version, itself included. The language switch in the header is written into every page, so it works without JavaScript; on pages that aren't translated it leads to each language's home page.</li>

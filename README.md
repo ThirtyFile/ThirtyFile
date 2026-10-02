@@ -1,3 +1,5 @@
+English · [繁體中文](README.zh-TW.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
+
 <img src="web/public/favicon.svg" width="72" alt="ThirtyFile logo: a tiger's head" />
 
 # ThirtyFile
@@ -78,7 +80,7 @@ Checks before committing, the same ones that run on GitHub: the interface, the s
 
 ```bash
 scripts/check.sh            # everything
-scripts/check.sh web        # or one part: web, server or e2e
+scripts/check.sh web        # or one part: web, server, e2e or site
 ```
 
 | Folder | Contents |
