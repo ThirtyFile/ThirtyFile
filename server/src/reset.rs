@@ -21,6 +21,7 @@ use serde_json::{Value, json};
 use crate::{
     auth::{self, client_ip, hash_password, min_password, validate_password},
     error::{AppError, AppResult},
+    i18n::{Lang, Text, tr},
     logs,
     state::AppState,
     util::{now, random_token, sha256_hex},
@@ -100,7 +101,7 @@ pub async fn forgot(
         let link = format!("{base}/reset-password?token={token}");
         // In the account's language, not the one of whoever asked
         let lang = crate::i18n::recipient(&chosen_lang, &last_lang, crate::i18n::system_default(&st));
-        let (subject, body) = message(lang == crate::i18n::Lang::ZhTw, &site, &username, &link);
+        let (subject, body) = message(lang, &site, &username, &link);
         // Sent after answering: how long the email server takes mustn't tell whether the account exists
         tokio::spawn(async move {
             if let Err(e) = crate::mail::send(&smtp, &site, &crate::mail::Message { to: &email, subject: &subject, body: &body }).await {
@@ -111,22 +112,9 @@ pub async fn forgot(
     Ok(Json(json!({ "ok": true })))
 }
 
-fn message(zh: bool, site: &str, username: &str, link: &str) -> (String, String) {
-    if zh {
-        (
-            format!("重設 {site} 的密碼"),
-            format!(
-                "有人要求重設 {site} 帳號「{username}」的密碼。\n\n在一小時內開啟這個連結，設定新密碼（只能使用一次）：\n{link}\n\n如果不是你要求的，請忽略這封郵件，你的密碼不會改變。\n"
-            ),
-        )
-    } else {
-        (
-            format!("Reset your password for {site}"),
-            format!(
-                "Someone asked to reset the password of the account \"{username}\" on {site}.\n\nOpen this link within an hour to choose a new password (it works once):\n{link}\n\nIf it wasn't you, ignore this email: your password stays as it is.\n"
-            ),
-        )
-    }
+fn message(lang: Lang, site: &str, username: &str, link: &str) -> (String, String) {
+    let vars = [("site", site), ("username", username), ("link", link)];
+    (tr(lang, Text::ResetSubject, &vars), tr(lang, Text::ResetBody, &vars))
 }
 
 #[derive(Deserialize)]
@@ -294,6 +282,41 @@ mod tests {
         assert_eq!(to, "amy@example.com");
         assert!(text.contains("https://files.example.com/reset-password?token="), "{text}");
         assert!(!text.contains("untrusted.example.com"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn the_reset_email_is_in_the_accounts_language_not_in_the_one_of_whoever_asked() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        sqlx::query("UPDATE users SET email = 'amy@example.com', chosen_lang = 'zh-TW' WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+        let (port, mut mails) = crate::mail::tests::fake_server(true).await;
+        email_on(&env, port).await;
+        env.st.system.write().unwrap().public_url = "https://files.example.com".into();
+        env.st.system.write().unwrap().default_lang = "en".into();
+        let mut headers = HeaderMap::new();
+        headers.insert(axum::http::header::COOKIE, "tf_lang=en; tf_lang_chosen=1".parse().unwrap());
+        headers.insert(axum::http::header::ACCEPT_LANGUAGE, "en-US".parse().unwrap());
+        let asks = |n: u8| {
+            let st = env.st.clone();
+            let headers = headers.clone();
+            async move {
+                // A different address each time, so the limits on requests don't count
+                let addr = ConnectInfo(format!("203.0.113.{n}:5000").parse().unwrap());
+                let _ = forgot(State(st), addr, headers, Json(ForgotReq { account: "amy".into() })).await.unwrap();
+            }
+        };
+        asks(1).await;
+        let (_, text) = tokio::time::timeout(std::time::Duration::from_secs(10), mails.recv()).await.unwrap().unwrap();
+        let first_line = |lang| tr(lang, Text::ResetBody, &[("site", "ThirtyFile"), ("username", "amy"), ("link", "")]).lines().next().unwrap().to_string();
+        assert!(text.contains(&first_line(Lang::ZhTw)), "{text}");
+
+        // Without a language of her own: the system default, before the language she last used
+        sqlx::query("UPDATE users SET chosen_lang = '', lang = 'zh-TW' WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+        sqlx::query("DELETE FROM password_resets").execute(&env.st.db).await.unwrap();
+        env.st.part::<crate::auth::Memory>().login_failures.lock().unwrap().clear();
+        asks(2).await;
+        let (_, text) = tokio::time::timeout(std::time::Duration::from_secs(10), mails.recv()).await.unwrap().unwrap();
+        assert!(text.contains(&first_line(Lang::En)), "{text}");
     }
 
     #[tokio::test]

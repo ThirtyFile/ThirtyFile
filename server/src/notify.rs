@@ -16,8 +16,8 @@
 //! - `replica` (administrators): a replica policy doesn't keep its copies (a target not working, damaged copies, too
 //!   few targets, or behind for too long); and when it does again (replicas/policy.rs)
 //!
-//! Each person can turn each kind off, in the app and by email separately. Emails are sent in the person's interface
-//! language and time zone (the ones they last used the app with), after the change that caused them is saved.
+//! Each person can turn each kind off, in the app and by email separately. Emails are sent in the person's language
+//! (`i18n::recipient`) and the time zone they last used the app with, after the change that caused them is saved.
 //! Space and expiry checks run with the hourly maintenance.
 
 use axum::{
@@ -32,6 +32,7 @@ use sqlx::SqliteConnection;
 use crate::{
     auth::{User, get_cookie},
     error::{AppError, AppResult},
+    i18n::{Lang, Text, tr},
     logs::format_time,
     state::AppState,
     tree::{PrincipalType, Role},
@@ -369,8 +370,8 @@ pub fn send_later(st: &AppState, mut emails: Vec<Outgoing>) {
         let base = st.system.read().unwrap().public_url.clone();
         let default = crate::i18n::system_default(&st);
         for e in emails {
-            let zh = crate::i18n::recipient(&e.chosen_lang, &e.lang, default) == crate::i18n::Lang::ZhTw;
-            let (subject, body) = render(&e.notice, zh, e.tz_offset, &site, &base);
+            let lang = crate::i18n::recipient(&e.chosen_lang, &e.lang, default);
+            let (subject, body) = render(&e.notice, lang, e.tz_offset, &site, &base);
             if let Err(err) = crate::mail::send(&cfg, &site, &crate::mail::Message { to: &e.to, subject: &subject, body: &body }).await {
                 tracing::warn!("Couldn't send a notification email to {}: {err}", e.to);
             }
@@ -379,12 +380,8 @@ pub fn send_later(st: &AppState, mut emails: Vec<Outgoing>) {
 }
 
 /// The test message of Control panel › Email
-pub fn test_message(zh: bool, site: &str) -> (String, String) {
-    if zh {
-        (format!("{site} 的測試郵件"), format!("這是 {site} 寄出的測試郵件。收到這封郵件，表示電子郵件通知可以正常寄送。\n"))
-    } else {
-        (format!("Test email from {site}"), format!("This is a test email from {site}. If you can read it, email notifications work.\n"))
-    }
+pub fn test_message(lang: Lang, site: &str) -> (String, String) {
+    (tr(lang, Text::TestSubject, &[("site", site)]), tr(lang, Text::TestBody, &[("site", site)]))
 }
 
 /// A time in the person's time zone, e.g. "2026-10-01 14:00 (UTC+8)"
@@ -399,219 +396,137 @@ fn local_time(t: i64, tz_offset: i64) -> String {
 }
 
 /// A name as the app shows it: the spaces the system names itself are translated
-fn shown_name(data: &Value, zh: bool) -> String {
+fn shown_name(data: &Value, lang: Lang) -> String {
     let name = data["name"].as_str().unwrap_or_default();
     let item = data["item"].as_str();
     let kind = data["drive_kind"].as_str();
     let is_space = item.is_none() || item == Some("space");
-    match (zh, is_space, kind, name) {
-        (true, true, Some("personal"), "My files") => "我的檔案".into(),
-        (true, true, Some("company"), "All files") => "全部檔案".into(),
+    match (is_space, kind, name) {
+        (true, Some("personal"), "My files") => tr(lang, Text::MyFiles, &[]),
+        (true, Some("company"), "All files") => tr(lang, Text::AllFiles, &[]),
         _ => name.to_string(),
     }
 }
 
-fn role_name(role: &str, zh: bool) -> &'static str {
-    match (role, zh) {
-        ("owner", false) => "Owner",
-        ("owner", true) => "擁有者",
-        ("manager", false) => "Manager",
-        ("manager", true) => "管理者",
-        ("editor", false) => "Editor",
-        ("editor", true) => "編輯者",
-        (_, false) => "Viewer",
-        (_, true) => "檢視者",
-    }
+fn role_name(role: &str, lang: Lang) -> String {
+    let text = match role {
+        "owner" => Text::RoleOwner,
+        "manager" => Text::RoleManager,
+        "editor" => Text::RoleEditor,
+        _ => Text::RoleViewer,
+    };
+    tr(lang, text, &[])
 }
 
 /// Subject and text of a notification email
-pub fn render(n: &Notice, zh: bool, tz_offset: i64, site: &str, base_url: &str) -> (String, String) {
+pub fn render(n: &Notice, lang: Lang, tz_offset: i64, site: &str, base_url: &str) -> (String, String) {
     let d = &n.data;
-    let name = shown_name(d, zh);
-    let role = role_name(d["role"].as_str().unwrap_or_default(), zh);
+    let name = shown_name(d, lang);
+    let role = role_name(d["role"].as_str().unwrap_or_default(), lang);
     let ends = d["expires_at"].as_i64().map(|t| local_time(t, tz_offset));
     let (subject, mut body) = match n.kind {
-        "shared" => shared_text(d, &name, role, ends.as_deref(), zh),
-        "space_full" => space_full_text(d, &name, zh),
-        "backup" => backup_text(d, tz_offset, zh),
-        "replica" => replica_text(d, zh),
-        "link_upload" => link_upload_text(d, &name, zh),
-        "app_password" => app_password_text(d, zh),
-        "sign_in_method" => sign_in_method_text(d, zh),
-        _ => expiring_text(&name, role, &ends.unwrap_or_default(), zh),
+        "shared" => shared_text(d, &name, &role, ends.as_deref(), lang),
+        "space_full" => space_full_text(d, &name, lang),
+        "backup" => backup_text(d, tz_offset, lang),
+        "replica" => replica_text(d, lang),
+        "link_upload" => link_upload_text(d, &name, lang),
+        "app_password" => app_password_text(d, lang),
+        "sign_in_method" => sign_in_method_text(d, lang),
+        _ => expiring_text(&name, &role, &ends.unwrap_or_default(), lang),
     };
     if let (Some(id), false) = (&n.node_id, base_url.is_empty()) {
         let path = if d["item"].as_str() == Some("file") { "view" } else { "files" };
-        let link = format!("{base_url}/{path}/{id}");
-        body.push_str(&if zh { format!("\n開啟：{link}\n") } else { format!("\nOpen: {link}\n") });
+        body.push_str(&tr(lang, Text::MailOpen, &[("link", &format!("{base_url}/{path}/{id}"))]));
     }
-    body.push_str(&if zh {
-        format!("\n—\n你會收到這封郵件，是因為你在 {site} 開啟了電子郵件通知。若不想再收到，請在 {site} 按下鈴鐺並開啟「通知設定」。\n")
-    } else {
-        format!("\n—\nYou get this email because email notifications are on in {site}. To stop them, click the bell in {site} and open Notification settings.\n")
-    });
+    body.push_str(&tr(lang, Text::MailFooter, &[("site", site)]));
     (subject, body)
 }
 
 /// Someone was given access to an item or a space
-fn shared_text(d: &Value, name: &str, role: &str, ends: Option<&str>, zh: bool) -> (String, String) {
+fn shared_text(d: &Value, name: &str, role: &str, ends: Option<&str>, lang: Lang) -> (String, String) {
     let by = d["by"].as_str().unwrap_or_default();
     let space = d["item"].as_str() == Some("space");
-    let subject = match (space, zh) {
-        (true, false) => format!("{by} added you to the space “{name}”"),
-        (false, false) => format!("{by} shared “{name}” with you"),
-        (true, true) => format!("{by} 將你加入了空間「{name}」"),
-        (false, true) => format!("{by} 與你分享了「{name}」"),
-    };
-    let mut body = if zh { format!("{subject}。\n\n你的角色：{role}。\n") } else { format!("{subject}.\n\nYour role: {role}.\n") };
+    let subject = tr(lang, if space { Text::SharedSpaceSubject } else { Text::SharedItemSubject }, &[("by", by), ("name", name)]);
+    let mut body = tr(lang, Text::SharedBody, &[("subject", &subject), ("role", role)]);
     if let Some(ends) = ends {
-        body.push_str(&if zh { format!("你的存取權將於 {ends} 結束。\n") } else { format!("Your access ends on {ends}.\n") });
+        body.push_str(&tr(lang, Text::SharedEnds, &[("ends", ends)]));
     }
     (subject, body)
 }
 
 /// A space is almost full
-fn space_full_text(d: &Value, name: &str, zh: bool) -> (String, String) {
+fn space_full_text(d: &Value, name: &str, lang: Lang) -> (String, String) {
     let used = format_bytes(d["used"].as_i64().unwrap_or_default());
     let quota = format_bytes(d["quota"].as_i64().unwrap_or_default());
-    let percent = d["percent"].as_i64().unwrap_or_default();
-    if zh {
-        (
-            format!("空間「{name}」快滿了"),
-            format!("「{name}」已使用 {used}（共 {quota}，{percent}%）。空間滿了之後就無法再加入檔案。請刪除不再需要的檔案並清空垃圾桶，或請管理員加大空間。\n"),
-        )
-    } else {
-        (
-            format!("The space “{name}” is almost full"),
-            format!(
-                "“{name}” uses {used} of {quota} ({percent}%). Once it is full, no more files can be added. Delete files you no longer need and empty the trash, or ask an administrator for more space.\n"
-            ),
-        )
-    }
+    let percent = d["percent"].as_i64().unwrap_or_default().to_string();
+    let vars = [("name", name), ("used", &used), ("quota", &quota), ("percent", &percent)];
+    (tr(lang, Text::SpaceFullSubject, &vars), tr(lang, Text::SpaceFullBody, &vars))
 }
 
 /// A backup policy fails, waits for its location or is overdue, or works again
-fn backup_text(d: &Value, tz_offset: i64, zh: bool) -> (String, String) {
+fn backup_text(d: &Value, tz_offset: i64, lang: Lang) -> (String, String) {
     let backup = d["name"].as_str().unwrap_or_default();
     let error = d["error"].as_str().unwrap_or_default();
     let since = d["since"].as_i64().map(|t| local_time(t, tz_offset));
-    let (subject, text) = match (d["state"].as_str().unwrap_or_default(), zh) {
-        ("failing", false) => (format!("The backup “{backup}” failed"), format!("The latest snapshot of “{backup}” stopped by an error: {error}\n")),
-        ("failing", true) => (format!("備份「{backup}」失敗"), format!("「{backup}」最新的快照因錯誤而停止：{error}\n")),
-        ("waiting", false) => (
-            format!("The backup “{backup}” can't reach its location"),
-            format!("The location of “{backup}” can't be reached: {error}\nIt is tried again every few minutes.\n"),
-        ),
-        ("waiting", true) => (format!("備份「{backup}」無法連線到存放位置"), format!("無法連線到「{backup}」的存放位置：{error}\n每隔幾分鐘會自動再試一次。\n")),
-        ("overdue", false) => (format!("The backup “{backup}” is overdue"), format!("“{backup}” made no complete snapshot for longer than it should.\n")),
-        ("overdue", true) => (format!("備份「{backup}」逾期了"), format!("「{backup}」超過預定的時間都沒有完成快照。\n")),
-        (_, false) => (format!("The backup “{backup}” works again"), format!("“{backup}” made a complete snapshot again.\n")),
-        (_, true) => (format!("備份「{backup}」恢復正常"), format!("「{backup}」又完成了快照。\n")),
+    let (subject, text) = match d["state"].as_str().unwrap_or_default() {
+        "failing" => (Text::BackupFailingSubject, Text::BackupFailingBody),
+        "waiting" => (Text::BackupWaitingSubject, Text::BackupWaitingBody),
+        "overdue" => (Text::BackupOverdueSubject, Text::BackupOverdueBody),
+        _ => (Text::BackupOkSubject, Text::BackupOkBody),
     };
-    let mut body = text;
+    let vars = [("backup", backup), ("error", error)];
+    let mut body = tr(lang, text, &vars);
     if let Some(since) = since {
-        body.push_str(&if zh { format!("\n最新的完整快照：{since}。\n") } else { format!("\nNewest complete snapshot: {since}.\n") });
+        body.push_str(&tr(lang, Text::BackupNewest, &[("since", &since)]));
     }
-    body.push_str(if zh { "\n請到「控制台 › 備份」查看。\n" } else { "\nSee Control panel › Backups.\n" });
-    (subject, body)
+    body.push_str(&tr(lang, Text::BackupSee, &[]));
+    (tr(lang, subject, &vars), body)
 }
 
 /// A replica policy doesn't keep all its copies, or does again
-fn replica_text(d: &Value, zh: bool) -> (String, String) {
+fn replica_text(d: &Value, lang: Lang) -> (String, String) {
     let policy = d["name"].as_str().unwrap_or_default();
     let error = d["error"].as_str().filter(|e| !e.is_empty());
-    let (current, wanted) = (d["current"].as_i64().unwrap_or_default(), d["wanted"].as_i64().unwrap_or_default());
-    let (subject, mut body) = match (d["state"].as_str() == Some("degraded"), zh) {
-        (true, false) => (
-            format!("The replicas “{policy}” aren't all kept"),
-            format!("“{policy}” keeps {current} of the {wanted} copies it should: a target can't be reached, failed, holds damaged copies or is behind.\n"),
-        ),
-        (true, true) => (
-            format!("複本「{policy}」沒有全部保持"),
-            format!("「{policy}」應保持 {wanted} 份複本，目前只有 {current} 份是最新的：有目標無法連線、失敗、有損毀的複本或落後。\n"),
-        ),
-        (false, false) => (format!("The replicas “{policy}” are kept again"), format!("“{policy}” keeps its copies again.\n")),
-        (false, true) => (format!("複本「{policy}」恢復正常"), format!("「{policy}」又保持了它的複本。\n")),
+    let (current, wanted) = (d["current"].as_i64().unwrap_or_default().to_string(), d["wanted"].as_i64().unwrap_or_default().to_string());
+    let (subject, text) = if d["state"].as_str() == Some("degraded") {
+        (Text::ReplicaDegradedSubject, Text::ReplicaDegradedBody)
+    } else {
+        (Text::ReplicaOkSubject, Text::ReplicaOkBody)
     };
+    let vars = [("policy", policy), ("current", &current), ("wanted", &wanted)];
+    let mut body = tr(lang, text, &vars);
     if let Some(error) = error {
         body.push_str(&format!("\n{error}\n"));
     }
-    body.push_str(if zh { "\n請到「控制台 › 複本」查看。\n" } else { "\nSee Control panel › Replicas.\n" });
-    (subject, body)
+    body.push_str(&tr(lang, Text::ReplicaSee, &[]));
+    (tr(lang, subject, &vars), body)
 }
 
 /// A file arrived through a link that accepts files
-fn link_upload_text(d: &Value, name: &str, zh: bool) -> (String, String) {
-    let file = d["file"].as_str().unwrap_or_default();
-    if zh {
-        (format!("有人透過連結把「{file}」傳到了「{name}」"), format!("有人透過你建立的收件連結，把「{file}」上傳到「{name}」。\n"))
-    } else {
-        (format!("“{file}” arrived in “{name}” through a link"), format!("Someone uploaded “{file}” to “{name}” through a link you made that accepts files.\n"))
-    }
+fn link_upload_text(d: &Value, name: &str, lang: Lang) -> (String, String) {
+    let vars = [("file", d["file"].as_str().unwrap_or_default()), ("name", name)];
+    (tr(lang, Text::LinkUploadSubject, &vars), tr(lang, Text::LinkUploadBody, &vars))
 }
 
 /// An app password was created for the account
-fn app_password_text(d: &Value, zh: bool) -> (String, String) {
-    let ip = d["ip"].as_str().unwrap_or_default();
-    let (read_only, name) = (d["scope"].as_str() == Some("read"), d["name"].as_str().unwrap_or_default());
-    if zh {
-        let access = if read_only { "只能讀取檔案" } else { "可讀取及變更檔案" };
-        (
-            format!("你的帳號建立了應用程式密碼「{name}」"),
-            format!(
-                "你的帳號剛建立了應用程式密碼「{name}」（{access}），來源位址 {ip}。\n\n如果不是你建立的，請在帳號選單的「應用程式密碼」中移除它，並變更你的密碼。\n"
-            ),
-        )
-    } else {
-        let access = if read_only { "read files only" } else { "read and change files" };
-        (
-            format!("An app password “{name}” was created for your account"),
-            format!(
-                "The app password “{name}” ({access}) was just created for your account, from {ip}.\n\nIf you didn't create it, remove it under App passwords in the account menu and change your password.\n"
-            ),
-        )
-    }
+fn app_password_text(d: &Value, lang: Lang) -> (String, String) {
+    let read_only = d["scope"].as_str() == Some("read");
+    let access = tr(lang, if read_only { Text::AppPasswordReadOnly } else { Text::AppPasswordReadWrite }, &[]);
+    let vars = [("name", d["name"].as_str().unwrap_or_default()), ("access", &access), ("ip", d["ip"].as_str().unwrap_or_default())];
+    (tr(lang, Text::AppPasswordSubject, &vars), tr(lang, Text::AppPasswordBody, &vars))
 }
 
 /// A sign-in method was linked to the account
-fn sign_in_method_text(d: &Value, zh: bool) -> (String, String) {
-    let ip = d["ip"].as_str().unwrap_or_default();
-    let provider = d["label"].as_str().unwrap_or_default();
-    let account = d["account"].as_str().filter(|a| !a.is_empty());
-    if zh {
-        let account = account.map(|a| format!("（{a}）")).unwrap_or_default();
-        (
-            format!("你的帳號連結了 {provider} 帳號"),
-            format!(
-                "你的帳號剛連結了 {provider} 帳號{account}，來源位址 {ip}。之後可以用它登入你的帳號，不需要密碼。\n\n如果不是你連結的，請在帳號選單的「登入方式」中取消連結，並變更你的密碼。\n"
-            ),
-        )
-    } else {
-        let account = account.map(|a| format!(" ({a})")).unwrap_or_default();
-        (
-            format!("A {provider} account was linked to your account"),
-            format!(
-                "A {provider} account{account} was just linked to your account, from {ip}. It can now sign in to your account without the password.\n\nIf you didn't link it, unlink it under Sign-in methods in the account menu and change your password.\n"
-            ),
-        )
-    }
+fn sign_in_method_text(d: &Value, lang: Lang) -> (String, String) {
+    let account = d["account"].as_str().filter(|a| !a.is_empty()).map(|a| tr(lang, Text::SignInMethodAccount, &[("account", a)])).unwrap_or_default();
+    let vars = [("provider", d["label"].as_str().unwrap_or_default()), ("account", &account), ("ip", d["ip"].as_str().unwrap_or_default())];
+    (tr(lang, Text::SignInMethodSubject, &vars), tr(lang, Text::SignInMethodBody, &vars))
 }
 
 /// Access someone was given ends soon
-fn expiring_text(name: &str, role: &str, ends: &str, zh: bool) -> (String, String) {
-    if zh {
-        (
-            format!("你對「{name}」的存取權即將結束"),
-            format!("你對「{name}」的存取權（{role}）將於 {ends} 結束，之後就無法再開啟。如果還需要，請分享給你的人延長期限。\n"),
-        )
-    } else {
-        (
-            format!("Your access to “{name}” ends soon"),
-            format!(
-                "Your access to “{name}” ({role}) ends on {ends}. After that you can't open it any more. If you still need it, ask the person who shared it with you to extend it.\n"
-            ),
-        )
-    }
+fn expiring_text(name: &str, role: &str, ends: &str, lang: Lang) -> (String, String) {
+    let vars = [("name", name), ("role", role), ("ends", ends)];
+    (tr(lang, Text::ExpiringSubject, &vars), tr(lang, Text::ExpiringBody, &vars))
 }
 
 // ───────────── The bell ─────────────
@@ -648,7 +563,7 @@ pub async fn list(State(st): State<AppState>, user: User, headers: HeaderMap, Qu
             .fetch_one(&mut *c)
             .await?;
     drop(c);
-    let used_lang = get_cookie(&headers, "tf_lang").filter(|l| crate::i18n::Lang::parse(l).is_some()).unwrap_or(&lang).to_string();
+    let used_lang = get_cookie(&headers, "tf_lang").filter(|l| Lang::parse(l).is_some()).unwrap_or(&lang).to_string();
     let used_tz = q.tz.map_or(tz_offset, |t| t.clamp(-14 * 60, 14 * 60));
     if used_lang != lang || used_tz != tz_offset {
         let _w = st.write_lock.lock().await;
@@ -789,7 +704,7 @@ pub async fn update_settings(State(st): State<AppState>, user: User, Json(req): 
 
 /// Tells the address an account used to have that it was replaced (whatever the notification settings say), so a
 /// change the owner didn't make doesn't go unnoticed
-fn tell_old_address(st: &AppState, old: String, username: &str, lang: crate::i18n::Lang, new: &str) {
+fn tell_old_address(st: &AppState, old: String, username: &str, lang: Lang, new: &str) {
     let st = st.clone();
     let (username, new) = (username.to_string(), new.to_string());
     tokio::spawn(async move {
@@ -798,30 +713,17 @@ fn tell_old_address(st: &AppState, old: String, username: &str, lang: crate::i18
             return;
         }
         let site = st.part::<crate::branding::Memory>().settings.read().unwrap().site_name.clone();
-        let (subject, body) = email_changed(lang == crate::i18n::Lang::ZhTw, &site, &username, &new);
+        let (subject, body) = email_changed(lang, &site, &username, &new);
         if let Err(e) = crate::mail::send(&cfg, &site, &crate::mail::Message { to: &old, subject: &subject, body: &body }).await {
             tracing::warn!("Couldn't tell {old} that the email address of {username} changed: {e}");
         }
     });
 }
 
-fn email_changed(zh: bool, site: &str, username: &str, new: &str) -> (String, String) {
-    let new = if new.is_empty() { if zh { "（空白）" } else { "(none)" } } else { new };
-    if zh {
-        (
-            format!("你在 {site} 的電子郵件地址已變更"),
-            format!(
-                "{site} 帳號「{username}」的電子郵件地址已改為 {new}，之後的通知與重設密碼連結都會寄到那裡。\n\n如果不是你變更的，請立即變更密碼，或聯絡管理員。\n"
-            ),
-        )
-    } else {
-        (
-            format!("Your email address on {site} was changed"),
-            format!(
-                "The email address of the account \"{username}\" on {site} was changed to {new}. Notifications and password reset links go there from now on.\n\nIf you didn't change it, change your password now or contact your administrator.\n"
-            ),
-        )
-    }
+fn email_changed(lang: Lang, site: &str, username: &str, new: &str) -> (String, String) {
+    let new = if new.is_empty() { tr(lang, Text::EmailChangedNone, &[]) } else { new.to_string() };
+    let vars = [("site", site), ("username", username), ("new", &new)];
+    (tr(lang, Text::EmailChangedSubject, &vars), tr(lang, Text::EmailChangedBody, &vars))
 }
 
 #[cfg(test)]
@@ -955,6 +857,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn emails_are_in_the_recipients_language_not_in_the_one_of_whoever_shared() {
+        let env = testutil::env().await;
+        let (port, mut rx) = crate::mail::tests::fake_server(true).await;
+        let mut c = env.st.db.acquire().await.unwrap();
+        crate::mail::store(&mut c, &crate::mail::tests::settings(port)).await.unwrap();
+        drop(c);
+        env.st.system.write().unwrap().default_lang = "en".into();
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let cat = env.user("cat", true).await;
+        for (u, address) in [(&ben, "ben@example.com"), (&cat, "cat@example.com")] {
+            let prefs = json!({ "email": address, "password": testutil::password() });
+            let _ = update_settings(State(env.st.clone()), u.clone(), Json(serde_json::from_value(prefs).unwrap())).await.unwrap();
+        }
+        // Amy shares from a page in Traditional Chinese; Ben chose it for himself; Cat only last used it, and the
+        // system default comes first
+        sqlx::query("UPDATE users SET chosen_lang = 'zh-TW' WHERE id IN (?, ?)").bind(amy.id).bind(ben.id).execute(&env.st.db).await.unwrap();
+        sqlx::query("UPDATE users SET lang = 'zh-TW' WHERE id = ?").bind(cat.id).execute(&env.st.db).await.unwrap();
+        let folder = env.folder(&amy, amy.root(), "Plans").await;
+        for u in [&ben, &cat] {
+            share(&env, &amy, &folder, json!({ "principal_type": "user", "principal_id": u.id, "role": "viewer" })).await;
+        }
+        let mut got = std::collections::HashMap::new();
+        for _ in 0..2 {
+            let (to, text) = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv()).await.unwrap().unwrap();
+            got.insert(to, text);
+        }
+        let subject = |lang| tr(lang, Text::SharedItemSubject, &[("by", "amy"), ("name", "Plans")]);
+        assert!(got["ben@example.com"].contains(&subject(Lang::ZhTw)), "{}", got["ben@example.com"]);
+        assert!(got["cat@example.com"].contains(&subject(Lang::En)), "{}", got["cat@example.com"]);
+    }
+
+    #[tokio::test]
     async fn repeated_notices_send_a_few_emails_not_one_each() {
         let env = testutil::env().await;
         let (port, mut rx) = crate::mail::tests::fake_server(true).await;
@@ -996,15 +931,15 @@ mod tests {
             node_id: Some("abc".into()),
             data: json!({ "name": "My files", "item": "space", "drive_kind": "personal", "role": "viewer", "expires_at": 86400 }),
         };
-        let (subject, body) = render(&n, true, -480, "Drive", "https://drive.example.com");
+        let (subject, body) = render(&n, Lang::ZhTw, -480, "Drive", "https://drive.example.com");
         assert_eq!(subject, "你對「我的檔案」的存取權即將結束");
         assert!(body.contains("1970-01-02 08:00 (UTC+8)"), "{body}");
         assert!(body.contains("https://drive.example.com/files/abc"), "{body}");
-        let (_, body) = render(&n, false, 330, "Drive", "");
+        let (_, body) = render(&n, Lang::En, 330, "Drive", "");
         assert!(body.contains("1970-01-01 18:30 (UTC-5:30)"), "{body}");
         assert!(!body.contains("http"), "no site URL, no link: {body}");
         let file = Notice { kind: "shared", node_id: Some("f1".into()), data: json!({ "by": "Amy", "name": "a.txt", "item": "file", "role": "editor" }) };
-        let (subject, body) = render(&file, false, 0, "Drive", "https://d.example");
+        let (subject, body) = render(&file, Lang::En, 0, "Drive", "https://d.example");
         assert_eq!(subject, "Amy shared “a.txt” with you");
         assert!(body.contains("https://d.example/view/f1"), "{body}");
     }

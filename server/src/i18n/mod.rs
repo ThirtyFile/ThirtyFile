@@ -10,6 +10,15 @@
 //!   default, then English. People from outside who open a share link read their own language
 //! - An email's language ([`recipient`]): the recipient's saved language, else the system default, else the language
 //!   they last used, else English. Never that of the person whose action caused it
+//! - The texts the server writes itself (the emails) are in texts.rs, in English, with one file of translations per
+//!   language (zh_tw.rs, zh_cn.rs, ja.rs); [`tr`] looks a text up, falling back to English
+
+mod ja;
+mod texts;
+mod zh_cn;
+mod zh_tw;
+
+pub use texts::{Text, tr};
 
 use axum::{
     Json,
