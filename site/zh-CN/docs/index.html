@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN" data-root="../.." data-page="install">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>安装 · ThirtyFile</title>
+    <meta name="description" content="ThirtyFile 运行在 Docker 中。从下面两种方式中任选一种，都只需一分钟左右。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要内容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="网站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="../docs/index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">语言 </span><span class="lang-name">简体中文</span></summary>
+            <ul>
+              <li><a href="../../docs/index.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="../../zh-TW/docs/index.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="index.html" hreflang="zh-CN" lang="zh-CN" aria-current="true">简体中文</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>开始使用</p>
+          <a href="../docs/index.html" aria-current="page">安装</a>
+          <a href="../docs/first-steps.html">初始设置</a>
+          <p>日常使用</p>
+          <a href="../../docs/files.html" hreflang="en">文件操作</a>
+          <a href="../../docs/preview.html" hreflang="en">预览与编辑</a>
+          <a href="../../docs/sharing.html" hreflang="en">分享</a>
+          <a href="../../docs/account.html" hreflang="en">你的账号</a>
+          <a href="../../docs/webdav.html" hreflang="en">映射为网络驱动器</a>
+          <p>管理</p>
+          <a href="../../docs/users.html" hreflang="en">用户与空间</a>
+          <a href="../../docs/sign-in.html" hreflang="en">单点登录</a>
+          <a href="../../docs/storage.html" hreflang="en">存储位置</a>
+          <a href="../../docs/logs.html" hreflang="en">日志与品牌</a>
+          <p>部署与运维</p>
+          <a href="../../docs/settings.html" hreflang="en">设置</a>
+          <a href="../../docs/internet.html" hreflang="en">通过互联网访问</a>
+          <a href="../../docs/backup.html" hreflang="en">升级与备份</a>
+          <a href="../../docs/help.html" hreflang="en">故障排除</a>
+          <p>项目</p>
+          <a href="../../docs/contributing.html" hreflang="en">参与贡献</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+        <h1>安装</h1>
+        <p class="lead">ThirtyFile 运行在 Docker 中。从下面两种方式中任选一种，都只需一分钟左右。</p>
+        <p class="lang-note">安装和初始设置这两篇指南有简体中文版，其他指南目前只有英文版。</p>
+        <h2 id="before">开始之前</h2>
+        <p>在要存放文件的电脑或服务器上安装 <a href="https://docs.docker.com/get-docker/">Docker</a>，无需其他软件。</p>
+
+        <h2 id="docker-run">方法一：docker run</h2>
+        <pre><code>docker run -d --name thirtyfile --restart unless-stopped \
+  -p 8080:8080 \
+  -v /srv/thirtyfile/data:/data \
+  -v /srv/thirtyfile/storage:/storage \
+  -e THIRTYFILE_ADMIN_PASSWORD='choose-a-password' \
+  ghcr.io/thirtyfile/thirtyfile:latest</code></pre>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>部分</th><th>作用</th></tr></thead>
+            <tbody>
+              <tr><td><code>-p 8080:8080</code></td><td>访问网站所用的端口。如需使用 80 端口，请写成 <code>-p 80:8080</code></td></tr>
+              <tr><td><code>-v /srv/thirtyfile/data:/data</code></td><td>账号和设置的存放位置，更新后仍会保留</td></tr>
+              <tr><td><code>-v /srv/thirtyfile/storage:/storage</code></td><td>文件的存放位置。可以是另一块磁盘，或挂载的 NAS</td></tr>
+              <tr><td><code>THIRTYFILE_ADMIN_PASSWORD</code></td><td>第一个账号的密码。请把 <code>choose-a-password</code> 换成你自己的密码：沿用这个示例会被视为未设置。此项可以省略：省略时会生成随机密码并写入日志</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="compose">方法二：Docker Compose</h2>
+        <p>把现成的 <code>compose.yaml</code> 下载到一个空文件夹中，并在该文件夹中启动：</p>
+        <pre><code>curl -fLO https://github.com/ThirtyFile/ThirtyFile/releases/latest/download/compose.yaml
+docker compose up -d</code></pre>
+        <p>账号和设置保存在 <code>data</code> 文件夹，文件保存在 <code>storage</code> 文件夹，两者都位于 <code>compose.yaml</code> 旁边。其中是普通文件夹里的普通文件，每个空间一个文件夹（<a href="../../docs/storage.html#layout" hreflang="en">文件存放在哪里</a>）。如需把文件放在另一块磁盘或 NAS 上，请把 <code>compose.yaml</code> 中的 <code>./storage</code> 改为该路径。</p>
+        <div class="note"><strong>ThirtyFile 会接管交给它的文件夹。</strong>启动时，如果 <code>data</code> 和 <code>storage</code> 属于其他用户，ThirtyFile 会把文件夹及其中的全部内容改为归它运行时使用的用户所有（id 1000，<code>THIRTYFILE_RUN_AS</code>）。如果你把 <code>storage</code> 指向其他程序或其他人也在使用的已有文件夹，他们的文件所有者也会随之改变。请使用空文件夹，或把 <code>THIRTYFILE_RUN_AS</code> 设为该文件夹现有的所有者。如需改用用户组访问 NAS 共享文件夹，请用 <code>--group-add 2001</code>（在 <code>compose.yaml</code> 中为 <code>group_add:</code>）加入该用户组：ThirtyFile 切换用户后仍会保留这个用户组。</div>
+        <p>现成的 <code>compose.yaml</code> 以只读的根文件系统运行容器，除了移交文件夹和切换用户所需的四项之外，移除所有 Linux capability，并设置 <code>no-new-privileges</code>。在 Kubernetes 上，或任何无法以 root 启动容器的环境中，请直接以该用户运行（<code>--user 1000:1000</code>，或 <code>runAsUser: 1000</code> 和 <code>runAsGroup: 1000</code>），并确保卷归该用户所有；ThirtyFile 就会跳过移交步骤。</p>
+        <p>如需自己设置管理员密码，请在首次启动前，在同一文件夹中创建名为 <code>.env</code> 的文件，内容如下：</p>
+        <pre><code>THIRTYFILE_ADMIN_PASSWORD=choose-a-password</code></pre>
+
+        <h2 id="sign-in">登录</h2>
+        <ol>
+          <li>打开 <code>http://localhost:8080</code>。从其他电脑访问时，请把 <code>localhost</code> 换成服务器的地址。</li>
+          <li>在锁屏界面上任意位置点击一下，然后以 <strong>admin</strong> 和你设置的密码登录。</li>
+          <li>打开左下角的账号菜单，选择<strong>修改密码</strong>。</li>
+        </ol>
+        <div class="note"><strong>没有设置密码？</strong>系统会生成随机密码并写入日志。可以用 <code>docker logs thirtyfile 2&gt;&amp;1 | grep password</code> 查看。</div>
+
+        <h2 id="stop">停止与启动</h2>
+        <pre><code>docker stop thirtyfile
+docker start thirtyfile</code></pre>
+        <p>使用 Docker Compose 时，请在 <code>compose.yaml</code> 所在的文件夹中运行 <code>docker compose stop</code> 和 <code>docker compose start</code>。</p>
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="../docs/index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">源代码</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">报告问题</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 镜像</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>
