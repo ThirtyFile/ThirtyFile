@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use crate::{auth, backups, db, logs, nodes, notify, state::AppState, tree, upload, util, versions};
+use crate::{auth, backups, db, logs, nodes, notify, state::AppState, thumbnails, tree, upload, util, versions};
 
 pub fn spawn_maintenance(st: AppState, trash_days: i64) {
     // Content of spaces deleted while the server stopped before it was all removed
@@ -16,6 +16,11 @@ pub fn spawn_maintenance(st: AppState, trash_days: i64) {
             hours += 1;
             if hours.is_multiple_of(24) {
                 db::optimize(&st.db).await;
+            }
+            // At the start (the first tick is at once), then daily: space the database and the thumbnails no longer use
+            if hours % 24 == 1 {
+                db::shrink(&st.db, &st.write_lock).await;
+                thumbnails::sweep(&st).await;
             }
             // Once a day: put the usage counters back in step with the node table, should one ever drift
             if hours.is_multiple_of(24)

@@ -42,6 +42,9 @@ pub enum Command {
     /// Write a consistent copy of the database to a new file, also while ThirtyFile is running
     /// (e.g. `docker exec thirtyfile thirtyfile backup /data/backups/drive.db`)
     Backup { file: PathBuf },
+    /// Shrink the database file to what it holds, and keep giving back the space it no longer uses from then on (new
+    /// databases do so already). Stop ThirtyFile first
+    Compact,
     /// Encrypt the saved passwords and keys with a new key. Stop ThirtyFile first. With a key file, the file is
     /// replaced; with THIRTYFILE_SECRET_KEY, give the new key in THIRTYFILE_NEW_SECRET_KEY and set it afterwards
     RotateSecretKey,
@@ -133,6 +136,13 @@ pub async fn run(cfg: &Config, db: &sqlx::SqlitePool, storage: &Path, key_source
         }
         db::backup_to(db, file).await?;
         println!("Database saved to {}", file.display());
+        return Ok(true);
+    }
+
+    if let Some(Command::Compact) = &cfg.command {
+        let (before, after) = db::compact(db).await?;
+        let mb = |b: i64| b as f64 / 1_048_576.0;
+        println!("The database takes {:.1} MB now (it took {:.1} MB)", mb(after), mb(before));
         return Ok(true);
     }
 

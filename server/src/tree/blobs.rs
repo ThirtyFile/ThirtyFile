@@ -258,7 +258,7 @@ async fn remove_each(st: &AppState, blobs: Vec<BlobRef>) -> Vec<String> {
         record_deletion(st, &hash, &location, failed.as_deref()).await;
         // Keep the thumbnail when the content is still used in another location (e.g. the old copy after a move)
         if !still_used {
-            let _ = tokio::fs::remove_file(st.thumb_path(&hash)).await;
+            crate::thumbnails::forget(st, &hash).await;
         }
     }
     if let Some(last) = failures.last() {
