@@ -76,6 +76,18 @@ pub struct Node {
     pub has_folders: Option<bool>,
 }
 
+impl crate::logs::Item for Node {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn space(&self) -> Option<&str> {
+        self.drive_id.as_deref()
+    }
+}
+
 impl Node {
     pub fn is_folder(&self) -> bool {
         self.kind == "folder"

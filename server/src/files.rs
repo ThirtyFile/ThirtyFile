@@ -336,7 +336,7 @@ async fn store_content(st: AppState, user: User, before: Node, body: Bytes, hash
             let name = content::free_name(&mut tx, &parent, &format!("{stem} (conflict copy){ext}")).await?;
             let (copy_id, written) = content::create(&mut tx, &staged, user.id, &parent, &name, None).await?;
             let copy = tree::get_node(&mut tx, &copy_id).await?;
-            logs::record_activity(&mut tx, &user, copy.as_ref(), "upload", "").await?;
+            logs::record_activity(&mut tx, &user, copy.as_ref().map(|n| n as _), "upload", "").await?;
             tx.commit().await?;
             return Ok(Err((name, written)));
         }

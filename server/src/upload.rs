@@ -465,7 +465,7 @@ async fn finish(st: &AppState, up: &Uploader, upload: Upload, guard: ActiveGuard
                 Ok(mut c) => tree::get_node(&mut c, id).await.ok().flatten(),
                 Err(_) => None,
             };
-            crate::logs::record_share_access(&st, &share.id, up.user.id, node.as_ref(), "upload", &share.visitor);
+            crate::logs::record_share_access(&st, &share.id, up.user.id, node.as_ref().map(|n| n as _), "upload", &share.visitor);
             // The link's creator is told the file arrived
             if let Some(node) = &node
                 && let Err(e) = crate::notify::link_upload(&st, up.user.id, &share.id, node).await

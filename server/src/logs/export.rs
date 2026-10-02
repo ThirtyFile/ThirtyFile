@@ -7,9 +7,7 @@ use axum::{
     extract::{Query, State},
 };
 
-use super::{
-    ActivityQuery, ActivityRow, DAY, ErrorQuery, ErrorRow, LoginQuery, LoginRow, authorize_activity, query_activity, query_errors, query_logins, scope_logins,
-};
+use super::{DAY, ErrorQuery, ErrorRow, LoginQuery, LoginRow, query_errors, query_logins, scope_logins};
 use crate::{
     auth::{Admin, User},
     error::AppResult,
@@ -17,7 +15,7 @@ use crate::{
 };
 
 /// Row limit for exports
-const EXPORT_LIMIT: i64 = 100_000;
+pub(crate) const EXPORT_LIMIT: i64 = 100_000;
 
 /// Unix seconds + time zone offset → YYYY-MM-DD HH:MM:SS
 pub fn format_time(ts: i64, offset: i64) -> String {
@@ -25,13 +23,6 @@ pub fn format_time(ts: i64, offset: i64) -> String {
     let (days, secs) = (t.div_euclid(DAY), t.rem_euclid(DAY));
     let (y, m, d) = crate::util::civil_from_days(days);
     format!("{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}", secs / 3600, secs % 3600 / 60, secs % 60)
-}
-
-/// The activity log entries to export, as the person is shown them (`query_activity`: nothing named in someone else's
-/// personal space)
-pub async fn export_activity(State(st): State<AppState>, user: User, Query(q): Query<ActivityQuery>) -> AppResult<Json<Vec<ActivityRow>>> {
-    authorize_activity(&st, &user, &q).await?;
-    Ok(Json(query_activity(&st, &q, user.id, EXPORT_LIMIT).await?))
 }
 
 /// The error log entries to export, for administrators
@@ -51,7 +42,7 @@ mod tests {
     use serde_json::Value;
 
     use super::*;
-    use crate::{auth::Admin, testutil};
+    use crate::{auth::Admin, history::export_activity, logs::ActivityQuery, testutil};
 
     fn json<T: serde::Serialize>(rows: Json<Vec<T>>) -> Vec<Value> {
         rows.0.iter().map(|r| serde_json::to_value(r).unwrap()).collect()

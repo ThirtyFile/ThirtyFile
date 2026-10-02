@@ -20,6 +20,7 @@ mod files;
 mod folders;
 mod fsops;
 mod hashing;
+mod history;
 mod jobs;
 mod location_tools;
 mod locations;

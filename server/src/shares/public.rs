@@ -520,7 +520,7 @@ pub(super) async fn serve_public_download(
     };
     if !continuation {
         count_download(st, &share).await?;
-        record_share_access(st, &share.id, share.owner_id, roots.first(), if single { "download" } else { "zip" }, visitor);
+        record_share_access(st, &share.id, share.owner_id, roots.first().map(|n| n as _), if single { "download" } else { "zip" }, visitor);
         note_access(st, &share.id, false);
         if single && share.max_downloads.is_some() {
             res.headers_mut().append(header::SET_COOKIE, download_cookie(st, token, &share, &roots[0].id)?);

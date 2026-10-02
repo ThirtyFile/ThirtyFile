@@ -294,7 +294,7 @@ async fn store_new_file(st: &AppState, user: &User, folder_id: &str, name: &str,
         let (id, written) = content::create(&mut tx, &staged, user.id, &folder, &name, None).await?;
         tree::touch(&mut tx, &folder.id).await?;
         let node = tree::get_node(&mut tx, &id).await?;
-        logs::record_activity(&mut tx, user, node.as_ref(), action, "").await?;
+        logs::record_activity(&mut tx, user, node.as_ref().map(|n| n as _), action, "").await?;
         tx.commit().await?;
         Ok((id, name, written))
     }
@@ -588,7 +588,7 @@ async fn extract_into(st: &AppState, user: &User, progress: &Tracker, zip: &Node
             written.insert(i, w);
         }
         let node = tree::get_node(&mut tx, &root).await?;
-        logs::record_activity(&mut tx, user, node.as_ref(), "extract", &zip.name).await?;
+        logs::record_activity(&mut tx, user, node.as_ref().map(|n| n as _), "extract", &zip.name).await?;
         tx.commit().await?;
         Ok((root, name))
     }

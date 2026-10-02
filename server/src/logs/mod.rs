@@ -115,6 +115,7 @@ mod tests {
     use super::*;
     use crate::{
         auth::{Admin, User},
+        history::{activity, export_activity, node_history, share_access},
         testutil, tree,
         util::now,
     };
