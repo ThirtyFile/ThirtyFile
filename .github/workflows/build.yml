@@ -166,6 +166,9 @@ jobs:
             cargo llvm-cov report --summary-only
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          # A floor under the lines covered (91.8% by the tests alone, the same from run to run, in October 2026): raised
+          # as tests are added, never lowered to let a change through
+          cargo llvm-cov report --fail-under-lines 90 > /dev/null
 
       # Known security problems in dependencies, their licences and where they come from (server/deny.toml)
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1

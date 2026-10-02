@@ -105,7 +105,7 @@
             </tbody>
           </table>
         </div>
-        <p>On Windows, run it in Git Bash. On GitHub, the known security problems of the dependencies are checked too (<code>cargo deny</code> and <code>pnpm audit</code>).</p>
+        <p>On Windows, run it in Git Bash. On GitHub, the known security problems of the dependencies are checked too (<code>cargo deny</code> and <code>pnpm audit</code>), and the server's tests and the end-to-end test together must cover at least 90% of the server's lines (<code>cargo llvm-cov</code>, the floor in <code>.github/workflows/build.yml</code>).</p>
         <p>The code is formatted by tools, and the checks fail when it isn't. Format it before committing:</p>
         <pre><code>cd server &amp;&amp; cargo fmt
 cd web &amp;&amp; pnpm format</code></pre>
