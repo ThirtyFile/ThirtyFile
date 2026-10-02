@@ -98,12 +98,54 @@ const isDateFormat = (body: string) => /[ydg]|h|s|am\/pm|a\/p|\[h\]|e(?![+-])/i.
 
 // ───────────── Dates ─────────────
 
-const WEEK = ["日", "一", "二", "三", "四", "五", "六"]; // i18n-ignore: weekday names produced by Excel number formats
+/**
+ * The language of month and weekday names and of AM/PM in formats that name no locale: the page's (`<html lang>`,
+ * which the app sets), as Excel uses the system's. Traditional Chinese when the page names none
+ */
+let displayLocale: string | null = null;
 
-const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+/** Sets the language of names in formats that name no locale (tests; the page's language otherwise) */
+export function setFormatLocale(tag: string | null) {
+  displayLocale = tag;
+  names.clear();
+}
+
+function pageLocale() {
+  const tag = displayLocale ?? (typeof document !== "undefined" ? document.documentElement.lang : "");
+  return tag || "zh-TW";
+}
+
+interface Names {
+  months: string[];
+  monthsShort: string[];
+  days: string[];
+  daysShort: string[];
+  am: string;
+  pm: string;
+}
+
+const names = new Map<string, Names>();
+
+/** Month and weekday names and the AM/PM markers of a locale, from Intl */
+function namesOf(locale: string): Names {
+  let n = names.get(locale);
+  if (n) return n;
+  const utc = (options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(locale, { ...options, timeZone: "UTC" });
+  const month = (style: "long" | "short") => Array.from({ length: 12 }, (_, i) => utc({ month: style }).format(Date.UTC(2024, i, 1)));
+  // 2024-01-07 was a Sunday
+  const day = (style: "long" | "short") => Array.from({ length: 7 }, (_, i) => utc({ weekday: style }).format(Date.UTC(2024, 0, 7 + i)));
+  const period = (hour: number) =>
+    utc({ hour: "numeric", hour12: true })
+      .formatToParts(Date.UTC(2024, 0, 1, hour))
+      .find((p) => p.type === "dayPeriod")?.value ?? (hour < 12 ? "AM" : "PM");
+  n = { months: month("long"), monthsShort: month("short"), days: day("long"), daysShort: day("short"), am: period(9), pm: period(15) };
+  names.set(locale, n);
+  return n;
+}
 
 function formatDate(serial: number, body: string, roc = false, en = false) {
+  // A format that names a locale uses its names ([$-409] English, [$-404] Taiwan); others the page's language
+  const { months, monthsShort, days, daysShort, am, pm: pmMark } = namesOf(en ? "en-US" : roc ? "zh-TW" : pageLocale());
   if (serial < 0) return "#".repeat(8);
   const ms = Math.round(serial * DAY);
   const d = new Date(EPOCH + ms);
@@ -168,13 +210,14 @@ function formatDate(serial: number, body: string, roc = false, en = false) {
         out += minute ? pad(mi) : pad(M);
         break;
       case "mmm":
-        out += en ? MONTHS[M - 1].slice(0, 3) : `${M}月`; // i18n-ignore: month names produced by Excel number formats
+        out += monthsShort[M - 1];
         break;
       case "mmmm":
-        out += en ? MONTHS[M - 1] : `${M}月`; // i18n-ignore: month names produced by Excel number formats
+        out += months[M - 1];
         break;
       case "mmmmm":
-        out += en ? MONTHS[M - 1][0] : M;
+        // The first letter of a spelled-out month; the number where months are numbered (Chinese, Japanese)
+        out += /^\d/.test(monthsShort[M - 1]) ? M : months[M - 1][0];
         break;
       case "d":
         out += D;
@@ -183,10 +226,10 @@ function formatDate(serial: number, body: string, roc = false, en = false) {
         out += pad(D);
         break;
       case "ddd":
-        out += en ? DAYS[d.getUTCDay()].slice(0, 3) : `週${WEEK[d.getUTCDay()]}`; // i18n-ignore: weekday names produced by Excel number formats
+        out += daysShort[d.getUTCDay()];
         break;
       case "dddd":
-        out += en ? DAYS[d.getUTCDay()] : `星期${WEEK[d.getUTCDay()]}`; // i18n-ignore: weekday names produced by Excel number formats
+        out += days[d.getUTCDay()];
         break;
       case "h":
         out += h;
@@ -201,9 +244,8 @@ function formatDate(serial: number, body: string, roc = false, en = false) {
         out += pad(s);
         break;
       case "am/pm":
-        // English locale ([$-409]): AM / PM like the month names; otherwise the Taiwanese markers
-        if (en) out += pm ? "PM" : "AM";
-        else out += pm ? "下午" : "上午"; // i18n-ignore: AM/PM markers produced by Excel number formats
+        // The markers of the format's locale, like the month names, or of the page's language
+        out += pm ? pmMark : am;
         break;
       case "a/p":
         out += pm ? "P" : "A";

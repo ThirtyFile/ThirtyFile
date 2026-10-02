@@ -197,12 +197,33 @@ function fill(text: string, vars?: Vars) {
   });
 }
 
-/** English plurals: `single|plural`, picked by n (plural when there is no n) */
-function plural(text: string, vars?: Vars) {
-  const bar = text.indexOf("|");
-  if (bar < 0) return text;
-  const n = vars?.n ?? vars?.count;
-  return Number(n) === 1 ? text.slice(0, bar) : text.slice(bar + 1);
+/** The order in which a text lists its plural forms, of the categories its language uses (CLDR's order) */
+const CATEGORIES: Intl.LDMLPluralRule[] = ["zero", "one", "two", "few", "many", "other"];
+
+/** A language's plural rules, and the categories it uses in the order a text lists their forms */
+function pluralRules(tag: string) {
+  const rules = new Intl.PluralRules(tag);
+  const used = rules.resolvedOptions().pluralCategories;
+  return { rules, order: CATEGORIES.filter((c) => used.includes(c)) };
+}
+
+/** English (the source text): `single|plural` */
+const SOURCE_PLURALS = pluralRules("en");
+/** The active language's: Chinese and Japanese have one form, so their texts have no `|` */
+const PLURALS = lang === "en" ? SOURCE_PLURALS : pluralRules(locale);
+
+/**
+ * Plurals: a text lists its forms separated by `|`, one per plural category of its language (`Intl.PluralRules`),
+ * picked by n (or count). The last form (`other`) when there is no number or no form for the category
+ */
+function plural(text: string, vars?: Vars, { rules, order } = SOURCE_PLURALS) {
+  if (!text.includes("|")) return text;
+  const forms = text.split("|");
+  const raw = vars?.n ?? vars?.count;
+  // A count the server wrote may have digit grouping ("1,234")
+  const n = typeof raw === "string" ? Number(raw.replace(/,/g, "")) : Number(raw ?? NaN);
+  if (!Number.isFinite(n)) return forms[forms.length - 1];
+  return forms[order.indexOf(rules.select(n))] ?? forms[forms.length - 1];
 }
 
 const missing = new Set<string>();
@@ -216,7 +237,7 @@ function lookup(key: string, fallback: string, vars?: Vars) {
     }
     return fill(plural(fallback, vars), vars);
   }
-  return fill(value, vars);
+  return fill(plural(value, vars, PLURALS), vars);
 }
 
 /** Translate UI text (the key is the English source text) */
@@ -310,15 +331,24 @@ function known(part: string, depth: number): string | undefined {
 }
 
 /**
+ * What separates the items of a list in the active language, between items other than the last two (Chinese and
+ * Japanese: the enumeration comma U+3001)
+ */
+const LIST_SEPARATOR = (() => {
+  const parts = new Intl.ListFormat(locale, { type: "conjunction" }).formatToParts(["a", "b", "c"]);
+  return parts.find((p) => p.type === "literal")?.value ?? ", ";
+})();
+
+/**
  * A list of items joined with ", " (share link options, the changes made to something): each item translated, joined
- * with the Chinese enumeration comma U+3001. The first item may start with a capital (the server writes the list as a
+ * with the active language's separator. The first item may start with a capital (the server writes the list as a
  * sentence). Undefined unless every item is known, or `loose` (a parameter that always holds a list)
  */
 function list(v: string, depth: number, loose: boolean): string | undefined {
   const parts = v.split(", ");
-  const zh = parts.map((p, i) => known(p, depth) ?? (i === 0 ? known(p.charAt(0).toLowerCase() + p.slice(1), depth) : undefined));
-  if (!loose && zh.some((z) => z === undefined)) return undefined;
-  return parts.map((p, i) => zh[i] ?? p).join("、"); // i18n-ignore: Chinese list separator
+  const done = parts.map((p, i) => known(p, depth) ?? (i === 0 ? known(p.charAt(0).toLowerCase() + p.slice(1), depth) : undefined));
+  if (!loose && done.some((z) => z === undefined)) return undefined;
+  return parts.map((p, i) => done[i] ?? p).join(LIST_SEPARATOR);
 }
 
 /** Translate a parameter value: known terms, names ThirtyFile made, lists of known terms, and nested messages */
@@ -330,8 +360,8 @@ function fragment(name: string, v: string, depth: number): string {
     if (made !== undefined) return made;
   }
   if (v.includes(", ")) {
-    const zh = list(v, depth + 1, LISTS.has(name));
-    if (zh !== undefined) return zh;
+    const joined = list(v, depth + 1, LISTS.has(name));
+    if (joined !== undefined) return joined;
   }
   if (NESTED.has(name) && depth < 2) return translate(v, depth + 1);
   return v;
@@ -347,7 +377,7 @@ function templated(msg: string, depth: number, among: Template[] = templates!): 
     tpl.names.forEach((name, i) => {
       vars[name] = fragment(name, m[i + 1], depth);
     });
-    return fill(tpl.text, vars);
+    return fill(plural(tpl.text, vars, PLURALS), vars);
   }
   return undefined;
 }

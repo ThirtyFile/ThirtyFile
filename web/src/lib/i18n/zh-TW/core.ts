@@ -8,7 +8,6 @@ export default {
   "Request failed ({status})": "請求失敗（{status}）",
   "Language": "語言",
   "Just now": "剛剛",
-  "{n} minute ago|{n} minutes ago": "{n} 分鐘前",
   "Today {time}": "今天 {time}",
   "Couldn't create ({status})": "建立失敗（{status}）",
   // Shared terms used across many pages

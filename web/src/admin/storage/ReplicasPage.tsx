@@ -45,16 +45,10 @@ import {
   targetJob,
   useReplicas,
 } from "@/admin/storage/replicas";
-import { cn, formatBytes, formatDateTime, errorMessage } from "@/lib/utils";
+import { cn, formatAge, formatBytes, formatDateTime, formatList, errorMessage } from "@/lib/utils";
 
 /** How long ago, roughly */
-function ago(at: number) {
-  const s = Math.max(0, Math.round(Date.now() / 1000 - at));
-  if (s < 90) return t("{n} s|{n} s", { n: s });
-  if (s < 5400) return t("{n} min|{n} min", { n: Math.round(s / 60) });
-  if (s < 172_800) return t("{n} h|{n} h", { n: Math.round(s / 3600) });
-  return t("{n} day|{n} days", { n: Math.round(s / 86400) });
-}
+const ago = (at: number) => formatAge(Date.now() / 1000 - at);
 
 /** A job's progress: a bar with what is done, in files and bytes */
 function JobProgress({ j }: { j: ReplicaJob }) {
@@ -170,10 +164,10 @@ export function ReplicasPage() {
         <span className="flex min-w-0 items-center gap-1">
           <span className="truncate">{p.source_name}</span>
           <ArrowRightIcon className="size-3 shrink-0" aria-label={t("to")} />
-          <span className="truncate">{p.targets.map((x) => x.name).join(", ")}</span>
+          <span className="truncate">{formatList(p.targets.map((x) => x.name))}</span>
         </span>
       ),
-      title: (p) => `${p.source_name} → ${p.targets.map((x) => x.name).join(", ")}`,
+      title: (p) => `${p.source_name} → ${formatList(p.targets.map((x) => x.name))}`,
     },
     {
       header: t("State"),
@@ -314,7 +308,7 @@ export function ReplicasPage() {
           title={t('Delete the replica policy "{name}"?', { name: current.name })}
           description={t(
             "No more copies are made. The copies already made stay on {targets}, kept from deletion, until you remove them here as copies no policy wants. The spaces on {source} don't change.",
-            { targets: current.targets.map((x) => x.name).join(", "), source: current.source_name },
+            { targets: formatList(current.targets.map((x) => x.name)), source: current.source_name },
           )}
           confirmText={t("Delete replica policy")}
           destructive
@@ -625,7 +619,7 @@ function PromoteDialog({ p, target: preset, onClose, onDone }: { p: ReplicaPolic
             )}
             {pf.folder_spaces.length > 0 && (
               <p className="text-xs">
-                {t("Folder spaces not wholly on {name} stay on {source}, as they are: {names}", { name: pf.target_name, source: pf.source_name, names: pf.folder_spaces.join(", ") })}
+                {t("Folder spaces not wholly on {name} stay on {source}, as they are: {names}", { name: pf.target_name, source: pf.source_name, names: formatList(pf.folder_spaces) })}
               </p>
             )}
             {pf.problem && <ErrorText>{tServer(pf.problem)}</ErrorText>}

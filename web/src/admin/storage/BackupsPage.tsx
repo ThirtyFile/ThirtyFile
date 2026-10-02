@@ -38,7 +38,7 @@ import { activeJob, BACKUP_JOB_KIND_LABEL, BACKUP_JOB_STATE_LABEL, backupSpaceLa
 import { controlPanelItem, useSettingsSearch } from "@/admin/controlPanel";
 import { t, tc, tServer } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
-import { cn, formatBytes, formatDateTime, errorMessage } from "@/lib/utils";
+import { cn, formatAge, formatBytes, formatDateTime, errorMessage } from "@/lib/utils";
 import { useSubmit } from "@/lib/useSubmit";
 
 export const HEALTH_LABEL: Record<BackupHealthState, string> = {
@@ -64,13 +64,7 @@ const HEALTH_TONE: Record<BackupHealthState, string> = {
 };
 
 /** How long ago, roughly */
-function ago(at: number) {
-  const s = Math.max(0, Math.round(Date.now() / 1000 - at));
-  if (s < 90) return t("{n} s|{n} s", { n: s });
-  if (s < 5400) return t("{n} min|{n} min", { n: Math.round(s / 60) });
-  if (s < 172_800) return t("{n} h|{n} h", { n: Math.round(s / 3600) });
-  return t("{n} day|{n} days", { n: Math.round(s / 86400) });
-}
+const ago = (at: number) => formatAge(Date.now() / 1000 - at);
 
 /** A job's progress: a bar with what is done, in files and bytes */
 function JobProgress({ j }: { j: BackupJob }) {

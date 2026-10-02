@@ -1,6 +1,7 @@
 /** How the file list is laid out: its columns (which are shown, and how wide) and how items are grouped */
 import { createStore, useStore } from "@/lib/store";
 import { t } from "@/lib/i18n";
+import { nameCollator } from "@/lib/utils";
 
 // ───────────── Columns ─────────────
 
@@ -154,6 +155,6 @@ export function groupItems<T extends { kind: string }>(items: T[], by: GroupBy, 
     g.items.push(x);
   }
   const rank = (g: Group<T>) => DATE_GROUPS.indexOf(g.key as DateGroup);
-  const out = [...groups.values()].sort((a, b) => (by === "date" ? rank(a) - rank(b) : a.key === "" ? -1 : b.key === "" ? 1 : a.key.localeCompare(b.key)));
+  const out = [...groups.values()].sort((a, b) => (by === "date" ? rank(a) - rank(b) : a.key === "" ? -1 : b.key === "" ? 1 : nameCollator.compare(a.key, b.key)));
   return o.reversed ? out.reverse() : out;
 }
