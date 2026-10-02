@@ -3,8 +3,9 @@ import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
 import { makeFolder, signIn } from "./helpers";
 
-async function exported(page: Page): Promise<{ name: string; text: string }> {
-  const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Export CSV" }).filter({ visible: true }).click()]);
+/** Exports the log of the tab `log` (the tab left may still show for a moment after another is chosen) */
+async function exported(page: Page, log: string): Promise<{ name: string; text: string }> {
+  const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("tabpanel", { name: log }).getByRole("button", { name: "Export CSV" }).click()]);
   return { name: download.suggestedFilename(), text: await readFile(await download.path(), "utf8") };
 }
 
@@ -16,7 +17,7 @@ test("the activity log and the sign-in log export with the names the page shows"
 
   await page.goto("/admin/activity");
   await expect(page.locator("tbody tr").first()).toBeVisible();
-  const activity = await exported(page);
+  const activity = await exported(page, "Activity log");
   expect(activity.name).toMatch(/^activity-log-\d{8}\.csv$/);
   const lines = activity.text.split("\n");
   expect(lines[0]).toBe("\uFEFFTime,User,Action,Item,Details,Space");
@@ -27,7 +28,7 @@ test("the activity log and the sign-in log export with the names the page shows"
   expect(activity.text).not.toContain("create_folder");
 
   await page.getByRole("tab", { name: "Sign-in log" }).click();
-  const logins = await exported(page);
+  const logins = await exported(page, "Sign-in log");
   expect(logins.name).toMatch(/^login-log-\d{8}\.csv$/);
   expect(logins.text.split("\n")[0]).toBe("\uFEFFTime,Account,Event,Method,IP,Browser");
   expect(logins.text).toMatch(/,admin,Signed in,Password,/);
