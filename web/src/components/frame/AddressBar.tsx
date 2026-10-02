@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { NavMenu } from "@/components/NavMenu";
 import { openShortcuts } from "@/components/ShortcutsDialog";
 import { isTyping } from "@/components/explorer/types";
+import { listRefreshed } from "@/components/explorer/newItems";
 import { useFolderDrop } from "@/lib/dnd";
 import { folderOfPath, hasPersonal } from "@/lib/home";
 import { liveSearch, type LiveSearch } from "@/lib/liveSearch";
@@ -241,6 +242,8 @@ export function AddressBar({
 
   const refresh = async () => {
     setRefreshing(true);
+    // New items kept at the end of the list go to their sorted places, as in File Explorer
+    listRefreshed();
     await qc.invalidateQueries();
     setRefreshing(false);
   };

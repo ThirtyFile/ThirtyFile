@@ -6,7 +6,7 @@ import { keys } from "@/api/queryKeys";
 import { triggerDownload } from "@/downloads";
 import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
-import { type FileChange, invalidateFiles, refreshFiles, rowsOf } from "@/lib/queries";
+import { type FileChange, invalidateFiles, refreshFiles, renamed, rowsOf } from "@/lib/queries";
 import { eachBatch, idsOf, type Picked } from "@/lib/span";
 import { transferItems } from "@/lib/transfer";
 import { type Origins, originsOf, toastWithUndo, undoLast } from "@/lib/undo";
@@ -16,6 +16,7 @@ import { filesFromDrop, uploadFiles } from "@/uploads";
 import { runJob, waitForJob } from "@/lib/jobs";
 import { reportShown } from "@/lib/errorReport";
 import { type Item, isTyping } from "./types";
+import { isPending, listRefreshed } from "./newItems";
 import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
 import { errorMessage } from "@/lib/utils";
@@ -26,8 +27,11 @@ const MAX_AT_ONCE = 10_000;
 
 export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
   const { caps, qc, navigate, tabs, clip, canCreate, canUpload, selectedNodes, selectedIds, single, allFavorite, setSelected, setAnchor, dialog, setDialog, setDragging, setDetailsOpen } = s;
-  /** Refresh (the menu, or Retry after an error): everything shown loads again */
-  const refresh = () => invalidateFiles(qc);
+  /** Refresh (the menu, or Retry after an error): everything shown loads again, and new items go to their sorted places */
+  const refresh = () => {
+    listRefreshed();
+    return invalidateFiles(qc);
+  };
   /** After a change: what it touched loads again (lib/queries) */
   const changed = (change: FileChange) => refreshFiles(qc, change);
   /** The folders items are in (the folder shown, or each item's own in lists of several places) */
@@ -38,19 +42,86 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
 
   /** Like Windows: when the name exists, try "Name (2)", "Name (3)"… in turn */
   const uniqueName = (base: string, ext = "") => {
-    const taken = new Set(p.items.map((n) => n.name.toLowerCase()));
+    const taken = new Set([...p.items, ...s.newItems.items.map((n) => n.item)].map((n) => n.name.toLowerCase()));
     for (let i = 1; ; i++) {
       const name = i === 1 ? `${base}${ext}` : `${base} (${i})${ext}`;
       if (!taken.has(name.toLowerCase())) return name;
     }
   };
 
+  /** A new item shown where it was made gets its real id; the focus, lost with the row it was on, goes to it */
+  const settleNew = (key: string, id: string) => {
+    s.newItems.settle(key);
+    s.replaceSelected(key, id);
+    setTimeout(() => {
+      if (!document.activeElement || document.activeElement === document.body) s.listNav.current?.show(id, true);
+    });
+  };
+
+  /**
+   * The Windows style (explorer/newItems): the new item shows at once at the end of the list, selected and being
+   * renamed, while the server makes it. If making it fails, it goes and the reason is shown; a name typed meanwhile is
+   * given once it is made (`renameItem`).
+   */
+  const createAtEnd = async (kind: "folder" | "file", folder: string, name: string) => {
+    const made = kind === "folder" ? api.createFolder(folder, name).then((n) => n.id) : api.createEmptyFile(folder, name);
+    // Handled below (and by a rename waiting for it)
+    made.catch(() => undefined);
+    const list = p.list;
+    // A large folder not all loaded: after the items loaded, not in a part that isn't
+    const at = list && !list.complete ? (list.index.get(list.loaded.at(-1)?.id ?? "") ?? -1) + 1 : Infinity;
+    const now = Math.floor(Date.now() / 1000);
+    const item = s.newItems.add(
+      {
+        parent_id: folder,
+        kind,
+        name,
+        size: 0,
+        mime: kind === "file" ? "text/plain" : "",
+        created_at: now,
+        updated_at: now,
+        trashed_at: null,
+        drive_id: p.folder?.drive_id ?? null,
+        owner_name: s.me.display_name || s.me.username,
+        is_favorite: false,
+      },
+      at,
+      made,
+    );
+    setSelected(new Set([item.id]));
+    setAnchor(item.id);
+    // Being named from now on (the name box shows a moment later): it takes its id once that ends (`renameDone`)
+    s.naming.current.add(item.id);
+    let failed = false;
+    // At once, so what is typed next goes into the name; chosen in a menu, once the menu has given the focus back
+    if (!document.querySelector("[role=menu]")) setDialog({ t: "rename", node: item });
+    else void menusClosed().then(() => !failed && setDialog({ t: "rename", node: item }));
+    let id: string;
+    try {
+      id = await made;
+    } catch (e) {
+      failed = true;
+      s.naming.current.delete(item.id);
+      s.newItems.drop([item.id]);
+      setDialog((d) => (d?.t === "rename" && d.node.id === item.id ? null : d));
+      s.replaceSelected(item.id, null);
+      toast.error(errorMessage(e, t("Couldn't create")));
+      reportShown("create", e, folder);
+      return;
+    }
+    s.newItems.made(item.id, id);
+    void changed({ folders: [folder], contents: true, recent: kind === "file" });
+    // Still being renamed: it takes its id when that ends (`renameDone`), so the name box isn't started again
+    if (!s.naming.current.has(item.id)) settleNew(item.id, id);
+  };
+
   /** Like Windows: create "New folder" or "New Text Document.txt" right away, select it and start inline renaming */
   const createNew = async (kind: "folder" | "file") => {
     if (!p.folderId || !(kind === "folder" ? canCreate : canUpload)) return;
+    // Default names follow the UI language (like English Windows: New folder, New Text Document.txt)
+    const name = kind === "folder" ? uniqueName(t("New folder")) : uniqueName(t("New Text Document"), ".txt");
+    if (s.behaviour.newAtEnd) return createAtEnd(kind, p.folderId, name);
     try {
-      // Default names follow the UI language (like English Windows: New folder, New Text Document.txt)
-      const name = kind === "folder" ? uniqueName(t("New folder")) : uniqueName(t("New Text Document"), ".txt");
       const id = kind === "folder" ? (await api.createFolder(p.folderId, name)).id : await api.createEmptyFile(p.folderId, name);
       // Only after the list reloads does the new item have a place to edit its name; if it didn't reload, don't start
       // renaming a row that isn't there (that would leave the shortcuts turned off)
@@ -74,6 +145,42 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       toast.error(errorMessage(e, t("Couldn't create")));
       reportShown("create", e, p.folderId ?? undefined);
     }
+  };
+
+  /** Renames an item in the list; a new one still being made is renamed once it is (if making it failed, that was said) */
+  const renameItem = async (n: Item, name: string) => {
+    const added = s.newItems.items.find((x) => x.item.id === n.id);
+    let id = n.id;
+    if (added && isPending(n.id)) {
+      try {
+        id = await added.made;
+      } catch {
+        return;
+      }
+    }
+    const node = await api.rename(id, name);
+    if (added) s.newItems.rename(n.id, node.name);
+    void changed(renamed(node));
+    if (name !== n.name)
+      toastWithUndo(t('Renamed to "{name}"', { name }), {
+        undo: async () => {
+          const back = await api.rename(id, n.name);
+          s.newItems.rename(id, back.name);
+          void changed(renamed(back));
+        },
+        undoneText: t("Renamed back"),
+        label: t("Undo rename"),
+      });
+  };
+
+  /** Renaming ended (a new name, or Esc): a new item made meanwhile takes its id */
+  const renameDone = () => {
+    const d = s.dialogNow.current;
+    setDialog(null);
+    if (d?.t !== "rename" || !isPending(d.node.id)) return;
+    s.naming.current.delete(d.node.id);
+    const id = s.newItems.items.find((x) => x.item.id === d.node.id)?.id;
+    if (id) settleNew(d.node.id, id);
   };
 
   // Folders and files both open in the current tab, so "Back" returns to the original location; a file already open in another tab switches there
@@ -128,6 +235,8 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
    */
   const transfer = async (mode: "move" | "copy", picked: Picked, dest: string, done: (n: number) => string, fallback: string, known?: Origins) => {
     const ok = await transferItems(qc, mode, picked, dest, { done, fallback, origins: known, items: p.items });
+    // Moved away: new items kept at the end go with them
+    if (ok && mode === "move") s.newItems.drop(picked.ids);
     if (ok) setSelected(new Set());
     return ok;
   };
@@ -192,6 +301,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     });
     if (!ok) return;
     setSelected(new Set());
+    s.newItems.drop(picked.ids);
     const parents = parentsOf(picked.ids);
     try {
       await eachBatch(picked, t("Deleting permanently…"), async (ids) => {
@@ -237,6 +347,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     });
     // The rows go at once; the lists aren't loaded again for it
     void changed({ removed: picked.ids, usage: true });
+    s.newItems.drop(picked.ids);
   };
   // Keyboard shortcuts (moving around, search and refresh are the address bar's: see Frame)
   useEffect(() => {
@@ -347,6 +458,8 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     paste,
     dragProps,
     createNew,
+    renameItem,
+    renameDone,
   };
 }
 
