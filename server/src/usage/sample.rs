@@ -228,14 +228,26 @@ async fn totals(st: &AppState) -> AppResult<HashMap<String, Capacity>> {
         by.entry(id).or_default().pending_deletes = n;
     }
     // Copies kept on a location (backups/): each content once per copy. Locations holding none have none (NULL).
-    for (id, bytes) in crate::backups::bytes_by_location(db).await? {
+    for (id, bytes) in backup_bytes(db).await? {
         by.entry(id).or_default().backup_bytes = Some(bytes);
     }
     // Replicas kept on a location (replicas/)
-    for (id, bytes) in crate::replicas::bytes_by_location(db).await? {
+    for (id, bytes) in replica_bytes(db).await? {
         by.entry(id).or_default().replica_bytes = Some(bytes);
     }
     Ok(by)
+}
+
+/// Bytes of the backup sets kept on each location (backups/)
+async fn backup_bytes(db: &sqlx::SqlitePool) -> Result<Vec<(String, i64)>, sqlx::Error> {
+    sqlx::query_as("SELECT s.dest_location, COALESCE(SUM(o.size), 0) FROM backup_sets s LEFT JOIN backup_objects o ON o.set_id = s.id GROUP BY s.dest_location")
+        .fetch_all(db)
+        .await
+}
+
+/// Bytes of replica copies on each location (replicas/)
+async fn replica_bytes(db: &sqlx::SqlitePool) -> Result<Vec<(String, i64)>, sqlx::Error> {
+    sqlx::query_as("SELECT location_id, COALESCE(SUM(size), 0) FROM replica_copies GROUP BY location_id").fetch_all(db).await
 }
 
 /// Free and total bytes of the disk holding `path`, and which disk it is; None when the system doesn't tell within a

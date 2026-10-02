@@ -6,7 +6,15 @@ use sqlx::SqliteConnection;
 
 use super::Visitor;
 use crate::logs::Memory;
-use crate::{auth::User, error::AppResult, state::AppState, tree::Node, util::now};
+use crate::{auth::User, error::AppResult, state::AppState, util::now};
+
+/// What the logs record of an item (`tree::Node` is one), so writing them needn't know the tree
+pub trait Item: Sync {
+    fn id(&self) -> &str;
+    fn name(&self) -> &str;
+    /// The space it is in
+    fn space(&self) -> Option<&str>;
+}
 
 // ───────────── Background log writer ─────────────
 
@@ -171,15 +179,15 @@ pub fn prune_share_views(st: &AppState) {
 }
 
 /// Records one access to a share link (queued; downloads aren't slowed down)
-pub fn record_share_access(st: &AppState, share_id: &str, owner_id: i64, node: Option<&Node>, event: &'static str, v: &Visitor) {
+pub fn record_share_access(st: &AppState, share_id: &str, owner_id: i64, node: Option<&dyn Item>, event: &'static str, v: &Visitor) {
     enqueue(
         st,
         LogEvent::ShareAccess {
             at: now(),
             share_id: share_id.to_string(),
             owner_id,
-            node_id: node.map(|n| n.id.clone()),
-            node_name: node.map(|n| n.name.clone()).unwrap_or_default(),
+            node_id: node.map(|n| n.id().to_string()),
+            node_name: node.map(|n| n.name().to_string()).unwrap_or_default(),
             event,
             ip: v.ip.clone(),
             user_agent: v.user_agent.clone(),
@@ -188,15 +196,15 @@ pub fn record_share_access(st: &AppState, share_id: &str, owner_id: i64, node: O
 }
 
 /// Records an activity (within the caller's transaction, unlike sign-in and share link events)
-pub async fn record_activity(conn: &mut SqliteConnection, user: &User, node: Option<&Node>, action: &str, detail: &str) -> AppResult<()> {
+pub async fn record_activity(conn: &mut SqliteConnection, user: &User, node: Option<&dyn Item>, action: &str, detail: &str) -> AppResult<()> {
     debug_assert!(super::known_action(action), "{action} isn't in logs::ACTIONS");
     sqlx::query("INSERT INTO activity (at, user_id, username, drive_id, node_id, node_name, action, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(now())
         .bind(user.id)
         .bind(&user.username)
-        .bind(node.and_then(|n| n.drive_id.clone()))
-        .bind(node.map(|n| n.id.clone()))
-        .bind(node.map(|n| n.name.clone()).unwrap_or_default())
+        .bind(node.and_then(|n| n.space()))
+        .bind(node.map(|n| n.id()))
+        .bind(node.map(|n| n.name()).unwrap_or_default())
         .bind(action)
         .bind(detail)
         .execute(conn)

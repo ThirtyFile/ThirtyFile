@@ -135,7 +135,7 @@ pub(super) async fn store_file(st: &AppState, user: &User, parent: &Node, name: 
                 let (id, written) = content::create(&mut tx, &staged, user.id, &folder, name, None).await?;
                 tree::touch(&mut tx, &folder.id).await?;
                 let node = tree::get_node(&mut tx, &id).await?;
-                logs::record_activity(&mut tx, user, node.as_ref(), "upload", "").await?;
+                logs::record_activity(&mut tx, user, node.as_ref().map(|n| n as _), "upload", "").await?;
                 (true, written)
             }
         };

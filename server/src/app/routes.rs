@@ -12,8 +12,8 @@ use axum::{
 use tower_http::{CompressionLevel, compression::CompressionLayer, timeout::TimeoutLayer, trace::TraceLayer};
 
 use crate::{
-    admin, archive, auth, backups, branding, dav, downloads, drives, error, files, jobs, location_tools, locations, logs, mail, moves, nodes, notify, paths,
-    replicas, reset, sessions, shares, signin, sso, state::AppState, thumbnails, tokens, twofactor, upload, usage, versions, web,
+    admin, archive, auth, backups, branding, dav, downloads, drives, error, files, history, jobs, location_tools, locations, logs, mail, moves, nodes, notify,
+    paths, replicas, reset, sessions, shares, signin, sso, state::AppState, thumbnails, tokens, twofactor, upload, usage, versions, web,
 };
 
 use super::{
@@ -148,10 +148,10 @@ fn api() -> Router<AppState> {
         .route("/nodes/{id}/access", get(drives::access).post(drives::grant))
         .route("/grants/{id}", delete(drives::revoke))
         .route("/directory", get(drives::directory))
-        .route("/activity", get(logs::activity))
-        .route("/activity/export", get(logs::export_activity))
-        .route("/nodes/{id}/activity", get(logs::node_history))
-        .route("/share-access", get(logs::share_access))
+        .route("/activity", get(history::activity))
+        .route("/activity/export", get(history::export_activity))
+        .route("/nodes/{id}/activity", get(history::node_history))
+        .route("/share-access", get(history::share_access))
         .route("/auth/sso/providers", get(sso::providers))
         .route("/auth/sso/{provider}/start", get(sso::start))
         .route("/auth/sso/{provider}/link", post(sso::start_link))

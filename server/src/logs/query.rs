@@ -1,20 +1,16 @@
 //! Querying the logs: the activity log, an item's history, the share link visit log and the sign-in log. The three
-//! logs share their filters and paging (`Filters`, `page`).
+//! logs share their filters and paging (`Filters`, `page`). Who may read what of the first three is decided in
+//! history.rs.
 
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    extract::{Query, State},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
-use crate::{
-    auth::User,
-    error::{AppError, AppResult},
-    state::AppState,
-    tree::{self, Role},
-};
+use crate::{auth::User, error::AppResult, state::AppState};
 
 // ───────────── Filters and paging ─────────────
 
@@ -92,12 +88,12 @@ impl Filters {
 }
 
 /// Records per page in the log viewers
-pub(super) fn page_size(limit: Option<i64>) -> i64 {
+pub(crate) fn page_size(limit: Option<i64>) -> i64 {
     limit.unwrap_or(100).clamp(1, 1000)
 }
 
 /// A page of records, and in `next` the `before` value that loads the following page (none after the last page)
-pub(super) fn page<T: Serialize>(items: Vec<T>, limit: i64, id: fn(&T) -> i64) -> Json<Value> {
+pub(crate) fn page<T: Serialize>(items: Vec<T>, limit: i64, id: fn(&T) -> i64) -> Json<Value> {
     let next = (items.len() as i64 == limit).then(|| items.last().map(id)).flatten();
     Json(json!({ "items": items, "next": next }))
 }
@@ -106,7 +102,7 @@ pub(super) fn page<T: Serialize>(items: Vec<T>, limit: i64, id: fn(&T) -> i64) -
 
 #[derive(Serialize, sqlx::FromRow, Debug)]
 pub struct ActivityRow {
-    pub(super) id: i64,
+    pub(crate) id: i64,
     pub(super) at: i64,
     pub(super) username: String,
     pub(super) drive_id: Option<String>,
@@ -121,7 +117,7 @@ pub struct ActivityRow {
 
 #[derive(Deserialize, Default)]
 pub struct ActivityQuery {
-    pub(super) drive_id: Option<String>,
+    pub(crate) drive_id: Option<String>,
     /// Username (partial match)
     pub(super) user: Option<String>,
     /// Actions, comma-separated
@@ -133,24 +129,13 @@ pub struct ActivityQuery {
     pub(super) q: Option<String>,
     /// Paging: only records with an id below this value
     pub(super) before: Option<i64>,
-    pub(super) limit: Option<i64>,
-}
-
-pub(super) async fn authorize_activity(st: &AppState, user: &User, q: &ActivityQuery) -> AppResult<()> {
-    if let Some(drive_id) = &q.drive_id {
-        crate::drives::manageable_drive(&mut *st.db.acquire().await?, user, drive_id).await?;
-        Ok(())
-    } else if user.is_admin() {
-        Ok(())
-    } else {
-        Err(AppError::forbidden("Administrator permission required"))
-    }
+    pub(crate) limit: Option<i64>,
 }
 
 /// Entries as user `me` is shown them: those about someone else's personal space (or a space that is gone) say who did
 /// what there and when, but not to what (the item, the details), and the keyword search doesn't look at what they leave
 /// out. Administrators read the log without a space, so this keeps the names in personal spaces from them.
-pub(super) async fn query_activity(st: &AppState, q: &ActivityQuery, me: i64, limit: i64) -> AppResult<Vec<ActivityRow>> {
+pub(crate) async fn query_activity(st: &AppState, q: &ActivityQuery, me: i64, limit: i64) -> AppResult<Vec<ActivityRow>> {
     let private = format!("(a.private_to IS NOT NULL AND a.private_to <> {me})");
     let mut f = Filters::new(format!(
         "SELECT * FROM (
@@ -169,21 +154,14 @@ pub(super) async fn query_activity(st: &AppState, q: &ActivityQuery, me: i64, li
     f.fetch(&st.db, "a.id", q.before, limit).await
 }
 
-/// With a space: visible to the space's managers; without: administrators see everything. The returned next loads the following page
-pub async fn activity(State(st): State<AppState>, user: User, Query(q): Query<ActivityQuery>) -> AppResult<Json<Value>> {
-    authorize_activity(&st, &user, &q).await?;
-    let limit = page_size(q.limit);
-    Ok(page(query_activity(&st, &q, user.id, limit).await?, limit, |r| r.id))
-}
-
 // ───────────── An item's history (Details pane) ─────────────
 
 /// Entries shown in an item's history
-pub(super) const HISTORY_LIMIT: i64 = 50;
+pub(crate) const HISTORY_LIMIT: i64 = 50;
 
 /// What happened to the item and its contents. People who can only view or edit it don't see sharing and permission
 /// changes (who was given access, share links); those stay with managers, as in the space's activity log.
-const CONTENT_ACTIONS: [&str; 9] = ["upload", "create_folder", "edit", "rename", "move", "copy", "trash", "restore", "delete"];
+pub(crate) const CONTENT_ACTIONS: [&str; 9] = ["upload", "create_folder", "edit", "rename", "move", "copy", "trash", "restore", "delete"];
 
 #[derive(Serialize, sqlx::FromRow, Debug)]
 pub struct HistoryRow {
@@ -196,42 +174,11 @@ pub struct HistoryRow {
     pub(super) detail: String,
 }
 
-/// The most recent entries about an item, for anyone who can open it (the activity log itself is for space managers and
-/// administrators). A folder's history also has the entries of everything now inside it, including items in its trash;
-/// a space's root folder, those of the whole space. No IP addresses: the activity log doesn't record them.
-pub async fn node_history(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Json<Vec<HistoryRow>>> {
-    let mut c = st.db.acquire().await?;
-    let (node, role) = tree::node_with_role(&mut c, &user, &id).await?;
-    let mut qb = QueryBuilder::<Sqlite>::new("SELECT a.id, a.at, a.username, a.node_id, a.node_name, a.action, a.detail FROM activity a WHERE ");
-    if node.parent_id.is_none() {
-        qb.push("a.drive_id = ").push_bind(node.drive().to_string()).push(" AND a.node_id IS NOT NULL");
-    } else if node.is_folder() {
-        qb.push(
-            "a.node_id IN (WITH RECURSIVE sub(id) AS (
-               SELECT ",
-        )
-        .push_bind(node.id.clone())
-        .push(" UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id) SELECT id FROM sub)");
-    } else {
-        qb.push("a.node_id = ").push_bind(node.id.clone());
-    }
-    if role < Role::Manager {
-        qb.push(" AND a.action IN (");
-        let mut sep = qb.separated(", ");
-        for a in CONTENT_ACTIONS {
-            sep.push_bind(a);
-        }
-        qb.push(")");
-    }
-    qb.push(" ORDER BY a.id DESC LIMIT ").push_bind(HISTORY_LIMIT);
-    Ok(Json(qb.build_query_as().fetch_all(&mut *c).await?))
-}
-
 // ───────────── Share link visit log ─────────────
 
 #[derive(Serialize, sqlx::FromRow)]
 pub struct AccessRow {
-    pub(super) id: i64,
+    pub(crate) id: i64,
     pub(super) at: i64,
     pub(super) share_id: String,
     pub(super) owner_name: Option<String>,
@@ -247,7 +194,7 @@ pub struct AccessRow {
 
 #[derive(Deserialize, Default)]
 pub struct AccessQuery {
-    pub(super) share_id: Option<String>,
+    pub(crate) share_id: Option<String>,
     /// Sharer's username (partial match, for administrators)
     pub(super) owner: Option<String>,
     pub(super) event: Option<String>,
@@ -257,13 +204,13 @@ pub struct AccessQuery {
     pub(super) from: Option<i64>,
     pub(super) to: Option<i64>,
     pub(super) before: Option<i64>,
-    pub(super) limit: Option<i64>,
+    pub(crate) limit: Option<i64>,
 }
 
 /// Visit records: only those of links `owner_id` created, if given. For the administrator `admin`, visits to links
 /// someone else made in someone else's personal space (or in a space that is gone) don't say which link or item they
 /// were, and the keyword search doesn't look at what they leave out.
-pub(super) async fn query_access(st: &AppState, q: &AccessQuery, owner_id: Option<i64>, admin: Option<i64>, limit: i64) -> AppResult<Vec<AccessRow>> {
+pub(crate) async fn query_access(st: &AppState, q: &AccessQuery, owner_id: Option<i64>, admin: Option<i64>, limit: i64) -> AppResult<Vec<AccessRow>> {
     let private = match admin {
         Some(me) => format!("(a.owner_id IS NOT {me} AND a.private_to IS NOT NULL AND a.private_to <> {me})"),
         None => "0".to_string(),
@@ -285,24 +232,6 @@ pub(super) async fn query_access(st: &AppState, q: &AccessQuery, owner_id: Optio
         .contains(&["a.node_name", "a.share_id"], q.q.as_deref())
         .between("a.at", q.from, q.to);
     f.fetch(&st.db, "a.id", q.before, limit).await
-}
-
-/// Share link access records: standard users only see links they created; administrators can query everything
-pub async fn share_access(State(st): State<AppState>, user: User, Query(mut q): Query<AccessQuery>) -> AppResult<Json<Value>> {
-    // A link an administrator may only revoke is asked for by the handle they were given for it
-    if let Some(id) = &q.share_id {
-        let token = crate::shares::resolve(&st, &mut *st.db.acquire().await?, id).await?;
-        q.share_id = Some(token.unwrap_or_default());
-    }
-    // Standard users can only query links they created (including records left by deleted links), and a link someone
-    // else created that they may manage (a manager of its space, the owner of its item)
-    let others = match &q.share_id {
-        Some(id) if !user.is_admin() => crate::shares::may_manage(&st, &user, id).await?,
-        _ => false,
-    };
-    let owner = if user.is_admin() || others { None } else { Some(user.id) };
-    let limit = page_size(q.limit);
-    Ok(page(query_access(&st, &q, owner, user.is_admin().then_some(user.id), limit).await?, limit, |r| r.id))
 }
 
 // ───────────── Sign-in log ─────────────

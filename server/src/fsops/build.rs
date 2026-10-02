@@ -126,7 +126,7 @@ pub async fn place_folder(st: &AppState, user: &User, staged: Staging, dest_id: 
     tree::adjust_usage(&mut tx, dest.drive(), bytes).await?;
     tree::touch(&mut tx, &dest.id).await?;
     let node = tree::get_node(&mut tx, &root).await?;
-    logs::record_activity(&mut tx, user, node.as_ref(), action, detail).await?;
+    logs::record_activity(&mut tx, user, node.as_ref().map(|n| n as _), action, detail).await?;
     tx.commit().await?;
     locks.committed();
     drop(w);
