@@ -315,6 +315,22 @@ a:hover {
   .lang-menu .lang-name {
     display: none;
   }
+
+  /* Room for the language and theme switches next to the links on a phone */
+  .site-header .wrap {
+    gap: 8px;
+  }
+
+  .site-nav a,
+  .theme-toggle,
+  .lang-menu summary {
+    padding: 8px;
+  }
+}
+
+.site-nav a,
+.lang-menu summary {
+  white-space: nowrap;
 }
 
 .visually-hidden {
@@ -474,6 +490,22 @@ h1 em {
   color: var(--text-soft);
   max-width: 620px;
   text-wrap: pretty;
+}
+
+/* On a translated page: the other guides are in English */
+.lang-note {
+  margin: -8px 0 24px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--bg-soft);
+  color: var(--text-soft);
+  font-size: 15px;
+}
+
+.cta .lang-note {
+  margin: 28px auto 0;
+  max-width: 620px;
+  background: none;
 }
 
 .actions {

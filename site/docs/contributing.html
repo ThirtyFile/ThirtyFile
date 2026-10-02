@@ -27,6 +27,13 @@
           <a href="../index.html#features" class="hide-small">Features</a>
           <a href="../docs/index.html" aria-current="page">Guides</a>
           <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">Language </span><span class="lang-name">English</span></summary>
+            <ul>
+              <li><a href="../index.html" hreflang="en" lang="en" aria-current="true">English</a></li>
+              <li><a href="../zh-TW/index.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+            </ul>
+          </details>
         </nav>
       </div>
     </header>
@@ -139,6 +146,7 @@ cd web &amp;&amp; pnpm format</code></pre>
           <li>Each version has <code>&lt;html lang&gt;</code>, its own title and description, and a <code>&lt;link rel="alternate" hreflang&gt;</code> to every version, itself included. The language switch in the header is written into every page, so it works without JavaScript; on pages that aren't translated it leads to each language's home page.</li>
           <li>The languages and the translated pages are listed in <code>LANGUAGES</code> and <code>TRANSLATED</code> at the top of <code>site/assets/site.js</code>, which also holds the translations of the menu and footer. <code>scripts/check.sh site</code> fails when a page in <code>TRANSLATED</code> is missing in a language, or when the language links or switches don't match.</li>
           <li>The words follow the <a href="https://github.com/ThirtyFile/ThirtyFile/blob/main/web/src/lib/i18n/glossary.md">glossary</a> (<code>web/src/lib/i18n/glossary.md</code>), which the interface's translations use too. Simplified Chinese uses the words of mainland China rather than a character conversion of the Traditional Chinese, and Japanese uses です・ます in sentences and the terms of Windows Explorer and Finder.</li>
+          <li>The home page's main screenshot is taken in each language, from a local instance with sample data, 1280 × 720 at 2x, saved as WebP (<code>site/assets/files-light-&lt;language&gt;.webp</code> and <code>files-dark-&lt;language&gt;.webp</code>). The other screenshots stay in English.</li>
         </ul>
 
         <h2 id="labels">Labels</h2>

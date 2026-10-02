@@ -16,7 +16,7 @@
   // language's folder (English is at the root, the others in site/<code>/). Every other page is in English only.
   // scripts/check-site.mjs reads both lists (keep each on one line): it fails when a page below is missing in a
   // language, or when the language links of the pages don't match.
-  const LANGUAGES = [["en", "English"]];
+  const LANGUAGES = [["en", "English"], ["zh-TW", "繁體中文"]];
   const TRANSLATED = ["index.html", "docs/index.html", "docs/first-steps.html"];
 
   const GUIDES = [
@@ -50,7 +50,50 @@
 
   // The texts this script writes, by their English text. The pages' own texts are in their HTML. The words follow
   // the glossary in web/src/lib/i18n/glossary.md
-  const DICT = {};
+  const DICT = {
+    "zh-TW": {
+      "Site": "網站",
+      "Features": "功能",
+      "Guides": "指南",
+      "Language": "語言",
+      "Skip to content": "跳到主要內容",
+      "Switch between light and dark": "切換淺色與深色",
+      "This page is also available in English.": "這個頁面也有繁體中文版。",
+      "Read it in English": "改看繁體中文版",
+      "Close": "關閉",
+      "All guides": "所有指南",
+      "Get started": "開始使用",
+      "Install": "安裝",
+      "First steps": "初次設定",
+      "Everyday use": "日常使用",
+      "Working with files": "檔案操作",
+      "Preview and editing": "預覽與編輯",
+      "Sharing": "分享",
+      "Your account": "你的帳號",
+      "Mapping it as a drive": "連線為網路磁碟機",
+      "Administration": "管理",
+      "Users and spaces": "使用者與空間",
+      "Single sign-on": "單一登入",
+      "Storage locations": "儲存位置",
+      "Logs and branding": "紀錄與品牌",
+      "Running it": "架設與維運",
+      "Settings": "設定",
+      "Putting it on the internet": "從網際網路存取",
+      "Upgrade and backup": "升級與備份",
+      "Troubleshooting": "疑難排解",
+      "The project": "專案",
+      "Contributing": "參與貢獻",
+      "Previous": "上一篇",
+      "Next": "下一篇",
+      "More guides": "更多指南",
+      "Source code": "原始碼",
+      "Report a problem": "回報問題",
+      "Docker image": "Docker 映像檔",
+      "Copy": "複製",
+      "Copied": "已複製",
+      "Select and copy": "請選取後複製",
+    },
+  };
 
   const lang = LANGUAGES.some(([code]) => code === html.lang) ? html.lang : "en";
   const t = (text, code = lang) => DICT[code]?.[text] ?? text;
