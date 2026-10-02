@@ -57,6 +57,8 @@ test("restoring an earlier version while the workbook is open for editing shows 
   await page.getByRole("region", { name: "Versions" }).getByRole("button", { name: "Restore" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Restore" }).click();
   await expect(page.getByText("Version restored")).toBeVisible();
+  // The workbook is opened again, at its first cell
+  await expect(nameBox).toHaveValue("A1");
   await go("C1");
   await expect(page.getByLabel("Formula bar")).toHaveValue("");
 
