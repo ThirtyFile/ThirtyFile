@@ -1,6 +1,7 @@
 // How much is used: the status bar shows the space being browsed, and Storage usage counts folder spaces.
-import { expect, test } from "@playwright/test";
-import { signIn } from "./helpers";
+import { randomBytes } from "node:crypto";
+import { expect, test, type Page } from "@playwright/test";
+import { signIn, uploadFinished } from "./helpers";
 
 interface Drive {
   kind: string;
@@ -9,22 +10,52 @@ interface Drive {
   used_bytes: number;
 }
 
+// An upload is a few changes on the server, and saving thresholds one more: behind a large change made by another test
+// at the same time, each of them can wait half a minute for its turn
+test.describe.configure({ timeout: 120_000 });
+
+/** A size the way the page writes it (formatBytes) */
+function size(n: number) {
+  if (n < 1024) return `${n} B`;
+  let v = n / 1024;
+  let unit = 0;
+  while (v >= 1024 && unit < 3) [v, unit] = [v / 1024, unit + 1];
+  return `${v >= 100 ? v.toFixed(0) : v.toFixed(1)} ${["KB", "MB", "GB", "TB"][unit]}`;
+}
+
+/** The "All files" space: other tests (and other copies of these) use it at the same time */
+async function companySpace(page: Page): Promise<Drive> {
+  const drives: Drive[] = await (await page.request.get("/api/drives")).json();
+  return drives.find((d) => d.kind === "company")!;
+}
+
+/**
+ * Uploads a file of `bytes` bytes through the page into a new folder of the space, and waits until the server has saved
+ * it. The folder is this test's own (a random name), so its file is in view however many the space has.
+ */
+async function upload(page: Page, space: Drive, name: string, bytes: number) {
+  const res = await page.request.post("/api/folders", { data: { parent_id: space.root_id, name: `Usage ${randomBytes(4).toString("hex")}` } });
+  expect(res.ok()).toBe(true);
+  await page.goto(`/files/${(await res.json()).id}`);
+  const finished = uploadFinished(page);
+  await page.locator('input[type="file"][multiple]').setInputFiles([{ name, mimeType: "text/plain", buffer: Buffer.alloc(bytes, 97) }]);
+  await finished;
+  await expect(page.locator("[data-node-id]").filter({ hasText: name })).toBeVisible();
+}
+
 test("the status bar shows the space being browsed, and Storage usage counts folder spaces", async ({ page }) => {
   await signIn(page);
-  const drives: Drive[] = await (await page.request.get("/api/drives")).json();
-  const company = drives.find((d) => d.kind === "company")!;
+  const company = await companySpace(page);
   // A new installation keeps its spaces in folders on the disk
   expect(company.mode).toBe("folder");
-  await page.goto(`/files/${company.root_id}`);
-  await page.locator('input[type="file"][multiple]').setInputFiles([{ name: `usage ${Date.now().toString(36)}.txt`, mimeType: "text/plain", buffer: Buffer.alloc(3000, 97) }]);
-  await expect(page.locator("[data-node-id]").filter({ hasText: "usage " })).toBeVisible();
+  await upload(page, company, "usage.txt", 3000);
 
-  // Not the personal space's figure: the one of "All files"
-  const used = async () => ((await (await page.request.get("/api/drives")).json()) as Drive[]).find((d) => d.kind === "company")!.used_bytes;
-  await expect.poll(used).toBeGreaterThanOrEqual(3000);
-  const kb = `${((await used()) / 1024).toFixed(1)} KB used`;
+  // Not the personal space's figure: the one of "All files", which counts the file once the server has saved it
+  const used = async () => (await companySpace(page)).used_bytes;
+  expect(await used()).toBeGreaterThanOrEqual(company.used_bytes + 3000);
   await page.getByRole("button", { name: "Refresh", exact: true }).first().click();
-  await expect(page.locator("footer").getByText(kb)).toBeVisible();
+  // (read again each time: other tests may upload into the same space meanwhile)
+  await expect.poll(async () => (await page.locator("footer").textContent())?.includes(`${size(await used())} used`)).toBe(true);
 
   // The actual disk use includes the folder spaces' files
   const settings = await (await page.request.get("/api/admin/settings")).json();
@@ -33,11 +64,7 @@ test("the status bar shows the space being browsed, and Storage usage counts fol
 
 test("Storage usage shows each location, its history as charts and tables, and saves alert thresholds", async ({ page }) => {
   await signIn(page);
-  const drives: Drive[] = await (await page.request.get("/api/drives")).json();
-  const company = drives.find((d) => d.kind === "company")!;
-  await page.goto(`/files/${company.root_id}`);
-  await page.locator('input[type="file"][multiple]').setInputFiles([{ name: `chart ${Date.now().toString(36)}.txt`, mimeType: "text/plain", buffer: Buffer.alloc(5000, 98) }]);
-  await expect(page.locator("[data-node-id]").filter({ hasText: "chart " })).toBeVisible();
+  await upload(page, await companySpace(page), "chart.txt", 5000);
   // The first capacity sample is taken shortly after the start
   await expect.poll(async () => (await (await page.request.get("/api/admin/usage")).json()).total !== null, { timeout: 30_000 }).toBe(true);
 
@@ -66,14 +93,19 @@ test("Storage usage shows each location, its history as charts and tables, and s
   await page.getByLabel("Time range").selectOption("30d");
   await expect(page.getByText(/the last sample of each hour/i).first()).toBeVisible();
 
-  // Thresholds are saved, and a disk above one raises an alert at the top of the page
-  await page.getByLabel("Alert when a disk is fuller than").fill("0.001");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  // Thresholds are saved, and a disk above one raises an alert at the top of the page. Saving waits its turn behind
+  // other changes on the server: the page shows the alerts once the server has answered.
+  const save = async (percent: string) => {
+    await page.getByLabel("Alert when a disk is fuller than").fill(percent);
+    const saved = page.waitForResponse((r) => r.request().method() === "PUT" && new URL(r.url()).pathname === "/api/admin/usage/thresholds");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    expect((await saved).ok()).toBe(true);
+  };
+  await save("0.001");
   await expect(page.getByRole("heading", { name: /\d+ alerts?/ })).toBeVisible();
   await expect(page.getByText(/Local disk: the disk is .* full/)).toBeVisible();
   // (100: a test machine's disk may well be fuller than the usual 90%)
-  await page.getByLabel("Alert when a disk is fuller than").fill("100");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await save("100");
   await expect(page.getByText(/Local disk: the disk is .* full/)).toBeHidden();
 
   // At phone width nothing makes the page scroll sideways
