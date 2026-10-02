@@ -18,6 +18,20 @@ use crate::{
     util::new_id,
 };
 
+/// What thumbnails keep in memory (a part of `AppState`)
+pub struct Memory {
+    /// Thumbnails made at the same time
+    pub permits: tokio::sync::Semaphore,
+    /// Most memory one thumbnail may use to decode its image
+    pub decode_bytes: u64,
+}
+
+impl Memory {
+    pub fn new(jobs: usize, decode_bytes: u64) -> Memory {
+        Memory { permits: tokio::sync::Semaphore::new(jobs), decode_bytes }
+    }
+}
+
 /// Size limit for thumbnail source files: the source is read entirely into memory (`THIRTYFILE_THUMBNAIL_JOBS` at a time)
 const MAX_THUMB_SOURCE: i64 = 20 * 1024 * 1024;
 /// Decoding limit: keeps malicious images that are tiny on disk but huge when decoded (e.g. a 30000×30000 PNG) from
@@ -218,13 +232,13 @@ pub async fn thumbnail_response(st: &AppState, headers: &HeaderMap, n: &Node) ->
         // that stops waiting neither frees the turn while the picture is still being decoded nor throws the work away
         let (st, path) = (st.clone(), path.clone());
         tokio::spawn(async move {
-            let _permit = st.thumb_permits.acquire().await.map_err(AppError::internal)?;
+            let _permit = st.part::<Memory>().permits.acquire().await.map_err(AppError::internal)?;
             if tokio::fs::try_exists(&path).await? {
                 return Ok(());
             }
             let mut data = Vec::with_capacity(size as usize);
             source.open(&st, 0, size).await?.read_to_end(&mut data).await?;
-            let max_alloc = st.thumb_decode_bytes;
+            let max_alloc = st.part::<Memory>().decode_bytes;
             let jpeg = tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
                 let mut reader = image::ImageReader::new(std::io::Cursor::new(data)).with_guessed_format().ok()?;
                 let mut limits = image::Limits::default();
@@ -286,7 +300,7 @@ pub async fn upload_thumbnail(State(st): State<AppState>, user: User, Path(id): 
     if tokio::fs::metadata(&path).await.is_ok_and(|m| m.len() > 0) {
         return Ok(StatusCode::NO_CONTENT);
     }
-    let _permit = st.thumb_permits.acquire().await.map_err(AppError::internal)?;
+    let _permit = st.part::<Memory>().permits.acquire().await.map_err(AppError::internal)?;
     let jpeg = tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
         let format = image::guess_format(&body).ok()?;
         if !matches!(format, image::ImageFormat::Jpeg | image::ImageFormat::Png) {
@@ -381,13 +395,13 @@ mod tests {
         // The browser goes away while the picture is being decoded: the decoding keeps its turn until it is done, and
         // its thumbnail is kept, so asking again doesn't decode it again
         let asked = tokio::spawn(thumbnail(State(env.st.clone()), amy.clone(), Path(pic.clone()), HeaderMap::new()));
-        while env.st.thumb_permits.available_permits() == 2 {
+        while env.st.part::<Memory>().permits.available_permits() == 2 {
             assert!(!asked.is_finished(), "the thumbnail was made before its turn was seen");
             tokio::time::sleep(std::time::Duration::from_millis(1)).await;
         }
         asked.abort();
         let _ = asked.await;
-        assert_eq!(env.st.thumb_permits.available_permits(), 1, "the turn was given back while the picture is still decoded");
+        assert_eq!(env.st.part::<Memory>().permits.available_permits(), 1, "the turn was given back while the picture is still decoded");
         let cached = env.st.thumb_path(&crate::util::sha256_hex(&data));
         for _ in 0..3000 {
             if std::fs::metadata(&cached).is_ok_and(|m| m.len() > 0) {
@@ -397,12 +411,12 @@ mod tests {
         }
         assert!(std::fs::metadata(&cached).is_ok_and(|m| m.len() > 0), "the thumbnail was dropped with the request");
         for _ in 0..500 {
-            if env.st.thumb_permits.available_permits() == 2 {
+            if env.st.part::<Memory>().permits.available_permits() == 2 {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
-        assert_eq!(env.st.thumb_permits.available_permits(), 2);
+        assert_eq!(env.st.part::<Memory>().permits.available_permits(), 2);
     }
 
     #[tokio::test]

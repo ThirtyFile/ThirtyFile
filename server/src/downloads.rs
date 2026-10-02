@@ -495,6 +495,13 @@ pub const DOWNLOAD_LINK_SECS: i64 = 120;
 /// Download links kept per user or share link; making another one drops the oldest
 const DOWNLOAD_LINKS_PER_OWNER: usize = 16;
 
+/// What downloads keep in memory (a part of `AppState`)
+#[derive(Default)]
+pub struct Memory {
+    /// Selections waiting to be downloaded through a short-lived link: link token → selection (see `store_download_link`)
+    pub links: std::sync::Mutex<std::collections::HashMap<String, DownloadLink>>,
+}
+
 /// A selection of items to download, kept on the server so the ids don't have to fit in a URL
 pub struct DownloadLink {
     /// Who may use the link: `user:<id>` or `share:<token>`
@@ -527,7 +534,7 @@ pub fn store_download_link(st: &AppState, owner: String, ids: Vec<String>, tz: i
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let token = crate::util::random_token(32);
     let t = now();
-    let mut links = st.download_links.lock().unwrap();
+    let mut links = st.part::<Memory>().links.lock().unwrap();
     links.retain(|_, l| l.expires > t);
     let mut own: Vec<(u64, String)> = links.iter().filter(|(_, l)| l.owner == owner).map(|(k, l)| (l.seq, k.clone())).collect();
     if own.len() >= DOWNLOAD_LINKS_PER_OWNER {
@@ -542,7 +549,7 @@ pub fn store_download_link(st: &AppState, owner: String, ids: Vec<String>, tz: i
 
 /// The selection behind a download link (its ids and time zone), when it belongs to `owner` and hasn't expired
 pub fn download_link(st: &AppState, owner: &str, token: &str) -> AppResult<(Vec<String>, i64)> {
-    let links = st.download_links.lock().unwrap();
+    let links = st.part::<Memory>().links.lock().unwrap();
     match links.get(token) {
         Some(l) if l.owner == owner && l.expires > now() => Ok((l.ids.clone(), l.tz)),
         _ => Err(AppError::not_found("This download link has expired. Start the download again.")),
@@ -637,7 +644,7 @@ mod tests {
 
         // The link is only for the user who made it, and only for a short while
         assert_eq!(get(ben.clone(), token.clone()).await.unwrap_err().status, StatusCode::NOT_FOUND);
-        env.st.download_links.lock().unwrap().get_mut(&token).unwrap().expires = now();
+        env.st.part::<Memory>().links.lock().unwrap().get_mut(&token).unwrap().expires = now();
         assert_eq!(get(amy.clone(), token).await.unwrap_err().status, StatusCode::NOT_FOUND);
 
         // Items the user can't open are refused when the link is made
@@ -663,7 +670,7 @@ mod tests {
         let first = link("user:1");
         let tokens: Vec<String> = (0..DOWNLOAD_LINKS_PER_OWNER).map(|_| link("user:1")).collect();
         let other = link("user:2");
-        let links = env.st.download_links.lock().unwrap();
+        let links = env.st.part::<Memory>().links.lock().unwrap();
         assert_eq!(links.values().filter(|l| l.owner == "user:1").count(), DOWNLOAD_LINKS_PER_OWNER);
         assert!(!links.contains_key(&first));
         assert!(tokens.iter().all(|t| links.contains_key(t)) && links.contains_key(&other));

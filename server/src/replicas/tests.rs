@@ -11,6 +11,7 @@ use super::{REPLICAS, api, policy};
 use crate::{
     auth::{Admin, User},
     backups::runner,
+    replicas::Memory,
     storage::{self, LocalStorage, Storage},
     testutil::{self, TestEnv},
 };
@@ -57,7 +58,7 @@ async fn run_queued(env: &TestEnv, policy: &str) -> Vec<String> {
         .unwrap();
     let mut out = Vec::new();
     for (id,) in ids {
-        let job = runner::job_in(&mut env.st.db.acquire().await.unwrap(), &env.st.replicas, &id).await.unwrap().unwrap();
+        let job = runner::job_in(&mut env.st.db.acquire().await.unwrap(), &env.st.part::<Memory>().queue, &id).await.unwrap().unwrap();
         let ctl = runner::take_in(&env.st, &REPLICAS, &job).await.unwrap().expect("queued");
         runner::run_in(&env.st, &REPLICAS, &job, &ctl).await;
         let (state, error): (String, Option<String>) =
@@ -532,7 +533,7 @@ async fn a_sync_waits_for_its_target_continues_after_a_restart_and_is_refused_af
     policy::tick(&env.st, t).await.unwrap();
     policy::tick(&env.st, t + policy::BATCH_SECONDS).await.unwrap();
     sqlx::query("UPDATE replica_jobs SET state = 'running' WHERE state = 'queued'").execute(&env.st.db).await.unwrap();
-    runner::recover_in(&env.st, &env.st.replicas).await.unwrap();
+    runner::recover_in(&env.st, &env.st.part::<Memory>().queue).await.unwrap();
     let (queued,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM replica_jobs WHERE state = 'queued'").fetch_one(&env.st.db).await.unwrap();
     assert!(queued >= 1);
     // A promotion meanwhile: the syncs asked for before are refused, not run with an old view

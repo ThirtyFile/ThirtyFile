@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqliteConnection;
 
 use crate::{
+    backups::Memory,
     error::{AppError, AppResult},
     state::AppState,
     util::now,
@@ -343,7 +344,7 @@ pub static BACKUPS: BackupEngine = BackupEngine;
 
 impl Engine for BackupEngine {
     fn queue<'a>(&self, st: &'a AppState) -> &'a Queue {
-        &st.backups
+        &st.part::<Memory>().queue
     }
 
     fn run<'a>(&'a self, cx: &'a Ctx<'a>) -> BoxFuture<'a, AppResult<Stop>> {
@@ -413,7 +414,7 @@ pub fn spawn(st: AppState, engine: &'static dyn Engine) {
 /// After a restart: jobs of backups/ that were running wait for their turn again
 #[cfg(test)]
 pub(super) async fn recover(st: &AppState) -> AppResult<()> {
-    recover_in(st, &st.backups).await
+    recover_in(st, &st.part::<Memory>().queue).await
 }
 
 /// After a restart: jobs that were running wait for their turn again, ahead of newer ones

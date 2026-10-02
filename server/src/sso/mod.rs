@@ -158,6 +158,22 @@ impl ProviderConfig {
     }
 }
 
+/// What single sign-on keeps in memory (a part of `AppState`)
+pub struct Memory {
+    /// Third-party sign-in settings
+    pub settings: std::sync::RwLock<SsoSettings>,
+    /// Sign-ins in progress
+    pub pending: PendingMap,
+    /// One-time tickets for linking a sign-in method to an account: ticket → (user, created)
+    pub link_tickets: std::sync::Mutex<HashMap<String, (i64, std::time::Instant)>>,
+}
+
+impl Memory {
+    pub fn new(settings: SsoSettings) -> Memory {
+        Memory { settings: std::sync::RwLock::new(settings), pending: Default::default(), link_tickets: Default::default() }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SsoSettings {
@@ -343,7 +359,7 @@ pub fn base_url(st: &AppState, headers: &HeaderMap) -> String {
     let forwarded = headers
         .get("x-forwarded-proto")
         .and_then(|v| v.to_str().ok())
-        .filter(|_| st.trust_proxy.enabled())
+        .filter(|_| st.part::<crate::auth::Memory>().trust_proxy.enabled())
         .and_then(|v| v.rsplit(',').next())
         .map(str::trim)
         .filter(|v| matches!(*v, "http" | "https"));
@@ -448,7 +464,7 @@ mod tests {
             c.client_secret = crate::testutil::password().into();
         }
         f(&mut s);
-        *env.st.sso.write().unwrap() = s;
+        *env.st.part::<Memory>().settings.write().unwrap() = s;
     }
 
     fn location(r: &Response) -> String {
@@ -807,7 +823,7 @@ mod tests {
         assert!(save(oidc(&format!("{base}/other"))).await.is_err());
         // Its endpoints are read from the discovery document
         let _ = save(oidc(&format!("{base}/realm/"))).await.unwrap();
-        let cfg = env.st.sso.read().unwrap().oidc.clone();
+        let cfg = env.st.part::<Memory>().settings.read().unwrap().oidc.clone();
         assert_eq!((cfg.issuer, cfg.authorize_url, cfg.token_url), (format!("{base}/realm"), format!("{base}/oidc/authorize"), format!("{base}/oidc/token")));
         let Json(list) = providers(State(env.st.clone())).await;
         assert!(list.as_array().unwrap().iter().any(|p| p["id"] == "oidc" && p["label"] == "Company login"), "{list}");

@@ -380,7 +380,7 @@ pub fn spawn_runner(st: AppState) {
                 tracing::warn!("Couldn't start moving a space: {}", e.message);
             }
             tokio::select! {
-                _ = st.moves.wake.notified() => {}
+                _ = st.part::<Moves>().wake.notified() => {}
                 _ = tokio::time::sleep(Duration::from_secs(30)) => {}
             }
         }
@@ -428,7 +428,7 @@ async fn requeue_orphans(st: &AppState) -> AppResult<()> {
     let _w = st.write_lock.lock().await;
     // Read with the write lock held: a task takes its place in the list before its move is marked running (`take`),
     // and leaves it only after its last write (`Running`)
-    let running: Vec<String> = st.moves.running.lock().unwrap().keys().cloned().collect();
+    let running: Vec<String> = st.part::<Moves>().running.lock().unwrap().keys().cloned().collect();
     let orphans = sqlx::query("UPDATE space_moves SET state = 'queued' WHERE state = 'running' AND id NOT IN (SELECT value FROM json_each(?))")
         .bind(serde_json::to_string(&running).unwrap())
         .execute(&st.db)
@@ -445,7 +445,7 @@ async fn start_due(st: &AppState) -> AppResult<()> {
     requeue_orphans(st).await?;
     loop {
         let limit = st.system.read().unwrap().move_jobs.clamp(1, MAX_JOBS) as usize;
-        let busy: Vec<String> = st.moves.running.lock().unwrap().keys().cloned().collect();
+        let busy: Vec<String> = st.part::<Moves>().running.lock().unwrap().keys().cloned().collect();
         if busy.len() >= limit {
             return Ok(());
         }
@@ -468,7 +468,7 @@ async fn start_due(st: &AppState) -> AppResult<()> {
 /// when it was paused or cancelled meanwhile
 async fn take(st: &AppState, job: &Job) -> AppResult<Option<Arc<Control>>> {
     let ctl = Arc::new(Control::default());
-    st.moves.running.lock().unwrap().insert(job.id.clone(), ctl.clone());
+    st.part::<Moves>().running.lock().unwrap().insert(job.id.clone(), ctl.clone());
     let taken = async {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
@@ -492,7 +492,7 @@ async fn take(st: &AppState, job: &Job) -> AppResult<Option<Arc<Control>>> {
     }
     .await;
     if !matches!(taken, Ok(true)) {
-        st.moves.running.lock().unwrap().remove(&job.id);
+        st.part::<Moves>().running.lock().unwrap().remove(&job.id);
     }
     Ok(taken?.then_some(ctl))
 }
@@ -502,8 +502,8 @@ struct Running<'a>(&'a AppState, String);
 
 impl Drop for Running<'_> {
     fn drop(&mut self) {
-        self.0.moves.running.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.1);
-        self.0.moves.wake.notify_one();
+        self.0.part::<Moves>().running.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.1);
+        self.0.part::<Moves>().wake.notify_one();
     }
 }
 
@@ -761,7 +761,7 @@ pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<MovesL
     )))
     .fetch_all(&st.db)
     .await?;
-    let running = st.moves.running.lock().unwrap();
+    let running = st.part::<Moves>().running.lock().unwrap();
     for m in &mut moves {
         m.failure_list = serde_json::from_str(&m.failures).unwrap_or_default();
         if let Some(ctl) = running.get(&m.id) {
@@ -824,7 +824,7 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(mut req
     }
     .await;
     let ids = crate::db::settle(tx, res).await?;
-    st.moves.wake.notify_one();
+    st.part::<Moves>().wake.notify_one();
     Ok(Json(json!({ "ids": ids })))
 }
 
@@ -898,7 +898,7 @@ async fn job_for(st: &AppState, id: &str) -> AppResult<(Job, String)> {
 
 /// Pauses a move: a running one stops after the item it is copying, keeping what it copied
 pub async fn pause(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
-    if let Some(ctl) = st.moves.running.lock().unwrap().get(&id) {
+    if let Some(ctl) = st.part::<Moves>().running.lock().unwrap().get(&id) {
         ctl.pause.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
@@ -923,13 +923,13 @@ pub async fn resume(State(st): State<AppState>, _: Admin, Path(id): Path<String>
             return Err(AppError::conflict("This move can't be resumed now"));
         }
     }
-    st.moves.wake.notify_one();
+    st.part::<Moves>().wake.notify_one();
     Ok(Json(json!({ "ok": true })))
 }
 
 /// Cancels a move: the space stays where it was, and what was copied is removed
 pub async fn cancel(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
-    if let Some(ctl) = st.moves.running.lock().unwrap().get(&id) {
+    if let Some(ctl) = st.part::<Moves>().running.lock().unwrap().get(&id) {
         ctl.cancel.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
@@ -973,7 +973,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
         crate::db::settle(tx, res).await?;
     }
     st.system.write().unwrap().move_jobs = req.concurrency;
-    st.moves.wake.notify_one();
+    st.part::<Moves>().wake.notify_one();
     Ok(Json(json!({ "ok": true })))
 }
 

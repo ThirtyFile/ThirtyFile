@@ -148,7 +148,7 @@ pub async fn serve(State(st): State<crate::state::AppState>, uri: Uri, headers: 
         Some(index) => {
             // Inject branding (title, favicon, colors) so the default styling doesn't flash while loading
             let lang = st.system.read().unwrap().default_lang.clone();
-            let mut html = crate::branding::inject(&String::from_utf8_lossy(&index.data), &st.branding.read().unwrap(), &lang);
+            let mut html = crate::branding::inject(&String::from_utf8_lossy(&index.data), &st.part::<crate::branding::Memory>().settings.read().unwrap(), &lang);
             if wants_chinese(&headers, &lang) && Assets::get("zh-TW.js").is_some() {
                 html = html.replacen("</head>", "  <script src=\"/zh-TW.js\"></script>\n  </head>", 1);
             }

@@ -245,7 +245,7 @@ impl FromRequestParts<AppState> for Admin {
 /// limit while the first one is still hashing. Returns false (nothing recorded) when the limit is already reached.
 /// A successful attempt is taken back with `attempt_succeeded`.
 pub fn begin_attempt(st: &AppState, key: &str, limit: usize) -> bool {
-    let mut map = st.login_failures.lock().unwrap();
+    let mut map = st.part::<Memory>().login_failures.lock().unwrap();
     let cutoff = now() - FAIL_WINDOW;
     let list = map.entry(key.to_string()).or_default();
     list.retain(|t| *t > cutoff);
@@ -260,7 +260,7 @@ pub fn begin_attempt(st: &AppState, key: &str, limit: usize) -> bool {
 /// each attempt must wait twice as long after the previous one as the one before (up to `ACCOUNT_MAX_DELAY`), which
 /// slows down guessing from many addresses without letting anyone lock the real user out. Returns the seconds to wait.
 pub fn begin_account_attempt(st: &AppState, key: &str) -> Result<(), i64> {
-    let mut map = st.login_failures.lock().unwrap();
+    let mut map = st.part::<Memory>().login_failures.lock().unwrap();
     let ts = now();
     let list = map.entry(key.to_string()).or_default();
     list.retain(|t| *t > ts - FAIL_WINDOW);
@@ -280,12 +280,12 @@ pub fn begin_account_attempt(st: &AppState, key: &str) -> Result<(), i64> {
 /// rather than a password hash): the attempt is checked first and only a failure is counted, with `begin_attempt`.
 pub fn attempts_exhausted(st: &AppState, key: &str, limit: usize) -> bool {
     let cutoff = now() - FAIL_WINDOW;
-    st.login_failures.lock().unwrap().get(key).is_some_and(|list| list.iter().filter(|t| **t > cutoff).count() >= limit)
+    st.part::<Memory>().login_failures.lock().unwrap().get(key).is_some_and(|list| list.iter().filter(|t| **t > cutoff).count() >= limit)
 }
 
 /// Removes the attempt recorded by `begin_attempt` (the password was right)
 pub fn attempt_succeeded(st: &AppState, key: &str) {
-    let mut map = st.login_failures.lock().unwrap();
+    let mut map = st.part::<Memory>().login_failures.lock().unwrap();
     if let Some(list) = map.get_mut(key) {
         list.pop();
         if list.is_empty() {
@@ -297,10 +297,24 @@ pub fn attempt_succeeded(st: &AppState, key: &str) {
 /// Clears expired failed sign-in records (runs periodically, so large numbers of random usernames can't exhaust memory)
 pub fn prune_login_failures(st: &AppState) {
     let cutoff = now() - FAIL_WINDOW;
-    st.login_failures.lock().unwrap().retain(|_, list| {
+    st.part::<Memory>().login_failures.lock().unwrap().retain(|_, list| {
         list.retain(|t| *t > cutoff);
         !list.is_empty()
     });
+}
+
+/// What auth keeps in memory (a part of `AppState`)
+pub struct Memory {
+    /// Trust X-Forwarded-For sent by a reverse proxy
+    pub trust_proxy: TrustProxy,
+    /// Failed sign-in records: username → failure timestamps
+    pub login_failures: std::sync::Mutex<std::collections::HashMap<String, Vec<i64>>>,
+}
+
+impl Memory {
+    pub fn new(trust_proxy: TrustProxy) -> Memory {
+        Memory { trust_proxy, login_failures: Default::default() }
+    }
 }
 
 /// Which reverse proxies may tell us the visitor's address (`THIRTYFILE_TRUST_PROXY`)
@@ -377,7 +391,7 @@ fn in_network(ip: std::net::IpAddr, net: std::net::IpAddr, bits: u8) -> bool {
 /// `$proxy_add_x_forwarded_for` appends to the value the client sent), so they can't be used for sign-in rate limiting.
 /// Connections from anywhere else can't set it, so publishing the port directly doesn't let visitors choose their address.
 pub fn client_ip(st: &AppState, addr: std::net::SocketAddr, headers: &HeaderMap) -> String {
-    if st.trust_proxy.trusts(addr.ip())
+    if st.part::<Memory>().trust_proxy.trusts(addr.ip())
         && let Some(ip) = forwarded_ip(headers)
     {
         return ip;
@@ -435,7 +449,7 @@ pub async fn confirm_password(st: &AppState, user_id: i64, password: String) -> 
     if !verify_password(password, hash).await? {
         return Err(AppError::bad_request("Current password is incorrect"));
     }
-    st.login_failures.lock().unwrap().remove(&key);
+    st.part::<Memory>().login_failures.lock().unwrap().remove(&key);
     Ok(())
 }
 

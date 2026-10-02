@@ -249,7 +249,7 @@ pub struct Active {
 /// Counted operations per location, operation and kind of work
 pub type Windows = HashMap<String, HashMap<(Op, Work), Window>>;
 
-/// All counters of the server (`Inner::usage`)
+/// All counters of the server (`usage::Memory`)
 #[derive(Default)]
 pub struct Meters {
     windows: Mutex<Windows>,
@@ -521,6 +521,17 @@ impl Storage for Metered {
     }
     fn list_content<'a>(&'a self, seen: &'a (dyn Fn(u64) + Send + Sync)) -> BoxFuture<'a, io::Result<Vec<Entry>>> {
         Box::pin(self.timed(Op::List, 0, self.inner.list_content(seen)))
+    }
+}
+
+// `st.storage(location)`: the backend of a location, with its calls counted here
+impl crate::state::Inner {
+    /// Gets the backend of a storage location; its calls are counted for Storage usage (usage/)
+    pub fn storage(&self, location: &str) -> crate::error::AppResult<Arc<dyn Storage>> {
+        let backend = self.storages.read().unwrap().get(location).cloned().ok_or_else(|| {
+            crate::error::AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("Storage location \"{location}\" is currently unavailable"))
+        })?;
+        Ok(Metered::wrap(backend, self.part::<super::Memory>().meters.clone(), self.recheck.clone(), location))
     }
 }
 

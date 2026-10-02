@@ -35,6 +35,7 @@ use super::{LogEvent, enqueue};
 use crate::{
     auth::{Admin, User},
     error::{AppResult, ErrorInfo, REQUEST, RequestCtx},
+    logs::Memory,
     redact::{clip, page_route, redact},
     state::AppState,
     util::now,
@@ -134,7 +135,7 @@ fn record_server(
     severity: &'static str,
     kind: &'static str,
 ) {
-    if !st.error_log.allow_server() {
+    if !st.part::<Memory>().errors.allow_server() {
         return;
     }
     let resource = resource_of(route.as_deref(), path);
@@ -166,7 +167,7 @@ fn record_server(
         fingerprint: String::new(),
     }
     .fingerprinted();
-    st.error_log.remember(&ctx.id, &e.fingerprint);
+    st.part::<Memory>().errors.remember(&ctx.id, &e.fingerprint);
     enqueue(st, LogEvent::Error(Box::new(e)));
 }
 
@@ -211,7 +212,7 @@ pub(super) async fn write_error(conn: &mut sqlx::SqliteConnection, st: &AppState
         && let Some(request) = &e.request_id
     {
         // The server's record carries the request's id, or had it before a later occurrence of the same error took over
-        let fingerprint = st.error_log.fingerprint_of(request);
+        let fingerprint = st.part::<Memory>().errors.fingerprint_of(request);
         let res = sqlx::query(
             "UPDATE error_log SET client = ? WHERE id = (SELECT id FROM error_log WHERE source = 'backend'
                AND (request_id = ? OR (fingerprint = ? AND at >= ?)) ORDER BY id DESC LIMIT 1)",
@@ -395,7 +396,7 @@ pub async fn client_report(State(st): State<AppState>, ConnectInfo(addr): Connec
         Some(u) => format!("user:{}", u.id),
         None => format!("ip:{}", crate::auth::limit_key_ip(&crate::auth::client_ip(&st, addr, &parts.headers))),
     };
-    if !st.error_log.allow_client(&key, user.is_none()) {
+    if !st.part::<Memory>().errors.allow_client(&key, user.is_none()) {
         return refused(StatusCode::TOO_MANY_REQUESTS);
     }
     enqueue(&st, LogEvent::Error(Box::new(e)));

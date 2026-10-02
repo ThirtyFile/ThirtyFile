@@ -16,6 +16,7 @@ use super::{
 };
 use crate::{
     auth::{Admin, User},
+    backups::Memory,
     error::{AppError, AppResult},
     locations::Relation,
     state::AppState,
@@ -170,7 +171,7 @@ pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Overvi
     .await?;
     for j in &mut jobs {
         j.failure_list = serde_json::from_str(&j.failures).unwrap_or_default();
-        if let Some((fd, bd, ft, bt, rate)) = runner::live(&st.backups, &j.id) {
+        if let Some((fd, bd, ft, bt, rate)) = runner::live(&st.part::<Memory>().queue, &j.id) {
             (j.files_done, j.bytes_done, j.files_total, j.bytes_total, j.speed) = (fd, bd, ft, bt, Some(rate));
         }
         if j.kind == "restore" {
@@ -386,7 +387,7 @@ pub async fn copy(State(st): State<AppState>, Admin(user): Admin, Json(req): Jso
         .await;
         crate::db::settle(tx, res).await?;
     }
-    st.backups.wake.notify_one();
+    st.part::<Memory>().queue.wake.notify_one();
     Ok(Json(json!({ "set_id": set_id, "job_id": job_id })))
 }
 
@@ -647,7 +648,7 @@ pub async fn create_policy(State(st): State<AppState>, Admin(user): Admin, Json(
     }
     // The first snapshot is made now: the schedule protects the spaces from then on
     super::policy::trigger(&st, &set_id, "manual", Some((user.id, user.username.clone()))).await?;
-    st.backups.policies.notify_one();
+    st.part::<Memory>().queue.policies.notify_one();
     Ok(Json(json!({ "set_id": set_id })))
 }
 
@@ -704,20 +705,20 @@ pub async fn update_policy(State(st): State<AppState>, Admin(user): Admin, Path(
     };
     if !enabled && was {
         // The policy's snapshot being made now stops after the item it is copying
-        let running: Vec<String> = st.backups.running.lock().unwrap().keys().cloned().collect();
+        let running: Vec<String> = st.part::<Memory>().queue.running.lock().unwrap().keys().cloned().collect();
         let mine: Option<(String,)> = sqlx::query_as("SELECT id FROM backup_jobs WHERE set_id = ? AND kind = 'snapshot' AND id IN (SELECT value FROM json_each(?))")
             .bind(&id)
             .bind(serde_json::to_string(&running).unwrap())
             .fetch_optional(&st.db)
             .await?;
         if let Some((job,)) = mine
-            && let Some(ctl) = st.backups.running.lock().unwrap().get(&job)
+            && let Some(ctl) = st.part::<Memory>().queue.running.lock().unwrap().get(&job)
         {
             ctl.pause.store(true, Ordering::SeqCst);
         }
     }
-    st.backups.wake.notify_one();
-    st.backups.policies.notify_one();
+    st.part::<Memory>().queue.wake.notify_one();
+    st.part::<Memory>().queue.policies.notify_one();
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -748,7 +749,7 @@ async fn job_state(st: &AppState, id: &str) -> AppResult<(runner::Job, runner::J
 
 /// Pauses a job: a running one stops after the item it is working on, keeping what it did
 pub async fn pause(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
-    if let Some(ctl) = st.backups.running.lock().unwrap().get(&id) {
+    if let Some(ctl) = st.part::<Memory>().queue.running.lock().unwrap().get(&id) {
         ctl.pause.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
@@ -773,7 +774,7 @@ pub async fn resume(State(st): State<AppState>, _: Admin, Path(id): Path<String>
             return Err(AppError::conflict("This job can't be resumed now"));
         }
     }
-    st.backups.wake.notify_one();
+    st.part::<Memory>().queue.wake.notify_one();
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -783,7 +784,7 @@ pub async fn cancel(State(st): State<AppState>, _: Admin, Path(id): Path<String>
     if job.kind == "remove" {
         return Err(AppError::conflict("Deleting a copy can't be cancelled: a copy half deleted can't be restored from. Pause it instead."));
     }
-    if let Some(ctl) = st.backups.running.lock().unwrap().get(&id) {
+    if let Some(ctl) = st.part::<Memory>().queue.running.lock().unwrap().get(&id) {
         ctl.cancel.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
@@ -828,7 +829,7 @@ pub async fn verify(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
         .await;
         crate::db::settle(tx, res).await?;
     }
-    st.backups.wake.notify_one();
+    st.part::<Memory>().queue.wake.notify_one();
     Ok(Json(json!({ "job_id": job_id })))
 }
 
@@ -847,7 +848,7 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
         .await;
         crate::db::settle(tx, res).await?;
     }
-    st.backups.wake.notify_one();
+    st.part::<Memory>().queue.wake.notify_one();
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -948,7 +949,7 @@ pub async fn import(State(st): State<AppState>, Admin(user): Admin, Json(req): J
         crate::db::settle(tx, res).await?;
         added.push(info.name);
     }
-    st.backups.wake.notify_one();
+    st.part::<Memory>().queue.wake.notify_one();
     Ok(Json(json!({ "found": found, "added": added })))
 }
 
@@ -1168,7 +1169,7 @@ pub async fn restore(State(st): State<AppState>, Admin(user): Admin, Path(id): P
         .await;
         crate::db::settle(tx, res).await?;
     }
-    st.backups.wake.notify_one();
+    st.part::<Memory>().queue.wake.notify_one();
     Ok(Json(json!({ "job_id": job_id })))
 }
 

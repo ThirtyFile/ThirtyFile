@@ -43,6 +43,20 @@ use crate::{
 
 pub use policy::spawn_scheduler;
 
+/// What replicas keep in memory (a part of `AppState`)
+pub struct Memory {
+    /// Replica jobs running now
+    pub queue: crate::backups::Queue,
+    /// When reads last fell back to a replica, by location
+    pub fallbacks: std::sync::Mutex<std::collections::HashMap<String, i64>>,
+}
+
+impl Default for Memory {
+    fn default() -> Memory {
+        Memory { queue: crate::backups::Queue::replicas(), fallbacks: Default::default() }
+    }
+}
+
 /// The engine of replica jobs
 pub struct ReplicaEngine;
 
@@ -50,7 +64,7 @@ pub static REPLICAS: ReplicaEngine = ReplicaEngine;
 
 impl Engine for ReplicaEngine {
     fn queue<'a>(&self, st: &'a AppState) -> &'a Queue {
-        &st.replicas
+        &st.part::<Memory>().queue
     }
 
     fn run<'a>(&'a self, cx: &'a Ctx<'a>) -> BoxFuture<'a, AppResult<Stop>> {
@@ -313,7 +327,7 @@ pub(super) async fn note_fallback(st: &AppState, primary: &str, replica: &str) {
     let due = {
         // When reads last fell back from each location: the activity log says so at most every ten minutes
         let key = primary.to_string();
-        let mut seen = st.replica_fallbacks.lock().unwrap();
+        let mut seen = st.part::<Memory>().fallbacks.lock().unwrap();
         let last = seen.get(&key).copied().unwrap_or(0);
         let due = now() - last >= 600;
         if due {

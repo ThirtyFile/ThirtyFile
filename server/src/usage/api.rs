@@ -135,7 +135,7 @@ async fn recent(st: &AppState, now: i64) -> AppResult<Windows> {
             .bind(now - RECENT)
             .fetch_all(&st.db)
             .await?;
-    let mut all = st.usage.snapshot();
+    let mut all = st.part::<crate::usage::Memory>().meters.snapshot();
     for r in rows {
         let (Some(op), Some(work)) = (Op::parse(&r.op), Work::parse(&r.work)) else { continue };
         all.entry(r.location_id).or_default().entry((op, work)).or_default().merge(&r.row.window());
@@ -244,7 +244,7 @@ pub async fn build_overview(st: &AppState, now: i64) -> AppResult<Overview> {
     let thresholds = thresholds(st).await?;
     let mut latest = latest(st).await?;
     let mut recent = recent(st, now).await?;
-    let active = st.usage.active();
+    let active = st.part::<crate::usage::Memory>().meters.active();
     let rows: Vec<(String, String, String)> =
         sqlx::query_as("SELECT id, name, kind FROM storage_locations ORDER BY (id = 'local') DESC, created_at, name").fetch_all(&st.db).await?;
     let mut locations = Vec::new();
@@ -282,7 +282,7 @@ pub async fn build_overview(st: &AppState, now: i64) -> AppResult<Overview> {
             _ => queue.moves_paused = n,
         }
     }
-    queue.jobs_running = st.jobs.lock().unwrap().values().filter(|j| j.state == "running").count() as i64;
+    queue.jobs_running = st.part::<crate::jobs::Memory>().jobs.lock().unwrap().values().filter(|j| j.state == "running").count() as i64;
     (queue.pending_deletes,) = sqlx::query_as("SELECT COUNT(*) FROM pending_blob_deletes").fetch_one(&st.db).await?;
 
     let alerts = alerts(&thresholds, &locations, total.as_ref());
@@ -549,7 +549,7 @@ mod tests {
         env.upload(&admin, &root, "a.txt", b"hello").await;
         sample::sample_capacity(&env.st, t).await.unwrap();
         // Written once, still counting since: both are in the last hour
-        sample::write_ops(&env.st, &env.st.usage.take(), sample::bucket(t, OPS_SPAN)).await.unwrap();
+        sample::write_ops(&env.st, &env.st.part::<crate::usage::Memory>().meters.take(), sample::bucket(t, OPS_SPAN)).await.unwrap();
         env.upload(&admin, &root, "b.txt", b"world!").await;
         let o = build_overview(&env.st, t).await.unwrap();
         let local = &o.locations[0];
@@ -606,11 +606,18 @@ mod tests {
         let _ = set_thresholds(State(env.st.clone()), Admin(admin.clone()), Json(t)).await.unwrap();
         for i in 0..20 {
             let outcome = if i < 2 { super::super::meter::Outcome::Error } else { super::super::meter::Outcome::Ok };
-            env.st.usage.record("local", Op::Read, Work::Foreground, std::time::Duration::from_millis(3), outcome, 0);
+            env.st.part::<crate::usage::Memory>().meters.record("local", Op::Read, Work::Foreground, std::time::Duration::from_millis(3), outcome, 0);
         }
         // Health checks that failed don't count as failed operations
         for _ in 0..50 {
-            env.st.usage.record("local", Op::Check, Work::Probe, std::time::Duration::from_millis(3), super::super::meter::Outcome::Error, 0);
+            env.st.part::<crate::usage::Memory>().meters.record(
+                "local",
+                Op::Check,
+                Work::Probe,
+                std::time::Duration::from_millis(3),
+                super::super::meter::Outcome::Error,
+                0,
+            );
         }
         let o = build_overview(&env.st, now()).await.unwrap();
         assert_eq!(o.thresholds, t);

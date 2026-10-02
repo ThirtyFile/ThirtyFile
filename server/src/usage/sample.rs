@@ -14,6 +14,7 @@ use std::{
 use serde::Serialize;
 
 use super::meter::{Hist, Op, Window, Windows};
+use crate::usage::Memory;
 use crate::{error::AppResult, state::AppState, util::now};
 
 /// Operation counters are written this often (seconds), at multiples of it
@@ -50,10 +51,10 @@ pub fn spawn(st: AppState) {
 
 /// What the sampler does at the end of the period that ends at `end`
 async fn tick(st: &AppState, end: i64) {
-    let windows = st.usage.take();
+    let windows = st.part::<Memory>().meters.take();
     if let Err(e) = write_ops(st, &windows, end - OPS_SPAN).await {
         tracing::warn!("Couldn't write the storage operation counters, will try again: {}", e.message);
-        st.usage.restore(windows);
+        st.part::<Memory>().meters.restore(windows);
     }
     if end % CAPACITY_SPAN == 0
         && let Err(e) = sample_capacity(st, end).await
@@ -423,7 +424,7 @@ const RELOAD_AFTER: Duration = Duration::from_secs(10);
 /// isn't known
 pub async fn folder_location(st: &AppState, path: &Path) -> String {
     {
-        let map = st.usage.folders.lock().unwrap();
+        let map = st.part::<Memory>().meters.folders.lock().unwrap();
         if let Some(loc) = map.find(path) {
             return loc.to_string();
         }
@@ -446,7 +447,7 @@ pub async fn folder_location(st: &AppState, path: &Path) -> String {
             .collect::<Vec<_>>()
     });
     let folders = tokio::time::timeout(Duration::from_secs(3), resolve).await.ok().and_then(Result::ok).unwrap_or_default();
-    let mut map = st.usage.folders.lock().unwrap();
+    let mut map = st.part::<Memory>().meters.folders.lock().unwrap();
     *map = FolderMap { folders, loaded: Some(Instant::now()) };
     map.find(path).unwrap_or_default().to_string()
 }
@@ -467,7 +468,7 @@ pub fn real_path(path: &Path) -> PathBuf {
 /// Counts a finished operation on a folder space's files (they don't go through a storage backend)
 pub fn record_folder(st: &AppState, location: &str, op: Op, started: Instant, ok: bool, bytes: u64) {
     let outcome = if ok { super::meter::Outcome::Ok } else { super::meter::Outcome::Error };
-    st.usage.record(location, op, super::meter::current_work(), started.elapsed(), outcome, if ok { bytes } else { 0 });
+    st.part::<Memory>().meters.record(location, op, super::meter::current_work(), started.elapsed(), outcome, if ok { bytes } else { 0 });
 }
 
 /// A read of a folder space's file: timed until it can be read, the bytes counted as they are read
@@ -477,8 +478,8 @@ pub async fn folder_read(
     open: impl std::future::Future<Output = std::io::Result<crate::storage::BoxReader>>,
 ) -> std::io::Result<crate::storage::BoxReader> {
     let location = folder_location(st, &real_path(path)).await;
-    let reader = st.usage.timed(&location, Op::Read, 0, open).await?;
-    Ok(st.usage.count_reads(&location, reader))
+    let reader = st.part::<Memory>().meters.timed(&location, Op::Read, 0, open).await?;
+    Ok(st.part::<Memory>().meters.count_reads(&location, reader))
 }
 
 #[cfg(test)]
@@ -590,14 +591,14 @@ mod tests {
         assert_eq!(read(id).await, 5);
         let (scan,): (String,) = sqlx::query_as("SELECT id FROM nodes WHERE name = 'scan.txt'").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(read(scan).await, 7);
-        let w = env.st.usage.take();
+        let w = env.st.part::<Memory>().meters.take();
         let local = &w["local"];
         let write = &local[&(Op::Write, Work::Foreground)];
         assert_eq!((write.count, write.bytes), (1, 5));
         let read = &local[&(Op::Read, Work::Foreground)];
         assert_eq!((read.count, read.bytes), (1, 5));
         assert_eq!(w[""][&(Op::Read, Work::Foreground)].bytes, 7, "a chosen folder is on no location");
-        assert!(env.st.usage.active().is_empty());
+        assert!(env.st.part::<Memory>().meters.active().is_empty());
     }
 
     fn window(count: u64, bytes: u64, durations_us: &[u64]) -> Window {

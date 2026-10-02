@@ -57,6 +57,13 @@ pub fn short_wait() -> impl Drop {
     TEST_WAIT.with(|w| w.set(Some(Duration::from_millis(200))));
     Reset
 }
+/// What jobs keep in memory (a part of `AppState`)
+#[derive(Default)]
+pub struct Memory {
+    /// Tasks running or recently finished, by id
+    pub jobs: std::sync::Mutex<std::collections::HashMap<String, Job>>,
+}
+
 /// How long a finished job can still be looked up
 const KEEP_FINISHED_SECS: i64 = 3600;
 
@@ -184,7 +191,7 @@ impl Tracker {
 
 /// Registers a new job of `owner`; refused while they already run several of its kind
 pub fn start(st: &AppState, owner: i64, kind: &'static str, limit: Limit) -> AppResult<Job> {
-    let mut jobs = st.jobs.lock().unwrap();
+    let mut jobs = st.part::<Memory>().jobs.lock().unwrap();
     let t = now();
     jobs.retain(|_, j| j.finished_at.is_none_or(|f| f > t - KEEP_FINISHED_SECS));
     if let Some((most, message)) = limit.of()
@@ -198,13 +205,13 @@ pub fn start(st: &AppState, owner: i64, kind: &'static str, limit: Limit) -> App
 }
 
 fn update(st: &AppState, id: &str, f: impl FnOnce(&mut Job)) {
-    if let Some(j) = st.jobs.lock().unwrap().get_mut(id) {
+    if let Some(j) = st.part::<Memory>().jobs.lock().unwrap().get_mut(id) {
         f(j);
     }
 }
 
 fn snapshot(st: &AppState, id: &str) -> Option<Job> {
-    st.jobs.lock().unwrap().get(id).cloned()
+    st.part::<Memory>().jobs.lock().unwrap().get(id).cloned()
 }
 
 fn finish(st: &AppState, id: &str, result: &AppResult<Outcome>) {
@@ -308,7 +315,7 @@ impl Pending {
 impl Drop for Pending {
     fn drop(&mut self) {
         if let Some(job) = self.job.take() {
-            self.st.jobs.lock().unwrap().remove(&job.id);
+            self.st.part::<Memory>().jobs.lock().unwrap().remove(&job.id);
         }
     }
 }
@@ -324,7 +331,7 @@ where
 
 /// A job's progress; only its owner can see it
 pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Json<Job>> {
-    match st.jobs.lock().unwrap().get(&id) {
+    match st.part::<Memory>().jobs.lock().unwrap().get(&id) {
         Some(j) if j.owner == user.id => Ok(Json(j.clone())),
         _ => Err(AppError::not_found("This task has finished or doesn't exist")),
     }
@@ -333,7 +340,7 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
 /// The jobs kept now, for tests
 #[cfg(test)]
 pub fn all(st: &AppState) -> std::collections::HashMap<String, Job> {
-    st.jobs.lock().unwrap().clone()
+    st.part::<Memory>().jobs.lock().unwrap().clone()
 }
 
 /// Waits for a job to finish (tests)

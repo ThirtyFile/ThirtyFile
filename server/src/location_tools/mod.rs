@@ -19,6 +19,13 @@ pub use steps::test_steps;
 pub use unused::scan as unused_scan;
 pub use unused::{Job as UnusedSearch, find_unused, remove_unused, unused_status};
 
+/// What the storage location tools keep in memory (a part of `AppState`)
+#[derive(Default)]
+pub struct Memory {
+    /// Searches for unused content, by storage location (location_tools/unused.rs)
+    pub unused_searches: std::sync::Mutex<std::collections::HashMap<String, UnusedSearch>>,
+}
+
 use std::path::PathBuf;
 
 use crate::{

@@ -540,7 +540,7 @@ async fn moves_run_one_at_a_time_unless_set_otherwise() {
     }
     // A task leaves the running list just after it records how its move ended
     let deadline = Instant::now() + Duration::from_secs(30);
-    while !env.st.moves.running.lock().unwrap().is_empty() {
+    while !env.st.part::<Moves>().running.lock().unwrap().is_empty() {
         assert!(Instant::now() < deadline, "a move that ended is still on the running list");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -1088,7 +1088,7 @@ async fn several_spaces_move_one_after_the_other_and_a_location_can_then_be_dele
         if left == 0 {
             break;
         }
-        assert!(env.st.moves.running.lock().unwrap().len() <= 1);
+        assert!(env.st.part::<Moves>().running.lock().unwrap().len() <= 1);
         tokio::time::sleep(Duration::from_millis(20)).await;
         start_due(&env.st).await.unwrap();
     }

@@ -205,7 +205,7 @@ pub async fn test(State(st): State<AppState>, Admin(_): Admin, headers: HeaderMa
     }
     let saved = load(&st.db).await;
     let s = settings_from(SettingsReq { enabled: true, ..req.settings }, &saved)?;
-    let site = st.branding.read().unwrap().site_name.clone();
+    let site = st.part::<crate::branding::Memory>().settings.read().unwrap().site_name.clone();
     // In the language of the page it was sent from
     let zh = crate::auth::get_cookie(&headers, "tf_lang") == Some("zh-TW");
     let (subject, body) = crate::notify::test_message(zh, &site);

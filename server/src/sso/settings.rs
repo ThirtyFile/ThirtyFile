@@ -3,7 +3,7 @@
 use super::*;
 
 pub(super) fn admin_view(st: &AppState, headers: &HeaderMap) -> Value {
-    let cfg = st.sso.read().unwrap().clone();
+    let cfg = st.part::<Memory>().settings.read().unwrap().clone();
     let base = base_url(st, headers);
     let provider = |p: &str| {
         let c = cfg.provider(p).unwrap();
@@ -38,7 +38,7 @@ pub async fn get_settings(State(st): State<AppState>, _: Admin, headers: HeaderM
 }
 
 pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, headers: HeaderMap, Json(mut req): Json<SsoSettings>) -> AppResult<Json<Value>> {
-    let old = st.sso.read().unwrap().clone();
+    let old = st.part::<Memory>().settings.read().unwrap().clone();
     for p in PROVIDERS {
         check_provider(&st, p, req.provider_mut(p).unwrap(), old.provider(p).unwrap()).await?;
     }
@@ -52,7 +52,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, hea
         logs::record_activity(&mut tx, &user, None, "settings", &detail).await?;
         tx.commit().await?;
     }
-    *st.sso.write().unwrap() = req;
+    *st.part::<Memory>().settings.write().unwrap() = req;
     Ok(Json(admin_view(&st, &headers)))
 }
 

@@ -27,6 +27,7 @@ use super::{
     runner::{ACTIVE, Job, JobState},
 };
 use crate::{
+    backups::Memory,
     error::{AppError, AppResult},
     state::AppState,
     util::{new_id, now},
@@ -264,7 +265,7 @@ pub async fn trigger(st: &AppState, set: &str, trigger: &str, by: Option<(i64, S
     .await;
     let queued = crate::db::settle(tx, res).await?;
     if queued.is_some() {
-        st.backups.wake.notify_one();
+        st.part::<Memory>().queue.wake.notify_one();
     }
     Ok(queued)
 }
@@ -279,7 +280,7 @@ pub fn spawn_scheduler(st: AppState) {
                 tracing::warn!("Backup policies: {}", e.message);
             }
             tokio::select! {
-                _ = st.backups.policies.notified() => {}
+                _ = st.part::<Memory>().queue.policies.notified() => {}
                 _ = tokio::time::sleep(std::time::Duration::from_secs(BATCH_SECONDS as u64)) => {}
             }
         }
@@ -396,7 +397,7 @@ async fn queue_verify(st: &AppState, set: &str, t: i64) -> AppResult<()> {
     }
     .await;
     if crate::db::settle(tx, res).await? {
-        st.backups.wake.notify_one();
+        st.part::<Memory>().queue.wake.notify_one();
     }
     Ok(())
 }

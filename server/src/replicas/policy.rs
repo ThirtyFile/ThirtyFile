@@ -12,6 +12,7 @@ use crate::{
         runner::{ACTIVE, JobState},
     },
     error::AppResult,
+    replicas::Memory,
     state::AppState,
     util::{new_id, now},
 };
@@ -30,7 +31,7 @@ pub fn spawn_scheduler(st: AppState) {
                 tracing::warn!("Replica policies: {}", e.message);
             }
             tokio::select! {
-                _ = st.replicas.policies.notified() => {}
+                _ = st.part::<Memory>().queue.policies.notified() => {}
                 _ = tokio::time::sleep(std::time::Duration::from_secs(BATCH_SECONDS as u64)) => {}
             }
         }
@@ -289,7 +290,7 @@ pub async fn trigger(st: &AppState, policy: &str, location: &str, why: &str, by:
     .await;
     let queued = crate::db::settle(tx, res).await?;
     if queued.is_some() {
-        st.replicas.wake.notify_one();
+        st.part::<Memory>().queue.wake.notify_one();
     }
     Ok(queued)
 }
@@ -331,7 +332,7 @@ pub async fn queue_verify(st: &AppState, p: &Policy, location: &str, t: i64) -> 
     .await;
     let queued = crate::db::settle(tx, res).await?;
     if queued.is_some() {
-        st.replicas.wake.notify_one();
+        st.part::<Memory>().queue.wake.notify_one();
     }
     Ok(queued)
 }

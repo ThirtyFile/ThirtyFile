@@ -67,7 +67,7 @@ fn linked_notice(settings: &SsoSettings, provider: &str, ident: &Identity, ip: &
 /// Finds (or creates) the user to sign in, per the provider's policy: already linked → existing user whose username is the email → create automatically.
 /// Returns (user id, username, whether the account was just created)
 pub(super) async fn resolve_user(st: &AppState, provider: &str, ident: &Identity, ip: &str) -> AppResult<(i64, String, bool)> {
-    let settings = st.sso.read().unwrap().clone();
+    let settings = st.part::<Memory>().settings.read().unwrap().clone();
     let cfg = settings.provider(provider).cloned().unwrap_or_default();
     let linked: Option<(i64, String, bool)> =
         sqlx::query_as("SELECT u.id, u.username, u.disabled FROM user_identities i JOIN users u ON u.id = i.user_id WHERE i.provider = ? AND i.subject = ?")
@@ -163,7 +163,7 @@ pub(super) fn sso_username(email: &str) -> String {
 pub(super) async fn create_sso_user(st: &AppState, provider: &str, cfg: &ProviderConfig, ident: &Identity) -> AppResult<(i64, String, bool)> {
     let base = sso_username(&ident.email);
     // Settings for the new account: the rule for the email's domain, otherwise the provider's defaults
-    let rule = st.sso.read().unwrap().domain_rule(&ident.email).cloned();
+    let rule = st.part::<Memory>().settings.read().unwrap().domain_rule(&ident.email).cloned();
     let (perms, quota_setting, groups) = match &rule {
         Some(r) => ((r.can_write, r.can_delete, r.can_share), r.quota_bytes, r.groups.clone()),
         None => ((cfg.defaults.can_write, cfg.defaults.can_delete, cfg.defaults.can_share), cfg.defaults.quota_bytes, cfg.groups.clone()),
@@ -257,7 +257,7 @@ pub(super) async fn create_sso_user(st: &AppState, provider: &str, cfg: &Provide
 
 pub(super) async fn link(st: &AppState, provider: &str, ident: &Identity, user_id: i64, ip: &str) -> AppResult<String> {
     // The allowed domains apply to linked accounts too: with a list, only a verified email in it
-    let settings = st.sso.read().unwrap().clone();
+    let settings = st.part::<Memory>().settings.read().unwrap().clone();
     let cfg = settings.provider(provider).cloned().unwrap_or_default();
     let restricted = !settings.allowed_domains.is_empty() || !cfg.allowed_domains.is_empty();
     if restricted && !(ident.email_verified && domain_allowed(&settings, &cfg, &ident.email)) {

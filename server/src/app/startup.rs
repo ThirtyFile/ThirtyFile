@@ -6,9 +6,9 @@ use std::path::PathBuf;
 #[cfg(target_os = "linux")]
 use crate::watch;
 use crate::{
-    backups, branding, db, folders, locations, logs, moves, personal, replicas, secrets, sso,
-    state::{AppState, Setup},
-    thumbnails, tree, upload, usage, util,
+    auth, backups, branding, db, downloads, folders, jobs, location_tools, locations, logs, moves, personal, replicas, secrets, shares, sso,
+    state::{AppState, Parts, Setup},
+    thumbnails, tree, twofactor, upload, usage, util,
 };
 
 use super::{maintenance::spawn_maintenance, routes::router, serve::serve};
@@ -148,15 +148,17 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
         secret,
         secure_cookie: cfg.secure_cookie,
         trash_days: cfg.trash_days,
-        trust_proxy: cfg.trust_proxy,
         max_upload: cfg.max_upload_mb.checked_mul(1024 * 1024).ok_or("THIRTYFILE_MAX_UPLOAD_MB is too large")?,
-        thumb_jobs: thumb_jobs as usize,
-        thumb_decode_bytes,
         system,
-        logs: log_settings,
-        branding,
-        sso: sso_settings,
-        log_tx,
+        parts: parts(Loaded {
+            trust_proxy: cfg.trust_proxy,
+            thumb_jobs: thumb_jobs as usize,
+            thumb_decode_bytes,
+            logs: log_settings,
+            log_tx,
+            branding,
+            sso: sso_settings,
+        }),
     });
 
     let log_writer = logs::spawn_writer(state.clone(), log_rx);
@@ -185,6 +187,44 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
     watch::spawn_watchers(state.clone());
 
     Ok(Server { state, addr: cfg.addr, log_writer, _lock: lock })
+}
+
+/// What the features' parts start with: settings, and what startup loaded from the database
+pub struct Loaded {
+    pub trust_proxy: auth::TrustProxy,
+    /// Thumbnails made at the same time
+    pub thumb_jobs: usize,
+    pub thumb_decode_bytes: u64,
+    pub logs: logs::LogSettings,
+    pub log_tx: tokio::sync::mpsc::Sender<logs::LogEvent>,
+    pub branding: branding::Branding,
+    pub sso: sso::SsoSettings,
+}
+
+/// What each feature keeps in memory: the parts of `AppState` (`state::Parts`)
+pub fn parts(l: Loaded) -> Parts {
+    let parts = Parts::default()
+        .with(auth::Memory::new(l.trust_proxy))
+        .with(thumbnails::Memory::new(l.thumb_jobs, l.thumb_decode_bytes))
+        .with(logs::Memory::new(l.logs, l.log_tx))
+        .with(branding::Memory::new(l.branding))
+        .with(sso::Memory::new(l.sso))
+        .with(twofactor::Memory::default())
+        .with(moves::Moves::default())
+        .with(backups::Memory::default())
+        .with(replicas::Memory::default())
+        .with(upload::Memory::default())
+        .with(downloads::Memory::default())
+        .with(jobs::Memory::default())
+        .with(tree::Memory::default())
+        .with(usage::Memory::default())
+        .with(locations::Memory::default())
+        .with(folders::Memory::default())
+        .with(location_tools::Memory::default())
+        .with(shares::Memory::default());
+    #[cfg(target_os = "linux")]
+    let parts = parts.with(watch::Memory::default());
+    parts
 }
 
 impl Server {

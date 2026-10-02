@@ -752,7 +752,7 @@ pub async fn delete_group(State(st): State<AppState>, Admin(user): Admin, Path(i
     sqlx::query("DELETE FROM grants WHERE principal_type = 'group' AND principal_id = ?").bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM groups WHERE id = ?").bind(id).execute(&mut *tx).await?;
     // Accounts created by single sign-on must no longer be added to it
-    let mut sso = st.sso.read().unwrap().clone();
+    let mut sso = st.part::<crate::sso::Memory>().settings.read().unwrap().clone();
     let changed = sso.forget_group(id);
     if changed {
         crate::sso::store(&mut tx, &sso).await?;
@@ -760,7 +760,7 @@ pub async fn delete_group(State(st): State<AppState>, Admin(user): Admin, Path(i
     logs::record_activity(&mut tx, &user, None, "group_delete", &name).await?;
     tx.commit().await?;
     if changed {
-        *st.sso.write().unwrap() = sso;
+        *st.part::<crate::sso::Memory>().settings.write().unwrap() = sso;
     }
     Ok(Json(json!({ "ok": true })))
 }
@@ -849,12 +849,12 @@ mod tests {
         let Json(g) = create_group(State(env.st.clone()), Admin(admin.clone()), group("Sales")).await.unwrap();
         let id = g["id"].as_i64().unwrap();
         {
-            let mut sso = env.st.sso.write().unwrap();
+            let mut sso = env.st.part::<crate::sso::Memory>().settings.write().unwrap();
             sso.google.groups = vec![id];
             sso.domain_rules = vec![crate::sso::DomainRule { domain: "example.com".into(), groups: vec![id, 99], ..Default::default() }];
         }
         let _ = delete_group(State(env.st.clone()), Admin(admin.clone()), Path(id)).await.unwrap();
-        let sso = env.st.sso.read().unwrap().clone();
+        let sso = env.st.part::<crate::sso::Memory>().settings.read().unwrap().clone();
         assert!(sso.google.groups.is_empty() && sso.domain_rules[0].groups == vec![99]);
         let Json(again) = create_group(State(env.st.clone()), Admin(admin), group("Support")).await.unwrap();
         assert!(again["id"].as_i64().unwrap() > id);

@@ -9,3 +9,10 @@ pub mod meter;
 pub mod sample;
 
 pub use meter::{Metered, Meters, Op, background, probe};
+
+/// What Storage usage keeps in memory (a part of `AppState`)
+#[derive(Default)]
+pub struct Memory {
+    /// Storage operations counted since the last sample
+    pub meters: std::sync::Arc<Meters>,
+}

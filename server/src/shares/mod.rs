@@ -7,6 +7,13 @@ mod uploads;
 pub use public::*;
 pub use uploads::*;
 
+/// What share links keep in memory (a part of `AppState`)
+#[derive(Default)]
+pub struct Memory {
+    /// Share links opened a moment ago (shares/public.rs)
+    pub links: SeenLinks,
+}
+
 use axum::{
     Json,
     extract::{ConnectInfo, Path, Query, State},
@@ -1223,7 +1230,7 @@ mod tests {
             }
         }
         assert!(waited, "guessing from many addresses is slowed down");
-        env.st.login_failures.lock().unwrap().clear();
+        env.st.part::<crate::auth::Memory>().login_failures.lock().unwrap().clear();
 
         // The unlock lasts a day, even when the cookie is kept longer
         let res = try_from("203.0.113.9", password).await.unwrap();

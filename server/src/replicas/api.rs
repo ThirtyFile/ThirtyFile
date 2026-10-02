@@ -17,6 +17,7 @@ use crate::{
     backups::runner::{ACTIVE, Failure},
     error::{AppError, AppResult},
     locations::Relation,
+    replicas::Memory,
     state::AppState,
     util::{new_id, now},
 };
@@ -134,7 +135,7 @@ pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Overvi
     .await?;
     for j in &mut jobs {
         j.failure_list = serde_json::from_str(&j.failures).unwrap_or_default();
-        if let Some((fd, bd, ft, bt, rate)) = crate::backups::runner::live(&st.replicas, &j.id) {
+        if let Some((fd, bd, ft, bt, rate)) = crate::backups::runner::live(&st.part::<Memory>().queue, &j.id) {
             (j.files_done, j.bytes_done, j.files_total, j.bytes_total, j.speed) = (fd, bd, ft, bt, Some(rate));
         }
     }
@@ -319,7 +320,7 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(req): J
         .await;
         crate::db::settle(tx, res).await?;
     }
-    st.replicas.policies.notify_one();
+    st.part::<Memory>().queue.policies.notify_one();
     Ok(Json(json!({ "id": id })))
 }
 
@@ -389,15 +390,15 @@ pub async fn update(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
     if req.enabled == Some(false) {
         pause_running(&st, &id);
     }
-    st.replicas.wake.notify_one();
-    st.replicas.policies.notify_one();
+    st.part::<Memory>().queue.wake.notify_one();
+    st.part::<Memory>().queue.policies.notify_one();
     Ok(Json(json!({ "ok": true })))
 }
 
 /// The policy's job running now stops after the item it is copying
 fn pause_running(st: &AppState, policy: &str) {
     let running: Vec<(String, std::sync::Arc<crate::backups::runner::Control>)> =
-        st.replicas.running.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        st.part::<Memory>().queue.running.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     let st = st.clone();
     let policy = policy.to_string();
     tokio::spawn(async move {
@@ -557,7 +558,7 @@ pub async fn purge(State(st): State<AppState>, Admin(user): Admin, Json(req): Js
 // ───────────── Jobs ─────────────
 
 pub async fn pause_job(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
-    if let Some(ctl) = st.replicas.running.lock().unwrap().get(&id) {
+    if let Some(ctl) = st.part::<Memory>().queue.running.lock().unwrap().get(&id) {
         ctl.pause.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
@@ -585,12 +586,12 @@ pub async fn resume_job(State(st): State<AppState>, _: Admin, Path(id): Path<Str
             return Err(AppError::conflict("This job can't be resumed now"));
         }
     }
-    st.replicas.wake.notify_one();
+    st.part::<Memory>().queue.wake.notify_one();
     Ok(Json(json!({ "ok": true })))
 }
 
 pub async fn cancel_job(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
-    if let Some(ctl) = st.replicas.running.lock().unwrap().get(&id) {
+    if let Some(ctl) = st.part::<Memory>().queue.running.lock().unwrap().get(&id) {
         ctl.cancel.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
@@ -880,13 +881,13 @@ pub async fn promote(State(st): State<AppState>, Admin(user): Admin, Path(id): P
     }
     // A job of the policy running now was asked for before: it stops, and its results are refused anyway
     let running: Vec<(String, std::sync::Arc<crate::backups::runner::Control>)> =
-        st.replicas.running.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        st.part::<Memory>().queue.running.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     for (job, ctl) in running {
         let mine: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM replica_jobs WHERE id = ? AND policy_id = ?").bind(&job).bind(&id).fetch_optional(&st.db).await?;
         if mine.is_some() {
             ctl.cancel.store(true, Ordering::SeqCst);
         }
     }
-    st.replicas.policies.notify_one();
+    st.part::<Memory>().queue.policies.notify_one();
     Ok(Json(json!({ "moved": moved, "missing": missing })))
 }

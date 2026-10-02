@@ -361,7 +361,7 @@ pub fn send_later(st: &AppState, mut emails: Vec<Outgoing>) {
         if !cfg.ready() {
             return;
         }
-        let site = st.branding.read().unwrap().site_name.clone();
+        let site = st.part::<crate::branding::Memory>().settings.read().unwrap().site_name.clone();
         let (base, default_lang) = {
             let s = st.system.read().unwrap();
             (s.public_url.clone(), s.default_lang.clone())
@@ -782,7 +782,7 @@ fn tell_old_address(st: &AppState, old: String, username: &str, lang: &str, new:
         if !cfg.ready() {
             return;
         }
-        let site = st.branding.read().unwrap().site_name.clone();
+        let site = st.part::<crate::branding::Memory>().settings.read().unwrap().site_name.clone();
         let zh = match lang.as_str() {
             "zh-TW" => true,
             "en" => false,

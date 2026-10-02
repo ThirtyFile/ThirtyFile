@@ -28,6 +28,18 @@ const DEFAULT_DARK: &str = "#4f8bff";
 const MAX_LOGO: usize = 1024 * 1024;
 pub const MAX_BACKGROUND: usize = 5 * 1024 * 1024;
 
+/// What branding keeps in memory (a part of `AppState`)
+pub struct Memory {
+    /// Site name, logo, colors, sign-in page text
+    pub settings: std::sync::RwLock<Branding>,
+}
+
+impl Memory {
+    pub fn new(settings: Branding) -> Memory {
+        Memory { settings: std::sync::RwLock::new(settings) }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Branding {
@@ -96,7 +108,7 @@ async fn save(st: &AppState, b: &Branding, detail: &str, user: &crate::auth::Use
     set_setting(&mut tx, "branding", &serde_json::to_string(b).unwrap()).await?;
     logs::record_activity(&mut tx, user, None, "settings", detail).await?;
     tx.commit().await?;
-    *st.branding.write().unwrap() = b.clone();
+    *st.part::<Memory>().settings.write().unwrap() = b.clone();
     Ok(())
 }
 
@@ -123,11 +135,11 @@ pub fn public_json(b: &Branding) -> Value {
 }
 
 pub async fn get(State(st): State<AppState>) -> Json<Value> {
-    Json(public_json(&st.branding.read().unwrap()))
+    Json(public_json(&st.part::<Memory>().settings.read().unwrap()))
 }
 
 pub async fn css(State(st): State<AppState>) -> Response {
-    let body = palette_css(&st.branding.read().unwrap());
+    let body = palette_css(&st.part::<Memory>().settings.read().unwrap());
     // The page links the stylesheet with ?v=<version>, which changes whenever the branding changes: safe to cache for good
     ([(header::CONTENT_TYPE, "text/css; charset=utf-8"), (header::CACHE_CONTROL, "public, max-age=31536000, immutable")], body).into_response()
 }
@@ -135,7 +147,7 @@ pub async fn css(State(st): State<AppState>) -> Response {
 /// Web app manifest, so the site can be added to a phone's home screen and opens there without the browser's bars.
 /// It's fetched from this origin, which the page's Content-Security-Policy allows (`default-src 'self'`).
 pub async fn manifest(State(st): State<AppState>) -> Response {
-    let body = manifest_json(&st.branding.read().unwrap()).to_string();
+    let body = manifest_json(&st.part::<Memory>().settings.read().unwrap()).to_string();
     ([(header::CONTENT_TYPE, "application/manifest+json"), (header::CACHE_CONTROL, "no-cache")], body).into_response()
 }
 
@@ -192,7 +204,7 @@ pub struct LogoQuery {
 
 pub async fn logo(State(st): State<AppState>, Query(q): Query<LogoQuery>) -> AppResult<Response> {
     let logo = {
-        let b = st.branding.read().unwrap();
+        let b = st.part::<Memory>().settings.read().unwrap();
         if q.dark { b.logo_dark.clone().or_else(|| b.logo.clone()) } else { b.logo.clone() }
     };
     let Some(logo) = logo else { return Err(AppError::not_found("No logo has been set")) };
@@ -200,7 +212,7 @@ pub async fn logo(State(st): State<AppState>, Query(q): Query<LogoQuery>) -> App
 }
 
 pub async fn background(State(st): State<AppState>) -> AppResult<Response> {
-    let bg = st.branding.read().unwrap().login_background.clone();
+    let bg = st.part::<Memory>().settings.read().unwrap().login_background.clone();
     let Some(bg) = bg else { return Err(AppError::not_found("No sign-in page background has been set")) };
     serve(&st, &bg).await
 }
@@ -260,7 +272,7 @@ pub async fn update(State(st): State<AppState>, Admin(user): Admin, Json(req): J
     if !matches!(req.default_mode.as_str(), "system" | "light" | "dark") {
         return Err(AppError::bad_request("Invalid default appearance"));
     }
-    let mut b = st.branding.read().unwrap().clone();
+    let mut b = st.part::<Memory>().settings.read().unwrap().clone();
     b.site_name = site_name.to_string();
     b.show_name = req.show_name;
     b.light_brand = req.light_brand.to_ascii_lowercase();
@@ -342,7 +354,7 @@ pub async fn upload_logo(State(st): State<AppState>, Admin(user): Admin, Path(v)
     let file = format!("logo-{}-{ts}-{}.{ext}", if dark { "dark" } else { "light" }, crate::util::new_id());
     tokio::fs::write(dir.join(&file), &body).await?;
 
-    let mut b = st.branding.read().unwrap().clone();
+    let mut b = st.part::<Memory>().settings.read().unwrap().clone();
     let old = if dark { b.logo_dark.replace(LogoFile { file, mime: mime.into() }) } else { b.logo.replace(LogoFile { file, mime: mime.into() }) };
     b.version = ts;
     save(&st, &b, if dark { "Updated dark mode logo" } else { "Updated logo" }, &user).await?;
@@ -354,7 +366,7 @@ pub async fn upload_logo(State(st): State<AppState>, Admin(user): Admin, Path(v)
 
 pub async fn delete_logo(State(st): State<AppState>, Admin(user): Admin, Path(v): Path<String>) -> AppResult<Json<Value>> {
     let dark = variant(&v)?;
-    let mut b = st.branding.read().unwrap().clone();
+    let mut b = st.part::<Memory>().settings.read().unwrap().clone();
     let old = if dark { b.logo_dark.take() } else { b.logo.take() };
     b.version = now();
     save(&st, &b, if dark { "Removed dark mode logo" } else { "Removed logo" }, &user).await?;
@@ -381,7 +393,7 @@ pub async fn upload_background(State(st): State<AppState>, Admin(user): Admin, b
     let file = format!("login-bg-{ts}-{}.{ext}", crate::util::new_id());
     tokio::fs::write(dir.join(&file), &body).await?;
 
-    let mut b = st.branding.read().unwrap().clone();
+    let mut b = st.part::<Memory>().settings.read().unwrap().clone();
     let old = b.login_background.replace(LogoFile { file, mime: mime.into() });
     b.version = ts;
     save(&st, &b, "Updated sign-in page background", &user).await?;
@@ -392,7 +404,7 @@ pub async fn upload_background(State(st): State<AppState>, Admin(user): Admin, b
 }
 
 pub async fn delete_background(State(st): State<AppState>, Admin(user): Admin) -> AppResult<Json<Value>> {
-    let mut b = st.branding.read().unwrap().clone();
+    let mut b = st.part::<Memory>().settings.read().unwrap().clone();
     let old = b.login_background.take();
     b.version = now();
     save(&st, &b, "Removed sign-in page background", &user).await?;
@@ -460,7 +472,7 @@ mod tests {
         assert!(update(State(env.st.clone()), Admin(admin.clone()), Json(req("", "#7c3aed"))).await.is_err());
         assert!(update(State(env.st.clone()), Admin(admin.clone()), Json(req("x", "red"))).await.is_err());
 
-        let b = env.st.branding.read().unwrap().clone();
+        let b = env.st.part::<Memory>().settings.read().unwrap().clone();
         let css = palette_css(&b);
         assert!(css.contains(":root{--brand:#7c3aed;--brand-foreground:#ffffff;--ring:#7c3aed;"), "the focus ring is the accent color at full strength");
         assert!(css.contains(".dark{--brand:#a78bfa;--brand-foreground:#111111"), "a light accent color gets dark text");

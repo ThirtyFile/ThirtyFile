@@ -46,7 +46,7 @@ impl Predicate for Compressible {
 /// the headers are removed before anything reads them. An HTTPS site also tells browsers to use HTTPS only (HSTS).
 pub async fn forwarding(axum::extract::State(st): axum::extract::State<AppState>, mut req: Request, next: Next) -> Response {
     let peer = req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().map(|c| c.0.ip());
-    if !peer.is_some_and(|p| st.trust_proxy.trusts(p)) {
+    if !peer.is_some_and(|p| st.part::<crate::auth::Memory>().trust_proxy.trusts(p)) {
         req.headers_mut().remove("x-forwarded-host");
         req.headers_mut().remove("x-forwarded-proto");
     }
@@ -75,7 +75,7 @@ pub async fn same_origin(axum::extract::State(st): axum::extract::State<AppState
     {
         let origin_host = origin.split_once("://").map(|(_, h)| h).unwrap_or(origin);
         let h = req.headers();
-        let hosts = [h.get("x-forwarded-host").filter(|_| st.trust_proxy.enabled()), h.get(header::HOST)];
+        let hosts = [h.get("x-forwarded-host").filter(|_| st.part::<crate::auth::Memory>().trust_proxy.enabled()), h.get(header::HOST)];
         let ok = hosts.iter().flatten().filter_map(|v| v.to_str().ok()).any(|host| host == origin_host);
         if !ok {
             return (StatusCode::FORBIDDEN, "cross-origin request blocked").into_response();

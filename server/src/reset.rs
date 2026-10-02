@@ -96,7 +96,7 @@ pub async fn forgot(
             tx.commit().await?;
         }
         logs::record_login(&st, Some(id), &username, "password_reset_requested", &ip, &headers);
-        let site = st.branding.read().unwrap().site_name.clone();
+        let site = st.part::<crate::branding::Memory>().settings.read().unwrap().site_name.clone();
         let link = format!("{base}/reset-password?token={token}");
         let (subject, body) = message(lang == "zh-TW", &site, &username, &link);
         // Sent after answering: how long the email server takes mustn't tell whether the account exists
