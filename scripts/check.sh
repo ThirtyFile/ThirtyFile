@@ -9,6 +9,8 @@
 #   scripts/check.sh e2e       the end-to-end test in a real browser (sign in, upload, preview, download), against a
 #                              server built from here (the first time, get the browser: cd web && pnpm exec
 #                              playwright install chromium)
+#   scripts/check.sh site      the website: each translated page in every language with matching language links, and
+#                              links and anchors that resolve (scripts/check-site.mjs; it needs only Node)
 # Arguments after `web` go to the unit tests (CI passes --coverage).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -52,6 +54,10 @@ migrations() {
   return "$failed"
 }
 
+site() {
+  node "$ROOT/scripts/check-site.mjs"
+}
+
 server() {
   migrations
   cd "$ROOT/server"
@@ -75,7 +81,8 @@ case "${1:-all}" in
   web) shift; web "$@" ;;
   server) server ;;
   migrations) migrations ;;
+  site) site ;;
   e2e) e2e ;;
-  all) (web) && (server) && (e2e) ;;
-  *) echo "usage: scripts/check.sh [web|server|migrations|e2e]" >&2; exit 2 ;;
+  all) (web) && (server) && (e2e) && (site) ;;
+  *) echo "usage: scripts/check.sh [web|server|migrations|site|e2e]" >&2; exit 2 ;;
 esac

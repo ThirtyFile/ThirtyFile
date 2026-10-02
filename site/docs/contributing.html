@@ -102,6 +102,7 @@
               <tr><td><code>scripts/check.sh web</code></td><td>The interface: dependencies as locked, formatting (<code>pnpm format:check</code>), translations (<code>node scripts/check-i18n.mjs</code>), that the Office code in <code>web/src/ooxml</code> imports nothing else from the app (<code>node scripts/check-boundaries.mjs</code>), types, lint and unit tests. With <code>scripts/check.sh web --coverage</code>, as on GitHub, the unit tests also fail when they cover less than the floor in <code>web/vitest.config.ts</code></td></tr>
               <tr><td><code>scripts/check.sh server</code></td><td>The server: formatting (<code>cargo fmt --check</code>), <code>cargo test</code>, and <code>cargo clippy</code> with warnings as errors</td></tr>
               <tr><td><code>scripts/check.sh e2e</code></td><td>The end-to-end test: signs in, uploads and previews files in a real browser (Playwright), against a server built from the repository. The first time, get the browser with <code>cd web &amp;&amp; pnpm exec playwright install chromium</code></td></tr>
+              <tr><td><code>scripts/check.sh site</code></td><td>The website: every translated page exists in each language with matching language links, and the links and anchors inside the site lead somewhere (<code>node scripts/check-site.mjs</code>). It needs only Node, and it runs for changes to the website too</td></tr>
             </tbody>
           </table>
         </div>
@@ -119,6 +120,26 @@ cd web &amp;&amp; pnpm format</code></pre>
           <li>Logic that changes people's files (formulas, saving workbooks, text encodings) gets unit tests in <code>web/tests/unit/</code>.</li>
         </ul>
         <p>Every pull request runs the tests, and so does every merge into <code>main</code>. A change that only touches the website or the guides skips them. A change to how the image is built or started (the <code>Dockerfile</code>, the lock files, <code>compose.yaml</code>…) also builds the image for amd64 and arm64, without publishing it, and starts each with <code>compose.yaml</code> on data made by the latest release. CodeQL scans <code>main</code> every week and before each release. Merging into <code>main</code> publishes nothing, not even the website: the guides are published with each release, so they describe what people can install. A fix to the guides that is true of the released version too can be published by hand: <strong>Actions › Website › Run workflow</strong> with <code>main</code> as the branch or tag to publish.</p>
+
+        <h2 id="translations">The website in other languages</h2>
+        <p>The website is in English, with a few pages also in other languages. Those are the pages a newcomer needs to decide and get started:</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Page</th><th>English</th><th>Other languages</th></tr></thead>
+            <tbody>
+              <tr><td>Home page</td><td><code>site/index.html</code></td><td><code>site/&lt;language&gt;/index.html</code></td></tr>
+              <tr><td>Install</td><td><code>site/docs/index.html</code></td><td><code>site/&lt;language&gt;/docs/index.html</code></td></tr>
+              <tr><td>First steps</td><td><code>site/docs/first-steps.html</code></td><td><code>site/&lt;language&gt;/docs/first-steps.html</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>The other guides are in English only; the translated pages link to them and say so.</p>
+        <ul>
+          <li><strong>Changing a translated page means changing it in every language</strong>, in the same pull request. If you can't write one of the languages, say so in the pull request, and a maintainer will find someone who can.</li>
+          <li>Each version has <code>&lt;html lang&gt;</code>, its own title and description, and a <code>&lt;link rel="alternate" hreflang&gt;</code> to every version, itself included. The language switch in the header is written into every page, so it works without JavaScript; on pages that aren't translated it leads to each language's home page.</li>
+          <li>The languages and the translated pages are listed in <code>LANGUAGES</code> and <code>TRANSLATED</code> at the top of <code>site/assets/site.js</code>, which also holds the translations of the menu and footer. <code>scripts/check.sh site</code> fails when a page in <code>TRANSLATED</code> is missing in a language, or when the language links or switches don't match.</li>
+          <li>The words follow the <a href="https://github.com/ThirtyFile/ThirtyFile/blob/main/web/src/lib/i18n/glossary.md">glossary</a> (<code>web/src/lib/i18n/glossary.md</code>), which the interface's translations use too. Simplified Chinese uses the words of mainland China rather than a character conversion of the Traditional Chinese, and Japanese uses です・ます in sentences and the terms of Windows Explorer and Finder.</li>
+        </ul>
 
         <h2 id="labels">Labels</h2>
         <div class="table-scroll">
