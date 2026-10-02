@@ -40,17 +40,148 @@ fn browser_thumbnailable(n: &Node) -> bool {
 
 /// Where a file's thumbnail is cached, and the content's size as it is now. Stored content the server draws itself is
 /// keyed by its hash (the same picture wherever it is). A thumbnail a browser drew (`browser_thumbnailable`) is kept
-/// for the space only: people elsewhere with the same content never see one someone else uploaded. A folder space's
-/// file is keyed by its space, identity, size and time, so a changed file gets a new thumbnail.
+/// for the space only, `<hash>.<space>`: people elsewhere with the same content never see one someone else uploaded.
+/// Both go with their content (`forget`). A folder space's file is keyed by its space, identity, size and time,
+/// `<sha256>.f`, so a changed file gets a new thumbnail; those go once they haven't been shown for a while (`sweep`).
 async fn thumb_key(st: &AppState, n: &Node) -> AppResult<(Source, u64, String)> {
     let source = Source::resolve(st, n).await?;
     let (size, tag) = source.describe(n.size as u64).await?;
     let hash = match &source {
         Source::Stored { hash, .. } if !browser_thumbnailable(n) => hash.clone(),
-        Source::Stored { hash, .. } => crate::util::sha256_hex(format!("{}:{hash}", n.drive()).as_bytes()),
-        Source::File(_) => crate::util::sha256_hex(format!("{}:{tag}", n.drive()).as_bytes()),
+        Source::Stored { hash, .. } => format!("{hash}.{}", n.drive()),
+        Source::File(_) => format!("{}.f", crate::util::sha256_hex(format!("{}:{tag}", n.drive()).as_bytes())),
     };
     Ok((source, size, hash))
+}
+
+/// Thumbnails not shown for this long are removed by `sweep` (made again when they are)
+const UNUSED_DAYS: u64 = 30;
+/// Temporary files of thumbnails being written that are older than this were left by a stop
+const TMP_GRACE: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// Thumbnails shown since the last `sweep`, whose time on disk was moved to now: once a day at most for each
+static SHOWN: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
+
+/// A thumbnail is shown (or asked for again, whether or not the browser had it): its time on disk becomes now, so that
+/// `sweep` keeps it, once a day at most
+fn shown(st: &AppState, key: &str) {
+    {
+        let mut shown = SHOWN.lock().unwrap_or_else(|e| e.into_inner());
+        let shown = shown.get_or_insert_default();
+        // (a day of a very large server: started over, which only dates some of them again)
+        if shown.len() >= 100_000 {
+            shown.clear();
+        }
+        if !shown.insert(key.to_string()) {
+            return;
+        }
+    }
+    let path = st.thumb_path(key);
+    tokio::task::spawn_blocking(move || {
+        if let Ok(f) = std::fs::File::options().write(true).open(&path) {
+            let _ = f.set_modified(std::time::SystemTime::now());
+        }
+    });
+}
+
+/// The content `hash` is deleted for good: its thumbnails go too, the one the server drew and those browsers drew for
+/// each space
+pub async fn forget(st: &AppState, hash: &str) {
+    let dir = st.thumb_path(hash).parent().map(std::path::Path::to_path_buf);
+    let (Some(dir), prefix) = (dir, format!("{hash}.")) else { return };
+    let _ = tokio::task::spawn_blocking(move || {
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            if e.file_name().to_str().is_some_and(|n| n.starts_with(&prefix) && n.ends_with(".jpg") && !n.ends_with(".f.jpg")) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    })
+    .await;
+}
+
+/// What `sweep` does with a file of the thumbnail folder (by its name): keeps it, removes it, or keeps it as long as
+/// the content `hash` is there
+#[derive(Debug, PartialEq)]
+enum Swept<'a> {
+    Keep,
+    Remove,
+    WhileStored(&'a str),
+}
+
+fn sweep_rule(name: &str, age: std::time::Duration) -> Swept<'_> {
+    if name.ends_with(".tmp") {
+        return if age > TMP_GRACE { Swept::Remove } else { Swept::Keep };
+    }
+    let Some(key) = name.strip_suffix(".jpg") else { return Swept::Remove };
+    if age > std::time::Duration::from_secs(UNUSED_DAYS * 86400) {
+        return Swept::Remove;
+    }
+    let (hash, rest) = key.split_once('.').map_or((key, None), |(h, r)| (h, Some(r)));
+    if !crate::storage::is_hash(hash) {
+        return Swept::Remove;
+    }
+    match rest {
+        // A folder space's file
+        Some("f") => Swept::Keep,
+        // Content, as the server drew it or a browser drew it for a space
+        None => Swept::WhileStored(hash),
+        Some(space) if crate::util::is_new_id(space) => Swept::WhileStored(hash),
+        Some(_) => Swept::Remove,
+    }
+}
+
+/// Daily: removes the thumbnails nobody was shown for `UNUSED_DAYS` (those of folder spaces' files go this way, as
+/// nothing tells when such a file is gone), those whose content is gone, and the temporary files a stop left
+pub async fn sweep(st: &AppState) {
+    SHOWN.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let root = st.data_dir.join("thumbs");
+    let dirs: Vec<std::path::PathBuf> = match tokio::task::spawn_blocking(move || std::fs::read_dir(root).map(|r| r.flatten().map(|e| e.path()).collect())).await {
+        Ok(Ok(d)) => d,
+        _ => return,
+    };
+    let mut removed = 0;
+    for dir in dirs {
+        // Each folder holds the thumbnails of the keys starting with its name
+        let read = tokio::task::spawn_blocking(move || -> Vec<(String, std::path::PathBuf, std::time::Duration)> {
+            let now = std::time::SystemTime::now();
+            std::fs::read_dir(&dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|e| {
+                    let age = e.metadata().ok()?.modified().ok().and_then(|t| now.duration_since(t).ok()).unwrap_or_default();
+                    Some((e.file_name().into_string().ok()?, e.path(), age))
+                })
+                .collect()
+        })
+        .await
+        .unwrap_or_default();
+        let mut gone = Vec::new();
+        let mut stored = Vec::new();
+        for (name, path, age) in &read {
+            match sweep_rule(name, *age) {
+                Swept::Keep => {}
+                Swept::Remove => gone.push(path.clone()),
+                Swept::WhileStored(hash) => stored.push((hash.to_string(), path.clone())),
+            }
+        }
+        if !stored.is_empty() {
+            let hashes: Vec<&str> = stored.iter().map(|(h, _)| h.as_str()).collect();
+            let missing: Result<Vec<(String,)>, _> =
+                sqlx::query_as("SELECT j.value FROM json_each(?) j WHERE NOT EXISTS (SELECT 1 FROM blobs WHERE hash = j.value)")
+                    .bind(serde_json::to_string(&hashes).unwrap())
+                    .fetch_all(&st.db)
+                    .await;
+            let Ok(missing) = missing else { continue };
+            let missing: std::collections::HashSet<String> = missing.into_iter().map(|(h,)| h).collect();
+            gone.extend(stored.into_iter().filter(|(h, _)| missing.contains(h)).map(|(_, p)| p));
+        }
+        removed += gone.len();
+        let _ = tokio::task::spawn_blocking(move || gone.iter().for_each(|p| drop(std::fs::remove_file(p)))).await;
+    }
+    if removed > 0 {
+        tracing::info!("Removed {removed} thumbnail(s) no longer shown or whose file is gone");
+    }
 }
 
 /// A cached thumbnail, with the headers that let the browser keep it
@@ -68,6 +199,7 @@ pub async fn thumbnail_response(st: &AppState, headers: &HeaderMap, n: &Node) ->
         return Err(AppError::not_found("No thumbnail"));
     }
     let hash = hash.as_str();
+    shown(st, hash);
     // The thumbnail is derived from the content: a matching ETag means the browser's copy is current (no disk read, no body)
     let etag = format!("\"t{hash}\"");
     if headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
@@ -203,7 +335,7 @@ mod tests {
         sqlx::query("UPDATE nodes SET mime = 'application/pdf', blob_hash = ?, size = 1000 WHERE id = ?").bind(&hash).bind(&pdf).execute(&env.st.db).await.unwrap();
         // Kept for Amy's space only: the same content elsewhere doesn't get it
         let content = hash;
-        let hash = crate::util::sha256_hex(format!("{}:{content}", env.drive_of(&pdf).await).as_bytes());
+        let hash = format!("{content}.{}", env.drive_of(&pdf).await);
         let text = env.file(&amy, amy.root(), "notes.txt").await;
         let get = |user: User, id: String| thumbnail(State(env.st.clone()), user, Path(id), HeaderMap::new());
         let put = |user: User, id: String, body: Bytes| upload_thumbnail(State(env.st.clone()), user, Path(id), body);
@@ -305,5 +437,84 @@ mod tests {
         let big = env.stored_file(&amy, amy.root(), "big.png", &png(8, 8)).await;
         sqlx::query("UPDATE nodes SET size = ? WHERE id = ?").bind(MAX_THUMB_SOURCE + 1).bind(&big).execute(&env.st.db).await.unwrap();
         assert_eq!(get(big, HeaderMap::new()).await.unwrap_err().status, StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn the_thumbnail_folder_is_swept_by_what_each_file_is() {
+        let (day, hash, space) = (std::time::Duration::from_secs(86400), "ab".repeat(32), crate::util::new_id());
+        let fresh = std::time::Duration::from_secs(60);
+        assert_eq!(sweep_rule(&format!("{hash}.jpg"), fresh), Swept::WhileStored(&hash));
+        assert_eq!(sweep_rule(&format!("{hash}.{space}.jpg"), fresh), Swept::WhileStored(&hash));
+        assert_eq!(sweep_rule(&format!("{hash}.f.jpg"), fresh), Swept::Keep);
+        // Not shown for UNUSED_DAYS: removed, whatever it is
+        assert_eq!(sweep_rule(&format!("{hash}.f.jpg"), day * 31), Swept::Remove);
+        assert_eq!(sweep_rule(&format!("{hash}.jpg"), day * 31), Swept::Remove);
+        // Left by a stop while it was written
+        assert_eq!(sweep_rule(&format!("{hash}.{space}.tmp"), fresh), Swept::Keep);
+        assert_eq!(sweep_rule(&format!("{hash}.{space}.tmp"), day), Swept::Remove);
+        // Not ThirtyFile's
+        assert_eq!(sweep_rule("notes.txt", fresh), Swept::Remove);
+        assert_eq!(sweep_rule(&format!("{hash}.x.jpg"), fresh), Swept::Remove);
+    }
+
+    /// The thumbnails of folder spaces' files in the cache
+    fn folder_thumbs(env: &testutil::TestEnv) -> usize {
+        let dirs = std::fs::read_dir(env.dir.join("thumbs")).unwrap().flatten();
+        dirs.flat_map(|d| std::fs::read_dir(d.path()).unwrap().flatten()).filter(|e| e.file_name().to_string_lossy().ends_with(".f.jpg")).count()
+    }
+
+    #[tokio::test]
+    async fn thumbnails_go_with_their_content_and_when_nobody_was_shown_them_for_a_month() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let get = |id: String| thumbnail(State(env.st.clone()), amy.clone(), Path(id), HeaderMap::new());
+        // A picture the server drew, and a PDF a browser drew, of content in the content store
+        let data = png(64, 64);
+        let pic = env.stored_file(&amy, amy.root(), "pic.png", &data).await;
+        get(pic.clone()).await.unwrap();
+        let drawn = env.st.thumb_path(&crate::util::sha256_hex(&data));
+        let pdf = env.stored_file(&amy, amy.root(), "Report.pdf", b"%PDF-1.7 report").await;
+        sqlx::query("UPDATE nodes SET mime = 'application/pdf' WHERE id = ?").bind(&pdf).execute(&env.st.db).await.unwrap();
+        upload_thumbnail(State(env.st.clone()), amy.clone(), Path(pdf.clone()), png(320, 200)).await.unwrap();
+        let uploaded = env.st.thumb_path(&format!("{}.{}", crate::util::sha256_hex(b"%PDF-1.7 report"), env.drive_of(&pdf).await));
+        assert!(drawn.is_file() && uploaded.is_file());
+        // A folder space's picture, a thumbnail nobody was shown for a month, and what a stop left
+        let space = env.folder_space("Disk").await;
+        testutil::write_old(&space.dir.join("photo.png"), &png(32, 32));
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (photo, _) = env.node_at(&space.drive, "photo.png").await.unwrap();
+        thumbnail(State(env.st.clone()), env.admin().await, Path(photo), HeaderMap::new()).await.unwrap();
+        assert_eq!(folder_thumbs(&env), 1);
+        let old = env.st.thumb_path(&"cd".repeat(32));
+        write_thumb(&old, b"old").await.unwrap();
+        let month_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 86400);
+        std::fs::File::options().write(true).open(&old).unwrap().set_modified(month_ago).unwrap();
+        let left = old.with_extension("x.tmp");
+        std::fs::write(&left, b"half").unwrap();
+        std::fs::File::options().write(true).open(&left).unwrap().set_modified(month_ago).unwrap();
+        sweep(&env.st).await;
+        assert!(drawn.is_file() && uploaded.is_file() && folder_thumbs(&env) == 1, "thumbnails in use are kept");
+        assert!(!old.exists() && !left.exists());
+
+        // Shown, a thumbnail of a month ago is kept: it is dated today again
+        std::fs::File::options().write(true).open(&drawn).unwrap().set_modified(month_ago).unwrap();
+        get(pic.clone()).await.unwrap();
+        for _ in 0..100 {
+            if std::fs::metadata(&drawn).unwrap().modified().unwrap() > month_ago + std::time::Duration::from_secs(86400) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        sweep(&env.st).await;
+        assert!(drawn.is_file());
+
+        // The content deleted for good: its thumbnails go with it, the server's and the browsers'
+        for id in [&pic, &pdf] {
+            let mut c = env.st.db.acquire().await.unwrap();
+            let blobs = crate::tree::purge_subtree(&mut c, id).await.unwrap();
+            drop(c);
+            crate::tree::remove_unreferenced(&env.st, blobs).await;
+        }
+        assert!(!drawn.exists() && !uploaded.exists());
     }
 }
