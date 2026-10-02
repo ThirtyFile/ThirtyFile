@@ -9,6 +9,8 @@ use base64::Engine;
 use rust_embed::RustEmbed;
 use sha2::{Digest, Sha256};
 
+use crate::i18n::{self, Lang};
+
 #[derive(RustEmbed)]
 #[folder = "../web/dist"]
 #[allow_missing = true]
@@ -37,35 +39,51 @@ fn content_security_policy(html: &str) -> String {
     )
 }
 
-/// The languages with a dictionary script (web/dist/<lang>.js, from web/src/lib/i18n/<lang>/). English is the source
-/// text and has none
-const DICTIONARIES: [&str; 3] = ["zh-TW", "zh-CN", "ja"];
+/// What the page is told about its language, decided for each request (i18n/):
+/// - `__TF_LANG__`: the language the person (or, for someone signed in, the system default) picked; absent when the
+///   browser's languages decide. The page takes it first, unless it doesn't offer it
+/// - `__TF_DEFAULT_LANG__`: the system default, for a visitor whose browser has none of the languages offered
+/// - `<html lang>`, and the dictionary script (`<lang>.js`, from web/src/lib/i18n/<lang>/) of the language the server
+///   expects the page to use, so it needn't fetch it. The page decides the browser's part itself (it also offers the
+///   languages being previewed), and loads its own dictionary when this guessed wrong
+struct PageLang {
+    picked: Option<Lang>,
+    default: Option<Lang>,
+    expected: Lang,
+}
 
-/// The dictionary script the page should carry (`<lang>.js`), if any: the visitor's saved language, else the system
-/// default, else the browser's preferred language. The frontend decides the same way and loads its dictionary itself
-/// when this guessed wrong, so this only saves a round trip
-fn page_dictionary(headers: &HeaderMap, default_lang: &str) -> Option<&'static str> {
-    let known = |lang: &str| DICTIONARIES.iter().copied().find(|d| *d == lang);
-    let cookie = crate::auth::get_cookie(headers, "tf_lang");
-    // `tf_lang_chosen` is set only when the person picked a language themselves; without it `tf_lang` just mirrors
-    // what the page last decided, so the system default (when fixed) takes precedence, like in the frontend
-    if crate::auth::get_cookie(headers, "tf_lang_chosen").is_some()
-        && let Some(saved) = cookie
-    {
-        return known(saved);
+impl PageLang {
+    async fn of(st: &crate::state::AppState, headers: &HeaderMap) -> PageLang {
+        let visitor = i18n::visitor(st, headers).await;
+        let default = i18n::system_default(st);
+        PageLang { picked: i18n::picked(headers, visitor, default), default, expected: i18n::resolve(headers, visitor, default) }
     }
-    match default_lang {
-        "auto" => match cookie {
-            Some(used) => known(used),
-            // The server doesn't match the other languages' browsers yet: a Chinese one gets Traditional Chinese
-            None => headers
-                .get(header::ACCEPT_LANGUAGE)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.split(',').next())
-                .is_some_and(|first| first.trim().to_ascii_lowercase().starts_with("zh"))
-                .then_some("zh-TW"),
-        },
-        fixed => known(fixed),
+
+    /// The script setting the page's globals (codes only, so nothing needs escaping)
+    fn script(&self) -> String {
+        let mut js = String::new();
+        if let Some(l) = self.picked {
+            js.push_str(&format!("window.__TF_LANG__=\"{}\";", l.code()));
+        }
+        if let Some(l) = self.default {
+            js.push_str(&format!("window.__TF_DEFAULT_LANG__=\"{}\";", l.code()));
+        }
+        js
+    }
+
+    /// The dictionary script to put on the page: English is the source text and has none
+    fn dictionary(&self) -> Option<String> {
+        (self.expected != Lang::En).then(|| format!("{}.js", self.expected.code()))
+    }
+
+    /// index.html with `<html lang>` set to the expected language
+    fn tag(&self, html: &str) -> String {
+        const OPEN: &str = "<html lang=\"";
+        let Some(start) = html.find(OPEN).map(|i| i + OPEN.len()) else { return html.to_string() };
+        let Some(len) = html[start..].find('"') else { return html.to_string() };
+        let mut out = html.to_string();
+        out.replace_range(start..start + len, self.expected.html_tag());
+        out
     }
 }
 
@@ -156,15 +174,18 @@ pub async fn serve(State(st): State<crate::state::AppState>, uri: Uri, headers: 
     match Assets::get("index.html") {
         Some(index) => {
             // Inject branding (title, favicon, colors) so the default styling doesn't flash while loading
-            let lang = st.system.read().unwrap().default_lang.clone();
-            let mut html = crate::branding::inject(&String::from_utf8_lossy(&index.data), &st.part::<crate::branding::Memory>().settings.read().unwrap(), &lang);
-            if let Some(dict) = page_dictionary(&headers, &lang)
-                && Assets::get(&format!("{dict}.js")).is_some()
+            let lang = PageLang::of(&st, &headers).await;
+            let page = lang.tag(&String::from_utf8_lossy(&index.data));
+            let mut html = crate::branding::inject(&page, &st.part::<crate::branding::Memory>().settings.read().unwrap(), &lang.script());
+            if let Some(dict) = lang.dictionary()
+                && Assets::get(&dict).is_some()
             {
-                html = html.replacen("</head>", &format!("  <script src=\"/{dict}.js\"></script>\n  </head>"), 1);
+                html = html.replacen("</head>", &format!("  <script src=\"/{dict}\"></script>\n  </head>"), 1);
             }
             let csp = content_security_policy(&html);
-            ([(header::CACHE_CONTROL, "no-cache".to_string()), (header::CONTENT_SECURITY_POLICY, csp)], SECURITY_HEADERS, Html(html)).into_response()
+            // The page differs by who asks: their session and language cookies, and their browser's languages
+            let vary = (header::VARY, "Cookie, Accept-Language".to_string());
+            ([(header::CACHE_CONTROL, "no-cache".to_string()), (header::CONTENT_SECURITY_POLICY, csp), vary], SECURITY_HEADERS, Html(html)).into_response()
         }
         None => (StatusCode::NOT_FOUND, Html("<p>The frontend hasn't been built yet: run <code>pnpm build</code> in web/ first, or use <code>pnpm dev</code>.</p>"))
             .into_response(),
@@ -191,40 +212,55 @@ mod tests {
         assert!(csp.contains("frame-ancestors 'self'"));
     }
 
-    #[test]
-    fn dictionary_follows_the_system_default_unless_the_person_chose() {
-        let with = |pairs: &[(&str, &str)]| {
-            let mut h = HeaderMap::new();
-            for (k, v) in pairs {
-                h.append(k.parse::<header::HeaderName>().unwrap(), v.parse().unwrap());
-            }
-            h
-        };
-        // No fixed default: the browser decides, or the language the page last used
-        assert_eq!(page_dictionary(&with(&[("accept-language", "zh-TW,zh;q=0.9")]), "auto"), Some("zh-TW"));
-        assert_eq!(page_dictionary(&with(&[("accept-language", "en-US")]), "auto"), None);
-        assert_eq!(page_dictionary(&with(&[("accept-language", "en-US"), ("cookie", "tf_lang=zh-TW")]), "auto"), Some("zh-TW"));
-        assert_eq!(page_dictionary(&with(&[("accept-language", "zh-TW"), ("cookie", "tf_lang=ja")]), "auto"), Some("ja"));
-        // A fixed default wins over what the page mirrored into tf_lang…
-        assert_eq!(page_dictionary(&with(&[("accept-language", "zh-TW"), ("cookie", "tf_lang=zh-TW")]), "en"), None);
-        assert_eq!(page_dictionary(&with(&[("cookie", "tf_lang=en")]), "zh-TW"), Some("zh-TW"));
-        // …but not over a language the person picked themselves
-        assert_eq!(page_dictionary(&with(&[("cookie", "tf_lang=zh-TW; tf_lang_chosen=1")]), "en"), Some("zh-TW"));
-        assert_eq!(page_dictionary(&with(&[("cookie", "tf_lang=zh-CN; tf_lang_chosen=1")]), "en"), Some("zh-CN"));
-        assert_eq!(page_dictionary(&with(&[("cookie", "tf_lang_chosen=1; tf_lang=en")]), "zh-TW"), None);
+    fn with(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.append(k.parse::<header::HeaderName>().unwrap(), v.parse().unwrap());
+        }
+        h
     }
 
-    #[test]
-    fn only_known_dictionaries_are_put_on_the_page() {
-        // The cookie is the visitor's own text: anything but a known language name adds no script
-        let h = |cookie: &str| {
-            let mut h = HeaderMap::new();
-            h.insert(header::COOKIE, cookie.parse().unwrap());
-            h
+    #[tokio::test]
+    async fn the_page_carries_the_language_of_whoever_asks() {
+        let env = crate::testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let (_, session) = env.sign_in(&amy, "Firefox").await;
+        env.st.system.write().unwrap().default_lang = "en".into();
+        let page = |h: HeaderMap| {
+            let st = env.st.clone();
+            async move { PageLang::of(&st, &h).await }
         };
-        assert_eq!(page_dictionary(&h("tf_lang=\"><script>x</script>; tf_lang_chosen=1"), "auto"), None);
-        assert_eq!(page_dictionary(&h("tf_lang=../index.html"), "auto"), None);
-        assert_eq!(page_dictionary(&h("tf_lang=fr"), "auto"), None);
+
+        // Not signed in: the browser's language before the system default, which the page gets in case none fits
+        let p = page(with(&[("accept-language", "zh-TW,zh;q=0.9")])).await;
+        assert_eq!((p.picked, p.expected), (None, Lang::ZhTw));
+        assert_eq!(p.script(), r#"window.__TF_DEFAULT_LANG__="en";"#);
+        assert_eq!(p.dictionary().as_deref(), Some("zh-TW.js"));
+        assert_eq!(p.tag(r#"<!doctype html><html lang="en"><head>"#), r#"<!doctype html><html lang="zh-Hant"><head>"#);
+        // A language chosen in this browser
+        let p = page(with(&[("accept-language", "en"), ("cookie", "tf_lang=zh-CN; tf_lang_chosen=1")])).await;
+        assert_eq!((p.picked, p.expected), (Some(Lang::ZhCn), Lang::ZhCn));
+        assert_eq!(p.script(), r#"window.__TF_LANG__="zh-CN";window.__TF_DEFAULT_LANG__="en";"#);
+
+        // Signed in: the system default before the browser, and the language saved with the account before both
+        let p = page(with(&[("accept-language", "zh-TW"), ("cookie", &session)])).await;
+        assert_eq!((p.picked, p.expected), (Some(Lang::En), Lang::En));
+        assert_eq!(p.dictionary(), None);
+        sqlx::query("UPDATE users SET chosen_lang = 'ja' WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+        let p = page(with(&[("accept-language", "zh-TW"), ("cookie", &format!("{session}; tf_lang=zh-TW; tf_lang_chosen=1"))])).await;
+        assert_eq!((p.picked, p.expected), (Some(Lang::Ja), Lang::Ja));
+        assert_eq!(p.dictionary().as_deref(), Some("ja.js"));
+        assert_eq!(p.tag(r#"<html lang="zh-Hant">"#), r#"<html lang="ja">"#);
+    }
+
+    #[tokio::test]
+    async fn only_known_languages_reach_the_page() {
+        // The cookies are the visitor's own text: anything but a known language's code is no choice
+        let env = crate::testutil::env().await;
+        for cookie in ["tf_lang=\"><script>x</script>; tf_lang_chosen=1", "tf_lang=../index.html; tf_lang_chosen=1", "tf_lang=fr; tf_lang_chosen=1"] {
+            let p = PageLang::of(&env.st, &with(&[("cookie", cookie)])).await;
+            assert_eq!((p.picked, p.expected, p.script(), p.dictionary()), (None, Lang::En, String::new(), None), "{cookie}");
+        }
     }
 
     #[test]

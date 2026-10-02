@@ -123,20 +123,49 @@ describe("choosing the language", () => {
     expect(browserLanguage(["ja-JP", "zh-TW"], ready)).toBe("zh-TW");
   });
 
-  test("a saved choice comes first, then the system default, then the browser", async () => {
-    vi.resetModules();
-    vi.stubGlobal("navigator", { ...navigator, languages: ["zh-HK", "en"] });
+  test("the language the server says was picked comes first, then a choice kept here, then the browser, then the system default", async () => {
+    const detected = async (languages: string[]) => {
+      vi.resetModules();
+      vi.stubGlobal("navigator", { ...navigator, languages });
+      return (await import("@/lib/i18n")).lang;
+    };
     try {
-      expect((await import("@/lib/i18n")).lang).toBe("zh-TW");
-      vi.resetModules();
-      window.__TF_DEFAULT_LANG__ = "en";
-      expect((await import("@/lib/i18n")).lang).toBe("en");
-      vi.resetModules();
-      localStorage.setItem("tf-lang", "zh-TW");
-      expect((await import("@/lib/i18n")).lang).toBe("zh-TW");
+      // The system default only counts when none of the browser's languages fits
+      window.__TF_DEFAULT_LANG__ = "zh-TW";
+      expect(await detected(["en-GB"])).toBe("en");
+      expect(await detected(["fr", "de"])).toBe("zh-TW");
+      expect(await detected(["zh-HK", "en"])).toBe("zh-TW");
+      localStorage.setItem("tf-lang", "en");
+      expect(await detected(["zh-HK"])).toBe("en");
+      // Saved with the account, chosen in this browser, or (signed in) the system default: the server says which
+      window.__TF_LANG__ = "zh-TW";
+      expect(await detected(["en"])).toBe("zh-TW");
+      // …unless this page doesn't offer it
+      window.__TF_LANG__ = "ja";
+      expect(await detected(["fr"])).toBe("en");
     } finally {
       vi.unstubAllGlobals();
       window.__TF_DEFAULT_LANG__ = undefined;
+      window.__TF_LANG__ = undefined;
+    }
+  });
+
+  test("after signing in, the page switches once to the language picked for the person", async () => {
+    const { languageToAdopt, adoptLanguage } = await load("en");
+    const reload = vi.fn<() => void>();
+    vi.stubGlobal("location", { ...window.location, reload });
+    try {
+      expect(languageToAdopt(null)).toBeUndefined();
+      expect(languageToAdopt("en")).toBeUndefined();
+      expect(languageToAdopt("ja")).toBeUndefined(); // not offered here
+      expect(languageToAdopt("zh-TW")).toBe("zh-TW");
+      adoptLanguage("zh-TW");
+      expect(reload).toHaveBeenCalledTimes(1);
+      // The page came back in another language (made elsewhere than by the server): it doesn't reload for it again
+      expect(languageToAdopt("zh-TW")).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+      sessionStorage.clear();
     }
   });
 

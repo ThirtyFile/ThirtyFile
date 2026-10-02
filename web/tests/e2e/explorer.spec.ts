@@ -1,7 +1,8 @@
 // File explorer against the real server: name conflicts when uploading, keyboard browsing, and search typed through an
 // input method. Each test works in a folder of its own inside My files.
+import { randomBytes } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
-import { signIn } from "./helpers";
+import { signIn, uploadFinished } from "./helpers";
 
 interface Item {
   id: string;
@@ -11,11 +12,12 @@ interface Item {
 
 /**
  * A new folder, made through the API with the page's session. In My files (when no parent is given) its name gets a
- * unique ending, so a test run again on the same server (a retry) starts afresh.
+ * random ending, so a test run again on the same server (a retry), or by another worker at the same moment, starts
+ * afresh.
  */
 async function folder(page: Page, name: string, parent?: string): Promise<string> {
   const parentId = parent ?? (await (await page.request.get("/api/auth/me")).json()).root_id;
-  const res = await page.request.post("/api/folders", { data: { parent_id: parentId, name: parent ? name : `${name} ${Date.now().toString(36)}` } });
+  const res = await page.request.post("/api/folders", { data: { parent_id: parentId, name: parent ? name : `${name} ${randomBytes(4).toString("hex")}` } });
   expect(res.ok()).toBe(true);
   return (await res.json()).id;
 }
@@ -29,6 +31,9 @@ async function content(page: Page, id: string) {
 }
 
 test("uploading a name the folder already has asks what to do, and each choice does it", async ({ page }) => {
+  // Three uploads, each a few changes on the server: behind a large change made by another test at the same time, each
+  // of them can wait half a minute for its turn
+  test.setTimeout(120_000);
   await signIn(page);
   const dir = await folder(page, "Conflicts");
   await page.goto(`/files/${dir}`);
@@ -36,14 +41,18 @@ test("uploading a name the folder already has asks what to do, and each choice d
   const row = (name: string) => page.locator("[data-node-id]").filter({ hasText: name });
   const dialog = page.getByRole("dialog");
 
+  let finished = uploadFinished(page);
   await upload("first");
+  await finished;
   await expect(row("note.txt")).toBeVisible();
   const [original] = await children(page, dir);
 
   // Keep both: the new file gets a numbered name, the original stays as it was
   await upload("second");
   await expect(dialog.getByText('The destination already has a file named "note.txt"')).toBeVisible();
+  finished = uploadFinished(page);
   await dialog.getByRole("button", { name: /Keep both/ }).click();
+  await finished;
   await expect(row("note (1).txt")).toBeVisible();
   let items = await children(page, dir);
   expect(items.map((n) => n.name).sort()).toEqual(["note (1).txt", "note.txt"]);
@@ -62,8 +71,10 @@ test("uploading a name the folder already has asks what to do, and each choice d
 
   // Replace: the original file gets the new content
   await upload("third");
+  finished = uploadFinished(page);
   await dialog.getByRole("button", { name: /Replace the file in the destination/ }).click();
-  await expect.poll(() => content(page, original.id)).toBe("third");
+  await finished;
+  expect(await content(page, original.id)).toBe("third");
   expect(await children(page, dir)).toHaveLength(2);
   await expect(page.getByText(/Something went wrong|useMe must be used/)).toHaveCount(0);
 });

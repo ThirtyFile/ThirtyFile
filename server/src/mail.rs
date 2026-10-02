@@ -198,7 +198,7 @@ pub struct TestReq {
 }
 
 /// Sends a test message with the settings on the page (saved or not), and says what went wrong
-pub async fn test(State(st): State<AppState>, Admin(_): Admin, headers: HeaderMap, Json(req): Json<TestReq>) -> AppResult<Json<Value>> {
+pub async fn test(State(st): State<AppState>, Admin(admin): Admin, headers: HeaderMap, Json(req): Json<TestReq>) -> AppResult<Json<Value>> {
     let to = req.to.trim().to_string();
     if !valid_address(&to) {
         return Err(AppError::bad_request("Enter a valid email address to send the test to"));
@@ -206,9 +206,10 @@ pub async fn test(State(st): State<AppState>, Admin(_): Admin, headers: HeaderMa
     let saved = load(&st.db).await;
     let s = settings_from(SettingsReq { enabled: true, ..req.settings }, &saved)?;
     let site = st.part::<crate::branding::Memory>().settings.read().unwrap().site_name.clone();
-    // In the language of the page it was sent from
-    let zh = crate::auth::get_cookie(&headers, "tf_lang") == Some("zh-TW");
-    let (subject, body) = crate::notify::test_message(zh, &site);
+    // In the language of the administrator who sends it
+    let visitor = crate::i18n::Visitor::SignedIn(crate::i18n::saved(&st, admin.id).await?);
+    let lang = crate::i18n::resolve(&headers, visitor, crate::i18n::system_default(&st));
+    let (subject, body) = crate::notify::test_message(lang == crate::i18n::Lang::ZhTw, &site);
     send(&s, &site, &Message { to: &to, subject: &subject, body: &body })
         .await
         .map_err(|e| AppError::bad_request(format!("The test email couldn't be sent: {e}")))?;

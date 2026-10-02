@@ -102,8 +102,11 @@ export default {
   "Site URL: {url}": "网站地址：{url}",
   "Use the browser's current URL": "使用浏览器当前的地址",
   "Invalid default language": "默认语言无效",
+  "Unknown language": "未知的语言",
   "Default language: English": "默认语言：英语",
+  "Default language: Traditional Chinese": "默认语言：繁体中文",
   "Default language: Simplified Chinese": "默认语言：简体中文",
+  "Default language: Japanese": "默认语言：日语",
   "Default language: Follow the browser language": "默认语言：跟随浏览器语言",
   // Branding settings (branding.rs)
   "Sign in to access your files": "登录以访问你的文件",

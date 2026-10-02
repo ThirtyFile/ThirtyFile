@@ -121,8 +121,8 @@ pub struct SettingsReq {
     pub(super) version_days: Option<i64>,
 }
 
-/// Values of the default interface language: follow the browser, English, Traditional Chinese
-pub const LANGS: [&str; 3] = ["auto", "en", "zh-TW"];
+/// Values of the default interface language: follow the browser, or one of the languages (i18n/)
+pub const LANGS: [&str; 5] = ["auto", "en", "zh-TW", "zh-CN", "ja"];
 
 /// Site URL: only accepts http(s)://host[:port], with the trailing / removed; blank means not set
 pub fn normalize_public_url(raw: &str) -> AppResult<String> {
@@ -213,6 +213,8 @@ async fn save_site(tx: &mut SqliteConnection, user: &User, req: &SettingsReq, pu
         let label = match lang.as_str() {
             "en" => "English",
             "zh-TW" => "Traditional Chinese",
+            "zh-CN" => "Simplified Chinese",
+            "ja" => "Japanese",
             _ => "Follow the browser language",
         };
         logs::record_activity(tx, user, None, "settings", &format!("Default language: {label}")).await?;

@@ -42,3 +42,11 @@ export async function uploadFile(page: Page, parent: string, name: string, conte
   expect(res.ok()).toBe(true);
   return res.headers()["x-node-id"];
 }
+
+/**
+ * The server's answer to the request that finishes an upload made by the page: start waiting before the upload starts.
+ * The file is saved once it comes, and a server busy with large changes from other tests may take a while to answer.
+ */
+export function uploadFinished(page: Page) {
+  return page.waitForResponse((r) => new URL(r.url()).pathname.startsWith("/api/uploads") && r.ok() && r.headers()["x-node-id"] !== undefined);
+}

@@ -7,7 +7,7 @@ import { ApiError } from "@/api";
 import { keys, queries } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { MeContext } from "@/lib/session";
-import { t } from "@/lib/i18n";
+import { adoptLanguage, languageToAdopt, t } from "@/lib/i18n";
 import { errorMessage, unreachable } from "@/lib/utils";
 import { useApplyBranding } from "@/lib/branding";
 import { ConfirmHost } from "@/components/confirm";
@@ -61,6 +61,12 @@ function RequireAuth() {
     if (me.data) noteSignedIn(me.data.id);
   }, [me.data]);
 
+  // Signed in on a page in another language than theirs (the sign-in page had the browser's): reload in theirs
+  const adopting = languageToAdopt(me.data?.ui_lang);
+  useEffect(() => {
+    if (adopting) adoptLanguage(adopting);
+  }, [adopting]);
+
   // Any API returning 401 (session expired) sends the user back to the login page
   useEffect(() => {
     const onUnauthorized = () => {
@@ -71,7 +77,7 @@ function RequireAuth() {
     return () => window.removeEventListener("tf:unauthorized", onUnauthorized);
   }, [navigate, location, qc]);
 
-  if (me.isLoading)
+  if (me.isLoading || adopting)
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
         <Loader2Icon className="size-6 animate-spin" />
