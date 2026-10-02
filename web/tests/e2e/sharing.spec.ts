@@ -70,9 +70,10 @@ test("Share with… picks a person with the keyboard alone", async ({ page }) =>
   await signIn(page);
   const kim = `kim-${Date.now().toString(36)}`;
   expect((await page.request.post("/api/admin/users", { data: { username: kim, password: "a-long-test-password-1" } })).ok()).toBe(true);
-  const dir = await makeFolder(page, "Shared with Kim");
-  const me = await (await page.request.get("/api/auth/me")).json();
-  await page.goto(`/files/${me.root_id}`);
+  // In a folder of its own: My files holds the other tests' folders too
+  const parent = await makeFolder(page, "Sharing by keyboard");
+  const dir = await makeFolder(page, "Shared with Kim", parent);
+  await page.goto(`/files/${parent}`);
   await page.locator("[data-node-id]").filter({ hasText: "Shared with Kim" }).first().click();
   await page.getByRole("button", { name: "Share with…" }).click();
   const dialog = page.getByRole("dialog");
