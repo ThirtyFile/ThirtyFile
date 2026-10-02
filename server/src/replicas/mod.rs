@@ -141,11 +141,6 @@ pub async fn location_used(conn: &mut SqliteConnection, location: &str) -> Resul
     Ok((copies, policies > 0))
 }
 
-/// Bytes of replica copies on each location (Storage usage)
-pub async fn bytes_by_location(db: &SqlitePool) -> Result<Vec<(String, i64)>, sqlx::Error> {
-    sqlx::query_as("SELECT location_id, COALESCE(SUM(size), 0) FROM replica_copies GROUP BY location_id").fetch_all(db).await
-}
-
 /// Whether a location is an old primary after a promotion, not checked since: new content isn't stored there, so it
 /// can't take writes the new primary doesn't have (tree::commit_blob)
 pub async fn fenced(conn: &mut SqliteConnection, location: &str) -> Result<bool, sqlx::Error> {

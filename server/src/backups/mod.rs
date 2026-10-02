@@ -134,13 +134,6 @@ pub async fn location_busy(conn: &mut SqliteConnection, location: &str) -> Resul
     Ok(row.is_some())
 }
 
-/// Bytes of the sets kept on each location (Storage usage)
-pub async fn bytes_by_location(db: &SqlitePool) -> Result<Vec<(String, i64)>, sqlx::Error> {
-    sqlx::query_as("SELECT s.dest_location, COALESCE(SUM(o.size), 0) FROM backup_sets s LEFT JOIN backup_objects o ON o.set_id = s.id GROUP BY s.dest_location")
-        .fetch_all(db)
-        .await
-}
-
 /// Writes an activity log entry about a job, as done by whoever asked for it
 async fn log(conn: &mut SqliteConnection, job: &Job, action: &str, detail: &str) -> Result<(), sqlx::Error> {
     debug_assert!(crate::logs::known_action(action), "{action} isn't in logs::ACTIONS");
