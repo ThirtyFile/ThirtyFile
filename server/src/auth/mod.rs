@@ -123,7 +123,7 @@ pub struct User {
     pub can_delete: bool,
     pub can_share: bool,
     pub quota_bytes: i64,
-    /// Root folder of their personal space ("My files"); None when they have none (personal.rs)
+    /// Root folder of their personal space ("My files"); None when they have none (personal/)
     pub root_id: Option<String>,
     /// An administrator chose the password (a new account, a reset): the person sets their own before anything else
     pub must_change_password: bool,

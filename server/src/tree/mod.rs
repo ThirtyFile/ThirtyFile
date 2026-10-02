@@ -179,7 +179,7 @@ pub async fn get_drive(conn: &mut SqliteConnection, id: &str) -> AppResult<Optio
 
 pub fn resolve_alias<'a>(user: &'a User, id: &'a str) -> AppResult<&'a str> {
     Ok(match id {
-        // The personal space, which a user may not have (personal.rs): the web never asks them for it
+        // The personal space, which a user may not have (personal/): the web never asks them for it
         "root" => user.root_id.as_deref().ok_or_else(|| AppError::not_found("You don't have a personal space"))?,
         "shared" => user.shared_root.as_deref().ok_or_else(|| AppError::not_found("The shared space isn't enabled"))?,
         _ => id,

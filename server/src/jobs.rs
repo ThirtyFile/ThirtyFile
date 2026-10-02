@@ -1,6 +1,6 @@
 //! Tasks that go on after the request that asked for them has answered: compressing and extracting (archive.rs),
 //! moving and copying to or from folder spaces, deleting for good and emptying the trash (nodes/), checking a folder
-//! space for changes (drives.rs), and removing a user or their "My files" (admin/, personal.rs).
+//! space for changes (drives.rs), and removing a user or their "My files" (admin/, personal/).
 //!
 //! A request has a time limit, and a browser or WebDAV client can give up on it at any moment; work cut off in the
 //! middle would leave things half done. So the work runs as a job of its own: the request waits a moment for it (most

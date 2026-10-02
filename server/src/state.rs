@@ -211,7 +211,7 @@ pub struct SystemSettings {
     pub default_user_quota: i64,
     /// New users get a personal space ("My files") unless the administrator or a sign-in domain rule says otherwise
     pub personal_spaces: bool,
-    /// The storage location new personal spaces go on; blank = the default location at the time (personal.rs)
+    /// The storage location new personal spaces go on; blank = the default location at the time (personal/)
     pub personal_location: String,
     /// The site's public URL (e.g. https://drive.example.com), used to build share links; blank = use the browser's current URL
     pub public_url: String,

@@ -53,6 +53,7 @@ mod tree;
 mod twofactor;
 mod upload;
 mod usage;
+mod users;
 mod util;
 mod versions;
 #[cfg(target_os = "linux")]

@@ -38,13 +38,13 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    admin::{NewUser, create_user},
     auth::{Admin, NO_PASSWORD, User, client_ip},
     db::{get_setting, set_setting},
     error::{AppError, AppResult},
     logs::{self, record_login_via},
     signin::open_session,
     state::AppState,
+    users::{NewUser, create_user},
     util::{now, random_token},
 };
 
@@ -721,7 +721,7 @@ mod tests {
         assert!(long.chars().count() <= 28 && !long.contains('@'));
         // CJK local parts must be replaced with allowed characters
         for name in ["amy+drive@example.com", "王小明@example.com", "x@y", "+@z"] {
-            assert!(crate::admin::validate_username(&sso_username(name)).is_ok(), "{name}");
+            assert!(crate::users::validate_username(&sso_username(name)).is_ok(), "{name}");
         }
     }
 
@@ -1085,7 +1085,7 @@ mod tests {
         for i in 0..(MAX_CREATED_PER_HOUR - 1) {
             let hash = crate::auth::hash_password("x".into()).await.unwrap();
             let mut c = env.st.db.acquire().await.unwrap();
-            crate::admin::create_user(
+            crate::users::create_user(
                 &mut c,
                 NewUser {
                     username: &format!("bulk{i}@example.com"),
