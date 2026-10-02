@@ -8,8 +8,9 @@ use serde_json::json;
 use super::{Policy, Target};
 use crate::{
     backups::{
-        policy::{Schedule, next_after, time_zone},
+        policy::{Schedule, time_zone},
         runner::{ACTIVE, JobState},
+        scheduler::{self, Slot, Step},
     },
     error::AppResult,
     replicas::Memory,
@@ -17,25 +18,9 @@ use crate::{
     util::{new_id, now},
 };
 
-/// How long changes are gathered before a sync is made for them
-pub const BATCH_SECONDS: i64 = 5;
-/// A sync that failed is tried again after this long; one waiting for its location, sooner
-const RETRY_FAILED: i64 = 3600;
-const RETRY_WAITING: i64 = 300;
-
 /// Looks at every policy every few seconds (and when woken)
 pub fn spawn_scheduler(st: AppState) {
-    tokio::spawn(async move {
-        loop {
-            if let Err(e) = tick(&st, now()).await {
-                tracing::warn!("Replica policies: {}", e.message);
-            }
-            tokio::select! {
-                _ = st.part::<Memory>().queue.policies.notified() => {}
-                _ = tokio::time::sleep(std::time::Duration::from_secs(BATCH_SECONDS as u64)) => {}
-            }
-        }
-    });
+    scheduler::spawn(st, "Replica policies", |st| &st.part::<Memory>().queue.policies, |st, t| async move { tick(&st, t).await });
 }
 
 /// One look at every policy, as of `t`
@@ -127,34 +112,31 @@ async fn look_at(st: &AppState, p: &Policy, t: i64) -> AppResult<()> {
                     .execute(&st.db)
                     .await?;
             }
-            let mut due = None;
-            if target.state == "stale" {
+            let due = if target.state == "stale" {
                 // An old primary: checked, then brought up to date, before it counts again
-                due = Some("reconcile");
-            } else if target.mode == "realtime" {
-                let oldest = behind_since(st, &p.id, l, &spaces).await?;
-                if (!changed.is_empty() && oldest.is_some_and(|o| t - o >= BATCH_SECONDS)) || target.synced_at.is_none() {
-                    due = Some("change");
+                Some("reconcile")
+            } else {
+                let realtime = target.mode == "realtime";
+                let schedule = match serde_json::from_str(&target.schedule).ok().and_then(|v| Schedule::parse(&v).ok()).filter(|_| !realtime) {
+                    Some(s) => Some((s, time_zone(&target.tz)?)),
+                    None => None,
+                };
+                let behind_since = if realtime { behind_since(st, &p.id, l, &spaces).await? } else { None };
+                let slot = Slot {
+                    realtime,
+                    schedule,
+                    next_run_at: target.next_run_at,
+                    changed: !changed.is_empty(),
+                    behind_since,
+                    catch_up: target.catch_up,
+                    never_ran: target.synced_at.is_none(),
+                };
+                let (due, next) = scheduler::due(&slot, t);
+                if let Some(next) = next {
+                    set_next(st, &p.id, l, next).await?;
                 }
-            } else if let Some(s) = serde_json::from_str(&target.schedule).ok().and_then(|v| Schedule::parse(&v).ok()) {
-                let tz = time_zone(&target.tz)?;
-                match target.next_run_at {
-                    Some(next) if next <= t => {
-                        due = Some("schedule");
-                        set_next(st, &p.id, l, next_after(&s, &tz, t)).await?;
-                    }
-                    None => {
-                        set_next(st, &p.id, l, next_after(&s, &tz, t)).await?;
-                        if target.synced_at.is_none() {
-                            due = Some("schedule");
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            if due.is_none() && target.catch_up {
-                due = Some("change");
-            }
+                due
+            };
             match due {
                 Some(why) => {
                     trigger(st, &p.id, l, why, None).await?;
@@ -220,8 +202,7 @@ async fn set_next(st: &AppState, policy: &str, location: &str, next: Option<i64>
 }
 
 /// Queues a sync of a target for `why` ('change', 'schedule', 'reconcile', 'repair', 'manual', or 'retry' for one
-/// that failed or waits). One at a time: a queued one is left as it is, a failed or waiting one is tried again (not
-/// more often than `RETRY_*`, unless asked for), a running or paused one gets one more after it.
+/// that failed or waits), one at a time (`scheduler::step`)
 pub async fn trigger(st: &AppState, policy: &str, location: &str, why: &str, by: Option<(i64, String)>) -> AppResult<Option<String>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
@@ -237,30 +218,22 @@ pub async fn trigger(st: &AppState, policy: &str, location: &str, why: &str, by:
         let (last_run,): (Option<i64>,) =
             sqlx::query_as("SELECT last_run_at FROM replica_targets WHERE policy_id = ? AND location_id = ?").bind(policy).bind(location).fetch_one(&mut *tx).await?;
         let t = now();
-        match active {
-            Some((_, JobState::Queued)) => Ok(None),
-            Some((id, state @ (JobState::Failed | JobState::Waiting))) => {
-                let wait = if state == JobState::Failed { RETRY_FAILED } else { RETRY_WAITING };
-                // A location that works again, as checked since the job last ran, is tried again at once
-                let back = state == JobState::Waiting
-                    && st.location_health.lock().unwrap().get(location).is_some_and(|h| h.ok && last_run.is_some_and(|l| h.checked_at > l));
-                if why == "manual" || back || last_run.is_none_or(|l| t - l >= wait) {
-                    sqlx::query("UPDATE replica_jobs SET state = 'queued', error = NULL, params = json_set(params, '$.epoch', ?) WHERE id = ?")
-                        .bind(p.epoch)
-                        .bind(&id)
-                        .execute(&mut *tx)
-                        .await?;
-                    sqlx::query("UPDATE replica_targets SET last_run_at = ? WHERE policy_id = ? AND location_id = ?").bind(t).bind(policy).bind(location).execute(&mut *tx).await?;
-                    return Ok(Some(id));
+        // A location that works again, as checked since the job last ran, is tried again at once
+        let back = scheduler::back(st, location, last_run);
+        match scheduler::step(active, why, last_run, back, t) {
+            Step::Leave => Ok(None),
+            Step::Requeue(id) => {
+                if !scheduler::requeue(&mut tx, "replica_jobs", &id, &json!({ "epoch": p.epoch })).await? {
+                    return Ok(None);
                 }
-                Ok(None)
+                sqlx::query("UPDATE replica_targets SET last_run_at = ? WHERE policy_id = ? AND location_id = ?").bind(t).bind(policy).bind(location).execute(&mut *tx).await?;
+                Ok(Some(id))
             }
-            Some(_) => {
+            Step::CatchUp => {
                 sqlx::query("UPDATE replica_targets SET catch_up = 1 WHERE policy_id = ? AND location_id = ?").bind(policy).bind(location).execute(&mut *tx).await?;
                 Ok(None)
             }
-            None if why == "retry" => Ok(None),
-            None => {
+            Step::Queue => {
                 let (name,): (String,) = sqlx::query_as("SELECT name FROM storage_locations WHERE id = ?").bind(location).fetch_optional(&mut *tx).await?.unwrap_or_default();
                 let id = new_id();
                 let (by_id, by_name) = by.map_or((None, String::new()), |(i, n)| (Some(i), n));
@@ -450,38 +423,20 @@ pub async fn health(st: &AppState, p: &Policy, targets: &[Target], t: i64) -> Ap
 /// targets, or behind for longer than it allows), and once when it does again
 async fn alert(st: &AppState, p: &Policy, targets: &[Target], t: i64) -> AppResult<()> {
     let h = health(st, p, targets, t).await?;
-    let now_state = if h.state == "degraded" { "degraded" } else { "" };
-    if now_state == p.alerted {
+    let state = if h.state == "degraded" { "degraded" } else { "" };
+    if state == p.alerted {
         return Ok(());
     }
     let error = h.source_offline.clone().or_else(|| h.targets.iter().find_map(|x| x.error.clone()));
-    let emails = {
-        let _w = st.write_lock.lock().await;
-        let mut tx = crate::db::begin_write(&st.db).await?;
-        let res = async {
-            sqlx::query("UPDATE replica_policies SET alerted = ? WHERE id = ?").bind(now_state).bind(&p.id).execute(&mut *tx).await?;
-            let kind = if now_state.is_empty() { "recovered" } else { "degraded" };
-            let admins: Vec<i64> = sqlx::query_as::<_, (i64,)>("SELECT id FROM users WHERE role = 'admin' AND disabled = 0")
-                .fetch_all(&mut *tx)
-                .await?
-                .into_iter()
-                .map(|(i,)| i)
-                .collect();
-            let notice = crate::notify::Notice {
-                kind: "replica",
-                node_id: None,
-                data: json!({ "name": p.name, "state": kind, "error": error, "current": h.current, "wanted": h.wanted }),
-            };
-            sqlx::query("INSERT INTO activity (at, action, detail) VALUES (?, 'replica_alert', ?)")
-                .bind(t)
-                .bind(format!("{}: {kind}", p.name))
-                .execute(&mut *tx)
-                .await?;
-            crate::notify::add(&mut tx, &admins, &notice).await
-        }
-        .await;
-        crate::db::settle(tx, res).await?
+    let alert = scheduler::Alert {
+        state,
+        alerted: &p.alerted,
+        record: "UPDATE replica_policies SET alerted = ?1 WHERE id = ?2",
+        id: &p.id,
+        notice: "replica",
+        data: json!({ "name": p.name, "error": error, "current": h.current, "wanted": h.wanted }),
+        action: "replica_alert",
+        name: &p.name,
     };
-    crate::notify::send_later(st, emails);
-    Ok(())
+    scheduler::alert(st, alert, t).await
 }
