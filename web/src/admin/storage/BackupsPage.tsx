@@ -203,8 +203,8 @@ export function BackupsPage() {
       <ToolButton icon={PlayIcon} label={t("Resume")} disabled={!canResume(selected)} onClick={() => selected && resume(selected)} />
       <ToolButton icon={XIcon} label={t("Cancel")} disabled={!canCancel(selected)} onClick={() => selected && setDialog({ t: "cancel", set: selected })} />
       <ToolSeparator />
-      <ToolButton icon={ShieldCheckIcon} label={t("Check the copy")} disabled={!idle(selected) || !canRestore(selected)} onClick={() => selected && verify(selected)} />
-      <ToolButton icon={Trash2Icon} label={t("Delete copy")} disabled={!idle(selected)} onClick={() => selected && setDialog({ t: "delete", set: selected })} />
+      <ToolButton icon={ShieldCheckIcon} label={t("Check the backup")} disabled={!idle(selected) || !canRestore(selected)} onClick={() => selected && verify(selected)} />
+      <ToolButton icon={Trash2Icon} label={t("Delete backup")} disabled={!idle(selected)} onClick={() => selected && setDialog({ t: "delete", set: selected })} />
       <ToolButton icon={InfoIcon} label={t("Details")} disabled={!selected} onClick={() => selected && setDialog({ t: "details", set: selected })} />
       <ToolButton icon={FolderSearchIcon} label={t("Find backups on a location…")} onClick={() => setFinding(true)} />
       <ToolButton icon={RefreshCwIcon} label={t("Refresh")} onClick={refresh} />
@@ -308,11 +308,11 @@ export function BackupsPage() {
           </DropdownMenuItem>
         )}
         <DropdownMenuItem disabled={!idle(s) || !canRestore(s)} onClick={() => verify(s)}>
-          <ShieldCheckIcon /> {t("Check the copy")}
+          <ShieldCheckIcon /> {t("Check the backup")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" disabled={!idle(s)} onClick={() => setDialog({ t: "delete", set: s })}>
-          <Trash2Icon /> {t("Delete copy")}
+          <Trash2Icon /> {t("Delete backup")}
         </DropdownMenuItem>
       </>
     ) : (
@@ -339,7 +339,7 @@ export function BackupsPage() {
       onSearch={searchSettings}
       footer={
         <span>
-          {t("{n} copy|{n} copies", { n: sets.length })} · {t("{n} job not finished|{n} jobs not finished", { n: running })}
+          {t("{n} backup|{n} backups", { n: sets.length })} · {t("{n} job not finished|{n} jobs not finished", { n: running })}
         </span>
       }
     >
@@ -385,7 +385,7 @@ export function BackupsPage() {
       {dialog?.t === "restore" && completeSnapshot(dialog.set) && <RestoreDialog set={dialog.set} onClose={() => setDialog(null)} onDone={refresh} />}
       {dialog?.t === "delete" && (
         <ConfirmDialog
-          title={t('Delete the copy "{name}"?', { name: dialog.set.name })}
+          title={t('Delete the backup "{name}"?', { name: dialog.set.name })}
           description={
             dialog.set.policy
               ? t(
@@ -400,7 +400,7 @@ export function BackupsPage() {
                   source: dialog.set.source_name,
                 })
           }
-          confirmText={t("Delete copy")}
+          confirmText={t("Delete backup")}
           destructive
           onClose={() => setDialog(null)}
           onConfirm={async () => {
@@ -417,7 +417,7 @@ export function BackupsPage() {
           description={
             cancelling.kind === "snapshot"
               ? completeSnapshot(dialog.set)
-                ? t("It stops; the copy stays as it was.")
+                ? t("It stops; the backup stays as it was.")
                 : t("It stops, and what was already copied to {dest} is removed. Nothing on {source} changes.", { dest: dialog.set.dest_name, source: dialog.set.source_name })
               : cancelling.kind === "restore"
                 ? t("It stops. What was already restored stays in its new folder, where it can be deleted.")
@@ -438,7 +438,7 @@ export function BackupsPage() {
   );
 }
 
-/** "Find backups on a location…": copies and backups kept there that this server doesn't list, made before its
+/** "Find backups on a location…": backups and one-time copies kept there that this server doesn't list, made before its
  * database was lost or by another installation */
 function FindBackupsDialog({ onClose, onDone }: { onClose(): void; onDone(): void }) {
   const locations = useQuery(queries.storageLocations);
@@ -461,7 +461,7 @@ function FindBackupsDialog({ onClose, onDone }: { onClose(): void; onDone(): voi
             <DialogTitle>{t("Find backups on a location")}</DialogTitle>
             <DialogDescription>
               {t(
-                "Lists copies and backups kept on a location that this server doesn't know, for example after its database was lost. Their complete snapshots can then be restored from; a personal space goes into the personal space of the user with the same user name.",
+                "Lists backups and one-time copies kept on a location that this server doesn't know, for example after its database was lost. Their complete snapshots can then be restored from; a personal space goes into the personal space of the user with the same user name.",
               )}
             </DialogDescription>
           </DialogHeader>
@@ -556,7 +556,7 @@ function SetDetails({ set: s, jobs, onClose }: { set: BackupSet; jobs: BackupJob
         )}
         {snap && (
           <div className="grid gap-1">
-            <p className="text-sm">{t("Spaces in the copy")}</p>
+            <p className="text-sm">{t("Spaces in the snapshot")}</p>
             <ul className="max-h-36 divide-y overflow-y-auto rounded-md border text-xs">
               {snap.spaces.map((sp) => {
                 const Icon = DRIVE_ICON[sp.kind];

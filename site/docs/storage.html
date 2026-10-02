@@ -184,8 +184,8 @@
           <li><strong>Pause and resume.</strong> A paused copy stops after the item it is working on and keeps what it copied; resumed, or after ThirtyFile restarts, it continues where it stopped.</li>
           <li><strong>Errors.</strong> A file that can't be read is tried three times. When some still can't be copied, the copy stops as <em>Stopped by an error</em> and isn't complete. <strong>Details</strong> lists them (for a personal space, without their names) and why. Fix the cause and <strong>Resume</strong> to try again. A location that can't be reached stops it the same way.</li>
           <li><strong>Cancel.</strong> A copy that never completed is removed from the other location. The source isn't touched.</li>
-          <li><strong>Check the copy</strong> reads everything back from the other location and checks each content against its SHA-256, and each manifest against its <code>complete.json</code>. What is missing or damaged is listed.</li>
-          <li><strong>Delete copy</strong> removes its folder from the other location, after you confirm. It can be paused, not cancelled: a copy half deleted can't be restored from.</li>
+          <li><strong>Check the backup</strong> reads everything back from the other location and checks each content against its SHA-256, and each manifest against its <code>complete.json</code>. What is missing or damaged is listed.</li>
+          <li><strong>Delete backup</strong> removes its folder from the other location, after you confirm. It can be paused, not cancelled: a copy half deleted can't be restored from.</li>
         </ul>
         <p>A location holding a copy can't be deleted, nor its folder changed, until the copy is deleted. Removing unused content and deleting files for good never look in <code>.thirtyfile-backups</code>, so they never remove a copy, and <strong>Browse</strong> doesn't open it (its manifests name the files of personal spaces). The activity log records when copies are made, restored from, checked and deleted.</p>
         <h3 id="copy-restore">Restoring from a copy</h3>

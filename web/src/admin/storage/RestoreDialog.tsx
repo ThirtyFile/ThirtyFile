@@ -109,7 +109,7 @@ export function RestoreDialog({ set, onClose, onDone }: { set: BackupSet; onClos
               </NativeSelect>
             </div>
           )}
-          {points.length === 1 && snapshot?.cutoff && <p className="text-sm">{t("The copy shows the spaces as they were on {time}.", { time: formatDateTime(snapshot.cutoff) })}</p>}
+          {points.length === 1 && snapshot?.cutoff && <p className="text-sm">{t("The snapshot shows the spaces as they were on {time}.", { time: formatDateTime(snapshot.cutoff) })}</p>}
           <div className="grid gap-2">
             <Label htmlFor="restore-space">{t("Space to restore")}</Label>
             <NativeSelect
