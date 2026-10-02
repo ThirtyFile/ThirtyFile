@@ -27,9 +27,42 @@ pub struct TestEnv {
     pub dir: PathBuf,
 }
 
+/// The removals of the data folders of the tests run on a thread
+struct Removals(std::cell::RefCell<Vec<std::thread::JoinHandle<()>>>);
+
+impl Drop for Removals {
+    fn drop(&mut self) {
+        for removal in self.0.get_mut().drain(..) {
+            let _ = removal.join();
+        }
+    }
+}
+
+thread_local! {
+    /// Waited for when the thread ends, after the test and its runtime; the test harness waits for that in turn, so
+    /// none is cut short when the last tests end
+    static REMOVALS: Removals = const { Removals(std::cell::RefCell::new(Vec::new())) };
+}
+
 impl Drop for TestEnv {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
+        // The pool keeps drive.db open, and Windows doesn't remove a folder with a file open in it: the pool is closed
+        // first. That waits for the connection used last, which goes back to the pool in a task of the test's runtime
+        // (sqlx), and the runtime only lets go of it once the test is over: so it is done on a thread of its own.
+        let (db, dir) = (self.st.db.clone(), self.dir.clone());
+        let removal = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            let _ = rt.block_on(async { tokio::time::timeout(std::time::Duration::from_secs(30), db.close()).await });
+            drop(db);
+            // A file may still be held for a moment (a connection closing on its own thread, a virus scanner)
+            for _ in 0..50 {
+                match std::fs::remove_dir_all(&dir) {
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => std::thread::sleep(std::time::Duration::from_millis(100)),
+                    _ => return,
+                }
+            }
+        });
+        let _ = REMOVALS.try_with(|r| r.0.borrow_mut().push(removal));
     }
 }
 

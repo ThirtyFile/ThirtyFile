@@ -400,3 +400,153 @@ pub async fn daily_archive(st: &AppState) {
         Err(e) => tracing::warn!("Log archiving failed: {}", e.message),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+
+    use super::*;
+    use crate::testutil;
+
+    /// Old entries: activity, sign-ins and errors from 400 days ago
+    async fn old_entries(env: &testutil::TestEnv, activity: usize, logins: usize, errors: usize) {
+        let at = now() - 400 * DAY;
+        for i in 0..activity {
+            sqlx::query("INSERT INTO activity (at, username, node_name, action, detail) VALUES (?, 'amy', ?, 'upload', '')")
+                .bind(at + i as i64)
+                .bind(format!("file-{i}.txt"))
+                .execute(&env.st.db)
+                .await
+                .unwrap();
+        }
+        for _ in 0..logins {
+            sqlx::query("INSERT INTO login_log (at, username, event) VALUES (?, 'amy', 'login')").bind(at).execute(&env.st.db).await.unwrap();
+        }
+        for _ in 0..errors {
+            sqlx::query("INSERT INTO error_log (at, first_at, source, severity, fingerprint) VALUES (?, ?, 'backend', 'error', 'f')")
+                .bind(at)
+                .bind(at)
+                .execute(&env.st.db)
+                .await
+                .unwrap();
+        }
+    }
+
+    async fn logged(env: &testutil::TestEnv, action: &str) -> Vec<String> {
+        sqlx::query_scalar("SELECT detail FROM activity WHERE action = ? ORDER BY id").bind(action).fetch_all(&env.st.db).await.unwrap()
+    }
+
+    fn english() -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(header::COOKIE, HeaderValue::from_static("tf_lang=en"));
+        h
+    }
+
+    fn file_name(res: &Response) -> String {
+        let d = res.headers()[header::CONTENT_DISPOSITION].to_str().unwrap();
+        percent_encoding::percent_decode_str(d.split("filename*=UTF-8''").nth(1).unwrap()).decode_utf8().unwrap().into_owned()
+    }
+
+    #[tokio::test]
+    async fn archiving_by_hand_files_old_entries_logs_the_run_and_the_archives_can_be_fetched_and_deleted() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        old_entries(&env, 3, 2, 1).await;
+
+        let Json(v) = archive_now(State(env.st.clone()), Admin(admin.clone())).await.unwrap();
+        let summary = "Archived 3 activity log entries, 2 sign-in log entries, 1 error log entry";
+        assert_eq!(v["summary"], summary);
+        assert_eq!(logged(&env, "log_archive").await, [summary]);
+        // What is left is the run itself; the archives are listed, newest first, with their size
+        assert_eq!((v["activity"]["rows"].as_i64(), v["login_log"]["rows"].as_i64(), v["error_log"]["rows"].as_i64()), (Some(1), Some(0), Some(0)));
+        assert_eq!(v["archives"].as_array().unwrap().len(), 3);
+        assert!(v["archive_bytes"].as_i64().unwrap() > 0);
+        assert!(v["last_run"].as_i64().unwrap() >= now() - 60);
+        let Json(status) = get_status(State(env.st.clone()), Admin(admin.clone())).await.unwrap();
+        assert_eq!(status["archives"], v["archives"]);
+
+        // Nothing more to archive
+        let Json(again) = archive_now(State(env.st.clone()), Admin(admin.clone())).await.unwrap();
+        assert_eq!(again["summary"], "No logs needed archiving");
+
+        // Downloaded under a name in the interface language
+        let (id, file): (i64, String) = sqlx::query_as("SELECT id, file FROM log_archives WHERE kind = 'login_log'").fetch_one(&env.st.db).await.unwrap();
+        let day = format_time(now() - 400 * DAY, 0)[..10].to_string();
+        let res = download_archive(State(env.st.clone()), Admin(admin.clone()), english(), Path(id)).await.unwrap();
+        assert_eq!(res.headers()[header::CONTENT_TYPE], "application/gzip");
+        assert_eq!(file_name(&res), format!("login-log-{day}-{day}.jsonl.gz"));
+        let res = download_archive(State(env.st.clone()), Admin(admin.clone()), HeaderMap::new(), Path(id)).await.unwrap();
+        assert_eq!(file_name(&res), format!("登入紀錄-{day}-{day}.jsonl.gz"));
+
+        // Deleted: the file goes, and so does the row; the deletion is logged
+        let Json(ok) = delete_archive(State(env.st.clone()), Admin(admin.clone()), Path(id)).await.unwrap();
+        assert_eq!(ok["ok"], true);
+        assert!(!env.dir.join("archives").join(&file).exists());
+        assert_eq!(logged(&env, "log_archive_delete").await, [format!("{file} (2 records)")]);
+        let missing = |r: AppResult<Response>| r.unwrap_err().status;
+        assert_eq!(missing(download_archive(State(env.st.clone()), Admin(admin.clone()), HeaderMap::new(), Path(id)).await), StatusCode::NOT_FOUND);
+        assert_eq!(delete_archive(State(env.st.clone()), Admin(admin.clone()), Path(id)).await.unwrap_err().status, StatusCode::NOT_FOUND);
+
+        // A row whose file was removed by hand says so
+        let (id, file): (i64, String) = sqlx::query_as("SELECT id, file FROM log_archives WHERE kind = 'activity'").fetch_one(&env.st.db).await.unwrap();
+        std::fs::remove_file(env.dir.join("archives").join(&file)).unwrap();
+        let err = download_archive(State(env.st.clone()), Admin(admin), HeaderMap::new(), Path(id)).await.unwrap_err();
+        assert_eq!((err.status, err.message.as_str()), (StatusCode::NOT_FOUND, "The archive file no longer exists"));
+    }
+
+    #[tokio::test]
+    async fn log_settings_are_checked_saved_and_described_in_the_log() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        for (bad, label) in [
+            (LogSettings { activity_days: -1, ..Default::default() }, "Activity log retention (days)"),
+            (LogSettings { login_days: 36_501, ..Default::default() }, "Sign-in log retention (days)"),
+            (LogSettings { archive_keep_days: -5, ..Default::default() }, "Archive retention (days)"),
+        ] {
+            let err = update_settings(State(env.st.clone()), Admin(admin.clone()), Json(bad)).await.unwrap_err();
+            assert_eq!(err.status, StatusCode::BAD_REQUEST);
+            assert_eq!(err.message, format!("{label} must be between 0 and 36500"));
+        }
+        assert!(logged(&env, "settings").await.is_empty());
+
+        let s = LogSettings { activity_days: 30, share_days: 0, login_days: 1, archive: false, archive_keep_days: 0, record_visitor: false };
+        let Json(v) = update_settings(State(env.st.clone()), Admin(admin.clone()), Json(s)).await.unwrap();
+        assert_eq!(v["settings"]["activity_days"], 30);
+        let saved = super::super::load_settings(&env.st.db).await;
+        assert_eq!((saved.activity_days, saved.share_days, saved.login_days, saved.archive, saved.record_visitor), (30, 0, 1, false, false));
+        assert_eq!(env.st.logs.read().unwrap().login_days, 1, "in use at once");
+        assert_eq!(
+            logged(&env, "settings").await,
+            ["Log settings: activity 30 days, share visits never cleaned up, sign-ins 1 day, delete directly, archives kept forever, visitor IPs not recorded"]
+        );
+
+        let s = LogSettings { activity_days: 1, archive_keep_days: 1, ..Default::default() };
+        let _ = update_settings(State(env.st.clone()), Admin(admin), Json(s)).await.unwrap();
+        assert_eq!(
+            logged(&env, "settings").await.pop().unwrap(),
+            "Log settings: activity 1 day, share visits 180 days, sign-ins 365 days, compress and archive, archives kept 1 day"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_daily_run_waits_a_day_after_the_last_one() {
+        let env = testutil::env().await;
+        old_entries(&env, 2, 0, 0).await;
+        let ran_at = |t: i64| {
+            let st = env.st.clone();
+            async move {
+                let mut c = st.db.acquire().await.unwrap();
+                set_setting(&mut c, "log_archived_at", &t.to_string()).await.unwrap();
+            }
+        };
+        let old = || async { sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM activity").fetch_one(&env.st.db).await.unwrap() };
+        ran_at(now() - 3600).await;
+        daily_archive(&env.st).await;
+        assert_eq!(old().await, 2);
+        ran_at(now() - DAY - 1).await;
+        daily_archive(&env.st).await;
+        assert_eq!(old().await, 0);
+        let last: i64 = get_setting(&env.st.db, "log_archived_at").await.unwrap().unwrap().parse().unwrap();
+        assert!(last >= now() - 60);
+    }
+}
