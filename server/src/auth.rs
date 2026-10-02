@@ -388,7 +388,11 @@ impl TrustProxy {
             let ip: std::net::IpAddr = ip.parse().map_err(|_| invalid(part))?;
             let max = if ip.is_ipv4() { 32 } else { 128 };
             let bits = if bits.is_empty() { max } else { bits.parse::<u8>().ok().filter(|b| *b <= max).ok_or_else(|| invalid(part))? };
-            list.push((ip.to_canonical(), bits));
+            // An IPv4-mapped entry (`::ffff:172.18.0.1`, as Docker may show it) is kept as IPv4, so its prefix length
+            // counts from the IPv4 part; a shorter prefix reaches past the mapped block and isn't an IPv4 network
+            let canonical = ip.to_canonical();
+            let bits = if ip.is_ipv6() && canonical.is_ipv4() { bits.checked_sub(96).ok_or_else(|| invalid(part))? } else { bits };
+            list.push((canonical, bits));
         }
         Ok(TrustProxy::Listed(list))
     }
@@ -412,16 +416,14 @@ impl TrustProxy {
 }
 
 fn in_network(ip: std::net::IpAddr, net: std::net::IpAddr, bits: u8) -> bool {
-    let mask = |len: u32, bits: u8| if bits == 0 { 0u128 } else { u128::MAX << (len - bits as u32) };
+    // A prefix longer than the address matches nothing; shifting by the full width leaves no bits (a /0 matches all)
+    let mask = |len: u32| len.checked_sub(bits as u32).map(|shift| u128::MAX.checked_shl(shift).unwrap_or(0));
     match (ip, net) {
-        (std::net::IpAddr::V4(a), std::net::IpAddr::V4(b)) => {
-            let m = mask(32, bits) as u32;
+        (std::net::IpAddr::V4(a), std::net::IpAddr::V4(b)) => mask(32).is_some_and(|m| {
+            let m = m as u32;
             u32::from(a) & m == u32::from(b) & m
-        }
-        (std::net::IpAddr::V6(a), std::net::IpAddr::V6(b)) => {
-            let m = mask(128, bits);
-            u128::from(a) & m == u128::from(b) & m
-        }
+        }),
+        (std::net::IpAddr::V6(a), std::net::IpAddr::V6(b)) => mask(128).is_some_and(|m| u128::from(a) & m == u128::from(b) & m),
         _ => false,
     }
 }
@@ -705,6 +707,35 @@ mod tests {
         assert!(TrustProxy::parse("proxy.example.com").is_err());
         assert!(TrustProxy::parse("10.0.0.0/33").is_err());
         assert!(!TrustProxy::Off.trusts(ip("127.0.0.1")));
+    }
+
+    #[test]
+    fn proxy_entries_written_as_ipv4_mapped_addresses_cover_only_their_ipv4_part() {
+        let ip = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
+        // How Docker on a dual-stack host may show the proxy's address
+        let one = TrustProxy::parse("::ffff:172.18.0.1").unwrap();
+        assert_eq!(one, TrustProxy::Listed(vec![(ip("172.18.0.1"), 32)]));
+        assert!(one.trusts(ip("172.18.0.1")) && one.trusts(ip("::ffff:172.18.0.1")));
+        for peer in ["172.18.0.2", "203.0.113.9", "8.8.8.8", "::ffff:203.0.113.9"] {
+            assert!(!one.trusts(ip(peer)), "{peer}");
+        }
+        // A mapped network keeps its IPv4 prefix length: /112 is a /16
+        let net = TrustProxy::parse("::ffff:172.18.0.0/112").unwrap();
+        assert_eq!(net, TrustProxy::Listed(vec![(ip("172.18.0.0"), 16)]));
+        assert!(net.trusts(ip("172.18.200.3")) && !net.trusts(ip("172.19.0.1")) && !net.trusts(ip("10.0.0.1")));
+        assert_eq!(TrustProxy::parse("::ffff:0.0.0.0/96").unwrap(), TrustProxy::Listed(vec![(ip("0.0.0.0"), 0)]));
+        // A prefix shorter than the mapped block isn't an IPv4 network
+        assert!(TrustProxy::parse("::ffff:172.18.0.1/64").is_err());
+    }
+
+    #[test]
+    fn network_masks_never_overflow() {
+        let ip = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
+        // Entries can't hold these, but the check stays false instead of trusting everyone or panicking
+        assert!(!in_network(ip("203.0.113.9"), ip("172.18.0.1"), 128));
+        assert!(!in_network(ip("2001:db8::1"), ip("2001:db8::2"), 200));
+        assert!(in_network(ip("203.0.113.9"), ip("203.0.113.9"), 32));
+        assert!(in_network(ip("203.0.113.9"), ip("10.0.0.0"), 0));
     }
 
     #[tokio::test]
