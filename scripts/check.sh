@@ -3,7 +3,9 @@
 #   scripts/check.sh           everything below, in this order
 #   scripts/check.sh web       the interface: dependencies as locked, formatting, translations, the Office code's
 #                              boundary, types, lint, unit tests
-#   scripts/check.sh server    the server: formatting, tests, and clippy with warnings as errors
+#   scripts/check.sh server    the server: migration files numbered without repeats or gaps, formatting, tests, and
+#                              clippy with warnings as errors
+#   scripts/check.sh migrations  only the migration files' numbers
 #   scripts/check.sh e2e       the end-to-end test in a real browser (sign in, upload, preview, download), against a
 #                              server built from here (the first time, get the browser: cd web && pnpm exec
 #                              playwright install chromium)
@@ -23,7 +25,35 @@ web() {
   pnpm test "$@"
 }
 
+migrations() {
+  # The migration files are numbered 0001, 0002, … with no number used twice and none skipped. Two branches that each
+  # add the next number pass on their own but break main together; the later one takes the next free number
+  local dir="$ROOT/server/migrations" expected=1 failed=0 file name number previous=""
+  for file in "$dir"/*.sql; do
+    name=$(basename "$file")
+    if ! [[ $name =~ ^([0-9]{4})_[a-z0-9_]+\.sql$ ]]; then
+      echo "server/migrations/$name: name it 000N_<name>.sql (four digits, then lowercase letters, digits and _)" >&2
+      failed=1
+      continue
+    fi
+    number=$((10#${BASH_REMATCH[1]}))
+    if [ "$number" -eq $((expected - 1)) ] && [ -n "$previous" ]; then
+      echo "server/migrations/$name: number ${BASH_REMATCH[1]} is also used by $previous; give one of them the next free number" >&2
+      failed=1
+    elif [ "$number" -ne "$expected" ]; then
+      echo "server/migrations/$name: expected number $(printf %04d "$expected") next, found ${BASH_REMATCH[1]}; the numbers go up by one with no gaps" >&2
+      failed=1
+      expected=$((number + 1))
+    else
+      expected=$((number + 1))
+    fi
+    previous=$name
+  done
+  return "$failed"
+}
+
 server() {
+  migrations
   cd "$ROOT/server"
   # Formatting (rustfmt, server/rustfmt.toml): `cargo fmt` fixes it
   cargo fmt --check
@@ -44,7 +74,8 @@ e2e() {
 case "${1:-all}" in
   web) shift; web "$@" ;;
   server) server ;;
+  migrations) migrations ;;
   e2e) e2e ;;
   all) (web) && (server) && (e2e) ;;
-  *) echo "usage: scripts/check.sh [web|server|e2e]" >&2; exit 2 ;;
+  *) echo "usage: scripts/check.sh [web|server|migrations|e2e]" >&2; exit 2 ;;
 esac
