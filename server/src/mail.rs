@@ -209,7 +209,7 @@ pub async fn test(State(st): State<AppState>, Admin(admin): Admin, headers: Head
     // In the language of the administrator who sends it
     let visitor = crate::i18n::Visitor::SignedIn(crate::i18n::saved(&st, admin.id).await?);
     let lang = crate::i18n::resolve(&headers, visitor, crate::i18n::system_default(&st));
-    let (subject, body) = crate::notify::test_message(lang == crate::i18n::Lang::ZhTw, &site);
+    let (subject, body) = crate::notify::test_message(lang, &site);
     send(&s, &site, &Message { to: &to, subject: &subject, body: &body })
         .await
         .map_err(|e| AppError::bad_request(format!("The test email couldn't be sent: {e}")))?;
