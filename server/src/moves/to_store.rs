@@ -198,7 +198,7 @@ async fn copy_one(cx: &Ctx<'_>, dst: &Arc<dyn Storage>, root: &Pinned, item: &It
                 return Ok(None);
             }
             let what = if item.kind == "version" { format!("{} (an earlier version)", item.name) } else { item.path.clone() };
-            cx.failed(Some(what), if missing { "The file isn't in the folder".to_string() } else { disk_error(e).message });
+            cx.failed(&cx.job.drive_id, Some(what), if missing { "The file isn't in the folder".to_string() } else { disk_error(e).message });
             return Ok(None);
         }
     };

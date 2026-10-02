@@ -451,7 +451,7 @@ async fn copy_one(cx: &Ctx<'_>, root: &Pinned, id: &str, rel: &str, hash: Option
             let (planned,): (i64,) =
                 sqlx::query_as("SELECT COUNT(*) FROM space_move_items WHERE move_id = ? AND item_id = ?").bind(&job.id).bind(id).fetch_one(&st.db).await?;
             if planned == 1 {
-                cx.failed(Some(if name.is_empty() { rel.to_string() } else { name.to_string() }), e.to_string());
+                cx.failed(&cx.job.drive_id, Some(if name.is_empty() { rel.to_string() } else { name.to_string() }), e.to_string());
             }
             return Ok(None);
         }
