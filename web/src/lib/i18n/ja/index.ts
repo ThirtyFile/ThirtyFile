@@ -1,4 +1,4 @@
-/** Japanese dictionary, split by feature and merged here (the same files as zh-TW). Until it is translated, its entries are placeholders: the English text. Keys are the English source text (plurals as "single|plural"); tc() keys are "context::English". */
+/** Japanese dictionary, split by feature and merged here (the same files as zh-TW). Keys are the English source text (plurals as "single|plural"); tc() keys are "context::English". */
 import server from "./server";
 import settings from "./settings";
 import spaces from "./spaces";
