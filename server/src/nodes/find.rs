@@ -91,7 +91,7 @@ pub async fn search(State(st): State<AppState>, user: User, Query(q): Query<Sear
         qb.push(" AND n.kind = 'file' AND n.size <= ").push_bind(m);
     }
     if let Some(o) = q.owner.as_deref().filter(|o| !o.trim().is_empty()) {
-        qb.push(" AND n.owner_id = (SELECT id FROM users WHERE username = ").push_bind(o.trim().to_string()).push(")");
+        qb.push(" AND n.found = 0 AND n.owner_id = (SELECT id FROM users WHERE username = ").push_bind(o.trim().to_string()).push(")");
     }
     qb.push(" ORDER BY (n.kind = 'folder') DESC, n.updated_at DESC LIMIT ").push_bind(SEARCH_LIMIT + 1);
     let mut nodes: Vec<Node> = qb.build_query_as().fetch_all(&mut *c).await?;
@@ -191,7 +191,7 @@ pub async fn recent(State(st): State<AppState>, user: User) -> AppResult<Json<Ve
     let sql = format!(
         "WITH cand(id, at) AS (
            SELECT * FROM (SELECT id, updated_at FROM nodes
-                          WHERE owner_id = ?3 AND kind = 'file' AND trashed_at IS NULL ORDER BY updated_at DESC LIMIT ?4)
+                          WHERE owner_id = ?3 AND kind = 'file' AND found = 0 AND trashed_at IS NULL ORDER BY updated_at DESC LIMIT ?4)
            UNION ALL
            SELECT node_id, at FROM recent_files WHERE user_id = ?3
            UNION ALL

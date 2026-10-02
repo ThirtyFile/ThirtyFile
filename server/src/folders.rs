@@ -219,14 +219,19 @@ pub(crate) fn ignored(name: &str) -> bool {
         || lower.starts_with(".smbdelete")
 }
 
+/// Nanoseconds since 1970 of a file time: before 1970 counts as 1970, and after 2262 (more than an i64 holds) as 2262
+fn nanos_since_1970(t: std::time::SystemTime) -> i64 {
+    t.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_nanos()).unwrap_or(i64::MAX))
+}
+
 pub(crate) fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
-    meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos() as i64).unwrap_or(0)
+    meta.modified().map_or(0, nanos_since_1970)
 }
 
 /// When an item was created (it never changes, also not when the item is renamed or edited); None where the file
 /// system doesn't tell
 pub(crate) fn birth_ns(meta: &std::fs::Metadata) -> Option<i64> {
-    meta.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos() as i64)
+    meta.created().ok().map(nanos_since_1970)
 }
 
 #[cfg(unix)]
@@ -1276,8 +1281,8 @@ async fn apply_one(conn: &mut SqliteConnection, drive: &Drive, owner: i64, op: O
         Op::Create { id, parent, e } => {
             sqlx::query(
                 "INSERT INTO nodes (id, owner_id, parent_id, kind, name, size, mime, drive_id, created_at, updated_at,
-                                    fs_path, fs_dev, fs_ino, fs_size, fs_mtime_ns, fs_birth_ns)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                    fs_path, fs_dev, fs_ino, fs_size, fs_mtime_ns, fs_birth_ns, found)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
             )
             .bind(&id)
             .bind(owner)
@@ -1747,6 +1752,51 @@ mod tests {
         let root_node = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &root).await.unwrap().unwrap();
         sync_folder(&env.st, &root_node).await;
         assert!(env.node_at(&drive, "new.txt").await.is_some());
+    }
+
+    #[test]
+    fn file_times_far_from_now_dont_wrap() {
+        use std::time::{Duration, UNIX_EPOCH};
+        assert_eq!(nanos_since_1970(UNIX_EPOCH + Duration::from_secs(1)), 1_000_000_000);
+        assert_eq!(nanos_since_1970(UNIX_EPOCH - Duration::from_secs(10)), 0);
+        // Around 2270: more nanoseconds than an i64 holds
+        assert_eq!(nanos_since_1970(UNIX_EPOCH + Duration::from_secs(300 * 365 * 86_400)), i64::MAX);
+    }
+
+    #[tokio::test]
+    async fn items_found_on_the_disk_have_no_uploader_and_arent_anyones_recent_files() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        let uploaded = env.file(&admin, &space.root, "uploaded.txt").await;
+        write_old(&space.dir.join("found.txt"), b"found");
+        write_old(&space.dir.join("Found folder").join("inside.txt"), b"inside");
+        scan(&env.st, &space.drive).await.unwrap();
+        let (found, _) = env.node_at(&space.drive, "found.txt").await.unwrap();
+
+        let axum::Json(recent) = crate::nodes::recent(State(env.st.clone()), admin.clone()).await.unwrap();
+        let recent = serde_json::to_value(recent).unwrap();
+        let names: Vec<&str> = recent.as_array().unwrap().iter().map(|n| n["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["uploaded.txt"]);
+
+        let owner = |id: String| {
+            let st = env.st.clone();
+            async move { tree::get_node(&mut st.db.acquire().await.unwrap(), &id).await.unwrap().unwrap().owner_name }
+        };
+        assert_eq!(owner(uploaded).await, "admin");
+        assert_eq!(owner(found.clone()).await, "");
+        assert_eq!(owner(env.node_at(&space.drive, "Found folder").await.unwrap().0).await, "");
+        // Its earlier content, once someone saves over it, has no author either
+        let node = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &found).await.unwrap().unwrap();
+        assert_eq!(crate::versions::content_author(&mut env.st.db.acquire().await.unwrap(), &node).await.unwrap().1, "");
+        // Recent goes through the index of uploads, not every file of the space
+        let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+            "EXPLAIN QUERY PLAN SELECT id FROM nodes WHERE owner_id = 1 AND kind = 'file' AND found = 0 AND trashed_at IS NULL ORDER BY updated_at DESC LIMIT 5",
+        )
+        .fetch_all(&env.st.db)
+        .await
+        .unwrap();
+        assert!(plan.iter().any(|p| p.3.contains("nodes_uploads_recent")), "{plan:?}");
     }
 
     #[tokio::test]

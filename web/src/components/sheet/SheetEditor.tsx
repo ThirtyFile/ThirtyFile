@@ -5,7 +5,7 @@ import { ApiError, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { ConfirmDialog } from "@/components/dialogs";
-import { setDraft } from "@/lib/drafts";
+import { getDraft, setDraft } from "@/lib/drafts";
 import { t, tc } from "@/lib/i18n";
 import { shortcut } from "@/lib/keys";
 import { cn } from "@/lib/utils";
@@ -56,6 +56,16 @@ export default function SheetEditor(props: { node: Node; source: FileSource; onS
     // Load only when the file changes or a reload is requested; updated_at changing after a save doesn't require reloading
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every save
   }, [node.id, reload]);
+
+  // The file got other content while it is open (an earlier version restored, say), and there are no changes here to
+  // keep (none, or they were discarded): what it has now is loaded, so the next save doesn't take it for someone else's
+  useEffect(() => {
+    if (!session || session.base === node.updated_at) return;
+    if (session.version !== session.saved && getDraft(node.id, "sheet")) return;
+    dropSession(node.id);
+    setReload((x) => x + 1);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- when the file's version changes
+  }, [node.updated_at]);
 
   if (error)
     return (

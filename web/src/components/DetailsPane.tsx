@@ -171,7 +171,8 @@ export function DetailsPane({ selected, folder, onClose, count, whole }: { selec
       ...(info.data ? ([[t("My role"), ROLE_LABEL[info.data.role]]] as [string, string][]) : []),
       [t("Date modified"), formatWinDate(node.updated_at)],
       [t("Date created"), formatWinDate(node.created_at)],
-      ...(isRoot ? [] : ([[t("Created by"), node.owner_name]] as [string, string][])),
+      // Nobody, for an item found on the disk of a folder space
+      ...(isRoot ? [] : ([[t("Created by"), node.owner_name || "—"]] as [string, string][])),
       ...(isRoot ? [] : ([[t("Favorite"), node.is_favorite ? t("Yes") : t("No")]] as [string, string][])),
       ...(isRoot ? [] : ([[t("Share links"), shares.data ? (shares.data.length ? t("{n}", { n: shares.data.length }) : t("None")) : shares.error ? "—" : "…"]] as [string, string][])),
     ];

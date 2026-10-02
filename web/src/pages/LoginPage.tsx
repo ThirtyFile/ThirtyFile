@@ -12,10 +12,9 @@ import { RecoveryCodes, SetupCode } from "@/components/TwoFactor";
 import { cn, errorMessage } from "@/lib/utils";
 import { t, tServer } from "@/lib/i18n";
 import { safeNext, takeSsoError } from "@/lib/signInReturn";
+import { LAST_USER } from "@/lib/signOut";
 import { formatClock, formatDate, LoginWallpaper, LoginAvatar } from "@/components/LoginScreen";
 
-/** Account last used for a password sign-in (like an OS, next time only the password is needed) */
-const LAST_USER = "tf-last-user";
 /** Return to the lock screen after the sign-in screen has been idle this long (with no password typed) */
 const IDLE_MS = 60_000;
 

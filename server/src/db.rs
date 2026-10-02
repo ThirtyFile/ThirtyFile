@@ -601,6 +601,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn items_from_0_4_0_keep_their_uploader() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-040-found-{}", crate::util::new_id()));
+        let path = dir.join("drive.db");
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'amy', 'x', 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO nodes (id, owner_id, kind, name, created_at, updated_at, fs_path) VALUES ('n', 1, 'file', 'a.txt', 0, 0, 'a.txt')")
+            .execute(&db)
+            .await
+            .unwrap();
+        db.close().await;
+        // Which of them a folder check found can't be told any more: they stay as they were
+        let db = connect(&path, 16).await.unwrap();
+        let sql = format!("SELECT found, owner_name FROM (SELECT n.found AS found, {} FROM nodes n)", crate::tree::NODE_COLS);
+        let read = async || -> (i64, String) { sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).fetch_one(&db).await.unwrap() };
+        assert_eq!(read().await, (0, "amy".to_string()));
+        // Found from now on
+        sqlx::query("UPDATE nodes SET found = 1").execute(&db).await.unwrap();
+        assert_eq!(read().await, (1, String::new()));
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn the_database_is_only_copied_on_request_when_it_is_up_to_date() {
         let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));
         std::fs::create_dir_all(&dir).unwrap();
