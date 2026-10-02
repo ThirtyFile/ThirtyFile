@@ -1,18 +1,18 @@
 import { useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { DownloadIcon, Loader2Icon } from "lucide-react";
-import { api, type LoginFilter } from "@/api";
+import { Loader2Icon } from "lucide-react";
+import { api, type LoginFilter, type LoginRecord } from "@/api";
 import { keys } from "@/api/queryKeys";
-import { nativeDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn, formatWinDate } from "@/lib/utils";
 import { DateRangeFilter, FilterBar, MultiSelect, SearchBox, rangeToUnix, type DateRange } from "./filters";
 import { describeAgent } from "./ShareAccessLog";
-import { ProviderIcon } from "@/components/ProviderIcon";
+import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
 import { t, tc } from "@/lib/i18n";
 import { shownCount } from "@/components/logs/shown";
+import { ExportCsvButton, csvTime, type CsvColumn } from "@/components/logs/exportCsv";
 
 const PAGE = 100;
 
@@ -51,6 +51,16 @@ const METHOD_LABEL: Record<string, string> = {
   github: "GitHub",
   app_password: t("App password"),
 };
+
+/** The columns of an exported sign-in log, with the names the list shows */
+const LOGIN_COLUMNS: CsvColumn<LoginRecord>[] = [
+  { header: t("Time"), value: (r) => csvTime(r.at) },
+  { header: t("Account"), value: (r) => r.username },
+  { header: t("Event"), value: (r) => LOGIN_EVENTS[r.event]?.label ?? r.event },
+  { header: t("Method"), value: (r) => METHOD_LABEL[r.method] ?? SSO_LABEL[r.method as SsoProviderId] ?? r.method },
+  { header: "IP", value: (r) => r.ip },
+  { header: t("Browser"), value: (r) => r.user_agent },
+];
 
 const EVENT_GROUPS = [
   {
@@ -96,20 +106,7 @@ export function LoginLog({ userId, admin, className }: { userId?: number; admin?
 
   return (
     <div className={cn("flex min-h-0 flex-col", className)}>
-      <FilterBar
-        right={
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-xs"
-            disabled={!rows.length}
-            title={t("Export records that match the filters (up to 100,000)")}
-            onClick={() => nativeDownload(api.loginLogExportUrl(filter))}
-          >
-            <DownloadIcon /> {t("Export CSV")}
-          </Button>
-        }
-      >
+      <FilterBar right={<ExportCsvButton name={t("login-log")} load={() => api.loginLogExport(filter)} columns={LOGIN_COLUMNS} disabled={!rows.length} />}>
         {showUser && <SearchBox value={user} onChange={setUser} placeholder={t("Account")} className="w-32" />}
         <SearchBox value={ip} onChange={setIp} placeholder="IP" className="w-32" />
         <MultiSelect label={t("Event")} groups={EVENT_GROUPS} value={events} onChange={setEvents} />

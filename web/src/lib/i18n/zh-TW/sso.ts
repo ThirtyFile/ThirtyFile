@@ -28,7 +28,6 @@ export default {
   "This external account isn't linked yet. Sign in with your username and password, then link it in \"My account › Sign-in methods\".": "這個外部帳號尚未連結。請先用帳號密碼登入，再到「我的帳號 › 登入方式」連結。",
   "Too many accounts were created in the last hour. Try again later or ask your administrator to create your account.": "過去一小時建立的帳號過多，請稍後再試，或請管理員為你建立帳號。",
   "The space size can't be negative": "空間大小不能是負數",
-  "Account created by SSO": "三方登入自動建立帳號",
   // Phase 2: display names and domain rules
   "Display name (optional)": "顯示名稱（選填）",
   "Follows the name from {provider} on each sign-in unless you set a different one here": "每次登入會跟隨 {provider} 的姓名，除非在這裡另外設定",

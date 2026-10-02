@@ -491,7 +491,6 @@ pub struct ErrorQuery {
     pub(super) to: Option<i64>,
     pub(super) before: Option<i64>,
     pub(super) limit: Option<i64>,
-    pub(super) tz: Option<i64>,
 }
 
 const ERROR_COLS: &str =

@@ -104,7 +104,7 @@ pub(super) fn page<T: Serialize>(items: Vec<T>, limit: i64, id: fn(&T) -> i64) -
 
 // ───────────── Activity log queries ─────────────
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize, sqlx::FromRow, Debug)]
 pub struct ActivityRow {
     pub(super) id: i64,
     pub(super) at: i64,
@@ -134,8 +134,6 @@ pub struct ActivityQuery {
     /// Paging: only records with an id below this value
     pub(super) before: Option<i64>,
     pub(super) limit: Option<i64>,
-    /// Time zone for exports (minutes, same as JavaScript's getTimezoneOffset)
-    pub(super) tz: Option<i64>,
 }
 
 pub(super) async fn authorize_activity(st: &AppState, user: &User, q: &ActivityQuery) -> AppResult<()> {
@@ -332,7 +330,6 @@ pub struct LoginQuery {
     pub(super) to: Option<i64>,
     pub(super) before: Option<i64>,
     pub(super) limit: Option<i64>,
-    pub(super) tz: Option<i64>,
 }
 
 pub(super) async fn query_logins(st: &AppState, q: &LoginQuery, limit: i64) -> AppResult<Vec<LoginRow>> {

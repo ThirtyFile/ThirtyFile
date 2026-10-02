@@ -110,10 +110,12 @@ export function BackupPolicyDialog({ set, source: preset, onClose, onDone }: { s
       verify_days: verifyDays,
     };
     if (set) {
-      await api.updateBackupPolicy(set.id, { ...settings, name: name.trim() || undefined });
+      // The name shown may be a translation of the one ThirtyFile gave it: it is sent only when changed
+      await api.updateBackupPolicy(set.id, { ...settings, name: name.trim() && name.trim() !== set.name ? name.trim() : undefined });
       toast.success(t('"{name}" was changed', { name: name.trim() || set.name }));
     } else {
-      await api.createBackupPolicy({ ...settings, name: name.trim() || defaultName, source, dest });
+      // Left empty, the server names it "Backup of <location>", shown in each person's language
+      await api.createBackupPolicy({ ...settings, name: name.trim() || undefined, source, dest });
       toast.success(t('"{name}" was made; its first snapshot is being made in the background', { name: name.trim() || defaultName }));
     }
     onDone();

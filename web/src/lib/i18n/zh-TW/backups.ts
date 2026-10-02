@@ -2,7 +2,7 @@
 export default {
   // Copy everything to… (admin/storage/CopyEverythingDialog.tsx)
   "Copy everything to…": "全部複製到…",
-  "Copy of {name}": "{name} 的副本",
+  "Copy of {name}": "{name}的副本",
   "\"{name}\" is being made in the background": "正在背景製作「{name}」",
   "Show copies": "查看副本",
   "Copy everything on \"{name}\"": "複製「{name}」上的全部內容",

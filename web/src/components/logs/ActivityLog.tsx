@@ -1,15 +1,15 @@
 import { useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { DownloadIcon, Loader2Icon } from "lucide-react";
-import { api, type ActivityFilter } from "@/api";
+import { Loader2Icon } from "lucide-react";
+import { api, type Activity, type ActivityFilter } from "@/api";
 import { keys } from "@/api/queryKeys";
-import { nativeDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
 import { ACTION_GROUPS, actionLabel } from "@/components/logs/actions";
 import { cn, formatWinDate } from "@/lib/utils";
 import { t, tServer } from "@/lib/i18n";
 import { shownCount } from "@/components/logs/shown";
+import { ExportCsvButton, csvTime, type CsvColumn } from "@/components/logs/exportCsv";
 import { DateRangeFilter, FilterBar, MultiSelect, SearchBox, rangeToUnix, type DateRange } from "./filters";
 
 const PAGE = 100;
@@ -21,6 +21,16 @@ const GROUPS = ACTION_GROUPS.map((g) => ({ label: g.label, options: g.actions.ma
  */
 /** Space names are user data; only the default names created by the system are translated */
 const defaultName = (name: string | null) => (name === "My files" ? t("My files") : name === "All files" ? t("All files") : (name ?? ""));
+
+/** The columns of an exported activity log: what the list shows, with the same names */
+const ACTIVITY_COLUMNS: CsvColumn<Activity>[] = [
+  { header: t("Time"), value: (r) => csvTime(r.at) },
+  { header: t("User"), value: (r) => r.username },
+  { header: t("Action"), value: (r) => actionLabel(r.action) },
+  { header: t("Item"), value: (r) => r.node_name },
+  { header: t("Details"), value: (r) => tServer(r.detail) },
+  { header: t("Space"), value: (r) => defaultName(r.drive_name) },
+];
 
 export function ActivityLog({ driveId, className, compact }: { driveId?: string; className?: string; compact?: boolean }) {
   const [q, setQ] = useState("");
@@ -41,20 +51,7 @@ export function ActivityLog({ driveId, className, compact }: { driveId?: string;
 
   return (
     <div className={cn("flex min-h-0 flex-col", className)}>
-      <FilterBar
-        right={
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-xs"
-            disabled={!rows.length}
-            title={t("Export records that match the filters (up to 100,000)")}
-            onClick={() => nativeDownload(api.activityExportUrl(filter))}
-          >
-            <DownloadIcon /> {t("Export CSV")}
-          </Button>
-        }
-      >
+      <FilterBar right={<ExportCsvButton name={t("activity-log")} load={() => api.activityExport(filter)} columns={ACTIVITY_COLUMNS} disabled={!rows.length} />}>
         <SearchBox value={q} onChange={setQ} placeholder={t("Search items or details")} className="w-48 max-sm:w-full" />
         {!compact && <SearchBox value={user} onChange={setUser} placeholder={t("User")} className="w-32" />}
         <MultiSelect label={t("Action")} groups={GROUPS} value={actions} onChange={setActions} />

@@ -1,20 +1,38 @@
 import { Fragment, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { ChevronRightIcon, CircleAlertIcon, DownloadIcon, Loader2Icon, TriangleAlertIcon } from "lucide-react";
+import { ChevronRightIcon, CircleAlertIcon, Loader2Icon, TriangleAlertIcon } from "lucide-react";
 import { api, type ErrorEntry, type ErrorFilter } from "@/api";
 import { keys } from "@/api/queryKeys";
-import { nativeDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ErrorState";
 import { cn, formatWinDate } from "@/lib/utils";
 import { t, tServer } from "@/lib/i18n";
 import { shownCount } from "@/components/logs/shown";
+import { ExportCsvButton, csvTime, type CsvColumn } from "@/components/logs/exportCsv";
 import { DateRangeFilter, FilterBar, MultiSelect, SearchBox, rangeToUnix, type DateRange } from "./filters";
 
 const PAGE = 100;
 
 const SOURCE_LABEL: Record<ErrorEntry["source"], string> = { backend: t("Server"), frontend: t("Web page") };
 const SEVERITY_LABEL: Record<ErrorEntry["severity"], string> = { error: t("Error"), warning: t("Warning") };
+
+/** The columns of an exported error log, with the names the list and a record's details show */
+const ERROR_COLUMNS: CsvColumn<ErrorEntry>[] = [
+  { header: t("Time"), value: (r) => csvTime(r.at) },
+  { header: t("First seen"), value: (r) => csvTime(r.first_at) },
+  { header: t("Occurrences"), value: (r) => r.count },
+  { header: t("User"), value: (r) => (r.user_id === null && !r.username ? t("Not signed in") : r.username) },
+  { header: t("Source"), value: (r) => SOURCE_LABEL[r.source] ?? r.source },
+  { header: t("Severity"), value: (r) => SEVERITY_LABEL[r.severity] ?? r.severity },
+  { header: t("Kind"), value: (r) => ERROR_KINDS[r.kind] ?? r.kind },
+  { header: t("Operation"), value: (r) => r.operation },
+  { header: t("Status"), value: (r) => r.status },
+  { header: t("Message"), value: (r) => (r.source === "backend" ? tServer(r.message) : r.message) },
+  { header: t("Diagnostic details"), value: (r) => r.detail },
+  { header: t("Reported by the page"), value: (r) => r.client },
+  { header: t("Request ID"), value: (r) => r.request_id },
+  { header: t("Version"), value: (r) => r.version },
+];
 
 /** What kind of failure it was */
 export const ERROR_KINDS: Record<string, string> = {
@@ -78,20 +96,7 @@ export function ErrorLog({ className }: { className?: string }) {
 
   return (
     <div className={cn("flex min-h-0 flex-col", className)}>
-      <FilterBar
-        right={
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-xs"
-            disabled={!rows.length}
-            title={t("Export records that match the filters (up to 100,000)")}
-            onClick={() => nativeDownload(api.errorLogExportUrl(filter))}
-          >
-            <DownloadIcon /> {t("Export CSV")}
-          </Button>
-        }
-      >
+      <FilterBar right={<ExportCsvButton name={t("error-log")} load={() => api.errorLogExport(filter)} columns={ERROR_COLUMNS} disabled={!rows.length} />}>
         <SearchBox value={q} onChange={setQ} placeholder={t("Search messages or request IDs")} className="w-52 max-sm:w-full" />
         <SearchBox value={user} onChange={setUser} placeholder={t("User")} className="w-32" />
         <MultiSelect label={t("Source")} groups={FILTER_GROUPS.source} value={sources} onChange={setSources} />

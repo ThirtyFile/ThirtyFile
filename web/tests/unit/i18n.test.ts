@@ -55,4 +55,27 @@ describe("Traditional Chinese", () => {
       fill(ZH["Connection test failed: {error}"], { error: fill(ZH['The destination folder already contains "{name}"'], { name: "a" }) }),
     );
   });
+
+  test("tServer translates a list of known items, such as a share link's options, whatever the order", async () => {
+    const { tServer } = await load("zh-TW");
+    const list = (...parts: string[]) => parts.join("、");
+    expect(tServer("Expires 2026-05-01, accepts files, preview only")).toBe(list(fill(ZH["expires {date}"], { date: "2026-05-01" }), ZH["accepts files"], ZH["preview only"]));
+    expect(tServer("Password protected, limited to 3 downloads, only accepts files")).toBe(
+      list(ZH["Password protected"], fill(ZH["limited to {n} downloads"], { n: "3" }), ZH["only accepts files"]),
+    );
+    // A change to a link: each change, also those with a date or a number
+    expect(tServer("/share/abc: changed the password, expires 2026-05-01, view and download")).toBe(
+      fill(ZH["{username}: {changes}"], { username: "/share/abc", changes: list(ZH["changed the password"], fill(ZH["expires {date}"], { date: "2026-05-01" }), ZH["view and download"]) }),
+    );
+  });
+
+  test("names ThirtyFile gives backups, copies and replica policies are shown translated, also inside messages", async () => {
+    const { tServer, tMadeName } = await load("zh-TW");
+    const backup = fill(ZH["Backup of {name}"], { name: ZH["Local disk"] });
+    expect(tMadeName("Backup of Local disk")).toBe(backup);
+    expect(tMadeName("Copy of NAS")).toBe(fill(ZH["Copy of {name}"], { name: "NAS" }));
+    expect(tMadeName("Upload")).toBe("Upload");
+    expect(tServer("Backup of Local disk: Local disk → NAS")).toBe(fill(ZH["{name}: {source} → {dest}"], { name: backup, source: ZH["Local disk"], dest: "NAS" }));
+    expect(tServer("The backup “Backup of Local disk” can't reach its location")).toBe(fill(ZH["The backup “{name}” can't reach its location"], { name: backup }));
+  });
 });

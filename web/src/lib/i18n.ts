@@ -161,6 +161,8 @@ interface Template {
 
 let exact: Map<string, string> | null = null;
 let templates: Template[] | null = null;
+/** The templates of names ThirtyFile makes (MADE_NAME), tried apart from the others: see translate() */
+let madeTemplates: Template[] = [];
 
 /** Every English form of a dictionary key: `single|plural` keys give both forms */
 const forms = (key: string) => (key.includes("|") ? key.split("|") : [key]);
@@ -169,6 +171,7 @@ const forms = (key: string) => (key.includes("|") ? key.split("|") : [key]);
 function build() {
   exact = new Map();
   const list: Template[] = [];
+  const made: Template[] = [];
   for (const [key, zh] of Object.entries(ZH)) {
     if (key.includes("::")) continue;
     for (const en of forms(key)) {
@@ -189,11 +192,14 @@ function build() {
           return part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         })
         .join("");
-      list.push({ re: new RegExp(`^${pattern}$`), names, zh, fixed: en.replace(/\{\w+\}/g, "").length });
+      const tpl = { re: new RegExp(`^${pattern}$`), names, zh, fixed: en.replace(/\{\w+\}/g, "").length };
+      if (MADE_NAME.test(en)) made.push(tpl);
+      else list.push(tpl);
     }
   }
   // Templates with more fixed text are tried first, so loose ones like "{a}: {b}" don't win
   templates = list.sort((a, b) => b.fixed - a.fixed);
+  madeTemplates = made;
 }
 
 /** Parameters that carry a whole nested message (e.g. "Connection test failed: {error}") */
@@ -201,23 +207,52 @@ const NESTED = new Set(["error", "detail", "reason", "message"]);
 /** Parameters that carry a list of fragments joined with ", " (e.g. "{username}: {changes}") */
 const LISTS = new Set(["changes", "providers"]);
 
-/** Translate a parameter value: known terms, lists of known terms (joined with the Chinese enumeration comma U+3001), and nested messages */
+/**
+ * Names ThirtyFile gives what an administrator left unnamed, stored in English (server/src/backups/api.rs,
+ * replicas/api.rs): shown in the interface's language wherever they appear, like "My files"
+ */
+const MADE_NAME = /^(?:Backup|Copy|Replicas) of .+$/s;
+
+/** A list item's translation: a known term or a template's; undefined when there is none */
+function known(part: string, depth: number): string | undefined {
+  const hit = exact!.get(part);
+  if (hit !== undefined) return hit;
+  const out = templated(part, depth);
+  return out === undefined || out === part ? undefined : out;
+}
+
+/**
+ * A list of items joined with ", " (share link options, the changes made to something): each item translated, joined
+ * with the Chinese enumeration comma U+3001. The first item may start with a capital (the server writes the list as a
+ * sentence). Undefined unless every item is known, or `loose` (a parameter that always holds a list)
+ */
+function list(v: string, depth: number, loose: boolean): string | undefined {
+  const parts = v.split(", ");
+  const zh = parts.map((p, i) => known(p, depth) ?? (i === 0 ? known(p.charAt(0).toLowerCase() + p.slice(1), depth) : undefined));
+  if (!loose && zh.some((z) => z === undefined)) return undefined;
+  return parts.map((p, i) => zh[i] ?? p).join("、"); // i18n-ignore: Chinese list separator
+}
+
+/** Translate a parameter value: known terms, names ThirtyFile made, lists of known terms, and nested messages */
 function fragment(name: string, v: string, depth: number): string {
   const hit = exact!.get(v);
   if (hit !== undefined) return hit;
+  if (MADE_NAME.test(v) && depth < 2) {
+    const made = templated(v, depth + 1, madeTemplates);
+    if (made !== undefined) return made;
+  }
   if (v.includes(", ")) {
-    const parts = v.split(", ");
-    const zh = parts.map((p) => exact!.get(p));
-    if (LISTS.has(name) || zh.every((z) => z !== undefined)) return parts.map((p, i) => zh[i] ?? p).join("、"); // i18n-ignore: Chinese list separator
+    const zh = list(v, depth + 1, LISTS.has(name));
+    if (zh !== undefined) return zh;
   }
   if (NESTED.has(name) && depth < 2) return translate(v, depth + 1);
   return v;
 }
 
-function translate(msg: string, depth: number): string {
-  const hit = exact!.get(msg);
-  if (hit !== undefined) return hit;
-  for (const tpl of templates!) {
+/** The first template that matches, filled with translated parameters; undefined when none does */
+function templated(msg: string, depth: number, among: Template[] = templates!): string | undefined {
+  if (depth > 3) return undefined;
+  for (const tpl of among) {
     const m = tpl.re.exec(msg);
     if (!m) continue;
     const vars: Vars = {};
@@ -226,7 +261,28 @@ function translate(msg: string, depth: number): string {
     });
     return fill(tpl.zh, vars);
   }
-  return msg;
+  return undefined;
+}
+
+/**
+ * An exact message first; then a list whose items are all known, before any template (a loose one would take the rest
+ * of the list as its last parameter: "Expires {date}"); then the templates; and last the names ThirtyFile makes, which
+ * would otherwise take a whole message about the name ("Backup of {name}" on "Backup of X: X → Y")
+ */
+function translate(msg: string, depth: number): string {
+  const hit = exact!.get(msg);
+  if (hit !== undefined) return hit;
+  return (msg.includes(", ") ? list(msg, depth + 1, false) : undefined) ?? templated(msg, depth) ?? templated(msg, depth, madeTemplates) ?? msg;
+}
+
+/**
+ * A name ThirtyFile gave a backup, a one-time copy or a replica policy ("Backup of Local disk", stored in English) in
+ * the interface's language; any other name as it is
+ */
+export function tMadeName(name: string): string {
+  if (lang === "en" || !MADE_NAME.test(name)) return name;
+  if (!exact) build();
+  return translate(name, 0);
 }
 
 /**
