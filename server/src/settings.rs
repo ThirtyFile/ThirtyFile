@@ -6,11 +6,11 @@ use std::path::Path;
 use sqlx::SqlitePool;
 
 use crate::{
-    admin::{NewUser, create_user},
     auth::hash_password,
     db::{add_grant, begin_write, create_drive, get_setting, set_setting},
     error::AppResult,
     state::SystemSettings,
+    users::{NewUser, create_user},
     util::random_token,
 };
 

@@ -8,9 +8,9 @@ pub(super) async fn sync_profile(st: &AppState, user_id: i64, provider: &str, id
     let previous: Option<(String,)> =
         sqlx::query_as("SELECT name FROM user_identities WHERE provider = ? AND subject = ?").bind(provider).bind(&ident.subject).fetch_optional(&st.db).await?;
     let (current,): (String,) = sqlx::query_as("SELECT display_name FROM users WHERE id = ?").bind(user_id).fetch_one(&st.db).await?;
-    let name = crate::admin::validate_display_name(&ident.name).unwrap_or("");
+    let name = crate::users::validate_display_name(&ident.name).unwrap_or("");
     // Compare with the previous name as it would have been stored (trimmed), so surrounding spaces don't break the follow-up
-    let previous = previous.map(|(p,)| crate::admin::validate_display_name(&p).unwrap_or("").to_string());
+    let previous = previous.map(|(p,)| crate::users::validate_display_name(&p).unwrap_or("").to_string());
     let follow = !name.is_empty() && name != current && (current.is_empty() || previous.as_deref() == Some(current.as_str()));
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
@@ -205,7 +205,7 @@ pub(super) async fn create_sso_user(st: &AppState, provider: &str, cfg: &Provide
         }
         username = format!("{}-{i}", base.chars().take(28).collect::<String>());
     }
-    crate::admin::validate_username(&username)?;
+    crate::users::validate_username(&username)?;
     // "My files" as the domain rule says, else by the system setting; a location that was deleted since gives way to
     // the setting's
     let personal = crate::personal::choose(st, &mut tx, create, location, false).await?;
@@ -226,7 +226,7 @@ pub(super) async fn create_sso_user(st: &AppState, provider: &str, cfg: &Provide
         },
     )
     .await?;
-    if let Ok(name) = crate::admin::validate_display_name(&ident.name)
+    if let Ok(name) = crate::users::validate_display_name(&ident.name)
         && !name.is_empty()
     {
         sqlx::query("UPDATE users SET display_name = ? WHERE id = ?").bind(name).bind(id).execute(&mut *tx).await?;

@@ -13,7 +13,7 @@ use tower_http::{CompressionLevel, compression::CompressionLayer, timeout::Timeo
 
 use crate::{
     admin, archive, auth, backups, branding, dav, downloads, drives, error, files, jobs, location_tools, locations, logs, mail, moves, nodes, notify, paths,
-    personal, replicas, reset, sessions, shares, signin, sso, state::AppState, thumbnails, tokens, twofactor, upload, usage, versions, web,
+    replicas, reset, sessions, shares, signin, sso, state::AppState, thumbnails, tokens, twofactor, upload, usage, versions, web,
 };
 
 use super::{
@@ -196,7 +196,7 @@ fn api() -> Router<AppState> {
         .route("/admin/users/{id}/sessions", get(sessions::admin_list).delete(sessions::admin_sign_out_all))
         .route("/admin/users/{id}/sessions/{session}", delete(sessions::admin_sign_out))
         .route("/admin/users/{id}/2fa", delete(twofactor::admin_reset))
-        .route("/admin/users/{id}/personal-space", post(personal::add).delete(personal::remove))
+        .route("/admin/users/{id}/personal-space", post(admin::personal::add).delete(admin::personal::remove))
         .route("/admin/settings", get(admin::get_settings).patch(admin::update_settings))
         .route("/admin/usage", get(usage::api::overview))
         .route("/admin/usage/history", get(usage::api::history))

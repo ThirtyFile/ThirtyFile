@@ -28,7 +28,7 @@ pub struct Me {
     pub user: User,
     /// Used in their personal space (0 without one)
     pub used_bytes: i64,
-    /// Their personal space is waiting for its storage location to be available (personal.rs)
+    /// Their personal space is waiting for its storage location to be available (personal/)
     pub personal_pending: bool,
     /// Can create team spaces
     pub can_create_drive: bool,

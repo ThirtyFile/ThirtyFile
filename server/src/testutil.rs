@@ -3,11 +3,11 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use crate::{
-    admin::NewUser,
     auth::{self, User},
     db,
     state::{AppState, Setup},
     storage::{LocalStorage, Storage},
+    users::NewUser,
     util::{new_id, now},
 };
 
@@ -121,7 +121,7 @@ impl TestEnv {
         let mut conn = self.st.db.acquire().await.unwrap();
         let password_hash = auth::hash_password(password().into()).await.unwrap();
         let location = crate::locations::default_location(&mut conn).await.unwrap();
-        let id = crate::admin::create_user(
+        let id = crate::users::create_user(
             &mut conn,
             NewUser {
                 username: name,
