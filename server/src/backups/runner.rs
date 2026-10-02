@@ -219,8 +219,10 @@ impl Ctx<'_> {
         }
         let done = self.ctl.progress.lock().unwrap().bytes_done.max(0) as f64;
         let due = Duration::from_secs_f64(done / self.rate_limit as f64);
-        while self.started.elapsed() < due && self.stop().is_none() {
-            tokio::time::sleep((due - self.started.elapsed()).min(Duration::from_millis(500))).await;
+        while let Some(wait) = throttle_wait(due, self.started.elapsed())
+            && self.stop().is_none()
+        {
+            tokio::time::sleep(wait).await;
         }
     }
 
@@ -233,6 +235,16 @@ impl Ctx<'_> {
         p.failed += 1;
         if p.failures.len() < MAX_FAILURES {
             p.failures.push(Failure { item, error });
+        }
+    }
+
+    /// An item to tell about that isn't a failure (a file that kept changing, say): listed with the failures, not
+    /// counted. Items of personal spaces aren't named.
+    pub fn noted(&self, space: &str, item: Option<String>, note: String) {
+        let item = item.filter(|_| !self.private.contains(space));
+        let mut p = self.ctl.progress.lock().unwrap();
+        if p.failures.len() < MAX_FAILURES {
+            p.failures.push(Failure { item, error: note });
         }
     }
 
@@ -315,6 +327,13 @@ impl Ctx<'_> {
             }
         }
     }
+}
+
+/// How long a throttled job still waits, a little at a time, once it is `elapsed` into a run that may only be done at
+/// `due`; None when it may go on. The time goes on while it is computed, so it never subtracts a later time.
+fn throttle_wait(due: Duration, elapsed: Duration) -> Option<Duration> {
+    let left = due.saturating_sub(elapsed);
+    (!left.is_zero()).then(|| left.min(Duration::from_millis(500)))
 }
 
 /// The engine of backups/
@@ -603,4 +622,19 @@ pub(crate) fn live(q: &Queue, id: &str) -> Option<(i64, i64, i64, i64, f64)> {
     let ctl = running.get(id)?;
     let p = ctl.progress.lock().unwrap();
     Some((p.files_done, p.bytes_done, p.files_total, p.bytes_total, p.rate))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    #[test]
+    fn a_throttle_never_waits_a_negative_time() {
+        let due = Duration::from_millis(1000);
+        assert_eq!(super::throttle_wait(due, Duration::from_millis(200)), Some(Duration::from_millis(500)));
+        assert_eq!(super::throttle_wait(due, Duration::from_millis(900)), Some(Duration::from_millis(100)));
+        // Past the time it was due by when it is computed again: no wait, and no panic
+        assert_eq!(super::throttle_wait(due, due), None);
+        assert_eq!(super::throttle_wait(due, Duration::from_millis(1001)), None);
+    }
 }

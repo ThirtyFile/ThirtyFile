@@ -163,6 +163,42 @@ async fn replicas_are_copied_checked_kept_from_cleanup_and_read_when_the_primary
 }
 
 #[tokio::test]
+async fn a_space_deleted_before_its_changes_were_synced_leaves_no_target_behind() {
+    let env = testutil::env().await;
+    let admin = env.admin().await;
+    let amy = env.user("amy", true).await;
+    env.upload(&amy, amy.root(), "a.txt", b"amy's").await;
+    let req = serde_json::from_value(json!({ "name": "Sales" })).unwrap();
+    let Json(info) = crate::drives::create(State(env.st.clone()), admin.clone(), Json(req)).await.unwrap();
+    let info = serde_json::to_value(&info).unwrap();
+    let (sales, root) = (info["id"].as_str().unwrap().to_string(), info["root_id"].as_str().unwrap().to_string());
+    env.upload(&admin, &root, "plan.txt", b"the plan").await;
+    add_nas(&env, "nas").await;
+    let id = make(&env, json!({ "source": "local", "targets": [{ "location": "nas" }] })).await;
+    assert_eq!(settle(&env, &id).await, ["done"]);
+    // The team space changes, and is deleted before the change is synced
+    env.upload(&admin, &root, "later.txt", b"later").await;
+    let t = crate::util::now();
+    policy::tick(&env.st, t).await.unwrap();
+    let _ = crate::drives::delete(State(env.st.clone()), admin.clone(), Path(sales.clone())).await.unwrap();
+    // Long after: not behind, so not degraded either (administrators would be told)
+    let mut c = env.st.db.acquire().await.unwrap();
+    let p = super::load(&mut c, &id).await.unwrap().unwrap();
+    let targets = super::targets(&mut c, &id).await.unwrap();
+    drop(c);
+    let h = policy::health(&env.st, &p, &targets, t + 48 * 3600).await.unwrap();
+    assert_eq!((h.state, h.targets[0].state, h.targets[0].behind_since), ("ok", "current", None));
+    // What was recorded of it goes with the next sync
+    policy::trigger(&env.st, &id, "nas", "manual", None).await.unwrap();
+    assert_eq!(run_queued(&env, &id).await, ["done"]);
+    for table in ["replica_dirty", "replica_captured"] {
+        let (n,): (i64,) =
+            sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table} WHERE drive_id = ?"))).bind(&sales).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(n, 0, "{table}");
+    }
+}
+
+#[tokio::test]
 async fn changes_are_copied_soon_after_and_content_nothing_uses_lets_go_of_its_copy() {
     let env = testutil::env().await;
     let amy = env.user("amy", true).await;

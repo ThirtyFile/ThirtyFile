@@ -659,6 +659,44 @@ async fn folder_spaces_are_copied_with_their_versions_and_restored_into_their_fo
     assert!(space.dir.join(&name).join("empty").is_dir());
 }
 
+#[tokio::test]
+async fn a_folder_file_that_keeps_changing_is_kept_as_last_read_and_listed_without_naming_personal_files() {
+    let env = testutil::folders_env().await;
+    let admin = env.admin().await;
+    let amy = env.user("amy", true).await;
+    let company = env.st.shared_root().unwrap();
+    let company_drive = env.drive_of(&company).await;
+    let (company_dir, amy_dir) = (env.dir.join("blobs").join("company"), env.dir.join("blobs").join("users").join("amy"));
+    testutil::write_old(&company_dir.join("steady.txt"), b"steady");
+    testutil::write_old(&company_dir.join("app.log"), b"line 1;");
+    testutil::write_old(&amy_dir.join("diary.txt"), b"day 1;");
+    crate::folders::scan(&env.st, &company_drive).await.unwrap();
+    crate::folders::scan(&env.st, &env.drive_of(amy.root()).await).await.unwrap();
+    // Other programs write these all the time: a check for changes leaves a file written in the last few seconds as
+    // the index had it, so the index never has them as they are read
+    std::fs::write(company_dir.join("app.log"), b"line 1; line 2;").unwrap();
+    std::fs::write(amy_dir.join("diary.txt"), b"day 1; day 2;").unwrap();
+    add_nas(&env, "nas").await;
+    let (set, job) = copy_all(&env, "local", "nas").await;
+    assert_eq!(run_job(&env, &job).await, "done", "{:?}", state(&env, &job).await);
+    // Listed, but never by name in a personal space
+    let (failures, failed, note): (String, i64, Option<String>) =
+        sqlx::query_as("SELECT failures, failed_items, note FROM backup_jobs WHERE id = ?").bind(&job).fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(failed, 0, "{failures}");
+    assert!(failures.contains("app.log") && failures.contains(super::capture::KEPT_AS_READ), "{failures}");
+    assert!(!failures.contains("diary") && failures.contains("\"item\":null"), "{failures}");
+    assert_eq!(note.as_deref(), Some("2 files kept changing while they were copied: each is kept as it was last read"));
+    // The file is in the snapshot whole, as it was read
+    let snapshot = snapshot_of(&env, &set).await;
+    let job = restore(&env, &snapshot, &company_drive, None, false).await.unwrap();
+    assert_eq!(run_job(&env, &job).await, "done", "{:?}", state(&env, &job).await);
+    let top = restored_folder(&env, &company).await;
+    let name = children(&env, &company).await.into_iter().find(|(_, (id, _))| *id == top).unwrap().0;
+    assert_eq!(std::fs::read(company_dir.join(&name).join("app.log")).unwrap(), b"line 1; line 2;");
+    assert_eq!(std::fs::read(company_dir.join(&name).join("steady.txt")).unwrap(), b"steady");
+    let _ = admin;
+}
+
 /// Copies to and from S3, SFTP and FTP locations (the in-memory bucket and the test servers of sftp.rs and ftp.rs)
 #[tokio::test]
 async fn copies_go_to_s3_sftp_and_ftp_locations_and_come_back_from_them() {

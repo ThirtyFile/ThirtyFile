@@ -343,3 +343,43 @@ async fn a_policy_takes_the_spaces_on_its_location_when_each_snapshot_starts() {
     assert_eq!(health(&env, &set).await.state, "paused");
     let _: User = amy;
 }
+
+/// A team space made by an administrator: (space, its top folder)
+async fn team(env: &TestEnv, name: &str) -> (String, String) {
+    let req = serde_json::from_value(json!({ "name": name })).unwrap();
+    let Json(info) = crate::drives::create(State(env.st.clone()), env.admin().await, Json(req)).await.unwrap();
+    let v = serde_json::to_value(&info).unwrap();
+    (v["id"].as_str().unwrap().to_string(), v["root_id"].as_str().unwrap().to_string())
+}
+
+#[tokio::test]
+async fn a_space_deleted_before_its_changes_were_backed_up_stops_counting_as_waiting() {
+    let env = testutil::env().await;
+    let admin = env.admin().await;
+    let amy = env.user("amy", true).await;
+    env.upload(&amy, amy.root(), "a.txt", b"amy's").await;
+    let (sales, root) = team(&env, "Sales").await;
+    env.upload(&admin, &root, "plan.txt", b"the plan").await;
+    add_nas(&env, "nas").await;
+    let set = make_policy(&env, json!({ "mode": "realtime" })).await;
+    assert_eq!(run_queued(&env, &set).await, "done");
+    // The team space changes, and is deleted before the change is backed up
+    env.upload(&admin, &root, "later.txt", b"later").await;
+    let t = crate::util::now();
+    policy::tick(&env.st, t).await.unwrap();
+    assert!(health(&env, &set).await.behind_since.is_some());
+    let _ = crate::drives::delete(State(env.st.clone()), admin.clone(), Path(sales.clone())).await.unwrap();
+    // It is never backed up again: nothing waits for it
+    let h = health(&env, &set).await;
+    assert_eq!((h.state, h.behind_since, h.changed_spaces), ("protected", None, 0));
+    // What was recorded of it goes with the next snapshot
+    env.upload(&amy, amy.root(), "b.txt", b"amy's too").await;
+    policy::tick(&env.st, t + 1).await.unwrap();
+    policy::tick(&env.st, t + 1 + policy::BATCH_SECONDS).await.unwrap();
+    assert_eq!(run_queued(&env, &set).await, "done");
+    for table in ["backup_dirty", "backup_captured"] {
+        let (n,): (i64,) =
+            sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table} WHERE drive_id = ?"))).bind(&sales).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(n, 0, "{table}");
+    }
+}
