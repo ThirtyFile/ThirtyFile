@@ -148,6 +148,6 @@ describe("sorting and type-to-find", () => {
     expect(en.keys.findByPrefix(["Zebra", "École", "eclair"], "EC", 1)).toBe(2);
     const ja = await load("ja");
     // "a" in hiragana finds a name that starts with "a" in katakana
-    expect(ja.keys.findByPrefix(["アルバム", "インク"], "あ", -1)).toBe(0);
+    expect(ja.keys.findByPrefix(["\u30a2\u30eb\u30d0\u30e0", "\u30a4\u30f3\u30af"], "\u3042", -1)).toBe(0);
   });
 });
