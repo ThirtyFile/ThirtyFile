@@ -161,6 +161,17 @@ pub async fn folder_scope(conn: &mut SqliteConnection, policy: &str) -> AppResul
     scope_of(conn, policy, Some("folder")).await
 }
 
+/// Whether the spaces `?1` (JSON list) use the content `hash` (an SQL expression): a file or an earlier version of
+/// theirs has it. Looked up by the content, so a walk of the content in hash order reads only the content it looks at,
+/// instead of gathering every content of the spaces first.
+fn in_scope(hash: &str) -> String {
+    format!(
+        "(EXISTS (SELECT 1 FROM nodes n WHERE n.blob_hash = {hash} AND n.drive_id IN (SELECT value FROM json_each(?1)))
+          OR EXISTS (SELECT 1 FROM node_versions v JOIN nodes n ON n.id = v.node_id
+                     WHERE v.blob_hash = {hash} AND n.drive_id IN (SELECT value FROM json_each(?1))))"
+    )
+}
+
 /// Content the spaces `?1` (JSON list) use: their files and earlier versions
 const SCOPE_HASHES: &str = "SELECT blob_hash AS hash FROM nodes WHERE drive_id IN (SELECT value FROM json_each(?1)) AND blob_hash IS NOT NULL
      UNION SELECT v.blob_hash FROM node_versions v JOIN nodes n ON n.id = v.node_id WHERE n.drive_id IN (SELECT value FROM json_each(?1)) AND v.blob_hash IS NOT NULL";

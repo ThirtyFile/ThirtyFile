@@ -49,7 +49,7 @@ pub async fn tick(st: &AppState, t: i64) -> AppResult<()> {
 }
 
 /// Spaces of the policy with changes a target's last sync doesn't hold (spaces never synced included)
-async fn changed(st: &AppState, p: &Policy, location: &str, spaces: &[String]) -> AppResult<Vec<String>> {
+pub(super) async fn changed(st: &AppState, p: &Policy, location: &str, spaces: &[String]) -> AppResult<Vec<String>> {
     Ok(sqlx::query_as::<_, (String,)>(
         "SELECT d.value FROM json_each(?3) d
          LEFT JOIN space_changes c ON c.drive_id = d.value
@@ -116,8 +116,19 @@ async fn look_at(st: &AppState, p: &Policy, t: i64) -> AppResult<()> {
                     trigger(st, &p.id, l, why, None).await?;
                 }
                 None => {
-                    // A sync that failed, or waits for its location, is tried again now and then
-                    trigger(st, &p.id, l, "retry", None).await.map(|_| ())?;
+                    // A sync that failed, or waits for its location, is tried again now and then. Looked for first
+                    // without the write lock: an idle target takes none.
+                    let stuck: Option<(i64,)> = sqlx::query_as(
+                        "SELECT 1 FROM replica_jobs WHERE policy_id = ? AND location_id = ? AND kind = 'sync' AND state IN ('failed', 'waiting')
+                         ORDER BY created_at DESC LIMIT 1",
+                    )
+                    .bind(&p.id)
+                    .bind(l)
+                    .fetch_optional(&st.db)
+                    .await?;
+                    if stuck.is_some() {
+                        trigger(st, &p.id, l, "retry", None).await?;
+                    }
                 }
             }
             if p.verify_days > 0 && target.state == "active" && target.synced_at.is_some() && target.last_verify_at.is_none_or(|v| t - v >= p.verify_days * 86400) {
@@ -302,7 +313,14 @@ async fn behind_since(st: &AppState, policy: &str, location: &str, spaces: &[Str
 }
 
 pub async fn health(st: &AppState, p: &Policy, targets: &[Target], t: i64) -> AppResult<Health> {
-    let coverage = super::sync::coverage(st, p, targets).await?;
+    health_of(st, p, targets, t, true).await
+}
+
+/// How a policy is doing; `counts`: with the copies each target holds and should hold (they read every content of the
+/// spaces). Without them, a target that holds fewer copies than it should and has no changes waiting shows as current:
+/// whether the policy is degraded doesn't depend on them.
+async fn health_of(st: &AppState, p: &Policy, targets: &[Target], t: i64, counts: bool) -> AppResult<Health> {
+    let coverage = if counts { super::sync::coverage(st, p, targets).await? } else { Default::default() };
     let spaces = super::scope(&mut *st.db.acquire().await?, &p.id).await?;
     let mut out = Vec::new();
     for target in targets {
@@ -364,11 +382,14 @@ pub async fn health(st: &AppState, p: &Policy, targets: &[Target], t: i64) -> Ap
 /// Tells administrators once when a policy stops keeping its copies (a target not working, damaged copies, too few
 /// targets, or behind for longer than it allows), and once when it does again
 async fn alert(st: &AppState, p: &Policy, targets: &[Target], t: i64) -> AppResult<()> {
-    let h = health(st, p, targets, t).await?;
+    // Every few seconds: without the counts, which don't change whether it is degraded
+    let h = health_of(st, p, targets, t, false).await?;
     let now_state = if h.state == "degraded" { "degraded" } else { "" };
     if now_state == p.alerted {
         return Ok(());
     }
+    // Told: with the counts, for how many targets are current
+    let h = health_of(st, p, targets, t, true).await?;
     let error = h.source_offline.clone().or_else(|| h.targets.iter().find_map(|x| x.error.clone()));
     let emails = {
         let _w = st.write_lock.lock().await;
