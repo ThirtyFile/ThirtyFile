@@ -131,12 +131,40 @@ describe("telling files apart", () => {
     expect(await m.sampleOf(new Blob([small]))).not.toBe(await m.sampleOf(new Blob([new TextEncoder().encode("hellO")])));
   });
 
-  test("the tus fingerprint is the one uploads already use, so earlier uploads still continue", async () => {
+  test("an upload's tus fingerprint is its record's, with the upload address hashed", async () => {
     const m = await load();
-    const fp = m.fingerprintOf("/api/uploads", { parentId: "p", relativePath: "A", onConflict: "keep", name: "f.txt", size: 3, lastModified: 9 });
-    expect(fp).toBe(["sd", "/api/uploads", "p", "A", "keep", "f.txt", 3, 9].join("|"));
-    localStorage.setItem(`tus::${fp}::1`, JSON.stringify({ uploadUrl: "/api/uploads/abc" }));
+    const fp = m.fingerprintOf("/api/public/shares/SeCrEtToKeN/uploads", "r1");
+    expect(fp).not.toContain("SeCrEtToKeN");
+    expect(fp).not.toBe(m.fingerprintOf("/api/public/shares/SeCrEtToKeN/uploads", "r2"));
+    expect(fp).not.toBe(m.fingerprintOf("/api/uploads", "r1"));
+    localStorage.setItem(`tus::${fp}::1`, JSON.stringify({ uploadUrl: "/api/uploads/abc", creationTime: new Date().toString() }));
     expect(m.sessionsOf(fp)).toEqual([{ key: `tus::${fp}::1`, url: "/api/uploads/abc" }]);
+  });
+
+  test("tus-js-client's records expire with the upload records, and those of earlier versions go when the page loads", async () => {
+    const m = await load();
+    const fp = m.fingerprintOf("/api/uploads", "r1");
+    const at = (ms: number) => JSON.stringify({ uploadUrl: "/api/uploads/x", creationTime: new Date(ms).toString() });
+    localStorage.setItem(`tus::${fp}::new`, at(Date.now() - DAY));
+    localStorage.setItem(`tus::${fp}::old`, at(Date.now() - 8 * DAY));
+    localStorage.setItem("tus::sd|/api/public/shares/SeCrEtToKeN/uploads|p||keep|f.txt|3|9::1", at(Date.now()));
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetch);
+    m.sweepSessions();
+    vi.unstubAllGlobals();
+    expect(Object.keys(localStorage)).toEqual([`tus::${fp}::new`]);
+    // The server lets go of what it received of the earlier version's upload
+    expect(fetch).toHaveBeenCalledWith("/api/uploads/x", expect.objectContaining({ method: "DELETE" }));
+  });
+
+  test("a file's identity is computed by the page where no worker can run", async () => {
+    const m = await load();
+    const { createHash } = await import("node:crypto");
+    expect(await m.sampleOf(new Blob(["hello"]))).toBe(m.IDENTITY_PREFIX + createHash("sha256").update("hello").digest("hex"));
+    // Stopped (the upload was cancelled)
+    const stop = new AbortController();
+    stop.abort();
+    await expect(m.sampleOf(new Blob(["hello"]), stop.signal)).rejects.toThrow("stopped");
   });
 });
 
@@ -159,15 +187,6 @@ test("content identity detects edits between the old sampled regions", async () 
   const changed = old.slice();
   changed[20000] = 1;
   expect(await m.sampleOf(new Blob([changed]))).not.toBe(await m.sampleOf(new Blob([old])));
-});
-
-test("tus identities distinguish changed content with matching names and timestamps", async () => {
-  const m = await load();
-  const r = record();
-  const a = { ...r, sample: await m.sampleOf(new Blob(["old"])) };
-  const b = { ...r, sample: await m.sampleOf(new Blob(["new"])) };
-  expect(m.fingerprintOf("/api/uploads", a)).not.toBe(m.fingerprintOf("/api/uploads", b));
-  expect(m.fingerprintOf("/api/uploads", a)).not.toBe(m.fingerprintOf("/api/uploads", r));
 });
 
 test("the complete identity matches standard SHA-256 across chunk boundaries", async () => {

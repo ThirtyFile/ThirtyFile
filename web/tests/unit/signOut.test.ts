@@ -19,7 +19,7 @@ describe("after a session expired", () => {
     localStorage.setItem("tf-tabs-1", '{"tabs":[{"title":"Salaries.xlsx"}]}');
     sessionStorage.setItem("tf-tabs-1", '{"tabs":[{"title":"Salaries.xlsx"}]}');
     localStorage.setItem("tf-tree-expanded-1", '["a"]');
-    localStorage.setItem("tus::tus-br::Salaries.xlsx::1", '{"uploadUrl":"/api/upload/x"}');
+    localStorage.setItem("tus::tf|0123456789abcdef|r1::1", JSON.stringify({ uploadUrl: "/api/upload/x", metadata: { filename: "Salaries.xlsx" }, creationTime: new Date().toString() }));
     // Interrupted uploads that can be continued after a reload: Amy's own, one through a share link, and Ben's
     localStorage.setItem("tf-upload-tasks-u1", '[{"name":"Salaries.xlsx"}]');
     localStorage.setItem("tf-upload-tasks-s0123456789abcdef", '[{"name":"Dropped.pdf"}]');

@@ -24,6 +24,9 @@ export interface Answer {
   forAll: boolean;
 }
 
+/** Names one question to the server about clashes takes (organize.rs, MAX_CONFLICT_NAMES) */
+export const CONFLICT_NAMES = 10_000;
+
 /** The files and folders a pick or drop puts directly in the destination: a folder's files all count as that folder */
 export function topLevel(files: readonly { file: File; relativePath: string }[]): { name: string; kind: "file" | "folder"; size?: number; modified?: number }[] {
   const seen = new Map<string, { name: string; kind: "file" | "folder"; size?: number; modified?: number }>();

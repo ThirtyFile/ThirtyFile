@@ -1,8 +1,9 @@
 import { useMemo, useSyncExternalStore } from "react";
 import * as tus from "tus-js-client";
 import { toast } from "sonner";
-import { ApiError, api, errorFromBody } from "@/api";
-import { applyToUpload, resolveConflicts, topLevel } from "@/lib/conflicts";
+import { ApiError, api, errorFromBody, type NameConflict } from "@/api";
+import { CONFLICT_NAMES, applyToUpload, resolveConflicts, topLevel } from "@/lib/conflicts";
+import { chunks } from "@/lib/span";
 import { reportShown } from "@/lib/errorReport";
 import { t } from "@/lib/i18n";
 import { createStore, useStore } from "@/lib/store";
@@ -53,8 +54,10 @@ export interface UploadTask {
   recordId: string;
   scope: string | null;
   created: number;
-  /** A complete content identity, computed before sending */
+  /** Its complete content identity, computed while it is sent (or, for an upload continued, before) */
   sample?: string;
+  /** Stops computing the identity (the upload was cancelled) */
+  identifying?: AbortController;
   /** Continued after a reload: how far it had got, and whether it must start again (the file changed, or "Start over") */
   recovered?: { sent: number; fresh: boolean };
   /** Start a new upload rather than continue one the server may have */
@@ -252,10 +255,11 @@ export async function resumeRecovered(endpoint: string, records: UploadRecord[],
       continue;
     }
     used.add(p);
-    const same = p.file.size === r.size && p.file.lastModified === r.lastModified && !!r.sample?.startsWith(IDENTITY_PREFIX) && (await sampleOf(p.file).catch(() => "")) === r.sample;
+    const sample = p.file.size === r.size && p.file.lastModified === r.lastModified && !!r.sample?.startsWith(IDENTITY_PREFIX) ? await sampleOf(p.file).catch(() => undefined) : undefined;
+    const same = !!sample && sample === r.sample;
     const fresh = restart || !same;
     // The old upload can't be continued with this file: let the server drop what it received
-    if (fresh) await forgetSessions(fingerprintOf(endpoint, r));
+    if (fresh) await forgetSessions(fingerprintOf(endpoint, r.id));
     if (!same) result.changed++;
     else if (restart) result.restarted++;
     else result.continuing++;
@@ -266,6 +270,8 @@ export async function resumeRecovered(endpoint: string, records: UploadRecord[],
       batch: r.batch,
       onConflict: r.onConflict,
       recordId: r.id,
+      // Computed once: the upload doesn't compute it again
+      sample,
       recovered: { sent: fresh ? 0 : r.sent, fresh },
     });
   }
@@ -282,7 +288,7 @@ export async function discardRecovered(endpoint: string, records: UploadRecord[]
       scope,
       records.map((r) => r.id),
     );
-  for (const r of records) await forgetSessions(fingerprintOf(endpoint, r));
+  for (const r of records) await forgetSessions(fingerprintOf(endpoint, r.id));
 }
 
 /** Show changes: right away after something the user did, otherwise at most every EMIT_MS */
@@ -295,6 +301,8 @@ function setStatus(task: UploadTask, status: UploadStatus) {
   totals[task.status]--;
   totals[status]++;
   task.status = status;
+  // Sent: its identity is no longer needed
+  if (status === "done") task.identifying?.abort();
 }
 
 function setSent(task: UploadTask, sent: number) {
@@ -303,6 +311,7 @@ function setSent(task: UploadTask, sent: number) {
 }
 
 function forget(task: UploadTask) {
+  task.identifying?.abort();
   totals[task.status]--;
   totals.size -= task.size;
   totals.sent -= task.sent;
@@ -374,7 +383,7 @@ export function savedName(header: string | undefined, uploaded: string): string 
 }
 
 function start(task: UploadTask) {
-  const fingerprint = () => fingerprintOf(task.endpoint, { ...task, lastModified: task.file.lastModified });
+  const fingerprint = fingerprintOf(task.endpoint, task.recordId);
   const upload = new tus.Upload(task.file, {
     endpoint: task.endpoint,
     chunkSize: 32 * 1024 * 1024,
@@ -388,8 +397,8 @@ function start(task: UploadTask) {
       batchId: task.batch,
       onConflict: task.onConflict,
     },
-    // Uploads of the same file to different locations, or with a different answer to a name clash, must not resume each other
-    fingerprint: async () => fingerprint(),
+    // An upload continues only its own server session: another one of the same file, here or elsewhere, never does
+    fingerprint: async () => fingerprint,
     onProgress: (sent) => {
       if (task.upload !== upload || task.status !== "uploading") return;
       setSent(task, sent);
@@ -436,8 +445,27 @@ function fail(task: UploadTask, message: string) {
 }
 
 /**
- * Starts sending: takes the file's lock (another tab may be sending it), notes its complete content identity, and continues
- * the upload the server has, if any. An upload continued after a reload asks the server first: one it finished (the
+ * Notes the file's complete content identity, which lets the upload be continued after a reload: computed in a worker
+ * while the file is sent, and kept with the upload's record once known
+ */
+function identify(task: UploadTask) {
+  if (task.sample || task.identifying) return;
+  const stop = new AbortController();
+  task.identifying = stop;
+  void sampleOf(task.file, stop.signal)
+    .then((sample) => {
+      task.sample = sample;
+      schedulePersist();
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      if (task.identifying === stop) task.identifying = undefined;
+    });
+}
+
+/**
+ * Starts sending: takes the file's lock (another tab may be sending it), starts computing its content identity, and
+ * continues the upload the server has, if any. An upload continued after a reload asks the server first: one it finished (the
  * answer was lost) is done, and one it no longer has starts again, unless everything had been sent, which is then
  * reported rather than sent a second time.
  */
@@ -452,9 +480,9 @@ async function begin(task: UploadTask, upload: tus.Upload) {
   releaseLock(task);
   task.release = release;
   if (!current()) return releaseLock(task);
-  task.sample ??= await sampleOf(task.file).catch(() => undefined);
-  const fingerprint = fingerprintOf(task.endpoint, { ...task, lastModified: task.file.lastModified });
-  let previous = task.sample?.startsWith(IDENTITY_PREFIX) ? await upload.findPreviousUploads().catch(() => []) : [];
+  identify(task);
+  const fingerprint = fingerprintOf(task.endpoint, task.recordId);
+  let previous = await upload.findPreviousUploads().catch(() => []);
   if (!current()) return releaseLock(task);
   const recovered = task.recovered;
   task.recovered = undefined;
@@ -516,6 +544,7 @@ interface TaskInit {
   batch: string;
   onConflict: "replace" | "keep";
   recordId?: string;
+  sample?: string;
   recovered?: { sent: number; fresh: boolean };
 }
 
@@ -533,7 +562,7 @@ function addTasks(inits: TaskInit[], endpoint: string) {
   if (!inits.length) return;
   const scope = scopeOf(endpoint);
   const now = Date.now();
-  for (const { file, relativePath, parentId, batch, onConflict, recordId: id, recovered } of inits) {
+  for (const { file, relativePath, parentId, batch, onConflict, recordId: id, sample, recovered } of inits) {
     const task: UploadTask = {
       id: `u${++seq}`,
       name: file.name,
@@ -549,6 +578,7 @@ function addTasks(inits: TaskInit[], endpoint: string) {
       recordId: id ?? recordId(),
       scope,
       created: now,
+      sample,
       recovered,
     };
     tasks.push(task);
@@ -570,9 +600,14 @@ function addTasks(inits: TaskInit[], endpoint: string) {
 export async function uploadFiles(files: PickedFile[], parentId: string) {
   if (!files.length) return;
   const tops = topLevel(files);
-  let found;
+  const found: NameConflict[] = [];
   try {
-    found = await api.conflicts({ dest_id: parentId, names: tops.map((x) => x.name) });
+    // The server takes a limited number of names at once
+    for (const names of chunks(
+      tops.map((x) => x.name),
+      CONFLICT_NAMES,
+    ))
+      found.push(...(await api.conflicts({ dest_id: parentId, names })));
   } catch (e) {
     toast.error(errorMessage(e, t("Couldn't upload")));
     reportShown("upload", e, parentId);
@@ -632,7 +667,7 @@ export function cancel(id: string) {
   t.upload = undefined;
   releaseLock(t);
   // Not started yet, or failed: what the server may have of it goes too
-  if (t.status === "queued" || t.status === "error" || t.status === "paused") void forgetSessions(fingerprintOf(t.endpoint, { ...t, lastModified: t.file.lastModified }));
+  if (t.status === "queued" || t.status === "error" || t.status === "paused") void forgetSessions(fingerprintOf(t.endpoint, t.recordId));
   forget(t);
   tasks = tasks.filter((x) => x !== t);
   pump();
@@ -653,6 +688,7 @@ export function cancelAll() {
   for (const t of tasks) {
     if (t.upload && t.status !== "done") t.upload.abort(true).catch(() => {});
     releaseLock(t);
+    t.identifying?.abort();
   }
   tasks = [];
   byId.clear();

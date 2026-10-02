@@ -136,7 +136,7 @@ test("a legacy sparse-sample record starts again instead of authorizing a resume
   await page.goto(`/files/${target}`);
   await startAndHold(page, path);
   await reload(page);
-  // An earlier version kept a sparse sample and a metadata-only tus fingerprint.
+  // An earlier version kept a sparse sample, and a tus fingerprint made of the upload address and the file's details
   const oldUrl = await page.evaluate(() => {
     let url: string | null = null;
     for (const [key, value] of Object.entries(localStorage)) {
@@ -146,7 +146,7 @@ test("a legacy sparse-sample record starts again instead of authorizing a resume
         localStorage.setItem(key, JSON.stringify(records));
       }
       if (key.startsWith("tus::")) {
-        localStorage.setItem(key.replace(/\|sha256-v1:[0-9a-f]{64}/, ""), value);
+        localStorage.setItem("tus::sd|/api/uploads|folder||keep|legacy.bin|41943040|1::1", value);
         localStorage.removeItem(key);
         url = JSON.parse(value).uploadUrl;
       }
@@ -155,6 +155,8 @@ test("a legacy sparse-sample record starts again instead of authorizing a resume
   });
   expect(oldUrl).not.toBeNull();
   await page.reload();
+  // Its upload address is no longer kept under the old key
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("tus::sd|")))).toEqual([]);
   const offsets = patchOffsets(page);
   await page.getByRole("region", { name: "Interrupted uploads" }).locator('input[type="file"][multiple]').setInputFiles(path);
   await expect(page.getByRole("status").filter({ hasText: "1 upload complete" })).toBeAttached({ timeout: 60_000 });

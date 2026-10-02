@@ -2,7 +2,7 @@
 // files land. tus-js-client is stood in for: each upload is started, and succeeds or fails when a test says so.
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -44,7 +44,23 @@ vi.mock("tus-js-client", () => ({
 // A failure shown is reported to the server: not from here
 vi.mock("@/lib/errorReport", () => ({ reportShown: vi.fn<() => void>() }));
 
+// Content identities: counted, and held back while a test says so
+const identity = vi.hoisted(() => ({ computed: 0, hold: null as Promise<void> | null }));
+vi.mock("@/lib/uploadRecovery", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/uploadRecovery")>();
+  return {
+    ...real,
+    sampleOf: async (file: Blob, signal?: AbortSignal) => {
+      identity.computed++;
+      if (identity.hold) await identity.hold;
+      return real.sampleOf(file, signal);
+    },
+  };
+});
+
 const up = await import("@/uploads");
+const recovery = await import("@/lib/uploadRecovery");
+const { api } = await import("@/api");
 type Snapshot = ReturnType<typeof up.useUploads>;
 
 /** What the upload panel would show */
@@ -146,5 +162,75 @@ describe("upload queue", () => {
     await settle();
     expect(shown.tasks).toHaveLength(0);
     stop();
+  });
+});
+
+describe("content identity", () => {
+  beforeEach(() => void (identity.computed = 0));
+  afterEach(() => {
+    identity.hold = null;
+    recovery.setRecoveryUser(null);
+    localStorage.clear();
+    vi.restoreAllMocks();
+  });
+  const kept = () => recovery.readRecords("u7");
+
+  test("a file is sent before its identity is known, which its record gets once computed", async () => {
+    recovery.setRecoveryUser(7);
+    let release!: () => void;
+    identity.hold = new Promise((r) => (release = r));
+    act(() => up.enqueue(files(1), "folder"));
+    await settle();
+    expect(started()).toHaveLength(1);
+    expect(identity.computed).toBe(1);
+    expect(kept()[0].sample).toBeUndefined();
+    release();
+    await act(async () => void (await new Promise((r) => setTimeout(r, 1200))));
+    expect(kept()[0].sample).toMatch(/^sha256-v1:/);
+  });
+
+  test("a file chosen again after a reload is read once: to tell whether it is the same, not again to send it", async () => {
+    recovery.setRecoveryUser(7);
+    const file = new File(["the same content"], "a.txt", { lastModified: 5 });
+    const changed = new File(["other content!!!"], "b.txt", { lastModified: 5 });
+    const now = Date.now();
+    const base = {
+      relativePath: "",
+      parentId: "folder",
+      batch: "b",
+      lastModified: 5,
+      onConflict: "keep" as const,
+      sent: 4,
+      state: "sending" as const,
+      created: now,
+      updated: now,
+      tab: "gone",
+      beat: 0,
+    };
+    const sample = await recovery.sampleOf(file);
+    identity.computed = 0;
+    const records = [
+      { ...base, id: "r1", name: "a.txt", size: file.size, sample },
+      { ...base, id: "r2", name: "b.txt", size: changed.size, sample },
+    ];
+    let result;
+    await act(
+      async () =>
+        void (result = await up.resumeRecovered("/api/uploads", records, [
+          { file, relativePath: "" },
+          { file: changed, relativePath: "" },
+        ])),
+    );
+    await settle();
+    expect(result).toMatchObject({ continuing: 1, changed: 1 });
+    expect(started()).toHaveLength(2);
+    expect(identity.computed).toBe(2);
+  });
+
+  test("more loose files than the server checks at once are checked for name clashes in parts", async () => {
+    const conflicts = vi.spyOn(api, "conflicts").mockResolvedValue([]);
+    await act(() => up.uploadFiles(files(10_001), "folder"));
+    expect(conflicts.mock.calls.map(([req]) => req.names!.length)).toEqual([10_000, 1]);
+    expect(shown.tasks).toHaveLength(10_001);
   });
 });
