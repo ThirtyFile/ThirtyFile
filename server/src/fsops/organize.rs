@@ -76,13 +76,25 @@ fn name_on_disk(dir: &Pinned, name: &str, path: &Pinned) -> String {
     alike.unwrap_or_else(|| name.to_string())
 }
 
-/// Renames `node` to `name` in the folder `dest` on disk; returns where it is now and where it was
-pub(super) async fn rename_on_disk(node: &Node, dest: &Node, name: &str) -> AppResult<(Pinned, Pinned)> {
+/// Renames `node` to `name` in the folder `dest` on disk, the move written into the space's journal first
+/// (journal.rs): should the change not be committed, the next scan puts the item back, or records the move, before it
+/// reads the folders. Returns where it is now, where it was, and the entry in the journal.
+pub(super) async fn rename_on_disk(node: &Node, dest: &Node, name: &str) -> AppResult<(Pinned, Pinned, Entry)> {
     let (drive, node, dest, name) = (node.drive().to_string(), node.clone(), dest.clone(), name.to_string());
     on_disk(&drive, disk_wait(), move || {
+        let root = space_root(&node)?;
         let (from, to) = (abs(&node)?, abs(&dest)?.join(&name).map_err(gone_or_disk_error)?);
-        rename_new(from.as_path(), to.as_path()).map_err(disk_error)?;
-        Ok((to, from))
+        let intent = Intent::Move { node: node.id.clone(), from: rel_of(&node).to_string(), to: child_rel(rel_of(&dest), &name) };
+        let entry = write(&root, &intent).map_err(disk_error)?;
+        match rename_new(from.as_path(), to.as_path()) {
+            #[cfg(test)]
+            Ok(()) if testing::stops(node.drive(), testing::Stop::Moved) => Err(testing::stopped()),
+            Ok(()) => Ok((to, from, entry)),
+            Err(e) => {
+                entry.remove();
+                Err(disk_error(e))
+            }
+        }
     })
     .await
 }
@@ -91,8 +103,8 @@ pub(super) async fn rename_on_disk(node: &Node, dest: &Node, name: &str) -> AppR
 /// new name and folder)
 pub async fn rename(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node, dest: &Node, name: &str) -> AppResult<()> {
     check_name(name)?;
-    let (to, from) = rename_on_disk(node, dest, name).await?;
-    locks.note(to, from, None);
+    let (to, from, entry) = rename_on_disk(node, dest, name).await?;
+    locks.note_journaled(to, from, None, Some(entry));
     locks.later(changes::repath(conn, &node.id, node.drive(), rel_of(node), &child_rel(rel_of(dest), name)).await?);
     Ok(())
 }
@@ -142,9 +154,9 @@ pub async fn trash(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node,
 
 /// Moves a trashed item back into `dest` as `name`
 pub async fn restore(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node, dest: &Node, name: &str) -> AppResult<()> {
-    let (to, from) = rename_on_disk(node, dest, name).await?;
+    let (to, from, entry) = rename_on_disk(node, dest, name).await?;
     // Its emptied trash folder stays until `clean_trash` (should the change fail, the item goes back into it)
-    locks.note(to, from, None);
+    locks.note_journaled(to, from, None, Some(entry));
     locks.later(changes::repath(conn, &node.id, node.drive(), rel_of(node), &child_rel(rel_of(dest), name)).await?);
     Ok(())
 }

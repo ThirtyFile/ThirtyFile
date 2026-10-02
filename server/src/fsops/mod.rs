@@ -285,6 +285,26 @@ pub(crate) mod testing {
         Answer(drive.to_string())
     }
 
+    static NO_IDENTITIES: Mutex<Vec<std::path::PathBuf>> = Mutex::new(Vec::new());
+
+    /// Scans of the folder `dir` see no identities of items on disk (as on Windows or exFAT) until the guard is dropped
+    pub fn no_identities(dir: &std::path::Path) -> impl Drop {
+        struct Identities(std::path::PathBuf);
+        impl Drop for Identities {
+            fn drop(&mut self) {
+                NO_IDENTITIES.lock().unwrap().retain(|d| *d != self.0);
+            }
+        }
+        let dir = std::fs::canonicalize(dir).unwrap();
+        NO_IDENTITIES.lock().unwrap().push(dir.clone());
+        Identities(dir)
+    }
+
+    pub fn identities(dir: &std::path::Path) -> bool {
+        let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+        !NO_IDENTITIES.lock().unwrap().contains(&dir)
+    }
+
     static NO_LINKS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
     /// The disk of the folder space `drive` has no hard links until the guard is dropped
@@ -342,6 +362,9 @@ pub(crate) mod testing {
         Replaced,
         /// Moving to the trash: the item is in the trash folder, the change isn't committed
         Trashed,
+        /// Renaming or moving within a space (out of the trash too): the item has its new place, the change isn't
+        /// committed
+        Moved,
         /// Moving or copying to a folder space: the content is in place under its name, the index hasn't followed
         Placed,
     }

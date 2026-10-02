@@ -363,6 +363,8 @@ fn walk_each(
                 report.skip(format!("{rel}: another file system mounted inside"));
                 continue;
             }
+            #[cfg(test)]
+            let (dev, ino) = if crate::fsops::testing::identities(root) { (dev, ino) } else { (0, 0) };
             let mtime = mtime_ns(&meta);
             children.push(Entry {
                 rel: rel.clone(),
