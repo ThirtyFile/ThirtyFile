@@ -11,7 +11,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/lib/i18n/zh-TW/**"],
+      exclude: ["src/lib/i18n/*/**"],
       reporter: ["text-summary", "json-summary"],
       // A floor under what the unit tests cover (pnpm test --coverage, as CI runs them fails below it): raised as tests
       // are added, never lowered to let a change through

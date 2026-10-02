@@ -4,7 +4,7 @@
   // long lines. `pnpm format` formats src, tests and scripts; `pnpm format:check` checks them. Tables laid out by
   // hand, with several entries per line, keep their layout with a `// oxfmt-ignore` line above them.
   "printWidth": 190,
-  // The Traditional Chinese dictionaries keep one entry per line, however long: scripts/check-i18n.mjs reads them
+  // The dictionaries (src/lib/i18n/<lang>/) keep one entry per line, however long: scripts/check-i18n.mjs reads them
   // line by line
-  "ignorePatterns": ["src/lib/i18n/zh-TW/**"]
+  "ignorePatterns": ["src/lib/i18n/*/**"]
 }

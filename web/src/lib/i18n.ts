@@ -1,20 +1,53 @@
-//! Localization (English, Traditional Chinese).
+//! Localization: English, Traditional Chinese (zh-TW), Simplified Chinese (zh-CN) and Japanese (ja).
 //!
 //! Source text is English: `t("{n} item selected|{n} items selected", { n })`. English uses the source text as is;
-//! Traditional Chinese looks it up in the zh-TW dictionary and falls back to the English source when missing.
+//! every other language looks it up in its own dictionary (`lib/i18n/<lang>/`, the same files in each) and falls back
+//! to the English source when an entry is missing.
 //! - Parameters are written as `{name}`; English plurals are `single|plural`, picked by `n` (or `count`)
 //! - Number parameters are formatted for the locale (1,234); write whole sentences, not pieces joined in code
-//! - `tc(context, "English")` is for English text that needs different Chinese in different places (key `context::English`)
+//! - `tc(context, "English")` is for English text that needs different words in different places (key `context::English`)
 //! - Messages returned by the server (errors, activity log details…) are English; `tServer()` translates them:
 //!   exact match first, then templates with parameters
 //! - The language is decided at load time (so module-level constants can call t); switching reloads the page
+//! - Only the page's own language is downloaded: the server adds its dictionary script (`<lang>.js`) to the page, or
+//!   `loadDictionary()` fetches it before the app starts
 
-export type Lang = "zh-TW" | "en";
+export type Lang = "en" | "zh-TW" | "zh-CN" | "ja";
 
-export const LANGS: { id: Lang; label: string }[] = [
-  { id: "zh-TW", label: "繁體中文" }, // i18n-ignore: language name shown in its own language
-  { id: "en", label: "English" },
+interface Language {
+  id: Lang;
+  /** The language's name in its own language */
+  label: string;
+  /**
+   * Offered in the language switch and picked from the browser's languages. A language whose dictionary isn't
+   * translated yet stays hidden, so nobody gets half-translated pages, except with the preview flag (`PREVIEW_KEY`)
+   */
+  ready: boolean;
+}
+
+/** Every language the interface knows, English first */
+export const LANGUAGES: Language[] = [
+  { id: "en", label: "English", ready: true },
+  { id: "zh-TW", label: "繁體中文", ready: true }, // i18n-ignore: language name shown in its own language
+  { id: "zh-CN", label: "简体中文", ready: false }, // i18n-ignore: language name shown in its own language
+  { id: "ja", label: "日本語", ready: false }, // i18n-ignore: language name shown in its own language
 ];
+
+/** `localStorage[PREVIEW_KEY] = "1"` also offers the languages that aren't ready, to check their translations */
+export const PREVIEW_KEY = "tf-lang-preview";
+
+function previewing() {
+  try {
+    return localStorage.getItem(PREVIEW_KEY) === "1";
+  } catch {
+    return false; // storage unavailable
+  }
+}
+
+/** The languages people can use: the ready ones, and the others too while previewing */
+export const LANGS: Language[] = LANGUAGES.filter((l) => l.ready || previewing());
+
+const usable = (v: unknown): v is Lang => LANGS.some((l) => l.id === v);
 
 const KEY = "tf-lang";
 
@@ -29,39 +62,57 @@ declare global {
 function detect(): Lang {
   try {
     const saved = localStorage.getItem(KEY);
-    if (saved === "zh-TW" || saved === "en") return saved;
+    if (usable(saved)) return saved;
   } catch {
     // storage unavailable: fall back to the system default / browser language
   }
   const preset = typeof window !== "undefined" ? window.__TF_DEFAULT_LANG__ : undefined;
-  if (preset === "zh-TW" || preset === "en") return preset;
+  if (usable(preset)) return preset;
   const nav = typeof navigator !== "undefined" ? (navigator.languages?.[0] ?? navigator.language ?? "") : "";
   return nav.toLowerCase().startsWith("zh") ? "zh-TW" : "en";
 }
 
+/** A dictionary module (`lib/i18n/<lang>/index.ts`, also built as the script `dist/<lang>.js`) */
+interface Dictionary {
+  LANG: string;
+  DICT: Record<string, string>;
+}
+
 declare global {
   interface Window {
-    /** Dictionary script the server adds to the page for Chinese visitors (dist/zh-TW.js) */
-    __TF_ZH__?: { ZH: Record<string, string> };
+    /** Dictionary script the server added to the page for the language it expects (dist/<lang>.js) */
+    __TF_DICT__?: Dictionary;
   }
 }
 
+/** Each language's dictionary, a chunk of its own */
+const DICTIONARIES: Record<Exclude<Lang, "en">, () => Promise<Dictionary>> = {
+  "zh-TW": () => import("@/lib/i18n/zh-TW"),
+  "zh-CN": () => import("@/lib/i18n/zh-CN"),
+  ja: () => import("@/lib/i18n/ja"),
+};
+
 export const lang: Lang = detect();
 
+/** The dictionary the server put on the page, when it is this language's */
+function preloaded() {
+  const d = typeof window !== "undefined" ? window.__TF_DICT__ : undefined;
+  return d?.LANG === lang ? d.DICT : undefined;
+}
+
 /**
- * Traditional Chinese dictionary: the script the server put on the page, if any, else empty until `loadDictionary()`
- * fetched it (English users never download it)
+ * The active language's dictionary: the script the server put on the page, if any, else empty until `loadDictionary()`
+ * fetched it (English needs none)
  */
-let ZH: Record<string, string> = (typeof window !== "undefined" && window.__TF_ZH__?.ZH) || {};
+let DICT: Record<string, string> = preloaded() ?? {};
 
 /**
  * Load the dictionary for the active language. Called by main.tsx before the app's modules are evaluated.
  * Usually the server already put the dictionary on the page (no extra round trip); otherwise it's fetched now.
  */
 export async function loadDictionary() {
-  if (lang !== "zh-TW") return;
-  const preloaded = typeof window !== "undefined" ? window.__TF_ZH__?.ZH : undefined;
-  ZH = preloaded ?? (await import("@/lib/i18n/zh-TW")).ZH;
+  if (lang === "en") return;
+  DICT = preloaded() ?? (await DICTIONARIES[lang]()).DICT;
 }
 /**
  * Locale used by Intl. English follows the browser's region when it is an English one (en-GB: day/month/year and
@@ -77,7 +128,7 @@ function englishLocale() {
   }
 }
 
-export const locale = lang === "en" ? englishLocale() : "zh-TW";
+export const locale = lang === "en" ? englishLocale() : lang;
 
 if (typeof document !== "undefined") {
   document.documentElement.lang = lang === "en" ? "en" : "zh-Hant";
@@ -121,15 +172,15 @@ function plural(text: string, vars?: Vars) {
 const missing = new Set<string>();
 
 function lookup(key: string, fallback: string, vars?: Vars) {
-  const zh = ZH[key];
-  if (zh === undefined) {
+  const value = DICT[key];
+  if (value === undefined) {
     if (import.meta.env.DEV && !missing.has(fallback)) {
       missing.add(fallback);
-      console.warn("[i18n] Missing Traditional Chinese translation:", fallback);
+      console.warn("[i18n] Missing translation:", fallback);
     }
     return fill(plural(fallback, vars), vars);
   }
-  return fill(zh, vars);
+  return fill(value, vars);
 }
 
 /** Translate UI text (the key is the English source text) */
@@ -139,14 +190,14 @@ export function t(en: string, vars?: Vars): string {
 }
 
 /**
- * For English text that needs different Chinese in different places
+ * For English text that another language words differently in different places
  * (e.g. "Unlimited" takes a longer Chinese wording in forms but a shorter one in tables).
  * The dictionary key is `context::English`; falls back to the plain key.
  */
 export function tc(context: string, en: string, vars?: Vars): string {
   if (lang === "en") return fill(plural(en, vars), vars);
   const key = `${context}::${en}`;
-  return lookup(ZH[key] !== undefined ? key : en, en, vars);
+  return lookup(DICT[key] !== undefined ? key : en, en, vars);
 }
 
 // ───────────── Server messages ─────────────
@@ -154,7 +205,8 @@ export function tc(context: string, en: string, vars?: Vars): string {
 interface Template {
   re: RegExp;
   names: string[];
-  zh: string;
+  /** The translation, with the same parameters */
+  text: string;
   /** Length of the fixed text (parameters excluded) */
   fixed: number;
 }
@@ -172,11 +224,11 @@ function build() {
   exact = new Map();
   const list: Template[] = [];
   const made: Template[] = [];
-  for (const [key, zh] of Object.entries(ZH)) {
+  for (const [key, text] of Object.entries(DICT)) {
     if (key.includes("::")) continue;
     for (const en of forms(key)) {
       if (!/\{\w+\}/.test(en)) {
-        exact.set(en, zh);
+        exact.set(en, text);
         continue;
       }
       const names: string[] = [];
@@ -192,7 +244,7 @@ function build() {
           return part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         })
         .join("");
-      const tpl = { re: new RegExp(`^${pattern}$`), names, zh, fixed: en.replace(/\{\w+\}/g, "").length };
+      const tpl = { re: new RegExp(`^${pattern}$`), names, text, fixed: en.replace(/\{\w+\}/g, "").length };
       if (MADE_NAME.test(en)) made.push(tpl);
       else list.push(tpl);
     }
@@ -259,7 +311,7 @@ function templated(msg: string, depth: number, among: Template[] = templates!): 
     tpl.names.forEach((name, i) => {
       vars[name] = fragment(name, m[i + 1], depth);
     });
-    return fill(tpl.zh, vars);
+    return fill(tpl.text, vars);
   }
   return undefined;
 }

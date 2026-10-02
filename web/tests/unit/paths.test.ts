@@ -1,18 +1,18 @@
 // The language is decided when the module loads, so each test imports a fresh copy after choosing it.
 // Expected Chinese text is taken from the dictionary itself (no Chinese in the tests).
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { ZH } from "@/lib/i18n/zh-TW";
+import { DICT as ZH } from "@/lib/i18n/zh-TW";
 
 async function load(lang: "en" | "zh-TW") {
   vi.resetModules();
   localStorage.setItem("tf-lang", lang);
-  window.__TF_ZH__ = lang === "zh-TW" ? { ZH } : undefined;
+  window.__TF_DICT__ = lang === "zh-TW" ? { LANG: "zh-TW", DICT: ZH } : undefined;
   return import("@/lib/paths");
 }
 
 afterEach(() => {
   localStorage.clear();
-  window.__TF_ZH__ = undefined;
+  window.__TF_DICT__ = undefined;
 });
 
 const info = (location: string[] | null, kind: "personal" | "company" | "team", via_share = false) => ({

@@ -26,7 +26,7 @@ import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/dialogs";
 import { LocationSelect } from "@/components/LocationSelect";
 import { cn, formatBytes } from "@/lib/utils";
-import { LANGS, t } from "@/lib/i18n";
+import { LANGUAGES, t } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
 import { Toggle, Section, SettingsFrame } from "@/admin/SettingsFrame";
 
@@ -178,7 +178,7 @@ export function GeneralSettingsPage() {
                   )}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label={t("Default language")}>
-                  {([["auto", t("Follow browser")], ...LANGS.map((l) => [l.id, l.label])] as [DefaultLang, string][]).map(([id, label]) => (
+                  {([["auto", t("Follow browser")], ...LANGUAGES.filter((l) => l.ready).map((l) => [l.id, l.label])] as [DefaultLang, string][]).map(([id, label]) => (
                     <button
                       key={id}
                       type="button"

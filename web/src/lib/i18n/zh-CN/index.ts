@@ -1,4 +1,4 @@
-/** Traditional Chinese dictionary, split by feature and merged here. Keys are the English source text (plurals as "single|plural"); tc() keys are "context::English". */
+/** Simplified Chinese dictionary, split by feature and merged here (the same files as zh-TW). Until it is translated, its entries are placeholders: the Traditional Chinese text. Keys are the English source text (plurals as "single|plural"); tc() keys are "context::English". */
 import server from "./server";
 import settings from "./settings";
 import spaces from "./spaces";
@@ -28,6 +28,6 @@ import folderSpaces from "./folderSpaces";
 import backups from "./backups";
 import replicas from "./replicas";
 
-export const LANG = "zh-TW";
+export const LANG = "zh-CN";
 
 export const DICT: Record<string, string> = { ...server, ...settings, ...spaces, ...users, ...explorer, ...sharing, ...viewer, ...login, ...notices, ...core, ...sso, ...wording, ...accessibility, ...undo, ...largeFolders, ...accountSecurity, ...shareLinks, ...conflicts, ...details, ...dragAndDrop, ...webdav, ...search, ...archives, ...addressBar, ...notifications, ...folderSpaces, ...backups, ...replicas };
