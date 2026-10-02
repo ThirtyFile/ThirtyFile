@@ -72,7 +72,7 @@ async fn run_queued(env: &TestEnv, policy: &str) -> Vec<String> {
 async fn settle(env: &TestEnv, policy: &str) -> Vec<String> {
     let t = crate::util::now();
     policy::tick(&env.st, t).await.unwrap();
-    policy::tick(&env.st, t + policy::BATCH_SECONDS).await.unwrap();
+    policy::tick(&env.st, t + crate::backups::scheduler::BATCH_SECONDS).await.unwrap();
     run_queued(env, policy).await
 }
 
@@ -531,7 +531,7 @@ async fn a_sync_waits_for_its_target_continues_after_a_restart_and_is_refused_af
     env.upload(&amy, amy.root(), "b.txt", b"b").await;
     let t = crate::util::now();
     policy::tick(&env.st, t).await.unwrap();
-    policy::tick(&env.st, t + policy::BATCH_SECONDS).await.unwrap();
+    policy::tick(&env.st, t + crate::backups::scheduler::BATCH_SECONDS).await.unwrap();
     sqlx::query("UPDATE replica_jobs SET state = 'running' WHERE state = 'queued'").execute(&env.st.db).await.unwrap();
     runner::recover_in(&env.st, &env.st.part::<Memory>().queue).await.unwrap();
     let (queued,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM replica_jobs WHERE state = 'queued'").fetch_one(&env.st.db).await.unwrap();

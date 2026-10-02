@@ -211,12 +211,12 @@ async fn a_policy_backs_up_changes_one_snapshot_at_a_time_and_keeps_the_last_one
     policy::tick(&env.st, t).await.unwrap();
     assert!(open_jobs(&env, &set).await.is_empty(), "changes are gathered first");
     assert_eq!(health(&env, &set).await.state, "catching_up");
-    policy::tick(&env.st, t + policy::BATCH_SECONDS).await.unwrap();
+    policy::tick(&env.st, t + crate::backups::scheduler::BATCH_SECONDS).await.unwrap();
     assert_eq!(open_jobs(&env, &set).await.len(), 1);
     // More changes and the schedule meanwhile: still one snapshot queued
     env.upload(&amy, amy.root(), "b.txt", b"third").await;
     sqlx::query("UPDATE backup_policies SET next_run_at = ? WHERE set_id = ?").bind(t - 86400 * 3).bind(&set).execute(&env.st.db).await.unwrap();
-    policy::tick(&env.st, t + 2 * policy::BATCH_SECONDS).await.unwrap();
+    policy::tick(&env.st, t + 2 * crate::backups::scheduler::BATCH_SECONDS).await.unwrap();
     assert_eq!(open_jobs(&env, &set).await.len(), 1);
     // ThirtyFile was stopped for three days: one catch-up, and the next time is in the future again
     let next: i64 = sqlx::query_as::<_, (i64,)>("SELECT next_run_at FROM backup_policies WHERE set_id = ?").bind(&set).fetch_one(&env.st.db).await.unwrap().0;
@@ -240,7 +240,7 @@ async fn a_policy_backs_up_changes_one_snapshot_at_a_time_and_keeps_the_last_one
     assert!(object(b"first").exists() && object(b"second").exists() && object(b"third").exists());
     assert!(!nas.join(super::layout::complete_key(&set, &before[1].0)).exists());
     // Everything is captured: nothing waits
-    policy::tick(&env.st, t + 3 * policy::BATCH_SECONDS).await.unwrap();
+    policy::tick(&env.st, t + 3 * crate::backups::scheduler::BATCH_SECONDS).await.unwrap();
     assert!(open_jobs(&env, &set).await.is_empty(), "{:?}", open_jobs(&env, &set).await);
 }
 
@@ -259,10 +259,10 @@ async fn a_failing_or_unreachable_backup_keeps_what_it_had_is_retried_and_admini
     std::fs::write(testutil::blob_file(&env, b"broken"), b"BROKEN").unwrap();
     let t = crate::util::now();
     policy::tick(&env.st, t).await.unwrap();
-    policy::tick(&env.st, t + policy::BATCH_SECONDS).await.unwrap();
+    policy::tick(&env.st, t + crate::backups::scheduler::BATCH_SECONDS).await.unwrap();
     assert_eq!(run_queued(&env, &set).await, "failed");
     assert_eq!(complete(&env, &set).await, first);
-    policy::tick(&env.st, t + 2 * policy::BATCH_SECONDS).await.unwrap();
+    policy::tick(&env.st, t + 2 * crate::backups::scheduler::BATCH_SECONDS).await.unwrap();
     assert_eq!(health(&env, &set).await.state, "failing");
     let told = |kind: &'static str| {
         let db = env.st.db.clone();
@@ -278,30 +278,57 @@ async fn a_failing_or_unreachable_backup_keeps_what_it_had_is_retried_and_admini
         }
     };
     assert_eq!(told("failing").await, 1);
-    policy::tick(&env.st, t + 3 * policy::BATCH_SECONDS).await.unwrap();
+    policy::tick(&env.st, t + 3 * crate::backups::scheduler::BATCH_SECONDS).await.unwrap();
     assert_eq!(told("failing").await, 1, "told once");
     // Repaired: tried again (not at once: an hour after the last try), and all is well again
     std::fs::write(testutil::blob_file(&env, b"broken"), b"broken").unwrap();
     sqlx::query("UPDATE backup_policies SET last_run_at = last_run_at - 7200 WHERE set_id = ?").bind(&set).execute(&env.st.db).await.unwrap();
-    policy::tick(&env.st, t + 4 * policy::BATCH_SECONDS).await.unwrap();
+    policy::tick(&env.st, t + 4 * crate::backups::scheduler::BATCH_SECONDS).await.unwrap();
     assert_eq!(run_queued(&env, &set).await, "done");
-    policy::tick(&env.st, t + 5 * policy::BATCH_SECONDS).await.unwrap();
+    policy::tick(&env.st, t + 5 * crate::backups::scheduler::BATCH_SECONDS).await.unwrap();
     assert_eq!(health(&env, &set).await.state, "protected");
     assert_eq!(told("recovered").await, 1);
     // The location goes away: the snapshot waits for it, and is tried again once it is back
     env.upload(&amy, amy.root(), "c.txt", b"while offline").await;
     std::fs::rename(&nas, env.dir.join("unplugged")).unwrap();
-    policy::tick(&env.st, t + 6 * policy::BATCH_SECONDS).await.unwrap();
-    policy::tick(&env.st, t + 7 * policy::BATCH_SECONDS).await.unwrap();
+    policy::tick(&env.st, t + 6 * crate::backups::scheduler::BATCH_SECONDS).await.unwrap();
+    policy::tick(&env.st, t + 7 * crate::backups::scheduler::BATCH_SECONDS).await.unwrap();
     assert_eq!(run_queued(&env, &set).await, "waiting");
-    policy::tick(&env.st, t + 8 * policy::BATCH_SECONDS).await.unwrap();
+    policy::tick(&env.st, t + 8 * crate::backups::scheduler::BATCH_SECONDS).await.unwrap();
     assert_eq!(health(&env, &set).await.state, "waiting");
     assert_eq!(told("waiting").await, 1);
     std::fs::rename(env.dir.join("unplugged"), &nas).unwrap();
     sqlx::query("UPDATE backup_policies SET last_run_at = last_run_at - 600 WHERE set_id = ?").bind(&set).execute(&env.st.db).await.unwrap();
-    policy::tick(&env.st, t + 9 * policy::BATCH_SECONDS).await.unwrap();
+    policy::tick(&env.st, t + 9 * crate::backups::scheduler::BATCH_SECONDS).await.unwrap();
     assert_eq!(run_queued(&env, &set).await, "done");
     assert_eq!(complete(&env, &set).await.len(), 3);
+}
+
+/// Backups and replicas share their scheduler (scheduler.rs): a retry only tries a run again, and a run waiting for a
+/// location is tried again as soon as the location works, as replicas did before
+#[tokio::test]
+async fn a_retry_never_queues_a_new_snapshot_and_one_waiting_goes_once_its_location_is_back() {
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    env.upload(&amy, amy.root(), "a.txt", b"amy's").await;
+    add_nas(&env, "nas").await;
+    let set = make_policy(&env, json!({ "mode": "scheduled" })).await;
+    assert_eq!(run_queued(&env, &set).await, "done");
+    // Nothing failed or waits: a retry has nothing to do
+    assert_eq!(policy::trigger(&env.st, &set, "retry", None).await.unwrap(), None);
+    assert!(open_jobs(&env, &set).await.is_empty());
+
+    // A snapshot waiting for its location, which ran a moment ago: not tried again yet
+    let id = policy::trigger(&env.st, &set, "manual", None).await.unwrap().expect("queued");
+    sqlx::query("UPDATE backup_jobs SET state = 'waiting' WHERE id = ?").bind(&id).execute(&env.st.db).await.unwrap();
+    let t = crate::util::now();
+    sqlx::query("UPDATE backup_policies SET last_run_at = ? WHERE set_id = ?").bind(t).bind(&set).execute(&env.st.db).await.unwrap();
+    assert_eq!(policy::trigger(&env.st, &set, "retry", None).await.unwrap(), None);
+    // Its location was checked since, and works: at once
+    let back = crate::state::LocationHealth { ok: true, error: None, checked_at: t + 1 };
+    env.st.location_health.lock().unwrap().insert("nas".into(), back);
+    assert_eq!(policy::trigger(&env.st, &set, "retry", None).await.unwrap(), Some(id.clone()));
+    assert_eq!(open_jobs(&env, &set).await, [(id, "queued".to_string())]);
 }
 
 #[tokio::test]
@@ -375,7 +402,7 @@ async fn a_space_deleted_before_its_changes_were_backed_up_stops_counting_as_wai
     // What was recorded of it goes with the next snapshot
     env.upload(&amy, amy.root(), "b.txt", b"amy's too").await;
     policy::tick(&env.st, t + 1).await.unwrap();
-    policy::tick(&env.st, t + 1 + policy::BATCH_SECONDS).await.unwrap();
+    policy::tick(&env.st, t + 1 + crate::backups::scheduler::BATCH_SECONDS).await.unwrap();
     assert_eq!(run_queued(&env, &set).await, "done");
     for table in ["backup_dirty", "backup_captured"] {
         let (n,): (i64,) =

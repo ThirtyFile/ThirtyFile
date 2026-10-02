@@ -25,6 +25,7 @@ use super::{
     Set,
     layout::{self, Line},
     runner::{ACTIVE, Job, JobState},
+    scheduler::{self, Slot, Step},
 };
 use crate::{
     backups::Memory,
@@ -33,11 +34,6 @@ use crate::{
     util::{new_id, now},
 };
 
-/// How long changes are gathered before a snapshot is made for them
-pub const BATCH_SECONDS: i64 = 5;
-/// A failed snapshot of a policy is tried again after this long; a location that can't be reached, sooner
-const RETRY_FAILED: i64 = 3600;
-const RETRY_WAITING: i64 = 300;
 /// Content no snapshot holds is kept this long after it was stored (a snapshot being made may be about to use it)
 const GC_GRACE: i64 = 3600;
 
@@ -203,15 +199,15 @@ pub async fn changed(conn: &mut SqliteConnection, set: &str, spaces: &[String]) 
     .collect())
 }
 
-/// Queues a snapshot of a policy for `trigger` ('schedule', 'change', 'manual'). One at a time: when one isn't over,
-/// a queued one is left as it is, a failed or waiting one is tried again (not more often than `RETRY_*`), and a
-/// running or paused one gets one more after it. Returns the job queued, if any.
+/// Queues a snapshot of a policy for `trigger` ('schedule', 'change', 'manual', or 'retry' for one that failed or
+/// waits), one at a time (`scheduler::step`). Returns the job queued, if any.
 pub async fn trigger(st: &AppState, set: &str, trigger: &str, by: Option<(i64, String)>) -> AppResult<Option<String>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let res = async {
         let Some(p) = load(&mut tx, set).await? else { return Ok(None) };
-        let (name, removing): (String, bool) = sqlx::query_as("SELECT name, removing FROM backup_sets WHERE id = ?").bind(set).fetch_one(&mut *tx).await?;
+        let (name, removing, dest): (String, bool, String) =
+            sqlx::query_as("SELECT name, removing, dest_location FROM backup_sets WHERE id = ?").bind(set).fetch_one(&mut *tx).await?;
         if removing {
             return Ok(None);
         }
@@ -222,25 +218,22 @@ pub async fn trigger(st: &AppState, set: &str, trigger: &str, by: Option<(i64, S
         .fetch_optional(&mut *tx)
         .await?;
         let t = now();
-        match active {
-            Some((_, JobState::Queued)) => Ok(None),
-            Some((id, state @ (JobState::Failed | JobState::Waiting))) => {
-                let wait = if state == JobState::Failed { RETRY_FAILED } else { RETRY_WAITING };
-                if trigger == "manual" || p.last_run_at.is_none_or(|l| t - l >= wait) {
-                    sqlx::query("UPDATE backup_jobs SET state = 'queued', error = NULL WHERE id = ? AND state IN ('failed', 'waiting')")
-                        .bind(&id)
-                        .execute(&mut *tx)
-                        .await?;
-                    sqlx::query("UPDATE backup_policies SET last_run_at = ? WHERE set_id = ?").bind(t).bind(set).execute(&mut *tx).await?;
-                    return Ok(Some(id));
+        // A destination that works again, as checked since the job last ran, is tried again at once
+        let back = scheduler::back(st, &dest, p.last_run_at);
+        match scheduler::step(active, trigger, p.last_run_at, back, t) {
+            Step::Leave => Ok(None),
+            Step::Requeue(id) => {
+                if !scheduler::requeue(&mut tx, "backup_jobs", &id, &json!({})).await? {
+                    return Ok(None);
                 }
-                Ok(None)
+                sqlx::query("UPDATE backup_policies SET last_run_at = ? WHERE set_id = ?").bind(t).bind(set).execute(&mut *tx).await?;
+                Ok(Some(id))
             }
-            Some(_) => {
+            Step::CatchUp => {
                 sqlx::query("UPDATE backup_policies SET catch_up = 1 WHERE set_id = ?").bind(set).execute(&mut *tx).await?;
                 Ok(None)
             }
-            None => {
+            Step::Queue => {
                 let spaces = scope(&mut tx, set).await?;
                 let id = new_id();
                 let params = json!({ "spaces": spaces, "versions": p.versions, "trash": p.trash, "trigger": trigger, "rate_limit": p.rate_limit });
@@ -274,17 +267,7 @@ pub async fn trigger(st: &AppState, set: &str, trigger: &str, by: Option<(i64, S
 
 /// Looks at every policy every few seconds (and when woken)
 pub fn spawn_scheduler(st: AppState) {
-    tokio::spawn(async move {
-        loop {
-            if let Err(e) = tick(&st, now()).await {
-                tracing::warn!("Backup policies: {}", e.message);
-            }
-            tokio::select! {
-                _ = st.part::<Memory>().queue.policies.notified() => {}
-                _ = tokio::time::sleep(std::time::Duration::from_secs(BATCH_SECONDS as u64)) => {}
-            }
-        }
-    });
+    scheduler::spawn(st, "Backup policies", |st| &st.part::<Memory>().queue.policies, |st, t| async move { tick(&st, t).await });
 }
 
 /// One look at every policy, as of `t`
@@ -305,8 +288,8 @@ pub async fn tick(st: &AppState, t: i64) -> AppResult<()> {
 async fn look_at(st: &AppState, p: &Policy, t: i64) -> AppResult<()> {
     let set = &p.set_id;
     if p.enabled {
-        let mut due = None;
         // Changes: noted when first seen, backed up once they had a few seconds to settle
+        let (mut changed_now, mut behind) = (false, None);
         if p.realtime() {
             let mut c = st.db.acquire().await?;
             let spaces = scope(&mut c, set).await?;
@@ -321,26 +304,25 @@ async fn look_at(st: &AppState, p: &Policy, t: i64) -> AppResult<()> {
                     .execute(&st.db)
                     .await?;
             }
-            let oldest = behind_since(&mut *st.db.acquire().await?, set, &spaces).await?;
-            if !changed.is_empty() && oldest.is_some_and(|o| t - o >= BATCH_SECONDS) {
-                due = Some("change");
-            }
+            changed_now = !changed.is_empty();
+            behind = behind_since(&mut *st.db.acquire().await?, set, &spaces).await?;
         }
-        if let Some(s) = p.schedule() {
-            let tz = time_zone(&p.tz)?;
-            match p.next_run_at {
-                Some(next) if next <= t => {
-                    due = Some("schedule");
-                    // One catch-up after downtime, then the next time from now
-                    set_next(st, set, next_after(&s, &tz, t)).await?;
-                }
-                None => set_next(st, set, next_after(&s, &tz, t)).await?,
-                _ => {}
-            }
-        }
-        // One more after a snapshot that had changes (or the schedule) come during it
-        if due.is_none() && p.catch_up {
-            due = Some("change");
+        let schedule = match p.schedule() {
+            Some(s) => Some((s, time_zone(&p.tz)?)),
+            None => None,
+        };
+        let slot = Slot {
+            realtime: p.realtime(),
+            schedule,
+            next_run_at: p.next_run_at,
+            changed: changed_now,
+            behind_since: behind,
+            catch_up: p.catch_up,
+            never_ran: false,
+        };
+        let (due, next) = scheduler::due(&slot, t);
+        if let Some(next) = next {
+            set_next(st, set, next).await?;
         }
         if let Some(trigger) = due {
             self::trigger(st, set, trigger, None).await?;
@@ -460,42 +442,22 @@ async fn behind_since(conn: &mut SqliteConnection, set: &str, spaces: &[String])
 /// Tells administrators once when a policy starts failing, waiting or being overdue, and once when it is fine again
 async fn alert(st: &AppState, p: &Policy, t: i64) -> AppResult<()> {
     let h = health(&mut *st.db.acquire().await?, p, t).await?;
-    let trouble = matches!(h.state, "failing" | "waiting" | "overdue");
-    let now_state = if trouble { h.state } else { "" };
-    if now_state == p.alerted {
+    let state = if matches!(h.state, "failing" | "waiting" | "overdue") { h.state } else { "" };
+    if state == p.alerted {
         return Ok(());
     }
-    // Back to fine: told only when trouble was told
-    let kind = if trouble { h.state } else { "recovered" };
     let (name,): (String,) = sqlx::query_as("SELECT name FROM backup_sets WHERE id = ?").bind(&p.set_id).fetch_one(&st.db).await?;
-    let emails = {
-        let _w = st.write_lock.lock().await;
-        let mut tx = crate::db::begin_write(&st.db).await?;
-        let res = async {
-            sqlx::query("UPDATE backup_policies SET alerted = ? WHERE set_id = ?").bind(now_state).bind(&p.set_id).execute(&mut *tx).await?;
-            if !trouble && p.alerted.is_empty() {
-                return Ok(Vec::new());
-            }
-            let admins: Vec<i64> = sqlx::query_as::<_, (i64,)>("SELECT id FROM users WHERE role = 'admin' AND disabled = 0")
-                .fetch_all(&mut *tx)
-                .await?
-                .into_iter()
-                .map(|(i,)| i)
-                .collect();
-            let notice = crate::notify::Notice {
-                kind: "backup",
-                node_id: None,
-                data: json!({ "name": name, "state": kind, "error": h.error, "since": h.protected_through }),
-            };
-            let detail = format!("{name}: {kind}");
-            sqlx::query("INSERT INTO activity (at, action, detail) VALUES (?, 'backup_alert', ?)").bind(t).bind(&detail).execute(&mut *tx).await?;
-            crate::notify::add(&mut tx, &admins, &notice).await
-        }
-        .await;
-        crate::db::settle(tx, res).await?
+    let alert = scheduler::Alert {
+        state,
+        alerted: &p.alerted,
+        record: "UPDATE backup_policies SET alerted = ?1 WHERE set_id = ?2",
+        id: &p.set_id,
+        notice: "backup",
+        data: json!({ "name": name, "error": h.error, "since": h.protected_through }),
+        action: "backup_alert",
+        name: &name,
     };
-    crate::notify::send_later(st, emails);
-    Ok(())
+    scheduler::alert(st, alert, t).await
 }
 
 // ───────────── After a snapshot ─────────────

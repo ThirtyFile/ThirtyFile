@@ -25,6 +25,7 @@ pub mod layout;
 pub mod policy;
 mod restore;
 pub(crate) mod runner;
+pub mod scheduler;
 mod tidy;
 
 #[cfg(test)]
