@@ -15,7 +15,7 @@ import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
 import { t, tServer } from "@/lib/i18n";
 import { FOLDER_CONTENTS } from "@/lib/queries";
 import { usePersisted } from "@/lib/session";
-import { formatBytes, formatWinDate } from "@/lib/utils";
+import { formatBytes, formatDateTime } from "@/lib/utils";
 
 /** Right-hand "Details" pane (Windows 11 style) */
 const PANE_DEFAULT_WIDTH = 280;
@@ -65,7 +65,7 @@ function History({ node, query }: { node: Node; query: { data?: HistoryEntry[]; 
                 {a.node_id !== node.id && a.node_name && <> · {a.node_name}</>}
                 {detail && <span className="text-muted-foreground"> {detail}</span>}
               </div>
-              <div className="text-muted-foreground">{formatWinDate(a.at)}</div>
+              <div className="text-muted-foreground">{formatDateTime(a.at)}</div>
             </li>
           );
         })}
@@ -169,8 +169,8 @@ export function DetailsPane({ selected, folder, onClose, count, whole }: { selec
       ...(node.kind === "folder" ? ([[t("Contains"), contents.data ? containsText(contents.data) : pending(contents)]] as [string, string][]) : []),
       ...(isRoot ? [] : ([[t("Location"), location]] as [string, string][])),
       ...(info.data ? ([[t("My role"), ROLE_LABEL[info.data.role]]] as [string, string][]) : []),
-      [t("Date modified"), formatWinDate(node.updated_at)],
-      [t("Date created"), formatWinDate(node.created_at)],
+      [t("Date modified"), formatDateTime(node.updated_at)],
+      [t("Date created"), formatDateTime(node.created_at)],
       // Nobody, for an item found on the disk of a folder space
       ...(isRoot ? [] : ([[t("Created by"), node.owner_name || "—"]] as [string, string][])),
       ...(isRoot ? [] : ([[t("Favorite"), node.is_favorite ? t("Yes") : t("No")]] as [string, string][])),

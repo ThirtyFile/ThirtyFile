@@ -30,7 +30,7 @@ import { FileViewer } from "@/components/FileViewer";
 import { crumbPath, Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { ShareDialog } from "@/components/ShareDialog";
 import { usePersisted, useMe } from "@/lib/session";
-import { extOf, formatBytes, formatWinDate } from "@/lib/utils";
+import { extOf, formatBytes, formatDateTime } from "@/lib/utils";
 import { hasDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 import { refreshFiles, renamed, saved } from "@/lib/queries";
@@ -199,7 +199,7 @@ export function FileViewPage() {
       footer={
         node && (
           <span>
-            {typeLabel(node)} · {formatBytes(node.size)} · {t("Modified {date}", { date: formatWinDate(node.updated_at) })}
+            {typeLabel(node)} · {formatBytes(node.size)} · {t("Modified {date}", { date: formatDateTime(node.updated_at) })}
             {fileAt >= 0 && files && files.length > 1 && ` · ${t("{n} of {total}", { n: fileAt + 1, total: files.length })}`}
           </span>
         )
