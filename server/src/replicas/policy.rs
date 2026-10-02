@@ -88,8 +88,7 @@ async fn look_at(st: &AppState, p: &Policy, t: i64) -> AppResult<()> {
                 // An old primary: checked, then brought up to date, before it counts again
                 due = Some("reconcile");
             } else if target.mode == "realtime" {
-                let (oldest,): (Option<i64>,) =
-                    sqlx::query_as("SELECT MIN(since) FROM replica_dirty WHERE policy_id = ? AND location_id = ?").bind(&p.id).bind(l).fetch_one(&st.db).await?;
+                let oldest = behind_since(st, &p.id, l, &spaces).await?;
                 if (!changed.is_empty() && oldest.is_some_and(|o| t - o >= BATCH_SECONDS)) || target.synced_at.is_none() {
                     due = Some("change");
                 }
@@ -289,13 +288,26 @@ pub struct Health {
     pub state: &'static str,
 }
 
+/// Since when changes of the policy's spaces (`spaces`, its scope now) wait for a sync of a target. A space deleted or
+/// taken out of the policy since doesn't count: it is never synced again.
+async fn behind_since(st: &AppState, policy: &str, location: &str, spaces: &[String]) -> AppResult<Option<i64>> {
+    let (since,): (Option<i64>,) =
+        sqlx::query_as("SELECT MIN(since) FROM replica_dirty WHERE policy_id = ? AND location_id = ? AND drive_id IN (SELECT value FROM json_each(?))")
+            .bind(policy)
+            .bind(location)
+            .bind(serde_json::to_string(spaces).unwrap())
+            .fetch_one(&st.db)
+            .await?;
+    Ok(since)
+}
+
 pub async fn health(st: &AppState, p: &Policy, targets: &[Target], t: i64) -> AppResult<Health> {
     let coverage = super::sync::coverage(st, p, targets).await?;
+    let spaces = super::scope(&mut *st.db.acquire().await?, &p.id).await?;
     let mut out = Vec::new();
     for target in targets {
         let l = &target.location_id;
-        let (behind_since,): (Option<i64>,) =
-            sqlx::query_as("SELECT MIN(since) FROM replica_dirty WHERE policy_id = ? AND location_id = ?").bind(&p.id).bind(l).fetch_one(&st.db).await?;
+        let behind_since = behind_since(st, &p.id, l, &spaces).await?;
         let (damaged,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM replica_copies WHERE location_id = ? AND state = 'corrupt'").bind(l).fetch_one(&st.db).await?;
         let job: Option<(String, Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT state, error FROM replica_jobs WHERE policy_id = ? AND location_id = ? AND kind = 'sync' AND state IN {ACTIVE} ORDER BY created_at DESC LIMIT 1"

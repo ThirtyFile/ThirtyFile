@@ -245,6 +245,18 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
         .bind(&location)
         .execute(&mut *tx)
         .await?;
+        // Spaces deleted, or taken out of the policy, since: never synced again, so what was recorded of them goes
+        for table in ["replica_dirty", "replica_captured"] {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DELETE FROM {table} WHERE policy_id = ?1 AND location_id = ?2 AND drive_id NOT IN (SELECT value FROM json_each(?3))"
+            )))
+            .bind(&policy.id)
+            .bind(&location)
+            .bind(serde_json::to_string(&all).unwrap())
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx::query("DELETE FROM replica_folder_files WHERE drive_id NOT IN (SELECT id FROM drives)").execute(&mut *tx).await?;
         sqlx::query("UPDATE replica_targets SET synced_at = ?, state = 'active' WHERE policy_id = ? AND location_id = ?")
             .bind(now())
             .bind(&policy.id)

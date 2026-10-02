@@ -320,7 +320,7 @@ async fn look_at(st: &AppState, p: &Policy, t: i64) -> AppResult<()> {
                     .execute(&st.db)
                     .await?;
             }
-            let (oldest,): (Option<i64>,) = sqlx::query_as("SELECT MIN(since) FROM backup_dirty WHERE set_id = ?").bind(set).fetch_one(&st.db).await?;
+            let oldest = behind_since(&mut *st.db.acquire().await?, set, &spaces).await?;
             if !changed.is_empty() && oldest.is_some_and(|o| t - o >= BATCH_SECONDS) {
                 due = Some("change");
             }
@@ -421,8 +421,8 @@ pub struct Health {
 pub async fn health(conn: &mut SqliteConnection, p: &Policy, t: i64) -> AppResult<Health> {
     let (protected_through,): (Option<i64>,) =
         sqlx::query_as("SELECT MAX(cutoff) FROM backup_snapshots WHERE set_id = ? AND state = 'complete'").bind(&p.set_id).fetch_one(&mut *conn).await?;
-    let (behind_since,): (Option<i64>,) = sqlx::query_as("SELECT MIN(since) FROM backup_dirty WHERE set_id = ?").bind(&p.set_id).fetch_one(&mut *conn).await?;
     let spaces = scope(conn, &p.set_id).await?;
+    let behind_since = behind_since(conn, &p.set_id, &spaces).await?;
     let changed_spaces = changed(conn, &p.set_id, &spaces).await?.len() as i64;
     let job: Option<(String, Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT state, error FROM backup_jobs WHERE set_id = ? AND kind = 'snapshot' AND state IN {ACTIVE} ORDER BY created_at DESC LIMIT 1"
@@ -442,6 +442,17 @@ pub async fn health(conn: &mut SqliteConnection, p: &Policy, t: i64) -> AppResul
         _ => "protected",
     };
     Ok(Health { state, protected_through, behind_since, changed_spaces, error: job.and_then(|(_, e)| e) })
+}
+
+/// Since when changes of the policy's spaces (`spaces`, its scope now) wait for a snapshot. A space deleted or taken
+/// out of the policy since doesn't count: it is never backed up again.
+async fn behind_since(conn: &mut SqliteConnection, set: &str, spaces: &[String]) -> AppResult<Option<i64>> {
+    let (since,): (Option<i64>,) = sqlx::query_as("SELECT MIN(since) FROM backup_dirty WHERE set_id = ? AND drive_id IN (SELECT value FROM json_each(?))")
+        .bind(set)
+        .bind(serde_json::to_string(spaces).unwrap())
+        .fetch_one(conn)
+        .await?;
+    Ok(since)
 }
 
 /// Tells administrators once when a policy starts failing, waiting or being overdue, and once when it is fine again
@@ -581,8 +592,17 @@ pub async fn collect(st: &AppState, set: &Set) -> AppResult<()> {
 }
 
 /// In the transaction that completes a snapshot of a policy: what it captured is recorded, changes it holds stop
-/// counting as waiting, and a snapshot asked for meanwhile follows
+/// counting as waiting, and a snapshot asked for meanwhile follows. `changes` has every space the snapshot took: what
+/// is recorded of other spaces (deleted, or taken out of the policy, since) goes.
 pub async fn completed(conn: &mut SqliteConnection, set: &str, changes: &HashMap<String, i64>) -> AppResult<()> {
+    let taken = serde_json::to_string(changes).unwrap();
+    for table in ["backup_dirty", "backup_captured", "backup_folder_files"] {
+        sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table} WHERE set_id = ?1 AND drive_id NOT IN (SELECT key FROM json_each(?2))")))
+            .bind(set)
+            .bind(&taken)
+            .execute(&mut *conn)
+            .await?;
+    }
     sqlx::query(
         "INSERT INTO backup_captured (set_id, drive_id, seq) SELECT ?1, key, value FROM json_each(?2) WHERE true
          ON CONFLICT (set_id, drive_id) DO UPDATE SET seq = excluded.seq",

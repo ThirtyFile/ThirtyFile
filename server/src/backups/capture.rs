@@ -7,7 +7,9 @@
 //!    set has that content already.
 //! 2. The manifest is written from one consistent view of the database (`cutoff`). Content of content-store spaces that
 //!    the set doesn't hold yet is pinned (`backup_pending`): background deletion leaves it alone until it is copied. A
-//!    folder file that changed after it was read is left for the next round, which reads it again.
+//!    folder file that changed after it was read is left for the next round, which reads it again. After a few rounds,
+//!    a file that keeps changing (a log another program writes, say) is held as it was last read whole and unchanged,
+//!    and listed in the job; one never read so is left out, and listed.
 //! 3. The pinned content is copied from wherever it is kept, checked against its SHA-256.
 //! 4. The manifest is stored on the destination, then `complete.json`; the snapshot is complete.
 //!
@@ -37,13 +39,18 @@ use crate::{
 
 /// Rounds before giving up on spaces that keep changing
 const ROUNDS: usize = 10;
+/// Rounds after which a folder file that keeps changing is held as it was last read instead of read again
+const SETTLE_ROUNDS: usize = 2;
 /// Items looked at per page
 const PAGE: i64 = 200;
 /// Pins written per transaction
 const PIN_BATCH: usize = 500;
 pub(crate) const DAMAGED: &str = "The content read didn't match its SHA-256";
 /// What a snapshot can promise, as its manifest says
-const CONSISTENCY: &str = "Content-store spaces: as recorded at the cutoff, each file with the content it had then. Folder spaces: each file as read and checked unchanged while it was copied, as indexed at the cutoff; files changed by other programs at different times are not one instant together.";
+const CONSISTENCY: &str = "Content-store spaces: as recorded at the cutoff, each file with the content it had then. Folder spaces: each file as read and checked unchanged while it was copied, as indexed at the cutoff; files changed by other programs at different times are not one instant together, and a file that kept changing is held as it was last read whole.";
+/// What the job's list says of a folder file that kept changing
+pub(crate) const KEPT_AS_READ: &str = "Changed while it was copied: kept as it was last read";
+pub(crate) const LEFT_OUT: &str = "Changed while it was copied: not in this snapshot";
 
 /// What a snapshot job copies
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,7 +92,7 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
     let snapshot = snapshot_of(cx).await?;
     cx.set_counts(0, 0, 0, 0);
     cx.flush().await?;
-    for _ in 0..ROUNDS {
+    for round in 0..ROUNDS {
         if let Some(stop) = read_folder_spaces(cx, &set, &dst, &p).await? {
             return Ok(stop);
         }
@@ -95,7 +102,7 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
         if let Some(stop) = cx.stop() {
             return Ok(stop);
         }
-        let m = write_manifest(cx, &set, &snapshot, &p).await?;
+        let m = write_manifest(cx, &set, &snapshot, &p, round >= SETTLE_ROUNDS).await?;
         if m.stale > 0 {
             // Folder files changed since they were read: read again
             continue;
@@ -113,6 +120,10 @@ pub async fn run(cx: &Ctx<'_>) -> AppResult<Stop> {
         }
         if let Some(stop) = cx.stop() {
             return Ok(stop);
+        }
+        for c in &m.changing {
+            // Never named in a personal space, also one the policy took after the job was asked for
+            cx.noted(&c.space, (!c.personal).then(|| c.path.clone()), if c.kept { KEPT_AS_READ } else { LEFT_OUT }.to_string());
         }
         publish(cx, &set, &snapshot, dst.as_ref(), &m, policy).await?;
         if policy {
@@ -283,8 +294,10 @@ async fn read_one(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, root: &Pinned
         }
         Err(Err(e)) => {
             let _ = tokio::fs::remove_file(&tmp).await;
-            // Moved or deleted since the scan: the manifest finds the index out of date, and the next round scans again
-            if !matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) {
+            // Moved or deleted since the scan: the manifest finds the index out of date, and the next round scans again.
+            // Changing each time it was read: likewise, until it is held as it was last read (or left out, and listed).
+            let changing = crate::hashing::unusable_kind(&e) == Some(crate::hashing::Unusable::Changed);
+            if !changing && !matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) {
                 cx.failed(space, Some(shown.to_string()), crate::fsops::disk_error(e).message);
             }
             return Ok(None);
@@ -370,8 +383,20 @@ pub(super) struct Manifest {
     spaces: Vec<SpaceInfo>,
     /// Folder files the set hasn't read as the index has them now
     stale: i64,
+    /// Folder files that kept changing: held as last read, or left out
+    changing: Vec<Changing>,
     /// The changes of each space the snapshot holds (`space_changes.seq` as read)
     changes: HashMap<String, i64>,
+}
+
+/// A folder file that kept changing while the snapshot was made
+struct Changing {
+    space: String,
+    /// Its path in the space (a version: its file's name)
+    path: String,
+    /// Held as it was last read (else left out: it was never read whole)
+    kept: bool,
+    personal: bool,
 }
 
 /// Writes lines to a local file, hashing them
@@ -456,6 +481,8 @@ struct FileRow {
     f_path: Option<String>,
     f_size: Option<i64>,
     f_mtime_ns: Option<i64>,
+    /// The set holds the content `f_hash`
+    f_held: bool,
 }
 
 #[derive(sqlx::FromRow)]
@@ -469,12 +496,15 @@ struct VersionRow {
     created_at: i64,
     author_name: String,
     parent_id: Option<String>,
+    /// Its file's name
+    name: String,
     trashed_at: Option<i64>,
     location: Option<String>,
     held: bool,
     f_hash: Option<String>,
     f_path: Option<String>,
     f_size: Option<i64>,
+    f_held: bool,
 }
 
 /// A folder as the manifest has it: its path and when it (or a folder it is in) went to the trash
@@ -520,8 +550,9 @@ fn places(root: &str, folders: &[FolderRow]) -> HashMap<String, Place> {
     out
 }
 
-/// Writes the manifest of the job's spaces as they are now, pinning the content the set doesn't hold yet
-async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params) -> AppResult<Manifest> {
+/// Writes the manifest of the job's spaces as they are now, pinning the content the set doesn't hold yet. `settle`: a
+/// folder file the set hasn't read as the index has it is held as it was last read (or left out), not read again.
+async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params, settle: bool) -> AppResult<Manifest> {
     let st = cx.st;
     tokio::fs::create_dir_all(layout::cache_dir(st)).await?;
     let path = layout::cache_dir(st).join(format!("{snapshot}.jsonl.partial"));
@@ -539,6 +570,7 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params) -> 
         logical_bytes: 0,
         spaces: Vec::new(),
         stale: 0,
+        changing: Vec::new(),
         changes: HashMap::new(),
     };
     let mut conn = st.db.acquire().await?;
@@ -627,7 +659,8 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params) -> 
                 "SELECT n.id, n.parent_id, n.name, n.blob_hash, n.size, n.mime, n.updated_at, n.trashed_at, n.fs_path, n.fs_size, n.fs_mtime_ns,
                         (SELECT location_id FROM blobs WHERE hash = n.blob_hash) AS location,
                         EXISTS (SELECT 1 FROM backup_objects o WHERE o.set_id = ?1 AND o.hash = n.blob_hash) AS held,
-                        f.hash AS f_hash, f.path AS f_path, f.size AS f_size, f.mtime_ns AS f_mtime_ns
+                        f.hash AS f_hash, f.path AS f_path, f.size AS f_size, f.mtime_ns AS f_mtime_ns,
+                        EXISTS (SELECT 1 FROM backup_objects o WHERE o.set_id = ?1 AND o.hash = f.hash) AS f_held
                  FROM nodes n LEFT JOIN backup_folder_files f ON f.set_id = ?1 AND f.item_id = n.id
                  WHERE n.drive_id = ?2 AND n.kind = 'file' AND n.id > ?3 ORDER BY n.id LIMIT 1000",
             )
@@ -644,11 +677,20 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params) -> 
                 if trashed.is_some() && !p.trash {
                     continue;
                 }
+                let path = if parent.path.is_empty() { r.name.clone() } else { format!("{}/{}", parent.path, r.name) };
                 let (hash, size) = match (&r.fs_path, &r.blob_hash) {
                     (Some(fs_path), _) => {
                         let current = r.f_path.as_deref() == Some(fs_path.as_str()) && r.f_size == r.fs_size && r.f_mtime_ns == r.fs_mtime_ns;
                         match (current, r.f_hash) {
                             (true, Some(h)) => (h, r.f_size.unwrap_or(r.size)),
+                            (false, Some(h)) if settle && r.f_held => {
+                                m.changing.push(Changing { space: s.id.clone(), path: path.clone(), kept: true, personal: s.kind == "personal" });
+                                (h, r.f_size.unwrap_or(r.size))
+                            }
+                            _ if settle => {
+                                m.changing.push(Changing { space: s.id.clone(), path, kept: false, personal: s.kind == "personal" });
+                                continue;
+                            }
                             _ => {
                                 m.stale += 1;
                                 continue;
@@ -663,7 +705,6 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params) -> 
                     }
                     (None, None) => continue,
                 };
-                let path = if parent.path.is_empty() { r.name.clone() } else { format!("{}/{}", parent.path, r.name) };
                 w.line(&Line::File {
                     space: s.id.clone(),
                     id: r.id.clone(),
@@ -686,10 +727,11 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params) -> 
             let mut last = String::new();
             loop {
                 let rows: Vec<VersionRow> = sqlx::query_as(
-                    "SELECT v.id, v.node_id, v.blob_hash, v.fs_path, v.size, v.modified_at, v.created_at, v.author_name, n.parent_id, n.trashed_at,
+                    "SELECT v.id, v.node_id, v.blob_hash, v.fs_path, v.size, v.modified_at, v.created_at, v.author_name, n.parent_id, n.name, n.trashed_at,
                             (SELECT location_id FROM blobs WHERE hash = v.blob_hash) AS location,
                             EXISTS (SELECT 1 FROM backup_objects o WHERE o.set_id = ?1 AND o.hash = v.blob_hash) AS held,
-                            f.hash AS f_hash, f.path AS f_path, f.size AS f_size
+                            f.hash AS f_hash, f.path AS f_path, f.size AS f_size,
+                            EXISTS (SELECT 1 FROM backup_objects o WHERE o.set_id = ?1 AND o.hash = f.hash) AS f_held
                      FROM node_versions v JOIN nodes n ON n.id = v.node_id LEFT JOIN backup_folder_files f ON f.set_id = ?1 AND f.item_id = v.id
                      WHERE n.drive_id = ?2 AND v.id > ?3 ORDER BY v.id LIMIT 1000",
                 )
@@ -708,6 +750,24 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params) -> 
                     let hash = match (&r.fs_path, &r.blob_hash) {
                         (Some(fs_path), _) => match (r.f_path.as_deref() == Some(fs_path.as_str()) && r.f_size == Some(r.size), r.f_hash) {
                             (true, Some(h)) => h,
+                            (false, Some(h)) if settle && r.f_held && r.f_size == Some(r.size) => {
+                                m.changing.push(Changing {
+                                    space: s.id.clone(),
+                                    path: format!("{} (an earlier version)", r.name),
+                                    kept: true,
+                                    personal: s.kind == "personal",
+                                });
+                                h
+                            }
+                            _ if settle => {
+                                m.changing.push(Changing {
+                                    space: s.id.clone(),
+                                    path: format!("{} (an earlier version)", r.name),
+                                    kept: false,
+                                    personal: s.kind == "personal",
+                                });
+                                continue;
+                            }
                             _ => {
                                 m.stale += 1;
                                 continue;
@@ -931,8 +991,27 @@ async fn publish(cx: &Ctx<'_>, set: &Set, snapshot: &str, dst: &dyn Storage, m: 
         .await
         .map_err(|e| unreachable_dest(&e))?;
     tokio::fs::rename(&m.path, layout::cached_manifest(st, snapshot)).await?;
-    let note = (m.spaces.len() < serde_json::from_str::<Params>(&cx.job.params).map_or(0, |p| p.spaces.len()))
-        .then_some("Spaces deleted while they were being copied aren't in the copy");
+    let mut notes = Vec::new();
+    if m.spaces.len() < serde_json::from_str::<Params>(&cx.job.params).map_or(0, |p| p.spaces.len()) {
+        notes.push("Spaces deleted while they were being copied aren't in the copy".to_string());
+    }
+    let kept = m.changing.iter().filter(|c| c.kept).count();
+    let left_out = m.changing.len() - kept;
+    if kept > 0 {
+        notes.push(if kept == 1 {
+            "1 file kept changing while it was copied: it is kept as it was last read".to_string()
+        } else {
+            format!("{kept} files kept changing while they were copied: each is kept as it was last read")
+        });
+    }
+    if left_out > 0 {
+        notes.push(if left_out == 1 {
+            "1 file kept changing while it was copied and isn't in this snapshot".to_string()
+        } else {
+            format!("{left_out} files kept changing while they were copied and aren't in this snapshot")
+        });
+    }
+    let note = (!notes.is_empty()).then(|| notes.join("\n"));
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let res = async {
@@ -958,7 +1037,7 @@ async fn publish(cx: &Ctx<'_>, set: &Set, snapshot: &str, dst: &dyn Storage, m: 
         if policy {
             super::policy::completed(&mut tx, &set.id, &m.changes).await?;
         }
-        super::runner::finish(&mut tx, cx, note).await?;
+        super::runner::finish(&mut tx, cx, note.as_deref()).await?;
         super::log(&mut tx, cx.job, "backup_done", &cx.job.label).await?;
         AppResult::Ok(())
     }
