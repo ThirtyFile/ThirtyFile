@@ -21,7 +21,7 @@
 - 檔案以一般資料夾的形式存放在本機磁碟或 NAS，也可以放在相容 S3 的儲存服務、SFTP 或 FTP；既有的資料夾也能成為一個空間
 - 個人、公司與團隊空間，有角色與容量上限
 - 以密碼加兩步驟驗證登入，或使用 Microsoft、Google、GitHub 及任何 OpenID Connect 服務的帳號
-- 英文與繁體中文介面、深色模式，手機也能用
+- 英文、繁體中文、簡體中文與日文介面、深色模式，手機也能用
 
 ## 安裝
 
@@ -86,7 +86,7 @@ scripts/check.sh web        # 或其中一部分：web、server、e2e 或 site
 | 資料夾 | 內容 |
 | --- | --- |
 | `server/` | 後端（Rust） |
-| `web/` | 前端（React）。繁體中文翻譯在 `web/src/lib/i18n/zh-TW/` |
+| `web/` | 前端（React）。翻譯在 `web/src/lib/i18n/`，每種語言一個資料夾 |
 | `site/` | 網站與指南，發佈到 GitHub Pages |
 
 變更都透過 pull request 進行：請參閱 [Contributing](https://thirtyfile.github.io/ThirtyFile/docs/contributing.html)（英文）。版本由 `main` 手動發佈，發佈為 `ghcr.io/thirtyfile/thirtyfile:latest`、主版本號（`1`，從 1.0.0 起：適合自動更新的標籤）與完整版本號；每個 [release](https://github.com/ThirtyFile/ThirtyFile/releases) 也附有 Linux（amd64、arm64）的單一執行檔伺服器與 `compose.yaml`。

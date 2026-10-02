@@ -12,7 +12,7 @@ use super::{Lang, ja, zh_cn, zh_tw};
 /// Languages whose texts must be complete: a new text needs their translation in the same change. A language that is
 /// offered to people must be complete too
 #[cfg(test)]
-pub const COMPLETE: &[Lang] = &[Lang::En, Lang::ZhTw];
+pub const COMPLETE: &[Lang] = &[Lang::En, Lang::ZhTw, Lang::ZhCn, Lang::Ja];
 
 macro_rules! texts {
     ($($(#[doc = $doc:literal])* $name:ident = $en:literal,)*) => {

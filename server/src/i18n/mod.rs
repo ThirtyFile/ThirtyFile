@@ -58,8 +58,8 @@ struct Info {
 const LANGUAGES: [Info; 4] = [
     Info { lang: Lang::En, code: "en", html: "en", offered: true },
     Info { lang: Lang::ZhTw, code: "zh-TW", html: "zh-Hant", offered: true },
-    Info { lang: Lang::ZhCn, code: "zh-CN", html: "zh-Hans", offered: false },
-    Info { lang: Lang::Ja, code: "ja", html: "ja", offered: false },
+    Info { lang: Lang::ZhCn, code: "zh-CN", html: "zh-Hans", offered: true },
+    Info { lang: Lang::Ja, code: "ja", html: "ja", offered: true },
 ];
 
 impl Lang {
@@ -301,13 +301,19 @@ mod tests {
         assert_eq!(accept("*"), None);
         assert_eq!(accept(""), None);
         assert_eq!(browser_language(&HeaderMap::new()), None);
-        // Languages that aren't offered yet: Simplified Chinese reads Traditional Chinese, Japanese the next language
+        // Simplified Chinese and Japanese get their own language once offered; before, Simplified Chinese reads Traditional
+        // Chinese and Japanese the next language
         if !Lang::ZhCn.offered() {
             assert_eq!(accept("zh-CN,zh;q=0.9"), Some(Lang::ZhTw));
+        } else {
+            assert_eq!(accept("zh-CN,zh;q=0.9"), Some(Lang::ZhCn));
+            assert_eq!(accept("zh-Hans, zh-TW;q=0.5"), Some(Lang::ZhCn));
         }
         if !Lang::Ja.offered() {
             assert_eq!(accept("ja-JP"), None);
             assert_eq!(accept("ja-JP, en;q=0.5"), Some(Lang::En));
+        } else {
+            assert_eq!(accept("ja-JP, en;q=0.5"), Some(Lang::Ja));
         }
     }
 
