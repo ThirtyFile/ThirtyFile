@@ -2,8 +2,7 @@
 import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import { buildDocx, buildWorkbook } from "../fixtures";
-
-const PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? "e2e-admin-password";
+import { makeFolder, PASSWORD, uploadFinished } from "./helpers";
 
 test("sign in, upload, preview and download", async ({ page }) => {
   const docx = Buffer.from(await buildDocx(["Hello from the smoke test", "Second paragraph"]));
@@ -28,15 +27,15 @@ test("sign in, upload, preview and download", async ({ page }) => {
   await page.waitForURL(/\/files/);
 
   // Upload both files to a new folder in "My files" (which holds the other tests' folders, more than fit on screen)
-  const root = (await (await page.request.get("/api/auth/me")).json()).root_id;
-  const made = await page.request.post("/api/folders", { data: { parent_id: root, name: `Smoke ${Date.now().toString(36)}` } });
-  expect(made.ok()).toBe(true);
-  await page.goto(`/files/${(await made.json()).id}`);
+  await page.goto(`/files/${await makeFolder(page, "Smoke")}`);
   await expect(page.getByText("No files here yet")).toBeVisible();
+  // Both saved once the server has answered: it may wait its turn behind other tests' changes
+  const finished = uploadFinished(page, 2);
   await page.locator('input[type="file"][multiple]').setInputFiles([
     { name: "letter.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", buffer: docx },
     { name: "budget.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: xlsx },
   ]);
+  await finished;
   const row = (name: string) => page.locator("tbody tr").filter({ hasText: name });
   await expect(row("letter.docx")).toBeVisible();
   await expect(row("budget.xlsx")).toBeVisible();

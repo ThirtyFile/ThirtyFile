@@ -1,6 +1,6 @@
 // Tabs, drop-down lists, choices and error messages work with the keyboard and a screen reader.
 import { expect, test } from "@playwright/test";
-import { signIn } from "./helpers";
+import { makeFolder, signIn } from "./helpers";
 
 test("Tab doesn't stop on the tabs' close buttons, and Delete closes the focused tab", async ({ page }) => {
   await signIn(page);
@@ -45,11 +45,11 @@ test("the log tabs move with the arrow keys and are tied to their log", async ({
 
 test("a share link's expiry choices say which is chosen", async ({ page }) => {
   await signIn(page);
-  const me = await (await page.request.get("/api/auth/me")).json();
-  const name = `Expiry ${Date.now().toString(36)}`;
-  await page.request.post("/api/folders", { data: { parent_id: me.root_id, name } });
-  await page.goto("/files");
-  await page.locator("[data-node-id]").filter({ hasText: name }).click({ button: "right" });
+  // In a folder of its own: My files holds the other tests' folders too
+  const dir = await makeFolder(page, "Expiry");
+  await makeFolder(page, "Shared", dir);
+  await page.goto(`/files/${dir}`);
+  await page.locator("[data-node-id]").filter({ hasText: "Shared" }).click({ button: "right" });
   await page.getByRole("menuitem", { name: "Create share link" }).click();
   const group = page.getByRole("group", { name: "Expiration" });
   await expect(group.getByRole("button", { pressed: true })).toHaveCount(1);
@@ -62,9 +62,8 @@ test("a share link's expiry choices say which is chosen", async ({ page }) => {
 
 test("a wrong share password marks the field and points it to the message", async ({ page }) => {
   await signIn(page);
-  const me = await (await page.request.get("/api/auth/me")).json();
-  const folder = await (await page.request.post("/api/folders", { data: { parent_id: me.root_id, name: `Locked ${Date.now().toString(36)}` } })).json();
-  const share = await (await page.request.post("/api/shares", { data: { node_id: folder.id, password: "right-password-1" } })).json();
+  const folder = await makeFolder(page, "Locked");
+  const share = await (await page.request.post("/api/shares", { data: { node_id: folder, password: "right-password-1" } })).json();
   await page.context().clearCookies();
   await page.goto(`/share/${share.id}`);
   const field = page.getByLabel("Password");

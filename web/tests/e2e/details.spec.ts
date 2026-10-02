@@ -1,27 +1,13 @@
 // The details pane while moving through a folder, share links put on the clipboard, and restoring skipped items.
 import { expect, test, type Page } from "@playwright/test";
-import { signIn } from "./helpers";
+import { answer, makeFolder, signIn, signInAsNewUser, uploadFile } from "./helpers";
 
-/** A new folder in My files, with a unique name */
-async function folder(page: Page, name: string): Promise<string> {
-  const me = await (await page.request.get("/api/auth/me")).json();
-  const res = await page.request.post("/api/folders", { data: { parent_id: me.root_id, name: `${name} ${Date.now().toString(36)}` } });
-  return (await res.json()).id;
-}
-
-/** An empty file (a tus upload of no bytes is complete at once); returns its id */
-async function file(page: Page, parent: string, name: string): Promise<string> {
-  const b64 = (s: string) => Buffer.from(s).toString("base64");
-  const res = await page.request.post("/api/uploads", {
-    headers: { "Tus-Resumable": "1.0.0", "Upload-Length": "0", "Upload-Metadata": `filename ${b64(name)},parentId ${b64(parent)}` },
-  });
-  expect(res.ok()).toBe(true);
-  return res.headers()["x-node-id"];
-}
+/** An empty file: its id */
+const file = (page: Page, parent: string, name: string) => uploadFile(page, parent, name, "");
 
 test("holding an arrow key in the list asks for the details of where it stops, not of every file passed", async ({ page }) => {
   await signIn(page);
-  const dir = await folder(page, "Details");
+  const dir = await makeFolder(page, "Details");
   for (let i = 0; i < 20; i++) await file(page, dir, `file ${String(i).padStart(2, "0")}.txt`);
   await page.evaluate(() => localStorage.setItem("tf-view", JSON.stringify("list")));
   await page.goto(`/files/${dir}`);
@@ -44,7 +30,7 @@ test("holding an arrow key in the list asks for the details of where it stops, n
 test("a new share link is said to be copied only when it is on the clipboard", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await signIn(page);
-  const dir = await folder(page, "Share");
+  const dir = await makeFolder(page, "Share");
   await file(page, dir, "shared.txt");
   await page.goto(`/files/${dir}`);
   const row = page.locator("[data-node-id]").filter({ hasText: "shared.txt" });
@@ -53,7 +39,10 @@ test("a new share link is said to be copied only when it is on the clipboard", a
     .getByRole("menuitem", { name: /share link/i })
     .first()
     .click();
+  // Each link is made once the server has answered: it may wait its turn behind other tests' changes
+  let created = answer(page, "POST", "/api/shares");
   await page.getByRole("button", { name: "Create link" }).click();
+  expect((await created).ok()).toBe(true);
   await expect(page.getByText("Share link created and copied to clipboard")).toBeVisible();
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   expect(copied).toMatch(/\/share\/[A-Za-z0-9_-]+$/);
@@ -64,19 +53,22 @@ test("a new share link is said to be copied only when it is on the clipboard", a
     navigator.clipboard.writeText = () => Promise.reject(new Error("refused"));
     document.execCommand = () => false;
   });
+  created = answer(page, "POST", "/api/shares");
   await page.getByRole("button", { name: "Create link" }).click();
+  expect((await created).ok()).toBe(true);
   await expect(page.getByText("Share link created", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Copy link" }).last()).toBeVisible();
 });
 
 test("restoring an item whose name was taken meanwhile and skipping it doesn't say it was restored", async ({ page }) => {
-  await signIn(page);
-  const dir = await folder(page, "Restore");
+  // As an account of its own: the administrator's trash holds thousands of items from the other tests
+  await signInAsNewUser(page, "restore");
+  const dir = await makeFolder(page, "Restore");
   const first = await file(page, dir, "same.txt");
   expect((await page.request.post("/api/nodes/trash", { data: { ids: [first] } })).ok()).toBe(true);
   await file(page, dir, "same.txt");
   await page.goto("/trash");
-  await page.locator("[data-node-id]").filter({ hasText: "same.txt" }).first().click();
+  await page.locator("[data-node-id]").filter({ hasText: "same.txt" }).click();
   await page.getByRole("button", { name: "Restore", exact: true }).first().click();
   await page
     .getByRole("dialog")

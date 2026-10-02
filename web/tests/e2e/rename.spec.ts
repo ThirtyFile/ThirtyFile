@@ -1,14 +1,24 @@
 // Click the name of the selected item to rename it, as in File Explorer (the Windows style): in the list and in the
 // folder tree, and a double-click that opens without renaming
 import { expect, test, type Page } from "@playwright/test";
-import { makeFolder, signIn, uploadFile } from "./helpers";
+import { answer, makeFolder, signIn, uploadFile } from "./helpers";
 
 const row = (page: Page, name: string) => page.locator("[data-node-id]").filter({ hasText: name });
 const nameOf = (page: Page, name: string) => row(page, name).locator("[data-name]");
 const box = (page: Page) => page.getByRole("textbox", { name: "New name" });
 
-/** Longer than a double-click, so the next click is a click of its own */
-const pause = (page: Page) => page.waitForTimeout(700);
+/**
+ * Moves the page's clock past the wait for a second click (clickToRename.ts: RENAME_DELAY), so the next click is a
+ * click of its own, and a rename that a click started would show. Each test installs the clock first.
+ */
+const pause = (page: Page) => page.clock.runFor(700);
+
+/** The server's answer to a rename: it may wait its turn behind other tests' changes */
+const renamed = (page: Page) => answer(page, "PATCH", /^\/api\/nodes\/[^/]+$/);
+
+test.beforeEach(async ({ page }) => {
+  await page.clock.install();
+});
 
 test("clicking the name of the selected item renames it; the click that selects it, its icon and Ctrl don't", async ({ page }) => {
   await signIn(page);
@@ -33,7 +43,9 @@ test("clicking the name of the selected item renames it; the click that selects 
   await expect(box(page)).toBeFocused();
   await expect(box(page)).toHaveValue("draft.txt");
   await page.keyboard.type("final");
+  const done = renamed(page);
   await page.keyboard.press("Enter");
+  expect((await done).ok()).toBe(true);
   await expect(row(page, "final.txt")).toBeVisible();
   const items: { name: string }[] = await (await page.request.get(`/api/nodes/${dir}/children`)).json();
   expect(items.map((n) => n.name).sort()).toEqual(["final.txt", "other.txt"]);
@@ -75,7 +87,9 @@ test("clicking the open folder's name in the folder tree renames it there", asyn
   const name = page.getByRole("tree").getByRole("textbox", { name: "New name" });
   await expect(name).toBeFocused();
   await name.fill("New name here");
+  const done = renamed(page);
   await name.press("Enter");
+  expect((await done).ok()).toBe(true);
   await expect(page.getByRole("treeitem", { name: "New name here" })).toBeFocused();
   await expect(page.getByRole("heading", { name: "New name here" })).toBeVisible();
 });

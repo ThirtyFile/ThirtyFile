@@ -2,7 +2,7 @@
 // stopping once it is deleted
 import { readFile } from "node:fs/promises";
 import { devices, expect, test } from "@playwright/test";
-import { makeFolder, signIn, uploadFile } from "./helpers";
+import { answer, makeFolder, makeUser, signIn, uploadFile } from "./helpers";
 
 test("a visitor unlocks a shared folder with its password, opens a folder in it and downloads a file", async ({ page, browser, baseURL }) => {
   await signIn(page);
@@ -68,8 +68,7 @@ test("a link to one file shows it to a visitor on a phone, who can download it",
 
 test("Share with… picks a person with the keyboard alone", async ({ page }) => {
   await signIn(page);
-  const kim = `kim-${Date.now().toString(36)}`;
-  expect((await page.request.post("/api/admin/users", { data: { username: kim, password: "a-long-test-password-1" } })).ok()).toBe(true);
+  const kim = await makeUser(page, "kim");
   // In a folder of its own: My files holds the other tests' folders too
   const parent = await makeFolder(page, "Sharing by keyboard");
   const dir = await makeFolder(page, "Shared with Kim", parent);
@@ -100,6 +99,9 @@ test("Share with… picks a person with the keyboard alone", async ({ page }) =>
   await page.keyboard.press("Tab");
   await page.keyboard.press("Tab");
   await expect(dialog.getByRole("button", { name: "Add" })).toBeFocused();
+  // Added once the server has answered: it may wait its turn behind other tests' changes
+  const added = answer(page, "POST", `/api/nodes/${dir}/access`);
   await page.keyboard.press("Enter");
-  await expect.poll(async () => JSON.stringify(await (await page.request.get(`/api/nodes/${dir}/access`)).json())).toContain(kim);
+  expect((await added).ok()).toBe(true);
+  expect(JSON.stringify(await (await page.request.get(`/api/nodes/${dir}/access`)).json())).toContain(kim);
 });

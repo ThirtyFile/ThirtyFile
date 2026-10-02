@@ -1,10 +1,12 @@
 // New items as in File Explorer (the Windows style): a new folder shows at once at the end of the list, being renamed,
 // stays there after renaming until F5, takes a name typed before the server answered, and goes again if making it failed
 import { expect, test, type Page } from "@playwright/test";
-import { makeFolder, signIn } from "./helpers";
+import { answer, listing, makeFolder, signIn } from "./helpers";
 
 const names = (page: Page) => page.locator("[data-node-id]").evaluateAll((rows) => rows.map((r) => r.querySelector("[data-name]")?.textContent ?? r.querySelector("input")?.value));
 const box = (page: Page) => page.getByRole("textbox", { name: "New name" });
+/** The server's answer to a rename: it may wait its turn behind other tests' changes */
+const renamed = (page: Page) => answer(page, "PATCH", /^\/api\/nodes\/[^/]+$/);
 
 async function folderWith(page: Page, name: string, items: string[]) {
   await signIn(page);
@@ -17,16 +19,19 @@ async function folderWith(page: Page, name: string, items: string[]) {
 }
 
 test("a new folder shows at the end being renamed, and stays there after renaming until F5", async ({ page }) => {
-  await folderWith(page, "At the end", ["Alpha", "Zulu"]);
+  const dir = await folderWith(page, "At the end", ["Alpha", "Zulu"]);
   await page.keyboard.press("Control+Shift+N");
   await expect(box(page)).toBeFocused();
   await expect(box(page)).toHaveValue("New folder");
   expect(await names(page)).toEqual(["Alpha", "Zulu", "New folder"]);
   await box(page).fill("Beta");
+  const done = renamed(page);
+  const listed = listing(page, dir, done);
   await box(page).press("Enter");
   await expect(page.locator("[data-node-id]").nth(2)).toHaveText(/Beta/);
+  expect((await done).ok()).toBe(true);
   // The list loads again after the change: the folder stays where it is, selected, with the focus
-  await page.waitForLoadState("networkidle");
+  await listed;
   expect(await names(page)).toEqual(["Alpha", "Zulu", "Beta"]);
   const beta = page.locator("[data-node-id]").nth(2);
   await expect(beta).toHaveAttribute("aria-selected", "true");
@@ -36,9 +41,11 @@ test("a new folder shows at the end being renamed, and stays there after renamin
   await expect.poll(() => names(page)).toEqual(["Alpha", "Beta", "Zulu"]);
 
   // A name typed straight after the shortcut goes into the new folder's name
+  const gamma = renamed(page);
   await page.keyboard.press("Control+Shift+N");
   await page.keyboard.type("Gamma");
   await page.keyboard.press("Enter");
+  expect((await gamma).ok()).toBe(true);
   await expect.poll(() => names(page)).toEqual(["Alpha", "Beta", "Zulu", "Gamma"]);
 });
 
@@ -56,9 +63,11 @@ test("a name typed before the server has made the folder is given to it once it 
   // Shown at once, while the server hasn't answered
   await expect(box(page)).toBeFocused();
   await box(page).fill("Reports");
+  const done = renamed(page);
   await box(page).press("Enter");
   release();
-  await expect.poll(async () => ((await (await page.request.get(`/api/nodes/${dir}/children`)).json()) as { name: string }[]).map((n) => n.name).sort()).toEqual(["Alpha", "Reports"]);
+  expect((await done).ok()).toBe(true);
+  expect(((await (await page.request.get(`/api/nodes/${dir}/children`)).json()) as { name: string }[]).map((n) => n.name).sort()).toEqual(["Alpha", "Reports"]);
   await expect.poll(() => names(page)).toEqual(["Alpha", "Reports"]);
 });
 

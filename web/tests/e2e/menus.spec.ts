@@ -1,7 +1,7 @@
 // The Windows style's context menus, as in Windows 11: View, Sort by, Group by, Undo, New and Upload on empty space,
 // a row of icon buttons on items, and both opened and gone through from the keyboard
 import { expect, test, type Page } from "@playwright/test";
-import { makeFolder, signIn, uploadFile } from "./helpers";
+import { answer, makeFolder, signIn, uploadFile } from "./helpers";
 
 const row = (page: Page, name: string) => page.locator("[data-node-id]").filter({ hasText: name });
 
@@ -95,7 +95,10 @@ test("New › Folder in the empty space's menu makes a folder and starts renamin
   await expect(box).toBeFocused();
   await expect(box).toHaveValue("New folder");
   await box.fill("Projects");
+  // Renamed once the server has answered: it may wait its turn behind other tests' changes
+  const renamed = answer(page, "PATCH", /^\/api\/nodes\/[^/]+$/);
   await box.press("Enter");
+  expect((await renamed).ok()).toBe(true);
   await expect(row(page, "Projects")).toBeVisible();
   const items: { name: string }[] = await (await page.request.get(`/api/nodes/${dir}/children`)).json();
   expect(items.map((n) => n.name)).toContain("Projects");
@@ -105,13 +108,18 @@ test("Undo in the empty space's menu is named for what it takes back, and takes 
   await setUp(page, "Undo from menu");
   await row(page, "notes.txt").click();
   await page.keyboard.press("Delete");
+  // Each change waits for the server's answer: it may wait its turn behind other tests' changes
+  const trashed = answer(page, "POST", "/api/nodes/trash");
   await page.getByRole("dialog").getByRole("button", { name: "Move to trash" }).click();
+  expect((await trashed).ok()).toBe(true);
   await expect(row(page, "notes.txt")).toHaveCount(0);
 
   await emptySpaceMenu(page);
   const undo = menu(page).getByRole("menuitem", { name: /^Undo delete/ });
   await expect(undo).toBeVisible();
+  const restored = answer(page, "POST", "/api/trash/restore");
   await undo.click();
+  expect((await restored).ok()).toBe(true);
   await expect(row(page, "notes.txt")).toBeVisible();
   // Taken back: nothing left to undo
   await emptySpaceMenu(page);
