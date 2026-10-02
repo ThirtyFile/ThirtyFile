@@ -479,26 +479,35 @@ async fn restore_version(st: &AppState, user: &User, id: &str, version: &str) ->
     {
         return Ok(node);
     }
-    // The version's content in a temporary file, then in like an upload that replaces the file
     let tmp = st.tmp_dir().join(new_id());
-    let copied = async {
-        let mut reader = source.open(st, 0, size).await?;
-        let mut file = tokio::fs::File::create(&tmp).await?;
-        let got = tokio::io::copy(&mut reader, &mut file).await?;
-        file.flush().await?;
-        file.sync_all().await?;
-        if got != size {
-            return Err(AppError::internal("a version was read incompletely"));
+    // A version kept in the content store, of a file in the content store: the file takes another reference to that
+    // content (staging finds it stored already), which is neither read nor stored again. Copying it would read all of
+    // it, from S3 say, onto this server's disk, and hash it, only to find it there.
+    let stored = match &source {
+        Source::Stored { hash, .. } if !node.in_folder_space() => Some(hash.clone()),
+        _ => None,
+    };
+    if stored.is_none() {
+        // The version's content in a temporary file
+        let copied = async {
+            let mut reader = source.open(st, 0, size).await?;
+            let mut file = tokio::fs::File::create(&tmp).await?;
+            let got = tokio::io::copy(&mut reader, &mut file).await?;
+            file.flush().await?;
+            file.sync_all().await?;
+            if got != size {
+                return Err(AppError::internal("a version was read incompletely"));
+            }
+            Ok::<_, AppError>(())
         }
-        Ok::<_, AppError>(())
-    }
-    .await;
-    if let Err(e) = copied {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(e);
+        .await;
+        if let Err(e) = copied {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err(e);
+        }
     }
     // Then in like an upload that replaces the file (content.rs)
-    let staged = match content::stage(st, &node, content::Received { path: tmp.clone(), size, hash: None }).await {
+    let staged = match content::stage(st, &node, content::Received { path: tmp.clone(), size, hash: stored }).await {
         Ok(s) => s,
         Err(e) => {
             let _ = tokio::fs::remove_file(&tmp).await;
@@ -620,6 +629,30 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.headers()[header::CONTENT_LENGTH], "4");
+    }
+
+    #[tokio::test]
+    async fn restoring_a_version_in_the_content_store_takes_its_content_without_reading_it_again() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let id = new_file(&env, &amy, amy.root(), "notes.txt").await;
+        save(&env, &amy, &id, b"the first content").await;
+        save(&env, &amy, &id, b"the second content").await;
+        let list = versions(&env, &amy, &id).await;
+        let (hash,): (String,) = sqlx::query_as("SELECT blob_hash FROM node_versions WHERE id = ?").bind(&list[0].id).fetch_one(&env.st.db).await.unwrap();
+        let refs = async || sqlx::query_as::<_, (i64,)>("SELECT refcount FROM blobs WHERE hash = ?").bind(&hash).fetch_one(&env.st.db).await.unwrap().0;
+        let before = refs().await;
+        // Its content can't be read now (a storage service that is slow or away): restoring doesn't need to
+        let stored = testutil::blob_file(&env, b"the first content");
+        let kept = stored.with_extension("kept");
+        std::fs::rename(&stored, &kept).unwrap();
+        let Json(node) = restore(State(env.st.clone()), amy.clone(), UrlPath((id.clone(), list[0].id.clone()))).await.unwrap();
+        std::fs::rename(&kept, &stored).unwrap();
+        assert_eq!((node.blob_hash.as_deref(), node.size), (Some(hash.as_str()), 17));
+        assert_eq!(current(&env, &amy, &id).await, b"the first content");
+        // One more reference: the file's, besides the version's
+        assert_eq!(refs().await, before + 1);
+        assert_eq!(std::fs::read_dir(env.st.tmp_dir()).unwrap().count(), 0, "nothing copied through the temporary folder");
     }
 
     async fn list_err(env: &testutil::TestEnv, user: &User, id: &str) -> bool {
