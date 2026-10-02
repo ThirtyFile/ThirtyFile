@@ -74,7 +74,14 @@ function RecoveredRow({ endpoint, batch }: { endpoint: string; batch: RecoveredB
       confirmText: t("Discard"),
       destructive: true,
     });
-    if (ok) await discardRecovered(endpoint, records);
+    if (!ok) return;
+    // The server lets go of what it received first, which can take a moment: the row says it is on it meanwhile
+    setBusy(true);
+    try {
+      await discardRecovered(endpoint, records);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (

@@ -1,5 +1,5 @@
 // Uploads interrupted by a reload continue once their files are chosen again, against the real server
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,7 +27,7 @@ function diskFile(name: string, size: number, seed: number): string {
 
 async function folder(page: Page, name: string): Promise<string> {
   const root = (await (await page.request.get("/api/auth/me")).json()).root_id;
-  const res = await page.request.post("/api/folders", { data: { parent_id: root, name: `${name} ${Date.now().toString(36)}` } });
+  const res = await page.request.post("/api/folders", { data: { parent_id: root, name: `${name} ${randomBytes(4).toString("hex")}` } });
   expect(res.ok()).toBe(true);
   return (await res.json()).id;
 }
@@ -61,6 +61,16 @@ async function startAndHold(page: Page, path: string) {
 async function reload(page: Page) {
   await page.reload();
   await page.unrouteAll({ behavior: "ignoreErrors" });
+}
+
+/**
+ * The server's answer when the page ends an upload (`url`: that upload's address, or any): the page waits for it, and
+ * a server busy with other requests may take a while
+ */
+function uploadEnded(page: Page, url?: string) {
+  return page.waitForResponse(
+    (r) => r.request().method() === "DELETE" && (url ? new URL(r.url()).pathname === new URL(url, r.url()).pathname : new URL(r.url()).pathname.startsWith("/api/uploads/")),
+  );
 }
 
 /** The PATCH requests' starting offsets from now on */
@@ -136,6 +146,8 @@ test("a legacy sparse-sample record starts again instead of authorizing a resume
   await page.goto(`/files/${target}`);
   await startAndHold(page, path);
   await reload(page);
+  // The page has looked at what is kept (it does so once, when it loads) before it is changed below
+  await expect(page.getByRole("region", { name: "Interrupted uploads" })).toContainText("legacy.bin");
   // An earlier version kept a sparse sample, and a tus fingerprint made of the upload address and the file's details
   const oldUrl = await page.evaluate(() => {
     let url: string | null = null;
@@ -154,6 +166,7 @@ test("a legacy sparse-sample record starts again instead of authorizing a resume
     return url;
   });
   expect(oldUrl).not.toBeNull();
+  const ended = uploadEnded(page, oldUrl!);
   await page.reload();
   // Its upload address is no longer kept under the old key
   await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("tus::sd|")))).toEqual([]);
@@ -161,6 +174,7 @@ test("a legacy sparse-sample record starts again instead of authorizing a resume
   await page.getByRole("region", { name: "Interrupted uploads" }).locator('input[type="file"][multiple]').setInputFiles(path);
   await expect(page.getByRole("status").filter({ hasText: "1 upload complete" })).toBeAttached({ timeout: 60_000 });
   expect(offsets[0]).toBe(0);
+  expect((await ended).status()).toBe(204);
   expect((await page.request.head(oldUrl!, { headers: { "Tus-Resumable": "1.0.0" } })).status()).toBe(404);
   const [file] = await children(page, target);
   expect(sha(await (await page.request.get(`/api/files/${file.id}/content`)).body())).toBe(sha(readFileSync(path)));
@@ -182,13 +196,18 @@ test("an upload the server finished, whose answer was lost, isn't uploaded twice
   await page.reload();
 
   const offsets = patchOffsets(page);
+  // The page learns the server finished it, and ends the upload before saying it is complete
+  const ended = uploadEnded(page);
   await page.getByRole("region", { name: "Interrupted uploads" }).locator('input[type="file"][multiple]').setInputFiles(path);
+  expect((await ended).status()).toBe(204);
   await expect(page.getByRole("status").filter({ hasText: "1 upload complete" })).toBeAttached();
   expect(offsets).toEqual([]);
   expect((await children(page, target)).map((f) => f.name)).toEqual(["finished.bin"]);
 });
 
 test("another open tab's upload isn't offered, and a discarded one is gone from the server too", async ({ page, context }) => {
+  // Time flows as usual in both tabs, until the test moves it on (uploadRecovery.ts: BEAT_MS, STALE_MS)
+  await context.clock.install();
   await signIn(page);
   const target = await folder(page, "Recovery tabs");
   const path = diskFile("tabs.bin", 40 * MB, 5);
@@ -197,22 +216,29 @@ test("another open tab's upload isn't offered, and a discarded one is gone from 
 
   const other = await context.newPage();
   await other.goto(`/files/${target}`);
-  await expect(other.getByRole("heading", { name: /./ }).first()).toBeAttached();
-  await other.waitForTimeout(1000);
-  await expect(other.getByRole("region", { name: "Interrupted uploads" })).toHaveCount(0);
+  // Signed in and showing the folder: the interrupted uploads were worked out, and the first tab's record is there
+  await expect(other.getByText("No files here yet")).toBeVisible();
+  await expect.poll(() => other.evaluate(() => Object.entries(localStorage).some(([k, v]) => k.startsWith("tf-upload-tasks-") && v.includes("tabs.bin")))).toBe(true);
+  // A beat later the first tab is still there, so the other one doesn't offer its upload
+  await context.clock.runFor(5_000);
+  const region = other.getByRole("region", { name: "Interrupted uploads" });
+  await expect(region).toHaveCount(0);
 
-  // The first tab closes: after a while, the other one offers to continue its upload
+  // The first tab closes: once its record went stale, the other one offers to continue its upload
   const url = await page.evaluate(() => {
     const key = Object.keys(localStorage).find((k) => k.startsWith("tus::"));
     return key ? JSON.parse(localStorage.getItem(key)!).uploadUrl : null;
   });
+  expect(url).not.toBeNull();
   await page.close();
-  const region = other.getByRole("region", { name: "Interrupted uploads" });
-  await expect(region).toContainText("tabs.bin", { timeout: 40_000 });
+  await context.clock.fastForward(25_000);
+  await expect(region).toContainText("tabs.bin");
 
   await region.getByRole("button", { name: "Discard" }).click();
-  // (the confirmation's button comes after the row's)
-  await other.getByRole("button", { name: "Discard", exact: true }).last().click();
+  // The server lets go of the upload first, then the row goes: it may be busy with other requests for a while
+  const deleted = uploadEnded(other, url);
+  await other.getByRole("dialog").getByRole("button", { name: "Discard", exact: true }).click();
+  expect((await deleted).status()).toBe(204);
   await expect(region).toHaveCount(0);
   expect((await other.request.head(url, { headers: { "Tus-Resumable": "1.0.0" } })).status()).toBe(404);
   expect(await other.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("tf-upload-tasks-") || k.startsWith("tus::")))).toEqual([]);
