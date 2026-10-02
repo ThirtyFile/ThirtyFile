@@ -195,8 +195,7 @@
     const links = GUIDES.map(
       ([group, items]) => `<p>${t(group)}</p>` + items.map(([id, title]) => `<a ${guideLink(id, id === page ? ' aria-current="page"' : "")}>${t(title)}</a>`).join(""),
     ).join("");
-    const note = lang === "en" ? "" : `<div class="docs-note">${t("The other guides are in English.")}</div>`;
-    nav.innerHTML = `<details><summary>${t("All guides")}</summary>${note}${links}</details>`;
+    nav.innerHTML = `<details><summary>${t("All guides")}</summary>${links}</details>`;
     const details = nav.querySelector("details");
     const wide = matchMedia("(min-width: 900px)");
     const sync = () => (details.open = wide.matches);

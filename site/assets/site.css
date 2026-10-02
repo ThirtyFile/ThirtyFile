@@ -928,17 +928,6 @@ code {
   padding-left: 12px;
 }
 
-/* On a translated guide: the other guides are in English */
-.docs-nav .docs-note {
-  margin: 4px 0 0;
-  padding: 8px 12px;
-  border-radius: 9px;
-  background: var(--bg-soft);
-  color: var(--text-soft);
-  font-size: 14px;
-  line-height: 1.5;
-}
-
 .docs-nav a {
   display: block;
   padding: 6px 12px;
