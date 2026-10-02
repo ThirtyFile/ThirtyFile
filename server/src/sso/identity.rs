@@ -51,7 +51,8 @@ pub(super) async fn fetch_identity(provider: &str, cfg: &ProviderConfig, code: &
         };
         let email = Some(text("email")).filter(|e| e.contains('@')).unwrap_or_else(|| text("preferred_username"));
         let email = if email.contains('@') { email.to_ascii_lowercase() } else { String::new() };
-        Ok(Identity { subject, email_verified: !email.is_empty() && ms_tenant_is_specific(&cfg.tenant), email, name: clean_name(&text("name")) })
+        let email_verified = !email.is_empty() && ms_tenant_is_specific(&cfg.tenant) && ms_email_trusted(&claims);
+        Ok(Identity { subject, email_verified, email, name: clean_name(&text("name")) })
     } else {
         Ok(Identity {
             subject: text("sub"),
@@ -60,6 +61,24 @@ pub(super) async fn fetch_identity(provider: &str, cfg: &ProviderConfig, code: &
             name: clean_name(&text("name")),
         })
     }
+}
+
+/// Whether the email of someone signing in through a specific Microsoft tenant can be trusted to match an account. A
+/// member's comes from the tenant's own administrator. A guest (B2B) signs in through the tenant too, but their email is
+/// set by their own organization, which can enter any address, unless Microsoft says the owner of the email's domain
+/// is verified: the optional claim `xms_edov`, which the app registration has to add to the ID token.
+pub(super) fn ms_email_trusted(claims: &Value) -> bool {
+    let yes = |v: &Value| v.as_bool() == Some(true) || v.as_i64() == Some(1) || v.as_str().is_some_and(|s| s.eq_ignore_ascii_case("true") || s == "1");
+    if claims.get("xms_edov").is_some_and(yes) {
+        return true;
+    }
+    let tid = claims.get("tid").and_then(Value::as_str).unwrap_or_default();
+    // `acct` (an optional claim) is 1 for guests; `idp` names the organization that signed the person in when it isn't
+    // the tenant itself (`https://sts.windows.net/<their tenant>/`, or `live.com` for a personal account), and is
+    // missing for members
+    let guest = claims.get("acct").is_some_and(yes)
+        || claims.get("idp").and_then(Value::as_str).is_some_and(|idp| tid.is_empty() || !idp.trim_end_matches('/').split('/').any(|part| part == tid));
+    !guest
 }
 
 /// Checks the ID token's claims. The token was obtained by the server directly from the provider over TLS (not relayed by the browser),

@@ -103,7 +103,13 @@ const splitDomains = (text: string) => text.split(/[,\s;]+/).filter(Boolean);
 
 const PROVISIONING: { value: SsoProvisioning; label: string; help: string }[] = [
   { value: "off", label: t("Linked accounts only"), help: t('People sign in with their password first and link the account under "Sign-in methods".') },
-  { value: "link", label: t("Match existing users by email"), help: t("Users whose username is their verified email sign in directly; nobody else.") },
+  {
+    value: "link",
+    label: t("Match existing users by email"),
+    help: t(
+      'Accounts whose username is the verified email sign in directly, unless they have a password or two-factor sign-in: their owner links them once under "Sign-in methods". Nobody else.',
+    ),
+  },
   { value: "create", label: t("Create accounts automatically"), help: t("Like the above, and people without an account get one on first sign-in, with the settings below.") },
 ];
 
