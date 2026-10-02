@@ -198,15 +198,41 @@ pub struct Target {
     pub last_verify_at: Option<i64>,
     #[serde(skip)]
     pub catch_up: bool,
+    /// How many contents it holds of those it should, as last worked out (None: not yet); shown with its health
+    #[serde(skip)]
+    pub held: Option<i64>,
+    #[serde(skip)]
+    pub wanted: Option<i64>,
 }
 
-pub const TARGET_COLS: &str = "location_id, priority, mode, schedule, tz, next_run_at, state, synced_at, last_run_at, last_verify_at, catch_up";
+pub const TARGET_COLS: &str = "location_id, priority, mode, schedule, tz, next_run_at, state, synced_at, last_run_at, last_verify_at, catch_up, held, wanted";
 
 pub async fn targets(conn: &mut SqliteConnection, policy: &str) -> AppResult<Vec<Target>> {
     Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {TARGET_COLS} FROM replica_targets WHERE policy_id = ? ORDER BY priority, location_id")))
         .bind(policy)
         .fetch_all(conn)
         .await?)
+}
+
+/// Forgets the counts the Replicas page shows, to be worked out again soon (policy.rs): those of a policy's targets
+/// (every policy's with None), and the copies no policy wants on each location
+pub async fn forget_counts(conn: &mut SqliteConnection, policy: Option<&str>) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE replica_targets SET held = NULL, wanted = NULL WHERE ?1 IS NULL OR policy_id = ?1").bind(policy).execute(&mut *conn).await?;
+    sqlx::query("DELETE FROM replica_unneeded").execute(&mut *conn).await?;
+    Ok(())
+}
+
+/// What the replica policies and their targets are as of now: a count worked out under an earlier stamp is out of
+/// date (a policy was made, changed, promoted or deleted meanwhile)
+pub(crate) async fn stamp(conn: &mut SqliteConnection) -> Result<String, sqlx::Error> {
+    let (s,): (Option<String>,) = sqlx::query_as(
+        "SELECT (SELECT group_concat(id || ' ' || updated_at || ' ' || epoch || ' ' || copies || ' ' || all_spaces, ',') FROM replica_policies)
+                || '|' || COALESCE((SELECT group_concat(policy_id || ' ' || location_id || ' ' || priority || ' ' || state, ',') FROM replica_targets), '')
+                || '|' || COALESCE((SELECT group_concat(policy_id || ' ' || drive_id, ',') FROM replica_policy_spaces), '')",
+    )
+    .fetch_one(conn)
+    .await?;
+    Ok(s.unwrap_or_default())
 }
 
 /// A policy as the database has it

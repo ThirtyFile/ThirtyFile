@@ -133,7 +133,7 @@ async fn replicas_are_copied_checked_kept_from_cleanup_and_read_when_the_primary
     assert_eq!(copies(&env, "nas").await.len(), 1);
     assert!(stored(&nas, b"amy's report").is_file());
     let h = health(&env, &id).await;
-    assert_eq!((h.state, h.current, h.targets[0].held, h.targets[0].wanted), ("ok", 1, 1, 1));
+    assert_eq!((h.state, h.current, h.targets[0].held, h.targets[0].wanted), ("ok", 1, Some(1), Some(1)));
     // The copy isn't taken for unused content, nor deleted by a deletion of that content there
     let s = env.st.storage("nas").unwrap();
     let (unused, _) = crate::location_tools::unused_scan(&env.st, "nas", s.as_ref(), crate::util::now() + 86400 * 10, &|_| {}).await.unwrap();
@@ -222,6 +222,61 @@ async fn a_sync_reads_the_content_a_page_at_a_time_and_an_idle_look_takes_no_wri
     let look = tokio::time::timeout(std::time::Duration::from_secs(10), policy::tick(&env.st, crate::util::now())).await;
     drop(held);
     look.expect("an idle look waited for the write lock").unwrap();
+}
+
+#[tokio::test]
+async fn the_replicas_page_shows_the_counts_kept_with_each_target_instead_of_counting_every_copy() {
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    let a = env.upload(&amy, amy.root(), "a.txt", b"first").await;
+    env.upload(&amy, amy.root(), "b.txt", b"second").await;
+    add_nas(&env, "nas").await;
+    let id = make(&env, json!({ "source": "local", "targets": [{ "location": "nas" }] })).await;
+    let page = async || {
+        let Json(o) = api::list(State(env.st.clone()), Admin(env.admin().await)).await.unwrap();
+        serde_json::to_value(&o).unwrap()
+    };
+    let shown = |o: &serde_json::Value, i: usize| {
+        let t = &o["policies"][0]["health"]["targets"][i];
+        (t["held"].clone(), t["wanted"].clone())
+    };
+    let kept = async |location: &str| {
+        sqlx::query_as::<_, (Option<i64>, Option<i64>)>("SELECT held, wanted FROM replica_targets WHERE policy_id = ? AND location_id = ?")
+            .bind(&id)
+            .bind(location)
+            .fetch_one(&env.st.db)
+            .await
+            .unwrap()
+    };
+    // Not worked out yet
+    assert_eq!(shown(&page().await, 0), (json!(null), json!(null)));
+    // The sync works them out and keeps them with the target
+    assert_eq!(settle(&env, &id).await, ["done"]);
+    assert_eq!(kept("nas").await, (Some(2), Some(2)));
+    // The page shows what is kept: it doesn't count the copies again
+    sqlx::query("UPDATE replica_targets SET held = 7, wanted = 9").execute(&env.st.db).await.unwrap();
+    sqlx::query("INSERT OR REPLACE INTO replica_unneeded (location_id, copies, bytes) VALUES ('nas', 3, 300)").execute(&env.st.db).await.unwrap();
+    let o = page().await;
+    assert_eq!(shown(&o, 0), (json!(7), json!(9)));
+    assert_eq!(o["policies"][0]["health"]["targets"][0]["state"], "behind");
+    assert_eq!(o["unneeded"], json!([["nas", "NAS", 3, 300]]));
+    // Copies made, and let go of: worked out again by the sync that made or let go of them
+    env.upload(&amy, amy.root(), "c.txt", b"third").await;
+    assert_eq!(settle(&env, &id).await, ["done"]);
+    assert_eq!(kept("nas").await, (Some(3), Some(3)));
+    assert_eq!(page().await["unneeded"], json!([]));
+    purge_file(&env, &amy, &a).await;
+    assert_eq!(settle(&env, &id).await, ["done"]);
+    assert_eq!(kept("nas").await, (Some(2), Some(2)));
+    // A changed policy (paused: no sync runs): worked out again by the scheduler's next look
+    add_nas(&env, "usb").await;
+    let req = json!({ "enabled": false, "copies": 2, "targets": [{ "location": "nas" }, { "location": "usb" }] });
+    let Json(_) = api::update(State(env.st.clone()), Admin(env.admin().await), Path(id.clone()), Json(serde_json::from_value(req).unwrap())).await.unwrap();
+    assert_eq!(shown(&page().await, 1), (json!(null), json!(null)));
+    policy::tick(&env.st, crate::util::now()).await.unwrap();
+    let o = page().await;
+    assert_eq!((shown(&o, 0), shown(&o, 1)), ((json!(2), json!(2)), (json!(0), json!(2))), "{o}");
+    assert_eq!(o["unneeded"], json!([]));
 }
 
 #[tokio::test]
@@ -531,7 +586,7 @@ async fn folder_spaces_are_read_from_their_folder_kept_from_cleanup_and_read_whe
     }
     assert_eq!(held.len(), 4);
     let h = health(&env, &id).await;
-    assert_eq!((h.state, h.current, h.targets[0].held, h.targets[0].wanted), ("ok", 1, 4, 4), "{h:?}");
+    assert_eq!((h.state, h.current, h.targets[0].held, h.targets[0].wanted), ("ok", 1, Some(4), Some(4)), "{h:?}");
     // A file put there by another program is copied once the check for changes has seen it
     testutil::write_old(&folder.join("scan.pdf"), b"scanned by a copier");
     crate::folders::scan(&env.st, &all).await.unwrap();
@@ -616,7 +671,7 @@ async fn a_folder_file_changed_after_its_check_is_copied_as_read_and_content_not
     assert!(failures.contains("report.txt") && failures.contains(super::folders::KEPT_AS_READ), "{failures}");
     assert_eq!(note.as_deref(), Some("1 content was copied\n1 file kept changing while it was copied: it is kept as it was last read"));
     let h = health(&env, &id).await;
-    assert_eq!((h.targets[0].held, h.targets[0].wanted, h.state), (1, 1, "ok"), "{h:?}");
+    assert_eq!((h.targets[0].held, h.targets[0].wanted, h.state), (Some(1), Some(1), "ok"), "{h:?}");
     // Once it settled and was seen, it is copied as it is
     testutil::write_old(&folder.join("report.txt"), b"report, final");
     crate::folders::scan(&env.st, &all).await.unwrap();

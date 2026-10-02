@@ -138,23 +138,13 @@ pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Overvi
             (j.files_done, j.bytes_done, j.files_total, j.bytes_total, j.speed) = (fd, bd, ft, bt, Some(rate));
         }
     }
-    let mut unneeded = Vec::new();
-    let locations: Vec<(String, String)> =
-        sqlx::query_as("SELECT DISTINCT c.location_id, COALESCE(l.name, '') FROM replica_copies c LEFT JOIN storage_locations l ON l.id = c.location_id")
-            .fetch_all(&st.db)
-            .await?;
-    for (l, name) in locations {
-        let extra = unneeded_on(&st, &l).await?;
-        if !extra.is_empty() {
-            let (bytes,): (i64,) =
-                sqlx::query_as("SELECT COALESCE(SUM(size), 0) FROM replica_copies WHERE location_id = ?1 AND hash IN (SELECT value FROM json_each(?2))")
-                    .bind(&l)
-                    .bind(serde_json::to_string(&extra).unwrap())
-                    .fetch_one(&st.db)
-                    .await?;
-            unneeded.push((l, name, extra.len() as i64, bytes));
-        }
-    }
+    // As last worked out (policy.rs): working it out reads every content of the spaces
+    let unneeded: Vec<(String, String, i64, i64)> = sqlx::query_as(
+        "SELECT u.location_id, COALESCE(l.name, ''), u.copies, u.bytes FROM replica_unneeded u LEFT JOIN storage_locations l ON l.id = u.location_id
+         WHERE u.copies > 0 ORDER BY l.name",
+    )
+    .fetch_all(&st.db)
+    .await?;
     Ok(Json(Overview { policies: out, jobs, unneeded }))
 }
 
@@ -322,6 +312,7 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(req): J
                 .bind(serde_json::to_string(&if all_spaces { Vec::new() } else { spaces.clone() }).unwrap())
                 .execute(&mut *tx)
                 .await?;
+            super::forget_counts(&mut tx, Some(&id)).await?;
             crate::logs::record_activity(&mut tx, &user, None, "replica_create", &name).await?;
             AppResult::Ok(())
         }
@@ -378,6 +369,10 @@ pub async fn update(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
             }
             if let Some(targets) = &req.targets {
                 save_targets(&mut tx, &id, targets).await?;
+            }
+            // What the targets should hold may be other now
+            if req.copies.is_some() || req.targets.is_some() || req.spaces.is_some() || req.all_spaces.is_some() {
+                super::forget_counts(&mut tx, Some(&id)).await?;
             }
             // Paused: syncs waiting for their turn wait until it is resumed
             if req.enabled == Some(false) {
@@ -465,12 +460,24 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
             .execute(&mut *tx)
             .await?;
         sqlx::query("DELETE FROM replica_policies WHERE id = ?").bind(&id).execute(&mut *tx).await?;
+        super::forget_counts(&mut tx, Some(&id)).await?;
         crate::logs::record_activity(&mut tx, &user, None, "replica_delete", &p.name).await?;
         AppResult::Ok(())
     }
     .await;
     crate::db::settle(tx, res).await?;
     Ok(Json(json!({ "ok": true })))
+}
+
+/// How many copies on a location no policy wants (`unneeded_on`), and their bytes
+pub(super) async fn unneeded_count(st: &AppState, location: &str) -> AppResult<(i64, i64)> {
+    let extra = unneeded_on(st, location).await?;
+    let (bytes,): (i64,) = sqlx::query_as("SELECT COALESCE(SUM(size), 0) FROM replica_copies WHERE location_id = ?1 AND hash IN (SELECT value FROM json_each(?2))")
+        .bind(location)
+        .bind(serde_json::to_string(&extra).unwrap())
+        .fetch_one(&st.db)
+        .await?;
+    Ok((extra.len() as i64, bytes))
 }
 
 /// Copies on a location that no policy wants: of content no attached policy uses, or not among the copies a policy
@@ -537,7 +544,11 @@ pub async fn purge(State(st): State<AppState>, Admin(user): Admin, Json(req): Js
         let name = location_name(&mut *st.db.acquire().await?, &req.location).await?;
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
-        let res = crate::logs::record_activity(&mut tx, &user, None, "replica_purge", &format!("{name}: {n}")).await;
+        let res = async {
+            sqlx::query("DELETE FROM replica_unneeded WHERE location_id = ?").bind(&req.location).execute(&mut *tx).await?;
+            crate::logs::record_activity(&mut tx, &user, None, "replica_purge", &format!("{name}: {n}")).await
+        }
+        .await;
         crate::db::settle(tx, res).await?;
     }
     Ok(Json(json!({ "removed": n })))
@@ -839,6 +850,8 @@ pub async fn promote(State(st): State<AppState>, Admin(user): Admin, Path(id): P
             .execute(&mut *tx)
             .await?;
             sqlx::query("DELETE FROM replica_captured WHERE policy_id = ?").bind(&id).execute(&mut *tx).await?;
+            // Content of every policy may be kept elsewhere now
+            super::forget_counts(&mut tx, None).await?;
             sqlx::query("DELETE FROM replica_dirty WHERE policy_id = ?").bind(&id).execute(&mut *tx).await?;
             sqlx::query(sqlx::AssertSqlSafe(format!(
                 "UPDATE replica_jobs SET state = 'cancelled', finished_at = ? WHERE policy_id = ? AND state IN {ACTIVE} AND state != 'running'"

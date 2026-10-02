@@ -432,9 +432,8 @@ function PolicyDetails({ p, jobs, onClose, onPromote, onChanged }: { p: ReplicaP
                   </span>
                   {h && (
                     <span className="text-muted-foreground">
-                      {t("Holds {held} of {wanted} contents", { held: h.held, wanted: h.wanted })}
-                      {h.damaged > 0 ? ` · ${t("{n} damaged", { n: h.damaged })}` : ""}
-                      {" · "}
+                      {h.held !== null && h.wanted !== null && `${t("Holds {held} of {wanted} contents", { held: h.held, wanted: h.wanted })} · `}
+                      {h.damaged > 0 ? `${t("{n} damaged", { n: h.damaged })} · ` : ""}
                       {x.mode === "realtime" ? t("Soon after changes") : t("On a schedule")}
                       {" · "}
                       {x.synced_at ? t("Synced {time}", { time: formatDateTime(x.synced_at) }) : t("Not synced yet")}
