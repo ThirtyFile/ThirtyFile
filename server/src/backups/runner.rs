@@ -1,7 +1,7 @@
-//! Jobs that run in the background one at a time, in the order they were asked for, and are kept afterwards as their
-//! history: backups/ (`backup_jobs`) and replicas/ (`replica_jobs`) each have a queue of their own, and an engine that
-//! runs their kinds of job. A job that stops (paused, failed, or ThirtyFile restarted) continues where it was, from
-//! what it recorded. Modelled on moves/, whose jobs switch spaces over and remove originals: these never do either.
+//! Jobs that run in the background in the order they were asked for, and are kept afterwards as their history:
+//! backups/ (`backup_jobs`), replicas/ (`replica_jobs`) and moves/ (`space_moves`) each have a queue of their own, and
+//! an engine that runs their kinds of job. Backups and replicas run one job at a time, moves as many as the Moves page
+//! allows. A job that stops (paused, failed, or ThirtyFile restarted) continues where it was, from what it recorded.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -62,7 +62,8 @@ pub struct Queue {
 }
 
 impl Queue {
-    fn new(table: &'static str, cols: &'static str) -> Queue {
+    /// The queue of `table`, whose jobs are read with the columns `cols`
+    pub(crate) fn new(table: &'static str, cols: &'static str) -> Queue {
         Queue { table, cols, running: Default::default(), wake: Default::default(), policies: Default::default() }
     }
 
@@ -77,19 +78,43 @@ impl Queue {
     }
 }
 
+/// A job as its queue's table has it
+pub trait QueueJob: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Send + Sync + Unpin + 'static {
+    fn id(&self) -> &str;
+    /// What it is, in the server's log ("snapshot", "the space Sales")
+    fn describe(&self) -> String;
+    /// Bytes per second it may copy (0: no limit)
+    fn rate_limit(&self) -> i64 {
+        0
+    }
+}
+
 /// What runs the jobs of a queue
 pub trait Engine: Send + Sync + 'static {
+    type Job: QueueJob;
     fn queue<'a>(&self, st: &'a AppState) -> &'a Queue;
+    /// Jobs of the queue that run at the same time
+    fn limit(&self, _st: &AppState) -> usize {
+        1
+    }
     /// Runs a job to its end, or until it is asked to stop
-    fn run<'a>(&'a self, cx: &'a Ctx<'a>) -> BoxFuture<'a, AppResult<Stop>>;
+    fn run<'a>(&'a self, cx: &'a Ctx<'a, Self::Job>) -> BoxFuture<'a, AppResult<Stop>>;
+    /// In the transaction that marks a job as running: what else starts with it
+    fn taken<'a>(&'a self, _conn: &'a mut SqliteConnection, _job: &'a Self::Job) -> BoxFuture<'a, AppResult<()>> {
+        Box::pin(async { Ok(()) })
+    }
     /// A job asked to be cancelled: records it as cancelled, and undoes what the kind of job undoes
-    fn cancelled<'a>(&'a self, st: &'a AppState, job: &'a Job) -> BoxFuture<'a, AppResult<()>>;
+    fn cancelled<'a>(&'a self, st: &'a AppState, job: &'a Self::Job) -> BoxFuture<'a, AppResult<()>>;
     /// Whether a job that failed waits instead (a location that can't be reached, tried again by itself)
-    fn waits<'a>(&'a self, st: &'a AppState, job: &'a Job, error: &'a AppError) -> BoxFuture<'a, bool>;
+    fn waits<'a>(&'a self, st: &'a AppState, job: &'a Self::Job, error: &'a AppError) -> BoxFuture<'a, bool>;
     /// The spaces whose items aren't named in the job's failures (personal spaces)
-    fn private<'a>(&'a self, st: &'a AppState, job: &'a Job) -> BoxFuture<'a, AppResult<HashSet<String>>>;
-    /// The activity log action of a job that failed
-    fn failed_action(&self) -> &'static str;
+    fn private<'a>(&'a self, st: &'a AppState, job: &'a Self::Job) -> BoxFuture<'a, AppResult<HashSet<String>>>;
+    /// In the transaction that records that a job failed: its entry in the activity log
+    fn log_failure<'a>(&'a self, conn: &'a mut SqliteConnection, job: &'a Self::Job, error: &'a str) -> BoxFuture<'a, AppResult<()>>;
+    /// After a restart, once the jobs that were running wait for their turn again: what else is finished first
+    fn recovered<'a>(&'a self, _st: &'a AppState) -> BoxFuture<'a, AppResult<()>> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 /// What a running job is asked to do, and how far it got
@@ -147,14 +172,28 @@ pub async fn job(conn: &mut SqliteConnection, id: &str) -> AppResult<Option<Job>
 }
 
 /// A job of a queue
-pub async fn job_in(conn: &mut SqliteConnection, q: &Queue, id: &str) -> AppResult<Option<Job>> {
+pub async fn job_in<J: QueueJob>(conn: &mut SqliteConnection, q: &Queue, id: &str) -> AppResult<Option<J>> {
     Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {} FROM {} WHERE id = ?", q.cols, q.table))).bind(id).fetch_optional(conn).await?)
 }
 
+impl QueueJob for Job {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn describe(&self) -> String {
+        self.kind.clone()
+    }
+
+    fn rate_limit(&self) -> i64 {
+        serde_json::from_str::<serde_json::Value>(&self.params).ok().and_then(|p| p["rate_limit"].as_i64()).unwrap_or(0)
+    }
+}
+
 /// A running job, as its engine sees it
-pub struct Ctx<'a> {
+pub struct Ctx<'a, J = Job> {
     pub st: &'a AppState,
-    pub job: &'a Job,
+    pub job: &'a J,
     pub(crate) ctl: &'a Control,
     /// The table of the job
     pub(crate) table: &'static str,
@@ -165,7 +204,7 @@ pub struct Ctx<'a> {
     pub started: Instant,
 }
 
-impl Ctx<'_> {
+impl<J: QueueJob> Ctx<'_, J> {
     /// Whether the job was asked to stop (checked between items)
     pub fn stop(&self) -> Option<Stop> {
         if self.ctl.cancel.load(Ordering::SeqCst) {
@@ -293,10 +332,24 @@ impl Ctx<'_> {
         .bind(bytes_total)
         .bind(failed)
         .bind(failures)
-        .bind(&self.job.id)
+        .bind(self.job.id())
         .execute(&self.st.db)
         .await?;
         Ok(())
+    }
+
+    /// Waits before trying an item again (`attempt` from 1), longer each time; None when the job is asked to stop
+    /// meanwhile
+    pub async fn wait_to_retry(&self, attempt: u32) -> Option<Stop> {
+        let wait = Duration::from_secs(if cfg!(test) { 0 } else { 2u64.pow(attempt) });
+        let until = Instant::now() + wait;
+        while Instant::now() < until {
+            if let Some(stop) = self.stop() {
+                return Some(stop);
+            }
+            tokio::time::sleep(Duration::from_millis(200).min(until - Instant::now())).await;
+        }
+        self.stop()
     }
 
     /// Tries `f` up to `TRIES` times while it fails with an error `retry` accepts, waiting longer each time. Err(Ok(stop))
@@ -311,15 +364,7 @@ impl Ctx<'_> {
             match f().await {
                 Ok(v) => return Ok(v),
                 Err(e) if attempt < TRIES && retry(&e) => {
-                    let wait = Duration::from_secs(if cfg!(test) { 0 } else { 2u64.pow(attempt) });
-                    let until = Instant::now() + wait;
-                    while Instant::now() < until {
-                        if let Some(stop) = self.stop() {
-                            return Err(Ok(stop));
-                        }
-                        tokio::time::sleep(Duration::from_millis(200).min(until - Instant::now())).await;
-                    }
-                    if let Some(stop) = self.stop() {
+                    if let Some(stop) = self.wait_to_retry(attempt).await {
                         return Err(Ok(stop));
                     }
                     attempt += 1;
@@ -343,6 +388,8 @@ pub struct BackupEngine;
 pub static BACKUPS: BackupEngine = BackupEngine;
 
 impl Engine for BackupEngine {
+    type Job = Job;
+
     fn queue<'a>(&self, st: &'a AppState) -> &'a Queue {
         &st.part::<Memory>().queue
     }
@@ -382,8 +429,8 @@ impl Engine for BackupEngine {
         Box::pin(private_spaces(st, job))
     }
 
-    fn failed_action(&self) -> &'static str {
-        "backup_failed"
+    fn log_failure<'a>(&'a self, conn: &'a mut SqliteConnection, job: &'a Job, error: &'a str) -> BoxFuture<'a, AppResult<()>> {
+        Box::pin(async move { Ok(super::log(conn, job, "backup_failed", &format!("{}: {error}", job.label)).await?) })
     }
 }
 
@@ -394,9 +441,9 @@ pub fn spawn_runner(st: AppState) {
 }
 
 /// Starts a queue's runner: jobs that were running when ThirtyFile stopped continue, then queued jobs start in turn
-pub fn spawn(st: AppState, engine: &'static dyn Engine) {
+pub fn spawn<E: Engine>(st: AppState, engine: &'static E) {
     tokio::spawn(async move {
-        if let Err(e) = recover_in(&st, engine.queue(&st)).await {
+        if let Err(e) = recover_with(&st, engine).await {
             tracing::warn!("Couldn't continue the jobs of {} that were running: {}", engine.queue(&st).table, e.message);
         }
         loop {
@@ -414,7 +461,7 @@ pub fn spawn(st: AppState, engine: &'static dyn Engine) {
 /// After a restart: jobs of backups/ that were running wait for their turn again
 #[cfg(test)]
 pub(super) async fn recover(st: &AppState) -> AppResult<()> {
-    recover_in(st, &st.part::<Memory>().queue).await
+    recover_with(st, &BACKUPS).await
 }
 
 /// After a restart: jobs that were running wait for their turn again, ahead of newer ones
@@ -424,34 +471,54 @@ pub(crate) async fn recover_in(st: &AppState, q: &Queue) -> AppResult<()> {
     Ok(())
 }
 
-/// Jobs recorded as running that no task runs (recording how one ended failed, say): they wait for their turn again
+/// After a restart: jobs that were running wait for their turn again, then the engine finishes what else it left
+pub(crate) async fn recover_with<E: Engine>(st: &AppState, engine: &'static E) -> AppResult<()> {
+    recover_in(st, engine.queue(st)).await?;
+    engine.recovered(st).await
+}
+
+/// Jobs recorded as running that no task runs (recording how one ended failed, on a full disk say, or it panicked):
+/// they wait for their turn again, as after a restart, rather than stay running with pause, resume and cancel refused
 async fn requeue_orphans(st: &AppState, q: &Queue) -> AppResult<()> {
     let _w = st.write_lock.lock().await;
+    // Read with the write lock held: a task takes its place in the list before its job is marked running (`take_in`),
+    // and leaves it only after its last write (`Running`)
     let running: Vec<String> = q.running.lock().unwrap().keys().cloned().collect();
-    sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {} SET state = 'queued' WHERE state = 'running' AND id NOT IN (SELECT value FROM json_each(?))", q.table)))
-        .bind(serde_json::to_string(&running).unwrap())
-        .execute(&st.db)
-        .await?;
+    let orphans =
+        sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {} SET state = 'queued' WHERE state = 'running' AND id NOT IN (SELECT value FROM json_each(?))", q.table)))
+            .bind(serde_json::to_string(&running).unwrap())
+            .execute(&st.db)
+            .await?
+            .rows_affected();
+    if orphans > 0 {
+        tracing::warn!("{orphans} jobs of {} were left running without anything running them: they continue in turn", q.table);
+    }
     Ok(())
 }
 
-/// Starts the oldest queued job when none of the queue is running: one at a time, so copying never takes more than one
-/// transfer from what people do
-pub(crate) async fn start_due_in(st: &AppState, engine: &'static dyn Engine) -> AppResult<()> {
+/// Starts the oldest queued jobs while fewer than the engine's limit are running (backups and replicas one at a time,
+/// so copying never takes more than one transfer from what people do)
+pub(crate) async fn start_due_in<E: Engine>(st: &AppState, engine: &'static E) -> AppResult<()> {
     let q = engine.queue(st);
     requeue_orphans(st, q).await?;
-    if !q.running.lock().unwrap().is_empty() {
-        return Ok(());
+    loop {
+        let busy: Vec<String> = q.running.lock().unwrap().keys().cloned().collect();
+        if busy.len() >= engine.limit(st) {
+            return Ok(());
+        }
+        let next: Option<E::Job> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {} FROM {} WHERE state = 'queued' AND id NOT IN (SELECT value FROM json_each(?)) ORDER BY created_at, rowid LIMIT 1",
+            q.cols, q.table
+        )))
+        .bind(serde_json::to_string(&busy).unwrap())
+        .fetch_optional(&st.db)
+        .await?;
+        let Some(job) = next else { return Ok(()) };
+        let Some(ctl) = take_in(st, engine, &job).await? else { continue };
+        let st = st.clone();
+        // Counted apart from what people do (Storage usage)
+        tokio::spawn(crate::usage::background(async move { run_in(&st, engine, &job, &ctl).await }));
     }
-    let next: Option<Job> =
-        sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {} FROM {} WHERE state = 'queued' ORDER BY created_at, rowid LIMIT 1", q.cols, q.table)))
-            .fetch_optional(&st.db)
-            .await?;
-    let Some(job) = next else { return Ok(()) };
-    let Some(ctl) = take_in(st, engine, &job).await? else { return Ok(()) };
-    let st = st.clone();
-    tokio::spawn(crate::usage::background(async move { run_in(&st, engine, &job, &ctl).await }));
-    Ok(())
 }
 
 /// Marks a queued job of backups/ as running (tests)
@@ -460,27 +527,37 @@ pub(super) async fn take(st: &AppState, job: &Job) -> AppResult<Option<Arc<Contr
     take_in(st, &BACKUPS, job).await
 }
 
-/// Marks a queued job as running, with its controls in place first; None when it was paused or cancelled meanwhile
-pub(crate) async fn take_in(st: &AppState, engine: &'static dyn Engine, job: &Job) -> AppResult<Option<Arc<Control>>> {
+/// Marks a queued job as running, with its controls in place first (a pause asked for right away finds them); None
+/// when it was paused or cancelled meanwhile
+pub(crate) async fn take_in<E: Engine>(st: &AppState, engine: &'static E, job: &E::Job) -> AppResult<Option<Arc<Control>>> {
     let q = engine.queue(st);
     let ctl = Arc::new(Control::default());
-    q.running.lock().unwrap().insert(job.id.clone(), ctl.clone());
+    q.running.lock().unwrap().insert(job.id().to_string(), ctl.clone());
     let taken = async {
         let _w = st.write_lock.lock().await;
-        let n = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "UPDATE {} SET state = 'running', started_at = COALESCE(started_at, ?), error = NULL WHERE id = ? AND state = 'queued'",
-            q.table
-        )))
-        .bind(now())
-        .bind(&job.id)
-        .execute(&st.db)
-        .await?
-        .rows_affected();
-        AppResult::Ok(n == 1)
+        let mut tx = crate::db::begin_write(&st.db).await?;
+        let res = async {
+            let taken = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE {} SET state = 'running', started_at = COALESCE(started_at, ?), error = NULL WHERE id = ? AND state = 'queued'",
+                q.table
+            )))
+            .bind(now())
+            .bind(job.id())
+            .execute(&mut *tx)
+            .await?
+            .rows_affected()
+                == 1;
+            if taken {
+                engine.taken(&mut tx, job).await?;
+            }
+            AppResult::Ok(taken)
+        }
+        .await;
+        crate::db::settle(tx, res).await
     }
     .await;
     if !matches!(taken, Ok(true)) {
-        q.running.lock().unwrap().remove(&job.id);
+        q.running.lock().unwrap().remove(job.id());
     }
     Ok(taken?.then_some(ctl))
 }
@@ -530,9 +607,9 @@ pub(super) async fn run(st: &AppState, job: &Job, ctl: &Control) {
 }
 
 /// Runs a job that was just marked as running, and records how it ended
-pub(crate) async fn run_in(st: &AppState, engine: &'static dyn Engine, job: &Job, ctl: &Control) {
+pub(crate) async fn run_in<E: Engine>(st: &AppState, engine: &'static E, job: &E::Job, ctl: &Control) {
     let q = engine.queue(st);
-    let _running = Running(q, job.id.clone());
+    let _running = Running(q, job.id().to_string());
     let private = match engine.private(st, job).await {
         Ok(p) => p,
         Err(e) => {
@@ -540,27 +617,27 @@ pub(crate) async fn run_in(st: &AppState, engine: &'static dyn Engine, job: &Job
             Default::default()
         }
     };
-    let rate_limit = serde_json::from_str::<serde_json::Value>(&job.params).ok().and_then(|p| p["rate_limit"].as_i64()).unwrap_or(0);
-    let cx = Ctx { st, job, ctl, table: q.table, private, rate_limit, started: Instant::now() };
+    let cx = Ctx { st, job, ctl, table: q.table, private, rate_limit: job.rate_limit(), started: Instant::now() };
     let res = engine.run(&cx).await;
     let ended = match res {
         Ok(Stop::Done) => Ok(()),
-        Ok(Stop::Paused) => set_state(&cx, JobState::Paused, None, engine.failed_action()).await,
+        Ok(Stop::Paused) => set_state(&cx, engine, JobState::Paused, None).await,
         Ok(Stop::Cancelled) => engine.cancelled(st, job).await,
         Err(e) => {
-            tracing::warn!("A job of {} ({}) failed: {}", q.table, job.kind, e.message);
+            tracing::warn!("A job of {} ({}) failed: {}", q.table, job.describe(), e.message);
             let state = if engine.waits(st, job, &e).await { JobState::Waiting } else { JobState::Failed };
-            set_state(&cx, state, Some(&e.message), engine.failed_action()).await
+            set_state(&cx, engine, state, Some(&e.message)).await
         }
     };
     q.policies.notify_one();
     if let Err(e) = ended {
-        tracing::warn!("Couldn't record how a job of {} ended: {}", q.table, e.message);
+        tracing::warn!("Couldn't record how a job of {} ({}) ended: {}", q.table, job.describe(), e.message);
     }
 }
 
-/// Records that a run stopped (paused, or failed with `error`), with its progress
-async fn set_state(cx: &Ctx<'_>, state: JobState, error: Option<&str>, action: &str) -> AppResult<()> {
+/// Records that a run stopped (paused, or failed with `error`), with its progress. A job that ended meanwhile stays as
+/// it is (a move that switched its space over is done, and stays done).
+async fn set_state<E: Engine>(cx: &Ctx<'_, E::Job>, engine: &E, state: JobState, error: Option<&str>) -> AppResult<()> {
     let (files_done, bytes_done, files_total, bytes_total, failed, failures) = cx.progress();
     let _w = cx.st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&cx.st.db).await?;
@@ -578,13 +655,13 @@ async fn set_state(cx: &Ctx<'_>, state: JobState, error: Option<&str>, action: &
         .bind(bytes_total)
         .bind(failed)
         .bind(failures)
-        .bind(&cx.job.id)
+        .bind(cx.job.id())
         .execute(&mut *tx)
         .await?
         .rows_affected()
             == 1;
         if stopped && let Some(error) = error {
-            super::log(&mut tx, cx.job, action, &format!("{}: {error}", cx.job.label)).await?;
+            engine.log_failure(&mut tx, cx.job, error).await?;
         }
         AppResult::Ok(())
     }
@@ -592,7 +669,7 @@ async fn set_state(cx: &Ctx<'_>, state: JobState, error: Option<&str>, action: &
     crate::db::settle(tx, res).await
 }
 
-/// In the transaction that ends a job well: it is done, with its progress and `note`
+/// In the transaction that ends a job of backups/ or replicas/ well: it is done, with its progress and `note`
 pub(crate) async fn finish(conn: &mut SqliteConnection, cx: &Ctx<'_>, note: Option<&str>) -> AppResult<()> {
     let (files, bytes, failed, failures) = {
         let p = cx.ctl.progress.lock().unwrap();

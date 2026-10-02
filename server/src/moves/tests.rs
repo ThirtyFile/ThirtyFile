@@ -1,6 +1,10 @@
 use std::{
     path::Path as FsPath,
-    sync::atomic::{AtomicUsize, Ordering::SeqCst},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering::SeqCst},
+    },
+    time::{Duration, Instant},
 };
 
 use axum::{
@@ -13,6 +17,7 @@ use serde_json::json;
 
 use super::*;
 use crate::{
+    backups::runner::Control,
     storage::{self, LocalStorage, Storage},
     testutil::{self, TestEnv},
 };
@@ -540,7 +545,7 @@ async fn moves_run_one_at_a_time_unless_set_otherwise() {
     }
     // A task leaves the running list just after it records how its move ended
     let deadline = Instant::now() + Duration::from_secs(30);
-    while !env.st.part::<Moves>().running.lock().unwrap().is_empty() {
+    while !env.st.part::<Memory>().queue.running.lock().unwrap().is_empty() {
         assert!(Instant::now() < deadline, "a move that ended is still on the running list");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -1088,7 +1093,7 @@ async fn several_spaces_move_one_after_the_other_and_a_location_can_then_be_dele
         if left == 0 {
             break;
         }
-        assert!(env.st.part::<Moves>().running.lock().unwrap().len() <= 1);
+        assert!(env.st.part::<Memory>().queue.running.lock().unwrap().len() <= 1);
         tokio::time::sleep(Duration::from_millis(20)).await;
         start_due(&env.st).await.unwrap();
     }
@@ -1480,7 +1485,7 @@ async fn a_move_whose_end_couldnt_be_recorded_runs_again() {
     let (_job, ctl) = take_job(&env, &id).await;
     // Its task ended without recording how (the disk was full, say, or it panicked): it is no longer running, and the
     // database still says it is
-    drop(Running(&env.st, id.clone()));
+    env.st.part::<Memory>().queue.running.lock().unwrap().remove(&id);
     drop(ctl);
     assert_eq!(state(&env, &id).await, "running");
     start_due(&env.st).await.unwrap();

@@ -17,22 +17,15 @@
 //! A move that copies from or to a folder makes the space read-only meanwhile (`drives.moving`): the folder must stay
 //! as it was copied. Changes made in a folder from outside ThirtyFile are found by a scan before the switch.
 //!
-//! One engine per direction: store.rs moves a space between content stores, to_store.rs a folder space into a content
-//! store.
+//! The jobs run on the runner of backups and replicas (backups/runner.rs, `MOVES`). One engine per direction: store.rs
+//! moves a space between content stores, to_store.rs a folder space into a content store.
 
 mod between_folders;
 mod store;
 mod to_folder;
 pub(crate) mod to_store;
 
-use std::{
-    collections::HashMap,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::{Duration, Instant},
-};
+use std::{collections::HashSet, sync::atomic::Ordering};
 
 use axum::{
     Json,
@@ -43,8 +36,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{SqliteConnection, SqlitePool};
 
+pub use crate::backups::runner::Stop;
 use crate::{
     auth::Admin,
+    backups::runner::{self, Engine, Failure, Queue, QueueJob},
     error::{AppError, AppResult},
     state::AppState,
     tree::{self, SpaceMode},
@@ -55,49 +50,19 @@ use crate::{
 pub const MAX_JOBS: i64 = 8;
 /// States of a move that isn't over: the space is still being moved (or waits to be)
 pub(super) const ACTIVE: &str = "('queued', 'running', 'paused', 'failed')";
-/// Items listed in a move's failures (all are counted)
-const MAX_FAILURES: usize = 100;
-/// Tries for each item before it counts as failed
-const TRIES: u32 = 3;
-/// How often a running move writes its progress to the database
-const FLUSH_EVERY: Duration = Duration::from_secs(2);
 /// Moves listed on the Moves page
 const HISTORY: i64 = 500;
 
-/// The moves running now, and the runner's wake-up call
-#[derive(Default)]
-pub struct Moves {
-    running: Mutex<HashMap<String, Arc<Control>>>,
-    wake: tokio::sync::Notify,
+/// What moves keep in memory (a part of `AppState`)
+pub struct Memory {
+    /// Moves running now
+    pub queue: Queue,
 }
 
-/// What a running move is asked to do, and how far it got
-#[derive(Default)]
-pub struct Control {
-    pause: AtomicBool,
-    cancel: AtomicBool,
-    progress: Mutex<Progress>,
-}
-
-#[derive(Default)]
-struct Progress {
-    files_done: i64,
-    bytes_done: i64,
-    files_total: i64,
-    bytes_total: i64,
-    failed: i64,
-    failures: Vec<Failure>,
-    /// When progress was last written to the database, and the bytes done then
-    flushed: Option<(Instant, i64)>,
-    /// Bytes copied per second, smoothed
-    rate: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Failure {
-    /// Which item (its path or name); None in personal spaces, whose content administrators don't see
-    item: Option<String>,
-    error: String,
+impl Default for Memory {
+    fn default() -> Memory {
+        Memory { queue: Queue::new("space_moves", JOB_COLS) }
+    }
 }
 
 /// Where a move is (`space_moves.state`)
@@ -114,15 +79,6 @@ pub enum MoveState {
     Failed,
     /// The space is on its new location
     Done,
-    Cancelled,
-}
-
-/// Why a job's run ended without an error
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Stop {
-    /// The space is on the new location
-    Done,
-    Paused,
     Cancelled,
 }
 
@@ -151,138 +107,78 @@ async fn job(conn: &mut SqliteConnection, id: &str) -> AppResult<Option<Job>> {
     Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {JOB_COLS} FROM space_moves WHERE id = ?"))).bind(id).fetch_optional(conn).await?)
 }
 
-/// A running job, as its engine sees it: the job, the server, and the job's controls
-pub struct Ctx<'a> {
-    pub st: &'a AppState,
-    pub job: &'a Job,
-    ctl: &'a Control,
+/// A running move, as its engine sees it: the job, the server, and the job's controls
+pub type Ctx<'a> = runner::Ctx<'a, Job>;
+
+impl QueueJob for Job {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn describe(&self) -> String {
+        format!("the space {}", self.space_name)
+    }
 }
 
-impl Ctx<'_> {
-    /// Whether the job was asked to stop (checked between items)
-    pub fn stop(&self) -> Option<Stop> {
-        if self.ctl.cancel.load(Ordering::SeqCst) {
-            Some(Stop::Cancelled)
-        } else if self.ctl.pause.load(Ordering::SeqCst) {
-            Some(Stop::Paused)
-        } else {
-            None
-        }
+/// The engine of moves
+pub struct MoveEngine;
+
+pub static MOVES: MoveEngine = MoveEngine;
+
+impl Engine for MoveEngine {
+    type Job = Job;
+
+    fn queue<'a>(&self, st: &'a AppState) -> &'a Queue {
+        &st.part::<Memory>().queue
     }
 
-    /// Sets what was done before and what there is in all (at the start of each run)
-    pub fn set_counts(&self, files_done: i64, bytes_done: i64, files_total: i64, bytes_total: i64) {
-        let mut p = self.ctl.progress.lock().unwrap();
-        (p.files_done, p.bytes_done, p.files_total, p.bytes_total) = (files_done, bytes_done, files_total, bytes_total);
-        p.flushed = None;
+    /// As many as the Moves page allows (1 by default)
+    fn limit(&self, st: &AppState) -> usize {
+        st.system.read().unwrap().move_jobs.clamp(1, MAX_JOBS) as usize
     }
 
-    /// More to copy than counted at the start (changes made meanwhile)
-    pub fn add_total(&self, files: i64, bytes: i64) {
-        let mut p = self.ctl.progress.lock().unwrap();
-        p.files_total += files;
-        p.bytes_total += bytes;
-    }
-
-    /// An item was copied: counted, and written to the database every few seconds
-    pub async fn done(&self, files: i64, bytes: i64) -> AppResult<()> {
-        let due = {
-            let mut p = self.ctl.progress.lock().unwrap();
-            p.files_done += files;
-            p.bytes_done += bytes;
-            p.files_total = p.files_total.max(p.files_done);
-            p.bytes_total = p.bytes_total.max(p.bytes_done);
-            p.flushed.is_none_or(|(at, _)| at.elapsed() >= FLUSH_EVERY)
-        };
-        if due {
-            self.flush().await?;
-        }
-        Ok(())
-    }
-
-    /// An item that couldn't be copied after a few tries. `item` names it (left out in personal spaces).
-    pub fn failed(&self, item: Option<String>, error: String) {
-        tracing::warn!("Moving a space: an item couldn't be copied: {error}");
-        let item = item.filter(|_| self.job.space_kind != "personal");
-        let mut p = self.ctl.progress.lock().unwrap();
-        p.failed += 1;
-        if p.failures.len() < MAX_FAILURES {
-            p.failures.push(Failure { item, error });
-        }
-    }
-
-    pub fn failed_count(&self) -> i64 {
-        self.ctl.progress.lock().unwrap().failed
-    }
-
-    /// The progress as it is written to the database: files and bytes done, in all, failed items and the list of them
-    fn progress(&self) -> (i64, i64, i64, i64, i64, String) {
-        let mut p = self.ctl.progress.lock().unwrap();
-        let now = Instant::now();
-        if let Some((at, bytes)) = p.flushed {
-            let secs = now.duration_since(at).as_secs_f64();
-            if secs > 0.2 {
-                let rate = (p.bytes_done - bytes).max(0) as f64 / secs;
-                p.rate = if p.rate == 0.0 { rate } else { p.rate * 0.7 + rate * 0.3 };
+    fn run<'a>(&'a self, cx: &'a Ctx<'a>) -> BoxFuture<'a, AppResult<Stop>> {
+        Box::pin(async move {
+            prepare(cx).await?;
+            match (cx.job.from_mode, cx.job.to_mode) {
+                (SpaceMode::Store, SpaceMode::Store) => store::run(cx).await,
+                (SpaceMode::Folder, SpaceMode::Store) => to_store::run(cx).await,
+                (SpaceMode::Store, SpaceMode::Folder) => to_folder::run(cx).await,
+                (SpaceMode::Folder, SpaceMode::Folder) => between_folders::run(cx).await,
             }
-        }
-        p.flushed = Some((now, p.bytes_done));
-        (p.files_done, p.bytes_done, p.files_total, p.bytes_total, p.failed, serde_json::to_string(&p.failures).unwrap())
+        })
     }
 
-    /// Writes the progress to the database
-    pub async fn flush(&self) -> AppResult<()> {
-        let (files_done, bytes_done, files_total, bytes_total, failed, failures) = self.progress();
-        let _w = self.st.write_lock.lock().await;
-        sqlx::query(
-            "UPDATE space_moves SET files_done = ?, bytes_done = ?, files_total = ?, bytes_total = ?, failed_items = ?, failures = ?
-             WHERE id = ? AND state = 'running'",
-        )
-        .bind(files_done)
-        .bind(bytes_done)
-        .bind(files_total)
-        .bind(bytes_total)
-        .bind(failed)
-        .bind(failures)
-        .bind(&self.job.id)
-        .execute(&self.st.db)
-        .await?;
-        Ok(())
-    }
-
-    /// Waits before trying an item again (`attempt` from 1); None when the job is asked to stop meanwhile
-    pub async fn wait_to_retry(&self, attempt: u32) -> Option<Stop> {
-        let wait = Duration::from_secs(if cfg!(test) { 0 } else { 2u64.pow(attempt) });
-        let until = Instant::now() + wait;
-        while Instant::now() < until {
-            if let Some(stop) = self.stop() {
-                return Some(stop);
+    /// Read-only from the first start until the move is over
+    fn taken<'a>(&'a self, conn: &'a mut SqliteConnection, job: &'a Job) -> BoxFuture<'a, AppResult<()>> {
+        Box::pin(async move {
+            if job.locks_space() {
+                sqlx::query("UPDATE drives SET moving = 1 WHERE id = ?").bind(&job.drive_id).execute(&mut *conn).await?;
             }
-            tokio::time::sleep(Duration::from_millis(200).min(until - Instant::now())).await;
-        }
-        self.stop()
+            Ok(())
+        })
     }
 
-    /// Tries `f` up to `TRIES` times while it fails with an error `retry` accepts. Err(Ok(stop)) when the job is
-    /// asked to stop in between.
-    pub async fn tries<T, E, F, Fut>(&self, retry: impl Fn(&E) -> bool, mut f: F) -> Result<T, Result<Stop, E>>
-    where
-        F: FnMut() -> Fut,
-        Fut: std::future::Future<Output = Result<T, E>>,
-    {
-        let mut attempt = 1;
-        loop {
-            match f().await {
-                Ok(v) => return Ok(v),
-                Err(e) if attempt < TRIES && retry(&e) => {
-                    if let Some(stop) = self.wait_to_retry(attempt).await {
-                        return Err(Ok(stop));
-                    }
-                    attempt += 1;
-                }
-                Err(e) => return Err(Err(e)),
-            }
-        }
+    fn cancelled<'a>(&'a self, st: &'a AppState, job: &'a Job) -> BoxFuture<'a, AppResult<()>> {
+        Box::pin(cancelled(st, job))
+    }
+
+    /// A move that failed stays failed until an administrator resumes or cancels it
+    fn waits<'a>(&'a self, _st: &'a AppState, _job: &'a Job, _error: &'a AppError) -> BoxFuture<'a, bool> {
+        Box::pin(async { false })
+    }
+
+    /// A personal space's items aren't named in the failures
+    fn private<'a>(&'a self, _st: &'a AppState, job: &'a Job) -> BoxFuture<'a, AppResult<HashSet<String>>> {
+        Box::pin(async move { Ok(HashSet::from_iter((job.space_kind == "personal").then(|| job.drive_id.clone()))) })
+    }
+
+    fn log_failure<'a>(&'a self, conn: &'a mut SqliteConnection, job: &'a Job, error: &'a str) -> BoxFuture<'a, AppResult<()>> {
+        Box::pin(async move { Ok(log(conn, job, "move_failed", &format!("{}: {error}", route(job))).await?) })
+    }
+
+    fn recovered<'a>(&'a self, st: &'a AppState) -> BoxFuture<'a, AppResult<()>> {
+        Box::pin(finish_unfinished(st))
     }
 }
 
@@ -380,29 +276,12 @@ fn route(job: &Job) -> String {
 
 /// Starts the runner: moves that were running when ThirtyFile stopped continue, then queued moves start in turn
 pub fn spawn_runner(st: AppState) {
-    tokio::spawn(async move {
-        if let Err(e) = recover(&st).await {
-            tracing::warn!("Couldn't continue the moves of spaces that were running: {}", e.message);
-        }
-        loop {
-            if let Err(e) = start_due(&st).await {
-                tracing::warn!("Couldn't start moving a space: {}", e.message);
-            }
-            tokio::select! {
-                _ = st.part::<Moves>().wake.notified() => {}
-                _ = tokio::time::sleep(Duration::from_secs(30)) => {}
-            }
-        }
-    });
+    runner::spawn(st, &MOVES);
 }
 
-/// After a restart: moves that were running wait for their turn again (ahead of newer ones, as they are older), and
-/// cleanups that didn't finish are done (one that fails is tried again at the next start)
-async fn recover(st: &AppState) -> AppResult<()> {
-    {
-        let _w = st.write_lock.lock().await;
-        sqlx::query("UPDATE space_moves SET state = 'queued' WHERE state = 'running'").execute(&st.db).await?;
-    }
+/// After a restart, once the moves that were running wait for their turn again: cleanups that didn't finish are done
+/// (one that fails is tried again at the next start)
+async fn finish_unfinished(st: &AppState) -> AppResult<()> {
     let unfinished: Vec<(String, MoveState)> = sqlx::query_as(
         "SELECT id, state FROM space_moves m
          WHERE state IN ('cancelled', 'done') AND (EXISTS (SELECT 1 FROM space_move_items i WHERE i.move_id = m.id) OR renamed = 1)",
@@ -423,124 +302,35 @@ async fn recover(st: &AppState) -> AppResult<()> {
 }
 
 /// After the switch: removes the old folder. The move is done whatever happens here; what isn't removed now is tried
-/// again at the next start (`recover`).
+/// again at the next start (`finish_unfinished`).
 async fn clean_up(st: &AppState, job: &Job) {
     if let Err(e) = to_store::cleanup(st, job).await {
         tracing::warn!("Couldn't remove the old folder of the space {} after moving it: {}", job.space_name, e.message);
     }
 }
 
-/// Moves recorded as running that no task runs (recording how one ended failed, on a full disk say, or it panicked):
-/// they wait for their turn again, as after a restart, rather than stay running with pause, resume and cancel refused
-/// and the space read-only
-async fn requeue_orphans(st: &AppState) -> AppResult<()> {
-    let _w = st.write_lock.lock().await;
-    // Read with the write lock held: a task takes its place in the list before its move is marked running (`take`),
-    // and leaves it only after its last write (`Running`)
-    let running: Vec<String> = st.part::<Moves>().running.lock().unwrap().keys().cloned().collect();
-    let orphans = sqlx::query("UPDATE space_moves SET state = 'queued' WHERE state = 'running' AND id NOT IN (SELECT value FROM json_each(?))")
-        .bind(serde_json::to_string(&running).unwrap())
-        .execute(&st.db)
-        .await?
-        .rows_affected();
-    if orphans > 0 {
-        tracing::warn!("{orphans} moves of spaces were left running without anything running them: they continue in turn");
-    }
-    Ok(())
+/// Tests: after a restart
+#[cfg(test)]
+async fn recover(st: &AppState) -> AppResult<()> {
+    runner::recover_with(st, &MOVES).await
 }
 
-/// Starts queued moves while fewer than the setting are running
+/// Tests: starts queued moves while fewer than the setting are running
+#[cfg(test)]
 async fn start_due(st: &AppState) -> AppResult<()> {
-    requeue_orphans(st).await?;
-    loop {
-        let limit = st.system.read().unwrap().move_jobs.clamp(1, MAX_JOBS) as usize;
-        let busy: Vec<String> = st.part::<Moves>().running.lock().unwrap().keys().cloned().collect();
-        if busy.len() >= limit {
-            return Ok(());
-        }
-        let next: Option<Job> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT {JOB_COLS} FROM space_moves WHERE state = 'queued' AND id NOT IN (SELECT value FROM json_each(?))
-             ORDER BY created_at, rowid LIMIT 1"
-        )))
-        .bind(serde_json::to_string(&busy).unwrap())
-        .fetch_optional(&st.db)
-        .await?;
-        let Some(job) = next else { return Ok(()) };
-        let Some(ctl) = take(st, &job).await? else { continue };
-        let st = st.clone();
-        // Counted apart from what people do (Storage usage)
-        tokio::spawn(crate::usage::background(async move { run(&st, &job, &ctl).await }));
-    }
+    runner::start_due_in(st, &MOVES).await
 }
 
-/// Marks a queued job as running, with its controls in place first (a pause asked for right away finds them); None
-/// when it was paused or cancelled meanwhile
-async fn take(st: &AppState, job: &Job) -> AppResult<Option<Arc<Control>>> {
-    let ctl = Arc::new(Control::default());
-    st.part::<Moves>().running.lock().unwrap().insert(job.id.clone(), ctl.clone());
-    let taken = async {
-        let _w = st.write_lock.lock().await;
-        let mut tx = crate::db::begin_write(&st.db).await?;
-        let res = async {
-            let taken =
-                sqlx::query("UPDATE space_moves SET state = 'running', started_at = COALESCE(started_at, ?), error = NULL WHERE id = ? AND state = 'queued'")
-                    .bind(now())
-                    .bind(&job.id)
-                    .execute(&mut *tx)
-                    .await?
-                    .rows_affected()
-                    == 1;
-            // Read-only from the first start until the move is over
-            if taken && job.locks_space() {
-                sqlx::query("UPDATE drives SET moving = 1 WHERE id = ?").bind(&job.drive_id).execute(&mut *tx).await?;
-            }
-            AppResult::Ok(taken)
-        }
-        .await;
-        crate::db::settle(tx, res).await
-    }
-    .await;
-    if !matches!(taken, Ok(true)) {
-        st.part::<Moves>().running.lock().unwrap().remove(&job.id);
-    }
-    Ok(taken?.then_some(ctl))
+/// Tests: marks a queued move as running
+#[cfg(test)]
+async fn take(st: &AppState, job: &Job) -> AppResult<Option<std::sync::Arc<runner::Control>>> {
+    runner::take_in(st, &MOVES, job).await
 }
 
-/// Takes a job off the running list when its run ends, however it ends
-struct Running<'a>(&'a AppState, String);
-
-impl Drop for Running<'_> {
-    fn drop(&mut self) {
-        self.0.part::<Moves>().running.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.1);
-        self.0.part::<Moves>().wake.notify_one();
-    }
-}
-
-/// Runs a job that was just marked as running, and records how it ended
-async fn run(st: &AppState, job: &Job, ctl: &Control) {
-    let _running = Running(st, job.id.clone());
-    let cx = Ctx { st, job, ctl };
-    let res = match prepare(&cx).await {
-        Ok(()) => match (job.from_mode, job.to_mode) {
-            (SpaceMode::Store, SpaceMode::Store) => store::run(&cx).await,
-            (SpaceMode::Folder, SpaceMode::Store) => to_store::run(&cx).await,
-            (SpaceMode::Store, SpaceMode::Folder) => to_folder::run(&cx).await,
-            (SpaceMode::Folder, SpaceMode::Folder) => between_folders::run(&cx).await,
-        },
-        Err(e) => Err(e),
-    };
-    let ended = match res {
-        Ok(Stop::Done) => Ok(()),
-        Ok(Stop::Paused) => set_state(&cx, MoveState::Paused, None).await,
-        Ok(Stop::Cancelled) => cancelled(st, job).await,
-        Err(e) => {
-            tracing::warn!("Moving the space {} failed: {}", job.space_name, e.message);
-            set_state(&cx, MoveState::Failed, Some(&e.message)).await
-        }
-    };
-    if let Err(e) = ended {
-        tracing::warn!("Couldn't record how moving the space {} ended: {}", job.space_name, e.message);
-    }
+/// Tests: runs a move that was just marked as running, and records how it ended
+#[cfg(test)]
+async fn run(st: &AppState, job: &Job, ctl: &runner::Control) {
+    runner::run_in(st, &MOVES, job, ctl).await
 }
 
 /// Before copying: the target can be reached, and a disk of this server has room for what is left to copy. A folder
@@ -623,43 +413,6 @@ pub(super) async fn check_room(st: &AppState, location: &str, bytes: i64) -> App
         ))),
         _ => Ok(()),
     }
-}
-
-/// Records that a run stopped (paused, or failed with `error`), with its progress. A move that switched the space over
-/// is done, and stays done: resuming or cancelling it would take the files it moved for copies.
-async fn set_state(cx: &Ctx<'_>, state: MoveState, error: Option<&str>) -> AppResult<()> {
-    let _w = cx.st.write_lock.lock().await;
-    let mut tx = crate::db::begin_write(&cx.st.db).await?;
-    let res = async {
-        let (files_done, bytes_done, files_total, bytes_total, failed, failures) = cx.progress();
-        let stopped = sqlx::query(
-            "UPDATE space_moves SET state = ?, error = ?, files_done = ?, bytes_done = ?, files_total = ?, bytes_total = ?, failed_items = ?,
-                                    failures = ?
-             WHERE id = ? AND state = 'running'",
-        )
-        .bind(state)
-        .bind(error)
-        .bind(files_done)
-        .bind(bytes_done)
-        .bind(files_total)
-        .bind(bytes_total)
-        .bind(failed)
-        .bind(failures)
-        .bind(&cx.job.id)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected()
-            == 1;
-        if !stopped {
-            return Ok(());
-        }
-        if let Some(error) = error {
-            log(&mut tx, cx.job, "move_failed", &format!("{}: {error}", route(cx.job))).await?;
-        }
-        AppResult::Ok(())
-    }
-    .await;
-    crate::db::settle(tx, res).await
 }
 
 /// A job asked to be cancelled while it ran: it ends as cancelled, and what it copied goes
@@ -770,17 +523,14 @@ pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<MovesL
     )))
     .fetch_all(&st.db)
     .await?;
-    let running = st.part::<Moves>().running.lock().unwrap();
     for m in &mut moves {
         m.failure_list = serde_json::from_str(&m.failures).unwrap_or_default();
-        if let Some(ctl) = running.get(&m.id) {
-            let p = ctl.progress.lock().unwrap();
-            m.speed = Some(p.rate);
-            // Fresher than the database, which is written every few seconds
-            (m.files_done, m.bytes_done, m.files_total, m.bytes_total) = (p.files_done, p.bytes_done, p.files_total, p.bytes_total);
+        // Fresher than the database, which is written every few seconds
+        if let Some((files_done, bytes_done, files_total, bytes_total, rate)) = runner::live(&st.part::<Memory>().queue, &m.id) {
+            m.speed = Some(rate);
+            (m.files_done, m.bytes_done, m.files_total, m.bytes_total) = (files_done, bytes_done, files_total, bytes_total);
         }
     }
-    drop(running);
     Ok(Json(MovesList { moves, concurrency: st.system.read().unwrap().move_jobs }))
 }
 
@@ -833,7 +583,7 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(mut req
     }
     .await;
     let ids = crate::db::settle(tx, res).await?;
-    st.part::<Moves>().wake.notify_one();
+    st.part::<Memory>().queue.wake.notify_one();
     Ok(Json(json!({ "ids": ids })))
 }
 
@@ -907,7 +657,7 @@ async fn job_for(st: &AppState, id: &str) -> AppResult<(Job, String)> {
 
 /// Pauses a move: a running one stops after the item it is copying, keeping what it copied
 pub async fn pause(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
-    if let Some(ctl) = st.part::<Moves>().running.lock().unwrap().get(&id) {
+    if let Some(ctl) = st.part::<Memory>().queue.running.lock().unwrap().get(&id) {
         ctl.pause.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
@@ -932,13 +682,13 @@ pub async fn resume(State(st): State<AppState>, _: Admin, Path(id): Path<String>
             return Err(AppError::conflict("This move can't be resumed now"));
         }
     }
-    st.part::<Moves>().wake.notify_one();
+    st.part::<Memory>().queue.wake.notify_one();
     Ok(Json(json!({ "ok": true })))
 }
 
 /// Cancels a move: the space stays where it was, and what was copied is removed
 pub async fn cancel(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
-    if let Some(ctl) = st.part::<Moves>().running.lock().unwrap().get(&id) {
+    if let Some(ctl) = st.part::<Memory>().queue.running.lock().unwrap().get(&id) {
         ctl.cancel.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
@@ -982,7 +732,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
         crate::db::settle(tx, res).await?;
     }
     st.system.write().unwrap().move_jobs = req.concurrency;
-    st.part::<Moves>().wake.notify_one();
+    st.part::<Memory>().queue.wake.notify_one();
     Ok(Json(json!({ "ok": true })))
 }
 

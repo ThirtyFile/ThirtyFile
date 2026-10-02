@@ -145,7 +145,7 @@ async fn copy_one(cx: &Ctx<'_>, dst: &Arc<dyn Storage>, hash: &str, size: i64, f
                     .bind(&job.drive_id)
                     .fetch_optional(&st.db)
                     .await?;
-                cx.failed(name.map(|(n,)| n), e.to_string());
+                cx.failed(&cx.job.drive_id, name.map(|(n,)| n), e.to_string());
                 return Ok(None);
             }
             return Err(AppError::new(axum::http::StatusCode::BAD_GATEWAY, format!("Failed to move files: {}", crate::locations::describe(&e))));

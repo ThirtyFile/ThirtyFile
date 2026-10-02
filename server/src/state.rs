@@ -51,7 +51,7 @@ pub struct Inner {
 }
 
 /// What the features keep in memory for themselves (caches, work in progress, settings loaded at startup), one value
-/// of each type: `shares::Memory`, `moves::Moves`… They are made by `app::startup::parts`, and a feature reaches its
+/// of each type: `shares::Memory`, `moves::Memory`… They are made by `app::startup::parts`, and a feature reaches its
 /// own with `st.part::<Memory>()`. `AppState` holds them without naming them, as every feature depends on it.
 #[derive(Default)]
 pub struct Parts(HashMap<TypeId, Box<dyn Any + Send + Sync>>);

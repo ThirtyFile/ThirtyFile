@@ -210,7 +210,7 @@ pub fn parts(l: Loaded) -> Parts {
         .with(branding::Memory::new(l.branding))
         .with(sso::Memory::new(l.sso))
         .with(twofactor::Memory::default())
-        .with(moves::Moves::default())
+        .with(moves::Memory::default())
         .with(backups::Memory::default())
         .with(replicas::Memory::default())
         .with(upload::Memory::default())

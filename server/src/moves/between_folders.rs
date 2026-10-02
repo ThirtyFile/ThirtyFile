@@ -325,7 +325,7 @@ async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, ignores_case: bo
             }
             if clashing.contains(&name) {
                 if last {
-                    cx.failed(Some(rel), CASE_CLASH.to_string());
+                    cx.failed(&cx.job.drive_id, Some(rel), CASE_CLASH.to_string());
                 }
                 continue;
             }
@@ -374,7 +374,7 @@ async fn copy_all(cx: &Ctx<'_>, source: &Pinned, dest: &Pinned, ignores_case: bo
                 Ok((src, dst)) => record(cx, &rel, src, dst).await?,
                 Err(Ok(stop)) => return Ok(Some(stop)),
                 Err(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(Err(e)) => cx.failed(Some(rel.clone()), disk_error(e).message),
+                Err(Err(e)) => cx.failed(&cx.job.drive_id, Some(rel.clone()), disk_error(e).message),
             }
         }
         if last {

@@ -453,6 +453,32 @@ async fn content_deleted_while_a_copy_is_being_made_is_kept_until_it_is_copied()
     }
 }
 
+/// The runner moves use too (backups/runner.rs): copies run one at a time, and one recorded as running that no task
+/// runs (its end couldn't be recorded) waits for its turn again, as a move does
+#[tokio::test]
+async fn copies_run_one_at_a_time_and_one_whose_end_couldnt_be_recorded_runs_again() {
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    env.upload(&amy, amy.root(), "a.txt", b"a").await;
+    let nas = add_nas(&env, "nas").await;
+    let (set, job) = copy_all(&env, "local", "nas").await;
+    let (_j, ctl) = take_job(&env, &job).await;
+    env.st.part::<super::Memory>().queue.running.lock().unwrap().remove(&job);
+    drop(ctl);
+    assert_eq!(state(&env, &job).await.0, "running");
+    let (_, second) = copy_all(&env, "local", "nas").await;
+    runner::start_due_in(&env.st, &runner::BACKUPS).await.unwrap();
+    assert_eq!(state(&env, &second).await.0, "queued", "one at a time");
+    for _ in 0..500 {
+        if state(&env, &job).await.0 == "done" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(state(&env, &job).await.0, "done");
+    assert_eq!(objects_in(&nas, &set).len(), 1);
+}
+
 #[tokio::test]
 async fn a_paused_copy_continues_where_it_stopped_also_after_a_restart_and_a_cancelled_one_is_removed() {
     let env = testutil::env().await;

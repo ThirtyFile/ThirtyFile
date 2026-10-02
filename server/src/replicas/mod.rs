@@ -63,6 +63,8 @@ pub struct ReplicaEngine;
 pub static REPLICAS: ReplicaEngine = ReplicaEngine;
 
 impl Engine for ReplicaEngine {
+    type Job = Job;
+
     fn queue<'a>(&self, st: &'a AppState) -> &'a Queue {
         &st.part::<Memory>().queue
     }
@@ -100,8 +102,8 @@ impl Engine for ReplicaEngine {
         })
     }
 
-    fn failed_action(&self) -> &'static str {
-        "replica_failed"
+    fn log_failure<'a>(&'a self, conn: &'a mut SqliteConnection, job: &'a Job, error: &'a str) -> BoxFuture<'a, AppResult<()>> {
+        Box::pin(async move { Ok(crate::backups::log(conn, job, "replica_failed", &format!("{}: {error}", job.label)).await?) })
     }
 }
 
