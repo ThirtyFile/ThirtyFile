@@ -123,7 +123,7 @@ export function TwoFactorDialog({ onClose }: { onClose(): void }) {
   } else if (!s.has_password) {
     body = (
       <p className="text-sm text-muted-foreground">
-        {t("You sign in with Microsoft, Google or GitHub, so there's no password here to protect. Use two-step verification in that account instead.")}
+        {t("You sign in with single sign-on (Microsoft, Google, GitHub or OpenID Connect), so there's no password here to protect. Turn on two-factor sign-in in that account instead.")}
       </p>
     );
   } else if (codes) {
@@ -262,7 +262,7 @@ export function TwoFactorDialog({ onClose }: { onClose(): void }) {
           <DialogTitle>{t("Two-factor sign-in")}</DialogTitle>
           <DialogDescription>
             {t(
-              "After your password, sign-in asks for a code from an authenticator app, so a stolen password alone isn't enough. App passwords and sign-in with Microsoft, Google or GitHub don't ask for it.",
+              "After your password, sign-in asks for a code from an authenticator app, so a stolen password alone isn't enough. App passwords and single sign-on (Microsoft, Google, GitHub or OpenID Connect) don't ask for it.",
             )}
           </DialogDescription>
         </DialogHeader>

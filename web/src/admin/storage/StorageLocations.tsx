@@ -34,7 +34,7 @@ import { ErrorState } from "@/components/ErrorState";
 import { RowMenuArea } from "@/components/RowMenuArea";
 import { LocationBrowseDialog, LocationTestDialog, UnusedContentDialog } from "@/admin/storage/StorageTools";
 import { cn, formatBytes, formatDateTime, errorMessage } from "@/lib/utils";
-import { t, tServer } from "@/lib/i18n";
+import { locale, t, tServer } from "@/lib/i18n";
 import { useSelectableList } from "@/lib/listSelection";
 import { useMoves } from "@/admin/storage/moves";
 import { MoveEverythingDialog, MovedOff, SpacesDialog } from "@/admin/storage/LocationSpaces";
@@ -241,7 +241,16 @@ export function StorageLocations() {
                       <div className="tabular-nums">{t("{free} free of {total}", { free: formatBytes(l.disk_free_bytes), total: formatBytes(l.disk_total_bytes) })}</div>
                     )}
                     <div>
-                      {t("{n} file|{n} files", { n: l.blob_count })} ·{" "}
+                      <span
+                        title={
+                          l.folder_files > 0 && l.blob_count > 0
+                            ? t("{store} in the content store, {folders} in folder spaces", { store: l.blob_count.toLocaleString(locale), folders: l.folder_files.toLocaleString(locale) })
+                            : undefined
+                        }
+                      >
+                        {t("{n} file|{n} files", { n: l.blob_count + l.folder_files })}
+                      </span>{" "}
+                      ·{" "}
                       <button
                         type="button"
                         className="underline-offset-2 hover:text-foreground hover:underline"

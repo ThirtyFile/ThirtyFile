@@ -106,6 +106,7 @@ export default {
   "{n} hour|{n} hours": "{n} 小時",
   "Time zone": "時區",
   "Next: {times}": "接下來：{times}",
+  "run::Next": "下次執行",
   "A time clocks skip when summer time starts isn't run that day; one that happens twice when it ends is run once. After the server was off, one snapshot catches up.":
     "夏令時間開始時被跳過的時間，當天不會執行；結束時重複出現的時間只執行一次。伺服器關機後再開啟時，會補做一次快照。",
   "Keeping and checking": "保留與檢查",

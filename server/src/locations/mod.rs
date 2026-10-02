@@ -210,12 +210,13 @@ mod tests {
         let local = find(BUILTIN);
         // "My files" of the administrator and Amy, and "All files"
         assert_eq!((local["drive_count"].as_i64(), local["used_bytes"].as_i64(), local["folder_bytes"].as_i64()), (Some(3), Some(16), Some(16)));
-        assert_eq!(local["blob_count"], 0);
+        // Its files are in folders, not in the content store: notes.txt and plan.txt
+        assert_eq!((local["blob_count"].as_i64(), local["folder_files"].as_i64()), (Some(0), Some(2)));
         assert!(!cfg!(any(unix, windows)) || local["disk_total_bytes"].as_u64().unwrap() > 0);
         assert!(!cfg!(any(unix, windows)) || local["disk_free_bytes"].as_u64().is_some());
         let bucket = find("bucket");
         assert_eq!((bucket["drive_count"].as_i64(), bucket["used_bytes"].as_i64(), bucket["blob_count"].as_i64()), (Some(1), Some(10), Some(1)));
-        assert_eq!(bucket["folder_bytes"], 0);
+        assert_eq!((bucket["folder_bytes"].as_i64(), bucket["folder_files"].as_i64()), (Some(0), Some(0)));
         assert!(bucket["disk_total_bytes"].is_null(), "a bucket isn't a disk of this server");
 
         // The spaces on a location: what they are and their size

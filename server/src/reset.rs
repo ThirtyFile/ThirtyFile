@@ -66,7 +66,7 @@ pub async fn forgot(
         return Err(AppError::new(axum::http::StatusCode::TOO_MANY_REQUESTS, "Too many requests. Try again in 15 minutes."));
     }
     let account = req.account.trim();
-    // Accounts that sign in with a password (not only through Microsoft, Google or GitHub) and have somewhere to send it
+    // Accounts that sign in with a password (not only through single sign-on) and have somewhere to send it
     let found: Option<(i64, String, String, String, i64)> = sqlx::query_as(
         "SELECT id, username, email, lang, tz_offset FROM users
          WHERE (username = ?1 OR (email != '' AND lower(email) = lower(?1))) AND disabled = 0 AND password_hash != ?2 AND email != ''

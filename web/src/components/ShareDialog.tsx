@@ -43,7 +43,7 @@ export function LocalLinkWarning({ admin }: { admin: boolean }) {
   return (
     <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:text-amber-300">
       {admin
-        ? t("Share links currently use a local address ({host}), so other people can't open them. Enter the site URL in Control panel › General settings.", { host: location.host })
+        ? t("Share links currently use a local address ({host}), so other people can't open them. Enter the site URL in Control panel › General.", { host: location.host })
         : t("Share links currently use a local address ({host}), so other people can't open them. Ask an administrator to set the site URL in system settings.", { host: location.host })}
     </p>
   );

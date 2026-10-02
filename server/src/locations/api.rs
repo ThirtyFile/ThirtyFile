@@ -25,6 +25,8 @@ pub struct LocationInfo {
     pub(super) folder_bytes: i64,
     /// Files in the content store there
     pub(super) blob_count: i64,
+    /// Files in the folder spaces on the location, as their index knows them (the content store doesn't hold them)
+    pub(super) folder_files: i64,
     /// Spaces on the location (`drives.location_id`), of every kind and mode
     pub(super) drive_count: i64,
     /// Locations on this server's disks (built-in and Local folder): free and total bytes of the disk holding the
@@ -74,12 +76,19 @@ pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<Lo
     )
     .await?;
     let pending = totals("SELECT location_id, COUNT(*), 0 FROM pending_blob_deletes GROUP BY location_id").await?;
+    // Folder spaces: their files, counted on the index nodes_drive (drive_id, kind, …), space by space
+    let folder_files = totals(
+        "SELECT d.location_id, COUNT(n.id), 0 FROM drives d JOIN nodes n ON n.drive_id = d.id AND n.kind = 'file'
+         WHERE d.mode = 'folder' AND d.location_id IS NOT NULL GROUP BY d.location_id",
+    )
+    .await?;
     let mut out = Vec::new();
     let mut disks = Vec::new();
     for r in rows {
         let (store_bytes, blob_count) = blobs.get(&r.id).copied().unwrap_or_default();
         let (drive_count, folder_bytes) = drives.get(&r.id).copied().unwrap_or_default();
         let pending_deletes = pending.get(&r.id).map_or(0, |d| d.0);
+        let folder_files = folder_files.get(&r.id).map_or(0, |d| d.0);
         let (mut config, has_secret) = public_config(&config_json(&r.id, &r.config));
         if r.id == BUILTIN {
             // Shown in the list; the built-in location's folder is set with THIRTYFILE_STORAGE
@@ -108,6 +117,7 @@ pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<Lo
             used_bytes: store_bytes + folder_bytes,
             folder_bytes,
             blob_count,
+            folder_files,
             drive_count,
             disk_free_bytes: None,
             disk_total_bytes: None,

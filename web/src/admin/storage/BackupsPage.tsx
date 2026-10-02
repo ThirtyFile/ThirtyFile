@@ -36,7 +36,7 @@ import { RestoreDialog } from "@/admin/storage/RestoreDialog";
 import { DRIVE_ICON } from "@/lib/drives";
 import { activeJob, BACKUP_JOB_KIND_LABEL, BACKUP_JOB_STATE_LABEL, backupSpaceLabel, completeSnapshot, useBackups } from "@/admin/storage/backups";
 import { controlPanelItem, useSettingsSearch } from "@/admin/controlPanel";
-import { t, tServer } from "@/lib/i18n";
+import { t, tc, tServer } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
 import { cn, formatBytes, formatDateTime, errorMessage } from "@/lib/utils";
 import { useSubmit } from "@/lib/useSubmit";
@@ -257,7 +257,8 @@ export function BackupsPage() {
       },
     },
     {
-      header: t("Next"),
+      // The next run, not the next page
+      header: tc("run", "Next"),
       className: "w-[150px] max-xl:hidden",
       cellClassName: "text-muted-foreground",
       cell: (s) => (s.policy?.enabled && s.policy.next_run_at ? zonedTime(s.policy.next_run_at, s.policy.tz) : s.policy?.enabled && s.policy.mode === "realtime" ? t("After changes") : "—"),
@@ -506,7 +507,7 @@ function SetDetails({ set: s, jobs, onClose }: { set: BackupSet; jobs: BackupJob
       ? ([
           [t("State"), HEALTH_LABEL[p.health.state] + (p.health.error ? ` · ${tServer(p.health.error)}` : "")],
           [t("When"), p.mode === "realtime" ? t("Soon after changes") : p.mode === "scheduled" ? t("On a schedule") : t("Soon after changes, and on a schedule")],
-          ...(p.next_run_at ? ([[t("Next"), `${zonedTime(p.next_run_at, p.tz)} (${p.tz})`]] as [string, string][]) : []),
+          ...(p.next_run_at ? ([[tc("run", "Next"), `${zonedTime(p.next_run_at, p.tz)} (${p.tz})`]] as [string, string][]) : []),
           [t("Kept"), t("{days} days, and always the newest {n}", { days: p.keep_days, n: p.keep_min })],
           ...(p.last_verify_at ? ([[t("Last checked"), formatDateTime(p.last_verify_at)]] as [string, string][]) : []),
         ] as [string, string][])

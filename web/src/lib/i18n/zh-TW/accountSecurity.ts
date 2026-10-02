@@ -22,7 +22,7 @@ export default {
   // App passwords
   "App passwords": "應用程式密碼",
   "App password": "應用程式密碼",
-  "For scripts, backup tools and file clients, including accounts that sign in with Microsoft, Google or GitHub. They work for files only, not for your account settings, sharing or administration, and don't ask for a two-factor code.": "給指令碼、備份工具與檔案用戶端使用，用 Microsoft、Google 或 GitHub 登入的帳號也可以建立。只能存取檔案，不能變更帳號設定、分享或管理，也不需要兩步驟驗證碼。",
+  "For scripts, backup tools and file clients, including accounts that use single sign-on (Microsoft, Google, GitHub or OpenID Connect). They work for files only, not for your account settings, sharing or administration, and don't ask for a two-factor code.": "給指令碼、備份工具與檔案用戶端使用，使用單一登入（Microsoft、Google、GitHub 或 OpenID Connect）的帳號也可以建立。只能存取檔案，不能變更帳號設定、分享或管理，也不需要兩步驟驗證碼。",
   "App password \"{name}\" created": "已建立應用程式密碼「{name}」",
   "Copy it now. It won't be shown again.": "請現在複製，之後不會再顯示。",
   "Send it as the header \"Authorization: Bearer <app password>\", or sign in with the username {username} and the app password as the password.": "以標頭「Authorization: Bearer <應用程式密碼>」傳送，或用帳號 {username} 搭配這組應用程式密碼當作密碼登入。",
@@ -30,8 +30,6 @@ export default {
   "Access": "權限",
   "Read files only": "只能讀取檔案",
   "Read and change files": "讀取並變更檔案",
-  "Read only": "唯讀",
-  "Read and write": "讀寫",
   "Expires": "到期",
   "In {n} day|In {n} days": "{n} 天後",
   "You have no app passwords.": "你還沒有應用程式密碼。",
@@ -47,8 +45,8 @@ export default {
   "App password removed": "移除應用程式密碼",
   // Two-factor sign-in
   "Two-factor sign-in": "兩步驟驗證",
-  "After your password, sign-in asks for a code from an authenticator app, so a stolen password alone isn't enough. App passwords and sign-in with Microsoft, Google or GitHub don't ask for it.": "輸入密碼後，登入還需要驗證器 App 產生的驗證碼，密碼外洩也無法單獨登入。應用程式密碼，以及用 Microsoft、Google 或 GitHub 登入時不需要驗證碼。",
-  "You sign in with Microsoft, Google or GitHub, so there's no password here to protect. Use two-step verification in that account instead.": "你是用 Microsoft、Google 或 GitHub 登入，這裡沒有需要保護的密碼。請改在該帳號開啟兩步驟驗證。",
+  "After your password, sign-in asks for a code from an authenticator app, so a stolen password alone isn't enough. App passwords and single sign-on (Microsoft, Google, GitHub or OpenID Connect) don't ask for it.": "輸入密碼後，登入還需要驗證器 App 產生的驗證碼，密碼外洩也無法單獨登入。應用程式密碼與單一登入（Microsoft、Google、GitHub 或 OpenID Connect）不需要驗證碼。",
+  "You sign in with single sign-on (Microsoft, Google, GitHub or OpenID Connect), so there's no password here to protect. Turn on two-factor sign-in in that account instead.": "你是用單一登入（Microsoft、Google、GitHub 或 OpenID Connect）登入，這裡沒有需要保護的密碼。請改在該帳號開啟兩步驟驗證。",
   "Signing in with your password also asks for a code from an app on your phone.": "用密碼登入時，還要輸入手機 App 上的驗證碼。",
   "{n} recovery code left|{n} recovery codes left": "剩下 {n} 組復原碼",
   "On": "已開啟",
@@ -78,7 +76,7 @@ export default {
   "For someone who lost their phone and recovery codes. Their authenticator app and recovery codes stop working, and they sign in with just their password until they set it up again (right away, if two-factor sign-in is required).": "給手機和復原碼都遺失的人使用。對方的驗證器 App 與復原碼會失效，在重新設定前只用密碼登入（如果要求使用兩步驟驗證，登入時會立即要求重新設定）。",
   "Two-factor sign-in reset": "已重設兩步驟驗證",
   "Require two-factor sign-in for password accounts": "密碼登入必須使用兩步驟驗證",
-  "Signing in with a password also asks for a code from an authenticator app. People who haven't set it up are asked to right after their password, before they get in, and can't turn it off. Sign-in with Microsoft, Google or GitHub relies on that provider, and app passwords keep working. Devices already signed in stay signed in.": "用密碼登入時，還要輸入驗證器 App 的驗證碼。尚未設定的人輸入密碼後會先被要求設定，完成後才能進入，而且不能關閉。用 Microsoft、Google 或 GitHub 登入時由該服務負責驗證，應用程式密碼也照常可用。已登入的裝置不會被登出。",
+  "Signing in with a password also asks for a code from an authenticator app. People who haven't set it up are asked to right after their password, before they get in, and can't turn it off. Sign-in with single sign-on (Microsoft, Google, GitHub or OpenID Connect) relies on that provider, and app passwords keep working. Devices already signed in stay signed in.": "用密碼登入時，還要輸入驗證器 App 的驗證碼。尚未設定的人輸入密碼後會先被要求設定，完成後才能進入，而且不能關閉。用單一登入（Microsoft、Google、GitHub 或 OpenID Connect）登入時由該服務負責驗證，應用程式密碼也照常可用。已登入的裝置不會被登出。",
   "Minimum password length": "密碼最短長度",
   "The shortest password people can choose, from 6 to 64 characters. It applies to new and changed passwords; existing passwords keep working.": "可設定的最短密碼長度，6 到 64 個字元。只套用在新設定或變更的密碼，現有密碼照常可用。",
   // Sign-in log events
