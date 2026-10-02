@@ -697,6 +697,39 @@ async fn a_folder_file_that_keeps_changing_is_kept_as_last_read_and_listed_witho
     let _ = admin;
 }
 
+#[tokio::test]
+async fn a_snapshot_reads_the_versions_of_a_space_by_its_files_and_keeps_every_one() {
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    let bob = env.user("bob", true).await;
+    // Several versions of several files, in two spaces
+    for (user, name, bodies) in
+        [(&amy, "a.txt", [&b"a0"[..], b"a1", b"a2", b"a3"]), (&amy, "b.txt", [b"b0", b"b1", b"b2", b"b3"]), (&bob, "c.txt", [b"c0", b"c1", b"c2", b"c3"])]
+    {
+        let f = env.upload(user, user.root(), name, bodies[0]).await;
+        for body in &bodies[1..] {
+            save(&env, user, &f, body).await;
+        }
+    }
+    add_nas(&env, "nas").await;
+    let (set, job) = copy_all(&env, "local", "nas").await;
+    assert_eq!(run_job(&env, &job).await, "done", "{:?}", state(&env, &job).await);
+    let (versions,): (i64,) = sqlx::query_as("SELECT versions FROM backup_snapshots WHERE set_id = ?").bind(&set).fetch_one(&env.st.db).await.unwrap();
+    let (all,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM node_versions").fetch_one(&env.st.db).await.unwrap();
+    assert_eq!((versions, all), (9, 9), "every version, once");
+    // A page goes on from the file it ended in: the space's files in id order, never every version of every space
+    let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("EXPLAIN QUERY PLAN {}", super::capture::VERSIONS_PAGE)))
+        .bind(&set)
+        .bind(env.drive_of(amy.root()).await)
+        .bind("")
+        .bind("")
+        .fetch_all(&env.st.db)
+        .await
+        .unwrap();
+    let plan = plan.into_iter().map(|r| r.3).collect::<Vec<_>>().join(" | ");
+    assert!(plan.starts_with("SEARCH n USING INDEX nodes_drive_kind_id (drive_id=? AND kind=? AND id>?)"), "{plan}");
+}
+
 /// Copies to and from S3, SFTP and FTP locations (the in-memory bucket and the test servers of sftp.rs and ftp.rs)
 #[tokio::test]
 async fn copies_go_to_s3_sftp_and_ftp_locations_and_come_back_from_them() {

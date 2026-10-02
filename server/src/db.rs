@@ -750,6 +750,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_database_from_0_4_0_reads_a_space_a_page_at_a_time() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-040-pages-{}", crate::util::new_id()));
+        let path = dir.join("drive.db");
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'amy', 'x', 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO nodes (id, owner_id, kind, name, created_at, updated_at, drive_id) VALUES ('f', 1, 'file', 'a.txt', 0, 0, 'd')")
+            .execute(&db)
+            .await
+            .unwrap();
+        db.close().await;
+
+        let db = connect(&path, 16).await.unwrap();
+        let plan = |sql: &'static str| {
+            let db = db.clone();
+            async move {
+                sqlx::query_as::<_, (i64, i64, i64, String)>(sqlx::AssertSqlSafe(format!("EXPLAIN QUERY PLAN {sql}")))
+                    .fetch_all(&db)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| r.3)
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            }
+        };
+        // A page of a space's files starts where the last one ended, in id order, without sorting
+        let page = plan("SELECT id FROM nodes WHERE drive_id = 'd' AND kind = 'file' AND id > 'a' ORDER BY id LIMIT 200").await;
+        assert!(page.contains("USING COVERING INDEX nodes_drive_kind_id (drive_id=? AND kind=? AND id>?)") && !page.contains("TEMP B-TREE"), "{page}");
+        // Copies to check again are found without reading every copy of the location
+        let recheck = plan("SELECT hash FROM replica_copies WHERE location_id = 'nas' AND state IN ('stale', 'corrupt') ORDER BY hash LIMIT 200").await;
+        assert!(recheck.contains("replica_copies_recheck"), "{recheck}");
+        // Whether some spaces use a content is answered from the index alone
+        let used = plan("SELECT 1 FROM nodes WHERE blob_hash = 'h' AND drive_id IN ('d', 'e')").await;
+        assert!(used.contains("COVERING INDEX nodes_blob (blob_hash=? AND drive_id=?)"), "{used}");
+        let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id = 'd'").fetch_one(&db).await.unwrap();
+        assert_eq!(n, 1);
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn the_database_is_only_copied_on_request_when_it_is_up_to_date() {
         let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));
         std::fs::create_dir_all(&dir).unwrap();

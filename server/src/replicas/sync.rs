@@ -14,7 +14,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use super::{SCOPE_HASHES, Target};
+use super::{SCOPE_HASHES, Target, in_scope};
 use crate::{
     backups::runner::{Ctx, Stop},
     error::{AppError, AppResult},
@@ -128,7 +128,10 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
             .bind(&location)
             .fetch_one(&st.db)
             .await?;
-    let pending = pending_count(st, &spaces, &location).await?;
+    // Counted for the progress only: not again when the target holds every change of the spaces already (each count
+    // reads every content of the spaces)
+    let unchanged = target.state == "active" && target.synced_at.is_some() && super::policy::changed(st, &policy, &location, &all).await?.is_empty();
+    let pending = if unchanged { (0, 0) } else { pending_count(st, &spaces, &location).await? };
     cx.set_counts(0, 0, recheck + pending.0, recheck_bytes + pending.1);
     cx.flush().await?;
     let mut repaired = 0i64;
@@ -172,17 +175,8 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
     let mut copied = 0i64;
     let mut last = String::new();
     loop {
-        let rows: Vec<(String, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT b.hash, b.size, b.location_id FROM blobs b
-             WHERE b.hash IN ({SCOPE_HASHES}) AND b.hash > ?3 AND b.location_id != ?2
-               AND NOT EXISTS (SELECT 1 FROM replica_copies c WHERE c.hash = b.hash AND c.location_id = ?2 AND c.state = 'verified')
-             ORDER BY b.hash LIMIT {PAGE}"
-        )))
-        .bind(serde_json::to_string(&spaces).unwrap())
-        .bind(&location)
-        .bind(&last)
-        .fetch_all(&st.db)
-        .await?;
+        let rows: Vec<(String, i64, String)> =
+            sqlx::query_as(sqlx::AssertSqlSafe(missing_page())).bind(serde_json::to_string(&spaces).unwrap()).bind(&location).bind(&last).fetch_all(&st.db).await?;
         let Some((h, ..)) = rows.last() else { break };
         last = h.clone();
         for (hash, size, primary) in rows {
@@ -282,17 +276,32 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
     Ok(Stop::Done)
 }
 
+/// Content the spaces `?1` use that the target `?2` doesn't hold a checked copy of (a condition on `blobs b`). The
+/// content is walked in hash order, with its copy on the target, both from their indexes: only content without a copy
+/// is read and looked up in the spaces' files and versions (`CASE` keeps SQLite from doing that first).
+fn missing() -> String {
+    format!(
+        "LEFT JOIN replica_copies c ON c.hash = b.hash AND c.location_id = ?2 AND c.state = 'verified'
+         WHERE b.hash > ?3 AND CASE WHEN c.hash IS NULL THEN b.location_id != ?2 AND {} ELSE 0 END",
+        in_scope("b.hash")
+    )
+}
+
+/// A page of the content the spaces `?1` use that the target `?2` doesn't hold a checked copy of, after the hash `?3`:
+/// (hash, size, where it is kept). A page reads about as many contents as it returns, and a target that holds
+/// everything is gone through once, from the indexes.
+pub(super) fn missing_page() -> String {
+    format!("SELECT b.hash, b.size, b.location_id FROM blobs b {} ORDER BY b.hash LIMIT {PAGE}", missing())
+}
+
 /// Content left to copy to the target: how many, and their bytes
 async fn pending_count(st: &AppState, spaces: &[String], location: &str) -> AppResult<(i64, i64)> {
-    Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT COUNT(*), COALESCE(SUM(b.size), 0) FROM blobs b
-         WHERE b.hash IN ({SCOPE_HASHES}) AND b.location_id != ?2
-           AND NOT EXISTS (SELECT 1 FROM replica_copies c WHERE c.hash = b.hash AND c.location_id = ?2 AND c.state = 'verified')"
-    )))
-    .bind(serde_json::to_string(spaces).unwrap())
-    .bind(location)
-    .fetch_one(&st.db)
-    .await?)
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT COUNT(*), COALESCE(SUM(b.size), 0) FROM blobs b {}", missing())))
+        .bind(serde_json::to_string(spaces).unwrap())
+        .bind(location)
+        .bind("")
+        .fetch_one(&st.db)
+        .await?)
 }
 
 /// Copies one content to the target and records it: Ok(true) when copied, Ok(false) when there was nothing to do
@@ -427,11 +436,15 @@ pub async fn release(st: &AppState, location: &str) -> AppResult<i64> {
     for (p,) in policies {
         spaces.extend(super::store_scope(&mut *st.db.acquire().await?, &p).await?);
     }
-    // Content of a folder space's current files stays, whatever policy took it: its folder may be the one that failed
+    // Content whose primary is there now (few: from the location's own content), and content no policy's spaces use
+    // (deleted for good included); content of a folder space's current files stays, whatever policy took it: its
+    // folder may be the one that failed
     let unused: Vec<(String,)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT c.hash FROM replica_copies c LEFT JOIN blobs b ON b.hash = c.hash
-         WHERE c.location_id = ?2 AND (b.hash IS NULL OR b.location_id = ?2 OR c.hash NOT IN ({SCOPE_HASHES}))
-           AND c.hash NOT IN ({})",
+        "SELECT hash FROM (
+           SELECT b.hash FROM blobs b WHERE b.location_id = ?2 AND EXISTS (SELECT 1 FROM replica_copies c WHERE c.hash = b.hash AND c.location_id = ?2)
+           UNION SELECT c.hash FROM replica_copies c WHERE c.location_id = ?2 AND NOT {})
+         WHERE hash NOT IN ({})",
+        in_scope("c.hash"),
         super::folders::current_hashes(None)
     )))
     .bind(serde_json::to_string(&spaces).unwrap())

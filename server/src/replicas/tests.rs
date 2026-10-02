@@ -199,6 +199,32 @@ async fn a_space_deleted_before_its_changes_were_synced_leaves_no_target_behind(
 }
 
 #[tokio::test]
+async fn a_sync_reads_the_content_a_page_at_a_time_and_an_idle_look_takes_no_write_lock() {
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    env.upload(&amy, amy.root(), "a.txt", b"amy's").await;
+    add_nas(&env, "nas").await;
+    let id = make(&env, json!({ "source": "local", "targets": [{ "location": "nas" }] })).await;
+    assert_eq!(settle(&env, &id).await, ["done"]);
+    // A page of what to copy goes on in hash order from where the last one ended, each content looked up in the
+    // spaces: the content of the spaces isn't gathered again for every page
+    let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("EXPLAIN QUERY PLAN {}", super::sync::missing_page())))
+        .bind("[]")
+        .bind("nas")
+        .bind("")
+        .fetch_all(&env.st.db)
+        .await
+        .unwrap();
+    let plan = plan.into_iter().map(|r| r.3).collect::<Vec<_>>().join(" | ");
+    assert!(plan.contains("SEARCH b USING INDEX sqlite_autoindex_blobs_1 (hash>?)") && !plan.contains("UNION"), "{plan}");
+    // Nothing to do: a look at the policy takes no write lock (it is held here, so one taken would wait)
+    let held = env.st.write_lock.lock().await;
+    let look = tokio::time::timeout(std::time::Duration::from_secs(10), policy::tick(&env.st, crate::util::now())).await;
+    drop(held);
+    look.expect("an idle look waited for the write lock").unwrap();
+}
+
+#[tokio::test]
 async fn changes_are_copied_soon_after_and_content_nothing_uses_lets_go_of_its_copy() {
     let env = testutil::env().await;
     let amy = env.user("amy", true).await;

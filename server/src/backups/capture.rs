@@ -485,6 +485,17 @@ struct FileRow {
     f_held: bool,
 }
 
+/// A page of the earlier versions of a space's (`?2`) files, after the file `?3` and its version `?4`, with what the set
+/// (`?1`) holds of them
+pub(super) const VERSIONS_PAGE: &str =
+    "SELECT v.id, v.node_id, v.blob_hash, v.fs_path, v.size, v.modified_at, v.created_at, v.author_name, n.parent_id, n.name, n.trashed_at,
+            (SELECT location_id FROM blobs WHERE hash = v.blob_hash) AS location,
+            EXISTS (SELECT 1 FROM backup_objects o WHERE o.set_id = ?1 AND o.hash = v.blob_hash) AS held,
+            f.hash AS f_hash, f.path AS f_path, f.size AS f_size,
+            EXISTS (SELECT 1 FROM backup_objects o WHERE o.set_id = ?1 AND o.hash = f.hash) AS f_held
+     FROM nodes n JOIN node_versions v ON v.node_id = n.id LEFT JOIN backup_folder_files f ON f.set_id = ?1 AND f.item_id = v.id
+     WHERE n.drive_id = ?2 AND n.kind = 'file' AND n.id >= ?3 AND (n.id > ?3 OR v.id > ?4) ORDER BY n.id, v.id LIMIT 1000";
+
 #[derive(sqlx::FromRow)]
 struct VersionRow {
     id: String,
@@ -724,24 +735,13 @@ async fn write_manifest(cx: &Ctx<'_>, set: &Set, snapshot: &str, p: &Params, set
             }
         }
         if p.versions {
-            let mut last = String::new();
+            // A page at a time by file, then version: the space's files in id order from where the last page ended
+            // (never every version of every space)
+            let (mut last_file, mut last) = (String::new(), String::new());
             loop {
-                let rows: Vec<VersionRow> = sqlx::query_as(
-                    "SELECT v.id, v.node_id, v.blob_hash, v.fs_path, v.size, v.modified_at, v.created_at, v.author_name, n.parent_id, n.name, n.trashed_at,
-                            (SELECT location_id FROM blobs WHERE hash = v.blob_hash) AS location,
-                            EXISTS (SELECT 1 FROM backup_objects o WHERE o.set_id = ?1 AND o.hash = v.blob_hash) AS held,
-                            f.hash AS f_hash, f.path AS f_path, f.size AS f_size,
-                            EXISTS (SELECT 1 FROM backup_objects o WHERE o.set_id = ?1 AND o.hash = f.hash) AS f_held
-                     FROM node_versions v JOIN nodes n ON n.id = v.node_id LEFT JOIN backup_folder_files f ON f.set_id = ?1 AND f.item_id = v.id
-                     WHERE n.drive_id = ?2 AND v.id > ?3 ORDER BY v.id LIMIT 1000",
-                )
-                .bind(&set.id)
-                .bind(&s.id)
-                .bind(&last)
-                .fetch_all(&mut *tx)
-                .await?;
+                let rows: Vec<VersionRow> = sqlx::query_as(VERSIONS_PAGE).bind(&set.id).bind(&s.id).bind(&last_file).bind(&last).fetch_all(&mut *tx).await?;
                 let Some(r) = rows.last() else { break };
-                last = r.id.clone();
+                (last_file, last) = (r.node_id.clone(), r.id.clone());
                 for r in rows {
                     let Some(parent) = r.parent_id.as_deref().and_then(|id| placed.get(id)) else { continue };
                     if r.trashed_at.or(parent.trashed).is_some() && !p.trash {
