@@ -436,7 +436,7 @@ pub async fn login_code(
     if accepted == Accepted::Recovery {
         logs::record_login(&st, Some(user_id), &username, "recovery_code_used", &ip, &headers);
     }
-    auth::finish_login(&st, user_id, &username, &ip, &headers, codes).await
+    crate::signin::finish_login(&st, user_id, &username, &ip, &headers, codes).await
 }
 
 // ───────────── My two-factor sign-in ─────────────
@@ -463,7 +463,7 @@ pub async fn status(State(st): State<AppState>, user: User) -> AppResult<Json<St
     .fetch_one(&st.db)
     .await?;
     let required = st.system.read().unwrap().require_two_factor;
-    Ok(Json(Status { enabled, recovery_codes_left: left, required, has_password: hash != crate::sso::NO_PASSWORD }))
+    Ok(Json(Status { enabled, recovery_codes_left: left, required, has_password: hash != crate::auth::NO_PASSWORD }))
 }
 
 #[derive(Deserialize)]
@@ -478,7 +478,7 @@ pub struct PasswordReq {
 /// Starts setting up (or replacing the authenticator app): after the password, a new secret to add to the app
 pub async fn start_setup(State(st): State<AppState>, user: User, Json(req): Json<PasswordReq>) -> AppResult<Json<Value>> {
     let (hash,): (String,) = sqlx::query_as("SELECT password_hash FROM users WHERE id = ?").bind(user.id).fetch_one(&st.db).await?;
-    if hash == crate::sso::NO_PASSWORD {
+    if hash == crate::auth::NO_PASSWORD {
         return Err(AppError::bad_request("This account has no password: it signs in with single sign-on, whose own two-factor sign-in applies."));
     }
     auth::confirm_password(&st, user.id, req.password).await?;
@@ -593,7 +593,7 @@ pub async fn admin_reset(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::{auth::LoginReq, testutil};
+    use crate::{signin::LoginReq, testutil};
 
     fn addr() -> ConnectInfo<SocketAddr> {
         ConnectInfo("203.0.113.9:5000".parse().unwrap())
@@ -606,7 +606,7 @@ pub(crate) mod tests {
 
     async fn login(env: &testutil::TestEnv, name: &str) -> Response {
         let req = LoginReq { username: name.into(), password: testutil::password().into() };
-        auth::login(State(env.st.clone()), addr(), HeaderMap::new(), Json(req)).await.unwrap()
+        crate::signin::login(State(env.st.clone()), addr(), HeaderMap::new(), Json(req)).await.unwrap()
     }
 
     async fn code(env: &testutil::TestEnv, ticket: &str, code: &str) -> Result<Response, AppError> {
@@ -785,7 +785,7 @@ pub(crate) mod tests {
     async fn accounts_without_a_password_have_nothing_to_set_up() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
-        sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?").bind(crate::sso::NO_PASSWORD).bind(amy.id).execute(&env.st.db).await.unwrap();
+        sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?").bind(crate::auth::NO_PASSWORD).bind(amy.id).execute(&env.st.db).await.unwrap();
         let err = start_setup(State(env.st.clone()), amy.clone(), Json(PasswordReq { password: String::new(), code: None })).await.unwrap_err();
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
         let Json(s) = status(State(env.st.clone()), amy).await.unwrap();
@@ -803,7 +803,7 @@ pub(crate) mod tests {
         let token = v["token"].as_str().unwrap();
         let req = axum::http::Request::builder().header(axum::http::header::AUTHORIZATION, format!("Bearer {token}")).body(()).unwrap();
         let (mut parts, _) = req.into_parts();
-        parts.extensions.insert(crate::tokens::AllowAppPasswords);
+        parts.extensions.insert(crate::auth::app_passwords::AllowAppPasswords);
         assert_eq!(User::from_request_parts(&mut parts, &env.st).await.unwrap().id, amy.id);
     }
 }

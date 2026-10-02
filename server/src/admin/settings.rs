@@ -214,7 +214,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
                        AND user_id IN (SELECT id FROM users WHERE totp_secret IS NULL AND password_hash != ?)",
                 )
                 .bind(&user.session_id)
-                .bind(crate::sso::NO_PASSWORD)
+                .bind(crate::auth::NO_PASSWORD)
                 .execute(&mut *tx)
                 .await?;
             }

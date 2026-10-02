@@ -45,7 +45,7 @@ use sqlx::SqliteConnection;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
-    auth::User,
+    auth::{self, User},
     content,
     error::{AppError, AppResult},
     files,
@@ -53,7 +53,6 @@ use crate::{
     logs, nodes,
     paths::{Found, SHARED, Target, child_named, resolve, tops},
     state::AppState,
-    tokens,
     tree::{self, Need, Node},
     util::{new_id, now, numbered_name, validate_name},
 };
@@ -117,8 +116,8 @@ fn options() -> Response {
 
 /// Signs the request in with its app password (a missing or wrong one is answered with a sign-in challenge)
 async fn authenticate(st: &AppState, parts: &Parts) -> AppResult<User> {
-    let credential = tokens::credential(&parts.headers).ok_or_else(AppError::unauthorized)?;
-    tokens::authenticate(parts, st, credential).await
+    let credential = auth::app_passwords::credential(&parts.headers).ok_or_else(AppError::unauthorized)?;
+    auth::app_passwords::authenticate(parts, st, credential).await
 }
 
 fn challenge() -> Response {
@@ -197,7 +196,10 @@ async fn trash(st: &AppState, user: &User, id: &str) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::{self, TestEnv};
+    use crate::{
+        testutil::{self, TestEnv},
+        tokens,
+    };
     use axum::{Router, extract::ConnectInfo};
     use tower::ServiceExt;
 

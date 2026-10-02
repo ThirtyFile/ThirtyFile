@@ -39,6 +39,7 @@ mod secrets;
 mod sessions;
 mod settings;
 mod shares;
+mod signin;
 mod space_folders;
 mod sso;
 mod state;

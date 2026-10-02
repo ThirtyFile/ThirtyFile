@@ -153,7 +153,7 @@ impl TestEnv {
     pub async fn sign_in(&self, user: &User, agent: &str) -> (User, String) {
         let mut headers = axum::http::HeaderMap::new();
         headers.insert(axum::http::header::USER_AGENT, agent.parse().unwrap());
-        let set = auth::open_session(&self.st, user.id, "password", "10.0.0.1", &headers).await.unwrap();
+        let set = crate::signin::open_session(&self.st, user.id, "password", "10.0.0.1", &headers).await.unwrap();
         let cookie = set.split(';').next().unwrap().to_string();
         let session = self.session_user(&cookie).await.expect("a new session works");
         (session, cookie)

@@ -858,7 +858,7 @@ mod tests {
             disabled: None,
         };
         assert!(super::update(State(env.st.clone()), Admin(admin), Path(amy.id), Json(update)).await.is_err());
-        let Json(me) = crate::auth::me(State(env.st.clone()), amy).await.unwrap();
+        let Json(me) = crate::signin::me(State(env.st.clone()), amy).await.unwrap();
         assert_eq!(me.min_password_length, 12);
     }
 
@@ -881,7 +881,7 @@ mod tests {
         assert_eq!(info.public_url, "https://drive.example.com");
         assert_eq!(crate::settings::load_system_settings(&env.st.db).await.unwrap().public_url, "https://drive.example.com");
         let amy = env.user("amy", true).await;
-        let Json(me) = crate::auth::me(State(env.st.clone()), amy).await.unwrap();
+        let Json(me) = crate::signin::me(State(env.st.clone()), amy).await.unwrap();
         assert_eq!(me.public_url, "https://drive.example.com");
     }
 
