@@ -10,8 +10,9 @@
 //     language has (Intl.PluralRules: Chinese and Japanese have one)
 // Missing (1, 4) and left-over (5) entries fail the check for the languages that must be complete (COMPLETE, and
 // --require); for the others they are reported only. Every language offered to people (`ready` in src/lib/i18n.ts) must
-// be complete. Entries still holding their placeholder (the Traditional Chinese text in zh-CN, the English text in ja)
-// are counted, as a measure of what is left to translate.
+// be complete. In a language that isn't complete yet, entries still holding their placeholder (the Traditional Chinese
+// text in zh-CN, the English text in ja) are counted, as a measure of what is left to translate; once it is complete,
+// such an entry is a translation that is written the same (a word spelled alike in both Chinese scripts, "OK" in Japanese).
 // Usage: node scripts/check-i18n.mjs [--files path,path] [--lenient] [--require lang,lang]
 //   --files    only check the given files (for 1 and 3)
 //   --lenient  skip comments (only report Chinese in code); the default is strict
@@ -21,7 +22,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** Languages whose dictionaries must be complete: a new English text needs their translation in the same change */
-const COMPLETE = ["zh-TW"];
+const COMPLETE = ["zh-TW", "zh-CN", "ja"];
 
 const toPath = (u) => fileURLToPath(new URL(u, import.meta.url));
 const web = toPath("../");
@@ -237,7 +238,8 @@ function check(lang) {
     const extra = [...params(value)].filter((p) => !params(english).has(p));
     if (extra.length) misfits.push(`${file}: ${key}: {${extra.join("}, {")}} isn't a parameter of the English text`);
     if (value.split("|").length > categories) misfits.push(`${file}: ${key}: more plural forms than ${lang} has (${categories})`);
-    // Still the placeholder: the English text in ja, the Traditional Chinese text in zh-CN
+    // Still the placeholder: the English text in ja, the Traditional Chinese text in zh-CN (until the language is complete)
+    if (required.has(lang)) continue;
     if (lang === "ja" && /[A-Za-z]/.test(value) && english.split("|").includes(value)) placeholders++;
     if (lang === "zh-CN" && cjk.test(value) && base?.get(key)?.value === value) placeholders++;
   }
