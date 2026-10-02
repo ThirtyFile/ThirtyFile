@@ -615,6 +615,55 @@ pub(crate) async fn finish(conn: &mut SqliteConnection, cx: &Ctx<'_>, note: Opti
     Ok(())
 }
 
+// ───────────── History ─────────────
+
+/// Finished jobs (done or cancelled) are kept this many days as their history…
+pub const HISTORY_DAYS: i64 = 90;
+/// …the newest of each set, replica target or space whatever their age…
+pub const HISTORY_MIN: i64 = 20;
+/// …and never more than this many of each (a replica target synced soon after every change makes many)
+pub const HISTORY_MAX: i64 = 1000;
+/// Jobs deleted per transaction
+const TRIM_BATCH: usize = 1000;
+
+/// Deletes finished jobs past the history kept, of backups/, replicas/ and moves/: returns how many
+pub async fn trim_histories(st: &AppState) -> AppResult<u64> {
+    let t = now();
+    let mut n = 0;
+    for (table, group) in [("backup_jobs", "set_id"), ("replica_jobs", "policy_id, location_id"), ("space_moves", "drive_id")] {
+        n += trim_history(st, table, group, t).await?;
+    }
+    Ok(n)
+}
+
+/// Deletes the finished jobs of `table` past the history kept as of `t`, its jobs grouped by `group`
+async fn trim_history(st: &AppState, table: &str, group: &str, t: i64) -> AppResult<u64> {
+    let ids: Vec<String> = sqlx::query_as::<_, (String,)>(sqlx::AssertSqlSafe(format!(
+        "SELECT id FROM (
+           SELECT id, COALESCE(finished_at, created_at) AS ended, ROW_NUMBER() OVER (PARTITION BY {group} ORDER BY created_at DESC, rowid DESC) AS r
+           FROM {table} WHERE state IN ('done', 'cancelled'))
+         WHERE r > ?1 OR (r > ?2 AND ended < ?3)"
+    )))
+    .bind(HISTORY_MAX)
+    .bind(HISTORY_MIN)
+    .bind(t - HISTORY_DAYS * 86400)
+    .fetch_all(&st.db)
+    .await?
+    .into_iter()
+    .map(|(id,)| id)
+    .collect();
+    let mut deleted = 0;
+    for chunk in ids.chunks(TRIM_BATCH) {
+        let _w = st.write_lock.lock().await;
+        deleted += sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table} WHERE id IN (SELECT value FROM json_each(?)) AND state IN ('done', 'cancelled')")))
+            .bind(serde_json::to_string(chunk).unwrap())
+            .execute(&st.db)
+            .await?
+            .rows_affected();
+    }
+    Ok(deleted)
+}
+
 /// The progress of a running job, fresher than the database (written every few seconds): files and bytes done and in
 /// all, and the speed
 pub(crate) fn live(q: &Queue, id: &str) -> Option<(i64, i64, i64, i64, f64)> {

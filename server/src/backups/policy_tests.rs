@@ -383,3 +383,75 @@ async fn a_space_deleted_before_its_changes_were_backed_up_stops_counting_as_wai
         assert_eq!(n, 0, "{table}");
     }
 }
+
+#[tokio::test]
+async fn finished_jobs_are_kept_for_a_while_and_the_newest_of_each_whatever_their_age() {
+    let env = testutil::env().await;
+    let t = crate::util::now();
+    let day = 86400;
+    let db = &env.st.db;
+    // A backup set: 30 jobs from 100 days ago, 1100 from the last few days, and a failed one from a year ago (it can
+    // still be resumed)
+    for i in 0..1130i64 {
+        let at = if i < 30 { t - 100 * day + i } else { t - 3 * day + i };
+        sqlx::query("INSERT INTO backup_jobs (id, kind, set_id, state, created_at, finished_at) VALUES (?, 'snapshot', 'set', 'done', ?, ?)")
+            .bind(format!("b{i:05}"))
+            .bind(at)
+            .bind(at + 1)
+            .execute(db)
+            .await
+            .unwrap();
+    }
+    sqlx::query("INSERT INTO backup_jobs (id, kind, set_id, state, created_at) VALUES ('failed', 'snapshot', 'set', 'failed', ?)")
+        .bind(t - 365 * day)
+        .execute(db)
+        .await
+        .unwrap();
+    // Another set ran 5 jobs long ago: all kept, being its newest
+    for i in 0..5i64 {
+        sqlx::query("INSERT INTO backup_jobs (id, kind, set_id, state, created_at, finished_at) VALUES (?, 'verify', 'other', 'cancelled', ?, NULL)")
+            .bind(format!("o{i}"))
+            .bind(t - 200 * day + i)
+            .execute(db)
+            .await
+            .unwrap();
+    }
+    // Replica targets: 40 old syncs of one target, 40 old of another; moves of a space: 30 old
+    for (i, target) in (0..80i64).map(|i| (i, if i < 40 { "nas" } else { "usb" })) {
+        sqlx::query("INSERT INTO replica_jobs (id, kind, policy_id, location_id, state, created_at, finished_at) VALUES (?, 'sync', 'p', ?, 'done', ?, ?)")
+            .bind(format!("r{i:03}"))
+            .bind(target)
+            .bind(t - 100 * day + i)
+            .bind(t - 100 * day + i)
+            .execute(db)
+            .await
+            .unwrap();
+    }
+    for i in 0..30i64 {
+        sqlx::query(
+            "INSERT INTO space_moves (id, drive_id, space_name, space_kind, from_mode, to_location, to_mode, state, created_at, finished_at)
+             VALUES (?, 'd', 'Sales', 'team', 'store', 'nas', 'store', 'done', ?, ?)",
+        )
+        .bind(format!("m{i:02}"))
+        .bind(t - 100 * day + i)
+        .bind(t - 100 * day + i)
+        .execute(db)
+        .await
+        .unwrap();
+    }
+    let deleted = runner::trim_histories(&env.st).await.unwrap();
+    let count = |sql: &'static str| async move { sqlx::query_as::<_, (i64,)>(sql).fetch_one(db).await.unwrap().0 };
+    // The set: its newest 1000, all of the last 90 days; the old ones beyond the newest 20 go; the failed one stays
+    assert_eq!(count("SELECT COUNT(*) FROM backup_jobs WHERE set_id = 'set' AND state = 'done'").await, runner::HISTORY_MAX);
+    assert_eq!(count("SELECT COUNT(*) FROM backup_jobs WHERE set_id = 'set' AND state = 'done' AND id < 'b00030'").await, 0);
+    assert_eq!(count("SELECT COUNT(*) FROM backup_jobs WHERE id = 'failed'").await, 1);
+    assert_eq!(count("SELECT COUNT(*) FROM backup_jobs WHERE set_id = 'other'").await, 5);
+    // Each replica target and each space keeps its newest 20
+    assert_eq!(count("SELECT COUNT(*) FROM replica_jobs WHERE location_id = 'nas'").await, runner::HISTORY_MIN);
+    assert_eq!(count("SELECT COUNT(*) FROM replica_jobs WHERE location_id = 'usb'").await, runner::HISTORY_MIN);
+    assert_eq!(count("SELECT COUNT(*) FROM replica_jobs WHERE location_id = 'nas' AND id >= 'r020'").await, runner::HISTORY_MIN, "the newest");
+    assert_eq!(count("SELECT COUNT(*) FROM space_moves").await, runner::HISTORY_MIN);
+    assert_eq!(deleted, 130 + 2 * 20 + 10);
+    // Nothing more the next time
+    assert_eq!(runner::trim_histories(&env.st).await.unwrap(), 0);
+}
