@@ -10,6 +10,8 @@ import { focusIsFree } from "@/lib/focus";
 import type { GroupBy } from "@/lib/listView";
 import { inSpan, spanCount, type FolderSpan, type ListSpan, type Picked } from "@/lib/span";
 import { usePersisted, useMe } from "@/lib/session";
+import { useUndoLabel } from "@/lib/undo";
+import { useWindowsBehaviour } from "@/lib/windowsBehaviour";
 import { useTabActions } from "@/tabs";
 import type { DialogState } from "./types";
 import type { ExplorerProps } from "../Explorer";
@@ -35,6 +37,12 @@ export function useExplorerState(p: ExplorerProps) {
   const fileInput = useRef<HTMLInputElement>(null);
   const dirInput = useRef<HTMLInputElement>(null);
   const listNav = useRef<ListNav>(null);
+  /** The area around the list, whose context menu is the one for empty space */
+  const area = useRef<HTMLDivElement>(null);
+  /** The File Explorer conventions followed (lib/windowsBehaviour) */
+  const behaviour = useWindowsBehaviour();
+  /** What Ctrl+Z would take back, as a menu names it ("Undo delete"); null when nothing */
+  const undoLabel = useUndoLabel();
 
   // New folder and paste only touch the database; uploading and creating files need to write to the storage service, so they're disabled while offline
   const canCreate = !!p.folderId && caps.write;
@@ -155,6 +163,9 @@ export function useExplorerState(p: ExplorerProps) {
     fileInput,
     dirInput,
     listNav,
+    area,
+    behaviour,
+    undoLabel,
     enteredByKey,
     renameWhenShown,
     canCreate,

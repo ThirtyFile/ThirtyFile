@@ -160,7 +160,7 @@ export function FileList(p: FileListProps) {
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- only when renaming starts, not while the list reloads
   }, [p.renamingId, renamingShown]);
 
-  const { focusItem, rangeTo, toggle, keyNav, keyMenu } = useListKeyboard({
+  const { focusItem, rangeTo, toggle, keyNav } = useListKeyboard({
     p,
     items,
     n,
@@ -214,12 +214,6 @@ export function FileList(p: FileListProps) {
     focused: setFocusId,
     // Right-clicking an unselected item selects only that item
     contextMenu: (e, index) => {
-      // The browser's own menu event after Shift+F10 or the Menu key, which already opened the menu
-      if (e.nativeEvent.isTrusted && Date.now() < keyMenu.current) {
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
       if (press.current) {
         // Android reports a long press as a right-click too: the long press handles it
         if (!p.touchMenu) {

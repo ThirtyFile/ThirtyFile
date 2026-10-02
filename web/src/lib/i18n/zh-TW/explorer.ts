@@ -53,7 +53,9 @@ export default {
   "Share with…": "共用給…",
   "Create share link": "建立分享連結",
   "Delete": "刪除",
+  "Common actions": "常用動作",
   "Sort": "排序",
+  "Sort by": "排序方式",
   "Ascending": "遞增",
   "Descending": "遞減",
   "View": "檢視",
@@ -76,6 +78,8 @@ export default {
   "Invert selection": "反向選取",
   "New folder": "新增資料夾",
   "New text document": "新增文字檔",
+  // The New submenu of the empty space's menu
+  "Text document": "文字檔",
   "Upload files": "上傳檔案",
   "Upload folder": "上傳資料夾",
   "Storage service offline. You can't upload or create files right now.": "儲存服務離線，暫時無法上傳或新增檔案",

@@ -7,6 +7,7 @@ import type { FileListProps } from "@/components/FileList";
 import { HEAD, PAD, ROW, type Item, type Layout, type TILED } from "@/components/fileList/layout";
 import { pageRows } from "@/lib/listView";
 import { findByPrefix } from "@/lib/keys";
+import { isMenuKey, menuPointOf, openMenuByKey } from "@/lib/contextMenus";
 import type { ListSpan } from "@/lib/span";
 
 /** What the list knows that its keyboard handling works with */
@@ -32,8 +33,7 @@ export interface ListKeyboard {
 
 /**
  * The list's keyboard handling: `keyNav` for a row's keys, `toggle` and `rangeTo` for clicks with Ctrl and Shift too,
- * `focusItem`, and `keyMenu` (when a context menu was just opened from the keyboard). Also answers the explorer's
- * `navRef` (typing to find an item, showing one).
+ * and `focusItem`. Also answers the explorer's `navRef` (typing to find an item, showing one).
  */
 export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, root, grid, tile, scroller, focusId, setFocusId, tabStop }: ListKeyboard) {
   const pendingFocus = useRef<string | null>(null);
@@ -145,28 +145,6 @@ export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, 
     return at;
   };
 
-  /** Shift+F10 or the Menu key: open the context menu at the item, as right-clicking it does (browsers don't all do it for a focused row) */
-  const keyMenu = useRef(0);
-  const openMenu = (el: HTMLElement) => {
-    const r = (el.querySelector("[data-drag-handle]") ?? el).getBoundingClientRect();
-    keyMenu.current = Date.now() + 500;
-    el.dispatchEvent(new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: r.left + Math.min(r.width / 2, 100), clientY: r.top + r.height / 2 }));
-    // A menu opened like a right-click leaves the focus on the row: move it into the menu, so the arrow keys go through its items
-    setTimeout(() => {
-      const menu = document.querySelector<HTMLElement>("[role=menu][data-open]");
-      if (!menu) return;
-      menu.focus();
-      // Closed without doing anything that takes the focus (a dialog, the rename box): it goes back to the row, not the list around it
-      const back = new MutationObserver(() => {
-        if (menu.isConnected) return;
-        back.disconnect();
-        const at = document.activeElement;
-        if (el.isConnected && (!at || at === document.body || !at.closest("[role=menu], [role=dialog], input, textarea"))) el.focus({ preventScroll: true });
-      });
-      back.observe(document.body, { childList: true, subtree: true });
-    }, 30);
-  };
-
   /**
    * Keyboard: arrows move the selection (Shift extends it, Ctrl moves only the focus), Space selects (toggles with Ctrl),
    * Home/End and PageUp/PageDown jump, Enter opens, Shift+F10 or the Menu key opens the context menu
@@ -180,9 +158,10 @@ export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, 
       p.onOpen(current, true);
       return;
     }
-    if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey)) {
+    // Shift+F10 or the Menu key: the item's context menu, as right-clicking it opens
+    if (isMenuKey(e)) {
       e.preventDefault();
-      openMenu(e.currentTarget);
+      openMenuByKey(e.currentTarget, menuPointOf(e.currentTarget));
       return;
     }
     // Alt+arrows move around folders (handled by the address bar)
@@ -242,5 +221,5 @@ export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, 
   const scrollTo = (index: number) => index >= 0 && index < n && v.scrollToIndex(rowOf(index), { align: "center" });
   if (p.navRef) p.navRef.current = { typeAhead, show, focusStart, scrollTo };
 
-  return { focusItem, rangeTo, toggle, keyNav, keyMenu };
+  return { focusItem, rangeTo, toggle, keyNav };
 }

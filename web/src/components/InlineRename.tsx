@@ -88,6 +88,7 @@ export function InlineRename({
     value,
     disabled: busy,
     "aria-label": t("New name"),
+    "data-rename-box": true,
     spellCheck: false,
     onChange: (e: { target: { value: string } }) => setValue(e.target.value.replace(/[\r\n]/g, "")),
     onKeyDown,

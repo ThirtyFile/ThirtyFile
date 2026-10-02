@@ -7,13 +7,9 @@ import {
   EllipsisIcon,
   FolderInputIcon,
   Columns3Icon,
-  Grid2X2Icon,
-  Grid3X3Icon,
   GroupIcon,
   KeyboardIcon,
-  LayoutGridIcon,
   LayoutListIcon,
-  ListIcon,
   PanelRightIcon,
   PencilIcon,
   PlusCircleIcon,
@@ -25,17 +21,13 @@ import {
   Trash2Icon,
   UsersRoundIcon,
   XSquareIcon,
-  type LucideIcon,
 } from "lucide-react";
-import type { SortKey, SortOrder } from "@/api";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -43,7 +35,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ColumnChoices, listColumns } from "@/components/fileList/columns";
-import type { ViewMode } from "@/components/fileList/layout";
 import { ToolButton, ToolSeparator } from "@/components/Frame";
 import { openShortcuts } from "@/components/ShortcutsDialog";
 import { shortcut } from "@/lib/keys";
@@ -52,30 +43,8 @@ import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
 import type { ExplorerActions } from "./actions";
 import { Kbd } from "./ui";
+import { GroupChoices, SortChoices, ViewChoices } from "./viewChoices";
 import { t } from "@/lib/i18n";
-import type { GroupBy } from "@/lib/listView";
-
-const SORTS: [SortKey, string][] = [
-  ["name", t("Name")],
-  ["updated", t("Date modified")],
-  ["created", t("Date created")],
-  ["type", t("Type")],
-  ["size", t("Size")],
-];
-
-const VIEWS: [ViewMode, LucideIcon, string][] = [
-  ["grid", Grid2X2Icon, t("Large icons")],
-  ["medium", Grid3X3Icon, t("Medium icons")],
-  ["compact", LayoutListIcon, t("List")],
-  ["list", ListIcon, t("Details")],
-  ["tiles", LayoutGridIcon, t("Tiles")],
-];
-
-const GROUPS: [GroupBy, string][] = [
-  ["none", t("(None)")],
-  ["type", t("Type")],
-  ["date", t("Date modified")],
-];
 
 export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerActions, newItems: React.ReactNode) {
   const { caps, canCreate, single, allFavorite, view, setView, groupBy, setGroupBy, setSelected, setDialog, showCheckboxes, setShowCheckboxes, detailsOpen, setDetailsOpen } = s;
@@ -138,49 +107,21 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
         <DropdownMenu>
           <DropdownMenuTrigger render={<ToolButton icon={ArrowDownUpIcon} label={t("Sort")} showLabel phoneLabel className="h-9 px-2.5 text-[13px]" />} />
           <DropdownMenuContent className="w-44">
-            {/* Radio items, so screen readers say which one is chosen */}
-            <DropdownMenuRadioGroup value={p.sort.key} onValueChange={(k) => p.onSortChange!({ key: k as SortKey, order: p.sort!.order })}>
-              {SORTS.map(([k, label]) => (
-                <DropdownMenuRadioItem key={k} value={k} closeOnClick>
-                  {label}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuRadioGroup value={p.sort.order} onValueChange={(o) => p.onSortChange!({ key: p.sort!.key, order: o as SortOrder })}>
-              <DropdownMenuRadioItem value="asc" closeOnClick>
-                {t("Ascending")}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="desc" closeOnClick>
-                {t("Descending")}
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
+            <SortChoices sort={p.sort} onChange={p.onSortChange} />
           </DropdownMenuContent>
         </DropdownMenu>
       )}
       <DropdownMenu>
         <DropdownMenuTrigger render={<ToolButton icon={LayoutListIcon} label={t("View")} showLabel phoneLabel className="h-9 px-2.5 text-[13px]" />} />
         <DropdownMenuContent className="w-52">
-          <DropdownMenuRadioGroup value={view} onValueChange={(v) => setView(v as ViewMode)}>
-            {VIEWS.map(([v, Icon, label]) => (
-              <DropdownMenuRadioItem key={v} value={v} closeOnClick>
-                <Icon /> {label}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
+          <ViewChoices view={view} onChange={setView} />
           <DropdownMenuSeparator />
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
               <GroupIcon /> {t("Group by")}
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="w-44">
-              <DropdownMenuRadioGroup value={groupBy} onValueChange={(g) => setGroupBy(g as GroupBy)}>
-                {GROUPS.map(([g, label]) => (
-                  <DropdownMenuRadioItem key={g} value={g} closeOnClick>
-                    {label}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
+              <GroupChoices groupBy={groupBy} onChange={setGroupBy} />
             </DropdownMenuSubContent>
           </DropdownMenuSub>
           <DropdownMenuSub>

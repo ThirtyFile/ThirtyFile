@@ -268,6 +268,7 @@ export function FileViewPage() {
               toastWithUndo(t('Renamed to "{name}"', { name }), {
                 undo: async () => void refreshFiles(qc, renamed(await api.rename(node.id, before))),
                 undoneText: t("Renamed back"),
+                label: t("Undo rename"),
               });
           }}
         />

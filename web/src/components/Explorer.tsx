@@ -97,6 +97,8 @@ export function Explorer(p: ExplorerProps) {
   const { open, dropInto, uploadInto, dragProps, changed } = a;
   // Hold the left button and drag on empty space to marquee-select (disabled while renaming); the list gives its row geometry
   const measure = useRef<MeasureHits>(null);
+  /** What had the focus when the context menu opened */
+  const menuFrom = useRef<HTMLElement | null>(null);
   const marquee = useMarquee({ selected, onSelect: setSelected, enabled: !p.loading && dialog?.t !== "rename", measure });
   // Phones: a bar with the selected items' actions takes the place of the context menu on a long press
   const phone = useMediaQuery("(max-width: 47.99rem)");
@@ -157,8 +159,14 @@ export function Explorer(p: ExplorerProps) {
     <Frame toolbar={toolbar} crumbs={p.crumbs} icon={p.icon} path={p.path} upTo={p.upTo} activeFolder={p.folderId} space={p.spaceId} footer={footer} footerRight={footerRight} keys>
       {p.notice}
       <div className="relative flex min-h-0 flex-1">
-        <ContextMenu>
+        <ContextMenu
+          onOpenChange={(open) => {
+            if (open) menuFrom.current = document.activeElement as HTMLElement | null;
+          }}
+        >
           <ContextMenuTrigger
+            ref={s.area}
+            data-explorer-area
             className="relative min-h-0 flex-1 overflow-auto outline-none"
             onContextMenuCapture={(e) => {
               // The column headers have their own menu, which leaves the selection alone
@@ -215,6 +223,7 @@ export function Explorer(p: ExplorerProps) {
                     toastWithUndo(t('Renamed to "{name}"', { name }), {
                       undo: async () => void changed(renamed(await api.rename(n.id, n.name))),
                       undoneText: t("Renamed back"),
+                      label: t("Undo rename"),
                     });
                 }}
                 onRenameDone={() => setDialog(null)}
@@ -241,7 +250,17 @@ export function Explorer(p: ExplorerProps) {
               </div>
             )}
           </ContextMenuTrigger>
-          <ContextMenuContent>{menuItems}</ContextMenuContent>
+          {/* Closed, the focus goes back where it was, unless what was chosen took it: the rename box (a new folder's
+              too, which may show as the menu goes) or a dialog */}
+          <ContextMenuContent
+            finalFocus={() => {
+              if (document.querySelector("[data-rename-box], [role=dialog]")) return false;
+              const from = menuFrom.current;
+              return from?.isConnected && from !== document.body ? from : true;
+            }}
+          >
+            {menuItems}
+          </ContextMenuContent>
         </ContextMenu>
         {detailsOpen && (
           <DetailsPane

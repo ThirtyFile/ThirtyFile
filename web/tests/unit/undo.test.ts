@@ -11,7 +11,7 @@ describe("undo", () => {
   test("Ctrl+Z takes back the last action once, then runs what follows", async () => {
     const undo = vi.fn<() => Promise<void>>(() => Promise.resolve());
     const after = vi.fn<() => void>();
-    toastWithUndo("Moved", { undo, undoneText: "Moved back", after });
+    toastWithUndo("Moved", { undo, undoneText: "Moved back", label: "Undo move", after });
     expect(undoLast()).toBe(true);
     await vi.waitFor(() => expect(after).toHaveBeenCalled());
     expect(undo).toHaveBeenCalledTimes(1);
@@ -21,8 +21,8 @@ describe("undo", () => {
   test("only the last action is taken back", () => {
     const first = vi.fn<() => Promise<void>>(() => Promise.resolve());
     const second = vi.fn<() => Promise<void>>(() => Promise.resolve());
-    toastWithUndo("Renamed", { undo: first, undoneText: "Renamed back" });
-    toastWithUndo("Deleted", { undo: second, undoneText: "Restored" });
+    toastWithUndo("Renamed", { undo: first, undoneText: "Renamed back", label: "Undo rename" });
+    toastWithUndo("Deleted", { undo: second, undoneText: "Restored", label: "Undo delete" });
     undoLast();
     expect(second).toHaveBeenCalled();
     expect(first).not.toHaveBeenCalled();
