@@ -196,8 +196,8 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
         }
     }
     // Folder spaces: read from their folder
-    match super::folders::sync(cx, &policy, &targets, &location, &dst).await? {
-        Ok((n, after_scan)) => {
+    let changing = match super::folders::sync(cx, &policy, &targets, &location, &dst).await? {
+        Ok((n, after_scan, changing)) => {
             copied += n;
             // A folder space holds what its check for changes found
             for (d, seq) in after_scan {
@@ -205,9 +205,10 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
                     e.1 = seq;
                 }
             }
+            changing
         }
         Err(stop) => return Ok(stop),
-    }
+    };
     if let Some(e) = cx.failures_error() {
         return Err(e);
     }
@@ -267,6 +268,7 @@ pub async fn sync(cx: &Ctx<'_>) -> AppResult<Stop> {
         if released > 0 {
             notes.push(if released == 1 { "1 copy nothing uses any more was let go".to_string() } else { format!("{released} copies nothing uses any more were let go") });
         }
+        notes.extend(changing.notes());
         let note = (!notes.is_empty()).then(|| notes.join("\n"));
         crate::backups::runner::finish(&mut tx, cx, note.as_deref()).await?;
         AppResult::Ok(())
@@ -437,7 +439,7 @@ pub async fn release(st: &AppState, location: &str) -> AppResult<i64> {
         spaces.extend(super::store_scope(&mut *st.db.acquire().await?, &p).await?);
     }
     // Content whose primary is there now (few: from the location's own content), and content no policy's spaces use
-    // (deleted for good included); content of a folder space's current files stays, whatever policy took it: its
+    // (deleted for good included); content of a folder space's files as last read stays, whatever policy took it: its
     // folder may be the one that failed
     let unused: Vec<(String,)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT hash FROM (
