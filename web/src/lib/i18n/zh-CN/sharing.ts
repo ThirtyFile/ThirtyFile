@@ -1,5 +1,11 @@
 /** Simplified Chinese translations: share links, access, activity/access logs, public share page, upload and download progress */
 export default {
+  "Preparing upload…": "准备上传…",
+  "Finishing upload…": "正在完成保存…",
+  "Preparing download…": "准备下载…",
+  "Uploading {n} file|Uploading {n} files": "正在上传 {n} 个文件",
+  "Downloading {n} item|Downloading {n} items": "正在下载 {n} 个项目",
+  "Downloading directly in your browser. Check the browser's download list for progress.": "交由浏览器直接下载，请在浏览器的下载列表中查看进度",
   // Share links (My shares, share dialog)
   "Link copied": "已复制链接",
   "Copy link": "复制链接",

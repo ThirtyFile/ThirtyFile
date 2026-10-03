@@ -1,5 +1,11 @@
 /** Japanese translations: share links, access, activity/access logs, public share page, upload and download progress */
 export default {
+  "Preparing upload…": "アップロードを準備中…",
+  "Finishing upload…": "保存を完了しています…",
+  "Preparing download…": "ダウンロードを準備中…",
+  "Uploading {n} file|Uploading {n} files": "{n} 個のファイルをアップロード中",
+  "Downloading {n} item|Downloading {n} items": "{n} 件をダウンロード中",
+  "Downloading directly in your browser. Check the browser's download list for progress.": "ブラウザーで直接ダウンロードします。進行状況はブラウザーのダウンロード一覧で確認してください",
   // Share links (My shares, share dialog)
   "Link copied": "リンクをコピーしました",
   "Copy link": "リンクのコピー",

@@ -43,6 +43,8 @@ export interface UploadTask {
   size: number;
   sent: number;
   status: UploadStatus;
+  /** Byte transfer is separate from preparing the session and waiting for its final server confirmation. */
+  phase?: "preparing" | "sending" | "finishing";
   error?: string;
   upload?: tus.Upload;
   file: File;
@@ -403,6 +405,7 @@ function start(task: UploadTask) {
     onProgress: (sent) => {
       if (task.upload !== upload || task.status !== "uploading") return;
       setSent(task, sent);
+      task.phase = sent >= task.size ? "finishing" : sent > 0 ? "sending" : "preparing";
       emit();
     },
     onSuccess: ({ lastResponse }) => {
@@ -429,6 +432,7 @@ function start(task: UploadTask) {
     },
   });
   setStatus(task, "uploading");
+  task.phase = "preparing";
   task.upload = upload;
   task.error = undefined;
   void begin(task, upload);

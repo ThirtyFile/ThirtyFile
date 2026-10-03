@@ -30,13 +30,18 @@ export function UploadPanel({ visitor = false, endpoint = "/api/uploads" }: { vi
   const active = totals.uploading + totals.queued;
   const failed = totals.error;
   const pct = totals.size ? Math.round((totals.sent / totals.size) * 100) : 100;
+  const waiting = tasks.some((task) => task.status === "uploading" && (task.phase === "preparing" || task.phase === "finishing"));
   const title = active
-    ? t("Uploading {n} file · {pct}%|Uploading {n} files · {pct}%", { n: active, pct })
+    ? waiting
+      ? t("Uploading {n} file|Uploading {n} files", { n: active })
+      : t("Uploading {n} file · {pct}%|Uploading {n} files · {pct}%", { n: active, pct })
     : failed
       ? t("{n} file failed to upload|{n} files failed to upload", { n: failed })
-      : tasks.length
-        ? t("{n} upload complete|{n} uploads complete", { n: tasks.length })
-        : t("{n} interrupted upload|{n} interrupted uploads", { n: recovered.length });
+      : totals.paused
+        ? t("Paused · {pct}%", { pct })
+        : tasks.length
+          ? t("{n} upload complete|{n} uploads complete", { n: tasks.length })
+          : t("{n} interrupted upload|{n} interrupted uploads", { n: recovered.length });
 
   const condensed = tasks.length > ROW_LIMIT;
   const shown = condensed ? tasks.filter((x) => x.status === "uploading" || x.status === "paused" || x.status === "error") : tasks;
@@ -73,11 +78,11 @@ export function UploadPanel({ visitor = false, endpoint = "/api/uploads" }: { vi
       </div>
       {/* Read out by screen readers once everything has finished (not on every percent) */}
       <div role="status" className="sr-only">
-        {active ? "" : title}
+        {active ? (waiting ? (tasks.some((task) => task.status === "uploading" && task.phase === "preparing") ? t("Preparing upload…") : t("Finishing upload…")) : "") : title}
       </div>
       {active > 0 && (
-        <div role="progressbar" aria-label={t("Upload progress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} className="h-0.5 bg-muted">
-          <div className="h-full bg-brand transition-[width]" style={{ width: `${pct}%` }} />
+        <div role="progressbar" aria-label={t("Upload progress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={waiting ? undefined : pct} className="h-0.5 bg-muted">
+          <div className={cn("h-full bg-brand transition-[width]", waiting && "w-1/3 animate-pulse motion-reduce:animate-none")} style={waiting ? undefined : { width: `${pct}%` }} />
         </div>
       )}
       {!collapsed && recovered.length > 0 && <RecoveredUploads endpoint={endpoint} batches={recovered} />}
@@ -86,6 +91,7 @@ export function UploadPanel({ visitor = false, endpoint = "/api/uploads" }: { vi
           <ContextMenuTrigger className="block max-h-72 overflow-y-auto" onContextMenuCapture={() => setMenuId(null)}>
             {rows.map((task) => {
               const p = task.size ? Math.round((task.sent / task.size) * 100) : 100;
+              const pending = task.status === "uploading" && (task.phase === "preparing" || task.phase === "finishing");
               return (
                 <div key={task.id} className="flex items-center gap-2.5 border-b border-border/50 px-3 py-2 last:border-0" onContextMenu={() => setMenuId(task.id)}>
                   <FileIcon node={{ kind: "file", name: task.relativePath ? `${task.relativePath}/${task.name}` : task.name, mime: task.file.type, size: task.size }} className="size-5" />
@@ -105,11 +111,25 @@ export function UploadPanel({ visitor = false, endpoint = "/api/uploads" }: { vi
                             ? t("Waiting")
                             : task.status === "paused"
                               ? t("Paused · {pct}%", { pct: p })
-                              : `${formatBytes(task.sent)} / ${formatBytes(task.size)} · ${p}%`}
+                              : task.phase === "preparing"
+                                ? t("Preparing upload…")
+                                : task.phase === "finishing"
+                                  ? t("Finishing upload…")
+                                  : `${formatBytes(task.sent)} / ${formatBytes(task.size)} · ${p}%`}
                     </div>
                     {(task.status === "uploading" || task.status === "paused") && (
-                      <div role="progressbar" aria-label={task.name} aria-valuemin={0} aria-valuemax={100} aria-valuenow={p} className="mt-1 h-1 overflow-hidden rounded bg-muted">
-                        <div className="h-full bg-brand transition-[width]" style={{ width: `${p}%` }} />
+                      <div
+                        role="progressbar"
+                        aria-label={task.name}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={pending ? undefined : p}
+                        className="mt-1 h-1 overflow-hidden rounded bg-muted"
+                      >
+                        <div
+                          className={cn("h-full bg-brand transition-[width]", pending && "w-1/3 animate-pulse motion-reduce:animate-none")}
+                          style={pending ? undefined : { width: `${p}%` }}
+                        />
                       </div>
                     )}
                   </div>

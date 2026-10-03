@@ -7,7 +7,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/component
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { api, shareSource, shareUploadEndpoint, type Node, type PublicShare } from "@/api";
 import { keys } from "@/api/queryKeys";
-import { triggerDownload } from "@/downloads";
+import { download as startDownload, type DownloadSource } from "@/downloads";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,8 +23,9 @@ import { Preview } from "@/components/Preview";
 import { Logo } from "@/components/Logo";
 import { LanguageSwitch } from "@/components/LanguageSwitch";
 import { UploadPanel } from "@/components/UploadPanel";
+import { DownloadPanel } from "@/components/DownloadPanel";
 import { enqueue, filesFromDrop, filesFromInput, onUploadsLanded, type PickedFile } from "@/uploads";
-import { cn, formatBytes, formatDate, errorMessage } from "@/lib/utils";
+import { cn, formatBytes, formatDate } from "@/lib/utils";
 import { useSubmit } from "@/lib/useSubmit";
 import { t, tc } from "@/lib/i18n";
 import { refreshFirstPage, useAllPages } from "@/lib/pages";
@@ -67,7 +68,8 @@ export function PublicSharePage() {
         {!info.data?.needs_password && <h1 className="sr-only">{info.data?.node?.name ?? t("Share link")}</h1>}
         {body}
       </main>
-      <div className="fixed right-4 bottom-4 z-40 w-[min(380px,calc(100vw-2rem))]">
+      <div className="fixed right-4 bottom-4 z-40 grid w-[min(380px,calc(100vw-2rem))] gap-3">
+        <DownloadPanel />
         <UploadPanel visitor endpoint={shareUploadEndpoint(token)} />
       </div>
     </div>
@@ -197,14 +199,8 @@ function DropBox({ share, root }: { share: PublicShare; root: Node }) {
 /** Starts a download and then refreshes the share, so a download limit shows the downloads left */
 function useShareDownload(token: string) {
   const qc = useQueryClient();
-  return async (link: string | Promise<string>) => {
-    try {
-      triggerDownload(await link);
-    } catch (e) {
-      // The server refused the selection (too many items, the limit reached…)
-      toast.error(errorMessage(e, t("Download failed")));
-      return;
-    }
+  return async (link: DownloadSource) => {
+    await startDownload(link, { native: true });
     // The browser downloads in the background; the server counts it when the download starts
     setTimeout(() => qc.invalidateQueries({ queryKey: keys.publicShare(token) }), 1500);
   };
@@ -344,7 +340,7 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
           </Button>
         )}
         {share.allow_download && (
-          <Button size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90" disabled={exhausted} onClick={() => download(source.downloadLink(downloadIds))}>
+          <Button size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90" disabled={exhausted} onClick={() => download((signal) => source.downloadLink(downloadIds, signal))}>
             <DownloadIcon /> {selected.size ? t("Download {n} item|Download {n} items", { n: selected.size }) : t("Download all")}
           </Button>
         )}
@@ -400,7 +396,7 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
               </DropdownMenuItem>
             )}
             {share.allow_download && (
-              <DropdownMenuItem disabled={exhausted} onClick={() => download(source.downloadLink(downloadIds))}>
+              <DropdownMenuItem disabled={exhausted} onClick={() => download((signal) => source.downloadLink(downloadIds, signal))}>
                 <DownloadIcon /> {selected.size ? t("Download {n} item|Download {n} items", { n: selected.size }) : t("Download all (ZIP)")}
               </DropdownMenuItem>
             )}

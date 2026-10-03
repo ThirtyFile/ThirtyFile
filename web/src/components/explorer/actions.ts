@@ -197,7 +197,11 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
   // A span of a large folder is asked of the server first (a download takes at most 10,000 items: more, and it says so)
   const download = (picked: Picked) => {
     if (!picked.count) return;
-    void triggerDownload(async () => privateSource.downloadLink(picked.span ? await idsOf(picked, MAX_AT_ONCE) : picked.ids));
+    void triggerDownload(async (signal) => {
+      const ids = picked.span ? await idsOf(picked, MAX_AT_ONCE) : picked.ids;
+      signal?.throwIfAborted();
+      return privateSource.downloadLink(ids, signal);
+    });
   };
 
   // A new ZIP file in this folder, or a new folder with a ZIP file's contents: made on the server, followed in a message

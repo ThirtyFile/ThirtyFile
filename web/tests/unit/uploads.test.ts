@@ -86,6 +86,21 @@ afterEach(async () => {
 });
 
 describe("upload queue", () => {
+  test("preparing and finishing remain active until the server confirms success", async () => {
+    act(() => up.enqueue(files(1), "folder"));
+    await settle();
+    expect(shown.tasks[0]).toMatchObject({ status: "uploading", phase: "preparing" });
+    const upload = started()[0];
+    act(() => upload.options.onProgress(3, 9));
+    expect(shown.tasks[0]).toMatchObject({ status: "uploading", phase: "sending" });
+    act(() => upload.options.onProgress(9, 9));
+    expect(shown.tasks[0]).toMatchObject({ status: "uploading", phase: "finishing" });
+    expect(up.hasActiveUploads()).toBe(true);
+    succeed(upload);
+    expect(shown.tasks[0].status).toBe("done");
+    expect(up.hasActiveUploads()).toBe(false);
+  });
+
   test("three files are sent at a time, and the next starts when one ends", async () => {
     act(() => up.enqueue(files(5), "folder"));
     await settle();
