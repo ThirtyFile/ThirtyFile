@@ -20,6 +20,12 @@ export default {
   "Clear the selection": "選択を解除",
   "Working with items": "項目の操作",
   "Cut, copy, paste": "切り取り、コピー、貼り付け",
+  // The Mac style's shortcuts (components/style/mac/keys.ts)
+  "Like a Mac. ⌘ is Ctrl on other computers. Shortcuts don't apply while you're typing in a box.": "Mac と同じです。ほかのコンピューターでは ⌘ は Ctrl です。入力ボックスに入力している間はショートカットは機能しません。",
+  "In the List view: expand or collapse the selected folder": "一覧表示：選択したフォルダーを展開または折りたたむ",
+  "Quick look; the arrows go to the next item": "クイックルック。矢印キーで次の項目に移動します",
+  "Copy, paste": "コピー、貼り付け",
+  "Move the items copied here": "コピーした項目をここに移動",
   "Undo the last move, rename or delete": "直前の移動、名前の変更、削除を元に戻す",
   "Show details": "詳細を表示",
   "Show these shortcuts": "このショートカット一覧を表示",

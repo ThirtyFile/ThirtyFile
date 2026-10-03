@@ -77,7 +77,7 @@ export function detectDevice(h: DeviceHints): Device {
 
 /** What a page uses */
 export interface Resolved {
-  /** The style: its keys, menus, icons and views (the Mac style while it doesn't exist yet: the Windows style) */
+  /** The style: its keys, menus, icons and views */
   style: Style;
   /**
    * The phone and tablet layout, the same in every style, rather than a computer's. Today that is the layout of a

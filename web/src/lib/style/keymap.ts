@@ -51,6 +51,8 @@ export type Action =
   | "cut"
   | "copy"
   | "paste"
+  /** Moving the items copied into the folder shown (the Mac style's way of moving: copy, then "Move here") */
+  | "moveHere"
   | "undo"
   | "trash"
   | "deleteForever"

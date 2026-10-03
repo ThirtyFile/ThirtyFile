@@ -3,8 +3,8 @@
  * artwork. Data, file operations, previews and the phone layout are the ones every style shares.
  */
 import type { StyleKit } from "../types";
-import { WINDOWS_KEYS, windowsShortcuts } from "../windows/keys";
 import { MacFrame } from "./frame";
+import { MAC_KEYS, macShortcuts } from "./keys";
 import { MAC_ICONS, macViews } from "./look";
 import { macMenu } from "./menus";
 import { QuickLook } from "./quickLook";
@@ -16,10 +16,8 @@ export const macKit: StyleKit = {
   toolbar: macToolbar,
   menu: macMenu,
   Extras: QuickLook,
-  // The Mac keyboard map comes with the style being offered (#325); until then, the Windows style's keys, with Space
-  // for Quick look
-  keys: { ...WINDOWS_KEYS, select: [], quickLook: ["Space"] },
-  shortcuts: windowsShortcuts,
+  keys: MAC_KEYS,
+  shortcuts: macShortcuts,
   icons: MAC_ICONS,
   views: macViews,
   defaultView: "grid",
