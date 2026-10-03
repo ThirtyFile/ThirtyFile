@@ -34,6 +34,7 @@ export default {
   "All favorites": "所有收藏",
   "Shared": "共享",
   "Icons": "图标",
+  "Gallery": "画廊",
   "Sort and group": "排序与分组",
   "Actions": "操作",
   "Get info": "显示简介",

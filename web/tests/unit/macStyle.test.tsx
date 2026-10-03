@@ -23,16 +23,24 @@ describe("the Mac style's kit", () => {
     expect(macKit.id).toBe("mac");
   });
 
-  test("offers Icons, List and Columns, in the toolbar rather than the status bar; Icons first", () => {
-    expect(macKit.views().map((v) => v.id)).toEqual(["grid", "list", "columns"]);
+  test("offers Icons, List, Columns and Gallery, in the toolbar rather than the status bar; Icons first; not Columns and Gallery on phones", () => {
+    expect(macKit.views().map((v) => v.id)).toEqual(["grid", "list", "columns", "gallery"]);
     expect(
       macKit
         .views()
         .filter((v) => v.notOnPhones)
         .map((v) => v.id),
-    ).toEqual(["columns"]);
+    ).toEqual(["columns", "gallery"]);
     expect(macKit.defaultView).toBe("grid");
     expect(macKit.statusViews).toEqual([]);
+    // The Gallery is the Mac style's own view; the Windows style doesn't have it
+    expect(Object.keys(macKit.ownViews ?? {})).toEqual(["gallery"]);
+    expect(kits().windows?.ownViews).toBeUndefined();
+    expect(
+      kits()
+        .windows?.views()
+        .map((v) => v.id),
+    ).not.toContain("gallery");
   });
 
   test("follows Finder's conventions: no click on a name to rename, and new items sort into place", () => {

@@ -11,7 +11,7 @@ import type { StyleKit, ViewChoice } from "./types";
 import { macKit } from "./mac";
 import { windowsKit } from "./windows";
 
-export type { FrameParts, FramePlace, IconSet, ShortcutGroup, ShortcutRow, StyleKit, ViewChoice } from "./types";
+export type { FrameParts, FramePlace, IconSet, OwnViewProps, ShortcutGroup, ShortcutRow, StyleKit, ViewChoice } from "./types";
 
 /** The kits there are, looked up when asked for (the kits' modules import the explorer, which imports this) */
 export function kits(): Partial<Record<Style, StyleKit>> {

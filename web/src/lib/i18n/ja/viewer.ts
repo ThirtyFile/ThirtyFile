@@ -102,6 +102,11 @@ export default {
   "Quick look: {name}": "クイックルック: {name}",
   "Previous item": "前の項目",
   "Next item": "次の項目",
+  // The Mac style's Gallery view (components/style/mac/gallery.tsx)
+  "Preview: {name}": "プレビュー: {name}",
+  "Thumbnails": "サムネイル",
+  "{name}, {n} of {total}": "{name}、{total} 件中 {n} 件目",
+  "Select an item to see it here.": "項目を選択すると、ここに表示されます。",
   "File not found": "ファイルが見つかりません",
   "Share with…": "ユーザーと共有…",
   "Create share link": "共有リンクを作成",

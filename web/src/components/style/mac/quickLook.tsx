@@ -151,8 +151,8 @@ function QuickLookWindow({ s, a, onClose }: { s: ExplorerState; a: ExplorerActio
   );
 }
 
-/** A folder has no preview: its icon, name, kind and dates */
-function FolderCard({ node }: { node: Node }) {
+/** A folder has no preview: its icon, name, kind and dates (Quick look, and the Gallery view) */
+export function FolderCard({ node }: { node: Node }) {
   return (
     <div className="flex flex-col items-center gap-2 p-6 text-center">
       <FileIcon node={node} className="size-24 stroke-1" />

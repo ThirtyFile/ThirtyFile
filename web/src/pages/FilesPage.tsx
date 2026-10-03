@@ -21,6 +21,7 @@ import { t } from "@/lib/i18n";
 import { locationOf } from "@/components/frame/location";
 import { useSort } from "@/lib/sort";
 import { useView } from "@/components/style";
+import { groupable } from "@/components/fileList/layout";
 
 /** Folder page: `/files` (My files, or the first space of someone without it), `/files/shared` (All files), `/files/:id` */
 export function FilesPage() {
@@ -71,10 +72,10 @@ function FolderPage({ id }: { id: string }) {
   const node = info.data?.node;
   const folderId = node?.id;
   // A large folder loads the parts in view (lib/windows). Grouped by date or type, every group shows in full, so the
-  // whole folder loads, a page after another. The Columns view doesn't group: its columns load the parts in view too
+  // whole folder loads, a page after another. The Columns and Gallery views don't group: they load the parts in view too
   const [groupBy] = usePersisted<GroupBy>("tf-group", "none");
   const [view] = useView();
-  const grouped = groupBy !== "none" && view !== "columns";
+  const grouped = groupBy !== "none" && groupable(view);
   const windows = useFolderWindows(folderId, sort.key, sort.order, !!folderId && !grouped);
   const pages = useAllPages(
     keys.childrenPages(folderId, sort.key, sort.order),

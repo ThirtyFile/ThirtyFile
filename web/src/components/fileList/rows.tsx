@@ -353,6 +353,17 @@ export const Tile = memo(function Tile(r: RowProps & { view: Exclude<ViewMode, "
         {view === "columns" && item.kind === "folder" && <ChevronRightIcon aria-hidden className="ml-auto size-3.5 shrink-0 text-muted-foreground" />}
       </>
     );
+  } else if (view === "gallery") {
+    // The Gallery view's strip: the picture alone; the name is what the item is called, and shows on hover
+    body = (
+      <>
+        <Thumb node={item} source={r.source} className="max-h-full max-w-full rounded-sm" iconClass="size-9" />
+        <span data-name className="sr-only">
+          {item.name}
+        </span>
+        {marks && <span className="absolute top-0.5 right-0.5 flex">{marks}</span>}
+      </>
+    );
   } else if (view === "tiles") {
     // Tiles: a medium picture, with the name, type and size beside it
     body = (
@@ -405,7 +416,7 @@ export const Tile = memo(function Tile(r: RowProps & { view: Exclude<ViewMode, "
       title={item.name}
       className={cn(
         "relative min-w-0 rounded-md border border-transparent outline-none select-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring aria-selected:border-brand aria-selected:bg-selection",
-        line ? "flex items-center gap-2 px-1.5 text-xs" : view === "tiles" ? "flex items-center gap-2.5 p-2" : "text-center",
+        line ? "flex items-center gap-2 px-1.5 text-xs" : view === "tiles" ? "flex items-center gap-2.5 p-2" : view === "gallery" ? "flex items-center justify-center p-1" : "text-center",
         view === "grid" ? "p-2" : view === "medium" && "p-1.5",
         r.dropping && "border-brand bg-brand/10",
         r.dimmed && "opacity-50",

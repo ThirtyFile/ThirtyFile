@@ -108,6 +108,8 @@ GitHub, Microsoft, Google, Keycloak, Authentik, Excel, Word, PowerPoint, NAS.
 | Go to folder (Mac style)                      | 前往資料夾               | 前往文件夹               | フォルダーへ移動                          |
 | folder tree                                   | 資料夾樹狀結構           | 文件夹树                 | フォルダーツリー                          |
 | Columns (view: a column per folder level)     | 直欄                     | 分栏                     | カラム                                    |
+| Gallery (view, Mac style)                     | 圖庫                     | 画廊                     | ギャラリー                                |
+| thumbnail                                     | 縮圖                     | 缩略图                   | サムネイル                                |
 | right-click menu                              | 右鍵選單                 | 右键菜单                 | 右クリックメニュー                        |
 | navigation pane / details pane                | 瀏覽窗格 / 詳細資料窗格  | 导航窗格 / 详细信息窗格  | ナビゲーションウィンドウ / 詳細ウィンドウ |
 | keyboard shortcut                             | 鍵盤快速鍵               | 键盘快捷键               | キーボードショートカット                  |

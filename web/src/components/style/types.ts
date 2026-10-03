@@ -6,6 +6,7 @@
 import type { ComponentType, ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import type { ExplorerProps } from "@/components/Explorer";
+import type { FileListProps } from "@/components/FileList";
 import type { Crumb } from "@/components/frame/AddressBar";
 import type { ExplorerActions } from "@/components/explorer/actions";
 import type { MenuEntries } from "@/components/explorer/menus";
@@ -75,6 +76,15 @@ export interface ViewChoice {
   notOnPhones?: boolean;
 }
 
+/** What a view of the style's own is given: the explorer, the file list's props as every view has them, and what an empty list shows */
+export interface OwnViewProps {
+  p: ExplorerProps;
+  s: ExplorerState;
+  a: ExplorerActions;
+  list: FileListProps;
+  empty: ReactNode;
+}
+
 /** The icon of each kind of file; `table` is for CSV and TSV files */
 export type IconSet = Record<FileCategory | "table", { Icon: LucideIcon; color: string }>;
 
@@ -106,6 +116,8 @@ export interface StyleKit {
   newAtEnd: boolean;
   /** What the style adds to the explorer: the Mac style's Quick look */
   Extras?: ComponentType<{ p: ExplorerProps; s: ExplorerState; a: ExplorerActions }>;
+  /** Views only this style has (the Mac style's Gallery), each shown in place of the file list once the items have loaded */
+  ownViews?: Partial<Record<ViewMode, ComponentType<OwnViewProps>>>;
   /** In the List view, folders expand in place to show their items indented below them (components/fileList/listTree) */
   disclosure: boolean;
 }

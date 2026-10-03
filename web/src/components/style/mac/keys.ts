@@ -75,7 +75,7 @@ export function macShortcuts(): { note: string; groups: ShortcutGroup[] } {
         rows: [
           {
             actions: ["itemUp", "itemDown", "first", "last", "pageUp", "pageDown"],
-            label: t("Move through the list (also ← and → in the icon view); hold Shift to select as you go"),
+            label: t("Move through the list (also ← and → in the Icons and Gallery views); hold Shift to select as you go"),
           },
           { actions: ["expand", "collapse"], label: t("In the List view: expand or collapse the selected folder") },
           { actions: ["previousColumn", "nextColumn"], label: t("In the Columns view: back to the column before, or on to the column of the selected folder") },

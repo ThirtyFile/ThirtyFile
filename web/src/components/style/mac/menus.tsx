@@ -8,6 +8,7 @@ import { ArrowDownUpIcon, CopyIcon, EyeIcon, FolderInputIcon, GroupIcon, InfoIco
 import { DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from "@/components/ui/dropdown-menu";
 import { sections, type MenuEntries } from "@/components/explorer/menus";
 import { Kbd } from "@/components/explorer/ui";
+import { groupable } from "@/components/fileList/layout";
 import { GroupChoices, SortChoices, ViewChoices } from "@/components/explorer/viewChoices";
 import { t } from "@/lib/i18n";
 import { undoLast } from "@/lib/undo";
@@ -97,7 +98,7 @@ export function macMenu(m: MenuEntries): ReactNode {
         </DropdownMenuSub>
       ),
       <DropdownMenuSub key="group">
-        <DropdownMenuSubTrigger disabled={s.view === "columns"}>
+        <DropdownMenuSubTrigger disabled={!groupable(s.view)}>
           <GroupIcon /> {t("Group by")}
         </DropdownMenuSubTrigger>
         <DropdownMenuSubContent className="w-44">

@@ -12,6 +12,7 @@ export default {
   "Refresh the list": "重新整理清單",
   "Selecting": "選取",
   "Move through the list (also ← and → in the icon view); hold Shift to select as you go": "在清單中移動（圖示檢視也可用 ← 和 →）；按住 Shift 可一路選取",
+  "Move through the list (also ← and → in the Icons and Gallery views); hold Shift to select as you go": "在清單中移動（圖示與圖庫檢視也可用 ← 和 →）；按住 Shift 可一路選取",
   "In the Columns view: back to the column before, or on to the column of the selected folder": "直欄檢視：回到前一欄，或前往所選資料夾的那一欄",
   "Select the item with the focus": "選取目前焦點所在的項目",
   "Add the item with the focus to the selection, or remove it": "將焦點所在的項目加入選取範圍，或從中移除",

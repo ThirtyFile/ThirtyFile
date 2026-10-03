@@ -5,9 +5,10 @@ import type { Group } from "@/lib/listView";
 
 /**
  * "list" is Details and "grid" Large icons (the names they were saved under); "compact" is File Explorer's List;
- * "columns" is a column for each folder level (components/columns), each column a list of one item per row
+ * "columns" is a column for each folder level (components/columns), each column a list of one item per row; "gallery"
+ * is a large preview of the item selected above a strip of thumbnails side by side (components/gallery)
  */
-export type ViewMode = "list" | "grid" | "medium" | "compact" | "tiles" | "columns";
+export type ViewMode = "list" | "grid" | "medium" | "compact" | "tiles" | "columns" | "gallery";
 /** An item of the list: a file or folder, with where it is in lists of several places */
 export type Item = Node & { location?: string };
 
@@ -23,18 +24,25 @@ export const TILED: Record<Exclude<ViewMode, "list">, { w: number; h: number; ga
   compact: { w: 220, h: 26, gap: 2 },
   // One to a row, as wide as the column
   columns: { w: 0, h: 24, gap: 0 },
+  // Side by side in a strip that scrolls across
+  gallery: { w: 64, h: 64, gap: 6 },
 };
 export const PAD = 12;
-/** The space around the items of an icon view (a column of the Columns view has less) */
-export const padOf = (view: ViewMode) => (view === "columns" ? 4 : PAD);
+/** The space around the items of an icon view (a column of the Columns view and the Gallery view's strip have less) */
+export const padOf = (view: ViewMode) => (view === "columns" ? 4 : view === "gallery" ? 8 : PAD);
+/** The items are laid out across rather than down: the Gallery view's strip, which scrolls sideways */
+export const sideways = (view: ViewMode) => view === "gallery";
+/** Views that show their items grouped when a grouping is chosen (grouped, a large folder loads every item) */
+export const groupable = (view: ViewMode) => view !== "columns" && view !== "gallery";
 /** Large icons on phones: the smallest width of an item */
 export const PHONE_GRID_W = 100;
 /** Icon views: height of a group's heading, with the space above it */
 export const GROUP_H = 36;
-/** The nearest scrolling ancestor, which the list is virtualised against */
-export function scrollParent(el: HTMLElement): HTMLElement {
+/** The nearest ancestor scrolling down (or across, with `x`), which the list is virtualised against */
+export function scrollParent(el: HTMLElement, x = false): HTMLElement {
   for (let p = el.parentElement; p; p = p.parentElement) {
-    const o = getComputedStyle(p).overflowY;
+    const style = getComputedStyle(p);
+    const o = x ? style.overflowX : style.overflowY;
     if (o === "auto" || o === "scroll") return p;
   }
   return document.documentElement;

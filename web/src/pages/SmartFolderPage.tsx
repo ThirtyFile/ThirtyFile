@@ -5,6 +5,8 @@ import { FolderSearchIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { api, type Located } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { Explorer } from "@/components/Explorer";
+import { groupable } from "@/components/fileList/layout";
+import { useView } from "@/components/style";
 import { QuerySummary, askToDeleteSmartFolder } from "@/components/smartFolders";
 import { Button } from "@/components/ui/button";
 import { t } from "@/lib/i18n";
@@ -37,9 +39,11 @@ export function SmartFolderPage() {
   const { byId, loading } = useSmartFolders();
   const folder = byId.get(id);
   const [sort, onSort, setSort] = useSort();
-  // Grouped by date or type, every group shows in full, so the whole list loads, a page after another (as a folder)
+  // Grouped by date or type, every group shows in full, so the whole list loads, a page after another (as a folder; not
+  // in the views that don't group)
   const [groupBy] = usePersisted<GroupBy>("tf-group", "none");
-  const grouped = groupBy !== "none";
+  const [view] = useView();
+  const grouped = groupBy !== "none" && groupable(view);
   const source = useMemo<WindowSource<Located>>(
     () => ({
       key: keys.smartAt(id, sort.key, sort.order),

@@ -100,7 +100,7 @@ export interface FileListProps {
   inactive?: boolean;
 }
 
-const coarse = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+const coarse = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
 /** How long a finger rests on an item to select it, and how far it may move meanwhile */
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_SLOP = 10;
@@ -153,7 +153,7 @@ export function FileList(p: FileListProps) {
 
   const tabStop = firstSelected >= 0 ? firstSelected : 0;
   // Rows rendered even out of view: the Tab stop, the focused item and the one being renamed
-  const { root, head, scroller, geo, tile, grid, pad, cols, layout, rowOf, v } = useListLayout({
+  const { root, head, scroller, geo, tile, grid, pad, cols, layout, rowOf, v, across } = useListLayout({
     view,
     wide,
     groups,
@@ -189,6 +189,7 @@ export function FileList(p: FileListProps) {
     grid,
     pad,
     across: grid && view !== "columns",
+    sideways: across,
     tile,
     scroller,
     focusId,
@@ -345,7 +346,8 @@ export function FileList(p: FileListProps) {
   const measure: MeasureHits = (container) => {
     const el = root.current;
     const shown = items;
-    if (!el) return () => [];
+    // A strip laid out across isn't selected with a box (its view marks it `data-no-marquee`)
+    if (!el || across) return () => [];
     const at = offsetIn(el, container);
     const top = at.top + (grid ? pad : (head.current?.offsetHeight ?? HEAD));
     const gap = tile?.gap ?? 0;
@@ -432,6 +434,43 @@ export function FileList(p: FileListProps) {
       dropTarget: !!(p.onDropInto || p.onUploadInto) && item.kind === "folder",
     };
   };
+
+  if (tile && across) {
+    // Across (the Gallery view's strip): the items side by side, with the room of those not rendered before and after
+    return (
+      <>
+        {status}
+        <div
+          ref={(el) => void (root.current = el)}
+          role="listbox"
+          aria-multiselectable
+          aria-orientation="horizontal"
+          aria-label={label}
+          className="flex h-full w-max items-center"
+          style={{ paddingInline: pad }}
+        >
+          {rows.map(({ row: r, gap }) => {
+            const i = layout.row(r).start;
+            const item = items[i];
+            return (
+              <Fragment key={item?.id ?? `#${i}`}>
+                {gap > 0 && <div aria-hidden className="shrink-0" style={{ width: gap }} />}
+                <div role="none" className="shrink-0" style={{ width: tile.w, marginRight: tile.gap }}>
+                  {item ? (
+                    <Tile {...row(i)} view={view as Exclude<ViewMode, "list">} source={p.source} count={n} checkboxes={false} />
+                  ) : (
+                    // Not loaded yet: its place, until its part loads
+                    <div aria-hidden className="animate-pulse rounded-md bg-muted/60" style={{ height: tile.h }} />
+                  )}
+                </div>
+              </Fragment>
+            );
+          })}
+          {rest > 0 && <div aria-hidden className="shrink-0" style={{ width: rest }} />}
+        </div>
+      </>
+    );
+  }
 
   if (tile) {
     return (
