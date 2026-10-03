@@ -583,6 +583,8 @@ pub(super) async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: 
             }
         }
     }
+    // The copies get the copier's tags of the originals (each person's tags are their own)
+    crate::tags::copy_tags(&mut tx, user.id, ids.iter().map(|(from, to)| (*from, to.as_str()))).await?;
     tree::adjust_usage(&mut tx, dest.drive(), bytes).await?;
     tree::touch(&mut tx, &dest.id).await?;
     logs::record_activity(&mut tx, user, Some(top), "copy", &format!("→ {}", if dest.parent_id.is_none() { "Root folder" } else { &dest.name })).await?;

@@ -459,12 +459,18 @@ mod tests {
             let (a, _) = env.node_at(&space.drive, "Docs/a.txt").await.unwrap();
             let (other, _) = env.node_at(&space.drive, "Other").await.unwrap();
             env.grant(&docs, &ben, "viewer").await;
+            // ben's tags on both
+            let tag = crate::tags::tests::make(&env, &ben, "Urgent").await;
+            crate::tags::tests::tag(&env, &ben, &[&docs, &a], &[tag], &[]).await.unwrap();
             let unchanged = async || {
                 assert_eq!(std::fs::read(space.dir.join("Docs/a.txt")).unwrap(), b"alpha", "identities: {identities}");
                 assert_eq!(env.node_at(&space.drive, "Docs").await.map(|n| n.0), Some(docs.clone()), "identities: {identities}");
                 assert_eq!(env.node_at(&space.drive, "Docs/a.txt").await.map(|n| n.0), Some(a.clone()), "identities: {identities}");
                 let (grants,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM grants WHERE node_id = ?").bind(&docs).fetch_one(&env.st.db).await.unwrap();
                 assert_eq!(grants, 1);
+                let (tagged,): (i64,) =
+                    sqlx::query_as("SELECT COUNT(*) FROM tagged WHERE node_id IN (?, ?)").bind(&docs).bind(&a).fetch_one(&env.st.db).await.unwrap();
+                assert_eq!(tagged, 2, "identities: {identities}");
                 assert_eq!(files_in(&space.dir.join(JOURNAL_DIR)), 0);
             };
 

@@ -20,6 +20,17 @@ pub struct SearchQuery {
     pub(super) max_size: Option<i64>,
     /// Uploaded by (username, exact)
     pub(super) owner: Option<String>,
+    /// Only items with all of these tags of the person's own (tag ids, comma separated); with tags, the name may be left
+    /// out to find every item that has them
+    pub(super) tags: Option<String>,
+}
+
+impl SearchQuery {
+    /// The tags asked for; anything that isn't a tag id is "not found", as someone else's tag is
+    fn tag_ids(&self) -> AppResult<Vec<i64>> {
+        let parts = self.tags.as_deref().unwrap_or_default().split(',').map(str::trim).filter(|t| !t.is_empty());
+        parts.map(|t| t.parse().map_err(|_| AppError::not_found("Tag not found"))).collect()
+    }
 }
 
 /// Results returned at most
@@ -35,10 +46,12 @@ pub struct SearchResult {
 /// Searches names in all spaces and shared folders I can access, or in one folder and below
 pub async fn search(State(st): State<AppState>, user: User, Query(q): Query<SearchQuery>) -> AppResult<Json<SearchResult>> {
     let term = q.q.trim();
-    if term.is_empty() {
+    let tags = q.tag_ids()?;
+    if term.is_empty() && tags.is_empty() {
         return Ok(Json(SearchResult { items: Vec::new(), truncated: false }));
     }
     let mut c = st.db.acquire().await?;
+    crate::tags::check_own(&mut c, &user, &tags).await?;
     let (drives, folders) = tree::scope(&mut c, &user).await?;
     let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(format!("SELECT {NODE_COLS} FROM nodes n WHERE "));
     qb.push("(n.drive_id IN (SELECT value FROM json_each(").push_bind(drives).push("))");
@@ -50,10 +63,15 @@ pub async fn search(State(st): State<AppState>, user: User, Query(q): Query<Sear
         qb.push(" AND n.id IN (WITH RECURSIVE d(id) AS (SELECT id FROM nodes WHERE parent_id = ").push_bind(folder.id);
         qb.push(" AND trashed_at IS NULL UNION ALL SELECT c.id FROM nodes c JOIN d ON c.parent_id = d.id WHERE c.trashed_at IS NULL) SELECT id FROM d)");
     }
+    for tag in tags {
+        // The person's own tags only (checked above)
+        qb.push(" AND n.id IN (SELECT node_id FROM tagged WHERE tag_id = ").push_bind(tag).push(" AND owner_id = ").push_bind(user.id).push(")");
+    }
+    // Without a term: every item with the tags
     if term.chars().count() >= 3 {
         // The trigram index: the term as one phrase (quotes inside it doubled)
         qb.push(" AND n.rowid IN (SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ").push_bind(format!("\"{}\"", term.replace('"', "\"\""))).push(")");
-    } else {
+    } else if !term.is_empty() {
         let escaped = crate::util::like_escape(&term.to_lowercase());
         qb.push(" AND unicode_lower(n.name) LIKE ").push_bind(format!("%{escaped}%")).push(" ESCAPE '\\'");
     }
@@ -141,6 +159,29 @@ pub async fn favorites(State(st): State<AppState>, user: User, Query(q): Query<L
     );
     let nodes: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(drives).bind(folders).bind(user.id).fetch_all(&st.db).await?;
     Ok(Json(locate(&st, &user, nodes).await?))
+}
+
+/// Items listed with a tag at most
+pub(super) const TAGGED_LIMIT: i64 = 5000;
+
+/// The items with one of the person's tags, where they can still open them and not in the trash (as Favorites); at
+/// most TAGGED_LIMIT of them, in the order asked for
+pub async fn tagged(State(st): State<AppState>, user: User, Path(tag): Path<i64>, Query(q): Query<ListQuery>) -> AppResult<Json<SearchResult>> {
+    let mut c = st.db.acquire().await?;
+    crate::tags::check_own(&mut c, &user, &[tag]).await?;
+    let (drives, folders) = tree::scope(&mut c, &user).await?;
+    let sql = format!(
+        "SELECT {NODE_COLS} FROM tagged t JOIN nodes n ON n.id = t.node_id
+         WHERE t.tag_id = ?3 AND t.owner_id = ?4 AND {} AND n.trashed_at IS NULL {} LIMIT ?5",
+        tree::scope_sql(1, 2),
+        order_clause(q.sort.as_deref(), q.order.as_deref())
+    );
+    let mut nodes: Vec<Node> =
+        sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(drives).bind(folders).bind(tag).bind(user.id).bind(TAGGED_LIMIT + 1).fetch_all(&mut *c).await?;
+    drop(c);
+    let truncated = nodes.len() as i64 > TAGGED_LIMIT;
+    nodes.truncate(TAGGED_LIMIT as usize);
+    Ok(Json(SearchResult { items: locate(&st, &user, nodes).await?, truncated }))
 }
 
 /// Files listed in Recent

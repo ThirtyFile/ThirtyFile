@@ -13,7 +13,7 @@ use tower_http::{CompressionLevel, compression::CompressionLayer, timeout::Timeo
 
 use crate::{
     admin, archive, auth, backups, branding, dav, downloads, drives, error, files, history, i18n, jobs, location_tools, locations, logs, mail, moves, nodes, notify,
-    paths, replicas, reset, sessions, shares, signin, sso, state::AppState, style, thumbnails, tokens, twofactor, upload, usage, versions, web,
+    paths, replicas, reset, sessions, shares, signin, sso, state::AppState, style, tags, thumbnails, tokens, twofactor, upload, usage, versions, web,
 };
 
 use super::{
@@ -108,6 +108,11 @@ fn file_api() -> Router<AppState> {
         .route("/recent", get(nodes::recent))
         .route("/favorites", get(nodes::favorites))
         .route("/nodes/favorite", post(nodes::set_favorite))
+        // Each person's own tags (tags.rs)
+        .route("/tags", get(tags::list).post(tags::create))
+        .route("/tags/{id}", patch(tags::update).delete(tags::delete))
+        .route("/tags/{id}/items", get(nodes::tagged))
+        .route("/nodes/tags", post(tags::apply))
         .route("/shared-with-me", get(nodes::shared_with_me))
         .route("/files/{id}/content", get(files::content))
         .route("/files/{id}/versions", get(versions::list))

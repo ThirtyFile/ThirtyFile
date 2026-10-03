@@ -50,9 +50,13 @@ pub struct Node {
     pub drive_id: Option<String>,
     /// Uploader / creator; empty for an item the check of a folder space found on its disk
     pub owner_name: String,
-    /// Whether the current user has favorited it; filled in by mark_favorites
+    /// Whether the current user has favorited it; filled in by mark_own
     #[sqlx(default)]
     pub is_favorite: bool,
+    /// The current user's tags on it (their ids), never anyone else's; filled in by mark_own
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[sqlx(skip)]
+    pub tags: Vec<i64>,
     /// Folder spaces: the path below the space's folder
     #[serde(skip)]
     #[sqlx(default)]
@@ -203,13 +207,34 @@ pub async fn get_node(conn: &mut SqliteConnection, id: &str) -> AppResult<Option
     Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(id).fetch_optional(conn).await?)
 }
 
-/// Fills in the current user's favorite status.
+/// Fills in what is the current user's own on these nodes: whether they favorited each, and their tags on it (never
+/// anyone else's, tags.rs).
 /// Takes the caller's connection: taking a second one from the pool while holding one can use up the pool under load.
-pub async fn mark_favorites<'a>(conn: &mut SqliteConnection, user_id: i64, nodes: impl IntoIterator<Item = &'a mut Node>) -> AppResult<()> {
-    let favs: Vec<(String,)> = sqlx::query_as("SELECT node_id FROM favorites WHERE user_id = ?").bind(user_id).fetch_all(&mut *conn).await?;
+pub async fn mark_own<'a>(conn: &mut SqliteConnection, user_id: i64, nodes: impl IntoIterator<Item = &'a mut Node>) -> AppResult<()> {
+    let nodes: Vec<&mut Node> = nodes.into_iter().collect();
+    if nodes.is_empty() {
+        return Ok(());
+    }
+    let ids = serde_json::to_string(&nodes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>()).unwrap();
+    let favs: Vec<(String,)> = sqlx::query_as("SELECT node_id FROM favorites WHERE user_id = ? AND node_id IN (SELECT value FROM json_each(?))")
+        .bind(user_id)
+        .bind(&ids)
+        .fetch_all(&mut *conn)
+        .await?;
     let favs: std::collections::HashSet<String> = favs.into_iter().map(|(id,)| id).collect();
+    let tagged: Vec<(String, i64)> =
+        sqlx::query_as("SELECT node_id, tag_id FROM tagged WHERE owner_id = ? AND node_id IN (SELECT value FROM json_each(?)) ORDER BY tag_id")
+            .bind(user_id)
+            .bind(&ids)
+            .fetch_all(&mut *conn)
+            .await?;
+    let mut tags: HashMap<String, Vec<i64>> = HashMap::new();
+    for (node, tag) in tagged {
+        tags.entry(node).or_default().push(tag);
+    }
     for n in nodes {
         n.is_favorite = favs.contains(&n.id);
+        n.tags = tags.remove(&n.id).unwrap_or_default();
     }
     Ok(())
 }

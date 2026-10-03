@@ -14,6 +14,12 @@ pub struct ListQuery {
     /// Where the page starts, counted from the first item (instead of `after`), so a list can show any part of a large
     /// folder without loading what comes before it. The page then says how many items there are (`total`).
     pub(super) offset: Option<i64>,
+    /// Folders: only the items with this tag of the person's own (`children` checks that it is theirs)
+    pub(super) tag: Option<i64>,
+    /// Whose tag `tag` is: set by `children` once it checked, never from the request. Without it no item has the tag,
+    /// so a listing that doesn't check (a share link's) tells nothing about anyone's tags.
+    #[serde(skip)]
+    pub(super) tagged_by: Option<i64>,
 }
 
 /// Largest page of a folder or trash listing
@@ -170,6 +176,11 @@ pub async fn list_children(conn: &mut SqliteConnection, parent_id: &str, q: &Lis
     let offset = q.offset.filter(|_| limit.is_some() && after.is_none()).map(|o| o.max(0));
     let folders_only = q.folders_only == Some(true);
     let kind_filter = if folders_only { "AND n.kind = 'folder'" } else { "" };
+    let tag_filter = match (q.tag, q.tagged_by) {
+        (Some(tag), Some(owner)) => format!("AND n.id IN (SELECT node_id FROM tagged WHERE tag_id = {tag} AND owner_id = {owner})"),
+        (Some(_), None) => "AND 0".to_string(),
+        (None, _) => String::new(),
+    };
     // The navigation pane shows an arrow only on folders with folders in them (the index nodes_subfolders answers it)
     let has_folders =
         if folders_only { ", EXISTS (SELECT 1 FROM nodes c WHERE c.parent_id = n.id AND c.kind = 'folder' AND c.trashed_at IS NULL) AS has_folders" } else { "" };
@@ -181,7 +192,7 @@ pub async fn list_children(conn: &mut SqliteConnection, parent_id: &str, q: &Lis
     let ext = if sort == SortCol::Type { sort.expr() } else { "NULL" };
     let sql = format!(
         "SELECT {NODE_COLS}{has_folders}, {ext} AS ext FROM nodes n
-         WHERE n.parent_id = ?1 AND n.trashed_at IS NULL {kind_filter} {keyset} {} LIMIT ?{} OFFSET ?{}",
+         WHERE n.parent_id = ?1 AND n.trashed_at IS NULL {kind_filter} {tag_filter} {keyset} {} LIMIT ?{} OFFSET ?{}",
         order_clause(q.sort.as_deref(), q.order.as_deref()),
         args.len() + 1,
         args.len() + 2,
@@ -196,7 +207,7 @@ pub async fn list_children(conn: &mut SqliteConnection, parent_id: &str, q: &Lis
     };
     let total = match offset {
         Some(_) => {
-            let sql = format!("SELECT COUNT(*) FROM nodes n WHERE n.parent_id = ?1 AND n.trashed_at IS NULL {kind_filter}");
+            let sql = format!("SELECT COUNT(*) FROM nodes n WHERE n.parent_id = ?1 AND n.trashed_at IS NULL {kind_filter} {tag_filter}");
             Some(sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(sql.as_str())).bind(parent_id).fetch_one(&mut *conn).await?)
         }
         None => None,
@@ -392,7 +403,7 @@ pub async fn select(State(st): State<AppState>, user: User, Path(id): Path<Strin
     Ok(Json(Selected { ids: rows.into_iter().map(|r| r.node.id).collect(), next }))
 }
 
-pub async fn children(State(st): State<AppState>, user: User, Path(id): Path<String>, Query(q): Query<ListQuery>) -> AppResult<Json<Listing<Node>>> {
+pub async fn children(State(st): State<AppState>, user: User, Path(id): Path<String>, Query(mut q): Query<ListQuery>) -> AppResult<Json<Listing<Node>>> {
     let folder = tree::folder_for(&mut *st.db.acquire().await?, &user, &id, Need::Read).await?;
     if folder.in_folder_space() && q.after.is_none() && q.offset.unwrap_or(0) == 0 {
         // Changes made on the server's folder show up when the folder is opened (not again for each further page).
@@ -401,7 +412,11 @@ pub async fn children(State(st): State<AppState>, user: User, Path(id): Path<Str
         crate::folders::sync_opened(&st, &folder).await;
     }
     let mut c = st.db.acquire().await?;
+    if let Some(tag) = q.tag {
+        crate::tags::check_own(&mut c, &user, &[tag]).await?;
+        q.tagged_by = Some(user.id);
+    }
     let mut list = list_children(&mut c, &folder.id, &q).await?;
-    tree::mark_favorites(&mut c, user.id, list.items_mut()).await?;
+    tree::mark_own(&mut c, user.id, list.items_mut()).await?;
     Ok(Json(list))
 }
