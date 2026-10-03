@@ -75,8 +75,7 @@ pub(super) async fn receive(st: &AppState, body: Body, path: &Path, hash: bool, 
     let mut stream = body.into_data_stream();
     let mut size = 0u64;
     let mut hasher = hash.then(sha2::Sha256::new);
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_| AppError::bad_request("Connection interrupted"))?;
+    while let Some(chunk) = crate::http_body::next_chunk(&mut stream).await? {
         size += chunk.len() as u64;
         check_size(st, size)?;
         if let Some((left, drive)) = &room

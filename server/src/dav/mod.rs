@@ -37,7 +37,6 @@ use axum::{
     http::{HeaderMap, Method, StatusCode, header, request::Parts},
     response::{IntoResponse, Response},
 };
-use futures_util::StreamExt;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 use quick_xml::{NsReader, escape::escape, events::Event, name::ResolveResult};
 use serde_json::{Value, json};
@@ -208,6 +207,37 @@ mod tests {
         let addr = ConnectInfo(std::net::SocketAddr::from(([10, 0, 0, 9], 5000)));
         let Json(v) = tokens::create(State(env.st.clone()), user.clone(), addr, HeaderMap::new(), Json(req)).await.unwrap();
         v["token"].as_str().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn an_idle_put_removes_its_temporary_file_and_keeps_the_existing_content() {
+        use futures_util::StreamExt;
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let path = vec!["My files".to_string(), "idle.txt".to_string()];
+        assert_eq!(put(&env.st, &amy, &path, &HeaderMap::new(), Body::from("original")).await.unwrap().status(), StatusCode::CREATED);
+        let before: (String, String) = sqlx::query_as("SELECT id, blob_hash FROM nodes WHERE name = 'idle.txt'").fetch_one(&env.st.db).await.unwrap();
+        let first = futures_util::stream::once(async { Ok::<_, std::io::Error>(axum::body::Bytes::from_static(b"partial")) });
+        let (waiting, waited) = tokio::sync::oneshot::channel();
+        let rest = futures_util::stream::once(async move {
+            waiting.send(()).unwrap();
+            std::future::pending::<Result<axum::body::Bytes, std::io::Error>>().await
+        });
+        let st = env.st.clone();
+        let user = amy.clone();
+        let request_path = path.clone();
+        let request = tokio::spawn(async move { put(&st, &user, &request_path, &HeaderMap::new(), Body::from_stream(first.chain(rest))).await });
+        waited.await.unwrap();
+        tokio::time::pause();
+        tokio::time::advance(crate::http_body::UPLOAD_IDLE + std::time::Duration::from_secs(1)).await;
+        tokio::time::resume();
+        assert_eq!(request.await.unwrap().unwrap_err().status, StatusCode::REQUEST_TIMEOUT);
+        assert_eq!(std::fs::read_dir(env.st.tmp_dir()).unwrap().count(), 0);
+        let after: (String, String) = sqlx::query_as("SELECT id, blob_hash FROM nodes WHERE name = 'idle.txt'").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(before, after);
+        assert_eq!(put(&env.st, &amy, &path, &HeaderMap::new(), Body::from("retry")).await.unwrap().status(), StatusCode::NO_CONTENT);
+        let (hash,): (String,) = sqlx::query_as("SELECT blob_hash FROM nodes WHERE id = ?").bind(&before.0).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(hash, crate::util::sha256_hex(b"retry"));
     }
 
     struct Client {
