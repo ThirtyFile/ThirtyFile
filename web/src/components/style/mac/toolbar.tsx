@@ -13,6 +13,7 @@ import {
   EllipsisIcon,
   FolderInputIcon,
   FolderOpenIcon,
+  FolderSymlinkIcon,
   InfoIcon,
   KeyboardIcon,
   PanelRightIcon,
@@ -52,6 +53,7 @@ import { useMediaQuery } from "@/lib/focus";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { windowsToolbar } from "../windows/toolbar";
+import { openGoToFolder } from "./pathBar";
 
 export function macToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerActions, newItems: ReactNode) {
   return <MacToolbar p={p} s={s} a={a} newItems={newItems} />;
@@ -191,6 +193,9 @@ function ActionsMenu({ p, s, a, newItems }: { p: ExplorerProps; s: ExplorerState
           </DropdownMenuItem>
         )}
         <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={openGoToFolder}>
+          <FolderSymlinkIcon /> {t("Go to folder…")} <Kbd>{k.addressBar[0]}</Kbd>
+        </DropdownMenuItem>
         <DropdownMenuItem onClick={s.selectAll}>
           <SquareCheckIcon /> {t("Select all")} <Kbd>{k.selectAll[0]}</Kbd>
         </DropdownMenuItem>

@@ -14,6 +14,7 @@ import { useStyleKit } from "@/components/style";
 import { useMediaQuery } from "@/lib/focus";
 import { t } from "@/lib/i18n";
 import { shortcut } from "@/lib/keys";
+import { GoToFolder, PathBar, openGoToFolder } from "./pathBar";
 import { MacSidebar } from "./sidebar";
 
 export function MacFrame(f: FrameParts) {
@@ -36,7 +37,7 @@ function MacWindow(f: FrameParts) {
       searchRef.current?.focus();
       searchRef.current?.select();
     },
-    editPath: () => {},
+    editPath: openGoToFolder,
   });
   const title = place.crumbs.at(-1)?.label ?? "";
   const nav = "size-8 px-0 [&_svg]:size-[18px]";
@@ -59,6 +60,7 @@ function MacWindow(f: FrameParts) {
         <div id={MAIN_ID} tabIndex={-1} className="relative flex min-h-0 min-w-0 flex-1 flex-col outline-none">
           {f.content}
         </div>
+        <PathBar place={place} />
         <footer className="flex h-7 shrink-0 items-center gap-3 border-t px-3 text-xs text-muted-foreground">
           {f.status}
           <span className="flex-1" />
@@ -66,6 +68,7 @@ function MacWindow(f: FrameParts) {
           {f.statusEnd}
         </footer>
       </div>
+      <GoToFolder path={place.path} />
     </div>
   );
 }
