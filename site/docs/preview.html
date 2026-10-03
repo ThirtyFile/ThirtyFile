@@ -98,6 +98,9 @@
           <li>A formula that would have to go through millions of cells one by one, such as <code>COUNTIF</code> over most of a sheet, shows <code>#CALC!</code> instead of slowing the page down. Saving keeps the result Excel stored for it, and Excel calculates it again when it opens the file.</li>
           <li>Use the toolbar for bold, colours, borders, alignment, number formats and merged cells. Month and weekday names and AM/PM in dates are shown in the language you use ThirtyFile in, unless the cell's format names a language of its own. Function names stay in English, as Excel stores them in the file.</li>
           <li>Copy and paste works between cells, and to and from Excel on your computer.</li>
+          <li>Cut moves cells within the same workbook. Pasting a cut selection into another workbook copies the values, formulas and formatting, and keeps the source cells. Undo reverses a move within a workbook.</li>
+          <li>Copying, pasting or filling accepts at most 100,000 cells and about 8 million characters of clipboard text at once. A paste that would extend beyond the worksheet is refused before changing any cells. Clearing a large sparse selection visits only cells with content, up to 100,000 changes; larger changes must be split into smaller selections.</li>
+          <li>In the formula bar and name box, Enter and Escape used by an input method to choose or cancel a candidate keep their input-method behavior. Press Enter again after composing to commit the value or navigate.</li>
           <li>Insert or delete rows and columns from the <strong>Insert</strong> and <strong>Delete</strong> menus. Formulas are adjusted for you.</li>
           <li>Press <kbd>Ctrl</kbd> + <kbd>Z</kbd> to undo and <kbd>Ctrl</kbd> + <kbd>S</kbd> to save. Undo goes back up to 200 steps, of which at most 20 can be row or column inserts and deletes.</li>
           <li>With a screen reader, move with the arrow keys: the address and value of the cell you move to (or the range you select) are read out.</li>
@@ -108,6 +111,7 @@
 
         <h2 id="text">Editing text files</h2>
         <p>Text and code files open in an editor with colours for most programming languages. Press <kbd>Ctrl</kbd> + <kbd>S</kbd> to save.</p>
+        <p>Switching tabs while a save is still on its way keeps each file's edits separate. Text typed after saving started stays unsaved when the save finishes; save again to store it. Discarding a draft does not bring it back when an earlier save completes.</p>
         <p>A file ThirtyFile doesn't recognise, such as <code>Dockerfile</code>, <code>README</code> or a file with an unusual extension, shows <strong>Preview isn't available for this file type</strong>. If it holds text, click <strong>Open in text editor</strong> to read and edit it there. This doesn't rename the file or change its type: it is only saved when you save it. <strong>Default view</strong> goes back; unsaved changes are kept and come back when you open the editor again.</p>
         <ul>
           <li>You can only save when you may change the file. On a share link, the button shows only when the link allows downloading, and the text is read-only.</li>

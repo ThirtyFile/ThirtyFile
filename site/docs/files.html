@@ -120,6 +120,7 @@
           <li><strong>Shared with me</strong> holds folders and files other people shared with you from spaces you aren't a member of: <code>/Shared with me/Plans/Q1</code>. Two shared items with the same name are numbered too.</li>
         </ul>
         <p>The names ThirtyFile gives (<strong>My files</strong>, <strong>All files</strong> and <strong>Shared with me</strong>) show in the language you chose, and a path you type may use them in that language or in English. Letter case doesn't matter, <code>\</code> works like <code>/</code>, and you can also paste a WebDAV address or a link to a page of ThirtyFile. When nothing is at the path you typed, or you don't have access to it, the address bar says so and keeps what you typed, so you can correct it. Recent, Favorites, the trash and other lists aren't in a space, so their paths can't be typed.</p>
+        <p>Administrators can also type a Control panel path: <code>/Control panel/Storage locations</code>, or the names shown in their chosen language. Copied paths from its address bar work too. For a path independent of the interface language, use <code>/admin</code>, <code>/admin/storage</code>, <code>/admin/usage</code>, or the other Control panel page addresses. These paths work in the Windows address bar and the Mac style's <strong>Go to folder</strong>. They require the same administrator permissions as opening the page from its menu. A recognized Control panel path takes priority over a space of the same name; open that space from the sidebar or paste its full page URL instead.</p>
 
         <h2 id="upload">Uploading</h2>
         <ul>
@@ -127,6 +128,8 @@
           <li>click <strong>New</strong> and choose <strong>Upload files</strong> or <strong>Upload folder</strong>.</li>
         </ul>
         <p>Progress is shown at the bottom right, and each file starts being sent at once. When you upload more than 100 files, only the files being sent, paused or failed are listed, and the others are counted below them. Right-click the list to retry every failed file at once. While files are still uploading, the browser asks before you close or reload the page. Dropped files or folders the browser can't read (no permission, or removed meanwhile) are skipped, and a message says how many.</p>
+        <p><strong>Preparing upload…</strong> appears before data starts moving. After all bytes are sent, <strong>Finishing upload…</strong> stays until the server confirms the file is stored. These stages show a waiting indicator instead of a completion percentage. Pause and cancel remain available.</p>
+        <p>If no upload data arrives for two minutes, the server stops waiting and the upload can resume from the bytes it already received. A long upload that keeps sending data has no overall time limit. WebDAV uploads use the same idle limit, but a failed WebDAV request must be sent again in full.</p>
 
         <h3 id="interrupted">Interrupted uploads</h3>
         <p>If you reload the page, or close the tab or the browser while files are uploading, they show under <strong>Interrupted uploads</strong> at the bottom right the next time you open ThirtyFile in this browser, as they were added: an uploaded folder by its name, files picked together as one entry. The browser can't reopen your files by itself, so choose them again:</p>
@@ -141,6 +144,7 @@
         <h2 id="download">Downloading</h2>
         <p>Select one or more items and click <strong>Download</strong>. Several items, or a folder, arrive as one ZIP file. It holds the items as they were when the download started: what is added to the folders meanwhile isn't in it. If a file in a folder on the server changes size while the ZIP is being sent, the download fails rather than arrive incomplete; start it again.</p>
         <p>Progress is shown at the bottom right. Downloads larger than 256 MB (64 MB on phones and tablets) go straight to your browser's own download list instead, so the page doesn't hold them in memory.</p>
+        <p><strong>Preparing download…</strong> appears while a download link or the server's response is being prepared, and you can cancel during that wait. If the size is unknown, a waiting indicator replaces the percentage while received bytes are still shown. A failed preparation can be retried. Downloads handed directly to the browser, including public share downloads, show a notice: follow progress in your browser's download list.</p>
         <p>Up to 10,000 selected items can be downloaded at once. For more, download the folder they are in: a folder counts as one item, however much it holds.</p>
 
         <h2 id="zip">Compressing and extracting ZIP files</h2>
