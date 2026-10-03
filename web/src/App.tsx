@@ -7,6 +7,7 @@ import { ApiError } from "@/api";
 import { keys, queries } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { MeContext } from "@/lib/session";
+import { StyleChoiceContext, styleChoice } from "@/lib/style";
 import { adoptLanguage, languageToAdopt, t } from "@/lib/i18n";
 import { errorMessage, unreachable } from "@/lib/utils";
 import { useApplyBranding } from "@/lib/branding";
@@ -105,9 +106,11 @@ function RequireAuth() {
 
   return (
     <MeContext.Provider value={me.data}>
-      <AppShell />
-      {/* "Replace or skip" questions before uploading, moving, copying or restoring: they read the signed-in user's settings */}
-      <ConflictHost />
+      <StyleChoiceContext.Provider value={styleChoice(me.data.style)}>
+        <AppShell />
+        {/* "Replace or skip" questions before uploading, moving, copying or restoring: they read the signed-in user's settings */}
+        <ConflictHost />
+      </StyleChoiceContext.Provider>
     </MeContext.Provider>
   );
 }

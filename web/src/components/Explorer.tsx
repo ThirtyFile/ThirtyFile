@@ -1,5 +1,5 @@
 import { useMemo, useRef, type ReactNode } from "react";
-import { FolderOpenIcon, Grid2X2Icon, ListIcon, UploadCloudIcon, type LucideIcon } from "lucide-react";
+import { FolderOpenIcon, UploadCloudIcon, type LucideIcon } from "lucide-react";
 import { privateSource, type Node, type Role, type SortKey, type SortOrder } from "@/api";
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
@@ -17,7 +17,6 @@ import { filesFromInput, uploadFiles } from "@/uploads";
 import { useExplorerState } from "./explorer/state";
 import { useExplorerActions } from "./explorer/actions";
 import { explorerMenus } from "./explorer/menus";
-import { explorerToolbar } from "./explorer/toolbar";
 import { ExplorerDialogs } from "./explorer/dialogs";
 import { SelectionBar } from "./explorer/selectionBar";
 import { useMediaQuery } from "@/lib/focus";
@@ -70,7 +69,7 @@ export function Explorer(p: ExplorerProps) {
   const s = useExplorerState(p);
   const a = useExplorerActions(p, s);
   const { newItems, menuItems } = explorerMenus(p, s, a);
-  const toolbar = explorerToolbar(p, s, a, newItems);
+  const toolbar = s.kit.toolbar(p, s, a, newItems);
   const {
     caps,
     tabs,
@@ -135,21 +134,16 @@ export function Explorer(p: ExplorerProps) {
     </>
   );
 
+  // The views with a button of their own in the status bar (the style's)
   const footerRight = (
     <span className="flex items-center gap-0.5">
-      <Button variant={view === "list" ? "secondary" : "ghost"} aria-pressed={view === "list"} size="icon-xs" aria-label={t("Details")} title={t("Details")} onClick={() => setView("list")}>
-        <ListIcon />
-      </Button>
-      <Button
-        variant={view === "grid" ? "secondary" : "ghost"}
-        aria-pressed={view === "grid"}
-        size="icon-xs"
-        aria-label={t("Large icons")}
-        title={t("Large icons")}
-        onClick={() => setView("grid")}
-      >
-        <Grid2X2Icon />
-      </Button>
+      {s.kit.statusViews
+        .flatMap((id) => s.kit.views().filter((v) => v.id === id))
+        .map(({ id, Icon, label }) => (
+          <Button key={id} variant={view === id ? "secondary" : "ghost"} aria-pressed={view === id} size="icon-xs" aria-label={label} title={label} onClick={() => setView(id)}>
+            <Icon />
+          </Button>
+        ))}
     </span>
   );
 
@@ -217,7 +211,7 @@ export function Explorer(p: ExplorerProps) {
                 renamingId={dialog?.t === "rename" ? dialog.node.id : null}
                 onRename={a.renameItem}
                 onRenameDone={a.renameDone}
-                onClickRename={s.behaviour.clickToRename && caps.write ? (n) => setDialog({ t: "rename", node: n }) : undefined}
+                onClickRename={s.kit.clickToRename && caps.write ? (n) => setDialog({ t: "rename", node: n }) : undefined}
                 empty={
                   p.empty ?? (
                     <div className="flex min-h-52 flex-col items-center justify-center gap-2 py-10 text-muted-foreground">

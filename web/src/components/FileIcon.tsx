@@ -1,19 +1,5 @@
-import {
-  FileArchiveIcon,
-  FileAudioIcon,
-  FileCodeIcon,
-  FileIcon as GenericFileIcon,
-  FileImageIcon,
-  FileSpreadsheetIcon,
-  FileTextIcon,
-  FileTypeIcon,
-  FileVideoIcon,
-  FolderIcon,
-  PresentationIcon,
-  Table2Icon,
-  type LucideIcon,
-} from "lucide-react";
 import type { Node } from "@/api";
+import { useStyleKit } from "@/components/style";
 import { fileTypeOf, isScriptNotVideo, type FileType } from "@/lib/fileTypes";
 import { t } from "@/lib/i18n";
 import { cn, extOf } from "@/lib/utils";
@@ -55,20 +41,21 @@ export function categoryOf(n: NodeLike): FileCategory {
   return "other";
 }
 
-const STYLE: Record<FileCategory, { Icon: LucideIcon; color: string; title: string }> = {
-  folder: { Icon: FolderIcon, color: "text-[#d8b66c] fill-[#d8b66c]/25", title: t("Folder") },
-  markdown: { Icon: FileCodeIcon, color: "text-[#6f86f0] dark:text-[#9aabf7]", title: t("Markdown document") },
-  pdf: { Icon: FileTypeIcon, color: "text-[#e05d5d] dark:text-[#ed8585]", title: t("PDF document") },
-  word: { Icon: FileTextIcon, color: "text-[#3f86e0] dark:text-[#77acf2]", title: t("Document") },
-  sheet: { Icon: FileSpreadsheetIcon, color: "text-[#35a26c] dark:text-[#71c69c]", title: t("Spreadsheet") },
-  slides: { Icon: PresentationIcon, color: "text-[#dc7a3c] dark:text-[#e9a071]", title: t("Presentation") },
-  image: { Icon: FileImageIcon, color: "text-[#9a63d8] dark:text-[#bd94ed]", title: t("Image") },
-  audio: { Icon: FileAudioIcon, color: "text-[#c9559a] dark:text-[#de8abd]", title: t("Audio") },
-  video: { Icon: FileVideoIcon, color: "text-[#7b69da] dark:text-[#a99aee]", title: t("Video") },
-  archive: { Icon: FileArchiveIcon, color: "text-[#b58f35] dark:text-[#d8b66c]", title: t("Compressed archive") },
-  code: { Icon: FileCodeIcon, color: "text-[#2e9ea8] dark:text-[#71c7cf]", title: t("Code or data file") },
-  text: { Icon: FileTextIcon, color: "text-muted-foreground", title: t("Text file") },
-  other: { Icon: GenericFileIcon, color: "text-muted-foreground", title: t("File") },
+/** What each kind of file is called; its icon is the style's (components/style) */
+const TITLES: Record<FileCategory, string> = {
+  folder: t("Folder"),
+  markdown: t("Markdown document"),
+  pdf: t("PDF document"),
+  word: t("Document"),
+  sheet: t("Spreadsheet"),
+  slides: t("Presentation"),
+  image: t("Image"),
+  audio: t("Audio"),
+  video: t("Video"),
+  archive: t("Compressed archive"),
+  code: t("Code or data file"),
+  text: t("Text file"),
+  other: t("File"),
 };
 
 /** Text shown in the Type column: uppercase extension; folders show "Folder" */
@@ -87,14 +74,15 @@ function specificType(n: NodeLike): FileType | "archive" | null {
 export function typeTitle(n: NodeLike) {
   const type = specificType(n);
   if (type && type !== "archive") return type.title;
-  return STYLE[type === "archive" ? "archive" : categoryOf(n)].title;
+  return TITLES[type === "archive" ? "archive" : categoryOf(n)];
 }
 
 export function FileIcon({ node, className }: { node: NodeLike; className?: string }) {
+  const icons = useStyleKit().icons;
   const type = specificType(node);
   if (type && type !== "archive") return <TypeMark type={type} className={className} />;
   const c = type === "archive" ? "archive" : categoryOf(node);
-  const { Icon, color } = c === "sheet" && /^(csv|tsv)$/.test(extOf(node.name)) ? { ...STYLE.sheet, Icon: Table2Icon } : STYLE[c];
+  const { Icon, color } = icons[c === "sheet" && /^(csv|tsv)$/.test(extOf(node.name)) ? "table" : c];
   return <Icon className={cn("shrink-0", color, className)} strokeWidth={1.7} aria-hidden="true" />;
 }
 
