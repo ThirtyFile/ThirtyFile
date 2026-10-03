@@ -104,4 +104,6 @@ export interface StyleKit {
    * stays there until a refresh, a change of sort or leaving the folder (components/explorer/newItems)
    */
   newAtEnd: boolean;
+  /** In the List view, folders expand in place to show their items indented below them (components/fileList/listTree) */
+  disclosure: boolean;
 }

@@ -17,6 +17,7 @@ import { th, Head, type Handlers, type RowProps, COLUMN_CLASS, fitsScreen, ListR
 import { listColumns, ColumnChoices } from "@/components/fileList/columns";
 import { useListKeyboard } from "@/components/fileList/useListKeyboard";
 import { useClickToRename } from "@/lib/clickToRename";
+import type { ListTreeView } from "@/components/fileList/listTree";
 
 /** What the explorer's keyboard handling asks of the list */
 export interface ListNav {
@@ -90,6 +91,8 @@ export interface FileListProps {
   navRef?: RefObject<ListNav | null>;
   /** A column of the Columns view: the style's keys for the column before (-1) and the next one (1), on the item with the focus */
   onColumn?(dir: -1 | 1, item: Item): void;
+  /** The List view of a style whose folders expand in place (components/fileList/listTree): `items` are its rows */
+  tree?: ListTreeView;
   /**
    * A column of the Columns view that isn't the open folder's: what it shows selected is the folder open in the next
    * column, shown less strongly and not announced
@@ -335,6 +338,7 @@ export function FileList(p: FileListProps) {
       const index = indexOf.get(item.id);
       if (byKey && index !== undefined) focusItem(index);
     },
+    expand: (item, open) => p.tree?.toggle(item.id, open),
   };
 
   // Marquee selection finds the boxed items from the row geometry: most rows aren't in the DOM
@@ -497,13 +501,14 @@ export function FileList(p: FileListProps) {
     />
   );
 
-  // role="grid": screen readers only report the selected state of rows in a grid, not in a plain table
+  // role="grid": screen readers only report the selected state of rows in a grid, not in a plain table (a treegrid when
+  // folders expand in place: rows say how deep they are, and whether they are expanded)
   return (
     <>
       {status}
       <table
         ref={(el) => void (root.current = el)}
-        role="grid"
+        role={p.tree ? "treegrid" : "grid"}
         aria-multiselectable
         aria-label={label}
         aria-rowcount={layout.count + 1}
@@ -553,7 +558,15 @@ export function FileList(p: FileListProps) {
                     </td>
                   </tr>
                 ) : item ? (
-                  <ListRow {...row(at.start)} checkboxes={!!p.showCheckboxes} columns={shownIds} filler={filler} ariaRow={r + 2} />
+                  <ListRow
+                    {...row(at.start)}
+                    checkboxes={!!p.showCheckboxes}
+                    columns={shownIds}
+                    filler={filler}
+                    ariaRow={r + 2}
+                    level={p.tree?.depth(at.start)}
+                    expanded={p.tree && item.kind === "folder" ? p.tree.isOpen(item.id) : undefined}
+                  />
                 ) : (
                   <PlaceholderRow cells={cellCount} ariaRow={r + 2} />
                 )}

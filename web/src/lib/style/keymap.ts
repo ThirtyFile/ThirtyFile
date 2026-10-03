@@ -28,6 +28,9 @@ export type Action =
   /** In the Columns view: back to the column before, and on to the column of the folder selected */
   | "previousColumn"
   | "nextColumn"
+  /** In a list whose folders expand in place (the Mac style's List view): expanding the folder with the focus, or collapsing it */
+  | "expand"
+  | "collapse"
   | "first"
   | "last"
   | "pageUp"

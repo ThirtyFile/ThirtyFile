@@ -73,7 +73,8 @@ export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, 
 
   /**
    * The selection from the anchor to an item (Shift), with the items in `keep` (Ctrl+Shift). With items between them
-   * not loaded, it is a span from one to the other (the server knows what is between them).
+   * not loaded, it is a span from one to the other (the server knows what is between them); in a list with folders
+   * expanded in place, whose rows aren't the list's own, it is the items loaded.
    */
   const rangeTo = (index: number, keep?: Set<string>): { selected: Set<string>; span: ListSpan | null } | null => {
     const anchorIndex = p.anchor === null ? -1 : (indexOf.get(p.anchor) ?? -1);
@@ -82,6 +83,7 @@ export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, 
     const next = new Set(keep);
     for (let i = lo; i <= hi; i++) {
       const item = items[i];
+      if (!item && p.tree?.expanded) continue;
       if (!item) {
         // The span holds every item from one end to the other: those kept that it covers (the anchor, at least) would count twice
         const outside = [...(keep ?? [])].filter((id) => {
@@ -177,6 +179,24 @@ export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, 
     if (p.onColumn && (pressed(e, k.previousColumn) || pressed(e, k.nextColumn))) {
       e.preventDefault();
       p.onColumn(pressed(e, k.nextColumn) ? 1 : -1, current);
+      return;
+    }
+    // Folders that expand in place: the style's keys expand and collapse them; on to the first item inside, or back to
+    // the folder an item is in
+    if (p.tree && (pressed(e, k.expand) || pressed(e, k.collapse))) {
+      const tree = p.tree;
+      const open = current.kind === "folder" ? tree.isOpen(current.id) : undefined;
+      const depth = tree.depth(index);
+      e.preventDefault();
+      if (pressed(e, k.expand)) {
+        if (open === false) tree.toggle(current.id, true);
+        else if (open && index + 1 < n && tree.depth(index + 1) > depth) moveTo(index + 1, "only");
+      } else if (open) tree.toggle(current.id, false);
+      else if (depth > 0) {
+        let up = index - 1;
+        while (up >= 0 && tree.depth(up) >= depth) up--;
+        if (up >= 0) moveTo(up, "only");
+      }
       return;
     }
     // Alt+arrows move around folders (handled by the address bar)

@@ -18,6 +18,9 @@ export const WINDOWS_KEYS: KeyMap = {
   itemRight: ["→"],
   previousColumn: ["←"],
   nextColumn: ["→"],
+  // Unused: folders don't expand in place in this style (`disclosure`)
+  expand: ["→"],
+  collapse: ["←"],
   first: ["Home"],
   last: ["End"],
   pageUp: ["PgUp"],

@@ -84,6 +84,8 @@ export interface Handlers {
   extra?(n: Item): string;
   rename(item: Item, name: string): Promise<void>;
   renameDone(item: Item, byKey: boolean): void;
+  /** A folder's triangle, in a list whose folders expand in place: expands it, or collapses it */
+  expand(item: Item, open: boolean): void;
 }
 export type HandlersRef = RefObject<Handlers>;
 
@@ -230,13 +232,30 @@ export function Cell({ id, item, h }: { id: ColumnId; item: Item; h: HandlersRef
   }
 }
 
-export const ListRow = memo(function ListRow(r: RowProps & { checkboxes: boolean; columns: ColumnId[]; filler: boolean; ariaRow: number }) {
+/** How far in each level of a list whose folders expand in place is indented */
+export const LEVEL_INDENT = 16;
+
+export const ListRow = memo(function ListRow(
+  r: RowProps & {
+    checkboxes: boolean;
+    columns: ColumnId[];
+    filler: boolean;
+    ariaRow: number;
+    /** A list whose folders expand in place: how deep the row is (0: the list's own items) */
+    level?: number;
+    /** ...and whether the folder is expanded (none for a file) */
+    expanded?: boolean;
+  },
+) {
   const { item } = r;
+  const tree = r.level !== undefined;
   return (
     <tr
       {...rowProps(r)}
       role="row"
       aria-rowindex={r.ariaRow}
+      aria-level={tree ? r.level! + 1 : undefined}
+      aria-expanded={r.expanded}
       className={cn(
         "cursor-default outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset aria-selected:bg-selection aria-selected:text-accent-foreground aria-selected:shadow-[inset_3px_0_0_var(--color-brand)]",
         r.dropping && "bg-brand/15",
@@ -257,9 +276,25 @@ export const ListRow = memo(function ListRow(r: RowProps & { checkboxes: boolean
           />
         </td>
       )}
-      <td role="gridcell" className={cn(td, "pl-3")}>
-        <div data-drag-handle {...dragHandle(r)} className="flex w-fit max-w-full min-w-0 items-center gap-2" title={item.name}>
-          <FileIcon node={item} className="size-4 shrink-0" />
+      <td role="gridcell" className={cn(td, tree ? "pl-1" : "pl-3")} style={tree ? { paddingLeft: 4 + r.level! * LEVEL_INDENT } : undefined}>
+        <div data-drag-handle {...dragHandle(r)} className={cn("flex w-fit max-w-full min-w-0 items-center", tree ? "gap-1" : "gap-2")} title={item.name}>
+          {/* The triangle is for the mouse (the keyboard uses → and ←): hidden from screen readers, which hear the row expanded or not */}
+          {tree && (
+            <span
+              aria-hidden
+              data-disclosure
+              className={cn("flex size-4 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground", r.expanded === undefined && "invisible")}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (r.expanded !== undefined) r.h.current.expand(item, !r.expanded);
+              }}
+              onDoubleClick={(e) => e.stopPropagation()}
+            >
+              <ChevronRightIcon className={cn("size-3.5 transition-transform", r.expanded && "rotate-90")} />
+            </span>
+          )}
+          <FileIcon node={item} className={cn("size-4 shrink-0", tree && "mr-1")} />
           {r.renaming ? (
             renameBox(r)
           ) : (
