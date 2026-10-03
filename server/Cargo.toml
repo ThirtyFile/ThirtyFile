@@ -87,6 +87,13 @@ lto = "thin"
 codegen-units = 1
 strip = true
 
+# The images that pull requests and main build to start them (build.yml): the same code as `release`, compiled in
+# parallel and without link-time optimisation. Slower and larger at run time; releases always use `release`
+[profile.ci]
+inherits = "release"
+lto = false
+codegen-units = 16
+
 # Every test that creates an account hashes its password with Argon2 (19 MiB, two passes). Unoptimized, a hash is
 # slow enough to take most of the time cargo test runs; optimizing only the hashing crates keeps the rest debuggable.
 [profile.dev.package.argon2]

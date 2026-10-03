@@ -74,11 +74,14 @@ COPY --from=web /src/web/dist /src/web/dist
 # The version `thirtyfile --version` reports, and the web app shows to people who are signed in
 ARG VERSION=dev
 ENV THIRTYFILE_VERSION=$VERSION
+# The Cargo profile: `release` for the images people run, `ci` for the ones pull requests and main build to start
+# them (quicker to compile, see server/Cargo.toml)
+ARG CARGO_PROFILE=release
 # Dependencies and build output are cached, so rebuilds after code changes only recompile what changed
 RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=thirtyfile-target-${TARGETARCH},target=/src/server/target \
-    xx-cargo auditable build --release --locked \
- && install -m 755 "target/$(xx-cargo --print-target-triple)/release/thirtyfile" /thirtyfile \
+    xx-cargo auditable build --profile "$CARGO_PROFILE" --locked \
+ && install -m 755 "target/$(xx-cargo --print-target-triple)/$CARGO_PROFILE/thirtyfile" /thirtyfile \
  && xx-verify --static /thirtyfile
 
 # ───────────── 3) Runtime files ─────────────
