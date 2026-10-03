@@ -22,8 +22,8 @@ export default {
     "コピーは {name} 上に専用のフォルダー（.thirtyfile-backups 内）を持ち、他の機能がそこに書き込むことはありません。そこにあるものが置き換えられることはなく、コピーはそれぞれ別々に保管されます。コピーは「コントロールパネル › バックアップ」に表示され、そこでコピー内のスペースを新しいフォルダーに復元したり、コピーを検証または削除したりできます。",
   "The spaces stay usable meanwhile. The copy shows them as they were when their list of files was made: files changed or deleted after that are copied as they were. Content-store files are kept from deletion until they are copied; files in folders are read and checked unchanged.":
     "コピー中もスペースは通常どおり使用できます。コピーには、ファイルの一覧を作成した時点のスペースが反映されます。その後に変更または削除されたファイルは、その時点の状態でコピーされます。コンテンツストアのファイルはコピーが終わるまで削除されません。フォルダー内のファイルは、読み取り時に変更がないことを確認します。",
-  "Share links, favorites and upload sessions aren't copied. Who had access is recorded, but restoring doesn't give it again.":
-    "共有リンク、お気に入り、アップロードセッションはコピーされません。アクセス権を持っていたユーザーは記録されますが、復元してもアクセス権は再び付与されません。",
+  "Share links, favorites, tags and upload sessions aren't copied. Who had access is recorded, but restoring doesn't give it again.":
+    "共有リンク、お気に入り、タグ、アップロードセッションはコピーされません。アクセス権を持っていたユーザーは記録されますが、復元してもアクセス権は再び付与されません。",
   "{name} can't be reached now: {error}": "現在 {name} に接続できません：{error}",
   "There isn't enough free space there for the copy.": "コピー先には、このコピーを保存するのに十分な空き容量がありません。",
   "{name} is on the same disk or storage service as {source}: the copy doesn't survive a failure of it.": "{name} は {source} と同じディスクまたはストレージサービス上にあります。そこで障害が起きると、コピーも失われます。",

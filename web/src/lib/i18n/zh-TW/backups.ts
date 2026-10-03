@@ -22,8 +22,8 @@ export default {
     "副本會在 {name} 上有自己的資料夾（在 .thirtyfile-backups 中），其他功能不會寫入這裡：不會取代那裡的任何東西，每份副本也各自分開。副本會列在「控制台 › 備份」，可以在那裡把其中的空間還原到新資料夾，也可以檢查或刪除副本。",
   "The spaces stay usable meanwhile. The copy shows them as they were when their list of files was made: files changed or deleted after that are copied as they were. Content-store files are kept from deletion until they are copied; files in folders are read and checked unchanged.":
     "複製期間空間仍可正常使用。副本呈現的是列出檔案清單當下的空間：之後才變更或刪除的檔案，會以當時的樣子複製。內容儲存區的檔案在複製完成前不會被刪除；資料夾中的檔案會在讀取時確認沒有變動。",
-  "Share links, favorites and upload sessions aren't copied. Who had access is recorded, but restoring doesn't give it again.":
-    "分享連結、我的最愛和上傳工作階段不會複製。誰有存取權會記錄下來，但還原時不會重新授予。",
+  "Share links, favorites, tags and upload sessions aren't copied. Who had access is recorded, but restoring doesn't give it again.":
+    "分享連結、我的最愛、標籤和上傳工作階段不會複製。誰有存取權會記錄下來，但還原時不會重新授予。",
   "{name} can't be reached now: {error}": "目前無法連線到 {name}：{error}",
   "There isn't enough free space there for the copy.": "那裡的可用空間不足以存放這份副本。",
   "{name} is on the same disk or storage service as {source}: the copy doesn't survive a failure of it.": "{name} 和 {source} 在同一個磁碟或儲存服務上：它故障時，副本也會一起失去。",

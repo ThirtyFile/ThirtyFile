@@ -14,6 +14,7 @@ import {
   SearchIcon,
   SettingsIcon,
   StarIcon,
+  TagIcon,
   Trash2Icon,
   XIcon,
   type LucideIcon,
@@ -44,6 +45,7 @@ function describe(path: string, personal: boolean): { icon: LucideIcon; title: s
   if (p === "/recent") return { icon: ClockIcon, title: t("Recent") };
   if (p === "/favorites") return { icon: StarIcon, title: t("Favorites") };
   if (p === "/search") return { icon: SearchIcon, title: t("Search") };
+  if (p.startsWith("/tags/")) return { icon: TagIcon, title: t("Tags") };
   if (p === "/shares") return { icon: Link2Icon, title: t("My share links") };
   if (p === "/trash") return { icon: Trash2Icon, title: t("Trash") };
   if (p === "/admin") return { icon: SettingsIcon, title: t("Control panel") };
@@ -60,7 +62,7 @@ function TabItem({ tab, active, onlyOne }: { tab: Tab; active: boolean; onlyOne:
   const personal = hasPersonal(useMe());
   const { icon: Icon, title: fallback } = describe(path, personal);
   // Folder and file names come from the page; other fixed pages always use their current name (to avoid reusing a title saved before a rename)
-  const dynamic = path.startsWith("/files/") || path.startsWith("/view/") || path.startsWith("/search");
+  const dynamic = path.startsWith("/files/") || path.startsWith("/view/") || path.startsWith("/search") || path.startsWith("/tags/");
   const title = (dynamic && tab.title) || fallback;
   const file = viewedFile(tab);
   useDraftsVersion();

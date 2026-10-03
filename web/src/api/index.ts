@@ -13,6 +13,7 @@ import { notificationsApi } from "@/api/notifications";
 import { storageApi } from "@/api/storage";
 import { backupsApi } from "@/api/backups";
 import { replicasApi } from "@/api/replicas";
+import { tagsApi } from "@/api/tags";
 
 export * from "@/api/types";
 export { SORT_KEYS } from "@/api/files";
@@ -34,4 +35,5 @@ export const api = {
   ...storageApi,
   ...backupsApi,
   ...replicasApi,
+  ...tagsApi,
 };

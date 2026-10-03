@@ -22,8 +22,8 @@ export default {
     "副本会在 {name} 上拥有自己的文件夹（位于 .thirtyfile-backups 中），其他功能不会写入该文件夹：那里的任何内容都不会被替换，每份副本也相互独立。副本会列在“控制面板 › 备份”中，你可以在那里将其中的某个空间还原到新文件夹，也可以检查或删除副本。",
   "The spaces stay usable meanwhile. The copy shows them as they were when their list of files was made: files changed or deleted after that are copied as they were. Content-store files are kept from deletion until they are copied; files in folders are read and checked unchanged.":
     "复制期间空间仍可正常使用。副本呈现的是生成文件列表那一刻的空间：之后才修改或删除的文件，会按当时的样子复制。内容存储区中的文件在复制完成前不会被删除；文件夹中的文件会在读取时确认没有变动。",
-  "Share links, favorites and upload sessions aren't copied. Who had access is recorded, but restoring doesn't give it again.":
-    "分享链接、收藏和上传会话不会被复制。谁拥有访问权限会被记录下来，但还原时不会重新授予。",
+  "Share links, favorites, tags and upload sessions aren't copied. Who had access is recorded, but restoring doesn't give it again.":
+    "分享链接、收藏、标签和上传会话不会被复制。谁拥有访问权限会被记录下来，但还原时不会重新授予。",
   "{name} can't be reached now: {error}": "目前无法连接到 {name}：{error}",
   "There isn't enough free space there for the copy.": "那里的可用空间不足以存放这份副本。",
   "{name} is on the same disk or storage service as {source}: the copy doesn't survive a failure of it.": "{name} 和 {source} 位于同一磁盘或存储服务上：一旦它出现故障，副本也会一起丢失。",

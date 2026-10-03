@@ -6,10 +6,10 @@ import { nameCollator } from "@/lib/utils";
 // ───────────── Columns ─────────────
 
 /** Details view columns besides the name, which is always shown. `date` is the list's main date (modified, or deleted in the trash) */
-export type ColumnId = "location" | "date" | "created" | "type" | "size" | "owner" | "extra";
+export type ColumnId = "location" | "date" | "created" | "type" | "size" | "owner" | "tags" | "extra";
 
 /** Default widths in pixels; the name takes the space left, until it's resized itself */
-export const COLUMN_WIDTH: Record<ColumnId, number> = { location: 220, date: 170, created: 170, type: 120, size: 100, owner: 110, extra: 110 };
+export const COLUMN_WIDTH: Record<ColumnId, number> = { location: 220, date: 170, created: 170, type: 120, size: 100, owner: 110, tags: 150, extra: 110 };
 export const MIN_COLUMN = 50;
 export const MIN_NAME = 160;
 export const MAX_COLUMN = 1000;
@@ -38,8 +38,8 @@ export function pageRows(height: number, rowHeight: number) {
   return Math.max(1, Math.floor(height / rowHeight) - 1);
 }
 
-/** Shown unless turned off; Date created is off until turned on */
-const SHOWN: Record<ColumnId, boolean> = { location: true, date: true, created: false, type: true, size: true, owner: true, extra: true };
+/** Shown unless turned off; Date created and Tags are off until turned on */
+const SHOWN: Record<ColumnId, boolean> = { location: true, date: true, created: false, type: true, size: true, owner: true, tags: false, extra: true };
 
 export interface ColumnPrefs {
   visible: Partial<Record<ColumnId, boolean>>;

@@ -61,6 +61,7 @@ const OPERATIONS: Record<string, string> = {
   delete: t("Delete permanently"),
   create: t("New"),
   favorite: t("Favorites"),
+  tags: t("Tags"),
   compress: t("Compress to ZIP"),
   extract: t("Extract"),
   job: t("Background task"),

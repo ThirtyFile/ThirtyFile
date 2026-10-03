@@ -1,7 +1,7 @@
 //! The Details view's columns, and the menu that chooses them
 
 import { DropdownMenuCheckboxItem, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
-import type { SortKey } from "@/api";
+import { privateSource, type SortKey } from "@/api";
 import { columnShown, resetColumns, showColumn, useColumnPrefs, type ColumnId } from "@/lib/listView";
 import { t } from "@/lib/i18n";
 import type { FileListProps } from "@/components/FileList";
@@ -13,8 +13,11 @@ export interface ListColumn {
   sort?: SortKey;
 }
 
-/** The Details view's columns a list can show besides the name, in order (shown or not, see lib/listView.ts) */
-export function listColumns(p: Pick<FileListProps, "showLocation" | "showOwner" | "extraColumn" | "dateLabel">): ListColumn[] {
+/**
+ * The Details view's columns a list can show besides the name, in order (shown or not, see lib/listView.ts). Tags are
+ * the signed-in person's: not offered to visitors of a share link (a list of another `source`)
+ */
+export function listColumns(p: Pick<FileListProps, "showLocation" | "showOwner" | "extraColumn" | "dateLabel"> & { source?: FileListProps["source"] }): ListColumn[] {
   const out: ListColumn[] = [];
   if (p.showLocation) out.push({ id: "location", label: t("Location") });
   out.push({ id: "date", label: p.dateLabel ?? t("Date modified"), sort: "updated" });
@@ -22,6 +25,8 @@ export function listColumns(p: Pick<FileListProps, "showLocation" | "showOwner" 
   out.push({ id: "type", label: t("Type"), sort: "type" });
   out.push({ id: "size", label: t("Size"), sort: "size" });
   if (p.showOwner) out.push({ id: "owner", label: t("Uploaded by") });
+  // The person's own tags, with their names (as File Explorer's Tags column)
+  if (!p.source || p.source === privateSource) out.push({ id: "tags", label: t("Tags") });
   if (p.extraColumn) out.push({ id: "extra", label: p.extraColumn.label });
   return out;
 }

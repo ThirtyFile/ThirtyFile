@@ -128,7 +128,7 @@ export function CopyEverythingDialog({ location, onClose }: { location: StorageL
                     "The spaces stay usable meanwhile. The copy shows them as they were when their list of files was made: files changed or deleted after that are copied as they were. Content-store files are kept from deletion until they are copied; files in folders are read and checked unchanged.",
                   )}
                 </p>
-                <p>{t("Share links, favorites and upload sessions aren't copied. Who had access is recorded, but restoring doesn't give it again.")}</p>
+                <p>{t("Share links, favorites, tags and upload sessions aren't copied. Who had access is recorded, but restoring doesn't give it again.")}</p>
               </div>
               {(p.shared || p.unencrypted || tooSmall || p.problem) && (
                 <div className="grid gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-900 dark:text-amber-100" role="note">

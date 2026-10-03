@@ -23,6 +23,7 @@ const ResetPasswordPage = page(() => import("@/pages/ResetPasswordPage"), "Reset
 const PublicSharePage = page(() => import("@/pages/PublicSharePage"), "PublicSharePage");
 const AppShell = page(() => import("@/pages/AppShell"), "AppShell");
 const ConflictHost = page(() => import("@/components/ConflictDialog"), "ConflictHost");
+const TagDialogHost = page(() => import("@/components/tags"), "TagDialogHost");
 const ChangePasswordDialog = page<typeof import("@/components/ChangePasswordDialog"), "ChangePasswordDialog", { required?: boolean; onClose(): void }>(
   () => import("@/components/ChangePasswordDialog"),
   "ChangePasswordDialog",
@@ -31,6 +32,7 @@ const FilesPage = page(() => import("@/pages/FilesPage"), "FilesPage");
 const FileViewPage = page(() => import("@/pages/FileViewPage"), "FileViewPage");
 const RecentPage = page(() => import("@/pages/ListPages"), "RecentPage");
 const FavoritesPage = page(() => import("@/pages/ListPages"), "FavoritesPage");
+const TaggedPage = page(() => import("@/pages/ListPages"), "TaggedPage");
 const SearchPage = page(() => import("@/pages/ListPages"), "SearchPage");
 const ThisPcPage = page(() => import("@/pages/ThisPcPage"), "ThisPcPage");
 const SharedWithMePage = page(() => import("@/pages/SharedWithMePage"), "SharedWithMePage");
@@ -110,6 +112,8 @@ function RequireAuth() {
         <AppShell />
         {/* "Replace or skip" questions before uploading, moving, copying or restoring: they read the signed-in user's settings */}
         <ConflictHost />
+        {/* Making and changing tags, from the menus, the details pane and the navigation pane */}
+        <TagDialogHost />
       </StyleChoiceContext.Provider>
     </MeContext.Provider>
   );
@@ -140,6 +144,7 @@ export function App() {
             <Route path="/shared-with-me" element={<SharedWithMePage />} />
             <Route path="/recent" element={<RecentPage />} />
             <Route path="/favorites" element={<FavoritesPage />} />
+            <Route path="/tags/:id" element={<TaggedPage />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/shares" element={<SharesPage />} />
             <Route path="/trash" element={<TrashPage />} />
