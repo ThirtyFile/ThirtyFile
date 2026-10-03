@@ -11,6 +11,7 @@ import {
   CopyIcon,
   DownloadIcon,
   EllipsisIcon,
+  EyeIcon,
   FolderInputIcon,
   FolderOpenIcon,
   FolderSymlinkIcon,
@@ -54,6 +55,7 @@ import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { windowsToolbar } from "../windows/toolbar";
 import { openGoToFolder } from "./pathBar";
+import { openQuickLook } from "./quickLook";
 
 export function macToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerActions, newItems: ReactNode) {
   return <MacToolbar p={p} s={s} a={a} newItems={newItems} />;
@@ -154,6 +156,9 @@ function ActionsMenu({ p, s, a, newItems }: { p: ExplorerProps; s: ExplorerState
         )}
         <DropdownMenuItem disabled={!single} onClick={() => single && a.open(single)}>
           <FolderOpenIcon /> {t("Open")} <Kbd>{k.open[0]}</Kbd>
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={none} onClick={openQuickLook}>
+          <EyeIcon /> {t("Quick look")} <Kbd>{k.quickLook[0]}</Kbd>
         </DropdownMenuItem>
         <DropdownMenuItem disabled={none} onClick={() => setDetailsOpen(true)}>
           <InfoIcon /> {t("Get info")} <Kbd>{k.details[0]}</Kbd>

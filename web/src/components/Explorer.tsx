@@ -298,6 +298,7 @@ export function Explorer(p: ExplorerProps) {
       />
 
       <ExplorerDialogs p={p} s={s} a={a} />
+      {s.kit.Extras && <s.kit.Extras p={p} s={s} a={a} />}
     </Frame>
   );
 }

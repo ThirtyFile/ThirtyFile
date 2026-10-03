@@ -42,6 +42,8 @@ export const WINDOWS_KEYS: KeyMap = {
   deleteForever: ["Shift+Delete"],
   newFolder: ["Ctrl+Shift+N"],
   details: ["Alt+Enter"],
+  // Not in this style: the details pane shows the item selected
+  quickLook: [],
   shortcuts: ["?"],
 };
 

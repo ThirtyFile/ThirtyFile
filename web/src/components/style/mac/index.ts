@@ -7,6 +7,7 @@ import { WINDOWS_KEYS, windowsShortcuts } from "../windows/keys";
 import { MacFrame } from "./frame";
 import { MAC_ICONS, macViews } from "./look";
 import { macMenu } from "./menus";
+import { QuickLook } from "./quickLook";
 import { macToolbar } from "./toolbar";
 
 export const macKit: StyleKit = {
@@ -14,8 +15,10 @@ export const macKit: StyleKit = {
   Frame: MacFrame,
   toolbar: macToolbar,
   menu: macMenu,
-  // The Mac keyboard map comes with the style being offered (#325); until then, the Windows style's keys
-  keys: WINDOWS_KEYS,
+  Extras: QuickLook,
+  // The Mac keyboard map comes with the style being offered (#325); until then, the Windows style's keys, with Space
+  // for Quick look
+  keys: { ...WINDOWS_KEYS, select: [], quickLook: ["Space"] },
   shortcuts: windowsShortcuts,
   icons: MAC_ICONS,
   views: macViews,

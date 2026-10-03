@@ -97,6 +97,11 @@ export default {
   "Edit workbook": "编辑工作簿",
   "Search files": "搜索文件",
   "Modified {date}": "修改于 {date}",
+  // Quick look, the Mac style's preview window (components/style/mac/quickLook.tsx)
+  "Quick look": "快速查看",
+  "Quick look: {name}": "快速查看：{name}",
+  "Previous item": "上一个项目",
+  "Next item": "下一个项目",
   "File not found": "找不到这个文件",
   "Share with…": "共享给…",
   "Create share link": "创建分享链接",

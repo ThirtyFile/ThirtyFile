@@ -56,6 +56,8 @@ export type Action =
   | "deleteForever"
   | "newFolder"
   | "details"
+  /** A preview of the item selected in a window over the list, and the next one with the arrows (the Mac style's Quick look) */
+  | "quickLook"
   | "shortcuts";
 
 /** Every action's keys, the first one being the one menus and tooltips show */

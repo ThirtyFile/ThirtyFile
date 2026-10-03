@@ -145,8 +145,8 @@ describe("the Windows style's keys", () => {
     expect(pressed(press("ArrowRight", { shiftKey: true }), WINDOWS_KEYS.nextColumn)).toBe(false);
   });
 
-  test("every action has keys", () => {
-    expect(Object.entries(WINDOWS_KEYS).filter(([, keys]) => !keys.length)).toEqual([]);
+  test("every action has keys, but those of features the style doesn't have", () => {
+    expect(Object.entries(WINDOWS_KEYS).filter(([, keys]) => !keys.length)).toEqual([["quickLook", []]]);
   });
 });
 
