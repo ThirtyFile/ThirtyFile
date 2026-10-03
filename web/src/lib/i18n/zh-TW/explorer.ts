@@ -31,6 +31,13 @@ export default {
   "Windows style": "Windows 風格",
   "Mac style": "Mac 風格",
   "Mac style (coming soon)": "Mac 風格（即將推出）",
+  // The Mac style (components/style/mac): its sidebar, toolbar and menus
+  "All favorites": "所有收藏",
+  "Shared": "共用",
+  "Icons": "圖示",
+  "Sort and group": "排序與群組",
+  "Actions": "動作",
+  "Get info": "取得資訊",
   "Sign out": "登出",
   // The release that runs: the account menu, and the Control panel's status bar (admin/ControlPanelPage.tsx)
   "ThirtyFile {version}": "ThirtyFile {version}",

@@ -11,27 +11,18 @@ import { t } from "@/lib/i18n";
 import { cn, formatBytes } from "@/lib/utils";
 import { AccountMenu } from "./AccountMenu";
 import { SmartFoldersNav } from "./SmartFoldersNav";
-import { TagsNav } from "./TagsNav";
+import { TagsNav, windowsNavItem } from "./TagsNav";
 
 // ───────────── Left-hand locations list ─────────────
 
-const NAV_DEFAULT_WIDTH = 200;
-const NAV_MIN_WIDTH = 150;
-const NAV_MAX_WIDTH = 480;
+export const NAV_DEFAULT_WIDTH = 200;
+export const NAV_MIN_WIDTH = 150;
+export const NAV_MAX_WIDTH = 480;
 
 function NavItem({ to, icon: Icon, label, end }: { to: string; icon: LucideIcon; label: string; end?: boolean }) {
   return (
     <NavMenu to={to}>
-      <NavLink
-        to={to}
-        end={end}
-        className={({ isActive }) =>
-          cn(
-            "flex h-[29px] items-center gap-[7px] rounded px-2 whitespace-nowrap text-muted-foreground hover:bg-muted",
-            isActive && "bg-selection text-accent-foreground shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-selection",
-          )
-        }
-      >
+      <NavLink to={to} end={end} className={({ isActive }) => windowsNavItem(isActive)}>
         <Icon className="size-[15px] shrink-0" />
         <span className="truncate">{label}</span>
       </NavLink>
@@ -42,10 +33,6 @@ function NavItem({ to, icon: Icon, label, end }: { to: string; icon: LucideIcon;
 export function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean; activeFolder?: string; onNavigate(): void }) {
   const me = useMe();
   const [width, setWidth] = usePersisted("tf-nav-width", NAV_DEFAULT_WIDTH);
-  // The quota and usage are those of "My files": nothing to show for someone without it
-  const personal = hasPersonal(me);
-  const usedPct = me.quota_bytes > 0 ? Math.min(100, (me.used_bytes / me.quota_bytes) * 100) : 0;
-  const usage = !personal ? null : me.quota_bytes > 0 ? `${formatBytes(me.used_bytes)} / ${formatBytes(me.quota_bytes)}` : formatBytes(me.used_bytes);
   // On phones the pane opens over the page (with a backdrop): keep focus in it until it closes
   const ref = useRef<HTMLElement>(null);
   const phone = useMediaQuery("(max-width: 47.99rem)");
@@ -81,24 +68,36 @@ export function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean
         )}
       </div>
 
-      <div className="grid gap-2 border-t p-2">
-        {usage !== null && me.quota_bytes > 0 && (
-          <div className="grid gap-1 px-1">
-            <div
-              role="progressbar"
-              aria-label={t("Storage used")}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(usedPct)}
-              aria-valuetext={usage}
-              className="h-1 overflow-hidden rounded-full bg-muted"
-            >
-              <div className={cn("h-full rounded-full", usedPct > 90 ? "bg-destructive" : "bg-brand")} style={{ width: `${usedPct}%` }} />
-            </div>
-          </div>
-        )}
-        <AccountMenu usage={usage} />
-      </div>
+      <NavFooter />
     </nav>
+  );
+}
+
+/** The bottom of the locations: how much of "My files" is used, and the account menu */
+export function NavFooter() {
+  const me = useMe();
+  // The quota and usage are those of "My files": nothing to show for someone without it
+  const personal = hasPersonal(me);
+  const usedPct = me.quota_bytes > 0 ? Math.min(100, (me.used_bytes / me.quota_bytes) * 100) : 0;
+  const usage = !personal ? null : me.quota_bytes > 0 ? `${formatBytes(me.used_bytes)} / ${formatBytes(me.quota_bytes)}` : formatBytes(me.used_bytes);
+  return (
+    <div className="grid gap-2 border-t p-2">
+      {usage !== null && me.quota_bytes > 0 && (
+        <div className="grid gap-1 px-1">
+          <div
+            role="progressbar"
+            aria-label={t("Storage used")}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(usedPct)}
+            aria-valuetext={usage}
+            className="h-1 overflow-hidden rounded-full bg-muted"
+          >
+            <div className={cn("h-full rounded-full", usedPct > 90 ? "bg-destructive" : "bg-brand")} style={{ width: `${usedPct}%` }} />
+          </div>
+        </div>
+      )}
+      <AccountMenu usage={usage} />
+    </div>
   );
 }

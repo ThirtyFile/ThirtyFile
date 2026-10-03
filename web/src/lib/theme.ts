@@ -6,7 +6,8 @@ export type ThemeMode = "system" | "light" | "dark";
 
 /** Tells the components showing the appearance that it changed (it is read from the page and the settings) */
 const changes = createStore(undefined);
-const media = matchMedia("(prefers-color-scheme: dark)");
+// Not in every environment the modules load in (tests)
+const media = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null;
 
 // Default appearance set by the admin in branding settings, and whether users may switch it themselves (injected by the home page HTML first)
 let policy: { mode: ThemeMode; allowToggle: boolean } = {
@@ -30,11 +31,11 @@ function currentMode(): ThemeMode {
 
 function apply() {
   const mode = currentMode();
-  document.documentElement.classList.toggle("dark", mode === "dark" || (mode === "system" && media.matches));
+  document.documentElement.classList.toggle("dark", mode === "dark" || (mode === "system" && !!media?.matches));
   changes.emit();
 }
 
-media.addEventListener("change", apply);
+media?.addEventListener("change", apply);
 // The inline script in index.html applies the theme before the page is drawn; when it didn't run (blocked by the
 // browser, say), "Follow system" or a chosen appearance would otherwise not show until something changed
 apply();
