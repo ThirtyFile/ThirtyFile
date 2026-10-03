@@ -3,6 +3,7 @@
 import type { Branding } from "@/lib/branding";
 import type { SORT_KEYS } from "@/api/files";
 import type { Lang } from "@/lib/i18n";
+import type { StyleChoice } from "@/lib/style/device";
 
 export interface Node {
   id: string;
@@ -1063,6 +1064,8 @@ export interface Me {
    * chosen in this browser, or the system default); null when the browser's languages decide
    */
   ui_lang: Lang | null;
+  /** The interface style they chose (lib/style): `auto` follows the operating system of the device in use */
+  style: StyleChoice;
 }
 
 export interface SharePolicy {

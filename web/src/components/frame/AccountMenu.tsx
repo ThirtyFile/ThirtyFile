@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { leaveAfterSignOut } from "@/lib/signOut";
 import {
+  AppWindowIcon,
   BellIcon,
   ChevronsUpDownIcon,
   HistoryIcon,
@@ -15,7 +17,8 @@ import {
   ShieldCheckIcon,
   SunIcon,
 } from "lucide-react";
-import { api } from "@/api";
+import { api, type Me } from "@/api";
+import { keys } from "@/api/queryKeys";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,13 +42,16 @@ import { useMe } from "@/lib/session";
 import { useTheme, type ThemeMode } from "@/lib/theme";
 import { errorMessage } from "@/lib/utils";
 import { LANGS, lang, setLang, t, type Lang } from "@/lib/i18n";
+import { READY_STYLES, useInterfaceStyle, type StyleChoice } from "@/lib/style";
 
 /**
- * The signed-in user's menu at the bottom of the locations list: account settings, appearance, language and signing
- * out. `usage`: how much of "My files" is used; null for someone without it.
+ * The signed-in user's menu at the bottom of the locations list: account settings, appearance, interface style,
+ * language and signing out. `usage`: how much of "My files" is used; null for someone without it.
  */
 export function AccountMenu({ usage }: { usage: string | null }) {
   const me = useMe();
+  const qc = useQueryClient();
+  const style = useInterfaceStyle();
   const { dark, mode, canToggle, setMode } = useTheme();
   const [changingPassword, setChangingPassword] = useState(false);
   const [showLogins, setShowLogins] = useState(false);
@@ -69,6 +75,17 @@ export function AccountMenu({ usage }: { usage: string | null }) {
       return;
     }
     setLang(next);
+  };
+
+  /** Saved with the account, so the style follows them to their other devices */
+  const chooseStyle = async (next: StyleChoice) => {
+    try {
+      await api.setStyle(next);
+    } catch (e) {
+      toast.error(errorMessage(e, t("Couldn't save the interface style")));
+      return;
+    }
+    qc.setQueryData<Me>(keys.me(), (old) => old && { ...old, style: next });
   };
 
   return (
@@ -127,6 +144,24 @@ export function AccountMenu({ usage }: { usage: string | null }) {
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           )}
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <AppWindowIcon /> {t("Interface style")}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-64">
+              <div className="px-1.5 py-1 text-xs text-muted-foreground">{t("How the file explorer is laid out, and which keys do what. Saved with your account.")}</div>
+              <DropdownMenuRadioGroup value={me.style} onValueChange={(v) => void chooseStyle(v as StyleChoice)}>
+                <DropdownMenuRadioItem value="auto">
+                  {style.style === "mac" ? t("Automatic (Mac style on this device)") : t("Automatic (Windows style on this device)")}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="windows">{t("Windows style")}</DropdownMenuRadioItem>
+                {/* Until the Mac style exists (#325), choosing it would change nothing */}
+                <DropdownMenuRadioItem value="mac" disabled={!READY_STYLES.includes("mac")}>
+                  {READY_STYLES.includes("mac") ? t("Mac style") : t("Mac style (coming soon)")}
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
               <LanguagesIcon /> {t("Language")}

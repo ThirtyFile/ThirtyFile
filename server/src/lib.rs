@@ -51,6 +51,7 @@ mod space_folders;
 mod sso;
 mod state;
 mod storage;
+mod style;
 #[cfg(test)]
 mod testutil;
 mod thumbnails;

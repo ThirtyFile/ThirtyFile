@@ -8,6 +8,7 @@ export default {
   "Request failed ({status})": "リクエストに失敗しました（{status}）",
   "Language": "言語",
   "Couldn't save the language": "言語を保存できませんでした",
+  "Couldn't save the interface style": "インターフェイスのスタイルを保存できませんでした",
   "Just now": "たった今",
   "Today {time}": "今日 {time}",
   "Couldn't create ({status})": "作成できませんでした（{status}）",

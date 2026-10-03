@@ -68,7 +68,7 @@
       </nav>
       <main id="content" class="article">
         <h1>Your account</h1>
-        <p class="lead">Your password, two-factor sign-in, the devices you're signed in on, app passwords for scripts, your language, your sign-in history, and notifications.</p>
+        <p class="lead">Your password, two-factor sign-in, the devices you're signed in on, app passwords for scripts, your language and interface style, your sign-in history, and notifications.</p>
         <p>Everything on this page is in the <strong>account menu</strong>: click your name at the bottom of the list on the left. Its last line says which version of ThirtyFile the server runs, such as <strong>ThirtyFile 0.5.0</strong>.</p>
 
         <h2 id="password">Password</h2>
@@ -117,6 +117,9 @@ curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;fil
 
         <h2 id="language">Language</h2>
         <p><strong>Language</strong> in the account menu changes the language ThirtyFile is shown in. Your choice is saved with your account, so your other computers and phones use it too once you sign in there. Until you choose one, you get the default language your administrator set, or your browser's language. The sign-in page and share links follow your browser, or the language picked in the list at their bottom.</p>
+
+        <h2 id="style">Interface style</h2>
+        <p><strong>Interface style</strong> in the account menu decides how the file explorer is laid out and which keys do what. <strong>Automatic</strong>, the default, follows the computer you're on: the Mac style on a Mac, the Windows style on Windows, Linux and ChromeOS. Phones and tablets get the same layout in both styles. Your choice is saved with your account. The Mac style is coming soon; until then, everyone gets the Windows style. The modifier key always follows your computer, whatever the style: ⌘ on a Mac, Ctrl elsewhere.</p>
 
         <h2 id="history">Sign-in history</h2>
         <p><strong>My sign-in history</strong> shows your sign-ins, failed attempts, sign-outs, password changes, and app passwords created, removed or used with a wrong secret, with the address and browser of each.</p>

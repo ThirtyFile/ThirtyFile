@@ -49,6 +49,8 @@ pub struct Me {
     /// Their language: the one saved with the account, and the one pages use for them (i18n/)
     #[serde(flatten)]
     pub lang: crate::i18n::MeLang,
+    /// The interface style they chose: `auto`, `windows` or `mac` (style.rs)
+    pub style: String,
 }
 
 async fn me_of(st: &AppState, user: User, headers: &HeaderMap) -> AppResult<Me> {
@@ -61,6 +63,7 @@ async fn me_of(st: &AppState, user: User, headers: &HeaderMap) -> AppResult<Me> 
     };
     let share_policy = crate::shares::policy(st);
     let lang = crate::i18n::me_lang(st, user.id, headers).await?;
+    let style = crate::style::saved(st, user.id).await?;
     Ok(Me {
         user,
         used_bytes,
@@ -74,6 +77,7 @@ async fn me_of(st: &AppState, user: User, headers: &HeaderMap) -> AppResult<Me> 
         max_edit_bytes: crate::files::MAX_EDIT_BYTES,
         version: crate::VERSION,
         lang,
+        style,
     })
 }
 
