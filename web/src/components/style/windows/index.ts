@@ -19,4 +19,5 @@ export const windowsKit: StyleKit = {
   statusViews: ["list", "grid"],
   clickToRename: true,
   newAtEnd: true,
+  disclosure: false,
 };

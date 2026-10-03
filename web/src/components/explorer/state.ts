@@ -16,6 +16,7 @@ import { useStyleKit, useView } from "@/components/style";
 import { useTabActions } from "@/tabs";
 import type { DialogState } from "./types";
 import { arrange, notLoaded, useNewItems } from "./newItems";
+import { useListTree } from "@/components/fileList/listTree";
 import type { ExplorerProps } from "../Explorer";
 
 export function useExplorerState(p: ExplorerProps) {
@@ -64,16 +65,27 @@ export function useExplorerState(p: ExplorerProps) {
   const loadedById = useMemo(() => new Map(p.items.map((n) => [n.id, n])), [p.items]);
   const { see } = newItems;
   useEffect(() => see(loadedById), [see, loadedById]);
-  /** What the list shows, by position */
-  const shown = useMemo(
+  /** The list's own items, by position */
+  const own = useMemo(
     () => (kit.newAtEnd ? arrange(p.list?.at ?? p.items, newItems.items, loadedById) : (p.list?.at ?? p.items)),
     [kit.newAtEnd, p.list, p.items, newItems.items, loadedById],
   );
-  /** The items known here: those loaded, and new ones that aren't (items being made aren't: nothing can be done with them yet) */
+  // Folders that expand in place (the style's List view of a folder, not grouped): their items show under them
+  // (components/fileList/listTree). Not in lists of several places (search results…), which may hold them already
+  const tree = useListTree({
+    enabled: kit.disclosure && view === "list" && groupBy === "none" && !!p.folderId,
+    place: `${p.folderId}|${p.sort?.key}|${p.sort?.order}`,
+    base: own,
+    show: p.list?.show,
+    sort: p.sort,
+  });
+  /** What the list shows, by position */
+  const shown = tree.rows;
+  /** The items known here: those loaded (in expanded folders too), and new ones that aren't (items being made aren't: nothing can be done with them yet) */
   const items = useMemo(() => {
-    const more = notLoaded(newItems.items, loadedById);
+    const more = [...notLoaded(newItems.items, loadedById), ...tree.children];
     return more.length ? [...p.items, ...more] : p.items;
-  }, [p.items, newItems.items, loadedById]);
+  }, [p.items, newItems.items, loadedById, tree.children]);
 
   /** Selects items picked one by one (none: `span` is cleared too) */
   const setSelected = (next: Set<string>) => {
@@ -217,6 +229,21 @@ export function useExplorerState(p: ExplorerProps) {
     setTimeout(() => focusIsFree(document.activeElement) && listNav.current?.focusStart());
   }, [p.items, p.loading, p.folderId]);
 
+  /** The tree's folders expand and collapse; collapsing one with items selected inside it selects it instead */
+  const listTree = tree.view && {
+    ...tree.view,
+    toggle: (id: string, open: boolean) => {
+      if (!open) {
+        const inside = new Set(tree.under(id).map((n) => n.id));
+        if ([...selected].some((x) => inside.has(x))) {
+          setSelected(new Set([id]));
+          setAnchor(id);
+        }
+      }
+      tree.view!.toggle(id, open);
+    },
+  };
+
   return {
     me,
     caps,
@@ -234,6 +261,9 @@ export function useExplorerState(p: ExplorerProps) {
     naming,
     replaceSelected,
     shown,
+    /** The positions in view: a large folder (and a large folder expanded in it) loads them */
+    onShow: tree.show,
+    listTree,
     items,
     undoLabel,
     enteredByKey,

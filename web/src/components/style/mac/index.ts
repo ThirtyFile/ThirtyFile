@@ -25,4 +25,6 @@ export const macKit: StyleKit = {
   // Finder's conventions: a click on a name doesn't rename it, and a new item goes to its place in the sorted list
   clickToRename: false,
   newAtEnd: false,
+  // Folders in the List view have a triangle to expand them in place
+  disclosure: true,
 };

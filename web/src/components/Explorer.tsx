@@ -112,7 +112,8 @@ export function Explorer(p: ExplorerProps) {
   const clipCount = clip ? (clip.count ?? clip.ids.length) : 0;
   const listProps: FileListProps = {
     items: s.shown,
-    onShow: p.list?.show,
+    onShow: s.onShow,
+    tree: s.listTree,
     view,
     source: privateSource,
     selected,
