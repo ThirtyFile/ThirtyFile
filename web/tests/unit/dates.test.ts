@@ -23,6 +23,14 @@ afterEach(() => {
 const at = new Date(2026, 9, 2, 14, 44).getTime() / 1000;
 
 describe("dates and times", () => {
+  for (const lang of ["en", "zh-TW", "zh-CN", "ja"] as const) {
+    test(`long list dates follow Intl in ${lang}, without changing the compact formatter`, async () => {
+      const u = await load(lang);
+      const expected = new Intl.DateTimeFormat(lang === "en" ? "en-US" : lang, { dateStyle: "long", timeStyle: "short", timeZone: "UTC" }).format(new Date(at * 1000));
+      expect(u.formatDateTime(at, "UTC", "long")).toBe(expected);
+      expect(u.formatDateTime(at, "UTC")).not.toBe(expected);
+    });
+  }
   test("en-US: month first and the 12-hour clock, in lists and dialogs alike", async () => {
     const u = await load("en");
     expect(u.formatDateTime(at)).toBe("10/2/2026 2:44 PM");

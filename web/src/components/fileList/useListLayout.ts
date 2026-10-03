@@ -32,9 +32,10 @@ export interface ListLayoutOptions {
   n: number;
   /** Items whose rows are rendered even out of view (the Tab stop, the focused item, the one being renamed) */
   keep: (number | undefined)[];
+  rowHeight?: number;
 }
 
-export function useListLayout({ view, wide, groups, n, keep }: ListLayoutOptions) {
+export function useListLayout({ view, wide, groups, n, keep, rowHeight = ROW }: ListLayoutOptions) {
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   /** Where the first row starts in the scroll container's content, the list's width, and the width it has in view */
   const [geo, setGeo] = useState({ top: 0, width: 0, room: 0 });
@@ -51,7 +52,7 @@ export function useListLayout({ view, wide, groups, n, keep }: ListLayoutOptions
   const minTileW = tile && view === "grid" && !wide ? PHONE_GRID_W : tile?.w;
   // A column of the Columns view has one item to a row, as does the strip laid out across
   const cols = tile && view !== "columns" && !across ? Math.max(1, Math.floor((geo.width - 2 * pad + tile.gap) / (minTileW! + tile.gap))) : 1;
-  const size = tile ? (across ? tile.w : tile.h) + tile.gap : ROW;
+  const size = tile ? (across ? tile.w : tile.h) + tile.gap : rowHeight;
   // The rows: in each group, its heading and then its items, `cols` to a row
   const layout = useMemo(() => (groups ? groupedLayout(groups, cols, size, tile ? GROUP_H : GROUP_ROW) : evenLayout(n, cols, size)), [groups, n, cols, size, tile]);
   const rowOf = (i: number) => layout.rowOf(i);

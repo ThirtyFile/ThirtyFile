@@ -2,6 +2,9 @@
 import { createStore, useStore } from "@/lib/store";
 import { t } from "@/lib/i18n";
 import { nameCollator } from "@/lib/utils";
+import { useContext } from "react";
+import { MeContext } from "@/lib/session";
+import { useInterfaceStyle } from "@/lib/style";
 
 // ───────────── Columns ─────────────
 
@@ -48,23 +51,41 @@ export interface ColumnPrefs {
 
 const KEY = "tf-columns";
 const prefs = createStore<ColumnPrefs>(load());
+const scoped = new Map<string, typeof prefs>();
 
-function load(): ColumnPrefs {
+/** Windows keeps its existing preferences; Mac window columns belong to the current account. Public links need no session. */
+export function useColumnScope() {
+  const me = useContext(MeContext);
+  const { style } = useInterfaceStyle();
+  return style === "mac" ? `tf-columns-mac-${me?.id ?? "visitor"}` : KEY;
+}
+
+function storeFor(key: string) {
+  if (key === KEY) return prefs;
+  let store = scoped.get(key);
+  if (!store) {
+    store = createStore(load(key));
+    scoped.set(key, store);
+  }
+  return store;
+}
+
+function load(key = KEY): ColumnPrefs {
   try {
-    const raw = JSON.parse(localStorage.getItem(KEY) ?? "null") as Partial<ColumnPrefs> | null;
+    const raw = JSON.parse(localStorage.getItem(key) ?? localStorage.getItem(KEY) ?? "null") as Partial<ColumnPrefs> | null;
     return { visible: raw?.visible ?? {}, widths: raw?.widths ?? {} };
   } catch {
     return { visible: {}, widths: {} };
   }
 }
 
-function save(next: ColumnPrefs) {
+function save(next: ColumnPrefs, key = KEY) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(next));
+    localStorage.setItem(key, JSON.stringify(next));
   } catch {
     // Ignore
   }
-  prefs.set(next);
+  storeFor(key).set(next);
 }
 
 export function columnPrefs() {
@@ -72,29 +93,31 @@ export function columnPrefs() {
 }
 
 /** The column settings, shared by every list (and kept for the next visit) */
-export function useColumnPrefs() {
-  return useStore(prefs);
+export function useColumnPrefs(key = KEY) {
+  return useStore(storeFor(key));
 }
 
-export function columnShown(p: ColumnPrefs, id: ColumnId) {
-  return p.visible[id] ?? SHOWN[id];
+export function columnShown(p: ColumnPrefs, id: ColumnId, mac = false) {
+  return p.visible[id] ?? (mac && id === "owner" ? false : SHOWN[id]);
 }
 
-export function showColumn(id: ColumnId, on: boolean) {
-  save({ ...prefs.get(), visible: { ...prefs.get().visible, [id]: on } });
+export function showColumn(id: ColumnId, on: boolean, key = KEY) {
+  const p = storeFor(key).get();
+  save({ ...p, visible: { ...p.visible, [id]: on } }, key);
 }
 
 /** A column's width; undefined goes back to the default */
-export function setColumnWidth(id: ColumnId | "name", width: number | undefined) {
-  const widths = { ...prefs.get().widths };
+export function setColumnWidth(id: ColumnId | "name", width: number | undefined, key = KEY) {
+  const p = storeFor(key).get();
+  const widths = { ...p.widths };
   if (width === undefined) delete widths[id];
   else widths[id] = Math.round(Math.min(MAX_COLUMN, Math.max(id === "name" ? MIN_NAME : MIN_COLUMN, width)));
-  save({ ...prefs.get(), widths });
+  save({ ...p, widths }, key);
 }
 
 /** Every column shown as it is at first, at its default width */
-export function resetColumns() {
-  save({ visible: {}, widths: {} });
+export function resetColumns(key = KEY) {
+  save({ visible: {}, widths: {} }, key);
 }
 
 // ───────────── Groups ─────────────

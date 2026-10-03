@@ -96,6 +96,9 @@ test("a large folder loads a part at a time across the strip; End reaches the la
     if (url.pathname === `/api/nodes/${big}/children` && url.searchParams.has("offset")) offsets.push(Number(url.searchParams.get("offset")));
   });
   await openFolder(page, big);
+  // The Mac status bar is opt-in; the Gallery keeps its item count when it is shown.
+  await page.getByRole("button", { name: "View options", exact: true }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Show status bar" }).click();
   await expect(page.locator("footer")).toContainText(`${COUNT.toLocaleString("en-US")} items`);
   await expect(thumb(page, itemName(0))).toHaveAttribute("aria-selected", "true");
   expect(offsets).not.toContain(1000);

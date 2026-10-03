@@ -11,6 +11,7 @@ export function ToolButton({
   showLabel = false,
   phoneLabel = false,
   className,
+  children,
   ...props
 }: React.ComponentProps<typeof Button> & {
   icon: LucideIcon;
@@ -35,6 +36,7 @@ export function ToolButton({
     >
       <Icon />
       {showLabel && <span className={phoneLabel ? "md:max-lg:hidden" : "max-lg:hidden"}>{label}</span>}
+      {children}
     </Button>
   );
 }

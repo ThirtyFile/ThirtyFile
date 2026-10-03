@@ -120,6 +120,7 @@
 :root {
   /* Type: the file list and the tables of other pages; the names under the icons of the icon views */
   --tf-list-text: 0.75rem;
+  --tf-list-row-h: 28px;
   --tf-list-leading: 1rem;
   --tf-name-text: 0.75rem;
   /* Rows of lists (tf-row): the Details view, and the tables of other pages */

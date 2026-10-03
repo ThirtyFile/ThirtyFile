@@ -109,7 +109,7 @@ export function MacSidebar({ activeFolder }: { activeFolder?: string }) {
   const sym = useMacSymbols();
   const spaceIcon = { personal: sym.personal, company: sym.company, team: sym.team };
   return (
-    <nav aria-label={t("File locations")} style={{ width, maxWidth: "40vw" }} className="tf-mac-sidebar relative flex shrink-0 flex-col">
+    <nav aria-label={t("File locations")} style={{ width, maxWidth: "40vw" }} className="tf-mac-sidebar relative m-2 mr-0 flex shrink-0 flex-col rounded-2xl">
       <Resizer width={width} onChange={setWidth} min={NAV_MIN_WIDTH} max={NAV_MAX_WIDTH} defaultWidth={NAV_DEFAULT_WIDTH} edge="right" label={t("Resize navigation pane")} />
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
         <Group id="favorites" title={t("Favorites")} action={<NewSmartFolderButton />}>

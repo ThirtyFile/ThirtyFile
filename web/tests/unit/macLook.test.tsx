@@ -98,6 +98,8 @@ describe("the Mac style's tokens", () => {
     // Rows hovered
     { fg: "--foreground", bg: ["--tf-row-hover", "--background"], min: 4.5 },
     { fg: "--muted-foreground", bg: ["--tf-row-hover", "--background"], min: 4.5 },
+    { fg: "--foreground", bg: ["--mac-list-stripe", "--background"], min: 4.5 },
+    { fg: "--muted-foreground", bg: ["--mac-list-stripe", "--background"], min: 4.5 },
     // Focus rings, on the page and on a selection
     { fg: "--tf-focus", bg: ["--background"], min: 3 },
     { fg: "--tf-focus", bg: ["--mac-toolbar-bg"], min: 3 },

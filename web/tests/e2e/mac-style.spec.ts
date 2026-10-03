@@ -9,6 +9,9 @@ async function macStyle(page: Page, view?: "grid" | "list" | "columns") {
   await page.setViewportSize({ width: 1280, height: 720 });
   await signInAsNewUser(page, "mac");
   expect((await page.request.put("/api/auth/style", { data: { style: "mac" } })).ok()).toBe(true);
+  const me = await (await page.request.get("/api/auth/me")).json();
+  // These existing path-navigation tests opt into the now-optional bars.
+  await page.addInitScript((id) => localStorage.setItem(`tf-mac-window-${id}`, JSON.stringify({ path: true, status: true })), me.id);
   if (view) await page.addInitScript((v) => localStorage.setItem("tf-view", JSON.stringify(v)), view);
 }
 

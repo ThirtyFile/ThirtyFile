@@ -26,6 +26,7 @@ export function Head({
   onSort,
   width,
   resize,
+  sortAtEnd = false,
 }: {
   k?: SortKey;
   label: string;
@@ -35,6 +36,7 @@ export function Head({
   width?: number;
   /** The handle that resizes the column */
   resize?: ReactNode;
+  sortAtEnd?: boolean;
 }) {
   const active = !!k && sort?.key === k;
   return (
@@ -46,14 +48,18 @@ export function Head({
     >
       {/* Windows 11 shows the sort direction arrow above the column header */}
       {active &&
+        !sortAtEnd &&
         (sort!.order === "asc" ? (
           <ChevronUpIcon className="absolute -top-0.5 left-1/2 size-3 -translate-x-1/2" />
         ) : (
           <ChevronDownIcon className="absolute -top-0.5 left-1/2 size-3 -translate-x-1/2" />
         ))}
       {k && onSort ? (
-        <button type="button" onClick={() => onSort(k)} className="flex h-full w-full min-w-0 items-center hover:text-foreground">
+        <button type="button" onClick={() => onSort(k)} className="flex h-full w-full min-w-0 items-center gap-1 hover:text-foreground">
           <span className="truncate">{label}</span>
+          {active &&
+            sortAtEnd &&
+            (sort!.order === "asc" ? <ChevronUpIcon aria-hidden className="ml-auto size-3 shrink-0" /> : <ChevronDownIcon aria-hidden className="ml-auto size-3 shrink-0" />)}
         </button>
       ) : (
         <span className="block truncate">{label}</span>
@@ -159,7 +165,7 @@ export function renameBox(r: RowProps, multiline?: boolean) {
   );
 }
 
-export const td = "h-7 px-2 truncate";
+export const td = "h-(--tf-list-row-h) px-2 truncate";
 
 /** Where each column shows: narrow screens keep the name and size */
 export const COLUMN_CLASS: Record<ColumnId, string> = {
@@ -178,7 +184,7 @@ export function fitsScreen(id: ColumnId, wide: boolean, large: boolean) {
   return id === "size" || (id === "location" ? large : wide);
 }
 
-export function Cell({ id, item, h }: { id: ColumnId; item: Item; h: HandlersRef }) {
+export function Cell({ id, item, h, longDates }: { id: ColumnId; item: Item; h: HandlersRef; longDates?: boolean }) {
   const muted = cn(td, "text-muted-foreground", COLUMN_CLASS[id]);
   switch (id) {
     case "location":
@@ -190,13 +196,13 @@ export function Cell({ id, item, h }: { id: ColumnId; item: Item; h: HandlersRef
     case "date":
       return (
         <td role="gridcell" className={muted}>
-          {formatDateTime(h.current.dateOf(item))}
+          {formatDateTime(h.current.dateOf(item), undefined, longDates ? "long" : "short")}
         </td>
       );
     case "created":
       return (
         <td role="gridcell" className={muted}>
-          {formatDateTime(item.created_at)}
+          {formatDateTime(item.created_at, undefined, longDates ? "long" : "short")}
         </td>
       );
     case "type":
@@ -245,6 +251,8 @@ export const ListRow = memo(function ListRow(
     level?: number;
     /** ...and whether the folder is expanded (none for a file) */
     expanded?: boolean;
+    source?: FileSource;
+    longDates?: boolean;
   },
 ) {
   const { item } = r;
@@ -252,6 +260,8 @@ export const ListRow = memo(function ListRow(
   return (
     <tr
       {...rowProps(r)}
+      data-stripe={r.index % 2 === 1 ? "odd" : "even"}
+      data-dropping={r.dropping || undefined}
       role="row"
       aria-rowindex={r.ariaRow}
       aria-level={tree ? r.level! + 1 : undefined}
@@ -295,7 +305,9 @@ export const ListRow = memo(function ListRow(
               <ChevronRightIcon className={cn("size-3.5 transition-transform", r.expanded && "rotate-90")} />
             </span>
           )}
-          <FileIcon node={item} className={cn("size-4 shrink-0", tree && "mr-1")} />
+          <span className={cn("flex size-4 shrink-0 items-center justify-center", tree && "mr-1")}>
+            {r.source ? <Thumb node={item} source={r.source} className="size-4 rounded-xs" iconClass="size-4" /> : <FileIcon node={item} className="size-4" />}
+          </span>
           {r.renaming ? (
             renameBox(r)
           ) : (
@@ -309,7 +321,7 @@ export const ListRow = memo(function ListRow(
         </div>
       </td>
       {r.columns.map((id) => (
-        <Cell key={id} id={id} item={item} h={r.h} />
+        <Cell key={id} id={id} item={item} h={r.h} longDates={r.longDates} />
       ))}
       {r.filler && <td aria-hidden />}
     </tr>
@@ -453,8 +465,8 @@ export function GroupHeading({ group, className }: { group: Group<Item>; classNa
 /** A row whose item isn't loaded yet (a large folder loads it as it comes into view) */
 export function PlaceholderRow({ cells, ariaRow }: { cells: number; ariaRow: number }) {
   return (
-    <tr role="row" aria-rowindex={ariaRow} aria-busy>
-      <td role="gridcell" colSpan={cells} className="h-7 px-3">
+    <tr role="row" aria-rowindex={ariaRow} aria-busy data-stripe={(ariaRow - 2) % 2 === 1 ? "odd" : "even"}>
+      <td role="gridcell" colSpan={cells} className="h-(--tf-list-row-h) px-3">
         <span className="block h-3 w-1/3 animate-pulse rounded bg-muted" />
       </td>
     </tr>

@@ -30,6 +30,7 @@ export const macKit: StyleKit = {
   newAtEnd: false,
   // Folders in the List view have a triangle to expand them in place
   disclosure: true,
+  list: { rowHeight: 19, thumbnails: true, longDates: true, sortAtEnd: true },
   // A large preview of the item selected, above a strip of thumbnails
   ownViews: { gallery: GalleryView },
 };

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject, type CSSProperties } from "react";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Resizer } from "@/components/Resizer";
 import type { FileSource, Node, SortKey, SortOrder } from "@/api";
@@ -6,17 +6,31 @@ import { typeLabel } from "@/components/FileIcon";
 import type { Box, MeasureHits } from "@/components/useMarquee";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/lib/focus";
-import { COLUMN_WIDTH, MAX_COLUMN, MIN_COLUMN, MIN_NAME, columnShown, groupItems, columnsToHide, setColumnWidth, useColumnPrefs, type ColumnId, type GroupBy } from "@/lib/listView";
+import {
+  COLUMN_WIDTH,
+  MAX_COLUMN,
+  MIN_COLUMN,
+  MIN_NAME,
+  columnShown,
+  groupItems,
+  columnsToHide,
+  setColumnWidth,
+  useColumnPrefs,
+  useColumnScope,
+  type ColumnId,
+  type GroupBy,
+} from "@/lib/listView";
 import { carriesFiles, carriesItems, dropEffect, droppedIds, startDrag } from "@/lib/dnd";
 import { t } from "@/lib/i18n";
 import { wantsCopy } from "@/lib/keys";
 import { inSpan, spanCount, type ListSpan } from "@/lib/span";
-import { type ViewMode, type Item, HEAD, GROUP_ROW, GROUP_H, offsetIn, touching } from "@/components/fileList/layout";
+import { type ViewMode, type Item, HEAD, ROW, GROUP_ROW, GROUP_H, offsetIn, touching } from "@/components/fileList/layout";
 import { useListLayout } from "@/components/fileList/useListLayout";
 import { th, Head, type Handlers, type RowProps, COLUMN_CLASS, fitsScreen, ListRow, Tile, GroupHeading, PlaceholderRow } from "@/components/fileList/rows";
 import { listColumns, ColumnChoices } from "@/components/fileList/columns";
 import { useListKeyboard } from "@/components/fileList/useListKeyboard";
 import { useClickToRename } from "@/lib/clickToRename";
+import { useStyleKit } from "@/components/style";
 import type { ListTreeView } from "@/components/fileList/listTree";
 
 /** What the explorer's keyboard handling asks of the list */
@@ -112,7 +126,10 @@ export function FileList(p: FileListProps) {
   const view = p.view;
   const span = p.span ?? null;
   const selecting = p.selected.size > 0 || !!span;
-  const prefs = useColumnPrefs();
+  const kit = useStyleKit();
+  const mac = kit.id === "mac";
+  const scope = useColumnScope();
+  const prefs = useColumnPrefs(scope);
   // Column widths apply from tablet width up; narrower, only the name and size show
   const wide = useMediaQuery("(min-width: 48rem)");
   const large = useMediaQuery("(min-width: 64rem)");
@@ -156,6 +173,7 @@ export function FileList(p: FileListProps) {
   const { root, head, scroller, geo, tile, grid, pad, cols, layout, rowOf, v, across } = useListLayout({
     view,
     wide,
+    rowHeight: wide ? (kit.list?.rowHeight ?? ROW) : ROW,
     groups,
     n,
     keep: [tabStop, focusId === null ? undefined : indexOf.get(focusId), p.renamingId ? indexOf.get(p.renamingId) : undefined],
@@ -190,7 +208,6 @@ export function FileList(p: FileListProps) {
     pad,
     across: grid && view !== "columns",
     sideways: across,
-    tile,
     scroller,
     focusId,
     setFocusId,
@@ -376,11 +393,11 @@ export function FileList(p: FileListProps) {
   if (p.measureRef) p.measureRef.current = measure;
 
   // Details view: the columns shown (a key, so the rows only re-render when they change), and their widths
-  const shownKey = listColumns(p)
-    .filter((c) => columnShown(prefs, c.id))
+  const shownKey = listColumns(p, mac)
+    .filter((c) => columnShown(prefs, c.id, mac))
     .map((c) => c.id)
     .join();
-  const widthOf = (id: ColumnId) => prefs.widths[id] ?? COLUMN_WIDTH[id];
+  const widthOf = (id: ColumnId) => prefs.widths[id] ?? (mac && (id === "date" || id === "created") ? 230 : COLUMN_WIDTH[id]);
   // Too narrow for every column (e.g. with the details pane open): Type, then Size, make room before the list scrolls sideways
   const hide =
     wide && geo.room > 0
@@ -506,7 +523,7 @@ export function FileList(p: FileListProps) {
     );
   }
 
-  const columns = listColumns(p).filter((c) => shownIds.includes(c.id));
+  const columns = listColumns(p, mac).filter((c) => shownIds.includes(c.id));
   // The name takes the space left, until it's resized: then a blank column at the end takes it
   const nameWidth = wide ? prefs.widths.name : undefined;
   const filler = nameWidth !== undefined;
@@ -524,8 +541,8 @@ export function FileList(p: FileListProps) {
     <Resizer
       width={id === "name" ? (nameWidth ?? MIN_NAME) : widthOf(id)}
       measure={(handle) => handle.parentElement!.getBoundingClientRect().width}
-      onChange={(w) => setColumnWidth(id, w)}
-      onReset={() => setColumnWidth(id, undefined)}
+      onChange={(w) => setColumnWidth(id, w, scope)}
+      onReset={() => setColumnWidth(id, undefined, scope)}
       min={id === "name" ? MIN_NAME : MIN_COLUMN}
       max={MAX_COLUMN}
       defaultWidth={id === "name" ? MIN_NAME : COLUMN_WIDTH[id]}
@@ -545,8 +562,8 @@ export function FileList(p: FileListProps) {
         aria-multiselectable
         aria-label={label}
         aria-rowcount={layout.count + 1}
-        className="w-full table-fixed border-collapse text-(length:--tf-list-text) leading-(--tf-list-leading) whitespace-nowrap select-none"
-        style={minWidth === undefined ? undefined : { minWidth }}
+        className={cn("w-full table-fixed border-collapse text-(length:--tf-list-text) leading-(--tf-list-leading) whitespace-nowrap select-none", wide && kit.list && "tf-finder-list")}
+        style={{ minWidth, "--tf-list-row-h": `${wide ? (kit.list?.rowHeight ?? ROW) : ROW}px` } as CSSProperties}
       >
         <thead ref={head}>
           {/* Right-click the column headers to choose the columns */}
@@ -566,14 +583,33 @@ export function FileList(p: FileListProps) {
                   />
                 </th>
               )}
-              <Head sort={p.sort} onSort={p.onSort} k="name" label={t("Name")} className="pl-3" width={nameWidth} resize={resizer("name", t("Name"))} />
+              <Head
+                sortAtEnd={wide && kit.list?.sortAtEnd}
+                sort={p.sort}
+                onSort={p.onSort}
+                k="name"
+                label={t("Name")}
+                className="pl-3"
+                width={nameWidth}
+                resize={resizer("name", t("Name"))}
+              />
               {columns.map((c) => (
-                <Head key={c.id} sort={p.sort} onSort={p.onSort} k={c.sort} label={c.label} className={COLUMN_CLASS[c.id]} width={widthOf(c.id)} resize={resizer(c.id, c.label)} />
+                <Head
+                  sortAtEnd={wide && kit.list?.sortAtEnd}
+                  key={c.id}
+                  sort={p.sort}
+                  onSort={p.onSort}
+                  k={c.sort}
+                  label={c.label}
+                  className={COLUMN_CLASS[c.id]}
+                  width={widthOf(c.id)}
+                  resize={resizer(c.id, c.label)}
+                />
               ))}
               {filler && <th aria-hidden className={th} />}
             </ContextMenuTrigger>
             <ContextMenuContent>
-              <ColumnChoices columns={listColumns(p)} />
+              <ColumnChoices columns={listColumns(p, mac)} />
             </ContextMenuContent>
           </ContextMenu>
         </thead>
@@ -593,6 +629,8 @@ export function FileList(p: FileListProps) {
                 ) : item ? (
                   <ListRow
                     {...row(at.start)}
+                    source={wide && kit.list?.thumbnails ? p.source : undefined}
+                    longDates={wide && kit.list?.longDates}
                     checkboxes={!!p.showCheckboxes}
                     columns={shownIds}
                     filler={filler}

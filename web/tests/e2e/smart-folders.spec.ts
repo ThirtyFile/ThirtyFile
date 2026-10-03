@@ -37,9 +37,12 @@ test("a search is saved as a smart folder that lists what matches, and its items
   await dialog.getByLabel("File types").fill("pdf");
   await dialog.getByLabel("Name", { exact: true }).fill(`Reports ${u}`);
   const made = answer(page, "POST", "/api/smart-folders");
+  // Rows also present in the preceding search do not prove the smart folder has loaded.
+  const matches = answer(page, "GET", /^\/api\/smart-folders\/\d+\/items$/);
   await dialog.getByRole("button", { name: "Create" }).click();
   expect((await made).ok()).toBe(true);
   await page.waitForURL(/\/smart\/\d+$/);
+  expect((await matches).ok()).toBe(true);
 
   // It lists the matches wherever they are below the folder, with where each is, and says what it looks for
   await expect(row(page, `report-${u}.pdf`)).toBeVisible();

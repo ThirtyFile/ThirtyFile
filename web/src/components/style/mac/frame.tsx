@@ -3,7 +3,7 @@
  * the place's name, the page's commands and the search box), the page, the path bar and the status bar. Phones get
  * the layout every style shares (the Windows style's frame).
  */
-import { useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { MAIN_ID, type FrameParts } from "../types";
 import { WindowsFrame } from "../windows/frame";
 import { SearchInput } from "@/components/frame/AddressBar";
@@ -17,6 +17,9 @@ import { useMacArt } from "./loadArt";
 import { useMacSymbols } from "./look";
 import { GoToFolder, PathBar, openGoToFolder } from "./pathBar";
 import { MacSidebar } from "./sidebar";
+import { CompactToolbar, useMacWindowPrefs, useSingleMacTab } from "./windowPrefs";
+import { NotificationBell } from "@/components/NotificationBell";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 export function MacFrame(f: FrameParts) {
   const phone = useMediaQuery("(max-width: 47.99rem)");
@@ -34,6 +37,20 @@ function MacWindow(f: FrameParts) {
   const { refresh } = useRefresh();
   const searchRef = useRef<HTMLInputElement>(null);
   const sym = useMacSymbols();
+  const [bars] = useMacWindowPrefs();
+  const singleTab = useSingleMacTab();
+  const toolbar = useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = useState(false);
+  useLayoutEffect(() => {
+    const el = toolbar.current;
+    if (!el) return;
+    // Leave room for the view capsule, optional commands, search, notifications and a short title.
+    const measure = () => setCompact(el.clientWidth < 820);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   useFrameKeys({
     enabled: place.keys,
     upTo: place.upTo,
@@ -51,28 +68,41 @@ function MacWindow(f: FrameParts) {
     <div className="tf-mac-desktop flex min-h-0 flex-1 overflow-hidden">
       <MacSidebar activeFolder={place.activeFolder} />
       <div className="flex min-w-0 flex-1 flex-col bg-background">
-        <div className="flex min-h-(--mac-toolbar-h) shrink-0 flex-wrap items-center gap-1 border-b bg-(--mac-toolbar-bg) px-2 py-1.5">
-          <ToolButton icon={sym.back} label={t("Back")} title={`${t("Back")} (${shortcut(k.back[0])})`} className={nav} disabled={!canBack} onClick={back} />
-          <ToolButton icon={sym.forward} label={t("Forward")} title={`${t("Forward")} (${shortcut(k.forward[0])})`} className={nav} disabled={!canForward} onClick={forward} />
+        <div
+          ref={toolbar}
+          data-mac-toolbar
+          data-compact={compact || undefined}
+          className="tf-mac-toolbar flex h-(--mac-toolbar-h) shrink-0 items-center gap-2 border-b bg-(--mac-toolbar-bg) px-3"
+        >
+          <div role="group" aria-label={t("Navigation")} className="tf-mac-capsule flex shrink-0 items-center p-0.5">
+            <ToolButton icon={sym.back} label={t("Back")} title={`${t("Back")} (${shortcut(k.back[0])})`} className={nav} disabled={!canBack} onClick={back} />
+            <ToolButton icon={sym.forward} label={t("Forward")} title={`${t("Forward")} (${shortcut(k.forward[0])})`} className={nav} disabled={!canForward} onClick={forward} />
+          </div>
           {/* The page's heading is the frame's (read by screen readers): this is the same name, shown */}
-          <div aria-hidden className="mx-1.5 min-w-0 shrink truncate text-[13px] font-semibold" title={title}>
+          <div aria-hidden className="min-w-0 flex-1 truncate text-[13px] font-semibold" title={title}>
             {title}
           </div>
-          <span className="flex-1" />
-          {f.toolbar}
-          <SearchInput placeholder={place.searchPlaceholder} onSearch={place.onSearch} within={place.searchIn} inputRef={searchRef} />
+          <CompactToolbar value={compact}>{f.toolbar}</CompactToolbar>
+          <SearchInput className="tf-mac-search min-w-24 shrink-0" placeholder={place.searchPlaceholder} onSearch={place.onSearch} within={place.searchIn} inputRef={searchRef} />
+          {singleTab && (
+            <ErrorBoundary>
+              <NotificationBell />
+            </ErrorBoundary>
+          )}
         </div>
         {/* Target of the "Skip to main content" link (AppShell) */}
         <div id={MAIN_ID} tabIndex={-1} className="relative flex min-h-0 min-w-0 flex-1 flex-col outline-none">
           {f.content}
         </div>
-        <PathBar place={place} />
-        <footer className="flex h-(--mac-bar-h) shrink-0 items-center gap-3 border-t px-3 text-xs text-muted-foreground">
-          {f.status}
-          <span className="flex-1" />
-          {f.used}
-          {f.statusEnd}
-        </footer>
+        {bars.path && <PathBar place={place} />}
+        {bars.status && (
+          <footer data-mac-status className="flex h-(--mac-bar-h) shrink-0 items-center gap-3 border-t px-3 text-xs text-muted-foreground">
+            {f.status}
+            <span className="flex-1" />
+            {f.used}
+            {f.statusEnd}
+          </footer>
+        )}
       </div>
       <GoToFolder path={place.path} />
     </div>

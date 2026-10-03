@@ -130,4 +130,6 @@ export interface StyleKit {
   ownViews?: Partial<Record<ViewMode, ComponentType<OwnViewProps>>>;
   /** In the List view, folders expand in place to show their items indented below them (components/fileList/listTree) */
   disclosure: boolean;
+  /** Desktop Details rows: shared by the DOM and virtual scroll geometry */
+  list?: { rowHeight: number; thumbnails: boolean; longDates: boolean; sortAtEnd: boolean };
 }
