@@ -55,7 +55,7 @@ export function FileViewer(props: {
   if (isTextLike(node))
     return (
       <Suspense fallback={<Loader2Icon className={cn("size-6 animate-spin", embedded ? "text-muted-foreground" : "text-white/70")} />}>
-        <TextEditor node={node} source={props.source} editable={props.editable} embedded={embedded} onSaved={props.onSaved} onDirtyChange={props.onDirtyChange} />
+        <TextEditor key={node.id} node={node} source={props.source} editable={props.editable} embedded={embedded} onSaved={props.onSaved} onDirtyChange={props.onDirtyChange} />
       </Suspense>
     );
   return <OtherFile key={node.id} {...props} />;
@@ -88,7 +88,17 @@ function OtherFile(props: Parameters<typeof FileViewer>[0]) {
       // The editor's own right-click menu (copy, paste) rather than the page's
       <div className="flex size-full min-h-0 items-center justify-center" onContextMenu={(e) => e.stopPropagation()}>
         <Suspense fallback={<Loader2Icon className={cn("size-6 animate-spin", embedded ? "text-muted-foreground" : "text-white/70")} />}>
-          <TextEditor node={node} source={props.source} editable={props.editable} embedded={embedded} asText toolbar={back} onSaved={props.onSaved} onDirtyChange={props.onDirtyChange} />
+          <TextEditor
+            key={node.id}
+            node={node}
+            source={props.source}
+            editable={props.editable}
+            embedded={embedded}
+            asText
+            toolbar={back}
+            onSaved={props.onSaved}
+            onDirtyChange={props.onDirtyChange}
+          />
         </Suspense>
       </div>
     );
@@ -144,7 +154,16 @@ function MarkdownFile(props: Parameters<typeof FileViewer>[0]) {
       {mode === "preview" ? (
         <MarkdownPreview node={node} source={props.source} embedded={embedded} toolbar={toggle} />
       ) : (
-        <TextEditor node={node} source={props.source} editable={props.editable} embedded={embedded} toolbar={toggle} onSaved={props.onSaved} onDirtyChange={props.onDirtyChange} />
+        <TextEditor
+          key={node.id}
+          node={node}
+          source={props.source}
+          editable={props.editable}
+          embedded={embedded}
+          toolbar={toggle}
+          onSaved={props.onSaved}
+          onDirtyChange={props.onDirtyChange}
+        />
       )}
     </Suspense>
   );
