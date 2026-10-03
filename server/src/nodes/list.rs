@@ -169,11 +169,6 @@ pub fn order_clause(sort: Option<&str>, order: Option<&str>) -> String {
 /// SQLite runs NODE_COLS' subqueries after sorting, only for the rows it returns: measured on a folder of 50,000
 /// items, that is faster than joining the same tables for every row, with or without a limit.
 pub async fn list_children(conn: &mut SqliteConnection, parent_id: &str, q: &ListQuery) -> AppResult<Listing<Node>> {
-    let sort = SortCol::parse(q.sort.as_deref());
-    let desc = q.order.as_deref() == Some("desc");
-    let (limit, after) = page_of::<Cursor>(q.limit, q.after.as_deref())?;
-    // A position only goes with a page size, and not with a cursor
-    let offset = q.offset.filter(|_| limit.is_some() && after.is_none()).map(|o| o.max(0));
     let folders_only = q.folders_only == Some(true);
     let kind_filter = if folders_only { "AND n.kind = 'folder'" } else { "" };
     let tag_filter = match (q.tag, q.tagged_by) {
@@ -184,15 +179,46 @@ pub async fn list_children(conn: &mut SqliteConnection, parent_id: &str, q: &Lis
     // The navigation pane shows an arrow only on folders with folders in them (the index nodes_subfolders answers it)
     let has_folders =
         if folders_only { ", EXISTS (SELECT 1 FROM nodes c WHERE c.parent_id = n.id AND c.kind = 'folder' AND c.trashed_at IS NULL) AS has_folders" } else { "" };
-    let mut args = vec![Arg::Text(parent_id.to_string())];
+    let held = Held::new(format!("n.parent_id = ?1 AND n.trashed_at IS NULL {kind_filter} {tag_filter}"), vec![Arg::Text(parent_id.to_string())]);
+    list_held(conn, &held, has_folders, q).await
+}
+
+/// The items a listing holds, whatever it is (a folder's children, a smart folder's matches): a condition on the item
+/// `n` and the values it takes, numbered from ?1. Listing a page, the position of an item and selecting a range work
+/// the same on any of them.
+pub(super) struct Held {
+    pub(super) condition: String,
+    pub(super) args: Vec<Arg>,
+}
+
+impl Held {
+    pub(super) fn new(condition: String, args: Vec<Arg>) -> Self {
+        Held { condition, args }
+    }
+
+    /// What a folder holds: its children, not in the trash
+    pub(super) fn children_of(folder: &str) -> Self {
+        Held::new("n.parent_id = ?1 AND n.trashed_at IS NULL".into(), vec![Arg::Text(folder.to_string())])
+    }
+}
+
+/// The items `held` holds (with `extra` columns) in the order of `order_clause`; with a limit, one page of them
+pub(super) async fn list_held(conn: &mut SqliteConnection, held: &Held, extra: &str, q: &ListQuery) -> AppResult<Listing<Node>> {
+    let sort = SortCol::parse(q.sort.as_deref());
+    let desc = q.order.as_deref() == Some("desc");
+    let (limit, after) = page_of::<Cursor>(q.limit, q.after.as_deref())?;
+    // A position only goes with a page size, and not with a cursor
+    let offset = q.offset.filter(|_| limit.is_some() && after.is_none()).map(|o| o.max(0));
+    let mut args = held.args.clone();
     let keyset = match &after {
         Some(c) => format!("AND {}", after_cursor(sort, desc, c, &mut args)),
         None => String::new(),
     };
     let ext = if sort == SortCol::Type { sort.expr() } else { "NULL" };
     let sql = format!(
-        "SELECT {NODE_COLS}{has_folders}, {ext} AS ext FROM nodes n
-         WHERE n.parent_id = ?1 AND n.trashed_at IS NULL {kind_filter} {tag_filter} {keyset} {} LIMIT ?{} OFFSET ?{}",
+        "SELECT {NODE_COLS}{extra}, {ext} AS ext FROM nodes n
+         WHERE {} {keyset} {} LIMIT ?{} OFFSET ?{}",
+        held.condition,
         order_clause(q.sort.as_deref(), q.order.as_deref()),
         args.len() + 1,
         args.len() + 2,
@@ -206,10 +232,7 @@ pub async fn list_children(conn: &mut SqliteConnection, parent_id: &str, q: &Lis
         _ => None,
     };
     let total = match offset {
-        Some(_) => {
-            let sql = format!("SELECT COUNT(*) FROM nodes n WHERE n.parent_id = ?1 AND n.trashed_at IS NULL {kind_filter} {tag_filter}");
-            Some(sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(sql.as_str())).bind(parent_id).fetch_one(&mut *conn).await?)
-        }
+        Some(_) => Some(count_held(conn, held).await?),
         None => None,
     };
     let items = rows.into_iter().map(|r| r.node).collect();
@@ -219,7 +242,15 @@ pub async fn list_children(conn: &mut SqliteConnection, parent_id: &str, q: &Lis
     })
 }
 
+/// How many items `held` holds
+pub(super) async fn count_held(conn: &mut SqliteConnection, held: &Held) -> AppResult<i64> {
+    let sql = format!("SELECT COUNT(*) FROM nodes n WHERE {}", held.condition);
+    let (count,): (i64,) = bind_all(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())), held.args.clone()).fetch_one(&mut *conn).await?;
+    Ok(count)
+}
+
 /// A value bound to a query built at run time
+#[derive(Clone)]
 pub(super) enum Arg {
     Int(i64),
     Text(String),
@@ -288,15 +319,13 @@ pub(super) fn after_cursor(sort: SortCol, desc: bool, c: &Cursor, args: &mut Vec
     )
 }
 
-/// An item of a folder (not in the trash) with what it is sorted by
-pub(super) async fn sort_row(conn: &mut SqliteConnection, parent_id: &str, id: &str, sort: SortCol) -> AppResult<Option<SortRow>> {
+/// An item `held` holds, with what it is sorted by
+pub(super) async fn sort_row(conn: &mut SqliteConnection, held: &Held, id: &str, sort: SortCol) -> AppResult<Option<SortRow>> {
     let ext = if sort == SortCol::Type { sort.expr() } else { "NULL" };
-    let sql = format!("SELECT {NODE_COLS}, {ext} AS ext FROM nodes n WHERE n.id = ?1 AND n.parent_id = ?2 AND n.trashed_at IS NULL");
-    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(id).bind(parent_id).fetch_optional(&mut *conn).await?)
-}
-
-pub(super) async fn count_children(conn: &mut SqliteConnection, parent_id: &str) -> AppResult<i64> {
-    Ok(sqlx::query_scalar("SELECT COUNT(*) FROM nodes WHERE parent_id = ? AND trashed_at IS NULL").bind(parent_id).fetch_one(&mut *conn).await?)
+    let mut args = held.args.clone();
+    args.push(Arg::Text(id.to_string()));
+    let sql = format!("SELECT {NODE_COLS}, {ext} AS ext FROM nodes n WHERE n.id = ?{} AND {}", args.len(), held.condition);
+    Ok(bind_all(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())), args).fetch_optional(&mut *conn).await?)
 }
 
 #[derive(Deserialize)]
@@ -306,7 +335,7 @@ pub struct PositionQuery {
     pub(super) order: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct Position {
     /// Where the item is in the folder's listing, counted from 0; None when it isn't in the folder (any more)
     pub(super) position: Option<i64>,
@@ -318,15 +347,20 @@ pub struct Position {
 pub async fn position(State(st): State<AppState>, user: User, Path(id): Path<String>, Query(q): Query<PositionQuery>) -> AppResult<Json<Position>> {
     let mut c = st.db.acquire().await?;
     let folder = tree::folder_for(&mut c, &user, &id, Need::Read).await?;
+    Ok(Json(position_in(&mut c, &Held::children_of(&folder.id), &q).await?))
+}
+
+/// Where an item is in the listing of what `held` holds
+pub(super) async fn position_in(conn: &mut SqliteConnection, held: &Held, q: &PositionQuery) -> AppResult<Position> {
     let sort = SortCol::parse(q.sort.as_deref());
     let desc = q.order.as_deref() == Some("desc");
-    let total = count_children(&mut c, &folder.id).await?;
-    let Some(row) = sort_row(&mut c, &folder.id, &q.item, sort).await? else { return Ok(Json(Position { position: None, total })) };
-    let mut args = vec![Arg::Text(folder.id.clone())];
+    let total = count_held(conn, held).await?;
+    let Some(row) = sort_row(conn, held, &q.item, sort).await? else { return Ok(Position { position: None, total }) };
+    let mut args = held.args.clone();
     let after = after_cursor(sort, desc, &row.cursor(sort), &mut args);
-    let sql = format!("SELECT COUNT(*) FROM nodes n WHERE n.parent_id = ?1 AND n.trashed_at IS NULL AND {after}");
-    let (behind,): (i64,) = bind_all(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())), args).fetch_one(&mut *c).await?;
-    Ok(Json(Position { position: Some((total - 1 - behind).max(0)), total }))
+    let sql = format!("SELECT COUNT(*) FROM nodes n WHERE {} AND {after}", held.condition);
+    let (behind,): (i64,) = bind_all(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())), args).fetch_one(&mut *conn).await?;
+    Ok(Position { position: Some((total - 1 - behind).max(0)), total })
 }
 
 #[derive(Deserialize, Clone)]
@@ -358,19 +392,26 @@ pub struct Selected {
 pub async fn select(State(st): State<AppState>, user: User, Path(id): Path<String>, Json(req): Json<SelectReq>) -> AppResult<Json<Selected>> {
     let mut c = st.db.acquire().await?;
     let folder = tree::folder_for(&mut c, &user, &id, Need::Read).await?;
+    Ok(Json(select_in(&mut c, &Held::children_of(&folder.id), &req).await?))
+}
+
+/// The ids of the items selected of those `held` holds, a batch at a time (see `select`)
+pub(super) async fn select_in(c: &mut SqliteConnection, held: &Held, req: &SelectReq) -> AppResult<Selected> {
     let sort = SortCol::parse(req.sort.as_deref());
     let desc = req.order.as_deref() == Some("desc");
     let limit = req.limit.unwrap_or(MAX_BATCH as i64).clamp(1, MAX_BATCH as i64);
     let after: Option<Cursor> = req.after.as_deref().map(decode_cursor).transpose()?;
-    let mut args = vec![Arg::Text(folder.id.clone()), Arg::Text(serde_json::to_string(&req.except).unwrap())];
+    let mut args = held.args.clone();
+    args.push(Arg::Text(serde_json::to_string(&req.except).unwrap()));
+    let except = args.len();
     let mut conditions = Vec::new();
     let bound = async |c: &mut SqliteConnection, item: &str| -> AppResult<SortRow> {
-        sort_row(c, &folder.id, item, sort).await?.ok_or_else(|| AppError::conflict("The selected items have changed. Select them again."))
+        sort_row(c, held, item, sort).await?.ok_or_else(|| AppError::conflict("The selected items have changed. Select them again."))
     };
     match (&after, &req.from) {
         (Some(a), _) => conditions.push(after_cursor(sort, desc, a, &mut args)),
         (None, Some(from)) => {
-            let first = bound(&mut c, from).await?;
+            let first = bound(&mut *c, from).await?;
             args.push(Arg::Text(first.node.id.clone()));
             let same = args.len();
             conditions.push(format!("(n.id = ?{same} OR {})", after_cursor(sort, desc, &first.cursor(sort), &mut args)));
@@ -378,7 +419,7 @@ pub async fn select(State(st): State<AppState>, user: User, Path(id): Path<Strin
         (None, None) => {}
     }
     if let Some(to) = &req.to {
-        let last = bound(&mut c, to).await?;
+        let last = bound(&mut *c, to).await?;
         args.push(Arg::Text(last.node.id.clone()));
         let same = args.len();
         conditions.push(format!("(n.id = ?{same} OR NOT {})", after_cursor(sort, desc, &last.cursor(sort), &mut args)));
@@ -386,7 +427,8 @@ pub async fn select(State(st): State<AppState>, user: User, Path(id): Path<Strin
     let ext = if sort == SortCol::Type { sort.expr() } else { "NULL" };
     let sql = format!(
         "SELECT {NODE_COLS}, {ext} AS ext FROM nodes n
-         WHERE n.parent_id = ?1 AND n.trashed_at IS NULL AND n.id NOT IN (SELECT value FROM json_each(?2)) {} {} LIMIT {}",
+         WHERE {} AND n.id NOT IN (SELECT value FROM json_each(?{except})) {} {} LIMIT {}",
+        held.condition,
         conditions.iter().map(|w| format!("AND {w}")).collect::<String>(),
         order_clause(req.sort.as_deref(), req.order.as_deref()),
         limit + 1,
@@ -400,7 +442,7 @@ pub async fn select(State(st): State<AppState>, user: User, Path(id): Path<Strin
         Some(last) if more => Some(encode_cursor(&last.cursor(sort))),
         _ => None,
     };
-    Ok(Json(Selected { ids: rows.into_iter().map(|r| r.node.id).collect(), next }))
+    Ok(Selected { ids: rows.into_iter().map(|r| r.node.id).collect(), next })
 }
 
 pub async fn children(State(st): State<AppState>, user: User, Path(id): Path<String>, Query(mut q): Query<ListQuery>) -> AppResult<Json<Listing<Node>>> {

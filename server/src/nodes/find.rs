@@ -43,6 +43,108 @@ pub struct SearchResult {
     pub(super) truncated: bool,
 }
 
+/// Extensions as a search takes them (comma separated, with or without the dot): lowercase, without the dot
+pub(super) fn ext_list(ext: Option<&str>) -> Vec<String> {
+    ext.unwrap_or_default().split(',').map(|e| e.trim().trim_start_matches('.').to_lowercase()).filter(|e| !e.is_empty()).collect()
+}
+
+/// What a search, or a smart folder (nodes/smart.rs), looks for. The parts left empty don't narrow it down. Matches
+/// are looked up in the index, never on the disks.
+#[derive(Default)]
+pub(super) struct Criteria {
+    /// In the name (with 3 characters or more, through the trigram index)
+    pub(super) term: String,
+    /// Only below this folder: its id, after checking the person can open it
+    pub(super) below: Option<String>,
+    /// Only in this space
+    pub(super) space: Option<String>,
+    /// "folder" or "file"
+    pub(super) kind: Option<String>,
+    /// Files with one of these extensions (lowercase, without the dot)
+    pub(super) exts: Vec<String>,
+    /// Modified at or after / before (Unix seconds)
+    pub(super) from: Option<i64>,
+    pub(super) to: Option<i64>,
+    /// Files of this size in bytes
+    pub(super) min_size: Option<i64>,
+    pub(super) max_size: Option<i64>,
+    /// Uploaded by (username, exact)
+    pub(super) owner: Option<String>,
+    /// With all of these tags of `tagged_by`'s own
+    pub(super) tags: Vec<i64>,
+    pub(super) tagged_by: i64,
+}
+
+impl Criteria {
+    /// The items that match, of those the person can open (`drives` and `folders`, from tree::scope) and not in the
+    /// trash, never a space's top folder
+    pub(super) fn held(&self, drives: String, folders: String) -> Held {
+        let mut args: Vec<Arg> = Vec::new();
+        let mut arg = |a: Arg| {
+            args.push(a);
+            format!("?{}", args.len())
+        };
+        let (d, f) = (arg(Arg::Text(drives)), arg(Arg::Text(folders)));
+        let mut sql = format!(
+            "(n.drive_id IN (SELECT value FROM json_each({d}))
+              OR n.id IN (WITH RECURSIVE s(id) AS (SELECT value FROM json_each({f}) UNION ALL SELECT c.id FROM nodes c JOIN s ON c.parent_id = s.id) SELECT id FROM s))
+             AND n.trashed_at IS NULL AND n.parent_id IS NOT NULL"
+        );
+        if let Some(below) = &self.below {
+            let p = arg(Arg::Text(below.clone()));
+            sql += &format!(
+                " AND n.id IN (WITH RECURSIVE d(id) AS (SELECT id FROM nodes WHERE parent_id = {p}
+                  AND trashed_at IS NULL UNION ALL SELECT c.id FROM nodes c JOIN d ON c.parent_id = d.id WHERE c.trashed_at IS NULL) SELECT id FROM d)"
+            );
+        }
+        if let Some(space) = &self.space {
+            sql += &format!(" AND n.drive_id = {}", arg(Arg::Text(space.clone())));
+        }
+        for tag in &self.tags {
+            // The person's own tags only: someone else's matches nothing
+            sql += &format!(" AND n.id IN (SELECT node_id FROM tagged WHERE tag_id = {} AND owner_id = {})", arg(Arg::Int(*tag)), arg(Arg::Int(self.tagged_by)));
+        }
+        let term = self.term.trim();
+        if term.chars().count() >= 3 {
+            // The trigram index: the term as one phrase (quotes inside it doubled)
+            let phrase = arg(Arg::Text(format!("\"{}\"", term.replace('"', "\"\""))));
+            sql += &format!(" AND n.rowid IN (SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH {phrase})");
+        } else if !term.is_empty() {
+            let escaped = crate::util::like_escape(&term.to_lowercase());
+            sql += &format!(" AND unicode_lower(n.name) LIKE {} ESCAPE '\\'", arg(Arg::Text(format!("%{escaped}%"))));
+        }
+        match self.kind.as_deref() {
+            Some("folder") => sql += " AND n.kind = 'folder'",
+            Some("file") => sql += " AND n.kind = 'file'",
+            _ => {}
+        }
+        if !self.exts.is_empty() {
+            let each: Vec<String> = self
+                .exts
+                .iter()
+                .map(|e| format!("unicode_lower(n.name) LIKE {} ESCAPE '\\'", arg(Arg::Text(format!("%.{}", e.replace(['%', '\\'], "").replace('_', "\\_"))))))
+                .collect();
+            sql += &format!(" AND n.kind = 'file' AND ({})", each.join(" OR "));
+        }
+        if let Some(from) = self.from {
+            sql += &format!(" AND n.updated_at >= {}", arg(Arg::Int(from)));
+        }
+        if let Some(to) = self.to {
+            sql += &format!(" AND n.updated_at < {}", arg(Arg::Int(to)));
+        }
+        if let Some(m) = self.min_size {
+            sql += &format!(" AND n.kind = 'file' AND n.size >= {}", arg(Arg::Int(m)));
+        }
+        if let Some(m) = self.max_size {
+            sql += &format!(" AND n.kind = 'file' AND n.size <= {}", arg(Arg::Int(m)));
+        }
+        if let Some(o) = self.owner.as_deref().map(str::trim).filter(|o| !o.is_empty()) {
+            sql += &format!(" AND n.found = 0 AND n.owner_id = (SELECT id FROM users WHERE username = {})", arg(Arg::Text(o.to_string())));
+        }
+        Held::new(sql, args)
+    }
+}
+
 /// Searches names in all spaces and shared folders I can access, or in one folder and below
 pub async fn search(State(st): State<AppState>, user: User, Query(q): Query<SearchQuery>) -> AppResult<Json<SearchResult>> {
     let term = q.q.trim();
@@ -53,66 +155,28 @@ pub async fn search(State(st): State<AppState>, user: User, Query(q): Query<Sear
     let mut c = st.db.acquire().await?;
     crate::tags::check_own(&mut c, &user, &tags).await?;
     let (drives, folders) = tree::scope(&mut c, &user).await?;
-    let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(format!("SELECT {NODE_COLS} FROM nodes n WHERE "));
-    qb.push("(n.drive_id IN (SELECT value FROM json_each(").push_bind(drives).push("))");
-    qb.push(" OR n.id IN (WITH RECURSIVE s(id) AS (SELECT value FROM json_each(").push_bind(folders);
-    qb.push(") UNION ALL SELECT c.id FROM nodes c JOIN s ON c.parent_id = s.id) SELECT id FROM s))");
-    qb.push(" AND n.trashed_at IS NULL AND n.parent_id IS NOT NULL");
-    if let Some(within) = q.within.as_deref().filter(|w| !w.is_empty()) {
-        let folder = tree::folder_for(&mut c, &user, within, Need::Read).await?;
-        qb.push(" AND n.id IN (WITH RECURSIVE d(id) AS (SELECT id FROM nodes WHERE parent_id = ").push_bind(folder.id);
-        qb.push(" AND trashed_at IS NULL UNION ALL SELECT c.id FROM nodes c JOIN d ON c.parent_id = d.id WHERE c.trashed_at IS NULL) SELECT id FROM d)");
-    }
-    for tag in tags {
-        // The person's own tags only (checked above)
-        qb.push(" AND n.id IN (SELECT node_id FROM tagged WHERE tag_id = ").push_bind(tag).push(" AND owner_id = ").push_bind(user.id).push(")");
-    }
-    // Without a term: every item with the tags
-    if term.chars().count() >= 3 {
-        // The trigram index: the term as one phrase (quotes inside it doubled)
-        qb.push(" AND n.rowid IN (SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ").push_bind(format!("\"{}\"", term.replace('"', "\"\""))).push(")");
-    } else if !term.is_empty() {
-        let escaped = crate::util::like_escape(&term.to_lowercase());
-        qb.push(" AND unicode_lower(n.name) LIKE ").push_bind(format!("%{escaped}%")).push(" ESCAPE '\\'");
-    }
-    match q.kind.as_deref() {
-        Some("folder") => {
-            qb.push(" AND n.kind = 'folder'");
-        }
-        Some("file") => {
-            qb.push(" AND n.kind = 'file'");
-        }
-        _ => {}
-    }
-    let exts: Vec<String> =
-        q.ext.as_deref().unwrap_or_default().split(',').map(|e| e.trim().trim_start_matches('.').to_lowercase()).filter(|e| !e.is_empty()).collect();
-    if !exts.is_empty() {
-        qb.push(" AND n.kind = 'file' AND (");
-        let mut sep = qb.separated(" OR ");
-        for e in exts {
-            sep.push("unicode_lower(n.name) LIKE ")
-                .push_bind_unseparated(format!("%.{}", e.replace(['%', '\\'], "").replace('_', "\\_")))
-                .push_unseparated(" ESCAPE '\\'");
-        }
-        qb.push(")");
-    }
-    if let Some(f) = q.from {
-        qb.push(" AND n.updated_at >= ").push_bind(f);
-    }
-    if let Some(t) = q.to {
-        qb.push(" AND n.updated_at < ").push_bind(t);
-    }
-    if let Some(m) = q.min_size {
-        qb.push(" AND n.kind = 'file' AND n.size >= ").push_bind(m);
-    }
-    if let Some(m) = q.max_size {
-        qb.push(" AND n.kind = 'file' AND n.size <= ").push_bind(m);
-    }
-    if let Some(o) = q.owner.as_deref().filter(|o| !o.trim().is_empty()) {
-        qb.push(" AND n.found = 0 AND n.owner_id = (SELECT id FROM users WHERE username = ").push_bind(o.trim().to_string()).push(")");
-    }
-    qb.push(" ORDER BY (n.kind = 'folder') DESC, n.updated_at DESC LIMIT ").push_bind(SEARCH_LIMIT + 1);
-    let mut nodes: Vec<Node> = qb.build_query_as().fetch_all(&mut *c).await?;
+    let below = match q.within.as_deref().filter(|w| !w.is_empty()) {
+        Some(within) => Some(tree::folder_for(&mut c, &user, within, Need::Read).await?.id),
+        None => None,
+    };
+    let criteria = Criteria {
+        term: term.to_string(),
+        below,
+        space: None,
+        kind: q.kind.clone(),
+        exts: ext_list(q.ext.as_deref()),
+        from: q.from,
+        to: q.to,
+        min_size: q.min_size,
+        max_size: q.max_size,
+        owner: q.owner.clone(),
+        tags,
+        tagged_by: user.id,
+    };
+    let Held { condition, mut args } = criteria.held(drives, folders);
+    let sql = format!("SELECT {NODE_COLS} FROM nodes n WHERE {condition} ORDER BY (n.kind = 'folder') DESC, n.updated_at DESC LIMIT ?{}", args.len() + 1);
+    args.push(Arg::Int(SEARCH_LIMIT + 1));
+    let mut nodes: Vec<Node> = bind_all(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())), args).fetch_all(&mut *c).await?;
     drop(c);
     let truncated = nodes.len() as i64 > SEARCH_LIMIT;
     nodes.truncate(SEARCH_LIMIT as usize);

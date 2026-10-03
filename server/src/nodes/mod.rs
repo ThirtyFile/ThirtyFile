@@ -4,11 +4,13 @@
 mod find;
 mod list;
 mod organize;
+mod smart;
 mod trash;
 
 pub use find::*;
 pub use list::*;
 pub use organize::*;
+pub use smart::*;
 pub use trash::*;
 
 use std::collections::{HashMap, HashSet};

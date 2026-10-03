@@ -781,6 +781,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_database_from_0_4_0_takes_smart_folders_that_go_with_their_people() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-040-smart-{}", crate::util::new_id()));
+        let path = dir.join("drive.db");
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'amy', 'x', 0), (2, 'ben', 'x', 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO nodes (id, owner_id, kind, name, created_at, updated_at) VALUES ('n', 1, 'file', 'a.pdf', 0, 0)").execute(&db).await.unwrap();
+        db.close().await;
+
+        let db = connect(&path, 16).await.unwrap();
+        let save = async |owner: i64, name: &str| {
+            sqlx::query("INSERT INTO smart_folders (owner_id, name, query, created_at, updated_at) VALUES (?, ?, '{\"ext\":\"pdf\"}', 0, 0)")
+                .bind(owner)
+                .bind(name)
+                .execute(&db)
+                .await
+        };
+        save(1, "Été").await.unwrap();
+        // Names are a person's own, without counting letter case
+        assert!(save(1, "éTÉ").await.is_err());
+        save(2, "été").await.unwrap();
+        let count = async || -> i64 { sqlx::query_scalar("SELECT COUNT(*) FROM smart_folders").fetch_one(&db).await.unwrap() };
+        // They hold no items: deleting one leaves the items, and they go with the person
+        sqlx::query("DELETE FROM smart_folders WHERE owner_id = 1").execute(&db).await.unwrap();
+        let (items,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes").fetch_one(&db).await.unwrap();
+        assert_eq!((count().await, items), (1, 1));
+        sqlx::query("DELETE FROM users WHERE id = 2").execute(&db).await.unwrap();
+        assert_eq!(count().await, 0);
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn a_database_from_0_4_0_keeps_what_the_replicas_page_shows() {
         let dir = std::env::temp_dir().join(format!("thirtyfile-040-replica-counts-{}", crate::util::new_id()));
         let path = dir.join("drive.db");
