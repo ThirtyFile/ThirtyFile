@@ -8,7 +8,7 @@ import type { Query, QueryClient, QueryKey } from "@tanstack/react-query";
 import type { Node, NodeInfo } from "@/api";
 
 /** Queries a change to files or folders can affect: lists, the opened item, space usage; not settings, users or branding */
-const FILE_QUERIES = ["children", "node", "recent", "favorites", "tagged", "search", "shared-with-me", "trash", "drives", "me", "access", "versions"];
+const FILE_QUERIES = ["children", "node", "recent", "favorites", "tagged", "smart", "search", "shared-with-me", "trash", "drives", "me", "access", "versions"];
 
 /**
  * What folders hold, counted through every level (the details pane): only changes that add, move or remove items
@@ -17,9 +17,9 @@ const FILE_QUERIES = ["children", "node", "recent", "favorites", "tagged", "sear
 export const FOLDER_CONTENTS = "folder-contents";
 
 /** Lists of items (each has an id): folders' pages and the navigation pane's folders, and the lists of several places */
-const LISTS = ["children", "recent", "favorites", "tagged", "search", "shared-with-me", "trash"];
+const LISTS = ["children", "recent", "favorites", "tagged", "smart", "search", "shared-with-me", "trash"];
 /** Lists that show where each item is: a renamed or moved folder changes that */
-const LOCATED = ["recent", "favorites", "tagged", "search", "shared-with-me"];
+const LOCATED = ["recent", "favorites", "tagged", "smart", "search", "shared-with-me"];
 
 type Ids = Iterable<string | null | undefined>;
 
@@ -307,8 +307,8 @@ async function apply(qc: QueryClient, c: Combined) {
   // The lists of several places show where each item is, and can hold items at any depth inside what moved, was renamed
   // or went: they load again when shown (only the one shown, if any, loads now)
   if (repathed.size || gone.size) refetch((q) => LOCATED.includes(q.queryKey[0] as string));
-  // Search results: new names and new items can match
-  if (folders.size || repathed.size || trees.size) refetch((q) => q.queryKey[0] === "search");
+  // Search results and smart folders (saved searches): new names and new items can match
+  if (folders.size || repathed.size || trees.size) refetch((q) => q.queryKey[0] === "search" || q.queryKey[0] === "smart");
 
   // Details without new values: the item's info, its history and versions
   if (c.nodes.size) refetch((q) => (q.queryKey[0] === "node" || q.queryKey[0] === "versions") && c.nodes.has(idOf(q) ?? ""));
@@ -345,6 +345,8 @@ async function apply(qc: QueryClient, c: Combined) {
     [c.usage, "me"],
     [c.favorites, "favorites"],
     [c.tags, "tagged"],
+    // Smart folders can look for tags
+    [c.tags, "smart"],
     [c.trash || gone.size > 0, "trash"],
     [c.recent, "recent"],
   ];

@@ -69,6 +69,36 @@ export interface SearchFilter {
   tags?: string;
 }
 
+/** Where a smart folder looks: everywhere the person has access, one space, or a folder and its subfolders */
+export type SmartScope = { kind: "all" } | { kind: "space"; id: string } | { kind: "folder"; id: string };
+
+/** What a smart folder looks for (server/src/nodes/smart.rs): what is left out doesn't narrow it down */
+export interface SmartQuery {
+  /** In the name */
+  name?: string;
+  kind?: "file" | "folder";
+  /** Extensions, comma separated, lowercase, without the dot */
+  ext?: string;
+  /** Size in bytes (files) */
+  min_size?: number;
+  max_size?: number;
+  /** Modified from / before (Unix seconds) */
+  modified_from?: number;
+  modified_to?: number;
+  /** Modified in the last this many days, counted when it is opened (instead of dates) */
+  modified_days?: number;
+  scope: SmartScope;
+  /** With all of these tags of the person's own */
+  tags?: number[];
+}
+
+/** One of the signed-in person's smart folders: a saved search that shows as a folder; only they see it */
+export interface SmartFolder {
+  id: number;
+  name: string;
+  query: SmartQuery;
+}
+
 export interface Located extends Node {
   /** Where the item is, e.g. "All files/Projects/2026", in the interface's language (built by `localizeLocated`) */
   location: string;
