@@ -12,10 +12,11 @@ Security problems are reported privately: see the [security policy](SECURITY.md)
 
 1. For anything larger than a small fix, agree on the idea in an issue first.
 2. Create a branch from `main`: `feat/…`, `fix/…`, `docs/…` or `chore/…`.
-3. Format the code (`cd server && cargo fmt`, `cd web && pnpm format`) and run the checks, the same ones that run on GitHub:
+3. Format the code (`cd server && cargo fmt`, `cd web && pnpm format`) and run the full local checks:
    ```bash
    scripts/check.sh
    ```
+   Pull requests run `scripts/check.sh quick`: formatting, translations, boundaries, types, lint, migrations and website links, without tests or artifact builds. Main is scanned with CodeQL after merges. Full tests, browser tests and image startup/upgrade verification run before releases; **Actions > Build > Run workflow** also runs full verification without publishing.
 4. Open a pull request with a title that says what changes, one label (`enhancement`, `bug`, `performance`, `accessibility`, `documentation`, `dependencies` or `maintenance`), and `Closes #123` in the description.
 
 Code, comments and guides are written in English. Text in the interface needs its translation in every required language in `web/src/lib/i18n/<lang>/` (Traditional Chinese, Simplified Chinese and Japanese; `node scripts/check-i18n.mjs` lists what is missing). When behaviour changes, update the guide in `site/docs/` that describes it.
