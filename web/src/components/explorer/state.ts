@@ -11,7 +11,7 @@ import type { GroupBy } from "@/lib/listView";
 import { inSpan, spanCount, type FolderSpan, type ListSpan, type Picked } from "@/lib/span";
 import { usePersisted, useMe } from "@/lib/session";
 import { useUndoLabel } from "@/lib/undo";
-import { useWindowsBehaviour } from "@/lib/windowsBehaviour";
+import { useStyleKit } from "@/components/style";
 import { useTabActions } from "@/tabs";
 import type { DialogState } from "./types";
 import { arrange, notLoaded, useNewItems } from "./newItems";
@@ -24,7 +24,11 @@ export function useExplorerState(p: ExplorerProps) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const tabs = useTabActions();
-  const [view, setView] = usePersisted<ViewMode>("tf-view", "list");
+  /** The parts of the interface style in use (components/style) */
+  const kit = useStyleKit();
+  const [kept, setView] = usePersisted<ViewMode>("tf-view", kit.defaultView);
+  /** A view kept from before that the style doesn't offer: the style's own */
+  const view = kit.views().some((v) => v.id === kept) ? kept : kit.defaultView;
   const [groupBy, setGroupBy] = usePersisted<GroupBy>("tf-group", "none");
   const [selected, setChosen] = useState<Set<string>>(new Set());
   /** A large folder: what is selected without being loaded (Select all, or Shift across parts not loaded; lib/span) */
@@ -40,8 +44,6 @@ export function useExplorerState(p: ExplorerProps) {
   const listNav = useRef<ListNav>(null);
   /** The area around the list, whose context menu is the one for empty space */
   const area = useRef<HTMLDivElement>(null);
-  /** The File Explorer conventions followed (lib/windowsBehaviour) */
-  const behaviour = useWindowsBehaviour();
   /** What Ctrl+Z would take back, as a menu names it ("Undo delete"); null when nothing */
   const undoLabel = useUndoLabel();
 
@@ -62,8 +64,8 @@ export function useExplorerState(p: ExplorerProps) {
   useEffect(() => see(loadedById), [see, loadedById]);
   /** What the list shows, by position */
   const shown = useMemo(
-    () => (behaviour.newAtEnd ? arrange(p.list?.at ?? p.items, newItems.items, loadedById) : (p.list?.at ?? p.items)),
-    [behaviour.newAtEnd, p.list, p.items, newItems.items, loadedById],
+    () => (kit.newAtEnd ? arrange(p.list?.at ?? p.items, newItems.items, loadedById) : (p.list?.at ?? p.items)),
+    [kit.newAtEnd, p.list, p.items, newItems.items, loadedById],
   );
   /** The items known here: those loaded, and new ones that aren't (items being made aren't: nothing can be done with them yet) */
   const items = useMemo(() => {
@@ -190,7 +192,7 @@ export function useExplorerState(p: ExplorerProps) {
     dirInput,
     listNav,
     area,
-    behaviour,
+    kit,
     newItems,
     dialogNow,
     naming,

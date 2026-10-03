@@ -1,6 +1,6 @@
 /** The view, sort and group choices, shared by the command bar's menus and the context menu's submenus (so both show the same state) */
-import { Grid2X2Icon, Grid3X3Icon, LayoutGridIcon, LayoutListIcon, ListIcon, type LucideIcon } from "lucide-react";
 import type { SortKey, SortOrder } from "@/api";
+import { useStyleKit } from "@/components/style";
 import { DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import type { ViewMode } from "@/components/fileList/layout";
 import type { GroupBy } from "@/lib/listView";
@@ -12,14 +12,6 @@ const SORTS: [SortKey, string][] = [
   ["created", t("Date created")],
   ["type", t("Type")],
   ["size", t("Size")],
-];
-
-const VIEWS: [ViewMode, LucideIcon, string][] = [
-  ["grid", Grid2X2Icon, t("Large icons")],
-  ["medium", Grid3X3Icon, t("Medium icons")],
-  ["compact", LayoutListIcon, t("List")],
-  ["list", ListIcon, t("Details")],
-  ["tiles", LayoutGridIcon, t("Tiles")],
 ];
 
 const GROUPS: [GroupBy, string][] = [
@@ -54,11 +46,13 @@ export function SortChoices({ sort, onChange }: { sort: Sort; onChange(sort: Sor
   );
 }
 
+/** The views the style offers (components/style) */
 export function ViewChoices({ view, onChange }: { view: ViewMode; onChange(view: ViewMode): void }) {
+  const views = useStyleKit().views();
   return (
     <DropdownMenuRadioGroup value={view} onValueChange={(v) => onChange(v as ViewMode)}>
-      {VIEWS.map(([v, Icon, label]) => (
-        <DropdownMenuRadioItem key={v} value={v} closeOnClick>
+      {views.map(({ id, Icon, label }) => (
+        <DropdownMenuRadioItem key={id} value={id} closeOnClick>
           <Icon /> {label}
         </DropdownMenuRadioItem>
       ))}

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { FolderIcon, PanelLeftIcon, type LucideIcon } from "lucide-react";
+import { FolderIcon, type LucideIcon } from "lucide-react";
 import { ShortcutsHost } from "@/components/ShortcutsDialog";
+import { useStyleKit } from "@/components/style";
 import { useDrives } from "@/lib/drives";
 import { useBranding } from "@/lib/branding";
 import { t } from "@/lib/i18n";
@@ -8,7 +9,6 @@ import { formatBytes } from "@/lib/utils";
 import { setActiveTitle } from "@/tabs";
 import { AddressBar, crumbPath, type Crumb } from "./frame/AddressBar";
 import { LocationsNav } from "./frame/LocationsNav";
-import { ToolButton } from "./frame/ToolButton";
 
 export { crumbPath, type Crumb };
 export { ToolButton, ToolSeparator } from "./frame/ToolButton";
@@ -38,7 +38,7 @@ export interface FrameProps {
   children: ReactNode;
 }
 
-export const MAIN_ID = "tf-main";
+export { MAIN_ID } from "@/components/style/types";
 
 export function Frame(p: FrameProps) {
   const drives = useDrives();
@@ -50,42 +50,40 @@ export function Frame(p: FrameProps) {
     if (title) setActiveTitle(title);
     document.title = title ? `${title} - ${siteName}` : siteName;
   }, [title, siteName]);
+  // The parts, which the style places (components/style)
+  const Layout = useStyleKit().Frame;
   return (
     <main className="flex h-full min-h-0 flex-col bg-background text-[13px]" aria-label={t("File Explorer")}>
       <h1 className="sr-only">{title}</h1>
-      <AddressBar
-        crumbs={p.crumbs}
-        icon={p.icon ?? FolderIcon}
-        path={p.path ?? crumbPath(p.crumbs)}
-        upTo={p.upTo}
-        searchPlaceholder={p.searchPlaceholder ?? (p.activeFolder ? t("Search {name}", { name: title }) : t("Search all spaces"))}
-        onSearch={p.onSearch}
-        searchIn={p.activeFolder}
-        keys={p.keys}
+      <Layout
+        pathBar={
+          <AddressBar
+            crumbs={p.crumbs}
+            icon={p.icon ?? FolderIcon}
+            path={p.path ?? crumbPath(p.crumbs)}
+            upTo={p.upTo}
+            searchPlaceholder={p.searchPlaceholder ?? (p.activeFolder ? t("Search {name}", { name: title }) : t("Search all spaces"))}
+            onSearch={p.onSearch}
+            searchIn={p.activeFolder}
+            keys={p.keys}
+          />
+        }
+        toolbar={p.toolbar}
+        nav={<LocationsNav open={navOpen} activeFolder={p.activeFolder} onNavigate={() => setNavOpen(false)} />}
+        navOpen={navOpen}
+        setNavOpen={setNavOpen}
+        content={p.children}
+        status={p.footer}
+        used={
+          // How much of the space being browsed is used ("My files" shows its own in the navigation pane)
+          space && (
+            <span className="max-sm:hidden" title={space.name}>
+              {t("{size} used", { size: space.quota_bytes > 0 ? `${formatBytes(space.used_bytes)} / ${formatBytes(space.quota_bytes)}` : formatBytes(space.used_bytes) })}
+            </span>
+          )
+        }
+        statusEnd={p.footerRight}
       />
-      <div className="flex min-h-12 shrink-0 flex-wrap items-center gap-1 border-y px-3 py-1.5 max-lg:px-2">
-        <ToolButton icon={PanelLeftIcon} label={t("Navigation pane")} showLabel className="md:hidden" aria-expanded={navOpen} onClick={() => setNavOpen(!navOpen)} />
-        {p.toolbar}
-      </div>
-      <div className="relative flex min-h-0 flex-1 overflow-hidden">
-        <LocationsNav open={navOpen} activeFolder={p.activeFolder} onNavigate={() => setNavOpen(false)} />
-        {navOpen && <div className="absolute inset-0 z-[5] bg-black/20 md:hidden" onClick={() => setNavOpen(false)} />}
-        {/* Target of the "Skip to main content" link (AppShell) */}
-        <div id={MAIN_ID} tabIndex={-1} className="relative flex min-w-0 flex-1 flex-col outline-none">
-          {p.children}
-        </div>
-      </div>
-      <footer className="flex h-7 shrink-0 items-center gap-3 px-3 text-xs text-muted-foreground">
-        {p.footer}
-        <span className="flex-1" />
-        {/* How much of the space being browsed is used ("My files" shows its own in the navigation pane) */}
-        {space && (
-          <span className="max-sm:hidden" title={space.name}>
-            {t("{size} used", { size: space.quota_bytes > 0 ? `${formatBytes(space.used_bytes)} / ${formatBytes(space.quota_bytes)}` : formatBytes(space.used_bytes) })}
-          </span>
-        )}
-        {p.footerRight}
-      </footer>
       {p.keys && <ShortcutsHost />}
     </main>
   );

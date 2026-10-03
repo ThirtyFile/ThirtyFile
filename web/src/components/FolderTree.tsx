@@ -12,7 +12,7 @@ import { capsOf } from "@/lib/drives";
 import { refreshFiles, renamed } from "@/lib/queries";
 import { useMe } from "@/lib/session";
 import { toastWithUndo } from "@/lib/undo";
-import { useWindowsBehaviour } from "@/lib/windowsBehaviour";
+import { useStyleKit } from "@/components/style";
 import { ToolButton } from "@/components/frame/ToolButton";
 import { DRIVE_ICON, useDrives } from "@/lib/drives";
 import { t, tServer } from "@/lib/i18n";
@@ -369,15 +369,15 @@ export function FolderTree({ activeId }: { activeId?: string }) {
   const [tabKey, setTabKey] = useState(ROOT);
   const tree = useRef<HTMLDivElement>(null);
 
-  // Clicking the open folder's name renames it (the Windows style), where the person may: not a space's top folder.
-  // Its details are the folder page's, which usually has them already
-  const behaviour = useWindowsBehaviour();
+  // Clicking the open folder's name renames it in a style that does that (the Windows style), where the person may: not
+  // a space's top folder. Its details are the folder page's, which usually has them already
+  const kit = useStyleKit();
   const me = useMe();
-  const info = useQuery({ queryKey: keys.node(activeId), queryFn: () => api.node(activeId!), enabled: !!activeId && behaviour.clickToRename });
+  const info = useQuery({ queryKey: keys.node(activeId), queryFn: () => api.node(activeId!), enabled: !!activeId && kit.clickToRename });
   const active = info.data?.node.id === activeId ? info.data : undefined;
   const canRename = !!active?.node.parent_id && capsOf(active.role, me, active.read_only).write;
   useClickToRename({
-    enabled: behaviour.clickToRename && canRename,
+    enabled: kit.clickToRename && canRename,
     root: tree,
     itemOf: (el) => el.closest<HTMLElement>("[data-tree-id]")?.dataset.treeId ?? null,
     selectedAlone: (id) => id === activeId,

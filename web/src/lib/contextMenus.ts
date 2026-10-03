@@ -1,6 +1,8 @@
 //! Context menus: opening one from the keyboard (Shift+F10 or the Menu key, as right-clicking does), and waiting for
 //! them to go
 
+import { pressed, type KeyPress } from "@/lib/style/keymap";
+
 /**
  * Resolves once no menu is open (at most half a second): a menu that closes puts the focus back where it was, which
  * would take it from a rename box shown meanwhile
@@ -16,9 +18,9 @@ export function menusClosed() {
   });
 }
 
-/** Shift+F10 or the Menu key */
-export function isMenuKey(e: { key: string; shiftKey: boolean; ctrlKey: boolean; altKey: boolean; metaKey: boolean }) {
-  return e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey);
+/** The keyboard's Menu key, or the style's keys for a menu (`menu` in its keyboard map: Shift+F10 in the Windows style) */
+export function isMenuKey(e: KeyPress, keys: readonly string[]) {
+  return e.key === "ContextMenu" || pressed(e, keys);
 }
 
 /**

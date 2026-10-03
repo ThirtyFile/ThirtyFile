@@ -21,6 +21,7 @@ import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
 import { errorMessage } from "@/lib/utils";
 import { isMenuKey, menuPointOf, menusClosed, openMenuByKey } from "@/lib/contextMenus";
+import { pressed } from "@/lib/style/keymap";
 
 /** The most items a download or a ZIP file takes at once (the server's limit, which it words when there are more) */
 const MAX_AT_ONCE = 10_000;
@@ -120,7 +121,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     if (!p.folderId || !(kind === "folder" ? canCreate : canUpload)) return;
     // Default names follow the UI language (like English Windows: New folder, New Text Document.txt)
     const name = kind === "folder" ? uniqueName(t("New folder")) : uniqueName(t("New Text Document"), ".txt");
-    if (s.behaviour.newAtEnd) return createAtEnd(kind, p.folderId, name);
+    if (s.kit.newAtEnd) return createAtEnd(kind, p.folderId, name);
     try {
       const id = kind === "folder" ? (await api.createFolder(p.folderId, name)).id : await api.createEmptyFile(p.folderId, name);
       // Only after the list reloads does the new item have a place to edit its name; if it didn't reload, don't start
@@ -349,48 +350,47 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     void changed({ removed: picked.ids, usage: true });
     s.newItems.drop(picked.ids);
   };
-  // Keyboard shortcuts (moving around, search and refresh are the address bar's: see Frame)
+  // Keyboard shortcuts, the style's (moving around, search and refresh are the address bar's: see Frame)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (dialog || isTyping(e.target) || document.querySelector("[role=dialog]")) return;
       // A focused button, tab, menu item or list row handles its own keys (Enter on a toolbar button mustn't also open the selected file)
       if (e.defaultPrevented || (e.target as HTMLElement | null)?.closest?.("button, a, select, [role=menu], [role=menuitem], [role=tab], [role=separator]")) return;
+      const k = s.kit.keys;
       const mod = e.ctrlKey || e.metaKey;
-      const key = e.key.toLowerCase();
-      if (mod && key === "x") cut();
-      else if (mod && key === "c" && !window.getSelection()?.toString()) copy();
-      else if (mod && key === "v" && canPaste) {
+      if (pressed(e, k.cut)) cut();
+      else if (pressed(e, k.copy) && !window.getSelection()?.toString()) copy();
+      else if (pressed(e, k.paste) && canPaste) {
         e.preventDefault();
         paste();
-      } else if (mod && key === "a") {
+      } else if (pressed(e, k.selectAll)) {
         e.preventDefault();
         s.selectAll();
-      } else if (e.altKey && e.key === "Enter") {
+      } else if (pressed(e, k.details)) {
         setDetailsOpen(true);
-      } else if (mod && !e.shiftKey && key === "z") {
-        // Ctrl+Z: take back the last move, rename or delete
+      } else if (pressed(e, k.undo)) {
+        // Take back the last move, rename or delete
         e.preventDefault();
         undoLast();
-      } else if (e.key === "Delete" && e.shiftKey && s.count && caps.del) {
+      } else if (pressed(e, k.deleteForever) && s.count && caps.del) {
         e.preventDefault();
         void deleteForever(s.picked);
-      } else if (e.key === "Delete" && s.count && caps.del) {
+      } else if (pressed(e, k.trash) && s.count && caps.del) {
         setDialog({ t: "trash", picked: s.picked });
-      } else if (mod && e.shiftKey && key === "n" && canCreate) {
-        // Ctrl+Shift+N: new folder (like Windows)
+      } else if (pressed(e, k.newFolder) && canCreate) {
         e.preventDefault();
         void createNew("folder");
-      } else if (e.key === "F2" && single && caps.write) {
+      } else if (pressed(e, k.rename) && single && caps.write) {
         e.preventDefault();
         setDialog({ t: "rename", node: single });
-      } else if (e.key === "Enter" && single) {
+      } else if (pressed(e, k.open) && single) {
         open(single, true);
-      } else if (isMenuKey(e)) {
+      } else if (isMenuKey(e, k.menu)) {
         e.preventDefault();
         openMenu();
-      } else if (e.key === "Escape") {
+      } else if (pressed(e, k.clearSelection)) {
         setSelected(new Set());
-      } else if (e.key.length === 1 && e.key !== " " && e.key !== "?" && !mod && !e.altKey) {
+      } else if (e.key.length === 1 && e.key !== " " && !pressed(e, k.shortcuts) && !mod && !e.altKey) {
         // Typing letters goes to the next item whose name starts with them
         e.preventDefault();
         s.listNav.current?.typeAhead(e.key);

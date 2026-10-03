@@ -1,4 +1,7 @@
-/** Windows 11 style command bar: New | Cut Copy Paste Rename Share Delete | Sort | View | ⋯ | Details */
+/**
+ * The Windows style's command bar, as in Windows 11: New | Cut Copy Paste Rename Share Delete | Sort | View | ⋯ |
+ * Details
+ */
 import {
   ArrowDownUpIcon,
   ClipboardPasteIcon,
@@ -35,22 +38,22 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ColumnChoices, listColumns } from "@/components/fileList/columns";
-import { ToolButton, ToolSeparator } from "@/components/Frame";
+import { ToolButton, ToolSeparator } from "@/components/frame/ToolButton";
 import { openShortcuts } from "@/components/ShortcutsDialog";
 import { shortcut } from "@/lib/keys";
 import { cn } from "@/lib/utils";
-import type { ExplorerProps } from "../Explorer";
-import type { ExplorerState } from "./state";
-import type { ExplorerActions } from "./actions";
-import { Kbd } from "./ui";
-import { GroupChoices, SortChoices, ViewChoices } from "./viewChoices";
+import type { ExplorerProps } from "@/components/Explorer";
+import type { ExplorerState } from "@/components/explorer/state";
+import type { ExplorerActions } from "@/components/explorer/actions";
+import { Kbd } from "@/components/explorer/ui";
+import { GroupChoices, SortChoices, ViewChoices } from "@/components/explorer/viewChoices";
 import { t } from "@/lib/i18n";
 
-export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerActions, newItems: React.ReactNode) {
+export function windowsToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerActions, newItems: React.ReactNode) {
   const { caps, canCreate, single, allFavorite, view, setView, groupBy, setGroupBy, setSelected, setDialog, showCheckboxes, setShowCheckboxes, detailsOpen, setDetailsOpen } = s;
   const { download, toggleFavorite, cut, copy, canPaste, paste } = a;
   const none = s.count === 0;
-  // Windows 11 style command bar: New | Cut Copy Paste Rename Share Delete | Sort | View | ⋯ | Details
+  const k = s.kit.keys;
   const icon = "size-9 px-0 [&_svg]:size-[18px]";
   const phoneHidden = "max-md:hidden";
   const toolbar = (
@@ -62,12 +65,12 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
       {/* Phones: what works on the selected items is in the bar that shows below the list while items are selected (and
           in its menu), so the toolbar keeps to one row; Paste stays while there is something to paste */}
       <ToolSeparator className="max-md:hidden" />
-      <ToolButton icon={ScissorsIcon} label={t("Cut")} title={`${t("Cut")} (${shortcut("Ctrl+X")})`} className={cn(icon, phoneHidden)} disabled={none || !caps.write} onClick={cut} />
-      <ToolButton icon={CopyIcon} label={t("Copy")} title={`${t("Copy")} (${shortcut("Ctrl+C")})`} className={cn(icon, phoneHidden)} disabled={none} onClick={copy} />
+      <ToolButton icon={ScissorsIcon} label={t("Cut")} title={`${t("Cut")} (${shortcut(k.cut[0])})`} className={cn(icon, phoneHidden)} disabled={none || !caps.write} onClick={cut} />
+      <ToolButton icon={CopyIcon} label={t("Copy")} title={`${t("Copy")} (${shortcut(k.copy[0])})`} className={cn(icon, phoneHidden)} disabled={none} onClick={copy} />
       <ToolButton
         icon={ClipboardPasteIcon}
         label={t("Paste")}
-        title={`${t("Paste")} (${shortcut("Ctrl+V")})`}
+        title={`${t("Paste")} (${shortcut(k.paste[0])})`}
         className={cn(icon, !canPaste && phoneHidden)}
         disabled={!canPaste}
         onClick={paste}
@@ -75,7 +78,7 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
       <ToolButton
         icon={PencilIcon}
         label={t("Rename")}
-        title={`${t("Rename")} (F2)`}
+        title={`${t("Rename")} (${shortcut(k.rename[0])})`}
         className={cn(icon, phoneHidden)}
         disabled={!single || !caps.write}
         onClick={() => single && setDialog({ t: "rename", node: single })}
@@ -97,7 +100,7 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
       <ToolButton
         icon={Trash2Icon}
         label={t("Delete")}
-        title={`${t("Delete")} (Delete)`}
+        title={`${t("Delete")} (${shortcut(k.trash[0])})`}
         className={cn(icon, phoneHidden)}
         disabled={none || !caps.del}
         onClick={() => setDialog({ t: "trash", picked: s.picked })}
@@ -163,10 +166,10 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
           )}
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={s.selectAll}>
-            <SquareCheckIcon /> {t("Select all")} <Kbd>Ctrl+A</Kbd>
+            <SquareCheckIcon /> {t("Select all")} <Kbd>{k.selectAll[0]}</Kbd>
           </DropdownMenuItem>
           <DropdownMenuItem disabled={none} onClick={() => setSelected(new Set())}>
-            <XSquareIcon /> {t("Select none")} <Kbd>Esc</Kbd>
+            <XSquareIcon /> {t("Select none")} <Kbd>{k.clearSelection[0]}</Kbd>
           </DropdownMenuItem>
           {/* With nothing selected, inverting selects everything (like File Explorer) */}
           <DropdownMenuItem disabled={!s.canInvert} onClick={s.invert}>
@@ -174,7 +177,7 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={openShortcuts}>
-            <KeyboardIcon /> {t("Keyboard shortcuts")} <Kbd>?</Kbd>
+            <KeyboardIcon /> {t("Keyboard shortcuts")} <Kbd>{k.shortcuts[0]}</Kbd>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -185,7 +188,7 @@ export function explorerToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerA
         aria-pressed={detailsOpen}
         // The label is hidden on narrow screens: the button still needs a name
         aria-label={t("Details pane")}
-        title={`${t("Details pane")} (${shortcut("Alt+Enter")})`}
+        title={`${t("Details pane")} (${shortcut(k.details[0])})`}
         onClick={() => setDetailsOpen(!detailsOpen)}
       >
         <PanelRightIcon />

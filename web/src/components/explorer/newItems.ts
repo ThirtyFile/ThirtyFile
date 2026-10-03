@@ -1,5 +1,5 @@
 /**
- * New items, as in File Explorer (the Windows style; lib/windowsBehaviour `newAtEnd`): a new folder or text document
+ * New items, as in File Explorer (the Windows style; `newAtEnd` in components/style): a new folder or text document
  * shows at once at the end of the list, in rename mode, while the server makes it, and stays there after renaming. It
  * only moves into its sorted place after a refresh, a change of sort, or leaving the folder. In a large folder not all
  * loaded (lib/windows) it stays after the items that were loaded when it was made, rather than going to its place in a

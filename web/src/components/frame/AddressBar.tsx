@@ -16,6 +16,8 @@ import { liveSearch, type LiveSearch } from "@/lib/liveSearch";
 import { useMe } from "@/lib/session";
 import { appLink, pathAliases, urlOf } from "@/lib/paths";
 import { shortcut } from "@/lib/keys";
+import { pressed } from "@/lib/style/keymap";
+import { useStyleKit } from "@/components/style";
 import { t } from "@/lib/i18n";
 import { cn, copyText } from "@/lib/utils";
 import { useTabActions, useTabsState } from "@/tabs";
@@ -222,6 +224,8 @@ export function AddressBar({
   const [copied, setCopied] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const trail = useRef<HTMLElement>(null);
+  /** The style's keys (components/style) */
+  const k = useStyleKit().keys;
 
   // A long path doesn't fit on a phone: show its end, the folder you're in (like File Explorer), scrolling back for the rest
   const trailKey = crumbs.map((c) => c.label).join("/");
@@ -248,39 +252,44 @@ export function AddressBar({
     setRefreshing(false);
   };
 
-  // Moving around with the keyboard, like File Explorer (see the shortcuts dialog)
+  // Moving around with the keyboard, with the style's keys (see the shortcuts dialog)
   useEffect(() => {
     if (!keys) return;
+    // Keys with Alt are taken wherever the focus is (onAltArrow); the others only where nothing else wants them
+    const withAlt = (combos: readonly string[]) => combos.filter((c) => /\bAlt\+/.test(c));
+    const withoutAlt = (combos: readonly string[]) => combos.filter((c) => !/\bAlt\+/.test(c));
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
-      const mod = e.ctrlKey || e.metaKey;
-      // F5 refreshes the list rather than reloading the page, also while typing in a box
-      if (e.key === "F5" && !mod && !e.shiftKey && !e.altKey) {
+      // Refreshing refreshes the list rather than reloading the page, also while typing in a box
+      if (pressed(e, k.refresh)) {
         e.preventDefault();
         void refresh();
         return;
       }
       if (isTyping(e.target) || document.querySelector("[role=dialog]") || (e.target as HTMLElement | null)?.closest?.("[role=menu], [role=menuitem]")) return;
-      const alt = e.altKey && !mod;
-      // (Alt+arrows: onAltArrow)
-      if (e.key === "Backspace" && !mod && !e.altKey) back();
-      else if ((mod && !e.altKey && e.key.toLowerCase() === "f") || (e.key === "F3" && !mod && !e.altKey)) {
+      if (pressed(e, withoutAlt(k.back))) back();
+      else if (pressed(e, withoutAlt(k.forward))) forward();
+      else if (pressed(e, withoutAlt(k.upFolder))) {
+        if (upTo) navigate(upTo);
+      } else if (pressed(e, k.search)) {
         searchRef.current?.focus();
         searchRef.current?.select();
-      } else if ((mod && !e.altKey && e.key.toLowerCase() === "l") || (alt && e.code === "KeyD")) setEditing(true);
-      else if (e.key === "?" && !mod && !e.altKey) openShortcuts();
+      } else if (pressed(e, k.addressBar)) setEditing(true);
+      else if (pressed(e, k.shortcuts)) openShortcuts();
       else return;
       e.preventDefault();
     };
     // Alt+arrows move around folders wherever the focus is: before a focused menu button takes Alt+↑ or Alt+↓ to open
     // its menu
     const onAltArrow = (e: KeyboardEvent) => {
-      if (!e.altKey || e.ctrlKey || e.metaKey || !["ArrowUp", "ArrowLeft", "ArrowRight"].includes(e.key)) return;
+      const up = pressed(e, withAlt(k.upFolder));
+      const backward = pressed(e, withAlt(k.back));
+      if (!up && !backward && !pressed(e, withAlt(k.forward))) return;
       const at = e.target as HTMLElement | null;
       if (isTyping(at) || at?.tagName === "SELECT" || document.querySelector("[role=dialog]") || at?.closest?.("[role=menu]")) return;
-      if (e.key === "ArrowUp") {
+      if (up) {
         if (upTo) navigate(upTo);
-      } else if (e.key === "ArrowLeft") back();
+      } else if (backward) back();
       else forward();
       e.preventDefault();
       e.stopPropagation();
@@ -297,10 +306,10 @@ export function AddressBar({
 
   return (
     <div className="flex shrink-0 items-center gap-1 px-2 py-1.5 max-sm:flex-wrap">
-      <Button variant="ghost" size="icon" className={nav} aria-label={t("Back")} title={`${t("Back")} (${shortcut("Alt+←")})`} disabled={!canBack} onClick={back}>
+      <Button variant="ghost" size="icon" className={nav} aria-label={t("Back")} title={`${t("Back")} (${shortcut(k.back[0])})`} disabled={!canBack} onClick={back}>
         <ArrowLeftIcon />
       </Button>
-      <Button variant="ghost" size="icon" className={nav} aria-label={t("Forward")} title={`${t("Forward")} (${shortcut("Alt+→")})`} disabled={!canForward} onClick={forward}>
+      <Button variant="ghost" size="icon" className={nav} aria-label={t("Forward")} title={`${t("Forward")} (${shortcut(k.forward[0])})`} disabled={!canForward} onClick={forward}>
         <ArrowRightIcon />
       </Button>
       <Button
@@ -308,13 +317,13 @@ export function AddressBar({
         size="icon"
         className={nav}
         aria-label={t("Up")}
-        title={`${t("Up to parent folder")} (${shortcut("Alt+↑")})`}
+        title={`${t("Up to parent folder")} (${shortcut(k.upFolder[0])})`}
         disabled={!upTo}
         onClick={() => upTo && navigate(upTo)}
       >
         <ArrowUpIcon />
       </Button>
-      <Button variant="ghost" size="icon" className={cn(nav, "mr-1")} aria-label={t("Refresh")} title={`${t("Refresh")} (F5)`} onClick={refresh}>
+      <Button variant="ghost" size="icon" className={cn(nav, "mr-1")} aria-label={t("Refresh")} title={`${t("Refresh")} (${shortcut(k.refresh[0])})`} onClick={refresh}>
         <RefreshCwIcon className={cn(refreshing && "animate-spin")} />
       </Button>
       <div

@@ -8,6 +8,8 @@ import { HEAD, PAD, ROW, type Item, type Layout, type TILED } from "@/components
 import { pageRows } from "@/lib/listView";
 import { findByPrefix } from "@/lib/keys";
 import { isMenuKey, menuPointOf, openMenuByKey } from "@/lib/contextMenus";
+import { pressed, pressedKey } from "@/lib/style/keymap";
+import { useStyleKit } from "@/components/style";
 import type { ListSpan } from "@/lib/span";
 
 /** What the list knows that its keyboard handling works with */
@@ -37,6 +39,8 @@ export interface ListKeyboard {
  */
 export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, root, grid, tile, scroller, focusId, setFocusId, tabStop }: ListKeyboard) {
   const pendingFocus = useRef<string | null>(null);
+  /** The style's keys (components/style) */
+  const k = useStyleKit().keys;
 
   // Keyboard moves: focus the item once its row is rendered; a move to an item not loaded yet is made once it loads
   useLayoutEffect(() => {
@@ -146,20 +150,21 @@ export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, 
   };
 
   /**
-   * Keyboard: arrows move the selection (Shift extends it, Ctrl moves only the focus), Space selects (toggles with Ctrl),
-   * Home/End and PageUp/PageDown jump, Enter opens, Shift+F10 or the Menu key opens the context menu
+   * Keyboard, with the style's keys (in the Windows style): arrows move the selection (Shift extends it, Ctrl moves only
+   * the focus), Space selects (toggles with Ctrl), Home/End and PageUp/PageDown jump, Enter opens, Shift+F10 or the
+   * Menu key opens the context menu
    */
   const keyNav = (e: KeyboardEvent<HTMLElement>, index: number) => {
     // Keys typed in a control inside the row (its checkbox, the rename box) belong to that control
     const current = items[index];
     if (e.target !== e.currentTarget || !current || current.id === p.renamingId) return;
-    if (e.key === "Enter" && !e.altKey && !e.repeat) {
+    if (pressed(e, k.open) && !e.repeat) {
       e.preventDefault();
       p.onOpen(current, true);
       return;
     }
-    // Shift+F10 or the Menu key: the item's context menu, as right-clicking it opens
-    if (isMenuKey(e)) {
+    // The item's context menu, as right-clicking it opens
+    if (isMenuKey(e, k.menu)) {
       e.preventDefault();
       openMenuByKey(e.currentTarget, menuPointOf(e.currentTarget));
       return;
@@ -167,15 +172,15 @@ export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, 
     // Alt+arrows move around folders (handled by the address bar)
     if (e.altKey) return;
     let next: number | null = null;
-    if (e.key === "ArrowDown") next = vertical(index, 1);
-    else if (e.key === "ArrowUp") next = vertical(index, -1);
-    else if (e.key === "ArrowRight" && grid) next = Math.min(n - 1, index + 1);
-    else if (e.key === "ArrowLeft" && grid) next = Math.max(0, index - 1);
-    else if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = n - 1;
-    else if (e.key === "PageDown") next = page(index, 1);
-    else if (e.key === "PageUp") next = page(index, -1);
-    else if (e.key === " ") {
+    if (pressedKey(e, k.itemDown)) next = vertical(index, 1);
+    else if (pressedKey(e, k.itemUp)) next = vertical(index, -1);
+    else if (pressedKey(e, k.itemRight) && grid) next = Math.min(n - 1, index + 1);
+    else if (pressedKey(e, k.itemLeft) && grid) next = Math.max(0, index - 1);
+    else if (pressedKey(e, k.first)) next = 0;
+    else if (pressedKey(e, k.last)) next = n - 1;
+    else if (pressedKey(e, k.pageDown)) next = page(index, 1);
+    else if (pressedKey(e, k.pageUp)) next = page(index, -1);
+    else if (pressedKey(e, k.select)) {
       e.preventDefault();
       if (e.ctrlKey || e.metaKey) toggle(index);
       else p.onSelect(new Set([current.id]), current.id, null);
