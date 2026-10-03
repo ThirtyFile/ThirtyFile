@@ -26,6 +26,7 @@ mod folders;
 mod fsops;
 mod hashing;
 mod history;
+mod http_body;
 mod i18n;
 mod jobs;
 mod location_tools;

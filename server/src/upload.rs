@@ -11,7 +11,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use base64::Engine;
-use futures_util::StreamExt;
 use sha2::{
     Digest, Sha256,
     digest::common::hazmat::{SerializableState, SerializedState},
@@ -432,25 +431,23 @@ pub async fn patch_as(st: &AppState, up: &Uploader, id: &str, headers: &HeaderMa
 /// the body ended, if it did: what was received is kept, so the upload can resume.
 async fn receive(file: &mut tokio::fs::File, body: Body, offset: &mut u64, size: u64, hasher: &mut Option<Sha256>) -> Option<AppError> {
     let mut stream = body.into_data_stream();
-    while let Some(chunk) = stream.next().await {
-        match chunk {
-            Ok(bytes) => {
-                if *offset + bytes.len() as u64 > size {
-                    return Some(AppError::bad_request("The uploaded data exceeds the declared file size"));
-                }
-                if let Err(e) = file.write_all(&bytes).await {
-                    return Some(e.into());
-                }
-                if let Some(h) = hasher {
-                    h.update(&bytes);
-                }
-                *offset += bytes.len() as u64;
-            }
-            // Connection interrupted: keep what was received so the upload can resume later
-            Err(_) => return Some(AppError::bad_request("Connection interrupted")),
+    loop {
+        let bytes = match crate::http_body::next_chunk(&mut stream).await {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => return None,
+            Err(e) => return Some(e),
+        };
+        if *offset + bytes.len() as u64 > size {
+            return Some(AppError::bad_request("The uploaded data exceeds the declared file size"));
         }
+        if let Err(e) = file.write_all(&bytes).await {
+            return Some(e.into());
+        }
+        if let Some(h) = hasher {
+            h.update(&bytes);
+        }
+        *offset += bytes.len() as u64;
     }
-    None
 }
 
 /// Finishes an upload in a task of its own: storing the content and creating the file must not stop halfway when the
@@ -863,6 +860,39 @@ mod tests {
     async fn stored_hash(env: &testutil::TestEnv, node: &str) -> String {
         let (h,): (String,) = sqlx::query_as("SELECT blob_hash FROM nodes WHERE id = ?").bind(node).fetch_one(&env.st.db).await.unwrap();
         h
+    }
+
+    #[tokio::test]
+    async fn an_idle_patch_preserves_progress_and_releases_the_upload_for_resume() {
+        use futures_util::StreamExt;
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let id = begin(&env, &amy, "idle.txt", 11).await;
+        let first = futures_util::stream::once(async { Ok::<_, std::io::Error>(axum::body::Bytes::from_static(b"hello")) });
+        let (waiting, waited) = tokio::sync::oneshot::channel();
+        let rest = futures_util::stream::once(async move {
+            waiting.send(()).unwrap();
+            std::future::pending::<Result<axum::body::Bytes, std::io::Error>>().await
+        });
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONTENT_TYPE, "application/offset+octet-stream".parse().unwrap());
+        headers.insert("upload-offset", "0".parse().unwrap());
+        let request = tokio::spawn(patch(State(env.st.clone()), amy.clone(), Path(id.clone()), headers, Body::from_stream(first.chain(rest))));
+        // The second read starts only after the first chunk was written and hashed.
+        waited.await.unwrap();
+        tokio::time::pause();
+        tokio::time::advance(crate::http_body::UPLOAD_IDLE + std::time::Duration::from_secs(1)).await;
+        tokio::time::resume();
+        assert_eq!(request.await.unwrap().unwrap_err().status, StatusCode::REQUEST_TIMEOUT);
+        assert!(!env.st.part::<Memory>().active.lock().unwrap().contains(&id));
+        let res = head(State(env.st.clone()), amy.clone(), Path(id.clone())).await.unwrap();
+        assert_eq!(res.headers()["upload-offset"], "5");
+        let (hashed,): (i64,) = sqlx::query_as("SELECT hashed FROM uploads WHERE id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(hashed, 5);
+        let done = send(&env, &amy, &id, 5, b" world").await.unwrap();
+        let node = done.headers()["x-node-id"].to_str().unwrap();
+        assert_eq!(stored_hash(&env, node).await, crate::util::sha256_hex(b"hello world"));
+        assert_eq!(files_named(&env, "idle").await, 1);
     }
 
     #[tokio::test]

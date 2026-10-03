@@ -253,6 +253,7 @@ export default {
   "Upload-Offset mismatch": "Upload-Offset が一致しません",
   "The uploaded data exceeds the declared file size": "アップロードされたデータが宣言されたファイルサイズを超えています",
   "Connection interrupted": "接続が中断されました",
+  "Upload timed out while waiting for data. Resume or retry the upload.": "アップロードデータの待機がタイムアウトしました。再開するか、再試行してください。",
   "File size mismatch": "ファイルサイズが一致しません",
   // Share links (shares.rs)
   "The download limit must be greater than 0": "ダウンロード回数の上限は 0 より大きくしてください",

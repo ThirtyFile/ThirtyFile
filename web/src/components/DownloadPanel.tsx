@@ -13,6 +13,7 @@ function eta(task: DownloadTask) {
 }
 
 function detail(task: DownloadTask) {
+  if (task.status === "preparing") return t("Preparing download…");
   if (task.status === "done") return t("Completed · {size}", { size: formatBytes(task.received) });
   if (task.status === "canceled") return t("Canceled");
   if (task.status === "error") return task.error ?? t("Download failed");
@@ -28,14 +29,17 @@ export function DownloadPanel() {
   const [collapsed, setCollapsed] = useState(false);
   if (tasks.length === 0) return null;
 
-  const active = tasks.filter((task) => task.status === "downloading");
-  const total = active.reduce((s, task) => s + (task.total ?? task.received), 0);
+  const active = tasks.filter((task) => task.status === "downloading" || task.status === "preparing");
+  const known = active.every((task) => task.status === "downloading" && task.total !== null);
+  const total = active.reduce((s, task) => s + (task.total ?? 0), 0);
   const received = active.reduce((s, task) => s + task.received, 0);
-  const pct = total ? Math.round((received / total) * 100) : 0;
+  const pct = total ? Math.min(100, Math.round((received / total) * 100)) : 0;
   const failed = tasks.filter((task) => task.status === "error").length;
   const done = tasks.filter((task) => task.status === "done").length;
   const title = active.length
-    ? t("Downloading {n} item · {pct}%|Downloading {n} items · {pct}%", { n: active.length, pct })
+    ? known
+      ? t("Downloading {n} item · {pct}%|Downloading {n} items · {pct}%", { n: active.length, pct })
+      : t("Downloading {n} item|Downloading {n} items", { n: active.length })
     : failed
       ? t("{n} download failed|{n} downloads failed", { n: failed })
       : done
@@ -64,11 +68,11 @@ export function DownloadPanel() {
       </div>
       {/* Read out by screen readers once everything has finished (not on every percent) */}
       <div role="status" className="sr-only">
-        {active.length ? "" : title}
+        {active.length ? (active.some((task) => task.status === "preparing") ? t("Preparing download…") : "") : title}
       </div>
       {active.length > 0 && (
-        <div role="progressbar" aria-label={t("Download progress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} className="h-0.5 bg-muted">
-          <div className="h-full bg-brand transition-[width]" style={{ width: `${pct}%` }} />
+        <div role="progressbar" aria-label={t("Download progress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={known ? pct : undefined} className="h-0.5 bg-muted">
+          <div className={cn("h-full bg-brand transition-[width]", !known && "w-1/3 animate-pulse motion-reduce:animate-none")} style={known ? { width: `${pct}%` } : undefined} />
         </div>
       )}
       {!collapsed && (
@@ -86,7 +90,7 @@ export function DownloadPanel() {
                     </span>
                     {task.status === "downloading" && task.total && <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">{p}%</span>}
                   </div>
-                  {task.status === "downloading" && (
+                  {(task.status === "downloading" || task.status === "preparing") && (
                     <div
                       role="progressbar"
                       aria-label={task.name}
@@ -95,14 +99,17 @@ export function DownloadPanel() {
                       aria-valuenow={task.total ? p : undefined}
                       className="mt-1 h-1 overflow-hidden rounded-full bg-muted"
                     >
-                      <div className={cn("h-full rounded-full bg-brand transition-[width]", !task.total && "w-1/3 animate-pulse")} style={task.total ? { width: `${p}%` } : undefined} />
+                      <div
+                        className={cn("h-full rounded-full bg-brand transition-[width]", !task.total && "w-1/3 animate-pulse motion-reduce:animate-none")}
+                        style={task.total ? { width: `${p}%` } : undefined}
+                      />
                     </div>
                   )}
                   <div className={cn("mt-0.5 truncate text-[11px] text-muted-foreground tabular-nums", task.status === "error" && "text-destructive")} title={detail(task)}>
                     {detail(task)}
                   </div>
                 </div>
-                {task.status === "downloading" ? (
+                {task.status === "downloading" || task.status === "preparing" ? (
                   <Button size="icon-xs" variant="ghost" aria-label={t("Cancel download")} title={t("Cancel download")} onClick={() => cancelDownload(task.id)}>
                     <XIcon />
                   </Button>

@@ -17,7 +17,7 @@ import { HEADER_H, HEADER_W, cellRect, cellText, draw, fontOf, type View } from 
 import { SheetToolbar } from "./SheetToolbar";
 import { SheetMenu, type MenuTarget } from "./SheetMenu";
 import * as history from "./history";
-import { clipStore, createClipboard } from "./clipboard";
+import { clipboardRange, createClipboard } from "./clipboard";
 import { createFormatting } from "./format";
 import { createKeyboard } from "./keyboard";
 import { useGridMouse } from "./mouse";
@@ -109,7 +109,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
   /** Saving in progress (live value; Ctrl+S may be pressed again before the UI updates) */
   const savingRef = useRef(false);
   const [confirmExit, setConfirmExit] = useState(false);
-  const [clip, setClip] = useState<Range | null>(clipStore.current?.sheet === session.sheet ? clipStore.current.range : null);
+  const [clip, setClip] = useState<Range | null>(clipboardRange(book, session.sheet));
   const [menuTarget, setMenuTarget] = useState<MenuTarget>("cell");
   const [cursor, setCursor] = useState<string>("cell");
   // Update the layout live while dragging column widths/row heights
@@ -479,6 +479,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
           defaultValue={nameBox}
           key={nameBox}
           onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (e.key !== "Enter") return;
             // Don't let this Enter carry over into the cell (focus moves there during keydown)
             e.preventDefault();
@@ -505,6 +506,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
             setEditing({ text: e.target.value, mode: "edit", from: "bar" });
           }}
           onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (e.key === "Enter") {
               e.preventDefault();
               commitEdit([1, 0]);
@@ -622,8 +624,14 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
             merged={activeMerged}
             canUndo={session.undo.length > 0}
             canRedo={session.redo.length > 0}
-            onCut={() => void navigator.clipboard?.writeText(copyRange(true))}
-            onCopy={() => void navigator.clipboard?.writeText(copyRange(false))}
+            onCut={() => {
+              const text = copyRange(true);
+              if (text !== null) void navigator.clipboard?.writeText(text);
+            }}
+            onCopy={() => {
+              const text = copyRange(false);
+              if (text !== null) void navigator.clipboard?.writeText(text);
+            }}
             onPaste={async () => {
               try {
                 pasteText(await navigator.clipboard.readText());
@@ -662,7 +670,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
                 setSheetIdx(i);
                 setSelState({ anchor: [0, 0], focus: [0, 0] });
                 scrollRef.current?.scrollTo({ left: 0, top: 0 });
-                setClip(clipStore.current?.sheet === i ? clipStore.current.range : null);
+                setClip(clipboardRange(book, i));
                 focusGrid();
               }}
             >

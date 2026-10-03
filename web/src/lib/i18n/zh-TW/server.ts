@@ -253,6 +253,7 @@ export default {
   "Upload-Offset mismatch": "Upload-Offset 不一致",
   "The uploaded data exceeds the declared file size": "上傳資料超過宣告的檔案大小",
   "Connection interrupted": "連線中斷",
+  "Upload timed out while waiting for data. Resume or retry the upload.": "等待上傳資料逾時，請繼續或重試上傳",
   "File size mismatch": "檔案大小不符",
   // Share links (shares.rs)
   "The download limit must be greater than 0": "下載次數上限必須大於 0",

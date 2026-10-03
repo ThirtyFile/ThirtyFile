@@ -50,6 +50,20 @@ describe("pathAliases", () => {
 });
 
 describe("urlOf and appLink", () => {
+  test.each(["en", "zh-TW"] as const)("Control panel paths round-trip in %s without accepting arbitrary routes", async (lang) => {
+    const { controlPanelPath } = await load(lang);
+    const { CONTROL_PANEL_ITEMS } = await import("@/admin/controlPanel");
+    const root = lang === "en" ? "Control panel" : ZH["Control panel"];
+    expect(controlPanelPath("/admin", CONTROL_PANEL_ITEMS)).toBe("/admin");
+    for (const item of CONTROL_PANEL_ITEMS) {
+      expect(controlPanelPath(`/admin/${item.key}`, CONTROL_PANEL_ITEMS)).toBe(item.to);
+      expect(controlPanelPath(`/${root}/${item.title}`, CONTROL_PANEL_ITEMS)).toBe(item.to);
+    }
+    expect(controlPanelPath("/admin/not-a-page", CONTROL_PANEL_ITEMS)).toBeNull();
+    expect(controlPanelPath("/admin/storage/anything", CONTROL_PANEL_ITEMS)).toBeNull();
+    expect(controlPanelPath("/My files/admin/storage", CONTROL_PANEL_ITEMS)).toBeNull();
+    expect(controlPanelPath("//admin/storage", CONTROL_PANEL_ITEMS)).toBeNull();
+  });
   test("a found path opens its page", async () => {
     const { urlOf } = await load("en");
     expect(urlOf({ place: "spaces", id: null, path: [] })).toBe("/drives");

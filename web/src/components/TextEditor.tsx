@@ -51,11 +51,20 @@ export default function TextEditor(props: {
   const [reload, setReload] = useState(0);
   /** File and reload count the current editor content belongs to */
   const loaded = useRef<{ id: string; reload: number } | null>(null);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     // After our own save the parent updates the node (updated_at changes): the content is already current, so don't re-download; keep undo history and cursor position
     if (loaded.current?.id === props.node.id && loaded.current.reload === reload && props.node.updated_at <= base.current) return;
     let cancelled = false;
+    loaded.current = null;
+    setSaving(false);
     setOriginal(null);
     setError(null);
     // The editor stays mounted when moving to another file: forget the previous file's language
@@ -120,32 +129,44 @@ export default function TextEditor(props: {
     setSaving(true);
     // What is sent: typing goes on while the save is on its way
     const saved = text;
+    const fileId = props.node.id;
+    const opened = loaded.current;
+    const version = base.current;
+    const here = () => mounted.current && loaded.current === opened;
     try {
       const out = encodeText(eol.current === "\n" ? saved : saved.replace(/\n/g, eol.current), encoding);
-      const n = await api.saveContent(props.node.id, out.body, base.current);
-      base.current = n.updated_at;
+      const n = await api.saveContent(fileId, out.body, version);
       // Edits typed meanwhile stay unsaved (tab marker, warning before closing), now based on this version
-      textSaved(props.node.id, saved, current.current, n.updated_at);
-      setOriginal(saved);
-      setEncoding(out.encoding);
+      const draft = getDraft(fileId, "text");
+      if (here()) {
+        textSaved(fileId, saved, current.current, n.updated_at);
+        base.current = n.updated_at;
+        setOriginal(saved);
+        setEncoding(out.encoding);
+      } else if (draft && draft.base === original && (draft.version === undefined || draft.version === version)) {
+        // Another editor may have continued this file. Reconcile its own draft, never the displayed file's text.
+        textSaved(fileId, saved, draft.text, n.updated_at);
+      }
       toast.success(t("Saved"));
       props.onSaved?.(n);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 409) {
+      if (e instanceof ApiError && e.status === 409 && here()) {
         toast.error(e.message, {
           duration: 10000,
           action: {
             label: t("Reload (discard changes)"),
             onClick: () => {
-              setDraft(props.node.id, null);
-              setReload((x) => x + 1);
+              if (here()) {
+                setDraft(fileId, null);
+                setReload((x) => x + 1);
+              }
             },
           },
         });
       } else toast.error(errorMessage(e, t("Couldn't save")));
-      reportShown("save", e, props.node.id);
+      reportShown("save", e, fileId);
     } finally {
-      setSaving(false);
+      if (here()) setSaving(false);
     }
   };
 

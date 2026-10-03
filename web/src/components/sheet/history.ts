@@ -2,7 +2,7 @@
  * Change history: applying cell changes, layout changes, row/column inserts/deletes, and undo/redo.
  * Only data is handled here; which sheet to switch to and what to select is decided by the caller from the returned entry.
  */
-import { colOf, key, rowOf, type Cell, type Scalar, type Workbook } from "@/ooxml/xlsx/model";
+import { MAX_ROWS, MAX_COLS, colOf, key, rowOf, type Cell, type Scalar, type Workbook } from "@/ooxml/xlsx/model";
 import { applyStructOp, inverseOp } from "@/ooxml/xlsx/ops";
 import { restoreStates, type Change, type Entry, type Layout, type Session } from "./session";
 
@@ -60,6 +60,7 @@ export function commit(session: Session, changes: Change[], sheet: number, sel: 
 
 /** Build a change that sets (r, c) to content; omitting style keeps the existing style, null clears it */
 export function changeAt(book: Workbook, s: number, r: number, c: number, content: { v: Scalar; f?: string } | null, style?: number | null): Change {
+  if (!book.sheets[s] || !Number.isInteger(r) || !Number.isInteger(c) || r < 0 || r >= MAX_ROWS || c < 0 || c >= MAX_COLS) throw new RangeError("Cell is outside the worksheet");
   const k = key(r, c);
   const before = book.sheets[s].cells.get(k);
   const st = style === undefined ? before?.s : (style ?? undefined);
