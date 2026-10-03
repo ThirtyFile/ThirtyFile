@@ -1,26 +1,22 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
-import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeftIcon, ArrowRightIcon, ArrowUpIcon, CheckIcon, ChevronRightIcon, CopyIcon, RefreshCwIcon, SearchIcon, type LucideIcon } from "lucide-react";
 import { api, ApiError } from "@/api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NavMenu } from "@/components/NavMenu";
-import { openShortcuts } from "@/components/ShortcutsDialog";
-import { isTyping } from "@/components/explorer/types";
-import { listRefreshed } from "@/components/explorer/newItems";
 import { useFolderDrop } from "@/lib/dnd";
 import { folderOfPath, hasPersonal } from "@/lib/home";
 import { liveSearch, type LiveSearch } from "@/lib/liveSearch";
 import { useMe } from "@/lib/session";
 import { appLink, pathAliases, urlOf } from "@/lib/paths";
 import { shortcut } from "@/lib/keys";
-import { pressed } from "@/lib/style/keymap";
 import { useStyleKit } from "@/components/style";
 import { t } from "@/lib/i18n";
 import { cn, copyText } from "@/lib/utils";
-import { useTabActions, useTabsState } from "@/tabs";
+import { useTabActions } from "@/tabs";
+import { useFrameKeys, useHistory, useRefresh } from "./frameKeys";
 
 // ───────────── Address bar ─────────────
 
@@ -31,7 +27,7 @@ export interface Crumb {
   virtual?: boolean;
 }
 
-function SearchInput({ placeholder, onSearch, within, inputRef }: { placeholder: string; onSearch?: (q: string) => void; within?: string; inputRef?: React.Ref<HTMLInputElement> }) {
+export function SearchInput({ placeholder, onSearch, within, inputRef }: { placeholder: string; onSearch?: (q: string) => void; within?: string; inputRef?: React.Ref<HTMLInputElement> }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [params] = useSearchParams();
@@ -106,7 +102,7 @@ export function crumbPath(crumbs: Crumb[]) {
 }
 
 /** A part of the address bar path: a link to that folder, which also takes dropped items and files */
-function CrumbItem({ crumb: c, last, path }: { crumb: Crumb; last: boolean; path: string }) {
+export function CrumbItem({ crumb: c, last, path }: { crumb: Crumb; last: boolean; path: string }) {
   const folder = folderOfPath(c.to, hasPersonal(useMe()));
   const { dropping, dropProps } = useFolderDrop(folder ? { id: folder, name: c.label } : null);
   const drop = cn(dropping && "bg-brand/15 ring-1 ring-brand ring-inset");
@@ -213,13 +209,8 @@ export function AddressBar({
   keys?: boolean;
 }) {
   const navigate = useNavigate();
-  const qc = useQueryClient();
-  const tabs = useTabsState();
-  const { back, forward } = useTabActions();
-  const tab = tabs.tabs.find((t) => t.id === tabs.active);
-  const canBack = !!tab && tab.index > 0;
-  const canForward = !!tab && tab.index < tab.entries.length - 1;
-  const [refreshing, setRefreshing] = useState(false);
+  const { back, forward, canBack, canForward } = useHistory();
+  const { refreshing, refresh } = useRefresh();
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -244,62 +235,16 @@ export function AddressBar({
     return () => ro.disconnect();
   }, [trailKey, editing]);
 
-  const refresh = async () => {
-    setRefreshing(true);
-    // New items kept at the end of the list go to their sorted places, as in File Explorer
-    listRefreshed();
-    await qc.invalidateQueries();
-    setRefreshing(false);
-  };
-
   // Moving around with the keyboard, with the style's keys (see the shortcuts dialog)
-  useEffect(() => {
-    if (!keys) return;
-    // Keys with Alt are taken wherever the focus is (onAltArrow); the others only where nothing else wants them
-    const withAlt = (combos: readonly string[]) => combos.filter((c) => /\bAlt\+/.test(c));
-    const withoutAlt = (combos: readonly string[]) => combos.filter((c) => !/\bAlt\+/.test(c));
-    const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
-      // Refreshing refreshes the list rather than reloading the page, also while typing in a box
-      if (pressed(e, k.refresh)) {
-        e.preventDefault();
-        void refresh();
-        return;
-      }
-      if (isTyping(e.target) || document.querySelector("[role=dialog]") || (e.target as HTMLElement | null)?.closest?.("[role=menu], [role=menuitem]")) return;
-      if (pressed(e, withoutAlt(k.back))) back();
-      else if (pressed(e, withoutAlt(k.forward))) forward();
-      else if (pressed(e, withoutAlt(k.upFolder))) {
-        if (upTo) navigate(upTo);
-      } else if (pressed(e, k.search)) {
-        searchRef.current?.focus();
-        searchRef.current?.select();
-      } else if (pressed(e, k.addressBar)) setEditing(true);
-      else if (pressed(e, k.shortcuts)) openShortcuts();
-      else return;
-      e.preventDefault();
-    };
-    // Alt+arrows move around folders wherever the focus is: before a focused menu button takes Alt+↑ or Alt+↓ to open
-    // its menu
-    const onAltArrow = (e: KeyboardEvent) => {
-      const up = pressed(e, withAlt(k.upFolder));
-      const backward = pressed(e, withAlt(k.back));
-      if (!up && !backward && !pressed(e, withAlt(k.forward))) return;
-      const at = e.target as HTMLElement | null;
-      if (isTyping(at) || at?.tagName === "SELECT" || document.querySelector("[role=dialog]") || at?.closest?.("[role=menu]")) return;
-      if (up) {
-        if (upTo) navigate(upTo);
-      } else if (backward) back();
-      else forward();
-      e.preventDefault();
-      e.stopPropagation();
-    };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("keydown", onAltArrow, true);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("keydown", onAltArrow, true);
-    };
+  useFrameKeys({
+    enabled: keys,
+    upTo,
+    refresh: () => void refresh(),
+    focusSearch: () => {
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    },
+    editPath: () => setEditing(true),
   });
 
   const nav = "size-8 rounded-md [&_svg]:size-[18px]";

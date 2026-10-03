@@ -6,6 +6,7 @@
 import type { ComponentType, ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import type { ExplorerProps } from "@/components/Explorer";
+import type { Crumb } from "@/components/frame/AddressBar";
 import type { ExplorerActions } from "@/components/explorer/actions";
 import type { MenuEntries } from "@/components/explorer/menus";
 import type { ExplorerState } from "@/components/explorer/state";
@@ -17,14 +18,32 @@ import type { Action, KeyMap } from "@/lib/style/keymap";
 /** The id of the element holding `content` in every style's frame: the target of "Skip to main content" (AppShell) */
 export const MAIN_ID = "tf-main";
 
+/** Where a page is: what its path, its title and its search box show (components/Frame.tsx) */
+export interface FramePlace {
+  crumbs: Crumb[];
+  /** The icon of the place */
+  icon: LucideIcon;
+  /** The full path, for copying */
+  path: string;
+  /** The folder above, for Up */
+  upTo?: string | null;
+  searchPlaceholder: string;
+  /** When given, the search box only filters the page */
+  onSearch?(q: string): void;
+  /** The folder the search box searches in (and below); none: everything */
+  searchIn?: string;
+  /** The page has the file explorer's keys (moving around, the search box, the path, refreshing, the shortcuts) */
+  keys?: boolean;
+  /** The folder shown, which the locations show as the current one */
+  activeFolder?: string;
+}
+
 /** The parts of a page's frame (components/Frame.tsx), for the style to place */
 export interface FrameParts {
-  /** Where the path is shown, with back, forward and up, and the search box */
-  pathBar: ReactNode;
+  /** Where the page is: each style shows the path, back and forward, the search box and the locations its own way */
+  place: FramePlace;
   /** The page's commands */
   toolbar: ReactNode;
-  /** The locations: the folder tree, Recent, Favorites, the trash… */
-  nav: ReactNode;
   /** On narrow screens the locations are a panel, opened from the toolbar */
   navOpen: boolean;
   setNavOpen(open: boolean): void;

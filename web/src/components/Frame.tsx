@@ -7,8 +7,7 @@ import { useBranding } from "@/lib/branding";
 import { t } from "@/lib/i18n";
 import { formatBytes } from "@/lib/utils";
 import { setActiveTitle } from "@/tabs";
-import { AddressBar, crumbPath, type Crumb } from "./frame/AddressBar";
-import { LocationsNav } from "./frame/LocationsNav";
+import { crumbPath, type Crumb } from "./frame/AddressBar";
 
 export { crumbPath, type Crumb };
 export { ToolButton, ToolSeparator } from "./frame/ToolButton";
@@ -56,20 +55,18 @@ export function Frame(p: FrameProps) {
     <main className="flex h-full min-h-0 flex-col bg-background text-[13px]" aria-label={t("File Explorer")}>
       <h1 className="sr-only">{title}</h1>
       <Layout
-        pathBar={
-          <AddressBar
-            crumbs={p.crumbs}
-            icon={p.icon ?? FolderIcon}
-            path={p.path ?? crumbPath(p.crumbs)}
-            upTo={p.upTo}
-            searchPlaceholder={p.searchPlaceholder ?? (p.activeFolder ? t("Search {name}", { name: title }) : t("Search all spaces"))}
-            onSearch={p.onSearch}
-            searchIn={p.activeFolder}
-            keys={p.keys}
-          />
-        }
+        place={{
+          crumbs: p.crumbs,
+          icon: p.icon ?? FolderIcon,
+          path: p.path ?? crumbPath(p.crumbs),
+          upTo: p.upTo,
+          searchPlaceholder: p.searchPlaceholder ?? (p.activeFolder ? t("Search {name}", { name: title }) : t("Search all spaces")),
+          onSearch: p.onSearch,
+          searchIn: p.activeFolder,
+          keys: p.keys,
+          activeFolder: p.activeFolder,
+        }}
         toolbar={p.toolbar}
-        nav={<LocationsNav open={navOpen} activeFolder={p.activeFolder} onNavigate={() => setNavOpen(false)} />}
         navOpen={navOpen}
         setNavOpen={setNavOpen}
         content={p.children}
