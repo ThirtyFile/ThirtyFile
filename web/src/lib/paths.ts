@@ -44,3 +44,18 @@ export function appLink(text: string, origin: string) {
   if (url.origin !== origin || url.pathname === "/dav" || url.pathname.startsWith("/dav/")) return null;
   return url.pathname + url.search + url.hash;
 }
+
+/** Recognized Control panel paths take precedence over equally named spaces; other paths stay file paths. */
+export function isControlPanelPath(text: string) {
+  if (!text.trim().startsWith("/") || text.trim().startsWith("//")) return false;
+  const first = text.trim().split("/")[1];
+  return first === "admin" || first === "Control panel" || first === t("Control panel");
+}
+
+export function controlPanelPath(text: string, items: readonly { key: string; to: string; title: string }[]): string | null {
+  if (!isControlPanelPath(text)) return null;
+  const parts = text.trim().replace(/\/$/, "").split("/").slice(1);
+  if (parts.length === 1) return "/admin";
+  if (parts.length !== 2) return null;
+  return items.find((item) => (parts[0] === "admin" ? item.key === parts[1] : item.title === parts[1]))?.to ?? null;
+}

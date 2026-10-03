@@ -10,7 +10,7 @@ import { useFolderDrop } from "@/lib/dnd";
 import { folderOfPath, hasPersonal } from "@/lib/home";
 import { liveSearch, type LiveSearch } from "@/lib/liveSearch";
 import { useMe } from "@/lib/session";
-import { appLink, pathAliases, urlOf } from "@/lib/paths";
+import { appLink, controlPanelPath, isControlPanelPath, pathAliases, urlOf } from "@/lib/paths";
 import { shortcut } from "@/lib/keys";
 import { useStyleKit } from "@/components/style";
 import { t } from "@/lib/i18n";
@@ -152,6 +152,14 @@ export function useGoToPath() {
     }
     setFinding(true);
     try {
+      if (isControlPanelPath(typed)) {
+        const { CONTROL_PANEL_ITEMS } = await import("@/admin/controlPanel");
+        const page = controlPanelPath(typed, CONTROL_PANEL_ITEMS);
+        if (page) {
+          void navigate(page);
+          return true;
+        }
+      }
       const found = await api.findPath(typed, pathAliases());
       if (found.place === "file") openFile(urlOf(found));
       else void navigate(urlOf(found));
