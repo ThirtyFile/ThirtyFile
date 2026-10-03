@@ -1138,8 +1138,8 @@ mod tests {
         for seen in [listed(managed()).await, listed(ListQuery { node_id: Some(inbox.clone()), ..Default::default() }).await] {
             assert_eq!(seen.len(), 1);
             let s = &seen[0];
-            assert!(s.private, "{s:?}");
-            assert!(!s.id.contains(&info.id) && s.node_id.is_empty() && s.node_name.is_empty(), "{s:?}");
+            assert!(s.private, "the administrative listing marks the share as private");
+            assert!(!s.id.contains(&info.id) && s.node_id.is_empty() && s.node_name.is_empty(), "the administrative listing redacts the private share");
             assert_eq!((s.owner_name.as_str(), s.drive_owner.as_str(), s.has_password, s.drop_only), ("amy", "amy", true, true));
         }
         let handle = listed(managed()).await[0].id.clone();
@@ -1148,7 +1148,7 @@ mod tests {
         // It can't be changed, by its address or by what the list gave
         for id in [&info.id, &handle] {
             let err = change(&env, &admin, id, json!({ "password": "", "drop_only": false, "max_downloads": null })).await.unwrap_err();
-            assert_eq!(err.status, StatusCode::FORBIDDEN, "{id}");
+            assert_eq!(err.status, StatusCode::FORBIDDEN);
         }
         let (hash, drop_only): (Option<String>, bool) =
             sqlx::query_as("SELECT password_hash, drop_only FROM shares WHERE id = ?").bind(&info.id).fetch_one(&env.st.db).await.unwrap();
@@ -1159,7 +1159,7 @@ mod tests {
         assert!(!own[0].private && own[0].id == info.id && own[0].node_name == "Inbox");
         env.grant(&inbox, &admin, "manager").await;
         let seen = listed(managed()).await;
-        assert!(!seen[0].private && seen[0].id == info.id, "{seen:?}");
+        assert!(!seen[0].private && seen[0].id == info.id, "a manager's listing includes the share she can manage");
         assert!(change(&env, &admin, &info.id, json!({ "max_downloads": 5 })).await.is_ok());
         env.revoke(&inbox, &admin).await;
 

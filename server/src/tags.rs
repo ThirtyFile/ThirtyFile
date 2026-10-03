@@ -190,7 +190,7 @@ pub async fn apply(State(st): State<AppState>, user: User, Json(req): Json<Apply
     let mut tx = crate::db::begin_write(&st.db).await?;
     check_own(&mut tx, &user, &req.add).await?;
     check_own(&mut tx, &user, &req.remove).await?;
-    let mut items = Vec::with_capacity(req.ids.len());
+    let mut items = Vec::new();
     for id in &req.ids {
         // Any item the person can see, and nothing else: someone else's item is "not found"
         let node = tree::node_for(&mut tx, &user, id, Need::Read).await?;
