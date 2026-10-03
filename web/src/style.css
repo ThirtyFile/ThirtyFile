@@ -111,6 +111,65 @@
   --series-3: #199e70;
 }
 
+/*
+ * The look of the interface style (components/style), as tokens the shared components take it from: these are the
+ * Windows style's. The Mac style sets its own in components/style/mac/art/mac.css, which loads only with that style.
+ * Tokens ending in -text, -leading, -h, -w, -px, -radius or -icon are sizes; the others are colours or shadows, which a
+ * style sets for the light and the dark theme.
+ */
+:root {
+  /* Type: the file list and the tables of other pages; the names under the icons of the icon views */
+  --tf-list-text: 0.75rem;
+  --tf-list-leading: 1rem;
+  --tf-name-text: 0.75rem;
+  /* Rows of lists (tf-row): the Details view, and the tables of other pages */
+  --tf-row-radius: 0px;
+  --tf-row-hover: color-mix(in oklab, var(--muted) 70%, transparent);
+  --tf-sel-bg: var(--selection);
+  --tf-sel-fg: var(--accent-foreground);
+  --tf-sel-muted: var(--muted-foreground);
+  --tf-sel-bar: inset 3px 0 0 var(--brand);
+  /* Items of the icon views (tf-item); "line" items are the small ones in rows (List, a column of the Columns view) */
+  --tf-item-radius: calc(var(--radius) * 0.8);
+  --tf-item-hover: var(--muted);
+  --tf-item-sel-bg: var(--selection);
+  --tf-item-sel-border: var(--brand);
+  --tf-line-sel-bg: var(--selection);
+  --tf-line-sel-fg: currentColor;
+  --tf-line-sel-border: var(--brand);
+  /* ...and the strip of pictures under the Gallery view's preview */
+  --tf-strip-sel-bg: var(--selection);
+  --tf-strip-sel-border: var(--brand);
+  /* ...and in the large icon views, the picture and the name under it (tf-thumb, tf-name) */
+  --tf-grid-icon: 42px;
+  --tf-thumb-w: auto;
+  --tf-thumb-radius: 0px;
+  --tf-thumb-sel-bg: transparent;
+  --tf-name-w: auto;
+  --tf-name-radius: 0px;
+  --tf-name-px: 0px;
+  --tf-name-sel-bg: transparent;
+  --tf-name-sel-fg: currentColor;
+  /* The selection of a list that isn't the one in use (tf-idle): a column of the Columns view left of the open one */
+  --tf-idle-bg: var(--muted);
+  --tf-idle-fg: currentColor;
+  /* Toolbar buttons (components/frame/ToolButton) */
+  --tf-tool-h: 30px;
+  --tf-tool-radius: var(--radius);
+  --tf-tool-icon: 1rem;
+  --tf-tool-text: 0.75rem;
+  --tf-tool-fg: currentColor;
+  --tf-tool-hover: var(--muted);
+  /* Focus rings of rows and items: on the page, and on a selected one */
+  --tf-focus-w: 2px;
+  --tf-focus: var(--ring);
+  --tf-focus-on-sel: var(--ring);
+}
+
+.dark {
+  --tf-tool-hover: color-mix(in oklab, var(--muted) 50%, transparent);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring;
@@ -134,6 +193,105 @@
 
 #root {
   height: 100dvh;
+}
+
+/*
+ * Rows and items of lists, drawn with the style's tokens (above). A layer below the utilities, so a component's own
+ * classes (an item things are dragged onto, say) still win. A row's cells take the colours, so its first and last can
+ * be rounded; its focus ring is an outline, drawn over them.
+ */
+@layer components {
+  .tf-row {
+    outline: none;
+  }
+  .tf-row:hover > td {
+    background-color: var(--tf-row-hover);
+  }
+  .tf-row[aria-selected="true"] {
+    color: var(--tf-sel-fg);
+    --muted-foreground: var(--tf-sel-muted);
+  }
+  .tf-row[aria-selected="true"] > td {
+    background-color: var(--tf-sel-bg);
+  }
+  .tf-row[aria-selected="true"] > td:first-child {
+    border-start-start-radius: var(--tf-row-radius);
+    border-end-start-radius: var(--tf-row-radius);
+    box-shadow: var(--tf-sel-bar);
+  }
+  .tf-row[aria-selected="true"] > td:last-child {
+    border-start-end-radius: var(--tf-row-radius);
+    border-end-end-radius: var(--tf-row-radius);
+  }
+  .tf-row:focus-visible {
+    outline: var(--tf-focus-w) solid var(--tf-focus);
+    outline-offset: calc(var(--tf-focus-w) * -1);
+  }
+  .tf-row[aria-selected="true"]:focus-visible {
+    outline-color: var(--tf-focus-on-sel);
+  }
+
+  .tf-item {
+    border: 1px solid transparent;
+    border-radius: var(--tf-item-radius);
+    outline: none;
+  }
+  .tf-item:hover {
+    background-color: var(--tf-item-hover);
+  }
+  .tf-item[aria-selected="true"] {
+    background-color: var(--tf-item-sel-bg);
+    border-color: var(--tf-item-sel-border);
+  }
+  .tf-item[data-line][aria-selected="true"] {
+    background-color: var(--tf-line-sel-bg);
+    border-color: var(--tf-line-sel-border);
+    color: var(--tf-line-sel-fg);
+    --muted-foreground: var(--tf-sel-muted);
+  }
+  .tf-item[data-strip][aria-selected="true"] {
+    background-color: var(--tf-strip-sel-bg);
+    border-color: var(--tf-strip-sel-border);
+  }
+  .tf-item:focus-visible {
+    box-shadow: 0 0 0 var(--tf-focus-w) var(--tf-focus);
+  }
+  /* A selected line item is filled: a style can draw its ring inside it (--tf-line-focus-inset: inset) */
+  .tf-item[data-line][aria-selected="true"]:focus-visible {
+    box-shadow: var(--tf-line-focus-inset,) 0 0 0 var(--tf-focus-w) var(--tf-focus-on-sel);
+  }
+  .tf-thumb {
+    border-radius: var(--tf-thumb-radius);
+  }
+  .tf-item[aria-selected="true"] .tf-thumb {
+    background-color: var(--tf-thumb-sel-bg);
+  }
+  .tf-name {
+    border-radius: var(--tf-name-radius);
+    padding-inline: var(--tf-name-px);
+  }
+  .tf-item[aria-selected="true"] .tf-name {
+    background-color: var(--tf-name-sel-bg);
+    color: var(--tf-name-sel-fg);
+  }
+
+  /* A list that isn't the one in use shows its selection quieter */
+  .tf-idle {
+    --tf-sel-bg: var(--tf-idle-bg);
+    --tf-sel-fg: var(--tf-idle-fg);
+    --tf-sel-muted: var(--muted-foreground);
+    --tf-sel-bar: none;
+    --tf-item-sel-bg: var(--tf-idle-bg);
+    --tf-item-sel-border: transparent;
+    --tf-line-sel-bg: var(--tf-idle-bg);
+    --tf-line-sel-fg: var(--tf-idle-fg);
+    --tf-line-sel-border: transparent;
+    --tf-strip-sel-bg: var(--tf-idle-bg);
+    --tf-strip-sel-border: transparent;
+    --tf-name-sel-bg: var(--tf-idle-bg);
+    --tf-name-sel-fg: var(--tf-idle-fg);
+    --tf-focus-on-sel: var(--tf-focus);
+  }
 }
 
 .cm-editor {

@@ -104,8 +104,8 @@ describe("the Mac style's sidebar", () => {
       ["Administration", "Control panel"],
     ]);
     // The folder open is the current one
-    expect(document.querySelector('a[href="/files/team"]')!.className).toContain("bg-selection");
-    expect(document.querySelector('a[href="/files/home"]')!.className).not.toContain("bg-selection");
+    expect(document.querySelector('a[href="/files/team"]')!.className).toContain("bg-(--mac-nav-sel-bg)");
+    expect(document.querySelector('a[href="/files/home"]')!.className).not.toContain("bg-(--mac-nav-sel-bg)");
   });
 
   test("new tags and new smart folders are made from their group's heading", () => {

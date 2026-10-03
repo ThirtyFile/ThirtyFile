@@ -1,0 +1,164 @@
+/*
+ * The Mac style's look, as tokens: those every style sets (--tf-*, whose Windows values are in src/style.css), and the
+ * Mac style's own (--mac-*), for its frame, sidebar, toolbar and icons. Loaded only with the Mac style (./index.tsx),
+ * on the page's root while the style is in use (components/style, data-style).
+ *
+ * Tokens ending in -text, -leading, -h, -w, -px, -radius, -icon, -blur or -stroke are sizes, set once; the others are
+ * colours or shadows, set for the light and the dark theme. Colours are plain hex (with alpha for the translucent
+ * ones), so tests/unit/macLook.test.ts can check their contrast.
+ */
+:root[data-style="mac"] {
+  /* Type and spacing */
+  --tf-list-text: 0.8125rem;
+  --tf-list-leading: 1.125rem;
+  --tf-name-text: 0.75rem;
+  --mac-nav-text: 0.8125rem;
+  --mac-nav-heading-text: 0.6875rem;
+  --mac-nav-item-h: 28px;
+  --mac-nav-px: 10px;
+  --mac-toolbar-h: 52px;
+  --mac-bar-h: 26px;
+
+  /* Rows: rounded, filled with the accent when selected */
+  --tf-row-radius: 6px;
+  --tf-row-hover: #0000000a;
+  --tf-sel-bg: #2563d6;
+  --tf-sel-fg: #ffffff;
+  --tf-sel-muted: #ffffff;
+  --tf-sel-bar: none;
+
+  /* Icon views: the picture gets a grey rounded backdrop, the name an accent pill; line items are filled as rows */
+  --tf-item-radius: 8px;
+  --tf-item-hover: #0000000a;
+  --tf-item-sel-bg: #00000000;
+  --tf-item-sel-border: #00000000;
+  --tf-line-sel-bg: #2563d6;
+  --tf-line-sel-fg: #ffffff;
+  --tf-line-sel-border: #00000000;
+  --tf-line-focus-inset: inset;
+  --tf-strip-sel-bg: #0000001a;
+  --tf-strip-sel-border: #2563d6;
+  --tf-grid-icon: 64px;
+  --tf-thumb-w: 88px;
+  --tf-thumb-radius: 6px;
+  --tf-thumb-sel-bg: #0000001a;
+  --tf-name-w: fit-content;
+  --tf-name-radius: 4px;
+  --tf-name-px: 5px;
+  --tf-name-sel-bg: #2563d6;
+  --tf-name-sel-fg: #ffffff;
+  --tf-idle-bg: #e5e6ea;
+  --tf-idle-fg: #1f2328;
+
+  /* Toolbar buttons: borderless, a quiet grey, rounded when hovered */
+  --tf-tool-h: 28px;
+  --tf-tool-radius: 6px;
+  --tf-tool-icon: 18px;
+  --tf-tool-text: 0.75rem;
+  --tf-tool-fg: #55585f;
+  --tf-tool-hover: #0000000f;
+
+  /* Focus rings: wider, in the accent; white on a selection */
+  --tf-focus-w: 3px;
+  --tf-focus: #3a7bf0;
+  --tf-focus-on-sel: #ffffff;
+
+  /* The window: the toolbar, the bars at the bottom, the view switcher */
+  --mac-toolbar-bg: #f6f6f8;
+  --mac-seg-bg: #0000000d;
+  --mac-seg-on: #ffffff;
+  --mac-seg-shadow: 0 1px 2px #0000002e;
+
+  /* The sidebar: translucent over a soft backdrop (the frame's), with the backdrop blurred through it */
+  --mac-desktop-1: #d9e3f2;
+  --mac-desktop-2: #ecdfe8;
+  --mac-desktop-3: #e1ecec;
+  --mac-sidebar-bg: #eef0f4c7;
+  --mac-sidebar-blur: 24px;
+  --mac-sidebar-edge: #0000001a;
+  --mac-nav-fg: #1f2328;
+  --mac-nav-heading: #5c6170;
+  --mac-nav-symbol: #2563d6;
+  --mac-nav-hover: #0000000d;
+  --mac-nav-sel-bg: #0000001a;
+
+  /* Symbols (./symbols.ts): their line width */
+  --mac-symbol-stroke: 1.7;
+
+  /* Icons (./documents.tsx): folders, and the page of documents */
+  --mac-folder-back: #5a9fe2;
+  --mac-folder-front: #7db9ef;
+  --mac-folder-line: #a8d1f6;
+  --mac-page: #ffffff;
+  --mac-page-edge: #b9bfc8;
+  --mac-page-fold: #e3e7ec;
+  --mac-page-ink: #6b717c;
+}
+
+:root.dark[data-style="mac"] {
+  --tf-row-hover: #ffffff0d;
+  --tf-sel-bg: #1f5fc9;
+  --tf-sel-fg: #ffffff;
+  --tf-sel-muted: #ffffff;
+  --tf-sel-bar: none;
+  --tf-item-hover: #ffffff0d;
+  --tf-item-sel-bg: #00000000;
+  --tf-item-sel-border: #00000000;
+  --tf-line-sel-bg: #1f5fc9;
+  --tf-line-sel-fg: #ffffff;
+  --tf-line-sel-border: #00000000;
+  --tf-line-focus-inset: inset;
+  --tf-strip-sel-bg: #ffffff1f;
+  --tf-strip-sel-border: #5a9cff;
+  --tf-thumb-sel-bg: #ffffff1f;
+  --tf-name-sel-bg: #1f5fc9;
+  --tf-name-sel-fg: #ffffff;
+  --tf-idle-bg: #333337;
+  --tf-idle-fg: #e8e8e6;
+  --tf-tool-fg: #c9cbd1;
+  --tf-tool-hover: #ffffff14;
+  --tf-focus: #5a9cff;
+  --tf-focus-on-sel: #ffffff;
+
+  --mac-toolbar-bg: #242427;
+  --mac-seg-bg: #ffffff12;
+  --mac-seg-on: #4a4a4f;
+  --mac-seg-shadow: 0 1px 2px #00000066;
+
+  --mac-desktop-1: #1b2130;
+  --mac-desktop-2: #271d27;
+  --mac-desktop-3: #1d2626;
+  --mac-sidebar-bg: #26272bcc;
+  --mac-sidebar-edge: #00000066;
+  --mac-nav-fg: #e6e6e8;
+  --mac-nav-heading: #a3a6ae;
+  --mac-nav-symbol: #5a9cff;
+  --mac-nav-hover: #ffffff12;
+  --mac-nav-sel-bg: #ffffff1f;
+
+  --mac-folder-back: #3f82c4;
+  --mac-folder-front: #5b9ad8;
+  --mac-folder-line: #86b8e8;
+  --mac-page: #ebedf0;
+  --mac-page-edge: #8d94a0;
+  --mac-page-fold: #cdd2d9;
+  --mac-page-ink: #5b616c;
+}
+
+/* The frame's backdrop, which the sidebar lets through */
+.tf-mac-desktop {
+  background: radial-gradient(120% 70% at 0% 0%, var(--mac-desktop-1), transparent 70%), radial-gradient(90% 60% at 0% 100%, var(--mac-desktop-2), transparent 70%), var(--mac-desktop-3);
+}
+
+.tf-mac-sidebar {
+  background-color: var(--mac-sidebar-bg);
+  border-inline-end: 1px solid var(--mac-sidebar-edge);
+  -webkit-backdrop-filter: blur(var(--mac-sidebar-blur)) saturate(1.6);
+  backdrop-filter: blur(var(--mac-sidebar-blur)) saturate(1.6);
+  color: var(--mac-nav-fg);
+}
+
+/* The Mac style's own symbols (./symbols.ts) are drawn thinner than the shared ones */
+svg.lucide[class*="lucide-mac-"] {
+  stroke-width: var(--mac-symbol-stroke);
+}

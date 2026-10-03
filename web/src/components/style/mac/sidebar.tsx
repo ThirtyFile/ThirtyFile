@@ -7,7 +7,7 @@
 import type { ReactNode } from "react";
 import { NavLink } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDownIcon, ClockIcon, FolderIcon, LayersIcon, Link2Icon, SettingsIcon, StarIcon, Trash2Icon, UsersRoundIcon, type LucideIcon } from "lucide-react";
+import { ChevronDownIcon, type LucideIcon } from "lucide-react";
 import { api } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { NavMenu } from "@/components/NavMenu";
@@ -16,18 +16,19 @@ import { NAV_DEFAULT_WIDTH, NAV_MAX_WIDTH, NAV_MIN_WIDTH, NavFooter } from "@/co
 import { NewSmartFolderButton, SmartFolderItem } from "@/components/frame/SmartFoldersNav";
 import { NewTagButton, TagItem } from "@/components/frame/TagsNav";
 import { useFolderDrop } from "@/lib/dnd";
-import { DRIVE_ICON, useDrives } from "@/lib/drives";
+import { useDrives } from "@/lib/drives";
 import { t } from "@/lib/i18n";
 import { usePersisted, useMe } from "@/lib/session";
 import { useSmartFolders } from "@/lib/smartFolders";
 import { useTags } from "@/lib/tags";
 import { cn } from "@/lib/utils";
+import { useMacSymbols } from "./look";
 
 /** A location's link: the one open is highlighted */
 export const macNavItem = (isActive: boolean) =>
   cn(
-    "flex h-7 items-center gap-2 rounded-md px-2 whitespace-nowrap text-foreground/85 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-    isActive && "bg-selection text-accent-foreground hover:bg-selection",
+    "flex h-(--mac-nav-item-h) items-center gap-2 rounded-(--tf-row-radius) px-2 text-(length:--mac-nav-text) whitespace-nowrap text-(--mac-nav-fg) outline-none hover:bg-(--mac-nav-hover) focus-visible:ring-(length:--tf-focus-w) focus-visible:ring-(--tf-focus) focus-visible:ring-inset",
+    isActive && "bg-(--mac-nav-sel-bg) hover:bg-(--mac-nav-sel-bg)",
   );
 
 /** The groups hidden from their heading */
@@ -46,7 +47,7 @@ function Group({ id, title, action, children }: { id: string; title: string; act
             type="button"
             aria-expanded={open}
             onClick={() => setHidden(open ? [...hidden, id] : hidden.filter((h) => h !== id))}
-            className="flex w-full items-center gap-1 rounded px-2 py-0.5 text-left text-[11px] font-semibold text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex w-full items-center gap-1 rounded px-2 py-0.5 text-left text-(length:--mac-nav-heading-text) font-semibold text-(--mac-nav-heading) outline-none hover:text-(--mac-nav-fg) focus-visible:ring-(length:--tf-focus-w) focus-visible:ring-(--tf-focus)"
           >
             <span className="truncate">{title}</span>
             <ChevronDownIcon
@@ -68,7 +69,7 @@ function PageItem({ to, icon: Icon, label, end }: { to: string; icon: LucideIcon
     <li>
       <NavMenu to={to}>
         <NavLink to={to} end={end} className={({ isActive }) => macNavItem(isActive)}>
-          <Icon className="size-4 shrink-0 text-brand" />
+          <Icon className="size-4 shrink-0 text-(--mac-nav-symbol)" />
           <span className="truncate">{label}</span>
         </NavLink>
       </NavMenu>
@@ -84,7 +85,7 @@ function FolderItem({ id, label, icon: Icon, isSpaceRoot, offline, current }: { 
     <li {...dropProps}>
       <NavMenu to={to} nodeId={id} isSpaceRoot={isSpaceRoot}>
         <NavLink to={to} title={label} className={({ isActive }) => cn(macNavItem(isActive || !!current), dropping && "bg-brand/15 ring-1 ring-brand ring-inset")}>
-          <Icon className={cn("size-4 shrink-0 text-brand", offline && "opacity-40")} />
+          <Icon className={cn("size-4 shrink-0 text-(--mac-nav-symbol)", offline && "opacity-40")} />
           <span className="truncate">{label}</span>
         </NavLink>
       </NavMenu>
@@ -94,8 +95,9 @@ function FolderItem({ id, label, icon: Icon, isSpaceRoot, offline, current }: { 
 
 /** Favourite folders, in name order (the list of every favourite has files too) */
 function FavoriteFolders({ activeFolder }: { activeFolder?: string }) {
+  const sym = useMacSymbols();
   const favorites = useQuery({ queryKey: keys.favorites("name", "asc"), queryFn: () => api.favorites("name", "asc") });
-  return favorites.data?.filter((n) => n.kind === "folder").map((n) => <FolderItem key={n.id} id={n.id} label={n.name} icon={FolderIcon} current={n.id === activeFolder} />);
+  return favorites.data?.filter((n) => n.kind === "folder").map((n) => <FolderItem key={n.id} id={n.id} label={n.name} icon={sym.folder} current={n.id === activeFolder} />);
 }
 
 export function MacSidebar({ activeFolder }: { activeFolder?: string }) {
@@ -104,32 +106,34 @@ export function MacSidebar({ activeFolder }: { activeFolder?: string }) {
   const { tags } = useTags();
   const { folders: smart } = useSmartFolders();
   const [width, setWidth] = usePersisted("tf-nav-width", NAV_DEFAULT_WIDTH);
+  const sym = useMacSymbols();
+  const spaceIcon = { personal: sym.personal, company: sym.company, team: sym.team };
   return (
-    <nav aria-label={t("File locations")} style={{ width, maxWidth: "40vw" }} className="relative flex shrink-0 flex-col border-r bg-sidebar">
+    <nav aria-label={t("File locations")} style={{ width, maxWidth: "40vw" }} className="tf-mac-sidebar relative flex shrink-0 flex-col">
       <Resizer width={width} onChange={setWidth} min={NAV_MIN_WIDTH} max={NAV_MAX_WIDTH} defaultWidth={NAV_DEFAULT_WIDTH} edge="right" label={t("Resize navigation pane")} />
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
         <Group id="favorites" title={t("Favorites")} action={<NewSmartFolderButton />}>
-          <PageItem to="/favorites" icon={StarIcon} label={t("All favorites")} />
+          <PageItem to="/favorites" icon={sym.favorites} label={t("All favorites")} />
           <FavoriteFolders activeFolder={activeFolder} />
           {smart.map((folder) => (
             <li key={folder.id}>
-              <SmartFolderItem folder={folder} itemClass={macNavItem} iconClass="size-4 text-brand" />
+              <SmartFolderItem folder={folder} itemClass={macNavItem} icon={sym.smartFolder} iconClass="size-4 text-(--mac-nav-symbol)" />
             </li>
           ))}
         </Group>
         <Group id="spaces" title={t("Spaces")}>
-          <PageItem to="/drives" icon={LayersIcon} label={t("All spaces")} end />
+          <PageItem to="/drives" icon={sym.spaces} label={t("All spaces")} end />
           {drives.data?.map((d) => (
-            <FolderItem key={d.id} id={d.root_id} label={d.name} icon={DRIVE_ICON[d.kind]} isSpaceRoot offline={!!d.offline} current={d.root_id === activeFolder} />
+            <FolderItem key={d.id} id={d.root_id} label={d.name} icon={spaceIcon[d.kind]} isSpaceRoot offline={!!d.offline} current={d.root_id === activeFolder} />
           ))}
         </Group>
         <Group id="shared" title={t("Shared")}>
-          <PageItem to="/shared-with-me" icon={UsersRoundIcon} label={t("Shared with me")} />
-          <PageItem to="/shares" icon={Link2Icon} label={t("My share links")} />
+          <PageItem to="/shared-with-me" icon={sym.sharedWithMe} label={t("Shared with me")} />
+          <PageItem to="/shares" icon={sym.shareLinks} label={t("My share links")} />
         </Group>
         <ul className="mt-3 grid gap-px">
-          <PageItem to="/recent" icon={ClockIcon} label={t("Recent")} />
-          <PageItem to="/trash" icon={Trash2Icon} label={t("Trash")} />
+          <PageItem to="/recent" icon={sym.recent} label={t("Recent")} />
+          <PageItem to="/trash" icon={sym.trash} label={t("Trash")} />
         </ul>
         <Group id="tags" title={t("Tags")} action={<NewTagButton />}>
           {tags.map((tag) => (
@@ -140,7 +144,7 @@ export function MacSidebar({ activeFolder }: { activeFolder?: string }) {
         </Group>
         {me.role === "admin" && (
           <Group id="admin" title={t("Administration")}>
-            <PageItem to="/admin" icon={SettingsIcon} label={t("Control panel")} />
+            <PageItem to="/admin" icon={sym.controlPanel} label={t("Control panel")} />
           </Group>
         )}
       </div>

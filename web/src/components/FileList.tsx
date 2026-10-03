@@ -476,13 +476,7 @@ export function FileList(p: FileListProps) {
     return (
       <>
         {status}
-        <div
-          ref={(el) => void (root.current = el)}
-          role="listbox"
-          aria-multiselectable
-          aria-label={label}
-          className={cn(view === "columns" ? "p-1" : "p-3", p.inactive && "[&_[aria-selected=true]]:border-transparent! [&_[aria-selected=true]]:bg-muted!")}
-        >
+        <div ref={(el) => void (root.current = el)} role="listbox" aria-multiselectable aria-label={label} className={cn(view === "columns" ? "p-1" : "p-3", p.inactive && "tf-idle")}>
           {rows.map(({ row: r, gap }) => {
             const at = layout.row(r);
             return (
@@ -551,7 +545,7 @@ export function FileList(p: FileListProps) {
         aria-multiselectable
         aria-label={label}
         aria-rowcount={layout.count + 1}
-        className="w-full table-fixed border-collapse text-xs whitespace-nowrap select-none"
+        className="w-full table-fixed border-collapse text-(length:--tf-list-text) leading-(--tf-list-leading) whitespace-nowrap select-none"
         style={minWidth === undefined ? undefined : { minWidth }}
       >
         <thead ref={head}>

@@ -1,6 +1,6 @@
 // The Mac style (components/style/mac), chosen in the account: its sidebar, toolbar and path bar; every key of its map;
-// Quick look; folders that expand in place in the List view; dragging onto the path bar; and search. Each test signs in
-// as an account of its own, so the other tests keep the Windows style.
+// Quick look; folders that expand in place in the List view; its icons and look; dragging onto the path bar; and search.
+// Each test signs in as an account of its own, so the other tests keep the Windows style.
 import { expect, test, type Page } from "@playwright/test";
 import { answer, listing, makeFolder, openFolder, signInAsNewUser, uploadFile } from "./helpers";
 
@@ -301,6 +301,41 @@ test("on a phone, the Mac style has the layout every style shares", async ({ pag
   await expect(page.getByRole("navigation", { name: "File path" })).toBeVisible();
   await expect(pathBar(page)).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+});
+
+test("the Mac style has icons and a look of its own, which the Windows style never loads", async ({ page }) => {
+  const assets: string[] = [];
+  page.on("request", (r) => {
+    if (/\/assets\/art-[\w-]+\.(js|css)$/.test(r.url())) assets.push(r.url());
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await signInAsNewUser(page, "mac-look");
+  expect((await page.request.put("/api/auth/style", { data: { style: "windows" } })).ok()).toBe(true);
+  const top = await makeFolder(page, "Look");
+  await makeFolder(page, "Inner", top);
+  await uploadFile(page, top, "main.rs", "fn main() {}\n");
+  await uploadFile(page, top, "notes.customext", "x");
+  await openFolder(page, top);
+  await expect(item(page, "main.rs").locator('svg[data-type="rust"]')).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-style", "windows");
+  await expect(page.locator("svg[data-art]")).toHaveCount(0);
+  expect(assets).toEqual([]);
+
+  // The Mac style loads its own: a folder, a format's label on a page, a file of no known kind as a blank page
+  expect((await page.request.put("/api/auth/style", { data: { style: "mac" } })).ok()).toBe(true);
+  await page.evaluate(() => localStorage.setItem("tf-view", JSON.stringify("list")));
+  await openFolder(page, top);
+  await expect(page.locator("html")).toHaveAttribute("data-style", "mac");
+  await expect(item(page, "Inner").locator('svg[data-art="mac"][data-kind="folder"]')).toBeVisible();
+  await expect(item(page, "main.rs").locator('svg[data-art="mac"][data-type="rust"] text')).toHaveText("RS");
+  await expect(item(page, "notes.customext").locator('svg[data-art="mac"][data-kind="other"]')).toBeVisible();
+  expect(assets.some((a) => a.endsWith(".js")) && assets.some((a) => a.endsWith(".css"))).toBe(true);
+  // Its look: a selected row is rounded and filled with the accent, its text white
+  await item(page, "main.rs").click();
+  const cell = item(page, "main.rs").locator("td").first();
+  await expect(cell).toHaveCSS("border-top-left-radius", "6px");
+  await expect(cell).toHaveCSS("background-color", "rgb(37, 99, 214)");
+  await expect(item(page, "main.rs")).toHaveCSS("color", "rgb(255, 255, 255)");
 });
 
 test("items dragged onto a folder of the path bar move there", async ({ page }) => {

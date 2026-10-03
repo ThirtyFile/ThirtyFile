@@ -5,7 +5,7 @@
 
 import { NavLink, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { FolderOpenIcon, FolderSearchIcon, PanelTopIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { FolderOpenIcon, FolderSearchIcon, PanelTopIcon, PencilIcon, PlusIcon, Trash2Icon, type LucideIcon } from "lucide-react";
 import type { SmartFolder } from "@/api";
 import { askToDeleteSmartFolder } from "@/components/smartFolders";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
@@ -16,8 +16,18 @@ import { cn } from "@/lib/utils";
 import { useTabActions } from "@/tabs";
 import { windowsNavItem } from "./TagsNav";
 
-/** A smart folder: its link, and its context menu. `itemClass`: how the link looks, open or not */
-export function SmartFolderItem({ folder, itemClass = windowsNavItem, iconClass = "size-[15px]" }: { folder: SmartFolder; itemClass?: (isActive: boolean) => string; iconClass?: string }) {
+/** A smart folder: its link, and its context menu. `itemClass`: how the link looks, open or not; `icon`: the style's symbol */
+export function SmartFolderItem({
+  folder,
+  itemClass = windowsNavItem,
+  icon: Icon = FolderSearchIcon,
+  iconClass = "size-[15px]",
+}: {
+  folder: SmartFolder;
+  itemClass?: (isActive: boolean) => string;
+  icon?: LucideIcon;
+  iconClass?: string;
+}) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const tabs = useTabActions();
@@ -26,7 +36,7 @@ export function SmartFolderItem({ folder, itemClass = windowsNavItem, iconClass 
     <ContextMenu>
       <ContextMenuTrigger className="contents">
         <NavLink to={to} className={({ isActive }) => itemClass(isActive)}>
-          <FolderSearchIcon aria-hidden className={cn("shrink-0", iconClass)} />
+          <Icon aria-hidden className={cn("shrink-0", iconClass)} />
           <span className="truncate">{folder.name}</span>
         </NavLink>
       </ContextMenuTrigger>

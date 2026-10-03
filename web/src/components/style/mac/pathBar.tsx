@@ -31,7 +31,7 @@ export function PathBar({ place }: { place: FramePlace }) {
     return () => ro.disconnect();
   }, [key]);
   return (
-    <div className="flex h-7 shrink-0 items-center gap-1.5 border-t px-2 text-xs">
+    <div className="flex h-(--mac-bar-h) shrink-0 items-center gap-1.5 border-t px-2 text-xs">
       <Icon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
       <nav
         ref={trail}

@@ -77,13 +77,14 @@ export function typeTitle(n: NodeLike) {
   return TITLES[type === "archive" ? "archive" : categoryOf(n)];
 }
 
+/** An item's icon, as the style draws it (components/style) */
 export function FileIcon({ node, className }: { node: NodeLike; className?: string }) {
-  const icons = useStyleKit().icons;
+  const { ItemIcon } = useStyleKit();
   const type = specificType(node);
-  if (type && type !== "archive") return <TypeMark type={type} className={className} />;
+  const ext = node.kind === "folder" ? "" : extOf(node.name);
   const c = type === "archive" ? "archive" : categoryOf(node);
-  const { Icon, color } = icons[c === "sheet" && /^(csv|tsv)$/.test(extOf(node.name)) ? "table" : c];
-  return <Icon className={cn("shrink-0", color, className)} strokeWidth={1.7} aria-hidden="true" />;
+  const kind = c === "sheet" && /^(csv|tsv)$/.test(ext) ? "table" : c;
+  return <ItemIcon kind={kind} type={type && type !== "archive" ? type : null} ext={ext} className={className} />;
 }
 
 /** Whether white or black text reads better on a colour */
@@ -93,10 +94,11 @@ function textOn(hex: string) {
 }
 
 /**
- * A specific type's icon: its symbol, or a page with its label ("RS", "GO"), cut out from the page so it reads on light
- * and dark backgrounds alike. The page is lucide's file outline (ISC licence), like the other file icons.
+ * A specific type's icon in the Windows style: its symbol, or a page with its label ("RS", "GO"), cut out from the page
+ * so it reads on light and dark backgrounds alike. The page is lucide's file outline (ISC licence), like the other file
+ * icons.
  */
-function TypeMark({ type, className }: { type: FileType; className?: string }) {
+export function TypeMark({ type, className }: { type: FileType; className?: string }) {
   const m = type.mark;
   if ("icon" in m) {
     const Icon = m.icon;

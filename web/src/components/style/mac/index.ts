@@ -1,12 +1,13 @@
 /**
- * The Mac style: a Finder window's layout and views. Its name in the interface is "Mac style"; it uses no Apple
- * artwork. Data, file operations, previews and the phone layout are the ones every style shares.
+ * The Mac style: a Finder window's layout and views, with its own icons and look (./look.tsx, ./art). Its name in the
+ * interface is "Mac style"; it uses no Apple artwork. Data, file operations, previews and the phone layout are the ones
+ * every style shares.
  */
 import type { StyleKit } from "../types";
 import { MacFrame } from "./frame";
 import { GalleryView } from "./gallery";
 import { MAC_KEYS, macShortcuts } from "./keys";
-import { MAC_ICONS, macViews } from "./look";
+import { MacItemIcon, macViews } from "./look";
 import { macMenu } from "./menus";
 import { QuickLook } from "./quickLook";
 import { macToolbar } from "./toolbar";
@@ -19,7 +20,7 @@ export const macKit: StyleKit = {
   Extras: QuickLook,
   keys: MAC_KEYS,
   shortcuts: macShortcuts,
-  icons: MAC_ICONS,
+  ItemIcon: MacItemIcon,
   views: macViews,
   defaultView: "grid",
   // The view is chosen in the toolbar

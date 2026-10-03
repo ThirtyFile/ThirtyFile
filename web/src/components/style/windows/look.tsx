@@ -1,4 +1,4 @@
-/** The Windows style's icons for each kind of file, and the views of the file list it offers (File Explorer's) */
+/** The Windows style's icons for items, and the views of the file list it offers (File Explorer's) */
 import {
   Columns4Icon,
   FileArchiveIcon,
@@ -18,11 +18,15 @@ import {
   ListIcon,
   PresentationIcon,
   Table2Icon,
+  type LucideIcon,
 } from "lucide-react";
+import { TypeMark } from "@/components/FileIcon";
 import { t, tc } from "@/lib/i18n";
-import type { IconSet, ViewChoice } from "../types";
+import { cn } from "@/lib/utils";
+import type { ItemIconProps, ViewChoice } from "../types";
 
-export const WINDOWS_ICONS: IconSet = {
+/** The icon of each general kind of file; `table` is for CSV and TSV files */
+export const WINDOWS_ICONS: Record<ItemIconProps["kind"], { Icon: LucideIcon; color: string }> = {
   folder: { Icon: FolderIcon, color: "text-[#d8b66c] fill-[#d8b66c]/25" },
   markdown: { Icon: FileCodeIcon, color: "text-[#6f86f0] dark:text-[#9aabf7]" },
   pdf: { Icon: FileTypeIcon, color: "text-[#e05d5d] dark:text-[#ed8585]" },
@@ -38,6 +42,13 @@ export const WINDOWS_ICONS: IconSet = {
   text: { Icon: FileTextIcon, color: "text-muted-foreground" },
   other: { Icon: FileIcon, color: "text-muted-foreground" },
 };
+
+/** An item's icon in the Windows style: its specific type's mark when it has one, else its kind's outline */
+export function WindowsItemIcon({ kind, type, className }: ItemIconProps) {
+  if (type) return <TypeMark type={type} className={className} />;
+  const { Icon, color } = WINDOWS_ICONS[kind];
+  return <Icon className={cn("shrink-0", color, className)} strokeWidth={1.7} aria-hidden="true" />;
+}
 
 export function windowsViews(): ViewChoice[] {
   return [
