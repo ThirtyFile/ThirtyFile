@@ -5,12 +5,10 @@
  */
 import type { ReactNode } from "react";
 import {
-  ArrowDownUpIcon,
   ClipboardPasteIcon,
   Columns3Icon,
   CopyIcon,
   DownloadIcon,
-  EllipsisIcon,
   EyeIcon,
   FolderInputIcon,
   FolderOpenIcon,
@@ -56,13 +54,15 @@ import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { windowsToolbar } from "../windows/toolbar";
 import { openGoToFolder } from "./pathBar";
+import { useMacSymbols } from "./look";
 import { openQuickLook } from "./quickLook";
 
 export function macToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerActions, newItems: ReactNode) {
   return <MacToolbar p={p} s={s} a={a} newItems={newItems} />;
 }
 
-const icon = "size-8 px-0 [&_svg]:size-[18px]";
+/** An icon button of the toolbar: square, its size and look the style's (--tf-tool-*, art/mac.css) */
+const icon = "w-(--tf-tool-h) px-0";
 
 function MacToolbar({ p, s, a, newItems }: { p: ExplorerProps; s: ExplorerState; a: ExplorerActions; newItems: ReactNode }) {
   const phone = useMediaQuery("(max-width: 47.99rem)");
@@ -81,7 +81,7 @@ function MacToolbar({ p, s, a, newItems }: { p: ExplorerProps; s: ExplorerState;
 function ViewSwitcher({ s }: { s: ExplorerState }) {
   const views = useViews();
   return (
-    <div role="group" aria-label={t("View")} className="mr-1 flex items-center rounded-md bg-muted/70 p-0.5">
+    <div role="group" aria-label={t("View")} className="mr-1 flex items-center rounded-(--tf-tool-radius) bg-(--mac-seg-bg) p-0.5">
       {views.map(({ id, Icon, label }) => (
         <Button
           key={id}
@@ -89,7 +89,10 @@ function ViewSwitcher({ s }: { s: ExplorerState }) {
           aria-label={label}
           title={label}
           aria-pressed={s.view === id}
-          className={cn("h-7 w-8 rounded-[5px] px-0 [&_svg]:size-4", s.view === id && "bg-background shadow-sm hover:bg-background")}
+          className={cn(
+            "h-6 w-8 rounded-[5px] px-0 text-(--tf-tool-fg) hover:bg-(--tf-tool-hover) dark:hover:bg-(--tf-tool-hover) [&_svg]:size-4",
+            s.view === id && "bg-(--mac-seg-on) text-foreground shadow-(--mac-seg-shadow) hover:bg-(--mac-seg-on) dark:hover:bg-(--mac-seg-on)",
+          )}
           onClick={() => s.setView(id)}
         >
           <Icon />
@@ -101,10 +104,11 @@ function ViewSwitcher({ s }: { s: ExplorerState }) {
 
 /** How the items are sorted, then grouped (the Columns and Gallery views don't group) */
 function SortAndGroup({ p, s }: { p: ExplorerProps; s: ExplorerState }) {
+  const sym = useMacSymbols();
   if (!p.sort || !p.onSortChange) return null;
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<ToolButton icon={ArrowDownUpIcon} label={t("Sort and group")} className={icon} />} />
+      <DropdownMenuTrigger render={<ToolButton icon={sym.sort} label={t("Sort and group")} className={icon} />} />
       <DropdownMenuContent className="w-52">
         <DropdownMenuGroup>
           <DropdownMenuLabel>{t("Sort by")}</DropdownMenuLabel>
@@ -124,10 +128,11 @@ function SortAndGroup({ p, s }: { p: ExplorerProps; s: ExplorerState }) {
 
 /** Sharing the item selected: with people, or with a link */
 function ShareMenu({ s }: { s: ExplorerState }) {
+  const sym = useMacSymbols();
   const { single, caps, setDialog } = s;
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<ToolButton icon={Share2Icon} label={t("Share")} className={icon} disabled={!single} />} />
+      <DropdownMenuTrigger render={<ToolButton icon={sym.share} label={t("Share")} className={icon} disabled={!single} />} />
       <DropdownMenuContent className="w-48">
         <DropdownMenuItem onClick={() => single && setDialog({ t: "access", nodeId: single.id })}>
           <UsersRoundIcon /> {t("Share with…")}
@@ -145,9 +150,10 @@ function ActionsMenu({ p, s, a, newItems }: { p: ExplorerProps; s: ExplorerState
   const { caps, single, allFavorite, setDialog, detailsOpen, setDetailsOpen, view } = s;
   const none = s.count === 0;
   const k = s.kit.keys;
+  const sym = useMacSymbols();
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<ToolButton icon={EllipsisIcon} label={t("Actions")} className={icon} />} />
+      <DropdownMenuTrigger render={<ToolButton icon={sym.actions} label={t("Actions")} className={icon} />} />
       <DropdownMenuContent className="w-60">
         {s.canCreate && (
           <>

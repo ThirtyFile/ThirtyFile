@@ -257,7 +257,8 @@ export const ListRow = memo(function ListRow(
       aria-level={tree ? r.level! + 1 : undefined}
       aria-expanded={r.expanded}
       className={cn(
-        "cursor-default outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset aria-selected:bg-selection aria-selected:text-accent-foreground aria-selected:shadow-[inset_3px_0_0_var(--color-brand)]",
+        // Hovered, selected and focused, it looks as the style says (tf-row, style.css)
+        "tf-row cursor-default",
         r.dropping && "bg-brand/15",
         r.dimmed && "opacity-50",
       )}
@@ -391,13 +392,13 @@ export const Tile = memo(function Tile(r: RowProps & { view: Exclude<ViewMode, "
     const medium = view === "medium";
     body = (
       <>
-        <div className={cn("flex items-center justify-center", medium ? "h-14" : "h-[88px]")}>
-          <Thumb node={item} source={r.source} className={cn("w-full rounded", medium ? "max-h-14" : "max-h-[88px]")} iconClass={medium ? "size-8" : "size-[42px]"} />
+        <div className={cn("tf-thumb flex items-center justify-center", medium ? "h-14" : "mx-auto h-[88px] w-(--tf-thumb-w) max-w-full")}>
+          <Thumb node={item} source={r.source} className={cn("w-full rounded", medium ? "max-h-14" : "max-h-[88px]")} iconClass={medium ? "size-8" : "size-(--tf-grid-icon)"} />
         </div>
         {r.renaming ? (
           renameBox(r, true)
         ) : (
-          <span data-name className="line-clamp-2 pt-1.5 text-xs leading-[18px] break-all">
+          <span data-name className="tf-name mx-auto mt-1.5 line-clamp-2 w-(--tf-name-w) max-w-full text-(length:--tf-name-text) leading-[18px] break-all">
             {item.name}
           </span>
         )}
@@ -414,9 +415,18 @@ export const Tile = memo(function Tile(r: RowProps & { view: Exclude<ViewMode, "
       aria-posinset={r.index + 1}
       aria-setsize={r.count}
       title={item.name}
+      data-line={line || undefined}
+      data-strip={view === "gallery" || undefined}
       className={cn(
-        "relative min-w-0 rounded-md border border-transparent outline-none select-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring aria-selected:border-brand aria-selected:bg-selection",
-        line ? "flex items-center gap-2 px-1.5 text-xs" : view === "tiles" ? "flex items-center gap-2.5 p-2" : view === "gallery" ? "flex items-center justify-center p-1" : "text-center",
+        // Hovered, selected and focused, it looks as the style says (tf-item, style.css)
+        "tf-item relative min-w-0 select-none",
+        line
+          ? "flex items-center gap-2 px-1.5 text-(length:--tf-list-text) leading-(--tf-list-leading)"
+          : view === "tiles"
+            ? "flex items-center gap-2.5 p-2"
+            : view === "gallery"
+              ? "flex items-center justify-center p-1"
+              : "text-center",
         view === "grid" ? "p-2" : view === "medium" && "p-1.5",
         r.dropping && "border-brand bg-brand/10",
         r.dimmed && "opacity-50",

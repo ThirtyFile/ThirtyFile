@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorText, errorProps } from "@/components/dialogs";
 import { ErrorState } from "@/components/ErrorState";
 import { FileList } from "@/components/FileList";
+import { useApplyStyle } from "@/components/style";
 import type { ViewMode } from "@/components/fileList/layout";
 import { Thumb } from "@/components/fileList/thumbs";
 import { canPreview } from "@/components/FileViewer";
@@ -31,6 +32,8 @@ import { refreshFirstPage, useAllPages } from "@/lib/pages";
 export function PublicSharePage() {
   const { token = "" } = useParams();
   const info = useQuery({ queryKey: keys.publicShare(token), queryFn: () => api.publicShare(token), retry: false });
+  // The items' icons and the list's look are the style's (a visitor's follows the operating system)
+  useApplyStyle();
 
   let body;
   if (info.isLoading) body = <Skeleton className="h-64 w-full max-w-3xl" />;

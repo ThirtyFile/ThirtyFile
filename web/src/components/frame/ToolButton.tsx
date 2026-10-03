@@ -22,7 +22,17 @@ export function ToolButton({
   phoneLabel?: boolean;
 }) {
   return (
-    <Button variant="ghost" title={title ?? label} aria-label={label} className={cn("h-[30px] gap-[5px] px-2 text-xs", className)} {...props}>
+    <Button
+      variant="ghost"
+      title={title ?? label}
+      aria-label={label}
+      // Its size, corners, colours and hover are the style's (--tf-tool-*, style.css)
+      className={cn(
+        "h-(--tf-tool-h) gap-[5px] rounded-(--tf-tool-radius) px-2 text-(length:--tf-tool-text) leading-4 text-(--tf-tool-fg) hover:bg-(--tf-tool-hover) dark:hover:bg-(--tf-tool-hover) [&_svg:not([class*='size-'])]:size-(--tf-tool-icon)",
+        className,
+      )}
+      {...props}
+    >
       <Icon />
       {showLabel && <span className={phoneLabel ? "md:max-lg:hidden" : "max-lg:hidden"}>{label}</span>}
     </Button>

@@ -2,7 +2,7 @@
 import type { StyleKit } from "../types";
 import { WindowsFrame } from "./frame";
 import { WINDOWS_KEYS, windowsShortcuts } from "./keys";
-import { WINDOWS_ICONS, windowsViews } from "./look";
+import { WindowsItemIcon, windowsViews } from "./look";
 import { windowsMenu } from "./menus";
 import { windowsToolbar } from "./toolbar";
 
@@ -13,7 +13,7 @@ export const windowsKit: StyleKit = {
   menu: windowsMenu,
   keys: WINDOWS_KEYS,
   shortcuts: windowsShortcuts,
-  icons: WINDOWS_ICONS,
+  ItemIcon: WindowsItemIcon,
   views: windowsViews,
   defaultView: "list",
   statusViews: ["list", "grid"],

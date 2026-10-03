@@ -13,6 +13,7 @@ import type { MenuEntries } from "@/components/explorer/menus";
 import type { ExplorerState } from "@/components/explorer/state";
 import type { FileCategory } from "@/components/FileIcon";
 import type { ViewMode } from "@/components/fileList/layout";
+import type { FileType } from "@/lib/fileTypes";
 import type { Style } from "@/lib/style";
 import type { Action, KeyMap } from "@/lib/style/keymap";
 
@@ -85,8 +86,16 @@ export interface OwnViewProps {
   empty: ReactNode;
 }
 
-/** The icon of each kind of file; `table` is for CSV and TSV files */
-export type IconSet = Record<FileCategory | "table", { Icon: LucideIcon; color: string }>;
+/** What an item's icon shows (components/FileIcon.tsx), for the style to draw */
+export interface ItemIconProps {
+  /** Its general kind; `table` is for CSV and TSV files */
+  kind: FileCategory | "table";
+  /** Its specific type, when known (a format, a language, a tool's file: lib/fileTypes.ts) */
+  type: FileType | null;
+  /** Its extension, in lowercase ("" for none) */
+  ext: string;
+  className?: string;
+}
 
 export interface StyleKit {
   id: Style;
@@ -100,7 +109,8 @@ export interface StyleKit {
   keys: KeyMap;
   /** The shortcuts dialog: what it says first, and its groups of rows */
   shortcuts(): { note: string; groups: readonly ShortcutGroup[] };
-  icons: IconSet;
+  /** How it draws the icon of an item: a file or a folder */
+  ItemIcon: ComponentType<ItemIconProps>;
   /** The views of the file list, in the order offered */
   views(): readonly ViewChoice[];
   /** The view a list starts in, and the one used when a view kept from before isn't offered */

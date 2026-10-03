@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { FolderIcon, type LucideIcon } from "lucide-react";
 import { ShortcutsHost } from "@/components/ShortcutsDialog";
-import { useStyleKit } from "@/components/style";
+import { useApplyStyle, useStyleKit } from "@/components/style";
 import { useDrives } from "@/lib/drives";
 import { useBranding } from "@/lib/branding";
 import { t } from "@/lib/i18n";
@@ -49,8 +49,9 @@ export function Frame(p: FrameProps) {
     if (title) setActiveTitle(title);
     document.title = title ? `${title} - ${siteName}` : siteName;
   }, [title, siteName]);
-  // The parts, which the style places (components/style)
+  // The parts, which the style places (components/style), with its look
   const Layout = useStyleKit().Frame;
+  useApplyStyle();
   return (
     <main className="flex h-full min-h-0 flex-col bg-background text-[13px]" aria-label={t("File Explorer")}>
       <h1 className="sr-only">{title}</h1>
