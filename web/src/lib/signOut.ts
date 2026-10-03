@@ -11,10 +11,16 @@ const TREE_STORAGE_PREFIX = "tf-tree-expanded";
 /** Where the folders a user expanded in the navigation pane are kept (components/FolderTree.tsx) */
 export const treeStorageKey = (userId: number) => `${TREE_STORAGE_PREFIX}-${userId}`;
 
+/** The start of the keys of the Columns view's column widths */
+const WIDTHS_STORAGE_PREFIX = "tf-column-widths";
+
+/** Where the widths a user gave the columns of the Columns view are kept, by folder (lib/columns.ts) */
+export const columnWidthsKey = (userId: number) => `${WIDTHS_STORAGE_PREFIX}-${userId}`;
+
 /**
  * Signs out without leaving anything of the user in this browser tab for the next person: transfers stop, the upload
- * resume records, the saved tabs of this user, the expanded folders of the tree and the account name the sign-in screen
- * offers are removed, and the sign-in page is loaded afresh, so nothing kept
+ * resume records, the saved tabs of this user, the expanded folders of the tree, the widths of their columns and the
+ * account name the sign-in screen offers are removed, and the sign-in page is loaded afresh, so nothing kept
  * in memory (unsaved drafts, open workbooks, the clipboard, file names in the transfer lists) survives.
  */
 export function leaveAfterSignOut(userId: number) {
@@ -28,6 +34,7 @@ export function leaveAfterSignOut(userId: number) {
     }
     localStorage.removeItem(`tf-tabs-${userId}`);
     localStorage.removeItem(treeStorageKey(userId));
+    localStorage.removeItem(columnWidthsKey(userId));
     sessionStorage.removeItem(`tf-tabs-${userId}`);
     // The next person isn't shown who was here
     localStorage.removeItem(LAST_USER);
@@ -47,7 +54,7 @@ function keysOf(storage: Storage, prefix: string) {
 
 /**
  * Removes what is kept in this browser for anyone but `userId`: their saved tabs (whose titles are file and folder
- * names) and the folders they expanded in the tree, and, when someone else signed in here last, the upload resume
+ * names), the folders they expanded in the tree and the widths of their columns, and, when someone else signed in here last, the upload resume
  * records (which name files and folders too). Needed when a session ended without signing out (it expired, or the
  * browser was closed), since only signing out clears them (`leaveAfterSignOut`).
  */
@@ -59,6 +66,8 @@ function forgetOtherUsers(userId: number) {
       for (const key of keysOf(storage, "tf-tabs-")) if (key !== ownTabs) storage.removeItem(key);
     }
     for (const key of keysOf(localStorage, TREE_STORAGE_PREFIX)) if (key !== ownTree) localStorage.removeItem(key);
+    const ownWidths = columnWidthsKey(userId);
+    for (const key of keysOf(localStorage, WIDTHS_STORAGE_PREFIX)) if (key !== ownWidths) localStorage.removeItem(key);
     const someoneElse = localStorage.getItem(LAST_USER_KEY) !== String(userId);
     if (someoneElse) {
       for (const key of keysOf(localStorage, "tus::")) localStorage.removeItem(key);

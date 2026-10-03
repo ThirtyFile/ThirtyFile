@@ -3,8 +3,11 @@
  * `useStyleKit()`. Only the Windows style exists so far; a style without a kit gets the Windows one.
  */
 import { createContext, useContext } from "react";
+import type { ViewMode } from "@/components/fileList/layout";
+import { useMediaQuery } from "@/lib/focus";
+import { usePersisted } from "@/lib/session";
 import { useInterfaceStyle, type Style } from "@/lib/style";
-import type { StyleKit } from "./types";
+import type { StyleKit, ViewChoice } from "./types";
 import { windowsKit } from "./windows";
 
 export type { FrameParts, IconSet, ShortcutGroup, ShortcutRow, StyleKit, ViewChoice } from "./types";
@@ -22,4 +25,20 @@ export function useStyleKit(): StyleKit {
   const forced = useContext(StyleKitContext);
   const { style } = useInterfaceStyle();
   return forced ?? kits()[style] ?? windowsKit;
+}
+
+/** The views of the file list the style offers on this screen (phones have fewer) */
+export function useViews(): readonly ViewChoice[] {
+  const kit = useStyleKit();
+  const phone = useMediaQuery("(max-width: 47.99rem)");
+  const views = kit.views();
+  return phone ? views.filter((v) => !v.notOnPhones) : views;
+}
+
+/** The view of the file list: the one chosen (kept in the browser), when it is offered here, else the style's own */
+export function useView(): [ViewMode, (view: ViewMode) => void] {
+  const kit = useStyleKit();
+  const views = useViews();
+  const [kept, setView] = usePersisted<ViewMode>("tf-view", kit.defaultView);
+  return [views.some((v) => v.id === kept) ? kept : kit.defaultView, setView];
 }

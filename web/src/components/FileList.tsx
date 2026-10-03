@@ -11,7 +11,7 @@ import { carriesFiles, carriesItems, dropEffect, droppedIds, startDrag } from "@
 import { t } from "@/lib/i18n";
 import { wantsCopy } from "@/lib/keys";
 import { inSpan, spanCount, type ListSpan } from "@/lib/span";
-import { type ViewMode, type Item, HEAD, GROUP_ROW, PAD, GROUP_H, offsetIn, touching } from "@/components/fileList/layout";
+import { type ViewMode, type Item, HEAD, GROUP_ROW, GROUP_H, offsetIn, touching } from "@/components/fileList/layout";
 import { useListLayout } from "@/components/fileList/useListLayout";
 import { th, Head, type Handlers, type RowProps, COLUMN_CLASS, fitsScreen, ListRow, Tile, GroupHeading, PlaceholderRow } from "@/components/fileList/rows";
 import { listColumns, ColumnChoices } from "@/components/fileList/columns";
@@ -88,6 +88,13 @@ export interface FileListProps {
   measureRef?: RefObject<MeasureHits | null>;
   /** Receives the list's keyboard helpers */
   navRef?: RefObject<ListNav | null>;
+  /** A column of the Columns view: the style's keys for the column before (-1) and the next one (1), on the item with the focus */
+  onColumn?(dir: -1 | 1, item: Item): void;
+  /**
+   * A column of the Columns view that isn't the open folder's: what it shows selected is the folder open in the next
+   * column, shown less strongly and not announced
+   */
+  inactive?: boolean;
 }
 
 const coarse = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
@@ -143,7 +150,7 @@ export function FileList(p: FileListProps) {
 
   const tabStop = firstSelected >= 0 ? firstSelected : 0;
   // Rows rendered even out of view: the Tab stop, the focused item and the one being renamed
-  const { root, head, scroller, geo, tile, grid, cols, layout, rowOf, v } = useListLayout({
+  const { root, head, scroller, geo, tile, grid, pad, cols, layout, rowOf, v } = useListLayout({
     view,
     wide,
     groups,
@@ -177,6 +184,8 @@ export function FileList(p: FileListProps) {
     v,
     root,
     grid,
+    pad,
+    across: grid && view !== "columns",
     tile,
     scroller,
     focusId,
@@ -334,9 +343,9 @@ export function FileList(p: FileListProps) {
     const shown = items;
     if (!el) return () => [];
     const at = offsetIn(el, container);
-    const top = at.top + (grid ? PAD : (head.current?.offsetHeight ?? HEAD));
+    const top = at.top + (grid ? pad : (head.current?.offsetHeight ?? HEAD));
     const gap = tile?.gap ?? 0;
-    const tileW = tile ? (el.clientWidth - 2 * PAD - (cols - 1) * gap) / cols : 0;
+    const tileW = tile ? (el.clientWidth - 2 * pad - (cols - 1) * gap) / cols : 0;
     return function* (b: Box) {
       if (!grid && (b.x > at.left + at.width || b.x + b.w < at.left)) return;
       // Items not loaded yet can't be boxed
@@ -350,7 +359,7 @@ export function FileList(p: FileListProps) {
           if (item) yield item.id;
           continue;
         }
-        const [c0, c1] = touching(at.left + PAD, tileW, tileW + gap, row.end - row.start, b.x, b.x + b.w);
+        const [c0, c1] = touching(at.left + pad, tileW, tileW + gap, row.end - row.start, b.x, b.x + b.w);
         for (let c = c0; c <= c1; c++) {
           const item = shown[row.start + c];
           if (item) yield item.id;
@@ -386,7 +395,7 @@ export function FileList(p: FileListProps) {
 
   // Screen readers announce how many items are selected (the status bar isn't read out)
   const chosen = p.selected.size + (span ? spanCount(span, n) : 0);
-  const status = (
+  const status = !p.inactive && (
     <div role="status" className="sr-only">
       {chosen > 0 ? t("{n} item selected|{n} items selected", { n: chosen }) : ""}
     </div>
@@ -409,7 +418,8 @@ export function FileList(p: FileListProps) {
       index,
       h,
       selected: isSelected(index, item.id),
-      tabStop: index === tabStop,
+      // Another column of the Columns view isn't a Tab stop: Tab goes to the open folder's, and the arrows to the others
+      tabStop: index === tabStop && !p.inactive,
       dimmed: !!p.dimmed?.has(item.id),
       dropping: dropTarget === item.id,
       renaming: item.id === p.renamingId && !!p.onRename,
@@ -423,7 +433,13 @@ export function FileList(p: FileListProps) {
     return (
       <>
         {status}
-        <div ref={(el) => void (root.current = el)} role="listbox" aria-multiselectable aria-label={label} className="p-3">
+        <div
+          ref={(el) => void (root.current = el)}
+          role="listbox"
+          aria-multiselectable
+          aria-label={label}
+          className={cn(view === "columns" ? "p-1" : "p-3", p.inactive && "[&_[aria-selected=true]]:border-transparent! [&_[aria-selected=true]]:bg-muted!")}
+        >
           {rows.map(({ row: r, gap }) => {
             const at = layout.row(r);
             return (

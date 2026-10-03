@@ -119,7 +119,7 @@ export function windowsMenu(m: MenuEntries): ReactNode {
         </DropdownMenuSub>
       ),
       <DropdownMenuSub key="group">
-        <DropdownMenuSubTrigger>
+        <DropdownMenuSubTrigger disabled={s.view === "columns"}>
           <GroupIcon /> {t("Group by")}
         </DropdownMenuSubTrigger>
         <DropdownMenuSubContent className="w-44">

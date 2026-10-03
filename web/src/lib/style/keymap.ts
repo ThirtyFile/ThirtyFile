@@ -25,6 +25,9 @@ export type Action =
   /** In the icon views */
   | "itemLeft"
   | "itemRight"
+  /** In the Columns view: back to the column before, and on to the column of the folder selected */
+  | "previousColumn"
+  | "nextColumn"
   | "first"
   | "last"
   | "pageUp"

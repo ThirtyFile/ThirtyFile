@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { FileSource, Node } from "@/api";
 import { FileList, type ListNav } from "@/components/FileList";
+import type { ViewMode } from "@/components/fileList/layout";
 import type { ListSpan } from "@/lib/span";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -26,7 +27,21 @@ const ITEMS = ["Budget.xlsx", "Contracts", "Minutes.docx", "Notes.txt", "Photos"
 const source: FileSource = { contentUrl: () => "", thumbUrl: () => "", downloadLink: () => Promise.resolve("") };
 
 /** The list with its selection kept like the explorer keeps it */
-function Harness({ onOpen, navRef, onClickRename }: { onOpen(n: Node, byKey?: boolean): void; navRef?: { current: ListNav | null }; onClickRename?(n: Node): void }) {
+function Harness({
+  onOpen,
+  navRef,
+  onClickRename,
+  view = "list",
+  onColumn,
+  inactive,
+}: {
+  onOpen(n: Node, byKey?: boolean): void;
+  navRef?: { current: ListNav | null };
+  onClickRename?(n: Node): void;
+  view?: ViewMode;
+  onColumn?(dir: -1 | 1, n: Node): void;
+  inactive?: boolean;
+}) {
   const [selected, setSelected] = useState(new Set<string>());
   const [anchor, setAnchor] = useState<string | null>(null);
   const [span, setSpan] = useState<ListSpan | null>(null);
@@ -35,7 +50,10 @@ function Harness({ onOpen, navRef, onClickRename }: { onOpen(n: Node, byKey?: bo
   return (
     <FileList
       items={ITEMS}
-      view="list"
+      view={view}
+      onColumn={onColumn}
+      inactive={inactive}
+      label={view === "columns" ? "Projects" : undefined}
       source={source}
       selected={selected}
       anchor={anchor}
@@ -199,5 +217,65 @@ describe("file list", () => {
     act(() => navRef.current!.typeAhead("p"));
     // "np" matches nothing: the selection stays
     expect(selectedNames()).toEqual(["Notes.txt"]);
+  });
+});
+
+describe("a column of the Columns view", () => {
+  const options = () => [...container.querySelectorAll('[role="option"]')];
+  const chosen = () =>
+    options()
+      .filter((o) => o.getAttribute("aria-selected") === "true")
+      .map((o) => o.getAttribute("data-node-id"));
+
+  test("is a listbox named after its folder, one item to a row, folders with an arrow", () => {
+    mount({ onOpen: vi.fn<(n: Node) => void>(), view: "columns" });
+    const box = container.querySelector('[role="listbox"]')!;
+    expect(box.getAttribute("aria-label")).toBe("Projects");
+    expect(options().map((o) => o.getAttribute("data-node-id"))).toEqual(ITEMS.map((n) => n.id));
+    expect(options().map((o) => o.getAttribute("aria-posinset"))).toEqual(["1", "2", "3", "4", "5"]);
+    // An arrow shows on folders only (they open in the next column)
+    expect(row("Contracts").querySelector("svg.lucide-chevron-right")).not.toBeNull();
+    expect(row("Notes.txt").querySelector("svg.lucide-chevron-right")).toBeNull();
+  });
+
+  test("Up and Down move within the column; Left and Right go to the column before and the next one", () => {
+    const onColumn = vi.fn<(dir: -1 | 1, n: Node) => void>();
+    mount({ onOpen: vi.fn<(n: Node) => void>(), view: "columns", onColumn });
+    click(row("Budget.xlsx"));
+    key(row("Budget.xlsx"), "ArrowDown");
+    expect(chosen()).toEqual(["Contracts"]);
+    expect(document.activeElement).toBe(row("Contracts"));
+    key(row("Contracts"), "ArrowRight");
+    expect(onColumn).toHaveBeenLastCalledWith(1, expect.objectContaining({ id: "Contracts" }));
+    key(row("Contracts"), "ArrowLeft");
+    expect(onColumn).toHaveBeenLastCalledWith(-1, expect.objectContaining({ id: "Contracts" }));
+    // Neither moves within the column
+    expect(chosen()).toEqual(["Contracts"]);
+    // Alt+Left is Back, the address bar's
+    key(row("Contracts"), "ArrowLeft", { altKey: true });
+    expect(onColumn).toHaveBeenCalledTimes(2);
+    key(row("Contracts"), "ArrowDown", { shiftKey: true });
+    expect(chosen()).toEqual(["Contracts", "Minutes.docx"]);
+  });
+
+  test("Left and Right don't move to the item beside, as they do in the icon views", () => {
+    mount({ onOpen: vi.fn<(n: Node) => void>(), view: "columns" });
+    click(row("Budget.xlsx"));
+    key(row("Budget.xlsx"), "ArrowRight");
+    expect(chosen()).toEqual(["Budget.xlsx"]);
+  });
+
+  test("typing letters goes to the next item starting with them", () => {
+    const navRef: { current: ListNav | null } = { current: null };
+    mount({ onOpen: vi.fn<(n: Node) => void>(), view: "columns", navRef });
+    act(() => navRef.current!.typeAhead("m"));
+    expect(chosen()).toEqual(["Minutes.docx"]);
+  });
+
+  test("another folder's column doesn't announce what it shows selected", () => {
+    mount({ onOpen: vi.fn<(n: Node) => void>(), view: "columns", inactive: true });
+    click(row("Contracts"));
+    expect(chosen()).toEqual(["Contracts"]);
+    expect(container.querySelector('[role="status"]')).toBeNull();
   });
 });

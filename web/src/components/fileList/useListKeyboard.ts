@@ -4,7 +4,7 @@
 import { useLayoutEffect, useRef, type KeyboardEvent, type RefObject } from "react";
 import type { Virtualizer } from "@tanstack/react-virtual";
 import type { FileListProps } from "@/components/FileList";
-import { HEAD, PAD, ROW, type Item, type Layout, type TILED } from "@/components/fileList/layout";
+import { HEAD, ROW, type Item, type Layout, type TILED } from "@/components/fileList/layout";
 import { pageRows } from "@/lib/listView";
 import { findByPrefix } from "@/lib/keys";
 import { isMenuKey, menuPointOf, openMenuByKey } from "@/lib/contextMenus";
@@ -25,6 +25,10 @@ export interface ListKeyboard {
   v: Virtualizer<HTMLElement, Element>;
   root: RefObject<HTMLElement | null>;
   grid: boolean;
+  /** Space around the items of an icon view */
+  pad: number;
+  /** Several items to a row: Left and Right go to the item before and after */
+  across: boolean;
   tile: (typeof TILED)[keyof typeof TILED] | null;
   scroller: HTMLElement | null;
   focusId: string | null;
@@ -37,7 +41,7 @@ export interface ListKeyboard {
  * The list's keyboard handling: `keyNav` for a row's keys, `toggle` and `rangeTo` for clicks with Ctrl and Shift too,
  * and `focusItem`. Also answers the explorer's `navRef` (typing to find an item, showing one).
  */
-export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, root, grid, tile, scroller, focusId, setFocusId, tabStop }: ListKeyboard) {
+export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, root, grid, pad, across, tile, scroller, focusId, setFocusId, tabStop }: ListKeyboard) {
   const pendingFocus = useRef<string | null>(null);
   /** The style's keys (components/style) */
   const k = useStyleKit().keys;
@@ -141,7 +145,7 @@ export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, 
     const view = scroller === document.documentElement || !scroller ? window.innerHeight : scroller.clientHeight;
     const rowHeight = tile ? tile.h + tile.gap : ROW;
     let at = index;
-    for (let k = pageRows(view - (grid ? PAD : HEAD), rowHeight); k > 0; k--) {
+    for (let k = pageRows(view - (grid ? pad : HEAD), rowHeight); k > 0; k--) {
       const next = vertical(at, dir);
       if (next === at) break;
       at = next;
@@ -169,13 +173,19 @@ export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, 
       openMenuByKey(e.currentTarget, menuPointOf(e.currentTarget));
       return;
     }
+    // The Columns view: the column before, or the folder's in the next one (the style's keys)
+    if (p.onColumn && (pressed(e, k.previousColumn) || pressed(e, k.nextColumn))) {
+      e.preventDefault();
+      p.onColumn(pressed(e, k.nextColumn) ? 1 : -1, current);
+      return;
+    }
     // Alt+arrows move around folders (handled by the address bar)
     if (e.altKey) return;
     let next: number | null = null;
     if (pressedKey(e, k.itemDown)) next = vertical(index, 1);
     else if (pressedKey(e, k.itemUp)) next = vertical(index, -1);
-    else if (pressedKey(e, k.itemRight) && grid) next = Math.min(n - 1, index + 1);
-    else if (pressedKey(e, k.itemLeft) && grid) next = Math.max(0, index - 1);
+    else if (pressedKey(e, k.itemRight) && across) next = Math.min(n - 1, index + 1);
+    else if (pressedKey(e, k.itemLeft) && across) next = Math.max(0, index - 1);
     else if (pressedKey(e, k.first)) next = 0;
     else if (pressedKey(e, k.last)) next = n - 1;
     else if (pressedKey(e, k.pageDown)) next = page(index, 1);

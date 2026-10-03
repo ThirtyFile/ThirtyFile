@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent } from "react";
+import { useEffect, useEffectEvent, useMemo } from "react";
 import { Navigate, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { FolderIcon, Loader2Icon } from "lucide-react";
@@ -20,6 +20,7 @@ import { useFolderWindows } from "@/lib/windows";
 import { t } from "@/lib/i18n";
 import { locationOf } from "@/components/frame/location";
 import { useSort } from "@/lib/sort";
+import { useView } from "@/components/style";
 
 /** Folder page: `/files` (My files, or the first space of someone without it), `/files/shared` (All files), `/files/:id` */
 export function FilesPage() {
@@ -70,9 +71,10 @@ function FolderPage({ id }: { id: string }) {
   const node = info.data?.node;
   const folderId = node?.id;
   // A large folder loads the parts in view (lib/windows). Grouped by date or type, every group shows in full, so the
-  // whole folder loads, a page after another
+  // whole folder loads, a page after another. The Columns view doesn't group: its columns load the parts in view too
   const [groupBy] = usePersisted<GroupBy>("tf-group", "none");
-  const grouped = groupBy !== "none";
+  const [view] = useView();
+  const grouped = groupBy !== "none" && view !== "columns";
   const windows = useFolderWindows(folderId, sort.key, sort.order, !!folderId && !grouped);
   const pages = useAllPages(
     keys.childrenPages(folderId, sort.key, sort.order),
@@ -101,6 +103,10 @@ function FolderPage({ id }: { id: string }) {
   const pathKey = path.map((c) => c.id).join();
   useEffect(() => expandHere(), [pathKey, node?.id]);
 
+  // The Columns view's columns: from the top of the space (or the folder shared with this person) down to this folder
+  const data = info.data;
+  const trail = useMemo(() => (data ? (data.via_share ? data.path : [{ id: data.drive.root_id, name: loc.rootLabel }, ...data.path]) : null), [data, loc.rootLabel]);
+
   const parent = path.length >= 2 ? `/files/${path[path.length - 2].id}` : path.length === 1 ? loc.rootUrl : "/drives";
 
   return (
@@ -124,6 +130,7 @@ function FolderPage({ id }: { id: string }) {
       upTo={parent}
       showOwner={!!info.data && (info.data.drive.kind !== "personal" || info.data.via_share)}
       folder={node}
+      trail={trail}
       icon={loc.icon}
       crumbs={loc.crumbs}
       path={pathOf(info.data) ?? crumbPath(loc.crumbs)}

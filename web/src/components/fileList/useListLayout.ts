@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import { GROUP_H, GROUP_ROW, HEAD, PAD, PHONE_GRID_W, ROW, TILED, evenLayout, groupedLayout, offsetIn, scrollParent, type Item, type ViewMode } from "@/components/fileList/layout";
+import { GROUP_H, GROUP_ROW, HEAD, PHONE_GRID_W, ROW, TILED, evenLayout, groupedLayout, offsetIn, padOf, scrollParent, type Item, type ViewMode } from "@/components/fileList/layout";
 import type { Group } from "@/lib/listView";
 
 export interface ListLayoutOptions {
@@ -27,10 +27,12 @@ export function useListLayout({ view, wide, groups, n, keep }: ListLayoutOptions
   // Anything but an icon view (also a view saved by a later version) is Details
   const tile: (typeof TILED)[keyof typeof TILED] | null = view === "list" ? null : (TILED[view] ?? null);
   const grid = !!tile;
+  const pad = padOf(view);
 
   // Phones: large icons a little narrower, three to a row rather than two with wide gaps
   const minTileW = tile && view === "grid" && !wide ? PHONE_GRID_W : tile?.w;
-  const cols = tile ? Math.max(1, Math.floor((geo.width - 2 * PAD + tile.gap) / (minTileW! + tile.gap))) : 1;
+  // A column of the Columns view has one item to a row
+  const cols = tile && view !== "columns" ? Math.max(1, Math.floor((geo.width - 2 * pad + tile.gap) / (minTileW! + tile.gap))) : 1;
   // The rows: in each group, its heading and then its items, `cols` to a row
   const layout = useMemo(
     () => (groups ? groupedLayout(groups, cols, tile ? tile.h + tile.gap : ROW, tile ? GROUP_H : GROUP_ROW) : evenLayout(n, cols, tile ? tile.h + tile.gap : ROW)),
@@ -50,7 +52,7 @@ export function useListLayout({ view, wide, groups, n, keep }: ListLayoutOptions
     overscan: grid ? 2 : 12,
     scrollMargin: geo.top,
     // Keep rows scrolled to by the keyboard clear of the sticky column headers
-    scrollPaddingStart: grid ? PAD : HEAD,
+    scrollPaddingStart: grid ? pad : HEAD,
     rangeExtractor: (range) => [...new Set([...defaultRangeExtractor(range), ...pinned])].sort((a, b) => a - b),
     initialRect: { width: 0, height: typeof window === "undefined" ? 800 : window.innerHeight },
   });
@@ -62,11 +64,11 @@ export function useListLayout({ view, wide, groups, n, keep }: ListLayoutOptions
     if (!el) return;
     const s = scrollParent(el);
     setScroller((cur) => (cur === s ? cur : s));
-    const top = offsetIn(el, s).top + (head.current ? head.current.offsetHeight : PAD);
+    const top = offsetIn(el, s).top + (head.current ? head.current.offsetHeight : pad);
     const width = el.clientWidth;
     const room = s === document.documentElement ? window.innerWidth : s.clientWidth;
     setGeo((g) => (g.top === top && g.width === width && g.room === room ? g : { top, width, room }));
-  }, []);
+  }, [pad]);
   const empty = n === 0;
   useLayoutEffect(measureGeo, [measureGeo, grid, empty]);
   useEffect(() => {
@@ -80,5 +82,5 @@ export function useListLayout({ view, wide, groups, n, keep }: ListLayoutOptions
     return () => ro.disconnect();
   }, [measureGeo, grid, empty]);
 
-  return { root, head, scroller, geo, tile, grid, cols, layout, rowOf, v };
+  return { root, head, scroller, geo, tile, grid, pad, cols, layout, rowOf, v };
 }

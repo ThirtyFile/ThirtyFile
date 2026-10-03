@@ -1,5 +1,6 @@
 /** The Windows style's icons for each kind of file, and the views of the file list it offers (File Explorer's) */
 import {
+  Columns4Icon,
   FileArchiveIcon,
   FileAudioIcon,
   FileCodeIcon,
@@ -18,7 +19,7 @@ import {
   PresentationIcon,
   Table2Icon,
 } from "lucide-react";
-import { t } from "@/lib/i18n";
+import { t, tc } from "@/lib/i18n";
 import type { IconSet, ViewChoice } from "../types";
 
 export const WINDOWS_ICONS: IconSet = {
@@ -45,5 +46,6 @@ export function windowsViews(): ViewChoice[] {
     { id: "compact", Icon: LayoutListIcon, label: t("List") },
     { id: "list", Icon: ListIcon, label: t("Details") },
     { id: "tiles", Icon: LayoutGridIcon, label: t("Tiles") },
+    { id: "columns", Icon: Columns4Icon, label: tc("view", "Columns"), notOnPhones: true },
   ];
 }
