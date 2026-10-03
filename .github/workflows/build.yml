@@ -4,7 +4,7 @@
 # tests, not the website's check.
 #
 # Changes to how the image is built or started (Dockerfile, .dockerignore, the lock files, cargo about's settings,
-# compose.yaml, the smoke test, the build workflows) also build the image for both platforms alongside the tests, without
+# compose.yaml, the smoke test, this file) also build the image for both platforms, once the tests have passed, without
 # pushing it, with the quicker `ci` Cargo profile (server/Cargo.toml). Each platform's image is started with the shipped compose.yaml on bind-mounted folders, first the latest
 # release and then the new image on its data, and restarted (.github/scripts/smoke-test.sh): amd64 natively, arm64
 # under QEMU.
@@ -35,7 +35,7 @@ on:
     outputs:
       digest:
         description: Digest of the pushed image (sha256:…), for releases
-        value: ${{ jobs.release_image.outputs.digest }}
+        value: ${{ jobs.image.outputs.digest }}
 
 # A newer push to a pull request replaces its run; every merge into main is tested to the end
 concurrency:
@@ -82,7 +82,7 @@ jobs:
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
           # What decides how the image is built and started
-          if echo "$changed" | grep -qE '^(Dockerfile|\.dockerignore|compose\.yaml|server/(Cargo\.(toml|lock)|about\.(toml|hbs)|rust-toolchain\.toml)|web/(package\.json|pnpm-lock\.yaml|scripts/third-party-notices\.mjs)|\.github/(scripts/smoke-test\.sh|workflows/build(-image)?\.yml))$'; then
+          if echo "$changed" | grep -qE '^(Dockerfile|\.dockerignore|compose\.yaml|server/(Cargo\.(toml|lock)|about\.(toml|hbs)|rust-toolchain\.toml)|web/(package\.json|pnpm-lock\.yaml|scripts/third-party-notices\.mjs)|\.github/(scripts/smoke-test\.sh|workflows/build\.yml))$'; then
             echo "image=true" >> "$GITHUB_OUTPUT"
           else
             echo "image=false" >> "$GITHUB_OUTPUT"
@@ -206,41 +206,171 @@ jobs:
           pnpm licenses list --dev --json > "$RUNNER_TEMP/licences-dev.json"
           node scripts/third-party-notices.mjs "$RUNNER_TEMP/licences-prod.json" "$RUNNER_TEMP/licences-dev.json" > /dev/null
 
-  # Non-release image validation has its own runner and does not wait for Tests. Neither path publishes an image.
+  # After the tests, when the image may have changed, and for releases: builds, starts and (releases only) pushes it
   image:
     name: Docker image
-    needs: changes
-    if: needs.changes.outputs.image == 'true' && !inputs.release_version
-    uses: ./.github/workflows/build-image.yml
+    timeout-minutes: 90
+    needs: [changes, check]
+    if: needs.changes.outputs.image == 'true'
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    env:
+      VERSION: ${{ inputs.release_version || 'dev' }}
+      # The images people run use `release`; the ones only started here compile ThirtyFile several times faster
+      CARGO_PROFILE: ${{ inputs.release_version && 'release' || 'ci' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The commit's time instead of the build's: the builds below then write the same image configuration, so the
+      # pushed images can be compared with the ones that were started
+      - run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+      # Starting the arm64 image on this amd64 machine needs QEMU (building it doesn't: the Dockerfile cross-compiles)
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+          cache-image: ${{ github.ref == 'refs/heads/main' }}
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        id: buildx
 
-  # Releases may publish only after all checks have passed. Keep the same image steps in the reusable workflow.
-  release_image:
-    name: Release image
-    needs: [changes, migrations, site, check]
-    if: inputs.release_version && needs.changes.outputs.image == 'true'
-    uses: ./.github/workflows/build-image.yml
-    with:
-      release_version: ${{ inputs.release_version }}
-    permissions:
-      contents: read
-      packages: write
+      # The Dockerfile's cache mounts (compiled Rust dependencies, downloaded crates and pnpm packages) only
+      # live inside the builder, which is new on every run. Keep them in the Actions cache, so that a change
+      # to the backend recompiles ThirtyFile itself and not every dependency. The key changes with the
+      # lock files; in between, the saved dependencies stay valid and the cache is only restored. Each profile has
+      # its own, since the dependencies are compiled for it.
+      # This is the image's only cache: a layer cache (cache-to: type=gha) would store much the same again, and
+      # the two would push each other out of the 10 GB the repository gets. Saved from main only (see the top)
+      - id: mounts
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: cache-mount
+          key: buildkit-${{ env.CARGO_PROFILE }}-${{ hashFiles('server/Cargo.lock', 'web/pnpm-lock.yaml', 'Dockerfile') }}
+          restore-keys: |
+            buildkit-${{ env.CARGO_PROFILE }}-
+      - if: github.ref != 'refs/heads/main'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: cache-mount
+          key: buildkit-${{ env.CARGO_PROFILE }}-${{ hashFiles('server/Cargo.lock', 'web/pnpm-lock.yaml', 'Dockerfile') }}
+          restore-keys: |
+            buildkit-${{ env.CARGO_PROFILE }}-
+
+      - uses: reproducible-containers/buildkit-cache-dance@5422eac04292c961a382e0f584ea0f03ad9da723 # v3.4.0
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          cache-map: |
+            {
+              "cache-mount/pnpm-store": { "target": "/root/.local/share/pnpm/store", "id": "pnpm-store" },
+              "cache-mount/cargo-registry": { "target": "/usr/local/cargo/registry", "id": "cargo-registry" },
+              "cache-mount/target-amd64": { "target": "/src/server/target", "id": "thirtyfile-target-amd64" },
+              "cache-mount/target-arm64": { "target": "/src/server/target", "id": "thirtyfile-target-arm64" }
+            }
+          # Taken out of the builder only to be saved
+          skip-extraction: ${{ github.ref != 'refs/heads/main' || steps.mounts.outputs.cache-hit == 'true' }}
+
+      # Standard image labels (source, revision, creation time…) with the version
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          labels: org.opencontainers.image.version=${{ env.VERSION }}
+
+      # Each platform's image, loaded into Docker to be started. The backend is cross-compiled in the Dockerfile, so
+      # building for arm64 needs no emulation
+      - name: Build for amd64
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: thirtyfile:amd64
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            CARGO_PROFILE=${{ env.CARGO_PROFILE }}
+          sbom: false
+          provenance: false
+      - name: Start the amd64 image
+        run: bash .github/scripts/smoke-test.sh thirtyfile:amd64
+      - name: Build for arm64
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          tags: thirtyfile:arm64
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            CARGO_PROFILE=${{ env.CARGO_PROFILE }}
+          sbom: false
+          provenance: false
+      - name: Start the arm64 image (QEMU)
+        env:
+          SMOKE_PLATFORM: linux/arm64
+        run: bash .github/scripts/smoke-test.sh thirtyfile:arm64
+
+      # Releases only, once everything above has passed: both platforms from the same builder (so from its cache: the
+      # same images), pushed by digest only (release.yml adds the tags), with an SBOM and the full build provenance;
+      # release.yml also signs the provenance
+      - if: inputs.release_version
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: push
+        name: Push both platforms
+        if: inputs.release_version
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          tags: ${{ env.IMAGE }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            CARGO_PROFILE=${{ env.CARGO_PROFILE }}
+          sbom: true
+          provenance: mode=max
+      # Each platform's image in the pushed index is the one started above: its image id is the pushed manifest's
+      # digest (containerd image store) or its configuration's (Docker's classic store)
+      - name: Check the pushed images are the ones started
+        if: inputs.release_version
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          index=$(docker buildx imagetools inspect --raw "$IMAGE@$DIGEST")
+          for arch in amd64 arm64; do
+            manifest=$(jq -r --arg arch "$arch" '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest' <<<"$index")
+            config=$(docker buildx imagetools inspect --raw "$IMAGE@$manifest" | jq -r .config.digest)
+            started=$(docker image inspect -f '{{.Id}}' "thirtyfile:$arch")
+            echo "$arch: pushed $manifest (configuration $config), started $started"
+            if [ "$started" != "$manifest" ] && [ "$started" != "$config" ]; then
+              echo "::error::The pushed $arch image isn't the one that was started."
+              exit 1
+            fi
+          done
 
   # The one check the ruleset requires. Skipped jobs count as passed on GitHub, so when "Changes" itself fails, the
   # tests and the image are skipped and would let the pull request through; this job fails in that case.
   result:
     name: Checks passed
     timeout-minutes: 5
-    needs: [changes, migrations, site, check, image, release_image]
+    needs: [changes, migrations, site, check, image]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          echo "changes, migrations, website, tests, image, release image: $RESULTS"
+          echo "changes, migrations, website, tests, image: $RESULTS"
           case " $RESULTS " in
             *" failure "* | *" cancelled "*) exit 1 ;;
           esac
