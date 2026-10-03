@@ -1,11 +1,8 @@
-# Checks every pull request, and main after every merge (the ruleset doesn't require branches to be up to date, so
-# two pull requests that pass on their own can still fail together): the tests, that released migrations are
-# unchanged, and the website's languages and links. Changes that only touch the website or the documentation skip the
-# tests, not the website's check.
+# Complete verification, called before releases or started by hand (Actions > Build > Run workflow).
+# Pull requests run checks.yml; pushes to main run CodeQL, without repeating the tests or builds.
 #
-# Changes to how the image is built or started (Dockerfile, .dockerignore, the lock files, cargo about's settings,
-# compose.yaml, the smoke test, this file) also build the image for both platforms, once the tests have passed, without
-# pushing it, with the quicker `ci` Cargo profile (server/Cargo.toml). Each platform's image is started with the shipped compose.yaml on bind-mounted folders, first the latest
+# Explicit verification also builds both image platforms once the tests have passed, without
+# pushing them, with the quicker `ci` Cargo profile (server/Cargo.toml). Each platform's image is started with the shipped compose.yaml on bind-mounted folders, first the latest
 # release and then the new image on its data, and restarted (.github/scripts/smoke-test.sh): amd64 natively, arm64
 # under QEMU.
 #
@@ -14,18 +11,13 @@
 # images are the ones that were started). release.yml gives it its tags. So a release whose tests or image fail leaves
 # nothing behind in the registry. Releases build with the `release` profile.
 #
-# The caches (compiled Rust dependencies, the image's cache mounts, QEMU) are saved from main only, by merges and
-# releases; pull requests restore them without saving their own, which would push main's out of the 10 GB the
-# repository gets.
+# Caches are saved only when verifying main, including releases. Other refs restore them without saving their own.
 #
-# The required check is "Checks passed" at the end: it passes when every job passed or was skipped, and fails when any
-# failed or was cancelled.
+# The result fails if any full-verification job fails or is cancelled. The PR gate is defined in checks.yml.
 name: Build
 
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
   workflow_call:
     inputs:
       release_version:
@@ -37,10 +29,10 @@ on:
         description: Digest of the pushed image (sha256:…), for releases
         value: ${{ jobs.image.outputs.digest }}
 
-# A newer push to a pull request replaces its run; every merge into main is tested to the end
+# Explicit full verification and releases always finish; no per-commit build is started.
 concurrency:
   group: build-${{ github.ref }}-${{ inputs.release_version || (github.event_name == 'push' && github.sha) || 'check' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -63,7 +55,7 @@ jobs:
           persist-credentials: false
       - id: diff
         env:
-          # A pull request's base, or the commit main was at before the push
+          # Explicit verification has no diff base and always runs the full checks.
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           RELEASE: ${{ inputs.release_version }}
         run: |
@@ -145,7 +137,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      # The checks are the ones in scripts/check.sh, which contributors run too.
+      # The full checks are the ones contributors run locally too.
       # The interface: formatting (oxfmt, web/.oxfmtrc.json), translations, types, lint (oxlint, web/.oxlintrc.json)
       # and the unit tests (Vitest), with the coverage in the job summary
       - name: Frontend
