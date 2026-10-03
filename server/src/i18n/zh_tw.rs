@@ -36,11 +36,11 @@ pub(super) const TEXTS: &[(Text, &str)] = &[
     (BackupNewest, "\n最新的完整快照：{since}。\n"),
     (BackupSee, "\n請到「控制台 › 備份」查看。\n"),
     // Replicas
-    (ReplicaDegradedSubject, "複本「{policy}」沒有全部保持"),
-    (ReplicaDegradedBody, "「{policy}」應保持 {wanted} 份複本，目前只有 {current} 份是最新的：有目標無法連線、失敗、有損毀的複本或落後。\n"),
-    (ReplicaOkSubject, "複本「{policy}」恢復正常"),
-    (ReplicaOkBody, "「{policy}」又保持了它的複本。\n"),
-    (ReplicaSee, "\n請到「控制台 › 複本」查看。\n"),
+    (ReplicaDegradedSubject, "鏡像規則「{policy}」沒有全部保持"),
+    (ReplicaDegradedBody, "「{policy}」應保持 {wanted} 個鏡像，目前只有 {current} 個是最新的：有目標無法連線、失敗、有損毀的鏡像或落後。\n"),
+    (ReplicaOkSubject, "鏡像規則「{policy}」恢復正常"),
+    (ReplicaOkBody, "「{policy}」又保持了它的鏡像。\n"),
+    (ReplicaSee, "\n請到「控制台 › 鏡像」查看。\n"),
     // Files received through a link
     (LinkUploadSubject, "有人透過連結把「{file}」傳到了「{name}」"),
     (LinkUploadBody, "有人透過你建立的收件連結，把「{file}」上傳到「{name}」。\n"),
