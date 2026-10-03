@@ -933,15 +933,15 @@ mod tests {
         };
         let (subject, body) = render(&n, Lang::ZhTw, -480, "Drive", "https://drive.example.com");
         assert_eq!(subject, "你對「我的檔案」的存取權即將結束");
-        assert!(body.contains("1970-01-02 08:00 (UTC+8)"), "{body}");
-        assert!(body.contains("https://drive.example.com/files/abc"), "{body}");
+        assert!(body.contains("1970-01-02 08:00 (UTC+8)"), "the expiry uses the recipient's time zone");
+        assert!(body.contains("https://drive.example.com/files/abc"), "the space link uses the configured site URL");
         let (_, body) = render(&n, Lang::En, 330, "Drive", "");
-        assert!(body.contains("1970-01-01 18:30 (UTC-5:30)"), "{body}");
-        assert!(!body.contains("http"), "no site URL, no link: {body}");
+        assert!(body.contains("1970-01-01 18:30 (UTC-5:30)"), "the expiry uses the recipient's time zone");
+        assert!(!body.contains("http"), "no site URL, no link");
         let file = Notice { kind: "shared", node_id: Some("f1".into()), data: json!({ "by": "Amy", "name": "a.txt", "item": "file", "role": "editor" }) };
         let (subject, body) = render(&file, Lang::En, 0, "Drive", "https://d.example");
         assert_eq!(subject, "Amy shared “a.txt” with you");
-        assert!(body.contains("https://d.example/view/f1"), "{body}");
+        assert!(body.contains("https://d.example/view/f1"), "the file link uses the configured site URL");
     }
 
     #[tokio::test]
