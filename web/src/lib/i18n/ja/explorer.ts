@@ -34,6 +34,7 @@ export default {
   "All favorites": "すべてのお気に入り",
   "Shared": "共有",
   "Icons": "アイコン",
+  "Gallery": "ギャラリー",
   "Sort and group": "並べ替えとグループ",
   "Actions": "アクション",
   "Get info": "情報を見る",

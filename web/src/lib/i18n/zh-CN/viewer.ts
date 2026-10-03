@@ -102,6 +102,11 @@ export default {
   "Quick look: {name}": "快速查看：{name}",
   "Previous item": "上一个项目",
   "Next item": "下一个项目",
+  // The Mac style's Gallery view (components/style/mac/gallery.tsx)
+  "Preview: {name}": "预览：{name}",
+  "Thumbnails": "缩略图",
+  "{name}, {n} of {total}": "{name}，第 {n} 个，共 {total} 个",
+  "Select an item to see it here.": "选择项目即可在这里查看。",
   "File not found": "找不到这个文件",
   "Share with…": "共享给…",
   "Create share link": "创建分享链接",

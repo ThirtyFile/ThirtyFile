@@ -34,6 +34,7 @@ export default {
   "All favorites": "所有收藏",
   "Shared": "共用",
   "Icons": "圖示",
+  "Gallery": "圖庫",
   "Sort and group": "排序與群組",
   "Actions": "動作",
   "Get info": "取得資訊",

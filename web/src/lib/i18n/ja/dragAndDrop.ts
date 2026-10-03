@@ -12,6 +12,7 @@ export default {
   "Refresh the list": "一覧を最新の情報に更新",
   "Selecting": "選択",
   "Move through the list (also ← and → in the icon view); hold Shift to select as you go": "一覧内を移動（アイコン表示では ← と → も使用可能）。Shift を押しながら移動すると選択",
+  "Move through the list (also ← and → in the Icons and Gallery views); hold Shift to select as you go": "一覧内を移動（アイコン表示とギャラリー表示では ← と → も使用可能）。Shift を押しながら移動すると選択",
   "In the Columns view: back to the column before, or on to the column of the selected folder": "カラム表示：前のカラムに戻る、または選択したフォルダーのカラムに進む",
   "Select the item with the focus": "フォーカスのある項目を選択",
   "Add the item with the focus to the selection, or remove it": "フォーカスのある項目を選択範囲に追加、または選択範囲から除外",

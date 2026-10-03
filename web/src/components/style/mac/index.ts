@@ -4,6 +4,7 @@
  */
 import type { StyleKit } from "../types";
 import { MacFrame } from "./frame";
+import { GalleryView } from "./gallery";
 import { MAC_KEYS, macShortcuts } from "./keys";
 import { MAC_ICONS, macViews } from "./look";
 import { macMenu } from "./menus";
@@ -28,4 +29,6 @@ export const macKit: StyleKit = {
   newAtEnd: false,
   // Folders in the List view have a triangle to expand them in place
   disclosure: true,
+  // A large preview of the item selected, above a strip of thumbnails
+  ownViews: { gallery: GalleryView },
 };

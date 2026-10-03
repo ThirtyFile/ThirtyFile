@@ -177,6 +177,19 @@ export function Explorer(p: ExplorerProps) {
     </>
   );
 
+  const empty = p.empty ?? (
+    <div className="flex min-h-52 flex-col items-center justify-center gap-2 py-10 text-muted-foreground">
+      <FolderOpenIcon className="size-9 stroke-[1.4]" />
+      <p>{t("No files here yet")}</p>
+      {/* Phones can't drag files in */}
+      {canUpload && <p className="text-xs">{phone ? t("Use New › Upload files to add some.") : t("Drag files or folders here to upload them.")}</p>}
+      {p.offline && <p className="text-xs">{t("Storage service offline. You can't upload right now.")}</p>}
+      {p.emptyHint && <p className="text-xs">{p.emptyHint}</p>}
+    </div>
+  );
+  /** A view only the style has (the Mac style's Gallery), in place of the file list */
+  const OwnView = s.kit.ownViews?.[view];
+
   // The views with a button of their own in the status bar (the style's)
   const footerRight = (
     <span className="flex items-center gap-0.5">
@@ -204,11 +217,12 @@ export function Explorer(p: ExplorerProps) {
             data-explorer-area
             className="relative min-h-0 flex-1 overflow-auto outline-none"
             onContextMenuCapture={(e) => {
-              // The column headers have their own menu, which leaves the selection alone
-              if (!(e.target as HTMLElement).closest("[data-node-id], thead")) setSelected(new Set());
+              // The column headers have their own menu, which leaves the selection alone, as does what shows the item
+              // selected (the Gallery view's preview)
+              if (!(e.target as HTMLElement).closest("[data-node-id], thead, [data-keeps-selection]")) setSelected(new Set());
             }}
             onClick={(e) => {
-              if (!(e.target as HTMLElement).closest("[data-node-id]")) setSelected(new Set());
+              if (!(e.target as HTMLElement).closest("[data-node-id], [data-keeps-selection]")) setSelected(new Set());
             }}
             {...dragProps}
             {...marquee.containerProps}
@@ -225,22 +239,10 @@ export function Explorer(p: ExplorerProps) {
               </div>
             ) : p.error ? (
               <ItemError error={p.error} kind="folder" onRetry={a.refresh} />
+            ) : OwnView ? (
+              <OwnView p={p} s={s} a={a} list={listProps} empty={empty} />
             ) : (
-              <FileList
-                {...listProps}
-                empty={
-                  p.empty ?? (
-                    <div className="flex min-h-52 flex-col items-center justify-center gap-2 py-10 text-muted-foreground">
-                      <FolderOpenIcon className="size-9 stroke-[1.4]" />
-                      <p>{t("No files here yet")}</p>
-                      {/* Phones can't drag files in */}
-                      {canUpload && <p className="text-xs">{phone ? t("Use New › Upload files to add some.") : t("Drag files or folders here to upload them.")}</p>}
-                      {p.offline && <p className="text-xs">{t("Storage service offline. You can't upload right now.")}</p>}
-                      {p.emptyHint && <p className="text-xs">{p.emptyHint}</p>}
-                    </div>
-                  )
-                }
-              />
+              <FileList {...listProps} empty={empty} />
             )}
             {dragging && (
               <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-brand bg-brand/10">

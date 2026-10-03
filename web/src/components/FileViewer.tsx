@@ -31,6 +31,8 @@ export function FileViewer(props: {
   allowDownload?: boolean;
   /** Embedded in a tab (light background, fills the area); otherwise a black floating preview */
   embedded?: boolean;
+  /** Video and audio start playing when shown (the default); the Gallery view, which shows each item passed, says no */
+  autoPlay?: boolean;
   onSaved?(n: Node): void;
   onDirtyChange?(dirty: boolean): void;
 }) {
@@ -39,7 +41,7 @@ export function FileViewer(props: {
   const url = props.source.contentUrl(node);
 
   // key: a new element (and a fresh error state) for each file
-  if (isBrowserMedia(node)) return <Media key={node.id} node={node} url={url} source={props.source} allowDownload={props.allowDownload} />;
+  if (isBrowserMedia(node)) return <Media key={node.id} node={node} url={url} source={props.source} allowDownload={props.allowDownload} autoPlay={props.autoPlay !== false} />;
   if (cat === "pdf") return <iframe key={node.id} src={url} title={node.name} className={cn("size-full bg-white", !embedded && "max-w-5xl rounded-lg")} />;
   if (isOfficePreviewable(node))
     return (
@@ -149,7 +151,7 @@ function MarkdownFile(props: Parameters<typeof FileViewer>[0]) {
 }
 
 /** Picture or video; if the browser can't show it after all (format or codec), offer the download instead of a broken image or an empty player */
-function Media({ node, url, source, allowDownload }: { node: Node; url: string; source: FileSource; allowDownload?: boolean }) {
+function Media({ node, url, source, allowDownload, autoPlay }: { node: Node; url: string; source: FileSource; allowDownload?: boolean; autoPlay: boolean }) {
   const [failed, setFailed] = useState(false);
   const fail = () => {
     setFailed(true);
@@ -162,10 +164,10 @@ function Media({ node, url, source, allowDownload }: { node: Node; url: string; 
       <div className="flex w-full max-w-md flex-col items-center gap-6 rounded-2xl border bg-background p-8 text-foreground">
         <FileIcon node={node} className="size-16" />
         <div className="text-sm font-medium break-all">{node.name}</div>
-        <audio src={url} controls autoPlay onError={fail} className="w-full" />
+        <audio src={url} controls autoPlay={autoPlay} onError={fail} className="w-full" />
       </div>
     );
-  return <video src={url} controls autoPlay onError={fail} className="max-h-full max-w-full rounded-lg bg-black" />;
+  return <video src={url} controls autoPlay={autoPlay} onError={fail} className="max-h-full max-w-full rounded-lg bg-black" />;
 }
 
 function NoPreview({ node, source, allowDownload, reason, extra }: { node: Node; source: FileSource; allowDownload?: boolean; reason: string; extra?: ReactNode }) {

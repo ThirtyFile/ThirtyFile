@@ -1,5 +1,5 @@
 /**
- * The Mac style's toolbar, as a Finder window's: the view (Icons, List, Columns), how items are sorted and grouped,
+ * The Mac style's toolbar, as a Finder window's: the view (Icons, List, Columns, Gallery), how items are sorted and grouped,
  * Share, and an actions menu with what can be done here and with the items selected. Back, forward and the search box
  * are the frame's. Phones get the toolbar every style shares (the Windows style's).
  */
@@ -41,6 +41,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ColumnChoices, listColumns } from "@/components/fileList/columns";
+import { groupable } from "@/components/fileList/layout";
 import { ToolButton } from "@/components/frame/ToolButton";
 import { openShortcuts } from "@/components/ShortcutsDialog";
 import { useViews } from "@/components/style";
@@ -98,7 +99,7 @@ function ViewSwitcher({ s }: { s: ExplorerState }) {
   );
 }
 
-/** How the items are sorted, then grouped (the Columns view doesn't group) */
+/** How the items are sorted, then grouped (the Columns and Gallery views don't group) */
 function SortAndGroup({ p, s }: { p: ExplorerProps; s: ExplorerState }) {
   if (!p.sort || !p.onSortChange) return null;
   return (
@@ -111,7 +112,7 @@ function SortAndGroup({ p, s }: { p: ExplorerProps; s: ExplorerState }) {
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuSub>
-          <DropdownMenuSubTrigger disabled={s.view === "columns"}>{t("Group by")}</DropdownMenuSubTrigger>
+          <DropdownMenuSubTrigger disabled={!groupable(s.view)}>{t("Group by")}</DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="w-44">
             <GroupChoices groupBy={s.groupBy} onChange={s.setGroupBy} />
           </DropdownMenuSubContent>

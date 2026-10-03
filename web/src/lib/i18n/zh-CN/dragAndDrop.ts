@@ -12,6 +12,7 @@ export default {
   "Refresh the list": "刷新列表",
   "Selecting": "选择",
   "Move through the list (also ← and → in the icon view); hold Shift to select as you go": "在列表中移动（图标视图中也可用 ← 和 →）；按住 Shift 可连续选择",
+  "Move through the list (also ← and → in the Icons and Gallery views); hold Shift to select as you go": "在列表中移动（图标和画廊视图中也可用 ← 和 →）；按住 Shift 可连续选择",
   "In the Columns view: back to the column before, or on to the column of the selected folder": "分栏视图：返回上一栏，或进入所选文件夹的那一栏",
   "Select the item with the focus": "选择焦点所在的项目",
   "Add the item with the focus to the selection, or remove it": "将焦点所在的项目加入选择范围，或从中移除",
