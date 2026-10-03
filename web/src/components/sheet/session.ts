@@ -110,11 +110,12 @@ export function editText(cell: Cell | undefined, style?: CellStyle) {
 }
 
 /** TSV copied from Excel (including quoted line breaks) */
-export function parseTsv(text: string): string[][] {
+export function parseTsv(text: string, maxCells = Infinity): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = "";
   let quoted = false;
+  let cells = 1;
   const src = text.replace(/\r\n/g, "\n").replace(/\n$/, "");
   for (let i = 0; i < src.length; i++) {
     const ch = src[i];
@@ -126,9 +127,11 @@ export function parseTsv(text: string): string[][] {
       else field += ch;
     } else if (ch === '"' && field === "") quoted = true;
     else if (ch === "\t") {
+      if (++cells > maxCells) throw new RangeError("Clipboard cell limit exceeded");
       row.push(field);
       field = "";
     } else if (ch === "\n") {
+      if (++cells > maxCells) throw new RangeError("Clipboard cell limit exceeded");
       row.push(field);
       rows.push(row);
       row = [];
