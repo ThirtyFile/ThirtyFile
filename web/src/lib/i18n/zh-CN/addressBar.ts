@@ -3,6 +3,11 @@ export default {
   "Can't find \"{path}\". Check the spelling and try again.": "找不到“{path}”。请检查拼写后重试。",
   "Couldn't open this path": "无法打开此路径",
   "Type or paste a path, then press Enter": "输入或粘贴路径，然后按 Enter",
+  // The Mac style's path bar, and Go to folder (components/style/mac/pathBar.tsx)
+  "Path bar": "路径栏",
+  "Go to folder": "前往文件夹",
+  "Go to folder…": "前往文件夹…",
+  "Go": "前往",
   // Views, columns and groups of the file list
   "Medium icons": "中图标",
   "List": "列表",

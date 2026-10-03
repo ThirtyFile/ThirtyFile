@@ -1,17 +1,21 @@
 // The Mac style (components/style/mac): its kit, and the sidebar's groups
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useLocation } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, describe, expect, test } from "vitest";
-import type { Drive, Located, Me, SmartFolder, Tag } from "@/api";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { FolderIcon } from "lucide-react";
+import { api, type Drive, type Located, type Me, type SmartFolder, type Tag } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { kits } from "@/components/style";
 import { macKit } from "@/components/style/mac";
 import { MacSidebar } from "@/components/style/mac/sidebar";
+import { GoToFolder, PathBar, openGoToFolder } from "@/components/style/mac/pathBar";
 import { MeContext } from "@/lib/session";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+vi.mock("sonner", () => ({ toast: { error: vi.fn<(m: string) => void>() } }));
 
 describe("the Mac style's kit", () => {
   test("is the kit of the Mac style", () => {
@@ -118,5 +122,71 @@ describe("the Mac style's sidebar", () => {
     expect(groups()[1]).toEqual(["Spaces"]);
     act(() => heading().click());
     expect(groups()[1]).toHaveLength(4);
+  });
+});
+
+describe("the path bar and Go to folder", () => {
+  let root: Root | null = null;
+  afterEach(() => {
+    act(() => root?.unmount());
+    root = null;
+    document.body.replaceChildren();
+    vi.restoreAllMocks();
+  });
+  const at = { path: "" };
+  function Where() {
+    at.path = useLocation().pathname;
+    return null;
+  }
+  function render(children: React.ReactNode) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, enabled: false } } });
+    const el = document.createElement("div");
+    document.body.append(el);
+    root = createRoot(el);
+    act(() =>
+      root!.render(
+        <QueryClientProvider client={qc}>
+          <MeContext.Provider value={{ id: 1, personal_root_id: "home" } as unknown as Me}>
+            <MemoryRouter initialEntries={["/files/reports"]}>
+              {children}
+              <Where />
+            </MemoryRouter>
+          </MeContext.Provider>
+        </QueryClientProvider>,
+      ),
+    );
+  }
+  const crumbs = [
+    { label: "All spaces", to: "/drives", virtual: true },
+    { label: "My files", to: "/files/home" },
+    { label: "Reports", to: "/files/reports" },
+  ];
+
+  test("shows the path, each folder above a link, the folder open last", () => {
+    render(<PathBar place={{ crumbs, icon: FolderIcon, path: "/My files/Reports", searchPlaceholder: "" }} />);
+    const bar = document.querySelector('nav[aria-label="Path bar"]')!;
+    expect([...bar.querySelectorAll("a")].map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+      ["All spaces", "/drives"],
+      ["My files", "/files/home"],
+    ]);
+    expect(bar.querySelector('[aria-current="page"]')!.textContent).toBe("Reports");
+  });
+
+  test("Go to folder starts with the path of the folder open, and goes to the one typed", async () => {
+    const find = vi.spyOn(api, "findPath").mockResolvedValueOnce({ place: "folder", id: "plans" } as never);
+    render(<GoToFolder path="/My files/Reports" />);
+    act(() => openGoToFolder());
+    const input = document.querySelector<HTMLInputElement>('[role="dialog"] input')!;
+    expect(input.value).toBe("/My files/Reports");
+    const type = (text: string) =>
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, text);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    type("/My files/Plans");
+    await act(async () => input.form!.requestSubmit());
+    expect(find).toHaveBeenCalledWith("/My files/Plans", expect.anything());
+    expect(at.path).toBe("/files/plans");
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 });

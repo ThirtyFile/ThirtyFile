@@ -3,6 +3,11 @@ export default {
   "Can't find \"{path}\". Check the spelling and try again.": "「{path}」が見つかりません。入力内容を確認して、もう一度お試しください。",
   "Couldn't open this path": "このパスを開けませんでした",
   "Type or paste a path, then press Enter": "パスを入力または貼り付けて、Enter キーを押してください",
+  // The Mac style's path bar, and Go to folder (components/style/mac/pathBar.tsx)
+  "Path bar": "パスバー",
+  "Go to folder": "フォルダーへ移動",
+  "Go to folder…": "フォルダーへ移動…",
+  "Go": "移動",
   // Views, columns and groups of the file list
   "Medium icons": "中アイコン",
   "List": "一覧",

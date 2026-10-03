@@ -125,32 +125,26 @@ export function CrumbItem({ crumb: c, last, path }: { crumb: Crumb; last: boolea
 }
 
 /**
- * The address bar being typed in: shows the full path to copy, and goes to a path typed or pasted into it (see
- * lib/paths.ts), or to a link to a page of this site. Escape or leaving the box puts the path back
+ * Going to a path typed or pasted (see lib/paths.ts), or to a link to a page of this site: the Windows style's address
+ * bar and the Mac style's "Go to folder". `go` resolves to whether it went (when it didn't, the reason was shown).
  */
-function PathInput({ path, onDone }: { path: string; onDone(): void }) {
+export function useGoToPath() {
   const navigate = useNavigate();
   const { openFile } = useTabActions();
-  const [text, setText] = useState(path);
   const [finding, setFinding] = useState(false);
-  const ref = useRef<HTMLInputElement>(null);
-
-  const go = async () => {
-    const typed = text.trim();
-    if (!typed || typed === path) return onDone();
+  const go = async (typed: string): Promise<boolean> => {
     const link = appLink(typed, window.location.origin);
     if (link) {
-      onDone();
-      return navigate(link);
+      void navigate(link);
+      return true;
     }
     setFinding(true);
     try {
       const found = await api.findPath(typed, pathAliases());
-      onDone();
       if (found.place === "file") openFile(urlOf(found));
-      else navigate(urlOf(found));
+      else void navigate(urlOf(found));
+      return true;
     } catch (e) {
-      setFinding(false);
       toast.error(
         e instanceof ApiError && e.status === 404
           ? t('Can\'t find "{path}". Check the spelling and try again.', { path: typed })
@@ -158,6 +152,28 @@ function PathInput({ path, onDone }: { path: string; onDone(): void }) {
             ? e.message
             : t("Couldn't open this path"),
       );
+      return false;
+    } finally {
+      setFinding(false);
+    }
+  };
+  return { finding, go };
+}
+
+/**
+ * The address bar being typed in: shows the full path to copy, and goes to a path typed or pasted into it, or to a
+ * link to a page of this site. Escape or leaving the box puts the path back
+ */
+function PathInput({ path, onDone }: { path: string; onDone(): void }) {
+  const [text, setText] = useState(path);
+  const { finding, go: goTo } = useGoToPath();
+  const ref = useRef<HTMLInputElement>(null);
+
+  const go = async () => {
+    const typed = text.trim();
+    if (!typed || typed === path) return onDone();
+    if (await goTo(typed)) onDone();
+    else {
       ref.current?.focus();
       ref.current?.select();
     }
