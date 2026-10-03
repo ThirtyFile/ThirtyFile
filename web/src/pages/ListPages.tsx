@@ -1,13 +1,15 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { ClockIcon, PencilIcon, SearchIcon, SearchXIcon, StarIcon, TagIcon, Trash2Icon } from "lucide-react";
+import { ClockIcon, FolderSearchIcon, PencilIcon, SearchIcon, SearchXIcon, StarIcon, TagIcon, Trash2Icon } from "lucide-react";
 import { api, type Located, type SearchFilter, type SortKey, type SortOrder, type TagColor } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { Explorer } from "@/components/Explorer";
 import { TagDot, askToDeleteTag, recolor } from "@/components/tags";
 import { Button } from "@/components/ui/button";
 import { TAG_COLORS, editTag, useTags } from "@/lib/tags";
+import { DAY, SEARCH_DATES, SEARCH_SIZES, SEARCH_TYPES } from "@/lib/searchFilters";
+import { editSmartFolder, queryFromSearch, smartPath } from "@/lib/smartFolders";
 import { useSort } from "@/lib/sort";
 import { t } from "@/lib/i18n";
 import { extOf, nameCollator } from "@/lib/utils";
@@ -148,33 +150,9 @@ export function TaggedPage() {
   );
 }
 
-/** Types to filter search results by: extensions, or folders */
-const SEARCH_TYPES: { id: string; label: () => string; filter: SearchFilter }[] = [
-  { id: "folder", label: () => t("Folders"), filter: { kind: "folder" } },
-  { id: "doc", label: () => t("Documents"), filter: { ext: "doc,docx,odt,rtf,pdf,txt,md" } },
-  { id: "sheet", label: () => t("Spreadsheets"), filter: { ext: "xls,xlsx,xlsm,ods,csv,tsv" } },
-  { id: "slides", label: () => t("Presentations"), filter: { ext: "ppt,pptx,odp" } },
-  { id: "image", label: () => t("Pictures"), filter: { ext: "jpg,jpeg,png,gif,webp,bmp,heic,heif,tif,tiff,svg" } },
-  { id: "video", label: () => t("Videos"), filter: { ext: "mp4,mov,m4v,mkv,avi,webm,wmv" } },
-  { id: "audio", label: () => t("Music and sound"), filter: { ext: "mp3,wav,flac,m4a,aac,ogg,wma" } },
-  { id: "archive", label: () => t("Compressed archives"), filter: { ext: "zip,rar,7z,tar,gz" } },
-];
-const DAY = 86400;
-const SEARCH_DATES: { id: string; label: () => string; days: number }[] = [
-  { id: "today", label: () => t("Today"), days: 1 },
-  { id: "week", label: () => t("Last 7 days"), days: 7 },
-  { id: "month", label: () => t("Last 30 days"), days: 30 },
-  { id: "year", label: () => t("Last year"), days: 365 },
-];
-const MB = 1024 * 1024;
-const SEARCH_SIZES: { id: string; label: () => string; filter: SearchFilter }[] = [
-  { id: "small", label: () => t("Smaller than 1 MB"), filter: { max_size: MB - 1 } },
-  { id: "medium", label: () => t("1 to 100 MB"), filter: { min_size: MB, max_size: 100 * MB } },
-  { id: "large", label: () => t("Larger than 100 MB"), filter: { min_size: 100 * MB + 1 } },
-];
-
 export function SearchPage() {
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
   const term = params.get("q") ?? "";
   const within = params.get("in") ?? undefined;
   const [type, date, size, tag] = [params.get("type") ?? "", params.get("date") ?? "", params.get("size") ?? "", params.get("tag") ?? ""];
@@ -259,6 +237,19 @@ export function SearchPage() {
         </label>
       )}
       {q.data?.truncated && <span role="status">{t("Showing the first {n} results. Add words or filters to find the rest.", { n: q.data.items.length })}</span>}
+      <Button
+        variant="ghost"
+        size="xs"
+        className="ml-auto"
+        disabled={!term.trim() && !tag}
+        onClick={async () => {
+          const query = queryFromSearch({ term, within, type, date, size, tag });
+          const saved = await editSmartFolder(undefined, { name: term.trim() || (tags.find((x) => String(x.id) === tag)?.name ?? ""), query });
+          if (saved) navigate(smartPath(saved));
+        }}
+      >
+        <FolderSearchIcon /> {t("Save as smart folder")}
+      </Button>
     </div>
   );
   return (

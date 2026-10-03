@@ -3,7 +3,7 @@
  * of WINDOW items, asked for by their position) that are in view, with one more each way; scrolling or jumping (End, a
  * drag of the scroll bar) loads the parts it reaches, not everything before them. At most KEEP parts are kept per
  * folder, the ones nearest where the list is, so a very large folder never fills the page's memory. A folder, sort or
- * order left cancels the parts still loading for it.
+ * order left cancels the parts still loading for it. A smart folder lists the same way (`WindowSource`).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQueries, useQueryClient, type Query, type QueryKey } from "@tanstack/react-query";
@@ -124,10 +124,33 @@ function useCacheVersion(key: QueryKey) {
   return useSyncExternalStore(subscribe, () => version.current);
 }
 
+/** Where a list's parts come from: a folder's items, or what a smart folder holds */
+export interface WindowSource<T> {
+  /** The cache key of the parts (5 parts long); the part's start follows it */
+  key: QueryKey;
+  /** The part from `start` on, with how many items the list has */
+  part(start: number, limit: number, signal: AbortSignal): Promise<PositionedPage<T>>;
+  /** Where an item is in the list (null: not in it) */
+  position(id: string): Promise<number | null>;
+}
+
 /** A folder's items, a part at a time (see the top of this file) */
 export function useFolderWindows(folder: string | undefined, sort: SortKey, order: SortOrder, enabled = true) {
+  const source = useMemo<WindowSource<Node>>(
+    () => ({
+      key: windowsKey(folder, sort, order),
+      part: (start, limit, signal) => api.childrenAt(folder!, sort, order, start, limit, signal),
+      position: async (id) => (folder ? (await api.position(folder, id, sort, order)).position : null),
+    }),
+    [folder, sort, order],
+  );
+  return useWindows(source, enabled && !!folder);
+}
+
+/** A list's items, a part at a time (see the top of this file) */
+export function useWindows<T extends { id: string }>(source: WindowSource<T>, enabled = true) {
   const qc = useQueryClient();
-  const key = useMemo(() => windowsKey(folder, sort, order), [folder, sort, order]);
+  const key = source.key;
   const text = JSON.stringify(key);
   /** The parts in view, by number */
   const [shown, setShown] = useState<[number, number]>([0, 0]);
@@ -146,7 +169,7 @@ export function useFolderWindows(folder: string | undefined, sort: SortKey, orde
           .findAll({ queryKey: key })
           .filter((q) => q.queryKey.length === 6 && q.state.data)
           .map((q) => {
-            const d = q.state.data as PositionedPage<Node>;
+            const d = q.state.data as PositionedPage<T>;
             return { start: startOf(q), items: d.items, total: d.total, at: q.state.dataUpdatedAt };
           }),
       ),
@@ -161,8 +184,8 @@ export function useFolderWindows(folder: string | undefined, sort: SortKey, orde
   const results = useQueries({
     queries: starts.map((start) => ({
       queryKey: [...key, start],
-      queryFn: ({ signal }: { signal: AbortSignal }) => api.childrenAt(folder!, sort, order, start, WINDOW, signal),
-      enabled: enabled && !!folder,
+      queryFn: ({ signal }: { signal: AbortSignal }) => source.part(start, WINDOW, signal),
+      enabled,
     })),
   });
 
@@ -198,13 +221,12 @@ export function useFolderWindows(folder: string | undefined, sort: SortKey, orde
     async (id: string) => {
       const at = index.get(id);
       if (at !== undefined) return at;
-      if (!folder) return null;
-      return (await api.position(folder, id, sort, order)).position;
+      return source.position(id);
     },
-    [index, folder, sort, order],
+    [index, source],
   );
   const firstPart = results[0];
-  const list: SparseList<Node> = {
+  const list: SparseList<T> = {
     at: built.at,
     total: built.total,
     loaded: built.loaded,

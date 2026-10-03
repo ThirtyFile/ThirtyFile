@@ -40,6 +40,14 @@ export const keys = {
   tags: () => ["tags"],
   /** The items with one of their tags */
   tagged: (id: number, sort: SortKey, order: SortOrder) => ["tagged", id, sort, order],
+  /** The signed-in person's own smart folders (saved searches) */
+  smartFolders: () => ["smart-folders"],
+  /** Every list of what a smart folder holds */
+  smart: (id: number) => ["smart", id],
+  /** What a smart folder holds page by page, in an order */
+  smartPages: (id: number, sort: SortKey, order: SortOrder) => ["smart", id, sort, order],
+  /** What a smart folder holds a part at a time (lib/windows.ts adds where each part starts) */
+  smartAt: (id: number, sort: SortKey, order: SortOrder) => ["smart", id, sort, order, "at"],
   search: (term: string, filter: SearchFilter) => ["search", term, filter],
   sharedWithMe: () => ["shared-with-me"],
   /** Every answer about the trash */
@@ -99,6 +107,8 @@ export const queries = {
   sharedWithMe: queryOptions({ queryKey: keys.sharedWithMe(), queryFn: api.sharedWithMe }),
   /** Read by every row that shows tag dots: changed only by the person, so kept until a change says otherwise */
   tags: queryOptions({ queryKey: keys.tags(), queryFn: api.tags, staleTime: 5 * 60_000 }),
+  /** The navigation pane's smart folders: changed only by the person, so kept until a change says otherwise */
+  smartFolders: queryOptions({ queryKey: keys.smartFolders(), queryFn: api.smartFolders, staleTime: 5 * 60_000 }),
   system: queryOptions({ queryKey: keys.system(), queryFn: api.systemSettings }),
   adminUsers: queryOptions({ queryKey: keys.adminUsers(), queryFn: api.users }),
   adminDrives: queryOptions({ queryKey: keys.adminDrives(), queryFn: api.adminDrives }),

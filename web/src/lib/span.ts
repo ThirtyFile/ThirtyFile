@@ -25,6 +25,7 @@ export interface ListSpan {
 
 /** A span in a folder, in the order it was selected in */
 export interface FolderSpan extends ListSpan {
+  /** The folder's id, or a smart folder's as `smartListing` gives it */
   folder: string;
   sort: SortKey;
   order: SortOrder;
@@ -38,6 +39,17 @@ export interface Picked {
   span: FolderSpan | null;
   /** How many items that is */
   count: number;
+}
+
+/**
+ * What a span of a smart folder (a saved search that lists like a folder) is selected in: "smart:<id>". A change to it
+ * loads the smart folder's lists again as it does a folder's (lib/queries.ts), and no folder has such an id.
+ */
+export const smartListing = (id: number) => `smart:${id}`;
+
+/** The smart folder a span is in; null for a folder */
+export function smartOf(listing: string): number | null {
+  return listing.startsWith("smart:") ? Number(listing.slice(6)) : null;
 }
 
 export function inSpan(span: ListSpan | null | undefined, index: number, id: string) {
@@ -69,15 +81,10 @@ export async function* batchesOf(picked: Picked): AsyncGenerator<string[]> {
   // An item picked one by one that the span holds too was already changed with its batch
   const done = new Set(picked.ids);
   let after: string | undefined;
+  const smart = smartOf(span.folder);
   do {
-    const page = await api.selection(span.folder, {
-      sort: span.sort,
-      order: span.order,
-      from: span.from?.id,
-      to: span.to?.id,
-      except: [...span.except],
-      after,
-    });
+    const req = { sort: span.sort, order: span.order, from: span.from?.id, to: span.to?.id, except: [...span.except], after };
+    const page = smart !== null ? await api.smartSelection(smart, req) : await api.selection(span.folder, req);
     const ids = done.size ? page.ids.filter((id) => !done.has(id)) : page.ids;
     if (ids.length) yield ids;
     after = page.next ?? undefined;

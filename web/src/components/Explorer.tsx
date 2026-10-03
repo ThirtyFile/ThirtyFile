@@ -42,6 +42,8 @@ export interface ExplorerProps {
   onRetryPart?(): void;
   /** Current folder; when set, uploading and creating are possible */
   folderId?: string;
+  /** A smart folder shown (a saved search): a large one is selected in as a folder is, and nothing is made in it */
+  smartFolder?: number;
   /** The space the folder is in (not when it was reached through a share) */
   spaceId?: string;
   /** A folder space: nothing can be changed from the web yet */

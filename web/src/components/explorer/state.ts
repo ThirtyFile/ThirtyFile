@@ -9,7 +9,7 @@ import { takeArrival } from "@/lib/columns";
 import { openMenuByKey } from "@/lib/contextMenus";
 import { focusIsFree } from "@/lib/focus";
 import type { GroupBy } from "@/lib/listView";
-import { inSpan, spanCount, type FolderSpan, type ListSpan, type Picked } from "@/lib/span";
+import { inSpan, smartListing, spanCount, type FolderSpan, type ListSpan, type Picked } from "@/lib/span";
 import { usePersisted, useMe } from "@/lib/session";
 import { useUndoLabel } from "@/lib/undo";
 import { useStyleKit, useView } from "@/components/style";
@@ -52,6 +52,8 @@ export function useExplorerState(p: ExplorerProps) {
   const canUpload = canCreate && !p.offline;
   const list = p.list;
   const total = list ? Math.max(0, list.total) : p.items.length;
+  /** What a span of a large list is selected in: the folder, or the smart folder */
+  const listing = p.folderId ?? (p.smartFolder !== undefined ? smartListing(p.smartFolder) : undefined);
 
   // New items stay where they were made until a refresh, a change of sort or leaving the folder (explorer/newItems)
   const dialogNow = useRef(dialog);
@@ -86,13 +88,13 @@ export function useExplorerState(p: ExplorerProps) {
   /** The file list's selection: with a span of a large folder, where and in which order it was made */
   const choose = (next: Set<string>, listSpan?: ListSpan | null) => {
     setChosen(next);
-    setSpan(listSpan && p.folderId && p.sort ? { ...listSpan, folder: p.folderId, sort: p.sort.key, order: p.sort.order, count: spanCount(listSpan, total) } : null);
+    setSpan(listSpan && listing && p.sort ? { ...listSpan, folder: listing, sort: p.sort.key, order: p.sort.order, count: spanCount(listSpan, total) } : null);
   };
   /** Ctrl+A: every item; in a large folder not all loaded, that is a span of the whole folder */
   const selectAll = () => {
-    if (list && !list.complete && p.folderId && p.sort) {
+    if (list && !list.complete && listing && p.sort) {
       setChosen(new Set());
-      setSpan({ folder: p.folderId, sort: p.sort.key, order: p.sort.order, except: new Set(), count: total });
+      setSpan({ folder: listing, sort: p.sort.key, order: p.sort.order, except: new Set(), count: total });
     } else setSelected(new Set(items.map((n) => n.id)));
   };
   /**
@@ -103,9 +105,9 @@ export function useExplorerState(p: ExplorerProps) {
   const canInvert = !span || whole;
   const invert = () => {
     if (whole) setSelected(new Set(span.except));
-    else if (list && !list.complete && p.folderId && p.sort) {
+    else if (list && !list.complete && listing && p.sort) {
       setChosen(new Set());
-      setSpan({ folder: p.folderId, sort: p.sort.key, order: p.sort.order, except: new Set(selected), count: total - selected.size });
+      setSpan({ folder: listing, sort: p.sort.key, order: p.sort.order, except: new Set(selected), count: total - selected.size });
     } else setSelected(new Set(items.filter((n) => !selected.has(n.id)).map((n) => n.id)));
   };
 

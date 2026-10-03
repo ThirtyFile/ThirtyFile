@@ -69,6 +69,7 @@ GitHub, Microsoft, Google, Keycloak, Authentik, Excel, Word, PowerPoint, NAS.
 | Recent                                        | 最近使用                 | 最近使用                 | 最近使ったファイル                        |
 | Favorites                                     | 收藏                     | 收藏                     | お気に入り                                |
 | tag (coloured label on files and folders)     | 標籤                     | 标签                     | タグ                                      |
+| smart folder (a saved search)                 | 智慧型資料夾             | 智能文件夹               | スマートフォルダー                        |
 | Trash                                         | 垃圾桶                   | 回收站                   | ごみ箱                                    |
 | storage location                              | 儲存位置                 | 存储位置                 | 保存場所                                  |
 | folder space                                  | 資料夾空間               | 文件夹空间               | フォルダースペース                        |
