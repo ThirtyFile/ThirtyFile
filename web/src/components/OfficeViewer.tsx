@@ -5,7 +5,7 @@ import { t } from "@/lib/i18n";
 import { reportShown } from "@/lib/errorReport";
 import { cancellable } from "@/lib/cancellable";
 import { frameDocument, loadFrameScript } from "@/components/officeFrame";
-import { extOf, errorMessage } from "@/lib/utils";
+import { cn, extOf, errorMessage } from "@/lib/utils";
 import SheetPreview from "@/components/sheet/SheetPreview";
 import { TOO_LARGE } from "@/ooxml/core/package";
 import { MAX_OFFICE_PREVIEW_BYTES, MAX_OFFICE_PREVIEW_LABEL } from "@/lib/officeLimits";
@@ -34,7 +34,14 @@ function viewError(e: unknown, fallback: string) {
 }
 
 function Status({ loading, error }: { loading: boolean; error: string | null }) {
-  if (error) return <div className="flex size-full items-center justify-center p-6 text-center text-sm text-destructive">{error}</div>;
+  // On a card of the theme's own background: behind it can be a spreadsheet's white sheet, the grey around a document,
+  // or the dark floating preview, against which the theme's red can't be read
+  if (error)
+    return (
+      <div className="flex size-full items-center justify-center p-6">
+        <p className="max-w-md rounded-xl border bg-background px-6 py-4 text-center text-sm text-destructive">{error}</p>
+      </div>
+    );
   if (loading)
     return (
       <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
@@ -140,7 +147,8 @@ function FramePreview({ node, source, kind }: { node: Node; source: FileSource; 
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every refresh of the list: its id and date say when the file changed
   }, [node.id, node.updated_at, source, kind, srcDoc]);
   return (
-    <div className="relative size-full overflow-hidden bg-neutral-200 dark:bg-neutral-800">
+    // Grey around the pages; not behind a message
+    <div className={cn("relative size-full overflow-hidden", !error && "bg-neutral-200 dark:bg-neutral-800")}>
       {!error && srcDoc && (
         <iframe
           // Use a fresh iframe on every reload, to be sure to receive the ready message
@@ -176,7 +184,8 @@ function XlsxPreview({ node, source }: { node: Node; source: FileSource }) {
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the node object is new after every refresh of the list: its id and date say when the file changed
   }, [node.id, node.updated_at, source]);
   return (
-    <div className="relative size-full bg-white">
+    // White like the sheet, which has its own colors; not behind a message
+    <div className={cn("relative size-full", !error && "bg-white")}>
       <Status loading={!buffer && !error} error={error} />
       {buffer && !error && <SheetPreview buffer={buffer} onError={(m) => setError(viewError(new ViewerError(m), t("Couldn't open this spreadsheet")))} />}
     </div>
