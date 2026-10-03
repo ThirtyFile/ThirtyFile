@@ -3,8 +3,11 @@
 import type { Node } from "@/api";
 import type { Group } from "@/lib/listView";
 
-/** "list" is Details and "grid" Large icons (the names they were saved under); "compact" is File Explorer's List */
-export type ViewMode = "list" | "grid" | "medium" | "compact" | "tiles";
+/**
+ * "list" is Details and "grid" Large icons (the names they were saved under); "compact" is File Explorer's List;
+ * "columns" is a column for each folder level (components/columns), each column a list of one item per row
+ */
+export type ViewMode = "list" | "grid" | "medium" | "compact" | "tiles" | "columns";
 /** An item of the list: a file or folder, with where it is in lists of several places */
 export type Item = Node & { location?: string };
 
@@ -18,8 +21,12 @@ export const TILED: Record<Exclude<ViewMode, "list">, { w: number; h: number; ga
   medium: { w: 88, h: 112, gap: 6 },
   tiles: { w: 250, h: 72, gap: 6 },
   compact: { w: 220, h: 26, gap: 2 },
+  // One to a row, as wide as the column
+  columns: { w: 0, h: 24, gap: 0 },
 };
 export const PAD = 12;
+/** The space around the items of an icon view (a column of the Columns view has less) */
+export const padOf = (view: ViewMode) => (view === "columns" ? 4 : PAD);
 /** Large icons on phones: the smallest width of an item */
 export const PHONE_GRID_W = 100;
 /** Icon views: height of a group's heading, with the space above it */

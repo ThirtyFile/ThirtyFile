@@ -1,6 +1,6 @@
 /** The view, sort and group choices, shared by the command bar's menus and the context menu's submenus (so both show the same state) */
 import type { SortKey, SortOrder } from "@/api";
-import { useStyleKit } from "@/components/style";
+import { useViews } from "@/components/style";
 import { DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import type { ViewMode } from "@/components/fileList/layout";
 import type { GroupBy } from "@/lib/listView";
@@ -46,9 +46,9 @@ export function SortChoices({ sort, onChange }: { sort: Sort; onChange(sort: Sor
   );
 }
 
-/** The views the style offers (components/style) */
+/** The views the style offers (components/style) on this screen */
 export function ViewChoices({ view, onChange }: { view: ViewMode; onChange(view: ViewMode): void }) {
-  const views = useStyleKit().views();
+  const views = useViews();
   return (
     <DropdownMenuRadioGroup value={view} onValueChange={(v) => onChange(v as ViewMode)}>
       {views.map(({ id, Icon, label }) => (

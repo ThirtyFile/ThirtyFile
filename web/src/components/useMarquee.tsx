@@ -41,6 +41,7 @@ function domHits(container: HTMLElement): HitTest {
 /**
  * Mouse marquee selection (like Windows File Explorer): hold the left button on empty space and drag to select every item in the box; with Ctrl held, toggle the boxed items.
  * Items are marked with `data-node-id` and count as selected when any part is boxed; in list view `data-drag-handle` (the name) is for drag-moving, so marquee doesn't start there.
+ * Nor does it start in what is marked `data-no-marquee` (the Columns view's other columns), or on the scroll bar of a box scrolling inside the container.
  * Put the returned props on the scrollable container (which must be position: relative) and render `<MarqueeBox store={box} />` inside it.
  * `measure` gives the list's own geometry (FileList renders only the rows in view); without it the items are measured in the DOM.
  */
@@ -163,10 +164,13 @@ export function useMarquee({
     const container = e.currentTarget;
     const target = e.target as HTMLElement;
     // Item names (drag-moving), icon-view items, buttons and inputs don't start a marquee
-    if (target.closest("[data-drag-handle], button, input, textarea, a, th, [data-node-id]:not(tr)")) return;
+    if (target.closest("[data-drag-handle], button, input, textarea, a, th, [data-node-id]:not(tr), [data-no-marquee]")) return;
     const r = container.getBoundingClientRect();
-    // Clicked on the scrollbar
+    // Clicked on the scrollbar (the container's, or that of a column scrolling in it)
     if (e.clientX >= r.left + container.clientWidth || e.clientY >= r.top + container.clientHeight) return;
+    const own = target.getBoundingClientRect();
+    const scrolls = target !== container && target.clientWidth > 0 && (target.scrollHeight > target.clientHeight || target.scrollWidth > target.clientWidth);
+    if (scrolls && (e.clientX >= own.left + target.clientLeft + target.clientWidth || e.clientY >= own.top + target.clientTop + target.clientHeight)) return;
     e.preventDefault(); // Don't select text
     const toggle = e.ctrlKey || e.metaKey;
     drag.current = {

@@ -36,7 +36,7 @@ const SETTLE_MS = 250;
  * `value` once it has stayed the same for `ms`: moving through a list with the arrow keys doesn't ask the server about
  * every item passed (a held key would send hundreds of requests). The first value is there at once.
  */
-function useSettled<T>(value: T, ms: number): T {
+export function useSettled<T>(value: T, ms: number): T {
   const [settled, setSettled] = useState(value);
   useEffect(() => {
     const timer = setTimeout(() => setSettled(value), ms);

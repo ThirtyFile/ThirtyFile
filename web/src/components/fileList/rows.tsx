@@ -1,7 +1,7 @@
 //! The file list's column headers, rows (Details view) and items (icon views)
 
 import { memo, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject, type FocusEvent, type TouchEvent } from "react";
-import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon } from "lucide-react";
 import type { FileSource, SortKey } from "@/api";
 import { FileIcon, typeLabel, typeTitle } from "@/components/FileIcon";
 import { cn, formatDateTime, formatWinSize } from "@/lib/utils";
@@ -284,12 +284,14 @@ export const Tile = memo(function Tile(r: RowProps & { view: Exclude<ViewMode, "
   const { item, view } = r;
   // The star and the tag dots
   const marks = hasMarks(item) && <ItemMarks item={item} large />;
+  /** A row of small icons and names: File Explorer's List, and a column of the Columns view */
+  const line = view === "compact" || view === "columns";
   // Space selects with the keyboard, so the check box isn't a Tab stop of its own
   const checkbox = r.checkboxes && (
     <input
       type="checkbox"
       tabIndex={-1}
-      className={cn("size-4 shrink-0 accent-brand", view !== "compact" && "absolute top-1.5 left-1.5")}
+      className={cn("size-4 shrink-0 accent-brand", !line && "absolute top-1.5 left-1.5")}
       aria-label={t("Select {name}", { name: item.name })}
       checked={r.selected}
       onClick={(e) => e.stopPropagation()}
@@ -298,8 +300,9 @@ export const Tile = memo(function Tile(r: RowProps & { view: Exclude<ViewMode, "
     />
   );
   let body: ReactNode;
-  if (view === "compact") {
-    // List: a small icon and the name, the items side by side in columns
+  if (line) {
+    // List: a small icon and the name, the items side by side in columns. Columns: the same, one to a row, and folders
+    // with an arrow (they open in the next column)
     body = (
       <>
         {checkbox}
@@ -312,6 +315,7 @@ export const Tile = memo(function Tile(r: RowProps & { view: Exclude<ViewMode, "
           </span>
         )}
         {marks}
+        {view === "columns" && item.kind === "folder" && <ChevronRightIcon aria-hidden className="ml-auto size-3.5 shrink-0 text-muted-foreground" />}
       </>
     );
   } else if (view === "tiles") {
@@ -366,7 +370,7 @@ export const Tile = memo(function Tile(r: RowProps & { view: Exclude<ViewMode, "
       title={item.name}
       className={cn(
         "relative min-w-0 rounded-md border border-transparent outline-none select-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring aria-selected:border-brand aria-selected:bg-selection",
-        view === "compact" ? "flex items-center gap-2 px-1.5 text-xs" : view === "tiles" ? "flex items-center gap-2.5 p-2" : "text-center",
+        line ? "flex items-center gap-2 px-1.5 text-xs" : view === "tiles" ? "flex items-center gap-2.5 p-2" : "text-center",
         view === "grid" ? "p-2" : view === "medium" && "p-1.5",
         r.dropping && "border-brand bg-brand/10",
         r.dimmed && "opacity-50",

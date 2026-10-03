@@ -3,15 +3,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import type { ListNav } from "@/components/FileList";
-import type { ViewMode } from "@/components/fileList/layout";
 import { useClipboard } from "@/lib/clipboard";
 import { capsOf } from "@/lib/drives";
+import { takeArrival } from "@/lib/columns";
+import { openMenuByKey } from "@/lib/contextMenus";
 import { focusIsFree } from "@/lib/focus";
 import type { GroupBy } from "@/lib/listView";
 import { inSpan, spanCount, type FolderSpan, type ListSpan, type Picked } from "@/lib/span";
 import { usePersisted, useMe } from "@/lib/session";
 import { useUndoLabel } from "@/lib/undo";
-import { useStyleKit } from "@/components/style";
+import { useStyleKit, useView } from "@/components/style";
 import { useTabActions } from "@/tabs";
 import type { DialogState } from "./types";
 import { arrange, notLoaded, useNewItems } from "./newItems";
@@ -26,9 +27,8 @@ export function useExplorerState(p: ExplorerProps) {
   const tabs = useTabActions();
   /** The parts of the interface style in use (components/style) */
   const kit = useStyleKit();
-  const [kept, setView] = usePersisted<ViewMode>("tf-view", kit.defaultView);
-  /** A view kept from before that the style doesn't offer: the style's own */
-  const view = kit.views().some((v) => v.id === kept) ? kept : kit.defaultView;
+  /** A view kept from before that the style doesn't offer (or not on this screen): the style's own */
+  const [view, setView] = useView();
   const [groupBy, setGroupBy] = usePersisted<GroupBy>("tf-group", "none");
   const [selected, setChosen] = useState<Set<string>>(new Set());
   /** A large folder: what is selected without being loaded (Select all, or Shift across parts not loaded; lib/span) */
@@ -124,13 +124,27 @@ export function useExplorerState(p: ExplorerProps) {
   /** The folder shown before this one (the folder id is unknown for a moment while the next folder loads) */
   const lastFolder = useRef(p.folderId);
   const cameFrom = useRef<string | undefined>(undefined);
+  /** The Columns view went to another column: on arriving, its first item is selected (the folder's id), or a menu opens */
+  const selectFirst = useRef<string | null>(null);
+  const focusOnArrival = useRef(false);
+  const menuOnArrival = useRef<{ x: number; y: number } | null>(null);
   useEffect(() => {
     setSelected(new Set());
     setAnchor(null);
-    if (p.folderId && p.folderId !== lastFolder.current) {
+    // The Columns view says what to select in the folder it went to (lib/columns), in place of the folder came from
+    const arrived = p.folderId ? takeArrival(p.folderId) : null;
+    if (arrived) {
+      cameFrom.current = arrived.select;
+      selectFirst.current = arrived.first ? p.folderId! : null;
+      focusOnArrival.current = !!arrived.focus;
+      menuOnArrival.current = arrived.menuAt ?? null;
+    } else if (p.folderId && p.folderId !== lastFolder.current) {
       cameFrom.current = lastFolder.current;
-      lastFolder.current = p.folderId;
+      selectFirst.current = null;
+      focusOnArrival.current = false;
+      menuOnArrival.current = null;
     }
+    if (p.folderId) lastFolder.current = p.folderId;
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the folder id is part of the place
   }, [place]);
   // A span is a part of the folder in one order: sorted another way, it would be other items
@@ -140,6 +154,13 @@ export function useExplorerState(p: ExplorerProps) {
   // goes to it too when it was lost with the list (Alt+Up, Backspace), not when it's on a button that was clicked
   const locating = useRef<string | null>(null);
   useEffect(() => {
+    const first = selectFirst.current;
+    if (first && first === p.folderId && !p.loading) {
+      selectFirst.current = null;
+      const item = (p.list?.at ?? p.items)[0];
+      if (item) arrive(item.id);
+      return;
+    }
     const id = cameFrom.current;
     if (!id) return;
     if (!p.items.some((n) => n.id === id)) {
@@ -154,12 +175,25 @@ export function useExplorerState(p: ExplorerProps) {
       return;
     }
     cameFrom.current = undefined;
+    arrive(id);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- runs as items load; the list is read as it is then
+  }, [p.items, p.loading]);
+  /** Selects the item arrived at, and shows it */
+  const arrive = (id: string) => {
     setSelected(new Set([id]));
     setAnchor(id);
-    const focus = !document.activeElement || document.activeElement === document.body;
-    setTimeout(() => listNav.current?.show(id, focus));
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- runs as items load; the list is read as it is then
-  }, [p.items]);
+    const focus = focusOnArrival.current || !document.activeElement || document.activeElement === document.body;
+    const menuAt = menuOnArrival.current;
+    focusOnArrival.current = false;
+    menuOnArrival.current = null;
+    setTimeout(() => {
+      listNav.current?.show(id, focus);
+      const row = menuAt && area.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
+      if (row) openMenuByKey(row, menuAt);
+    });
+  };
+  /** Something is still to be selected on arriving in this folder (the folder came from, or the first item) */
+  const arriving = () => !!cameFrom.current || !!selectFirst.current;
   /** An item just made in a part of a large folder not loaded: renamed once that part has loaded (actions' createNew) */
   const renameWhenShown = useRef<{ id: string; name: string } | null>(null);
   useEffect(() => {
@@ -202,6 +236,7 @@ export function useExplorerState(p: ExplorerProps) {
     undoLabel,
     enteredByKey,
     renameWhenShown,
+    arriving,
     canCreate,
     canUpload,
     selectedNodes,

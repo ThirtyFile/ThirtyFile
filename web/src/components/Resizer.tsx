@@ -18,6 +18,8 @@ export function Resizer(props: {
   measure?(handle: HTMLElement): number;
   /** Double-click: instead of going back to `defaultWidth` */
   onReset?(): void;
+  /** Not a Tab stop (reached another way: the Columns view's handles of the columns other than the open folder's) */
+  untabbable?: boolean;
 }) {
   // The drag in progress, if the panel goes away mid-drag (the listeners and the page cursor would otherwise stay)
   const release = useRef<(() => void) | null>(null);
@@ -32,7 +34,7 @@ export function Resizer(props: {
       aria-valuenow={props.width}
       aria-valuemin={props.min}
       aria-valuemax={props.max}
-      tabIndex={0}
+      tabIndex={props.untabbable ? -1 : 0}
       className={cn(
         // A bar where it is when it has the keyboard focus (the mouse only changes the cursor)
         "absolute inset-y-0 z-10 w-1.5 cursor-col-resize rounded-full outline-none focus-visible:bg-brand max-md:hidden",

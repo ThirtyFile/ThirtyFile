@@ -6,12 +6,14 @@ import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/component
 import { Skeleton } from "@/components/ui/skeleton";
 import { DetailsPane } from "@/components/DetailsPane";
 import { ItemError } from "@/components/ErrorState";
-import { FileList } from "@/components/FileList";
+import { FileList, type FileListProps } from "@/components/FileList";
+import { ColumnsView } from "@/components/columns/ColumnsView";
 import { MarqueeBox, useMarquee, type MeasureHits } from "@/components/useMarquee";
 import { Frame, type Crumb } from "@/components/Frame";
 import { setClipboard } from "@/lib/clipboard";
 import { t } from "@/lib/i18n";
 import type { SparseList } from "@/lib/windows";
+import type { Trail } from "@/lib/columns";
 import { formatBytes } from "@/lib/utils";
 import { filesFromInput, uploadFiles } from "@/uploads";
 import { useExplorerState } from "./explorer/state";
@@ -62,6 +64,11 @@ export interface ExplorerProps {
   role?: Role;
   /** Current folder node (shown in the details pane when nothing is selected) */
   folder?: Node;
+  /**
+   * A folder's page: the folders from the top of its location down to it, which the Columns view shows a column each
+   * of (null while the folder loads). Lists that aren't a folder's leave it out.
+   */
+  trail?: Trail | null;
   empty?: ReactNode;
 }
 
@@ -101,6 +108,39 @@ export function Explorer(p: ExplorerProps) {
   const phone = useMediaQuery("(max-width: 47.99rem)");
   const dimmed = useMemo(() => (clip?.mode === "cut" ? new Set(clip.ids) : undefined), [clip]);
   const clipCount = clip ? (clip.count ?? clip.ids.length) : 0;
+  const listProps: FileListProps = {
+    items: s.shown,
+    onShow: p.list?.show,
+    view,
+    source: privateSource,
+    selected,
+    span: s.span,
+    anchor,
+    onSelect: (next, at, span) => {
+      s.choose(next, span);
+      if (at !== undefined) setAnchor(at);
+    },
+    onSelectAll: s.selectAll,
+    onOpen: open,
+    onOpenInNewTab: (n) => tabs.open(n.kind === "folder" ? `/files/${n.id}` : `/view/${n.id}`, { reuse: n.kind === "file" }),
+    sort: p.sort,
+    onSort: p.onSort,
+    groupBy: s.groupBy,
+    groupReversed: s.groupBy === "date" ? p.sort?.key === "updated" && p.sort.order === "asc" : s.groupBy === "type" && p.sort?.key === "type" && p.sort.order === "desc",
+    showLocation: p.showLocation,
+    showOwner: p.showOwner,
+    showCheckboxes,
+    touchMenu: !phone,
+    dimmed,
+    measureRef: measure,
+    navRef: s.listNav,
+    onDropInto: caps.write && p.folderId ? dropInto : undefined,
+    onUploadInto: s.canUpload ? uploadInto : undefined,
+    renamingId: dialog?.t === "rename" ? dialog.node.id : null,
+    onRename: a.renameItem,
+    onRenameDone: a.renameDone,
+    onClickRename: s.kit.clickToRename && caps.write ? (n) => setDialog({ t: "rename", node: n }) : undefined,
+  };
   const footer = (
     <>
       {/* Not "0 items" while the folder loads */}
@@ -171,7 +211,10 @@ export function Explorer(p: ExplorerProps) {
             {...marquee.containerProps}
           >
             <MarqueeBox store={marquee.box} />
-            {p.loading ? (
+            {view === "columns" ? (
+              // Shows its own columns loading, or that they couldn't be loaded
+              <ColumnsView p={p} s={s} a={a} list={listProps} />
+            ) : p.loading ? (
               <div className="grid gap-1.5 p-3">
                 {Array.from({ length: 8 }, (_, i) => (
                   <Skeleton key={i} className="h-6 w-full" />
@@ -181,37 +224,7 @@ export function Explorer(p: ExplorerProps) {
               <ItemError error={p.error} kind="folder" onRetry={a.refresh} />
             ) : (
               <FileList
-                items={s.shown}
-                onShow={p.list?.show}
-                view={view}
-                source={privateSource}
-                selected={selected}
-                span={s.span}
-                anchor={anchor}
-                onSelect={(next, at, span) => {
-                  s.choose(next, span);
-                  if (at !== undefined) setAnchor(at);
-                }}
-                onSelectAll={s.selectAll}
-                onOpen={open}
-                onOpenInNewTab={(n) => tabs.open(n.kind === "folder" ? `/files/${n.id}` : `/view/${n.id}`, { reuse: n.kind === "file" })}
-                sort={p.sort}
-                onSort={p.onSort}
-                groupBy={s.groupBy}
-                groupReversed={s.groupBy === "date" ? p.sort?.key === "updated" && p.sort.order === "asc" : s.groupBy === "type" && p.sort?.key === "type" && p.sort.order === "desc"}
-                showLocation={p.showLocation}
-                showOwner={p.showOwner}
-                showCheckboxes={showCheckboxes}
-                touchMenu={!phone}
-                dimmed={dimmed}
-                measureRef={measure}
-                navRef={s.listNav}
-                onDropInto={caps.write && p.folderId ? dropInto : undefined}
-                onUploadInto={s.canUpload ? uploadInto : undefined}
-                renamingId={dialog?.t === "rename" ? dialog.node.id : null}
-                onRename={a.renameItem}
-                onRenameDone={a.renameDone}
-                onClickRename={s.kit.clickToRename && caps.write ? (n) => setDialog({ t: "rename", node: n }) : undefined}
+                {...listProps}
                 empty={
                   p.empty ?? (
                     <div className="flex min-h-52 flex-col items-center justify-center gap-2 py-10 text-muted-foreground">

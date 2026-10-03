@@ -120,7 +120,8 @@ export function windowsToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerAc
           <ViewChoices view={view} onChange={setView} />
           <DropdownMenuSeparator />
           <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
+            {/* The Columns view doesn't group */}
+            <DropdownMenuSubTrigger disabled={view === "columns"}>
               <GroupIcon /> {t("Group by")}
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="w-44">

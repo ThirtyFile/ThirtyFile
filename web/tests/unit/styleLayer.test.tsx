@@ -4,8 +4,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, test } from "vitest";
-import { kits, StyleKitContext, type StyleKit } from "@/components/style";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { kits, StyleKitContext, useView, useViews, type StyleKit } from "@/components/style";
 import { windowsKit } from "@/components/style/windows";
 import { WINDOWS_KEYS } from "@/components/style/windows/keys";
 import { openShortcuts, ShortcutsHost } from "@/components/ShortcutsDialog";
@@ -138,6 +138,13 @@ describe("the Windows style's keys", () => {
       }
   });
 
+  test("Left and Right go from column to column in the Columns view, without Alt (Back and Forward)", () => {
+    expect(pressed(press("ArrowLeft"), WINDOWS_KEYS.previousColumn)).toBe(true);
+    expect(pressed(press("ArrowRight"), WINDOWS_KEYS.nextColumn)).toBe(true);
+    expect(pressed(press("ArrowLeft", { altKey: true }), WINDOWS_KEYS.previousColumn)).toBe(false);
+    expect(pressed(press("ArrowRight", { shiftKey: true }), WINDOWS_KEYS.nextColumn)).toBe(false);
+  });
+
   test("every action has keys", () => {
     expect(Object.entries(WINDOWS_KEYS).filter(([, keys]) => !keys.length)).toEqual([]);
   });
@@ -150,8 +157,15 @@ describe("the kits", () => {
     expect(READY_STYLES).not.toContain("mac");
   });
 
-  test("the Windows style offers File Explorer's views, Details first in the status bar", () => {
-    expect(windowsKit.views().map((v) => v.id)).toEqual(["grid", "medium", "compact", "list", "tiles"]);
+  test("the Windows style offers File Explorer's views and Columns, Details first in the status bar", () => {
+    expect(windowsKit.views().map((v) => v.id)).toEqual(["grid", "medium", "compact", "list", "tiles", "columns"]);
+    // Phones show one folder level at a time already
+    expect(
+      windowsKit
+        .views()
+        .filter((v) => v.notOnPhones)
+        .map((v) => v.id),
+    ).toEqual(["columns"]);
     expect(windowsKit.defaultView).toBe("list");
     expect(windowsKit.statusViews).toEqual(["list", "grid"]);
   });
@@ -159,6 +173,31 @@ describe("the kits", () => {
   test("the shortcuts dialog lists only actions with keys", () => {
     const rows = windowsKit.shortcuts().groups.flatMap((g) => g.rows);
     expect(rows.filter((row) => !keysOf(windowsKit.keys, row.actions)).map((row) => row.label)).toEqual([]);
+  });
+});
+
+describe("the views offered on a screen", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** The views offered, and the view shown when Columns was chosen, on a phone or a wider screen */
+  function offered(phone: boolean) {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: phone && query.includes("max-width"), addEventListener() {}, removeEventListener() {} }));
+    localStorage.setItem("tf-view", JSON.stringify("columns"));
+    const seen = { ids: [] as string[], view: "" };
+    function Probe() {
+      seen.ids = useViews().map((v) => v.id);
+      seen.view = useView()[0];
+      return null;
+    }
+    const r = createRoot(document.createElement("div"));
+    act(() => r.render(<Probe />));
+    act(() => r.unmount());
+    return seen;
+  }
+
+  test("Columns is offered on wider screens, not on phones, which show the style's own view instead", () => {
+    expect(offered(false)).toEqual({ ids: ["grid", "medium", "compact", "list", "tiles", "columns"], view: "columns" });
+    expect(offered(true)).toEqual({ ids: ["grid", "medium", "compact", "list", "tiles"], view: "list" });
   });
 });
 
@@ -225,6 +264,7 @@ describe("the shortcuts dialog", () => {
     expect(shown).toContain("Shift+Delete = Delete permanently");
     expect(shown).toContain("Enter = Open");
     expect(shown).toContain("F2 = Rename");
+    expect(shown).toContain("← / → = In the Columns view: back to the column before, or on to the column of the selected folder");
     expect(shown).toHaveLength(windowsKit.shortcuts().groups.reduce((n, g) => n + g.rows.length, 0));
   });
 

@@ -52,6 +52,8 @@ export interface ViewChoice {
   id: ViewMode;
   Icon: LucideIcon;
   label: string;
+  /** Not offered on phones (the Columns view: the phone layout already shows one folder level at a time) */
+  notOnPhones?: boolean;
 }
 
 /** The icon of each kind of file; `table` is for CSV and TSV files */
