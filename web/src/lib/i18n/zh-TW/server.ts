@@ -214,6 +214,15 @@ export default {
     "一次最多只能下載 {n} 個項目，請改為下載它們所在的資料夾，或減少選取的項目",
   "This download link has expired. Start the download again.": "下載連結已過期，請重新下載",
   "{path}: file size mismatch": "{path}: 檔案大小不符",
+  // Tags (tags.rs)
+  "Enter a name for the tag": "請輸入標籤名稱",
+  "A tag's name can be at most {n} characters": "標籤名稱最多 {n} 個字元",
+  "A tag's name can't contain control characters": "標籤名稱不可包含控制字元",
+  "Choose one of the tag colors": "請選擇標籤顏色",
+  "You already have a tag named \"{name}\"": "你已經有名為「{name}」的標籤",
+  "Tag not found": "找不到標籤",
+  "You can have at most {n} tags": "最多只能有 {n} 個標籤",
+  "Change at most {n} tags at once": "一次最多只能變更 {n} 個標籤",
   // Uploads (upload.rs)
   "Missing Upload-Length": "缺少 Upload-Length",
   "The file exceeds the upload size limit": "檔案超過上傳大小限制",

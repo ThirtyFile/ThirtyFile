@@ -214,6 +214,15 @@ export default {
     "一次最多只能下载 {n} 个项目，请改为下载它们所在的文件夹，或减少选择的项目",
   "This download link has expired. Start the download again.": "下载链接已过期，请重新下载",
   "{path}: file size mismatch": "{path}：文件大小不符",
+  // Tags (tags.rs)
+  "Enter a name for the tag": "请输入标签名称",
+  "A tag's name can be at most {n} characters": "标签名称最多 {n} 个字符",
+  "A tag's name can't contain control characters": "标签名称不能包含控制字符",
+  "Choose one of the tag colors": "请选择标签颜色",
+  "You already have a tag named \"{name}\"": "你已经有名为“{name}”的标签",
+  "Tag not found": "找不到标签",
+  "You can have at most {n} tags": "最多只能有 {n} 个标签",
+  "Change at most {n} tags at once": "一次最多只能更改 {n} 个标签",
   // Uploads (upload.rs)
   "Missing Upload-Length": "缺少 Upload-Length",
   "The file exceeds the upload size limit": "文件超过上传大小上限",

@@ -338,6 +338,8 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
         .execute(&mut *tx)
         .await?;
         tree::add_blob_refs(&mut tx, &blobs).await?;
+        // The copies get the copier's tags of the originals (each person's tags are their own)
+        crate::tags::copy_tags(&mut tx, user.id, ids.iter().map(|(from, to)| (from.as_str(), to.as_str()))).await?;
         logs::record_activity(&mut tx, &user, Some(&nodes[0]), "copy", &format!("→ {}", if dest.parent_id.is_none() { "Root folder" } else { &dest.name })).await?;
     }
     tree::adjust_usage(&mut tx, dest.drive(), total).await?;

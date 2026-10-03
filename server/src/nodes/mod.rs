@@ -93,7 +93,7 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
     let drive = tree::get_drive(&mut c, node.drive()).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
     let (path, via_share) = visible_path(&mut c, &user, &node).await?;
     let location = paths::location_of(&mut c, &user, &node).await?;
-    tree::mark_favorites(&mut c, user.id, [&mut node]).await?;
+    tree::mark_own(&mut c, user.id, [&mut node]).await?;
     let is_root = node.parent_id.is_none();
     // A folder space is offline with its location (a disk that may not be mounted); a folder an administrator chose
     // is on no location
@@ -191,7 +191,7 @@ pub struct SpaceRef {
 /// Attaches each node's location (space name + path) and marks favorites
 async fn locate(st: &AppState, user: &User, mut nodes: Vec<Node>) -> AppResult<Vec<Located>> {
     let mut c = st.db.acquire().await?;
-    tree::mark_favorites(&mut c, user.id, &mut nodes).await?;
+    tree::mark_own(&mut c, user.id, &mut nodes).await?;
     let mut drives: HashMap<String, SpaceRef> =
         tree::user_drives(&mut c, user).await?.into_iter().map(|(d, _)| (d.id, SpaceRef { kind: d.kind, name: d.name })).collect();
     if user.is_admin() && nodes.iter().any(|n| !drives.contains_key(n.drive())) {
@@ -701,6 +701,7 @@ mod tests {
                 min_size: None,
                 max_size: None,
                 owner: None,
+                tags: None,
             };
             async move {
                 let Json(r) = search(State(st), amy, Query(q)).await.unwrap();

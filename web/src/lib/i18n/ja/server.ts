@@ -214,6 +214,15 @@ export default {
     "一度にダウンロードできる項目は {n} 個までです。項目があるフォルダーをダウンロードするか、選択する項目を減らしてください",
   "This download link has expired. Start the download again.": "このダウンロードリンクは期限切れです。もう一度ダウンロードしてください",
   "{path}: file size mismatch": "{path}：ファイルサイズが一致しません",
+  // Tags (tags.rs)
+  "Enter a name for the tag": "タグの名前を入力してください",
+  "A tag's name can be at most {n} characters": "タグの名前は {n} 文字以内にしてください",
+  "A tag's name can't contain control characters": "タグの名前に制御文字は使用できません",
+  "Choose one of the tag colors": "タグの色を選択してください",
+  "You already have a tag named \"{name}\"": "「{name}」という名前のタグは既にあります",
+  "Tag not found": "タグが見つかりません",
+  "You can have at most {n} tags": "タグは最大 {n} 個までです",
+  "Change at most {n} tags at once": "一度に変更できるタグは {n} 個までです",
   // Uploads (upload.rs)
   "Missing Upload-Length": "Upload-Length がありません",
   "The file exceeds the upload size limit": "ファイルがアップロードのサイズ上限を超えています",

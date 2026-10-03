@@ -335,7 +335,7 @@ pub async fn unlock(
 pub(super) fn public_node_json(node: &Node) -> serde_json::Value {
     let mut v = serde_json::to_value(node).unwrap();
     if let Some(o) = v.as_object_mut() {
-        for key in ["parent_id", "drive_id", "owner_name", "trashed_at", "is_favorite"] {
+        for key in ["parent_id", "drive_id", "owner_name", "trashed_at", "is_favorite", "tags"] {
             o.remove(key);
         }
     }

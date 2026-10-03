@@ -734,6 +734,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_database_from_0_4_0_takes_tags_that_go_with_their_items_and_people() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-040-tags-{}", crate::util::new_id()));
+        let path = dir.join("drive.db");
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'amy', 'x', 0), (2, 'ben', 'x', 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO nodes (id, owner_id, kind, name, created_at, updated_at) VALUES ('n', 1, 'file', 'a.txt', 0, 0), ('m', 1, 'file', 'b.txt', 0, 0)")
+            .execute(&db)
+            .await
+            .unwrap();
+        db.close().await;
+
+        let db = connect(&path, 16).await.unwrap();
+        let tag = async |owner: i64, name: &str, color: &str| -> Result<i64, sqlx::Error> {
+            sqlx::query_scalar("INSERT INTO tags (owner_id, name, color, created_at) VALUES (?, ?, ?, 0) RETURNING id")
+                .bind(owner)
+                .bind(name)
+                .bind(color)
+                .fetch_one(&db)
+                .await
+        };
+        let urgent = tag(1, "Été", "red").await.unwrap();
+        // Names are a person's own, without counting letter case; colours come from the palette
+        assert!(tag(1, "éTÉ", "blue").await.is_err());
+        let bens = tag(2, "été", "blue").await.unwrap();
+        assert!(tag(1, "Pink", "pink").await.is_err());
+        let assign = async |node: &str, tag: i64, owner: i64| {
+            sqlx::query("INSERT INTO tagged (node_id, tag_id, owner_id, created_at) VALUES (?, ?, ?, 0)").bind(node).bind(tag).bind(owner).execute(&db).await
+        };
+        assign("n", urgent, 1).await.unwrap();
+        assign("m", urgent, 1).await.unwrap();
+        assign("n", bens, 2).await.unwrap();
+        // An assignment is its tag owner's: it can't be filed under someone else
+        assert!(assign("m", bens, 1).await.is_err());
+        let count = async || -> i64 { sqlx::query_scalar("SELECT COUNT(*) FROM tagged").fetch_one(&db).await.unwrap() };
+        // They go with the item, and with the person
+        sqlx::query("DELETE FROM nodes WHERE id = 'm'").execute(&db).await.unwrap();
+        assert_eq!(count().await, 2);
+        sqlx::query("DELETE FROM users WHERE id = 2").execute(&db).await.unwrap();
+        assert_eq!(count().await, 1);
+        let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM tags").fetch_one(&db).await.unwrap();
+        assert_eq!(left, 1);
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn a_database_from_0_4_0_keeps_what_the_replicas_page_shows() {
         let dir = std::env::temp_dir().join(format!("thirtyfile-040-replica-counts-{}", crate::util::new_id()));
         let path = dir.join("drive.db");
