@@ -1051,6 +1051,25 @@ fn watched(st: &AppState, drive_id: &str) -> bool {
     }
 }
 
+/// The actual discovery policy, shared by the scanner and the administrator's space list. Zero disables scheduled
+/// scans, but refresh-on-open still works for spaces without reliable watching.
+#[derive(serde::Serialize)]
+pub struct FolderChanges {
+    pub watching: bool,
+    pub scan_minutes: i64,
+}
+
+pub fn changes(st: &AppState, drive_id: &str) -> FolderChanges {
+    let watching = watched(st, drive_id);
+    let minutes = st.system.read().unwrap().scan_minutes;
+    FolderChanges { watching, scan_minutes: if watching { minutes.saturating_mul(WATCHED_SCAN_FACTOR) } else { minutes } }
+}
+
+fn scan_due(st: &AppState, drive_id: &str, last: i64, at: i64) -> bool {
+    let minutes = changes(st, drive_id).scan_minutes;
+    minutes > 0 && last <= at.saturating_sub(minutes.saturating_mul(60))
+}
+
 /// Scans every folder space whose last scan is older than the interval set in the Control panel (0 = never)
 pub fn spawn_scanner(st: AppState) {
     tokio::spawn(async move {
@@ -1074,7 +1093,7 @@ pub fn spawn_scanner(st: AppState) {
                 };
             for (id, last) in due {
                 // Watched spaces only need the regular scan for what watching can miss
-                if watched(&st, &id) && last > now() - minutes * 60 * WATCHED_SCAN_FACTOR {
+                if !scan_due(&st, &id, last, now()) {
                     continue;
                 }
                 if let Err(e) = scan(&st, &id).await {
@@ -1600,6 +1619,23 @@ mod tests {
     use super::*;
     use crate::testutil::{self, write_old};
     use axum::extract::{Path as UrlPath, Query, State};
+
+    #[tokio::test]
+    async fn fallback_scans_use_the_normal_interval_and_respect_disabled_scans() {
+        let env = testutil::env().await;
+        let at = now();
+        assert!(!scan_due(&env.st, "unwatched", at - 899, at));
+        assert!(scan_due(&env.st, "unwatched", at - 900, at));
+        #[cfg(target_os = "linux")]
+        {
+            env.st.part::<crate::watch::Memory>().watched.lock().unwrap().insert("watched".into());
+            assert!(!scan_due(&env.st, "watched", at - 900, at));
+            assert!(scan_due(&env.st, "watched", at - 3600, at));
+        }
+        env.st.system.write().unwrap().scan_minutes = 0;
+        assert!(!scan_due(&env.st, "unwatched", 0, at));
+        assert!(!scan_due(&env.st, "watched", 0, at));
+    }
 
     #[tokio::test]
     async fn opening_a_folder_doesnt_wait_for_a_change_in_its_space_nor_read_it_again_right_away() {

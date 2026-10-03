@@ -188,6 +188,8 @@ export interface Drive {
   source_path?: string;
   last_scan_at?: number | null;
   scan_report?: ScanReport | null;
+  /** External change discovery and the effective scheduled scan interval (0 disables scheduled scans) */
+  folder_changes?: { watching: boolean; scan_minutes: number };
   /** A scan running now */
   scanning?: { phase: "reading" | "indexing"; found: number; done: number; total: number; started_at: number };
 }
