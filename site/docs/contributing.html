@@ -97,17 +97,18 @@
           </li>
           <li><strong>Make the change</strong>, and run the checks below.</li>
           <li><strong>Open a pull request.</strong> Give it a title that says what changes in plain words, and one label. Write <code>Closes #123</code> in the description to close the issue when it is merged.</li>
-          <li><strong>Wait for the checks.</strong> The tests must pass before it can be merged.</li>
+          <li><strong>Wait for the checks.</strong> The lightweight <strong>Checks passed</strong> gate must pass before it can be merged.</li>
           <li><strong>Merge.</strong> The pull request becomes one commit on <code>main</code>, and its branch is deleted.</li>
         </ol>
 
         <h2 id="checks">Checks</h2>
-        <p>Run them before opening a pull request, with one script. The tests on GitHub run the same script.</p>
+        <p>Run the full checks locally before opening a pull request, with one script. Releases and manual full verification run these checks too; automatic pull-request checks are lighter.</p>
         <pre><code>scripts/check.sh</code></pre>
         <div class="table-scroll">
           <table>
             <thead><tr><th>Part</th><th>Checks</th></tr></thead>
             <tbody>
+              <tr><td><code>scripts/check.sh quick</code></td><td>Automatic pull-request checks: frontend formatting, translations, module boundaries, end-to-end test structure, types and lint; Rust formatting; migration numbering and unchanged released migrations; website links. No unit/browser tests, Rust compilation or image build</td></tr>
               <tr><td><code>scripts/check.sh web</code></td><td>The interface: dependencies as locked, formatting (<code>pnpm format:check</code>), translations (<code>node scripts/check-i18n.mjs</code>), that the Office code in <code>web/src/ooxml</code> imports nothing else from the app (<code>node scripts/check-boundaries.mjs</code>), that the end-to-end tests have no fixed waits and no names without a random part (<code>node scripts/check-e2e.mjs</code>), types, lint and unit tests. With <code>scripts/check.sh web --coverage</code>, as on GitHub, the unit tests also fail when they cover less than the floor in <code>web/vitest.config.ts</code></td></tr>
               <tr><td><code>scripts/check.sh server</code></td><td>The server: formatting (<code>cargo fmt --check</code>), <code>cargo test</code>, and <code>cargo clippy</code> with warnings as errors</td></tr>
               <tr><td><code>scripts/check.sh e2e</code></td><td>The end-to-end test: signs in, uploads and previews files in a real browser (Playwright), against a server built from the repository. The tests run several at a time (4 on GitHub), so each one works in a folder of its own, gives names a random part, and waits for the server's answer after a change rather than a fixed time: the helpers in <code>web/tests/e2e/helpers.ts</code> do this. The first time, get the browser with <code>cd web &amp;&amp; pnpm exec playwright install chromium</code></td></tr>
@@ -115,7 +116,7 @@
             </tbody>
           </table>
         </div>
-        <p>On Windows, run it in Git Bash. On GitHub, the known security problems of the dependencies are checked too (<code>cargo deny</code> and <code>pnpm audit</code>), and the server's tests and the end-to-end test together must cover at least 90% of the server's lines (<code>cargo llvm-cov</code>, the floor in <code>.github/workflows/build.yml</code>).</p>
+        <p>On Windows, run it in Git Bash. During full verification on GitHub, known security problems of the dependencies are checked too (<code>cargo deny</code> and <code>pnpm audit</code>), and the server's tests and the end-to-end test together must cover at least 90% of the server's lines (<code>cargo llvm-cov</code>, the floor in <code>.github/workflows/build.yml</code>).</p>
         <p>The code is formatted by tools, and the checks fail when it isn't. Format it before committing:</p>
         <pre><code>cd server &amp;&amp; cargo fmt
 cd web &amp;&amp; pnpm format</code></pre>
@@ -129,7 +130,7 @@ cd web &amp;&amp; pnpm format</code></pre>
           <li>The database structure of 0.4.0 is fixed, so that data made by a release keeps working. A change to the structure goes into a new migration file, <code>server/migrations/0002_&lt;name&gt;.sql</code> and up, that upgrades a 0.4.0 database; <code>0001_init.sql</code> and the files of earlier releases are never edited, and the checks fail when they are.</li>
           <li>Logic that changes people's files (formulas, saving workbooks, text encodings) gets unit tests in <code>web/tests/unit/</code>.</li>
         </ul>
-        <p>Every pull request runs the tests, and so does every merge into <code>main</code>. A change that only touches the website or the guides skips them. A change to how the image is built or started (the <code>Dockerfile</code>, the lock files, <code>compose.yaml</code>…) also builds the image for amd64 and arm64, without publishing it, and starts each with <code>compose.yaml</code> on data made by the latest release. CodeQL scans <code>main</code> every week and before each release. Merging into <code>main</code> publishes nothing, not even the website: the guides are published with each release, so they describe what people can install. A fix to the guides that is true of the released version too can be published by hand: <strong>Actions › Website › Run workflow</strong> with <code>main</code> as the branch or tag to publish.</p>
+        <p>Every pull request runs the lightweight checks above. Full tests and image builds run before releases and pre-releases, or by hand through <strong>Actions › Build › Run workflow</strong>; manual verification publishes nothing. Both image architectures are started with <code>compose.yaml</code> on data made by the latest release before publication. CodeQL scans <code>main</code> after merges, every week and before each release. Merging into <code>main</code> publishes nothing, not even the website: the guides are published with each release, so they describe what people can install. A fix to the guides that is true of the released version too can be published by hand: <strong>Actions › Website › Run workflow</strong> with <code>main</code> as the branch or tag to publish.</p>
 
         <h2 id="translations">The website in other languages</h2>
         <p>The website is in English, with a few pages also in Traditional Chinese, Simplified Chinese and Japanese. Those are the pages a newcomer needs to decide and get started:</p>
