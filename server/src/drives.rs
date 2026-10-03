@@ -54,6 +54,10 @@ pub struct DriveInfo {
     /// Folder spaces, for administrators: the scan running now
     #[serde(skip_serializing_if = "Option::is_none")]
     scanning: Option<crate::folders::ScanProgress>,
+    /// Folder spaces, for administrators: whether external changes use watching or refresh-on-open, and the actual
+    /// scheduled scan interval (zero means no scheduled scans).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    folder_changes: Option<crate::folders::FolderChanges>,
 }
 
 async fn drive_info(st: &AppState, conn: &mut SqliteConnection, d: Drive, role: Option<Role>, admin: bool) -> AppResult<DriveInfo> {
@@ -112,6 +116,7 @@ async fn drive_infos(
             last_scan_at: r.last_scan_at.filter(|_| details),
             scan_report: r.scan_report.filter(|_| details).and_then(|r| serde_json::from_str(&r).ok()).map(|r| crate::folders::report_for(r, private)),
             scanning: if details { crate::folders::progress(st, &d.id) } else { None },
+            folder_changes: details.then(|| crate::folders::changes(st, &d.id)),
             used_bytes: d.used_bytes,
             id: d.id,
             name: d.name,
@@ -767,6 +772,21 @@ pub async fn delete_group(State(st): State<AppState>, Admin(user): Admin, Path(i
 mod tests {
     use super::*;
     use crate::testutil;
+
+    #[tokio::test]
+    async fn folder_discovery_policy_is_reported_to_administrators_without_leaking_paths() {
+        let env = testutil::folders_env().await;
+        let admin = env.admin().await;
+        let Json(spaces) = admin_list(State(env.st.clone()), Admin(admin.clone())).await.unwrap();
+        let own = spaces.iter().find(|d| d.root_id == admin.root()).unwrap();
+        let info = serde_json::to_value(own).unwrap();
+        assert_eq!(info["folder_changes"], json!({ "watching": false, "scan_minutes": 15 }));
+        env.st.system.write().unwrap().scan_minutes = 0;
+        let Json(spaces) = admin_list(State(env.st.clone()), Admin(admin.clone())).await.unwrap();
+        assert_eq!(serde_json::to_value(&spaces[0]).unwrap()["folder_changes"]["scan_minutes"], 0);
+        let Json(accessible) = list(State(env.st.clone()), admin).await.unwrap();
+        assert!(accessible.iter().all(|d| serde_json::to_value(d).unwrap().get("folder_changes").is_none()));
+    }
 
     #[tokio::test]
     async fn checking_a_folder_space_answers_with_its_report_or_runs_on_as_a_job() {
