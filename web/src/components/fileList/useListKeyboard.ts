@@ -4,7 +4,7 @@
 import { useLayoutEffect, useRef, type KeyboardEvent, type RefObject } from "react";
 import type { Virtualizer } from "@tanstack/react-virtual";
 import type { FileListProps } from "@/components/FileList";
-import { HEAD, ROW, type Item, type Layout, type TILED } from "@/components/fileList/layout";
+import { HEAD, type Item, type Layout } from "@/components/fileList/layout";
 import { pageRows } from "@/lib/listView";
 import { findByPrefix } from "@/lib/keys";
 import { isMenuKey, menuPointOf, openMenuByKey } from "@/lib/contextMenus";
@@ -31,7 +31,6 @@ export interface ListKeyboard {
   across: boolean;
   /** The items are laid out across, one after another (the Gallery view's strip): a page is as many as fit across */
   sideways?: boolean;
-  tile: (typeof TILED)[keyof typeof TILED] | null;
   scroller: HTMLElement | null;
   focusId: string | null;
   setFocusId(id: string | null): void;
@@ -43,7 +42,7 @@ export interface ListKeyboard {
  * The list's keyboard handling: `keyNav` for a row's keys, `toggle` and `rangeTo` for clicks with Ctrl and Shift too,
  * and `focusItem`. Also answers the explorer's `navRef` (typing to find an item, showing one).
  */
-export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, root, grid, pad, across, sideways, tile, scroller, focusId, setFocusId, tabStop }: ListKeyboard) {
+export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, root, grid, pad, across, sideways, scroller, focusId, setFocusId, tabStop }: ListKeyboard) {
   const pendingFocus = useRef<string | null>(null);
   /** The style's keys (components/style) */
   const k = useStyleKit().keys;
@@ -148,7 +147,7 @@ export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, 
   const page = (index: number, dir: 1 | -1) => {
     const whole = scroller === document.documentElement || !scroller;
     const view = sideways ? (whole ? window.innerWidth : scroller.clientWidth) : whole ? window.innerHeight : scroller.clientHeight;
-    const rowHeight = tile ? (sideways ? tile.w : tile.h) + tile.gap : ROW;
+    const rowHeight = layout.row(rowOf(index)).size;
     let at = index;
     for (let k = pageRows(view - (grid ? pad : HEAD), rowHeight); k > 0; k--) {
       const next = vertical(at, dir);

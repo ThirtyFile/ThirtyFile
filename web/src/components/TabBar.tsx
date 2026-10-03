@@ -1,4 +1,5 @@
 import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useSingleMacTab } from "@/components/style/mac/windowPrefs";
 import {
   CircleIcon,
   ClockIcon,
@@ -174,6 +175,7 @@ function TabItem({ tab, active, onlyOne }: { tab: Tab; active: boolean; onlyOne:
 }
 
 export function TabBar() {
+  const singleMac = useSingleMacTab();
   const { tabs, active } = useTabsState();
   const { open, activate, close } = useTabActions();
   // Keyboard: Tab reaches the active tab, Left/Right (Home/End) switch to the others, Delete closes it
@@ -186,7 +188,10 @@ export function TabBar() {
       close(active);
       // The tab that takes its place gets the focus (not when closing waits for an answer about unsaved changes)
       requestAnimationFrame(() => {
-        if (!document.querySelector("[role=dialog], [role=alertdialog]")) bar.querySelector<HTMLElement>("[role=tab][aria-selected=true]")?.focus();
+        if (!document.querySelector("[role=dialog], [role=alertdialog]")) {
+          const target = bar.isConnected ? bar.querySelector<HTMLElement>("[role=tab][aria-selected=true]") : document.getElementById(MAIN_ID);
+          target?.focus();
+        }
       });
       return;
     }
@@ -201,6 +206,8 @@ export function TabBar() {
     const items = e.currentTarget.querySelectorAll<HTMLElement>("[role=tab]");
     items[next]?.focus();
   };
+  // Tab shortcuts live in AppShell, even when the strip has nothing to distinguish.
+  if (singleMac) return null;
   // The tabs take up to 220px each and shrink together; "New tab" follows them, outside the list of tabs
   return (
     <div className="flex h-10 shrink-0 items-end overflow-x-auto bg-sidebar px-2 pt-2" onDoubleClick={(e) => e.target === e.currentTarget && open()}>

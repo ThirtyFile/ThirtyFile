@@ -2,7 +2,8 @@
 
 import { DropdownMenuCheckboxItem, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { privateSource, type SortKey } from "@/api";
-import { columnShown, resetColumns, showColumn, useColumnPrefs, type ColumnId } from "@/lib/listView";
+import { columnShown, resetColumns, showColumn, useColumnPrefs, useColumnScope, type ColumnId } from "@/lib/listView";
+import { useStyleKit } from "@/components/style";
 import { t } from "@/lib/i18n";
 import type { FileListProps } from "@/components/FileList";
 
@@ -17,13 +18,14 @@ export interface ListColumn {
  * The Details view's columns a list can show besides the name, in order (shown or not, see lib/listView.ts). Tags are
  * the signed-in person's: not offered to visitors of a share link (a list of another `source`)
  */
-export function listColumns(p: Pick<FileListProps, "showLocation" | "showOwner" | "extraColumn" | "dateLabel"> & { source?: FileListProps["source"] }): ListColumn[] {
+export function listColumns(p: Pick<FileListProps, "showLocation" | "showOwner" | "extraColumn" | "dateLabel"> & { source?: FileListProps["source"] }, mac = false): ListColumn[] {
   const out: ListColumn[] = [];
   if (p.showLocation) out.push({ id: "location", label: t("Location") });
   out.push({ id: "date", label: p.dateLabel ?? t("Date modified"), sort: "updated" });
   out.push({ id: "created", label: t("Date created"), sort: "created" });
-  out.push({ id: "type", label: t("Type"), sort: "type" });
+  if (!mac) out.push({ id: "type", label: t("Type"), sort: "type" });
   out.push({ id: "size", label: t("Size"), sort: "size" });
+  if (mac) out.push({ id: "type", label: t("Kind"), sort: "type" });
   if (p.showOwner) out.push({ id: "owner", label: t("Uploaded by") });
   // The person's own tags, with their names (as File Explorer's Tags column)
   if (!p.source || p.source === privateSource) out.push({ id: "tags", label: t("Tags") });
@@ -33,19 +35,21 @@ export function listColumns(p: Pick<FileListProps, "showLocation" | "showOwner" 
 
 /** Menu items choosing the columns (the column headers' context menu, and View › Columns) */
 export function ColumnChoices({ columns }: { columns: ListColumn[] }) {
-  const prefs = useColumnPrefs();
+  const scope = useColumnScope();
+  const prefs = useColumnPrefs(scope);
+  const mac = useStyleKit().id === "mac";
   return (
     <>
       <DropdownMenuCheckboxItem checked disabled>
         {t("Name")}
       </DropdownMenuCheckboxItem>
       {columns.map((c) => (
-        <DropdownMenuCheckboxItem key={c.id} checked={columnShown(prefs, c.id)} onCheckedChange={(on) => showColumn(c.id, on)} closeOnClick>
+        <DropdownMenuCheckboxItem key={c.id} checked={columnShown(prefs, c.id, mac)} onCheckedChange={(on) => showColumn(c.id, on, scope)} closeOnClick>
           {c.label}
         </DropdownMenuCheckboxItem>
       ))}
       <DropdownMenuSeparator />
-      <DropdownMenuItem onClick={resetColumns}>{t("Restore default columns")}</DropdownMenuItem>
+      <DropdownMenuItem onClick={() => resetColumns(scope)}>{t("Restore default columns")}</DropdownMenuItem>
     </>
   );
 }

@@ -1,5 +1,10 @@
 /** Simplified Chinese translations: explorer frame, navigation pane, address bar, command bar and context menus, file list, tab bar, share dialog, recent/favorites/search/trash pages */
 export default {
+  "Navigation": "导航",
+  "View options": "视图选项",
+  "Show path bar": "显示路径栏",
+  "Show status bar": "显示状态栏",
+
   // components/Frame.tsx
   "Collapse": "折叠",
   "Expand": "展开",
@@ -35,7 +40,6 @@ export default {
   "Shared": "共享",
   "Icons": "图标",
   "Gallery": "画廊",
-  "Sort and group": "排序与分组",
   "Actions": "操作",
   "Get info": "显示简介",
   "Sign out": "退出登录",

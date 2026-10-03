@@ -27,7 +27,19 @@ export interface Crumb {
   virtual?: boolean;
 }
 
-export function SearchInput({ placeholder, onSearch, within, inputRef }: { placeholder: string; onSearch?: (q: string) => void; within?: string; inputRef?: React.Ref<HTMLInputElement> }) {
+export function SearchInput({
+  placeholder,
+  onSearch,
+  within,
+  inputRef,
+  className,
+}: {
+  placeholder: string;
+  onSearch?: (q: string) => void;
+  within?: string;
+  inputRef?: React.Ref<HTMLInputElement>;
+  className?: string;
+}) {
   const navigate = useNavigate();
   const location = useLocation();
   const [params] = useSearchParams();
@@ -68,7 +80,7 @@ export function SearchInput({ placeholder, onSearch, within, inputRef }: { place
   };
 
   return (
-    <div className="relative max-sm:w-full">
+    <div className={cn("relative max-sm:w-full", className)}>
       <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-[13px] -translate-y-1/2 text-muted-foreground" />
       <Input
         ref={inputRef}

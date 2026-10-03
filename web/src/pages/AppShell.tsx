@@ -6,6 +6,7 @@ import { SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useQueryClient } from "@tanstack/react-query";
 import { TabBar } from "@/components/TabBar";
+import { useSingleMacTab } from "@/components/style/mac/windowPrefs";
 import { NotificationBell } from "@/components/NotificationBell";
 import { UploadPanel } from "@/components/UploadPanel";
 import { DownloadPanel } from "@/components/DownloadPanel";
@@ -22,6 +23,7 @@ import { t, tServer } from "@/lib/i18n";
 import { takeSsoError } from "@/lib/signInReturn";
 
 export function AppShell() {
+  const singleMac = useSingleMacTab();
   const me = useMe();
   const qc = useQueryClient();
   const location = useLocation();
@@ -87,16 +89,18 @@ export function AppShell() {
         {t("Skip to main content")}
       </a>
       {/* The page's banner: its tabs and notifications */}
-      <header className="flex shrink-0 bg-sidebar">
-        <div className="min-w-0 flex-1">
+      {!singleMac && (
+        <header className="flex shrink-0 bg-sidebar">
+          <div className="min-w-0 flex-1">
+            <ErrorBoundary>
+              <TabBar />
+            </ErrorBoundary>
+          </div>
           <ErrorBoundary>
-            <TabBar />
+            <NotificationBell />
           </ErrorBoundary>
-        </div>
-        <ErrorBoundary>
-          <NotificationBell />
-        </ErrorBoundary>
-      </header>
+        </header>
+      )}
       <div className="min-h-0 flex-1">
         {/* An error in one page only affects the content area; the tab bar and upload panel keep working */}
         <ErrorBoundary resetKey={location.pathname}>

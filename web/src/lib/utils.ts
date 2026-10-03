@@ -79,7 +79,8 @@ const tidy = (s: string) =>
     .trim();
 
 /** A date and time: 10/2/2026 2:44 PM. `timeZone` writes it as the clock there shows it (default: the browser's) */
-export function formatDateTime(ts: number, timeZone?: string): string {
+export function formatDateTime(ts: number, timeZone?: string, style: "short" | "long" = "short"): string {
+  if (style === "long") return dateFormat({ dateStyle: "long", timeStyle: "short" }, timeZone).format(new Date(ts * 1000));
   return tidy(dateFormat({ ...DATE, ...TIME }, timeZone).format(new Date(ts * 1000)));
 }
 

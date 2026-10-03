@@ -10,6 +10,10 @@
 :root[data-style="mac"] {
   /* Type and spacing */
   --tf-list-text: 0.8125rem;
+  --tf-list-row-h: 28px;
+  --mac-list-text: 0.75rem;
+  --mac-list-leading: 16px;
+  --mac-list-stripe: #00000005;
   --tf-list-leading: 1.125rem;
   --tf-name-text: 0.75rem;
   --mac-nav-text: 0.8125rem;
@@ -96,6 +100,7 @@
 }
 
 :root.dark[data-style="mac"] {
+  --mac-list-stripe: #ffffff05;
   --tf-row-hover: #ffffff0d;
   --tf-sel-bg: #1f5fc9;
   --tf-sel-fg: #ffffff;
@@ -152,10 +157,45 @@
 
 .tf-mac-sidebar {
   background-color: var(--mac-sidebar-bg);
-  border-inline-end: 1px solid var(--mac-sidebar-edge);
+  border: 1px solid var(--mac-sidebar-edge);
   -webkit-backdrop-filter: blur(var(--mac-sidebar-blur)) saturate(1.6);
   backdrop-filter: blur(var(--mac-sidebar-blur)) saturate(1.6);
   color: var(--mac-nav-fg);
+}
+
+.tf-finder-list {
+  font-size: var(--mac-list-text);
+  line-height: var(--mac-list-leading);
+}
+
+/* Absolute positions keep the stripe stable through virtual gaps and expanded folders. */
+.tf-finder-list [data-stripe="odd"]:not([aria-selected="true"]):not(:hover):not([data-dropping="true"]) > td {
+  background-color: var(--mac-list-stripe);
+}
+
+.tf-finder-list input:not([type="checkbox"]) {
+  height: 17px;
+  padding-block: 0;
+}
+
+.tf-mac-capsule {
+  border-radius: 999px;
+  background-color: var(--mac-seg-bg);
+  box-shadow: inset 0 0 0 1px var(--mac-sidebar-edge);
+}
+
+.tf-mac-toolbar .tf-mac-search {
+  width: clamp(100px, 15vw, 180px);
+}
+.tf-mac-toolbar .tf-mac-search input {
+  width: 100%;
+  border-radius: 999px;
+  background-color: var(--mac-seg-bg);
+}
+
+/* The notification button also lives in the toolbar when there is only one tab. */
+.tf-mac-toolbar > button {
+  margin: 0;
 }
 
 /* The Mac style's own symbols (./symbols.ts) are drawn thinner than the shared ones */

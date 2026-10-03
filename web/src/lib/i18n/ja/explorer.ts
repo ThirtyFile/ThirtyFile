@@ -1,5 +1,10 @@
 /** Japanese translations: explorer frame, navigation pane, address bar, command bar and context menus, file list, tab bar, share dialog, recent/favorites/search/trash pages */
 export default {
+  "Navigation": "ナビゲーション",
+  "View options": "表示オプション",
+  "Show path bar": "パスバーを表示",
+  "Show status bar": "ステータスバーを表示",
+
   // components/Frame.tsx
   "Collapse": "折りたたむ",
   "Expand": "展開",
@@ -35,7 +40,6 @@ export default {
   "Shared": "共有",
   "Icons": "アイコン",
   "Gallery": "ギャラリー",
-  "Sort and group": "並べ替えとグループ",
   "Actions": "アクション",
   "Get info": "情報を見る",
   "Sign out": "サインアウト",

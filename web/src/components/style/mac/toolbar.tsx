@@ -3,9 +3,12 @@
  * Share, and an actions menu with what can be done here and with the items selected. Back, forward and the search box
  * are the frame's. Phones get the toolbar every style shares (the Windows style's).
  */
-import type { ReactNode } from "react";
+import { useContext, type ReactNode } from "react";
 import {
   ClipboardPasteIcon,
+  ChevronDownIcon,
+  LayoutGridIcon,
+  TagIcon,
   Columns3Icon,
   CopyIcon,
   DownloadIcon,
@@ -29,9 +32,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -43,7 +44,7 @@ import { groupable } from "@/components/fileList/layout";
 import { ToolButton } from "@/components/frame/ToolButton";
 import { openShortcuts } from "@/components/ShortcutsDialog";
 import { useViews } from "@/components/style";
-import { TagSubmenu } from "@/components/tags";
+import { TagSubmenu, TagMenuItems } from "@/components/tags";
 import type { ExplorerProps } from "@/components/Explorer";
 import type { ExplorerActions } from "@/components/explorer/actions";
 import type { ExplorerState } from "@/components/explorer/state";
@@ -56,32 +57,63 @@ import { windowsToolbar } from "../windows/toolbar";
 import { openGoToFolder } from "./pathBar";
 import { useMacSymbols } from "./look";
 import { openQuickLook } from "./quickLook";
+import { CompactToolbar, useMacWindowPrefs } from "./windowPrefs";
 
 export function macToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerActions, newItems: ReactNode) {
   return <MacToolbar p={p} s={s} a={a} newItems={newItems} />;
 }
 
 /** An icon button of the toolbar: square, its size and look the style's (--tf-tool-*, art/mac.css) */
-const icon = "w-(--tf-tool-h) px-0";
+const icon = "tf-mac-capsule w-(--tf-tool-h) shrink-0 px-0";
 
 function MacToolbar({ p, s, a, newItems }: { p: ExplorerProps; s: ExplorerState; a: ExplorerActions; newItems: ReactNode }) {
+  const compact = useContext(CompactToolbar);
   const phone = useMediaQuery("(max-width: 47.99rem)");
   if (phone) return windowsToolbar(p, s, a, newItems);
   return (
     <>
-      <ViewSwitcher s={s} />
-      <SortAndGroup p={p} s={s} />
-      <ShareMenu s={s} />
+      <ViewSwitcher p={p} s={s} />
+      {!compact && (
+        <>
+          <SortMenu p={p} />
+          <GroupMenu s={s} />
+          <ShareMenu s={s} />
+          <TagsMenu s={s} />
+        </>
+      )}
       <ActionsMenu p={p} s={s} a={a} newItems={newItems} />
     </>
   );
 }
 
 /** The views side by side, the one shown pressed */
-function ViewSwitcher({ s }: { s: ExplorerState }) {
+function ViewSwitcher({ p, s }: { p: ExplorerProps; s: ExplorerState }) {
   const views = useViews();
+  const compact = useContext(CompactToolbar);
+  const ActiveIcon = views.find((v) => v.id === s.view)?.Icon ?? LayoutGridIcon;
+  if (compact)
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <ToolButton icon={ActiveIcon} label={t("View")} className="tf-mac-capsule shrink-0 px-2">
+              <ChevronDownIcon className="size-3!" />
+            </ToolButton>
+          }
+        />
+        <DropdownMenuContent className="w-56">
+          {views.map(({ id, Icon, label }) => (
+            <DropdownMenuCheckboxItem key={id} checked={s.view === id} onCheckedChange={() => s.setView(id)} closeOnClick>
+              <Icon /> {label}
+            </DropdownMenuCheckboxItem>
+          ))}
+          <DropdownMenuSeparator />
+          <ViewOptions p={p} s={s} />
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
   return (
-    <div role="group" aria-label={t("View")} className="mr-1 flex items-center rounded-(--tf-tool-radius) bg-(--mac-seg-bg) p-0.5">
+    <div role="group" aria-label={t("View")} className="tf-mac-capsule flex shrink-0 items-center p-0.5">
       {views.map(({ id, Icon, label }) => (
         <Button
           key={id}
@@ -98,48 +130,106 @@ function ViewSwitcher({ s }: { s: ExplorerState }) {
           <Icon />
         </Button>
       ))}
+      <DropdownMenu>
+        <DropdownMenuTrigger render={<ToolButton icon={ChevronDownIcon} label={t("View options")} className="w-5 px-0" />} />
+        <DropdownMenuContent className="w-56">
+          <ViewOptions p={p} s={s} />
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
 
-/** How the items are sorted, then grouped (the Columns and Gallery views don't group) */
-function SortAndGroup({ p, s }: { p: ExplorerProps; s: ExplorerState }) {
+/** Sorting and grouping are independent controls. */
+function SortMenu({ p }: { p: ExplorerProps }) {
   const sym = useMacSymbols();
   if (!p.sort || !p.onSortChange) return null;
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<ToolButton icon={sym.sort} label={t("Sort and group")} className={icon} />} />
+      <DropdownMenuTrigger render={<ToolButton icon={sym.sort} label={t("Sort by")} className={icon} />} />
       <DropdownMenuContent className="w-52">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>{t("Sort by")}</DropdownMenuLabel>
-          <SortChoices sort={p.sort} onChange={p.onSortChange} />
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger disabled={!groupable(s.view)}>{t("Group by")}</DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="w-44">
-            <GroupChoices groupBy={s.groupBy} onChange={s.setGroupBy} />
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
+        <SortChoices sort={p.sort} onChange={p.onSortChange} />
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+function GroupMenu({ s }: { s: ExplorerState }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <ToolButton icon={LayoutGridIcon} label={t("Group by")} disabled={!groupable(s.view)} className="tf-mac-capsule shrink-0 gap-0.5 px-2">
+            <ChevronDownIcon className="size-3!" />
+          </ToolButton>
+        }
+      />
+      <DropdownMenuContent className="w-44">
+        <GroupChoices groupBy={s.groupBy} onChange={s.setGroupBy} />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function TagsMenu({ s }: { s: ExplorerState }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<ToolButton icon={TagIcon} label={t("Tags")} disabled={s.count === 0} className={icon} />} />
+      <DropdownMenuContent className="max-h-80 w-56 overflow-y-auto">
+        <TagMenuItems nodes={s.selectedNodes} picked={s.picked} />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function ViewOptions({ p, s }: { p: ExplorerProps; s: ExplorerState }) {
+  const [bars, setBars] = useMacWindowPrefs();
+  return (
+    <>
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger disabled={s.view !== "list"}>
+          <Columns3Icon /> {t("Columns")}
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className="w-52">
+          <ColumnChoices columns={listColumns(p, true)} />
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+      <DropdownMenuCheckboxItem checked={bars.path} onCheckedChange={(path) => setBars({ ...bars, path })} closeOnClick>
+        {t("Show path bar")}
+      </DropdownMenuCheckboxItem>
+      <DropdownMenuCheckboxItem checked={bars.status} onCheckedChange={(status) => setBars({ ...bars, status })} closeOnClick>
+        {t("Show status bar")}
+      </DropdownMenuCheckboxItem>
+      <DropdownMenuCheckboxItem checked={s.detailsOpen} onCheckedChange={s.setDetailsOpen} closeOnClick>
+        <PanelRightIcon /> {t("Details pane")}
+      </DropdownMenuCheckboxItem>
+    </>
+  );
+}
+
+function ShareChoices({ s }: { s: ExplorerState }) {
+  const { single, caps, setDialog } = s;
+  return (
+    <>
+      <DropdownMenuItem disabled={!single} onClick={() => single && setDialog({ t: "access", nodeId: single.id })}>
+        <UsersRoundIcon /> {t("Share with…")}
+      </DropdownMenuItem>
+      <DropdownMenuItem disabled={!single || !caps.share} onClick={() => single && setDialog({ t: "share", node: single })}>
+        <Share2Icon /> {t("Create share link")}
+      </DropdownMenuItem>
+    </>
   );
 }
 
 /** Sharing the item selected: with people, or with a link */
 function ShareMenu({ s }: { s: ExplorerState }) {
   const sym = useMacSymbols();
-  const { single, caps, setDialog } = s;
+  const { single } = s;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger render={<ToolButton icon={sym.share} label={t("Share")} className={icon} disabled={!single} />} />
       <DropdownMenuContent className="w-48">
-        <DropdownMenuItem onClick={() => single && setDialog({ t: "access", nodeId: single.id })}>
-          <UsersRoundIcon /> {t("Share with…")}
-        </DropdownMenuItem>
-        <DropdownMenuItem disabled={!caps.share} onClick={() => single && setDialog({ t: "share", node: single })}>
-          <Share2Icon /> {t("Create share link")}
-        </DropdownMenuItem>
+        <ShareChoices s={s} />
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -147,7 +237,8 @@ function ShareMenu({ s }: { s: ExplorerState }) {
 
 /** What can be made here, then what can be done with the items selected, then the window's own settings */
 function ActionsMenu({ p, s, a, newItems }: { p: ExplorerProps; s: ExplorerState; a: ExplorerActions; newItems: ReactNode }) {
-  const { caps, single, allFavorite, setDialog, detailsOpen, setDetailsOpen, view } = s;
+  const { caps, single, allFavorite, setDialog, setDetailsOpen } = s;
+  const compact = useContext(CompactToolbar);
   const none = s.count === 0;
   const k = s.kit.keys;
   const sym = useMacSymbols();
@@ -217,16 +308,35 @@ function ActionsMenu({ p, s, a, newItems }: { p: ExplorerProps; s: ExplorerState
           <SquareCheckIcon /> {t("Select all")} <Kbd>{k.selectAll[0]}</Kbd>
         </DropdownMenuItem>
         <DropdownMenuSub>
-          <DropdownMenuSubTrigger disabled={view !== "list"}>
-            <Columns3Icon /> {t("Columns")}
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="w-52">
-            <ColumnChoices columns={listColumns(p)} />
+          <DropdownMenuSubTrigger>{t("View")}</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-56">
+            <ViewOptions p={p} s={s} />
           </DropdownMenuSubContent>
         </DropdownMenuSub>
-        <DropdownMenuCheckboxItem checked={detailsOpen} onCheckedChange={(on) => setDetailsOpen(on)} closeOnClick>
-          <PanelRightIcon /> {t("Details pane")}
-        </DropdownMenuCheckboxItem>
+        {compact && (
+          <>
+            {p.sort && p.onSortChange && (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>{t("Sort by")}</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-52">
+                  <SortChoices sort={p.sort} onChange={p.onSortChange} />
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            )}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger disabled={!groupable(s.view)}>{t("Group by")}</DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-44">
+                <GroupChoices groupBy={s.groupBy} onChange={s.setGroupBy} />
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger disabled={!single}>{t("Share")}</DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-48">
+                <ShareChoices s={s} />
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          </>
+        )}
         <DropdownMenuItem onClick={openShortcuts}>
           <KeyboardIcon /> {t("Keyboard shortcuts")} <Kbd>{k.shortcuts[0]}</Kbd>
         </DropdownMenuItem>
