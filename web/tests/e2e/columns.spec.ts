@@ -85,7 +85,8 @@ test("folders open in columns to the right, Left and Right go between them, and 
   await item(page, topName, "Beta").click();
   await page.waitForURL(`**/files/${top}`);
   await expect(item(page, topName, "Beta")).toHaveAttribute("aria-selected", "true");
-  await expect(column(page, "Beta")).toContainText("This folder is empty.");
+  // An empty folder's column isn't a list: a group named after it, which says it is empty
+  await expect(page.getByRole("group", { name: "Beta", exact: true })).toContainText("This folder is empty.");
   await expect(column(page, "Alpha")).toHaveCount(0);
 });
 

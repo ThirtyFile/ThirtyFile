@@ -288,9 +288,9 @@ function Column({
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- once the column has loaded, and when another folder opens next to it
   }, [open, next, ready]);
 
-  // Still a list named after its folder, with nothing in it
+  // Named after its folder, but not a list: a list box may hold only its items, not a message
   const empty = (
-    <div role="listbox" aria-label={label} className="px-3 py-4 text-xs text-muted-foreground">
+    <div role="group" aria-label={label} className="px-3 py-4 text-xs text-muted-foreground">
       {t("This folder is empty.")}
     </div>
   );
