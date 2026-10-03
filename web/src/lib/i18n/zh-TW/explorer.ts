@@ -30,7 +30,6 @@ export default {
   "Automatic (Windows style on this device)": "自動（這部裝置使用 Windows 風格）",
   "Windows style": "Windows 風格",
   "Mac style": "Mac 風格",
-  "Mac style (coming soon)": "Mac 風格（即將推出）",
   // The Mac style (components/style/mac): its sidebar, toolbar and menus
   "All favorites": "所有收藏",
   "Shared": "共用",

@@ -219,6 +219,22 @@ describe("commands over a span of a large folder", () => {
     expect(hooks().a.canPaste).toBe(true);
   });
 
+  test("a span copied and then moved here (the Mac style) moves batch by batch, and the clipboard empties", async () => {
+    const s = server();
+    await selectAll();
+    await act(async () => hooks().a.copy());
+    await act(async () => hooks().go("dest"));
+    await act(() => hooks().a.moveHere());
+    expect(s.copy).not.toHaveBeenCalled();
+    expect(s.move.mock.calls.map(([ids, dest]) => [ids.length, dest])).toEqual([
+      [1000, "dest"],
+      [1000, "dest"],
+      [500, "dest"],
+    ]);
+    expect(toast.success).toHaveBeenCalledWith("Moved 2,500 items");
+    expect(hooks().a.canPaste).toBe(false);
+  });
+
   test("moving a span with Move to goes batch by batch, never into a folder it holds", async () => {
     const s = server();
     await selectAll();

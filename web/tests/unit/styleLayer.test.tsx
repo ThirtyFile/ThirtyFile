@@ -146,15 +146,18 @@ describe("the Windows style's keys", () => {
   });
 
   test("every action has keys, but those of features the style doesn't have", () => {
-    expect(Object.entries(WINDOWS_KEYS).filter(([, keys]) => !keys.length)).toEqual([["quickLook", []]]);
+    expect(Object.entries(WINDOWS_KEYS).filter(([, keys]) => !keys.length)).toEqual([
+      ["moveHere", []],
+      ["quickLook", []],
+    ]);
   });
 });
 
 describe("the kits", () => {
-  test("every style that is ready has one; the others get the Windows style's", () => {
+  test("every style is ready, with a kit of its own", () => {
     for (const style of READY_STYLES) expect(kits()[style]?.id).toBe(style);
     expect(STYLE_CHOICES).toContain("mac");
-    expect(READY_STYLES).not.toContain("mac");
+    expect(READY_STYLES).toEqual(["windows", "mac"]);
   });
 
   test("the Windows style offers File Explorer's views and Columns, Details first in the status bar", () => {

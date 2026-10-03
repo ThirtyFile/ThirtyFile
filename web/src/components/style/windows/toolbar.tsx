@@ -65,7 +65,14 @@ export function windowsToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerAc
       {/* Phones: what works on the selected items is in the bar that shows below the list while items are selected (and
           in its menu), so the toolbar keeps to one row; Paste stays while there is something to paste */}
       <ToolSeparator className="max-md:hidden" />
-      <ToolButton icon={ScissorsIcon} label={t("Cut")} title={`${t("Cut")} (${shortcut(k.cut[0])})`} className={cn(icon, phoneHidden)} disabled={none || !caps.write} onClick={cut} />
+      <ToolButton
+        icon={ScissorsIcon}
+        label={t("Cut")}
+        title={k.cut.length ? `${t("Cut")} (${shortcut(k.cut[0])})` : t("Cut")}
+        className={cn(icon, phoneHidden)}
+        disabled={none || !caps.write}
+        onClick={cut}
+      />
       <ToolButton icon={CopyIcon} label={t("Copy")} title={`${t("Copy")} (${shortcut(k.copy[0])})`} className={cn(icon, phoneHidden)} disabled={none} onClick={copy} />
       <ToolButton
         icon={ClipboardPasteIcon}

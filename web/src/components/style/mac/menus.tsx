@@ -4,7 +4,7 @@
  * how items are sorted and grouped
  */
 import { Fragment, type ReactNode } from "react";
-import { ArrowDownUpIcon, CopyIcon, EyeIcon, GroupIcon, InfoIcon, LayoutListIcon, PencilIcon, Trash2Icon, Undo2Icon } from "lucide-react";
+import { ArrowDownUpIcon, CopyIcon, EyeIcon, FolderInputIcon, GroupIcon, InfoIcon, LayoutListIcon, PencilIcon, Trash2Icon, Undo2Icon } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from "@/components/ui/dropdown-menu";
 import { sections, type MenuEntries } from "@/components/explorer/menus";
 import { Kbd } from "@/components/explorer/ui";
@@ -65,6 +65,11 @@ export function macMenu(m: MenuEntries): ReactNode {
     [canCreate && <Fragment key="new">{m.newItems}</Fragment>],
     [
       m.pasteItem,
+      canCreate && (
+        <DropdownMenuItem key="move-here" disabled={!a.canPaste} onClick={() => void a.moveHere()}>
+          <FolderInputIcon /> {t("Move here")} <Kbd>{k.moveHere[0]}</Kbd>
+        </DropdownMenuItem>
+      ),
       s.undoLabel && (
         <DropdownMenuItem key="undo" onClick={() => undoLast()}>
           <Undo2Icon /> {s.undoLabel} <Kbd>{k.undo[0]}</Kbd>

@@ -276,7 +276,8 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
   };
   const copy = () => {
     if (!s.count) return;
-    setClipboard({ mode: "copy", ids: selectedIds, span: s.span, count: s.count });
+    // Where the items are, for undoing a "Move here" (the Mac style's way of moving them)
+    setClipboard({ mode: "copy", ids: selectedIds, span: s.span, count: s.count, origins: originsOf(selectedNodes, selectedIds, "") });
     toast(t("{n} item copied|{n} items copied", { n: s.count }));
   };
   const canPaste = !!clip && canCreate;
@@ -289,6 +290,14 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     } else {
       await transfer("copy", picked, p.folderId, (n) => t("Pasted {n} item|Pasted {n} items", { n }), t("Couldn't paste"));
     }
+  };
+
+  /** The Mac style's "Move here": the items copied (or cut) are moved into this folder, with the same questions about names */
+  const moveHere = async () => {
+    if (!clip || !p.folderId) return;
+    const picked: Picked = { ids: clip.ids, span: clip.span ?? null, count: clip.count ?? clip.ids.length };
+    const moved = await transfer("move", picked, p.folderId, (n) => t("Moved {n} item|Moved {n} items", { n }), t("Couldn't move"), clip.origins ?? new Map());
+    if (moved) setClipboard(null);
   };
 
   /** Shift+Delete: delete for good without going through the trash, after asking */
@@ -363,10 +372,14 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       else if (pressed(e, k.paste) && canPaste) {
         e.preventDefault();
         paste();
+      } else if (pressed(e, k.moveHere) && canPaste) {
+        e.preventDefault();
+        void moveHere();
       } else if (pressed(e, k.selectAll)) {
         e.preventDefault();
         s.selectAll();
       } else if (pressed(e, k.details)) {
+        e.preventDefault();
         setDetailsOpen(true);
       } else if (pressed(e, k.undo)) {
         // Take back the last move, rename or delete
@@ -384,6 +397,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         e.preventDefault();
         setDialog({ t: "rename", node: single });
       } else if (pressed(e, k.open) && single) {
+        e.preventDefault();
         open(single, true);
       } else if (isMenuKey(e, k.menu)) {
         e.preventDefault();
@@ -456,6 +470,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     copy,
     canPaste,
     paste,
+    moveHere,
     dragProps,
     createNew,
     renameItem,

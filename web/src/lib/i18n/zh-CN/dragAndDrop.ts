@@ -20,6 +20,12 @@ export default {
   "Clear the selection": "清除选择",
   "Working with items": "处理项目",
   "Cut, copy, paste": "剪切、复制、粘贴",
+  // The Mac style's shortcuts (components/style/mac/keys.ts)
+  "Like a Mac. ⌘ is Ctrl on other computers. Shortcuts don't apply while you're typing in a box.": "与 Mac 相同。在其他电脑上，⌘ 即 Ctrl。在输入框中输入文字时，快捷键不起作用。",
+  "In the List view: expand or collapse the selected folder": "列表视图：展开或折叠所选文件夹",
+  "Quick look; the arrows go to the next item": "快速查看；方向键可前往下一个项目",
+  "Copy, paste": "复制、粘贴",
+  "Move the items copied here": "将复制的项目移到这里",
   "Undo the last move, rename or delete": "撤销上一次的移动、重命名或删除",
   "Show details": "显示详细信息",
   "Show these shortcuts": "显示这些快捷键",

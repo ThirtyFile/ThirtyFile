@@ -42,7 +42,7 @@ import { useMe } from "@/lib/session";
 import { useTheme, type ThemeMode } from "@/lib/theme";
 import { errorMessage } from "@/lib/utils";
 import { LANGS, lang, setLang, t, type Lang } from "@/lib/i18n";
-import { READY_STYLES, useInterfaceStyle, type StyleChoice } from "@/lib/style";
+import { useInterfaceStyle, type StyleChoice } from "@/lib/style";
 
 /**
  * The signed-in user's menu at the bottom of the locations list: account settings, appearance, interface style,
@@ -155,10 +155,7 @@ export function AccountMenu({ usage }: { usage: string | null }) {
                   {style.style === "mac" ? t("Automatic (Mac style on this device)") : t("Automatic (Windows style on this device)")}
                 </DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="windows">{t("Windows style")}</DropdownMenuRadioItem>
-                {/* Until the Mac style exists (#325), choosing it would change nothing */}
-                <DropdownMenuRadioItem value="mac" disabled={!READY_STYLES.includes("mac")}>
-                  {READY_STYLES.includes("mac") ? t("Mac style") : t("Mac style (coming soon)")}
-                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="mac">{t("Mac style")}</DropdownMenuRadioItem>
               </DropdownMenuRadioGroup>
             </DropdownMenuSubContent>
           </DropdownMenuSub>

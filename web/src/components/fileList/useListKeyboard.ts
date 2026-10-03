@@ -199,8 +199,9 @@ export function useListKeyboard({ p, items, n, indexOf, span, layout, rowOf, v, 
       }
       return;
     }
-    // Alt+arrows move around folders (handled by the address bar)
-    if (e.altKey) return;
+    // Alt+arrows move around folders (handled by the address bar), as do the style's keys for up, back and forward
+    // (⌘↑ in the Mac style)
+    if (e.altKey || pressed(e, k.upFolder) || pressed(e, k.back) || pressed(e, k.forward)) return;
     let next: number | null = null;
     if (pressedKey(e, k.itemDown)) next = vertical(index, 1);
     else if (pressedKey(e, k.itemUp)) next = vertical(index, -1);

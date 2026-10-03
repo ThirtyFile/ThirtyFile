@@ -178,6 +178,11 @@ function ActionsMenu({ p, s, a, newItems }: { p: ExplorerProps; s: ExplorerState
             <ClipboardPasteIcon /> {t("Paste")} <Kbd>{k.paste[0]}</Kbd>
           </DropdownMenuItem>
         )}
+        {s.canCreate && (
+          <DropdownMenuItem disabled={!a.canPaste} onClick={() => void a.moveHere()}>
+            <FolderInputIcon /> {t("Move here")} <Kbd>{k.moveHere[0]}</Kbd>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem disabled={none || !caps.write} onClick={() => setDialog({ t: "move", picked: s.picked })}>
           <FolderInputIcon /> {t("Move to…")}
         </DropdownMenuItem>

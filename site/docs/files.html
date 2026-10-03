@@ -68,7 +68,7 @@
       </nav>
       <main id="content" class="article">
         <h1>Working with files</h1>
-        <p class="lead">ThirtyFile works like File Explorer. This page lists what you can do and the shortcuts that make it quicker.</p>
+        <p class="lead">ThirtyFile works like File Explorer, or like a Mac's Finder in the <a href="#mac-style">Mac style</a>. This page lists what you can do and the shortcuts that make it quicker.</p>
         <div class="shot"><img src="../assets/files-light.webp" width="2560" height="1440" alt="The file list with the folder tree on the left" /></div>
 
         <h2 id="around">Finding your way around</h2>
@@ -256,6 +256,41 @@
         <p>On a Mac, use <kbd>⌘</kbd> for <kbd>Ctrl</kbd> and <kbd>Option</kbd> for <kbd>Alt</kbd>; the menus and the list of shortcuts show them that way. Shortcuts don't apply while you are typing in a box, except <kbd>F5</kbd>.</p>
         <p>The folder tree on the left is one stop for <kbd>Tab</kbd>. In it, <kbd>↑</kbd> and <kbd>↓</kbd> move between folders, <kbd>→</kbd> expands a folder (or goes to its first subfolder), <kbd>←</kbd> collapses it (or goes to the folder above), <kbd>Home</kbd> and <kbd>End</kbd> jump to the first and last folder, and <kbd>Enter</kbd> opens the folder. A folder with many subfolders shows the first 100; <strong>Show more folders</strong> below them adds the next 100.</p>
         <p>Two buttons above the menu on the left help in a long folder tree: <strong>Show current folder</strong> opens the tree down to the folder you are looking at and scrolls to it, and <strong>Collapse all</strong> closes every folder and space, leaving the list of spaces. The folders you expanded are remembered in this browser until you sign out.</p>
+
+        <h2 id="mac-style">The Mac style</h2>
+        <p>In the <strong>Mac style</strong> (see <a href="account.html#style">Interface style</a>), the file explorer is laid out like a Mac's Finder and uses its keys. The files, what you can do with them and the questions ThirtyFile asks are the same as in the Windows style: a name the folder already has always brings up the dialog described in <a href="#same-name">When the name is already taken</a>, and deleting permanently always asks first.</p>
+        <ul>
+          <li><strong>Sidebar</strong>: the same places as the Windows style's menu on the left, in groups. <strong>Favorites</strong> has <strong>All favorites</strong>, your favourite folders and your <a href="#smart-folders">smart folders</a> (<strong>+</strong> beside the heading makes a new smart folder). Then come <strong>Spaces</strong>, <strong>Shared</strong> (<strong>Shared with me</strong> and <strong>My share links</strong>), <strong>Recent</strong>, <strong>Trash</strong> and <strong>Tags</strong>. Click a heading to hide or show its group. You can drop items and files on a folder or a space there.</li>
+          <li><strong>Toolbar</strong>: back and forward, the name of the folder you are in, the view (<strong>Icons</strong>, <strong>List</strong> or <strong>Columns</strong>), <strong>Sort and group</strong>, <strong>Share</strong>, and <strong>Actions</strong> (<strong>⋯</strong>) with everything else: new folders and uploads, <strong>Quick look</strong>, <strong>Get info</strong>, <strong>Rename</strong>, <strong>Copy</strong>, <strong>Paste</strong>, <strong>Move here</strong>, <strong>Move to trash</strong>, favourites, tags, <strong>Go to folder…</strong> and the keyboard shortcuts. The search box is on the right.</li>
+          <li><strong>Path bar</strong>: at the bottom of the window, the path of the folder you are in. Click a folder of it to go there, or drop items on it to move them there. There is no box to type a path into: <strong>Go to folder</strong> (<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd>) asks for one, as described in <a href="#paths">Paths</a>.</li>
+          <li><strong>List</strong>: a folder has a triangle beside its name. Click it, or press <kbd>→</kbd>, to show what the folder holds right below it, indented; <kbd>←</kbd> or another click hides it again. A large folder expanded this way loads a part at a time as you scroll, like the folder itself (see <a href="#large-folders">Large folders</a>).</li>
+          <li><strong>Quick look</strong>: press <kbd>Space</kbd> to see the selected item in a window over the list, with the same preview as an open file. The arrow keys go to the next or previous item, which is selected in the list as you go; with several items selected, Quick look goes through those. <kbd>Space</kbd> or <kbd>Esc</kbd> closes it, and <strong>Open</strong> opens the item.</li>
+          <li><strong>Moving</strong>: there is no cut. Copy the items (<kbd>⌘</kbd> + <kbd>C</kbd>), go to the folder where they belong, and choose <strong>Move here</strong> (<kbd>⌘</kbd> + <kbd>Option</kbd> + <kbd>V</kbd>) to move them, or <strong>Paste</strong> (<kbd>⌘</kbd> + <kbd>V</kbd>) for copies. Dragging works as in the Windows style.</li>
+          <li><strong>New items</strong> go straight to their place in the sorted list, and clicking the name of a selected item doesn't rename it: press <kbd>Enter</kbd>.</li>
+          <li>On a phone, the Mac style looks the same as the Windows style.</li>
+        </ul>
+        <p>Its keys are Finder's, except those the browser keeps for itself (such as <kbd>⌘</kbd> + <kbd>N</kbd> and <kbd>⌘</kbd> + <kbd>W</kbd>). On a computer that isn't a Mac, use <kbd>Ctrl</kbd> for <kbd>⌘</kbd> and <kbd>Alt</kbd> for <kbd>Option</kbd>. The other keys work as in the Windows style (above): moving through the list, <kbd>⌘</kbd> + <kbd>A</kbd>, <kbd>⌘</kbd> + <kbd>Z</kbd>, <kbd>Shift</kbd> + <kbd>F10</kbd>, <kbd>F5</kbd>, typing the start of a name, <kbd>Esc</kbd> and <kbd>?</kbd>.</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Keys</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr><td><kbd>Enter</kbd></td><td>Rename</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>↓</kbd></td><td>Open</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>↑</kbd></td><td>Go up one folder, with the folder you came from selected</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>[</kbd> / <kbd>]</kbd></td><td>Back, forward</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd></td><td>Go to folder</td></tr>
+              <tr><td><kbd>Space</kbd></td><td>Quick look; the arrow keys go to the next item</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>I</kbd></td><td>Get info (the details pane)</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>⌫</kbd></td><td>Move to the trash</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>Option</kbd> + <kbd>⌫</kbd></td><td>Delete permanently, after asking</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>C</kbd> / <kbd>V</kbd></td><td>Copy, paste</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>Option</kbd> + <kbd>V</kbd></td><td>Move the copied items here</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>Option</kbd> + <kbd>N</kbd></td><td>New folder</td></tr>
+              <tr><td><kbd>→</kbd> <kbd>←</kbd> (in the <strong>List</strong> view)</td><td>Expand or collapse the selected folder; on an expanded folder, <kbd>→</kbd> goes to its first item, and <kbd>←</kbd> goes from an item back to its folder</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>F</kbd></td><td>Go to the search box</td></tr>
+            </tbody>
+          </table>
+        </div>
 
         <h2 id="trash">The trash</h2>
         <p>Deleted items go to the trash, where they can be restored. They are removed for good after 30 days (the administrator can change this with <a href="settings.html"><code>THIRTYFILE_TRASH_DAYS</code></a>, or keep them until the trash is emptied), or when you empty the trash. The trash page shows how many days apply.</p>
