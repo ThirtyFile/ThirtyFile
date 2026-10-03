@@ -3,8 +3,8 @@
 //!
 //! - Each folder of the space is watched; a changed folder is checked (`folders::sync_folder`) once nothing has
 //!   changed in it for a little longer than files need to settle, so files still being written are indexed too.
-//! - Network file systems (NFS, SMB/CIFS) don't report changes made by other computers, so they aren't watched: the
-//!   regular scan keeps them up to date.
+//! - Shared file systems (NFS, SMB/CIFS, 9P and FUSE, including Docker Desktop host folders) may not report external
+//!   changes. Only known local file systems use watching; the rest are checked when opened and by regular scans.
 //! - When the event queue overflows, or the number of watches allowed (`fs.inotify.max_user_watches`) is reached, the
 //!   spaces fall back to full scans, and the log says so.
 //! - All spaces share one thread and one inotify instance.
@@ -81,21 +81,30 @@ pub fn spawn_watchers(st: AppState) {
     });
 }
 
-/// File systems whose changes by other computers inotify doesn't see
-fn network_fs(path: &Path) -> Option<&'static str> {
-    let c = CString::new(path.as_os_str().as_bytes()).ok()?;
+/// Unknown or shared file systems cannot establish external event delivery by registering a watch or writing a
+/// probe from this process: those operations may work while changes made by the host still produce no event.
+fn fallback_fs(path: &Path) -> Option<&'static str> {
+    let Ok(c) = CString::new(path.as_os_str().as_bytes()) else { return Some("an unidentified file system") };
     let mut st: libc::statfs = unsafe { std::mem::zeroed() };
     // SAFETY: a valid path and a writable statfs
     if unsafe { libc::statfs(c.as_ptr(), &mut st) } != 0 {
-        return None;
+        return Some("an unidentified file system");
     }
     #[allow(clippy::unnecessary_cast, reason = "f_type is i64 on some targets and not on others")]
-    match st.f_type as i64 {
+    fallback_kind(st.f_type as i64)
+}
+
+fn fallback_kind(kind: i64) -> Option<&'static str> {
+    match kind {
+        // ext2/3/4, XFS, Btrfs, tmpfs, overlayfs, ZFS, ramfs, F2FS, NTFS, FAT and exFAT: local changes reach inotify.
+        0xEF53 | 0x58465342 | 0x9123683E | 0x01021994 | 0x794C7630 | 0x2FC12FC1 | 0x858458F6 | 0xF2F52010 | 0x5346544E | 0x4D44 | 0x2011BAB0 => None,
         0x6969 => Some("NFS"),
         0x517B => Some("SMB"),
         0xFF534D42 => Some("CIFS"),
         0xFE534D42 => Some("SMB2"),
-        _ => None,
+        0x01021997 => Some("9P"),
+        0x65735546 => Some("FUSE or virtiofs"),
+        _ => Some("an unrecognized file system"),
     }
 }
 
@@ -107,8 +116,8 @@ struct Watcher {
     roots: HashMap<String, PathBuf>,
     /// Watches could not all be added: rely on full scans
     limited: bool,
-    /// Spaces on network file systems, left to the regular scan (told in the log once)
-    skipped: HashSet<String>,
+    /// Spaces using refresh-on-open and regular scans, with their paths (told in the log once)
+    skipped: HashMap<String, PathBuf>,
     /// Where the fully watched spaces are told (`Memory::watched`)
     published: std::sync::Arc<std::sync::Mutex<HashSet<String>>>,
 }
@@ -177,7 +186,12 @@ impl Watcher {
 
     /// Starts and stops watching spaces so the watched ones are `wanted`
     fn update(&mut self, wanted: Spaces) {
-        self.skipped.retain(|id| wanted.contains_key(id));
+        self.update_with(wanted, fallback_fs);
+    }
+
+    /// Tests can model a mounted file system with no external events without changing the process's environment.
+    fn update_with(&mut self, wanted: Spaces, fallback: impl Fn(&Path) -> Option<&'static str>) {
+        self.skipped.retain(|id, path| wanted.get(id) == Some(path));
         let gone: Vec<String> = self.roots.iter().filter(|(id, path)| wanted.get(*id) != Some(*path)).map(|(id, _)| id.clone()).collect();
         for id in &gone {
             self.roots.remove(id);
@@ -189,14 +203,18 @@ impl Watcher {
             }
         }
         for (id, path) in wanted {
-            if self.roots.contains_key(&id) || self.skipped.contains(&id) {
+            if self.roots.contains_key(&id) {
                 continue;
             }
-            if let Some(kind) = network_fs(&path) {
-                tracing::info!("{} is on {kind}: changes made there by other computers are found by the regular scan", path.display());
-                self.skipped.insert(id);
+            // A shared mount needs no watch at all. Avoid opening its marker over the network on every update.
+            if let Some(kind) = fallback(&path) {
+                if self.skipped.get(&id) != Some(&path) {
+                    tracing::info!("{} is on {kind}: external changes are checked when a folder is opened and by the regular scan", path.display());
+                    self.skipped.insert(id, path);
+                }
                 continue;
             }
+            self.skipped.remove(&id);
             // A folder that isn't there, or isn't the space's (a disk not mounted yet: its empty mount point), isn't
             // watched: it is scanned as often as any space, and tried again at the next update
             let marked = crate::beneath::Pinned::root(&path).ok().and_then(|r| crate::folders::space_marker(&r).ok().flatten());
@@ -270,7 +288,7 @@ fn watch(st: AppState, handle: tokio::runtime::Handle, rx: std::sync::mpsc::Rece
         tracing::warn!("Can't watch folder spaces for changes: {}", std::io::Error::last_os_error());
         return;
     }
-    let mut w = Watcher { fd, dirs: HashMap::new(), roots: HashMap::new(), limited: false, skipped: HashSet::new(), published: st.part::<Memory>().watched.clone() };
+    let mut w = Watcher { fd, dirs: HashMap::new(), roots: HashMap::new(), limited: false, skipped: HashMap::new(), published: st.part::<Memory>().watched.clone() };
     // (space, folder) → last change
     let mut changed: HashMap<(String, String), Instant> = HashMap::new();
     let mut overflow = false;
@@ -373,7 +391,7 @@ mod tests {
         // SAFETY: plain system call
         let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
         assert!(fd >= 0);
-        Watcher { fd, dirs: HashMap::new(), roots: HashMap::new(), limited: false, skipped: HashSet::new(), published: Default::default() }
+        Watcher { fd, dirs: HashMap::new(), roots: HashMap::new(), limited: false, skipped: HashMap::new(), published: Default::default() }
     }
 
     fn paths(w: &Watcher) -> Vec<String> {
@@ -392,6 +410,80 @@ mod tests {
             }
         }
         changed
+    }
+
+    #[test]
+    fn shared_and_unknown_file_systems_do_not_claim_external_event_delivery() {
+        for kind in [0x6969, 0x517B, 0xFF534D42, 0xFE534D42, 0x01021997, 0x65735546, 0x12345678] {
+            assert!(fallback_kind(kind).is_some());
+        }
+        for kind in [0xEF53, 0x58465342, 0x9123683E, 0x01021994, 0x794C7630] {
+            assert!(fallback_kind(kind).is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn no_external_events_falls_back_to_opening_and_the_normal_scan_interval() {
+        use axum::extract::{Path as UrlPath, Query, State};
+        let env = crate::testutil::env().await;
+        let space = env.folder_space("Host files").await;
+        let admin = env.admin().await;
+        let mut w = watcher();
+        w.published = env.st.part::<Memory>().watched.clone();
+        let wanted = || HashMap::from([(space.drive.clone(), space.dir.clone())]);
+        w.update_with(wanted(), |_| Some("9P"));
+        assert!(paths(&w).is_empty());
+        assert!(!is_watched(&env.st, &space.drive));
+        assert_eq!(crate::folders::changes(&env.st, &space.drive).scan_minutes, 15);
+        let list = || async {
+            let axum::Json(l) = crate::nodes::children(State(env.st.clone()), admin.clone(), UrlPath(space.root.clone()), Query(Default::default())).await.unwrap();
+            l.into_items().into_iter().map(|n| n.name).collect::<Vec<_>>()
+        };
+        crate::testutil::write_old(&space.dir.join("host.txt"), b"host");
+        assert_eq!(list().await, ["host.txt"]);
+        std::fs::rename(space.dir.join("host.txt"), space.dir.join("renamed.txt")).unwrap();
+        crate::folders::forget_reads(&env.st);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while list().await != ["renamed.txt"] {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("opening reconciles the host rename");
+        std::fs::remove_file(space.dir.join("renamed.txt")).unwrap();
+        crate::folders::forget_reads(&env.st);
+        // A missing item may have moved elsewhere, so opening starts the existing background scan before removing
+        // its index entry. Wait for that reconciliation, without invoking a manual scan.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !list().await.is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("opening reconciles the host deletion");
+        // Reconsider the same path: a share remounted as a local disk must not remain in the skipped set forever.
+        w.update_with(wanted(), |_| None);
+        assert!(is_watched(&env.st, &space.drive));
+        assert!(!w.skipped.contains_key(&space.drive));
+    }
+
+    #[tokio::test]
+    async fn real_local_watching_keeps_the_fast_listing_and_longer_scan_interval() {
+        let env = crate::testutil::env().await;
+        let space = env.folder_space("Local files").await;
+        let root = crate::tree::get_node(&mut env.st.db.acquire().await.unwrap(), &space.root).await.unwrap().unwrap();
+        let mut w = watcher();
+        w.published = env.st.part::<Memory>().watched.clone();
+        w.update(HashMap::from([(space.drive.clone(), space.dir.clone())]));
+        assert!(is_watched(&env.st, &space.drive));
+        assert_eq!(crate::folders::changes(&env.st, &space.drive).scan_minutes, 60);
+        crate::testutil::write_old(&space.dir.join("event.txt"), b"event");
+        // Opening the watched folder skips a redundant read; the real inotify event drives its update.
+        crate::folders::sync_opened(&env.st, &root).await;
+        assert!(env.node_at(&space.drive, "event.txt").await.is_none());
+        assert!(settle(&mut w).contains(""));
+        crate::folders::sync_folder(&env.st, &root).await;
+        assert!(env.node_at(&space.drive, "event.txt").await.is_some());
     }
 
     #[test]

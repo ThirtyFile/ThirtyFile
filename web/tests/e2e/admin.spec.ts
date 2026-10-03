@@ -21,6 +21,32 @@ const PAGES = [
   "Log settings",
 ];
 
+test("folder spaces explain watching, refresh-on-open and disabled scheduled checks", async ({ page }) => {
+  await signIn(page);
+  const cases = [
+    { watching: false, scan_minutes: 15, text: "Changes are checked when opened and every 15 minutes" },
+    { watching: false, scan_minutes: 0, text: "Changes are checked when opened; scheduled checks are off" },
+    { watching: true, scan_minutes: 60, text: "External changes appear within seconds" },
+  ];
+  for (const state of cases) {
+    await page.route("**/api/admin/drives", async (route) => {
+      const response = await route.fetch();
+      const drives = await response.json();
+      await route.fulfill({ response, json: drives.map((d: { mode: string }) => (d.mode === "folder" ? { ...d, folder_changes: state } : d)) });
+    });
+    await page.goto("/admin/drives");
+    const status = page.getByText(state.text, { exact: true }).first();
+    await expect(status).toBeVisible();
+    await expect(status.locator("..")).toHaveAttribute("title", new RegExp(state.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    await page.setViewportSize({ width: 375, height: 812 });
+    await status.scrollIntoViewIfNeeded();
+    await expect(status).toBeVisible();
+    expect(await status.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.unroute("**/api/admin/drives");
+  }
+});
+
 test("each Control panel tile opens its page, which loads without an error", async ({ page }) => {
   const failed: string[] = [];
   page.on("response", (r) => {

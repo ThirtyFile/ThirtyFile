@@ -30,4 +30,7 @@ export default {
   "Up one folder, with the folder you came from selected": "上移一層，並選取剛才所在的資料夾",
   "Move the focus without changing the selection": "移動焦點，不變更選取範圍",
   "Open the menu of the item with the focus": "開啟焦點所在項目的選單",
+  "External changes appear within seconds": "外部變更會在數秒內顯示",
+  "Changes are checked when opened and every {n} minutes": "開啟時及每 {n} 分鐘檢查變更",
+  "Changes are checked when opened; scheduled checks are off": "開啟時檢查變更；定期檢查已關閉",
 } satisfies Record<string, string>;

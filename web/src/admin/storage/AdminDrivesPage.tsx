@@ -229,7 +229,7 @@ export function AdminDrivesPage() {
     },
     {
       header: t("Storage location"),
-      className: "w-[150px]",
+      className: "w-[240px] max-md:w-[180px]",
       cell: (d) => {
         const move = moveOf(d.id);
         const moving = move && (move.state === "running" || move.state === "queued" || move.state === "paused");
@@ -454,9 +454,17 @@ function scanSummary(r: ScanReport) {
 /** A folder space's folder and its last check (and a move that stopped) */
 function FolderCell({ drive, move }: { drive: Drive; move?: SpaceMove }) {
   const r = drive.scan_report;
-  const title = [drive.source_path, r?.error ? tServer(r.error) : r ? scanSummary(r) : "", ...(r?.skipped ?? [])].filter(Boolean).join("\n");
+  const discovery = drive.folder_changes;
+  const changes = discovery
+    ? discovery.watching
+      ? t("External changes appear within seconds")
+      : discovery.scan_minutes > 0
+        ? t("Changes are checked when opened and every {n} minutes", { n: discovery.scan_minutes })
+        : t("Changes are checked when opened; scheduled checks are off")
+    : "";
+  const title = [drive.source_path, changes, r?.error ? tServer(r.error) : r ? scanSummary(r) : "", ...(r?.skipped ?? [])].filter(Boolean).join("\n");
   return (
-    <span className="flex min-w-0 flex-col" title={title}>
+    <span className="flex min-w-0 flex-col py-1" title={title}>
       <span className="truncate font-mono text-[12px]">{drive.source_path}</span>
       <span className={cn("truncate text-[11px]", r?.error ? "text-destructive" : "text-muted-foreground")}>
         {move?.state === "failed" && <span className="text-destructive" title={move.error ? tServer(move.error) : undefined}>{`${t("Move stopped")} · `}</span>}
@@ -471,6 +479,7 @@ function FolderCell({ drive, move }: { drive: Drive; move?: SpaceMove }) {
               ? t("Checked {time}", { time: formatDateTime(drive.last_scan_at) })
               : t("Being indexed…")}
       </span>
+      {changes && <span className="whitespace-normal break-words text-[11px] leading-4 text-muted-foreground">{changes}</span>}
     </span>
   );
 }
