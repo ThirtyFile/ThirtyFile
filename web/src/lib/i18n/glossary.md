@@ -87,6 +87,7 @@ GitHub, Microsoft, Google, Keycloak, Authentik, Excel, Word, PowerPoint, NAS.
 | upload                                        | 上傳                     | 上传                     | アップロード                              |
 | download                                      | 下載                     | 下载                     | ダウンロード                              |
 | preview                                       | 預覽                     | 预览                     | プレビュー                                |
+| Quick look (Mac style)                        | 快速查看                 | 快速查看                 | クイックルック                            |
 | edit                                          | 編輯                     | 编辑                     | 編集                                      |
 | rename                                        | 重新命名                 | 重命名                   | 名前の変更                                |
 | delete                                        | 刪除                     | 删除                     | 削除                                      |

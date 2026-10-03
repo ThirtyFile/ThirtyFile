@@ -4,13 +4,14 @@
  * how items are sorted and grouped
  */
 import { Fragment, type ReactNode } from "react";
-import { ArrowDownUpIcon, CopyIcon, GroupIcon, InfoIcon, LayoutListIcon, PencilIcon, Trash2Icon, Undo2Icon } from "lucide-react";
+import { ArrowDownUpIcon, CopyIcon, EyeIcon, GroupIcon, InfoIcon, LayoutListIcon, PencilIcon, Trash2Icon, Undo2Icon } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from "@/components/ui/dropdown-menu";
 import { sections, type MenuEntries } from "@/components/explorer/menus";
 import { Kbd } from "@/components/explorer/ui";
 import { GroupChoices, SortChoices, ViewChoices } from "@/components/explorer/viewChoices";
 import { t } from "@/lib/i18n";
 import { undoLast } from "@/lib/undo";
+import { openQuickLook } from "./quickLook";
 
 export function macMenu(m: MenuEntries): ReactNode {
   const { p, s, a } = m;
@@ -23,7 +24,14 @@ export function macMenu(m: MenuEntries): ReactNode {
   );
   if (s.count)
     return sections(
-      [m.openItem, m.openInNewTab, m.openLocation],
+      [
+        m.openItem,
+        m.openInNewTab,
+        m.openLocation,
+        <DropdownMenuItem key="look" onClick={openQuickLook}>
+          <EyeIcon /> {t("Quick look")} <Kbd>{k.quickLook[0]}</Kbd>
+        </DropdownMenuItem>,
+      ],
       [
         caps.del && (
           <DropdownMenuItem key="trash" variant="destructive" onClick={m.remove}>

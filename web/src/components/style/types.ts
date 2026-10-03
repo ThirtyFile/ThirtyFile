@@ -104,6 +104,8 @@ export interface StyleKit {
    * stays there until a refresh, a change of sort or leaving the folder (components/explorer/newItems)
    */
   newAtEnd: boolean;
+  /** What the style adds to the explorer: the Mac style's Quick look */
+  Extras?: ComponentType<{ p: ExplorerProps; s: ExplorerState; a: ExplorerActions }>;
   /** In the List view, folders expand in place to show their items indented below them (components/fileList/listTree) */
   disclosure: boolean;
 }

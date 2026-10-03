@@ -97,6 +97,11 @@ export default {
   "Edit workbook": "ブックを編集",
   "Search files": "ファイルを検索",
   "Modified {date}": "{date} に更新",
+  // Quick look, the Mac style's preview window (components/style/mac/quickLook.tsx)
+  "Quick look": "クイックルック",
+  "Quick look: {name}": "クイックルック: {name}",
+  "Previous item": "前の項目",
+  "Next item": "次の項目",
   "File not found": "ファイルが見つかりません",
   "Share with…": "ユーザーと共有…",
   "Create share link": "共有リンクを作成",
