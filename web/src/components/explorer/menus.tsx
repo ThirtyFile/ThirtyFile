@@ -34,6 +34,7 @@ import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
 import type { ExplorerActions } from "./actions";
 import { Kbd } from "./ui";
+import { TagSubmenu } from "@/components/tags";
 import { t } from "@/lib/i18n";
 import { isZip } from "@/components/FileIcon";
 
@@ -69,6 +70,8 @@ export interface MenuEntries {
   shareWith: ReactNode;
   shareLink: ReactNode;
   favorite: ReactNode;
+  /** "Tags ›": the person's own tags, put on the items or taken off */
+  tags: ReactNode;
   moveTo: ReactNode;
   copyTo: ReactNode;
   itemProperties: ReactNode;
@@ -156,6 +159,7 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
       {allFavorite ? <StarOffIcon /> : <StarIcon />} {allFavorite ? t("Remove from favorites") : t("Add to favorites")}
     </DropdownMenuItem>
   );
+  const tags = <TagSubmenu key="tags" nodes={s.selectedNodes} picked={s.picked} />;
   const moveTo = caps.write && (
     <DropdownMenuItem key="move" onClick={() => setDialog({ t: "move", picked: s.picked })}>
       <FolderInputIcon /> {t("Move to…")}
@@ -206,6 +210,7 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
     shareWith,
     shareLink,
     favorite,
+    tags,
     moveTo,
     copyTo,
     itemProperties,
@@ -219,8 +224,8 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
 }
 
 /**
- * The entries as plain lists, for a style that doesn't arrange them its own way: on items, open, share and favourite,
- * then the clipboard, rename, move, copy and delete, then properties; on empty space, New and Upload, paste, refresh
+ * The entries as plain lists, for a style that doesn't arrange them its own way: on items, open, share, favourite and
+ * tags, then the clipboard, rename, move, copy and delete, then properties; on empty space, New and Upload, paste, refresh
  * and properties
  */
 export function plainMenu(m: MenuEntries): ReactNode {
@@ -248,6 +253,7 @@ export function plainMenu(m: MenuEntries): ReactNode {
       {m.shareWith}
       {m.shareLink}
       {m.favorite}
+      {m.tags}
       <DropdownMenuSeparator />
       {caps.write && (
         <DropdownMenuItem onClick={a.cut}>

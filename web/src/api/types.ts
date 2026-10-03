@@ -20,8 +20,20 @@ export interface Node {
   /** Uploader / creator */
   owner_name: string;
   is_favorite: boolean;
+  /** The signed-in person's tags on it (ids of their `Tag`s); missing when it has none of theirs */
+  tags?: number[];
   /** Listings of folders only (the navigation pane): whether it has folders in it */
   has_folders?: boolean;
+}
+
+/** The colours a tag can have: the server keeps the name, each style and theme draws it in its own shade */
+export type TagColor = "red" | "orange" | "yellow" | "green" | "blue" | "purple" | "gray";
+
+/** One of the signed-in person's tags: only they see it, its name and what it is on */
+export interface Tag {
+  id: number;
+  name: string;
+  color: TagColor;
 }
 
 /** A task running on the server (`GET /jobs/:id`): a change that takes a while (see lib/jobs) */
@@ -53,6 +65,8 @@ export interface SearchFilter {
   to?: number;
   min_size?: number;
   max_size?: number;
+  /** Only items with all of these tags of the person's own (ids, comma separated); with tags, the search term may be empty */
+  tags?: string;
 }
 
 export interface Located extends Node {

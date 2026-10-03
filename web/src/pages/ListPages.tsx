@@ -1,10 +1,13 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useSearchParams } from "react-router";
-import { ClockIcon, SearchIcon, SearchXIcon, StarIcon } from "lucide-react";
-import { api, type Located, type SearchFilter, type SortKey, type SortOrder } from "@/api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useParams, useSearchParams } from "react-router";
+import { ClockIcon, PencilIcon, SearchIcon, SearchXIcon, StarIcon, TagIcon, Trash2Icon } from "lucide-react";
+import { api, type Located, type SearchFilter, type SortKey, type SortOrder, type TagColor } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { Explorer } from "@/components/Explorer";
+import { TagDot, askToDeleteTag, recolor } from "@/components/tags";
+import { Button } from "@/components/ui/button";
+import { TAG_COLORS, editTag, useTags } from "@/lib/tags";
 import { useSort } from "@/lib/sort";
 import { t } from "@/lib/i18n";
 import { extOf, nameCollator } from "@/lib/utils";
@@ -89,6 +92,62 @@ export function FavoritesPage() {
   );
 }
 
+/** The items with one of the person's tags (from the navigation pane), with the tag's name, colour and deleting it */
+export function TaggedPage() {
+  const id = Number(useParams().id);
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const { byId, loading } = useTags();
+  const tag = byId.get(id);
+  const [sort, onSort, setSort] = useSort();
+  const q = useQuery({ queryKey: keys.tagged(id, sort.key, sort.order), queryFn: () => api.tagged(id, sort.key, sort.order), enabled: !!tag });
+  const name = tag?.name ?? (loading ? "…" : t("Tag not found"));
+  const bar = tag && (
+    <div className="flex flex-wrap items-center gap-2 border-b px-3 py-1.5 text-xs text-muted-foreground" role="group" aria-label={t("Tag")}>
+      <TagDot color={tag.color} />
+      <span className="font-medium text-foreground">{tag.name}</span>
+      <Button variant="ghost" size="xs" onClick={() => void editTag(tag)}>
+        <PencilIcon /> {t("Rename…")}
+      </Button>
+      <label className="flex items-center gap-1.5">
+        {t("Color")}
+        <NativeSelect size="xs" value={tag.color} onChange={(e) => void recolor(qc, tag, e.target.value as TagColor)}>
+          {TAG_COLORS.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.label()}
+            </option>
+          ))}
+        </NativeSelect>
+      </label>
+      <Button variant="ghost" size="xs" onClick={() => void askToDeleteTag(qc, tag, () => navigate("/files"))}>
+        <Trash2Icon /> {t("Delete tag")}
+      </Button>
+      {q.data?.truncated && <span role="status">{t("Showing the first {n} items.", { n: q.data.items.length })}</span>}
+    </div>
+  );
+  return (
+    <Explorer
+      items={q.data?.items ?? []}
+      loading={loading || q.isLoading}
+      error={q.error}
+      showLocation
+      sort={sort}
+      onSort={onSort}
+      onSortChange={setSort}
+      notice={bar}
+      crumbs={[{ label: t("Files") }, { label: t("Tags") }, { label: name }]}
+      icon={TagIcon}
+      empty={
+        tag ? (
+          <Empty icon={TagIcon} text={t("Nothing has this tag yet")} hint={t("Right-click files or folders and choose Tags to put it on them.")} />
+        ) : (
+          <Empty icon={TagIcon} text={loading ? "…" : t("Tag not found")} />
+        )
+      }
+    />
+  );
+}
+
 /** Types to filter search results by: extensions, or folders */
 const SEARCH_TYPES: { id: string; label: () => string; filter: SearchFilter }[] = [
   { id: "folder", label: () => t("Folders"), filter: { kind: "folder" } },
@@ -118,7 +177,8 @@ export function SearchPage() {
   const [params, setParams] = useSearchParams();
   const term = params.get("q") ?? "";
   const within = params.get("in") ?? undefined;
-  const [type, date, size] = [params.get("type") ?? "", params.get("date") ?? "", params.get("size") ?? ""];
+  const [type, date, size, tag] = [params.get("type") ?? "", params.get("date") ?? "", params.get("size") ?? "", params.get("tag") ?? ""];
+  const { tags } = useTags();
   const set = (key: string, value: string) =>
     setParams(
       (p) => {
@@ -134,6 +194,7 @@ export function SearchPage() {
     in: within,
     ...SEARCH_TYPES.find((x) => x.id === type)?.filter,
     ...SEARCH_SIZES.find((x) => x.id === size)?.filter,
+    tags: tag || undefined,
   };
   const days = SEARCH_DATES.find((x) => x.id === date)?.days;
   // Rounded to the hour, so the query key stays the same while the page is open
@@ -184,6 +245,19 @@ export function SearchPage() {
           ))}
         </NativeSelect>
       </label>
+      {(tags.length > 0 || tag) && (
+        <label className="flex items-center gap-1.5">
+          {t("Tag")}
+          <NativeSelect size="xs" value={tag} onChange={(e) => set("tag", e.target.value)}>
+            <option value="">{t("Any")}</option>
+            {tags.map((x) => (
+              <option key={x.id} value={String(x.id)}>
+                {x.name}
+              </option>
+            ))}
+          </NativeSelect>
+        </label>
+      )}
       {q.data?.truncated && <span role="status">{t("Showing the first {n} results. Add words or filters to find the rest.", { n: q.data.items.length })}</span>}
     </div>
   );

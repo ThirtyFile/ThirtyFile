@@ -1,15 +1,17 @@
 //! The file list's column headers, rows (Details view) and items (icon views)
 
 import { memo, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject, type FocusEvent, type TouchEvent } from "react";
-import { ChevronDownIcon, ChevronUpIcon, StarIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import type { FileSource, SortKey } from "@/api";
 import { FileIcon, typeLabel, typeTitle } from "@/components/FileIcon";
 import { cn, formatDateTime, formatWinSize } from "@/lib/utils";
 import type { ColumnId, Group } from "@/lib/listView";
 import { InlineRename } from "@/components/InlineRename";
-import { t, tc } from "@/lib/i18n";
+import { t } from "@/lib/i18n";
 import { type ViewMode, type Item, TILED } from "@/components/fileList/layout";
 import { Thumb } from "@/components/fileList/thumbs";
+import { ItemMarks, hasMarks } from "@/components/fileList/marks";
+import { TagNames } from "@/components/tags";
 import type { FileListProps } from "@/components/FileList";
 
 export const th =
@@ -165,6 +167,7 @@ export const COLUMN_CLASS: Record<ColumnId, string> = {
   type: "max-md:hidden",
   size: "",
   owner: "max-md:hidden",
+  tags: "max-md:hidden",
   extra: "max-md:hidden",
 };
 
@@ -210,6 +213,12 @@ export function Cell({ id, item, h }: { id: ColumnId; item: Item; h: HandlersRef
       return (
         <td role="gridcell" className={muted}>
           {item.owner_name || "—"}
+        </td>
+      );
+    case "tags":
+      return (
+        <td role="gridcell" className={muted}>
+          {!!item.tags?.length && <TagNames ids={item.tags} className="flex-nowrap overflow-hidden" />}
         </td>
       );
     case "extra":
@@ -258,7 +267,7 @@ export const ListRow = memo(function ListRow(r: RowProps & { checkboxes: boolean
               <span data-name className="truncate">
                 {item.name}
               </span>
-              {item.is_favorite && <StarIcon className="size-[11px] shrink-0 fill-amber-400 text-amber-400" aria-label={tc("state", "Favorite")} />}
+              <ItemMarks item={item} />
             </>
           )}
         </div>
@@ -273,7 +282,8 @@ export const ListRow = memo(function ListRow(r: RowProps & { checkboxes: boolean
 
 export const Tile = memo(function Tile(r: RowProps & { view: Exclude<ViewMode, "list">; source: FileSource; count: number; checkboxes: boolean }) {
   const { item, view } = r;
-  const star = item.is_favorite && <StarIcon className="size-3 shrink-0 fill-amber-400 text-amber-400" aria-label={tc("state", "Favorite")} />;
+  // The star and the tag dots
+  const marks = hasMarks(item) && <ItemMarks item={item} large />;
   // Space selects with the keyboard, so the check box isn't a Tab stop of its own
   const checkbox = r.checkboxes && (
     <input
@@ -301,7 +311,7 @@ export const Tile = memo(function Tile(r: RowProps & { view: Exclude<ViewMode, "
             {item.name}
           </span>
         )}
-        {star}
+        {marks}
       </>
     );
   } else if (view === "tiles") {
@@ -322,7 +332,7 @@ export const Tile = memo(function Tile(r: RowProps & { view: Exclude<ViewMode, "
           <span className="truncate text-xs text-muted-foreground">{typeLabel(item)}</span>
           {item.kind === "file" && <span className="truncate text-xs text-muted-foreground tabular-nums">{formatWinSize(item.size)}</span>}
         </div>
-        {star && <span className="absolute top-1.5 right-1.5 flex">{star}</span>}
+        {marks && <span className="absolute top-1.5 right-1.5 flex">{marks}</span>}
         {checkbox}
       </>
     );
@@ -341,7 +351,7 @@ export const Tile = memo(function Tile(r: RowProps & { view: Exclude<ViewMode, "
             {item.name}
           </span>
         )}
-        {star && <span className="absolute top-1.5 right-1.5 flex">{star}</span>}
+        {marks && <span className="absolute top-1.5 right-1.5 flex">{marks}</span>}
         {checkbox}
       </>
     );

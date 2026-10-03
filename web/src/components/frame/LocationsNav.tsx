@@ -10,6 +10,7 @@ import { usePersisted, useMe } from "@/lib/session";
 import { t } from "@/lib/i18n";
 import { cn, formatBytes } from "@/lib/utils";
 import { AccountMenu } from "./AccountMenu";
+import { TagsNav } from "./TagsNav";
 
 // ───────────── Left-hand locations list ─────────────
 
@@ -69,6 +70,7 @@ export function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean
         <div className="mt-3 grid gap-0 border-t pt-2">
           <NavItem to="/trash" icon={Trash2Icon} label={t("Trash")} />
         </div>
+        <TagsNav />
         {me.role === "admin" && (
           <>
             <div className="px-2 pt-[15px] pb-[5px] text-[11px] text-muted-foreground">{t("Administration")}</div>

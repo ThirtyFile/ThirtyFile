@@ -8,7 +8,7 @@ import type { Query, QueryClient, QueryKey } from "@tanstack/react-query";
 import type { Node, NodeInfo } from "@/api";
 
 /** Queries a change to files or folders can affect: lists, the opened item, space usage; not settings, users or branding */
-const FILE_QUERIES = ["children", "node", "recent", "favorites", "search", "shared-with-me", "trash", "drives", "me", "access", "versions"];
+const FILE_QUERIES = ["children", "node", "recent", "favorites", "tagged", "search", "shared-with-me", "trash", "drives", "me", "access", "versions"];
 
 /**
  * What folders hold, counted through every level (the details pane): only changes that add, move or remove items
@@ -17,9 +17,9 @@ const FILE_QUERIES = ["children", "node", "recent", "favorites", "search", "shar
 export const FOLDER_CONTENTS = "folder-contents";
 
 /** Lists of items (each has an id): folders' pages and the navigation pane's folders, and the lists of several places */
-const LISTS = ["children", "recent", "favorites", "search", "shared-with-me", "trash"];
+const LISTS = ["children", "recent", "favorites", "tagged", "search", "shared-with-me", "trash"];
 /** Lists that show where each item is: a renamed or moved folder changes that */
-const LOCATED = ["recent", "favorites", "search", "shared-with-me"];
+const LOCATED = ["recent", "favorites", "tagged", "search", "shared-with-me"];
 
 type Ids = Iterable<string | null | undefined>;
 
@@ -50,6 +50,8 @@ export interface FileChange {
   /** Space used changed: the space list and the person's own usage */
   usage?: boolean;
   favorites?: boolean;
+  /** Tags put on or taken off items: the lists of tagged items (the rows' tags change with `updated`) */
+  tags?: boolean;
   trash?: boolean;
   recent?: boolean;
   /** The reach isn't known: every file query, as before changes said what they touched */
@@ -74,7 +76,7 @@ export function invalidateFiles(qc: QueryClient, ...more: string[]): Promise<unk
 // ───────────── Changes made at about the same time are applied together ─────────────
 
 const SETS = ["folders", "later", "trees", "nodes", "removed", "access", "left", "spaces"] as const;
-const FLAGS = ["contents", "usage", "favorites", "trash", "recent", "all"] as const;
+const FLAGS = ["contents", "usage", "favorites", "tags", "trash", "recent", "all"] as const;
 /** Changes merged: ids in sets, and each moved item with where it went */
 type Combined = { [K in (typeof SETS)[number]]: Set<string> } & { [K in (typeof FLAGS)[number]]: boolean } & {
   updated: Map<string, Partial<Node>>;
@@ -102,6 +104,7 @@ const empty = (): Combined => ({
   contents: false,
   usage: false,
   favorites: false,
+  tags: false,
   trash: false,
   recent: false,
   all: false,
@@ -341,6 +344,7 @@ async function apply(qc: QueryClient, c: Combined) {
     [c.usage, "drives"],
     [c.usage, "me"],
     [c.favorites, "favorites"],
+    [c.tags, "tagged"],
     [c.trash || gone.size > 0, "trash"],
     [c.recent, "recent"],
   ];

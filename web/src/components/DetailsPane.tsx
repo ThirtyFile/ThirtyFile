@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { XIcon } from "lucide-react";
+import { TagIcon, XIcon } from "lucide-react";
 import { api, privateSource, type FolderContents, type HistoryEntry, type Node } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { TagMenuItems, TagNames } from "@/components/tags";
 import { ErrorState } from "@/components/ErrorState";
 import { FileIcon, canBrowserThumbnail, canThumbnail, typeLabel } from "@/components/FileIcon";
 import { Thumb } from "@/components/fileList/thumbs";
@@ -174,6 +176,8 @@ export function DetailsPane({ selected, folder, onClose, count, whole }: { selec
       // Nobody, for an item found on the disk of a folder space
       ...(isRoot ? [] : ([[t("Created by"), node.owner_name || "—"]] as [string, string][])),
       ...(isRoot ? [] : ([[t("Favorite"), node.is_favorite ? t("Yes") : t("No")]] as [string, string][])),
+      // The person's own tags, by name
+      ...(isRoot ? [] : ([[t("Tags"), <TagNames key="tags" ids={node.tags} empty={t("None")} />]] as [string, React.ReactNode][])),
       ...(isRoot ? [] : ([[t("Share links"), shares.data ? (shares.data.length ? t("{n}", { n: shares.data.length }) : t("None")) : shares.error ? "—" : "…"]] as [string, string][])),
     ];
     body = (
@@ -195,6 +199,16 @@ export function DetailsPane({ selected, folder, onClose, count, whole }: { selec
               </div>
             ))}
           </dl>
+          {!isRoot && !node.trashed_at && (
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button variant="outline" size="xs" className="w-fit" />}>
+                <TagIcon /> {t("Edit tags")}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="max-h-80 w-56 overflow-y-auto">
+                <TagMenuItems nodes={[node]} picked={{ ids: [node.id], span: null, count: 1 }} />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           <History node={node} query={history} />
           {error && (
             <ErrorState compact message={error.message} onRetry={() => Promise.all([info.error && info.refetch(), shares.error && shares.refetch(), contents.error && contents.refetch()])} />

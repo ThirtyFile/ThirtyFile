@@ -68,6 +68,7 @@ GitHub, Microsoft, Google, Keycloak, Authentik, Excel, Word, PowerPoint, NAS.
 | Shared with me                                | 與我共用                 | 与我共享                 | 共有アイテム                              |
 | Recent                                        | 最近使用                 | 最近使用                 | 最近使ったファイル                        |
 | Favorites                                     | 收藏                     | 收藏                     | お気に入り                                |
+| tag (coloured label on files and folders)     | 標籤                     | 标签                     | タグ                                      |
 | Trash                                         | 垃圾桶                   | 回收站                   | ごみ箱                                    |
 | storage location                              | 儲存位置                 | 存储位置                 | 保存場所                                  |
 | folder space                                  | 資料夾空間               | 文件夹空间               | フォルダースペース                        |

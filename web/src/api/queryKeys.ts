@@ -36,6 +36,10 @@ export const keys = {
   versions: (id: string, version: number) => ["versions", id, version],
   recent: () => ["recent"],
   favorites: (sort: SortKey, order: SortOrder) => ["favorites", sort, order],
+  /** The signed-in person's own tags */
+  tags: () => ["tags"],
+  /** The items with one of their tags */
+  tagged: (id: number, sort: SortKey, order: SortOrder) => ["tagged", id, sort, order],
   search: (term: string, filter: SearchFilter) => ["search", term, filter],
   sharedWithMe: () => ["shared-with-me"],
   /** Every answer about the trash */
@@ -93,6 +97,8 @@ export const queries = {
   me: queryOptions({ queryKey: keys.me(), queryFn: api.me, retry: false, staleTime: 30_000 }),
   twoFactor: queryOptions({ queryKey: keys.twoFactor(), queryFn: api.twoFactor }),
   sharedWithMe: queryOptions({ queryKey: keys.sharedWithMe(), queryFn: api.sharedWithMe }),
+  /** Read by every row that shows tag dots: changed only by the person, so kept until a change says otherwise */
+  tags: queryOptions({ queryKey: keys.tags(), queryFn: api.tags, staleTime: 5 * 60_000 }),
   system: queryOptions({ queryKey: keys.system(), queryFn: api.systemSettings }),
   adminUsers: queryOptions({ queryKey: keys.adminUsers(), queryFn: api.users }),
   adminDrives: queryOptions({ queryKey: keys.adminDrives(), queryFn: api.adminDrives }),

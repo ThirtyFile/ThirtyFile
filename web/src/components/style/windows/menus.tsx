@@ -91,7 +91,7 @@ export function windowsMenu(m: MenuEntries): ReactNode {
         {sections(
           [m.openItem, m.openInNewTab, m.openLocation],
           [m.downloadItem, m.compressItem, m.extractItem],
-          [m.favorite, m.shareLink, m.shareWith],
+          [m.favorite, m.tags, m.shareLink, m.shareWith],
           [m.moveTo, m.copyTo],
           [m.itemProperties],
         )}
