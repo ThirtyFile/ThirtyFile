@@ -1,6 +1,7 @@
 import { request, get, post, enc, qs, send } from "@/api/client";
 import type { SsoProvider, LinkedIdentity, Me, TwoFactorPending, TwoFactorSetup, TwoFactorStatus, Device, AppPassword } from "@/api/types";
 import type { Lang } from "@/lib/i18n";
+import type { StyleChoice } from "@/lib/style/device";
 
 /** Signing in, two-factor sign-in, devices, app passwords and linked sign-in methods */
 export const authApi = {
@@ -20,6 +21,8 @@ export const authApi = {
   changePassword: (current: string, next: string) => request("PUT", "/auth/password", { current, new: next }),
   /** Saves the language the person chose with their account (`""` forgets it), so it follows them to other devices */
   setLanguage: (lang: Lang | "") => request("PUT", "/auth/language", { lang }),
+  /** Saves the interface style the person chose with their account */
+  setStyle: (style: StyleChoice) => request("PUT", "/auth/style", { style }),
   /**
    * The same where it isn't known whether someone is signed in (the sign-in page, share links): saved when they are;
    * nothing happens, and nobody is sent to sign in, when they aren't

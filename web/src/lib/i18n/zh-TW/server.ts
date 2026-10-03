@@ -103,6 +103,7 @@ export default {
   "Use the browser's current URL": "使用瀏覽器目前的網址",
   "Invalid default language": "預設語言無效",
   "Unknown language": "不明的語言",
+  "Unknown interface style": "不明的介面風格",
   "Default language: English": "預設語言：英文",
   "Default language: Traditional Chinese": "預設語言：繁體中文",
   "Default language: Simplified Chinese": "預設語言：簡體中文",

@@ -712,6 +712,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn accounts_from_0_4_0_get_the_interface_style_of_their_operating_system() {
+        let dir = std::env::temp_dir().join(format!("thirtyfile-040-styles-{}", crate::util::new_id()));
+        let path = dir.join("drive.db");
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'amy', 'x', 0)").execute(&db).await.unwrap();
+        db.close().await;
+
+        let db = connect(&path, 16).await.unwrap();
+        let (style,): (String,) = sqlx::query_as("SELECT ui_style FROM users WHERE id = 1").fetch_one(&db).await.unwrap();
+        assert_eq!(style, "auto");
+        sqlx::query("UPDATE users SET ui_style = 'mac' WHERE id = 1").execute(&db).await.unwrap();
+        assert!(sqlx::query("UPDATE users SET ui_style = 'linux' WHERE id = 1").execute(&db).await.is_err());
+        // Accounts made after the upgrade start with it too
+        sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (2, 'ben', 'x', 0)").execute(&db).await.unwrap();
+        let (style,): (String,) = sqlx::query_as("SELECT ui_style FROM users WHERE id = 2").fetch_one(&db).await.unwrap();
+        assert_eq!(style, "auto");
+        db.close().await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn a_database_from_0_4_0_keeps_what_the_replicas_page_shows() {
         let dir = std::env::temp_dir().join(format!("thirtyfile-040-replica-counts-{}", crate::util::new_id()));
         let path = dir.join("drive.db");

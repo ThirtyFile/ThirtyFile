@@ -8,6 +8,7 @@ export default {
   "Request failed ({status})": "请求失败（{status}）",
   "Language": "语言",
   "Couldn't save the language": "无法保存语言",
+  "Couldn't save the interface style": "无法保存界面风格",
   "Just now": "刚刚",
   "Today {time}": "今天 {time}",
   "Couldn't create ({status})": "创建失败（{status}）",

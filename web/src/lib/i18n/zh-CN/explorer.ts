@@ -24,6 +24,13 @@ export default {
   "Use system setting": "跟随系统",
   "Light": "浅色",
   "Dark": "深色",
+  "Interface style": "界面风格",
+  "How the file explorer is laid out, and which keys do what. Saved with your account.": "文件管理器的布局，以及各个按键的作用。会保存在你的账号中。",
+  "Automatic (Mac style on this device)": "自动（此设备使用 Mac 风格）",
+  "Automatic (Windows style on this device)": "自动（此设备使用 Windows 风格）",
+  "Windows style": "Windows 风格",
+  "Mac style": "Mac 风格",
+  "Mac style (coming soon)": "Mac 风格（即将推出）",
   "Sign out": "退出登录",
   // The release that runs: the account menu, and the Control panel's status bar (admin/ControlPanelPage.tsx)
   "ThirtyFile {version}": "ThirtyFile {version}",

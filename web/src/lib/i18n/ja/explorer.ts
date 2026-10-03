@@ -24,6 +24,13 @@ export default {
   "Use system setting": "システム設定を使用",
   "Light": "ライト",
   "Dark": "ダーク",
+  "Interface style": "インターフェイスのスタイル",
+  "How the file explorer is laid out, and which keys do what. Saved with your account.": "エクスプローラーのレイアウトと、各キーの動作です。アカウントに保存されます。",
+  "Automatic (Mac style on this device)": "自動（このデバイスでは Mac スタイル）",
+  "Automatic (Windows style on this device)": "自動（このデバイスでは Windows スタイル）",
+  "Windows style": "Windows スタイル",
+  "Mac style": "Mac スタイル",
+  "Mac style (coming soon)": "Mac スタイル（近日公開）",
   "Sign out": "サインアウト",
   // The release that runs: the account menu, and the Control panel's status bar (admin/ControlPanelPage.tsx)
   "ThirtyFile {version}": "ThirtyFile {version}",

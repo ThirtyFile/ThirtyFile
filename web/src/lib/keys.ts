@@ -1,8 +1,12 @@
 /** Keyboard differences between platforms */
 import { locale } from "@/lib/i18n";
+import { thisDevice } from "@/lib/style/device";
 
-/** macOS (and iPadOS with a keyboard): ⌘ takes the place of Ctrl, and Option the place of Alt */
-export const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+/**
+ * macOS (and iPadOS with a keyboard): ⌘ takes the place of Ctrl, and Option the place of Alt. This follows the
+ * operating system, whatever the interface style (lib/style)
+ */
+export const isMac = thisDevice.os === "mac" || thisDevice.os === "ios";
 
 /** Holding Ctrl while dropping copies instead of moving, like File Explorer (Option on macOS, like Finder) */
 export function wantsCopy(e: { ctrlKey: boolean; altKey: boolean }) {

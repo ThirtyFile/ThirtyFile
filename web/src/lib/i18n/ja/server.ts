@@ -103,6 +103,7 @@ export default {
   "Use the browser's current URL": "ブラウザーの現在の URL を使用",
   "Invalid default language": "既定の言語が無効です",
   "Unknown language": "不明な言語です",
+  "Unknown interface style": "不明なインターフェイスのスタイルです",
   "Default language: English": "既定の言語：英語",
   "Default language: Traditional Chinese": "既定の言語：繁体字中国語",
   "Default language: Simplified Chinese": "既定の言語：簡体字中国語",
