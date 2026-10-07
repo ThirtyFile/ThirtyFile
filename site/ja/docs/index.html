@@ -85,6 +85,7 @@
   -v /srv/thirtyfile/storage:/storage \
   -e THIRTYFILE_ADMIN_PASSWORD='choose-a-password' \
   ghcr.io/thirtyfile/thirtyfile:latest</code></pre>
+        <p><a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a> でも同じリリースのイメージを提供しています。上のコマンドで <code>thirtyfile/thirtyfile:latest</code> を指定すると、そこからインストールできます。Compose の場合は <code>image:</code> 行の <code>ghcr.io/thirtyfile/thirtyfile</code> を <code>thirtyfile/thirtyfile</code> に置き換え、バージョンタグと既存のボリューム設定はそのままにしてください。</p>
         <div class="table-scroll">
           <table>
             <thead><tr><th>部分</th><th>役割</th></tr></thead>

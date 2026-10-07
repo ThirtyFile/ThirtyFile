@@ -7,6 +7,7 @@
 [![Build](https://github.com/ThirtyFile/ThirtyFile/actions/workflows/build.yml/badge.svg)](https://github.com/ThirtyFile/ThirtyFile/actions/workflows/build.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Docker image](https://img.shields.io/badge/docker-ghcr.io%2Fthirtyfile%2Fthirtyfile-2563eb?logo=docker&logoColor=white)](https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile)
+[![Docker Hub](https://img.shields.io/badge/docker-thirtyfile%2Fthirtyfile-2563eb?logo=docker&logoColor=white)](https://hub.docker.com/r/thirtyfile/thirtyfile)
 
 可以自托管的文件管理工具，界面和操作都像 Windows 文件资源管理器，在浏览器中使用。
 
@@ -39,6 +40,8 @@ docker run -d --name thirtyfile --restart unless-stopped \
 ```
 
 **Docker Compose**
+
+[Docker Hub](https://hub.docker.com/r/thirtyfile/thirtyfile) 也提供相同的镜像。将上方命令或 Compose 的 `image:` 中的 `ghcr.io/thirtyfile/thirtyfile` 改为 `thirtyfile/thirtyfile`，保留相同的版本标签即可。
 
 ```bash
 curl -fLO https://github.com/ThirtyFile/ThirtyFile/releases/latest/download/compose.yaml

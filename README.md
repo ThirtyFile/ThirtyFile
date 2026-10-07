@@ -7,6 +7,7 @@ English · [繁體中文](README.zh-TW.md) · [简体中文](README.zh-CN.md) ·
 [![Build](https://github.com/ThirtyFile/ThirtyFile/actions/workflows/build.yml/badge.svg)](https://github.com/ThirtyFile/ThirtyFile/actions/workflows/build.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Docker image](https://img.shields.io/badge/docker-ghcr.io%2Fthirtyfile%2Fthirtyfile-2563eb?logo=docker&logoColor=white)](https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile)
+[![Docker Hub](https://img.shields.io/badge/docker-thirtyfile%2Fthirtyfile-2563eb?logo=docker&logoColor=white)](https://hub.docker.com/r/thirtyfile/thirtyfile)
 
 A self-hosted file manager that looks and works like Windows File Explorer, in your browser.
 
@@ -39,6 +40,8 @@ docker run -d --name thirtyfile --restart unless-stopped \
 ```
 
 **Docker Compose**
+
+The same images are available on [Docker Hub](https://hub.docker.com/r/thirtyfile/thirtyfile). Replace `ghcr.io/thirtyfile/thirtyfile` with `thirtyfile/thirtyfile` in the command above or the Compose `image:` line, keeping the same version tag.
 
 ```bash
 curl -fLO https://github.com/ThirtyFile/ThirtyFile/releases/latest/download/compose.yaml

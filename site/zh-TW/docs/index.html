@@ -85,6 +85,7 @@
   -v /srv/thirtyfile/storage:/storage \
   -e THIRTYFILE_ADMIN_PASSWORD='choose-a-password' \
   ghcr.io/thirtyfile/thirtyfile:latest</code></pre>
+        <p><a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a> 也提供相同的版本映像。將上方指令的映像改成 <code>thirtyfile/thirtyfile:latest</code> 即可從該處安裝。使用 Compose 時，將 <code>image:</code> 中的 <code>ghcr.io/thirtyfile/thirtyfile</code> 改成 <code>thirtyfile/thirtyfile</code>，保留版本標籤與原有的磁碟區設定。</p>
         <div class="table-scroll">
           <table>
             <thead><tr><th>部分</th><th>作用</th></tr></thead>

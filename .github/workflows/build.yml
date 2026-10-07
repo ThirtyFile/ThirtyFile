@@ -142,6 +142,7 @@ jobs:
       # and the unit tests (Vitest), with the coverage in the job summary
       - name: Frontend
         run: |
+          node --test .github/scripts/publish-dockerhub.test.mjs
           bash scripts/check.sh web --coverage
           (cd web && node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY")
 
