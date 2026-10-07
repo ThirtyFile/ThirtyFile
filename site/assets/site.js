@@ -12,12 +12,12 @@
   const page = html.dataset.page || "";
   const REPO = "https://github.com/ThirtyFile/ThirtyFile";
 
-  // The website's languages, English first, and the pages that exist in every one of them, by their path inside a
-  // language's folder (English is at the root, the others in site/<code>/). Every other page is in English only.
+  // The website's languages and complete set of translated pages, by their path inside a language's folder
+  // (English is at the root, the others in site/<code>/).
   // scripts/check-site.mjs reads both lists (keep each on one line): it fails when a page below is missing in a
   // language, or when the language links of the pages don't match.
   const LANGUAGES = [["en", "English"], ["zh-TW", "繁體中文"], ["zh-CN", "简体中文"], ["ja", "日本語"]];
-  const TRANSLATED = ["index.html", "docs/index.html", "docs/first-steps.html"];
+  const TRANSLATED = ["index.html", "docs/index.html", "docs/first-steps.html", "docs/files.html", "docs/preview.html", "docs/sharing.html", "docs/account.html", "docs/webdav.html", "docs/users.html", "docs/sign-in.html", "docs/storage.html", "docs/logs.html", "docs/settings.html", "docs/internet.html", "docs/backup.html", "docs/help.html", "docs/contributing.html"];
 
   const GUIDES = [
     ["Get started", [
@@ -92,6 +92,7 @@
       "Copy": "複製",
       "Copied": "已複製",
       "Select and copy": "請選取後複製",
+      "On this page": "本頁內容",
     },
     "zh-CN": {
       "Site": "网站",
@@ -134,6 +135,7 @@
       "Copy": "复制",
       "Copied": "已复制",
       "Select and copy": "请选中后复制",
+      "On this page": "本页内容",
     },
     "ja": {
       "Site": "サイト",
@@ -176,6 +178,7 @@
       "Copy": "コピー",
       "Copied": "コピーしました",
       "Select and copy": "選択してコピーしてください",
+      "On this page": "このページの内容",
     },
   };
 
@@ -193,7 +196,7 @@
   const link = (file) => at(TRANSLATED.includes(file) ? lang : "en", file);
   const guideUrl = (id) => link(`docs/${id === "install" ? "index" : id}.html`);
   // The same page in another language, or that language's home page when this page isn't translated
-  const counterpart = (code) => at(code, TRANSLATED.includes(path) ? path : "index.html");
+  const counterpart = (code) => at(code, TRANSLATED.includes(path) ? path : "index.html") + window.location.hash;
 
   const storage = {
     get(key) {
@@ -264,6 +267,12 @@
   const OFFERED = "tf-site-language-offered";
   const menu = siteNav.querySelector(".lang-menu");
   if (menu) {
+    // Static HTML keeps a working language switch without JavaScript; when available, keep the current section too.
+    const preserveSection = () => {
+      for (const a of menu.querySelectorAll("a[hreflang]")) a.href = counterpart(a.hreflang);
+    };
+    preserveSection();
+    window.addEventListener("hashchange", preserveSection);
     for (const a of menu.querySelectorAll("a")) a.addEventListener("click", () => storage.set(OFFERED, "1"));
     document.addEventListener("click", (e) => {
       if (menu.open && !menu.contains(e.target)) menu.open = false;
@@ -293,7 +302,7 @@
     return null;
   };
   const wanted = browserLanguage();
-  if (wanted && wanted !== lang && TRANSLATED.includes(path) && !storage.get(OFFERED)) {
+  if (lang === "en" && wanted && wanted !== lang && TRANSLATED.includes(path) && !storage.get(OFFERED)) {
     storage.set(OFFERED, "1");
     // Written in the language offered, which the visitor reads
     const offer = el(`
@@ -332,7 +341,7 @@
     const flat = GUIDES.flatMap(([, items]) => items);
     const index = flat.findIndex(([id]) => id === page);
     const article = document.querySelector(".article");
-    if (article && index >= 0) {
+    if (article && index >= 0 && !article.querySelector("nav.next")) {
       const prev = flat[index - 1];
       const next = flat[index + 1];
       article.append(
@@ -358,6 +367,16 @@
         </div>
       </footer>`),
     );
+  }
+
+  // Long guides keep their own section list in HTML, so it also works without JavaScript.
+  const toc = document.querySelector(".guide-toc");
+  if (toc) {
+    const sections = [...document.querySelectorAll(".article h2[id]")];
+    for (const a of toc.querySelectorAll("a")) {
+      const heading = sections.find((h) => `#${h.id}` === a.getAttribute("href"));
+      if (heading) a.textContent = heading.textContent;
+    }
   }
 
   // ── Copy buttons on code blocks ──

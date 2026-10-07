@@ -2,17 +2,16 @@
 //  1. every page in TRANSLATED (site/assets/site.js) exists in every language of LANGUAGES: English at the root, the
 //     others in their folder (site/zh-TW/…), and nothing else is in a language's folder
 //  2. each version says its language in <html lang>, has a title and a description of its own, and lists every
-//     version, itself included, in <link rel="alternate" hreflang>, plus x-default for English; pages that aren't
-//     translated have no such links
+//     version, itself included, in <link rel="alternate" hreflang>, plus x-default for English
 //  3. the language switch in each page's header links to every language once, in the order of LANGUAGES: to the same
-//     page when it is translated, to that language's home page otherwise
+//     page and language throughout the guide navigation
 //  4. the links and pictures inside the site lead to files that exist, and their #anchors to ids on those pages
-// Usage: node scripts/check-site.mjs
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { posix } from "node:path";
+// Usage: node scripts/check-site.mjs [--site <fixture directory>]
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { posix, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const site = fileURLToPath(new URL("../site/", import.meta.url));
+const site = process.argv[2] === "--site" ? resolve(process.argv[3]) + sep : fileURLToPath(new URL("../site/", import.meta.url));
 // Where GitHub Pages publishes site/
 const BASE = "https://thirtyfile.github.io/ThirtyFile/";
 
@@ -54,6 +53,7 @@ const tags = (html, name) => [...html.matchAll(new RegExp(`<${name}\\b[^>]*>`, "
 const ids = (html) => new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
 const titleOf = (html) => html.match(/<title>([^<]*)<\/title>/)?.[1].trim() ?? "";
 const descriptionOf = (html) => attr(tags(html, "meta").find((tag) => attr(tag, "name") === "description") ?? "", "content")?.trim() ?? "";
+const articleOf = (html) => html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)?.[1] ?? "";
 
 // ── 1. Every translated page in every language, and nothing else in their folders ──
 for (const dir of readdirSync(site)) {
@@ -68,6 +68,7 @@ for (const code of LANGUAGES) {
 }
 for (const file of pages) {
   const [code, inner] = where(file);
+  if (code === "en" && !TRANSLATED.includes(inner)) fail(file, "every published page must be listed in TRANSLATED and translated into every supported language");
   if (code !== "en" && !TRANSLATED.includes(inner)) fail(file, `isn't in TRANSLATED in site/assets/site.js; only the pages listed there are translated`);
 }
 
@@ -83,9 +84,23 @@ for (const file of pages) {
   const description = descriptionOf(html);
   if (!title) fail(file, "has no <title>");
   if (!description) fail(file, 'has no <meta name="description">');
+  const allIds = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);
+  if (new Set(allIds).size !== allIds.length) fail(file, "has duplicate element IDs");
   if (code !== "en" && translated && text.has(inner)) {
     if (title && title === titleOf(text.get(inner))) fail(file, `its <title> is the English one`);
     if (description && description === descriptionOf(text.get(inner))) fail(file, "its description is the English one");
+    const englishArticle = articleOf(text.get(inner));
+    const localArticle = articleOf(html);
+    const missingAnchors = [...ids(englishArticle)].filter((anchor) => !ids(localArticle).has(anchor));
+    if (missingAnchors.length) fail(file, `translated guide is missing source section anchors: ${missingAnchors.join(", ")}`);
+    if (localArticle.trim() === englishArticle.trim()) fail(file, "the guide body is an unchanged English copy");
+    for (const element of ["h2", "h3", "p", "li", "tr"]) {
+      const inBody = (body) => body.replace(/<details class="guide-toc">[\s\S]*?<\/details>/g, "");
+      if (tags(inBody(localArticle), element).length !== tags(inBody(englishArticle), element).length)
+        fail(file, `translated guide has a different number of ${element} elements; preserve all source content`);
+    }
+    const blocks = (body) => [...body.matchAll(/<pre\b[^>]*>([\s\S]*?)<\/pre>/g)].map((m) => m[1].trim());
+    if (JSON.stringify(blocks(localArticle)) !== JSON.stringify(blocks(englishArticle))) fail(file, "translated guide changes a command or configuration code block");
   }
 
   const expected = translated ? [...LANGUAGES.map((c) => [c, published(folder(c) + inner)]), ["x-default", published(inner)]] : [];
@@ -105,7 +120,9 @@ for (const file of pages) {
   } else if (menu) {
     const want = LANGUAGES.map((c) => `${c} ${folder(c) + (translated ? inner : "index.html")}${c === code ? " (current)" : ""}`);
     const have = tags(menu, "a").map((tag) => {
-      const target = posix.normalize(posix.join(posix.dirname(file), attr(tag, "href") ?? ""));
+      const href = attr(tag, "href") ?? "";
+      const path = (href.startsWith(BASE) ? href.slice(BASE.length) : posix.normalize(posix.join(posix.dirname(file), href))).split(/[?#]/)[0];
+      const target = !path || path.endsWith("/") ? `${path}index.html` : path;
       const current = attr(tag, "aria-current") === "true" ? " (current)" : "";
       const named = attr(tag, "lang") === attr(tag, "hreflang") ? "" : " (lang differs from hreflang)";
       return `${attr(tag, "hreflang")} ${target}${current}${named}`;
@@ -122,13 +139,25 @@ for (const file of pages) {
     if (url.startsWith(BASE)) target = url.slice(BASE.length);
     else if (/^([a-z]+:|\/\/)/i.test(url)) continue;
     else target = url.startsWith("#") ? file + url : posix.normalize(posix.join(posix.dirname(file), url));
-    const [path, anchor] = target.split("#");
+    const [withQuery, anchor] = target.split("#");
+    const path = withQuery.split("?")[0];
     const resolved = path === "" || path.endsWith("/") ? `${path}index.html` : path;
     if (!files.has(resolved)) {
       fail(file, `links to ${url}, which doesn't exist`);
     } else if (anchor && resolved.endsWith(".html") && !ids(text.get(resolved)).has(anchor)) {
       fail(file, `links to ${url}, but site/${resolved} has no id="${anchor}"`);
     }
+  }
+  // Metadata and the intentional language selector are the only cross-language links.
+  const reading = html.replace(/<head>[\s\S]*?<\/head>/, "").replace(/<details class="lang-menu">[\s\S]*?<\/details>/g, "");
+  for (const [, url] of reading.matchAll(/\shref="([^"]*)"/g)) {
+    let target;
+    if (url.startsWith(BASE)) target = url.slice(BASE.length);
+    else if (/^([a-z]+:|\/\/)/i.test(url)) continue;
+    else target = url.startsWith("#") ? file + url : posix.normalize(posix.join(posix.dirname(file), url));
+    target = target.split(/[?#]/)[0];
+    if (!target || target.endsWith("/")) target += "index.html";
+    if (target.endsWith(".html") && files.has(target) && where(file)[0] !== where(target)[0]) fail(file, `local reading link changes language: ${url}`);
   }
 }
 

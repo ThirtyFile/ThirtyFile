@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="zh-CN" data-root="../.." data-page="storage">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>存储位置 · ThirtyFile</title>
+    <meta name="description" content="配置本地文件夹、S3、SFTP 与 FTP 存储，管理空间、备份、镜像、迁移与存储用量。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/storage.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/storage.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/storage.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/storage.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/storage.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要内容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="网站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">语言 </span><span class="lang-name">简体中文</span></summary>
+            <ul>
+              <li><a href="../../docs/storage.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="../../zh-TW/docs/storage.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="storage.html" hreflang="zh-CN" lang="zh-CN" aria-current="true">简体中文</a></li>
+              <li><a href="../../ja/docs/storage.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>开始使用</p>
+          <a href="index.html">安装</a>
+          <a href="first-steps.html">初始设置</a>
+          <p>日常使用</p>
+          <a href="files.html">文件操作</a>
+          <a href="preview.html">预览与编辑</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的账号</a>
+          <a href="webdav.html">映射为网络驱动器</a>
+          <p>管理</p>
+          <a href="users.html">用户与空间</a>
+          <a href="sign-in.html">单点登录</a>
+          <a href="storage.html" aria-current="page">存储位置</a>
+          <a href="logs.html">日志与品牌</a>
+          <p>部署与运维</p>
+          <a href="settings.html">设置</a>
+          <a href="internet.html">通过互联网访问</a>
+          <a href="backup.html">升级与备份</a>
+          <a href="help.html">故障排除</a>
+          <p>项目</p>
+          <a href="contributing.html">参与贡献</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+
+        <h1>存储位置</h1>
+        <p class="lead">选择文件内容的存储位置。不同空间可以使用不同的位置。</p>
+        <details class="guide-toc">
+          <summary>本页内容</summary>
+          <ol>
+            <li><a href="#types">类型</a></li>
+            <li><a href="#layout">文件存放在哪里</a></li>
+            <li><a href="#add">添加位置</a></li>
+            <li><a href="#per-space">将空间迁移到其他位置</a></li>
+            <li><a href="#copy">将全部内容复制到其他位置</a></li>
+            <li><a href="#replicas">镜像：在多个位置保有相同文件</a></li>
+            <li><a href="#folder-spaces">文件夹空间：将服务器文件夹作为空间</a></li>
+            <li><a href="#check">检查位置中的内容</a></li>
+            <li><a href="#usage">存储用量与性能</a></li>
+            <li><a href="#offline">位置离线时</a></li>
+          </ol>
+        </details>
+        <h2 id="types">类型</h2>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>类型</th><th>适用情况</th></tr></thead>
+            <tbody>
+              <tr><td><strong>本地文件夹</strong></td><td>存储文件夹，或挂载到容器内的其他文件夹，例如 NAS</td></tr>
+              <tr><td><strong>S3 兼容服务</strong></td><td>AWS S3、Cloudflare R2、Backblaze B2、Wasabi、RustFS 等服务</td></tr>
+              <tr><td><strong>SFTP</strong></td><td>使用密码或私钥连接的服务器（建议使用 Ed25519 密钥，而非 RSA）</td></tr>
+              <tr><td><strong>FTP / FTPS</strong></td><td>较旧的文件服务器</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="layout">文件存放在哪里</h2>
+        <p>在存储文件夹与每个<em>本地文件夹</em>位置中，每个空间都是普通文件夹，里面的文件也都是保留原本名称的普通文件。打开 <code>/storage</code>（<code>compose.yaml</code> 旁的 <code>storage</code> 文件夹），就能找到所有内容：</p>
+        <pre><code>/storage/company/…              the company space "All files"
+/storage/teams/&lt;space name&gt;/…   team spaces
+/storage/users/&lt;user name&gt;/…    each user's "My files"</code></pre>
+        <p>创建空间时，系统会在所选存储位置的文件夹内创建它的文件夹，通常是默认位置（若选择已添加为<em>本地文件夹</em>位置的 NAS，则可能是 <code>/nas/teams/…</code>）。这些是<a href="#folder-spaces">文件夹空间</a>：其他程序、SMB 或扫描器复制进去的文件会出现在 ThirtyFile，网页上的变更也会直接应用到文件夹。</p>
+        <ul>
+          <li><strong>名称。</strong>文件夹以空间或用户命名。文件名称不允许的字符会改成 <code>_</code>；ThirtyFile 会隐藏的名称（例如 <code>desktop.ini</code>）前面会加上 <code>_</code>。若同名空间、手动创建的文件夹或已删除空间留下的文件夹已占用该名称，新文件夹会加上编号，例如 <code>teams/Sales (2)</code>。</li>
+          <li><strong>重命名。</strong>重命名空间不会改变文件夹名称，因此依赖其路径的程序、SMB 共享与备份仍可使用。<strong>控制面板 › 空间</strong>会显示每个空间的文件夹。</li>
+          <li><strong>删除。</strong>删除空间，或删除用户及其文件，只会从 ThirtyFile 移除它们：文件夹与文件仍留在磁盘上，由你决定保留或删除。同名的新空间或用户会取得新的文件夹，不会取得旧文件。将已删除用户的文件移到另一个空间时，磁盘上的文件也会移动。</li>
+          <li><strong>S3、SFTP 与 FTP</strong>则使用内容存储区：以文件内容产生名称（<code>ab/cd/…</code>），原本的名称与文件夹结构只保存在 ThirtyFile 的数据库。若以原本的文件夹结构保存，在那里重命名文件夹就必须复制里面的每个文件。当这类位置是默认位置时，新空间会使用内容存储区，之后仍可<a href="#per-space">移到其他位置</a>。</li>
+        </ul>
+
+        <h2 id="add">添加位置</h2>
+        <ol>
+          <li>打开<strong>控制面板 › 存储位置</strong>，点击<strong>添加存储位置</strong>。</li>
+          <li>选择类型，填入地址与登录信息。</li>
+          <li>点击<strong>测试连接</strong>。系统会写入、读回并删除一个小文件；测试成功后才能存储位置。只能写入但无法删除文件的密钥或账号不会通过测试，因为 ThirtyFile 将无法清除已删除的文件。<em>本地文件夹</em>若尚不存在，保存时会创建它（参阅<a href="#not-mounted">未挂载的磁盘与分享</a>）。S3、SFTP 与 FTP 在保存时会放入一个小型 <code>.thirtyfile-location</code> 文件（参阅<a href="#one-place">一个地方只能有一个位置</a>）。</li>
+          <li>若新空间应创建在这里，将它设为<strong>默认</strong>。</li>
+        </ol>
+        <p>之后编辑位置时，只要服务器、账号、存储桶、SFTP 主机密钥与证书检查设置都未变，已保存的密码或密钥就会保留。变更其中任何一项或重设主机密钥后，必须重新输入密码或密钥。</p>
+        <p>默认位置只决定新空间创建在哪里：用户的“我的文件”、团队空间，以及新服务器上的“全部文件”。创建团队空间时可以选择其他位置，新用户的“我的文件”也可以有个别位置（参阅<a href="users.html#personal">个人空间</a>）。每个空间会留在创建时的位置，因此变更默认位置不会迁移现有空间，新文件也会继续存到旧文件所在的位置。只有<a href="#per-space">迁移空间</a>才会改变位置。</p>
+
+        <h3 id="list">列表显示的信息</h3>
+        <ul>
+          <li><strong>已用空间</strong>：该位置上各空间的文件。文件夹空间使用最近一次检查时的文件夹文件大小；内容存储区则计算所存内容。多个文件内容相同时只计算一次。<a href="#usage">存储用量</a>提供历史记录。</li>
+          <li><strong>可用空间</strong>：存储文件夹与<em>本地文件夹</em>位置会显示所在磁盘的剩余空间与容量。</li>
+          <li><strong>文件与空间</strong>：该位置的文件夹空间在最近一次检查时的文件数量，加上内容存储区中的内容数量（将光标移到数字上可分别查看），以及该位置上的空间数量。点击空间数量可列出空间的类型、所有者与大小，不会显示里面的内容。</li>
+        </ul>
+        <p>当位置上还有空间、空间正在移入或移出，或内容存储区仍有文件时，不能删除该位置。管理员从自选文件夹创建的文件夹空间（<a href="#folder-spaces">见下方</a>）不属于任何存储位置。</p>
+
+        <h3>供应商注意事项</h3>
+        <ul>
+          <li><strong>AWS S3</strong>：端点留空。</li>
+          <li><strong>Cloudflare R2</strong>：端点为 <code>https://&lt;account ID&gt;.r2.cloudflarestorage.com</code>，区域为 <code>auto</code>。</li>
+          <li><strong>自托管</strong>：<a href="https://github.com/rustfs/rustfs">RustFS</a> 可使用。选择“自托管”，并勾选“路径式 URL”。</li>
+        </ul>
+        <div class="note">未加密的连接（普通 FTP，或通过 http 的 S3）只接受你自己网络内的地址。</div>
+
+        <h2 id="per-space">将空间迁移到其他位置</h2>
+        <p>在<strong>控制面板 › 空间</strong>选择空间，选择<strong>迁移到其他位置…</strong>。任何空间都能搬到任何其他位置：内容存储区之间、文件夹到内容存储区，或搬到文件夹。对话框显示当前位置与大小，并列出其他位置；位于这台服务器磁盘上的位置也会显示可用空间。目标位置空间不足时，对话框会提示，且无法开始迁移。继续迁移只需容纳尚未复制的部分；同一磁盘内直接迁移文件夹则不需额外空间。</p>
+        <p>迁移会在后台分三步执行（此处以内容存储区中的空间为例；<a href="#move-folder">文件夹空间</a>与<a href="#move-into-folder">迁移到文件夹</a>的流程相似，差异见下方）：</p>
+        <ol>
+          <li><strong>复制。</strong>空间的每个文件、历史版本与回收站中的项目都会复制到新位置，并以文件的 SHA-256 指纹验证每份副本。期间空间仍可使用；迁移期间上传或修改的文件也会复制。</li>
+          <li><strong>切换。</strong>全部内容就绪后，空间会一次切换到新位置，之后的新文件都会存到那里。</li>
+          <li><strong>清理。</strong>旧副本会在一分钟后删除，让仍在读取旧副本的下载有时间完成。</li>
+        </ol>
+        <p>切换之前，空间仍在原本位置：停止或取消迁移不会改变用户看到的内容。内容相同的文件在整个系统只保存一次，因此空间与其他位置的空间共享的内容也会一起迁移，那些空间之后也从新位置读取该内容。</p>
+        <h3 id="move-folder">将文件夹空间迁移到 S3、SFTP 或 FTP</h3>
+        <p>文件夹空间（位于存储文件夹、<em>本地文件夹</em>位置或自选文件夹的空间）可搬到 S3、SFTP 或 FTP 位置的内容存储区。文件会改以内容存储区形式保存，名称、文件夹、分享链接、权限、回收站与历史版本都保留。</p>
+        <ul>
+          <li><strong>期间只读。</strong>从开始迁移到完成或取消，用户可以打开、下载与分享文件，但不能修改；空间会显示提示。暂停或停止的迁移仍保持只读，因为已复制的内容必须维持一致：请继续迁移，或取消以恢复写入。尚在等待第一次执行的迁移不会立刻让空间只读。</li>
+          <li><strong>文件夹的外部变更。</strong>迁移期间，ThirtyFile 以外的程序（例如 SMB 或扫描器）修改、添加或删除的文件，会在切换前检查文件夹时找到并一并复制。更好的做法是让其他程序在迁移完成前停止写入。</li>
+          <li><strong>名称。</strong>内容存储区不区分只有大小写不同的名称，而文件夹可能同时容纳“Report.docx”与“report.docx”。其中一个会加上编号，例如“report (1).docx”；迁移详细信息会显示重命名的数量。</li>
+          <li><strong>旧文件夹。</strong>空间切换到新位置后，系统会移除旧文件夹：只有与已复制内容完全一致的文件才会删除，接着移除清空的文件夹。最后一刻被修改的文件，以及 ThirtyFile 不显示的文件（例如 <code>Thumbs.db</code>）会留下，并列在迁移详细信息中（个人空间只显示数量，保护文件名称隐私）。</li>
+          <li><strong>空间。</strong>每个文件都会经过 ThirtyFile 数据目录中的临时文件，因此该目录必须有足以容纳空间内最大文件的余裕。开始前会检查容量与文件夹是否存在；未挂载的磁盘不会被当成空的空间。</li>
+        </ul>
+        <h3 id="move-into-folder">将空间迁移到文件夹</h3>
+        <p>搬到存储文件夹或<em>本地文件夹</em>位置（例如 NAS）的空间，会成为文件夹空间，取得独立文件夹，命名方式与新空间相同（<code>company</code>、<code>teams/&lt;name&gt;</code> 或 <code>users/&lt;user name&gt;</code>，名称已占用时加编号），且复制期间保持只读。</p>
+        <ul>
+          <li><strong>从 S3、SFTP 或 FTP 搬入。</strong>每个文件会连同日期写入新文件夹，检查 SHA-256 后重命名到正式位置；回收站存到 <code>.thirtyfile-trash</code>，历史版本存到 <code>.thirtyfile-versions</code>，与其他文件夹空间相同。文件夹无法原样容纳的名称（含不允许的字符、扫描略过的名称如 <code>Thumbs.db</code>，或超过磁盘限制的长度）会改名，详细信息会显示数量。空间切换后，内容存储区会释放文件；若其他空间未使用相同内容，一分钟后便会删除。</li>
+          <li><strong>从其他文件夹搬入。</strong>在同一磁盘上，文件夹会立即直接搬到新位置。在不同磁盘上，会复制文件夹中的全部内容，包括回收站、版本与 ThirtyFile 不显示的文件，每个文件都保留日期并检查大小。期间从外部修改的文件会在切换前检查时找到并复制，之后按上述方式移除旧文件夹。若目标磁盘不区分大小写（例如 CIFS 共享或 exFAT 磁盘），而空间含有只有大小写不同的名称（“Report.docx”与“report.docx”），这些项目不会复制，迁移会停止并列出冲突。请先将每组中的其中一个重命名，再继续迁移。</li>
+          <li><strong>自选文件夹。</strong>显示自选文件夹且不属于任何位置的文件夹空间，也可用同样方式搬到任何存储位置。之后原本的文件夹会移除。</li>
+        </ul>
+        <p>取消迁移到文件夹时，会移除这次创建的文件夹及已复制的内容。</p>
+
+        <h3 id="move-many">多个空间，或位置上的所有内容</h3>
+        <ul>
+          <li><strong>多个空间。</strong>在<strong>控制面板 › 空间</strong>勾选空间（使用各列前的复选框，或表头的全选），选择<strong>将 … 个空间迁移到其他位置…</strong>。每个空间都有自己的迁移工作，依序执行。已位于目标位置或正在迁移的空间会略过，对话框会显示数量。</li>
+          <li><strong>位置上的所有内容。</strong>在<strong>控制面板 › 存储位置</strong>对位置选择<strong>全部迁移到…</strong>，将全部空间（包含个人空间）移到另一个位置。位置会显示进度。全部移走后，若原本是默认位置，系统会提供将目标位置设为默认的选项，并提供删除旧位置的选项。</li>
+        </ul>
+        <p>若目标位于这台服务器的磁盘上，会一次检查所有选择空间合计需要的可用空间。</p>
+
+        <h3 id="moves">追踪迁移进度</h3>
+        <p><strong>控制面板 › 迁移</strong>先列出未完成的迁移，再列出历史记录。每笔包含空间（用户的“我的文件”以用户命名）、来源与目标位置、已复制文件与字节数、速度、剩余时间与状态。工作执行时页面会自动更新。</p>
+        <ul>
+          <li><strong>一次一个。</strong>迁移依启动顺序逐一执行，其余等待。处理器较多且网络快速的服务器可使用<strong>同时执行</strong>，最多八个迁移一起执行。</li>
+          <li><strong>暂停与继续。</strong>暂停会在当前文件复制完后停止，并保留已复制内容。继续时先进入队列等待，轮到后从停止处接续。ThirtyFile 在迁移期间停止或重启，之后也以相同方式接续。</li>
+          <li><strong>取消。</strong>空间留在原位置，已复制到新位置的内容会移除。</li>
+          <li><strong>错误。</strong>无法复制的文件会尝试三次。若仍有失败，其他文件仍会复制，但迁移会以<em>因错误停止</em>结束，且不切换位置。<strong>详细信息</strong>列出失败文件与原因（用户的“我的文件”不显示文件名称，因管理员无权查看）。修正原因后继续迁移以重试，或取消工作。无法连接到新位置也会以相同方式停止。</li>
+          <li><strong>历史记录。</strong>完成与取消的迁移会保留 90 天（每个空间最新 20 笔不受天数限制），包含启动者与时间。活动日志也会记录迁移的开始、完成、失败与取消。</li>
+        </ul>
+        <p>迁移完成或取消前，不能删除该空间，也不能删除以它为“我的文件”的用户。</p>
+
+        <h2 id="copy">将全部内容复制到其他位置</h2>
+        <p>在<strong>控制面板 › 存储位置</strong>的位置 <strong>…</strong> 菜单中选择<strong>全部复制到…</strong>，会把该位置的全部空间复制到另一个位置，来源保持不变：不会移除文件，空间仍在原处，默认位置也不变。可用于在 NAS、异地存储桶或便携磁盘保存额外副本。若需要反复创建并保留一段时间的快照，请参阅<a href="backup.html#file-backups">将文件备份到其他位置</a>；保存与还原方式相同。</p>
+        <h3 id="copy-what">复制哪些内容</h3>
+        <ul>
+          <li><strong>位置上的每个空间</strong>，包含个人空间：文件夹（含空文件夹）、文件、回收站与历史版本。对话框会列出空间，显示文件数量、回收站占用量，以及将写入目标位置的大小。</li>
+          <li><strong>每份内容只存一次。</strong>相同内容的文件只保存一次，跨空间也一样。空间的内容无论当前存放在哪里都会复制（整个系统只保存一份相同内容，因此空间的文件内容可能存放在其他位置）。</li>
+          <li>副本会记录每个文件夹的<strong>访问权限</strong>供参考。分享链接、收藏与进行中的上传不会复制。</li>
+          <li>该位置上仅供其他位置空间使用的内容不会包含在内，因为它属于那些空间。</li>
+        </ul>
+        <h3 id="copy-where">副本存放在哪里</h3>
+        <p>每次复制会在目标位置取得独立文件夹 <code>.thirtyfile-backups/&lt;id&gt;</code>，ThirtyFile 的其他功能不会写入其中。既有内容不会被替换，副本彼此不混合。里面包含：</p>
+        <ul>
+          <li><code>objects/ab/cd/&lt;sha256&gt;</code>：每份内容，以 SHA-256 命名；</li>
+          <li><code>snapshots/&lt;id&gt;/manifest.jsonl</code>：每个空间、文件夹、文件与历史版本各占一行，包含路径与内容的 SHA-256；</li>
+          <li><code>snapshots/&lt;id&gt;/complete.json</code>：最后写入，包含列表的 SHA-256。没有此文件的副本不算完整，也不会提供还原；</li>
+          <li><code>set.json</code>：副本名称、来源位置，以及创建它的 ThirtyFile 信息。</li>
+        </ul>
+        <p>因此即使没有 ThirtyFile，也能找到文件：列表每一行都记录文件路径与存放内容的对象。</p>
+        <p>目标可能与来源在同一磁盘或存储服务；对话框会提示这样的副本无法承受该磁盘或服务故障。相同路径或互相包含的位置会被拒绝。未加密 FTP 会提示文件以未加密方式传输。若目标位于本服务器磁盘且可用空间不足，会拒绝复制；S3、SFTP 与 FTP 则无法得知剩余容量。</p>
+        <h3 id="copy-changes">复制期间变更的文件</h3>
+        <p>复制期间空间仍可使用。副本反映创建文件列表时的状态（<em>截至</em>）：之后修改或删除的文件会以当时版本复制，因为内容在复制完成前不会删除。文件夹空间的文件会逐一读取，并检查读取期间是否变更；变更过的会重读。开始前会先检查其他程序造成的文件夹变更。每个文件夹空间文件都完整且符合索引记录，但其他程序在不同时间修改的全部文件不代表同一瞬间的整体状态。</p>
+        <h3 id="copy-follow">追踪、暂停与错误</h3>
+        <p><strong>控制面板 › 备份</strong>列出副本、当前工作与进度。复制在后台执行，一次一项工作；关闭页面后仍会继续。</p>
+        <ul>
+          <li><strong>暂停与继续。</strong>暂停会在当前项目完成后停止并保留已复制内容；继续或 ThirtyFile 重启后，从停止处接续。</li>
+          <li><strong>错误。</strong>无法读取的文件会尝试三次。若仍无法复制，工作会以<em>因错误停止</em>结束，且副本不完整。<strong>详细信息</strong>列出项目与原因（个人空间不显示文件名称）。修正原因后按<strong>继续</strong>重试。无法连接到位置也会以相同方式停止。</li>
+          <li><strong>取消。</strong>从未完成的副本会从目标位置移除，来源不受影响。</li>
+          <li><strong>检查备份</strong>会从目标位置读回全部内容，检查每份内容的 SHA-256，以及每份列表与其 <code>complete.json</code> 是否一致，并列出丢失或损坏的项目。</li>
+          <li><strong>删除备份</strong>会在确认后从目标位置移除文件夹。可以暂停，但不能取消：删除到一半的副本无法还原。</li>
+        </ul>
+        <p>副本删除前，不能删除持有它的位置或变更该位置的文件夹。移除未使用内容与永久删除文件都不会查看 <code>.thirtyfile-backups</code>，因此不会移除副本；<strong>浏览次数</strong>也不会打开它（其中列表包含个人空间的文件名称）。活动日志会记录副本的创建、还原、检查与删除。</p>
+        <h3 id="copy-restore">从副本还原</h3>
+        <p>选择副本并选择<strong>还原…</strong>，再选择要还原的空间。内容会放入空间本身或你选择的其他公司／团队空间顶层的新文件夹，名称为<em>已还原 &lt;空间&gt; &lt;日期&gt;</em>；不会替换任何既有内容。该空间位置仍保有的内容不会重复复制。</p>
+        <ul>
+          <li>个人空间只能完整还原到其所有者的个人空间，管理员始终看不到里面的文件。</li>
+          <li>回收站内容默认略过，除非勾选<strong>也还原回收站中的项目</strong>。</li>
+          <li>新文件夹继承目标空间的权限。历史版本与副本中记录的访问权限仍留在副本；还原不会给任何人超过目标空间允许的权限。</li>
+          <li>文件夹无法容纳的名称会拒绝并列出；同一文件夹的名称冲突（例如从文件夹空间的 <em>A.txt</em> 与 <em>a.txt</em> 还原到内容存储区）会加上编号，工作会显示提示。</li>
+          <li>停止的还原会从停止处接续，不会重复创建项目。</li>
+        </ul>
+
+        <h2 id="replicas">镜像：在多个位置保有相同文件</h2>
+        <p>镜像策略会把某位置上各空间的文件保存到其他位置，检查副本，并在原位置故障时从副本读取。原位置永久丢失时，可将其他位置之一<em>提升为主要位置</em>，空间之后就在那里读写。只有管理员能在<strong>控制面板 › 镜像</strong>查看与管理镜像。</p>
+        <div class="note"><strong>镜像不是备份。</strong>镜像保存当前的文件状态：删除或覆写文件后，镜像也会稍后删除或覆写。若要救回误删或误改的内容，仍需保留<a href="backup.html#file-backups">备份</a>。镜像让磁盘、NAS 或存储桶故障时文件仍可读取；备份则保留历史状态。</div>
+        <h3 id="replica-make">创建镜像</h3>
+        <p>选择<strong>新建镜像…</strong>（或存储位置 <strong>…</strong> 菜单中的<strong>创建镜像…</strong>），然后设置：</p>
+        <ul>
+          <li><strong>要镜像的位置</strong>：要复制其空间的来源位置，即<em>主要位置</em>。</li>
+          <li><strong>副本存放位置</strong>：依优先顺序排列的一个或多个位置。每个位置可选择<strong>变更后尽快同步</strong>（汇整数秒内的变更，再于后台复制），或计划同步（每几分钟、每几小时，或在指定时区每日指定时间）。相同路径或互相包含的位置会被拒绝。</li>
+          <li><strong>副本数</strong>：除源文件外保留几份副本，默认 1 份。副本会使用列表中最前面可用的位置，其余作为备用。若位置数少于副本数，策略会提示并标示为需要处理。</li>
+          <li><strong>空间</strong>：位置上的全部空间（含之后添加的），或只选择勾选的空间。</li>
+          <li><strong>从副本读取</strong>、每几天检查一次（默认 1 天）、变更等待多久后通知管理员（默认 24 小时），以及速度限制。</li>
+        </ul>
+        <p>每份内容在每个位置只复制一次，即使多个文件或空间共享它。文件、历史版本与回收站都会复制。在目标位置，副本存放在内容存储区（<code>ab/cd/&lt;sha256&gt;</code>），无论来源是何种空间。</p>
+        <h3 id="replica-folders">文件夹空间</h3>
+        <p><a href="#folder-spaces">文件夹空间</a>（存储文件夹与<em>本地文件夹</em>位置上的全部空间）也能制作镜像。文件从文件夹读取，并在读取期间检查；若有变更就重读。其他程序持续写入的文件（例如记录或信箱）不会让同步整体失败：系统会复制最后一次完整读到的内容，详细信息会标示复制期间有变更（从未完整读到的文件尚无副本，也以相同方式列出；个人空间不显示文件名称）。下次同步会再读取。网页变更会在数秒后复制；其他程序通过 SMB 或扫描器造成的变更，则要等 ThirtyFile 侦测到：服务器本地磁盘约 12 秒，NFS 或 SMB 挂载则在下次定期检查时（默认每 15 分钟，可调整）。每次同步前会先检查文件夹变更。</p>
+        <h3 id="replica-copies">副本如何维护</h3>
+        <ul>
+          <li><strong>写入时检查。</strong>每份副本都会先读回并比对 SHA-256，通过后才计入。既有副本若损坏或长度错误，会被替换。</li>
+          <li>每隔几天会<strong>再次检查</strong>，也可使用<strong>检查副本</strong>逐一读回。损坏或丢失的副本会标记，下次同步会从原始内容或其他正常副本补回。</li>
+          <li><strong>短暂落后。</strong>副本在文件变更后稍晚创建，不是同时写入。位置故障前一刻修改的文件可能尚未复制。<strong>控制面板 › 镜像</strong>显示每个位置是否为最新、变更等待时间，以及最近同步计算时已持有与应持有的内容数量（策略变更后数秒更新）。同步与检查历史保留已完成工作 90 天，每个位置最多最新 1,000 笔，且最新 20 笔不受天数限制。</li>
+          <li><strong>无法连接的位置</strong>会等待，每 5 分钟重试，恢复后补齐。失败的同步会一小时后再试，或按<strong>立即同步</strong>立刻重试。同步可以暂停、继续与取消；继续时从停止处接续，ThirtyFile 重启后也是如此。</li>
+          <li><strong>避免误删。</strong>清空回收站、永久删除文件、移除未使用内容与待重试的删除都不会删除镜像。只有内容已无人使用，且由创建它的策略执行，才会释放副本。</li>
+          <li><strong>通知管理员</strong>：策略需要处理时（空间原位置或副本位置无法连接、同步失败、副本损坏、位置不足或变更等待超时），会在应用程序与电子邮件以<em>镜像</em>类型通知一次；恢复正常时再通知一次。</li>
+        </ul>
+        <h3 id="replica-read">主要位置故障时</h3>
+        <p>主要位置无法读取文件内容时（位置离线、内容丢失或文件夹空间的文件夹不存在），若策略允许从副本读取，会改从其他位置上已验证的副本读取。副本是以 SHA-256 命名的相同内容，因此不会比 ThirtyFile 已知的版本更旧。文件夹空间以索引最后记录的文件为准：磁盘故障前数秒由其他程序修改、但 ThirtyFile 尚未侦测到的内容不会出现在副本。每次回退都会记录于服务器记录；活动日志则每个位置最多每 10 分钟记录一次（<em>从镜像读取</em>）。</p>
+        <p>只有读取会回退。主要位置离线时，上传与空间变更会等待，详见<a href="#offline">位置离线时</a>；变更绝不会只写入镜像。</p>
+        <h3 id="replica-promote">提升位置为主要位置</h3>
+        <p>主要位置永久丢失或准备禁用时，选择<strong>提升…</strong>并指定位置。提升不会自动发生。执行前，对话框会显示两个位置是否可连接、目标落后多少、会转移多少内容与哪些空间，以及缺少多少内容。</p>
+        <ul>
+          <li>已是最新的位置会立即提升。</li>
+          <li>主要位置仍可连接时，不允许提升落后的位置：请先同步。主要位置无法连接时，可勾选确认“缺少内容的文件在旧主要位置恢复前无法读取”后提升。若检查提升条件期间缺少内容数量改变，系统不会变更任何内容；请重新视图状态后再试。</li>
+          <li>提升不会改变文件。空间之后在提升的位置读写，它成为主要位置。执行中的同步会停止；当时正在保存到旧主要位置的变更会被拒绝，可以再次尝试。</li>
+          <li>文件夹空间的全部文件与历史版本若在新主要位置都有已验证副本，就会转成该位置的内容存储区空间，与<a href="#move-folder">迁移到 S3、SFTP 或 FTP</a>相同：文件不再位于其他程序可直接修改的文件夹。旧主要位置的文件夹保持原状，不受修改；不再需要后可手动删除。若想恢复文件夹形式，之后可<a href="#move-into-folder">将空间迁移到文件夹</a>。未完整复制到新主要位置的文件夹空间仍留在原处，对话框会列出名称。</li>
+          <li>旧主要位置保留所有原有内容，之后不再以主要位置身份写入。它成为副本位置，标示<em>旧主要位置，检查中</em>：恢复后会读取并检查副本，替换损坏内容，更新完整后才计为有效副本。内容不会自行搬回。若要恢复原位置，请等它更新完整后再次提升。</li>
+        </ul>
+        <p>提升后请检查策略的位置列表：提升的位置已不在副本列表中；若要保有原本的副本数，请添加其他位置。</p>
+        <h3 id="replica-remove">移除位置或策略</h3>
+        <p>从列表移除位置、减少副本数或删除策略，都会停止创建新副本，但已创建的副本仍保留且受删除保护。<strong>控制面板 › 镜像</strong>会显示各位置不再有策略需要的副本数量，并提供<strong>移除…</strong>。删除前会再次逐一检查：策略仍需要的副本、该位置上的原始内容，以及当前来源位置无法连接的文件夹空间副本都会保留。在此之前，不能删除持有镜像或用作策略来源／目标的位置。</p>
+
+        <h2 id="folder-spaces">文件夹空间：将服务器文件夹作为空间</h2>
+        <p>存储文件夹或<em>本地文件夹</em>位置上的每个空间都是文件夹空间（参阅<a href="#layout">文件存放在哪里</a>）。也能把服务器上的现有文件夹（例如 NAS 共享）显示为空间。文件仍以普通文件留在原位置，也可以通过 SMB 或扫描器直接修改。</p>
+        <ol>
+          <li>将文件夹挂载到容器，例如 <code>-v /srv/shared:/mnt/shared</code>。</li>
+          <li>在<strong>控制面板 › 空间</strong>按<strong>新建文件夹空间</strong>，输入容器内路径 <code>/mnt/shared</code>。</li>
+          <li>像普通团队空间一样添加成员。</li>
+        </ol>
+        <p>用户打开文件夹时，ThirtyFile 会寻找外部变更（数秒内不重复检查；空间正在变更时，例如复制大型文件夹，不检查；被监测的空间也不检查，详见下方。此时列表显示 ThirtyFile 已知的内容）。系统也每 15 分钟检查所有文件夹空间（可在<strong>控制面板 › 常规</strong>调整），或按<strong>检查更改</strong>立即执行（大型文件夹会在列表与底部消息显示进度，离开页面仍会继续）。在文件夹内迁移或重命名的文件与文件夹会保留分享链接及权限。检查找到的项目没有上传者（<strong>上传者</strong>栏与详细信息的<strong>创建者</strong>显示 —），也不会出现在任何人的<strong>最近使用</strong>，除非有人打开或编辑它；旧版 ThirtyFile 找到的项目仍保留空间所有者为上传者。系统依磁盘记录的创建时间区分迁移与新项目。若磁盘未记录此信息（部分网络共享），仍可依大小与日期辨识迁移文件，但迁移文件夹会视为删除后重新添加，失去分享链接与权限。</p>
+        <p>在支持的 Linux 本地文件系统上，变更约 12 秒后会自动出现，因为 ThirtyFile 会监测文件夹。这类空间的定期检查频率降为四分之一（通常的 15 分钟设置下为每小时），补足监测可能漏掉的变更。NFS、SMB、9P 与 FUSE/virtiofs 挂载（含 Docker Desktop 分享的宿主机文件夹）可能不会报告外部变更。无法辨识的文件系统也采用较保守的后备方式：打开文件夹时重新检查（最多每五秒一次），计划检查维持正常间隔。不会写入探测文件来推断宿主机事件是否可用。文件夹很多时可能达到 Linux 监测上限（<code>fs.inotify.max_user_watches</code>，常见为 8,192 或更多）；记录会提示，其余变更通过打开时更新与定期检查发现。在宿主机上使用 <code>sysctl fs.inotify.max_user_watches=524288</code> 提高上限。所有空间的每个文件夹都会计入（每个用户都有自己的空间）。</p>
+        <p><strong>Windows 与 macOS 的 Docker Desktop。</strong>宿主机共享文件夹的变更，会在 ThirtyFile 打开或刷新该文件夹时，以及定期检查时发现，不一定立即出现。仍在写入的文件要等稳定后才显示。重命名或删除可能启动后台检查，以区分移到空间其他位置与真正删除。<strong>控制面板 › 空间</strong>显示变更是数秒内出现，或于打开时检查，以及实际计划间隔。将间隔设为零会禁用计划，但监测不可用时，打开文件夹仍会检查。随时可使用<strong>检查更改</strong>做完整检查。</p>
+        <p>大型文件夹空间检查期间，<strong>控制面板 › 空间</strong>显示进度；读取文件夹与更新索引耗时超过 10 秒时，记录会分别记下耗时。参考数值：SSD 上首次检查 200,000 个文件，读取约半秒、创建索引约 25 秒；没有更改时重新检查约一至两秒。网络挂载较慢，因为每个文件的大小与日期都需通过网络查询；大型 NFS 或 SMB 文件夹建议保留 15 分钟或更长的定期检查间隔。</p>
+        <p>网页上的所有操作都会修改文件夹本身：上传、创建文件夹、重命名、迁移、复制、编辑与删除。搬到不同磁盘的空间，或非文件夹空间时，先复制并验证文件，再移除来源；期间在文件夹中被修改的文件会留下，下次检查变更时出现。页面底部消息显示长时间迁移或复制的进度；即使关闭页面，服务器仍会继续。</p>
+        <ul>
+          <li><strong>回收站。</strong>删除项目会移到空间文件夹内隐藏的 <code>.thirtyfile-trash</code>，以便还原。清空回收站或从其中删除项目，才会移除文件。</li>
+          <li><strong>历史版本。</strong>在网页保存覆写、上传替换或还原旧版本时，原本的文件会保存在空间文件夹内隐藏的 <code>.thirtyfile-versions</code>（磁盘支持时使用硬链接，否则直接搬入，因此大型文件也能立即保留），ThirtyFile 不会把它们列为普通文件。直接在文件夹内修改（例如通过 SMB）不会保留版本。永久删除文件时也会删除其版本。该文件夹中没有版本参照的文件，存在满一天后会由变更检查移除。</li>
+          <li><strong>同时编辑。</strong>有人在网页编辑期间，文件若在文件夹内被修改，不会覆写外部变更：网页版本会另存为 <code>name (conflict copy)</code>，使用系统<a href="first-steps.html#general">默认语言</a>（若跟随浏览器则为英文），与保存者的语言无关。</li>
+          <li><strong>大小写。</strong>在不区分大小写的磁盘（exFAT、NTFS、多数 SMB 共享）上，只有大小写不同的文件夹名称视为既有文件夹。将 <code>Photos</code> 上传到已有 <code>photos</code> 的位置，文件会进入 <code>photos</code>；<strong>新建文件夹</strong> <code>Photos</code> 则会提示已存在。</li>
+          <li><strong>下载。</strong>续传会侦测期间已被替换的文件并重新开始。下载期间被替换的文件可能收到混合内容，请重新下载。</li>
+          <li><strong>只读。</strong>创建空间时勾选<strong>只读</strong>，或之后使用<strong>设为只读</strong>，只允许浏览、下载与分享。</li>
+          <li><strong>文件所有者。</strong>ThirtyFile 以 <code>THIRTYFILE_RUN_AS</code> 指定的用户写入文件（未设置时为 1000:1000），该用户必须有文件夹写入权限。若其他程序（例如 Samba 分享）以不同用户写入，请让两者加入相同用户组并让文件夹可由用户组写入，或把 <code>THIRTYFILE_RUN_AS</code> 设成其他程序使用的用户。</li>
+          <li>删除文件夹空间只会从 ThirtyFile 移除空间，文件夹与文件仍留在服务器。</li>
+          <li>一个文件夹只能属于一个空间或位置：若它包含或位于其他空间文件夹、<em>本地文件夹</em>位置或 ThirtyFile 数据目录内，会被拒绝，避免相同文件重复显示。系统文件夹（如 <code>/etc</code>、<code>/run</code>、<code>/usr</code> 与磁盘根目录）也会拒绝。</li>
+          <li>Office 与系统临时文件（<code>~$…</code>、<code>Thumbs.db</code>、<code>.DS_Store</code>）不会显示；以 <code>.thirtyfile-</code> 开头的 ThirtyFile 内部文件也不会显示。网页与 WebDAV 不允许使用这些名称。解压缩 ZIP 会略过这类项目；从其他空间迁移或复制到文件夹空间时，若来源含有这类名称，会拒绝操作。符号链接、不是有效文本的名称与文件夹内挂载的其他磁盘会略过，<strong>检查更改</strong>会列出它们（其他人的个人空间只显示数量，不显示空间文件夹）。</li>
+          <li>仍在复制到文件夹的文件，要等数秒内不再变更后才会出现。</li>
+          <li><strong>未挂载的磁盘与分享。</strong>空间创建时，文件夹内会放入包含空间 ID 的小型隐藏文件 <code>.thirtyfile-space</code>。缺少此文件且突然变空的文件夹，会视为未挂载磁盘或分享：空间保留项目、分享与历史，<strong>检查更改</strong>会提示。请重新挂载后检查。网页变更只会写入含有该空间标记的文件夹；文件夹丢失或同名路径挂载了不同磁盘时，上传与变更会以<em>文件夹不存在，或这里挂载了不同的磁盘</em>拒绝，且不会重建文件夹。含有其他空间标记的文件夹也不会检查。只有含有该空间标记的文件夹可读取文件。只读空间可能没有标记，因为不一定能写入。标记丢失时，<strong>检查更改</strong>只会在文件夹仍含有该空间项目时补回，否则只报告文件夹而不变更任何内容。空间内无法读取的子文件夹也以同样方式保留索引项目。若要清空空间，请在 ThirtyFile 删除项目。</li>
+          <li>同时删除、迁移或还原多个项目遇到错误时，文件夹中已变更的项目会恢复，避免只完成一半。若 ThirtyFile 在同一磁盘迁移项目到空间期间停止，一天后的下次检查会以原名将项目放回原文件夹。若在复制到其他磁盘期间停止，来源仍在原处，未完成副本会在该次检查移除。重命名、移到同一空间其他文件夹、移入或移出回收站，以及保留历史版本时，会先写入隐藏的 <code>.thirtyfile-journal</code>：若执行到一半停止，下次变更检查会把项目放回原处，保留分享、访问权与历史；无法依识别信息区分项目的磁盘（Windows、exFAT）也适用。若原名称期间被其他项目占用，项目会留在迁移后的位置并在那里保留相关信息。若保存已将新内容放入正式位置，新内容会保留，原内容则保存为历史版本。</li>
+        </ul>
+
+        <h2 id="check">检查位置中的内容</h2>
+        <p><strong>控制面板 › 存储位置</strong>各位置的 <strong>…</strong> 菜单还有三个操作，只有管理员可用。</p>
+        <h3 id="test-steps">逐步测试</h3>
+        <p>执行文件处理的每个步骤，并列出各步骤耗时：</p>
+        <ol>
+          <li><strong>连接</strong>到位置。</li>
+          <li><strong>写入小文件</strong>，再<strong>读回</strong>并比对。</li>
+          <li>以普通上传的保存方式<strong>上传较大文件</strong>（24 MB；S3 使用分段上传），再<strong>下载</strong>并比对。两者都会显示 MB/s 速度。</li>
+          <li><strong>删除测试文件</strong>，并确认已移除。</li>
+        </ol>
+        <p>测试文件存入 <code>.thirtyfile-check</code> 文件夹，完成后会删除，步骤失败也一样。测试最多两分钟；连接慢时会略过大文件，而非留下未完成内容。失败步骤会说明原因，例如密钥无法删除文件。</p>
+        <h3 id="browse">浏览</h3>
+        <p>逐层显示位置中的内容，每页 200 个项目，附大小与日期。此处不能修改内容。可依保存原样下载单一文件，但待删除内容与尚在写入的副本除外。</p>
+        <ul>
+          <li><strong>内容存储区</strong>（<code>ab/cd/…</code>，S3、SFTP 与 FTP 位于 <code>blobs</code> 下）：每个项目标示是否有文件、历史版本或回收站项目使用，是否为其他位置内容的<a href="#replicas">镜像</a>、等待删除或完全未使用。有文件使用时会显示空间与文件路径。</li>
+          <li>存储文件夹与<em>本地文件夹</em>位置上的<strong>文件夹空间</strong>会标示所属空间。</li>
+          <li><strong>个人空间保持隐私。</strong>其他人的个人空间会显示名称（例如“anna 的个人空间”），但不列出文件、无法在此打开文件夹，也不能下载内容。无论文件夹名称大小写如何（例如 <code>users/anna</code> 写为 <code>USERS/Anna</code>），迁移期间（目标文件夹、已复制内容与清理完之前的旧文件夹），以及其他位置上标示所属空间的<a href="#replicas">镜像</a>，都适用此规则。</li>
+          <li>符号链接会列出但绝不跟随，SFTP、FTP 与路径中间的链接也一样。</li>
+          <li>存放<a href="#copy">副本</a>的 <code>.thirtyfile-backups</code> 不能在此打开，因其中列表含有个人空间的文件名称。副本请在<strong>控制面板 › 备份</strong>管理。</li>
+        </ul>
+        <h3 id="unused">寻找未使用内容</h3>
+        <p>搜索该位置内容存储区中没有文件、历史版本或回收站项目使用的内容，例如上传途中服务器停止所留下的内容。任务在后台执行，列出结果与总大小。最近 24 小时写入的内容不会处理，因为上传先保存内容再登记；已等待删除的内容也略过。</p>
+        <p>确认后，<strong>移除 N 个项目</strong>会只删除列表列出的内容。删除前逐一再次检查；期间又被使用或写入的内容会保留。活动日志会记下移除操作。</p>
+        <p>在 S3、SFTP 与 FTP，若 <code>.thirtyfile-location</code> 指向其他位置或其他 ThirtyFile 安装，会拒绝搜索与移除：那些内容不是未使用，而是属于它们。</p>
+        <h3 id="one-place">一个地方只能有一个位置</h3>
+        <p>若两个位置指向同一地方，彼此会将对方的文件视为未使用内容。因此不能添加或改为其他位置已使用的地方：同一服务上的相同存储桶与前缀，或同一 SFTP／FTP 服务器上的相同文件夹（相对文件夹依账号分别判定）。</p>
+        <p>S3、SFTP 与 FTP 的位置也会保存小型 <code>.thirtyfile-location</code>：第一行是位置 ID，第二行是 ThirtyFile 安装 ID，添加位置时写入。早于此功能创建的位置，会在下次连接检查成功时补上。标记指向其他位置或其他 ThirtyFile 安装的地方不能添加，也不会搜索或移除其内容。删除位置时会移除标记。</p>
+
+        <h2 id="usage">存储用量与性能</h2>
+        <p><strong>控制面板 › 存储用量</strong>显示存储量、时间趋势与保存操作表现，只有管理员可见。顶部依空间类型、回收站与历史版本显示总量，下方每个位置与数据目录各有一张卡片。</p>
+        <h3 id="usage-figures">数字的意义</h3>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>数字</th><th>计算内容</th></tr></thead>
+            <tbody>
+              <tr><td><strong>文件</strong></td><td>用户看到的该位置空间文件，不含回收站，也是容量配额计算的内容。相同内容的两个文件会算两次。回收站与历史版本列在下方。</td></tr>
+              <tr><td><strong>ThirtyFile 存储量</strong></td><td>ThirtyFile 真正保存的内容：相同内容只存一份的内容存储区，加上文件夹空间文件（含回收站）与其中的历史版本。因共享内容可能小于<em>文件</em>数值，也可能因回收站与版本而更大。</td></tr>
+              <tr><td><strong>磁盘</strong></td><td>系统报告的整个磁盘用量，不论其中还有哪些其他内容。只适用于存储文件夹与<em>本地文件夹</em>位置。同一磁盘上的两个位置会提示，磁盘只计一次。</td></tr>
+              <tr><td><strong>容量未知</strong></td><td>S3、SFTP 与 FTP 不报告剩余容量；磁盘三秒内未响应也不会测量。此时不显示百分比或预计用满时间：未知不等于零。</td></tr>
+              <tr><td><strong>备份</strong></td><td>位置上保存的<a href="#copy">副本</a>与<a href="backup.html#file-backups">备份</a>；每份内容在每次副本或备份中只计一次。有备份的位置才会显示。</td></tr>
+              <tr><td><strong>镜像</strong></td><td>位置上保存、原始内容位于其他位置的<a href="#replicas">镜像</a>。有镜像的位置才会显示。</td></tr>
+              <tr><td><strong>等待删除</strong></td><td>删除失败的内容（例如位置离线）或迁移后的旧副本，在后台重试。其大小已无法得知。</td></tr>
+              <tr><td><strong>数据目录</strong></td><td>数据库、缩略图与进行中的上传，以及所在磁盘。也列出迁移、运行中的任务与待删除项目。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>其他程序对文件夹空间文件的变更，要在下次变更检查后才计入。</p>
+        <h3 id="usage-operations">操作</h3>
+        <p>位置上的每次读取、写入、删除、列目录与连接检查都会计时并计数，文件夹空间的文件读取与上传也一样。文件夹空间内的重命名、删除与扫描则不测量。计数在内存中进行，每五分钟写入一次，不会拖慢文件操作。服务器停止时最多会丢失五分钟的统计。</p>
+        <ul>
+          <li><strong>任务类型。</strong><em>用户文件操作</em>包含下载、预览、上传与保存。<em>后台任务</em>包含迁移空间、压缩与解压缩、长时间复制与迁移，以及移除未使用内容。<em>检查与测试</em>包含每 20 至 30 秒执行的连接检查与逐步测试。分开统计可避免迁移让上传时间难以判读，也不会把测试视为实际流量。</li>
+          <li><strong>每次操作时间。</strong>以中位数（p50）与第 95 百分位（p95）显示：一半操作比 p50 快，100 次中 95 次比 p95 快。百分位数误差约 10%。读取只计到可开始读取的时间，不含之后传输；写入则计到内容完成保存。同一磁盘可能只需重命名，因此很快。</li>
+          <li><strong>传输量。</strong>每秒读写字节数，取各期间平均。</li>
+          <li><strong>失败或超时。</strong>包含失败、耗时过长或被放弃的操作，例如用户在上传途中离开。中途断线的下载也算失败。用户遇到的错误位于<strong>控制面板 › 活动日志</strong>的<a href="logs.html#errors">错误标签页</a>，迁移则在<strong>控制面板 › 迁移</strong>；页面提供这两处的链接。</li>
+          <li><strong>闲置。</strong>没有操作的期间不绘制数据点，图表显示空，不会显示 0 ms。</li>
+        </ul>
+        <h3 id="usage-history">历史记录</h3>
+        <p>选择一个位置（或全部）、时间范围与任务类型。每张图表标示单位与每个数据点代表的期间。将光标移到图表，或用方向键移动，可查看单一期间数值。<strong>显示为表格</strong>列出全部数值；<strong>下载 CSV</strong>保存当前显示的内容。</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>范围</th><th>每个数据点代表</th><th>保留时间</th></tr></thead>
+            <tbody>
+              <tr><td>最近 6 小时、最近 2 天</td><td>5 分钟（操作）、15 分钟（容量）</td><td>2 天</td></tr>
+              <tr><td>最近 30 天</td><td>1 小时</td><td>45 天</td></tr>
+              <tr><td>最近一年</td><td>1 天，依 UTC 计算</td><td>400 天</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>容量每 15 分钟与启动后不久测量。每小时或每日以最后一次测量代表该期间；操作则按小时与日加总，让历史数据维持精简。时间以浏览器时区显示。最近测量已超过 30 分钟的卡片会标示<em>已过期</em>。</p>
+        <p><strong>预计用满时间</strong>以过去 30 天的磁盘用量拟合直线。只有容量已知、至少三天测量数据且使用量稳定增加的磁盘才会显示；否则页面会说明未显示原因。</p>
+        <h3 id="usage-alerts">警示</h3>
+        <p>在<strong>警报阈值</strong>设置何时提示：磁盘使用率超过指定百分比（默认 90%），或位置最近一小时的操作失败／超时比例超过门槛（默认 5%）。失败警示需要该小时至少 20 次操作。输入 0 可禁用个别门槛。位置离线与测量过期也会警示。警示显示于页面顶部，不会发送电子邮件。</p>
+
+        <h2 id="offline">位置离线时</h2>
+        <p>浏览、搜索与整理文件夹仍可使用。打开、下载与上传会暂停，位置恢复后自动继续。有已验证<a href="#replica-read">镜像</a>的文件仍可打开与下载，期间空间会标示离线。文件夹空间的文件夹在磁盘上，因此整理文件夹也会暂停。</p>
+
+        <h3 id="not-mounted">未挂载的磁盘与分享</h3>
+        <p><em>本地文件夹</em>位置常是挂载于服务器的磁盘或网络共享，例如 <code>/mnt/nas/thirtyfile</code>。未挂载时，文件夹可能丢失，或只是服务器自身磁盘上的空文件夹。ThirtyFile 不会写入那里，否则文件会落在错误磁盘上，重新挂载分享后反而被隐藏。</p>
+        <ul>
+          <li><strong>标记文件。</strong>添加<em>本地文件夹</em>位置或变更文件夹时，若文件夹不存在会创建，并放入记录位置 ID 的 <code>.thirtyfile-location</code>。保存前的<strong>测试连接</strong>不会创建任何内容，其他流程也不会创建文件夹。</li>
+          <li><strong>无法使用。</strong>之后只有文件夹持有该标记时才会使用位置，否则列表标示离线并显示<em>文件夹不存在，或这里挂载了不同的磁盘</em>，空间的上传与变更也以相同消息拒绝。不会创建或写入任何内容，包括空间文件夹。</li>
+          <li><strong>恢复。</strong>重新挂载磁盘或分享：离线位置每 20 秒检查一次，标记恢复后立即重新使用，不需重启。</li>
+          <li><strong>磁盘停止响应。</strong>网络共享的服务器消失时，可能仍保持挂载却不响应。ThirtyFile 最多等待一分钟（让磁盘有时间启动）；变更开始后则最多等待 20 秒，之后以<em>服务器上文件夹的磁盘没有响应</em>拒绝操作。在磁盘恢复响应前，该空间的变更会立即拒绝，其他功能仍正常。位置检查与健康检查也不会等待它。<em>本地文件夹</em>的内容存储区也同样处理：磁盘步骤超过一分钟会以<em>存储服务暂时无法使用</em>放弃，磁盘恢复前立即拒绝其文件操作，其余 ThirtyFile 功能照常。</li>
+          <li><strong>标记丢失。</strong>文件夹有内容却没有 <code>.thirtyfile-location</code>（例如复制时略过隐藏文件），位置会离线，消息会指出文件应包含的那一行：位置 ID。确认是正确文件夹后，创建只含该行的标记；下次检查就会恢复使用。</li>
+          <li><strong>其他位置的文件夹。</strong><code>.thirtyfile-location</code> 指向其他位置时会拒绝使用。删除位置会移除标记，让文件夹能再次使用。变更回原文件夹时，若仍有该位置自己的标记，会直接接受。</li>
+          <li><strong>变更文件夹。</strong>位置上还有空间或文件时，只能改到它的完整副本：先复制旧文件夹所有内容（含 <code>.thirtyfile-location</code>）到新文件夹，再变更路径，空间的文件夹会跟著更新。新的空文件夹会拒绝，因为空间文件仍留在旧处。空位置可改成任意文件夹。</li>
+        </ul>
+        <p>新服务器首次启动且存储文件夹为新建或空时，存储文件夹（Docker 内的 <code>/storage</code>，由 <code>THIRTYFILE_STORAGE</code> 设置）也会取得相同标记，内容为 <code>local</code>。磁盘或 NAS 自行创建的项目（<code>lost+found</code>、<code>#recycle</code>、<code>@eaDir</code>、<code>.DS_Store</code>、<code>System Volume Information</code>、<code>$RECYCLE.BIN</code>）不计入非空判定。一旦位置上有文件或空间，就不再接受丢失或空的存储文件夹：ThirtyFile 不会启动，并提示卷可能未挂载。文件夹有文件却缺少 <code>.thirtyfile-location</code>，或标记属于其他位置时也不会启动，因为可能与先前使用的磁盘不同。请检查卷与挂载；确定是正确文件夹后，创建内容为 <code>local</code> 的标记。</p>
+        <nav class="next" aria-label="更多指南">
+          <a href="sign-in.html"><span>上一篇</span>单点登录</a>
+          <a class="forward" href="logs.html"><span>下一篇</span>日志与品牌</a>
+        </nav>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">源代码</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">报告问题</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 镜像</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

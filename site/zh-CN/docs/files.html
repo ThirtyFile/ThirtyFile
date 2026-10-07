@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="zh-CN" data-root="../.." data-page="files">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>文件操作 · ThirtyFile</title>
+    <meta name="description" content="浏览、上传、下载和整理文件，使用搜索、标签、智能文件夹、键盘快捷键及 Windows 与 Mac 风格。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/files.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/files.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/files.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/files.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/files.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要内容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="网站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">语言 </span><span class="lang-name">简体中文</span></summary>
+            <ul>
+              <li><a href="../../docs/files.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="../../zh-TW/docs/files.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="files.html" hreflang="zh-CN" lang="zh-CN" aria-current="true">简体中文</a></li>
+              <li><a href="../../ja/docs/files.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>开始使用</p>
+          <a href="index.html">安装</a>
+          <a href="first-steps.html">初始设置</a>
+          <p>日常使用</p>
+          <a href="files.html" aria-current="page">文件操作</a>
+          <a href="preview.html">预览与编辑</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的账号</a>
+          <a href="webdav.html">映射为网络驱动器</a>
+          <p>管理</p>
+          <a href="users.html">用户与空间</a>
+          <a href="sign-in.html">单点登录</a>
+          <a href="storage.html">存储位置</a>
+          <a href="logs.html">日志与品牌</a>
+          <p>部署与运维</p>
+          <a href="settings.html">设置</a>
+          <a href="internet.html">通过互联网访问</a>
+          <a href="backup.html">升级与备份</a>
+          <a href="help.html">故障排除</a>
+          <p>项目</p>
+          <a href="contributing.html">参与贡献</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+
+        <h1>文件操作</h1>
+        <p class="lead">ThirtyFile 的操作方式类似文件资源管理器；使用<a href="#mac-style">Mac 风格</a>时则类似 Mac 的 Finder。本页介绍可用操作与加快操作的快捷键。</p>
+        <div class="shot"><img src="../../assets/files-light.webp" width="2560" height="1440" alt="文件列表，左侧显示文件夹树" /></div>
+        <details class="guide-toc">
+          <summary>本页内容</summary>
+          <ol>
+            <li><a href="#around">导航界面</a></li>
+            <li><a href="#views">视图、列与分组</a></li>
+            <li><a href="#paths">路径</a></li>
+            <li><a href="#upload">上传</a></li>
+            <li><a href="#download">下载</a></li>
+            <li><a href="#zip">压缩与解压缩 ZIP</a></li>
+            <li><a href="#organise">整理</a></li>
+            <li><a href="#tags">标签</a></li>
+            <li><a href="#smart-folders">智能文件夹</a></li>
+            <li><a href="#details">详细信息</a></li>
+            <li><a href="#same-name">名称已被使用时</a></li>
+            <li><a href="#versions">先前版本</a></li>
+            <li><a href="#shortcuts">键盘快捷键</a></li>
+            <li><a href="#mac-style">Mac 风格</a></li>
+            <li><a href="#trash">回收站</a></li>
+            <li><a href="#phone">手机操作</a></li>
+          </ol>
+        </details>
+
+        <h2 id="around">导航界面</h2>
+        <ul>
+          <li><strong>左侧菜单</strong>：最近使用的文件、收藏、空间、与你共享的项目、分享链接、回收站、你的<a href="#smart-folders">智能文件夹</a>与<a href="#tags">标签</a>。</li>
+          <li><strong>标签页</strong>：同时打开多个文件夹或文件。按 <strong>+</strong> 添加标签页，或以鼠标中键按文件夹，在新标签页打开。</li>
+          <li><strong>地址栏</strong>：显示所在位置。按路径任一部分即可前往；按路径旁空处（或 <kbd>Ctrl</kbd> + <kbd>L</kbd>）可查看完整路径、复制路径，或输入／粘贴另一个路径后按 <kbd>Enter</kbd> 前往（参阅<a href="#paths">路径</a>）。</li>
+          <li><strong>搜索</strong>：在当前文件夹与子文件夹中寻找名称包含输入文本的项目（从最近使用、收藏等列表搜索时，范围是所有可访问位置）。所有语言都不区分大小写；输入三个以上字符时也不区分重音符号。结果页可扩大范围到所有位置，并依类型、修改日期、大小与标签筛选。最多显示 300 笔，超过时会提示。<strong>保存为智能文件夹</strong>可保留搜索条件（参阅<a href="#smart-folders">智能文件夹</a>）。</li>
+          <li><strong>查看</strong>：选择列表呈现方式（参阅<a href="#views">视图、列与分组</a>）。右下角两个按钮可切换<strong>详细信息</strong>与<strong>大图标</strong>。</li>
+        </ul>
+        <p><strong>最近使用</strong>依新到旧列出你上传、编辑或打开的文件，不论位于自己的空间或共享空间／文件夹。打开是指在浏览器查看（查看器、编辑器或预览窗格）；下载与使用应用密码的文件客户端不计入。无法再打开或已在回收站的文件会略过。</p>
+        <h3 id="large-folders">大型文件夹</h3>
+        <p>数千个项目的文件夹会立即显示第一批项目，之后按需加载你滚动到、以 <kbd>End</kbd>／<kbd>Page Down</kbd> 前往，或拖动滚动条到的部分。尚未加载的列短暂显示灰线，状态栏显示<strong>正在加载更多项目…</strong>。状态栏计算文件夹全部项目，包括尚未加载的。只有附近部分保留在内存，因此十万个项目也不会拖慢浏览器。</p>
+        <p>选择可涵盖整个文件夹，包括尚未加载的项目：</p>
+        <ul>
+          <li><kbd>Ctrl</kbd> + <kbd>A</kbd>（或<strong>全选</strong>）选择文件夹全部项目。<kbd>Ctrl</kbd> + 点击可取消个别项目；状态栏显示选择数量。</li>
+          <li><kbd>Shift</kbd> + 点击，或 <kbd>Shift</kbd> + <kbd>End</kbd>，会选择两个项目之间的全部内容，不论距离多远。</li>
+          <li>移动、复制、剪切粘贴、拖动、加入收藏、标签、移到回收站与永久删除，都会处理全部选择项目。ThirtyFile 每次处理一千个，底部消息显示进度；这类大型变更无法从消息撤销。</li>
+          <li>一次下载或创建 ZIP 最多处理 10,000 个项目；更多时请下载文件夹本身。</li>
+          <li>详细信息窗格显示选择数量；选择整个文件夹时会显示总大小。</li>
+        </ul>
+        <p>输入名称开头会跳到已加载项目中下一个符合的项目。向上（或返回）回到大型文件夹时，无论原文件夹在列表何处，都会显示并选择它。依日期或类型分组（见下方）会加载整个文件夹，确保每个分组完整。</p>
+
+        <h2 id="views">视图、列与分组</h2>
+        <p><strong>查看</strong>菜单包含文件资源管理器的各种视图，以及<strong>分栏</strong>：</p>
+        <ul>
+          <li><strong>大图标</strong>与<strong>中图标</strong>：图片、PDF 与视频缩略图（参阅<a href="preview.html#thumbnails">缩略图</a>），名称显示在下方。</li>
+          <li><strong>列表</strong>：小图标与名称并排分栏，便于一次查看许多项目。</li>
+          <li><strong>详细信息</strong>：每行一个项目，附各列。</li>
+          <li><strong>平铺</strong>：缩略图旁显示名称、类型与大小。</li>
+          <li><strong>分栏</strong>：从空间顶层到当前文件夹，每层各有一栏。选择文件夹会在右侧下一栏显示内容；选择文件会显示预览栏，包含图片、类型、大小、日期及打开、下载、分享按钮。手机本来就一次显示一个文件夹，因此不提供此视图。</li>
+        </ul>
+        <p>在<strong>分栏</strong>中，<kbd>↑</kbd>／<kbd>↓</kbd>在栏内移动，<kbd>→</kbd>进入所选文件夹的栏，<kbd>←</kbd>返回前一栏；输入名称开头可跳到项目。按其他栏的项目会前往该栏。返回时会保留右侧已打开的栏，直到另选项目。选择、打开、重命名与删除和其他视图相同，大型文件夹也会分批加载；可将项目拖到任何栏的文件夹，或另一栏的空处以移动。拖动栏右边缘可调整宽度（双击恢复默认）；宽度会在此浏览器保留到退出登录。<strong>分组依据</strong>不适用此视图。</p>
+        <p>没有缩略图的文件显示类型图标。程序语言与数据格式各有专属图标（JSON、Rust 与 Go 不同）；常见工具文件即使没有扩展名，也可依名称辨识：<code>Dockerfile</code>、<code>Makefile</code>、<code>.env</code>、<code>.gitignore</code>、<code>package.json</code>、锁文件、<code>LICENSE</code> 与 <code>README</code>。字体、磁盘镜像、安装程序、数据库、电子书、设计文件、3D 模型与证书也有图标。在<strong>详细信息</strong>将光标移到<strong>类型</strong>栏可查看文件种类。无法辨识的文件维持普通文件图标。</p>
+        <p>在<strong>详细信息</strong>中，拖动列标题边缘可调宽度（或用 <kbd>Tab</kbd> 选择边缘后以方向键调整）；双击边缘恢复默认。右键按列标题，或选择<strong>查看</strong> › <strong>列</strong>，可选择<strong>修改日期</strong>、<strong>创建日期</strong>（默认隐藏）、<strong>类型</strong>、<strong>大小</strong>、<strong>标签</strong>（默认隐藏），以及列表适用时的<strong>位置</strong>与<strong>上传者</strong>。<strong>恢复默认列</strong>可撤销调整。列表太窄而容不下全部列时（例如打开详细信息窗格），会先隐藏<strong>类型</strong>再隐藏<strong>大小</strong>，之后才横向滚动。手机只显示名称与大小。</p>
+        <p><strong>排序</strong>可依名称、修改日期、创建日期、类型或大小，由 A 到 Z 或反向排列；按列标题也相同。文件夹永远在前。名称排序类似文件资源管理器：不区分大小写，数字依数值排序（<em>File 2</em> 在 <em>File 10</em> 前）。其他字符依 Unicode 码位排序，因此中文与日文依 Unicode 顺序（平假名、片假名、汉字），不是读音或笔画。所有语言与用户的顺序一致，让大型文件夹分页加载不会遗漏或重复。</p>
+        <p><strong>查看</strong> › <strong>分组依据</strong>会将项目分组，各组标题附项目数：</p>
+        <ul>
+          <li><strong>类型</strong>：文件夹在前，其余每种文件类型各一组。</li>
+          <li><strong>修改日期</strong>：<strong>今天</strong>、<strong>昨天</strong>、<strong>本周早些时候</strong>、<strong>上周</strong>、<strong>本月早些时候</strong>、<strong>上个月</strong>、<strong>今年早些时候</strong>与<strong>很久以前</strong>（每周从星期一开始）。</li>
+        </ul>
+        <p>组内仍依列表排序。若按相同依据反向排序（旧到新，或类型 Z 到 A），分组顺序也会反向。视图、列与分组设置会在浏览器中对每个文件夹保留。</p>
+
+        <h2 id="paths">路径</h2>
+        <p>路径在地址栏与 <a href="webdav.html">WebDAV</a> 中都用相同方式表示文件夹或文件，从包含所有空间的顶层开始，例如 <code>/My files/Reports/2026.xlsx</code>：</p>
+        <ul>
+          <li><code>/</code> 是<strong>所有空间</strong>。</li>
+          <li><strong>我的文件</strong>是个人空间（管理员可能未提供）。公司空间（<strong>全部文件</strong>，除非管理员改名）与团队空间使用各自名称。同名时后创建者加上编号，例如<strong>专案 (2)</strong>，WebDAV 使用相同编号。</li>
+          <li><strong>与我共享</strong>包含其他人从你不是成员的空间分享的文件夹与文件：<code>/Shared with me/Plans/Q1</code>。同名分享项目也会编号。</li>
+        </ul>
+        <p>ThirtyFile 提供的名称（<strong>我的文件</strong>、<strong>全部文件</strong>、<strong>与我共享</strong>）依所选语言显示，输入路径时可使用该语言或英文。不区分大小写，<code>\</code> 等同 <code>/</code>，也可粘贴 WebDAV 地址或 ThirtyFile 页面链接。路径不存在或无权访问时，地址栏会提示并保留输入供修正。最近使用、收藏、回收站等列表不在空间中，因此不能输入其路径。</p>
+        <p>管理员也可输入控制面板路径：<code>/Control panel/Storage locations</code>，或所选语言中显示的名称。从控制面板地址栏复制的路径也可使用。若需要不受语言影响的路径，可用 <code>/admin</code>、<code>/admin/storage</code>、<code>/admin/usage</code> 或其他控制面板页面地址。Windows 地址栏与 Mac 风格的<strong>前往文件夹</strong>都支持。所需管理员权限和从菜单打开相同。辨识到的控制面板路径优先于同名空间；请从侧栏打开该空间，或粘贴其完整页面 URL。</p>
+
+        <h2 id="upload">上传</h2>
+        <ul>
+          <li>把电脑上的文件或整个文件夹拖入列表。放到列表、文件夹树、地址栏或标签页中的文件夹，可上传到该文件夹；也可以</li>
+          <li>按<strong>新建</strong>，选择<strong>上传文件</strong>或<strong>上传文件夹</strong>。</li>
+        </ul>
+        <p>右下角显示进度，每个文件会立即开始传送。超过 100 个文件时，只列出传送中、暂停与失败的，其余在下方显示数量。右键按列表可一次重试所有失败文件。上传未完成时，浏览器会在关闭或重新加载页面前询问。无法读取的拖入项目（没有权限或已移除）会略过，消息显示数量。</p>
+        <p>传输开始前显示<strong>正在准备上传…</strong>。所有字节传完后，<strong>正在完成上传…</strong>会一直显示到服务器确认保存完成。这两个阶段使用等待指示器，没有完成百分比；仍可暂停与取消。</p>
+        <p>两分钟未收到上传数据时，服务器停止等待，上传可从已收到的字节继续。持续传送数据的长时间上传没有总时限。WebDAV 使用相同闲置限制，但失败的 WebDAV 请求必须完整重送。</p>
+
+        <h3 id="interrupted">中断的上传</h3>
+        <p>上传期间重新加载页面或关闭标签页／浏览器，下次在同一浏览器打开 ThirtyFile 时，右下角<strong>中断的上传</strong>会依原加入方式显示：文件夹以名称显示，一起选择的文件为同一笔。浏览器无法自行重开你的文件，因此请再次选择：</p>
+        <ul>
+          <li><strong>继续</strong>会要求相同文件（文件夹则选相同文件夹）。各文件依服务器已保存进度继续，使用同一目标文件夹与同名冲突处理选项。继续前会检查整份文件，包括大小与日期未变的内容变更；大文件读取可能需要时间。此检查会在原上传传送时读取文件，因此尚未读完整就中断的文件，以及旧版本保存的上传，都会重新开始。<strong>可以继续</strong>表示服务器仍保有已传送内容，否则从头开始。</li>
+          <li>文件先依文件夹路径与名称配对，再要求大小、日期与内容和原先一致。期间修改或被同名文件替换的会重新开始，不会接到旧片段。选到不属于原上传的文件会略过，未选到的中断文件继续等待。</li>
+          <li>服务器在中断前刚完成的文件不会上传两次。若服务器已无法辨识先前完整传送的文件，列表会提示可能已上传；重试前请检查文件夹。</li>
+          <li><strong>重新开始</strong>会从头上传所选文件，<strong>放弃</strong>会移除任务及服务器已收到的部分。</li>
+        </ul>
+        <p>其他标签页仍在执行的上传不会提供恢复，只有该标签页关闭后才会出现。中断上传在此浏览器保留七天，只属于你的账号（访客则属于其上传使用的分享链接）。只保存文件名称、文件夹、大小、日期与服务器上传地址（访客也包含分享链接），不保存文件内容。退出登录会移除这些记录。</p>
+
+        <h2 id="download">下载</h2>
+        <p>选择一个或多个项目，按<strong>下载</strong>。多个项目或文件夹会合成一个 ZIP，内容反映下载开始时的状态，期间添加到文件夹的项目不会包含。若服务器文件夹内的文件在传送 ZIP 时大小改变，下载会失败，而不是传回不完整内容；请重新开始。</p>
+        <p>右下角显示进度。超过 256 MB（手机与平板为 64 MB）的下载会直接进入浏览器自己的下载列表，避免页面把内容放在内存。</p>
+        <p>准备下载链接或等待服务器响应时，显示<strong>正在准备下载…</strong>，等待期间可取消。大小未知时，以等待指示器替换百分比，但仍显示已收到的字节数。准备失败可重试。直接交给浏览器的下载（包含公开分享下载）会提示到浏览器下载列表追踪进度。</p>
+        <p>一次最多下载 10,000 个所选项目。更多时请下载所在文件夹；无论内容多少，一个文件夹只算一个项目。</p>
+
+        <h2 id="zip">压缩与解压缩 ZIP</h2>
+        <ul>
+          <li><strong>压缩</strong>：选择项目，右键选<strong>压缩为 ZIP 文件</strong>，旁边会出现以项目命名的 ZIP（多个项目则以所在文件夹命名），像普通文件计入空间用量。压缩前，ThirtyFile 会确认所选项目的完整大小能容纳于空间配额与数据目录的可用容量，因为 ZIP 在数据目录组合。</li>
+          <li><strong>解压缩</strong>：右键按 ZIP，选<strong>全部解压缩</strong>。内容放到旁边以 ZIP 名称命名的新文件夹，名称已占用时加编号。</li>
+        </ul>
+        <p>两者都在服务器执行，底部消息显示进度，期间可继续工作，活动日志也会记录。</p>
+        <p>为避免单一文件耗尽服务器，符合以下条件的 ZIP 不会解压缩：</p>
+        <ul>
+          <li>内容超过空间可用容量，或大于 16 GB；</li>
+          <li>文件与文件夹超过 20,000 个，包含路径经过的中间文件夹；</li>
+          <li>内部路径超过 64 层文件夹；</li>
+          <li>内容膨胀远高于普通文件（超过压缩大小 250 倍），例如“ZIP 炸弹”；</li>
+          <li>内部名称导向新文件夹之外（<code>../</code> 或完整路径），或名称不允许（例如含 <code>:</code> 或 <code>?</code>）；</li>
+          <li>有密码保护，或使用普通 deflate 以外的压缩方法。</li>
+        </ul>
+
+        <h2 id="organise">整理</h2>
+        <ul>
+          <li><strong>添加文件夹或文本文件</strong>：按<strong>新建</strong>、用 <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> 建文件夹，或右键按空处选<strong>新建</strong>。和文件资源管理器相同，项目立即出现在列表末尾，名称可直接输入；命名后仍留在末尾，直到刷新（<kbd>F5</kbd>）、变更排序或离开文件夹。创建失败时会移除并提示原因。</li>
+          <li><strong>选择</strong>：按项目。按住 <kbd>Ctrl</kbd> 加选，<kbd>Shift</kbd> 选范围，或拖动框选。</li>
+          <li><strong>移动</strong>：拖到文件夹、剪切粘贴，或右键选<strong>移动到…</strong>。可放到列表或文件夹树的文件夹（停在未展开文件夹上片刻可展开）、地址栏路径片段或文件夹标签页。<strong>移动到…</strong>窗口中的<strong>新建文件夹</strong>会在当前查看的文件夹内创建并打开新文件夹。</li>
+          <li><strong>复制</strong>：拖放时按住 <kbd>Ctrl</kbd>（Mac 为 <kbd>Option</kbd>）、复制粘贴，或右键选<strong>复制到…</strong>。</li>
+          <li><strong>重命名</strong>：按 <kbd>F2</kbd>，或和文件资源管理器一样按已选项目的名称，稍候即可编辑（双击则打开）。文件夹树可按当前打开文件夹的名称。Enter 保留新名称，<kbd>Esc</kbd> 保留旧名称。</li>
+          <li><strong>右键按项目</strong>可使用其他功能。和 Windows 11 类似，菜单顶部是一排<strong>剪切</strong>、<strong>复制</strong>、<strong>重命名</strong>、<strong>分享</strong>与<strong>删除</strong>按钮（光标停留可查看名称），下方依序有打开、下载、压缩、收藏、标签、分享链接、移动到、复制到与内容。</li>
+          <li><strong>右键按列表空处</strong>可使用<strong>查看</strong>、<strong>排序方式</strong>、<strong>分组依据</strong>（与工具栏相同）、<strong>撤销</strong>（名称反映操作，例如<strong>撤销删除</strong>）、<strong>刷新</strong>、<strong>粘贴</strong>、<strong>新建</strong> › <strong>文件夹</strong>或<strong>文档</strong>、<strong>上传</strong> › <strong>文件</strong>或<strong>文件夹</strong>，以及<strong>内容</strong>。</li>
+        </ul>
+        <p>移入或移出<a href="storage.html#folder-spaces">服务器上的文件夹</a>会复制文件，大型文件夹可能需要时间。底部消息显示进度，期间可继续工作；关闭页面后服务器仍会接续移动或复制。</p>
+        <p>移动、重命名或删除后，底部消息会短暂提供<strong>撤销</strong>按钮，将项目移回、恢复旧名或从回收站还原。在列表按 <kbd>Ctrl</kbd> + <kbd>Z</kbd> 也会撤销最近一次这类操作。</p>
+
+        <h2 id="tags">标签</h2>
+        <p>标签是加在文件与文件夹上的彩色标记，例如<em>紧急</em>或<em>发票</em>，方便之后寻找。一个项目可以有多个标签。</p>
+        <ul>
+          <li><strong>为项目加标签</strong>：右键选<strong>标签</strong>，再选标签。勾号表示所有选择项目都有，横线表示只有部分有；选横线会加到全部项目，选已勾选者会移除。<strong>新建标签…</strong>会创建并加到项目。详细信息窗格的<strong>编辑标签</strong>可对单一项目做相同操作。</li>
+          <li><strong>查看标签</strong>：名称后以彩色圆点显示，光标停留可读取名称。详细信息窗格依名称列出，<strong>详细信息</strong>视图的<strong>标签</strong>栏也一样。</li>
+          <li><strong>寻找标记项目</strong>：按左侧<strong>标签</strong>下的标签，列出所有位置含该标签的项目。搜索结果也可依标签筛选。</li>
+          <li><strong>修改标签</strong>：右键按左侧标签（或用列表上方工具栏）可改名、换色或删除。删除会从所有项目移除标签，项目本身不受影响。<strong>标签</strong>旁的 <strong>+</strong> 可添加。</li>
+        </ul>
+        <p>标签只属于你。其他人看不到标签、名称与应用项目，共享空间内也一样；管理员与分享链接访客也看不到。每个人都可为有权打开的项目加上自己的标签。项目重命名、移动（包含跨空间）、移入回收站及还原，或被其他程序在<a href="storage.html#folder-spaces">服务器文件夹</a>修改时，标签仍保留；你创建的副本也继承原标签。无权再打开项目后不再显示其标签；永久删除项目会移除标签。与分享链接相同，标签保存在数据库：<a href="backup.html#backup">备份 <code>data</code> 文件夹</a>会保留，<a href="backup.html#file-backups">文件备份</a>不会。</p>
+
+        <h2 id="smart-folders">智能文件夹</h2>
+        <p>智能文件夹是保留的搜索条件，像文件夹显示在左侧菜单，每次打开都列出当时符合条件的项目，例如<em>最近 30 天修改的 PDF</em>或<em>所有标为紧急的项目</em>。</p>
+        <ul>
+          <li><strong>创建</strong>：搜索并使用筛选条件，按<strong>保存为智能文件夹</strong>。命名并确认条件后按<strong>创建</strong>。左侧<strong>智能文件夹</strong>旁的 <strong>+</strong> 可从空条件创建。</li>
+          <li><strong>搜索条件</strong>：名称片段；文件、文件夹或类型（文件、图片或自行输入扩展名）；修改日期（今天、最近 7／30 天或一年，每次打开重新计算，或两个日期之间）；大小（默认范围或两个大小之间）；你的标签（同时含所有勾选标签）。范围可为文件夹及子文件夹、一个空间，或所有有权访问的位置。</li>
+          <li><strong>打开</strong>：按<strong>智能文件夹</strong>下的项目。列表附各项目位置，可像普通文件夹排序、分组、选择、打开、改名、移动、分享、加标签与删除。大量结果和<a href="#large-folders">大型文件夹</a>一样分批加载。</li>
+          <li><strong>修改或删除</strong>：右键按左侧项目，或使用列表上方的<strong>编辑…</strong>与<strong>删除智能文件夹</strong>；工具栏也会说明搜索条件。</li>
+        </ul>
+        <p>智能文件夹本身不存项目。删除只移除保存的搜索条件，也不能把项目搬进去；项目符合条件时才显示，重命名、移动或修改后不符就离开。和标签相同，智能文件夹只属于你，其他人看不到。它永远只列出你当下可打开的项目；失去文件夹或空间权限后，相关项目会消失，以无权打开文件夹为范围的智能文件夹会列出空。数据保存在数据库：<a href="backup.html#backup">备份 <code>data</code> 文件夹</a>会保留，<a href="backup.html#file-backups">文件备份</a>不会。</p>
+
+        <h2 id="details">详细信息</h2>
+        <p>按工具栏<strong>详细信息窗格</strong>或 <kbd>Alt</kbd> + <kbd>Enter</kbd>，打开右侧窗格，显示所选项目；未选择时显示当前文件夹。</p>
+        <ul>
+          <li><strong>大小</strong>与<strong>包含</strong>：文件夹计算所有层级内容的大小与文件／文件夹数，不含回收站。大型文件夹可能需要一些时间。</li>
+          <li>选择多个项目时，显示合计文件与文件夹数（含所选文件夹内的项目）与总大小。</li>
+          <li><strong>标签</strong>：依名称列出你的标签，可用<strong>编辑标签</strong>修改（参阅<a href="#tags">标签</a>）。</li>
+          <li><strong>活动</strong>：谁在何时上传、编辑、重命名、移动、复制、删除或还原。文件夹包含当前里面所有项目的活动（含回收站项目）；空间根目录则涵盖整个空间。只显示最近 50 笔。</li>
+        </ul>
+        <p>有权打开项目的人都能查看活动。分享与权限变更（谁取得权限、分享链接）只有空间管理者与所有者可见。完整记录、筛选与导出仍在<a href="logs.html">活动日志</a>。</p>
+
+        <h2 id="same-name">名称已被使用时</h2>
+        <p>上传、移动、复制、粘贴或从回收站还原前，ThirtyFile 会检查目标是否有同名项目（不区分大小写，服务器上的文件夹除外）。每个冲突都显示双方大小与日期，并询问：</p>
+        <ul>
+          <li><strong>替换</strong>：上传文件会将内容写入既有文件，保留其分享、权限与收藏，原内容保存为<a href="#versions">先前版本</a>。移动、复制或还原时，原项目会移到回收站，仍可救回。</li>
+          <li><strong>略过</strong>：不处理此项目。</li>
+          <li><strong>保留两者</strong>：新项目加上编号，例如 <em>Report (1).docx</em>。上传列表会显示保存名称。</li>
+        </ul>
+        <p>勾选<strong>将此选择应用到接下来的冲突</strong>，可对剩余冲突使用相同答案；或选<strong>取消</strong>停止，不变更任何内容。同名的上传文件夹会合并到既有文件夹：<strong>替换</strong>会替换内部同名文件，<strong>保留两者</strong>保留两份。把副本贴回自己的文件夹时，和 Windows 一样总会加上编号。</p>
+        <p>上传完成前，若目标文件夹删除或你失去添加文件权限，上传会失败并在列表提示原因，不会把文件存到其他地方。</p>
+
+        <h2 id="versions">先前版本</h2>
+        <p>在在线编辑器保存、以上传替换或还原先前版本时，原本内容会保存为先前版本。选择文件并打开详细信息窗格（<kbd>Alt</kbd> + <kbd>Enter</kbd>），<strong>版本</strong>会由新到旧列出作者与时间。<strong>打开</strong>在新浏览器标签页查看，<strong>下载</strong>保存该版本，<strong>还原</strong>将其作为当前内容；还原前内容也会成为版本，因此可用相同方式撤销还原。</p>
+        <ul>
+          <li>默认每个文件保留最新 20 个版本，每个保留 90 天。管理员可在<strong>控制面板 › 常规</strong>修改两项限制或关闭版本功能。</li>
+          <li>先前版本不计入空间配额；管理员可在<strong>控制面板 › 存储用量</strong>查看占用量。</li>
+          <li>重命名或移动（含跨空间）会保留版本；副本从没有版本开始。永久删除文件也会删除版本。</li>
+          <li>有权打开文件的人都能查看与下载版本，还原需有编辑权限。</li>
+        </ul>
+
+        <h2 id="shortcuts">键盘快捷键</h2>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>按键</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr><td><kbd>Enter</kbd></td><td>打开</td></tr>
+              <tr><td><kbd>Alt</kbd> + <kbd>↑</kbd></td><td>上一层文件夹，并选择刚离开的文件夹</td></tr>
+              <tr><td><kbd>Alt</kbd> + <kbd>←</kbd> 或 <kbd>Backspace</kbd></td><td>返回</td></tr>
+              <tr><td><kbd>Alt</kbd> + <kbd>→</kbd></td><td>前进</td></tr>
+              <tr><td><kbd>←</kbd> <kbd>→</kbd>（已打开文件时）</td><td>依所在文件夹排序，前往上一个或下一个文件</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>L</kbd> 或 <kbd>Alt</kbd> + <kbd>D</kbd></td><td>聚焦地址栏，选择完整路径以复制或输入其他路径</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>F</kbd> 或 <kbd>F3</kbd></td><td>聚焦搜索框</td></tr>
+              <tr><td><kbd>F5</kbd></td><td>刷新列表（不重新加载网页）</td></tr>
+              <tr><td><kbd>F2</kbd></td><td>重命名</td></tr>
+              <tr><td><kbd>Delete</kbd></td><td>移到回收站</td></tr>
+              <tr><td><kbd>Shift</kbd> + <kbd>Delete</kbd></td><td>永久删除，不经回收站。会先确认，只能在有删除权限的位置使用</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>X</kbd> / <kbd>C</kbd> / <kbd>V</kbd></td><td>剪切、复制、粘贴</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd></td><td>撤销最近的移动、重命名或删除，消息消失后也可使用</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>A</kbd></td><td>全选</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd></td><td>添加文件夹</td></tr>
+              <tr><td><kbd>Alt</kbd> + <kbd>Enter</kbd></td><td>显示详细信息</td></tr>
+              <tr><td><kbd>←</kbd> <kbd>→</kbd>（<strong>分栏</strong>视图）</td><td>返回前一栏，或进入所选文件夹的栏</td></tr>
+              <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Home</kbd> <kbd>End</kbd> <kbd>Page Up</kbd> <kbd>Page Down</kbd></td><td>在列表移动（图标视图与空间平铺也支持 <kbd>←</kbd> <kbd>→</kbd>）。按住 <kbd>Shift</kbd> 边移动边选择；<kbd>Ctrl</kbd> 只移动焦点，保留当前选择</td></tr>
+              <tr><td><kbd>Space</kbd></td><td>选择焦点项目。加 <kbd>Ctrl</kbd> 可加入或移出选择范围</td></tr>
+              <tr><td><kbd>Shift</kbd> + <kbd>F10</kbd> 或 <kbd>Menu</kbd> 键</td><td>像右键一样打开焦点项目菜单；没有选择时打开空处菜单。方向键可移动到各选项，包含顶部按钮列；<kbd>→</kbd> 打开子菜单</td></tr>
+              <tr><td>字母</td><td>前往名称以输入字母开头的下一项。快速输入可比对多个字母；重复同一字母可跳到下一个相同开头项目</td></tr>
+              <tr><td><kbd>Esc</kbd></td><td>清除选择，或关闭覆盖列表的预览、详细信息窗格或手机菜单</td></tr>
+              <tr><td><kbd>?</kbd> (<kbd>Shift</kbd> + <kbd>/</kbd>)</td><td>显示快捷键列表，也可从<strong>查看更多</strong>（<strong>⋯</strong>）› <strong>键盘快捷键</strong>打开</td></tr>
+              <tr><td><kbd>Tab</kbd>（页面第一次按下时）</td><td>显示<strong>跳到主要内容</strong>链接，略过工具栏与导航窗格</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Mac 使用 <kbd>⌘</kbd> 代替 <kbd>Ctrl</kbd>，<kbd>Option</kbd> 代替 <kbd>Alt</kbd>；菜单与快捷键列表会如此显示。输入框打字时不应用快捷键，<kbd>F5</kbd> 除外。</p>
+        <p>左侧文件夹树是单一 <kbd>Tab</kbd> 焦点停靠位置。<kbd>↑</kbd>／<kbd>↓</kbd>在文件夹间移动，<kbd>→</kbd>展开（或进入第一个子文件夹），<kbd>←</kbd>折叠（或回到上一层），<kbd>Home</kbd>／<kbd>End</kbd>跳到第一／最后一个，<kbd>Enter</kbd>打开文件夹。子文件夹很多时先显示 100 个，下方<strong>显示更多文件夹</strong>再加 100 个。</p>
+        <p>左侧菜单上方两个按钮方便操作大型文件夹树：<strong>显示当前文件夹</strong>会展开到当前位置并滚动过去，<strong>全部折叠</strong>关闭所有文件夹与空间，只保留空间列表。已展开文件夹在此浏览器记住到退出登录。</p>
+
+        <h2 id="mac-style">Mac 风格</h2>
+        <p><strong>Mac 风格</strong>（参阅<a href="account.html#style">界面风格</a>）让文件浏览器采用 Finder 版面与按键。文件、可用操作与确认问题和 Windows 风格相同：同名冲突仍会出现<a href="#same-name">名称已被使用时</a>的对话框，永久删除总会先确认。</p>
+        <ul>
+          <li><strong>侧栏</strong>：与 Windows 风格左侧菜单相同位置，以分组放在内缩、半透明圆角面板。<strong>收藏</strong>包含<strong>所有收藏</strong>、收藏的文件夹与<a href="#smart-folders">智能文件夹</a>（标题旁 <strong>+</strong> 可新建）。接着是<strong>空间</strong>、<strong>分享</strong>（<strong>与我共享</strong>、<strong>我的分享链接</strong>）、<strong>最近使用</strong>、<strong>回收站</strong>与<strong>标签</strong>。按标题可隐藏／显示分组，项目与文件可拖放到里面的文件夹或空间。</li>
+          <li><strong>工具栏</strong>：返回／前进、当前文件夹名称、视图（<strong>图标</strong>、<strong>列表</strong>、<strong>分栏</strong>、<strong>画廊</strong>）、<strong>排序方式</strong>、<strong>分组依据</strong>、<strong>分享</strong>、<strong>标签</strong>，以及提供其余功能的<strong>操作</strong>（<strong>⋯</strong>）：添加文件夹、上传、<strong>快速查看</strong>、<strong>显示简介</strong>、<strong>重命名</strong>、<strong>复制</strong>、<strong>粘贴</strong>、<strong>移动到这里</strong>、<strong>移到回收站</strong>、收藏、标签、<strong>前往文件夹…</strong>与快捷键。搜索框在右侧，导航与命令使用圆角胶囊。窄窗口的视图按钮改为菜单，排序、分组、分享与标签保留在<strong>操作</strong>中，工具栏维持单行。分栏与画廊不提供分组。</li>
+          <li><strong>路径栏与状态栏</strong>：默认隐藏。打开<strong>视图选项</strong>（视图按钮旁箭头，窄窗口则为<strong>查看</strong>），打开<strong>显示路径栏</strong>或<strong>显示状态栏</strong>。选项依账号在此浏览器保存，不会跟随到其他浏览器。状态栏保留项目数与存储用量，路径栏位于窗口底部，显示当前文件夹路径。按其中文件夹可前往，拖放项目可移动到该处。没有直接输入路径的方框；<strong>前往文件夹</strong>（<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd>）会要求输入，详见<a href="#paths">路径</a>。</li>
+          <li><strong>标签页</strong>：打开两个以上标签页才显示标签页列。即使隐藏，仍可在新标签页打开文件夹与使用标签页快捷键。</li>
+          <li><strong>列表</strong>：紧凑交替底色行，有缩略图时显示小缩略图。默认列为名称、修改日期、大小与种类，日期使用界面语言的完整格式。<strong>上传者</strong>等列可从<strong>视图选项 → 列</strong>打开；列选择与宽度和另一风格分开保存。文件夹名称旁有三角形，按它或 <kbd>→</kbd> 可直接在下方缩进展开；<kbd>←</kbd> 或再次点击折叠。这种大型文件夹会和普通<a href="#large-folders">大型文件夹</a>一样，随滚动分批加载。</li>
+          <li><strong>画廊</strong>：上方大型预览与打开文件相同（图片、视频、PDF、Office 与文本，其他类型显示图标），下方缩略图列。打开文件夹时先选第一项。<kbd>→</kbd>／<kbd>←</kbd>前往下一／上一项，<kbd>Home</kbd>／<kbd>End</kbd>到第一／最后一项，<kbd>Space</kbd>打开<strong>快速查看</strong>；缩略图列跟随滚动，大型文件夹分批加载。停留在项目后才加载预览，视频不会自动播放。右侧面板显示类型、大小、日期与标签，并提供打开、下载、分享、重命名、移到回收站；缩略图列末端按钮可显示／隐藏面板（此浏览器会记住）。选择、复制、移动、拖到文件夹与右键菜单和其他视图相同；<kbd>Enter</kbd>可在预览上方名称处重命名。此视图不支持<strong>分组依据</strong>，手机也不提供。</li>
+          <li><strong>快速查看</strong>：按 <kbd>Space</kbd>在列表上方窗口预览所选项目，内容和打开文件相同。方向键切换上一／下一项，列表选择也跟著变更；选择多项时只依序预览它们。<kbd>Space</kbd> 或 <kbd>Esc</kbd>关闭，<strong>打开</strong>则正式打开项目。</li>
+          <li><strong>移动</strong>：没有剪切。先复制（<kbd>⌘</kbd> + <kbd>C</kbd>），到目标文件夹后选<strong>移动到这里</strong>（<kbd>⌘</kbd> + <kbd>Option</kbd> + <kbd>V</kbd>）移动，或用<strong>粘贴</strong>（<kbd>⌘</kbd> + <kbd>V</kbd>）创建副本。拖动与 Windows 风格相同。</li>
+          <li><strong>添加项目</strong>立即进入排序后的正确位置；按已选名称不会重命名，请按 <kbd>Enter</kbd>。</li>
+          <li><strong>外观</strong>：文件夹与文件使用专属图标（文件页面显示格式名称或符号）、强调色圆角选择、半透明侧栏与低调工具栏按钮，明暗模式都适用。</li>
+          <li>手机上的 Mac 风格和 Windows 风格版面相同，但有自己的图标。</li>
+        </ul>
+        <p>按键和 Finder 相同，但浏览器保留的按键除外（如 <kbd>⌘</kbd> + <kbd>N</kbd>、<kbd>⌘</kbd> + <kbd>W</kbd>）。非 Mac 电脑使用 <kbd>Ctrl</kbd> 代替 <kbd>⌘</kbd>，<kbd>Alt</kbd> 代替 <kbd>Option</kbd>。其他按键与上方 Windows 风格相同：列表移动、<kbd>⌘</kbd> + <kbd>A</kbd>、<kbd>⌘</kbd> + <kbd>Z</kbd>、<kbd>Shift</kbd> + <kbd>F10</kbd>、<kbd>F5</kbd>、输入名称开头、<kbd>Esc</kbd>、<kbd>?</kbd>。</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>按键</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr><td><kbd>Enter</kbd></td><td>重命名</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>↓</kbd></td><td>打开</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>↑</kbd></td><td>上一层文件夹，并选择刚离开的文件夹</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>[</kbd> / <kbd>]</kbd></td><td>返回、前进</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd></td><td>前往文件夹</td></tr>
+              <tr><td><kbd>Space</kbd></td><td>快速查看；方向键切换下一项</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>I</kbd></td><td>显示简介（详细信息窗格）</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>⌫</kbd></td><td>移到回收站</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>Option</kbd> + <kbd>⌫</kbd></td><td>确认后永久删除</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>C</kbd> / <kbd>V</kbd></td><td>复制、粘贴</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>Option</kbd> + <kbd>V</kbd></td><td>将已复制项目移动到这里</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>Option</kbd> + <kbd>N</kbd></td><td>添加文件夹</td></tr>
+              <tr><td><kbd>→</kbd> <kbd>←</kbd>（<strong>列表</strong>视图）</td><td>展开／折叠所选文件夹；已展开时 <kbd>→</kbd> 到第一个项目，<kbd>←</kbd> 从项目回到文件夹</td></tr>
+              <tr><td><kbd>→</kbd> <kbd>←</kbd>（<strong>画廊</strong>视图）</td><td>下一／上一项，在缩略图列上方预览</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>F</kbd></td><td>聚焦搜索框</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="trash">回收站</h2>
+        <p>删除项目会进入回收站，可从中还原。30 天后永久移除（管理员可用<a href="settings.html"><code>THIRTYFILE_TRASH_DAYS</code></a>修改，或保留到清空），手动清空也会永久移除。页面显示实际保留天数。</p>
+        <p>回收站列出所有你可打开空间的删除项目。<strong>清空回收站</strong>只删除你管理的空间（自己的文件、你为管理者的团队空间），会先列出各空间与删除数量供确认。只有查看权限的空间项目会留下。</p>
+        <p>永久删除大型文件夹或清空大量回收站可能需要时间。项目立即从回收站消失，底部消息显示删除进度，关闭页面仍继续。将数千项文件夹移到回收站、还原，或在服务器文件夹重命名，也需要片刻。完成前该文件夹无法还原、移动或复制，会提示稍后再试。</p>
+        <p>较宽屏幕的<strong>删除者</strong>栏显示移到回收站的人。早于记录功能删除或账号已移除的显示横线。列表上方<strong>由我删除</strong>只看自己的操作，<strong>所有人删除</strong>恢复完整列表。</p>
+
+        <h2 id="phone">手机操作</h2>
+        <p>同一网站也可用于手机。点项目打开，其余使用列表上方按钮。</p>
+        <ul>
+          <li><strong>选择</strong>：长按项目片刻以选择，之后点按可加入／移出选择。平板也会打开所选项目菜单。</li>
+          <li><strong>操作所选项目</strong>：选择时，底部工具栏提供<strong>下载</strong>、<strong>分享</strong>、<strong>移动</strong>、<strong>删除</strong>与<strong>更多</strong>（剪切、复制、重命名等）。<strong>×</strong>清除选择。列表上方保留<strong>导航窗格</strong>（空间与文件夹树）、<strong>新建</strong>、<strong>排序</strong>、<strong>查看</strong>、<strong>···</strong>与详细信息窗格，有内容可粘贴时也有<strong>粘贴</strong>。</li>
+          <li><strong>复选框</strong>：打开<strong>查看</strong> › <strong>项目复选框</strong>，每种视图的项目都会显示复选框。</li>
+          <li><strong>上传</strong>：选<strong>新建</strong> › <strong>上传文件</strong>或<strong>上传文件夹</strong>。</li>
+          <li><strong>地址栏</strong>：长路径显示末端，也就是当前文件夹；滑动可查看上层路径。</li>
+          <li><strong>主屏幕</strong>：把网站添加到主屏幕（Safari：<strong>分享</strong> › <strong>添加到主屏幕</strong>；Chrome：<strong>添加到主屏幕</strong>或<strong>安装应用</strong>），之后会像应用打开，不显示浏览器工具栏，使用网站名称与标志。</li>
+        </ul>
+        <div class="shot phone"><img src="../../assets/files-phone.webp" width="780" height="1600" loading="lazy" alt="手机上的文件列表" /></div>
+        <nav class="next" aria-label="更多指南">
+          <a href="first-steps.html"><span>上一篇</span>初始设置</a>
+          <a class="forward" href="preview.html"><span>下一篇</span>预览与编辑</a>
+        </nav>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">源代码</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">报告问题</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 镜像</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

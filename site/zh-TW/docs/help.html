@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-TW" data-root="../.." data-page="help">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>疑難排解 · ThirtyFile</title>
+    <meta name="description" content="解決登入、上傳、權限與容器問題，檢視紀錄，檢查伺服器健康狀態和檔案完整性。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/help.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/help.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/help.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/help.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/help.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要內容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="網站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">語言 </span><span class="lang-name">繁體中文</span></summary>
+            <ul>
+              <li><a href="../../docs/help.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="help.html" hreflang="zh-TW" lang="zh-TW" aria-current="true">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/help.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../../ja/docs/help.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>開始使用</p>
+          <a href="index.html">安裝</a>
+          <a href="first-steps.html">初次設定</a>
+          <p>日常使用</p>
+          <a href="files.html">檔案操作</a>
+          <a href="preview.html">預覽與編輯</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的帳號</a>
+          <a href="webdav.html">連線為網路磁碟機</a>
+          <p>管理</p>
+          <a href="users.html">使用者與空間</a>
+          <a href="sign-in.html">單一登入</a>
+          <a href="storage.html">儲存位置</a>
+          <a href="logs.html">紀錄與品牌</a>
+          <p>架設與維運</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">從網際網路存取</a>
+          <a href="backup.html">升級與備份</a>
+          <a href="help.html" aria-current="page">疑難排解</a>
+          <p>專案</p>
+          <a href="contributing.html">參與貢獻</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+
+        <h1>疑難排解</h1>
+        <p class="lead">常見問題與解決辦法。</p>
+        <details class="guide-toc">
+          <summary>本頁內容</summary>
+          <ol>
+            <li><a href="#password">忘記管理員密碼</a></li>
+            <li><a href="#shell">docker exec thirtyfile sh 無法執行</a></li>
+            <li><a href="#two-factor">管理員遺失了手機和復原碼</a></li>
+            <li><a href="#links">分享連結以 http://127.0.0.1:8080 開頭</a></li>
+            <li><a href="#signed-out">剛登入就退出了</a></li>
+            <li><a href="#locked">所有人都看到「失敗嘗試過多」</a></li>
+            <li><a href="#upload">大檔案上傳失敗</a></li>
+            <li><a href="#permission">啟動時顯示「Permission denied」</a></li>
+            <li><a href="#logs">檢視紀錄</a></li>
+            <li><a href="#health">檢查執行狀態</a></li>
+            <li><a href="#check">檢查已儲存的檔案</a></li>
+            <li><a href="#safety">檔案如何受到保護</a></li>
+            <li><a href="#more">仍然無法解決？</a></li>
+          </ol>
+        </details>
+
+        <h2 id="password">忘記管理員密碼</h2>
+        <pre><code>docker exec -it thirtyfile thirtyfile reset-password admin</code></pre>
+        <p>按提示輸入新密碼，避免密碼留在 shell 歷史中。如果帳號已停用，此操作也會重新啟用帳號。</p>
+        <h2 id="shell">docker exec thirtyfile sh 無法執行</h2>
+        <p>映像僅包含 ThirtyFile 本身，沒有 shell 或其他程式，減少需要維護更新的元件。ThirtyFile 命令可按指南所示執行，例如 <code>docker exec thirtyfile thirtyfile reset-password …</code>。檢視檔案時，請使用主機上的 <code>data</code> 和 <code>storage</code> 資料夾，或 <code>docker cp</code>。</p>
+        <h2 id="two-factor">管理員遺失了手機和復原碼</h2>
+        <p>其他管理員可在<strong>控制台 › 使用者</strong>中重設。如果沒有其他管理員，請在伺服器上關閉：</p>
+        <pre><code>docker exec thirtyfile thirtyfile reset-two-factor admin</code></pre>
+        <h2 id="links">分享連結以 http://127.0.0.1:8080 開頭</h2>
+        <p>在<strong>控制台 › 一般 › 網站網址</strong>中設定大家實際存取的位址。</p>
+        <h2 id="signed-out">剛登入就退出了</h2>
+        <p><code>THIRTYFILE_SECURE_COOKIE</code> 設為 <code>true</code>，但網站使用 <code>http://</code> 開啟。請透過 <code>https://</code> 存取；如果不使用 HTTPS，則設為 <code>false</code>。</p>
+        <h2 id="locked">所有人都看到「失敗嘗試過多」</h2>
+        <p>使用反向代理時，<code>THIRTYFILE_TRUST_PROXY</code> 必須設為 <code>true</code>（代理執行在另一台電腦時，需列出其位址），代理也必須按<a href="internet.html">範例</a>轉發訪客位址，否則所有人都會被視為同一訪客。</p>
+        <p>限制會在 15 分鐘後自動解除。</p>
+        <p>同一帳號從任何位址累計多次密碼錯誤後，每次重試都需等待更長時間，最長一分鐘。帳號本身永遠不會被鎖定。</p>
+        <h2 id="upload">大檔案上傳失敗</h2>
+        <p>遇到 413 錯誤時，同時檢查 <code>THIRTYFILE_MAX_UPLOAD_MB</code> 和反向代理的請求大小限制。瀏覽器使用 32 MB 分段上傳；請像 <a href="internet.html#nginx">nginx 範例</a>一樣允許每次請求至少 64 MB。WebDAV 一次請求傳送完整檔案，需設定足夠容納該檔案的請求限制；參閱 <a href="webdav.html#troubleshooting">WebDAV 疑難排解</a>。還需檢查空間配額和儲存剩餘容量。</p>
+        <h2 id="permission">啟動時顯示「Permission denied」</h2>
+        <p>容器啟動時會把資料夾交給使用者 1000。以下兩種情況無法完成：</p>
+        <ul>
+          <li>使用 <code>--user</code> 啟動容器。請讓資料夾對該使用者可寫：<code>sudo chown -R 1000:1000 /srv/thirtyfile</code>，將 1000 替換為實際使用者編號。</li>
+          <li>資料夾位於不允許修改擁有者的網路分享中。紀錄會顯示 <em>Can't give the folder … to user</em>。將 <code>THIRTYFILE_RUN_AS</code> 設為分享檔案的擁有者使用者與群組，例如 <code>1026:100</code>。</li>
+        </ul>
+        <h2 id="logs">檢視紀錄</h2>
+        <pre><code>docker logs --tail 100 thirtyfile</code></pre>
+        <h2 id="health">檢查執行狀態</h2>
+        <p><code>http://files.example.com:8080/api/health</code> 回傳伺服器狀態：<code>"status": "ok"</code>；當 <code>/data</code> 或 <code>/storage</code> 剩餘容量不足 1 GB，或儲存位置不可達時，回傳 <code>"degraded"</code>。它還列出兩個資料夾的剩餘和總容量，以及各儲存位置的 <code>ok</code> 或 <code>offline</code> 狀態，便於監控工具在磁碟用滿前警示。請設定監控檢查 JSON 的 <code>status</code>：降級健康狀態仍回傳 HTTP 200。資料庫檢查失敗則回傳 HTTP 503 和 <code>"status": "error"</code>。Docker 健康探針接受 HTTP 200，所以剩餘空間不足或儲存位置離線本身不會導致容器重新啟動。降級狀態的紀錄警告每小時最多記錄一次。</p>
+        <p>任何人都可查詢此端點，所以它不顯示版本，避免陌生人據此查詢已知漏洞。登入後可從<a href="account.html">帳號選單</a>最後一行檢視，例如 <strong>ThirtyFile 0.5.0</strong>。管理員也可在<strong>控制台</strong>右下角檢視，按一下可開啟該版本說明。在伺服器上執行 <code>docker exec thirtyfile thirtyfile --version</code> 可輸出版本。</p>
+        <h2 id="check">檢查已儲存的檔案</h2>
+        <p>如需檢查資料庫中的每個檔案是否仍位於儲存位置，以及儲存位置是否包含資料庫未知的檔案（例如手動留下的檔案），請執行：</p>
+        <pre><code>docker exec thirtyfile thirtyfile check</code></pre>
+        <p>命令會列出每個儲存位置中缺失、大小錯誤和未知的檔案，發現問題時以狀態碼 1 退出。未知檔案永遠不會刪除。新增 <code>--verify</code> 會讀取每個檔案，並將內容與指紋（SHA-256）比較，耗時相當於讀取全部資料。資料夾空間不在檢查範圍內：其中是磁碟上的一般檔案。</p>
+        <p>指紋在上傳過程中計算，即使上傳暫停或 ThirtyFile 重新啟動也會繼續，因此大檔案上傳完成時不需要再次讀取整個檔案。之後使用 <code>--verify</code> 才能確認磁碟內容仍與上傳時相同。</p>
+        <h2 id="safety">檔案如何受到保護</h2>
+        <ul>
+          <li>密碼、應用程式密碼、復原碼和登入工作階段均以無法逆向還原的形式儲存。</li>
+          <li>可以要求所有使用密碼登入的人開啟兩步驟驗證。</li>
+          <li>應用程式密碼僅存取檔案，無法存取帳號設定或控制台。參閱<a href="account.html#app-passwords">你的帳號</a>。</li>
+          <li>上傳的檔案不能在網站上執行腳本。</li>
+          <li>建立者失去項目存取權限後，分享連結隨即失效。</li>
+          <li>重複的錯誤登入密碼和應用程式密碼嘗試會被阻止 15 分鐘。</li>
+        </ul>
+        <h2 id="more">仍然無法解決？</h2>
+        <p>請<a href="https://github.com/ThirtyFile/ThirtyFile/issues">在 GitHub 回報問題</a>，說明操作過程、預期結果和實際發生的情況。</p>
+        <nav class="next" aria-label="更多指南">
+          <a href="backup.html"><span>上一篇</span>升級與備份</a>
+          <a class="forward" href="contributing.html"><span>下一篇</span>參與貢獻</a>
+        </nav>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">原始碼</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">回報問題</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 映像檔</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

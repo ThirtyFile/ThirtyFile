@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-TW" data-root="../.." data-page="webdav">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>對映為網路磁碟機 · ThirtyFile</title>
+    <meta name="description" content="通過應用程式密碼和 WebDAV，在 Windows 檔案總管、macOS Finder、相容手機應用或 rclone 中存取 ThirtyFile 空間。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/webdav.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/webdav.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/webdav.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/webdav.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/webdav.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要內容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="網站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">語言 </span><span class="lang-name">繁體中文</span></summary>
+            <ul>
+              <li><a href="../../docs/webdav.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="webdav.html" hreflang="zh-TW" lang="zh-TW" aria-current="true">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/webdav.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../../ja/docs/webdav.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>開始使用</p>
+          <a href="index.html">安裝</a>
+          <a href="first-steps.html">初次設定</a>
+          <p>日常使用</p>
+          <a href="files.html">檔案操作</a>
+          <a href="preview.html">預覽與編輯</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的帳號</a>
+          <a href="webdav.html" aria-current="page">連線為網路磁碟機</a>
+          <p>管理</p>
+          <a href="users.html">使用者與空間</a>
+          <a href="sign-in.html">單一登入</a>
+          <a href="storage.html">儲存位置</a>
+          <a href="logs.html">紀錄與品牌</a>
+          <p>架設與維運</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">從網際網路存取</a>
+          <a href="backup.html">升級與備份</a>
+          <a href="help.html">疑難排解</a>
+          <p>專案</p>
+          <a href="contributing.html">參與貢獻</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+
+        <h1>連線為網路磁碟機（WebDAV）</h1>
+        <p class="lead">透過 Windows 檔案總管、macOS Finder、支援 WebDAV 的手機 App或 rclone 開啟 ThirtyFile 空間，就像使用電腦上的磁碟機一樣。</p>
+        <details class="guide-toc">
+          <summary>本頁內容</summary>
+          <ol>
+            <li><a href="#address">位址與登入</a></li>
+            <li><a href="#layout">目錄內容</a></li>
+            <li><a href="#windows">Windows</a></li>
+            <li><a href="#macos">macOS</a></li>
+            <li><a href="#phones">iPhone、iPad 與 Android</a></li>
+            <li><a href="#rclone">rclone</a></li>
+            <li><a href="#troubleshooting">連線或儲存失敗時</a></li>
+            <li><a href="#limits">注意事項</a></li>
+          </ol>
+        </details>
+
+        <h2 id="address">位址與登入</h2>
+        <p>ThirtyFile 在自身位址的 <code>/dav/</code> 路徑提供 WebDAV，例如：</p>
+        <pre><code>https://files.example.com/dav/</code></pre>
+        <p>請使用<strong>帳號</strong>和<a href="account.html#app-passwords">應用程式密碼</a>登入，不要使用帳號登入密碼。在帳號選單的<strong>應用程式密碼</strong>中，為每台電腦或手機分別建立一個：</p>
+        <ul>
+          <li>如需處理檔案，選擇<strong>讀取並變更檔案</strong>。唯讀應用程式密碼可開啟和下載檔案，但不能儲存、建立、重新命名、移動或刪除任何項目。</li>
+          <li>透過單一登入存取的帳號在這裡也使用應用程式密碼。</li>
+          <li>這裡不會要求兩步驟驗證碼。錯誤應用程式密碼會計入一般限制：同一位址失敗 30 次後，該位址必須等待 15 分鐘。</li>
+        </ul>
+        <h2 id="layout">目錄內容</h2>
+        <p>頂層目錄為每個可存取空間提供一個資料夾：</p>
+        <ul>
+          <li><strong>我的檔案</strong>：你的個人空間（如果有）。</li>
+          <li>公司空間（除非管理員改名，否則為<strong>全部檔案</strong>），以及按名稱顯示的團隊空間。兩個空間同名時，後一個會加上數字，例如 <strong>Projects (2)</strong>。</li>
+          <li><strong>與我共用</strong>：別人從你不是成員的空間中向你分享的資料夾與檔案。</li>
+        </ul>
+        <p>這些路徑與瀏覽器位址列顯示的相同，也可以在瀏覽器中輸入或貼上（參閱<a href="files.html#paths">路徑</a>）。</p>
+        <p>所有行為與瀏覽器一致：能否更改取決於權限，唯讀空間不能修改，空間儲存上限和上傳大小限制同樣適用，每次變更都會出現在活動紀錄中。<strong>刪除</strong>檔案或資料夾會移入資源回收筒，可在瀏覽器中還原。</p>
+        <h2 id="windows">Windows</h2>
+        <p>Windows 內建用戶端需要 <strong>WebClient</strong> 服務。Microsoft 已棄用該服務，預設不啟動；是否可用取決於 Windows 安裝和管理員規則。無法對映磁碟機時，請使用專用 WebDAV 用戶端或 <a href="#rclone">rclone</a>。參閱 <a href="https://learn.microsoft.com/en-us/windows/whats-new/deprecated-features">Microsoft 的 WebClient 公告</a>。</p>
+        <ol>
+          <li>在檔案總管中右鍵按一下<strong>此電腦</strong>，選擇<strong>對映網路磁碟機</strong>（Windows 11 中位於工具列的 <strong>…（檢視更多）</strong>）。</li>
+          <li>選擇磁碟機代號，在<strong>資料夾</strong>中填寫位址：<code>https://files.example.com/dav/</code></li>
+          <li>勾選<strong>使用其他認證資訊連線</strong>，按一下<strong>完成</strong>，輸入使用者名稱與應用程式密碼。勾選<strong>記住我的認證資訊</strong>即可在重新啟動後重新連線。</li>
+        </ol>
+        <div class="note">Windows 只透過 HTTPS 傳送密碼。ThirtyFile 需要<a href="internet.html">透過 HTTPS 提供服務</a>，並使用 Windows 信任的憑證；一般 <code>http://</code> 位址會被拒絕，除非修改 WebClient 服務的登入檔值 <code>BasicAuthLevel</code>，但不建議這樣做。Windows 預設還限制檔案大小為 50 MB（位於 <code>HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters</code> 的 <code>FileSizeLimitInBytes</code>，最大值為 4 GB）。</div>
+        <h2 id="macos">macOS</h2>
+        <ol>
+          <li>在 Finder 中選擇<strong>前往 › 連線伺服器</strong>（<kbd>⌘</kbd> <kbd>K</kbd>）。</li>
+          <li>輸入 <code>https://files.example.com/dav/</code>，按一下<strong>連線</strong>。</li>
+          <li>選取<strong>註冊使用者</strong>，輸入使用者名稱與應用程式密碼。可以勾選<strong>在我的鑰匙圈中記住此密碼</strong>。</li>
+        </ol>
+        <p>空間會作為磁碟機顯示在 Finder 側欄的<strong>位置</strong>下。Finder 會在帶有額外資訊的檔案旁建立以 <code>._</code> 開頭的隱藏檔案；這些檔案也會顯示在瀏覽器中，可以刪除。</p>
+        <h2 id="phones">iPhone、iPad 與 Android</h2>
+        <ul>
+          <li><strong>iPhone 與 iPad</strong>：使用明確支援透過 HTTPS 存取 WebDAV 的 App，在 App 中新增位址、使用者名稱與應用程式密碼。如果 App 提供「檔案」擴充套件，可在「檔案」App 中啟用，然後瀏覽該連線。「檔案」內建的<strong>連線伺服器</strong>用於 SMB 伺服器，不能直接連線 ThirtyFile 的 <code>/dav/</code> 端點。Apple 的<a href="https://support.apple.com/en-us/118392">「檔案」功能說明</a>介紹了 SMB 支援。</li>
+          <li><strong>Android</strong>：使用明確支援 HTTPS WebDAV 的檔案管理器或用戶端，新增位址、使用者名稱與應用程式密碼。僅支援 SMB、FTP 或 SFTP 不代表該 App 是 WebDAV 用戶端。</li>
+        </ul>
+        <h2 id="rclone">rclone</h2>
+        <p><a href="https://rclone.org/webdav/">rclone</a> 可透過命令列與 ThirtyFile 複製和同步檔案，例如用於備份。請使用互動式設定，避免應用程式密碼被寫入 shell 歷史：</p>
+        <pre><code>rclone config</code></pre>
+        <p>建立名為 <code>thirtyfile</code> 的 remote，選擇 <code>webdav</code>，URL 設為 <code>https://files.example.com/dav/</code>，vendor 選擇 <code>other</code>，然後按提示輸入 ThirtyFile 使用者名稱與應用程式密碼。採用此使用者名稱/密碼方式時，bearer token 留空。rclone 會混淆儲存的密碼，但這種混淆可以逆向還原：請像保護認證資訊一樣保護設定檔案。</p>
+        <p>然後可以像其他 rclone remote 一樣使用：</p>
+        <pre><code>rclone ls "thirtyfile:My files"
+rclone copy ~/Pictures "thirtyfile:My files/Pictures" --progress
+rclone mount thirtyfile: ~/ThirtyFile --vfs-cache-mode writes</code></pre>
+        <p>使用 <code>rclone copy</code> <em>從</em> ThirtyFile 複製檔案時，唯讀應用程式密碼就足夠，例如將檔案備份到其他位置。</p>
+        <h2 id="troubleshooting">連線或儲存失敗時</h2>
+        <ul>
+          <li><strong>401 或不斷要求輸入密碼</strong>：使用使用者名稱與應用程式密碼，不要使用瀏覽器登入密碼、電子郵件位址或兩步驟驗證碼。檢查應用程式密碼是否過期或被撤銷，以及帳號是否啟用。失敗次數過多後，請等待 15 分鐘再嘗試。</li>
+          <li><strong>能讀取但不能儲存</strong>：檢查應用程式密碼的寫入權限、空間中的權限、儲存上限，以及儲存位置是否唯讀或離線。</li>
+          <li><strong>404、登入網頁或意外重新導向</strong>：使用完整的 <code>/dav/</code> 位址，並設定反向代理轉發 WebDAV 方法和 <code>Authorization</code> 請求標頭。HTML 登入頁不是 WebDAV 回應。</li>
+          <li><strong>憑證或大檔案錯誤</strong>：使用 HTTPS 和受信任憑證。同時檢查用戶端傳輸限制、代理請求大小限制和逾時設定。瀏覽器上傳使用分段，WebDAV 則透過單次請求傳送完整檔案。</li>
+        </ul>
+        <h2 id="limits">注意事項</h2>
+        <ul>
+          <li>每個檔案一次完整傳送。ThirtyFile 位於反向代理後方時，代理必須允許大型請求通過：參閱<a href="internet.html#nginx">從網際網路存取</a>。</li>
+          <li>名稱規則與瀏覽器相同：Windows 不允許的字元（<code>\ / : * ? " &lt; &gt; |</code>）會被拒絕。</li>
+          <li>Office 等程式在開啟檔案時會加鎖。ThirtyFile 會回應這些鎖請求以便儲存，但不會強制執行鎖：兩人同時儲存同一檔案時，最後儲存者的內容生效。共同處理檔案時請使用瀏覽器中的線上編輯器。</li>
+          <li>伺服器資料夾（資料夾空間）也可使用：變更直接寫入資料夾本身，伺服器新增的檔案會在開啟資料夾時顯示。</li>
+          <li>將大資料夾移入或移出伺服器資料夾時，需要複製其中的檔案。ThirtyFile 在完成後回應；如果超過一分鐘，會回覆變更已被接受並繼續在背景完成，即使用戶端已停止等待或斷開連線。稍後重新檢視即可確認結果。</li>
+          <li>與瀏覽器一樣，不能將別人分享給你的項目移動到自己的空間；請改用複製。</li>
+          <li>每次只列出資料夾的一層；請求一次列出整棵目錄樹的用戶端會收到逐資料夾查詢的要求，常見用戶端都採用這種方式。</li>
+        </ul>
+        <nav class="next" aria-label="更多指南">
+          <a href="account.html"><span>上一篇</span>你的帳號</a>
+          <a class="forward" href="users.html"><span>下一篇</span>使用者與空間</a>
+        </nav>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">原始碼</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">回報問題</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 映像檔</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

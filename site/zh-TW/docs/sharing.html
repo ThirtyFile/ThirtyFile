@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-TW" data-root="../.." data-page="sharing">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>分享 · ThirtyFile</title>
+    <meta name="description" content="向同事分享檔案或通過公開連結分享，設定權限、密碼和到期時間，並接收訪客上傳。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/sharing.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/sharing.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/sharing.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/sharing.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/sharing.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要內容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="網站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">語言 </span><span class="lang-name">繁體中文</span></summary>
+            <ul>
+              <li><a href="../../docs/sharing.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="sharing.html" hreflang="zh-TW" lang="zh-TW" aria-current="true">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/sharing.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../../ja/docs/sharing.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>開始使用</p>
+          <a href="index.html">安裝</a>
+          <a href="first-steps.html">初次設定</a>
+          <p>日常使用</p>
+          <a href="files.html">檔案操作</a>
+          <a href="preview.html">預覽與編輯</a>
+          <a href="sharing.html" aria-current="page">分享</a>
+          <a href="account.html">你的帳號</a>
+          <a href="webdav.html">連線為網路磁碟機</a>
+          <p>管理</p>
+          <a href="users.html">使用者與空間</a>
+          <a href="sign-in.html">單一登入</a>
+          <a href="storage.html">儲存位置</a>
+          <a href="logs.html">紀錄與品牌</a>
+          <p>架設與維運</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">從網際網路存取</a>
+          <a href="backup.html">升級與備份</a>
+          <a href="help.html">疑難排解</a>
+          <p>專案</p>
+          <a href="contributing.html">參與貢獻</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+
+        <h1>分享</h1>
+        <p class="lead">有兩種分享方式：分享給有帳號的人，或透過連結分享給任何人。</p>
+        <details class="guide-toc">
+          <summary>本頁內容</summary>
+          <ol>
+            <li><a href="#people">與同事分享</a></li>
+            <li><a href="#links">透過連結分享</a></li>
+            <li><a href="#manage">你的連結</a></li>
+            <li><a href="#admin">管理員設定</a></li>
+            <li><a href="#spaces">空間</a></li>
+          </ol>
+        </details>
+
+        <h2 id="people">與同事分享</h2>
+        <p>右鍵按一下資料夾或檔案，選擇<strong>共用給…</strong>。輸入使用者名稱或群組，選擇允許的操作，可選填存取權限結束日期，再按一下<strong>加入</strong>。如果你自己的存取權限有到期日，就不能給自己、自己所屬群組或所有人授予更長的權限。</p>
+        <p>項目會出現在對方選單的<strong>與我共用</strong>中，並透過鈴鐺通知（已設定郵件時也會傳送郵件）：參閱<a href="account.html#notifications">通知</a>。</p>
+        <h3>角色</h3>
+        <div class="table-scroll"><table>
+          <thead><tr><th>角色</th><th>可執行的操作</th></tr></thead>
+          <tbody>
+            <tr><td><strong>檢視者</strong></td><td>瀏覽、預覽和下載</td></tr>
+            <tr><td><strong>編輯者</strong></td><td>還可上傳、編輯、刪除和建立分享連結，但每項操作仍須帳號獲准執行（<strong>控制台 › 使用者</strong>）</td></tr>
+            <tr><td><strong>管理者</strong></td><td>帳號獲准分享時，還可管理成員與分享權限</td></tr>
+            <tr><td><strong>擁有者</strong></td><td>帳號獲准刪除時，還可刪除空間</td></tr>
+          </tbody>
+        </table></div>
+        <h2 id="links">透過連結分享</h2>
+        <p>右鍵按一下項目，選擇<strong>建立分享連結</strong>，或選取後按一下工具列的<strong>建立分享連結</strong>。除非另作設定，持有連結的任何人都無需帳號即可檢視和下載。</p>
+        <div class="shot narrow"><img src="../../assets/share-dialog.webp" width="1024" height="600" loading="lazy" alt="分享連結對話方塊" /></div>
+        <ul>
+          <li><strong>到期時間</strong>：連結在 1、7、30 或 90 天後失效，也可設為永不過期。</li>
+          <li><strong>密碼</strong>：訪客必須先輸入密碼才能檢視，一天後需重新輸入。密碼長度須滿足帳號密碼的要求（<strong>控制台 › 一般</strong>）。同一連結密碼錯誤十次後，每次重試都需等待更長時間，不論來源位址。請將密碼與連結分開傳送。</li>
+          <li><strong>下載次數上限</strong>：達到次數後連結失效。續傳下載或在影片中跳到只計為一次；資料夾內每個檔案分別計數。</li>
+          <li><strong>訪客可以</strong>：決定是否允許下載，以及資料夾是否允許上傳檔案。詳見下文。</li>
+        </ul>
+        <p>按一下連結旁的<strong>編輯連結</strong>可修改密碼、到期時間、下載次數上限或訪客權限，位址保持不變。設定新密碼後，之前開啟過連結的人也必須輸入新密碼。</p>
+        <h3 id="receive">透過連結接收檔案</h3>
+        <p>如果要收集檔案，例如向客戶收件，建立資料夾連結並勾選<strong>上傳檔案</strong>。訪客會看到<strong>上傳</strong>按鈕，也可將檔案拖入資料夾。</p>
+        <ul>
+          <li>同時勾選<strong>只能上傳</strong>時，訪客看不到資料夾內容，也無法下載，只會看到向該資料夾傳送檔案的區域。拖入資料夾時會上傳其中的檔案；名稱已存在時，以新名稱儲存，不向訪客透露衝突。</li>
+          <li>上傳的檔案歸你所有，計入空間容量，遵守一般命名規則和上傳大小限制。重名檔案會加上數字，例如 <code>report (1).pdf</code>。</li>
+          <li>每次上傳會以你的名字和<em>透過分享連結</em>標註在活動紀錄中，也記錄在連結存取紀錄。收到檔案時會通知你（參閱<a href="account.html#notifications">通知</a>）。</li>
+          <li>只有你仍可修改資料夾時，連結上傳才有效。失去權限，或資料夾移出原分享資料夾後，連結上傳會停止。</li>
+          <li>同一連結尚未完成的上傳同時最多占用 20 GB。透過連結上傳的任務一天未收到資料後會被捨棄，訪客需重新傳送該檔案。</li>
+        </ul>
+        <h3 id="view-only">僅供檢視的連結</h3>
+        <p>取消勾選<strong>下載</strong>後，訪客只能預覽檔案：下載按鈕和 ZIP 下載選項會消失，伺服器也會拒絕透過該連結下載。</p>
+        <div class="note">這只能增加儲存難度，並非保護措施。為了顯示預覽，完整檔案仍會傳送到訪客瀏覽器；有意儲存的人可以從瀏覽器儲存或截圖。不要依賴此設定保護不得流出公司的檔案。</div>
+        <h2 id="manage">你的連結</h2>
+        <p>選單中的<strong>我的分享連結</strong>列出你建立的所有連結、到期時間和使用次數。選取連結可複製、編輯或刪除；<strong>刪除連結</strong>會立即使其失效。</p>
+        <p>將清單切換為<strong>所有我可管理的連結</strong>，還可看到別人在你管理的空間、或你擁有的檔案上建立的連結。你也能編輯、刪除這些連結，並檢視誰開啟過它們。項目的分享對話方塊和詳細資訊窗格顯示同樣的連結。</p>
+        <div class="note">建立者失去項目存取權限或分享權限（例如離開團隊空間），或帳號被停用後，連結也會失效。刪除帳號會刪除該帳號建立的連結。</div>
+        <h2 id="admin">管理員設定</h2>
+        <p><strong>控制台 › 所有分享連結</strong>列出所有空間的公開連結和建立者。可按空間、建立者、有效狀態篩選，然後編輯、刪除或開啟存取紀錄。其他人個人空間中的連結只能刪除，不顯示連結位址和項目（參閱<a href="users.html#privacy">管理員能看到什麼</a>）。</p>
+        <p>在<strong>控制台 › 一般 › 分享連結</strong>中設定規則：</p>
+        <ul>
+          <li><strong>允許公開分享連結</strong>：關閉後無人可建立連結，現有連結全部停止工作，直到重新開啟。連結不會刪除。</li>
+          <li><strong>要求密碼</strong>：新連結必須設定密碼，已有密碼也不能移除。</li>
+          <li><strong>最長有效期限</strong>：新增或修改的連結必須在指定天數內到期。</li>
+        </ul>
+        <p>後兩項規則只適用於之後新增或修改的連結。之前建立的連結保持原狀；請在<strong>所有分享連結</strong>中找出並編輯或刪除。</p>
+        <h2 id="spaces">空間</h2>
+        <p>空間是具有獨立成員和容量限制的磁碟機。</p>
+        <ul>
+          <li><strong>我的檔案</strong>：個人空間，除非主動分享其中項目，否則只有你能看到。</li>
+          <li><strong>全部檔案</strong>：公司共用空間，管理員可以修改名稱。</li>
+          <li><strong>團隊空間</strong>：用於部門或專案，管理者可新增和移除成員。</li>
+        </ul>
+        <nav class="next" aria-label="更多指南">
+          <a href="preview.html"><span>上一篇</span>預覽與編輯</a>
+          <a class="forward" href="account.html"><span>下一篇</span>你的帳號</a>
+        </nav>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">原始碼</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">回報問題</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 映像檔</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

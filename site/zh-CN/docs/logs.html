@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN" data-root="../.." data-page="logs">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>日志与品牌 · ThirtyFile</title>
+    <meta name="description" content="查看活动、分享访问、登录和错误日志，设置保留时间，以及网站品牌与外观。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/logs.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/logs.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/logs.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/logs.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/logs.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要内容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="网站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">语言 </span><span class="lang-name">简体中文</span></summary>
+            <ul>
+              <li><a href="../../docs/logs.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="../../zh-TW/docs/logs.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="logs.html" hreflang="zh-CN" lang="zh-CN" aria-current="true">简体中文</a></li>
+              <li><a href="../../ja/docs/logs.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>开始使用</p>
+          <a href="index.html">安装</a>
+          <a href="first-steps.html">初始设置</a>
+          <p>日常使用</p>
+          <a href="files.html">文件操作</a>
+          <a href="preview.html">预览与编辑</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的账号</a>
+          <a href="webdav.html">映射为网络驱动器</a>
+          <p>管理</p>
+          <a href="users.html">用户与空间</a>
+          <a href="sign-in.html">单点登录</a>
+          <a href="storage.html">存储位置</a>
+          <a href="logs.html" aria-current="page">日志与品牌</a>
+          <p>部署与运维</p>
+          <a href="settings.html">设置</a>
+          <a href="internet.html">通过互联网访问</a>
+          <a href="backup.html">升级与备份</a>
+          <a href="help.html">故障排除</a>
+          <p>项目</p>
+          <a href="contributing.html">参与贡献</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+
+        <h1>日志与品牌</h1>
+        <p class="lead">查看发生的事情，并让网站呈现自己的品牌。</p>
+        <h2 id="logs">日志</h2>
+        <p>打开<strong>控制面板 › 活动日志</strong>。</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th>日志</th><th>记录内容</th></tr></thead>
+          <tbody>
+            <tr><td><strong>活动</strong></td><td>上传、编辑、迁移、删除、分享和设置变更</td></tr>
+            <tr><td><strong>分享链接访问</strong></td><td>谁打开了链接、密码尝试、预览和下载</td></tr>
+            <tr><td><strong>登录</strong></td><td>成功与失败的登录、退出登录（包括从<strong>设备</strong>中让设备退出）、修改密码、两步验证（错误验证码、使用恢复码、开启、关闭或重置），以及应用密码的创建、移除和错误密码尝试</td></tr>
+            <tr><td><strong>错误</strong></td><td>用户遇到的错误：服务器无法完成的请求，以及网页发生的错误（页面异常，上传、预览或文件操作失败）</td></tr>
+          </tbody>
+        </table></div>
+        <p>可按人员、操作和日期筛选，并将结果导出为 Excel 能打开的 CSV 文件。导出文件使用页面中看到的名称、语言和你的时区。</p>
+        <p>管理员可以查看活动日志；空间管理者可从空间属性（<strong>此电脑</strong>）查看对应空间的日志。其他人可以在可访问文件或文件夹的<a href="files.html#details">详细信息窗格</a>查看近期活动。</p>
+        <p>其他人的个人空间记录会说明谁在何时做了什么，但不显示具体文件或文件夹：项目名称和详情会省略（参阅<a href="users.html#privacy">管理员能看到什么</a>）。搜索、CSV 导出、个人空间分享链接的访问日志，以及归档文件也遵守相同规则。</p>
+        <p>所有人都可以从账号菜单查看自己的登录历史和已登录设备。参阅<a href="account.html">你的账号</a>。</p>
+        <h3 id="errors">错误</h3>
+        <p><strong>错误</strong>标签页仅供管理员使用。每条记录显示发生时间、遇到错误的人（或<em>未登录</em>）、来源和当时的操作。点击时间可查看详情：错误类型、请求状态、请求 ID、版本，以及网页错误的调用堆栈。</p>
+        <ul>
+          <li><strong>服务器</strong>记录表示服务器返回错误的请求。意外失败（数据库或存储问题、请求耗时过长）属于<strong>错误</strong>；被拒绝的更改（名称已存在、没有权限、文件过大）属于<strong>警告</strong>。可按<strong>严重程度</strong>筛选。</li>
+          <li><strong>网页</strong>记录由页面发送：页面异常、未捕获的脚本错误，以及上传、预览、保存和文件操作时显示的失败。</li>
+          <li>网页报告服务器已记录的失败请求时，两者会通过请求 ID 合并为一条记录，网页显示的内容列在<strong>网页报告</strong>下。</li>
+          <li>10 分钟内再次出现相同错误时，只增加原记录的次数，不新增记录。报告还按人员和分钟限流，避免循环报错的网页填满日志。</li>
+          <li>文件与文件夹名称不会记录：引号中的文字替换为 <code>"…"</code>（或 <code>「…」</code>）；网页报告服务器的英文消息，而非译文；请求按路由记录（<code>PATCH /api/nodes/{id}</code>），不会记录实际请求的路径。密码、cookie、分享链接令牌和文件内容永远不会记录。完整服务器故障信息可在服务器日志（<code>docker logs</code>）中用同一请求 ID 找到。</li>
+        </ul>
+        <h2 id="keep">日志保留时间</h2>
+        <p>在<strong>控制面板 › 日志设置</strong>中：</p>
+        <ul>
+          <li>活动和分享链接访问记录保留 180 天，登录记录保留 365 天。错误记录与活动记录保留相同时间。</li>
+          <li>较旧记录移入压缩归档文件，保留 3 年，可从同一页面下载。归档每行包含一条 JSON 记录，使用日志内部代码（<code>upload</code>、<code>bad_password</code>），时间为自 1970 年起的秒数（UTC），不因显示语言改变。</li>
+          <li>可关闭访客 IP 地址和浏览器的记录。</li>
+        </ul>
+        <div class="note">日志包含 IP 地址，在许多国家属于个人数据。请按照自己的隐私政策保留和删除。</div>
+        <h2 id="branding">品牌</h2>
+        <p>打开<strong>控制面板 › 品牌</strong>。</p>
+        <ul>
+          <li><strong>名称与标志</strong>，可为深色模式另设一个标志。标志也用作浏览器标签页图标。</li>
+          <li>浅色和深色模式的<strong>颜色</strong>。</li>
+          <li><strong>外观</strong>：浅色、深色或跟随个人设备，以及是否允许用户自行更改。</li>
+          <li><strong>登录界面</strong>：背景图片、文字，以及是否显示锁屏界面。</li>
+        </ul>
+        <nav class="next" aria-label="更多指南">
+          <a href="storage.html"><span>上一篇</span>存储位置</a>
+          <a class="forward" href="settings.html"><span>下一篇</span>设置</a>
+        </nav>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">源代码</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">报告问题</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 镜像</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

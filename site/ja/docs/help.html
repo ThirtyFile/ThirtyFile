@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ja" data-root="../.." data-page="help">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>トラブルシューティング · ThirtyFile</title>
+    <meta name="description" content="よくある問題、サインイン、アップロード、権限、ヘルスチェック、保存ファイルの確認への対処方法。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/help.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/help.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/help.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/help.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/help.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">本文へスキップ</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="サイト">
+          <a href="../index.html#features" class="hide-small">機能</a>
+          <a href="index.html" aria-current="page">ガイド</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">言語 </span><span class="lang-name">日本語</span></summary>
+            <ul>
+              <li><a href="../../docs/help.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="../../zh-TW/docs/help.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/help.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="help.html" hreflang="ja" lang="ja" aria-current="true">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="ガイド">
+        <details open>
+          <summary>すべてのガイド</summary>
+          <p>はじめに</p>
+          <a href="index.html">インストール</a>
+          <a href="first-steps.html">初期設定</a>
+          <p>日常の操作</p>
+          <a href="files.html">ファイルの操作</a>
+          <a href="preview.html">プレビューと編集</a>
+          <a href="sharing.html">共有</a>
+          <a href="account.html">アカウント</a>
+          <a href="webdav.html">ネットワークドライブとして割り当て</a>
+          <p>管理</p>
+          <a href="users.html">ユーザーとスペース</a>
+          <a href="sign-in.html">シングルサインオン</a>
+          <a href="storage.html">保存場所</a>
+          <a href="logs.html">ログとブランド設定</a>
+          <p>運用</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">インターネットに公開</a>
+          <a href="backup.html">アップグレードとバックアップ</a>
+          <a href="help.html" aria-current="page">トラブルシューティング</a>
+          <p>プロジェクト</p>
+          <a href="contributing.html">開発への参加</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+        <h1>トラブルシューティング</h1>
+        <p class="lead">よくある問題への対処方法です。</p>
+        <details class="guide-toc">
+          <summary>このページの内容</summary>
+          <ol>
+            <li><a href="#password">管理者のパスワードを忘れた</a></li>
+            <li><a href="#shell">docker exec thirtyfile sh が動かない</a></li>
+            <li><a href="#two-factor">管理者がスマートフォンと回復コードをなくした</a></li>
+            <li><a href="#links">共有リンクが http://127.0.0.1:8080 で始まる</a></li>
+            <li><a href="#signed-out">サインイン直後にサインアウトされる</a></li>
+            <li><a href="#locked">全員に「失敗した試行が多すぎます」と表示される</a></li>
+            <li><a href="#upload">大きなファイルのアップロードに失敗する</a></li>
+            <li><a href="#permission">起動時に「Permission denied」と表示される</a></li>
+            <li><a href="#logs">ログを見る</a></li>
+            <li><a href="#health">稼働状態を確認する</a></li>
+            <li><a href="#check">保存されたファイルを確認する</a></li>
+            <li><a href="#safety">ファイルを保護する仕組み</a></li>
+            <li><a href="#more">解決しない場合</a></li>
+          </ol>
+        </details>
+        <h2 id="password">管理者のパスワードを忘れた</h2>
+        <pre><code>docker exec -it thirtyfile thirtyfile reset-password admin</code></pre>
+        <p>求められたら新しいパスワードを入力します。こうするとシェルの履歴に残りません。無効になっているアカウントも、この操作で再び有効になります。</p>
+        <h2 id="shell">docker exec thirtyfile sh が動かない</h2>
+        <p>イメージには ThirtyFile 本体だけが含まれ、シェルやほかのプログラムはありません。その分、更新が必要なものを減らしています。<code>docker exec thirtyfile thirtyfile reset-password …</code> など、ThirtyFile のコマンドはガイドのとおりに使えます。ファイルを見るには、ホストの <code>data</code> と <code>storage</code> フォルダー、または <code>docker cp</code> を使ってください。</p>
+        <h2 id="two-factor">管理者がスマートフォンと回復コードをなくした</h2>
+        <p>ほかの管理者が <strong>コントロールパネル › ユーザー</strong> でリセットできます。ほかに管理者がいない場合は、サーバーで無効にします。</p>
+        <pre><code>docker exec thirtyfile thirtyfile reset-two-factor admin</code></pre>
+        <h2 id="links">共有リンクが http://127.0.0.1:8080 で始まる</h2>
+        <p><strong>コントロールパネル › 全般 › サイトの URL</strong> に、利用者がアクセスするアドレスを設定します。</p>
+        <h2 id="signed-out">サインイン直後にサインアウトされる</h2>
+        <p><code>THIRTYFILE_SECURE_COOKIE</code> が <code>true</code> なのに、<code>http://</code> で開いている状態です。<code>https://</code> で開くか、HTTPS を使わない場合は設定を <code>false</code> にします。</p>
+        <h2 id="locked">全員に「失敗した試行が多すぎます」と表示される</h2>
+        <p>リバースプロキシの背後では、<code>THIRTYFILE_TRUST_PROXY</code> を <code>true</code> にする必要があります。プロキシが別のコンピューターで動く場合は、そのアドレスを指定します。プロキシも <a href="internet.html">設定例</a> のとおりに利用者のアドレスを転送する必要があります。そうしないと、全員が同じ利用者として数えられます。</p>
+        <p>制限は 15 分後に自動で解除されます。</p>
+        <p>同じアカウントへのパスワード入力が何度も失敗すると、送信元のアドレスにかかわらず、次の試行までの待ち時間が少しずつ長くなり、最大 1 分になります。アカウント自体はロックされません。</p>
+        <h2 id="upload">大きなファイルのアップロードに失敗する</h2>
+        <p>413 エラーの場合は、<code>THIRTYFILE_MAX_UPLOAD_MB</code> とリバースプロキシのリクエストサイズ上限を両方確認してください。ブラウザーのアップローダーは 32 MB のチャンクを使います。<a href="internet.html#nginx">nginx の例</a> のように、1 リクエストあたり少なくとも 64 MB を許可します。WebDAV はファイル全体を 1 リクエストで送るため、そのファイルが収まる上限が必要です。<a href="webdav.html#troubleshooting">WebDAV のトラブルシューティング</a> も参照してください。スペースの容量制限と保存先の空き容量も確認します。</p>
+        <h2 id="permission">起動時に「Permission denied」と表示される</h2>
+        <p>起動時にコンテナーはフォルダーの所有者をユーザー 1000 に変更します。次の 2 つの場合は変更できません。</p>
+        <ul>
+          <li><code>--user</code> を指定して起動している場合。そのユーザーが書き込めるようにします。<code>sudo chown -R 1000:1000 /srv/thirtyfile</code> の 1000 を、そのユーザーの番号に置き換えてください。</li>
+          <li>所有者を変更できないネットワーク共有上のフォルダーを使っている場合。ログに <em>Can't give the folder … to user</em> と表示されます。<code>THIRTYFILE_RUN_AS</code> に、その共有のファイルを所有するユーザーとグループ、たとえば <code>1026:100</code> を指定してください。</li>
+        </ul>
+        <h2 id="logs">ログを見る</h2>
+        <pre><code>docker logs --tail 100 thirtyfile</code></pre>
+        <h2 id="health">稼働状態を確認する</h2>
+        <p><code>http://files.example.com:8080/api/health</code> はサーバーの状態を返します。通常は <code>"status": "ok"</code>、<code>/data</code> または <code>/storage</code> の空き容量が 1 GB 未満、あるいは保存場所に接続できない場合は <code>"degraded"</code> です。両フォルダーの空き容量と総容量、各保存場所が <code>ok</code> か <code>offline</code> かも返すので、ディスクがいっぱいになる前に監視ツールで警告できます。監視では JSON の <code>status</code> を確認してください。状態が degraded でも HTTP 200 を返します。データベースの確認に失敗すると、HTTP 503 と <code>"status": "error"</code> を返します。Docker のヘルスチェックは HTTP 200 を正常とするため、空き容量不足や保存場所のオフラインだけでコンテナーが再起動することはありません。状態低下の警告は、ログに最大 1 時間に 1 回記録されます。</p>
+        <p>誰でもアクセスできるため、バージョンは返しません。知らない人に、既知の問題を調べるためのバージョン情報を渡さないためです。サインイン後は <a href="account.html">アカウントメニュー</a> の最後の行に、たとえば <strong>ThirtyFile 0.5.0</strong> と表示されます。管理者は <strong>コントロールパネル</strong> の右下でも確認でき、そのリリースノートへのリンクになっています。サーバーでは <code>docker exec thirtyfile thirtyfile --version</code> で表示できます。</p>
+        <h2 id="check">保存されたファイルを確認する</h2>
+        <p>データベースにあるすべてのファイルが保存場所に残っているか、データベースにないファイルが保存場所に残っていないか（手作業で置いたものなど）を確認します。</p>
+        <pre><code>docker exec thirtyfile thirtyfile check</code></pre>
+        <p>すべての保存場所について、見つからないファイル、サイズが違うファイル、不明なファイルを一覧表示し、問題があれば終了コード 1 を返します。不明なファイルは削除しません。<code>--verify</code> を付けると、すべてのファイルを読み直して内容のフィンガープリント（SHA-256）と比較するため、全データを読むだけの時間がかかります。フォルダースペースは対象外です。そのファイルはディスク上の通常のファイルです。</p>
+        <p>フィンガープリントはアップロード中に計算され、一時停止や ThirtyFile の再起動をまたいでも引き継がれます。大きなアップロードの完了時に、全ファイルをもう一度読み直すことはありません。後からディスクに同じ内容が残っているかを確認するのが <code>--verify</code> です。</p>
+        <h2 id="safety">ファイルを保護する仕組み</h2>
+        <ul>
+          <li>パスワード、アプリパスワード、回復コード、サインインセッションは、元の値を読み出せない形式で保存します。</li>
+          <li>パスワードでサインインする全員に 2 段階認証を必須にできます。</li>
+          <li>アプリパスワードでアクセスできるのはファイルだけです。アカウントやコントロールパネルにはアクセスできません。<a href="account.html#app-passwords">アカウント</a> を参照してください。</li>
+          <li>アップロードしたファイルから、サイト上でスクリプトは実行できません。</li>
+          <li>共有リンクの作成者がアイテムへのアクセスを失うと、そのリンクも使えなくなります。</li>
+          <li>パスワードやアプリパスワードの入力に繰り返し失敗すると、15 分間ブロックされます。</li>
+        </ul>
+        <h2 id="more">解決しない場合</h2>
+        <p>行った操作、期待した結果、実際に起きたことを添えて、<a href="https://github.com/ThirtyFile/ThirtyFile/issues">GitHub で問題を報告</a> してください。</p>
+        <nav class="next" aria-label="その他のガイド">
+          <a href="backup.html"><span>前へ</span>アップグレードとバックアップ</a>
+          <a class="forward" href="contributing.html"><span>次へ</span>開発への参加</a>
+        </nav>
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">ガイド</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">ソースコード</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">問題を報告</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker イメージ</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

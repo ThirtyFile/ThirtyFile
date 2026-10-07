@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ja" data-root="../.." data-page="account">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>アカウント · ThirtyFile</title>
+    <meta name="description" content="パスワード、2 段階認証、デバイス、アプリパスワード、表示言語とスタイル、サインイン履歴、通知の管理。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/account.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/account.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/account.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/account.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/account.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">本文へスキップ</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="サイト">
+          <a href="../index.html#features" class="hide-small">機能</a>
+          <a href="index.html" aria-current="page">ガイド</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">言語 </span><span class="lang-name">日本語</span></summary>
+            <ul>
+              <li><a href="../../docs/account.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="../../zh-TW/docs/account.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/account.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="account.html" hreflang="ja" lang="ja" aria-current="true">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="ガイド">
+        <details open>
+          <summary>すべてのガイド</summary>
+          <p>はじめに</p>
+          <a href="index.html">インストール</a>
+          <a href="first-steps.html">初期設定</a>
+          <p>日常の操作</p>
+          <a href="files.html">ファイルの操作</a>
+          <a href="preview.html">プレビューと編集</a>
+          <a href="sharing.html">共有</a>
+          <a href="account.html" aria-current="page">アカウント</a>
+          <a href="webdav.html">ネットワークドライブとして割り当て</a>
+          <p>管理</p>
+          <a href="users.html">ユーザーとスペース</a>
+          <a href="sign-in.html">シングルサインオン</a>
+          <a href="storage.html">保存場所</a>
+          <a href="logs.html">ログとブランド設定</a>
+          <p>運用</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">インターネットに公開</a>
+          <a href="backup.html">アップグレードとバックアップ</a>
+          <a href="help.html">トラブルシューティング</a>
+          <p>プロジェクト</p>
+          <a href="contributing.html">開発への参加</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+        <h1>アカウント</h1>
+        <p class="lead">パスワード、2 段階認証、サインイン中のデバイス、スクリプト用のアプリパスワード、言語とインターフェーススタイル、サインイン履歴、通知を管理します。</p>
+        <p>このページの機能はすべて <strong>アカウントメニュー</strong> にあります。左の一覧の下部にある自分の名前をクリックします。最後の行には <strong>ThirtyFile 0.5.0</strong> のように、サーバーで動いているバージョンを表示します。</p>
+        <details class="guide-toc">
+          <summary>このページの内容</summary>
+          <ol>
+            <li><a href="#password">パスワード</a></li>
+            <li><a href="#two-factor">2 段階認証</a></li>
+            <li><a href="#devices">サインイン中のデバイス</a></li>
+            <li><a href="#app-passwords">アプリパスワード</a></li>
+            <li><a href="#language">言語</a></li>
+            <li><a href="#style">インターフェーススタイル</a></li>
+            <li><a href="#history">サインイン履歴</a></li>
+            <li><a href="#notifications">通知</a></li>
+          </ol>
+        </details>
+        <h2 id="password">パスワード</h2>
+        <p><strong>パスワードの変更</strong> では、現在と新しいパスワードを入力します。変更後はほかのデバイスがサインアウトします。新しいパスワードは 6 文字以上、管理者が最小文字数を増やした場合はその長さが必要です。</p>
+        <p>管理者が設定したパスワード（新規アカウントやリセット時）は、最初のサインインで自分のパスワードに変更します。忘れた場合は、サインイン画面の <strong>パスワードを忘れた場合</strong> からメールにリンクを送れます。管理者によるメールとサイトのアドレスの設定、アカウントのメールアドレス（<a href="#notifications">通知設定</a>）が必要です。</p>
+        <h2 id="two-factor">2 段階認証</h2>
+        <p>2 段階認証では、パスワードだけではサインインできません。続けて、スマートフォンの Microsoft Authenticator、Google Authenticator、1Password などの認証アプリから 6 桁のコードを入力します。コードは 30 秒ごとに変わり、1 回しか使えません。</p>
+        <ol>
+          <li><strong>2 段階認証</strong> を開いて <strong>設定</strong> を選び、パスワードを入力します。</li>
+          <li>アプリで QR コードを読み取ります。読み取れない場合は、その下のキーをアプリに入力します。</li>
+          <li>アプリのコードを入力して確認すると、2 段階認証が有効になります。</li>
+          <li>次に表示される 10 個の <strong>回復コード</strong> を、パスワード管理ツールや紙などに保存します。スマートフォンをなくした場合、各コードで 1 回ずつサインインできます。表示されるのはこのときだけです。</li>
+        </ol>
+        <p>同じダイアログで回復コードの再発行（古いコードは無効になります）、<strong>アプリの変更</strong> によるスマートフォンやアプリの移行、2 段階認証の無効化ができます。それぞれパスワードと現在のアプリのコード（または回復コード）が必要です。</p>
+        <ul>
+          <li>5 回コードを間違えると、パスワードの再入力が必要です。1 アカウントで 10 回間違えると、最大 15 分間コードを受け付けません。</li>
+          <li>Microsoft、Google、GitHub、OpenID Connect の <a href="sign-in.html">シングルサインオン</a> では、このコードは求めません。ID プロバイダー独自の 2 段階認証を使います。<a href="#app-passwords">アプリパスワード</a> でもコードは求めません。</li>
+          <li>管理者が 2 段階認証を必須にした場合、次のサインインでパスワード入力後に設定を求められ、無効にはできません。</li>
+        </ul>
+        <div class="note">スマートフォンも回復コードもなくした場合は、管理者に 2 段階認証のリセットを依頼してください。その後、パスワードでサインインして設定し直せます。</div>
+        <h2 id="devices">サインイン中のデバイス</h2>
+        <p><strong>デバイス</strong> は、サインイン中のすべてのブラウザーについて、ブラウザーと OS、最後に使ったアドレス、サインイン時刻、最終利用時刻を表示します。現在のものは <strong>このデバイス</strong> と表示します。</p>
+        <ul>
+          <li>各デバイスの <strong>サインアウト</strong> はセッションを即座に終了し、再サインインが必要になります。</li>
+          <li><strong>ほかのすべてのデバイスからサインアウト</strong> は、現在のデバイス以外をサインアウトします。</li>
+        </ul>
+        <div class="note">見覚えのないデバイスがあればサインアウトしてください。パスワードでサインインしている場合は変更もしてください。シングルサインオンの場合、ここにはパスワードがありません。デバイスをサインアウトしてアクセスを終了させ、連携アカウント側のセキュリティページも確認してください。</div>
+        <h2 id="app-passwords">アプリパスワード</h2>
+        <p>スクリプト、バックアップツール、ファイルクライアントはサインイン画面を使えません。<strong>アプリパスワード</strong> でそれぞれ専用のパスワードを作ります。独自のパスワードを持たないシングルサインオンのアカウントでも使います。</p>
+        <ul>
+          <li>使用先がわかる <strong>名前</strong>、<strong>ファイルの読み取り</strong> のみか <strong>変更</strong> も許可するか、<strong>有効期限</strong> を選びます。</li>
+          <li>現在のパスワードと、2 段階認証を使う場合はアプリのコードを入力します。シングルサインオンのアカウントは入力するパスワードがなく、サインイン後 10 分以内に作成します。</li>
+          <li>アカウントで作成したアプリパスワードは毎回通知するため、自分が作っていないものにも気づけます。</li>
+          <li>作成直後に 1 回だけ表示します。そのときにコピーしてください。フィンガープリントだけを保存するため、再表示はできません。</li>
+          <li>一覧には最終利用時刻と利用元のアドレスを表示します。<strong>削除</strong> すると、それを使うものはすぐに接続できなくなります。</li>
+        </ul>
+        <p><code>Authorization</code> ヘッダー、またはユーザー名と組み合わせた HTTP Basic 認証のパスワードとして送ります。</p>
+        <pre><code>curl -H "Authorization: Bearer tfa_…" https://drive.example.com/api/auth/me
+curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;file id&gt;/content?download=1"</code></pre>
+        <p>アプリパスワードで、エクスプローラー、Finder、スマートフォンのファイルアプリからドライブとして開くこともできます。<a href="webdav.html">ネットワークドライブとして割り当て</a> を参照してください。</p>
+        <p>アプリパスワードはファイル専用です。閲覧、検索、ダウンロード、アップロード、ファイルとフォルダーの整理に使えます。パスワード変更、アプリパスワード作成、サインイン方法のリンク、共有リンク、コントロールパネルには使えず、Cookie も取得しません。読み取り専用のものは、変更を伴うすべての操作を拒否します。</p>
+        <div class="note">パスワードの変更、管理者によるパスワードや 2 段階認証のリセットでは、すべてのアプリパスワードを削除します。後で作り直してください。デバイスのサインアウトは影響しないので、信頼できなくなったものは個別に削除してください。アカウントが無効または削除されると使えなくなります。誤ったアプリパスワードは通常のパスワードと同じ上限で数え、同じアドレスから 30 回失敗すると 15 分間待つ必要があります。</div>
+        <h2 id="language">言語</h2>
+        <p>アカウントメニューの <strong>言語</strong> で表示言語を変更します。選択はアカウントに保存するため、ほかのコンピューターやスマートフォンでもサインインすれば同じ言語になります。選ぶまでは管理者の既定の言語、またはブラウザーの言語を使います。サインイン画面と共有リンクは、ブラウザーの言語か、画面下部の一覧で選んだ言語に従います。</p>
+        <h2 id="style">インターフェーススタイル</h2>
+        <p>アカウントメニューの <strong>インターフェーススタイル</strong> は、ファイル画面のレイアウトとキー操作を決めます。既定の <strong>自動</strong> は使用中のコンピューターに合わせ、Mac では Mac スタイル、Windows、Linux、ChromeOS では Windows スタイルになります。スマートフォンとタブレットのレイアウトはどちらも同じです。選択はアカウントに保存します。修飾キーはスタイルにかかわらず、Mac では ⌘、それ以外では Ctrl です。</p>
+        <ul>
+          <li><strong>Windows スタイル</strong>：エクスプローラーのように、アドレスバー、フォルダーツリー、コマンドバーを配置します。<a href="files.html">ファイルの操作</a> で説明しています。</li>
+          <li><strong>Mac スタイル</strong>：Finder のように、グループ別のサイドバー、パスバー、その場で展開する <strong>リスト</strong> 表示、<strong>クイックルック</strong>、Finder のキー操作（<kbd>Enter</kbd> で名前変更、<kbd>⌘</kbd> + <kbd>↓</kbd> で開く）を使います。<a href="files.html#mac-style">Mac スタイル</a> を参照してください。</li>
+        </ul>
+        <p>両スタイルで同じファイル操作ができ、置き換えや削除の前には同じ確認を行います。</p>
+        <h2 id="history">サインイン履歴</h2>
+        <p><strong>自分のサインイン履歴</strong> は、サインイン、失敗、サインアウト、パスワード変更、アプリパスワードの作成、削除、誤ったシークレットでの使用を、アドレスとブラウザー付きで表示します。</p>
+        <h2 id="notifications">通知</h2>
+        <p>右上のタブの横にある <strong>ベル</strong> は、次のことを知らせます。</p>
+        <ul>
+          <li><strong>共有されたアイテム</strong>：誰かがファイルやフォルダーを共有した、または直接、所属グループを通じてスペースに追加した場合。全員へのアクセスや、既にあるアクセスの変更は通知しません。</li>
+          <li><strong>スペースの空き容量が少ない</strong>：所有または管理するスペースの使用量が 90% に達した場合。個人用スペース、所有者や管理者であるチームスペースが対象です。一度通知し、空き容量が戻った後に再び達した場合にまた通知します。</li>
+          <li><strong>アクセス期限が近づいています</strong>：与えられたアクセスが 3 日以内に終了する場合。最初からそれより短い期間だった場合は、共有時に既に知らせています。</li>
+          <li><strong>リンク経由でファイルを受信</strong>：作成した受信可能なリンクにファイルが届いた場合。同じリンクから 1 時間以内に届くファイルは 1 つの通知にまとめ、メールも 1 通送ります（メールだけで受け取る設定でも同じです）。</li>
+          <li><strong>新しいアプリパスワード</strong>：アカウントにアプリパスワードを作成した場合。作成元のアドレスも表示します。</li>
+          <li><strong>新しいサインイン方法</strong>：Microsoft、Google、GitHub、OpenID Connect のアカウントをリンクした場合（<a href="sign-in.html#link">自分でアカウントをリンクする</a>）。</li>
+        </ul>
+        <p>ベルの数字は未読件数です。通知をクリックすると対象を開きます。一覧の下に <strong>すべて既読にする</strong> と <strong>すべて消去</strong> があります。通知は 90 日保存します。</p>
+        <p>ベルの一覧下部かアカウントメニューの <strong>通知設定</strong> で、種類ごとにアプリ内通知とメールを別々に有効、無効にできます。メールはそこで入力する <strong>メールアドレス</strong> に送ります。シングルサインオンでは初回に連携先のアドレスを入れ、後から変更できます。空欄ならメールは送りません。パスワード再設定もこのアドレスに送るため、変更には現在のパスワード（2 段階認証ではコードも）が必要です。パスワードのないアカウントはサインイン後 10 分以内に変更します。旧アドレスにも変更を通知します。15 分以内に同じ種類のメールを 1 アドレスへ送るのは最大 5 通ですが、アプリ内通知はすべて保存します。</p>
+        <div class="note">管理者が <a href="users.html#email">メールサーバー</a> を設定して初めて送信できます。メールは <a href="#language">選択した言語</a>、未選択なら管理者の既定の言語、さらに未設定なら最後に ThirtyFile で使った言語で書きます。時刻は利用者のタイムゾーンです。</div>
+        <nav class="next" aria-label="その他のガイド">
+          <a href="sharing.html"><span>前へ</span>共有</a>
+          <a class="forward" href="webdav.html"><span>次へ</span>ネットワークドライブとして割り当て</a>
+        </nav>
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">ガイド</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">ソースコード</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">問題を報告</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker イメージ</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

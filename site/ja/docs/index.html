@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>インストール · ThirtyFile</title>
-    <meta name="description" content="ThirtyFile は Docker で動きます。次の 2 つの方法のどちらかを選んでください。どちらも 1 分ほどで終わります。" />
+    <meta name="description" content="Docker と Docker Compose で ThirtyFile をインストールし、サインインする手順。GHCR と Docker Hub に対応。" />
     <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/" />
     <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/" />
     <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/" />
@@ -30,7 +30,7 @@
         <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
         <nav class="site-nav" aria-label="サイト">
           <a href="../index.html#features" class="hide-small">機能</a>
-          <a href="../docs/index.html" aria-current="page">ガイド</a>
+          <a href="index.html" aria-current="page">ガイド</a>
           <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
           <details class="lang-menu">
             <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">言語 </span><span class="lang-name">日本語</span></summary>
@@ -49,35 +49,43 @@
         <details open>
           <summary>すべてのガイド</summary>
           <p>はじめに</p>
-          <a href="../docs/index.html" aria-current="page">インストール</a>
-          <a href="../docs/first-steps.html">初期設定</a>
+          <a href="index.html" aria-current="page">インストール</a>
+          <a href="first-steps.html">初期設定</a>
           <p>日常の操作</p>
-          <a href="../../docs/files.html" hreflang="en">ファイルの操作</a>
-          <a href="../../docs/preview.html" hreflang="en">プレビューと編集</a>
-          <a href="../../docs/sharing.html" hreflang="en">共有</a>
-          <a href="../../docs/account.html" hreflang="en">アカウント</a>
-          <a href="../../docs/webdav.html" hreflang="en">ネットワークドライブとして割り当て</a>
+          <a href="files.html">ファイルの操作</a>
+          <a href="preview.html">プレビューと編集</a>
+          <a href="sharing.html">共有</a>
+          <a href="account.html">アカウント</a>
+          <a href="webdav.html">ネットワークドライブとして割り当て</a>
           <p>管理</p>
-          <a href="../../docs/users.html" hreflang="en">ユーザーとスペース</a>
-          <a href="../../docs/sign-in.html" hreflang="en">シングルサインオン</a>
-          <a href="../../docs/storage.html" hreflang="en">保存場所</a>
-          <a href="../../docs/logs.html" hreflang="en">ログとブランド設定</a>
+          <a href="users.html">ユーザーとスペース</a>
+          <a href="sign-in.html">シングルサインオン</a>
+          <a href="storage.html">保存場所</a>
+          <a href="logs.html">ログとブランド設定</a>
           <p>運用</p>
-          <a href="../../docs/settings.html" hreflang="en">設定</a>
-          <a href="../../docs/internet.html" hreflang="en">インターネットに公開</a>
-          <a href="../../docs/backup.html" hreflang="en">アップグレードとバックアップ</a>
-          <a href="../../docs/help.html" hreflang="en">トラブルシューティング</a>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">インターネットに公開</a>
+          <a href="backup.html">アップグレードとバックアップ</a>
+          <a href="help.html">トラブルシューティング</a>
           <p>プロジェクト</p>
-          <a href="../../docs/contributing.html" hreflang="en">開発への参加</a>
+          <a href="contributing.html">開発への参加</a>
         </details>
       </nav>
       <main id="content" class="article">
         <h1>インストール</h1>
-        <p class="lead">ThirtyFile は Docker で動きます。次の 2 つの方法のどちらかを選んでください。どちらも 1 分ほどで終わります。</p>
-        <p class="lang-note">日本語で読めるのは、インストールと初期設定の 2 つのガイドです。その他のガイドは、現在英語のみです。</p>
+        <p class="lead">ThirtyFile は Docker で動きます。以下の 2 つから選んでください。どちらも約 1 分です。</p>
+        <details class="guide-toc">
+          <summary>このページの内容</summary>
+          <ol>
+            <li><a href="#before">始める前に</a></li>
+            <li><a href="#docker-run">方法 1：docker run</a></li>
+            <li><a href="#compose">方法 2：Docker Compose</a></li>
+            <li><a href="#sign-in">サインイン</a></li>
+            <li><a href="#stop">停止と起動</a></li>
+          </ol>
+        </details>
         <h2 id="before">始める前に</h2>
-        <p>ファイルを保存するパソコンかサーバーに <a href="https://docs.docker.com/get-docker/">Docker</a> をインストールしてください。ほかには何も要りません。</p>
-
+        <p>ファイルを保存するコンピューターやサーバーに <a href="https://docs.docker.com/get-docker/">Docker</a> をインストールします。他は不要です。</p>
         <h2 id="docker-run">方法 1：docker run</h2>
         <pre><code>docker run -d --name thirtyfile --restart unless-stopped \
   -p 8080:8080 \
@@ -85,50 +93,46 @@
   -v /srv/thirtyfile/storage:/storage \
   -e THIRTYFILE_ADMIN_PASSWORD='choose-a-password' \
   ghcr.io/thirtyfile/thirtyfile:latest</code></pre>
-        <p><a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a> でも同じリリースのイメージを提供しています。上のコマンドで <code>thirtyfile/thirtyfile:latest</code> を指定すると、そこからインストールできます。Compose の場合は <code>image:</code> 行の <code>ghcr.io/thirtyfile/thirtyfile</code> を <code>thirtyfile/thirtyfile</code> に置き換え、バージョンタグと既存のボリューム設定はそのままにしてください。</p>
-        <div class="table-scroll">
-          <table>
-            <thead><tr><th>部分</th><th>役割</th></tr></thead>
-            <tbody>
-              <tr><td><code>-p 8080:8080</code></td><td>サイトにアクセスするポートです。ポート 80 にするには <code>-p 80:8080</code> と書きます</td></tr>
-              <tr><td><code>-v /srv/thirtyfile/data:/data</code></td><td>アカウントと設定の保存先です。更新しても残ります</td></tr>
-              <tr><td><code>-v /srv/thirtyfile/storage:/storage</code></td><td>ファイルの保存先です。別のディスクや、マウントした NAS も使えます</td></tr>
-              <tr><td><code>THIRTYFILE_ADMIN_PASSWORD</code></td><td>最初のアカウントのパスワードです。<code>choose-a-password</code> は自分のパスワードに置き換えてください。この例のままだと、設定していないものとして扱われます。省略することもでき、その場合はランダムなパスワードが作られてログに書き出されます</td></tr>
-            </tbody>
-          </table>
-        </div>
-
+        <p>v0.6.0 以降は <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a> にもあります。上のコマンドで <code>thirtyfile/thirtyfile:0.6</code> を使えばその系列を保持します。Compose の <code>compose.yaml</code> は <code>image:</code> の <code>ghcr.io/thirtyfile/thirtyfile</code> を <code>thirtyfile/thirtyfile</code> に変え、Hub にあるタグと既存ボリュームを維持します。以前のリリースは GHCR にあります。</p>
+        <div class="table-scroll"><table><thead><tr><th>指定</th><th>役割</th></tr></thead><tbody>
+          <tr><td><code>-p 8080:8080</code></td><td>アクセスするポート。80 なら <code>-p 80:8080</code></td></tr>
+          <tr><td><code>-v /srv/thirtyfile/data:/data</code></td><td>アカウントと設定の保存先。更新でも保持します</td></tr>
+          <tr><td><code>-v /srv/thirtyfile/storage:/storage</code></td><td>ファイルの保存先。別ディスクや NAS にもできます</td></tr>
+          <tr><td><code>THIRTYFILE_ADMIN_PASSWORD</code></td><td>最初のアカウントのパスワード。<code>choose-a-password</code> を変更してください。この例は未設定同様に無視します。任意で、未指定はランダム生成してログに書きます</td></tr>
+        </tbody></table></div>
         <h2 id="compose">方法 2：Docker Compose</h2>
-        <p>用意された <code>compose.yaml</code> を空のフォルダーにダウンロードし、そのフォルダーで起動します。</p>
+        <p>空のフォルダーへ <code>compose.yaml</code> を取得し、そこで起動します。</p>
         <pre><code>curl -fLO https://github.com/ThirtyFile/ThirtyFile/releases/latest/download/compose.yaml
 docker compose up -d</code></pre>
-        <p>アカウントと設定は <code>data</code> フォルダーに、ファイルは <code>storage</code> フォルダーに保存されます。どちらも <code>compose.yaml</code> と同じ場所にあります。中身は普通のフォルダーに入った普通のファイルで、スペースごとに 1 つのフォルダーです（<a href="../../docs/storage.html#layout" hreflang="en">ファイルの保存場所</a>）。ファイルを別のディスクや NAS に置くには、<code>compose.yaml</code> の <code>./storage</code> をそのパスに変えてください。</p>
-        <div class="note"><strong>ThirtyFile は、渡されたフォルダーの所有者を変更します。</strong>起動時に <code>data</code> と <code>storage</code> がほかのユーザーの所有になっていると、ThirtyFile はフォルダーとその中身すべての所有者を、自分が動作するユーザー（id 1000、<code>THIRTYFILE_RUN_AS</code>）に変えます。ほかのプログラムや人が使っている既存のフォルダーを <code>storage</code> に指定すると、それらのファイルの所有者も変わります。空のフォルダーを使うか、<code>THIRTYFILE_RUN_AS</code> をそのフォルダーの今の所有者に設定してください。グループ経由で NAS の共有フォルダーにアクセスするには、<code>--group-add 2001</code>（<code>compose.yaml</code> では <code>group_add:</code>）でグループを追加します。ThirtyFile はユーザーを切り替えた後も、そのグループを保持します。</div>
-        <p>用意された <code>compose.yaml</code> は、ルートファイルシステムを読み取り専用にし、フォルダーの引き渡しとユーザーの切り替えに必要な 4 つを除いて Linux のケーパビリティをすべて外し、<code>no-new-privileges</code> を設定してコンテナーを実行します。Kubernetes など、コンテナーを root で起動できない環境では、そのユーザーで直接実行し（<code>--user 1000:1000</code>、または <code>runAsUser: 1000</code> と <code>runAsGroup: 1000</code>）、ボリュームの所有者をそのユーザーにしてください。その場合、ThirtyFile は引き渡しを行いません。</p>
-        <p>管理者のパスワードを自分で決めるには、最初に起動する前に、同じフォルダーに <code>.env</code> という名前のファイルを作り、次のように書きます。</p>
+        <p><code>compose.yaml</code> と同じ場所の <code>data</code> にアカウントと設定、<code>storage</code> にファイルを保存します。スペースごとの通常フォルダーの通常ファイルです（<a href="storage.html#layout">保存先</a>）。別ディスクや NAS なら <code>compose.yaml</code> の <code>./storage</code> をそのパスに変えます。</p>
+        <div class="note"><strong>指定フォルダーの所有者を変更します。</strong> 起動時、所有者が違えば <code>data</code>、<code>storage</code> とその全内容を実行ユーザー（ID 1000、<code>THIRTYFILE_RUN_AS</code>）にします。他プログラムや他人が使う既存フォルダーを <code>storage</code> に指定しても変わります。空を使うか、<code>THIRTYFILE_RUN_AS</code> に既存の所有者を設定してください。NAS のグループでアクセスするなら <code>--group-add 2001</code>（Compose は <code>group_add:</code>）を指定すれば、ユーザー切り替え後も維持します。</div>
+        <p>配布 Compose はルート FS を読み取り専用にし、所有者変更とユーザー切り替えの 4 権限以外を外し、<code>no-new-privileges</code> を使います。Kubernetes など root 開始不可なら、直接 <code>--user 1000:1000</code>、または <code>runAsUser: 1000</code>、<code>runAsGroup: 1000</code> で動かし、ボリュームをそのユーザー所有にしてください。所有者変更を省略します。</p>
+        <p>管理者パスワードを決めるには、初回起動前に <code>compose.yaml</code> と同じ場所の <code>.env</code> に書きます。</p>
         <pre><code>THIRTYFILE_ADMIN_PASSWORD=choose-a-password</code></pre>
-
         <h2 id="sign-in">サインイン</h2>
         <ol>
-          <li><code>http://localhost:8080</code> を開きます。ほかのパソコンからは、<code>localhost</code> の代わりにサーバーのアドレスを使います。</li>
-          <li>ロック画面のどこかをクリックし、<strong>admin</strong> と決めたパスワードでサインインします。</li>
-          <li>左下のアカウントメニューを開き、<strong>パスワードの変更</strong>を選びます。</li>
+          <li><code>http://localhost:8080</code> を開きます。別のコンピューターからは <code>localhost</code> をサーバーのアドレスに変えます。</li>
+          <li>ロック画面をクリックし、<strong>admin</strong> と指定パスワードで入ります。</li>
+          <li>左下のアカウントメニューで <strong>パスワードの変更</strong> を選びます。</li>
         </ol>
-        <div class="note"><strong>パスワードを設定しなかった場合は？</strong>ランダムなパスワードが作られ、ログに書き出されます。<code>docker logs thirtyfile 2&gt;&amp;1 | grep password</code> で確認できます。</div>
-
+        <div class="note"><strong>未設定の場合</strong>、ランダム生成してログに書きます。<code>docker logs thirtyfile 2&gt;&amp;1 | grep password</code> で確認します。</div>
         <h2 id="stop">停止と起動</h2>
         <pre><code>docker stop thirtyfile
 docker start thirtyfile</code></pre>
-        <p>Docker Compose の場合は、<code>compose.yaml</code> のあるフォルダーで <code>docker compose stop</code> と <code>docker compose start</code> を使います。</p>
+        <p>Compose なら <code>compose.yaml</code> の場所で <code>docker compose stop</code> と <code>docker compose start</code> を使います。</p>
+        <nav class="next" aria-label="その他のガイド">
+          <a class="forward" href="first-steps.html"><span>次へ</span>初期設定</a>
+        </nav>
       </main>
     </div>
     <footer class="site-footer">
       <div class="wrap">
         <span>ThirtyFile</span>
-        <a href="../docs/index.html">ガイド</a>
+        <a href="index.html">ガイド</a>
         <a href="https://github.com/ThirtyFile/ThirtyFile">ソースコード</a>
         <a href="https://github.com/ThirtyFile/ThirtyFile/issues">問題を報告</a>
         <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker イメージ</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
       </div>
     </footer>
     <script src="../../assets/site.js"></script>

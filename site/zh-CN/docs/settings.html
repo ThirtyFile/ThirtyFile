@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN" data-root="../.." data-page="settings">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>设置 · ThirtyFile</title>
+    <meta name="description" content="配置容器环境变量、代理、密钥、日志、缓存和内存上限，了解数据与文件的保存位置。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/settings.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/settings.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/settings.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/settings.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/settings.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要内容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="网站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">语言 </span><span class="lang-name">简体中文</span></summary>
+            <ul>
+              <li><a href="../../docs/settings.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="../../zh-TW/docs/settings.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="settings.html" hreflang="zh-CN" lang="zh-CN" aria-current="true">简体中文</a></li>
+              <li><a href="../../ja/docs/settings.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>开始使用</p>
+          <a href="index.html">安装</a>
+          <a href="first-steps.html">初始设置</a>
+          <p>日常使用</p>
+          <a href="files.html">文件操作</a>
+          <a href="preview.html">预览与编辑</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的账号</a>
+          <a href="webdav.html">映射为网络驱动器</a>
+          <p>管理</p>
+          <a href="users.html">用户与空间</a>
+          <a href="sign-in.html">单点登录</a>
+          <a href="storage.html">存储位置</a>
+          <a href="logs.html">日志与品牌</a>
+          <p>部署与运维</p>
+          <a href="settings.html" aria-current="page">设置</a>
+          <a href="internet.html">通过互联网访问</a>
+          <a href="backup.html">升级与备份</a>
+          <a href="help.html">故障排除</a>
+          <p>项目</p>
+          <a href="contributing.html">参与贡献</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+
+        <h1>设置</h1>
+        <p class="lead">大多数设置位于控制面板，少数设置在容器启动时提供。</p>
+        <details class="guide-toc">
+          <summary>本页内容</summary>
+          <ol>
+            <li><a href="#list">设置列表</a></li>
+            <li><a href="#docker-run">使用 docker run</a></li>
+            <li><a href="#compose">使用 Docker Compose</a></li>
+            <li><a href="#memory">内存</a></li>
+            <li><a href="#data">数据存放在哪里</a></li>
+          </ol>
+        </details>
+        <h2 id="list">设置列表</h2>
+        <div class="table-scroll"><table>
+          <thead><tr><th>设置</th><th>默认值</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>THIRTYFILE_ADMIN_PASSWORD</code></td><td>随机</td><td><code>admin</code> 账号的密码，仅首次启动时使用。示例 <code>choose-a-password</code> 视为未设置</td></tr>
+            <tr><td><code>THIRTYFILE_ADMIN_PASSWORD_FILE</code></td><td></td><td>从文件读取管理员密码，例如 Docker secret</td></tr>
+            <tr><td><code>THIRTYFILE_SECURE_COOKIE</code></td><td><code>false</code></td><td>网站使用 HTTPS 时设为 <code>true</code>（以 <code>https://</code> 开头的网站地址也有相同效果）。cookie 仅通过 HTTPS 发送，并要求浏览器一年内只使用 HTTPS（HSTS）</td></tr>
+            <tr><td><code>THIRTYFILE_TRUST_PROXY</code></td><td><code>false</code></td><td>网站位于同一电脑或 Docker 网络的反向代理后方时，设为 <code>true</code>。代理在另一台电脑时，填写地址列表，例如 <code>203.0.113.7, 10.1.0.0/16</code>。IPv6 形式的地址，例如 <code>::ffff:172.18.0.1</code>，按其中的 IPv4 地址处理（网络至少需要 <code>/96</code>：<code>::ffff:172.18.0.0/112</code> 等于 <code>172.18.0.0/16</code>）。<code>true</code> 信任所有私有地址，包括网络中其他电脑；明确列出代理地址更安全。仅信任来自这些地址的代理请求信息（<code>X-Forwarded-For</code>、<code>-Host</code> 和 <code>-Proto</code>）</td></tr>
+            <tr><td><code>THIRTYFILE_TRASH_DAYS</code></td><td><code>30</code></td><td>回收站保留天数。<code>0</code> 表示永久保留</td></tr>
+            <tr><td><code>THIRTYFILE_MAX_UPLOAD_MB</code></td><td><code>0</code></td><td>可上传的最大文件大小。<code>0</code> 表示不限制</td></tr>
+            <tr><td><code>THIRTYFILE_DB_CACHE_MB</code></td><td><code>16</code></td><td>每个数据库连接的缓存大小，单位 MB（最多 8 个连接）。多用户的大型服务器可提高</td></tr>
+            <tr><td><code>THIRTYFILE_THUMBNAIL_JOBS</code></td><td>1 或 2</td><td>同时生成的缩略图数量：服务器或容器内存不足 2 GB 时为 1，否则为 2</td></tr>
+            <tr><td><code>THIRTYFILE_RUN_AS</code></td><td><code>1000:1000</code></td><td>服务器运行的用户和用户组。启动时数据和存储文件夹交给该用户所有。由镜像设置；独立服务器程序继续使用启动它的用户运行</td></tr>
+            <tr><td><code>THIRTYFILE_LOG_FORMAT</code></td><td>text</td><td><code>json</code> 每行输出一个 JSON 对象，供日志收集工具使用</td></tr>
+            <tr><td><code>RUST_LOG</code></td><td><code>thirtyfile=info</code></td><td>日志详细程度，例如排查问题时设置 <code>thirtyfile=debug</code></td></tr>
+            <tr><td><code>TZ</code></td><td><code>UTC</code></td><td>时区，例如 <code>Asia/Taipei</code></td></tr>
+            <tr><td><code>THIRTYFILE_SECRET_KEY</code></td><td><code>/data</code> 中的 <code>secret.key</code></td><td>加密数据库所保存密码和密钥的密钥（存储位置、单点登录、签名密钥），为 64 个十六进制字符，例如由 <code>openssl rand -hex 32</code> 生成。未设置时，首次启动会创建 <code>/data/secret.key</code>。参阅<a href="backup.html#key">升级与备份</a></td></tr>
+            <tr><td><code>THIRTYFILE_SECRET_KEY_FILE</code></td><td></td><td>从文件读取密钥，例如 Docker secret</td></tr>
+            <tr><td><code>THIRTYFILE_ADDR</code></td><td><code>0.0.0.0:8080</code></td><td>容器内服务器监听的地址和端口。要更改电脑对外端口，应修改发布端口（<code>-p 9000:8080</code>）</td></tr>
+            <tr><td><code>THIRTYFILE_DATA</code></td><td><code>/data</code></td><td>数据库、缩略图和进行中上传的目录。由镜像设置，请在该处挂载文件夹，不要修改变量。独立服务器程序使用 <code>./data</code></td></tr>
+            <tr><td><code>THIRTYFILE_STORAGE</code></td><td><code>/storage</code></td><td>内置存储位置的文件夹，与 <code>THIRTYFILE_DATA</code> 一样由镜像设置。独立服务器程序使用数据目录内的 <code>blobs</code></td></tr>
+          </tbody>
+        </table></div>
+        <p>开关设置接受 <code>true</code> 和 <code>false</code>（也接受 <code>1</code>/<code>0</code>、<code>yes</code>/<code>no</code> 和 <code>on</code>/<code>off</code>，不区分大小写）。在 <code>compose.yaml</code> 中加引号（<code>"true"</code>），否则 YAML 会将其解析为其他类型。</p>
+        <h2 id="docker-run">使用 docker run</h2>
+        <p>每项设置添加一个 <code>-e</code>：</p>
+        <pre><code>docker run -d --name thirtyfile --restart unless-stopped -p 8080:8080 \
+  -v /srv/thirtyfile/data:/data -v /srv/thirtyfile/storage:/storage \
+  -e THIRTYFILE_ADMIN_PASSWORD='choose-a-password' \
+  -e TZ=Asia/Taipei \
+  -e THIRTYFILE_TRASH_DAYS=60 \
+  ghcr.io/thirtyfile/thirtyfile:latest</code></pre>
+        <p>之后更改设置时，先停止并移除容器，再用新值重新运行命令。文件会保留。</p>
+        <pre><code>docker stop thirtyfile && docker rm thirtyfile</code></pre>
+        <h2 id="compose">使用 Docker Compose</h2>
+        <p>在 <code>compose.yaml</code> 的 <code>environment:</code> 下添加，然后再次运行 <code>docker compose up -d</code>：</p>
+        <pre><code>    environment:
+      TZ: Asia/Taipei
+      THIRTYFILE_TRASH_DAYS: "60"</code></pre>
+        <h2 id="memory">内存</h2>
+        <p>ThirtyFile 空闲时约需 100 MB 内存，通常低于 300 MB。大型图片缩略图占用最多，每个同时生成的缩略图最多约 280 MB。可在 1 GB 内存的 NAS 或 Raspberry Pi 上运行：不足 2 GB 时，每次只生成一个缩略图，并降低图片解码允许的内存量（超过限制的图片不生成缩略图）。</p>
+        <p>如需限制内存用量，为容器设置上限，例如 <code>docker run</code> 添加 <code>--memory 512m</code>，或 <code>compose.yaml</code> 设置 <code>mem_limit: 512m</code>。ThirtyFile 启动时读取上限并相应调整。</p>
+        <h2 id="data">数据存放在哪里</h2>
+        <p>容器使用两个目录，请分别挂载电脑上的文件夹：</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th>容器内目录</th><th>内容</th></tr></thead>
+          <tbody>
+            <tr><td><code>/data</code></td><td>账号、设置、日志、缩略图和进行中的上传。通常较小</td></tr>
+            <tr><td><code>/storage</code></td><td>内置存储位置中的文件，按普通文件夹保存：<code>company</code>、<code>teams/&lt;space name&gt;</code>、<code>users/&lt;user name&gt;</code>。随文件数量增长</td></tr>
+          </tbody>
+        </table></div>
+        <p>两者无需位于同一磁盘：<code>/storage</code> 可放在大容量磁盘或 NAS 挂载点。缺少的文件夹会创建，启动时两者都交给用户 1000（参阅 <code>THIRTYFILE_RUN_AS</code>），无需自行更改所有者。</p>
+        <p>其他磁盘可添加为额外存储位置：挂载到容器，例如 <code>-v /mnt/nas:/nas</code>，再从<strong>控制面板 › 存储位置</strong>添加 <code>/nas</code>。参阅<a href="storage.html">存储位置</a>。</p>
+        <nav class="next" aria-label="更多指南">
+          <a href="logs.html"><span>上一篇</span>日志与品牌</a>
+          <a class="forward" href="internet.html"><span>下一篇</span>通过互联网访问</a>
+        </nav>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">源代码</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">报告问题</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 镜像</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

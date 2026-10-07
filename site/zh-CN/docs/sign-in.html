@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN" data-root="../.." data-page="sign-in">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>单点登录 · ThirtyFile</title>
+    <meta name="description" content="配置 Microsoft、Google、GitHub 与 OpenID Connect 登录，管理自动创建账号、邮箱域名规则和关联账号。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/sign-in.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/sign-in.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/sign-in.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/sign-in.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/sign-in.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要内容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="网站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">语言 </span><span class="lang-name">简体中文</span></summary>
+            <ul>
+              <li><a href="../../docs/sign-in.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="../../zh-TW/docs/sign-in.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="sign-in.html" hreflang="zh-CN" lang="zh-CN" aria-current="true">简体中文</a></li>
+              <li><a href="../../ja/docs/sign-in.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>开始使用</p>
+          <a href="index.html">安装</a>
+          <a href="first-steps.html">初始设置</a>
+          <p>日常使用</p>
+          <a href="files.html">文件操作</a>
+          <a href="preview.html">预览与编辑</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的账号</a>
+          <a href="webdav.html">映射为网络驱动器</a>
+          <p>管理</p>
+          <a href="users.html">用户与空间</a>
+          <a href="sign-in.html" aria-current="page">单点登录</a>
+          <a href="storage.html">存储位置</a>
+          <a href="logs.html">日志与品牌</a>
+          <p>部署与运维</p>
+          <a href="settings.html">设置</a>
+          <a href="internet.html">通过互联网访问</a>
+          <a href="backup.html">升级与备份</a>
+          <a href="help.html">故障排除</a>
+          <p>项目</p>
+          <a href="contributing.html">参与贡献</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+
+        <h1>单点登录</h1>
+        <p class="lead">让用户通过已有的 Microsoft、Google 或 GitHub 账号，或者组织的身份提供商（OpenID Connect）登录。</p>
+        <details class="guide-toc">
+          <summary>本页内容</summary>
+          <ol>
+            <li><a href="#setup">配置身份提供商</a></li>
+            <li><a href="#who">谁可以登录</a></li>
+            <li><a href="#rules">不同域名采用不同设置</a></li>
+            <li><a href="#link">自行关联账号</a></li>
+            <li><a href="#guests">包含来宾的 Microsoft 租户</a></li>
+          </ol>
+        </details>
+        <h2 id="setup">配置身份提供商</h2>
+        <ol>
+          <li>先在<strong>控制面板 › 常规</strong>中设置<strong>网站地址</strong>。</li>
+          <li>打开<strong>控制面板 › 单点登录</strong>，选择身份提供商，复制页面显示的<strong>重定向地址</strong>。</li>
+          <li>在身份提供商中注册 ThirtyFile（参阅下方），粘贴该地址。</li>
+          <li>将提供商给出的 ID 和 secret 复制到 ThirtyFile，启用并保存。</li>
+        </ol>
+        <h3>Microsoft Entra ID</h3>
+        <p>Microsoft Entra 管理中心 › App registrations › New registration。选择“Web”平台，填写重定向地址，再从“Certificates &amp; secrets”添加 client secret。application ID 和 tenant ID 位于“Overview”页面。</p>
+        <h3>Google</h3>
+        <p>Google Cloud Console › APIs &amp; Services › Credentials › Create credentials › OAuth client ID。选择“Web application”，在“Authorized redirect URIs”中添加重定向地址。</p>
+        <h3>GitHub</h3>
+        <p>GitHub › Settings › Developer settings › OAuth Apps › New OAuth App。将重定向地址填写为 callback URL，然后生成 client secret。</p>
+        <h3 id="oidc">OpenID Connect（Keycloak、Authentik、Authelia、Zitadel…）</h3>
+        <p>在身份提供商中创建 confidential client（Web 应用），设置重定向地址，并记下 client ID 和 secret。在 ThirtyFile 中填写 <strong>Issuer URL</strong>（Keycloak 例如 <code>https://auth.example.com/realms/&lt;realm&gt;</code>）和<strong>登录按钮名称</strong>，例如“公司登录”。保存时，ThirtyFile 从 <code>&lt;issuer&gt;/.well-known/openid-configuration</code> 读取配置；issuer 必须使用 https，文档中的 issuer 必须与之相同。</p>
+        <p>提供商必须返回用户邮箱，并标记为已验证（<code>email</code> scope 和 claim，以及 <code>email_verified</code>），否则用户只能自行关联账号。允许域名、域名规则、关联和自动创建账号与其他提供商相同。</p>
+        <h2 id="who">谁可以登录</h2>
+        <p>每个提供商都可以分别设置首次登录规则：</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th>规则</th><th>处理方式</th></tr></thead>
+          <tbody>
+            <tr><td><strong>仅限已关联账号</strong></td><td>只有从账号菜单自行关联外部账号的人可登录</td></tr>
+            <tr><td><strong>按邮箱匹配现有用户</strong></td><td>邮箱等于某个无密码、无两步验证账号的用户名时可匹配，例如同邮箱单点登录创建的账号。具有密码或两步验证的账号（例如管理员创建的账号）不会自动匹配，因为提供商登录会绕过这些验证；所有者应先用密码登录一次，再<a href="#link">关联账号</a></td></tr>
+            <tr><td><strong>自动创建账号</strong></td><td>允许邮箱域名中的任何用户都会获得新账号</td></tr>
+          </tbody>
+        </table></div>
+        <p>使用自动创建账号时，填写<strong>允许的邮箱域名</strong>，例如 <code>example.com</code>，确保只有组织内的人可以访问。</p>
+        <h2 id="rules">不同域名采用不同设置</h2>
+        <p>邮箱域名规则可为新账号设置不同权限、空间容量和用户组。例如来自 <code>partner.example</code> 的合作伙伴可获得较小空间，并禁止分享。</p>
+        <p>规则也可以决定新账号是否拥有<a href="users.html#personal">个人空间</a>（<strong>我的文件</strong>），以及使用哪个存储位置。保留<strong>按照系统设置</strong>时，采用<strong>控制面板 › 常规</strong>的设置。位置文件夹不可用时，用户仍可登录；恢复后会在该位置创建“我的文件”。</p>
+        <h2 id="link">自行关联账号</h2>
+        <p>所有人都可在<strong>账号菜单 › 登录方式</strong>中关联或取消关联已配置提供商的账号（Microsoft、Google、GitHub 或 OpenID Connect）。关联后的账号可绕过本地密码登录，因此关联前需要当前密码，两步验证账号还需验证码；无密码账号须在登录后 10 分钟内关联。每次关联（包括按邮箱匹配）都会通过应用内通知和邮件告知用户。</p>
+        <p>设置了允许域名列表时，只有提供商已验证的、位于该列表域名中的邮箱才能关联。关联账号只保存已验证的邮箱地址。</p>
+        <div class="note">单点登录创建的账号没有密码。只有管理员先为其设置密码后，才能移除最后一个关联账号。管理员为用户设置新密码时，关联账号也会移除；用户登录后需重新关联。</div>
+        <h2 id="guests">包含来宾的 Microsoft 租户</h2>
+        <p>设置 tenant ID 后，租户成员可按邮箱匹配。其他组织的来宾也通过你的租户登录，但邮箱由其所属组织提供，而该组织可填写任意地址。所以来宾邮箱不用于匹配或创建账号：来宾应使用密码登录，自行关联 Microsoft 账号。</p>
+        <p>若也需按邮箱匹配来宾，在 ID token 添加可选 claim <code>xms_edov</code>：应用注册中选择 <strong>Token configuration › Add optional claim › ID › xms_edov</strong>。Microsoft 会注明来宾邮箱域名是否属于其组织，仅匹配这些来宾。</p>
+        <nav class="next" aria-label="更多指南">
+          <a href="users.html"><span>上一篇</span>用户与空间</a>
+          <a class="forward" href="storage.html"><span>下一篇</span>存储位置</a>
+        </nav>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">源代码</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">报告问题</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 镜像</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Preview and editing · ThirtyFile</title>
     <meta name="description" content="Most files open right in the browser, with nothing to install." />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/preview.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/preview.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/preview.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/preview.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/preview.html" />
     <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -25,15 +30,15 @@
         <a class="brand" href="../index.html"><img src="../assets/logo.svg" alt="" />ThirtyFile</a>
         <nav class="site-nav" aria-label="Site">
           <a href="../index.html#features" class="hide-small">Features</a>
-          <a href="../docs/index.html" aria-current="page">Guides</a>
+          <a href="index.html" aria-current="page">Guides</a>
           <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
           <details class="lang-menu">
             <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">Language </span><span class="lang-name">English</span></summary>
             <ul>
-              <li><a href="../index.html" hreflang="en" lang="en" aria-current="true">English</a></li>
-              <li><a href="../zh-TW/index.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
-              <li><a href="../zh-CN/index.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
-              <li><a href="../ja/index.html" hreflang="ja" lang="ja">日本語</a></li>
+              <li><a href="preview.html" hreflang="en" lang="en" aria-current="true">English</a></li>
+              <li><a href="../zh-TW/docs/preview.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="../zh-CN/docs/preview.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../ja/docs/preview.html" hreflang="ja" lang="ja">日本語</a></li>
             </ul>
           </details>
         </nav>
@@ -44,31 +49,42 @@
         <details open>
           <summary>All guides</summary>
           <p>Get started</p>
-          <a href="../docs/index.html">Install</a>
-          <a href="../docs/first-steps.html">First steps</a>
+          <a href="index.html">Install</a>
+          <a href="first-steps.html">First steps</a>
           <p>Everyday use</p>
-          <a href="../docs/files.html">Working with files</a>
-          <a href="../docs/preview.html" aria-current="page">Preview and editing</a>
-          <a href="../docs/sharing.html">Sharing</a>
-          <a href="../docs/account.html">Your account</a>
-          <a href="../docs/webdav.html">Mapping it as a drive</a>
+          <a href="files.html">Working with files</a>
+          <a href="preview.html" aria-current="page">Preview and editing</a>
+          <a href="sharing.html">Sharing</a>
+          <a href="account.html">Your account</a>
+          <a href="webdav.html">Mapping it as a drive</a>
           <p>Administration</p>
-          <a href="../docs/users.html">Users and spaces</a>
-          <a href="../docs/sign-in.html">Single sign-on</a>
-          <a href="../docs/storage.html">Storage locations</a>
-          <a href="../docs/logs.html">Logs and branding</a>
+          <a href="users.html">Users and spaces</a>
+          <a href="sign-in.html">Single sign-on</a>
+          <a href="storage.html">Storage locations</a>
+          <a href="logs.html">Logs and branding</a>
           <p>Running it</p>
-          <a href="../docs/settings.html">Settings</a>
-          <a href="../docs/internet.html">Putting it on the internet</a>
-          <a href="../docs/backup.html">Upgrade and backup</a>
-          <a href="../docs/help.html">Troubleshooting</a>
+          <a href="settings.html">Settings</a>
+          <a href="internet.html">Putting it on the internet</a>
+          <a href="backup.html">Upgrade and backup</a>
+          <a href="help.html">Troubleshooting</a>
           <p>The project</p>
-          <a href="../docs/contributing.html">Contributing</a>
+          <a href="contributing.html">Contributing</a>
         </details>
       </nav>
       <main id="content" class="article">
         <h1>Preview and editing</h1>
         <p class="lead">Most files open right in the browser, with nothing to install.</p>
+        <details class="guide-toc">
+          <summary>On this page</summary>
+          <ol>
+            <li><a href="#what">What opens in the browser</a></li>
+            <li><a href="#excel">Editing Excel workbooks</a></li>
+            <li><a href="#text">Editing text files</a></li>
+            <li><a href="#markdown">Markdown</a></li>
+            <li><a href="#thumbnails">Thumbnails</a></li>
+            <li><a href="#together">When two people edit the same file</a></li>
+          </ol>
+        </details>
         <h2 id="what">What opens in the browser</h2>
         <div class="table-scroll">
           <table>
@@ -115,7 +131,7 @@
         <p>A file ThirtyFile doesn't recognise, such as <code>Dockerfile</code>, <code>README</code> or a file with an unusual extension, shows <strong>Preview isn't available for this file type</strong>. If it holds text, click <strong>Open in text editor</strong> to read and edit it there. This doesn't rename the file or change its type: it is only saved when you save it. <strong>Default view</strong> goes back; unsaved changes are kept and come back when you open the editor again.</p>
         <ul>
           <li>You can only save when you may change the file. On a share link, the button shows only when the link allows downloading, and the text is read-only.</li>
-          <li>A file that doesn't look like text (a program, a picture with a strange extension) opens read-only, so saving can't damage it. So does text in an encoding the editor can't write back. UTF-8, UTF-16 and Big5 files are kept as they are, and so are Windows line endings; Big5 is converted to UTF-8 when saved, as the editor says.</li>
+          <li>A file that doesn't look like text (a program, a picture with a strange extension) opens read-only, so saving can't damage it. So does text in an encoding the editor can't write back. UTF-8 and UTF-16 encodings and Windows line endings are preserved. Big5 can be read, but saving converts it to UTF-8, as the editor warns; opening it alone does not change the stored file.</li>
           <li>Files larger than 5 MB don't open in the editor: download them instead.</li>
         </ul>
 
@@ -128,15 +144,20 @@
 
         <h2 id="together">When two people edit the same file</h2>
         <p>If someone else saved the file while you were editing, your save is stopped and you are told, so nobody's work is overwritten without notice. Copy your changes, reload the file, and add them again.</p>
+        <nav class="next" aria-label="More guides">
+          <a href="files.html"><span>Previous</span>Working with files</a>
+          <a class="forward" href="sharing.html"><span>Next</span>Sharing</a>
+        </nav>
       </main>
     </div>
     <footer class="site-footer">
       <div class="wrap">
         <span>ThirtyFile</span>
-        <a href="../docs/index.html">Guides</a>
+        <a href="index.html">Guides</a>
         <a href="https://github.com/ThirtyFile/ThirtyFile">Source code</a>
         <a href="https://github.com/ThirtyFile/ThirtyFile/issues">Report a problem</a>
         <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker image</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
       </div>
     </footer>
     <script src="../assets/site.js"></script>

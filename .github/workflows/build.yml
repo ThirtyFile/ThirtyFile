@@ -143,6 +143,7 @@ jobs:
       - name: Frontend
         run: |
           node --test .github/scripts/publish-dockerhub.test.mjs
+          node --test scripts/check-site.test.mjs
           bash scripts/check.sh web --coverage
           (cd web && node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY")
 

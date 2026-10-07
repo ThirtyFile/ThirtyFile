@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="zh-CN" data-root="../.." data-page="internet">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>通过互联网访问 · ThirtyFile</title>
+    <meta name="description" content="使用 Caddy、nginx 或 Traefik 部署 HTTPS 反向代理，并正确设置端口、请求大小和受信任代理。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/internet.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/internet.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/internet.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/internet.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/internet.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要内容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="网站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">语言 </span><span class="lang-name">简体中文</span></summary>
+            <ul>
+              <li><a href="../../docs/internet.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="../../zh-TW/docs/internet.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="internet.html" hreflang="zh-CN" lang="zh-CN" aria-current="true">简体中文</a></li>
+              <li><a href="../../ja/docs/internet.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>开始使用</p>
+          <a href="index.html">安装</a>
+          <a href="first-steps.html">初始设置</a>
+          <p>日常使用</p>
+          <a href="files.html">文件操作</a>
+          <a href="preview.html">预览与编辑</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的账号</a>
+          <a href="webdav.html">映射为网络驱动器</a>
+          <p>管理</p>
+          <a href="users.html">用户与空间</a>
+          <a href="sign-in.html">单点登录</a>
+          <a href="storage.html">存储位置</a>
+          <a href="logs.html">日志与品牌</a>
+          <p>部署与运维</p>
+          <a href="settings.html">设置</a>
+          <a href="internet.html" aria-current="page">通过互联网访问</a>
+          <a href="backup.html">升级与备份</a>
+          <a href="help.html">故障排除</a>
+          <p>项目</p>
+          <a href="contributing.html">参与贡献</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+
+        <h1>通过互联网访问</h1>
+        <p class="lead">要在本地网络以外访问 ThirtyFile，请在前方部署支持 HTTPS 的反向代理。</p>
+        <details class="guide-toc">
+          <summary>本页内容</summary>
+          <ol>
+            <li><a href="#steps">需要完成三件事</a></li>
+            <li><a href="#caddy">Caddy</a></li>
+            <li><a href="#nginx">nginx</a></li>
+            <li><a href="#compose-caddy">在同一 Docker Compose 文件中运行 Caddy</a></li>
+            <li><a href="#traefik">Traefik</a></li>
+            <li><a href="#checklist">公开访问前</a></li>
+          </ol>
+        </details>
+        <h2 id="steps">需要完成三件事</h2>
+        <ol>
+          <li>启动 ThirtyFile 时设置 <code>THIRTYFILE_SECURE_COOKIE=true</code> 和 <code>THIRTYFILE_TRUST_PROXY=true</code>。参阅<a href="settings.html">设置</a>。</li>
+          <li>按照下方任一示例配置反向代理。</li>
+          <li>在<strong>控制面板 › 常规 › 网站地址</strong>填写公开地址。</li>
+        </ol>
+        <div class="note"><strong>代理设置必须符合实际部署。</strong>使用代理时必须为 <code>true</code>（代理位于另一台电脑时，填写代理地址），否则所有访客都会被视为同一人，一人的密码错误会导致所有人被限制登录。不使用代理时必须保持 <code>false</code>。</div>
+        <p>代理与 ThirtyFile 位于同一电脑时，让 ThirtyFile 仅能从本机访问：端口发布为 <code>-p 127.0.0.1:8080:8080</code>（<code>compose.yaml</code> 中为 <code>"127.0.0.1:8080:8080"</code>）。Docker 发布的端口会绕过电脑防火墙（ufw 和 firewalld 无法拦截），所以 <code>-p 8080:8080</code> 会让电脑所在的所有网络都能通过未加密 HTTP 访问 ThirtyFile。如果代理也运行在 Docker 中，则不发布任何端口（参阅<a href="#compose-caddy">下方</a>）。</p>
+        <h2 id="caddy">Caddy</h2>
+        <p>Caddy 会自动获取和续期证书。</p>
+        <pre><code>files.example.com {
+    reverse_proxy 127.0.0.1:8080 {
+        flush_interval -1
+    }
+}</code></pre>
+        <h2 id="nginx">nginx</h2>
+        <pre><code>server {
+    listen 80;
+    server_name files.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name files.example.com;
+    # ssl_certificate …; ssl_certificate_key …;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        client_max_body_size 64m;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+    }
+}</code></pre>
+        <ul>
+          <li><code>client_max_body_size 64m</code> 是可用的最小值：上传使用 32 MB 分块，在线编辑器则单次请求保存最多 20 MB 文件。nginx 默认的 1 MB 会导致上传和保存出现“413 Request Entity Too Large”。更大的文件仍可逐块上传。<a href="webdav.html">WebDAV</a> 客户端一次请求发送完整文件；通过 nginx 使用时，请添加相同配置的 <code>location /dav/</code> 区块，并设置 <code>client_max_body_size 0</code>（无限制；ThirtyFile 自身的上传大小限制仍适用）。</li>
+          <li><code>proxy_http_version 1.1</code> 让请求之间保持与 ThirtyFile 的连接；<code>proxy_buffering off</code> 和 <code>proxy_request_buffering off</code> 让大文件下载和上传直接流式传输，避免先存到代理磁盘。</li>
+          <li>第一个 <code>server</code> 区块将输入 <code>http://</code> 的访客重定向到 HTTPS 地址。</li>
+        </ul>
+        <h2 id="compose-caddy">在同一 Docker Compose 文件中运行 Caddy</h2>
+        <p>如果代理也运行在 Docker 中，将两者放入同一个 <code>compose.yaml</code>。ThirtyFile 不发布任何端口，只有 Caddy 可通过 Compose 为该文件创建的网络访问它。</p>
+        <pre><code>services:
+  thirtyfile:
+    image: ghcr.io/thirtyfile/thirtyfile:latest
+    container_name: thirtyfile
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+      - ./storage:/storage
+    environment:
+      THIRTYFILE_SECURE_COOKIE: "true"
+      THIRTYFILE_TRUST_PROXY: "true"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_READ_SEARCH]
+    security_opt: ["no-new-privileges:true"]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy-data:/data</code></pre>
+        <p><code>container_name</code> 保留其他指南命令使用的名称（<code>docker exec thirtyfile …</code>、<code>docker logs thirtyfile</code>）；服务最后四行让 ThirtyFile 仅使用必要权限，与每个版本的 <code>compose.yaml</code> 一致。下方 Traefik 示例也包含这些设置。</p>
+        <p>在旁边创建 <code>Caddyfile</code>，通过服务名访问 ThirtyFile：</p>
+        <pre><code>files.example.com {
+    reverse_proxy thirtyfile:8080 {
+        flush_interval -1
+    }
+}</code></pre>
+        <h2 id="traefik">Traefik</h2>
+        <p>如果 Traefik 已在 Docker 运行（443 端口使用 <code>websecure</code> 入口，证书解析器为 <code>letsencrypt</code>），给 ThirtyFile 添加标签，并加入 Traefik 网络。不发布任何端口。</p>
+        <pre><code>services:
+  thirtyfile:
+    image: ghcr.io/thirtyfile/thirtyfile:latest
+    container_name: thirtyfile
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+      - ./storage:/storage
+    environment:
+      THIRTYFILE_SECURE_COOKIE: "true"
+      THIRTYFILE_TRUST_PROXY: "true"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_READ_SEARCH]
+    security_opt: ["no-new-privileges:true"]
+    networks: [traefik]
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.thirtyfile.rule: Host(`files.example.com`)
+      traefik.http.routers.thirtyfile.entrypoints: websecure
+      traefik.http.routers.thirtyfile.tls.certresolver: letsencrypt
+      traefik.http.services.thirtyfile.loadbalancer.server.port: "8080"
+
+networks:
+  traefik:
+    external: true</code></pre>
+        <p>Traefik 默认以流式方式传输上传和下载，不限制请求体大小，无需额外设置。</p>
+        <h2 id="checklist">公开访问前</h2>
+        <ul>
+          <li>将 <code>admin</code> 密码改为长密码，开启<a href="account.html#two-factor">两步验证</a>。</li>
+          <li>设置<a href="backup.html">备份</a>。</li>
+          <li>决定谁可以登录，参阅<a href="sign-in.html#who">单点登录</a>。</li>
+        </ul>
+        <nav class="next" aria-label="更多指南">
+          <a href="settings.html"><span>上一篇</span>设置</a>
+          <a class="forward" href="backup.html"><span>下一篇</span>升级与备份</a>
+        </nav>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">源代码</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">报告问题</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 镜像</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Your account · ThirtyFile</title>
     <meta name="description" content="Your password, two-factor sign-in, the devices you're signed in on, app passwords for scripts, your sign-in history, and notifications." />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/account.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/account.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/account.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/account.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/account.html" />
     <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -25,15 +30,15 @@
         <a class="brand" href="../index.html"><img src="../assets/logo.svg" alt="" />ThirtyFile</a>
         <nav class="site-nav" aria-label="Site">
           <a href="../index.html#features" class="hide-small">Features</a>
-          <a href="../docs/index.html" aria-current="page">Guides</a>
+          <a href="index.html" aria-current="page">Guides</a>
           <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
           <details class="lang-menu">
             <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">Language </span><span class="lang-name">English</span></summary>
             <ul>
-              <li><a href="../index.html" hreflang="en" lang="en" aria-current="true">English</a></li>
-              <li><a href="../zh-TW/index.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
-              <li><a href="../zh-CN/index.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
-              <li><a href="../ja/index.html" hreflang="ja" lang="ja">日本語</a></li>
+              <li><a href="account.html" hreflang="en" lang="en" aria-current="true">English</a></li>
+              <li><a href="../zh-TW/docs/account.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="../zh-CN/docs/account.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../ja/docs/account.html" hreflang="ja" lang="ja">日本語</a></li>
             </ul>
           </details>
         </nav>
@@ -44,32 +49,45 @@
         <details open>
           <summary>All guides</summary>
           <p>Get started</p>
-          <a href="../docs/index.html">Install</a>
-          <a href="../docs/first-steps.html">First steps</a>
+          <a href="index.html">Install</a>
+          <a href="first-steps.html">First steps</a>
           <p>Everyday use</p>
-          <a href="../docs/files.html">Working with files</a>
-          <a href="../docs/preview.html">Preview and editing</a>
-          <a href="../docs/sharing.html">Sharing</a>
-          <a href="../docs/account.html" aria-current="page">Your account</a>
-          <a href="../docs/webdav.html">Mapping it as a drive</a>
+          <a href="files.html">Working with files</a>
+          <a href="preview.html">Preview and editing</a>
+          <a href="sharing.html">Sharing</a>
+          <a href="account.html" aria-current="page">Your account</a>
+          <a href="webdav.html">Mapping it as a drive</a>
           <p>Administration</p>
-          <a href="../docs/users.html">Users and spaces</a>
-          <a href="../docs/sign-in.html">Single sign-on</a>
-          <a href="../docs/storage.html">Storage locations</a>
-          <a href="../docs/logs.html">Logs and branding</a>
+          <a href="users.html">Users and spaces</a>
+          <a href="sign-in.html">Single sign-on</a>
+          <a href="storage.html">Storage locations</a>
+          <a href="logs.html">Logs and branding</a>
           <p>Running it</p>
-          <a href="../docs/settings.html">Settings</a>
-          <a href="../docs/internet.html">Putting it on the internet</a>
-          <a href="../docs/backup.html">Upgrade and backup</a>
-          <a href="../docs/help.html">Troubleshooting</a>
+          <a href="settings.html">Settings</a>
+          <a href="internet.html">Putting it on the internet</a>
+          <a href="backup.html">Upgrade and backup</a>
+          <a href="help.html">Troubleshooting</a>
           <p>The project</p>
-          <a href="../docs/contributing.html">Contributing</a>
+          <a href="contributing.html">Contributing</a>
         </details>
       </nav>
       <main id="content" class="article">
         <h1>Your account</h1>
         <p class="lead">Your password, two-factor sign-in, the devices you're signed in on, app passwords for scripts, your language and interface style, your sign-in history, and notifications.</p>
         <p>Everything on this page is in the <strong>account menu</strong>: click your name at the bottom of the list on the left. Its last line says which version of ThirtyFile the server runs, such as <strong>ThirtyFile 0.5.0</strong>.</p>
+        <details class="guide-toc">
+          <summary>On this page</summary>
+          <ol>
+            <li><a href="#password">Password</a></li>
+            <li><a href="#two-factor">Two-factor sign-in</a></li>
+            <li><a href="#devices">Signed-in devices</a></li>
+            <li><a href="#app-passwords">App passwords</a></li>
+            <li><a href="#language">Language</a></li>
+            <li><a href="#style">Interface style</a></li>
+            <li><a href="#history">Sign-in history</a></li>
+            <li><a href="#notifications">Notifications</a></li>
+          </ol>
+        </details>
 
         <h2 id="password">Password</h2>
         <p><strong>Change password</strong> asks for the current password and a new one. Your other devices are signed out afterwards. A new password needs at least 6 characters, or more if your administrator set a longer minimum.</p>
@@ -142,15 +160,20 @@ curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;fil
         <p>A number on the bell counts the ones you haven't read. Click one to open what it is about. <strong>Mark all as read</strong> and <strong>Clear all</strong> are at the bottom of the list. Notifications are kept for 90 days.</p>
         <p><strong>Notification settings</strong>, at the bottom of the bell's list or in the account menu, turns each kind on or off, in the app and by email separately. Emails go to the <strong>email address</strong> you enter there. If you sign in with single sign-on, the address that account gives is filled in the first time, and you can change it. Leave it blank to get no emails. Password reset links go to this address too, so changing it asks for your current password (and with two-factor sign-in a code; accounts without a password change it within 10 minutes of signing in), and the previous address gets an email about the change. At most five emails of one kind go to an address within 15 minutes; the notifications in the app are all kept.</p>
         <div class="note">Emails are only sent once an administrator has set up an email server (<a href="users.html#email">Notification emails</a>). They are written in the <a href="#language">language you chose</a>; without a choice, in the default language your administrator set, or else in the language you last used ThirtyFile in. Times are in your time zone.</div>
+        <nav class="next" aria-label="More guides">
+          <a href="sharing.html"><span>Previous</span>Sharing</a>
+          <a class="forward" href="webdav.html"><span>Next</span>Mapping it as a drive</a>
+        </nav>
       </main>
     </div>
     <footer class="site-footer">
       <div class="wrap">
         <span>ThirtyFile</span>
-        <a href="../docs/index.html">Guides</a>
+        <a href="index.html">Guides</a>
         <a href="https://github.com/ThirtyFile/ThirtyFile">Source code</a>
         <a href="https://github.com/ThirtyFile/ThirtyFile/issues">Report a problem</a>
         <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker image</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
       </div>
     </footer>
     <script src="../assets/site.js"></script>

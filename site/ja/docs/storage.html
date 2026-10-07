@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="ja" data-root="../.." data-page="storage">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>保存場所 · ThirtyFile</title>
+    <meta name="description" content="保存場所の追加、スペース移動、全コピー、ミラー、サーバーフォルダー、使用量と性能、障害時の動作。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/storage.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/storage.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/storage.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/storage.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/storage.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">本文へスキップ</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="サイト">
+          <a href="../index.html#features" class="hide-small">機能</a>
+          <a href="index.html" aria-current="page">ガイド</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">言語 </span><span class="lang-name">日本語</span></summary>
+            <ul>
+              <li><a href="../../docs/storage.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="../../zh-TW/docs/storage.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/storage.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="storage.html" hreflang="ja" lang="ja" aria-current="true">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="ガイド">
+        <details open>
+          <summary>すべてのガイド</summary>
+          <p>はじめに</p>
+          <a href="index.html">インストール</a>
+          <a href="first-steps.html">初期設定</a>
+          <p>日常の操作</p>
+          <a href="files.html">ファイルの操作</a>
+          <a href="preview.html">プレビューと編集</a>
+          <a href="sharing.html">共有</a>
+          <a href="account.html">アカウント</a>
+          <a href="webdav.html">ネットワークドライブとして割り当て</a>
+          <p>管理</p>
+          <a href="users.html">ユーザーとスペース</a>
+          <a href="sign-in.html">シングルサインオン</a>
+          <a href="storage.html" aria-current="page">保存場所</a>
+          <a href="logs.html">ログとブランド設定</a>
+          <p>運用</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">インターネットに公開</a>
+          <a href="backup.html">アップグレードとバックアップ</a>
+          <a href="help.html">トラブルシューティング</a>
+          <p>プロジェクト</p>
+          <a href="contributing.html">開発への参加</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+        <h1>保存場所</h1>
+        <p class="lead">ファイル内容の保存先を選びます。スペースごとに異なる場所を使えます。</p>
+        <details class="guide-toc">
+          <summary>このページの内容</summary>
+          <ol>
+            <li><a href="#types">種類</a></li>
+            <li><a href="#layout">ファイルの保存先</a></li>
+            <li><a href="#add">保存場所を追加する</a></li>
+            <li><a href="#per-space">スペースを別の保存場所へ移す</a></li>
+            <li><a href="#copy">別の場所へすべてをコピーする</a></li>
+            <li><a href="#replicas">ミラー：複数の場所に同じファイルを保持</a></li>
+            <li><a href="#folder-spaces">フォルダースペース：サーバーのフォルダーをスペースにする</a></li>
+            <li><a href="#check">保存場所の内容を確認する</a></li>
+            <li><a href="#usage">ストレージ使用量と性能</a></li>
+            <li><a href="#offline">保存場所がオフラインの場合</a></li>
+          </ol>
+        </details>
+        <h2 id="types">種類</h2>
+        <div class="table-scroll"><table><thead><tr><th>種類</th><th>用途</th></tr></thead><tbody>
+          <tr><td><strong>ローカルフォルダー</strong></td><td>ストレージフォルダー、NAS などコンテナーへマウントしたフォルダー</td></tr>
+          <tr><td><strong>S3 互換</strong></td><td>AWS S3、Cloudflare R2、Backblaze B2、Wasabi、RustFS など</td></tr>
+          <tr><td><strong>SFTP</strong></td><td>パスワードや秘密キーで接続するサーバー（RSA より Ed25519 を推奨）</td></tr>
+          <tr><td><strong>FTP / FTPS</strong></td><td>古いファイルサーバー</td></tr>
+        </tbody></table></div>
+        <h2 id="layout">ファイルの保存先</h2>
+        <p>ストレージと各 <em>ローカルフォルダー</em> のスペースは通常のフォルダーで、ファイルも元の名前の通常ファイルです。<code>/storage</code>（<code>compose.yaml</code> の横の <code>storage</code>）に全件があります。</p>
+        <pre><code>/storage/company/…              the company space "All files"
+/storage/teams/&lt;space name&gt;/…   team spaces
+/storage/users/&lt;user name&gt;/…    each user's "My files"</code></pre>
+        <p>作成時に、その保存場所、通常は既定の場所へ専用フォルダーを作ります。NAS なら <code>/nas/teams/…</code> などです。これらは <a href="#folder-spaces">フォルダースペース</a> なので、SMB、スキャナー、他プログラムがコピーしたものも表示し、Web の変更もそのフォルダーに適用します。</p>
+        <ul>
+          <li><strong>名前</strong>：スペースやユーザーの名前を使い、使えない文字を <code>_</code> にします。<code>desktop.ini</code> など隠す名前には先頭に <code>_</code> を付けます。同名スペース、手動作成、削除後の残存などで既にあれば、<code>teams/Sales (2)</code> のように番号を付けます。</li>
+          <li><strong>名前変更</strong>：スペース名を変えてもフォルダー名は変えず、既存のプログラム、SMB、バックアップのパスを保ちます。<strong>コントロールパネル › スペース</strong> で各フォルダーを表示します。</li>
+          <li><strong>削除</strong>：スペースやファイルごとのユーザー削除は ThirtyFile からだけで、ディスクのフォルダーと内容は残します。削除するか保持してください。同名で新規作成しても新しいフォルダーを使い、古い内容は再利用しません。削除ユーザーの別スペースへの移動はディスクでも移動します。</li>
+          <li><strong>S3、SFTP、FTP</strong> は内容に基づく名前（<code>ab/cd/…</code>）のコンテンツストアで保持し、元の名前と構造はデータベースだけにあります。通常のフォルダー名変更では全ファイルのコピーが必要なためです。これらが既定のときの新規スペースはコンテンツストアとなり、後から <a href="#per-space">別の場所へ移せます</a>。</li>
+        </ul>
+        <h2 id="add">保存場所を追加する</h2>
+        <ol>
+          <li><strong>コントロールパネル › 保存場所</strong> の <strong>保存場所を追加</strong> を選びます。</li>
+          <li>種類を選び、アドレスと認証情報を入力します。</li>
+          <li><strong>接続のテスト</strong> は小ファイルの書き込み、読み直し、削除を行い、成功すると保存できます。書き込みのみで削除不可のキーやアカウントは、削除できなくなるため失敗します。ローカルは保存時にフォルダーがなければ作成します（<a href="#not-mounted">未マウントのディスクと共有</a>）。S3、SFTP、FTP は <code>.thirtyfile-location</code> を置きます（<a href="#one-place">1 つの場所に 1 つの登録</a>）。</li>
+          <li>新規スペースを作る場所なら <strong>既定</strong> にします。</li>
+        </ol>
+        <p>後の編集では、サーバー、アカウント、バケット、SFTP ホストキー、証明書確認が同じなら保存したパスワードやキーを保ちます。どれかを変えるかホストキーをリセットしたら再入力してください。</p>
+        <p>既定は「マイファイル」、チーム、新サーバーの会社スペースの新規作成先だけを決めます。チームは個別に選べ、個人用も独自の場所にできます（<a href="users.html#personal">個人用スペース</a>）。既定を変えても既存スペースは移らず、新しいファイルも元と同じ場所に置きます。変更するのは <a href="#per-space">スペースの移動</a> だけです。</p>
+        <h3 id="list">一覧の情報</h3>
+        <ul>
+          <li><strong>使用量</strong>：その場所のスペースのファイル。フォルダーは最終確認のサイズ、コンテンツストアは保持内容です。複数ファイルの同一内容は一度だけ数えます。履歴は <a href="#usage">ストレージ使用量</a> にあります。</li>
+          <li><strong>空き容量</strong>：ストレージとローカルについて、フォルダーを置くディスクの空きと総容量。</li>
+          <li><strong>ファイルとスペース</strong>：最終確認時のフォルダー内件数とコンテンツストアの件数（ポインターで両方を表示）、スペース数。スペース数をクリックすると種類、所有者、容量を表示します。内容は見せません。</li>
+        </ul>
+        <p>スペースがある、移動中、コンテンツストアに残るファイルがある場合、保存場所は削除できません。管理者が任意フォルダーで作ったスペース（<a href="#folder-spaces">以下</a>）は保存場所に属しません。</p>
+        <h3>プロバイダー別の注意</h3>
+        <ul>
+          <li><strong>AWS S3</strong>：エンドポイントは空欄。</li>
+          <li><strong>Cloudflare R2</strong>：<code>https://&lt;account ID&gt;.r2.cloudflarestorage.com</code>、region は <code>auto</code>。</li>
+          <li><strong>セルフホスト</strong>：<a href="https://github.com/rustfs/rustfs">RustFS</a> に対応します。「セルフホスト」と「パス形式の URL」を選びます。</li>
+        </ul>
+        <div class="note">暗号化なしの FTP や http の S3 は、自分のネットワーク内のアドレスのみ受け付けます。</div>
+        <h2 id="per-space">スペースを別の保存場所へ移す</h2>
+        <p><strong>コントロールパネル › スペース</strong> の <strong>別の場所へ移動…</strong> で、コンテンツストア間、フォルダーからストア、フォルダーへなど、任意の場所へ移せます。現在地、サイズ、移動先とサーバーのディスクの空きを表示します。足りないと開始できません。再開は残りだけの空きが必要で、同じディスク内のフォルダー移動は空きを要しません。</p>
+        <p>バックグラウンドで 3 段階を実行します。コンテンツストアの場合を示し、<a href="#move-folder">フォルダーから</a>、<a href="#move-into-folder">フォルダーへ</a> も同様で以下の違いがあります。</p>
+        <ol>
+          <li><strong>コピー</strong>：全ファイル、旧版、ごみ箱を新しい場所にコピーし、SHA-256 と照合します。スペースは使え、途中のアップロードや変更もコピーします。</li>
+          <li><strong>切り替え</strong>：全部揃うと一度に切り替え、以後は新しい場所に保存します。</li>
+          <li><strong>清掃</strong>：旧内容を読むダウンロードが終われるよう、1 分後に削除します。</li>
+        </ol>
+        <p>切り替え前は元の場所なので、停止、キャンセルしても利用者には変化しません。同内容はシステム全体で 1 件だけなので、別スペースと共有する内容も移り、そのスペースも新しい場所から読みます。</p>
+        <h3 id="move-folder">フォルダースペースを S3、SFTP、FTP へ移す</h3>
+        <p>ストレージ、ローカル、任意フォルダーのスペースをコンテンツストアへ移せます。名前、フォルダー、共有リンク、権限、ごみ箱、旧版を保持します。</p>
+        <ul>
+          <li><strong>移動中は読み取り専用</strong>：開始から完了、キャンセルまで開く、ダウンロード、共有のみ可能で、案内を表示します。停止、一時停止もコピー内容を保つため読み取り専用です。再開かキャンセルで解除してください。順番待ちの段階はまだ制限しません。</li>
+          <li><strong>フォルダー内の変更</strong>：SMB やスキャナーによる追加、変更、削除は切り替え直前に確認しコピーします。完了まで他プログラムの書き込みを止めると確実です。</li>
+          <li><strong>名前</strong>：ストアは大文字小文字を区別しないので、「Report.docx」「report.docx」は片方を「report (1).docx」にし、変更件数を詳細に表示します。</li>
+          <li><strong>元のフォルダー</strong>：切り替え後、コピーと完全に同じファイルだけを削除し、空になったフォルダーを削除します。直前に変わったものや <code>Thumbs.db</code> など非表示のものは残し、詳細に表示します。個人用は名前を伏せ、件数だけです。</li>
+          <li><strong>空き容量</strong>：各ファイルがデータフォルダーの一時ファイルを経由するため、最大ファイル分の空きが必要です。開始前に空きとフォルダーの存在を確認し、未マウントを空スペースと見なしません。</li>
+        </ul>
+        <h3 id="move-into-folder">フォルダーへ移す</h3>
+        <p>ストレージや NAS などのローカルへ移すとフォルダースペースになり、<code>company</code>、<code>teams/&lt;name&gt;</code>、<code>users/&lt;user name&gt;</code>（重複なら番号）の専用フォルダーを作り、コピー中は読み取り専用です。</p>
+        <ul>
+          <li><strong>S3、SFTP、FTP から</strong>：日時付きで書き、SHA-256 を確認して所定位置へ名前変更します。ごみ箱は <code>.thirtyfile-trash</code>、旧版は <code>.thirtyfile-versions</code>。禁止文字、<code>Thumbs.db</code> などスキップ名、ディスク上限を超える長い名前は変え、件数を表示します。切り替え後は元の内容を手放し、他スペースで使わなければ 1 分後に削除します。</li>
+          <li><strong>別フォルダーから</strong>：同ディスクなら即時移動。別ディスクならごみ箱、旧版、非表示も全コピーし、日時を保持してサイズで確認します。外部変更も切り替え前に調べてコピーし、上記のように元を削除します。CIFS、exFAT など移動先が大文字小文字を区別せず、同名対がある場合はコピーせず停止、一覧表示します。片方を名前変更して再開してください。</li>
+          <li><strong>任意フォルダー</strong>：保存場所に属さないものも同様に移せます。元のフォルダーは削除します。</li>
+        </ul>
+        <p>フォルダーへの移動をキャンセルすると、作ったフォルダーとコピー内容を削除します。</p>
+        <h3 id="move-many">複数スペース、または保存場所全体</h3>
+        <ul>
+          <li><strong>複数</strong>：<strong>コントロールパネル › スペース</strong> でチェック（見出しで全件）し、<strong>… 個のスペースを別の場所へ移動…</strong> を選びます。各々のジョブが順番に動き、移動先に既存や移動中のものは除外して件数を表示します。</li>
+          <li><strong>全体</strong>：<strong>コントロールパネル › 保存場所</strong> の <strong>すべてを移動…</strong> で個人用を含む全スペースを移し、場所に進行を表示します。空になると、元が既定なら移動先を既定にする、元を削除する操作を案内します。</li>
+        </ul>
+        <p>移動先がサーバーのディスクなら、全件の合計で空きを確認します。</p>
+        <h3 id="moves">移動を確認する</h3>
+        <p><strong>コントロールパネル › 移動ジョブ</strong> は未完了、履歴の順に、スペース（個人用はユーザー名）、前後の場所、ファイル数、バイト、速度、残り時間、状態を表示し、実行中は自動更新します。</p>
+        <ul>
+          <li><strong>1 件ずつ</strong>：開始順に実行し、他は待ちます。CPU とネットワークが十分なら <strong>同時実行</strong> で最大 8 件です。</li>
+          <li><strong>一時停止、再開</strong>：現在のファイル後に止まり、コピー済みを保持します。再開は順番を待って続きからで、再起動も同様です。</li>
+          <li><strong>キャンセル</strong>：元の場所に保ち、新しい場所のコピーを削除します。</li>
+          <li><strong>エラー</strong>：各ファイルを 3 回試し、失敗が残っても他をコピーし、切り替えず <em>エラーにより停止</em> になります。詳細に原因を表示し、個人用は名前を伏せます。解決後に再開かキャンセルしてください。移動先に接続できない場合も同じです。</li>
+          <li><strong>履歴</strong>：完了、キャンセルは 90 日、各スペース最新 20 件は古くても残し、開始者、時刻付きです。開始、完了、失敗、キャンセルをログにも記録します。</li>
+        </ul>
+        <p>完了かキャンセルまでは、そのスペースや個人用スペースの所有ユーザーを削除できません。</p>
+
+        <h2 id="copy">別の場所へすべてをコピーする</h2>
+        <p><strong>コントロールパネル › 保存場所</strong> の <strong>…</strong> › <strong>すべてをコピー…</strong> は、全スペースを別の場所へコピーします。元は変えず、削除も移動も、既定の変更もしません。NAS、外部のバケット、持ち出すディスクへの追加コピーに使えます。定期的に過去を保持するものは <a href="backup.html#file-backups">別の場所へのバックアップ</a> で、同じ形式で保存、復元します。</p>
+        <h3 id="copy-what">コピー対象</h3>
+        <ul>
+          <li><strong>全スペース</strong>：個人用、空フォルダー、ファイル、ごみ箱、旧版を含みます。ダイアログにスペース、件数、ごみ箱の容量、書き込み量を表示します。</li>
+          <li><strong>内容は一度だけ</strong>：同内容をスペース間でも一度だけ保持します。システム全体で重複排除するため別の保存場所にある内容も対象です。</li>
+          <li><strong>アクセス権</strong> を参考として記録します。共有リンク、お気に入り、進行中のアップロードは含みません。</li>
+          <li>その場所にあっても、別のスペースだけが使う内容は対象外です。</li>
+        </ul>
+        <h3 id="copy-where">コピーの保存先</h3>
+        <p>移動先の独自フォルダー <code>.thirtyfile-backups/&lt;id&gt;</code> に置き、ThirtyFile の他処理は書き込みません。既存を置き換えず、コピーも混ざりません。内部は次の構造です。</p>
+        <ul>
+          <li><code>objects/ab/cd/&lt;sha256&gt;</code>：SHA-256 名の内容。</li>
+          <li><code>snapshots/&lt;id&gt;/manifest.jsonl</code>：スペース、フォルダー、ファイル、旧版ごとに 1 行でパスと SHA-256。</li>
+          <li><code>snapshots/&lt;id&gt;/complete.json</code>：最後に書く manifest の SHA-256。なければ不完全として復元に提供しません。</li>
+          <li><code>set.json</code>：名前、コピー元、作成した ThirtyFile。</li>
+        </ul>
+        <p>manifest に各パスと内容のオブジェクトを示すため、ThirtyFile なしでも探せます。</p>
+        <p>同ディスクやサービスにも置けますが、その障害から守れないと表示します。同じ場所や互いの内部は拒否します。非暗号化 FTP は無暗号で転送すると示します。サーバーのディスクは空き不足なら拒否し、S3、SFTP、FTP は空きを把握できません。</p>
+        <h3 id="copy-changes">コピー中の変更</h3>
+        <p>スペースは使えます。<em>取得時点</em> の一覧時点の内容をコピーし、後で変更、削除した内容も、コピーまで削除を保留して保持します。フォルダーは外部変更を先に確認し、各ファイルを読みながら変更がないか検証、変われば読み直します。各々は完全でインデックスの内容ですが、外部が別々の時刻に変えた全体を同一瞬間に揃えるものではありません。</p>
+        <h3 id="copy-follow">進行、一時停止、エラー</h3>
+        <p><strong>コントロールパネル › バックアップ</strong> に状態と進行を表示します。バックグラウンドで 1 ジョブずつ動き、ページを閉じても続けます。</p>
+        <ul>
+          <li><strong>一時停止、再開</strong>：現在の項目後に停止し、既存コピーを保持します。再開、再起動後は続きからです。</li>
+          <li><strong>エラー</strong>：読めないファイルを 3 回試し、残れば <em>エラーにより停止</em> で不完全です。詳細に理由、個人用は名前なしで表示します。原因を直して <strong>再開</strong> してください。接続できない場合も同じです。</li>
+          <li><strong>キャンセル</strong>：未完了のコピーを移動先から消し、元は触りません。</li>
+          <li><strong>バックアップの確認</strong>：全内容を読み直し SHA-256、manifest は <code>complete.json</code> と照合し、欠落、破損を表示します。</li>
+          <li><strong>バックアップの削除</strong>：確認後にフォルダーを削除します。一時停止は可能、半削除は復元できないためキャンセルは不可です。</li>
+        </ul>
+        <p>保持場所は、先にコピーを削除するまで場所の削除やフォルダー変更ができません。未使用の清掃や完全削除は <code>.thirtyfile-backups</code> を見ず、コピーを消しません。manifest に個人用名があるため <strong>閲覧</strong> でも開きません。作成、復元、検証、削除をログに記録します。</p>
+        <h3 id="copy-restore">コピーから復元する</h3>
+        <p><strong>復元…</strong> でスペースを選ぶと、同じスペースまたは別の会社、チームの最上位に <em>Restored &lt;space&gt; &lt;date&gt;</em> の新フォルダーを作り、既存は置き換えません。移動先にまだある内容は再コピーしません。</p>
+        <ul>
+          <li>個人用は全体を所有者の個人用へだけ戻し、管理者は内容を見ません。</li>
+          <li><strong>ごみ箱の内容も復元</strong> を選ばなければ、ごみ箱は除外します。</li>
+          <li>新フォルダーはスペースの権限に従います。旧版と記録アクセスはコピーに残し、復元で余分な権限を与えません。</li>
+          <li>フォルダーに使えない名前は拒否して表示し、フォルダーの <em>A.txt</em>、<em>a.txt</em> をストアに戻すなどの重複は番号を付け、ジョブに示します。</li>
+          <li>停止した復元は続きから再開し、二重に作りません。</li>
+        </ul>
+        <h2 id="replicas">ミラー：複数の場所に同じファイルを保持</h2>
+        <p>ミラーポリシーは 1 つの場所のスペースを他にも保持、検証し、障害時にそちらから読みます。永久に失った場合は他を <em>昇格</em> して読み書き先にできます。管理者のみ <strong>コントロールパネル › ミラー</strong> で管理します。</p>
+        <div class="note"><strong>ミラーはバックアップではありません。</strong> 現在の状態を持つため、削除、上書きは少し後にミラーにも反映します。誤操作を戻すには <a href="backup.html#file-backups">バックアップ</a> も保持してください。ミラーはディスク、NAS、バケットの障害時の読み取り、バックアップは過去の状態のためです。</div>
+        <h3 id="replica-make">ミラーを作る</h3>
+        <p><strong>新しいミラー…</strong>（または保存場所の <strong>…</strong> › <strong>ミラーを作成…</strong>）で設定します。</p>
+        <ul>
+          <li><strong>ミラー元</strong>：コピーする場所、<em>プライマリ</em>。</li>
+          <li><strong>コピーの保存先</strong>：優先順の 1 つ以上の場所。<strong>変更後すぐ</strong>（数秒集めてバックグラウンド）、または指定タイムゾーンの分、時間、毎日のスケジュールで更新します。同じ場所、互いの内部は拒否します。</li>
+          <li><strong>コピー数</strong>：原本以外に保持する数、初期は 1。正常な上位の場所に置き、残りは予備です。場所数が足りなければ注意が必要と示します。</li>
+          <li><strong>スペース</strong>：後から追加したものも含む全件、または選択分。</li>
+          <li><strong>コピーから読み取る</strong>、検証の間隔（初期 1 日）、変更待ちの通知時間（24 時間）、速度制限。</li>
+        </ul>
+        <p>同じ内容は場所ごとに一度だけで、複数ファイル、スペースも共有します。ファイル、旧版、ごみ箱を含み、元の種類によらず <code>ab/cd/&lt;sha256&gt;</code> の内容領域に保存します。</p>
+        <h3 id="replica-folders">フォルダースペース</h3>
+        <p>ストレージとローカルの <a href="#folder-spaces">フォルダースペース</a> も対応し、読みながら変更を確認、変われば再読します。ログ、メールなど外部が書き続けても同期を失敗させず、最後に全体を読めた内容でコピーし、詳細に途中変更と示します。全体を読めなければコピーなしで同様に記録し、個人用名は伏せます。次の同期でまた読みます。Web の変更は数秒後、SMB、スキャナーなどは検出後に反映し、ローカル約 12 秒、NFS、SMB は通常 15 分の変更確認で検出します。各同期の前にも変更を確認します。</p>
+        <h3 id="replica-copies">コピーの保持方法</h3>
+        <ul>
+          <li><strong>書き込み時の確認</strong>：全コピーを読み直して SHA-256 と照合してから数えます。既存が破損、長さ違いなら置き換えます。</li>
+          <li><strong>再確認</strong>：数日ごと、または <strong>コピーを確認</strong> で読み直します。欠落、破損を記し、次の同期で原本か正常コピーから置き換えます。</li>
+          <li><strong>反映の遅れ</strong>：変更と同時でなく少し後に作るため、障害直前の変更はまだない場合があります。ページで各場所の最新状態、待ち時間、最終同期の必要内容に対する保持数を表示します（ポリシー変更後数秒で更新）。同期、検証の履歴は 90 日、各場所最大最新 1,000 件、最新 20 件は期限を問わず保持します。</li>
+          <li><strong>接続不可</strong>：5 分ごとに再試行し、戻れば追いつきます。失敗同期は 1 時間後、<strong>今すぐ同期</strong> なら即時です。一時停止、再開、キャンセル、再起動後の続行も可能です。</li>
+          <li><strong>誤削除を防止</strong>：ごみ箱、完全削除、未使用清掃、削除再試行はミラーを削除しません。誰も使わなくなった内容だけを、作成したポリシーだけが手放します。</li>
+          <li><strong>管理者へ通知</strong>：元や保存先が接続不可、同期失敗、破損、場所不足、許容時間を超す変更待ちの開始と復旧で一度ずつ、アプリとメールの <em>ミラー</em> 通知を送ります。</li>
+        </ul>
+        <h3 id="replica-read">プライマリが故障した場合</h3>
+        <p>オフライン、内容欠落、フォルダー消失で読めず、ポリシーが許可していれば、検証済みの他のコピーから読みます。SHA-256 で名付けた同内容なので、ThirtyFile が知るより古い版ではありません。フォルダーは最終インデックスの内容で、障害直前の未検出外部変更は含みません。毎回サーバーログに記録し、アクティビティは各場所 10 分に最大 1 回 <em>ミラーから読み取り</em> と記録します。</p>
+        <p>代替するのは読み取りだけです。オフライン中のアップロード、変更は <a href="#offline">保存場所がオフラインの場合</a> のとおり待機し、ミラーだけに書くことはありません。</p>
+        <h3 id="replica-promote">保存場所を昇格する</h3>
+        <p>元を失った、引退する場合は <strong>昇格…</strong> で選びます。自動では行いません。変更前に両場所の到達可否、遅れ、移る内容数とスペース、欠落数を示します。</p>
+        <ul>
+          <li>最新ならすぐ昇格します。</li>
+          <li>元に届く場合、遅れた先は拒否するので先に同期してください。元に届かなければ、欠落内容は元が戻るまで読めない確認をオンにして昇格できます。確認中に欠落数が変われば何も変えず、現状を再確認して試し直します。</li>
+          <li>ファイルは変えず、新プライマリで読み書きします。同期は停止し、その瞬間に旧元へ保存中の変更は拒否して再試行できます。</li>
+          <li>全ファイルと旧版の検証済みコピーがあるフォルダーは <a href="#move-folder">S3、SFTP、FTP への移動</a> と同じくストア化し、外部が変更するフォルダーではなくなります。旧フォルダーは触らず残すので、不要後に手動削除してください。再びフォルダーにするなら <a href="#move-into-folder">フォルダーへ移動</a> します。全件のないものは元のままで、ダイアログに示します。</li>
+          <li>旧元は全内容を保持し、プライマリとしては書きません。<em>旧プライマリ、確認中</em> のコピー場所となり、戻ると検証、破損交換し、最新になると数に含みます。自動で戻らず、戻すには最新後に再昇格します。</li>
+        </ul>
+        <p>昇格先はコピー先一覧から外れるため、同じ数を保つなら場所を追加してください。</p>
+        <h3 id="replica-remove">保存場所やポリシーを削除する</h3>
+        <p>場所の除外、コピー数の減少、ポリシー削除は新規を止めますが、既存を残して削除から保護します。ページにどのポリシーも必要としない件数と <strong>削除…</strong> を表示します。直前に再確認し、必要なコピー、その場所の原本、現在原本が到達不可のフォルダーのコピーは残します。それまでは、コピーを保持する場所やポリシーの元、先は削除できません。</p>
+
+        <h2 id="folder-spaces">フォルダースペース：サーバーのフォルダーをスペースにする</h2>
+        <p>ストレージとローカルの全スペースはフォルダースペースです（<a href="#layout">保存先</a>）。NAS 共有など既存フォルダーも使えます。通常ファイルを元の場所に保持し、SMB、スキャナーなどからも変更できます。</p>
+        <ol>
+          <li><code>-v /srv/shared:/mnt/shared</code> のようにマウントします。</li>
+          <li><strong>コントロールパネル › スペース</strong> の <strong>新しいフォルダースペース</strong> で、内部パス <code>/mnt/shared</code> を入力します。</li>
+          <li>チームと同じようにメンバーを追加します。</li>
+        </ol>
+        <p>開くと変更を検出します。ただし数秒以内の再確認、大コピーなどの変更中、以下の監視対象では確認せず、既知の一覧を表示します。全スペースは通常 15 分ごと（全般で変更）、または <strong>変更を確認</strong> ですぐ確認します。大きい確認は一覧と下のメッセージに進行を示し、ページを離れても続きます。外部の名前変更、移動も共有リンクと権限を保持します。検出した新規はアップロードしたユーザーや詳細の作成者が — で、開く、編集までは最近の一覧に入りません。旧版が見つけたものは所有者を保持します。ディスクの作成時刻で移動を識別し、記録しないネットワークでもファイルはサイズ、日時で識別しますが、フォルダーは再追加扱いで共有と権限を失います。</p>
+        <p>対応 Linux ローカル FS では監視により約 12 秒後に反映し、取りこぼしの定期確認は 4 倍の間隔（通常 1 時間）です。NFS、SMB、9P、FUSE/virtiofs と Docker Desktop 共有は外部イベントを報告しない場合があります。未知の FS も安全側で、開くと最大 5 秒に一度確認し、定期も通常間隔です。イベントを推測するためのファイルは書きません。多数のフォルダーで Linux の上限 <code>fs.inotify.max_user_watches</code>（8,192 以上など）に達するとログに知らせ、開く時と定期で補います。ホストの <code>sysctl fs.inotify.max_user_watches=524288</code> で増やせます。全スペース、各ユーザーのものを合わせて数えます。</p>
+        <p><strong>Windows、macOS の Docker Desktop</strong>：ホスト共有の変更は開く、更新、定期で見つかり、即時とは限りません。書き込み中は安定してから表示します。名前変更や削除は、他場所への移動と区別するため全体のバックグラウンド確認を始める場合があります。スペースの一覧に数秒で反映するか開いた時に確認するかと実際の間隔を示します。間隔 0 は定期を止めますが、監視不可なら開く時の確認は残ります。<strong>変更を確認</strong> は常に全確認を使えます。</p>
+        <p>大確認中は一覧に進行を示し、10 秒を超えれば読み取りとインデックス更新の時間をログに記録します。目安として SSD の 20 万ファイルは初回読み取り約 0.5 秒、索引 25 秒、無変更の再確認 1〜2 秒です。ネットワークは各サイズと日時を聞くため遅く、大きな NFS、SMB は定期を 15 分以上にしてください。</p>
+        <p>Web のアップロード、作成、名前変更、移動、コピー、編集、削除は元フォルダーに適用します。別ディスクや非フォルダースペースへの移動はコピー、検証後に原本を削除します。途中で外部変更したファイルは残し、次の確認で表示します。長い処理は下に進行を表示し、閉じてもサーバーで続きます。</p>
+        <ul>
+          <li><strong>ごみ箱</strong>：内部の隠し <code>.thirtyfile-trash</code> へ移して復元可能にします。空にする、そこから削除すると実ファイルも削除します。</li>
+          <li><strong>旧版</strong>：Web の上書き、置き換え、旧版復元は <code>.thirtyfile-versions</code> に残し、通常一覧には見せません。可能ならハードリンク、他は移動で大容量も即時です。SMB など直接変更は版を作りません。完全削除は旧版も削除し、参照されない残存は 1 日後の確認で削除します。</li>
+          <li><strong>同時編集</strong>：Web 編集中に外部変更したら上書きせず、横に <code>name (conflict copy)</code> のコピーを保存します。名前は操作した人によらず <a href="first-steps.html#general">既定の言語</a>（ブラウザー追従なら英語）です。</li>
+          <li><strong>大文字小文字</strong>：exFAT、NTFS、多くの SMB は区別しません。<code>photos</code> に <code>Photos</code> をアップロードすると<code>photos</code> へ統合し、<strong>新しいフォルダー</strong> <code>Photos</code> は既存と伝えます。</li>
+          <li><strong>ダウンロード</strong>：再開は置き換えを検出して最初からにします。実行途中の置き換えは混在して届く可能性があるので、再度ダウンロードしてください。</li>
+          <li><strong>読み取り専用</strong>：作成時のチェック、後の <strong>読み取り専用にする</strong> で閲覧、ダウンロード、共有のみ許可します。</li>
+          <li><strong>所有者</strong>：<code>THIRTYFILE_RUN_AS</code>（既定 1000:1000）で書き、権限が必要です。Samba など別ユーザーが書くなら共通グループに書き込みを許すか、<code>THIRTYFILE_RUN_AS</code> を同じ実行ユーザーにします。</li>
+          <li>スペース削除は ThirtyFile からのみで、フォルダーと内容は残します。</li>
+          <li>1 フォルダーは 1 スペースか場所だけに属します。他スペース、ローカル場所、データフォルダーとの包含を拒否し二重表示を防ぎます。<code>/etc</code>、<code>/run</code>、<code>/usr</code>、ディスク最上位も拒否します。</li>
+          <li>Office、OS の <code>~$…</code>、<code>Thumbs.db</code>、<code>.DS_Store</code>、自身の <code>.thirtyfile-</code> は非表示で、Web、WebDAV でも命名不可です。ZIP は除外し、他スペースからそれらを含む移動、コピーは拒否します。リンク、不正なテキスト名、内部の別ディスクをスキップし、確認で表示します。個人用は件数のみで元フォルダーも伏せます。</li>
+          <li>コピー中のファイルは数秒安定してから表示します。</li>
+          <li><strong>未マウント</strong>：作成時の <code>.thirtyfile-space</code> にスペース ID があります。なくて突然空なら未マウントと見なし、項目、共有、履歴を保ち、確認で知らせます。再マウントして確認してください。Web は自分のマーカーがある場合のみ書き、消失、別ディスクなら <em>フォルダーが存在しないか、別のディスクがマウントされています</em> と拒否して再作成しません。他スペースのマーカーでも確認せず、読みも自分のもののみです。読み取り専用は書けないためなしでも許可します。欠落時の再作成は既存項目がある場合だけで、そうでなければ報告して変えません。読めない内部フォルダーも保持します。空にするには ThirtyFile で項目を削除してください。</li>
+          <li>複数の削除、移動、復元が失敗したら、既に変更したものを戻し半完了を防ぎます。同ディスクへの移動途中で停止なら 1 日後の確認で元名へ戻し、別ディスクへのコピー途中なら原本は元にあり、未完コピーを削除します。名前変更、内部移動、ごみ箱への出し入れ、旧版保存は隠し <code>.thirtyfile-journal</code> に先に記録し、次の確認で共有、権限、履歴ごと戻します。Windows、exFAT など識別 ID のないディスクも同じです。旧名が既に取られた場合は移動先で保持します。保存で新内容が配置済みならそれを残し、旧内容を以前の版にします。</li>
+        </ul>
+        <h2 id="check">保存場所の内容を確認する</h2>
+        <p>各場所の <strong>…</strong> には、管理者だけが使う 3 操作があります。</p>
+        <h3 id="test-steps">段階ごとのテスト</h3>
+        <p>各段階と所要時間を表示します。</p>
+        <ol>
+          <li>保存場所への <strong>接続</strong>。</li>
+          <li><strong>小ファイルを書き</strong>、<strong>読み直し</strong> て照合。</li>
+          <li>24 MB の <strong>大ファイルをアップロード</strong> し（S3 は multipart）、<strong>ダウンロード</strong> して照合。両方の MB/s を表示。</li>
+          <li><strong>テストファイルを削除</strong> し、消えたか確認。</li>
+        </ol>
+        <p><code>.thirtyfile-check</code> に置き、失敗時も削除します。最大 2 分で、遅ければ大ファイルを途中のまま残さずスキップします。削除権限なしなど理由を表示します。</p>
+        <h3 id="browse">閲覧</h3>
+        <p>1 階層ずつ、1 ページ 200 件、サイズと日時を表示します。変更はできず、削除待ちや書き込み中のコピー以外は保存形式のまま個別ダウンロードできます。</p>
+        <ul>
+          <li><strong>コンテンツストア</strong>（<code>ab/cd/…</code>、S3、SFTP、FTP は <code>blobs</code> 下）：ファイル、旧版、ごみ箱、他場所の <a href="#replicas">ミラー</a>、削除待ち、未使用のどれかを表示します。使用ファイルはスペースとパスを表示します。</li>
+          <li>ストレージとローカルの <strong>フォルダースペース</strong> は所属を表示します。</li>
+          <li><strong>個人用は非公開</strong>：「anna の個人用スペース」などの名前だけで、内容、フォルダーの展開、ダウンロードは不可です。<code>USERS/Anna</code> と <code>users/anna</code> の違い、移動中の新フォルダー、コピー済み内容、清掃までの旧フォルダー、他場所の <a href="#replicas">ミラー</a> にも適用し、所属を示します。</li>
+          <li>SFTP、FTP、パス途中でもリンクは表示だけでたどりません。</li>
+          <li><code>.thirtyfile-backups</code> は個人用名を含むため開けず、<a href="#copy">コピー</a> はバックアップのページで管理します。</li>
+        </ul>
+        <h3 id="unused">未使用の内容を探す</h3>
+        <p>アップロード途中停止などで残り、ファイル、旧版、ごみ箱のどれも参照しない内容をバックグラウンドで探し、一覧と総容量を表示します。書き込みから記録までの間を保護するため過去 24 時間の内容と、既に削除待ちのものは触りません。</p>
+        <p><strong>N 件を削除</strong> は確認後に一覧分だけを対象にし、直前に再確認して、使用や再書き込みがあれば保持します。ログにも記録します。</p>
+        <p>S3、SFTP、FTP の <code>.thirtyfile-location</code> が別の場所や別インストールを指せば、他者の内容なので検索、削除を拒否します。</p>
+        <h3 id="one-place">1 つの場所に 1 つの登録</h3>
+        <p>重複すると互いを未使用と誤認するため、同サービスのバケットと prefix、同 SFTP、FTP のフォルダーには重複して追加、変更できません。相対フォルダーはアカウントごとです。</p>
+        <p><code>.thirtyfile-location</code> の 1 行目に場所 ID、2 行目にインストール ID を追加時に書きます。古い登録は次の成功テストで作成します。他を指す場所は追加、検索、削除を拒否します。場所を削除するとマーカーも削除します。</p>
+        <h2 id="usage">ストレージ使用量と性能</h2>
+        <p>管理者の <strong>コントロールパネル › ストレージ使用量</strong> に、容量、推移、処理状況を表示します。上はスペース種別、ごみ箱、旧版の総計、下は各場所とデータフォルダーのカードです。</p>
+        <h3 id="usage-figures">数値の意味</h3>
+        <div class="table-scroll"><table><thead><tr><th>項目</th><th>数えるもの</th></tr></thead><tbody>
+          <tr><td><strong>ファイル</strong></td><td>ごみ箱以外の見えるファイル。容量制限の対象で、同内容も 2 件なら二度数えます。ごみ箱、旧版は下に別表示</td></tr>
+          <tr><td><strong>ThirtyFile が保存</strong></td><td>重複排除したストアと、フォルダー（ごみ箱含む）、内部の旧版。重複で Files より小さく、ごみ箱や版で大きくもなります</td></tr>
+          <tr><td><strong>ディスク</strong></td><td>他の内容も含むシステム報告の全体。ローカルのみ。同じディスクなら表示し、一度だけ数えます</td></tr>
+          <tr><td><strong>容量不明</strong></td><td>S3、SFTP、FTP は空きを報告せず、3 秒で答えないディスクも計測しません。割合、満杯までの時間は表示せず、不明は 0 ではありません</td></tr>
+          <tr><td><strong>バックアップ</strong></td><td>その場所の <a href="#copy">コピー</a> と <a href="backup.html#file-backups">バックアップ</a>。各々で内容を一度数え、保持する場所のみ表示</td></tr>
+          <tr><td><strong>ミラー</strong></td><td>原本が他の場所の <a href="#replicas">ミラー</a>。保持する場所のみ表示</td></tr>
+          <tr><td><strong>削除待ち</strong></td><td>オフラインなどで削除失敗した内容や移動後の旧コピー。背景で再試行し、サイズは既に不明です</td></tr>
+          <tr><td><strong>データフォルダー</strong></td><td>データベース、サムネイル、進行中アップロードとディスク。移動、稼働タスク、削除待ちも表示</td></tr>
+        </tbody></table></div>
+        <p>外部が変えたフォルダーのファイルは次の確認後に数えます。</p>
+        <h3 id="usage-operations">操作</h3>
+        <p>読み、書き、削除、一覧、接続確認を時間測定して数え、フォルダーファイルの読みとアップロードも含みます。フォルダー内の名前変更、削除、スキャンは測定しません。メモリで数えて 5 分ごとに保存し、ファイル操作を遅くしません。停止時に最大 5 分分を失います。</p>
+        <ul>
+          <li><strong>作業の種類</strong>：<em>ユーザーのファイル操作</em> はダウンロード、プレビュー、アップロード、保存。<em>バックグラウンド</em> はスペース移動、圧縮、展開、長いコピー、移動、未使用削除。<em>確認、テスト</em> は 20〜30 秒ごとの接続確認と段階テスト。分離して移動で転送時間を混ぜず、テストを通常通信と見なしません。</li>
+          <li><strong>操作時間</strong>：中央値 p50、95 パーセンタイル p95 で、半分、100 件中 95 件がより速い値です。精度約 10%。読みは開始可能までで転送を含まず、書きは保存まで、同ディスクは名前変更なので高速です。</li>
+          <li><strong>スループット</strong>：期間ごとの平均、毎秒の読み書きバイト。</li>
+          <li><strong>失敗、タイムアウト</strong>：失敗、長すぎた、アップロード途中退出など断念した操作。途中で切れたダウンロードも失敗です。エラーは <a href="logs.html#errors">アクティビティログのエラー</a>、移動は移動ジョブへ、両方へのリンクがあります。</li>
+          <li><strong>待機</strong>：操作なしの期間は点なし、グラフの隙間で、0 ms とは表示しません。</li>
+        </ul>
+        <h3 id="usage-history">履歴</h3>
+        <p>場所（または全件）、期間、種類を選びます。単位と各点の期間を示し、指すか矢印で値を表示します。<strong>表で表示</strong> は全件、<strong>CSV をダウンロード</strong> は表示内容を保存します。</p>
+        <div class="table-scroll"><table><thead><tr><th>範囲</th><th>1 点の期間</th><th>保存期間</th></tr></thead><tbody>
+          <tr><td>過去 6 時間、2 日</td><td>操作 5 分、容量 15 分</td><td>2 日</td></tr>
+          <tr><td>過去 30 日</td><td>1 時間</td><td>45 日</td></tr>
+          <tr><td>過去 1 年</td><td>UTC の 1 日</td><td>400 日</td></tr>
+        </tbody></table></div>
+        <p>容量は起動直後と 15 分ごとに測り、各時、日の最終値で代表します。操作は合計して小さく保持し、表示はブラウザーのタイムゾーンです。30 分より古いカードは <em>古い情報</em> と示します。</p>
+        <p><strong>満杯までの時間</strong> は過去 30 日の使用量に直線を当てます。容量既知、3 日以上の測定、一定ペースの増加時のみ表示し、他は理由を説明します。</p>
+        <h3 id="usage-alerts">警告</h3>
+        <p><strong>警告のしきい値</strong> で、ディスクの使用率（初期 90%）、過去 1 時間の失敗、タイムアウト率（5%）を設定します。失敗は 20 操作以上で判定し、0 は無効です。オフライン、古い測定も警告し、上部に表示するだけでメールは送りません。</p>
+        <h2 id="offline">保存場所がオフラインの場合</h2>
+        <p>閲覧、検索、フォルダー整理は続けられます。開く、ダウンロード、アップロードは待機し、復旧で自動再開します。検証済み <a href="#replica-read">ミラー</a> は引き続き開けます。スペースをオフラインと示し、ディスクにフォルダーがあるスペースは整理も待機します。</p>
+        <h3 id="not-mounted">未マウントのディスクと共有</h3>
+        <p>ローカルの <code>/mnt/nas/thirtyfile</code> などはディスクや共有のマウントで、解除すると消えるかホスト上の空フォルダーになります。誤ったディスクへ書き、再マウント後に隠れることを防ぐため、書きません。</p>
+        <ul>
+          <li><strong>マーカー</strong>：追加、フォルダー変更の保存時だけ、なければ作って <code>.thirtyfile-location</code> に場所 ID を置きます。保存前のテストは何も作らず、他の処理もフォルダーを作りません。</li>
+          <li><strong>利用不可</strong>：以後は <code>.thirtyfile-location</code> のある時だけ使い、なければ <em>フォルダーが存在しないか、別のディスクがマウントされています</em> とオフライン表示し、アップロード、変更を拒否します。スペースのフォルダーも作りません。</li>
+          <li><strong>復旧</strong>：再マウントすると、オフライン時の 20 秒ごとの確認で戻り、再起動は不要です。</li>
+          <li><strong>応答しないディスク</strong>：共有サーバーの停止はマウントしたまま無応答になり得ます。回転開始も待てる最大 1 分、変更開始後は 20 秒で、<em>サーバー上のフォルダーのディスクが応答しません</em> と拒否します。復旧まで変更は即座に拒否し、他は動きます。場所、健康確認も待ちません。ローカルのストアも同様で、1 分超は <em>ストレージサービスを一時的に利用できません</em> と諦め、復旧まで即拒否して他機能を保ちます。</li>
+          <li><strong>消失</strong>：隠しファイルを除いたコピーなど、項目があって <code>.thirtyfile-location</code> がなければ、必要な ID の行を案内します。正しいフォルダーならその内容でファイルを作り、次の確認で使います。</li>
+          <li><strong>他の場所</strong>：他 ID の <code>.thirtyfile-location</code> は拒否します。場所の削除でマーカーも消して再利用でき、元の自分のマーカーが残るフォルダーへ戻すならそのまま使います。</li>
+          <li><strong>フォルダー変更</strong>：内容があれば先に <code>.thirtyfile-location</code> を含む全コピーを新フォルダーに作ってから変更し、スペースのパスも従います。空の移動先は原本を取り残すため拒否します。何もない場所なら任意に変更できます。</li>
+        </ul>
+        <p>組み込みの <code>/storage</code>（<code>THIRTYFILE_STORAGE</code>）も新サーバー初回、空または新規なら <code>local</code> の同マーカーを作ります。ディスクや NAS 自身の <code>lost+found</code>、<code>#recycle</code>、<code>@eaDir</code>、<code>.DS_Store</code>、<code>System Volume Information</code>、<code>$RECYCLE.BIN</code> は内容と数えません。ファイルやスペースが既にあれば、空や欠落の場所は再採用せず、未マウントの可能性を示して起動を拒否します。内容ありでマーカーなし、別 ID も別ディスクかもしれず拒否します。マウントを確認し、本当に正しければ <code>local</code> のマーカーを作ってください。</p>
+        <nav class="next" aria-label="その他のガイド">
+          <a href="sign-in.html"><span>前へ</span>シングルサインオン</a>
+          <a class="forward" href="logs.html"><span>次へ</span>ログとブランド設定</a>
+        </nav>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">ガイド</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">ソースコード</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">問題を報告</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker イメージ</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

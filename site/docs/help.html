@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Troubleshooting · ThirtyFile</title>
     <meta name="description" content="Answers to the problems people run into most." />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/help.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/help.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/help.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/help.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/help.html" />
     <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -25,15 +30,15 @@
         <a class="brand" href="../index.html"><img src="../assets/logo.svg" alt="" />ThirtyFile</a>
         <nav class="site-nav" aria-label="Site">
           <a href="../index.html#features" class="hide-small">Features</a>
-          <a href="../docs/index.html" aria-current="page">Guides</a>
+          <a href="index.html" aria-current="page">Guides</a>
           <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
           <details class="lang-menu">
             <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">Language </span><span class="lang-name">English</span></summary>
             <ul>
-              <li><a href="../index.html" hreflang="en" lang="en" aria-current="true">English</a></li>
-              <li><a href="../zh-TW/index.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
-              <li><a href="../zh-CN/index.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
-              <li><a href="../ja/index.html" hreflang="ja" lang="ja">日本語</a></li>
+              <li><a href="help.html" hreflang="en" lang="en" aria-current="true">English</a></li>
+              <li><a href="../zh-TW/docs/help.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="../zh-CN/docs/help.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../ja/docs/help.html" hreflang="ja" lang="ja">日本語</a></li>
             </ul>
           </details>
         </nav>
@@ -44,31 +49,49 @@
         <details open>
           <summary>All guides</summary>
           <p>Get started</p>
-          <a href="../docs/index.html">Install</a>
-          <a href="../docs/first-steps.html">First steps</a>
+          <a href="index.html">Install</a>
+          <a href="first-steps.html">First steps</a>
           <p>Everyday use</p>
-          <a href="../docs/files.html">Working with files</a>
-          <a href="../docs/preview.html">Preview and editing</a>
-          <a href="../docs/sharing.html">Sharing</a>
-          <a href="../docs/account.html">Your account</a>
-          <a href="../docs/webdav.html">Mapping it as a drive</a>
+          <a href="files.html">Working with files</a>
+          <a href="preview.html">Preview and editing</a>
+          <a href="sharing.html">Sharing</a>
+          <a href="account.html">Your account</a>
+          <a href="webdav.html">Mapping it as a drive</a>
           <p>Administration</p>
-          <a href="../docs/users.html">Users and spaces</a>
-          <a href="../docs/sign-in.html">Single sign-on</a>
-          <a href="../docs/storage.html">Storage locations</a>
-          <a href="../docs/logs.html">Logs and branding</a>
+          <a href="users.html">Users and spaces</a>
+          <a href="sign-in.html">Single sign-on</a>
+          <a href="storage.html">Storage locations</a>
+          <a href="logs.html">Logs and branding</a>
           <p>Running it</p>
-          <a href="../docs/settings.html">Settings</a>
-          <a href="../docs/internet.html">Putting it on the internet</a>
-          <a href="../docs/backup.html">Upgrade and backup</a>
-          <a href="../docs/help.html" aria-current="page">Troubleshooting</a>
+          <a href="settings.html">Settings</a>
+          <a href="internet.html">Putting it on the internet</a>
+          <a href="backup.html">Upgrade and backup</a>
+          <a href="help.html" aria-current="page">Troubleshooting</a>
           <p>The project</p>
-          <a href="../docs/contributing.html">Contributing</a>
+          <a href="contributing.html">Contributing</a>
         </details>
       </nav>
       <main id="content" class="article">
         <h1>Troubleshooting</h1>
         <p class="lead">Answers to the problems people run into most.</p>
+        <details class="guide-toc">
+          <summary>On this page</summary>
+          <ol>
+            <li><a href="#password">I forgot the administrator password</a></li>
+            <li><a href="#shell">docker exec thirtyfile sh doesn't work</a></li>
+            <li><a href="#two-factor">An administrator lost their phone and recovery codes</a></li>
+            <li><a href="#links">Share links start with http://127.0.0.1:8080</a></li>
+            <li><a href="#signed-out">I am signed out right after signing in</a></li>
+            <li><a href="#locked">Everyone gets "too many failed attempts"</a></li>
+            <li><a href="#upload">Large uploads fail</a></li>
+            <li><a href="#permission">"Permission denied" when starting</a></li>
+            <li><a href="#logs">Looking at the log</a></li>
+            <li><a href="#health">Checking that it is running</a></li>
+            <li><a href="#check">Checking the stored files</a></li>
+            <li><a href="#safety">How your files are protected</a></li>
+            <li><a href="#more">Still stuck?</a></li>
+          </ol>
+        </details>
         <h2 id="password">I forgot the administrator password</h2>
         <pre><code>docker exec -it thirtyfile thirtyfile reset-password admin</code></pre>
         <p>Type the new password when asked, so it doesn't stay in your shell history. This also switches the account back on if it was disabled.</p>
@@ -92,7 +115,7 @@
         <p>After many wrong passwords for one account, from any address, each further attempt for that account has to wait a little longer, up to a minute. The account itself is never locked.</p>
 
         <h2 id="upload">Large uploads fail</h2>
-        <p>Error 413 comes from the reverse proxy. Raise its upload size limit to at least 64 MB, as in the <a href="internet.html#nginx">nginx example</a>.</p>
+        <p>For error 413, check both <code>THIRTYFILE_MAX_UPLOAD_MB</code> and the reverse proxy's request size limit. The browser uploader uses 32 MB chunks; allow at least 64 MB per request as in the <a href="internet.html#nginx">nginx example</a>. WebDAV sends a whole file in one request and needs a request limit large enough for that file; see <a href="webdav.html#troubleshooting">WebDAV troubleshooting</a>. Also check the space's quota and free storage.</p>
 
         <h2 id="permission">"Permission denied" when starting</h2>
         <p>On start, the container gives its folders to user 1000. This can't work in two cases:</p>
@@ -105,7 +128,7 @@
         <pre><code>docker logs --tail 100 thirtyfile</code></pre>
 
         <h2 id="health">Checking that it is running</h2>
-        <p><code>http://your-server:8080/api/health</code> answers with the state of the server: <code>"status": "ok"</code>, or <code>"degraded"</code> when <code>/data</code> or <code>/storage</code> has less than 1 GB free or a storage location can't be reached. It also lists the free and total space of both folders and whether each storage location is <code>ok</code> or <code>offline</code>, so a monitoring tool (Uptime Kuma, for example) can warn you before the disk is full. The log warns about it too, once an hour. Docker's own health check only fails when the server doesn't answer at all.</p>
+        <p><code>http://files.example.com:8080/api/health</code> answers with the state of the server: <code>"status": "ok"</code>, or <code>"degraded"</code> when <code>/data</code> or <code>/storage</code> has less than 1 GB free or a storage location can't be reached. It also lists the free and total space of both folders and whether each storage location is <code>ok</code> or <code>offline</code>, so a monitoring tool can warn you before the disk is full. Configure the monitor to inspect the JSON <code>status</code>: degraded health still returns HTTP 200. A database check failure returns HTTP 503 with <code>"status": "error"</code>. Docker's health probe accepts HTTP 200, so low disk space or an offline location does not by itself restart the container. The log warns about degraded health at most once an hour.</p>
         <p>Anyone can ask for it, so it doesn't say which version runs: that would tell a stranger which release to look up for known problems. Signed in, you find the version on the last line of the <a href="account.html">account menu</a>, such as <strong>ThirtyFile 0.5.0</strong>. Administrators also see it at the bottom right of the <strong>Control panel</strong>, linked to that release's notes. On the server, <code>docker exec thirtyfile thirtyfile --version</code> prints it.</p>
 
         <h2 id="check">Checking the stored files</h2>
@@ -126,15 +149,20 @@
 
         <h2 id="more">Still stuck?</h2>
         <p><a href="https://github.com/ThirtyFile/ThirtyFile/issues">Report the problem on GitHub</a>, with what you did, what you expected and what happened instead.</p>
+        <nav class="next" aria-label="More guides">
+          <a href="backup.html"><span>Previous</span>Upgrade and backup</a>
+          <a class="forward" href="contributing.html"><span>Next</span>Contributing</a>
+        </nav>
       </main>
     </div>
     <footer class="site-footer">
       <div class="wrap">
         <span>ThirtyFile</span>
-        <a href="../docs/index.html">Guides</a>
+        <a href="index.html">Guides</a>
         <a href="https://github.com/ThirtyFile/ThirtyFile">Source code</a>
         <a href="https://github.com/ThirtyFile/ThirtyFile/issues">Report a problem</a>
         <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker image</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
       </div>
     </footer>
     <script src="../assets/site.js"></script>

@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh-TW" data-root="../.." data-page="backup">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>升級與備份 · ThirtyFile</title>
+    <meta name="description" content="升級和退回版本，備份與還原資料庫和檔案，設定定時快照，安全儲存加密金鑰並演練災難恢復。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/backup.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/backup.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/backup.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/backup.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/backup.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要內容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="網站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">語言 </span><span class="lang-name">繁體中文</span></summary>
+            <ul>
+              <li><a href="../../docs/backup.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="backup.html" hreflang="zh-TW" lang="zh-TW" aria-current="true">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/backup.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../../ja/docs/backup.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>開始使用</p>
+          <a href="index.html">安裝</a>
+          <a href="first-steps.html">初次設定</a>
+          <p>日常使用</p>
+          <a href="files.html">檔案操作</a>
+          <a href="preview.html">預覽與編輯</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的帳號</a>
+          <a href="webdav.html">連線為網路磁碟機</a>
+          <p>管理</p>
+          <a href="users.html">使用者與空間</a>
+          <a href="sign-in.html">單一登入</a>
+          <a href="storage.html">儲存位置</a>
+          <a href="logs.html">紀錄與品牌</a>
+          <p>架設與維運</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">從網際網路存取</a>
+          <a href="backup.html" aria-current="page">升級與備份</a>
+          <a href="help.html">疑難排解</a>
+          <p>專案</p>
+          <a href="contributing.html">參與貢獻</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+
+        <h1>升級與備份</h1>
+        <p class="lead">保持 ThirtyFile 更新，並把資料副本存放在安全位置。</p>
+        <details class="guide-toc">
+          <summary>本頁內容</summary>
+          <ol>
+            <li><a href="#upgrade">升級</a></li>
+            <li><a href="#backup">備份</a></li>
+            <li><a href="#file-backups">將檔案備份到其他位置</a></li>
+            <li><a href="#restore">還原</a></li>
+            <li><a href="#database-size">資料庫大小</a></li>
+            <li><a href="#key">已儲存密碼的加密金鑰</a></li>
+            <li><a href="#safe">安全儲存備份</a></li>
+          </ol>
+        </details>
+
+        <h2 id="upgrade">升級</h2>
+        <p>請先<a href="#backup">備份</a>。檔案和設定會保留，新版本啟動時會更新資料庫。修改資料庫前，ThirtyFile 會將副本儲存到 <code>data/backups/drive-before-&lt;version&gt;.db</code>（保留最近三份）。</p>
+        <h3>docker run</h3>
+        <pre><code>docker pull ghcr.io/thirtyfile/thirtyfile:latest
+docker stop thirtyfile && docker rm thirtyfile
+docker run -d --name thirtyfile --restart unless-stopped …   # the same options as when you installed it</code></pre>
+        <h3>Docker Compose</h3>
+        <pre><code>docker compose pull && docker compose up -d</code></pre>
+        <p>版本頁面提供的 <code>compose.yaml</code> 跟隨對應版本系列，例如 <code>ghcr.io/thirtyfile/thirtyfile:0.4</code>，取得該系列的修復。升級到更新系列時，先閱讀版本說明，再修改 <code>image:</code> 的標籤（例如 <code>:0.5</code>），執行相同命令。</p>
+        <p>0.4.0 及以後的資料可以原地升級：在相同 <code>data</code> 和 <code>storage</code> 資料夾上啟動新版本即可。0.3 及以前不能升級，因為之後重新建立了資料庫結構；請用空的 <code>data</code> 和 <code>storage</code> 安裝新版本，再複製檔案。新版遇到 0.3 或更舊資料時，會在寫入任何 <code>data</code> 或 <code>storage</code> 內容前立即停止並記錄原因，保留舊資料原狀。資料庫被更新版本修改過時，也會停止並顯示明確訊息（參閱<a href="#downgrade">退回舊版本</a>）。</p>
+        <h3>會獲得哪個版本</h3>
+        <p><code>ghcr.io/thirtyfile/thirtyfile</code> 和 <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub 的 <code>thirtyfile/thirtyfile</code></a> 提供相同的已驗證映像和版本標籤。切換倉庫時，只修改命令或 Compose 的映像名稱，保留版本標籤和磁碟區。GitHub 已簽名的來源證明仍附在 GHCR 映像；檢查 Docker Hub 副本時，用對應 digest 在 GHCR 驗證。</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th>標籤</th><th>內容</th></tr></thead>
+          <tbody>
+            <tr><td><code>1</code></td><td>某個主版本的最新正式版（從 1.0.0 起）。取得新功能與修復，但不會升級到改變使用者依賴行為的版本（2.0.0），適合安全自動更新</td></tr>
+            <tr><td><code>latest</code></td><td>最新正式版，可能包含新的主版本，升級前請閱讀說明</td></tr>
+            <tr><td><code>1.2</code>、<code>1.2.3</code></td><td>某個版本系列或精確版本，適合自行決定何時升級</td></tr>
+            <tr><td><code>1.2.3-rc.1</code></td><td>預發布，用於試用即將發布的內容。僅使用自身版本編號標籤，其他標籤不會指向預發布</td></tr>
+          </tbody>
+        </table></div>
+        <p>1.0.0 之前沒有主版本標籤；最接近的是 <code>0.4</code>，因為任何 0.x 版本都可能改變行為。每個版本的更改列在<a href="https://github.com/ThirtyFile/ThirtyFile/releases">版本頁面</a>，還提供 <code>compose.yaml</code>、Linux amd64 與 arm64 的獨立伺服器程式，以及 <code>SHA256SUMS</code> 中的 SHA-256 校驗碼。</p>
+        <p>每個發布映像附有內容清單（SBOM）和已簽名的建置紀錄。要驗證映像或程式確實由 ThirtyFile 官方發布流程建置，使用 <a href="https://cli.github.com/">GitHub CLI</a>：</p>
+        <pre><code>gh attestation verify oci://ghcr.io/thirtyfile/thirtyfile:1.2.3 --repo ThirtyFile/ThirtyFile
+gh attestation verify thirtyfile-1.2.3-linux-amd64 --repo ThirtyFile/ThirtyFile</code></pre>
+        <p>ThirtyFile 內部相依函式庫的授權條款位於映像的 <code>/usr/share/licenses/thirtyfile/THIRD-PARTY-NOTICES</code>，以及版本頁面的 <code>THIRD-PARTY-NOTICES</code>。</p>
+        <h3 id="downgrade">退回舊版本</h3>
+        <p>舊版無法在新版已修改的資料庫上啟動。要退回舊版，先停止 ThirtyFile，用升級前的副本（<code>data/backups/drive-before-&lt;new version&gt;.db</code>）替換 <code>data/drive.db</code>，刪除存在的 <code>drive.db-wal</code> 和 <code>drive.db-shm</code>，再啟動舊映像。升級後的更改（新帳號、上傳的檔案及其名稱）會遺失；之後上傳的檔案仍在儲存資料夾，但不會出現在清單中。</p>
+        <h2 id="backup">備份</h2>
+        <p><code>data</code> 與 <code>storage</code> 合起來包含所有內容：檔案、帳號、設定和紀錄。<code>storage/company</code>、<code>storage/teams</code> 和 <code>storage/users</code> 內為一般檔案，任何備份工具都能複製並逐個還原；分享連結、權限、資源回收筒和歷史版本還需要資料庫。<code>data</code> 內的資料庫會持續寫入，所以執行時不要直接複製 <code>drive.db</code>，應使用備份命令取得副本，或停止 ThirtyFile 後複製。</p>
+        <h3 id="running">不停止服務</h3>
+        <ol>
+          <li>儲存一致的資料庫副本（不能覆蓋已有檔案，每次使用新名稱）：
+            <pre><code>docker exec thirtyfile thirtyfile backup /data/backups/drive-$(date +%F).db</code></pre></li>
+          <li>複製 <code>storage</code>，以及排除 <code>drive.db*</code>、<code>thumbs</code> 和 <code>tmp</code> 的 <code>data</code>（縮圖會重新產生，<code>tmp</code> 僅包含進行中的上傳）：
+            <pre><code>sudo tar czf thirtyfile-$(date +%F).tar.gz -C /srv/thirtyfile \
+  --exclude='data/drive.db*' --exclude=data/secret.key --exclude=data/thumbs --exclude=data/tmp data storage</code></pre></li>
+        </ol>
+        <p>製作封存檔時上傳的檔案，可能只在封存檔中而不在已儲存資料庫中，或者相反；兩種情況下都可還原備份。要每晚執行，把兩個命令寫入腳本並加入 cron，例如 <code>0 3 * * * /usr/local/bin/thirtyfile-backup.sh</code>，同一腳本也刪除超過數週的封存檔。</p>
+        <h3>停止 ThirtyFile 後備份</h3>
+        <pre><code>docker stop thirtyfile
+sudo tar czf thirtyfile-backup.tar.gz -C /srv/thirtyfile data storage
+docker start thirtyfile</code></pre>
+        <p>使用 Docker Compose 時，在 <code>compose.yaml</code> 資料夾執行 <code>docker compose stop</code> 和 <code>docker compose start</code>，<code>data storage</code> 也以該處為相對路徑。</p>
+        <div class="note"><strong>還需備份：</strong><code>/storage</code> 之外掛載的儲存位置（新增為<em>本機資料夾</em>位置的 NAS、資料夾空間），以及透過儲存服務自身工具備份的 S3、SFTP 或 FTP 檔案。資料庫備份包含這些檔案的清單和權限，不包含其內容。</div>
+        <h3 id="copies">儲存位置檔案的副本</h3>
+        <p>ThirtyFile 也能自行把儲存位置的檔案複製到另一位置：從<strong>控制台 › 儲存位置</strong>使用<strong>全部複製到…</strong>執行一次（參閱<a href="storage.html#copy">將全部內容複製到其他位置</a>），或使用<a href="#file-backups">檔案備份</a>反覆執行。<a href="storage.html#replicas">鏡像</a>在其他位置維護目前檔案，以便來源位置故障時繼續讀取；不保留歷史狀態，所以不能代替備份。這些都是檔案副本，不是整臺伺服器副本：不含帳號、設定、分享連結和紀錄，仍需按上文備份 <code>data</code>。</p>
+        <h2 id="file-backups">將檔案備份到其他位置</h2>
+        <p>備份把某個儲存位置的空間快照儲存在另一位置：NAS、其他磁碟、S3 儲存桶、SFTP 或 FTP 伺服器。每個快照都是還原點，包含當時的空間、資料夾、檔案、資源回收筒和歷史版本。舊快照按指定期限保留，以便還原誤刪或誤改的檔案。只有管理員可檢視和管理備份。</p>
+        <h3 id="backup-make">建立備份</h3>
+        <p>從<strong>控制台 › 備份</strong>選取<strong>新增備份…</strong>（或儲存位置選單中的<strong>備份…</strong>），然後：</p>
+        <ul>
+          <li><strong>備份</strong>和<strong>到</strong>：來源空間所在位置和備份目標。相同或互相包含的位置被拒絕。同一磁碟或服務的位置允許使用，但對話方塊會說明無法承受該磁碟或服務故障。一個位置可備份到多個目標，每個目標使用獨立備份。</li>
+          <li><strong>空間</strong>：預設包含來來源位置全部空間及之後新增空間，也可只選擇勾選的空間。預設包含歷史版本和資源回收筒，除非取消勾選。</li>
+          <li><strong>時間</strong>：
+            <ul>
+              <li><em>更改後儘快備份</em>：每次空間更改（上傳、編輯、重新命名、移動、刪除和權限修改）儲存後立即計入。連續數秒無新更改後建立快照。每次只執行一個快照，期間更改會在完成後觸發另一個。檔案在更改稍後才獲得保護，不是同步寫入；備份頁面顯示落後程度。</li>
+              <li><em>依排程</em>：每隔指定分鐘或小時、每天指定時間，或每週指定日期和時間，在所選時區執行（顯示接下來三次執行時間）。夏令時開始日不存在的時間不執行；結束日重複出現的時間只執行一次。伺服器停機後僅建立一次補償快照，不會為每個錯過時間分別建立。</li>
+              <li><em>兩者都用</em>（預設）：更改後儘快備份，同時按計劃執行。</li>
+            </ul>
+          </li>
+          <li><strong>保留與檢查</strong>：快照保留天數（預設 30）、始終保留的最新快照數（至少 1）、多久沒有新快照就通知管理員（48 小時）、讀回檢查頻率（每 7 天），以及複製速度上限（預設不限）。</li>
+        </ul>
+        <p>第一個快照立即建立，複製全部內容；之後只複製備份尚未持有的內容（相同內容只儲存一次，不論被多少快照使用）。快照與複製、還原共用一次一項的背景工作，關閉頁面或伺服器重新啟動後仍會繼續。</p>
+        <h3 id="backup-consistency">快照包含什麼</h3>
+        <ul>
+          <li><strong>內容儲存區空間</strong>（S3、SFTP、FTP）：精確反映產生檔案清單時的空間狀態。之後刪除的內容會暫緩刪除，直到快照複製完成。</li>
+          <li><strong>資料夾空間</strong>（儲存資料夾、<em>本機資料夾</em>位置）：先檢查其他程式造成的更改（例如 SMB），逐個讀取檔案，並驗證讀取期間未發生變化，變化時重新讀取。其他程式持續寫入的檔案（紀錄、電子郵件信箱）不會阻止整個快照：嘗試數次後，保留最後一次完整讀取的內容，工作詳細資訊列為複製期間發生變化（從未完整讀取的檔案不進入該快照，也以相同方式列出；個人空間不顯示檔案名稱）。每個檔案都完整，但不代表其他程式在不同時間修改的全部檔案在同一瞬間的整體狀態。外部更改在下一次變更檢查發現，並非發生時立即發現。</li>
+          <li>只有完整快照才計入：所有內容複製並驗證後，最後寫入清單和完成標記。無法複製全部內容的快照會停止，列出失敗項目（個人空間不顯示檔案名稱），不刪除任何內容。</li>
+        </ul>
+        <h3 id="backup-health">追蹤備份狀態</h3>
+        <p>每個備份顯示狀態：<em>已保護</em>（最新快照包含全部更改）、<em>更改等待中</em>（及等待多久）、<em>備份中</em>、<em>等待儲存位置</em>（不可達；每隔幾分鐘重試，ThirtyFile 發現恢復時也立即重試）、<em>失敗</em>（最近快照因錯誤停止；每小時重試，或<strong>立即備份</strong>）、<em>逾期</em>（超過規則允許時間無新快照）、<em>已暫停</em>，以及空間保護截止時間。開始失敗、等待位置或逾期時，管理員收到一次通知（已設定時也發郵件）；恢復後再通知一次。<strong>詳細資訊</strong>顯示還原點、工作與錯誤。已完成工作保留 90 天，每個備份最多最新 1,000 項，最新 20 項不受時間限制；失敗工作保留至繼續或取消。</p>
+        <p><strong>暫停備份</strong>停止建立快照，保留已有快照。<strong>刪除備份</strong>確認後停止備份，並刪除資料夾及全部快照；可暫停但不能取消。存有備份的位置，必須先刪除備份才能刪除位置。</p>
+        <h3 id="backup-size">占用多少空間</h3>
+        <p>多個快照共用的內容只存一份，因此備份約佔空間原大小，加上保留期間修改或刪除的內容。每次新快照完成後，刪除超過規則期限的快照（始終保留指定最新數量），再刪除其他快照均未使用的內容。<strong>控制台 › 儲存用量</strong>顯示各位置備份占用量。</p>
+        <h3 id="backup-restore">從備份還原</h3>
+        <p>還原會先驗證已有內容再重複使用。內容儲存區中缺失或損壞的內容從已檢查的備份還原，並保護共用該內容的檔案。名稱衝突選項在每個檔案實際寫入時套用，包括讀取備份期間新出現的同名項目。</p>
+        <p>選擇備份並<strong>還原…</strong>，再選擇還原點和空間。公司與團隊空間可選資料夾或部分項目；個人空間僅能完整還原到原擁有者的個人空間，因為管理員看不到內容。</p>
+        <ul>
+          <li><strong>還原到新資料夾</strong>（預設）：放入獨立資料夾，名稱為目前語言的<em>已還原 &lt;空間&gt; &lt;日期&gt;</em>（對話方塊顯示，可修改），目標可選原空間或其他空間，不替換已有內容。</li>
+          <li><strong>還原到原位置</strong>：直接放入空間。重複使用已有資料夾，重新建立缺失資料夾。開始前顯示目標已有內容的檔案數量，可選擇跳過、保留兩者（還原檔案加編號），或取代內容（目前內容保留為歷史版本）。</li>
+          <li>每個檔案還原時驗證 SHA-256。還原項目繼承目標權限，不重新授予備份記錄的存取權限。歷史版本保留在備份中。無法還原的檔案會列出原因。</li>
+        </ul>
+        <h3 id="backup-drill">伺服器本身遺失時</h3>
+        <p>檔案備份不依賴建立它的伺服器：備份位置中各快照的清單記錄空間、資料夾、檔案和對應內容（<code>.thirtyfile-backups/&lt;id&gt;/</code>，參閱<a href="storage.html#copy-where">目錄結構</a>）。舊伺服器與資料庫遺失後，在新伺服器還原：</p>
+        <ol>
+          <li>安裝 ThirtyFile，使用相同使用者名稱建立需要還原個人空間的帳號。</li>
+          <li>使用相同設定將備份位置新增為儲存位置。原 <code>.thirtyfile-location</code> 檔案屬於舊伺服器，因此新伺服器會拒絕；確認原伺服器已不存在後，先刪除該檔案（在資料夾、儲存桶頂層或伺服器資料夾頂層）。</li>
+          <li>在<strong>控制台 › 備份</strong>選取<strong>在位置上尋找備份…</strong>和該位置。找到的備份會列出並在背景檢查，之後可從完整快照還原。</li>
+        </ol>
+        <p>這只會還原檔案，不會還原整台伺服器：帳號、群組、權限、分享連結、設定和紀錄來自 <code>data</code> 備份（參閱<a href="#backup">備份</a>）；儲存位置和單一登入儲存的密碼需要 <code>secret.key</code>（參閱<a href="#key">下方</a>），否則必須重新輸入。請在 ThirtyFile 以外安全儲存備份位置的設定（金鑰、密碼），以便重新新增。定期演練：將某個資料夾還原到新資料夾，並檢查幾個檔案。</p>
+        <h2 id="restore">還原</h2>
+        <ol>
+          <li>停止 ThirtyFile，在目錄原位置解壓封存檔：<code>sudo tar xzf thirtyfile-backup.tar.gz -C /srv/thirtyfile</code>（Docker Compose 在 <code>compose.yaml</code> 資料夾）。</li>
+          <li>如果備份時未停止服務，把儲存的資料庫放回：將 <code>data/backups/drive-&lt;date&gt;.db</code> 複製到 <code>data/drive.db</code>，刪除 <code>drive.db-wal</code> 和 <code>drive.db-shm</code>。</li>
+          <li>啟動備份時相同或更高版本的 ThirtyFile，登入並開啟幾個檔案，包括近期上傳的檔案。</li>
+        </ol>
+        <p>資料庫也包含簽名登入工作階段與已解鎖分享連結的金鑰：同時還原 <code>secret.key</code>（參閱<a href="#key">下方</a>）時，使用者保持登入；沒有該金鑰時，所有人需重新登入，儲存位置和單一登入需重新輸入密碼。分享連結本身兩種情況下均保持有效。遷移到新伺服器也採用相同流程：在新伺服器安裝、還原備份，位址改變時修改網站網址。</p>
+        <p>定期在另一台電腦測試還原：備份是否可靠，取決於最近一次還原驗證。</p>
+        <h2 id="database-size">資料庫大小</h2>
+        <p>資料庫（<code>data/drive.db</code>）及近期寫入紀錄（<code>drive.db-wal</code>）在啟動和每日維護時歸還不再使用的空間：清空寫入紀錄；長時間讀取（例如備份產生檔案清單）結束後，紀錄不會持續大於 64 MB。新資料庫也歸還刪除內容（如舊紀錄）的空間，僅保留數 MB 供之後寫入。較舊版本建立的資料庫則保留空閒空間供自身重複使用；如需縮小並在之後自動歸還，停止 ThirtyFile，執行 <code>docker compose run --rm thirtyfile compact</code>（或 <code>docker run --rm -v …same volumes… ghcr.io/thirtyfile/thirtyfile compact</code>）。此操作重寫整個資料庫，需約等於資料庫大小的剩餘磁碟空間。</p>
+        <h2 id="key">已儲存密碼的加密金鑰</h2>
+        <p>儲存位置密碼與金鑰、單一登入 client secrets、兩步驟驗證金鑰，以及簽名工作階段和分享連結的金鑰，均加密存入資料庫。加密金鑰位於 <code>data/secret.key</code>（首次啟動建立），或 <code>THIRTYFILE_SECRET_KEY</code>、<code>THIRTYFILE_SECRET_KEY_FILE</code> 指定處。因此僅有資料庫副本無法取得這些秘密。</p>
+        <ul>
+          <li><strong>單獨備份金鑰</strong>，例如儲存到密碼管理器，並排除一般備份（如上方命令）。沒有金鑰仍可還原，但儲存位置和單一登入需重新輸入密碼，所有人必須重新登入。</li>
+          <li>要讓金鑰完全不放在資料目錄，先建立金鑰（<code>openssl rand -hex 32</code>），透過 <code>THIRTYFILE_SECRET_KEY_FILE</code>（Docker secret）或 <code>THIRTYFILE_SECRET_KEY</code> 提供。現有金鑰檔案內容也可採用相同方式。</li>
+          <li><strong>更換金鑰</strong>（例如含金鑰的備份外洩）：停止 ThirtyFile，執行 <code>docker compose run --rm thirtyfile rotate-secret-key</code>（或 <code>docker run --rm -v …same volumes… ghcr.io/thirtyfile/thirtyfile rotate-secret-key</code>）。操作重新加密全部內容，並替換 <code>secret.key</code>。使用 <code>THIRTYFILE_SECRET_KEY</code> 時，該次執行透過 <code>THIRTYFILE_NEW_SECRET_KEY</code> 提供新金鑰，再將設定切換為新值。</li>
+        </ul>
+        <h2 id="safe">安全儲存備份</h2>
+        <p>備份包含檔案、帳號，以及帶有訪客 IP 位址的紀錄；包含 <code>secret.key</code> 時，也包含解密已儲存密碼所需的全部資訊。請像保護密碼一樣保護備份，僅放在管理員能存取的位置。</p>
+        <nav class="next" aria-label="更多指南">
+          <a href="internet.html"><span>上一篇</span>從網際網路存取</a>
+          <a class="forward" href="help.html"><span>下一篇</span>疑難排解</a>
+        </nav>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">原始碼</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">回報問題</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 映像檔</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

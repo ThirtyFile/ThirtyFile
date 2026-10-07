@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ja" data-root="../.." data-page="users">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ユーザーとスペース · ThirtyFile</title>
+    <meta name="description" content="アカウント、個人用・チームスペース、グループ、権限、メール、管理者の閲覧範囲、パスワード再設定。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/users.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/users.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/users.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/users.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/users.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">本文へスキップ</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="サイト">
+          <a href="../index.html#features" class="hide-small">機能</a>
+          <a href="index.html" aria-current="page">ガイド</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">言語 </span><span class="lang-name">日本語</span></summary>
+            <ul>
+              <li><a href="../../docs/users.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="../../zh-TW/docs/users.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/users.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="users.html" hreflang="ja" lang="ja" aria-current="true">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="ガイド">
+        <details open>
+          <summary>すべてのガイド</summary>
+          <p>はじめに</p>
+          <a href="index.html">インストール</a>
+          <a href="first-steps.html">初期設定</a>
+          <p>日常の操作</p>
+          <a href="files.html">ファイルの操作</a>
+          <a href="preview.html">プレビューと編集</a>
+          <a href="sharing.html">共有</a>
+          <a href="account.html">アカウント</a>
+          <a href="webdav.html">ネットワークドライブとして割り当て</a>
+          <p>管理</p>
+          <a href="users.html" aria-current="page">ユーザーとスペース</a>
+          <a href="sign-in.html">シングルサインオン</a>
+          <a href="storage.html">保存場所</a>
+          <a href="logs.html">ログとブランド設定</a>
+          <p>運用</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">インターネットに公開</a>
+          <a href="backup.html">アップグレードとバックアップ</a>
+          <a href="help.html">トラブルシューティング</a>
+          <p>プロジェクト</p>
+          <a href="contributing.html">開発への参加</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+        <h1>ユーザーとスペース</h1>
+        <p class="lead">管理者がコントロールパネルでアカウント、グループ、スペースを管理します。</p>
+        <details class="guide-toc">
+          <summary>このページの内容</summary>
+          <ol>
+            <li><a href="#users">ユーザー</a></li>
+            <li><a href="#security">サインインの安全性</a></li>
+            <li><a href="#groups">グループ</a></li>
+            <li><a href="#spaces">スペース</a></li>
+            <li><a href="#email">通知メール</a></li>
+            <li><a href="#privacy">管理者が見られるもの</a></li>
+            <li><a href="#password">パスワードを忘れた場合</a></li>
+          </ol>
+        </details>
+        <h2 id="users">ユーザー</h2>
+        <p><strong>コントロールパネル › ユーザー</strong> を開きます。右上の検索欄で、ユーザー名、表示名、メールの一部から探せます。</p>
+        <ul>
+          <li>ユーザー名と初期パスワードでアカウントを <strong>作成</strong> します。初回サインインでは、ほかの操作より先に本人がパスワードを選びます。再設定も同じです。再設定は全デバイスからサインアウトし、アプリパスワード、再設定リンク、<a href="sign-in.html#link">リンクしたサインイン方法</a> も削除します。</li>
+          <li><strong>ロール</strong>：管理者はコントロールパネルを開けます。標準ユーザーは開けません。</li>
+          <li><strong>権限</strong>：<strong>編集</strong>（アップロードを含む）、<strong>削除</strong>、<strong>共有</strong>。共有は共有リンク、<strong>ユーザーと共有…</strong>、スペースのメンバー管理を含み、個人用スペースでも必要です。許可がなければ閲覧のみです。一覧の <strong>権限</strong> 列も同じ名前を使います。</li>
+          <li><strong>スペースの容量</strong>：保存できる量。<code>0</code> は無制限です。</li>
+          <li><strong>「マイファイル」を作成</strong>：<a href="#personal">個人用スペース</a> を作るかと、その保存場所。初期値は <strong>コントロールパネル › 全般</strong> に従います。</li>
+          <li>ファイルを削除せずサインインを止めるには <strong>無効化</strong> します。<a href="account.html#app-passwords">アプリパスワード</a> も使えなくなります。</li>
+          <li><strong>2 段階認証のリセット</strong> はスマートフォンと回復コードをなくした人向けです。パスワード再設定と同様に全デバイスからサインアウトし、<a href="account.html#app-passwords">アプリパスワード</a> を削除します。名前の横の盾は有効になっていることを示します。</li>
+          <li><strong>デバイス</strong> はサインイン中のブラウザーを表示します。個別に、または <strong>すべてのデバイスからサインアウト</strong> で全件を終了できます。アクティビティログと本人のサインイン履歴に記録します。</li>
+        </ul>
+        <p><strong>使用済み</strong> 列はごみ箱を含む個人用スペースの使用量を表示し、なければ <strong>「マイファイル」なし</strong> と表示します。</p>
+        <h3 id="personal">個人用スペース</h3>
+        <p><strong>マイファイル</strong> は所有者だけが開けるスペースです。<strong>コントロールパネル › 全般 › ユーザー</strong> で設定します。</p>
+        <ul>
+          <li><strong>新しいユーザーに個人用スペースを作成</strong> は既定でオンです。オフなら、通常は <strong>すべてのファイル</strong> など最初に使えるスペースから始まり、「マイファイル」は表示しません。既に持つ人はそのままです。</li>
+          <li><strong>新しいユーザーの「マイファイル」の場所</strong> は作成先の <a href="storage.html">保存場所</a> です。<strong>既定の場所</strong> は、各ユーザーを追加する時点の既定の場所に従います。</li>
+        </ul>
+        <p>新規ユーザーのダイアログはこの設定から始まり、シングルサインオンでは <a href="sign-in.html#rules">メールドメインの規則</a> で変更できます。後からはユーザーを右クリックするか <strong>編集</strong> を開きます。</p>
+        <ul>
+          <li><strong>「マイファイル」を作成…</strong> は、選んだ場所に今すぐ作成します。</li>
+          <li><strong>「マイファイル」を削除…</strong> は、<a href="#delete">アカウントの削除</a> と同じく、ファイルを別のスペースへ移すか削除するかを選びます。アカウントとほかのスペースへのアクセスは保持します。</li>
+        </ul>
+        <p>ディスクやネットワーク共有がマウントされていないなど、保存場所のフォルダーが使えなくても、ユーザーの追加と初回シングルサインオンはできます。一覧には <strong>マイファイルの作成待ち（保存場所を利用できません）</strong> と表示します。次のサインイン時、またはフォルダー復旧後 1 分以内に作成し、待った理由をサーバーログに記録します。</p>
+        <h3 id="delete">アカウントを削除する</h3>
+        <p>ユーザーを選択して <strong>削除</strong> をクリックします。個人用の <strong>マイファイル</strong> も削除するため、中のファイルをどうするか選びます。</p>
+        <ul>
+          <li><strong>ファイルの移動先</strong> に、他人の個人用スペース、チーム、会社のスペースを選びます。これが既定です。フォルダー構造を保持し、<em>amy のファイル</em> のようなユーザー名に基づく新しいフォルダーに入れます（重複なら番号付き）。ダイアログに名前を表示し、ThirtyFile が作る名前と同じく、操作した人にかかわらずシステムの <a href="first-steps.html#general">既定の言語</a> を使います（ブラウザーに従う場合は英語）。移動先の容量に数え、足りなければ何も削除せず、別のスペースや容量拡大を求めます。コピーしないため大きくても高速ですが、どちらかが <a href="storage.html#folder-spaces">サーバー上のフォルダー</a> なら、アカウント削除前にディスク上で移動します（別ディスクならコピー）。下部のメッセージに進行状況を表示します。ごみ箱は移さず空にします。同僚と共有したフォルダーの共有は維持します。</li>
+          <li><strong>ファイルを完全に削除</strong>。元に戻せません。</li>
+        </ul>
+        <p>どちらの場合も、他スペースに追加したファイルと所有するチームスペースは操作した管理者に引き継ぎ、作成した共有リンクは削除します。</p>
+        <div class="note">ほかを変更せずサインインだけ止めるなら <strong>無効化</strong> してください。ファイルを保持し、共有リンクは再び有効にするまで使えなくなります。</div>
+        <h2 id="security">サインインの安全性</h2>
+        <p><strong>コントロールパネル › 全般 › ユーザー</strong> で設定します。</p>
+        <ul>
+          <li><strong>パスワードのアカウントに 2 段階認証を必須にする</strong>：パスワード後に認証アプリのコードを求めます。未設定の人は入る前に設定し、無効にはできません。有効にすると、自分を除くパスワードで入った未設定の人をサインアウトして、次回に設定させます。シングルサインオンはプロバイダーの認証に従い、<a href="account.html#app-passwords">アプリパスワード</a> はコードなしで引き続き使えます。</li>
+          <li><strong>パスワードの最小文字数</strong>：既定は 6、最大 64 です。それ以降に設定、変更するパスワードに適用します。</li>
+        </ul>
+        <p>設定手順は <a href="account.html#two-factor">アカウント</a> にあります。</p>
+        <h2 id="groups">グループ</h2>
+        <p>グループは部署などのメンバー一覧です。個別に追加せず、グループにスペースやフォルダーへのアクセスを与えます。参加、退出にアクセスも従います。</p>
+        <h2 id="spaces">スペース</h2>
+        <p><strong>コントロールパネル › スペース</strong> でチームスペースの作成、容量上限、保存先を設定します。<strong>別の場所へ移動…</strong> は別の <a href="storage.html#per-space">保存場所</a> へバックグラウンドで移し、<strong>コントロールパネル › 移動ジョブ</strong> に進行状況を表示します。</p>
+        <ul>
+          <li><strong>新しいチームスペース</strong> で <a href="storage.html">保存場所</a> も選びます。変更しなければ既定です。<strong>新しいフォルダースペース</strong> は保存場所に属さない、指定フォルダーを表示します。</li>
+          <li><strong>メンバー</strong> ダイアログから追加し、各人に <a href="sharing.html#people">ロール</a> を与えます。</li>
+          <li>全員の作成を許可するには <strong>コントロールパネル › 全般</strong> で有効にします。作成者と同じ容量上限、既定の保存場所で作り、1 人最大 20 個です。</li>
+        </ul>
+        <h2 id="email">通知メール</h2>
+        <p>共有された、所有・管理するスペースがほぼいっぱい、アクセス期限が近い場合、アプリのベルで全員に知らせます（<a href="account.html#notifications">通知</a>）。メールも送るには <strong>コントロールパネル › メール</strong> に組織のメールサーバーを入力します。</p>
+        <ul>
+          <li><strong>サーバー</strong>、<strong>ポート</strong>、<strong>暗号化</strong>：STARTTLS（通常 587）、最初から TLS（通常 465）、自分のネットワークのリレーならなし（通常 25）。システムの証明書で確認し、<strong>自己署名証明書を許可</strong> は自分のネットワークで確認を省きます。暗号化や証明書確認がない場合はプライベートアドレス（<code>10.x</code>、<code>192.168.x</code>、同じマシンなど）へのみ送り、それ以外はテストで知らせます。</li>
+          <li>必要なら <strong>ユーザー名</strong> と <strong>パスワード</strong>。暗号化して保存し、再表示しません。空欄なら保持します。サーバー、ポート、暗号化、証明書確認、ユーザー名を変えた場合は再入力してください。保存した値は元のサーバーにのみ送ります。</li>
+          <li><strong>送信元アドレス</strong>：サイト名（<strong>ブランド設定</strong>）を送信者名として、このアドレスから送ります。サーバー側で送信を許可する必要があります。</li>
+          <li><strong>通知をメールで送信</strong> をオンにして <strong>保存</strong> します。<strong>テストメールを送信</strong> は未保存でもページの設定を使い、問題があれば理由を表示します。</li>
+        </ul>
+        <p>各人の通知設定のアドレスへ送ります。シングルサインオンのアカウントは、設定後の初回サインインで連携先の確認済みアドレスを使います。リンクは <strong>コントロールパネル › 全般</strong> の <strong>サイトの URL</strong> で作り、未設定ならリンクなしです。送信できないメールはサーバーログに記録します。</p>
+        <h2 id="privacy">管理者が見られるもの</h2>
+        <p>管理者は会社と全チームのスペース、ごみ箱を管理できます。個人用スペースは開けず内容も見られず、容量だけ見られます。ただし <a href="#delete">アカウントの削除</a> や <a href="#personal">「マイファイル」の削除</a> では、開けるスペースへ移せます。<a href="storage.html#per-space">別の保存場所へ移す</a> こともでき、コピーできないファイルは名前を伏せて表示します。</p>
+        <p><strong>コントロールパネル › すべての共有リンク</strong> で公開リンクを確認し、公開すべきでないものを取り消せます。ほかの人の個人用スペースのリンクは作成者、設定、使用回数のみで、アドレスや対象は見せません。編集はできず削除のみです。アクセスログも同じ情報を省略します。</p>
+        <p><a href="logs.html#logs">アクティビティログ</a> は、ほかの人の個人用スペースで誰が何をいつ行ったかを示しますが、対象のファイルやフォルダーは、検索、CSV、アーカイブでも伏せます。フォルダー上の個人用スペースの変更確認は、スキップ件数だけを示し、対象名もフォルダーの場所も示しません。エラー報告はすべての言語で引用された名前を省略します。</p>
+        <h2 id="password">パスワードを忘れた場合</h2>
+        <p><a href="#email">メールサーバー</a> と <strong>コントロールパネル › 全般</strong> の <strong>サイトの URL</strong> を設定すると、サインイン画面の <strong>パスワードを忘れた場合</strong> が使えます。ユーザー名かメールを入力すると、変更リンクを送ります。リクエストのアドレスではなくサイトの URL で作り、有効期間は 1 時間で 1 回のみ、パスワードとメールのあるアカウントのみ対象です。存在してもしなくても同じ応答を返します。変更すると全デバイスからサインアウトし、アプリパスワードを削除します。どの方法での変更、再設定でも、それ以前の再設定リンクと 2 段階認証待ちのサインインを終了します。</p>
+        <p>それ以外やメールのないアカウントは、管理者が <strong>コントロールパネル › ユーザー</strong> で再設定します。管理者自身が忘れた場合は <a href="help.html#password">トラブルシューティング</a> を参照してください。</p>
+        <nav class="next" aria-label="その他のガイド">
+          <a href="webdav.html"><span>前へ</span>ネットワークドライブとして割り当て</a>
+          <a class="forward" href="sign-in.html"><span>次へ</span>シングルサインオン</a>
+        </nav>
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">ガイド</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">ソースコード</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">問題を報告</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker イメージ</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

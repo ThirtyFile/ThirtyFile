@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="ja" data-root="../.." data-page="backup">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>アップグレードとバックアップ · ThirtyFile</title>
+    <meta name="description" content="Docker でのアップグレード、バージョンの選択、データベースとファイルのバックアップ、復元、暗号化キーの保管。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/backup.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/backup.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/backup.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/backup.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/backup.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">本文へスキップ</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="サイト">
+          <a href="../index.html#features" class="hide-small">機能</a>
+          <a href="index.html" aria-current="page">ガイド</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">言語 </span><span class="lang-name">日本語</span></summary>
+            <ul>
+              <li><a href="../../docs/backup.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="../../zh-TW/docs/backup.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/backup.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="backup.html" hreflang="ja" lang="ja" aria-current="true">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="ガイド">
+        <details open>
+          <summary>すべてのガイド</summary>
+          <p>はじめに</p>
+          <a href="index.html">インストール</a>
+          <a href="first-steps.html">初期設定</a>
+          <p>日常の操作</p>
+          <a href="files.html">ファイルの操作</a>
+          <a href="preview.html">プレビューと編集</a>
+          <a href="sharing.html">共有</a>
+          <a href="account.html">アカウント</a>
+          <a href="webdav.html">ネットワークドライブとして割り当て</a>
+          <p>管理</p>
+          <a href="users.html">ユーザーとスペース</a>
+          <a href="sign-in.html">シングルサインオン</a>
+          <a href="storage.html">保存場所</a>
+          <a href="logs.html">ログとブランド設定</a>
+          <p>運用</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">インターネットに公開</a>
+          <a href="backup.html" aria-current="page">アップグレードとバックアップ</a>
+          <a href="help.html">トラブルシューティング</a>
+          <p>プロジェクト</p>
+          <a href="contributing.html">開発への参加</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+        <h1>アップグレードとバックアップ</h1>
+        <p class="lead">ThirtyFile を最新に保ち、安全な場所にデータのコピーを保存します。</p>
+        <details class="guide-toc">
+          <summary>このページの内容</summary>
+          <ol>
+            <li><a href="#upgrade">アップグレード</a></li>
+            <li><a href="#backup">バックアップ</a></li>
+            <li><a href="#file-backups">別の場所へのファイルバックアップ</a></li>
+            <li><a href="#restore">復元</a></li>
+            <li><a href="#database-size">データベースの容量</a></li>
+            <li><a href="#key">保存パスワードの暗号化キー</a></li>
+            <li><a href="#safe">バックアップを安全に保つ</a></li>
+          </ol>
+        </details>
+        <h2 id="upgrade">アップグレード</h2>
+        <p>先に <a href="#backup">バックアップ</a> してください。ファイルと設定は保持し、新しいバージョンの起動時にデータベースを更新します。変更前に <code>data/backups/drive-before-&lt;version&gt;.db</code> にコピーを保存します（最新 3 件を保持）。</p>
+        <h3>docker run</h3>
+        <pre><code>docker pull ghcr.io/thirtyfile/thirtyfile:latest
+docker stop thirtyfile && docker rm thirtyfile
+docker run -d --name thirtyfile --restart unless-stopped …   # the same options as when you installed it</code></pre>
+        <h3>Docker Compose</h3>
+        <pre><code>docker compose pull && docker compose up -d</code></pre>
+        <p>リリースページの <code>compose.yaml</code> は <code>ghcr.io/thirtyfile/thirtyfile:0.4</code> のように、そのリリース系列の修正を受け取ります。新しい系列へは、リリースノートを読んでから <code>image:</code> のタグを <code>:0.5</code> などに変え、同じコマンドを実行します。</p>
+        <p>0.4.0 以降は同じ <code>data</code> と <code>storage</code> で起動して、その場で更新できます。0.3 以前はその後にデータベースを作り直したため更新できません。空の <code>data</code> と <code>storage</code> フォルダーで新しい版をインストールし、ファイルをコピーしてください。古いデータで起動すると、<code>data</code> と <code>storage</code> に何も書く前に停止し、ログに理由を示すので、データは変わりません。新しい版が変更したデータベースでも、明確なメッセージで停止します（<a href="#downgrade">古い版に戻す</a>）。</p>
+        <h3>取得するバージョン</h3>
+        <p><code>ghcr.io/thirtyfile/thirtyfile</code> と <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub の <code>thirtyfile/thirtyfile</code></a> は同じ検証済みイメージとタグを提供します。倉庫を変えるには、コマンドや Compose のイメージ名だけを変え、タグとデータボリュームは保持します。署名付き GitHub 来歴証明は GHCR に付くため、Docker Hub のコピーを確認するときは、一致する digest を GHCR で検証してください。</p>
+        <div class="table-scroll"><table><thead><tr><th>タグ</th><th>内容</th></tr></thead><tbody>
+          <tr><td><code>1</code></td><td>同じメジャー版の最新リリース（1.0.0 以降）。機能と修正を受け取り、互換性に影響する 2.0.0 へは移らないため、自動更新向けです</td></tr>
+          <tr><td><code>latest</code></td><td>新しいメジャー版を含む最新リリース。更新前にノートを読んでください</td></tr>
+          <tr><td><code>1.2</code>、<code>1.2.3</code></td><td>リリース系列、または正確な版。次へ進む時期を自分で決める場合</td></tr>
+          <tr><td><code>1.2.3-rc.1</code></td><td>今後の変更を試すプレリリース。独自の番号のみで提供し、ほかのタグはプレリリースを指しません</td></tr>
+        </tbody></table></div>
+        <p>1.0.0 より前にメジャー版のタグはありません。0.x はどのリリースでも動作が変わり得るため、<code>0.4</code> のような系列が最も近いものです。<a href="https://github.com/ThirtyFile/ThirtyFile/releases">リリースページ</a> に変更一覧、<code>compose.yaml</code>、Linux amd64、arm64 向けの単体サーバーと <code>SHA256SUMS</code> の SHA-256 チェックサムがあります。</p>
+        <p>各イメージに内容一覧（SBOM）とビルド方法の署名付き記録があります。ThirtyFile の正式ワークフローで作ったかは <a href="https://cli.github.com/">GitHub CLI</a> で検証できます。</p>
+        <pre><code>gh attestation verify oci://ghcr.io/thirtyfile/thirtyfile:1.2.3 --repo ThirtyFile/ThirtyFile
+gh attestation verify thirtyfile-1.2.3-linux-amd64 --repo ThirtyFile/ThirtyFile</code></pre>
+        <p>ライブラリのライセンスは、イメージ内の <code>/usr/share/licenses/thirtyfile/THIRD-PARTY-NOTICES</code> とリリースページの <code>THIRD-PARTY-NOTICES</code> にあります。</p>
+        <h3 id="downgrade">古い版に戻す</h3>
+        <p>新しい版で変更したデータベースでは古い版は起動しません。停止し、<code>data/drive.db</code> を更新前の <code>data/backups/drive-before-&lt;new version&gt;.db</code> に置き換え、あれば <code>drive.db-wal</code> と <code>drive.db-shm</code> を削除してから古いイメージを起動します。更新後のアカウント、アップロード、名前変更などは失われます。更新後のファイルは保存フォルダーに残りますが、一覧には載りません。</p>
+        <h2 id="backup">バックアップ</h2>
+        <p><code>data</code> と <code>storage</code> を合わせて、ファイル、アカウント、設定、ログを含みます。<code>storage/company</code>、<code>storage/teams</code>、<code>storage/users</code> は通常のファイルなので、一般のバックアップツールでコピーし、個別に復元できます。共有リンク、権限、ごみ箱、以前のバージョンにはデータベースも必要です。<code>data</code> のデータベースは常時書き込むため、稼働中に <code>drive.db</code> をコピーせず、バックアップコマンドを使うか停止してコピーしてください。</p>
+        <h3 id="running">停止せずに行う</h3>
+        <ol>
+          <li>整合性のあるデータベースのコピーを保存します（上書き不可なので毎回別名を使います）。
+            <pre><code>docker exec thirtyfile thirtyfile backup /data/backups/drive-$(date +%F).db</code></pre></li>
+          <li><code>storage</code> と、<code>drive.db*</code>、<code>thumbs</code>、<code>tmp</code> を除いた <code>data</code> をコピーします（サムネイルは再作成でき、<code>tmp</code> は進行中のアップロードだけです）。
+            <pre><code>sudo tar czf thirtyfile-$(date +%F).tar.gz -C /srv/thirtyfile \
+  --exclude='data/drive.db*' --exclude=data/secret.key --exclude=data/thumbs --exclude=data/tmp data storage</code></pre></li>
+        </ol>
+        <p>アーカイブ作成中のアップロードは、アーカイブだけ、または保存データベースだけに含まれる場合がありますが、どちらも復元できます。毎晩実行するなら両コマンドをスクリプトにし、<code>0 3 * * * /usr/local/bin/thirtyfile-backup.sh</code> のように cron に追加して、数週間を過ぎたアーカイブもそこで削除します。</p>
+        <h3>ThirtyFile を停止して行う</h3>
+        <pre><code>docker stop thirtyfile
+sudo tar czf thirtyfile-backup.tar.gz -C /srv/thirtyfile data storage
+docker start thirtyfile</code></pre>
+        <p>Docker Compose なら <code>compose.yaml</code> のフォルダーで <code>docker compose stop</code>、<code>docker compose start</code> を使い、その場所からの <code>data storage</code> を指定します。</p>
+        <div class="note"><strong>別途バックアップするもの：</strong><code>/storage</code> 以外のマウント先（<em>ローカルフォルダー</em> の NAS、フォルダースペース）と、S3、SFTP、FTP のファイルは、その保存先のツールで保存してください。このバックアップはファイル一覧とアクセス権を持ちますが、内容は含みません。</div>
+        <h3 id="copies">保存場所のファイルのコピー</h3>
+        <p>ThirtyFile 自身でも、<strong>コントロールパネル › 保存場所</strong> の <strong>すべてをコピー…</strong> で一度（<a href="storage.html#copy">別の場所へ全ファイルをコピー</a>）、または <a href="#file-backups">ファイルのバックアップ</a> で繰り返しコピーできます。<a href="storage.html#replicas">ミラー</a> は現在の状態を他の場所にも保持して障害時に読み取れるようにしますが、過去を残さないためバックアップの代わりにはなりません。サーバー全体ではなくファイルのコピーなので、アカウント、設定、共有リンク、ログには上記の <code>data</code> のバックアップを続けてください。</p>
+        <h2 id="file-backups">別の場所へのファイルバックアップ</h2>
+        <p>1 つの保存場所のスペースのスナップショットを、NAS、別のディスク、S3、SFTP、FTP に保存します。各スナップショットは、ある時点のフォルダー、ファイル、ごみ箱、以前のバージョンを持つ復元ポイントです。指定期間だけ過去を保持し、誤って削除、変更したファイルを戻せます。管理者のみ表示、管理できます。</p>
+        <h3 id="backup-make">バックアップを作る</h3>
+        <p><strong>コントロールパネル › バックアップ</strong> の <strong>新しいバックアップ…</strong>（または保存場所のメニューの <strong>バックアップ…</strong>）で設定します。</p>
+        <ul>
+          <li><strong>バックアップ元</strong> と <strong>保存先</strong>：対象と保存先の場所。同じ場所や、一方が他方の内部にあるものは拒否します。同じディスクやサービス内は許可しますが、その障害からは守れないとダイアログで示します。1 つの場所から複数へ、それぞれ別のバックアップを作れます。</li>
+          <li><strong>スペース</strong>：後で追加するものを含む全スペース（既定）、または選択したスペース。オフにしなければ以前のバージョンとごみ箱を含みます。</li>
+          <li><strong>タイミング</strong>：<ul>
+              <li><em>変更後すぐ</em>：アップロード、編集、名前変更、移動、削除、アクセス変更を保存時に数えます。数秒変更がなければ作成し、1 件ずつ実行します。途中の変更は次の 1 件になります。同時ではなく少し遅れて保護するため、ページに遅れを表示します。</li>
+              <li><em>スケジュール</em>：指定分、時間間隔、毎日、指定曜日の時刻を、選んだタイムゾーンで設定します（次の 3 回を表示）。夏時間開始で存在しない時刻はその日をスキップし、終了で 2 回ある時刻は 1 回だけです。停止後は 1 件で追いつき、未実行回数分は作りません。</li>
+              <li><em>両方</em>（既定）：変更後とスケジュールの両方で実行します。</li>
+            </ul></li>
+          <li><strong>保存と確認</strong>：保存日数（既定 30）、必ず残す最新件数（最低 1）、作成されないと管理者へ通知する時間（48 時間）、読み直して検証する頻度（7 日）、コピーの速度制限（なし）を指定します。</li>
+        </ul>
+        <p>初回はすぐに全件をコピーし、以後はまだ保存先にない内容だけをコピーします（どのスナップショットにも同じ内容は一度だけ保存）。コピーや復元と合わせて 1 ジョブずつバックグラウンドで動き、ページを閉じたり再起動しても続きます。</p>
+        <h3 id="backup-consistency">スナップショットに含まれるもの</h3>
+        <ul>
+          <li><strong>コンテンツストアのスペース</strong>（S3、SFTP、FTP）：一覧を作った時点の正確な内容。その後に削除した内容も、コピーまで削除を保留します。</li>
+          <li><strong>フォルダースペース</strong>（ストレージ、<em>ローカルフォルダー</em>）：先に SMB など他プログラムの変更を調べ、読み取り中の変更も確認し、変わったファイルは読み直します。書き込み続けるログやメールボックスは全体を止めず、数回後に最後に丸ごと読めた内容を保存し、ジョブにコピー中に変更されたと表示します。一度も全体を読めなければそのスナップショットから除外し同様に表示します。個人用スペースでは名前を伏せます。各ファイルは完全ですが、別々の時刻に変わるファイル全体を一瞬に揃えるものではありません。他プログラムの変更は即時ではなく次の確認で検出します。</li>
+          <li>完了したものだけが有効です。全内容のコピーと検証後、最後に manifest と完了マーカーを順に書きます。全部コピーできない場合は停止し、失敗したものを表示します（個人用の名前は伏せます）。何も削除しません。</li>
+        </ul>
+        <h3 id="backup-health">状態を確認する</h3>
+        <p>各バックアップに <em>保護済み</em>（最新が全変更を含む）、<em>変更待ち</em> と待ち時間、<em>バックアップ中</em>、<em>保存場所を待機中</em>（接続不可。数分ごとと復旧検出時に再試行）、<em>失敗</em>（エラーで停止。1 時間ごと、または <strong>今すぐバックアップ</strong> で再試行）、<em>期限超過</em>（設定時間を超えて新規作成なし）、<em>一時停止</em>、保護済みの時点を表示します。失敗、場所待ち、期限超過の開始と復旧時に管理者へ一度ずつ通知し、設定済みならメールも送ります。<strong>詳細</strong> に復元ポイント、ジョブ、エラーを表示します。完了ジョブは 90 日、各バックアップ最大最新 1,000 件で、最新 20 件は古くても残します。失敗ジョブは再開、キャンセルまで残します。</p>
+        <p><strong>バックアップを一時停止</strong> は新規作成を止め、既存分を保持します。<strong>バックアップの削除</strong> は確認後に停止し、全スナップショットとフォルダーを削除します。一時停止はできますがキャンセルはできません。バックアップを持つ保存場所は、先にバックアップを削除する必要があります。</p>
+        <h3 id="backup-size">必要な容量</h3>
+        <p>複数に含まれる内容は一度だけ保存するので、スペース容量と、保存期間中の変更、削除分ほどが必要です。作成後に保存期間外の古いものを削除し（最新の保持分は除く）、残りにない内容を削除します。<strong>コントロールパネル › ストレージ使用量</strong> に場所ごとのバックアップ容量を表示します。</p>
+        <h3 id="backup-restore">バックアップから復元する</h3>
+        <p>既存内容を再利用する前に検証します。欠落、破損したコンテンツストアの内容は、確認済みバックアップから回復し、同じ内容を共有するファイルも保持します。重複名の選択は各ファイルの書き込み時に適用し、読み取り中に新たに重複したものも対象です。</p>
+        <p>バックアップの <strong>復元…</strong> で、復元ポイントとスペースを選びます。会社、チームはフォルダーや個別アイテムを選べます。個人用は管理者が内容を見られないため、全体を所有者の個人用スペースにのみ戻します。</p>
+        <ul>
+          <li><strong>新しいフォルダーへ</strong>（既定）：同じか別のスペースの独自フォルダーへ入れます。名前は利用者の言語で <em>&lt;space&gt; の復元 &lt;date&gt;</em> のようになり、ダイアログで表示、変更できます。既存のものは置き換えません。</li>
+          <li><strong>元の場所へ</strong>：スペース自体へ戻し、既存フォルダーを使い、不足分を作ります。開始前に重複件数を表示します。スキップ、両方保持（復元側に番号）、内容を置き換え（現内容を以前のバージョンに保存）を選べます。</li>
+          <li>各ファイルの SHA-256 を確認します。権限は移動先に従い、記録されていたアクセスは再付与しません。以前のバージョンはバックアップに残ります。戻せないファイルは理由とともに表示します。</li>
+        </ul>
+        <h3 id="backup-drill">サーバー自体を失った場合</h3>
+        <p>ファイルのバックアップは元サーバーに依存しません。保存先の manifest はスペース、フォルダー、ファイル、内容を持ちます（<code>.thirtyfile-backups/&lt;id&gt;/</code>、<a href="storage.html#copy-where">構造</a> を参照）。サーバーとデータベースを失った後は次の手順です。</p>
+        <ol>
+          <li>ThirtyFile をインストールし、戻す個人用スペースのアカウントを同じユーザー名で作ります。</li>
+          <li>バックアップの場所を同じ設定で追加します。<code>.thirtyfile-location</code> は旧サーバーの場所を示すため、新しい登録を拒否します。旧サーバーがなくなっているので、先にそのファイルをフォルダー、バケット最上位、サーバーフォルダーから削除します。</li>
+          <li><strong>コントロールパネル › バックアップ</strong> の <strong>保存場所からバックアップを検索…</strong> でその場所を選びます。検出分を一覧にし、バックグラウンドで検証後、完全なスナップショットから復元できます。</li>
+        </ol>
+        <p>戻るのはファイルです。アカウント、グループ、権限、共有リンク、設定、ログは <code>data</code> のバックアップから（<a href="#backup">バックアップ</a>）、保存場所やシングルサインオンのパスワードは <code>secret.key</code>（<a href="#key">以下</a>）または再入力が必要です。場所のキーとパスワードを ThirtyFile の外に安全に保管してください。ときどき新しいフォルダーに復元し、数ファイルを確認して練習してください。</p>
+        <h2 id="restore">復元</h2>
+        <ol>
+          <li>停止して元の場所へ展開します。<code>sudo tar xzf thirtyfile-backup.tar.gz -C /srv/thirtyfile</code>（Compose は <code>compose.yaml</code> の場所）。</li>
+          <li>稼働中のバックアップなら、<code>data/backups/drive-&lt;date&gt;.db</code> を <code>data/drive.db</code> へコピーし、<code>drive.db-wal</code> と <code>drive.db-shm</code> を削除します。</li>
+          <li>バックアップ時と同じか新しい版を起動し、サインインして、最近アップロードしたものを含む数ファイルを開きます。</li>
+        </ol>
+        <p>データベースにはセッションと解除済み共有リンクの署名シークレットもあります。<code>secret.key</code>（<a href="#key">以下</a>）も戻せばサインイン状態を保持します。なければ全員が再サインインし、保存場所とシングルサインオンのパスワードも再入力します。共有リンク自体はどちらでも使えます。新サーバーへの移行も同じで、インストール、復元し、アドレスが変わったらサイトの URL を更新します。</p>
+        <p>別のコンピューターでときどき復元を試してください。バックアップの信頼性は、最後に復元できた確認に基づきます。</p>
+        <h2 id="database-size">データベースの容量</h2>
+        <p><code>data/drive.db</code> と最近の書き込みログ <code>drive.db-wal</code> は、起動時と毎日、不要な容量を返します。ログを空にし、バックアップの一覧作成など長い読み取りの後は 64 MB を超えたままになりません。新しいデータベースは古いログなどの削除領域も返し、次の書き込み用に数 MB を残します。古い版のデータベースは領域を次の書き込みに再利用するため、縮小して以後も返すには、停止して <code>docker compose run --rm thirtyfile compact</code>（または <code>docker run --rm -v …same volumes… ghcr.io/thirtyfile/thirtyfile compact</code>）を実行します。全体を書き直すので同程度の空き容量が必要です。</p>
+        <h2 id="key">保存パスワードの暗号化キー</h2>
+        <p>保存場所のパスワード、キー、シングルサインオンのシークレット、2 段階認証のシークレット、セッションと共有リンクの署名シークレットは暗号化して保存します。キーは初回作成の <code>data/secret.key</code>、または <code>THIRTYFILE_SECRET_KEY</code>、<code>THIRTYFILE_SECRET_KEY_FILE</code> です。データベースだけを入手しても読めません。</p>
+        <ul>
+          <li><strong>キーは別にバックアップ</strong> し、パスワード管理ツールなどへ入れ、通常のバックアップからは除外します（上記の例）。なくても復元できますが、パスワードの再入力と全員の再サインインが必要です。</li>
+          <li>データフォルダーに置かない場合は、<code>openssl rand -hex 32</code> で作り、Docker secret の <code>THIRTYFILE_SECRET_KEY_FILE</code> か <code>THIRTYFILE_SECRET_KEY</code> で渡します。既存キーファイルの内容も同じように使えます。</li>
+          <li><strong>新しいキー</strong> にする場合（キー入りバックアップを失った場合など）は停止し、<code>docker compose run --rm thirtyfile rotate-secret-key</code>（または <code>docker run --rm -v …same volumes… ghcr.io/thirtyfile/thirtyfile rotate-secret-key</code>）を実行します。すべてを再暗号化し、<code>secret.key</code> を置き換えます。<code>THIRTYFILE_SECRET_KEY</code> なら、その実行時の <code>THIRTYFILE_NEW_SECRET_KEY</code> に新キーを渡してから、通常設定も変更してください。</li>
+        </ul>
+        <h2 id="safe">バックアップを安全に保つ</h2>
+        <p>バックアップにはファイル、アカウント、IP アドレスを含むログがあり、<code>secret.key</code> があれば保存パスワードを読むための情報もあります。パスワードと同様に扱い、管理者だけがアクセスできる場所に保存してください。</p>
+        <nav class="next" aria-label="その他のガイド">
+          <a href="internet.html"><span>前へ</span>インターネットに公開</a>
+          <a class="forward" href="help.html"><span>次へ</span>トラブルシューティング</a>
+        </nav>
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">ガイド</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">ソースコード</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">問題を報告</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker イメージ</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>
