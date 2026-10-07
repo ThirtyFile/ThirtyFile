@@ -1,0 +1,54 @@
+# Copies an existing verified release to Docker Hub, including releases made before the mirror was added.
+name: Mirror a release to Docker Hub
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Published version, such as 0.6.0 (without v)"
+        type: string
+        required: true
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+  attestations: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check Docker Hub credentials
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          test "$GITHUB_REF" = refs/heads/main || { echo "::error::Mirror releases from main."; exit 1; }
+          test -n "$DOCKERHUB_USERNAME" && test -n "$DOCKERHUB_TOKEN" || {
+            echo "::error::Set the DOCKERHUB_USERNAME Actions variable and DOCKERHUB_TOKEN secret first."
+            exit 1
+          }
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: docker.io
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Verify and mirror the released image
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/publish-dockerhub.mjs --released

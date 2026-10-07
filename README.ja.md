@@ -7,6 +7,7 @@
 [![Build](https://github.com/ThirtyFile/ThirtyFile/actions/workflows/build.yml/badge.svg)](https://github.com/ThirtyFile/ThirtyFile/actions/workflows/build.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Docker image](https://img.shields.io/badge/docker-ghcr.io%2Fthirtyfile%2Fthirtyfile-2563eb?logo=docker&logoColor=white)](https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile)
+[![Docker Hub](https://img.shields.io/badge/docker-thirtyfile%2Fthirtyfile-2563eb?logo=docker&logoColor=white)](https://hub.docker.com/r/thirtyfile/thirtyfile)
 
 Windows のエクスプローラーと同じ見た目と操作で、ブラウザーから使えるセルフホスト型のファイルマネージャーです。
 
@@ -39,6 +40,8 @@ docker run -d --name thirtyfile --restart unless-stopped \
 ```
 
 **Docker Compose**
+
+[Docker Hub](https://hub.docker.com/r/thirtyfile/thirtyfile) でも同じイメージを提供しています。上のコマンドまたは Compose の `image:` 行で `ghcr.io/thirtyfile/thirtyfile` を `thirtyfile/thirtyfile` に置き換え、バージョンタグはそのままにしてください。
 
 ```bash
 curl -fLO https://github.com/ThirtyFile/ThirtyFile/releases/latest/download/compose.yaml
