@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="zh-TW" data-root="../.." data-page="storage">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>儲存位置 · ThirtyFile</title>
+    <meta name="description" content="設定本機資料夾、S3、SFTP 與 FTP 儲存位置；搬移空間、備份與鏡像、資料夾空間、儲存用量與離線處理。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/storage.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/storage.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/storage.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/storage.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/storage.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要內容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="網站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">語言 </span><span class="lang-name">繁體中文</span></summary>
+            <ul>
+              <li><a href="../../docs/storage.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="storage.html" hreflang="zh-TW" lang="zh-TW" aria-current="true">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/storage.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../../ja/docs/storage.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>開始使用</p>
+          <a href="index.html">安裝</a>
+          <a href="first-steps.html">初次設定</a>
+          <p>日常使用</p>
+          <a href="files.html">檔案操作</a>
+          <a href="preview.html">預覽與編輯</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的帳號</a>
+          <a href="webdav.html">連線為網路磁碟機</a>
+          <p>管理</p>
+          <a href="users.html">使用者與空間</a>
+          <a href="sign-in.html">單一登入</a>
+          <a href="storage.html" aria-current="page">儲存位置</a>
+          <a href="logs.html">紀錄與品牌</a>
+          <p>架設與維運</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">從網際網路存取</a>
+          <a href="backup.html">升級與備份</a>
+          <a href="help.html">疑難排解</a>
+          <p>專案</p>
+          <a href="contributing.html">參與貢獻</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+        <h1>儲存位置</h1>
+        <p class="lead">選擇檔案內容的儲存位置。不同空間可以使用不同的位置。</p>
+        <details class="guide-toc">
+          <summary>本頁內容</summary>
+          <ol>
+            <li><a href="#types">類型</a></li>
+            <li><a href="#layout">檔案存放在哪裡</a></li>
+            <li><a href="#add">新增位置</a></li>
+            <li><a href="#per-space">將空間搬移到其他位置</a></li>
+            <li><a href="#copy">將全部內容複製到其他位置</a></li>
+            <li><a href="#replicas">鏡像：在多個位置保有相同檔案</a></li>
+            <li><a href="#folder-spaces">資料夾空間：將伺服器資料夾作為空間</a></li>
+            <li><a href="#check">檢查位置中的內容</a></li>
+            <li><a href="#usage">儲存用量與效能</a></li>
+            <li><a href="#offline">位置離線時</a></li>
+          </ol>
+        </details>
+
+        <h2 id="types">類型</h2>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>類型</th><th>適用情況</th></tr></thead>
+            <tbody>
+              <tr><td><strong>本機資料夾</strong></td><td>儲存資料夾，或掛載到容器內的其他資料夾，例如 NAS</td></tr>
+              <tr><td><strong>S3 相容服務</strong></td><td>AWS S3、Cloudflare R2、Backblaze B2、Wasabi、RustFS 等服務</td></tr>
+              <tr><td><strong>SFTP</strong></td><td>使用密碼或私密金鑰連線的伺服器（建議使用 Ed25519 金鑰，而非 RSA）</td></tr>
+              <tr><td><strong>FTP / FTPS</strong></td><td>較舊的檔案伺服器</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="layout">檔案存放在哪裡</h2>
+        <p>在儲存資料夾與每個<em>本機資料夾</em>位置中，每個空間都是一般資料夾，裡面的檔案也都是保留原本名稱的一般檔案。開啟 <code>/storage</code>（<code>compose.yaml</code> 旁的 <code>storage</code> 資料夾），就能找到所有內容：</p>
+        <pre><code>/storage/company/…              the company space "All files"
+/storage/teams/&lt;space name&gt;/…   team spaces
+/storage/users/&lt;user name&gt;/…    each user's "My files"</code></pre>
+        <p>建立空間時，系統會在所選儲存位置的資料夾內建立它的資料夾，通常是預設位置（若選擇已新增為<em>本機資料夾</em>位置的 NAS，則可能是 <code>/nas/teams/…</code>）。這些是<a href="#folder-spaces">資料夾空間</a>：其他程式、SMB 或掃描器複製進去的檔案會出現在 ThirtyFile，網頁上的變更也會直接套用到資料夾。</p>
+        <ul>
+          <li><strong>名稱。</strong>資料夾以空間或使用者命名。檔案名稱不允許的字元會改成 <code>_</code>；ThirtyFile 會隱藏的名稱（例如 <code>desktop.ini</code>）前面會加上 <code>_</code>。若同名空間、手動建立的資料夾或已刪除空間留下的資料夾已占用該名稱，新資料夾會加上編號，例如 <code>teams/Sales (2)</code>。</li>
+          <li><strong>重新命名。</strong>重新命名空間不會改變資料夾名稱，因此依賴其路徑的程式、SMB 分享與備份仍可使用。<strong>控制台 › 空間管理</strong>會顯示每個空間的資料夾。</li>
+          <li><strong>刪除。</strong>刪除空間，或刪除使用者及其檔案，只會從 ThirtyFile 移除它們：資料夾與檔案仍留在磁碟上，由你決定保留或刪除。同名的新空間或使用者會取得新的資料夾，不會取得舊檔案。將已刪除使用者的檔案移到另一個空間時，磁碟上的檔案也會移動。</li>
+          <li><strong>S3、SFTP 與 FTP</strong>則使用內容儲存區：以檔案內容產生名稱（<code>ab/cd/…</code>），原本的名稱與資料夾結構只保存在 ThirtyFile 的資料庫。若以原本的資料夾結構儲存，在那裡重新命名資料夾就必須複製裡面的每個檔案。當這類位置是預設位置時，新空間會使用內容儲存區，之後仍可<a href="#per-space">移到其他位置</a>。</li>
+        </ul>
+
+        <h2 id="add">新增位置</h2>
+        <ol>
+          <li>開啟<strong>控制台 › 儲存位置</strong>，按一下<strong>新增儲存位置</strong>。</li>
+          <li>選擇類型，填入位址與登入資訊。</li>
+          <li>按一下<strong>測試連線</strong>。系統會寫入、讀回並刪除一個小檔案；測試成功後才能儲存位置。只能寫入但無法刪除檔案的金鑰或帳號不會通過測試，因為 ThirtyFile 將無法清除已刪除的檔案。<em>本機資料夾</em>若尚不存在，儲存時會建立它（參閱<a href="#not-mounted">未掛載的磁碟與分享</a>）。S3、SFTP 與 FTP 在儲存時會放入一個小型 <code>.thirtyfile-location</code> 檔案（參閱<a href="#one-place">一個地方只能有一個位置</a>）。</li>
+          <li>若新空間應建立在這裡，將它設為<strong>預設</strong>。</li>
+        </ol>
+        <p>之後編輯位置時，只要伺服器、帳號、儲存桶、SFTP 主機金鑰與憑證檢查設定都未變，已儲存的密碼或金鑰就會保留。變更其中任何一項或重設主機金鑰後，必須重新輸入密碼或金鑰。</p>
+        <p>預設位置只決定新空間建立在哪裡：使用者的「我的檔案」、團隊空間，以及新伺服器上的「全部檔案」。建立團隊空間時可以選擇其他位置，新使用者的「我的檔案」也可以有個別位置（參閱<a href="users.html#personal">個人空間</a>）。每個空間會留在建立時的位置，因此變更預設位置不會搬移現有空間，新檔案也會繼續存到舊檔案所在的位置。只有<a href="#per-space">搬移空間</a>才會改變位置。</p>
+
+        <h3 id="list">清單顯示的資訊</h3>
+        <ul>
+          <li><strong>已使用空間</strong>：該位置上各空間的檔案。資料夾空間使用最近一次檢查時的資料夾檔案大小；內容儲存區則計算所存內容。多個檔案內容相同時只計算一次。<a href="#usage">儲存用量</a>提供歷史紀錄。</li>
+          <li><strong>可用空間</strong>：儲存資料夾與<em>本機資料夾</em>位置會顯示所在磁碟的剩餘空間與容量。</li>
+          <li><strong>檔案與空間</strong>：該位置的資料夾空間在最近一次檢查時的檔案數量，加上內容儲存區中的內容數量（將游標移到數字上可分別查看），以及該位置上的空間數量。按一下空間數量可列出空間的類型、擁有者與大小，不會顯示裡面的內容。</li>
+        </ul>
+        <p>當位置上還有空間、空間正在移入或移出，或內容儲存區仍有檔案時，不能刪除該位置。管理員從自選資料夾建立的資料夾空間（<a href="#folder-spaces">見下方</a>）不屬於任何儲存位置。</p>
+
+        <h3>供應商注意事項</h3>
+        <ul>
+          <li><strong>AWS S3</strong>：端點留空。</li>
+          <li><strong>Cloudflare R2</strong>：端點為 <code>https://&lt;account ID&gt;.r2.cloudflarestorage.com</code>，區域為 <code>auto</code>。</li>
+          <li><strong>自行架設</strong>：<a href="https://github.com/rustfs/rustfs">RustFS</a> 可使用。選擇「自行架設」，並勾選「路徑式 URL」。</li>
+        </ul>
+        <div class="note">未加密的連線（一般 FTP，或透過 http 的 S3）只接受你自己網路內的位址。</div>
+
+        <h2 id="per-space">將空間搬移到其他位置</h2>
+        <p>在<strong>控制台 › 空間管理</strong>選取空間，選擇<strong>搬移到其他位置…</strong>。任何空間都能搬到任何其他位置：內容儲存區之間、資料夾到內容儲存區，或搬到資料夾。對話方塊顯示目前位置與大小，並列出其他位置；位於這台伺服器磁碟上的位置也會顯示可用空間。目標位置空間不足時，對話方塊會提示，且無法開始搬移。繼續搬移只需容納尚未複製的部分；同一磁碟內直接搬移資料夾則不需額外空間。</p>
+        <p>搬移會在背景分三步執行（此處以內容儲存區中的空間為例；<a href="#move-folder">資料夾空間</a>與<a href="#move-into-folder">搬移到資料夾</a>的流程相似，差異見下方）：</p>
+        <ol>
+          <li><strong>複製。</strong>空間的每個檔案、先前版本與資源回收筒中的項目都會複製到新位置，並以檔案的 SHA-256 指紋驗證每份副本。期間空間仍可使用；搬移期間上傳或修改的檔案也會複製。</li>
+          <li><strong>切換。</strong>全部內容就緒後，空間會一次切換到新位置，之後的新檔案都會存到那裡。</li>
+          <li><strong>清理。</strong>舊副本會在一分鐘後刪除，讓仍在讀取舊副本的下載有時間完成。</li>
+        </ol>
+        <p>切換之前，空間仍在原本位置：停止或取消搬移不會改變使用者看到的內容。內容相同的檔案在整個系統只儲存一次，因此空間與其他位置的空間共用的內容也會一起搬移，那些空間之後也從新位置讀取該內容。</p>
+        <h3 id="move-folder">將資料夾空間搬移到 S3、SFTP 或 FTP</h3>
+        <p>資料夾空間（位於儲存資料夾、<em>本機資料夾</em>位置或自選資料夾的空間）可搬到 S3、SFTP 或 FTP 位置的內容儲存區。檔案會改以內容儲存區形式儲存，名稱、資料夾、分享連結、權限、資源回收筒與先前版本都保留。</p>
+        <ul>
+          <li><strong>期間唯讀。</strong>從開始搬移到完成或取消，使用者可以開啟、下載與分享檔案，但不能修改；空間會顯示提示。暫停或停止的搬移仍保持唯讀，因為已複製的內容必須維持一致：請繼續搬移，或取消以恢復寫入。尚在等待第一次執行的搬移不會立刻讓空間唯讀。</li>
+          <li><strong>資料夾的外部變更。</strong>搬移期間，ThirtyFile 以外的程式（例如 SMB 或掃描器）修改、新增或刪除的檔案，會在切換前檢查資料夾時找到並一併複製。更好的做法是讓其他程式在搬移完成前停止寫入。</li>
+          <li><strong>名稱。</strong>內容儲存區不區分只有大小寫不同的名稱，而資料夾可能同時容納「Report.docx」與「report.docx」。其中一個會加上編號，例如「report (1).docx」；搬移詳細資訊會顯示重新命名的數量。</li>
+          <li><strong>舊資料夾。</strong>空間切換到新位置後，系統會移除舊資料夾：只有與已複製內容完全一致的檔案才會刪除，接著移除清空的資料夾。最後一刻被修改的檔案，以及 ThirtyFile 不顯示的檔案（例如 <code>Thumbs.db</code>）會留下，並列在搬移詳細資訊中（個人空間只顯示數量，保護檔案名稱隱私）。</li>
+          <li><strong>空間。</strong>每個檔案都會經過 ThirtyFile 資料目錄中的暫存檔，因此該目錄必須有足以容納空間內最大檔案的餘裕。開始前會檢查容量與資料夾是否存在；未掛載的磁碟不會被當成空的空間。</li>
+        </ul>
+        <h3 id="move-into-folder">將空間搬移到資料夾</h3>
+        <p>搬到儲存資料夾或<em>本機資料夾</em>位置（例如 NAS）的空間，會成為資料夾空間，取得獨立資料夾，命名方式與新空間相同（<code>company</code>、<code>teams/&lt;name&gt;</code> 或 <code>users/&lt;user name&gt;</code>，名稱已占用時加編號），且複製期間保持唯讀。</p>
+        <ul>
+          <li><strong>從 S3、SFTP 或 FTP 搬入。</strong>每個檔案會連同日期寫入新資料夾，檢查 SHA-256 後重新命名到正式位置；資源回收筒存到 <code>.thirtyfile-trash</code>，先前版本存到 <code>.thirtyfile-versions</code>，與其他資料夾空間相同。資料夾無法原樣容納的名稱（含不允許的字元、掃描略過的名稱如 <code>Thumbs.db</code>，或超過磁碟限制的長度）會改名，詳細資訊會顯示數量。空間切換後，內容儲存區會釋放檔案；若其他空間未使用相同內容，一分鐘後便會刪除。</li>
+          <li><strong>從其他資料夾搬入。</strong>在同一磁碟上，資料夾會立即直接搬到新位置。在不同磁碟上，會複製資料夾中的全部內容，包括資源回收筒、版本與 ThirtyFile 不顯示的檔案，每個檔案都保留日期並檢查大小。期間從外部修改的檔案會在切換前檢查時找到並複製，之後按上述方式移除舊資料夾。若目標磁碟不區分大小寫（例如 CIFS 分享或 exFAT 磁碟），而空間含有只有大小寫不同的名稱（「Report.docx」與「report.docx」），這些項目不會複製，搬移會停止並列出衝突。請先將每組中的其中一個重新命名，再繼續搬移。</li>
+          <li><strong>自選資料夾。</strong>顯示自選資料夾且不屬於任何位置的資料夾空間，也可用同樣方式搬到任何儲存位置。之後原本的資料夾會移除。</li>
+        </ul>
+        <p>取消搬移到資料夾時，會移除這次建立的資料夾及已複製的內容。</p>
+
+        <h3 id="move-many">多個空間，或位置上的所有內容</h3>
+        <ul>
+          <li><strong>多個空間。</strong>在<strong>控制台 › 空間管理</strong>勾選空間（使用各列前的核取方塊，或表頭的全選），選擇<strong>將 … 個空間搬移到其他位置…</strong>。每個空間都有自己的搬移工作，依序執行。已位於目標位置或正在搬移的空間會略過，對話方塊會顯示數量。</li>
+          <li><strong>位置上的所有內容。</strong>在<strong>控制台 › 儲存位置</strong>對位置選擇<strong>全部搬移到…</strong>，將全部空間（包含個人空間）移到另一個位置。位置會顯示進度。全部移走後，若原本是預設位置，系統會提供將目標位置設為預設的選項，並提供刪除舊位置的選項。</li>
+        </ul>
+        <p>若目標位於這台伺服器的磁碟上，會一次檢查所有選取空間合計需要的可用空間。</p>
+
+        <h3 id="moves">追蹤搬移進度</h3>
+        <p><strong>控制台 › 搬移作業</strong>先列出未完成的搬移，再列出歷史紀錄。每筆包含空間（使用者的「我的檔案」以使用者命名）、來源與目標位置、已複製檔案與位元組數、速度、剩餘時間與狀態。工作執行時頁面會自動更新。</p>
+        <ul>
+          <li><strong>一次一個。</strong>搬移依啟動順序逐一執行，其餘等待。處理器較多且網路快速的伺服器可使用<strong>同時執行</strong>，最多八個搬移一起執行。</li>
+          <li><strong>暫停與繼續。</strong>暫停會在目前檔案複製完後停止，並保留已複製內容。繼續時先等待排程，輪到後從停止處接續。ThirtyFile 在搬移期間停止或重新啟動，之後也以相同方式接續。</li>
+          <li><strong>取消。</strong>空間留在原位置，已複製到新位置的內容會移除。</li>
+          <li><strong>錯誤。</strong>無法複製的檔案會嘗試三次。若仍有失敗，其他檔案仍會複製，但搬移會以<em>因錯誤停止</em>結束，且不切換位置。<strong>詳細資訊</strong>列出失敗檔案與原因（使用者的「我的檔案」不顯示檔案名稱，因管理員無權查看）。修正原因後繼續搬移以重試，或取消工作。無法連線到新位置也會以相同方式停止。</li>
+          <li><strong>歷史紀錄。</strong>完成與取消的搬移會保留 90 天（每個空間最新 20 筆不受天數限制），包含啟動者與時間。活動紀錄也會記錄搬移的開始、完成、失敗與取消。</li>
+        </ul>
+        <p>搬移完成或取消前，不能刪除該空間，也不能刪除以它為「我的檔案」的使用者。</p>
+
+        <h2 id="copy">將全部內容複製到其他位置</h2>
+        <p>在<strong>控制台 › 儲存位置</strong>的位置 <strong>…</strong> 選單中選擇<strong>全部複製到…</strong>，會把該位置的全部空間複製到另一個位置，來源保持不變：不會移除檔案，空間仍在原處，預設位置也不變。可用於在 NAS、異地儲存桶或可攜磁碟保存額外副本。若需要反覆建立並保留一段時間的快照，請參閱<a href="backup.html#file-backups">將檔案備份到其他位置</a>；儲存與還原方式相同。</p>
+        <h3 id="copy-what">複製哪些內容</h3>
+        <ul>
+          <li><strong>位置上的每個空間</strong>，包含個人空間：資料夾（含空資料夾）、檔案、資源回收筒與先前版本。對話方塊會列出空間，顯示檔案數量、資源回收筒占用量，以及將寫入目標位置的大小。</li>
+          <li><strong>每份內容只存一次。</strong>相同內容的檔案只儲存一次，跨空間也一樣。空間的內容無論目前存放在哪裡都會複製（整個系統只儲存一份相同內容，因此空間的檔案內容可能存放在其他位置）。</li>
+          <li>副本會記錄每個資料夾的<strong>存取權限</strong>供參考。分享連結、我的最愛與進行中的上傳不會複製。</li>
+          <li>該位置上僅供其他位置空間使用的內容不會包含在內，因為它屬於那些空間。</li>
+        </ul>
+        <h3 id="copy-where">副本存放在哪裡</h3>
+        <p>每次複製會在目標位置取得獨立資料夾 <code>.thirtyfile-backups/&lt;id&gt;</code>，ThirtyFile 的其他功能不會寫入其中。既有內容不會被取代，副本彼此不混合。裡面包含：</p>
+        <ul>
+          <li><code>objects/ab/cd/&lt;sha256&gt;</code>：每份內容，以 SHA-256 命名；</li>
+          <li><code>snapshots/&lt;id&gt;/manifest.jsonl</code>：每個空間、資料夾、檔案與先前版本各占一行，包含路徑與內容的 SHA-256；</li>
+          <li><code>snapshots/&lt;id&gt;/complete.json</code>：最後寫入，包含清單的 SHA-256。沒有此檔案的副本不算完整，也不會提供還原；</li>
+          <li><code>set.json</code>：副本名稱、來來源位置，以及建立它的 ThirtyFile 資訊。</li>
+        </ul>
+        <p>因此即使沒有 ThirtyFile，也能找到檔案：清單每一行都記錄檔案路徑與存放內容的物件。</p>
+        <p>目標可能與來源在同一磁碟或儲存服務；對話方塊會提示這樣的副本無法承受該磁碟或服務故障。相同路徑或互相包含的位置會被拒絕。未加密 FTP 會提示檔案以未加密方式傳輸。若目標位於本伺服器磁碟且可用空間不足，會拒絕複製；S3、SFTP 與 FTP 則無法得知剩餘容量。</p>
+        <h3 id="copy-changes">複製期間變更的檔案</h3>
+        <p>複製期間空間仍可使用。副本反映建立檔案清單時的狀態（<em>截至</em>）：之後修改或刪除的檔案會以當時版本複製，因為內容在複製完成前不會刪除。資料夾空間的檔案會逐一讀取，並檢查讀取期間是否變更；變更過的會重讀。開始前會先檢查其他程式造成的資料夾變更。每個資料夾空間檔案都完整且符合索引紀錄，但其他程式在不同時間修改的全部檔案不代表同一瞬間的整體狀態。</p>
+        <h3 id="copy-follow">追蹤、暫停與錯誤</h3>
+        <p><strong>控制台 › 備份</strong>列出副本、目前工作與進度。複製在背景執行，一次一項工作；關閉頁面後仍會繼續。</p>
+        <ul>
+          <li><strong>暫停與繼續。</strong>暫停會在目前項目完成後停止並保留已複製內容；繼續或 ThirtyFile 重新啟動後，從停止處接續。</li>
+          <li><strong>錯誤。</strong>無法讀取的檔案會嘗試三次。若仍無法複製，工作會以<em>因錯誤停止</em>結束，且副本不完整。<strong>詳細資訊</strong>列出項目與原因（個人空間不顯示檔案名稱）。修正原因後按<strong>繼續</strong>重試。無法連線到位置也會以相同方式停止。</li>
+          <li><strong>取消。</strong>從未完成的副本會從目標位置移除，來源不受影響。</li>
+          <li><strong>檢查備份</strong>會從目標位置讀回全部內容，檢查每份內容的 SHA-256，以及每份清單與其 <code>complete.json</code> 是否一致，並列出遺失或損壞的項目。</li>
+          <li><strong>刪除備份</strong>會在確認後從目標位置移除資料夾。可以暫停，但不能取消：刪除到一半的副本無法還原。</li>
+        </ul>
+        <p>副本刪除前，不能刪除持有它的位置或變更該位置的資料夾。移除未使用內容與永久刪除檔案都不會查看 <code>.thirtyfile-backups</code>，因此不會移除副本；<strong>瀏覽</strong>也不會開啟它（其中清單包含個人空間的檔案名稱）。活動紀錄會記錄副本的建立、還原、檢查與刪除。</p>
+        <h3 id="copy-restore">從副本還原</h3>
+        <p>選取副本並選擇<strong>還原…</strong>，再選擇要還原的空間。內容會放入空間本身或你選擇的其他公司／團隊空間頂層的新資料夾，名稱為<em>已還原 &lt;空間&gt; &lt;日期&gt;</em>；不會取代任何既有內容。該空間位置仍保有的內容不會重複複製。</p>
+        <ul>
+          <li>個人空間只能完整還原到其擁有者的個人空間，管理員始終看不到裡面的檔案。</li>
+          <li>資源回收筒內容預設略過，除非勾選<strong>也還原資源回收筒中的項目</strong>。</li>
+          <li>新資料夾繼承目標空間的權限。先前版本與副本中記錄的存取權限仍留在副本；還原不會給任何人超過目標空間允許的權限。</li>
+          <li>資料夾無法容納的名稱會拒絕並列出；同一資料夾的名稱衝突（例如從資料夾空間的 <em>A.txt</em> 與 <em>a.txt</em> 還原到內容儲存區）會加上編號，工作會顯示提示。</li>
+          <li>停止的還原會從停止處接續，不會重複建立項目。</li>
+        </ul>
+
+        <h2 id="replicas">鏡像：在多個位置保有相同檔案</h2>
+        <p>鏡像規則會把某位置上各空間的檔案保存到其他位置，檢查副本，並在原位置故障時從副本讀取。原位置永久遺失時，可將其他位置之一<em>提升為主要位置</em>，空間之後就在那裡讀寫。只有管理員能在<strong>控制台 › 鏡像</strong>查看與管理鏡像。</p>
+        <div class="note"><strong>鏡像不是備份。</strong>鏡像保存目前的檔案狀態：刪除或覆寫檔案後，鏡像也會稍後刪除或覆寫。若要救回誤刪或誤改的內容，仍需保留<a href="backup.html#file-backups">備份</a>。鏡像讓磁碟、NAS 或儲存桶故障時檔案仍可讀取；備份則保留歷史狀態。</div>
+        <h3 id="replica-make">建立鏡像</h3>
+        <p>選擇<strong>新增鏡像…</strong>（或儲存位置 <strong>…</strong> 選單中的<strong>製作鏡像…</strong>），然後設定：</p>
+        <ul>
+          <li><strong>製作鏡像的位置</strong>：要複製其空間的來來源位置，即<em>主要位置</em>。</li>
+          <li><strong>保留副本的位置</strong>：依優先順序排列的一個或多個位置。每個位置可選擇<strong>變更後盡快同步</strong>（彙整數秒內的變更，再於背景複製），或排程同步（每幾分鐘、每幾小時，或在指定時區每日指定時間）。相同路徑或互相包含的位置會被拒絕。</li>
+          <li><strong>副本數</strong>：除原始檔案外保留幾份副本，預設 1 份。副本會使用清單中最前面可用的位置，其餘作為備用。若位置數少於副本數，原則會提示並標示為需要處理。</li>
+          <li><strong>空間</strong>：位置上的全部空間（含之後新增的），或只選擇勾選的空間。</li>
+          <li><strong>從副本讀取</strong>、每幾天檢查一次（預設 1 天）、變更等待多久後通知管理員（預設 24 小時），以及速度限制。</li>
+        </ul>
+        <p>每份內容在每個位置只複製一次，即使多個檔案或空間共用它。檔案、先前版本與資源回收筒都會複製。在目標位置，副本存放在內容儲存區（<code>ab/cd/&lt;sha256&gt;</code>），無論來源是何種空間。</p>
+        <h3 id="replica-folders">資料夾空間</h3>
+        <p><a href="#folder-spaces">資料夾空間</a>（儲存資料夾與<em>本機資料夾</em>位置上的全部空間）也能製作鏡像。檔案從資料夾讀取，並在讀取期間檢查；若有變更就重讀。其他程式持續寫入的檔案（例如紀錄或信箱）不會讓同步整體失敗：系統會複製最後一次完整讀到的內容，詳細資訊會標示複製期間有變更（從未完整讀到的檔案尚無副本，也以相同方式列出；個人空間不顯示檔案名稱）。下次同步會再讀取。網頁變更會在數秒後複製；其他程式透過 SMB 或掃描器造成的變更，則要等 ThirtyFile 偵測到：伺服器本機磁碟約 12 秒，NFS 或 SMB 掛載則在下次定期檢查時（預設每 15 分鐘，可調整）。每次同步前會先檢查資料夾變更。</p>
+        <h3 id="replica-copies">副本如何維護</h3>
+        <ul>
+          <li><strong>寫入時檢查。</strong>每份副本都會先讀回並比對 SHA-256，通過後才計入。既有副本若損壞或長度錯誤，會被取代。</li>
+          <li>每隔幾天會<strong>再次檢查</strong>，也可使用<strong>檢查副本</strong>逐一讀回。損壞或遺失的副本會標記，下次同步會從原始內容或其他正常副本補回。</li>
+          <li><strong>短暫落後。</strong>副本在檔案變更後稍晚建立，不是同時寫入。位置故障前一刻修改的檔案可能尚未複製。<strong>控制台 › 鏡像</strong>顯示每個位置是否為最新、變更等待時間，以及最近同步計算時已持有與應持有的內容數量（原則變更後數秒更新）。同步與檢查歷史保留已完成工作 90 天，每個位置最多最新 1,000 筆，且最新 20 筆不受天數限制。</li>
+          <li><strong>無法連線的位置</strong>會等待，每 5 分鐘重試，恢復後補齊。失敗的同步會一小時後再試，或按<strong>立即同步</strong>立刻重試。同步可以暫停、繼續與取消；繼續時從停止處接續，ThirtyFile 重新啟動後也是如此。</li>
+          <li><strong>避免誤刪。</strong>清空資源回收筒、永久刪除檔案、移除未使用內容與待重試的刪除都不會刪除鏡像。只有內容已無人使用，且由建立它的原則執行，才會釋放副本。</li>
+          <li><strong>通知管理員</strong>：原則需要處理時（空間原位置或副本位置無法連線、同步失敗、副本損壞、位置不足或變更等待逾時），會在應用程式與電子郵件以<em>鏡像</em>類型通知一次；恢復正常時再通知一次。</li>
+        </ul>
+        <h3 id="replica-read">主要位置故障時</h3>
+        <p>主要位置無法讀取檔案內容時（位置離線、內容遺失或資料夾空間的資料夾不存在），若原則允許從副本讀取，會改從其他位置上已驗證的副本讀取。副本是以 SHA-256 命名的相同內容，因此不會比 ThirtyFile 已知的版本更舊。資料夾空間以索引最後記錄的檔案為準：磁碟故障前數秒由其他程式修改、但 ThirtyFile 尚未偵測到的內容不會出現在副本。每次回退都會記錄於伺服器紀錄；活動紀錄則每個位置最多每 10 分鐘記錄一次（<em>從鏡像讀取</em>）。</p>
+        <p>只有讀取會回退。主要位置離線時，上傳與空間變更會等待，詳見<a href="#offline">位置離線時</a>；變更絕不會只寫入鏡像。</p>
+        <h3 id="replica-promote">提升位置為主要位置</h3>
+        <p>主要位置永久遺失或準備停用時，選擇<strong>提升…</strong>並指定位置。提升不會自動發生。執行前，對話方塊會顯示兩個位置是否可連線、目標落後多少、會轉移多少內容與哪些空間，以及缺少多少內容。</p>
+        <ul>
+          <li>已是最新的位置會立即提升。</li>
+          <li>主要位置仍可連線時，不允許提升落後的位置：請先同步。主要位置無法連線時，可勾選確認「缺少內容的檔案在舊主要位置恢復前無法讀取」後提升。若檢查提升條件期間缺少內容數量改變，系統不會變更任何內容；請重新檢視狀態後再試。</li>
+          <li>提升不會改變檔案。空間之後在提升的位置讀寫，它成為主要位置。執行中的同步會停止；當時正在儲存到舊主要位置的變更會被拒絕，可以再次嘗試。</li>
+          <li>資料夾空間的全部檔案與先前版本若在新主要位置都有已驗證副本，就會轉成該位置的內容儲存區空間，與<a href="#move-folder">搬移到 S3、SFTP 或 FTP</a>相同：檔案不再位於其他程式可直接修改的資料夾。舊主要位置的資料夾保持原狀，不受修改；不再需要後可手動刪除。若想恢復資料夾形式，之後可<a href="#move-into-folder">將空間搬移到資料夾</a>。未完整複製到新主要位置的資料夾空間仍留在原處，對話方塊會列出名稱。</li>
+          <li>舊主要位置保留所有原有內容，之後不再以主要位置身分寫入。它成為副本位置，標示<em>舊主要位置，檢查中</em>：恢復後會讀取並檢查副本，取代損壞內容，更新完整後才計為有效副本。內容不會自行搬回。若要恢復原位置，請等它更新完整後再次提升。</li>
+        </ul>
+        <p>提升後請檢查原則的位置清單：提升的位置已不在副本清單中；若要保有原本的副本數，請新增其他位置。</p>
+        <h3 id="replica-remove">移除位置或原則</h3>
+        <p>從清單移除位置、減少副本數或刪除原則，都會停止建立新副本，但已建立的副本仍保留且受刪除保護。<strong>控制台 › 鏡像</strong>會顯示各位置不再有原則需要的副本數量，並提供<strong>移除…</strong>。刪除前會再次逐一檢查：原則仍需要的副本、該位置上的原始內容，以及目前來來源位置無法連線的資料夾空間副本都會保留。在此之前，不能刪除持有鏡像或用作原則來源／目標的位置。</p>
+
+        <h2 id="folder-spaces">資料夾空間：將伺服器資料夾作為空間</h2>
+        <p>儲存資料夾或<em>本機資料夾</em>位置上的每個空間都是資料夾空間（參閱<a href="#layout">檔案存放在哪裡</a>）。也能把伺服器上的現有資料夾（例如 NAS 分享）顯示為空間。檔案仍以一般檔案留在原位置，也可以透過 SMB 或掃描器直接修改。</p>
+        <ol>
+          <li>將資料夾掛載到容器，例如 <code>-v /srv/shared:/mnt/shared</code>。</li>
+          <li>在<strong>控制台 › 空間管理</strong>按<strong>新增資料夾空間</strong>，輸入容器內路徑 <code>/mnt/shared</code>。</li>
+          <li>像一般團隊空間一樣新增成員。</li>
+        </ol>
+        <p>使用者開啟資料夾時，ThirtyFile 會尋找外部變更（數秒內不重複檢查；空間正在變更時，例如複製大型資料夾，不檢查；被監看的空間也不檢查，詳見下方。此時清單顯示 ThirtyFile 已知的內容）。系統也每 15 分鐘檢查所有資料夾空間（可在<strong>控制台 › 一般</strong>調整），或按<strong>檢查變更</strong>立即執行（大型資料夾會在清單與底部訊息顯示進度，離開頁面仍會繼續）。在資料夾內搬移或重新命名的檔案與資料夾會保留分享連結及權限。檢查找到的項目沒有上傳者（<strong>上傳者</strong>欄與詳細資料的<strong>建立者</strong>顯示 —），也不會出現在任何人的<strong>最近使用</strong>，除非有人開啟或編輯它；舊版 ThirtyFile 找到的項目仍保留空間擁有者為上傳者。系統依磁碟記錄的建立時間區分搬移與新項目。若磁碟未記錄此資訊（部分網路分享），仍可依大小與日期辨識搬移檔案，但搬移資料夾會視為刪除後重新新增，失去分享連結與權限。</p>
+        <p>在支援的 Linux 本機檔案系統上，變更約 12 秒後會自動出現，因為 ThirtyFile 會監看資料夾。這類空間的定期檢查頻率降為四分之一（一般 15 分鐘設定下為每小時），補足監看可能漏掉的變更。NFS、SMB、9P 與 FUSE/virtiofs 掛載（含 Docker Desktop 分享的主機資料夾）可能不會回報外部變更。無法辨識的檔案系統也採用較保守的後備方式：開啟資料夾時重新檢查（最多每五秒一次），排程檢查維持正常間隔。不會寫入探測檔案來推斷主機事件是否可用。資料夾很多時可能達到 Linux 監看上限（<code>fs.inotify.max_user_watches</code>，常見為 8,192 或更多）；紀錄會提示，其餘變更透過開啟時更新與定期檢查發現。在主機上使用 <code>sysctl fs.inotify.max_user_watches=524288</code> 提高上限。所有空間的每個資料夾都會計入（每個使用者都有自己的空間）。</p>
+        <p><strong>Windows 與 macOS 的 Docker Desktop。</strong>主機分享資料夾的變更，會在 ThirtyFile 開啟或重新整理該資料夾時，以及定期檢查時發現，不一定立即出現。仍在寫入的檔案要等穩定後才顯示。重新命名或刪除可能啟動背景檢查，以區分移到空間其他位置與真正刪除。<strong>控制台 › 空間管理</strong>顯示變更是數秒內出現，或於開啟時檢查，以及實際排程間隔。將間隔設為零會停用排程，但監看不可用時，開啟資料夾仍會檢查。隨時可使用<strong>檢查變更</strong>做完整檢查。</p>
+        <p>大型資料夾空間檢查期間，<strong>控制台 › 空間管理</strong>顯示進度；讀取資料夾與更新索引耗時超過 10 秒時，紀錄會分別記下耗時。參考數值：SSD 上首次檢查 200,000 個檔案，讀取約半秒、建立索引約 25 秒；沒有變更時重新檢查約一至兩秒。網路掛載較慢，因為每個檔案的大小與日期都需透過網路查詢；大型 NFS 或 SMB 資料夾建議保留 15 分鐘或更長的定期檢查間隔。</p>
+        <p>網頁上的所有操作都會修改資料夾本身：上傳、建立資料夾、重新命名、搬移、複製、編輯與刪除。搬到不同磁碟的空間，或非資料夾空間時，先複製並驗證檔案，再移除來源；期間在資料夾中被修改的檔案會留下，下次檢查變更時出現。頁面底部訊息顯示長時間搬移或複製的進度；即使關閉頁面，伺服器仍會繼續。</p>
+        <ul>
+          <li><strong>資源回收筒。</strong>刪除項目會移到空間資料夾內隱藏的 <code>.thirtyfile-trash</code>，以便還原。清空資源回收筒或從其中刪除項目，才會移除檔案。</li>
+          <li><strong>先前版本。</strong>在網頁儲存覆寫、上傳取代或還原舊版本時，原本的檔案會保存在空間資料夾內隱藏的 <code>.thirtyfile-versions</code>（磁碟支援時使用硬連結，否則直接搬入，因此大型檔案也能立即保留），ThirtyFile 不會把它們列為一般檔案。直接在資料夾內修改（例如透過 SMB）不會保留版本。永久刪除檔案時也會刪除其版本。該資料夾中沒有版本參照的檔案，存在滿一天後會由變更檢查移除。</li>
+          <li><strong>同時編輯。</strong>有人在網頁編輯期間，檔案若在資料夾內被修改，不會覆寫外部變更：網頁版本會另存為 <code>name (conflict copy)</code>，使用系統<a href="first-steps.html#general">預設語言</a>（若跟隨瀏覽器則為英文），與儲存者的語言無關。</li>
+          <li><strong>大小寫。</strong>在不區分大小寫的磁碟（exFAT、NTFS、多數 SMB 分享）上，只有大小寫不同的資料夾名稱視為既有資料夾。將 <code>Photos</code> 上傳到已有 <code>photos</code> 的位置，檔案會進入 <code>photos</code>；<strong>新增資料夾</strong> <code>Photos</code> 則會提示已存在。</li>
+          <li><strong>下載。</strong>續傳會偵測期間已被取代的檔案並重新開始。下載期間被取代的檔案可能收到混合內容，請重新下載。</li>
+          <li><strong>唯讀。</strong>建立空間時勾選<strong>唯讀</strong>，或之後使用<strong>設為唯讀</strong>，只允許瀏覽、下載與分享。</li>
+          <li><strong>檔案擁有者。</strong>ThirtyFile 以 <code>THIRTYFILE_RUN_AS</code> 指定的使用者寫入檔案（未設定時為 1000:1000），該使用者必須有資料夾寫入權限。若其他程式（例如 Samba 分享）以不同使用者寫入，請讓兩者加入相同群組並讓資料夾可由群組寫入，或把 <code>THIRTYFILE_RUN_AS</code> 設成其他程式使用的使用者。</li>
+          <li>刪除資料夾空間只會從 ThirtyFile 移除空間，資料夾與檔案仍留在伺服器。</li>
+          <li>一個資料夾只能屬於一個空間或位置：若它包含或位於其他空間資料夾、<em>本機資料夾</em>位置或 ThirtyFile 資料目錄內，會被拒絕，避免相同檔案重複顯示。系統資料夾（如 <code>/etc</code>、<code>/run</code>、<code>/usr</code> 與磁碟根目錄）也會拒絕。</li>
+          <li>Office 與系統暫存檔（<code>~$…</code>、<code>Thumbs.db</code>、<code>.DS_Store</code>）不會顯示；以 <code>.thirtyfile-</code> 開頭的 ThirtyFile 內部檔案也不會顯示。網頁與 WebDAV 不允許使用這些名稱。解壓縮 ZIP 會略過這類項目；從其他空間搬移或複製到資料夾空間時，若來源含有這類名稱，會拒絕操作。符號連結、不是有效文字的名稱與資料夾內掛載的其他磁碟會略過，<strong>檢查變更</strong>會列出它們（其他人的個人空間只顯示數量，不顯示空間資料夾）。</li>
+          <li>仍在複製到資料夾的檔案，要等數秒內不再變更後才會出現。</li>
+          <li><strong>未掛載的磁碟與分享。</strong>空間建立時，資料夾內會放入包含空間 ID 的小型隱藏檔 <code>.thirtyfile-space</code>。缺少此檔案且突然變空的資料夾，會視為未掛載磁碟或分享：空間保留項目、分享與歷史，<strong>檢查變更</strong>會提示。請重新掛載後檢查。網頁變更只會寫入含有該空間標記的資料夾；資料夾遺失或同名路徑掛載了不同磁碟時，上傳與變更會以<em>資料夾不存在，或這裡掛載了不同的磁碟</em>拒絕，且不會重建資料夾。含有其他空間標記的資料夾也不會檢查。只有含有該空間標記的資料夾可讀取檔案。唯讀空間可能沒有標記，因為不一定能寫入。標記遺失時，<strong>檢查變更</strong>只會在資料夾仍含有該空間項目時補回，否則只回報資料夾而不變更任何內容。空間內無法讀取的子資料夾也以同樣方式保留索引項目。若要清空空間，請在 ThirtyFile 刪除項目。</li>
+          <li>同時刪除、搬移或還原多個項目遇到錯誤時，資料夾中已變更的項目會復原，避免只完成一半。若 ThirtyFile 在同一磁碟搬移項目到空間期間停止，一天後的下次檢查會以原名將項目放回原資料夾。若在複製到其他磁碟期間停止，來源仍在原處，未完成副本會在該次檢查移除。重新命名、移到同一空間其他資料夾、移入或移出資源回收筒，以及保留先前版本時，會先寫入隱藏的 <code>.thirtyfile-journal</code>：若執行到一半停止，下次變更檢查會把項目放回原處，保留分享、存取權與歷史；無法依識別資訊區分項目的磁碟（Windows、exFAT）也適用。若原名稱期間被其他項目占用，項目會留在搬移後的位置並在那裡保留相關資訊。若儲存已將新內容放入正式位置，新內容會保留，原內容則保存為先前版本。</li>
+        </ul>
+
+        <h2 id="check">檢查位置中的內容</h2>
+        <p><strong>控制台 › 儲存位置</strong>各位置的 <strong>…</strong> 選單還有三個操作，只有管理員可用。</p>
+        <h3 id="test-steps">逐步測試</h3>
+        <p>執行檔案處理的每個步驟，並列出各步驟耗時：</p>
+        <ol>
+          <li><strong>連線</strong>到位置。</li>
+          <li><strong>寫入小檔案</strong>，再<strong>讀回</strong>並比對。</li>
+          <li>以一般上傳的儲存方式<strong>上傳較大檔案</strong>（24 MB；S3 使用分段上傳），再<strong>下載</strong>並比對。兩者都會顯示 MB/s 速度。</li>
+          <li><strong>刪除測試檔案</strong>，並確認已移除。</li>
+        </ol>
+        <p>測試檔案存入 <code>.thirtyfile-check</code> 資料夾，完成後會刪除，步驟失敗也一樣。測試最多兩分鐘；連線慢時會略過大檔案，而非留下未完成內容。失敗步驟會說明原因，例如金鑰無法刪除檔案。</p>
+        <h3 id="browse">瀏覽</h3>
+        <p>逐層顯示位置中的內容，每頁 200 個項目，附大小與日期。此處不能修改內容。可依儲存原樣下載單一檔案，但待刪除內容與尚在寫入的副本除外。</p>
+        <ul>
+          <li><strong>內容儲存區</strong>（<code>ab/cd/…</code>，S3、SFTP 與 FTP 位於 <code>blobs</code> 下）：每個項目標示是否有檔案、先前版本或資源回收筒項目使用，是否為其他位置內容的<a href="#replicas">鏡像</a>、等待刪除或完全未使用。有檔案使用時會顯示空間與檔案路徑。</li>
+          <li>儲存資料夾與<em>本機資料夾</em>位置上的<strong>資料夾空間</strong>會標示所屬空間。</li>
+          <li><strong>個人空間保持隱私。</strong>其他人的個人空間會顯示名稱（例如「anna 的個人空間」），但不列出檔案、無法在此開啟資料夾，也不能下載內容。無論資料夾名稱大小寫如何（例如 <code>users/anna</code> 寫為 <code>USERS/Anna</code>），搬移期間（目標資料夾、已複製內容與清理完之前的舊資料夾），以及其他位置上標示所屬空間的<a href="#replicas">鏡像</a>，都適用此規則。</li>
+          <li>符號連結會列出但絕不跟隨，SFTP、FTP 與路徑中間的連結也一樣。</li>
+          <li>存放<a href="#copy">副本</a>的 <code>.thirtyfile-backups</code> 不能在此開啟，因其中清單含有個人空間的檔案名稱。副本請在<strong>控制台 › 備份</strong>管理。</li>
+        </ul>
+        <h3 id="unused">尋找未使用內容</h3>
+        <p>搜尋該位置內容儲存區中沒有檔案、先前版本或資源回收筒項目使用的內容，例如上傳途中伺服器停止所留下的內容。工作在背景執行，列出結果與總大小。最近 24 小時寫入的內容不會處理，因為上傳先儲存內容再登記；已等待刪除的內容也略過。</p>
+        <p>確認後，<strong>移除 N 個項目</strong>會只刪除清單列出的內容。刪除前逐一再次檢查；期間又被使用或寫入的內容會保留。活動紀錄會記下移除操作。</p>
+        <p>在 S3、SFTP 與 FTP，若 <code>.thirtyfile-location</code> 指向其他位置或其他 ThirtyFile 安裝，會拒絕搜尋與移除：那些內容不是未使用，而是屬於它們。</p>
+        <h3 id="one-place">一個地方只能有一個位置</h3>
+        <p>若兩個位置指向同一地方，彼此會將對方的檔案視為未使用內容。因此不能新增或改為其他位置已使用的地方：同一服務上的相同儲存桶與前綴，或同一 SFTP／FTP 伺服器上的相同資料夾（相對資料夾依帳號分別判定）。</p>
+        <p>S3、SFTP 與 FTP 的位置也會保存小型 <code>.thirtyfile-location</code>：第一行是位置 ID，第二行是 ThirtyFile 安裝 ID，新增位置時寫入。早於此功能建立的位置，會在下次連線檢查成功時補上。標記指向其他位置或其他 ThirtyFile 安裝的地方不能新增，也不會搜尋或移除其內容。刪除位置時會移除標記。</p>
+
+        <h2 id="usage">儲存用量與效能</h2>
+        <p><strong>控制台 › 儲存用量</strong>顯示儲存量、時間趨勢與儲存操作表現，只有管理員可見。頂部依空間類型、資源回收筒與先前版本顯示總量，下方每個位置與資料目錄各有一張卡片。</p>
+        <h3 id="usage-figures">數字的意義</h3>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>數字</th><th>計算內容</th></tr></thead>
+            <tbody>
+              <tr><td><strong>檔案</strong></td><td>使用者看到的該位置空間檔案，不含資源回收筒，也是容量配額計算的內容。相同內容的兩個檔案會算兩次。資源回收筒與先前版本列在下方。</td></tr>
+              <tr><td><strong>ThirtyFile 儲存量</strong></td><td>ThirtyFile 真正保存的內容：相同內容只存一份的內容儲存區，加上資料夾空間檔案（含資源回收筒）與其中的先前版本。因共用內容可能小於<em>檔案</em>數值，也可能因資源回收筒與版本而更大。</td></tr>
+              <tr><td><strong>磁碟</strong></td><td>系統回報的整個磁碟用量，不論其中還有哪些其他內容。只適用於儲存資料夾與<em>本機資料夾</em>位置。同一磁碟上的兩個位置會提示，磁碟只計一次。</td></tr>
+              <tr><td><strong>容量未知</strong></td><td>S3、SFTP 與 FTP 不回報剩餘容量；磁碟三秒內未回應也不會測量。此時不顯示百分比或預計用滿時間：未知不等於零。</td></tr>
+              <tr><td><strong>備份</strong></td><td>位置上保存的<a href="#copy">副本</a>與<a href="backup.html#file-backups">備份</a>；每份內容在每次副本或備份中只計一次。有備份的位置才會顯示。</td></tr>
+              <tr><td><strong>鏡像</strong></td><td>位置上保存、原始內容位於其他位置的<a href="#replicas">鏡像</a>。有鏡像的位置才會顯示。</td></tr>
+              <tr><td><strong>等待刪除</strong></td><td>刪除失敗的內容（例如位置離線）或搬移後的舊副本，在背景重試。其大小已無法得知。</td></tr>
+              <tr><td><strong>資料目錄</strong></td><td>資料庫、縮圖與進行中的上傳，以及所在磁碟。也列出搬移、執行中的工作與待刪除項目。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>其他程式對資料夾空間檔案的變更，要在下次變更檢查後才計入。</p>
+        <h3 id="usage-operations">操作</h3>
+        <p>位置上的每次讀取、寫入、刪除、列目錄與連線檢查都會計時並計數，資料夾空間的檔案讀取與上傳也一樣。資料夾空間內的重新命名、刪除與掃描則不測量。計數在記憶體中進行，每五分鐘寫入一次，不會拖慢檔案操作。伺服器停止時最多會遺失五分鐘的統計。</p>
+        <ul>
+          <li><strong>工作類型。</strong><em>使用者檔案操作</em>包含下載、預覽、上傳與儲存。<em>背景工作</em>包含搬移空間、壓縮與解壓縮、長時間複製與搬移，以及移除未使用內容。<em>檢查與測試</em>包含每 20 至 30 秒執行的連線檢查與逐步測試。分開統計可避免搬移讓上傳時間難以判讀，也不會把測試視為實際流量。</li>
+          <li><strong>每次操作時間。</strong>以中位數（p50）與第 95 百分位（p95）顯示：一半操作比 p50 快，100 次中 95 次比 p95 快。百分位數誤差約 10%。讀取只計到可開始讀取的時間，不含之後傳輸；寫入則計到內容完成儲存。同一磁碟可能只需重新命名，因此很快。</li>
+          <li><strong>傳輸量。</strong>每秒讀寫位元組數，取各期間平均。</li>
+          <li><strong>失敗或逾時。</strong>包含失敗、耗時過長或被放棄的操作，例如使用者在上傳途中離開。中途斷線的下載也算失敗。使用者遇到的錯誤位於<strong>控制台 › 活動紀錄</strong>的<a href="logs.html#errors">錯誤分頁</a>，搬移則在<strong>控制台 › 搬移作業</strong>；頁面提供這兩處的連結。</li>
+          <li><strong>閒置。</strong>沒有操作的期間不繪製資料點，圖表顯示空白，不會顯示 0 ms。</li>
+        </ul>
+        <h3 id="usage-history">歷史紀錄</h3>
+        <p>選擇一個位置（或全部）、時間範圍與工作類型。每張圖表標示單位與每個資料點代表的期間。將游標移到圖表，或用方向鍵移動，可查看單一期間數值。<strong>顯示為表格</strong>列出全部數值；<strong>下載 CSV</strong>儲存目前顯示的內容。</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>範圍</th><th>每個資料點代表</th><th>保留時間</th></tr></thead>
+            <tbody>
+              <tr><td>最近 6 小時、最近 2 天</td><td>5 分鐘（操作）、15 分鐘（容量）</td><td>2 天</td></tr>
+              <tr><td>最近 30 天</td><td>1 小時</td><td>45 天</td></tr>
+              <tr><td>最近一年</td><td>1 天，依 UTC 計算</td><td>400 天</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>容量每 15 分鐘與啟動後不久測量。每小時或每日以最後一次測量代表該期間；操作則按小時與日加總，讓歷史資料維持精簡。時間以瀏覽器時區顯示。最近測量已超過 30 分鐘的卡片會標示<em>已過期</em>。</p>
+        <p><strong>預計用滿時間</strong>以過去 30 天的磁碟用量擬合直線。只有容量已知、至少三天測量資料且使用量穩定增加的磁碟才會顯示；否則頁面會說明未顯示原因。</p>
+        <h3 id="usage-alerts">警示</h3>
+        <p>在<strong>警示門檻</strong>設定何時提示：磁碟使用率超過指定百分比（預設 90%），或位置最近一小時的操作失敗／逾時比例超過門檻（預設 5%）。失敗警示需要該小時至少 20 次操作。輸入 0 可停用個別門檻。位置離線與測量過期也會警示。警示顯示於頁面頂部，不會寄送電子郵件。</p>
+
+        <h2 id="offline">位置離線時</h2>
+        <p>瀏覽、搜尋與整理資料夾仍可使用。開啟、下載與上傳會暫停，位置恢復後自動繼續。有已驗證<a href="#replica-read">鏡像</a>的檔案仍可開啟與下載，期間空間會標示離線。資料夾空間的資料夾在磁碟上，因此整理資料夾也會暫停。</p>
+
+        <h3 id="not-mounted">未掛載的磁碟與分享</h3>
+        <p><em>本機資料夾</em>位置常是掛載於伺服器的磁碟或網路分享，例如 <code>/mnt/nas/thirtyfile</code>。未掛載時，資料夾可能遺失，或只是伺服器自身磁碟上的空資料夾。ThirtyFile 不會寫入那裡，否則檔案會落在錯誤磁碟上，重新掛載分享後反而被隱藏。</p>
+        <ul>
+          <li><strong>標記檔案。</strong>新增<em>本機資料夾</em>位置或變更資料夾時，若資料夾不存在會建立，並放入記錄位置 ID 的 <code>.thirtyfile-location</code>。儲存前的<strong>測試連線</strong>不會建立任何內容，其他流程也不會建立資料夾。</li>
+          <li><strong>無法使用。</strong>之後只有資料夾持有該標記時才會使用位置，否則清單標示離線並顯示<em>資料夾不存在，或這裡掛載了不同的磁碟</em>，空間的上傳與變更也以相同訊息拒絕。不會建立或寫入任何內容，包括空間資料夾。</li>
+          <li><strong>恢復。</strong>重新掛載磁碟或分享：離線位置每 20 秒檢查一次，標記恢復後立即重新使用，不需重新啟動。</li>
+          <li><strong>磁碟停止回應。</strong>網路分享的伺服器消失時，可能仍保持掛載卻不回應。ThirtyFile 最多等待一分鐘（讓磁碟有時間啟動）；變更開始後則最多等待 20 秒，之後以<em>伺服器上資料夾的磁碟沒有回應</em>拒絕操作。在磁碟恢復回應前，該空間的變更會立即拒絕，其他功能仍正常。位置檢查與健康檢查也不會等待它。<em>本機資料夾</em>的內容儲存區也同樣處理：磁碟步驟超過一分鐘會以<em>儲存服務暫時無法使用</em>放棄，磁碟恢復前立即拒絕其檔案操作，其餘 ThirtyFile 功能照常。</li>
+          <li><strong>標記遺失。</strong>資料夾有內容卻沒有 <code>.thirtyfile-location</code>（例如複製時略過隱藏檔），位置會離線，訊息會指出檔案應包含的那一行：位置 ID。確認是正確資料夾後，建立只含該行的標記；下次檢查就會恢復使用。</li>
+          <li><strong>其他位置的資料夾。</strong><code>.thirtyfile-location</code> 指向其他位置時會拒絕使用。刪除位置會移除標記，讓資料夾能再次使用。變更回原資料夾時，若仍有該位置自己的標記，會直接接受。</li>
+          <li><strong>變更資料夾。</strong>位置上還有空間或檔案時，只能改到它的完整副本：先複製舊資料夾所有內容（含 <code>.thirtyfile-location</code>）到新資料夾，再變更路徑，空間的資料夾會跟著更新。新的空資料夾會拒絕，因為空間檔案仍留在舊處。空位置可改成任意資料夾。</li>
+        </ul>
+        <p>新伺服器首次啟動且儲存資料夾為新建或空白時，儲存資料夾（Docker 內的 <code>/storage</code>，由 <code>THIRTYFILE_STORAGE</code> 設定）也會取得相同標記，內容為 <code>local</code>。磁碟或 NAS 自行建立的項目（<code>lost+found</code>、<code>#recycle</code>、<code>@eaDir</code>、<code>.DS_Store</code>、<code>System Volume Information</code>、<code>$RECYCLE.BIN</code>）不計入非空判定。一旦位置上有檔案或空間，就不再接受遺失或空的儲存資料夾：ThirtyFile 不會啟動，並提示磁碟區可能未掛載。資料夾有檔案卻缺少 <code>.thirtyfile-location</code>，或標記屬於其他位置時也不會啟動，因為可能與先前使用的磁碟不同。請檢查磁碟區與掛載；確定是正確資料夾後，建立內容為 <code>local</code> 的標記。</p>
+        <nav class="next" aria-label="更多指南">
+          <a href="sign-in.html"><span>上一篇</span>單一登入</a>
+          <a class="forward" href="logs.html"><span>下一篇</span>紀錄與品牌</a>
+        </nav>
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">原始碼</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">回報問題</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 映像檔</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

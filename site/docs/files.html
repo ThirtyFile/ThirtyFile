@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Working with files · ThirtyFile</title>
     <meta name="description" content="ThirtyFile works like File Explorer. This page lists what you can do and the shortcuts that make it quicker." />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/files.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/files.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/files.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/files.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/files.html" />
     <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -25,15 +30,15 @@
         <a class="brand" href="../index.html"><img src="../assets/logo.svg" alt="" />ThirtyFile</a>
         <nav class="site-nav" aria-label="Site">
           <a href="../index.html#features" class="hide-small">Features</a>
-          <a href="../docs/index.html" aria-current="page">Guides</a>
+          <a href="index.html" aria-current="page">Guides</a>
           <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
           <details class="lang-menu">
             <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">Language </span><span class="lang-name">English</span></summary>
             <ul>
-              <li><a href="../index.html" hreflang="en" lang="en" aria-current="true">English</a></li>
-              <li><a href="../zh-TW/index.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
-              <li><a href="../zh-CN/index.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
-              <li><a href="../ja/index.html" hreflang="ja" lang="ja">日本語</a></li>
+              <li><a href="files.html" hreflang="en" lang="en" aria-current="true">English</a></li>
+              <li><a href="../zh-TW/docs/files.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="../zh-CN/docs/files.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../ja/docs/files.html" hreflang="ja" lang="ja">日本語</a></li>
             </ul>
           </details>
         </nav>
@@ -44,32 +49,53 @@
         <details open>
           <summary>All guides</summary>
           <p>Get started</p>
-          <a href="../docs/index.html">Install</a>
-          <a href="../docs/first-steps.html">First steps</a>
+          <a href="index.html">Install</a>
+          <a href="first-steps.html">First steps</a>
           <p>Everyday use</p>
-          <a href="../docs/files.html" aria-current="page">Working with files</a>
-          <a href="../docs/preview.html">Preview and editing</a>
-          <a href="../docs/sharing.html">Sharing</a>
-          <a href="../docs/account.html">Your account</a>
-          <a href="../docs/webdav.html">Mapping it as a drive</a>
+          <a href="files.html" aria-current="page">Working with files</a>
+          <a href="preview.html">Preview and editing</a>
+          <a href="sharing.html">Sharing</a>
+          <a href="account.html">Your account</a>
+          <a href="webdav.html">Mapping it as a drive</a>
           <p>Administration</p>
-          <a href="../docs/users.html">Users and spaces</a>
-          <a href="../docs/sign-in.html">Single sign-on</a>
-          <a href="../docs/storage.html">Storage locations</a>
-          <a href="../docs/logs.html">Logs and branding</a>
+          <a href="users.html">Users and spaces</a>
+          <a href="sign-in.html">Single sign-on</a>
+          <a href="storage.html">Storage locations</a>
+          <a href="logs.html">Logs and branding</a>
           <p>Running it</p>
-          <a href="../docs/settings.html">Settings</a>
-          <a href="../docs/internet.html">Putting it on the internet</a>
-          <a href="../docs/backup.html">Upgrade and backup</a>
-          <a href="../docs/help.html">Troubleshooting</a>
+          <a href="settings.html">Settings</a>
+          <a href="internet.html">Putting it on the internet</a>
+          <a href="backup.html">Upgrade and backup</a>
+          <a href="help.html">Troubleshooting</a>
           <p>The project</p>
-          <a href="../docs/contributing.html">Contributing</a>
+          <a href="contributing.html">Contributing</a>
         </details>
       </nav>
       <main id="content" class="article">
         <h1>Working with files</h1>
         <p class="lead">ThirtyFile works like File Explorer, or like a Mac's Finder in the <a href="#mac-style">Mac style</a>. This page lists what you can do and the shortcuts that make it quicker.</p>
         <div class="shot"><img src="../assets/files-light.webp" width="2560" height="1440" alt="The file list with the folder tree on the left" /></div>
+        <details class="guide-toc">
+          <summary>On this page</summary>
+          <ol>
+            <li><a href="#around">Finding your way around</a></li>
+            <li><a href="#views">Views, columns and groups</a></li>
+            <li><a href="#paths">Paths</a></li>
+            <li><a href="#upload">Uploading</a></li>
+            <li><a href="#download">Downloading</a></li>
+            <li><a href="#zip">Compressing and extracting ZIP files</a></li>
+            <li><a href="#organise">Organising</a></li>
+            <li><a href="#tags">Tags</a></li>
+            <li><a href="#smart-folders">Smart folders</a></li>
+            <li><a href="#details">Details</a></li>
+            <li><a href="#same-name">When the name is already taken</a></li>
+            <li><a href="#versions">Earlier versions</a></li>
+            <li><a href="#shortcuts">Keyboard shortcuts</a></li>
+            <li><a href="#mac-style">The Mac style</a></li>
+            <li><a href="#trash">The trash</a></li>
+            <li><a href="#phone">On a phone</a></li>
+          </ol>
+        </details>
 
         <h2 id="around">Finding your way around</h2>
         <ul>
@@ -317,15 +343,20 @@
           <li><strong>Home screen</strong>: add the site to your home screen (in Safari, <strong>Share</strong> › <strong>Add to Home Screen</strong>; in Chrome, <strong>Add to home screen</strong> or <strong>Install app</strong>). It then opens like an app, without the browser's bars, under your site's name and logo.</li>
         </ul>
         <div class="shot phone"><img src="../assets/files-phone.webp" width="780" height="1600" loading="lazy" alt="The file list on a phone" /></div>
+        <nav class="next" aria-label="More guides">
+          <a href="first-steps.html"><span>Previous</span>First steps</a>
+          <a class="forward" href="preview.html"><span>Next</span>Preview and editing</a>
+        </nav>
       </main>
     </div>
     <footer class="site-footer">
       <div class="wrap">
         <span>ThirtyFile</span>
-        <a href="../docs/index.html">Guides</a>
+        <a href="index.html">Guides</a>
         <a href="https://github.com/ThirtyFile/ThirtyFile">Source code</a>
         <a href="https://github.com/ThirtyFile/ThirtyFile/issues">Report a problem</a>
         <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker image</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
       </div>
     </footer>
     <script src="../assets/site.js"></script>

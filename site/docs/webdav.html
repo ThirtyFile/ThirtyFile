@@ -4,7 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Mapping it as a drive · ThirtyFile</title>
-    <meta name="description" content="Open your ThirtyFile spaces in Windows File Explorer, macOS Finder, the Files app of your phone or rclone, over WebDAV with an app password." />
+    <meta name="description" content="Open your ThirtyFile spaces in Windows File Explorer, macOS Finder, a WebDAV-compatible mobile app or rclone, over WebDAV with an app password." />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/webdav.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/webdav.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/webdav.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/webdav.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/webdav.html" />
     <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -25,15 +30,15 @@
         <a class="brand" href="../index.html"><img src="../assets/logo.svg" alt="" />ThirtyFile</a>
         <nav class="site-nav" aria-label="Site">
           <a href="../index.html#features" class="hide-small">Features</a>
-          <a href="../docs/index.html" aria-current="page">Guides</a>
+          <a href="index.html" aria-current="page">Guides</a>
           <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
           <details class="lang-menu">
             <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">Language </span><span class="lang-name">English</span></summary>
             <ul>
-              <li><a href="../index.html" hreflang="en" lang="en" aria-current="true">English</a></li>
-              <li><a href="../zh-TW/index.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
-              <li><a href="../zh-CN/index.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
-              <li><a href="../ja/index.html" hreflang="ja" lang="ja">日本語</a></li>
+              <li><a href="webdav.html" hreflang="en" lang="en" aria-current="true">English</a></li>
+              <li><a href="../zh-TW/docs/webdav.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="../zh-CN/docs/webdav.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../ja/docs/webdav.html" hreflang="ja" lang="ja">日本語</a></li>
             </ul>
           </details>
         </nav>
@@ -44,31 +49,44 @@
         <details open>
           <summary>All guides</summary>
           <p>Get started</p>
-          <a href="../docs/index.html">Install</a>
-          <a href="../docs/first-steps.html">First steps</a>
+          <a href="index.html">Install</a>
+          <a href="first-steps.html">First steps</a>
           <p>Everyday use</p>
-          <a href="../docs/files.html">Working with files</a>
-          <a href="../docs/preview.html">Preview and editing</a>
-          <a href="../docs/sharing.html">Sharing</a>
-          <a href="../docs/account.html">Your account</a>
-          <a href="../docs/webdav.html" aria-current="page">Mapping it as a drive</a>
+          <a href="files.html">Working with files</a>
+          <a href="preview.html">Preview and editing</a>
+          <a href="sharing.html">Sharing</a>
+          <a href="account.html">Your account</a>
+          <a href="webdav.html" aria-current="page">Mapping it as a drive</a>
           <p>Administration</p>
-          <a href="../docs/users.html">Users and spaces</a>
-          <a href="../docs/sign-in.html">Single sign-on</a>
-          <a href="../docs/storage.html">Storage locations</a>
-          <a href="../docs/logs.html">Logs and branding</a>
+          <a href="users.html">Users and spaces</a>
+          <a href="sign-in.html">Single sign-on</a>
+          <a href="storage.html">Storage locations</a>
+          <a href="logs.html">Logs and branding</a>
           <p>Running it</p>
-          <a href="../docs/settings.html">Settings</a>
-          <a href="../docs/internet.html">Putting it on the internet</a>
-          <a href="../docs/backup.html">Upgrade and backup</a>
-          <a href="../docs/help.html">Troubleshooting</a>
+          <a href="settings.html">Settings</a>
+          <a href="internet.html">Putting it on the internet</a>
+          <a href="backup.html">Upgrade and backup</a>
+          <a href="help.html">Troubleshooting</a>
           <p>The project</p>
-          <a href="../docs/contributing.html">Contributing</a>
+          <a href="contributing.html">Contributing</a>
         </details>
       </nav>
       <main id="content" class="article">
         <h1>Mapping it as a drive (WebDAV)</h1>
-        <p class="lead">Open your ThirtyFile spaces in Windows File Explorer, macOS Finder, the Files app of your phone or rclone, as if they were a drive on your computer.</p>
+        <p class="lead">Open your ThirtyFile spaces in Windows File Explorer, macOS Finder, a WebDAV-compatible mobile app or rclone, as if they were a drive on your computer.</p>
+        <details class="guide-toc">
+          <summary>On this page</summary>
+          <ol>
+            <li><a href="#address">The address and signing in</a></li>
+            <li><a href="#layout">What you see</a></li>
+            <li><a href="#windows">Windows</a></li>
+            <li><a href="#macos">macOS</a></li>
+            <li><a href="#phones">iPhone, iPad and Android</a></li>
+            <li><a href="#rclone">rclone</a></li>
+            <li><a href="#troubleshooting">If connecting or saving fails</a></li>
+            <li><a href="#limits">Good to know</a></li>
+          </ol>
+        </details>
 
         <h2 id="address">The address and signing in</h2>
         <p>ThirtyFile speaks WebDAV at <code>/dav/</code> on its own address, for example:</p>
@@ -91,6 +109,7 @@
         <p>Everything works as it does in the browser: what you may change depends on your permissions, read-only spaces can't be changed, the space's storage limit and the upload size limit apply, and every change shows in the activity log. <strong>Deleting</strong> a file or folder moves it to the trash, where you can restore it in the browser.</p>
 
         <h2 id="windows">Windows</h2>
+        <p>Windows' built-in client needs the <strong>WebClient</strong> service. Microsoft has deprecated that service and it is not started by default; availability depends on your Windows installation and administrator's policy. If drive mapping is unavailable, use a dedicated WebDAV client or <a href="#rclone">rclone</a>. See <a href="https://learn.microsoft.com/en-us/windows/whats-new/deprecated-features">Microsoft's WebClient notice</a>.</p>
         <ol>
           <li>In File Explorer, right-click <strong>This PC</strong> and choose <strong>Map network drive</strong> (on Windows 11, it's under <strong>… (See more)</strong> in the toolbar).</li>
           <li>Pick a drive letter and enter the address in <strong>Folder</strong>: <code>https://files.example.com/dav/</code></li>
@@ -108,18 +127,27 @@
 
         <h2 id="phones">iPhone, iPad and Android</h2>
         <ul>
-          <li><strong>iPhone and iPad</strong>: in the Files app, tap <strong>…</strong> at the top of <strong>Browse</strong>, choose <strong>Connect to Server</strong>, enter <code>https://files.example.com/dav/</code>, then choose <strong>Registered User</strong> with your username and the app password.</li>
-          <li><strong>Android</strong> has no WebDAV built in: use a file manager app that supports WebDAV (for example Material Files, Solid Explorer or CX File Explorer), add a WebDAV connection with the address, your username and the app password.</li>
+          <li><strong>iPhone and iPad</strong>: use an app that explicitly supports WebDAV over HTTPS. Add the address, your username and an app password there. If that app offers a Files provider, enable it in the Files app to browse the connection there. Files' built-in <strong>Connect to Server</strong> is for SMB servers; it does not connect directly to ThirtyFile's <code>/dav/</code> endpoint. Apple's <a href="https://support.apple.com/en-us/118392">Files feature notes</a> describe its SMB support.</li>
+          <li><strong>Android</strong>: use a file manager or client that explicitly supports WebDAV over HTTPS, and add the address, your username and an app password. Support for SMB, FTP or SFTP alone does not make an app a WebDAV client.</li>
         </ul>
 
         <h2 id="rclone">rclone</h2>
-        <p><a href="https://rclone.org/">rclone</a> copies and syncs files with ThirtyFile from the command line, for example for backups. Set it up once (it asks for the app password and stores it scrambled):</p>
-        <pre><code>rclone config create thirtyfile webdav url=https://files.example.com/dav/ vendor=other user=amy pass=tfa_… --obscure</code></pre>
+        <p><a href="https://rclone.org/webdav/">rclone</a> copies and syncs files with ThirtyFile from the command line, for example for backups. Use its interactive configuration so your app password is not written into shell history:</p>
+        <pre><code>rclone config</code></pre>
+        <p>Make a new remote named <code>thirtyfile</code>, choose <code>webdav</code>, set the URL to <code>https://files.example.com/dav/</code>, choose <code>other</code> as the vendor, and enter your ThirtyFile username and app password when prompted. Leave a bearer token empty when using this username/password setup. rclone obscures the saved password, which is reversible: protect its configuration file as a credential.</p>
         <p>Then use it like any other rclone remote:</p>
         <pre><code>rclone ls "thirtyfile:My files"
 rclone copy ~/Pictures "thirtyfile:My files/Pictures" --progress
 rclone mount thirtyfile: ~/ThirtyFile --vfs-cache-mode writes</code></pre>
         <p>A read-only app password is enough for <code>rclone copy</code> <em>from</em> ThirtyFile, for example to back your files up to another place.</p>
+
+        <h2 id="troubleshooting">If connecting or saving fails</h2>
+        <ul>
+          <li><strong>401 or repeated password prompts</strong>: use a username and an app password, not your browser password, email address or a two-factor code. Check that the app password has not expired or been revoked and that the account is enabled. After too many failed attempts, wait 15 minutes before trying again.</li>
+          <li><strong>You can read but cannot save</strong>: check the app password's write scope, your permission in the space, the storage limit and whether the location is read-only or offline.</li>
+          <li><strong>404, a login web page or an unexpected redirect</strong>: use the complete <code>/dav/</code> address and configure the reverse proxy to forward WebDAV methods and the <code>Authorization</code> header. An HTML sign-in page is not a WebDAV response.</li>
+          <li><strong>Certificate or large-file errors</strong>: use HTTPS with a trusted certificate. Check both the client's transfer limit and the proxy's request size and timeouts. The browser uploader sends chunks; WebDAV sends a whole file in one request.</li>
+        </ul>
 
         <h2 id="limits">Good to know</h2>
         <ul>
@@ -131,15 +159,20 @@ rclone mount thirtyfile: ~/ThirtyFile --vfs-cache-mode writes</code></pre>
           <li>Moving an item that was shared with you to one of your own spaces isn't allowed, as in the browser; copy it instead.</li>
           <li>Each folder is listed one level at a time; a client that asks for a whole tree at once is told to ask folder by folder, which all common clients do.</li>
         </ul>
+        <nav class="next" aria-label="More guides">
+          <a href="account.html"><span>Previous</span>Your account</a>
+          <a class="forward" href="users.html"><span>Next</span>Users and spaces</a>
+        </nav>
       </main>
     </div>
     <footer class="site-footer">
       <div class="wrap">
         <span>ThirtyFile</span>
-        <a href="../docs/index.html">Guides</a>
+        <a href="index.html">Guides</a>
         <a href="https://github.com/ThirtyFile/ThirtyFile">Source code</a>
         <a href="https://github.com/ThirtyFile/ThirtyFile/issues">Report a problem</a>
         <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker image</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
       </div>
     </footer>
     <script src="../assets/site.js"></script>

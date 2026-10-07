@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>初期設定 · ThirtyFile</title>
-    <meta name="description" content="初めてサインインした後に設定する 4 つのことです。どれも、左のメニューのいちばん下にあるコントロールパネルにあります。" />
+    <meta name="description" content="初回サインイン後にサイト、言語、保存場所、ユーザー、ロゴ、バックアップを設定する手順。" />
     <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/first-steps.html" />
     <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/first-steps.html" />
     <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/first-steps.html" />
@@ -30,7 +30,7 @@
         <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
         <nav class="site-nav" aria-label="サイト">
           <a href="../index.html#features" class="hide-small">機能</a>
-          <a href="../docs/index.html" aria-current="page">ガイド</a>
+          <a href="index.html" aria-current="page">ガイド</a>
           <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
           <details class="lang-menu">
             <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">言語 </span><span class="lang-name">日本語</span></summary>
@@ -49,66 +49,76 @@
         <details open>
           <summary>すべてのガイド</summary>
           <p>はじめに</p>
-          <a href="../docs/index.html">インストール</a>
-          <a href="../docs/first-steps.html" aria-current="page">初期設定</a>
+          <a href="index.html">インストール</a>
+          <a href="first-steps.html" aria-current="page">初期設定</a>
           <p>日常の操作</p>
-          <a href="../../docs/files.html" hreflang="en">ファイルの操作</a>
-          <a href="../../docs/preview.html" hreflang="en">プレビューと編集</a>
-          <a href="../../docs/sharing.html" hreflang="en">共有</a>
-          <a href="../../docs/account.html" hreflang="en">アカウント</a>
-          <a href="../../docs/webdav.html" hreflang="en">ネットワークドライブとして割り当て</a>
+          <a href="files.html">ファイルの操作</a>
+          <a href="preview.html">プレビューと編集</a>
+          <a href="sharing.html">共有</a>
+          <a href="account.html">アカウント</a>
+          <a href="webdav.html">ネットワークドライブとして割り当て</a>
           <p>管理</p>
-          <a href="../../docs/users.html" hreflang="en">ユーザーとスペース</a>
-          <a href="../../docs/sign-in.html" hreflang="en">シングルサインオン</a>
-          <a href="../../docs/storage.html" hreflang="en">保存場所</a>
-          <a href="../../docs/logs.html" hreflang="en">ログとブランド設定</a>
+          <a href="users.html">ユーザーとスペース</a>
+          <a href="sign-in.html">シングルサインオン</a>
+          <a href="storage.html">保存場所</a>
+          <a href="logs.html">ログとブランド設定</a>
           <p>運用</p>
-          <a href="../../docs/settings.html" hreflang="en">設定</a>
-          <a href="../../docs/internet.html" hreflang="en">インターネットに公開</a>
-          <a href="../../docs/backup.html" hreflang="en">アップグレードとバックアップ</a>
-          <a href="../../docs/help.html" hreflang="en">トラブルシューティング</a>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">インターネットに公開</a>
+          <a href="backup.html">アップグレードとバックアップ</a>
+          <a href="help.html">トラブルシューティング</a>
           <p>プロジェクト</p>
-          <a href="../../docs/contributing.html" hreflang="en">開発への参加</a>
+          <a href="contributing.html">開発への参加</a>
         </details>
       </nav>
       <main id="content" class="article">
         <h1>初期設定</h1>
-        <p class="lead">初めてサインインした後に設定する 4 つのことです。どれも、左のメニューのいちばん下にあるコントロールパネルにあります。</p>
-        <p class="lang-note">日本語で読めるのは、インストールと初期設定の 2 つのガイドです。その他のガイドは、現在英語のみです。</p>
-        <h2 id="general">1. サイトの URL と言語</h2>
-        <p><strong>コントロールパネル › 全般</strong>を開きます。</p>
+        <p class="lead">初回サインイン後に設定する 4 項目です。すべて左メニュー下部のコントロールパネルにあります。</p>
+        <details class="guide-toc">
+          <summary>このページの内容</summary>
+          <ol>
+            <li><a href="#general">1. サイトのアドレスと言語</a></li>
+            <li><a href="#storage">2. ファイルの保存先</a></li>
+            <li><a href="#people">3. ユーザー</a></li>
+            <li><a href="#branding">4. 名前とロゴ</a></li>
+            <li><a href="#next">次に行うこと</a></li>
+          </ol>
+        </details>
+        <h2 id="general">1. サイトのアドレスと言語</h2>
+        <p><strong>コントロールパネル › 全般</strong> を開きます。</p>
         <ul>
-          <li><strong>サイトの URL</strong>：サイトにアクセスするときのアドレスです（例：<code>https://files.example.com</code>）。共有リンクはこの URL をもとに作られるので、何かを共有する前に設定してください。</li>
-          <li><strong>既定の言語</strong>：アカウントメニューで言語を選んでいない人の言語です。英語、繁体字中国語、簡体字中国語、日本語、または各自のブラウザーの言語（ブラウザーの言語のうち ThirtyFile が提供する最初のもの）から選びます。サインインしている人には、ブラウザーの言語ではなく既定の言語が使われます。サインインしていない訪問者（共有リンクを開く人など）にはブラウザーの言語が使われ、ThirtyFile がそのブラウザーの言語をどれも提供していない場合だけ既定の言語になります。ThirtyFile が各ユーザーのスペースに作成する項目（「Files of amy」フォルダーなど）の名前も既定の言語になります（既定の言語がブラウザーに従う場合は英語）。英語では、日付、時刻、数値がブラウザーに設定された地域の形式になります。たとえば英語（イギリス）のブラウザーでは、日/月/年の順と 24 時間表記になります。</li>
-          <li><strong>個人用スペース</strong>：新しいユーザーに専用の「マイファイル」を用意するか、どの保存場所に置くか、どれだけ保存できるかを決めます。<a href="../../docs/users.html#personal" hreflang="en">個人用スペース</a>をご覧ください。</li>
-          <li><strong>2 段階認証</strong>と<strong>パスワードの最小文字数</strong>。<a href="../../docs/users.html#security" hreflang="en">サインインのセキュリティ</a>をご覧ください。</li>
+          <li><strong>サイトの URL</strong>：利用者が開く <code>https://files.example.com</code> などのアドレス。共有リンクの基準なので先に設定します。</li>
+          <li><strong>既定の言語</strong>：アカウントで未選択の人の言語。英語、繁体字、簡体字、日本語、またはブラウザーの対応する最初の言語です。サインイン中はブラウザーより既定を優先し、共有リンクなど未サインインの訪問者はブラウザーを優先、対応なしなら既定にします。<em>amy のファイル</em> など作成物の名前も既定（ブラウザーに従う設定なら英語）です。英語の日付、時刻、数字はブラウザーの地域に合わせ、英国英語なら日/月/年と 24 時間です。</li>
+          <li><strong>個人用スペース</strong>：新ユーザーにマイファイルを作るか、場所と容量。<a href="users.html#personal">個人用スペース</a> を参照。</li>
+          <li><strong>2 段階認証</strong> と <strong>パスワードの最小文字数</strong>。<a href="users.html#security">サインインの安全性</a> を参照。</li>
         </ul>
-
-        <h2 id="storage">2. ファイルの保存場所</h2>
-        <p>特に指定しない限り、ファイルは storage フォルダーに普通のフォルダーとして保存されます。「すべてのファイル」は <code>company</code>、ほかは <code>teams/&lt;スペース名&gt;</code> と <code>users/&lt;ユーザー名&gt;</code> です（<a href="../../docs/storage.html#layout" hreflang="en">ファイルの保存場所</a>）。NAS、S3、SFTP、FTP を使うには、<strong>コントロールパネル › 保存場所</strong>を開き、場所を追加して既定にします。</p>
-        <p>種類ごとの詳細は、<a href="../../docs/storage.html" hreflang="en">保存場所</a>をご覧ください。</p>
-
-        <h2 id="people">3. メンバー</h2>
-        <p><strong>コントロールパネル › ユーザー</strong>でアカウントを作り、<strong>グループ</strong>でメンバーをまとめます。たとえば部署ごとに 1 つのグループを作ります。</p>
-        <p>組織で Microsoft、Google、GitHub のアカウントや、独自の ID プロバイダー（Keycloak や Authentik など、任意の OpenID Connect プロバイダー）を使っている場合は、そのアカウントでサインインできます。<a href="../../docs/sign-in.html" hreflang="en">シングルサインオン</a>をご覧ください。</p>
-
+        <h2 id="storage">2. ファイルの保存先</h2>
+        <p>未指定なら通常フォルダーの <code>company</code>（会社）、<code>teams/&lt;space name&gt;</code>、<code>users/&lt;user name&gt;</code> に保存します（<a href="storage.html#layout">保存先</a>）。NAS、S3、SFTP、FTP なら <strong>コントロールパネル › 保存場所</strong> で追加して既定にします。</p>
+        <p>種類ごとの詳細は <a href="storage.html">保存場所</a> にあります。</p>
+        <h2 id="people">3. ユーザー</h2>
+        <p><strong>コントロールパネル › ユーザー</strong> で作成し、<strong>グループ</strong> で部署などをまとめます。</p>
+        <p>Microsoft、Google、GitHub、独自の OpenID Connect（Keycloak、Authentik など）を組織で使う場合、そのアカウントで入れます。<a href="sign-in.html">シングルサインオン</a> を参照してください。</p>
         <h2 id="branding">4. 名前とロゴ</h2>
-        <p><strong>コントロールパネル › ブランド設定</strong>で、サイト名、ロゴ、色、サインイン画面の画像を設定します。</p>
-
-        <h2 id="next">次のステップ</h2>
+        <p><strong>コントロールパネル › ブランド設定</strong> でサイト名、ロゴ、色、サインイン画面の画像を設定します。</p>
+        <h2 id="next">次に行うこと</h2>
         <ul>
-          <li>社内ネットワークの外から使う場合は、先に<a href="../../docs/internet.html" hreflang="en">インターネットに公開</a>をお読みください。</li>
-          <li>みんなが頼りにし始める前に、<a href="../../docs/backup.html" hreflang="en">バックアップ</a>を設定してください。</li>
+          <li>社内ネットワーク外でも使うなら、先に <a href="internet.html">インターネットに公開</a> を読んでください。</li>
+          <li>利用者が使い始める前に <a href="backup.html">バックアップ</a> を設定してください。</li>
         </ul>
+        <nav class="next" aria-label="その他のガイド">
+          <a href="index.html"><span>前へ</span>インストール</a>
+          <a class="forward" href="files.html"><span>次へ</span>ファイルの操作</a>
+        </nav>
       </main>
     </div>
     <footer class="site-footer">
       <div class="wrap">
         <span>ThirtyFile</span>
-        <a href="../docs/index.html">ガイド</a>
+        <a href="index.html">ガイド</a>
         <a href="https://github.com/ThirtyFile/ThirtyFile">ソースコード</a>
         <a href="https://github.com/ThirtyFile/ThirtyFile/issues">問題を報告</a>
         <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker イメージ</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
       </div>
     </footer>
     <script src="../../assets/site.js"></script>

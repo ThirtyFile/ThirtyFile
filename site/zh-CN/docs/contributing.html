@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="zh-CN" data-root="../.." data-page="contributing">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>参与贡献 · ThirtyFile</title>
+    <meta name="description" content="报告问题与安全漏洞，了解分支、检查、翻译、发布和许可证要求。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/contributing.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/contributing.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/contributing.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/contributing.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/contributing.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要内容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="网站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">语言 </span><span class="lang-name">简体中文</span></summary>
+            <ul>
+              <li><a href="../../docs/contributing.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="../../zh-TW/docs/contributing.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="contributing.html" hreflang="zh-CN" lang="zh-CN" aria-current="true">简体中文</a></li>
+              <li><a href="../../ja/docs/contributing.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>开始使用</p>
+          <a href="index.html">安装</a>
+          <a href="first-steps.html">初始设置</a>
+          <p>日常使用</p>
+          <a href="files.html">文件操作</a>
+          <a href="preview.html">预览与编辑</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的账号</a>
+          <a href="webdav.html">映射为网络驱动器</a>
+          <p>管理</p>
+          <a href="users.html">用户与空间</a>
+          <a href="sign-in.html">单点登录</a>
+          <a href="storage.html">存储位置</a>
+          <a href="logs.html">日志与品牌</a>
+          <p>部署与运维</p>
+          <a href="settings.html">设置</a>
+          <a href="internet.html">通过互联网访问</a>
+          <a href="backup.html">升级与备份</a>
+          <a href="help.html">故障排除</a>
+          <p>项目</p>
+          <a href="contributing.html" aria-current="page">参与贡献</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+
+        <h1>参与贡献</h1>
+        <p class="lead">如何报告问题、提出建议，或修改 ThirtyFile 代码。</p>
+        <p>所有参与者都须遵守<a href="https://github.com/ThirtyFile/ThirtyFile/blob/main/.github/CODE_OF_CONDUCT.md">行为准则</a>。</p>
+        <details class="guide-toc">
+          <summary>本页内容</summary>
+          <ol>
+            <li><a href="#issues">问题与建议</a></li>
+            <li><a href="#flow">修改代码</a></li>
+            <li><a href="#checks">检查</a></li>
+            <li><a href="#translations">其他语言的网站</a></li>
+            <li><a href="#labels">标签</a></li>
+            <li><a href="#releases">发布版本</a></li>
+            <li><a href="#licence">许可证</a></li>
+          </ol>
+        </details>
+        <h2 id="issues">问题与建议</h2>
+        <ul>
+          <li><a href="https://github.com/ThirtyFile/ThirtyFile/issues/new/choose">创建 Issue</a>，选择合适的表单：<strong>报告问题</strong>、<strong>Suggest an idea</strong>、<strong>Report an accessibility barrier</strong>、<strong>Improve the guides</strong> 或 <strong>Improve the code</strong>。表单会询问协助处理所需的信息。</li>
+          <li>先查看<a href="https://github.com/ThirtyFile/ThirtyFile/issues">已有 Issue</a>。如果已有相同问题，请补充到该 Issue，而非重复创建。</li>
+        </ul>
+        <div class="note"><strong>安全问题应私下报告。</strong>请使用 <a href="https://github.com/ThirtyFile/ThirtyFile/security/advisories/new">Report a vulnerability</a>，不要创建公开 Issue，以便在公开前修复问题。</div>
+        <h2 id="flow">修改代码</h2>
+        <p>禁止直接推送到 <code>main</code>。每项更改都通过独立分支的 Pull Request 提交。</p>
+        <ol>
+          <li><strong>从 Issue 开始。</strong>大于小修复的工作，先在 Issue 中讨论并确认方案。</li>
+          <li><strong>从 <code>main</code> 创建分支</strong>，按用途命名：
+            <div class="table-scroll"><table>
+              <thead><tr><th>分支</th><th>用途</th></tr></thead>
+              <tbody>
+                <tr><td><code>feat/share-link-editing</code></td><td>新增功能</td></tr>
+                <tr><td><code>fix/upload-resume</code></td><td>问题修复</td></tr>
+                <tr><td><code>docs/backup-guide</code></td><td>网站与指南</td></tr>
+                <tr><td><code>chore/update-actions</code></td><td>工具、构建和依赖</td></tr>
+              </tbody>
+            </table></div>
+          </li>
+          <li><strong>完成更改</strong>，执行下方检查。</li>
+          <li><strong>创建 Pull Request。</strong>标题用清晰语言说明改动，并添加一个标签。在说明中写 <code>Closes #123</code>，合并后即可关闭对应 Issue。</li>
+          <li><strong>等待检查。</strong>轻量的 <strong>Checks passed</strong> 检查必须通过才能合并。</li>
+          <li><strong>合并。</strong>Pull Request 在 <code>main</code> 上压缩为一个提交，随后删除分支。</li>
+        </ol>
+        <h2 id="checks">检查</h2>
+        <p>创建 Pull Request 前，请使用统一脚本在本地运行完整检查。发布和手动完整验证也会运行这些检查；自动 Pull Request 检查更轻量。</p>
+        <pre><code>scripts/check.sh</code></pre>
+        <div class="table-scroll"><table>
+          <thead><tr><th>部分</th><th>检查内容</th></tr></thead>
+          <tbody>
+            <tr><td><code>scripts/check.sh quick</code></td><td>自动 Pull Request 检查：前端格式、翻译、模块边界、端到端测试结构、类型和 lint；Rust 格式；迁移编号及已发布迁移保持不变；网站链接。不运行单元/浏览器测试、Rust 编译或镜像构建</td></tr>
+            <tr><td><code>scripts/check.sh web</code></td><td>界面：按锁文件安装依赖、格式（<code>pnpm format:check</code>）、翻译（<code>node scripts/check-i18n.mjs</code>）、确保 <code>web/src/ooxml</code> 的 Office 代码不导入应用其他模块（<code>node scripts/check-boundaries.mjs</code>）、确保端到端测试没有固定等待且名称包含随机部分（<code>node scripts/check-e2e.mjs</code>）、类型、lint 和单元测试。使用 <code>scripts/check.sh web --coverage</code> 时（与 GitHub 一样），覆盖率低于 <code>web/vitest.config.ts</code> 中的门槛也会失败</td></tr>
+            <tr><td><code>scripts/check.sh server</code></td><td>服务器：格式（<code>cargo fmt --check</code>）、<code>cargo test</code>，以及将警告视为错误的 <code>cargo clippy</code></td></tr>
+            <tr><td><code>scripts/check.sh e2e</code></td><td>端到端测试：通过真实浏览器（Playwright）对从仓库构建的服务器执行登录、上传和预览。多个测试并行运行（GitHub 上为 4 个），因此每个测试使用独立文件夹，名称含随机部分，操作后等待服务器响应而非固定时间；<code>web/tests/e2e/helpers.ts</code> 提供这些辅助功能。首次运行前，用 <code>cd web &amp;&amp; pnpm exec playwright install chromium</code> 安装浏览器</td></tr>
+            <tr><td><code>scripts/check.sh site</code></td><td>网站：每种语言都具有全部翻译页面及相互对应的语言链接，站内链接和锚点有效（<code>node scripts/check-site.mjs</code>）。仅需要 Node，修改网站时也会执行</td></tr>
+          </tbody>
+        </table></div>
+        <p>Windows 上请在 Git Bash 中运行。GitHub 完整验证还会检查依赖的已知安全问题（<code>cargo deny</code> 和 <code>pnpm audit</code>）；服务器测试与端到端测试合计必须覆盖至少 90% 的服务器代码行（<code>cargo llvm-cov</code>，门槛在 <code>.github/workflows/build.yml</code>）。</p>
+        <p>代码由工具格式化，未符合格式时检查会失败。提交前请格式化：</p>
+        <pre><code>cd server &amp;&amp; cargo fmt
+cd web &amp;&amp; pnpm format</code></pre>
+        <p>服务器使用 rustfmt（配置在 <code>server/rustfmt.toml</code>），界面使用 oxfmt（配置在 <code>web/.oxfmtrc.json</code>；格式化 <code>web/src</code>、<code>web/tests</code> 和 <code>web/scripts</code>）。编辑器安装 rustfmt 或 oxfmt 扩展后可按同样设置在保存时格式化。手工排版、每行多项的表格可在上方加 <code>// oxfmt-ignore</code> 保持布局。<code>web/src/lib/i18n/</code> 中的词典不格式化，保持每行一个条目。</p>
+        <p>仅调整格式的提交列在 <code>.git-blame-ignore-revs</code>。GitHub blame 视图会跳过这些提交；如需本地 <code>git blame</code> 也跳过，在克隆仓库中执行一次 <code>git config blame.ignoreRevsFile .git-blame-ignore-revs</code>。</p>
+        <ul>
+          <li>代码、注释和指南源文使用英文。</li>
+          <li>界面文字在代码中使用英文，译文位于 <code>web/src/lib/i18n/</code>，每种语言一个文件夹，文件名保持一致。繁体中文（<code>zh-TW</code>）、简体中文（<code>zh-CN</code>）和日文（<code>ja</code>）均为必需语言：新增文字须按下方术语表补齐三种译文。<code>node scripts/check-i18n.mjs</code> 检查所有语言：必需语言缺项，或保留代码已不再使用的条目时会失败；其他语言仅报告这些问题及占位译文数量。语言列入脚本的 <code>COMPLETE</code> 后即为必需语言，语言切换器提供的语言也必须完整。可用 <code>--require &lt;language&gt;</code> 查看新语言尚缺哪些内容。</li>
+          <li>服务器自行生成的邮件文字，以英文定义在 <code>server/src/i18n/texts.rs</code>，各语言译文位于旁边的文件（<code>zh_tw.rs</code>、<code>zh_cn.rs</code>、<code>ja.rs</code>）。缺少译文时使用英文。服务器测试会检查 <code>texts.rs</code> 中列入 <code>COMPLETE</code>，或语言切换器提供的语言；缺少文字或 <code>{parameters}</code> 与英文不一致时会失败。</li>
+          <li>行为改变时，同步更新 <code>site/docs/</code> 中描述该行为的指南。</li>
+          <li>0.4.0 的数据库结构已冻结，确保旧版本创建的数据继续有效。结构修改必须新增 <code>server/migrations/0002_&lt;name&gt;.sql</code> 及后续编号的迁移文件，以升级 0.4.0 数据库。禁止修改 <code>0001_init.sql</code> 和此前版本已发布的迁移文件，检查会阻止这种修改。</li>
+          <li>会更改用户文件的逻辑（公式、工作簿保存、文本编码）须在 <code>web/tests/unit/</code> 中添加单元测试。</li>
+        </ul>
+        <p>每个 Pull Request 都运行上述轻量检查。完整测试与镜像构建在正式发布和预发布前运行，也可在 <strong>Actions › Build › Run workflow</strong> 手动运行；手动验证不发布任何内容。发布前，两种架构的镜像都会使用 <code>compose.yaml</code> 在最新已发布版本的数据上启动。CodeQL 在合并后、每周及发布前扫描 <code>main</code>。合并到 <code>main</code> 不发布任何内容，网站也不发布：指南随版本发布，以描述用户实际可安装的功能。对当前已发布版本也正确的指南修复可手动发布：在 <strong>Actions › Website › Run workflow</strong> 中选择 <code>main</code> 为要发布的分支或标签。</p>
+        <h2 id="translations">其他语言的网站</h2>
+        <p>首页和全部 16 篇指南提供英文、繁体中文、简体中文和日文版本。每种语言覆盖相同的 17 个页面：</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th>页面</th><th>英文</th><th>其他语言</th></tr></thead>
+          <tbody>
+            <tr><td>首页</td><td><code>site/index.html</code></td><td><code>site/&lt;language&gt;/index.html</code></td></tr>
+            <tr><td>安装</td><td><code>site/docs/index.html</code></td><td><code>site/&lt;language&gt;/docs/index.html</code></td></tr>
+            <tr><td>其他所有指南</td><td><code>site/docs/&lt;guide&gt;.html</code></td><td><code>site/&lt;language&gt;/docs/&lt;guide&gt;.html</code></td></tr>
+          </tbody>
+        </table></div>
+        <p>指南菜单、相关链接、上一页/下一页链接和章节列表均保持当前语言。切换语言时停留在同一指南，有 JavaScript 时还会保留当前章节。README 也有翻译：<code>README.md</code> 旁有 <code>README.zh-TW.md</code>、<code>README.zh-CN.md</code> 和 <code>README.ja.md</code>，分别链接到对应语言网站。</p>
+        <ul>
+          <li><strong>修改翻译页面时，必须在同一个 Pull Request 中更新所有语言。</strong>如果不会某种语言，请在 Pull Request 中说明，维护者会安排其他人协助。</li>
+          <li>每个版本都有 <code>&lt;html lang&gt;</code>、独立标题和描述，以及指向所有版本（包括自身）的 <code>&lt;link rel="alternate" hreflang&gt;</code>。每页直接写入语言切换器、指南菜单和章节列表，无 JavaScript 时仍可使用。所有语言的章节 ID 及命令/配置示例必须保持相同。</li>
+          <li>语言和所有页面列在 <code>site/assets/site.js</code> 顶部的 <code>LANGUAGES</code> 和 <code>TRANSLATED</code> 中，该文件也保存菜单与页脚译文。修改导航或指南标题后，运行 <code>node scripts/update-site-navigation.mjs</code> 更新静态菜单和章节列表。<code>scripts/check.sh site</code> 会检查翻译缺漏、错误元数据或语言切换器、缺失章节、改变的代码区块、损坏链接和意外跨语言链接。每次新增页面必须在同一个 Pull Request 中补齐所有支持语言。运行 <code>node --test scripts/check-site.test.mjs</code> 测试检查器；安装前端的 Playwright 依赖和 Chromium 后，<code>node scripts/check-site-browser.mjs &lt;scratch-directory&gt;</code> 可检查实际页面、语言与章节切换、移动布局和无 JavaScript 导航，并将截图保存到网站目录外。</li>
+          <li>用词遵循<a href="https://github.com/ThirtyFile/ThirtyFile/blob/main/web/src/lib/i18n/glossary.md">术语表</a>（<code>web/src/lib/i18n/glossary.md</code>），与界面译文一致。简体中文使用中国大陆的习惯用语，而非仅转换繁体字；日文句子使用です・ます，并采用 Windows 文件资源管理器与 Finder 的术语。</li>
+          <li>首页主要截图为各语言分别拍摄：本地实例与示例数据、1280 × 720、2 倍缩放，保存为 WebP（<code>site/assets/files-light-&lt;language&gt;.webp</code> 和 <code>files-dark-&lt;language&gt;.webp</code>）。其他截图保持英文。</li>
+        </ul>
+        <h2 id="labels">标签</h2>
+        <div class="table-scroll"><table>
+          <thead><tr><th>标签</th><th>版本说明中的分类</th></tr></thead>
+          <tbody>
+            <tr><td><code>enhancement</code></td><td>新功能</td></tr>
+            <tr><td><code>bug</code></td><td>修复</td></tr>
+            <tr><td><code>performance</code></td><td>性能提升</td></tr>
+            <tr><td><code>accessibility</code></td><td>更易使用</td></tr>
+            <tr><td><code>documentation</code></td><td>指南与网站</td></tr>
+            <tr><td><code>dependencies</code></td><td>依赖更新</td></tr>
+            <tr><td><code>maintenance</code></td><td>维护</td></tr>
+          </tbody>
+        </table></div>
+        <h2 id="releases">发布版本</h2>
+        <p>正式镜像同时发布到 <code>ghcr.io/thirtyfile/thirtyfile</code> 和 <code>docker.io/thirtyfile/thirtyfile</code>。首次向 Docker Hub 发布前，在 <strong>Settings › Secrets and variables › Actions</strong> 中添加 Actions variable <code>DOCKERHUB_USERNAME</code> 和 secret <code>DOCKERHUB_TOKEN</code>。使用可读写该仓库的 Docker Hub access token。发布流程会在扫描与构建前检查凭据，按 digest 复制已验证的镜像，并在发布 GitHub release 前验证每个 Docker Hub 标签。</p>
+        <p>合并后的更改累积在 <code>main</code>，由维护者决定何时发布。发布须手动启动：在 GitHub 打开 <strong>Actions › Release › Run workflow</strong>，保留 <code>main</code>，输入新版本号，例如 <code>1.2.3</code>；预发布使用 <code>1.2.3-rc.1</code>。也可运行：</p>
+        <pre><code>gh workflow run release.yml -f version=1.2.3</code></pre>
+        <p>流程对 <code>main</code> 执行 CodeQL 扫描、测试，构建并启动 amd64 与 arm64 镜像。全部通过后才推送尚未附加标签的镜像。接着依序：从镜像提取两种架构的服务器程序，与校验码、许可声明和指向版本系列的 <code>compose.yaml</code> 创建草稿 release（1.0.0 之前为 <code>:1.2</code>，之后为 <code>:1</code>）；不重新构建，给镜像添加 <code>1.2.3</code>、<code>1.2</code>、<code>1</code>（从 1.0.0 起）及 <code>latest</code> 标签；发布 release，创建 <code>v1.2.3</code> 标签，说明由上次发布以来合并的 Pull Request 生成；最后从该标签发布网站。如果扫描发现未关闭的 high 或 critical 告警，或者测试或镜像失败，不会推送、添加标签或发布。修复告警，或在不适用时从 <strong>Security › Code scanning</strong> 中关闭告警，再次运行发布。后续步骤失败时，用相同版本号重试，会发布已标记为 <code>1.2.3</code> 的镜像，而非重新构建。版本号必须比上次发布更新。以 <code>v</code> 开头的标签不能移动或删除。</p>
+        <p>含 <code>-</code> 的版本号，例如 <code>1.2.3-rc.1</code>，为预发布：镜像仅添加 <code>1.2.3-rc.1</code> 标签，GitHub 将其标为预发布，用户必须主动选择才会获得；预发布不会发布网站。预发布验证通过且之后没有合并新提交时，可从同一提交发布 <code>1.2.3</code>：流程直接为预发布镜像添加标签，不重新构建，确保发布的就是已试用的内容（镜像版本标签仍显示预发布版本）。</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th>版本位</th><th>递增时机</th></tr></thead>
+          <tbody>
+            <tr><td>第一位（<code>2</code>.0.0）</td><td>修改或移除用户依赖的行为</td></tr>
+            <tr><td>第二位（1.<code>3</code>.0）</td><td>新增功能</td></tr>
+            <tr><td>第三位（1.2.<code>4</code>）</td><td>仅修复问题</td></tr>
+          </tbody>
+        </table></div>
+        <p>复制已有版本时，在 <strong>Actions › Mirror a release to Docker Hub › Run workflow</strong> 中选择 <code>main</code>，填写已发布版本，例如 <code>0.6.0</code>。流程先验证 Git 标签、镜像 revision 和已签名的 GHCR 来源证明，再复制镜像。仅当 GHCR 对应的版本系列、主版本或 <code>latest</code> 标签目前指向同一镜像时，才更新该标签；镜像旧版本不会覆盖更新版本。已有的精确版本标签必须与源 digest 一致，否则流程停止。内容一致的复制可安全重试，不会重新构建镜像。</p>
+        <h2 id="licence">许可证</h2>
+        <p>ThirtyFile 采用 <a href="https://github.com/ThirtyFile/ThirtyFile/blob/main/LICENSE">Apache License 2.0</a>，贡献内容遵循相同条款。</p>
+        <p>依赖须采用宽松许可证：Rust 依赖按 <code>server/deny.toml</code> 清单检查，<code>server/about.toml</code> 使用相同清单；npm 包按 <code>web/scripts/third-party-notices.mjs</code> 中相同清单（另加字体许可证 OFL-1.1）检查，两者均有测试。镜像构建会把所有 crate、npm 包、musl、证书颁发机构和时区数据库的许可声明汇总为 <code>THIRD-PARTY-NOTICES</code>；出现清单之外的许可证时构建失败。</p>
+        <nav class="next" aria-label="更多指南">
+          <a href="help.html"><span>上一篇</span>故障排除</a>
+        </nav>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">源代码</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">报告问题</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 镜像</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

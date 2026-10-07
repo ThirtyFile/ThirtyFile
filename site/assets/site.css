@@ -1103,6 +1103,30 @@ kbd {
   border-top: 1px solid var(--line);
 }
 
+.guide-toc {
+  margin: 24px 0;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-soft);
+}
+
+.guide-toc summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.guide-toc ol {
+  display: grid;
+  gap: 6px;
+  padding-left: 22px;
+  margin-bottom: 0;
+}
+
+.guide-toc a {
+  overflow-wrap: anywhere;
+}
+
 .next a {
   display: grid;
   gap: 2px;

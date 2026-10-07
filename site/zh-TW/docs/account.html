@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-TW" data-root="../.." data-page="account">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>你的帳號 · ThirtyFile</title>
+    <meta name="description" content="管理密碼、兩步驟驗證、裝置、應用程式密碼、語言與介面風格，以及登入紀錄和通知。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/account.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/account.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/account.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/account.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/account.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要內容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="網站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">語言 </span><span class="lang-name">繁體中文</span></summary>
+            <ul>
+              <li><a href="../../docs/account.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="account.html" hreflang="zh-TW" lang="zh-TW" aria-current="true">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/account.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../../ja/docs/account.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>開始使用</p>
+          <a href="index.html">安裝</a>
+          <a href="first-steps.html">初次設定</a>
+          <p>日常使用</p>
+          <a href="files.html">檔案操作</a>
+          <a href="preview.html">預覽與編輯</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html" aria-current="page">你的帳號</a>
+          <a href="webdav.html">連線為網路磁碟機</a>
+          <p>管理</p>
+          <a href="users.html">使用者與空間</a>
+          <a href="sign-in.html">單一登入</a>
+          <a href="storage.html">儲存位置</a>
+          <a href="logs.html">紀錄與品牌</a>
+          <p>架設與維運</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">從網際網路存取</a>
+          <a href="backup.html">升級與備份</a>
+          <a href="help.html">疑難排解</a>
+          <p>專案</p>
+          <a href="contributing.html">參與貢獻</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+
+        <h1>你的帳號</h1>
+        <p class="lead">管理密碼、兩步驟驗證、已登入裝置、腳本使用的應用程式密碼、語言與介面風格、登入紀錄和通知。</p>
+        <p>本頁所有功能都在<strong>帳號選單</strong>中：按一下左側清單底部的名字即可開啟。選單最後一行顯示伺服器執行的 ThirtyFile 版本，例如 <strong>ThirtyFile 0.5.0</strong>。</p>
+        <details class="guide-toc">
+          <summary>本頁內容</summary>
+          <ol>
+            <li><a href="#password">密碼</a></li>
+            <li><a href="#two-factor">兩步驟驗證</a></li>
+            <li><a href="#devices">已登入裝置</a></li>
+            <li><a href="#app-passwords">應用程式密碼</a></li>
+            <li><a href="#language">語言</a></li>
+            <li><a href="#style">介面風格</a></li>
+            <li><a href="#history">登入紀錄</a></li>
+            <li><a href="#notifications">通知</a></li>
+          </ol>
+        </details>
+
+        <h2 id="password">密碼</h2>
+        <p><strong>變更密碼</strong>需要輸入目前密碼和新密碼。修改後，其他裝置會登出。新密碼至少需要 6 個字元；如果管理員設定了更高的最低長度，則需滿足該要求。</p>
+        <p>如果密碼由管理員設定（新建帳號或重設密碼），首次登入時需要自行設定密碼。忘記密碼時，登入頁的<strong>忘記密碼？</strong>會向你的電子郵件信箱傳送連結，前提是管理員已設定郵件服務和網站網址，而且帳號已填寫電子郵件信箱（參閱<a href="#notifications">通知設定</a>）。</p>
+        <h2 id="two-factor">兩步驟驗證</h2>
+        <p>開啟兩步驟驗證後，只有密碼還不足以登入：輸入密碼後，還需輸入手機驗證器 App產生的六位驗證碼，例如 Microsoft Authenticator、Google Authenticator 或 1Password。驗證碼每 30 秒更換一次，只能使用一次。</p>
+        <ol>
+          <li>開啟<strong>兩步驟驗證</strong>，選擇<strong>設定</strong>，輸入密碼。</li>
+          <li>使用App 掃描 QR 碼。無法掃描時，把 QR 碼下方顯示的金鑰輸入 App。</li>
+          <li>輸入 App顯示的驗證碼確認，即可開啟兩步驟驗證。</li>
+          <li>儲存接下來顯示的十個<strong>復原碼</strong>，例如放在密碼管理器中或寫在紙上。手機遺失時，每個復原碼可代替驗證碼登入一次。復原碼只顯示這一次。</li>
+        </ol>
+        <p>在同一個對話方塊中，可以產生新的復原碼（舊復原碼隨即失效），透過<strong>更換 App</strong>改用其他手機或 App，或者關閉兩步驟驗證。每項操作都需要密碼和目前 App 的驗證碼（或復原碼）。</p>
+        <ul>
+          <li>驗證碼連續錯誤五次後，必須重新輸入密碼。一個帳號累計十次驗證碼錯誤後，系統會拒絕繼續驗證，最長持續 15 分鐘。</li>
+          <li><a href="sign-in.html">單一登入</a>（Microsoft、Google、GitHub 或 OpenID Connect 服務）不要求此驗證碼：身分提供者有自己的兩步驟驗證。<a href="#app-passwords">應用程式密碼</a>也不要求驗證碼。</li>
+          <li>如果管理員要求使用兩步驟驗證，下次輸入密碼登入後會立即要求設定，而且不能關閉。</li>
+        </ul>
+        <div class="note">手機和復原碼都遺失了？請讓管理員重設兩步驟驗證，然後就可以使用密碼登入並重新設定。</div>
+        <h2 id="devices">已登入裝置</h2>
+        <p><strong>裝置</strong>列出所有已登入你帳號的瀏覽器，包括瀏覽器和系統、最近使用的位址、登入時間和上次使用時間。目前使用的裝置標為<strong>這個裝置</strong>。</p>
+        <ul>
+          <li>裝置旁的<strong>登出</strong>會立即結束其工作階段。該裝置必須重新登入。</li>
+          <li><strong>登出其他所有裝置</strong>會讓目前裝置以外的所有裝置登出。</li>
+        </ul>
+        <div class="note">看到不認識的裝置時，請在這裡將其登出。如果使用密碼登入，也請修改密碼。如果使用單一登入，這裡沒有密碼：讓裝置登出即可結束其存取權限，也應檢查對應外部帳號的安全頁面。</div>
+        <h2 id="app-passwords">應用程式密碼</h2>
+        <p>腳本、備份工具和檔案用戶端無法透過登入頁登入。請在<strong>應用程式密碼</strong>中為每一個工具建立獨立應用程式密碼。使用單一登入且沒有本機密碼的帳號也採用這種方式。</p>
+        <ul>
+          <li>為它填寫能說明用途的<strong>名稱</strong>，選擇只能<strong>讀取檔案</strong>還是也能<strong>更改</strong>檔案，並設定<strong>到期</strong>時間。</li>
+          <li>輸入目前密碼；如果開啟了兩步驟驗證，還需 App 的驗證碼。單一登入帳號沒有本機密碼，必須在登入後的 10 分鐘內建立應用程式密碼。</li>
+          <li>每次為帳號建立應用程式密碼都會收到通知，幫助你發現非本人建立的密碼。</li>
+          <li>應用程式密碼只在建立後顯示一次，請立即複製。系統只保留密碼指紋，任何人都無法再次顯示原密碼。</li>
+          <li>清單顯示每個密碼的上次使用時間及來源位址。選擇<strong>移除</strong>後，使用它的工具會立即失效。</li>
+        </ul>
+        <p>透過 <code>Authorization</code> 請求標頭傳送，或者將其作為 HTTP Basic 登入的密碼，與使用者名稱一起使用：</p>
+        <pre><code>curl -H "Authorization: Bearer tfa_…" https://drive.example.com/api/auth/me
+curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;file id&gt;/content?download=1"</code></pre>
+        <p>應用程式密碼也能讓檔案在檔案總管、Finder 或相容的手機檔案 App 中顯示為磁碟機：參閱<a href="webdav.html">連線為網路磁碟機</a>。</p>
+        <p>應用程式密碼僅用於檔案操作：瀏覽、搜尋、下載、上傳，以及整理檔案與資料夾。不能修改帳號密碼、建立應用程式密碼、關聯登入方式、建立分享連結或使用控制台，也不會取得 cookie。唯讀應用程式密碼會被拒絕執行任何更改操作。</p>
+        <div class="note">修改密碼、管理員重設密碼或重設兩步驟驗證，都會移除所有應用程式密碼；之後需重新建立。讓裝置登出不會影響應用程式密碼，請主動移除不再信任的密碼。帳號被停用或刪除後，應用程式密碼隨即失效。錯誤的應用程式密碼與錯誤的登入密碼共用同一限制：同一位址失敗 30 次後，必須等待 15 分鐘。</div>
+        <h2 id="language">語言</h2>
+        <p>帳號選單中的<strong>語言</strong>決定 ThirtyFile 的顯示語言。選擇會隨帳號儲存，因此在其他電腦和手機登入後也會使用同一語言。尚未選擇時，使用管理員設定的預設語言或瀏覽器語言。登入頁和分享連結使用瀏覽器語言，或頁面底部清單中選擇的語言。</p>
+        <h2 id="style">介面風格</h2>
+        <p>帳號選單中的<strong>介面風格</strong>決定檔案瀏覽器的版面和按鍵行為。預設的<strong>自動</strong>按照目前電腦選擇：Mac 使用 Mac 風格，Windows、Linux 和 ChromeOS 使用 Windows 風格。手機和平板在兩種風格下使用相同版面。選擇隨帳號儲存。無論選擇哪種風格，修飾鍵始終跟隨電腦：Mac 使用 ⌘，其他系統使用 Ctrl。</p>
+        <ul>
+          <li><strong>Windows 風格</strong>：類似檔案總管，包含位址列、資料夾樹和命令欄。參閱<a href="files.html">檔案操作</a>。</li>
+          <li><strong>Mac 風格</strong>：類似 Mac 的 Finder，包含分組側欄、路徑欄、可在<strong>清單</strong>檢視原地展開的資料夾、<strong>快速查看</strong>和 Finder 快捷鍵（<kbd>Enter</kbd> 重新命名，<kbd>⌘</kbd> + <kbd>↓</kbd> 開啟）。參閱<a href="files.html#mac-style">Mac 風格</a>。</li>
+        </ul>
+        <p>兩種風格具備相同的檔案功能，取代或刪除項目前也會詢問同樣的確認問題。</p>
+        <h2 id="history">登入紀錄</h2>
+        <p><strong>我的登入紀錄</strong>顯示成功登入、失敗嘗試、登出、修改密碼，以及應用程式密碼的建立、移除或使用錯誤密碼的紀錄，並列出對應位址和瀏覽器。</p>
+        <h2 id="notifications">通知</h2>
+        <p>右上角分頁旁的<strong>鈴鐺</strong>會通知以下情況：</p>
+        <ul>
+          <li><strong>與你分享</strong>：有人向你分享資料夾或檔案，或者將你加入空間（直接加入，或透過你所屬的群組）。給所有人的存取權限不會通知；已有權限的變動也不會通知。</li>
+          <li><strong>空間即將用滿</strong>：你擁有或管理的空間已用滿 90%。包含個人空間，以及你是擁有者或管理者的團隊空間。只通知一次，直到空間恢復可用容量後再次接近用滿才重新通知。</li>
+          <li><strong>存取權即將結束</strong>：別人給你的存取權限將在 3 天內到期。如果最初設定的期限不足 3 天，分享通知本身已說明期限。</li>
+          <li><strong>透過連結收到檔案</strong>：有人透過你建立的收件連結上傳檔案。同一連結在一小時內持續收到的檔案合併為同一通知，只傳送一封郵件（即使只選擇電子郵件通知也一樣）。</li>
+          <li><strong>新應用程式密碼</strong>：帳號建立了應用程式密碼，同時顯示建立時使用的位址。</li>
+          <li><strong>新登入方式</strong>：Microsoft、Google、GitHub 或 OpenID Connect 單一登入帳號已關聯到你的帳號（參閱<a href="sign-in.html#link">自行關聯帳號</a>）。</li>
+        </ul>
+        <p>鈴鐺上的數字表示未讀通知數。按一下通知可開啟對應項目。清單底部提供<strong>全部標示為已讀</strong>和<strong>清除全部</strong>。通知保留 90 天。</p>
+        <p>鈴鐺清單底部或帳號選單中的<strong>通知設定</strong>可以分別開啟或關閉每類應用程式內通知和電子郵件通知。郵件傳送到這裡填寫的<strong>電子郵件位址</strong>。使用單一登入時，首次會填入外部帳號提供的位址，之後可以修改。留空則不收郵件。密碼重設連結也寄到這個位址，因此修改位址需要目前密碼（兩步驟驗證帳號還需驗證碼；無密碼帳號需在登入後 10 分鐘內修改），原電子郵件信箱也會收到變更通知。同一位址每 15 分鐘最多收到五封同類郵件；應用程式內通知全部保留。</p>
+        <div class="note">只有管理員設定電子郵件伺服器後才會傳送郵件（參閱<a href="users.html#email">通知電子郵件</a>）。郵件採用<a href="#language">你選擇的語言</a>；沒有選擇時使用管理員設定的預設語言，否則使用你最後使用 ThirtyFile 時的語言。時間按你的時區顯示。</div>
+        <nav class="next" aria-label="更多指南">
+          <a href="sharing.html"><span>上一篇</span>分享</a>
+          <a class="forward" href="webdav.html"><span>下一篇</span>連線為網路磁碟機</a>
+        </nav>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">原始碼</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">回報問題</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 映像檔</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

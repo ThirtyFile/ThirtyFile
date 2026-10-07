@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ja" data-root="../.." data-page="webdav">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ネットワークドライブとして割り当て · ThirtyFile</title>
+    <meta name="description" content="アプリパスワードと WebDAV で Windows、macOS、スマートフォン、rclone から ThirtyFile のスペースに接続する方法。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/webdav.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/webdav.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/webdav.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/webdav.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/webdav.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">本文へスキップ</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="サイト">
+          <a href="../index.html#features" class="hide-small">機能</a>
+          <a href="index.html" aria-current="page">ガイド</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">言語 </span><span class="lang-name">日本語</span></summary>
+            <ul>
+              <li><a href="../../docs/webdav.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="../../zh-TW/docs/webdav.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/webdav.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="webdav.html" hreflang="ja" lang="ja" aria-current="true">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="ガイド">
+        <details open>
+          <summary>すべてのガイド</summary>
+          <p>はじめに</p>
+          <a href="index.html">インストール</a>
+          <a href="first-steps.html">初期設定</a>
+          <p>日常の操作</p>
+          <a href="files.html">ファイルの操作</a>
+          <a href="preview.html">プレビューと編集</a>
+          <a href="sharing.html">共有</a>
+          <a href="account.html">アカウント</a>
+          <a href="webdav.html" aria-current="page">ネットワークドライブとして割り当て</a>
+          <p>管理</p>
+          <a href="users.html">ユーザーとスペース</a>
+          <a href="sign-in.html">シングルサインオン</a>
+          <a href="storage.html">保存場所</a>
+          <a href="logs.html">ログとブランド設定</a>
+          <p>運用</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">インターネットに公開</a>
+          <a href="backup.html">アップグレードとバックアップ</a>
+          <a href="help.html">トラブルシューティング</a>
+          <p>プロジェクト</p>
+          <a href="contributing.html">開発への参加</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+        <h1>ネットワークドライブとして割り当て（WebDAV）</h1>
+        <p class="lead">ThirtyFile のスペースを、Windows のエクスプローラー、macOS の Finder、WebDAV 対応のモバイルアプリ、rclone から、コンピューターのドライブのように開けます。</p>
+        <details class="guide-toc">
+          <summary>このページの内容</summary>
+          <ol>
+            <li><a href="#address">アドレスとサインイン</a></li>
+            <li><a href="#layout">表示されるもの</a></li>
+            <li><a href="#windows">Windows</a></li>
+            <li><a href="#macos">macOS</a></li>
+            <li><a href="#phones">iPhone、iPad、Android</a></li>
+            <li><a href="#rclone">rclone</a></li>
+            <li><a href="#troubleshooting">接続や保存に失敗する場合</a></li>
+            <li><a href="#limits">知っておきたいこと</a></li>
+          </ol>
+        </details>
+        <h2 id="address">アドレスとサインイン</h2>
+        <p>ThirtyFile のアドレスの <code>/dav/</code> で WebDAV を利用できます。たとえば次のアドレスです。</p>
+        <pre><code>https://files.example.com/dav/</code></pre>
+        <p><strong>ユーザー名</strong> と <a href="account.html#app-passwords">アプリパスワード</a> でサインインしてください。通常のパスワードは使いません。コンピューターやスマートフォンごとに、アカウントメニューの <strong>アプリパスワード</strong> で作成します。</p>
+        <ul>
+          <li>ファイルを操作するには <strong>ファイルの読み取りと変更</strong> を選びます。読み取り専用のアプリパスワードは開くこととダウンロードができますが、保存、作成、名前の変更、移動、削除はできません。</li>
+          <li>シングルサインオンのアカウントも、ここではアプリパスワードを使います。</li>
+          <li>2 段階認証のコードは求めません。誤ったアプリパスワードは通常の上限で数え、同じアドレスから 30 回失敗すると、15 分間待つ必要があります。</li>
+        </ul>
+        <h2 id="layout">表示されるもの</h2>
+        <p>最上位には、利用できるスペースごとに 1 つのフォルダーがあります。</p>
+        <ul>
+          <li><strong>マイファイル</strong>：個人用スペースがある場合に表示します。</li>
+          <li>会社のスペース（管理者が名前を変えていなければ <strong>すべてのファイル</strong>）と、各チームスペースの名前。同名なら後のものに <strong>Projects (2)</strong> のように番号を付けます。</li>
+          <li><strong>共有アイテム</strong>：自分がメンバーではないスペースから、ほかの人が共有したフォルダーやファイルです。</li>
+        </ul>
+        <p>ブラウザーのアドレスバーに表示するものと同じパスで、そこに入力、貼り付けもできます（<a href="files.html#paths">パス</a>）。</p>
+        <p>ブラウザーと同じ規則で動きます。変更できる内容は権限で決まり、読み取り専用スペースは変更できず、容量制限とアップロード上限も適用します。変更はすべてアクティビティログに記録します。ファイルやフォルダーの <strong>削除</strong> はごみ箱への移動で、ブラウザーから復元できます。</p>
+        <h2 id="windows">Windows</h2>
+        <p>Windows の標準クライアントには <strong>WebClient</strong> サービスが必要です。Microsoft はこのサービスを非推奨にし、既定では起動しません。利用できるかは Windows の構成と管理者のポリシーによります。割り当てが使えない場合は、専用の WebDAV クライアントか <a href="#rclone">rclone</a> を使ってください。<a href="https://learn.microsoft.com/en-us/windows/whats-new/deprecated-features">Microsoft の WebClient に関する案内</a> を参照してください。</p>
+        <ol>
+          <li>エクスプローラーで <strong>PC</strong> を右クリックし、<strong>ネットワークドライブの割り当て</strong> を選びます（Windows 11 ではツールバーの <strong>…（もっと見る）</strong> にあります）。</li>
+          <li>ドライブ文字を選び、<strong>フォルダー</strong> に <code>https://files.example.com/dav/</code> を入力します。</li>
+          <li><strong>別の資格情報を使用して接続する</strong> をオンにし、<strong>完了</strong> を選び、ユーザー名とアプリパスワードを入力します。再起動後も接続するなら <strong>資格情報を記憶する</strong> をオンにします。</li>
+        </ol>
+        <div class="note">Windows は HTTPS でのみパスワードを送ります。Windows が信頼する証明書を使い、ThirtyFile を <a href="internet.html">HTTPS の背後</a> に配置してください。通常の <code>http://</code> は WebClient サービスのレジストリ値 <code>BasicAuthLevel</code> を変更しなければ拒否され、変更は推奨しません。また既定のファイル上限は 50 MB です（<code>HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters</code> の <code>FileSizeLimitInBytes</code>。最大値は 4 GB）。</div>
+        <h2 id="macos">macOS</h2>
+        <ol>
+          <li>Finder で <strong>移動 › サーバへ接続</strong>（<kbd>⌘</kbd> <kbd>K</kbd>）を選びます。</li>
+          <li><code>https://files.example.com/dav/</code> を入力し、<strong>接続</strong> を選びます。</li>
+          <li><strong>登録ユーザ</strong> を選び、ユーザー名とアプリパスワードを入力します。必要なら <strong>このパスワードをキーチェーンに保存</strong> をオンにします。</li>
+        </ol>
+        <p>Finder のサイドバーの <strong>場所</strong> にドライブとして表示します。Finder は追加情報を持つファイルの横に <code>._</code> で始まる隠しファイルを保存します。ブラウザーにも表示し、削除できます。</p>
+        <h2 id="phones">iPhone、iPad、Android</h2>
+        <ul>
+          <li><strong>iPhone と iPad</strong>：HTTPS の WebDAV に明示的に対応するアプリを使い、アドレス、ユーザー名、アプリパスワードを追加します。ファイルプロバイダーを提供するアプリなら、「ファイル」で有効にして接続を参照できます。「ファイル」標準の <strong>サーバへ接続</strong> は SMB サーバー向けで、ThirtyFile の <code>/dav/</code> に直接接続できません。Apple の <a href="https://support.apple.com/en-us/118392">ファイルの機能説明</a> に SMB 対応の説明があります。</li>
+          <li><strong>Android</strong>：HTTPS の WebDAV に明示的に対応するファイル管理アプリやクライアントで、アドレス、ユーザー名、アプリパスワードを追加します。SMB、FTP、SFTP の対応だけでは WebDAV クライアントとして使えません。</li>
+        </ul>
+        <h2 id="rclone">rclone</h2>
+        <p><a href="https://rclone.org/webdav/">rclone</a> は、バックアップなどのためにコマンドラインから ThirtyFile のファイルをコピー、同期します。アプリパスワードをシェル履歴に残さないよう、対話式の設定を使ってください。</p>
+        <pre><code>rclone config</code></pre>
+        <p><code>thirtyfile</code> というリモートを作り、<code>webdav</code>、URL <code>https://files.example.com/dav/</code>、ベンダー <code>other</code> を選び、求められたら ThirtyFile のユーザー名とアプリパスワードを入力します。このユーザー名とパスワードの設定では Bearer トークンを空欄にします。rclone の保存パスワードは難読化されていますが元に戻せるため、設定ファイルを資格情報として保護してください。</p>
+        <p>その後は、通常の rclone リモートと同じように使えます。</p>
+        <pre><code>rclone ls "thirtyfile:My files"
+rclone copy ~/Pictures "thirtyfile:My files/Pictures" --progress
+rclone mount thirtyfile: ~/ThirtyFile --vfs-cache-mode writes</code></pre>
+        <p>ThirtyFile <em>から</em> 別の場所へのバックアップなど、<code>rclone copy</code> で読み出すだけなら読み取り専用のアプリパスワードで十分です。</p>
+        <h2 id="troubleshooting">接続や保存に失敗する場合</h2>
+        <ul>
+          <li><strong>401、パスワードを繰り返し求められる</strong>：ユーザー名とアプリパスワードを使ってください。ブラウザー用パスワード、メールアドレス、2 段階認証コードは使いません。有効期限、失効、アカウントが有効かを確認します。何度も失敗した後は 15 分待ってください。</li>
+          <li><strong>読めるが保存できない</strong>：アプリパスワードの書き込み範囲、スペースの権限、容量制限、保存場所の読み取り専用やオフライン状態を確認します。</li>
+          <li><strong>404、サインインの Web ページ、予期しないリダイレクト</strong>：完全な <code>/dav/</code> アドレスを使い、リバースプロキシに WebDAV メソッドと <code>Authorization</code> ヘッダーを転送させます。HTML のサインインページは WebDAV の応答ではありません。</li>
+          <li><strong>証明書や大きなファイルのエラー</strong>：信頼できる証明書で HTTPS を使います。クライアントの転送上限と、プロキシのサイズ上限、タイムアウトを確認します。ブラウザーはチャンク送信、WebDAV は 1 リクエストで全ファイルを送信します。</li>
+        </ul>
+        <h2 id="limits">知っておきたいこと</h2>
+        <ul>
+          <li>各ファイルを一度に送信します。リバースプロキシは大きなリクエストを許可する必要があります。<a href="internet.html#nginx">インターネットに公開</a> を参照してください。</li>
+          <li>名前はブラウザーと同じ規則です。Windows で使えない文字（<code>\ / : * ? " &lt; &gt; |</code>）は拒否します。</li>
+          <li>Office などは開いている間にファイルをロックします。ThirtyFile は保存が動くようにロック要求に応答しますが、ロックを強制しません。2 人が同時に保存すると、最後の内容が残ります。共同作業にはブラウザーのオンラインエディターを使ってください。</li>
+          <li>サーバー上のフォルダー（フォルダースペース）も使えます。変更はそのフォルダー内で行い、サーバーで追加されたファイルはフォルダーを開くと表示します。</li>
+          <li>サーバー上のフォルダーとの間で大きなフォルダーを移動、コピーすると、ファイルをコピーします。完了してから応答しますが、1 分以上かかる場合は受付済みと応答し、アプリが待つのをやめたり接続が切れたりしてもバックグラウンドで完了します。少し待って結果を確認してください。</li>
+          <li>共有されたアイテムを自分のスペースへ移動することは、ブラウザーと同様にできません。コピーしてください。</li>
+          <li>フォルダーは 1 階層ずつ一覧表示します。全ツリーを一度に求めるクライアントには、フォルダーごとに要求するよう応答します。一般的なクライアントはすべて対応しています。</li>
+        </ul>
+        <nav class="next" aria-label="その他のガイド">
+          <a href="account.html"><span>前へ</span>アカウント</a>
+          <a class="forward" href="users.html"><span>次へ</span>ユーザーとスペース</a>
+        </nav>
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">ガイド</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">ソースコード</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">問題を報告</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker イメージ</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

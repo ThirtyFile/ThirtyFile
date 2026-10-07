@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-TW" data-root="../.." data-page="users">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>使用者與空間 · ThirtyFile</title>
+    <meta name="description" content="管理帳號、權限、群組、個人與團隊空間、郵件、登入安全和管理員隱私邊界。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/users.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/users.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/users.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/users.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/users.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要內容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="網站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">語言 </span><span class="lang-name">繁體中文</span></summary>
+            <ul>
+              <li><a href="../../docs/users.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="users.html" hreflang="zh-TW" lang="zh-TW" aria-current="true">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/users.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../../ja/docs/users.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>開始使用</p>
+          <a href="index.html">安裝</a>
+          <a href="first-steps.html">初次設定</a>
+          <p>日常使用</p>
+          <a href="files.html">檔案操作</a>
+          <a href="preview.html">預覽與編輯</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的帳號</a>
+          <a href="webdav.html">連線為網路磁碟機</a>
+          <p>管理</p>
+          <a href="users.html" aria-current="page">使用者與空間</a>
+          <a href="sign-in.html">單一登入</a>
+          <a href="storage.html">儲存位置</a>
+          <a href="logs.html">紀錄與品牌</a>
+          <p>架設與維運</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">從網際網路存取</a>
+          <a href="backup.html">升級與備份</a>
+          <a href="help.html">疑難排解</a>
+          <p>專案</p>
+          <a href="contributing.html">參與貢獻</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+
+        <h1>使用者與空間</h1>
+        <p class="lead">管理員在控制台管理帳號、群組和空間。</p>
+        <details class="guide-toc">
+          <summary>本頁內容</summary>
+          <ol>
+            <li><a href="#users">使用者</a></li>
+            <li><a href="#security">登入安全</a></li>
+            <li><a href="#groups">群組</a></li>
+            <li><a href="#spaces">空間</a></li>
+            <li><a href="#email">通知電子郵件</a></li>
+            <li><a href="#privacy">管理員能看到什麼</a></li>
+            <li><a href="#password">忘記密碼</a></li>
+          </ol>
+        </details>
+
+        <h2 id="users">使用者</h2>
+        <p>開啟<strong>控制台 › 使用者</strong>。要查詢使用者，在右上角搜尋框輸入部分使用者名稱、顯示名稱或電子郵件位址。</p>
+        <ul>
+          <li>使用使用者名稱和初始密碼<strong>建立</strong>帳號。使用者首次登入時，必須先選擇自己的密碼，才能繼續其他操作；管理員為其設定新密碼後也一樣。設定新密碼還會讓所有裝置登出，並移除應用程式密碼、密碼重設連結和<a href="sign-in.html#link">關聯的登入方式</a>。</li>
+          <li><strong>角色</strong>：管理員可以開啟控制台，一般使用者不能。</li>
+          <li><strong>權限</strong>：<strong>編輯</strong>（含上傳）、<strong>刪除</strong>和<strong>分享</strong>。<strong>分享</strong>包括分享連結、<strong>共用給…</strong>和管理空間成員，個人空間也適用。沒有這些權限的帳號只能檢視。清單的<strong>權限</strong>列使用相同名稱。</li>
+          <li><strong>空間大小</strong>：使用者允許儲存的資料量。<code>0</code> 表示不限制。</li>
+          <li><strong>建立「我的檔案」</strong>：決定是否給使用者<a href="#personal">個人空間</a>及其儲存位置。兩項初始值都採用<strong>控制台 › 一般</strong>設定。</li>
+          <li><strong>停用</strong>帳號可阻止登入，不刪除檔案。其<a href="account.html#app-passwords">應用程式密碼</a>也會失效。</li>
+          <li><strong>重設兩步驟驗證</strong>適用於遺失手機和復原碼的使用者。與重設密碼一樣，會讓所有裝置登出，並移除<a href="account.html#app-passwords">應用程式密碼</a>。名稱旁的盾牌表示已開啟兩步驟驗證。</li>
+          <li><strong>裝置</strong>列出使用者已登入的瀏覽器。可讓單一裝置登出，或透過<strong>登出所有裝置</strong>讓全部登出。操作會記錄在活動紀錄和該使用者的登入紀錄中。</li>
+        </ul>
+        <p><strong>已使用</strong>列顯示個人空間用量，包括資源回收筒中的項目；沒有個人空間時顯示<strong>沒有「我的檔案」</strong>。</p>
+        <h3 id="personal">個人空間</h3>
+        <p>個人空間<strong>我的檔案</strong>只有其擁有者能開啟。在<strong>控制台 › 一般 › 使用者</strong>中：</p>
+        <ul>
+          <li><strong>為新使用者建立個人空間</strong>預設開啟。關閉後，新使用者進入第一個可用空間，通常是<strong>全部檔案</strong>，任何地方都不會出現「我的檔案」。已擁有個人空間的使用者保留原空間。</li>
+          <li><strong>新使用者「我的檔案」的位置</strong>決定新個人空間使用的<a href="storage.html">儲存位置</a>。<strong>預設位置</strong>跟隨新增該使用者時的預設儲存位置。</li>
+        </ul>
+        <p>新使用者對話方塊採用這些設定；<a href="sign-in.html#rules">電子郵件網域規則</a>可為單一登入建立的帳號採用不同設定。之後如需修改，右鍵按一下使用者（或開啟<strong>編輯</strong>）：</p>
+        <ul>
+          <li><strong>建立「我的檔案」…</strong>會立即在所選位置為使用者建立個人空間。</li>
+          <li><strong>移除「我的檔案」…</strong>會移除個人空間。與<a href="#delete">刪除帳號</a>一樣，可選擇把檔案移到其他空間的資料夾，或刪除檔案；使用者仍保留帳號和對其他空間的存取權限。</li>
+        </ul>
+        <p>位置資料夾不可用時，例如磁碟或網路分享尚未掛載，仍可新增使用者及完成首次單一登入。清單會顯示<strong>我的檔案待建立（位置不可用）</strong>；使用者下次登入，或資料夾恢復後一分鐘內，會在原定位置建立空間。等待原因記錄在伺服器紀錄。</p>
+        <h3 id="delete">刪除帳號</h3>
+        <p>選取使用者，按一下<strong>刪除</strong>。其個人空間<strong>我的檔案</strong>（如果有）會移除，請選擇其中內容的處理方式：</p>
+        <ul>
+          <li><strong>將檔案移到</strong>另一人的個人空間、團隊空間或公司空間。這是預設選項。檔案保留目錄結構，放入以原使用者命名的新資料夾，例如 <em>Files of amy</em>（重名時加數字）。對話方塊會顯示名稱；與 ThirtyFile 在使用者資料夾中建立的其他名稱一樣，採用系統<a href="first-steps.html#general">預設語言</a>（跟隨瀏覽器時用英文），不受刪除帳號者的語言影響。檔案計入目標空間容量；容量不足時不刪除任何內容，而是要求選擇其他空間或增加容量。操作不複製內容，因此大型空間也很快，除非任一空間是<a href="storage.html#folder-spaces">伺服器資料夾</a>：此時先在磁碟移動檔案（不同磁碟之間則複製），完成後才刪除帳號，頁面底部訊息顯示進度。原使用者資源回收筒會清空，不會移動。原已分享給同事的資料夾保留分享權限。</li>
+          <li><strong>永久刪除其檔案</strong>，此操作無法復原。</li>
+        </ul>
+        <p>無論選哪一種，該使用者新增到其他空間的檔案，以及擁有的團隊空間，都會轉交給你；其建立的分享連結會刪除。</p>
+        <div class="note">只想阻止登入而保持其他內容時，請<strong>停用</strong>帳號。檔案會保留，分享連結停止工作，直到重新啟用帳號。</div>
+        <h2 id="security">登入安全</h2>
+        <p>在<strong>控制台 › 一般 › 使用者</strong>中：</p>
+        <ul>
+          <li><strong>要求密碼帳號使用兩步驟驗證</strong>：密碼登入後還需身分驗證器驗證碼。尚未設定的使用者輸入密碼後必須先設定，才能進入，也不能關閉。開啟此要求會讓尚未設定兩步驟驗證的密碼工作階段登出（你自己除外），使其下次登入時設定。單一登入帳號依賴提供者的驗證，<a href="account.html#app-passwords">應用程式密碼</a>不需驗證碼仍可使用。</li>
+          <li><strong>密碼最短長度</strong>：預設 6 個字元，可提高至最多 64。適用於此後設定或修改的密碼。</li>
+        </ul>
+        <p>使用者如何設定兩步驟驗證，請參閱<a href="account.html#two-factor">你的帳號</a>。</p>
+        <h2 id="groups">群組</h2>
+        <p>群組是一組人員，例如某個部門。為群組授予空間或資料夾存取權限，無需逐個新增使用者。成員加入或離開群組時，存取權限同步變化。</p>
+        <h2 id="spaces">空間</h2>
+        <p>開啟<strong>控制台 › 空間管理</strong>可建立團隊空間、設定容量上限和選擇儲存位置。<strong>搬到其他位置…</strong>會在背景將空間檔案搬移到其他<a href="storage.html#per-space">儲存位置</a>；<strong>控制台 › 搬移作業</strong>顯示每項進度。</p>
+        <ul>
+          <li><strong>新增團隊空間</strong>也會詢問<a href="storage.html">儲存位置</a>；除非另選，否則使用預設位置。<strong>新增資料夾空間</strong>則顯示自行選擇的資料夾，不屬於某個儲存位置。</li>
+          <li>從空間的<strong>成員</strong>對話方塊新增成員，並授予對應<a href="sharing.html#people">角色</a>。</li>
+          <li>如需允許所有人自行建立團隊空間，在<strong>控制台 › 一般</strong>中開啟。自行建立的空間採用建立者相同的容量上限和預設儲存位置，每人最多建立 20 個。</li>
+        </ul>
+        <h2 id="email">通知電子郵件</h2>
+        <p>有人分享項目、擁有或管理的空間即將用滿，或存取權限即將到期時，使用者會收到應用程式內鈴鐺通知（參閱<a href="account.html#notifications">通知</a>）。如需電子郵件通知，在<strong>控制台 › 電子郵件</strong>填寫組織電子郵件伺服器：</p>
+        <ul>
+          <li><strong>伺服器</strong>、<strong>連接埠</strong>和<strong>加密</strong>：STARTTLS（通常為 587）、連線即 TLS（通常為 465），或內部網路中繼不加密（通常為 25）。憑證按系統信任庫驗證；<strong>接受自我簽署的憑證</strong>可對內部伺服器跳過檢查。不加密或不檢查憑證時，ThirtyFile 僅向私有網路位址的伺服器傳送（如 <code>10.x</code>、<code>192.168.x</code> 或同一電腦），否則測試會提示。</li>
+          <li>伺服器要求時填寫<strong>帳號</strong>和<strong>密碼</strong>。密碼加密儲存，不再顯示；留空表示保留已有密碼。修改伺服器、埠、加密方式、憑證檢查或使用者名稱後，必須重新輸入密碼：已儲存密碼只傳送到最初填寫時的伺服器。</li>
+          <li><strong>寄件位址</strong>：郵件以該位址傳送，寄件者名稱使用網站名稱（<strong>品牌</strong>）。電子郵件伺服器必須允許使用此位址傳送。</li>
+          <li>開啟<strong>以電子郵件寄送通知</strong>並<strong>儲存</strong>。<strong>寄出測試郵件</strong>會使用頁面上的設定測試，無論是否已儲存，並說明失敗原因。</li>
+        </ul>
+        <p>郵件寄到使用者在通知設定填寫的位址。單一登入帳號在郵件設定完成後的首次登入，會採用提供者已驗證的電子郵件信箱。郵件連結使用<strong>控制台 › 一般</strong>中的<strong>網站網址</strong>；未設定時郵件不含連結。郵件傳送失敗會記錄在伺服器紀錄。</p>
+        <h2 id="privacy">管理員能看到什麼</h2>
+        <p>管理員管理所有團隊和公司空間，包括資源回收筒。不能打開個人空間或檢視內容，只能看到用量；但<a href="#delete">刪除帳號</a>或<a href="#personal">移除「我的檔案」</a>時，可將檔案移到有權開啟的空間。也可<a href="storage.html#per-space">將「我的檔案」搬移到其他儲存位置</a>：搬移失敗清單不顯示檔案名稱。</p>
+        <p>管理員可從<strong>控制台 › 所有分享連結</strong>檢視每個公開連結，以撤銷不應公開的分享。其他人個人空間的連結只顯示建立者、選項和使用次數，不顯示位址或分享內容；管理員只能刪除，不能修改。相應存取紀錄也會省略同樣資訊。</p>
+        <p><a href="logs.html#logs">活動紀錄</a>顯示誰在何時對其他人的個人空間做了什麼，但不顯示具體檔案或資料夾；搜尋、CSV 匯出和封存檔同樣如此。個人資料夾空間的變更檢查只顯示跳過數量，不顯示具體項目或資料夾位置。錯誤報告在所有語言中都會省略引號內名稱。</p>
+        <h2 id="password">忘記密碼</h2>
+        <p>設定電子郵件伺服器（參閱<a href="#email">通知電子郵件</a>）和<strong>控制台 › 一般</strong>的<strong>網站網址</strong>後，登入頁提供<strong>忘記密碼？</strong>：使用者輸入使用者名稱或電子郵件信箱，會收到設定新密碼的連結。連結使用網站網址產生，絕不使用請求攜帶的位址。連結有效期一小時，僅可用一次，僅適用於有密碼和電子郵件信箱的帳號；無論帳號存在與否，頁面回傳相同訊息。設定新密碼會讓所有裝置登出，並移除應用程式密碼。透過任何方式修改或重設密碼，也會使之前請求的重設連結，以及尚在等待兩步驟驗證碼的登入失效。</p>
+        <p>其他情況下，或帳號沒有電子郵件信箱時，由管理員從<strong>控制台 › 使用者</strong>設定新密碼。管理員自己遺失密碼時，參閱<a href="help.html#password">疑難排解</a>。</p>
+        <nav class="next" aria-label="更多指南">
+          <a href="webdav.html"><span>上一篇</span>連線為網路磁碟機</a>
+          <a class="forward" href="sign-in.html"><span>下一篇</span>單一登入</a>
+        </nav>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">原始碼</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">回報問題</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 映像檔</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

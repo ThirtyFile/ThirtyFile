@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-CN" data-root="../.." data-page="users">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>用户与空间 · ThirtyFile</title>
+    <meta name="description" content="管理账号、权限、用户组、个人与团队空间、邮件、登录安全和管理员隐私边界。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/users.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/users.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/users.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/users.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/users.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要内容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="网站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">语言 </span><span class="lang-name">简体中文</span></summary>
+            <ul>
+              <li><a href="../../docs/users.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="../../zh-TW/docs/users.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="users.html" hreflang="zh-CN" lang="zh-CN" aria-current="true">简体中文</a></li>
+              <li><a href="../../ja/docs/users.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>开始使用</p>
+          <a href="index.html">安装</a>
+          <a href="first-steps.html">初始设置</a>
+          <p>日常使用</p>
+          <a href="files.html">文件操作</a>
+          <a href="preview.html">预览与编辑</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的账号</a>
+          <a href="webdav.html">映射为网络驱动器</a>
+          <p>管理</p>
+          <a href="users.html" aria-current="page">用户与空间</a>
+          <a href="sign-in.html">单点登录</a>
+          <a href="storage.html">存储位置</a>
+          <a href="logs.html">日志与品牌</a>
+          <p>部署与运维</p>
+          <a href="settings.html">设置</a>
+          <a href="internet.html">通过互联网访问</a>
+          <a href="backup.html">升级与备份</a>
+          <a href="help.html">故障排除</a>
+          <p>项目</p>
+          <a href="contributing.html">参与贡献</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+
+        <h1>用户与空间</h1>
+        <p class="lead">管理员在控制面板管理账号、用户组和空间。</p>
+        <details class="guide-toc">
+          <summary>本页内容</summary>
+          <ol>
+            <li><a href="#users">用户</a></li>
+            <li><a href="#security">登录安全</a></li>
+            <li><a href="#groups">用户组</a></li>
+            <li><a href="#spaces">空间</a></li>
+            <li><a href="#email">通知邮件</a></li>
+            <li><a href="#privacy">管理员能看到什么</a></li>
+            <li><a href="#password">忘记密码</a></li>
+          </ol>
+        </details>
+        <h2 id="users">用户</h2>
+        <p>打开<strong>控制面板 › 用户</strong>。要查找用户，在右上角搜索框输入部分用户名、显示名称或邮箱地址。</p>
+        <ul>
+          <li>使用用户名和初始密码<strong>创建</strong>账号。用户首次登录时，必须先选择自己的密码，才能继续其他操作；管理员为其设置新密码后也一样。设置新密码还会让所有设备退出登录，并移除应用密码、密码重置链接和<a href="sign-in.html#link">关联的登录方式</a>。</li>
+          <li><strong>角色</strong>：管理员可以打开控制面板，普通用户不能。</li>
+          <li><strong>权限</strong>：<strong>编辑</strong>（含上传）、<strong>删除</strong>和<strong>分享</strong>。<strong>分享</strong>包括分享链接、<strong>共享给…</strong>和管理空间成员，个人空间也适用。没有这些权限的账号只能查看。列表的<strong>权限</strong>列使用相同名称。</li>
+          <li><strong>空间大小</strong>：用户允许存储的数据量。<code>0</code> 表示不限制。</li>
+          <li><strong>创建“我的文件”</strong>：决定是否给用户<a href="#personal">个人空间</a>及其存储位置。两项初始值都采用<strong>控制面板 › 常规</strong>设置。</li>
+          <li><strong>禁用</strong>账号可阻止登录，不删除文件。其<a href="account.html#app-passwords">应用密码</a>也会失效。</li>
+          <li><strong>重置两步验证</strong>适用于丢失手机和恢复码的用户。与重置密码一样，会让所有设备退出登录，并移除<a href="account.html#app-passwords">应用密码</a>。名称旁的盾牌表示已开启两步验证。</li>
+          <li><strong>设备</strong>列出用户已登录的浏览器。可让单个设备退出，或通过<strong>在所有设备上退出登录</strong>让全部退出。操作会记录在活动日志和该用户的登录历史中。</li>
+        </ul>
+        <p><strong>已使用</strong>列显示个人空间用量，包括回收站中的项目；没有个人空间时显示<strong>没有“我的文件”</strong>。</p>
+        <h3 id="personal">个人空间</h3>
+        <p>个人空间<strong>我的文件</strong>只有其所有者能打开。在<strong>控制面板 › 常规 › 用户</strong>中：</p>
+        <ul>
+          <li><strong>为新用户创建个人空间</strong>默认开启。关闭后，新用户进入第一个可用空间，通常是<strong>全部文件</strong>，任何地方都不会出现“我的文件”。已拥有个人空间的用户保留原空间。</li>
+          <li><strong>新用户“我的文件”的位置</strong>决定新个人空间使用的<a href="storage.html">存储位置</a>。<strong>默认位置</strong>跟随添加该用户时的默认存储位置。</li>
+        </ul>
+        <p>新用户对话框采用这些设置；<a href="sign-in.html#rules">邮箱域名规则</a>可为单点登录创建的账号采用不同设置。之后如需修改，右键点击用户（或打开<strong>编辑</strong>）：</p>
+        <ul>
+          <li><strong>创建“我的文件”…</strong>会立即在所选位置为用户创建个人空间。</li>
+          <li><strong>移除“我的文件”…</strong>会移除个人空间。与<a href="#delete">删除账号</a>一样，可选择把文件移到其他空间的文件夹，或删除文件；用户仍保留账号和对其他空间的访问权限。</li>
+        </ul>
+        <p>位置文件夹不可用时，例如磁盘或网络共享尚未挂载，仍可添加用户及完成首次单点登录。列表会显示<strong>我的文件待创建（位置不可用）</strong>；用户下次登录，或文件夹恢复后一分钟内，会在原定位置创建空间。等待原因记录在服务器日志。</p>
+        <h3 id="delete">删除账号</h3>
+        <p>选中用户，点击<strong>删除</strong>。其个人空间<strong>我的文件</strong>（如果有）会移除，请选择其中内容的处理方式：</p>
+        <ul>
+          <li><strong>将文件移到</strong>另一人的个人空间、团队空间或公司空间。这是默认选项。文件保留目录结构，放入以原用户命名的新文件夹，例如 <em>Files of amy</em>（重名时加数字）。对话框会显示名称；与 ThirtyFile 在用户文件夹中创建的其他名称一样，采用系统<a href="first-steps.html#general">默认语言</a>（跟随浏览器时用英文），不受删除账号者的语言影响。文件计入目标空间容量；容量不足时不删除任何内容，而是要求选择其他空间或增加容量。操作不复制内容，因此大型空间也很快，除非任一空间是<a href="storage.html#folder-spaces">服务器文件夹</a>：此时先在磁盘移动文件（不同磁盘之间则复制），完成后才删除账号，页面底部消息显示进度。原用户回收站会清空，不会移动。原已共享给同事的文件夹保留共享权限。</li>
+          <li><strong>永久删除其文件</strong>，此操作无法撤销。</li>
+        </ul>
+        <p>无论选哪一种，该用户添加到其他空间的文件，以及拥有的团队空间，都会转交给你；其创建的分享链接会删除。</p>
+        <div class="note">只想阻止登录而保持其他内容时，请<strong>禁用</strong>账号。文件会保留，分享链接停止工作，直到重新启用账号。</div>
+        <h2 id="security">登录安全</h2>
+        <p>在<strong>控制面板 › 常规 › 用户</strong>中：</p>
+        <ul>
+          <li><strong>要求密码账号使用两步验证</strong>：密码登录后还需身份验证器验证码。尚未设置的用户输入密码后必须先设置，才能进入，也不能关闭。开启此要求会让尚未设置两步验证的密码会话退出（你自己除外），使其下次登录时设置。单点登录账号依赖提供商的验证，<a href="account.html#app-passwords">应用密码</a>不需验证码仍可使用。</li>
+          <li><strong>密码最短长度</strong>：默认 6 个字符，可提高至最多 64。适用于此后设置或修改的密码。</li>
+        </ul>
+        <p>用户如何设置两步验证，请参阅<a href="account.html#two-factor">你的账号</a>。</p>
+        <h2 id="groups">用户组</h2>
+        <p>用户组是一组人员，例如某个部门。为用户组授予空间或文件夹访问权限，无需逐个添加用户。成员加入或离开用户组时，访问权限同步变化。</p>
+        <h2 id="spaces">空间</h2>
+        <p>打开<strong>控制面板 › 空间</strong>可创建团队空间、设置容量上限和选择存储位置。<strong>迁移到其他位置…</strong>会在后台将空间文件迁移到其他<a href="storage.html#per-space">存储位置</a>；<strong>控制面板 › 迁移</strong>显示每项进度。</p>
+        <ul>
+          <li><strong>新建团队空间</strong>也会询问<a href="storage.html">存储位置</a>；除非另选，否则使用默认位置。<strong>新建文件夹空间</strong>则显示自行选择的文件夹，不属于某个存储位置。</li>
+          <li>从空间的<strong>成员</strong>对话框添加成员，并授予对应<a href="sharing.html#people">角色</a>。</li>
+          <li>如需允许所有人自行创建团队空间，在<strong>控制面板 › 常规</strong>中开启。自行创建的空间采用创建者相同的容量上限和默认存储位置，每人最多创建 20 个。</li>
+        </ul>
+        <h2 id="email">通知邮件</h2>
+        <p>有人共享项目、拥有或管理的空间即将用满，或访问权限即将到期时，用户会收到应用内铃铛通知（参阅<a href="account.html#notifications">通知</a>）。如需邮件通知，在<strong>控制面板 › 电子邮件</strong>填写组织邮件服务器：</p>
+        <ul>
+          <li><strong>服务器</strong>、<strong>端口</strong>和<strong>加密</strong>：STARTTLS（通常为 587）、连接即 TLS（通常为 465），或内部网络中继不加密（通常为 25）。证书按系统信任库验证；<strong>接受自签名证书</strong>可对内部服务器跳过检查。不加密或不检查证书时，ThirtyFile 仅向私有网络地址的服务器发送（如 <code>10.x</code>、<code>192.168.x</code> 或同一电脑），否则测试会提示。</li>
+          <li>服务器要求时填写<strong>用户名</strong>和<strong>密码</strong>。密码加密保存，不再显示；留空表示保留已有密码。修改服务器、端口、加密方式、证书检查或用户名后，必须重新输入密码：已保存密码只发送到最初填写时的服务器。</li>
+          <li><strong>发件地址</strong>：邮件以该地址发送，发件人名称使用网站名称（<strong>品牌</strong>）。邮件服务器必须允许使用此地址发送。</li>
+          <li>开启<strong>通过电子邮件发送通知</strong>并<strong>保存</strong>。<strong>发送测试邮件</strong>会使用页面上的配置测试，无论是否已保存，并说明失败原因。</li>
+        </ul>
+        <p>邮件发到用户在通知设置填写的地址。单点登录账号在邮件配置完成后的首次登录，会采用提供商已验证的邮箱。邮件链接使用<strong>控制面板 › 常规</strong>中的<strong>网站地址</strong>；未设置时邮件不含链接。邮件发送失败会记录在服务器日志。</p>
+        <h2 id="privacy">管理员能看到什么</h2>
+        <p>管理员管理所有团队和公司空间，包括回收站。不能打开个人空间或查看内容，只能看到用量；但<a href="#delete">删除账号</a>或<a href="#personal">移除“我的文件”</a>时，可将文件移到有权打开的空间。也可<a href="storage.html#per-space">将“我的文件”迁移到其他存储位置</a>：迁移失败列表不显示文件名称。</p>
+        <p>管理员可从<strong>控制面板 › 所有分享链接</strong>查看每个公开链接，以撤销不应公开的分享。其他人个人空间的链接只显示创建者、选项和使用次数，不显示地址或分享内容；管理员只能删除，不能修改。相应访问日志也会省略同样信息。</p>
+        <p><a href="logs.html#logs">活动日志</a>显示谁在何时对其他人的个人空间做了什么，但不显示具体文件或文件夹；搜索、CSV 导出和归档同样如此。个人文件夹空间的变更检查只显示跳过数量，不显示具体项目或文件夹位置。错误报告在所有语言中都会省略引号内名称。</p>
+        <h2 id="password">忘记密码</h2>
+        <p>配置邮件服务器（参阅<a href="#email">通知邮件</a>）和<strong>控制面板 › 常规</strong>的<strong>网站地址</strong>后，登录页提供<strong>忘记密码？</strong>：用户输入用户名或邮箱，会收到设置新密码的链接。链接使用网站地址生成，绝不使用请求携带的地址。链接有效期一小时，仅可用一次，仅适用于有密码和邮箱的账号；无论账号存在与否，页面返回相同消息。设置新密码会让所有设备退出，并移除应用密码。通过任何方式修改或重置密码，也会使之前请求的重置链接，以及尚在等待两步验证码的登录失效。</p>
+        <p>其他情况下，或账号没有邮箱时，由管理员从<strong>控制面板 › 用户</strong>设置新密码。管理员自己丢失密码时，参阅<a href="help.html#password">故障排除</a>。</p>
+        <nav class="next" aria-label="更多指南">
+          <a href="webdav.html"><span>上一篇</span>映射为网络驱动器</a>
+          <a class="forward" href="sign-in.html"><span>下一篇</span>单点登录</a>
+        </nav>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">源代码</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">报告问题</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 镜像</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

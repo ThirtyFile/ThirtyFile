@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-TW" data-root="../.." data-page="preview">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>預覽與編輯 · ThirtyFile</title>
+    <meta name="description" content="檢視瀏覽器支援的格式，編輯 Excel、文字與 Markdown，瞭解大小限制、縮圖和同時編輯的處理方式。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/preview.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/preview.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/preview.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/preview.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/preview.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要內容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="網站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">語言 </span><span class="lang-name">繁體中文</span></summary>
+            <ul>
+              <li><a href="../../docs/preview.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="preview.html" hreflang="zh-TW" lang="zh-TW" aria-current="true">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/preview.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../../ja/docs/preview.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>開始使用</p>
+          <a href="index.html">安裝</a>
+          <a href="first-steps.html">初次設定</a>
+          <p>日常使用</p>
+          <a href="files.html">檔案操作</a>
+          <a href="preview.html" aria-current="page">預覽與編輯</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的帳號</a>
+          <a href="webdav.html">連線為網路磁碟機</a>
+          <p>管理</p>
+          <a href="users.html">使用者與空間</a>
+          <a href="sign-in.html">單一登入</a>
+          <a href="storage.html">儲存位置</a>
+          <a href="logs.html">紀錄與品牌</a>
+          <p>架設與維運</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">從網際網路存取</a>
+          <a href="backup.html">升級與備份</a>
+          <a href="help.html">疑難排解</a>
+          <p>專案</p>
+          <a href="contributing.html">參與貢獻</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+
+        <h1>預覽與編輯</h1>
+        <p class="lead">大多數檔案可直接在瀏覽器中開啟，無需安裝其他軟體。</p>
+        <details class="guide-toc">
+          <summary>本頁內容</summary>
+          <ol>
+            <li><a href="#what">瀏覽器可開啟的格式</a></li>
+            <li><a href="#excel">編輯 Excel 活頁簿</a></li>
+            <li><a href="#text">編輯文字檔案</a></li>
+            <li><a href="#markdown">Markdown</a></li>
+            <li><a href="#thumbnails">縮圖</a></li>
+            <li><a href="#together">兩人編輯同一檔案時</a></li>
+          </ol>
+        </details>
+
+        <h2 id="what">瀏覽器可開啟的格式</h2>
+        <div class="table-scroll"><table>
+          <thead><tr><th>類型</th><th>檢視</th><th>編輯</th></tr></thead>
+          <tbody>
+            <tr><td>圖片（.jpg、.png、.gif、.webp、.avif、.svg、.bmp、.ico）</td><td>支援</td><td></td></tr>
+            <tr><td>影片（.mp4、.webm、.mov）</td><td>支援</td><td></td></tr>
+            <tr><td>音訊（.mp3、.wav、.ogg、.flac、.aac、.m4a）</td><td>支援</td><td></td></tr>
+            <tr><td>PDF</td><td>支援</td><td></td></tr>
+            <tr><td>Word（.docx）</td><td>支援</td><td></td></tr>
+            <tr><td>PowerPoint（.pptx）</td><td>支援</td><td></td></tr>
+            <tr><td>Excel（.xlsx）</td><td>支援</td><td>支援</td></tr>
+            <tr><td>Markdown（.md）</td><td>支援，顯示為排版頁面</td><td>支援</td></tr>
+            <tr><td>文字與程式碼，包括 HTML 和 XML（僅作為文字顯示，不作為網頁執行）</td><td>支援</td><td>支援</td></tr>
+          </tbody>
+        </table></div>
+        <p>連按兩下檔案即可在分頁中開啟。按 <kbd>←</kbd> 或 <kbd>→</kbd>，或按一下工具列右側箭頭，可前往同一資料夾的上一個或下一個檔案。順序與資料夾排序一致；整個資料夾載入完成後，狀態列顯示目前位置（例如<strong>第 3 個，共 12 個</strong>）。正在輸入檔案內容，或焦點位於影片控制元件時，方向鍵保留原有用途；請先按一下控制元件外部。</p>
+        <p>超過 5 MB 的文字與程式碼檔案，以及超過 50 MB 的 Word、PowerPoint 和 Excel 檔案，無法在瀏覽器中開啟，請下載後使用。</p>
+        <p>大多數瀏覽器無法顯示 HEIC、TIFF、Photoshop 圖片，AVI、MKV、WMV、FLV 影片，或 WMA、AIFF 音訊，因此這些格式會顯示下載按鈕。瀏覽器無法播放某個具體的影片或音訊檔案時也會這樣處理。</p>
+        <h2 id="excel">編輯 Excel 活頁簿</h2>
+        <p>開啟活頁簿，按一下<strong>編輯活頁簿</strong>。</p>
+        <div class="shot"><img src="../../assets/excel-edit.webp" width="2560" height="1440" loading="lazy" alt="開啟進行編輯的活頁簿" /></div>
+        <ul>
+          <li>在儲存格或公式列中輸入，公式以 <code>=</code> 開頭。</li>
+          <li>需要逐一掃描數百萬儲存格的公式，例如覆蓋大部分工作表的 <code>COUNTIF</code>，會顯示 <code>#CALC!</code>，避免頁面卡頓。儲存時保留 Excel 已儲存的結果，Excel 開啟檔案後會重新計算。</li>
+          <li>工具列提供粗體、顏色、邊框、對齊、數字格式和合併儲存格。日期中的月份、星期和 AM/PM 按 ThirtyFile 的目前語言顯示，除非儲存格格式另行指定語言。函式名稱保持英文，因為 Excel 在檔案中以英文儲存。</li>
+          <li>可以在儲存格之間複製貼上，也可以與電腦上的 Excel 互相複製貼上。</li>
+          <li>剪下會在同一活頁簿內移動儲存格。將剪下內容貼上到另一個活頁簿時，會複製值、公式和格式，保留來源儲存格。同一活頁簿內的移動可復原。</li>
+          <li>每次複製、貼上或填滿最多支援 100,000 個儲存格和約 800 萬個剪貼簿字元。超出工作表邊界的貼上會在修改任何儲存格之前被拒絕。清除大型稀疏選取範圍時，僅處理有內容的儲存格，最多更改 100,000 個；更大的操作需拆成較小選取範圍。</li>
+          <li>在公式列和名稱方塊中，輸入法用於選擇或取消候選詞的 Enter 和 Escape 會保留輸入法行為。完成輸入後，再按 Enter 才會提交值或跳到。</li>
+          <li>可從<strong>插入</strong>和<strong>刪除</strong>選單增刪列與欄，公式會自動調整。</li>
+          <li>按 <kbd>Ctrl</kbd> + <kbd>Z</kbd> 復原，按 <kbd>Ctrl</kbd> + <kbd>S</kbd> 儲存。最多可復原 200 步，其中列與欄插入和刪除最多保留 20 步。</li>
+          <li>使用螢幕閱讀器時，可用方向鍵移動，系統會讀出目標儲存格的位址與值，或選取範圍。</li>
+        </ul>
+        <p>僅檢視活頁簿時，螢幕閱讀器可以在工作表後面的表格中讀取目前螢幕顯示的儲存格。用方向鍵捲動工作表時，表格內容也會隨之更新。</p>
+        <p>儲存僅修改你編輯過的儲存格，圖表、圖片和活頁簿中其他內容保持原樣。</p>
+        <div class="note">超過 20 MB 的活頁簿可以檢視，但不能線上編輯。請下載並使用 Excel。</div>
+        <h2 id="text">編輯文字檔案</h2>
+        <p>文字與程式碼檔案會在編輯器中開啟，支援大多數程式語言的語法醒目提示。按 <kbd>Ctrl</kbd> + <kbd>S</kbd> 儲存。</p>
+        <p>儲存尚未完成時切換分頁，各檔案的修改仍獨立儲存。開始儲存後輸入的文字在儲存完成時仍屬於未儲存內容，請再次儲存。捨棄草稿後，即使較早的儲存請求完成，也不會恢復該草稿。</p>
+        <p>ThirtyFile 無法識別的檔案，例如 <code>Dockerfile</code>、<code>README</code> 或不常見副檔案名稱檔案，會顯示<strong>無法預覽此檔案類型</strong>。如果內容是文字，可按一下<strong>用文字編輯器開啟</strong>進行閱讀和編輯。這不會重新命名檔案或修改類型；只有主動儲存才會寫入。<strong>預設檢視</strong>可切回原檢視，未儲存的修改會保留，再次開啟編輯器時恢復。</p>
+        <ul>
+          <li>只有擁有修改檔案的權限時才能儲存。分享連結僅在允許下載時顯示此按鈕，文字為唯讀。</li>
+          <li>不像文字的檔案（程式或副檔案名稱異常的圖片）會以唯讀方式開啟，避免儲存損壞檔案。編輯器不能原樣寫回的文字編碼也採用唯讀方式。UTF-8、UTF-16 編碼和 Windows 換行保留不變。Big5 可以讀取，但儲存時會轉換為 UTF-8，編輯器會事先提示；僅開啟不會修改儲存檔案。</li>
+          <li>超過 5 MB 的檔案無法在編輯器中開啟，請改為下載。</li>
+        </ul>
+        <h2 id="markdown">Markdown</h2>
+        <p>Markdown 檔案以排版頁面顯示，包括標題、清單、表格、任務清單和程式碼。按一下頁面上方<strong>編輯</strong>修改文字（只有檢視權限時顯示<strong>原始碼</strong>），再切回<strong>預覽</strong>檢視結果，未儲存的修改也會顯示。</p>
+        <p>頁面採用安全顯示方式：檔案內的 HTML 不會執行，也不能偽裝成 ThirtyFile 介面；連結在新分頁開啟，只顯示嵌入檔案本身的圖片。外部網站圖片不會載入，因此開啟檔案不會向這些網站透露存取情況。</p>
+        <h2 id="thumbnails">縮圖</h2>
+        <p>在圖示檢視（<strong>大圖示</strong>、<strong>中圖示</strong>和<strong>並排</strong>）中，圖片、PDF 和影片會顯示縮圖。圖片縮圖由伺服器產生。PDF（第一頁）和影片（靠近開頭的一幀）的縮圖由第一位具有修改權限的使用者瀏覽器產生並儲存到伺服器，之後同空間內可開啟檔案的人都能看到。在此之前，只能檢視的人會在自己的瀏覽器中產生縮圖。瀏覽器不能播放的影片，以及超過 200 MB 的 PDF，保留原圖示。縮圖儲存在 <code>data/thumbs</code>：內容儲存區的檔案內容被永久刪除後，其縮圖一併刪除；30 天內未向任何人展示的縮圖也會刪除（再次檢視檔案時重新產生）。</p>
+        <h2 id="together">兩人編輯同一檔案時</h2>
+        <p>如果你編輯期間其他人已儲存該檔案，你的儲存會停止並顯示提示，避免在無通知的情況下覆蓋他人的工作。請複製自己的修改，重新載入檔案，再加入這些修改。</p>
+        <nav class="next" aria-label="更多指南">
+          <a href="files.html"><span>上一篇</span>檔案操作</a>
+          <a class="forward" href="sharing.html"><span>下一篇</span>分享</a>
+        </nav>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">原始碼</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">回報問題</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 映像檔</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

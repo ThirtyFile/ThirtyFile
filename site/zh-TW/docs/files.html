@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="zh-TW" data-root="../.." data-page="files">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>檔案操作 · ThirtyFile</title>
+    <meta name="description" content="檔案操作、資料夾檢視、搜尋、上傳下載、標籤、智慧型資料夾，以及 Windows 與 Mac 風格的快捷鍵。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/files.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/files.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/files.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/files.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/files.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要內容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="網站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">語言 </span><span class="lang-name">繁體中文</span></summary>
+            <ul>
+              <li><a href="../../docs/files.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="files.html" hreflang="zh-TW" lang="zh-TW" aria-current="true">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/files.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../../ja/docs/files.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>開始使用</p>
+          <a href="index.html">安裝</a>
+          <a href="first-steps.html">初次設定</a>
+          <p>日常使用</p>
+          <a href="files.html" aria-current="page">檔案操作</a>
+          <a href="preview.html">預覽與編輯</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的帳號</a>
+          <a href="webdav.html">連線為網路磁碟機</a>
+          <p>管理</p>
+          <a href="users.html">使用者與空間</a>
+          <a href="sign-in.html">單一登入</a>
+          <a href="storage.html">儲存位置</a>
+          <a href="logs.html">紀錄與品牌</a>
+          <p>架設與維運</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">從網際網路存取</a>
+          <a href="backup.html">升級與備份</a>
+          <a href="help.html">疑難排解</a>
+          <p>專案</p>
+          <a href="contributing.html">參與貢獻</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+        <h1>檔案操作</h1>
+        <p class="lead">ThirtyFile 的操作方式類似檔案總管；使用<a href="#mac-style">Mac 風格</a>時則類似 Mac 的 Finder。本頁介紹可用操作與加快操作的快捷鍵。</p>
+        <div class="shot"><img src="../../assets/files-light.webp" width="2560" height="1440" alt="檔案清單與左側的資料夾樹" /></div>
+        <details class="guide-toc">
+          <summary>本頁內容</summary>
+          <ol>
+            <li><a href="#around">導覽介面</a></li>
+            <li><a href="#views">檢視、欄位與群組</a></li>
+            <li><a href="#paths">路徑</a></li>
+            <li><a href="#upload">上傳</a></li>
+            <li><a href="#download">下載</a></li>
+            <li><a href="#zip">壓縮與解壓縮 ZIP</a></li>
+            <li><a href="#organise">整理</a></li>
+            <li><a href="#tags">標籤</a></li>
+            <li><a href="#smart-folders">智慧型資料夾</a></li>
+            <li><a href="#details">詳細資料</a></li>
+            <li><a href="#same-name">名稱已被使用時</a></li>
+            <li><a href="#versions">先前版本</a></li>
+            <li><a href="#shortcuts">鍵盤快捷鍵</a></li>
+            <li><a href="#mac-style">Mac 風格</a></li>
+            <li><a href="#trash">資源回收筒</a></li>
+            <li><a href="#phone">手機操作</a></li>
+          </ol>
+        </details>
+
+
+        <h2 id="around">導覽介面</h2>
+        <ul>
+          <li><strong>左側選單</strong>：最近使用的檔案、我的最愛、空間、與你分享的項目、分享連結、資源回收筒、你的<a href="#smart-folders">智慧型資料夾</a>與<a href="#tags">標籤</a>。</li>
+          <li><strong>分頁</strong>：同時開啟多個資料夾或檔案。按 <strong>+</strong> 新增分頁，或以滑鼠中鍵按資料夾，在新分頁開啟。</li>
+          <li><strong>位址列</strong>：顯示所在位置。按路徑任一部分即可前往；按路徑旁空白處（或 <kbd>Ctrl</kbd> + <kbd>L</kbd>）可查看完整路徑、複製路徑，或輸入／貼上另一個路徑後按 <kbd>Enter</kbd> 前往（參閱<a href="#paths">路徑</a>）。</li>
+          <li><strong>搜尋</strong>：在目前資料夾與子資料夾中尋找名稱包含輸入文字的項目（從最近使用、我的最愛等清單搜尋時，範圍是所有可存取位置）。所有語言都不區分大小寫；輸入三個以上字元時也不區分重音符號。結果頁可擴大範圍到所有位置，並依類型、修改日期、大小與標籤篩選。最多顯示 300 筆，超過時會提示。<strong>儲存為智慧型資料夾</strong>可保留搜尋條件（參閱<a href="#smart-folders">智慧型資料夾</a>）。</li>
+          <li><strong>檢視</strong>：選擇清單呈現方式（參閱<a href="#views">檢視、欄位與群組</a>）。右下角兩個按鈕可切換<strong>詳細資料</strong>與<strong>大圖示</strong>。</li>
+        </ul>
+        <p><strong>最近使用</strong>依新到舊列出你上傳、編輯或開啟的檔案，不論位於自己的空間或共用空間／資料夾。開啟是指在瀏覽器檢視（檢視器、編輯器或預覽窗格）；下載與使用應用程式密碼的檔案用戶端不計入。無法再開啟或已在資源回收筒的檔案會略過。</p>
+        <h3 id="large-folders">大型資料夾</h3>
+        <p>數千個項目的資料夾會立即顯示第一批項目，之後按需載入你捲動到、以 <kbd>End</kbd>／<kbd>Page Down</kbd> 前往，或拖曳捲軸到的部分。尚未載入的列短暫顯示灰線，狀態列顯示<strong>正在載入更多項目…</strong>。狀態列計算資料夾全部項目，包括尚未載入的。只有附近部分保留在記憶體，因此十萬個項目也不會拖慢瀏覽器。</p>
+        <p>選取可涵蓋整個資料夾，包括尚未載入的項目：</p>
+        <ul>
+          <li><kbd>Ctrl</kbd> + <kbd>A</kbd>（或<strong>全選</strong>）選取資料夾全部項目。<kbd>Ctrl</kbd> + 按一下可取消個別項目；狀態列顯示選取數量。</li>
+          <li><kbd>Shift</kbd> + 按一下，或 <kbd>Shift</kbd> + <kbd>End</kbd>，會選取兩個項目之間的全部內容，不論距離多遠。</li>
+          <li>搬移、複製、剪下貼上、拖曳、加入我的最愛、標籤、移到資源回收筒與永久刪除，都會處理全部選取項目。ThirtyFile 每次處理一千個，底部訊息顯示進度；這類大型變更無法從訊息復原。</li>
+          <li>一次下載或建立 ZIP 最多處理 10,000 個項目；更多時請下載資料夾本身。</li>
+          <li>詳細資料窗格顯示選取數量；選取整個資料夾時會顯示總大小。</li>
+        </ul>
+        <p>輸入名稱開頭會跳到已載入項目中下一個符合的項目。向上（或返回）回到大型資料夾時，無論原資料夾在清單何處，都會顯示並選取它。依日期或類型分組（見下方）會載入整個資料夾，確保每個群組完整。</p>
+
+        <h2 id="views">檢視、欄位與群組</h2>
+        <p><strong>檢視</strong>選單包含檔案總管的各種檢視，以及<strong>直欄</strong>：</p>
+        <ul>
+          <li><strong>大圖示</strong>與<strong>中圖示</strong>：圖片、PDF 與影片縮圖（參閱<a href="preview.html#thumbnails">縮圖</a>），名稱顯示在下方。</li>
+          <li><strong>清單</strong>：小圖示與名稱並排分欄，便於一次查看許多項目。</li>
+          <li><strong>詳細資料</strong>：每列一個項目，附各欄位。</li>
+          <li><strong>並排</strong>：縮圖旁顯示名稱、類型與大小。</li>
+          <li><strong>直欄</strong>：從空間頂層到目前資料夾，每層各有一欄。選取資料夾會在右側下一欄顯示內容；選取檔案會顯示預覽欄，包含圖片、類型、大小、日期及開啟、下載、分享按鈕。手機本來就一次顯示一個資料夾，因此不提供此檢視。</li>
+        </ul>
+        <p>在<strong>直欄</strong>中，<kbd>↑</kbd>／<kbd>↓</kbd>在欄內移動，<kbd>→</kbd>進入所選資料夾的欄，<kbd>←</kbd>返回前一欄；輸入名稱開頭可跳到項目。按其他欄的項目會前往該欄。返回時會保留右側已開啟的欄，直到另選項目。選取、開啟、重新命名與刪除和其他檢視相同，大型資料夾也會分批載入；可將項目拖到任何欄的資料夾，或另一欄的空白處以搬移。拖曳欄右邊緣可調整寬度（連按兩下恢復預設）；寬度會在此瀏覽器保留到登出。<strong>分組依據</strong>不適用此檢視。</p>
+        <p>沒有縮圖的檔案顯示類型圖示。程式語言與資料格式各有專屬圖示（JSON、Rust 與 Go 不同）；常見工具檔案即使沒有副檔案名稱，也可依名稱辨識：<code>Dockerfile</code>、<code>Makefile</code>、<code>.env</code>、<code>.gitignore</code>、<code>package.json</code>、鎖定檔、<code>LICENSE</code> 與 <code>README</code>。字型、磁碟映像、安裝程式、資料庫、電子書、設計檔、3D 模型與憑證也有圖示。在<strong>詳細資料</strong>將游標移到<strong>類型</strong>欄可查看檔案種類。無法辨識的檔案維持一般檔案圖示。</p>
+        <p>在<strong>詳細資料</strong>中，拖曳欄位標題邊緣可調寬度（或用 <kbd>Tab</kbd> 選取邊緣後以方向鍵調整）；連按兩下邊緣恢復預設。右鍵按欄位標題，或選擇<strong>檢視</strong> › <strong>欄位</strong>，可選擇<strong>修改日期</strong>、<strong>建立日期</strong>（預設隱藏）、<strong>類型</strong>、<strong>大小</strong>、<strong>標籤</strong>（預設隱藏），以及清單適用時的<strong>位置</strong>與<strong>上傳者</strong>。<strong>還原預設欄位</strong>可復原調整。清單太窄而容不下全部欄位時（例如開啟詳細資料窗格），會先隱藏<strong>類型</strong>再隱藏<strong>大小</strong>，之後才橫向捲動。手機只顯示名稱與大小。</p>
+        <p><strong>排序</strong>可依名稱、修改日期、建立日期、類型或大小，由 A 到 Z 或反向排列；按欄位標題也相同。資料夾永遠在前。名稱排序類似檔案總管：不區分大小寫，數字依數值排序（<em>File 2</em> 在 <em>File 10</em> 前）。其他字元依 Unicode 碼位排序，因此中文與日文依 Unicode 順序（平假名、片假名、漢字），不是讀音或筆畫。所有語言與使用者的順序一致，讓大型資料夾分頁載入不會遺漏或重複。</p>
+        <p><strong>檢視</strong> › <strong>分組依據</strong>會將項目分組，各組標題附項目數：</p>
+        <ul>
+          <li><strong>類型</strong>：資料夾在前，其餘每種檔案類型各一組。</li>
+          <li><strong>修改日期</strong>：<strong>今天</strong>、<strong>昨天</strong>、<strong>本週稍早</strong>、<strong>上週</strong>、<strong>本月稍早</strong>、<strong>上個月</strong>、<strong>今年稍早</strong>與<strong>很久以前</strong>（每週從星期一開始）。</li>
+        </ul>
+        <p>組內仍依清單排序。若按相同依據反向排序（舊到新，或類型 Z 到 A），群組順序也會反向。檢視、欄位與分組設定會在瀏覽器中對每個資料夾保留。</p>
+
+        <h2 id="paths">路徑</h2>
+        <p>路徑在位址列與 <a href="webdav.html">WebDAV</a> 中都用相同方式表示資料夾或檔案，從包含所有空間的頂層開始，例如 <code>/My files/Reports/2026.xlsx</code>：</p>
+        <ul>
+          <li><code>/</code> 是<strong>所有空間</strong>。</li>
+          <li><strong>我的檔案</strong>是個人空間（管理員可能未提供）。公司空間（<strong>全部檔案</strong>，除非管理員改名）與團隊空間使用各自名稱。同名時後建立者加上編號，例如<strong>專案 (2)</strong>，WebDAV 使用相同編號。</li>
+          <li><strong>與我共用</strong>包含其他人從你不是成員的空間分享的資料夾與檔案：<code>/Shared with me/Plans/Q1</code>。同名分享項目也會編號。</li>
+        </ul>
+        <p>ThirtyFile 提供的名稱（<strong>我的檔案</strong>、<strong>全部檔案</strong>、<strong>與我共用</strong>）依所選語言顯示，輸入路徑時可使用該語言或英文。不區分大小寫，<code>\</code> 等同 <code>/</code>，也可貼上 WebDAV 位址或 ThirtyFile 頁面連結。路徑不存在或無權存取時，位址列會提示並保留輸入供修正。最近使用、我的最愛、資源回收筒等清單不在空間中，因此不能輸入其路徑。</p>
+        <p>管理員也可輸入控制台路徑：<code>/Control panel/Storage locations</code>，或所選語言中顯示的名稱。從控制台位址列複製的路徑也可使用。若需要不受語言影響的路徑，可用 <code>/admin</code>、<code>/admin/storage</code>、<code>/admin/usage</code> 或其他控制台頁面位址。Windows 位址列與 Mac 風格的<strong>前往資料夾</strong>都支援。所需管理員權限和從選單開啟相同。辨識到的控制台路徑優先於同名空間；請從側欄開啟該空間，或貼上其完整頁面 URL。</p>
+
+        <h2 id="upload">上傳</h2>
+        <ul>
+          <li>把電腦上的檔案或整個資料夾拖入清單。放到清單、資料夾樹、位址列或分頁中的資料夾，可上傳到該資料夾；也可以</li>
+          <li>按<strong>新增</strong>，選擇<strong>上傳檔案</strong>或<strong>上傳資料夾</strong>。</li>
+        </ul>
+        <p>右下角顯示進度，每個檔案會立即開始傳送。超過 100 個檔案時，只列出傳送中、暫停與失敗的，其餘在下方顯示數量。右鍵按清單可一次重試所有失敗檔案。上傳未完成時，瀏覽器會在關閉或重新載入頁面前詢問。無法讀取的拖入項目（沒有權限或已移除）會略過，訊息顯示數量。</p>
+        <p>傳輸開始前顯示<strong>正在準備上傳…</strong>。所有位元組傳完後，<strong>正在完成上傳…</strong>會一直顯示到伺服器確認儲存完成。這兩個階段使用等待指示，沒有完成百分比；仍可暫停與取消。</p>
+        <p>兩分鐘未收到上傳資料時，伺服器停止等待，上傳可從已收到的位元組繼續。持續傳送資料的長時間上傳沒有總時限。WebDAV 使用相同閒置限制，但失敗的 WebDAV 請求必須完整重送。</p>
+
+        <h3 id="interrupted">中斷的上傳</h3>
+        <p>上傳期間重新載入頁面或關閉分頁／瀏覽器，下次在同一瀏覽器開啟 ThirtyFile 時，右下角<strong>中斷的上傳</strong>會依原加入方式顯示：資料夾以名稱顯示，一起選取的檔案為同一筆。瀏覽器無法自行重開你的檔案，因此請再次選取：</p>
+        <ul>
+          <li><strong>繼續</strong>會要求相同檔案（資料夾則選相同資料夾）。各檔案依伺服器已保存進度繼續，使用同一目標資料夾與同名衝突處理選項。繼續前會檢查整份檔案，包括大小與日期未變的內容變更；大檔案讀取可能需要時間。此檢查會在原上傳傳送時讀取檔案，因此尚未讀完整就中斷的檔案，以及舊版本保存的上傳，都會重新開始。<strong>可以繼續</strong>表示伺服器仍保有已傳送內容，否則從頭開始。</li>
+          <li>檔案先依資料夾路徑與名稱配對，再要求大小、日期與內容和原先一致。期間修改或被同名檔案取代的會重新開始，不會接到舊片段。選到不屬於原上傳的檔案會略過，未選到的中斷檔案繼續等待。</li>
+          <li>伺服器在中斷前剛完成的檔案不會上傳兩次。若伺服器已無法辨識先前完整傳送的檔案，清單會提示可能已上傳；重試前請檢查資料夾。</li>
+          <li><strong>重新開始</strong>會從頭上傳所選檔案，<strong>捨棄</strong>會移除工作及伺服器已收到的部分。</li>
+        </ul>
+        <p>其他分頁仍在執行的上傳不會提供恢復，只有該分頁關閉後才會出現。中斷上傳在此瀏覽器保留七天，只屬於你的帳號（訪客則屬於其上傳使用的分享連結）。只保存檔案名稱、資料夾、大小、日期與伺服器上傳位址（訪客也包含分享連結），不保存檔案內容。登出會移除這些紀錄。</p>
+
+        <h2 id="download">下載</h2>
+        <p>選取一個或多個項目，按<strong>下載</strong>。多個項目或資料夾會合成一個 ZIP，內容反映下載開始時的狀態，期間新增到資料夾的項目不會包含。若伺服器資料夾內的檔案在傳送 ZIP 時大小改變，下載會失敗，而不是傳回不完整內容；請重新開始。</p>
+        <p>右下角顯示進度。超過 256 MB（手機與平板為 64 MB）的下載會直接進入瀏覽器自己的下載清單，避免頁面把內容放在記憶體。</p>
+        <p>準備下載連結或等待伺服器回應時，顯示<strong>正在準備下載…</strong>，等待期間可取消。大小未知時，以等待指示取代百分比，但仍顯示已收到的位元組數。準備失敗可重試。直接交給瀏覽器的下載（包含公開分享下載）會提示到瀏覽器下載清單追蹤進度。</p>
+        <p>一次最多下載 10,000 個所選項目。更多時請下載所在資料夾；無論內容多少，一個資料夾只算一個項目。</p>
+
+        <h2 id="zip">壓縮與解壓縮 ZIP</h2>
+        <ul>
+          <li><strong>壓縮</strong>：選取項目，右鍵選<strong>壓縮為 ZIP 檔案</strong>，旁邊會出現以項目命名的 ZIP（多個項目則以所在資料夾命名），像一般檔案計入空間用量。壓縮前，ThirtyFile 會確認所選項目的完整大小能容納於空間配額與資料目錄的可用容量，因為 ZIP 在資料目錄組合。</li>
+          <li><strong>解壓縮</strong>：右鍵按 ZIP，選<strong>全部解壓縮</strong>。內容放到旁邊以 ZIP 名稱命名的新資料夾，名稱已占用時加編號。</li>
+        </ul>
+        <p>兩者都在伺服器執行，底部訊息顯示進度，期間可繼續工作，活動紀錄也會紀錄。</p>
+        <p>為避免單一檔案耗盡伺服器，符合以下條件的 ZIP 不會解壓縮：</p>
+        <ul>
+          <li>內容超過空間可用容量，或大於 16 GB；</li>
+          <li>檔案與資料夾超過 20,000 個，包含路徑經過的中間資料夾；</li>
+          <li>內部路徑超過 64 層資料夾；</li>
+          <li>內容膨脹遠高於一般檔案（超過壓縮大小 250 倍），例如「ZIP 炸彈」；</li>
+          <li>內部名稱導向新資料夾之外（<code>../</code> 或完整路徑），或名稱不允許（例如含 <code>:</code> 或 <code>?</code>）；</li>
+          <li>有密碼保護，或使用一般 deflate 以外的壓縮方法。</li>
+        </ul>
+
+        <h2 id="organise">整理</h2>
+        <ul>
+          <li><strong>新增資料夾或文字文件</strong>：按<strong>新增</strong>、用 <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> 建資料夾，或右鍵按空白處選<strong>新增</strong>。和檔案總管相同，項目立即出現在清單末尾，名稱可直接輸入；命名後仍留在末尾，直到重新整理（<kbd>F5</kbd>）、變更排序或離開資料夾。建立失敗時會移除並提示原因。</li>
+          <li><strong>選取</strong>：按項目。按住 <kbd>Ctrl</kbd> 加選，<kbd>Shift</kbd> 選範圍，或拖曳框選。</li>
+          <li><strong>搬移</strong>：拖到資料夾、剪下貼上，或右鍵選<strong>搬移到…</strong>。可放到清單或資料夾樹的資料夾（停在未展開資料夾上片刻可展開）、位址列路徑片段或資料夾分頁。<strong>搬移到…</strong>視窗中的<strong>新增資料夾</strong>會在目前查看的資料夾內建立並開啟新資料夾。</li>
+          <li><strong>複製</strong>：拖放時按住 <kbd>Ctrl</kbd>（Mac 為 <kbd>Option</kbd>）、複製貼上，或右鍵選<strong>複製到…</strong>。</li>
+          <li><strong>重新命名</strong>：按 <kbd>F2</kbd>，或和檔案總管一樣按已選項目的名稱，稍候即可編輯（連按兩下則開啟）。資料夾樹可按目前開啟資料夾的名稱。Enter 保留新名稱，<kbd>Esc</kbd> 保留舊名稱。</li>
+          <li><strong>右鍵按項目</strong>可使用其他功能。和 Windows 11 類似，選單頂部是一排<strong>剪下</strong>、<strong>複製</strong>、<strong>重新命名</strong>、<strong>分享</strong>與<strong>刪除</strong>按鈕（游標停留可查看名稱），下方依序有開啟、下載、壓縮、我的最愛、標籤、分享連結、搬移到、複製到與內容。</li>
+          <li><strong>右鍵按清單空白處</strong>可使用<strong>檢視</strong>、<strong>排序依據</strong>、<strong>分組依據</strong>（與工具列相同）、<strong>復原</strong>（名稱反映操作，例如<strong>復原刪除</strong>）、<strong>重新整理</strong>、<strong>貼上</strong>、<strong>新增</strong> › <strong>資料夾</strong>或<strong>文字文件</strong>、<strong>上傳</strong> › <strong>檔案</strong>或<strong>資料夾</strong>，以及<strong>內容</strong>。</li>
+        </ul>
+        <p>移入或移出<a href="storage.html#folder-spaces">伺服器上的資料夾</a>會複製檔案，大型資料夾可能需要時間。底部訊息顯示進度，期間可繼續工作；關閉頁面後伺服器仍會接續搬移或複製。</p>
+        <p>搬移、重新命名或刪除後，底部訊息會短暫提供<strong>復原</strong>按鈕，將項目移回、還原舊名或從資源回收筒還原。在清單按 <kbd>Ctrl</kbd> + <kbd>Z</kbd> 也會復原最近一次這類操作。</p>
+
+        <h2 id="tags">標籤</h2>
+        <p>標籤是加在檔案與資料夾上的彩色標記，例如<em>緊急</em>或<em>發票</em>，方便之後尋找。一個項目可以有多個標籤。</p>
+        <ul>
+          <li><strong>為項目加標籤</strong>：右鍵選<strong>標籤</strong>，再選標籤。勾號表示所有選取項目都有，橫線表示只有部分有；選橫線會加到全部項目，選已勾選者會移除。<strong>新增標籤…</strong>會建立並加到項目。詳細資料窗格的<strong>編輯標籤</strong>可對單一項目做相同操作。</li>
+          <li><strong>查看標籤</strong>：名稱後以彩色圓點顯示，游標停留可讀取名稱。詳細資料窗格依名稱列出，<strong>詳細資料</strong>檢視的<strong>標籤</strong>欄也一樣。</li>
+          <li><strong>尋找標記項目</strong>：按左側<strong>標籤</strong>下的標籤，列出所有位置含該標籤的項目。搜尋結果也可依標籤篩選。</li>
+          <li><strong>修改標籤</strong>：右鍵按左側標籤（或用清單上方工具列）可改名、換色或刪除。刪除會從所有項目移除標籤，項目本身不受影響。<strong>標籤</strong>旁的 <strong>+</strong> 可新增。</li>
+        </ul>
+        <p>標籤只屬於你。其他人看不到標籤、名稱與套用項目，共用空間內也一樣；管理員與分享連結訪客也看不到。每個人都可為有權開啟的項目加上自己的標籤。項目重新命名、搬移（包含跨空間）、移入資源回收筒及還原，或被其他程式在<a href="storage.html#folder-spaces">伺服器資料夾</a>修改時，標籤仍保留；你建立的副本也繼承原標籤。無權再開啟項目後不再顯示其標籤；永久刪除項目會移除標籤。與分享連結相同，標籤保存在資料庫：<a href="backup.html#backup">備份 <code>data</code> 資料夾</a>會保留，<a href="backup.html#file-backups">檔案備份</a>不會。</p>
+
+        <h2 id="smart-folders">智慧型資料夾</h2>
+        <p>智慧型資料夾是保留的搜尋條件，像資料夾顯示在左側選單，每次開啟都列出當時符合條件的項目，例如<em>最近 30 天修改的 PDF</em>或<em>所有標為緊急的項目</em>。</p>
+        <ul>
+          <li><strong>建立</strong>：搜尋並使用篩選條件，按<strong>儲存為智慧型資料夾</strong>。命名並確認條件後按<strong>建立</strong>。左側<strong>智慧型資料夾</strong>旁的 <strong>+</strong> 可從空白條件建立。</li>
+          <li><strong>搜尋條件</strong>：名稱片段；檔案、資料夾或類型（文件、圖片或自行輸入副檔案名稱）；修改日期（今天、最近 7／30 天或一年，每次開啟重新計算，或兩個日期之間）；大小（預設範圍或兩個大小之間）；你的標籤（同時含所有勾選標籤）。範圍可為資料夾及子資料夾、一個空間，或所有有權存取的位置。</li>
+          <li><strong>開啟</strong>：按<strong>智慧型資料夾</strong>下的項目。清單附各項目位置，可像一般資料夾排序、分組、選取、開啟、改名、搬移、分享、加標籤與刪除。大量結果和<a href="#large-folders">大型資料夾</a>一樣分批載入。</li>
+          <li><strong>修改或刪除</strong>：右鍵按左側項目，或使用清單上方的<strong>編輯…</strong>與<strong>刪除智慧型資料夾</strong>；工具列也會說明搜尋條件。</li>
+        </ul>
+        <p>智慧型資料夾本身不存項目。刪除只移除儲存的搜尋條件，也不能把項目搬進去；項目符合條件時才顯示，重新命名、搬移或修改後不符就離開。和標籤相同，智慧型資料夾只屬於你，其他人看不到。它永遠只列出你當下可開啟的項目；失去資料夾或空間權限後，相關項目會消失，以無權開啟資料夾為範圍的智慧型資料夾會列出空白。資料保存在資料庫：<a href="backup.html#backup">備份 <code>data</code> 資料夾</a>會保留，<a href="backup.html#file-backups">檔案備份</a>不會。</p>
+
+        <h2 id="details">詳細資料</h2>
+        <p>按工具列<strong>詳細資料窗格</strong>或 <kbd>Alt</kbd> + <kbd>Enter</kbd>，開啟右側窗格，顯示所選項目；未選取時顯示目前資料夾。</p>
+        <ul>
+          <li><strong>大小</strong>與<strong>包含</strong>：資料夾計算所有層級內容的大小與檔案／資料夾數，不含資源回收筒。大型資料夾可能需要一些時間。</li>
+          <li>選取多個項目時，顯示合計檔案與資料夾數（含所選資料夾內的項目）與總大小。</li>
+          <li><strong>標籤</strong>：依名稱列出你的標籤，可用<strong>編輯標籤</strong>修改（參閱<a href="#tags">標籤</a>）。</li>
+          <li><strong>活動</strong>：誰在何時上傳、編輯、重新命名、搬移、複製、刪除或還原。資料夾包含目前裡面所有項目的活動（含資源回收筒項目）；空間根目錄則涵蓋整個空間。只顯示最近 50 筆。</li>
+        </ul>
+        <p>有權開啟項目的人都能查看活動。分享與權限變更（誰取得權限、分享連結）只有空間管理者與擁有者可見。完整紀錄、篩選與匯出仍在<a href="logs.html">活動紀錄</a>。</p>
+
+        <h2 id="same-name">名稱已被使用時</h2>
+        <p>上傳、搬移、複製、貼上或從資源回收筒還原前，ThirtyFile 會檢查目標是否有同名項目（不區分大小寫，伺服器上的資料夾除外）。每個衝突都顯示雙方大小與日期，並詢問：</p>
+        <ul>
+          <li><strong>取代</strong>：上傳檔案會將內容寫入既有檔案，保留其分享、權限與我的最愛，原內容保存為<a href="#versions">先前版本</a>。搬移、複製或還原時，原項目會移到資源回收筒，仍可救回。</li>
+          <li><strong>略過</strong>：不處理此項目。</li>
+          <li><strong>保留兩者</strong>：新項目加上編號，例如 <em>Report (1).docx</em>。上傳清單會顯示儲存名稱。</li>
+        </ul>
+        <p>勾選<strong>將此選擇套用到接下來的衝突</strong>，可對剩餘衝突使用相同答案；或選<strong>取消</strong>停止，不變更任何內容。同名的上傳資料夾會合併到既有資料夾：<strong>取代</strong>會取代內部同名檔案，<strong>保留兩者</strong>保留兩份。把副本貼回自己的資料夾時，和 Windows 一樣總會加上編號。</p>
+        <p>上傳完成前，若目標資料夾刪除或你失去新增檔案權限，上傳會失敗並在清單提示原因，不會把檔案存到其他地方。</p>
+
+        <h2 id="versions">先前版本</h2>
+        <p>在線上編輯器儲存、以上傳取代或還原先前版本時，原本內容會保存為先前版本。選取檔案並開啟詳細資料窗格（<kbd>Alt</kbd> + <kbd>Enter</kbd>），<strong>版本</strong>會由新到舊列出作者與時間。<strong>開啟</strong>在新瀏覽器分頁檢視，<strong>下載</strong>儲存該版本，<strong>還原</strong>將其作為目前內容；還原前內容也會成為版本，因此可用相同方式復原還原。</p>
+        <ul>
+          <li>預設每個檔案保留最新 20 個版本，每個保留 90 天。管理員可在<strong>控制台 › 一般</strong>修改兩項限制或關閉版本功能。</li>
+          <li>先前版本不計入空間配額；管理員可在<strong>控制台 › 儲存用量</strong>查看占用量。</li>
+          <li>重新命名或搬移（含跨空間）會保留版本；副本從沒有版本開始。永久刪除檔案也會刪除版本。</li>
+          <li>有權開啟檔案的人都能查看與下載版本，還原需有編輯權限。</li>
+        </ul>
+
+        <h2 id="shortcuts">鍵盤快捷鍵</h2>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>按鍵</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr><td><kbd>Enter</kbd></td><td>開啟</td></tr>
+              <tr><td><kbd>Alt</kbd> + <kbd>↑</kbd></td><td>上一層資料夾，並選取剛離開的資料夾</td></tr>
+              <tr><td><kbd>Alt</kbd> + <kbd>←</kbd> 或 <kbd>Backspace</kbd></td><td>返回</td></tr>
+              <tr><td><kbd>Alt</kbd> + <kbd>→</kbd></td><td>前進</td></tr>
+              <tr><td><kbd>←</kbd> <kbd>→</kbd>（已開啟檔案時）</td><td>依所在資料夾排序，前往上一個或下一個檔案</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>L</kbd> 或 <kbd>Alt</kbd> + <kbd>D</kbd></td><td>聚焦位址列，選取完整路徑以複製或輸入其他路徑</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>F</kbd> 或 <kbd>F3</kbd></td><td>聚焦搜尋框</td></tr>
+              <tr><td><kbd>F5</kbd></td><td>重新整理清單（不重新載入網頁）</td></tr>
+              <tr><td><kbd>F2</kbd></td><td>重新命名</td></tr>
+              <tr><td><kbd>Delete</kbd></td><td>移到資源回收筒</td></tr>
+              <tr><td><kbd>Shift</kbd> + <kbd>Delete</kbd></td><td>永久刪除，不經資源回收筒。會先確認，只能在有刪除權限的位置使用</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>X</kbd> / <kbd>C</kbd> / <kbd>V</kbd></td><td>剪下、複製、貼上</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd></td><td>復原最近的搬移、重新命名或刪除，訊息消失後也可使用</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>A</kbd></td><td>全選</td></tr>
+              <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd></td><td>新增資料夾</td></tr>
+              <tr><td><kbd>Alt</kbd> + <kbd>Enter</kbd></td><td>顯示詳細資料</td></tr>
+              <tr><td><kbd>←</kbd> <kbd>→</kbd>（<strong>直欄</strong>檢視）</td><td>返回前一欄，或進入所選資料夾的欄</td></tr>
+              <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Home</kbd> <kbd>End</kbd> <kbd>Page Up</kbd> <kbd>Page Down</kbd></td><td>在清單移動（圖示檢視與空間磚塊也支援 <kbd>←</kbd> <kbd>→</kbd>）。按住 <kbd>Shift</kbd> 邊移動邊選取；<kbd>Ctrl</kbd> 只移動焦點，保留目前選取</td></tr>
+              <tr><td><kbd>Space</kbd></td><td>選取焦點項目。加 <kbd>Ctrl</kbd> 可加入或移出選取範圍</td></tr>
+              <tr><td><kbd>Shift</kbd> + <kbd>F10</kbd> 或 <kbd>Menu</kbd> 鍵</td><td>像右鍵一樣開啟焦點項目選單；沒有選取時開啟空白處選單。方向鍵可移動到各選项，包含頂部按鈕列；<kbd>→</kbd> 開啟子選單</td></tr>
+              <tr><td>字母</td><td>前往名稱以輸入字母開頭的下一項。快速輸入可比對多個字母；重複同一字母可跳到下一個相同開頭項目</td></tr>
+              <tr><td><kbd>Esc</kbd></td><td>清除選取，或關閉覆蓋清單的預覽、詳細資料窗格或手機選單</td></tr>
+              <tr><td><kbd>?</kbd> (<kbd>Shift</kbd> + <kbd>/</kbd>)</td><td>顯示快捷鍵清單，也可從<strong>查看更多</strong>（<strong>⋯</strong>）› <strong>鍵盤快捷鍵</strong>開啟</td></tr>
+              <tr><td><kbd>Tab</kbd>（頁面第一次按下時）</td><td>顯示<strong>跳到主要內容</strong>連結，略過工具列與導覽窗格</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Mac 使用 <kbd>⌘</kbd> 代替 <kbd>Ctrl</kbd>，<kbd>Option</kbd> 代替 <kbd>Alt</kbd>；選單與快捷鍵清單會如此顯示。輸入框打字時不套用快捷鍵，<kbd>F5</kbd> 除外。</p>
+        <p>左側資料夾樹是單一 <kbd>Tab</kbd> 焦點停靠位置。<kbd>↑</kbd>／<kbd>↓</kbd>在資料夾間移動，<kbd>→</kbd>展開（或進入第一個子資料夾），<kbd>←</kbd>收合（或回到上一層），<kbd>Home</kbd>／<kbd>End</kbd>跳到第一／最後一個，<kbd>Enter</kbd>開啟資料夾。子資料夾很多時先顯示 100 個，下方<strong>顯示更多資料夾</strong>再加 100 個。</p>
+        <p>左側選單上方兩個按鈕方便操作大型資料夾樹：<strong>顯示目前資料夾</strong>會展開到目前位置並捲動過去，<strong>全部收合</strong>關閉所有資料夾與空間，只保留空間清單。已展開資料夾在此瀏覽器記住到登出。</p>
+
+        <h2 id="mac-style">Mac 風格</h2>
+        <p><strong>Mac 風格</strong>（參閱<a href="account.html#style">介面風格</a>）讓檔案瀏覽器採用 Finder 版面與按鍵。檔案、可用操作與確認問題和 Windows 風格相同：同名衝突仍會出現<a href="#same-name">名稱已被使用時</a>的對話方塊，永久刪除總會先確認。</p>
+        <ul>
+          <li><strong>側欄</strong>：與 Windows 風格左側選單相同位置，以群組放在內縮、半透明圓角面板。<strong>我的最愛</strong>包含<strong>所有我的最愛</strong>、最愛資料夾與<a href="#smart-folders">智慧型資料夾</a>（標題旁 <strong>+</strong> 可新增）。接著是<strong>空間</strong>、<strong>分享</strong>（<strong>與我共用</strong>、<strong>我的分享連結</strong>）、<strong>最近使用</strong>、<strong>資源回收筒</strong>與<strong>標籤</strong>。按標題可隱藏／顯示群組，項目與檔案可拖放到裡面的資料夾或空間。</li>
+          <li><strong>工具列</strong>：返回／前進、目前資料夾名稱、檢視（<strong>圖示</strong>、<strong>清單</strong>、<strong>直欄</strong>、<strong>圖庫</strong>）、<strong>排序依據</strong>、<strong>分組依據</strong>、<strong>分享</strong>、<strong>標籤</strong>，以及提供其餘功能的<strong>操作</strong>（<strong>⋯</strong>）：新增資料夾、上傳、<strong>快速查看</strong>、<strong>取得資訊</strong>、<strong>重新命名</strong>、<strong>複製</strong>、<strong>貼上</strong>、<strong>搬移到這裡</strong>、<strong>移到資源回收筒</strong>、我的最愛、標籤、<strong>前往資料夾…</strong>與快捷鍵。搜尋框在右側，導覽與命令使用圓角膠囊。窄視窗的檢視按鈕改為選單，排序、分組、分享與標籤保留在<strong>操作</strong>中，工具列維持單行。直欄與圖庫不提供分組。</li>
+          <li><strong>路徑列與狀態列</strong>：預設隱藏。開啟<strong>檢視選項</strong>（檢視按鈕旁箭頭，窄視窗則為<strong>檢視</strong>），開啟<strong>顯示路徑列</strong>或<strong>顯示狀態列</strong>。選項依帳號在此瀏覽器保存，不會跟隨到其他瀏覽器。狀態列保留項目數與儲存用量，路徑列位於視窗底部，顯示目前資料夾路徑。按其中資料夾可前往，拖放項目可搬移到該處。沒有直接輸入路徑的方框；<strong>前往資料夾</strong>（<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd>）會要求輸入，詳見<a href="#paths">路徑</a>。</li>
+          <li><strong>分頁</strong>：開啟兩個以上分頁才顯示分頁列。即使隱藏，仍可在新分頁開啟資料夾與使用分頁快捷鍵。</li>
+          <li><strong>清單</strong>：緊湊交錯底色列，有縮圖時顯示小縮圖。預設欄為名稱、修改日期、大小與種類，日期使用介面語言的完整格式。<strong>上傳者</strong>等欄位可從<strong>檢視選項 → 欄位</strong>開啟；欄位選擇與寬度和另一風格分開保存。資料夾名稱旁有三角形，按它或 <kbd>→</kbd> 可直接在下方縮排展開；<kbd>←</kbd> 或再次按一下收合。這種大型資料夾會和一般<a href="#large-folders">大型資料夾</a>一樣，隨捲動分批載入。</li>
+          <li><strong>圖庫</strong>：上方大型預覽與開啟檔案相同（圖片、影片、PDF、Office 與文字，其他類型顯示圖示），下方縮圖列。開啟資料夾時先選第一項。<kbd>→</kbd>／<kbd>←</kbd>前往下一／上一項，<kbd>Home</kbd>／<kbd>End</kbd>到第一／最後一項，<kbd>Space</kbd>開啟<strong>快速查看</strong>；縮圖列跟隨捲動，大型資料夾分批載入。停留在項目後才載入預覽，影片不會自動播放。右側面板顯示類型、大小、日期與標籤，並提供開啟、下載、分享、重新命名、移到資源回收筒；縮圖列末端按鈕可顯示／隱藏面板（此瀏覽器會記住）。選取、複製、搬移、拖到資料夾與右鍵選單和其他檢視相同；<kbd>Enter</kbd>可在預覽上方名稱處重新命名。此檢視不支援<strong>分組依據</strong>，手機也不提供。</li>
+          <li><strong>快速查看</strong>：按 <kbd>Space</kbd>在清單上方視窗預覽所選項目，內容和開啟檔案相同。方向鍵切換上一／下一項，清單選取也跟著變更；選取多項時只依序預覽它們。<kbd>Space</kbd> 或 <kbd>Esc</kbd>關閉，<strong>開啟</strong>則正式開啟項目。</li>
+          <li><strong>搬移</strong>：沒有剪下。先複製（<kbd>⌘</kbd> + <kbd>C</kbd>），到目標資料夾後選<strong>搬移到這裡</strong>（<kbd>⌘</kbd> + <kbd>Option</kbd> + <kbd>V</kbd>）搬移，或用<strong>貼上</strong>（<kbd>⌘</kbd> + <kbd>V</kbd>）建立副本。拖曳與 Windows 風格相同。</li>
+          <li><strong>新增項目</strong>立即進入排序後的正確位置；按已選名稱不會重新命名，請按 <kbd>Enter</kbd>。</li>
+          <li><strong>外觀</strong>：資料夾與檔案使用專屬圖示（文件頁面顯示格式名稱或符號）、強調色圓角選取、半透明側欄與低調工具列按鈕，明暗模式都適用。</li>
+          <li>手機上的 Mac 風格和 Windows 風格版面相同，但有自己的圖示。</li>
+        </ul>
+        <p>按鍵和 Finder 相同，但瀏覽器保留的按鍵除外（如 <kbd>⌘</kbd> + <kbd>N</kbd>、<kbd>⌘</kbd> + <kbd>W</kbd>）。非 Mac 電腦使用 <kbd>Ctrl</kbd> 代替 <kbd>⌘</kbd>，<kbd>Alt</kbd> 代替 <kbd>Option</kbd>。其他按鍵與上方 Windows 風格相同：清單移動、<kbd>⌘</kbd> + <kbd>A</kbd>、<kbd>⌘</kbd> + <kbd>Z</kbd>、<kbd>Shift</kbd> + <kbd>F10</kbd>、<kbd>F5</kbd>、輸入名稱開頭、<kbd>Esc</kbd>、<kbd>?</kbd>。</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>按鍵</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr><td><kbd>Enter</kbd></td><td>重新命名</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>↓</kbd></td><td>開啟</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>↑</kbd></td><td>上一層資料夾，並選取剛離開的資料夾</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>[</kbd> / <kbd>]</kbd></td><td>返回、前進</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd></td><td>前往資料夾</td></tr>
+              <tr><td><kbd>Space</kbd></td><td>快速查看；方向鍵切換下一項</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>I</kbd></td><td>取得資訊（詳細資料窗格）</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>⌫</kbd></td><td>移到資源回收筒</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>Option</kbd> + <kbd>⌫</kbd></td><td>確認後永久刪除</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>C</kbd> / <kbd>V</kbd></td><td>複製、貼上</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>Option</kbd> + <kbd>V</kbd></td><td>將已複製項目搬移到這裡</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>Option</kbd> + <kbd>N</kbd></td><td>新增資料夾</td></tr>
+              <tr><td><kbd>→</kbd> <kbd>←</kbd>（<strong>清單</strong>檢視）</td><td>展開／收合所選資料夾；已展開時 <kbd>→</kbd> 到第一個項目，<kbd>←</kbd> 從項目回到資料夾</td></tr>
+              <tr><td><kbd>→</kbd> <kbd>←</kbd>（<strong>圖庫</strong>檢視）</td><td>下一／上一項，在縮圖列上方預覽</td></tr>
+              <tr><td><kbd>⌘</kbd> + <kbd>F</kbd></td><td>聚焦搜尋框</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="trash">資源回收筒</h2>
+        <p>刪除項目會進入資源回收筒，可從中還原。30 天後永久移除（管理員可用<a href="settings.html"><code>THIRTYFILE_TRASH_DAYS</code></a>修改，或保留到清空），手動清空也會永久移除。頁面顯示實際保留天數。</p>
+        <p>資源回收筒列出所有你可開啟空間的刪除項目。<strong>清空資源回收筒</strong>只刪除你管理的空間（自己的檔案、你為管理者的團隊空間），會先列出各空間與刪除數量供確認。只有檢視權限的空間項目會留下。</p>
+        <p>永久刪除大型資料夾或清空大量回收筒可能需要時間。項目立即從回收筒消失，底部訊息顯示刪除進度，關閉頁面仍繼續。將數千項資料夾移到回收筒、還原，或在伺服器資料夾重新命名，也需要片刻。完成前該資料夾無法還原、搬移或複製，會提示稍後再試。</p>
+        <p>較寬螢幕的<strong>刪除者</strong>欄顯示移到回收筒的人。早於紀錄功能刪除或帳號已移除的顯示橫線。清單上方<strong>由我刪除</strong>只看自己的操作，<strong>所有人刪除</strong>恢復完整清單。</p>
+
+        <h2 id="phone">手機操作</h2>
+        <p>同一網站也可用於手機。點項目開啟，其餘使用清單上方按鈕。</p>
+        <ul>
+          <li><strong>選取</strong>：長按項目片刻以選取，之後點按可加入／移出選取。平板也會開啟所選項目選單。</li>
+          <li><strong>操作所選項目</strong>：選取時，底部工具列提供<strong>下載</strong>、<strong>分享</strong>、<strong>搬移</strong>、<strong>刪除</strong>與<strong>更多</strong>（剪下、複製、重新命名等）。<strong>×</strong>清除選取。清單上方保留<strong>導覽窗格</strong>（空間與資料夾樹）、<strong>新增</strong>、<strong>排序</strong>、<strong>檢視</strong>、<strong>···</strong>與詳細資料窗格，有內容可貼上時也有<strong>貼上</strong>。</li>
+          <li><strong>核取方塊</strong>：開啟<strong>檢視</strong> › <strong>項目核取方塊</strong>，每種檢視的項目都會顯示核取方塊。</li>
+          <li><strong>上傳</strong>：選<strong>新增</strong> › <strong>上傳檔案</strong>或<strong>上傳資料夾</strong>。</li>
+          <li><strong>位址列</strong>：長路徑顯示末端，也就是目前資料夾；滑動可查看上層路徑。</li>
+          <li><strong>主畫面</strong>：把網站加入主畫面（Safari：<strong>分享</strong> › <strong>加入主畫面</strong>；Chrome：<strong>加入主畫面</strong>或<strong>安裝應用程式</strong>），之後會像應用程式開啟，不顯示瀏覽器工具列，使用網站名稱與標誌。</li>
+        </ul>
+        <div class="shot phone"><img src="../../assets/files-phone.webp" width="780" height="1600" loading="lazy" alt="手機上的檔案清單" /></div>
+        <nav class="next" aria-label="更多指南">
+          <a href="first-steps.html"><span>上一篇</span>初次設定</a>
+          <a class="forward" href="preview.html"><span>下一篇</span>預覽與編輯</a>
+        </nav>
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">原始碼</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">回報問題</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 映像檔</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>
