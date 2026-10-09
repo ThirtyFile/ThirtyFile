@@ -129,8 +129,8 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       await changed({ folders: [p.folderId], contents: true, recent: kind === "file" });
       // Chosen in a menu: the rename box takes the focus once the menu has given it back
       await menusClosed();
-      // The folder's pages, and the folder tree's list of subfolders
-      const listed = qc.getQueriesData({ queryKey: keys.children(p.folderId) }).some(([, d]) => rowsOf(d)?.some((n) => n.id === id));
+      // In the folder's own lists (not the navigation pane's list of its subfolders, which the file list doesn't show)
+      const listed = qc.getQueriesData({ queryKey: keys.children(p.folderId), predicate: (q) => q.queryKey[2] !== "folders" }).some(([, d]) => rowsOf(d)?.some((n) => n.id === id));
       if (!listed) {
         // A large folder where it sorts into a part not loaded: go there; renaming starts once that part has loaded
         const at = p.list ? await p.list.locate(id).catch(() => null) : null;

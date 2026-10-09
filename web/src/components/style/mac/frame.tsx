@@ -3,7 +3,7 @@
  * the place's name, the page's commands and the search box), the page, the path bar and the status bar. Phones get
  * the layout every style shares (the Windows style's frame).
  */
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MAIN_ID, type FrameParts } from "../types";
 import { WindowsFrame } from "../windows/frame";
 import { SearchInput } from "@/components/frame/AddressBar";
@@ -23,12 +23,22 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 export function MacFrame(f: FrameParts) {
   const phone = useMediaQuery("(max-width: 47.99rem)");
-  // The style's look, icons and symbols load with it (./loadArt.ts): until they are there, the window waits
+  // The style's look, icons and symbols load with it (./loadArt.ts): until they are there, the window waits a moment,
+  // then shows with the shared ones (they take their place once they arrive) rather than stay empty on a slow network
   const art = useMacArt();
-  if (art === undefined) return <div aria-busy className="flex-1" />;
+  const [waited, setWaited] = useState(false);
+  useEffect(() => {
+    if (art !== undefined) return;
+    const timer = setTimeout(() => setWaited(true), ART_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [art]);
+  if (art === undefined && !waited) return <div aria-busy className="flex-1" />;
   if (phone) return <WindowsFrame {...f} />;
   return <MacWindow {...f} />;
 }
+
+/** How long the window waits for the style's assets before showing without them */
+const ART_WAIT_MS = 1500;
 
 function MacWindow(f: FrameParts) {
   const { place } = f;

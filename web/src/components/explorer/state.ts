@@ -145,6 +145,9 @@ export function useExplorerState(p: ExplorerProps) {
   useEffect(() => {
     setSelected(new Set());
     setAnchor(null);
+    // A name box of the folder left can't be typed in any more: the shortcuts, off while it is open, come back
+    setDialog((d) => (d?.t === "rename" ? null : d));
+    renameWhenShown.current = null;
     // The Columns view says what to select in the folder it went to (lib/columns), in place of the folder came from
     const arrived = p.folderId ? takeArrival(p.folderId) : null;
     if (arrived) {
