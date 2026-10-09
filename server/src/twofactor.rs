@@ -507,6 +507,15 @@ pub struct EnableReq {
     code: String,
 }
 
+/// Who an administrator is, asked again before they reset someone's two-factor sign-in (see `tokens::confirm_identity`)
+#[derive(Deserialize, Default)]
+pub struct ConfirmReq {
+    #[serde(default)]
+    password: Option<String>,
+    #[serde(default)]
+    code: Option<String>,
+}
+
 /// Confirms the setup with a code from the app: turns two-factor sign-in on and returns the recovery codes
 pub async fn enable(
     State(st): State<AppState>,
@@ -584,9 +593,12 @@ pub async fn admin_reset(
     Path(user_id): Path<i64>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
+    Json(req): Json<ConfirmReq>,
 ) -> AppResult<Json<Value>> {
     let row: Option<(String,)> = sqlx::query_as("SELECT username FROM users WHERE id = ?").bind(user_id).fetch_optional(&st.db).await?;
     let Some((username,)) = row else { return Err(AppError::not_found("User not found")) };
+    // It lets someone into the account with the password alone, so it asks who the administrator is first
+    crate::tokens::confirm_identity(&st, &me, req.password, req.code.as_deref(), crate::admin::SIGN_IN_AGAIN).await?;
     if turn_off(&st, user_id).await? {
         {
             let _w = st.write_lock.lock().await;
@@ -604,6 +616,11 @@ pub async fn admin_reset(
 pub(crate) mod tests {
     use super::*;
     use crate::{signin::LoginReq, testutil};
+
+    /// The test administrator confirming who they are
+    pub(crate) fn as_admin() -> ConfirmReq {
+        ConfirmReq { password: Some(testutil::password().into()), code: None }
+    }
 
     fn addr() -> ConnectInfo<SocketAddr> {
         ConnectInfo("203.0.113.9:5000".parse().unwrap())
@@ -756,7 +773,12 @@ pub(crate) mod tests {
         let off =
             disable(State(env.st.clone()), amy.clone(), addr(), HeaderMap::new(), Json(PasswordReq { password: testutil::password().into(), code: None })).await;
         assert!(off.is_err());
-        let _ = admin_reset(State(env.st.clone()), Admin(admin), Path(amy.id), addr(), HeaderMap::new()).await.unwrap();
+        // The administrator confirms who they are first
+        for req in [ConfirmReq::default(), ConfirmReq { password: Some(testutil::wrong_password()), code: None }] {
+            assert!(admin_reset(State(env.st.clone()), Admin(admin.clone()), Path(amy.id), addr(), HeaderMap::new(), Json(req)).await.is_err());
+        }
+        assert!(status(State(env.st.clone()), amy.clone()).await.unwrap().0.enabled);
+        let _ = admin_reset(State(env.st.clone()), Admin(admin), Path(amy.id), addr(), HeaderMap::new(), Json(as_admin())).await.unwrap();
         let Json(s) = status(State(env.st.clone()), amy).await.unwrap();
         assert!(!s.enabled && s.recovery_codes_left == 0);
         let (detail,): (String,) =

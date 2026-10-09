@@ -15,6 +15,13 @@ pub mod app_passwords;
 
 pub const SESSION_COOKIE: &str = "tf_session";
 pub(crate) const SESSION_TTL: i64 = 30 * 24 * 3600;
+/// A session not used for this long ends before its time (a browser left signed in on a computer no longer used)
+pub(crate) const SESSION_IDLE: i64 = 14 * 24 * 3600;
+
+/// Sessions last used (or, never used, made) before this have ended for being idle
+pub(crate) fn idle_before() -> i64 {
+    now() - SESSION_IDLE
+}
 const FAIL_WINDOW: i64 = 15 * 60;
 /// Limit on consecutive failures for one username from one IP (counted per username + IP, so an attacker can't use it to lock the real user out from elsewhere)
 pub const FAIL_LIMIT: usize = 5;
@@ -192,12 +199,13 @@ async fn session_user(parts: &mut Parts, st: &AppState) -> Result<User, AppError
     let token = get_cookie(&parts.headers, SESSION_COOKIE).ok_or_else(AppError::unauthorized)?;
     let sql = format!(
         "SELECT {USER_COLS}, s.id AS session_id, s.last_used_at FROM sessions s JOIN users u ON u.id = s.user_id
-         WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled = 0"
+         WHERE s.token_hash = ? AND s.expires_at > ? AND COALESCE(s.last_used_at, s.created_at) > ? AND u.disabled = 0"
     );
     let ts = now();
     let row = sqlx::query_as::<_, SessionRow>(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(sha256_hex(token.as_bytes()))
         .bind(ts)
+        .bind(idle_before())
         .fetch_optional(&st.db)
         .await?
         .ok_or_else(AppError::unauthorized)?;

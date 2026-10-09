@@ -196,7 +196,15 @@ pub struct UpdateReq {
     can_share: Option<bool>,
     quota_bytes: Option<i64>,
     disabled: Option<bool>,
+    /// The administrator's own password (and two-factor code), asked again before resetting a password or changing a role
+    #[serde(default)]
+    my_password: Option<String>,
+    #[serde(default)]
+    my_code: Option<String>,
 }
+
+/// What an administrator is told when single sign-on was too long ago for a change that hands over an account
+pub(crate) const SIGN_IN_AGAIN: &str = "Sign out and sign in again, then make this change within 10 minutes";
 
 pub async fn update(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<i64>, Json(req): Json<UpdateReq>) -> AppResult<Json<UserRow>> {
     let role = req.role.as_deref().map(UserRole::parse).transpose()?;
@@ -211,6 +219,11 @@ pub async fn update(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
         None => None,
     };
     let target = get_row(&st, id).await?;
+    // A new password, or administrator rights, hand over an account: whoever is at an administrator's unlocked
+    // browser can't do it without knowing who they are
+    if password_hash.is_some() || role.is_some_and(|r| r != target.role) {
+        crate::tokens::confirm_identity(&st, &me, req.my_password.clone(), req.my_code.as_deref(), SIGN_IN_AGAIN).await?;
+    }
     let display_name = req.display_name.as_deref().map(validate_display_name).transpose()?.map(str::to_string);
     let mut changes = Vec::new();
     if password_hash.is_some() {
@@ -467,7 +480,7 @@ mod tests {
         let first = env.admin().await;
         let Json(row) = create(State(env.st.clone()), Admin(first.clone()), Json(CreateReq { role: "admin".into(), ..req("second", None).0 })).await.unwrap();
         let second = crate::auth::user_by_id(&env.st, &mut env.st.db.acquire().await.unwrap(), row.id).await.unwrap().unwrap();
-        let demote = || Json(serde_json::from_value::<UpdateReq>(json!({ "role": "user" })).unwrap());
+        let demote = || Json(serde_json::from_value::<UpdateReq>(json!({ "role": "user", "my_password": testutil::password() })).unwrap());
         // Both signed in as administrators; the first one's change lands first
         let _ = update(State(env.st.clone()), Admin(first.clone()), Path(second.id), demote()).await.unwrap();
         let res = update(State(env.st.clone()), Admin(second.clone()), Path(first.id), demote()).await;
@@ -477,6 +490,31 @@ mod tests {
         assert!(delete(State(env.st.clone()), Admin(second.clone()), Path(first.id), Query(DeleteQuery::default())).await.is_err());
         let (admins,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users WHERE role = 'admin' AND disabled = 0").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(admins, 1);
+    }
+
+    #[tokio::test]
+    async fn handing_over_an_account_asks_who_the_administrator_is() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let amy = env.user("amy", true).await;
+        let ask = async |change: serde_json::Value| {
+            let req = serde_json::from_value::<UpdateReq>(change).unwrap();
+            update(State(env.st.clone()), Admin(admin.clone()), Path(amy.id), Json(req)).await.map(|Json(row)| (row.role, row.display_name))
+        };
+        let new_password = crate::util::random_token(20);
+        for change in [json!({ "password": new_password }), json!({ "role": "admin" })] {
+            let err = ask(change.clone()).await.unwrap_err();
+            assert_eq!(err.message, "Enter your current password");
+            let mut wrong = change.clone();
+            wrong["my_password"] = json!(testutil::wrong_password());
+            assert!(ask(wrong).await.is_err());
+        }
+        let row = get_row(&env.st, amy.id).await.unwrap();
+        assert_eq!(row.role, UserRole::User);
+        crate::auth::confirm_password(&env.st, amy.id, testutil::password().into()).await.unwrap();
+        // Other changes, and asking for the role the account already has, don't
+        assert_eq!(ask(json!({ "display_name": "Amy", "role": "user", "can_share": false })).await.unwrap().1, "Amy");
+        assert_eq!(ask(json!({ "role": "admin", "my_password": testutil::password() })).await.unwrap().0, UserRole::Admin);
     }
 
     #[tokio::test]
@@ -552,6 +590,8 @@ mod tests {
             can_share: None,
             quota_bytes: None,
             disabled: None,
+            my_password: Some(testutil::password().into()),
+            my_code: None,
         };
         assert!(super::update(State(env.st.clone()), Admin(admin), Path(amy.id), Json(update)).await.is_err());
         let Json(me) = crate::signin::me(State(env.st.clone()), amy, axum::http::HeaderMap::new()).await.unwrap();

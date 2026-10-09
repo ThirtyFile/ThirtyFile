@@ -1149,6 +1149,7 @@ export default {
   "Sign out and sign in again, then create the app password within 10 minutes": "请退出登录后重新登录，并在 10 分钟内创建应用密码",
   "Sign out and sign in again, then change your email address within 10 minutes": "请退出登录后重新登录，并在 10 分钟内修改邮箱地址",
   "Sign out and sign in again, then link the account within 10 minutes": "请退出登录后重新登录，并在 10 分钟内关联账号",
+  "Sign out and sign in again, then make this change within 10 minutes": "请退出登录后重新登录，并在 10 分钟内进行此更改",
   "Only an account with a verified email address in a domain allowed on this site can be linked": "只能关联邮箱地址已验证、且属于本网站允许域名的账号",
   // Share-link passwords (shares.rs)
   "Too many wrong passwords for this link. Try again in {n} seconds.": "此链接的密码错误次数过多，请 {n} 秒后再试",

@@ -121,6 +121,7 @@
         <pre><code>docker logs --tail 100 thirtyfile</code></pre>
         <h2 id="health">检查运行状态</h2>
         <p><code>http://files.example.com:8080/api/health</code> 返回服务器状态：<code>"status": "ok"</code>；当 <code>/data</code> 或 <code>/storage</code> 剩余容量不足 1 GB、存储位置不可达，或过去一天内有后台任务因错误停止而重新启动（日志会写明是哪一项）时，返回 <code>"degraded"</code>。它还列出两个文件夹的剩余和总容量，以及各存储位置的 <code>ok</code> 或 <code>offline</code> 状态，便于监控工具在磁盘用满前告警。上传和通过 WebDAV 发送的文件会先存入 <code>/data</code>，若存入后 <code>/data</code> 剩余不到 64 MB，就会拒绝接收。请配置监控检查 JSON 的 <code>status</code>：降级健康状态仍返回 HTTP 200。数据库检查失败则返回 HTTP 503 和 <code>"status": "error"</code>。Docker 健康探针接受 HTTP 200，所以剩余空间不足或存储位置离线本身不会导致容器重启。降级状态的日志警告每小时最多记录一次。</p>
+        <p>只有在服务器本机发出（不经反向代理）的请求，以及已登录的管理员，才会看到这些详细信息。其他人只会看到 <code>status</code>。</p>
         <p>任何人都可查询此端点，所以它不显示版本，避免陌生人据此查找已知漏洞。登录后可从<a href="account.html">账号菜单</a>最后一行查看，例如 <strong>ThirtyFile 0.5.0</strong>。管理员也可在<strong>控制面板</strong>右下角查看，点击可打开该版本说明。在服务器上运行 <code>docker exec thirtyfile thirtyfile --version</code> 可输出版本。</p>
         <h2 id="check">检查已存储的文件</h2>
         <p>如需检查数据库中的每个文件是否仍位于存储位置，以及存储位置是否包含数据库未知的文件（例如手动留下的文件），请运行：</p>

@@ -554,7 +554,7 @@ mod tests {
 
         // An administrator resetting the password removes the linked sign-in methods
         let admin = env.admin().await;
-        let req = serde_json::from_value(json!({ "password": crate::util::random_token(20) })).unwrap();
+        let req = serde_json::from_value(json!({ "password": crate::util::random_token(20), "my_password": crate::testutil::password() })).unwrap();
         let _ = crate::admin::update(State(env.st.clone()), Admin(admin), Path(amy.id), Json(req)).await.unwrap();
         assert_eq!(linked().await, None);
         *MOCK_BASE.lock() = None;

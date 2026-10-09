@@ -1,6 +1,6 @@
 // Searching the users list, and pages that load only what they need.
 import { expect, test } from "@playwright/test";
-import { makeUser, signIn, unique } from "./helpers";
+import { PASSWORD, USER_PASSWORD, makeUser, signIn, unique } from "./helpers";
 
 test("the users list finds accounts on the server by name", async ({ page }) => {
   await signIn(page);
@@ -35,6 +35,28 @@ test("an account's permissions have the same names in the list and the dialog, a
   await expect(dialog.getByRole("checkbox", { name: "Delete", exact: true })).not.toBeChecked();
   await expect(dialog.getByRole("checkbox", { name: "Share", exact: true })).toBeChecked();
   await expect(dialog.getByText("Edit includes uploading. Share includes share links, Share with… and managing the members of a space.")).toBeVisible();
+});
+
+test("resetting someone's password asks for the administrator's own first", async ({ page }) => {
+  await signIn(page);
+  const name = await makeUser(page, "ria");
+  await page.goto("/admin/users");
+  await page.locator("tbody tr").filter({ hasText: name }).dblclick();
+  const dialog = page.getByRole("dialog", { name: `Edit "${name}"` });
+  const mine = dialog.getByLabel("Your current password");
+  // Other changes don't ask
+  await expect(mine).toHaveCount(0);
+  await dialog.getByLabel("Reset password (leave blank to keep current)").fill(`${USER_PASSWORD}-new`);
+  await expect(mine).toBeVisible();
+  const save = dialog.getByRole("button", { name: "Save" });
+  await expect(save).toBeDisabled();
+  await mine.fill(`${PASSWORD}-wrong`);
+  await save.click();
+  await expect(dialog.getByRole("alert")).toHaveText("Current password is incorrect");
+  await mine.fill(PASSWORD);
+  await save.click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText("User updated")).toBeVisible();
 });
 
 test("the sign-in page doesn't load the file explorer", async ({ page }) => {

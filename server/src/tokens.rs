@@ -358,7 +358,7 @@ mod tests {
             .await
             .unwrap();
         let _ = new_token(&env, &amy, "write", None).await;
-        let req = serde_json::from_value(json!({ "password": "reset by the admin" })).unwrap();
+        let req = serde_json::from_value(json!({ "password": "reset by the admin", "my_password": testutil::password() })).unwrap();
         let _ = crate::admin::update(State(env.st.clone()), auth::Admin(admin.clone()), Path(amy.id), Json(req)).await.unwrap();
         assert_eq!((count(&env, "app_passwords", &amy).await, count(&env, "sessions", &amy).await), (0, 0));
 
@@ -376,7 +376,16 @@ mod tests {
             .execute(&env.st.db)
             .await
             .unwrap();
-        let _ = crate::twofactor::admin_reset(State(env.st.clone()), auth::Admin(admin), Path(amy.id), addr(), HeaderMap::new()).await.unwrap();
+        let _ = crate::twofactor::admin_reset(
+            State(env.st.clone()),
+            auth::Admin(admin),
+            Path(amy.id),
+            addr(),
+            HeaderMap::new(),
+            Json(crate::twofactor::tests::as_admin()),
+        )
+        .await
+        .unwrap();
         assert_eq!((count(&env, "app_passwords", &amy).await, count(&env, "sessions", &amy).await), (0, 0));
     }
 

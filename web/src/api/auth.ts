@@ -16,7 +16,8 @@ export const authApi = {
   enableTwoFactor: (code: string) => post<{ recovery_codes: string[] }>("/auth/2fa/enable", { code }),
   disableTwoFactor: (password: string, code?: string) => post("/auth/2fa/disable", { password, code }),
   newRecoveryCodes: (password: string, code?: string) => post<{ recovery_codes: string[] }>("/auth/2fa/recovery-codes", { password, code }),
-  resetTwoFactor: (userId: number) => request("DELETE", `/admin/users/${userId}/2fa`),
+  /** With the administrator's own password (and code) */
+  resetTwoFactor: (userId: number, password?: string, code?: string) => request("DELETE", `/admin/users/${userId}/2fa`, { password, code }),
   logout: () => post("/auth/logout"),
   changePassword: (current: string, next: string) => request("PUT", "/auth/password", { current, new: next }),
   /** Saves the language the person chose with their account (`""` forgets it), so it follows them to other devices */

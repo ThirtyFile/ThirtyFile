@@ -64,7 +64,12 @@ async fn maintain(st: AppState, trash_days: i64) {
             logs::prune_share_views(&st);
             logs::daily_archive(&st).await;
             let _w = st.write_lock.lock().await;
-            let _ = sqlx::query("DELETE FROM sessions WHERE expires_at < ?").bind(util::now()).execute(&st.db).await;
+            // Sessions that expired, or ended for being idle
+            let _ = sqlx::query("DELETE FROM sessions WHERE expires_at < ? OR COALESCE(last_used_at, created_at) < ?")
+                .bind(util::now())
+                .bind(auth::idle_before())
+                .execute(&st.db)
+                .await;
         }
     }
 }

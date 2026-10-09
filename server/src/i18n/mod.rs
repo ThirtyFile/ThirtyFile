@@ -191,12 +191,15 @@ pub fn recipient(chosen: &str, last_used: &str, default: Option<Lang>) -> Lang {
 /// Who a page request comes from, by its sign-in cookie (pages don't go through the `User` extractor)
 pub async fn visitor(st: &AppState, headers: &HeaderMap) -> Visitor {
     let Some(token) = get_cookie(headers, crate::auth::SESSION_COOKIE) else { return Visitor::Anonymous };
-    let found: Result<Option<(String,)>, _> =
-        sqlx::query_as("SELECT u.chosen_lang FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled = 0")
-            .bind(sha256_hex(token.as_bytes()))
-            .bind(now())
-            .fetch_optional(&st.db)
-            .await;
+    let found: Result<Option<(String,)>, _> = sqlx::query_as(
+        "SELECT u.chosen_lang FROM sessions s JOIN users u ON u.id = s.user_id
+             WHERE s.token_hash = ? AND s.expires_at > ? AND COALESCE(s.last_used_at, s.created_at) > ? AND u.disabled = 0",
+    )
+    .bind(sha256_hex(token.as_bytes()))
+    .bind(now())
+    .bind(crate::auth::idle_before())
+    .fetch_optional(&st.db)
+    .await;
     match found {
         Ok(Some((chosen,))) => Visitor::SignedIn(Lang::parse(&chosen)),
         _ => Visitor::Anonymous,

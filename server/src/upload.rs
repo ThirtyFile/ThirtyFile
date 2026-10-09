@@ -79,6 +79,10 @@ pub struct ShareUpload {
     /// Visitors can't see the folder: files go into the shared folder itself
     pub drop_only: bool,
     pub visitor: crate::logs::Visitor,
+    /// The SHA-256 of this browser's key for the link (`shares::uploads`): its uploads are found only with it
+    pub visitor_key: String,
+    /// The cookie giving the browser its key, when it had none yet (sent with the upload it starts)
+    pub new_key: Option<String>,
 }
 
 impl Uploader {
@@ -92,6 +96,9 @@ impl Uploader {
     }
     fn share_id(&self) -> Option<&str> {
         self.share.as_ref().map(|s| s.id.as_str())
+    }
+    fn visitor_key(&self) -> Option<&str> {
+        self.share.as_ref().map(|s| s.visitor_key.as_str())
     }
     /// Where the client finds the upload: the link's own address for visitors
     fn location(&self, id: &str) -> String {
@@ -219,8 +226,8 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
         tree::check_quota(&mut tx, parent.drive(), size as i64).await?;
         let ts = now();
         sqlx::query(
-            "INSERT INTO uploads (id, owner_id, parent_id, rel_path, name, size, offset, created_at, expires_at, drive_id, batch, share_id, on_conflict)
-             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO uploads (id, owner_id, parent_id, rel_path, name, size, offset, created_at, expires_at, drive_id, batch, share_id, on_conflict, visitor)
+             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(user.id)
@@ -234,6 +241,7 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
         .bind(&batch)
         .bind(up.share_id())
         .bind(on_conflict)
+        .bind(up.visitor_key())
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -254,6 +262,12 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
     }
     tus(&mut res);
     res.headers_mut().insert(header::LOCATION, HeaderValue::from_str(&up.location(&id)).unwrap());
+    // A visitor's first upload through the link gives the browser its key for the link's uploads
+    if let Some(cookie) = up.share.as_ref().and_then(|s| s.new_key.as_deref())
+        && let Ok(v) = HeaderValue::from_str(cookie)
+    {
+        res.headers_mut().append(header::SET_COOKIE, v);
+    }
     Ok(res)
 }
 
@@ -270,11 +284,12 @@ async fn check_in_share(conn: &mut sqlx::SqliteConnection, share: &ShareUpload, 
 async fn load(st: &AppState, up: &Uploader, id: &str) -> AppResult<Upload> {
     sqlx::query_as(
         "SELECT id, owner_id, parent_id, rel_path, name, size, offset, drive_id, batch, node_id, on_conflict, hash_state, hashed FROM uploads
-         WHERE id = ?1 AND ((?3 IS NULL AND share_id IS NULL AND owner_id = ?2) OR share_id = ?3)",
+         WHERE id = ?1 AND ((?3 IS NULL AND share_id IS NULL AND owner_id = ?2) OR (share_id = ?3 AND visitor = ?4))",
     )
     .bind(id)
     .bind(up.user.id)
     .bind(up.share_id())
+    .bind(up.visitor_key())
     .fetch_optional(&st.db)
     .await?
     .ok_or_else(|| AppError::not_found("The upload doesn't exist or has expired"))

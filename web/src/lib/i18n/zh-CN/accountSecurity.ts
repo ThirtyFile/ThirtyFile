@@ -73,6 +73,8 @@ export default {
   "Two-factor sign-in is on": "已开启两步验证",
   "Reset two-factor sign-in": "重置两步验证",
   "Reset two-factor sign-in for \"{name}\"?": "要重置“{name}”的两步验证吗？",
+  "A new password or another role lets someone else use this account, so confirm it's you first.": "新密码或不同的角色会让别人能使用这个账号，请先确认是你本人。",
+  "For your security, this can only be done within 10 minutes of signing in.": "为了安全，只能在登录后 10 分钟内进行此操作。",
   "For someone who lost their phone and recovery codes. Their authenticator app and recovery codes stop working, and they sign in with just their password until they set it up again (right away, if two-factor sign-in is required).": "供手机和恢复码都丢失的人使用。对方的身份验证器应用和恢复码将失效，在重新设置前只用密码登录（如果要求使用两步验证，登录时会立即要求重新设置）。",
   "Two-factor sign-in reset": "已重置两步验证",
   "Require two-factor sign-in for password accounts": "密码登录必须使用两步验证",

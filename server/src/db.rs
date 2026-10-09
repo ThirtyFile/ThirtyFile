@@ -818,6 +818,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn uploads_from_0_4_0_through_a_link_belong_to_no_browser() {
+        let dir = scratch("thirtyfile-040-link-uploads");
+        let path = dir.join("drive.db");
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'amy', 'x', 0)").execute(&db).await.unwrap();
+        sqlx::query(
+            "INSERT INTO uploads (id, owner_id, parent_id, name, size, created_at, expires_at, share_id) VALUES
+             ('own', 1, 'root', 'a.pdf', 1, 0, 9, NULL), ('link', 1, 'root', 'b.pdf', 1, 0, 9, 'abc123')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        db.close().await;
+
+        // Nobody can continue an upload a visitor started before: it is dropped when it expires. People's own are kept.
+        let db = connect(&path, 16).await.unwrap();
+        let rows: Vec<(String, Option<String>)> = sqlx::query_as("SELECT id, visitor FROM uploads ORDER BY id").fetch_all(&db).await.unwrap();
+        assert_eq!(rows, [("link".to_string(), None), ("own".to_string(), None)]);
+        sqlx::query("UPDATE uploads SET visitor = 'key' WHERE id = 'link'").execute(&db).await.unwrap();
+        db.close().await;
+    }
+
+    #[tokio::test]
     async fn a_database_from_0_4_0_takes_smart_folders_that_go_with_their_people() {
         let dir = scratch("thirtyfile-040-smart");
         let path = dir.join("drive.db");
