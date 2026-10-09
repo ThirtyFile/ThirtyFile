@@ -10,7 +10,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { DownloadIcon, ExternalLinkIcon, EyeIcon, InfoIcon, PanelRightIcon, PencilIcon, Share2Icon, Trash2Icon } from "lucide-react";
 import { privateSource } from "@/api";
-import { useSettled } from "@/components/DetailsPane";
+import { useSettled } from "@/lib/useSettled";
 import { FileList } from "@/components/FileList";
 import { FileViewer } from "@/components/FileViewer";
 import { typeLabel } from "@/components/FileIcon";

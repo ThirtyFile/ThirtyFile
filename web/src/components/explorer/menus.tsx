@@ -83,6 +83,43 @@ export interface MenuEntries {
   properties: ReactNode;
 }
 
+/**
+ * Commands on the items selected as the styles' toolbars show them: always there, disabled when they don't apply, with
+ * the labels and rules of the context menu's entries (one place to change them for every style)
+ */
+export function toolbarCommands(p: ExplorerProps, s: ExplorerState, a: ExplorerActions) {
+  const { caps, single, allFavorite, setDialog } = s;
+  const none = s.count === 0;
+  return {
+    download: (
+      <DropdownMenuItem key="download" disabled={none} onClick={() => a.download(s.picked)}>
+        <DownloadIcon /> {s.count > 1 || single?.kind === "folder" ? t("Download (ZIP)") : t("Download")}
+      </DropdownMenuItem>
+    ),
+    favorite: (
+      <DropdownMenuItem key="favorite" disabled={none} onClick={a.toggleFavorite}>
+        {allFavorite ? <StarOffIcon /> : <StarIcon />} {allFavorite ? t("Remove from favorites") : t("Add to favorites")}
+      </DropdownMenuItem>
+    ),
+    moveTo: (
+      <DropdownMenuItem key="move" disabled={none || !caps.write} onClick={() => setDialog({ t: "move", picked: s.picked })}>
+        <FolderInputIcon /> {t("Move to…")}
+      </DropdownMenuItem>
+    ),
+    copyTo: (
+      <DropdownMenuItem key="copy" disabled={none || !caps.write} onClick={() => setDialog({ t: "copy", picked: s.picked })}>
+        <CopyIcon /> {t("Copy to…")}
+      </DropdownMenuItem>
+    ),
+    /** Who has access to the folder shown (the space's members at its top); not in lists of several places */
+    access: p.folderId && (
+      <DropdownMenuItem key="access-folder" onClick={() => setDialog({ t: "access", nodeId: p.folderId! })}>
+        <UsersRoundIcon /> {p.folder?.parent_id ? t("Access to this folder") : t("Space members")}
+      </DropdownMenuItem>
+    ),
+  };
+}
+
 export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerActions) {
   const { caps, navigate, tabs, fileInput, dirInput, canCreate, canUpload, single, allFavorite, setDialog, setDetailsOpen } = s;
   const { refresh, open, download, compress, extract, toggleFavorite, canPaste, paste, createNew } = a;

@@ -6,9 +6,7 @@ import {
   ArrowDownUpIcon,
   ClipboardPasteIcon,
   CopyIcon,
-  DownloadIcon,
   EllipsisIcon,
-  FolderInputIcon,
   Columns3Icon,
   GroupIcon,
   KeyboardIcon,
@@ -19,8 +17,6 @@ import {
   ScissorsIcon,
   Share2Icon,
   SquareCheckIcon,
-  StarIcon,
-  StarOffIcon,
   Trash2Icon,
   UsersRoundIcon,
   XSquareIcon,
@@ -46,12 +42,14 @@ import type { ExplorerProps } from "@/components/Explorer";
 import type { ExplorerState } from "@/components/explorer/state";
 import type { ExplorerActions } from "@/components/explorer/actions";
 import { Kbd } from "@/components/explorer/ui";
+import { toolbarCommands } from "@/components/explorer/menus";
 import { GroupChoices, SortChoices, ViewChoices } from "@/components/explorer/viewChoices";
 import { t } from "@/lib/i18n";
 
 export function windowsToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerActions, newItems: React.ReactNode) {
-  const { caps, canCreate, single, allFavorite, view, setView, groupBy, setGroupBy, setSelected, setDialog, showCheckboxes, setShowCheckboxes, detailsOpen, setDetailsOpen } = s;
-  const { download, toggleFavorite, cut, copy, canPaste, paste } = a;
+  const { caps, canCreate, single, view, setView, groupBy, setGroupBy, setSelected, setDialog, showCheckboxes, setShowCheckboxes, detailsOpen, setDetailsOpen } = s;
+  const commands = toolbarCommands(p, s, a);
+  const { cut, copy, canPaste, paste } = a;
   const none = s.count === 0;
   const k = s.kit.keys;
   const icon = "size-9 px-0 [&_svg]:size-[18px]";
@@ -155,23 +153,11 @@ export function windowsToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerAc
       <DropdownMenu>
         <DropdownMenuTrigger render={<ToolButton icon={EllipsisIcon} label={t("See more")} className={icon} />} />
         <DropdownMenuContent className="w-48">
-          <DropdownMenuItem disabled={none} onClick={() => download(s.picked)}>
-            <DownloadIcon /> {t("Download")}
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled={none} onClick={toggleFavorite}>
-            {allFavorite ? <StarOffIcon /> : <StarIcon />} {allFavorite ? t("Remove from favorites") : t("Add to favorites")}
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled={none || !caps.write} onClick={() => setDialog({ t: "move", picked: s.picked })}>
-            <FolderInputIcon /> {t("Move to…")}
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled={none || !caps.write} onClick={() => setDialog({ t: "copy", picked: s.picked })}>
-            <CopyIcon /> {t("Copy to…")}
-          </DropdownMenuItem>
-          {p.folderId && (
-            <DropdownMenuItem onClick={() => setDialog({ t: "access", nodeId: p.folderId! })}>
-              <UsersRoundIcon /> {p.folder?.parent_id ? t("Access to this folder") : t("Space members")}
-            </DropdownMenuItem>
-          )}
+          {commands.download}
+          {commands.favorite}
+          {commands.moveTo}
+          {commands.copyTo}
+          {commands.access}
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={s.selectAll}>
             <SquareCheckIcon /> {t("Select all")} <Kbd>{k.selectAll[0]}</Kbd>

@@ -11,7 +11,6 @@ import {
   TagIcon,
   Columns3Icon,
   CopyIcon,
-  DownloadIcon,
   EyeIcon,
   FolderInputIcon,
   FolderOpenIcon,
@@ -22,8 +21,6 @@ import {
   PencilIcon,
   Share2Icon,
   SquareCheckIcon,
-  StarIcon,
-  StarOffIcon,
   Trash2Icon,
   UsersRoundIcon,
 } from "lucide-react";
@@ -58,6 +55,7 @@ import { openGoToFolder } from "./pathBar";
 import { useMacSymbols } from "./look";
 import { openQuickLook } from "./quickLook";
 import { CompactToolbar, useMacWindowPrefs } from "./windowPrefs";
+import { toolbarCommands } from "@/components/explorer/menus";
 
 export function macToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerActions, newItems: ReactNode) {
   return <MacToolbar p={p} s={s} a={a} newItems={newItems} />;
@@ -237,9 +235,10 @@ function ShareMenu({ s }: { s: ExplorerState }) {
 
 /** What can be made here, then what can be done with the items selected, then the window's own settings */
 function ActionsMenu({ p, s, a, newItems }: { p: ExplorerProps; s: ExplorerState; a: ExplorerActions; newItems: ReactNode }) {
-  const { caps, single, allFavorite, setDialog, setDetailsOpen } = s;
+  const { caps, single, setDialog, setDetailsOpen } = s;
   const compact = useContext(CompactToolbar);
   const none = s.count === 0;
+  const commands = toolbarCommands(p, s, a);
   const k = s.kit.keys;
   const sym = useMacSymbols();
   return (
@@ -264,9 +263,7 @@ function ActionsMenu({ p, s, a, newItems }: { p: ExplorerProps; s: ExplorerState
         <DropdownMenuItem disabled={!single || !caps.write} onClick={() => single && setDialog({ t: "rename", node: single })}>
           <PencilIcon /> {t("Rename")} <Kbd>{k.rename[0]}</Kbd>
         </DropdownMenuItem>
-        <DropdownMenuItem disabled={none} onClick={() => a.download(s.picked)}>
-          <DownloadIcon /> {t("Download")}
-        </DropdownMenuItem>
+        {commands.download}
         <DropdownMenuSeparator />
         <DropdownMenuItem disabled={none} onClick={a.copy}>
           <CopyIcon /> {t("Copy")} <Kbd>{k.copy[0]}</Kbd>
@@ -281,25 +278,15 @@ function ActionsMenu({ p, s, a, newItems }: { p: ExplorerProps; s: ExplorerState
             <FolderInputIcon /> {t("Move here")} <Kbd>{k.moveHere[0]}</Kbd>
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem disabled={none || !caps.write} onClick={() => setDialog({ t: "move", picked: s.picked })}>
-          <FolderInputIcon /> {t("Move to…")}
-        </DropdownMenuItem>
-        <DropdownMenuItem disabled={none || !caps.write} onClick={() => setDialog({ t: "copy", picked: s.picked })}>
-          <CopyIcon /> {t("Copy to…")}
-        </DropdownMenuItem>
+        {commands.moveTo}
+        {commands.copyTo}
         <DropdownMenuItem variant="destructive" disabled={none || !caps.del} onClick={() => setDialog({ t: "trash", picked: s.picked })}>
           <Trash2Icon /> {t("Move to trash")} <Kbd>{k.trash[0]}</Kbd>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem disabled={none} onClick={a.toggleFavorite}>
-          {allFavorite ? <StarOffIcon /> : <StarIcon />} {allFavorite ? t("Remove from favorites") : t("Add to favorites")}
-        </DropdownMenuItem>
+        {commands.favorite}
         {!none && <TagSubmenu nodes={s.selectedNodes} picked={s.picked} />}
-        {p.folderId && (
-          <DropdownMenuItem onClick={() => setDialog({ t: "access", nodeId: p.folderId! })}>
-            <UsersRoundIcon /> {p.folder?.parent_id ? t("Access to this folder") : t("Space members")}
-          </DropdownMenuItem>
-        )}
+        {commands.access}
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={openGoToFolder}>
           <FolderSymlinkIcon /> {t("Go to folder…")} <Kbd>{k.addressBar[0]}</Kbd>

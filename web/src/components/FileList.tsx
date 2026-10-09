@@ -238,16 +238,19 @@ export function FileList(p: FileListProps) {
   };
   /** Long press (on every platform, iOS included): select the item, adding it when items are already selected */
   const longPress = (index: number) => {
-    const id = items[index]!.id;
+    const id = items[index]?.id;
+    if (!id) return;
     if (!isSelected(index, id)) p.onSelect(selecting ? new Set(p.selected).add(id) : new Set([id]), id, selecting ? span : null);
     navigator.vibrate?.(15);
   };
 
-  // Rows are rendered (and so used) only for items that are loaded
+  // Rows are rendered (and so used) only for items that are loaded; their part may have been dropped from the cache
+  // by the time an event arrives, and the event then does nothing
   const h = useRef<Handlers>(null!);
   h.current = {
     click: (e, index) => {
-      const item = items[index]!;
+      const item = items[index];
+      if (!item) return;
       // Marquee selection prevents the default mousedown, so the row wouldn't get the focus: arrows continue from the clicked row
       (e.currentTarget as HTMLElement).focus({ preventScroll: true });
       if (ignoreClick.current.index === index && Date.now() < ignoreClick.current.until) return;
@@ -273,8 +276,8 @@ export function FileList(p: FileListProps) {
         }
         return;
       }
-      const id = items[index]!.id;
-      if (!isSelected(index, id)) p.onSelect(new Set([id]), id, null);
+      const id = items[index]?.id;
+      if (id && !isSelected(index, id)) p.onSelect(new Set([id]), id, null);
     },
     touchStart: (e, index) => {
       cancelPress();
@@ -307,7 +310,11 @@ export function FileList(p: FileListProps) {
       }, 600);
     },
     dragStart: (e, index) => {
-      const id = items[index]!.id;
+      const id = items[index]?.id;
+      if (!id) {
+        e.preventDefault();
+        return;
+      }
       const chosen = isSelected(index, id);
       if (!chosen) p.onSelect(new Set([id]), id, null);
       // A span goes with the items picked one by one: where they are dropped asks the server for what it holds
@@ -434,8 +441,8 @@ export function FileList(p: FileListProps) {
   });
   const rest = v.getTotalSize() + geo.top - end;
 
-  const row = (index: number): RowProps => {
-    const item = items[index]!;
+  /** What a row of a loaded item gets */
+  const row = (index: number, item: Item): RowProps => {
     return {
       item,
       index,
@@ -474,7 +481,7 @@ export function FileList(p: FileListProps) {
                 {gap > 0 && <div aria-hidden className="shrink-0" style={{ width: gap }} />}
                 <div role="none" className="shrink-0" style={{ width: tile.w, marginRight: tile.gap }}>
                   {item ? (
-                    <Tile {...row(i)} view={view as Exclude<ViewMode, "list">} source={p.source} count={n} checkboxes={false} />
+                    <Tile {...row(i, item)} view={view as Exclude<ViewMode, "list">} source={p.source} count={n} checkboxes={false} />
                   ) : (
                     // Not loaded yet: its place, until its part loads
                     <div aria-hidden className="animate-pulse rounded-md bg-muted/60" style={{ height: tile.h }} />
@@ -510,7 +517,7 @@ export function FileList(p: FileListProps) {
                       const item = items[i];
                       // Not loaded yet: its place, until its part loads
                       if (!item) return <div key={`#${i}`} aria-hidden className="animate-pulse rounded-md bg-muted/60" style={{ height: tile.h }} />;
-                      return <Tile key={item.id} {...row(i)} view={view as Exclude<ViewMode, "list">} source={p.source} count={n} checkboxes={!!p.showCheckboxes} />;
+                      return <Tile key={item.id} {...row(i, item)} view={view as Exclude<ViewMode, "list">} source={p.source} count={n} checkboxes={!!p.showCheckboxes} />;
                     })}
                   </div>
                 )}
@@ -628,7 +635,7 @@ export function FileList(p: FileListProps) {
                   </tr>
                 ) : item ? (
                   <ListRow
-                    {...row(at.start)}
+                    {...row(at.start, item)}
                     source={wide && kit.list?.thumbnails ? p.source : undefined}
                     longDates={wide && kit.list?.longDates}
                     checkboxes={!!p.showCheckboxes}
