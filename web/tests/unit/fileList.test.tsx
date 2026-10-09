@@ -24,7 +24,7 @@ const node = (name: string, kind: "file" | "folder" = "file"): Node => ({
   is_favorite: false,
 });
 const ITEMS = ["Budget.xlsx", "Contracts", "Minutes.docx", "Notes.txt", "Photos"].map((n) => node(n, n.includes(".") ? "file" : "folder"));
-const source: FileSource = { contentUrl: () => "", thumbUrl: () => "", downloadLink: () => Promise.resolve("") };
+const source: FileSource = { contentUrl: () => "", viewUrl: () => "/view", thumbUrl: () => "", downloadLink: () => Promise.resolve("") };
 
 /** The list with its selection kept like the explorer keeps it */
 function Harness({

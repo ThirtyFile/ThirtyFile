@@ -29,10 +29,17 @@ import { cn, formatBytes, formatDate } from "@/lib/utils";
 import { useSubmit } from "@/lib/useSubmit";
 import { t, tc } from "@/lib/i18n";
 import { refreshFirstPage, useAllPages } from "@/lib/pages";
+import { useBranding } from "@/lib/branding";
 
 export function PublicSharePage() {
   const { token = "" } = useParams();
   const info = useQuery({ queryKey: keys.publicShare(token), queryFn: () => api.publicShare(token), retry: false });
+  // The title names what is shared, once the link is open (not before its password)
+  const siteName = useBranding().site_name;
+  const sharedName = info.data && !info.data.needs_password ? info.data.node?.name : undefined;
+  useEffect(() => {
+    document.title = `${sharedName ?? t("Share link")} - ${siteName}`;
+  }, [sharedName, siteName]);
   // The items' icons and the list's look are the style's (a visitor's follows the operating system)
   useApplyStyle();
 

@@ -82,6 +82,8 @@ export default {
   "{n} user|{n} users": "{n} 位使用者",
   "{n} user found|{n} users found": "找到 {n} 位使用者",
   "Search users": "搜尋使用者",
+  "Search groups": "搜尋群組",
+  "Search spaces": "搜尋空間",
   "No users match \"{query}\"": "沒有符合「{query}」的使用者",
   "{n} group|{n} groups": "{n} 個群組",
   "{n} team space|{n} team spaces": "{n} 個團隊空間",

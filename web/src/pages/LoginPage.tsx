@@ -62,6 +62,23 @@ const FIELD =
 /** code: the second step of two-factor sign-in; setup: setting it up first (required by the administrator); codes: the new recovery codes */
 type Stage = "lock" | "signin" | "code" | "setup" | "codes" | "welcome";
 
+/** The page reloads after the language is changed: the sign-in screen it was on shows again (once) */
+const SIGN_IN_OPEN = "tf-sign-in-open";
+function keepSignInOpen() {
+  try {
+    sessionStorage.setItem(SIGN_IN_OPEN, "1");
+  } catch {
+    // Storage forbidden: the lock screen shows again
+  }
+}
+function signInWasOpen(): boolean {
+  try {
+    return sessionStorage.getItem(SIGN_IN_OPEN) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function LoginPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -70,13 +87,27 @@ export function LoginPage() {
   const providers = useQuery({ queryKey: keys.ssoProviders(), queryFn: api.ssoProviders, staleTime: 60_000 });
   const options = useQuery({ queryKey: keys.authOptions(), queryFn: api.authOptions, staleTime: 60_000 });
   const nextPath = safeNext(params.get("next"));
+  // Not the title of the page signed out of
+  useEffect(() => {
+    document.title = `${t("Sign in")} - ${b.site_name}`;
+  }, [b.site_name]);
 
   // When a third-party login fails, the server redirects back with the reason
   const [error, setError] = useState<string | null>(() => {
     const e = takeSsoError(params);
-    return e ? tServer(e) : null;
+    if (e) return tServer(e);
+    // Sent here because the session ended (signed out elsewhere, or it expired)
+    return params.get("ended") ? t("Your session ended. Sign in again.") : null;
   });
-  const [stage, setStage] = useState<Stage>(() => (b.login_lock && !error ? "lock" : "signin"));
+  // Back from changing the language, the sign-in screen shows again rather than the lock screen
+  const [stage, setStage] = useState<Stage>(() => (b.login_lock && !error && !signInWasOpen() ? "lock" : "signin"));
+  useEffect(() => {
+    try {
+      sessionStorage.removeItem(SIGN_IN_OPEN);
+    } catch {
+      // Nothing was kept
+    }
+  }, []);
   const [lastUser] = useState(loadLastUser);
   /** Currently selected account; null = other user (type the account) */
   const [who, setWho] = useState<string | null>(lastUser);
@@ -479,7 +510,7 @@ export function LoginPage() {
       )}
 
       {/* Bottom right: language */}
-      <LanguageSwitch className="absolute right-5 bottom-5 text-white/85 drop-shadow [&_select:hover]:text-white" />
+      <LanguageSwitch className="absolute right-5 bottom-5 text-white/85 drop-shadow [&_select:hover]:text-white" signedOut beforeReload={keepSignInOpen} />
     </div>
   );
 }

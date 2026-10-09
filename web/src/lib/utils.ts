@@ -171,3 +171,9 @@ export function trashHint(days: number) {
     ? t("Removed items stay in the trash for {n} day and can be restored until then.|Removed items stay in the trash for {n} days and can be restored until then.", { n: days })
     : t("Removed items stay in the trash and can be restored until it's emptied.");
 }
+
+/** Whether one of `texts` holds what was typed in a search box (letter case doesn't count) */
+export function matches(typed: string, ...texts: (string | null | undefined)[]): boolean {
+  const q = typed.trim().toLocaleLowerCase();
+  return texts.some((x) => !!x && x.toLocaleLowerCase().includes(q));
+}

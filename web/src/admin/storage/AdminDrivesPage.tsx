@@ -28,8 +28,7 @@ import { CreateDriveDialog } from "@/components/DriveDialogs";
 import { ConfirmDialog, ErrorText, NameDialog } from "@/components/dialogs";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { DRIVE_ICON, DRIVE_KIND_LABEL, ROLE_LABEL, driveLabel } from "@/lib/drives";
-import { useSettingsSearch } from "@/admin/controlPanel";
-import { cn, formatBytes, formatDateTime, errorMessage } from "@/lib/utils";
+import { cn, formatBytes, formatDateTime, errorMessage, matches } from "@/lib/utils";
 import { useSubmit } from "@/lib/useSubmit";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -158,7 +157,9 @@ export function AdminDrivesPage() {
 
   const total = drives.reduce((s, d) => s + d.used_bytes, 0);
 
-  const searchSettings = useSettingsSearch();
+  // The search box finds spaces here, as it finds users on the Users page: by name or owner
+  const [search, setSearch] = useState("");
+  const shown = search.trim() ? drives.filter((d) => matches(search, driveLabel(d, true), d.name, d.owner_name)) : drives;
   const columns: Column<Drive>[] = [
     {
       header: (
@@ -244,13 +245,13 @@ export function AdminDrivesPage() {
       icon={HardDriveIcon}
       crumbs={[{ label: t("Control panel"), to: "/admin" }, { label: tc("admin", "Spaces") }]}
       upTo="/admin"
-      searchPlaceholder={t("Search settings")}
-      onSearch={searchSettings}
+      searchPlaceholder={t("Search spaces")}
+      onSearch={setSearch}
       footer={<span>{t("{n} space · {size} used|{n} spaces · {size} used", { n: drives.length, size: formatBytes(total) })}</span>}
     >
       <DataTable
         label={t("Spaces")}
-        rows={drives}
+        rows={shown}
         rowKey={(d) => d.id}
         columns={columns}
         fixed

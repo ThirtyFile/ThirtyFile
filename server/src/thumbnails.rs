@@ -221,10 +221,11 @@ pub async fn thumbnail_response(st: &AppState, headers: &HeaderMap, n: &Node) ->
     }
     let path = st.thumb_path(hash);
     if !made_here {
-        // Only one a browser uploaded; until there is one, the browser showing the file makes it
+        // Only one a browser uploaded; until there is one, the browser showing the file makes it: "none yet" is an
+        // answer, not an error (204, which browsers don't log as a failed request)
         return match tokio::fs::read(&path).await {
             Ok(data) if !data.is_empty() => Ok(thumb_reply(data, etag)),
-            _ => Err(AppError::not_found("No thumbnail")),
+            _ => Ok((StatusCode::NO_CONTENT, [(header::CACHE_CONTROL, "no-store")]).into_response()),
         };
     }
     if !tokio::fs::try_exists(&path).await? {
@@ -354,8 +355,10 @@ mod tests {
         let get = |user: User, id: String| thumbnail(State(env.st.clone()), user, Path(id), HeaderMap::new());
         let put = |user: User, id: String, body: Bytes| upload_thumbnail(State(env.st.clone()), user, Path(id), body);
 
-        // No thumbnail until a browser makes one
-        assert_eq!(get(amy.clone(), pdf.clone()).await.unwrap_err().status, StatusCode::NOT_FOUND);
+        // No thumbnail until a browser makes one: an answer saying so, not an error
+        let none = get(amy.clone(), pdf.clone()).await.unwrap();
+        assert_eq!(none.status(), StatusCode::NO_CONTENT);
+        assert_eq!(none.headers()[header::CACHE_CONTROL], "no-store");
         // Someone who can't open the file can't give it a thumbnail; nor can a file the server doesn't take them for
         assert!(put(ben.clone(), pdf.clone(), png(320, 200)).await.is_err());
         assert_eq!(put(amy.clone(), text, png(320, 200)).await.unwrap_err().status, StatusCode::BAD_REQUEST);

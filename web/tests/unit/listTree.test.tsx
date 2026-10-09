@@ -79,7 +79,7 @@ describe("the rows", () => {
 });
 
 describe("the List view with folders that expand", () => {
-  const source: FileSource = { contentUrl: () => "", thumbUrl: () => "", downloadLink: () => Promise.resolve("") };
+  const source: FileSource = { contentUrl: () => "", viewUrl: () => "/view", thumbUrl: () => "", downloadLink: () => Promise.resolve("") };
   const BRANCHES = new Map([["Projects", { at: [node("Design", "Projects"), undefined, node("plan.md", "Projects")], total: 3 }]]);
 
   function Harness() {

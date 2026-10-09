@@ -60,7 +60,7 @@ vi.mock("@/lib/uploadRecovery", async (importOriginal) => {
 
 const up = await import("@/uploads");
 const recovery = await import("@/lib/uploadRecovery");
-const { api } = await import("@/api");
+const { api, ApiError } = await import("@/api");
 type Snapshot = ReturnType<typeof up.useUploads>;
 
 /** What the upload panel would show */
@@ -202,6 +202,20 @@ describe("content identity", () => {
     release();
     await act(async () => void (await new Promise((r) => setTimeout(r, 1200))));
     expect(kept()[0].sample).toMatch(/^sha256-v1:/);
+  });
+
+  test("an upload the server refused for good isn't kept to continue after a reload; one that can be waited out is", async () => {
+    recovery.setRecoveryUser(7);
+    act(() => up.enqueue(files(2), "folder"));
+    await settle();
+    const response = (status: number, error: string) =>
+      Object.assign(new Error("tus: unexpected response"), { originalResponse: { getStatus: () => status, getBody: () => JSON.stringify({ error }), getHeader: () => undefined } });
+    act(() => started()[0].options.onError(response(400, "Name can't contain ?")));
+    act(() => started()[1].options.onError(response(507, "Not enough space")));
+    await act(async () => void (await new Promise((r) => setTimeout(r, 1200))));
+    expect(kept().map((r) => [r.name, r.state])).toEqual([["file1.txt", "failed"]]);
+    expect(up.refusedForGood(new ApiError("x", 401))).toBe(false);
+    expect(up.refusedForGood(new ApiError("x", 500, "upload_discarded"))).toBe(true);
   });
 
   test("a file chosen again after a reload is read once: to tell whether it is the same, not again to send it", async () => {

@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect } from "react";
+import { Suspense, lazy, useEffect, useRef } from "react";
 import { noteSignedIn } from "@/lib/signOut";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -19,6 +19,7 @@ import { ADMIN_PAGES, adminPath } from "@/admin/pages";
 // administration pages load only when an administrator opens them
 const page = <M, K extends keyof M, P = object>(load: () => Promise<M>, name: K) => lazy(() => load().then((m) => ({ default: m[name] as React.ComponentType<P> })));
 const LoginPage = page(() => import("@/pages/LoginPage"), "LoginPage");
+const NotFoundPage = page(() => import("@/pages/NotFoundPage"), "NotFoundPage");
 const ResetPasswordPage = page(() => import("@/pages/ResetPasswordPage"), "ResetPasswordPage");
 const PublicSharePage = page(() => import("@/pages/PublicSharePage"), "PublicSharePage");
 const AppShell = page(() => import("@/pages/AppShell"), "AppShell");
@@ -72,15 +73,29 @@ function RequireAuth() {
     if (adopting) adoptLanguage(adopting);
   }, [adopting]);
 
-  // Any API returning 401 (session expired) sends the user back to the login page
+  // Any API returning 401 (session expired) sends the user back to the login page, saying why. Once: every request of
+  // the page answers 401 by then, and clearing the cache while the page still shows would fetch everything again (each
+  // answering 401). What was loaded is forgotten once the page is gone.
+  const leaving = useRef(false);
+  /** Whether this page had someone signed in: only then did a session end (a first visit isn't signed in yet) */
+  const hadSession = useRef(false);
+  if (me.data) hadSession.current = true;
   useEffect(() => {
     const onUnauthorized = () => {
-      qc.clear();
-      navigate(`/login?next=${encodeURIComponent(location.pathname + location.search)}`);
+      if (leaving.current) return;
+      leaving.current = true;
+      void qc.cancelQueries();
+      navigate(`/login?next=${encodeURIComponent(location.pathname + location.search)}${hadSession.current ? "&ended=1" : ""}`);
     };
     window.addEventListener("tf:unauthorized", onUnauthorized);
     return () => window.removeEventListener("tf:unauthorized", onUnauthorized);
   }, [navigate, location, qc]);
+  useEffect(
+    () => () => {
+      if (leaving.current) setTimeout(() => qc.clear());
+    },
+    [qc],
+  );
 
   if (me.isLoading || adopting)
     return (
@@ -174,7 +189,7 @@ export function App() {
             ))}
             {/* Old URL: system settings were merged into the control panel */}
             <Route path="/admin/system" element={<Navigate to="/admin" replace />} />
-            <Route path="*" element={<Navigate to="/files" replace />} />
+            <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Routes>
       </Suspense>

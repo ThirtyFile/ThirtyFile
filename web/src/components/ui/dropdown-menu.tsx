@@ -113,7 +113,9 @@ function DropdownMenuSubTrigger({
   );
 }
 
-function DropdownMenuSubContent({ align = "start", alignOffset = -3, side = "right", sideOffset = 0, className, ...props }: React.ComponentProps<typeof DropdownMenuContent>) {
+// Placed against its item, which is inside the parent's padding (p-1) and ring: 5 px more puts it beside the parent,
+// not over its edge
+function DropdownMenuSubContent({ align = "start", alignOffset = -3, side = "right", sideOffset = 5, className, ...props }: React.ComponentProps<typeof DropdownMenuContent>) {
   return (
     <DropdownMenuContent
       data-slot="dropdown-menu-sub-content"

@@ -369,6 +369,17 @@ pub struct ContentQuery {
     pub(super) download: Option<u8>,
 }
 
+/// `public_content` at an address that ends in the file's name (see files::content_named)
+pub async fn public_content_named(
+    st: State<AppState>,
+    Path((token, id, _name)): Path<(String, String, String)>,
+    q: Query<ContentQuery>,
+    headers: HeaderMap,
+    visitor: Visitor,
+) -> AppResult<Response> {
+    public_content(st, Path((token, id)), q, headers, visitor).await
+}
+
 pub async fn public_content(
     State(st): State<AppState>,
     Path((token, id)): Path<(String, String)>,

@@ -112,13 +112,15 @@ export function browserThumb(n: Node, source: FileSource): { promise: Promise<st
 async function find(n: Node, source: FileSource, wanted: () => boolean, signal: AbortSignal): Promise<string | null> {
   const url = source.thumbUrl(n);
   const res = await fetch(url, { credentials: "same-origin", signal });
-  if (res.ok) {
+  // None yet (204; 404 from servers before 0.6): the page makes one
+  const none = res.status === 204 || res.status === 404;
+  if (res.ok && !none) {
     // Read to the end, so the browser keeps it for the image that shows it next
     await res.blob();
     return url;
   }
   // Anything but "no thumbnail yet" (no access, a server error) isn't solved by making one: tried again next time
-  if (res.status !== 404) throw new Error(res.statusText);
+  if (!none) throw new Error(res.statusText);
   const image = await new Promise<Blob | null>((resolve, reject) => {
     queue.push({
       wanted,

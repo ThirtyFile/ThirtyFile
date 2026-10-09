@@ -21,6 +21,19 @@ describe("markdown", () => {
     expect(d.querySelector("pre code")?.textContent).toBe("code\n");
   });
 
+  test("a table of contents goes to the headings, whose ids can't be the app's own", () => {
+    const d = dom(
+      ["- [Getting started](#getting-started)", "- [Notes](#notes-1)", "", "## Getting started!", "", "## Notes", "", "## Notes", "", "## Café Crème", "", '<p id="root">x</p>'].join("\n"),
+    );
+    expect([...d.querySelectorAll("h2")].map((h) => h.id)).toEqual(["md-getting-started", "md-notes", "md-notes-1", "md-café-crème"]);
+    expect([...d.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["#md-getting-started", "#md-notes-1"]);
+    // In-page links stay in the page
+    expect(d.querySelector("a")!.getAttribute("target")).toBeNull();
+    expect(d.querySelector("p#root")).toBeNull();
+    // Each file counts its own headings
+    expect(dom("## Notes").querySelector("h2")!.id).toBe("md-notes");
+  });
+
   test("raw HTML can't run scripts", () => {
     const d = dom(
       '<script>alert(1)</script>\n\n<img src=x onerror="alert(1)">\n\n<a href="javascript:alert(1)">x</a>\n\n<iframe src="/"></iframe><div style="position:fixed" onclick="alert(1)">y</div>',
@@ -44,7 +57,7 @@ describe("markdown", () => {
     const web = links.find((a) => a.textContent === "web")!;
     expect(web.getAttribute("target")).toBe("_blank");
     expect(web.getAttribute("rel")).toContain("noopener");
-    expect(links.find((a) => a.textContent === "here")!.getAttribute("href")).toBe("#part");
+    expect(links.find((a) => a.textContent === "here")!.getAttribute("href")).toBe("#md-part");
     for (const text of ["file", "bad", "data"]) expect(links.find((a) => a.textContent === text)?.hasAttribute("href") ?? false).toBe(false);
   });
 

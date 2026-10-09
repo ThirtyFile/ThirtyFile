@@ -64,12 +64,16 @@ test("each Control panel tile opens its page, which loads without an error", asy
   expect(failed).toEqual([]);
 });
 
-test("old and unknown addresses under /admin go to the Control panel or the files", async ({ page }) => {
+test("an old address goes to the Control panel; an unknown one says there is no such page", async ({ page }) => {
   await signIn(page);
   await page.goto("/admin/system");
   await page.waitForURL(/\/admin$/);
   await page.goto("/admin/nothing-here");
-  await page.waitForURL(/\/files/);
+  await expect(page.getByRole("alert").getByText("Page not found")).toBeVisible();
+  await expect(page).toHaveURL(/\/admin\/nothing-here$/);
+  await expect(page).toHaveTitle(/^Page not found - /);
+  await page.getByRole("link", { name: "Go to All spaces" }).click();
+  await page.waitForURL(/\/drives$/);
 });
 
 test("someone who isn't an administrator is sent to their files", async ({ page }) => {

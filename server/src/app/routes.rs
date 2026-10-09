@@ -121,6 +121,7 @@ fn file_api() -> Router<AppState> {
         .route("/smart-folders/{id}/select", post(nodes::smart_select))
         .route("/shared-with-me", get(nodes::shared_with_me))
         .route("/files/{id}/content", get(files::content))
+        .route("/files/{id}/content/{name}", get(files::content_named))
         .route("/files/{id}/versions", get(versions::list))
         .route("/files/{id}/versions/{version}/content", get(versions::content))
         .route("/download", get(downloads::download).post(downloads::create_download_link))
@@ -197,6 +198,7 @@ fn sharing_api() -> Router<AppState> {
         .route("/public/shares/{token}/nodes/{id}", get(shares::public_node))
         .route("/public/shares/{token}/nodes/{id}/children", get(shares::public_children))
         .route("/public/shares/{token}/nodes/{id}/content", get(shares::public_content))
+        .route("/public/shares/{token}/nodes/{id}/content/{name}", get(shares::public_content_named))
 }
 
 /// The site: its look, notifications, the logs, and email

@@ -345,6 +345,7 @@ export default {
   "Redirect URI": "リダイレクト URI",
   "Redirect URI copied": "リダイレクト URI をコピーしました",
   "Application (client) ID": "アプリケーション（クライアント）ID",
+  "Client ID": "クライアント ID",
   "Client secret": "クライアントシークレット",
   "Directory (tenant) ID": "ディレクトリ（テナント）ID",
   "Any OpenID Connect provider, such as Keycloak, Authentik, Authelia or Zitadel: create a confidential client (web application) with the redirect URI below, and enter its issuer URL, client ID and secret. The provider must send a verified email address.": "Keycloak、Authentik、Authelia、Zitadel など任意の OpenID Connect プロバイダー：以下のリダイレクト URI を指定して機密クライアント（Web アプリケーション）を作成し、その Issuer URL、クライアント ID、シークレットを入力します。プロバイダーは検証済みのメールアドレスを送信する必要があります。",

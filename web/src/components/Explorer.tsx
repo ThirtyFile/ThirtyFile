@@ -27,6 +27,8 @@ import type { Item } from "./explorer/types";
 export interface ExplorerProps {
   /** Notice shown above the file list (e.g. storage service offline) */
   notice?: ReactNode;
+  /** What the search box says it searches, when it isn't the folder shown or everywhere (search results in a folder) */
+  searchPlaceholder?: string;
   /** Why the storage service is offline: disables uploads (new folder and paste only touch the database, so they still work) */
   offline?: string | null;
   /** The items loaded (a large folder, with `list`, has only some of them) */
@@ -204,7 +206,19 @@ export function Explorer(p: ExplorerProps) {
   );
 
   return (
-    <Frame toolbar={toolbar} crumbs={p.crumbs} icon={p.icon} path={p.path} upTo={p.upTo} activeFolder={p.folderId} space={p.spaceId} footer={footer} footerRight={footerRight} keys>
+    <Frame
+      toolbar={toolbar}
+      crumbs={p.crumbs}
+      icon={p.icon}
+      path={p.path}
+      upTo={p.upTo}
+      activeFolder={p.folderId}
+      space={p.spaceId}
+      searchPlaceholder={p.searchPlaceholder}
+      footer={footer}
+      footerRight={footerRight}
+      keys
+    >
       {p.notice}
       <div className="relative flex min-h-0 flex-1">
         <ContextMenu

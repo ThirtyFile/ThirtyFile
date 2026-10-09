@@ -55,7 +55,11 @@ export function QuerySummary({ query }: { query: SmartQuery }) {
   if (f.term) parts.push(t('Name contains "{term}"', { term: f.term }));
   if (f.type === "file") parts.push(t("Files"));
   else if (f.type === "custom") parts.push(t("File types: {types}", { types: f.ext }));
-  else if (f.type) parts.push(SEARCH_TYPES.find((x) => x.id === f.type)?.label());
+  else if (f.type) {
+    // A type this version doesn't know (saved by a newer one) adds nothing, rather than an empty part
+    const label = SEARCH_TYPES.find((x) => x.id === f.type)?.label();
+    if (label) parts.push(label);
+  }
   if (f.date === "days") parts.push(t("Modified in the last {n} days", { n: f.days }));
   else if (f.date === "range")
     parts.push(

@@ -262,6 +262,8 @@ export function SearchPage() {
       onSort={onSort}
       onSortChange={setSort}
       notice={filters}
+      // A new search from here looks where this one does
+      searchPlaceholder={within ? t("Search {name}", { name: folderName || "…" }) : undefined}
       crumbs={crumbs(t('Search results for "{term}"', { term }))}
       icon={SearchIcon}
       empty={<Empty icon={SearchXIcon} text={t("No matching files found")} />}

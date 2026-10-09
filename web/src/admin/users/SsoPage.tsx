@@ -400,11 +400,11 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="grid gap-1.5">
-                <Label htmlFor={`sso-${id}-id`}>{id === "microsoft" ? t("Application (client) ID") : "Client ID"}</Label>
+                <Label htmlFor={`sso-${id}-id`}>{id === "microsoft" ? t("Application (client) ID") : t("Client ID")}</Label>
                 <Input id={`sso-${id}-id`} value={draft[id].client_id} onChange={(e) => setProvider(id, { client_id: e.target.value })} autoComplete="off" />
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor={`sso-${id}-secret`}>{id === "microsoft" ? t("Client secret") : "Client Secret"}</Label>
+                <Label htmlFor={`sso-${id}-secret`}>{t("Client secret")}</Label>
                 <Input
                   id={`sso-${id}-secret`}
                   type="password"
