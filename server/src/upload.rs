@@ -568,7 +568,12 @@ async fn finalize(st: &AppState, up: &Uploader, upload: Upload) -> AppResult<Str
     };
     let size = tokio::fs::metadata(&path).await?.len();
     if size != upload.size as u64 {
-        return Err(AppError::bad_request("File size mismatch"));
+        // A damaged temporary file: finishing again would fail again, and the client can't send the rest (it all
+        // arrived), so the upload goes rather than holding its space until it expires
+        let _w = st.write_lock.lock().await;
+        forget_upload(st, &upload.id).await;
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err(discarded(AppError::bad_request("File size mismatch")));
     }
     // Content for the content store was hashed while it arrived; it is read again only without a saved state that
     // matches the whole file
@@ -627,11 +632,20 @@ async fn commit_upload(st: &AppState, up: &Uploader, upload: &Upload, staged: &c
     }
     // The target folder may have been deleted, or the permission to it removed, during the upload
     let parent = tree::get_node(&mut tx, &upload.parent_id).await?.filter(|p| p.trashed_at.is_none() && p.is_folder()).ok_or_else(folder_gone)?;
-    let role = tree::role_on(&mut tx, user, &parent).await?;
+    // Also refused while a folder it is in is going to the trash (its items are marked a batch at a time)
+    let role = tree::live_role_on(&mut tx, user, &parent).await?;
+    if role.is_none() && tree::role_on(&mut tx, user, &parent).await?.is_some() {
+        return Err(folder_gone());
+    }
     if role.is_none_or(|r| tree::allows(user, r, tree::Need::Write).is_err()) {
         return Err(AppError::forbidden("You no longer have permission to upload to this folder"));
     }
     staged.check(&parent)?;
+    // In a folder space the path's folders are made on the disk, which a refused change can't take back: the size is
+    // checked before making them (a file in a folder made now replaces nothing, so all of it counts)
+    if parent.in_folder_space() && !crate::content::path_folders_exist(&mut tx, &parent.id, &upload.rel_path).await? {
+        tree::check_quota_except(&mut tx, parent.drive(), size, Some(&upload.id)).await?;
+    }
     let folder_id = crate::content::ensure_folders(&mut tx, upload.owner_id, &parent.id, &upload.rel_path, &upload.batch).await?;
     let folder = tree::get_node(&mut tx, &folder_id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
     let replaced = replaced_file(&mut tx, user, upload, &folder.id).await?;

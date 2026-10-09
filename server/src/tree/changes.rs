@@ -290,8 +290,17 @@ async fn restore_batch(conn: &mut SqliteConnection, trash_id: &str, limit: i64) 
 
 /// One batch of deleting `top` and everything in it for good, going down its folders depth first (`stack`, the folders
 /// on the way down, starts with `top`): a folder's files, then its folders, then the folder itself once it is empty.
-/// Returns how many items went, and whether `top` went too.
-async fn purge_batch(conn: &mut SqliteConnection, top: &str, stack: &mut VecDeque<String>, limit: i64, out: &mut Leftovers) -> AppResult<(i64, bool)> {
+/// With `keep_trash`, items in the trash that were in these folders aren't deleted: they move to that folder (the
+/// space's top), as they do when their folder is moved to another space. Returns how many items went, and whether `top`
+/// went too.
+async fn purge_batch(
+    conn: &mut SqliteConnection,
+    top: &str,
+    stack: &mut VecDeque<String>,
+    limit: i64,
+    keep_trash: Option<&str>,
+    out: &mut Leftovers,
+) -> AppResult<(i64, bool)> {
     if stack.is_empty() {
         stack.push_back(top.to_string());
     }
@@ -303,6 +312,9 @@ async fn purge_batch(conn: &mut SqliteConnection, top: &str, stack: &mut VecDequ
     while work < limit
         && let Some(folder) = stack.back().cloned()
     {
+        if let Some(keep) = keep_trash {
+            sqlx::query("UPDATE nodes SET parent_id = ? WHERE parent_id = ? AND trash_root = 1").bind(keep).bind(&folder).execute(&mut *conn).await?;
+        }
         let files: Vec<Row> = sqlx::query_as("SELECT id, drive_id, kind, size, blob_hash FROM nodes WHERE parent_id = ? AND kind <> 'folder' LIMIT ?")
             .bind(&folder)
             .bind(limit - work)
@@ -381,7 +393,7 @@ async fn step(conn: &mut SqliteConnection, c: &Change, frontier: &mut Option<Vec
             let Some(trash_id) = &c.trash_id else { return Ok((0, true)) };
             restore_batch(conn, trash_id, limit).await
         }
-        ChangeKind::Purge => purge_batch(conn, &c.node_id, frontier.get_or_insert_with(VecDeque::new), limit, out).await,
+        ChangeKind::Purge => purge_batch(conn, &c.node_id, frontier.get_or_insert_with(VecDeque::new), limit, None, out).await,
     }
 }
 
@@ -437,8 +449,9 @@ pub fn finish_later(st: &AppState, rows: Vec<Unfinished>, held: Vec<OwnedMutexGu
 }
 
 /// Deletes an item and everything in it for good, a batch per transaction, without hiding it first: for items that
-/// are gone from a folder space's folder, with its scan lock held. Returns how many items went.
-pub async fn purge_now(st: &AppState, id: &str) -> AppResult<usize> {
+/// are gone from a folder space's folder, with its scan lock held. What was in the trash from inside it stays there,
+/// moved to `space_top` (it is in the space's trash folder, not where the item was). Returns how many items went.
+pub async fn purge_now(st: &AppState, id: &str, space_top: &str) -> AppResult<usize> {
     let mut stack = VecDeque::new();
     let mut deleted = 0;
     loop {
@@ -446,7 +459,7 @@ pub async fn purge_now(st: &AppState, id: &str) -> AppResult<usize> {
         let done = {
             let _w = st.write_lock.lock().await;
             let mut tx = crate::db::begin_write(&st.db).await?;
-            let (n, done) = purge_batch(&mut tx, id, &mut stack, batch(), &mut out).await?;
+            let (n, done) = purge_batch(&mut tx, id, &mut stack, batch(), Some(space_top), &mut out).await?;
             tx.commit().await?;
             deleted += n as usize;
             done
@@ -613,6 +626,32 @@ mod tests {
             tokio::task::yield_now().await;
         }
         seen
+    }
+
+    #[tokio::test]
+    async fn items_of_a_folder_going_to_the_trash_cant_be_changed_until_it_is_done() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", false).await;
+        let big = env.folder(&amy, amy.root(), "Big").await;
+        let sub = env.folder(&amy, &big, "Sub").await;
+        let file = env.stored_file(&amy, &sub, "notes.txt", b"notes").await;
+        // Where a large folder is after its first transaction: the folder is marked, what is in it not yet
+        sqlx::query("UPDATE nodes SET trashed_at = ?, trash_id = 't', trash_root = 1 WHERE id = ?").bind(now()).bind(&big).execute(&env.st.db).await.unwrap();
+        let mut c = env.st.db.acquire().await.unwrap();
+        for id in [&sub, &file] {
+            let err = crate::tree::node_for(&mut c, &amy, id, crate::tree::Need::Read).await.unwrap_err();
+            assert_eq!(err.status, axum::http::StatusCode::NOT_FOUND, "{id}");
+        }
+        drop(c);
+        let err = crate::files::save_content(State(env.st.clone()), amy.clone(), axum::extract::Path(file.clone()), Default::default(), "changed".into())
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::NOT_FOUND);
+        let err = env.try_upload(&amy, &sub, "new.txt", b"new").await.unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::NOT_FOUND, "{}", err.message);
+        // Its role on items in the trash (to restore them, say) is still known
+        let node = crate::tree::get_node(&mut env.st.db.acquire().await.unwrap(), &file).await.unwrap().unwrap();
+        assert!(crate::tree::role_on(&mut env.st.db.acquire().await.unwrap(), &amy, &node).await.unwrap().is_some());
     }
 
     #[tokio::test]
@@ -844,7 +883,7 @@ mod tests {
             let t = std::time::Instant::now();
             let mut out = Leftovers::default();
             let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
-            let (_, done) = purge_batch(&mut tx, &batched, &mut stack, BATCH, &mut out).await.unwrap();
+            let (_, done) = purge_batch(&mut tx, &batched, &mut stack, BATCH, None, &mut out).await.unwrap();
             tx.commit().await.unwrap();
             longest = longest.max(t.elapsed());
             batches += 1;

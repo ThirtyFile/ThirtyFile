@@ -1334,7 +1334,7 @@ async fn apply(st: &AppState, drive: &Drive, ops: Vec<Op>) -> AppResult<usize> {
             tree::schedule_blob_removal(st, unused);
         }
         match after {
-            Some(Op::Remove { id }) => removed += tree::changes::purge_now(st, &id).await?,
+            Some(Op::Remove { id }) => removed += tree::changes::purge_now(st, &id, &drive.root_id).await?,
             Some(Op::Repath { old, new }) => tree::changes::repath_now(st, &drive.id, &old, &new).await?,
             _ => {}
         }
@@ -1837,6 +1837,44 @@ mod tests {
         let root_node = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &root).await.unwrap().unwrap();
         sync_folder(&env.st, &root_node).await;
         assert!(env.node_at(&drive, "new.txt").await.is_some());
+    }
+
+    #[tokio::test]
+    async fn items_in_the_trash_stay_there_when_their_folder_is_removed_on_the_server() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        let (dir, drive, root) = (space.dir.clone(), space.drive.clone(), space.root.clone());
+        testutil::write_old(&dir.join("Plans").join("report.txt"), b"report");
+        testutil::write_old(&dir.join("Plans").join("Old").join("draft.txt"), b"draft");
+        testutil::write_old(&dir.join("Plans").join("keep.txt"), b"keep");
+        scan(&env.st, &drive).await.unwrap();
+        let (report, _) = env.node_at(&drive, "Plans/report.txt").await.unwrap();
+        let (draft, _) = env.node_at(&drive, "Plans/Old/draft.txt").await.unwrap();
+        for id in [&report, &draft] {
+            let req = serde_json::from_value(serde_json::json!({ "ids": [id] })).unwrap();
+            let _ = crate::nodes::trash(State(env.st.clone()), admin.clone(), axum::Json(req)).await.unwrap();
+        }
+
+        // The folder is deleted on the server (or renamed, where a rename looks like a new folder)
+        std::fs::remove_dir_all(dir.join("Plans")).unwrap();
+        scan(&env.st, &drive).await.unwrap();
+        assert!(env.node_at(&drive, "Plans/keep.txt").await.is_none(), "what was in the folder is gone");
+        for id in [&report, &draft] {
+            let (parent, trashed): (String, Option<i64>) =
+                sqlx::query_as("SELECT parent_id, trashed_at FROM nodes WHERE id = ?").bind(id).fetch_one(&env.st.db).await.unwrap();
+            assert_eq!(parent, root, "kept in the trash, as an item of the space's top folder");
+            assert!(trashed.is_some());
+        }
+        crate::fsops::clean_trash(&env.st, &drive, &dir).await.unwrap();
+        assert_eq!(std::fs::read_dir(dir.join(crate::fsops::TRASH_DIR)).unwrap().count(), 2, "their copies in the trash folder stay");
+
+        // Restored, they come back to the space's top folder
+        let req = serde_json::from_value(serde_json::json!({ "ids": [&report, &draft] })).unwrap();
+        let _ = crate::nodes::restore(State(env.st.clone()), admin.clone(), axum::Json(req)).await.unwrap();
+        assert_eq!(std::fs::read(dir.join("report.txt")).unwrap(), b"report");
+        assert_eq!(std::fs::read(dir.join("draft.txt")).unwrap(), b"draft");
+        assert_eq!(env.node_at(&drive, "report.txt").await.unwrap().0, report);
     }
 
     #[test]
