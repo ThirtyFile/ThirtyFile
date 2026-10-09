@@ -306,10 +306,10 @@ test("on a phone, the Mac style has the layout every style shares", async ({ pag
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
 });
 
-test("the Mac style has icons and a look of its own, which the Windows style never loads", async ({ page }) => {
+test("the Mac style's parts, icons and look are its own, which the Windows style never loads", async ({ page }) => {
   const assets: string[] = [];
   page.on("request", (r) => {
-    if (/\/assets\/art-[\w-]+\.(js|css)$/.test(r.url())) assets.push(r.url());
+    if (/\/assets\/(art|macKit)-[\w-]+\.(js|css)$/.test(r.url())) assets.push(r.url());
   });
   await page.setViewportSize({ width: 1280, height: 720 });
   await signInAsNewUser(page, "mac-look");
@@ -332,7 +332,7 @@ test("the Mac style has icons and a look of its own, which the Windows style nev
   await expect(item(page, "Inner").locator('svg[data-art="mac"][data-kind="folder"]')).toBeVisible();
   await expect(item(page, "main.rs").locator('svg[data-art="mac"][data-type="rust"] text')).toHaveText("RS");
   await expect(item(page, "notes.customext").locator('svg[data-art="mac"][data-kind="other"]')).toBeVisible();
-  expect(assets.some((a) => a.endsWith(".js")) && assets.some((a) => a.endsWith(".css"))).toBe(true);
+  expect(assets.some((a) => /\/macKit-[\w-]+\.js$/.test(a)) && assets.some((a) => /\/art-[\w-]+\.js$/.test(a)) && assets.some((a) => a.endsWith(".css"))).toBe(true);
   // Its look: a selected row is rounded and filled with the accent, its text white
   await item(page, "main.rs").click();
   const cell = item(page, "main.rs").locator("td").first();
