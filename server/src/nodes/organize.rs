@@ -152,7 +152,35 @@ pub async fn copy_nodes(State(st): State<AppState>, user: User, Json(req): Json<
 pub(super) async fn run_across(st: &AppState, user: &User, pending: jobs::Pending, across: Option<fsops::Across>) -> AppResult<Job> {
     let Some(across) = across else { return Ok(Job::done(pending.kind())) };
     let (st, user) = (st.clone(), user.clone());
-    pending.run(jobs::wait(), move |t| async move { across.run(&st, &user, &t).await.map(|()| Outcome::default()) }).await
+    pending.run(jobs::wait(), move |t| async move { run_content(&st, &user, across, &t).await.map(|()| Outcome::default()) }).await
+}
+
+/// Moves or copies the content of items going to or from a folder space (`Across`). Should that fail, the items they
+/// were to replace come back from the trash, unless something has their name now: the person asked for a replace,
+/// not a delete.
+pub async fn run_content(st: &AppState, user: &User, across: fsops::Across, progress: &crate::jobs::Tracker) -> AppResult<()> {
+    let (dest, replaced) = (across.dest().id.clone(), across.replaced().to_vec());
+    let result = across.run(st, user, progress).await;
+    if result.is_err() {
+        for id in replaced {
+            if let Err(e) = put_back_replaced(st, user, &dest, &id).await {
+                tracing::warn!("Couldn't take an item that was to be replaced out of the trash again: {}", e.message);
+            }
+        }
+    }
+    result
+}
+
+/// Takes `id` out of the trash again, back into `dest`, if it is still there as the replace left it and its name is free
+async fn put_back_replaced(st: &AppState, user: &User, dest: &str, id: &str) -> AppResult<()> {
+    let mut c = st.db.acquire().await?;
+    let Some(node) = tree::get_node(&mut c, id).await? else { return Ok(()) };
+    if node.trashed_at.is_none() || node.parent_id.as_deref() != Some(dest) || tree::find_child(&mut c, dest, &node.name).await?.is_some() {
+        return Ok(());
+    }
+    drop(c);
+    let req = BatchReq { ids: vec![id.to_string()], dest_id: None, resolutions: HashMap::new() };
+    super::restore(State(st.clone()), user.clone(), Json(req)).await.map(|_| ())
 }
 
 /// Moves items in the index; what goes to or from a folder space is returned, for its content to be moved next
@@ -166,6 +194,7 @@ pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
     locks.check(&dest)?;
     // Moves between spaces that involve a folder space copy content: done after this transaction, item by item
     let mut across = Vec::new();
+    let mut replaced = Vec::new();
     let mut across_items = 0usize;
     for id in &ids {
         let mut node = tree::node_for(&mut tx, &user, id, Need::Write).await?;
@@ -180,13 +209,17 @@ pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
         }
         // The name the item has in the destination
         let mut name = node.name.clone();
+        let mut replacing = None;
         if let Some(existing) = tree::find_child(&mut tx, &dest.id, &node.name).await? {
             match req.resolution(&node.id) {
                 None => return Err(AppError::conflict(format!("The destination folder already contains \"{}\"", node.name))),
                 Some(Resolution::Skip) => continue,
                 Some(Resolution::Keep) if dest.in_folder_space() => name = fsops::free_name(&mut tx, &dest, &node.name, node.is_folder()).await?,
                 Some(Resolution::Keep) => name = tree::unique_name(&mut tx, &dest.id, &node.name, node.is_folder()).await?,
-                Some(Resolution::Replace) => replace_existing(&mut tx, &user, &locks, &existing, &node).await?,
+                Some(Resolution::Replace) => {
+                    replace_existing(&mut tx, &user, &locks, &existing, &node).await?;
+                    replacing = Some(existing.id);
+                }
             }
         }
         if node.drive_id != dest.drive_id {
@@ -212,6 +245,7 @@ pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
                 // The first one is the item itself: it goes in under its name in the destination
                 nodes[0].name = name;
                 across.push(nodes);
+                replaced.extend(replacing);
                 continue;
             }
             sqlx::query(
@@ -235,7 +269,7 @@ pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
     tree::touch(&mut tx, &dest.id).await?;
     tx.commit().await?;
     locks.committed();
-    Ok(fsops::Across::new(dest, across, true))
+    Ok(fsops::Across::new(dest, across, true).map(|a| a.replacing(replaced)))
 }
 
 /// The items of a subtree (sorted by depth, the item itself first) that aren't in the trash, nor inside a folder that
@@ -268,6 +302,7 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
     let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Write).await?;
     locks.check(&dest)?;
     let mut plans = Vec::new();
+    let mut replaced = Vec::new();
     let mut total = 0i64;
     let mut items = 0usize;
     for id in &ids {
@@ -284,7 +319,12 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
         {
             match req.resolution(&node.id) {
                 Some(Resolution::Skip) => continue,
-                Some(Resolution::Replace) => replace_existing(&mut tx, &user, &locks, &existing, &node).await?,
+                Some(Resolution::Replace) => {
+                    replace_existing(&mut tx, &user, &locks, &existing, &node).await?;
+                    if node.in_folder_space() || dest.in_folder_space() {
+                        replaced.push(existing.id);
+                    }
+                }
                 Some(Resolution::Keep) | None => {}
             }
         }
@@ -346,7 +386,7 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
     tree::touch(&mut tx, &dest.id).await?;
     tx.commit().await?;
     locks.committed();
-    Ok(fsops::Across::new(dest, across, false))
+    Ok(fsops::Across::new(dest, across, false).map(|a| a.replacing(replaced)))
 }
 
 pub async fn trash(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Value>> {

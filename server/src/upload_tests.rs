@@ -127,10 +127,15 @@ async fn received_data_of_the_wrong_size_doesnt_become_a_file() {
     sqlx::query("UPDATE uploads SET offset = 5 WHERE id = ?").bind(&id).execute(&env.st.db).await.unwrap();
     let err = head(State(env.st.clone()), amy.clone(), Path(id.clone())).await.unwrap_err();
     assert_eq!(err.status, StatusCode::BAD_REQUEST);
-    assert!(err.message.contains("size mismatch"), "{}", err.message);
+    assert!(err.message.contains("size mismatch") && err.message.contains("discarded"), "{}", err.message);
     let (files,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE name = 'odd.txt'").fetch_one(&env.st.db).await.unwrap();
     assert_eq!(files, 0);
     assert_eq!(used(&env, amy.root()).await, 0);
+    // It can't be finished or resumed, so it goes: no row holding the space, no temporary file
+    let (rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM uploads WHERE id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(rows, 0);
+    assert!(!upload_path(&env.st, &id).exists());
+    assert_eq!(head(State(env.st.clone()), amy.clone(), Path(id.clone())).await.unwrap_err().status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -261,4 +266,22 @@ async fn an_upload_left_idle_is_checked_against_the_space_again_when_it_finishes
         assert_eq!(err.status, StatusCode::PAYLOAD_TOO_LARGE, "folders: {folders}");
         assert_eq!(used(&env, amy.root()).await, 800, "folders: {folders}");
     }
+}
+
+#[tokio::test]
+async fn an_upload_refused_for_its_size_leaves_no_folders_on_the_disk() {
+    let env = testutil::folders_env().await;
+    let amy = env.user("amy", true).await;
+    sqlx::query("UPDATE users SET quota_bytes = 1000 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+    let first = start(&env, &amy, "root", "Trip/Day 1", "first.bin", 800).await.unwrap();
+    assert!(send(&env, &amy, &first, 0, &EIGHT_HUNDRED[..10]).await.is_ok());
+    idle_for(&env, &first, 2 * 86400).await;
+    let second = start(&env, &amy, "root", "", "second.bin", 800).await.unwrap();
+    assert!(send(&env, &amy, &second, 0, &EIGHT_HUNDRED).await.is_ok());
+    // Its folders would be made on the disk before the size is checked: they aren't made at all
+    let err = send(&env, &amy, &first, 10, &EIGHT_HUNDRED[10..]).await.unwrap_err();
+    assert_eq!(err.status, StatusCode::PAYLOAD_TOO_LARGE);
+    let (made,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE name = 'Trip'").fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(made, 0);
+    assert!(env.dir.join("blobs/users/amy").is_dir() && !env.dir.join("blobs/users/amy/Trip").exists(), "no folder is left on the disk");
 }

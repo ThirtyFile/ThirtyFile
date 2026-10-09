@@ -291,6 +291,24 @@ pub async fn ensure_folders(conn: &mut SqliteConnection, owner_id: i64, parent_i
     Ok(current)
 }
 
+/// Whether every folder of `rel` (a path below `parent_id`) is there already, so `ensure_folders` would make none
+pub async fn path_folders_exist(conn: &mut SqliteConnection, parent_id: &str, rel: &str) -> AppResult<bool> {
+    let mut current = parent_id.to_string();
+    for part in rel.split('/').filter(|p| !p.is_empty()) {
+        let name = crate::util::validate_name(part)?;
+        let existing: Option<(String, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT id, kind FROM nodes WHERE {}", crate::tree::NAMED)))
+            .bind(&current)
+            .bind(&name)
+            .fetch_optional(&mut *conn)
+            .await?;
+        match existing {
+            Some((id, kind)) if kind == "folder" => current = id,
+            _ => return Ok(false),
+        }
+    }
+    Ok(true)
+}
+
 /// Creates a folder; in a folder space it is made on the disk first. A folder already there on disk is used as it is,
 /// with the item the index has for it: on a disk that ignores letter case, "Photos" is the folder "photos" already there.
 pub async fn create_folder(conn: &mut SqliteConnection, owner_id: i64, parent_id: &str, name: &str) -> AppResult<String> {

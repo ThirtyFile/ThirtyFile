@@ -118,25 +118,41 @@ fn principal_match(user: u8, now: u8) -> String {
 
 /// The user's role on a node: the highest grant among all ancestors (including itself); None means no access
 pub async fn role_on(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppResult<Option<Role>> {
-    let Some(drive) = get_drive(conn, node.drive()).await? else { return Ok(None) };
+    Ok(access(conn, user, node).await?.0)
+}
+
+/// The user's role on a node that is out of the trash, as is every folder it is in; None means no access, or that it
+/// is in the trash. A folder moved to the trash is marked at once, but what is in a large one only a batch at a time
+/// (tree/changes.rs): meanwhile its items count as in the trash too, so nothing can be saved into them.
+pub async fn live_role_on(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppResult<Option<Role>> {
+    let (role, in_trash) = access(conn, user, node).await?;
+    Ok(role.filter(|_| !in_trash))
+}
+
+/// The user's role on a node (see `role_on`), and whether it or a folder it is in is in the trash
+async fn access(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppResult<(Option<Role>, bool)> {
+    let Some(drive) = get_drive(conn, node.drive()).await? else { return Ok((None, false)) };
     if drive.disabled {
-        return Ok(None);
+        return Ok((None, false));
     }
     // Administrators manage the company shared space (personal spaces are unaffected, for privacy)
     let mut best = (drive.kind == super::SpaceKind::Company && user.is_admin()).then_some(Role::Manager);
+    // A row for each folder on the way up, and one more for each grant there that applies
     let sql = format!(
-        "WITH RECURSIVE up(id, parent_id) AS (
-           SELECT id, parent_id FROM nodes WHERE id = ?1
-           UNION ALL SELECT n.id, n.parent_id FROM nodes n JOIN up ON n.id = up.parent_id
+        "WITH RECURSIVE up(id, parent_id, trashed) AS (
+           SELECT id, parent_id, trashed_at IS NOT NULL FROM nodes WHERE id = ?1
+           UNION ALL SELECT n.id, n.parent_id, n.trashed_at IS NOT NULL FROM nodes n JOIN up ON n.id = up.parent_id
          )
-         SELECT g.role FROM grants g JOIN up ON g.node_id = up.id WHERE {}",
+         SELECT g.role, up.trashed FROM up LEFT JOIN grants g ON g.node_id = up.id AND {}",
         principal_match(2, 3)
     );
-    let rows: Vec<(Role,)> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).bind(user.id).bind(now()).fetch_all(conn).await?;
-    for (r,) in rows {
-        best = best.max(Some(r));
+    let rows: Vec<(Option<Role>, bool)> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).bind(user.id).bind(now()).fetch_all(conn).await?;
+    let mut in_trash = false;
+    for (r, trashed) in rows {
+        best = best.max(r);
+        in_trash |= trashed;
     }
-    Ok(best)
+    Ok((best, in_trash))
 }
 
 /// When the user's right to manage access to a node ends: the latest end of the grants that make them a manager or
@@ -168,13 +184,13 @@ pub async fn grant_applies_to(conn: &mut SqliteConnection, user: &User, principa
     })
 }
 
-/// Gets a node the user can access that isn't in the trash, together with the user's role.
+/// Gets a node the user can access that isn't in the trash (nor in a folder that is), together with the user's role.
 /// `root` means the user's own personal space, `shared` means the "All files" company space.
 pub async fn node_with_role(conn: &mut SqliteConnection, user: &User, id: &str) -> AppResult<(Node, Role)> {
     let id = resolve_alias(user, id)?;
     if let Some(n) = get_node(conn, id).await?
         && n.trashed_at.is_none()
-        && let Some(role) = role_on(conn, user, &n).await?
+        && let Some(role) = live_role_on(conn, user, &n).await?
     {
         return Ok((n, role));
     }

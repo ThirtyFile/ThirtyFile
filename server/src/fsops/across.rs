@@ -291,12 +291,28 @@ pub struct Across {
     /// Each item with everything in it (not in the trash), ordered by depth
     pub(super) items: Vec<Vec<Node>>,
     pub(super) moving: bool,
+    /// Items of the destination these replace, moved to the trash in the change's transaction already
+    pub(super) replaced: Vec<String>,
 }
 
 impl Across {
     /// None when there is nothing to do this way
     pub fn new(dest: Node, items: Vec<Vec<Node>>, moving: bool) -> Option<Across> {
-        (!items.is_empty()).then_some(Across { dest, items, moving })
+        (!items.is_empty()).then_some(Across { dest, items, moving, replaced: Vec::new() })
+    }
+
+    /// The items of the destination (ids) the items replace: put in the trash so these can take their names
+    pub fn replacing(mut self, replaced: Vec<String>) -> Across {
+        self.replaced = replaced;
+        self
+    }
+
+    pub fn dest(&self) -> &Node {
+        &self.dest
+    }
+
+    pub fn replaced(&self) -> &[String] {
+        &self.replaced
     }
 
     pub async fn run(self, st: &AppState, user: &User, progress: &Tracker) -> AppResult<()> {
@@ -626,6 +642,41 @@ mod tests {
             assert_eq!(env.node_at(&one.drive, "Docs").await.map(|n| n.0), Some(docs.clone()));
             let r = crate::folders::scan(&env.st, &two.drive).await.unwrap();
             assert_eq!(r.added, 0, "moving: {moving}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_item_to_be_replaced_comes_back_when_the_move_or_copy_fails() {
+        for moving in [true, false] {
+            let env = testutil::env().await;
+            let one = env.folder_space("One").await;
+            let two = env.folder_space("Two").await;
+            let admin = env.admin().await;
+            write_old(&one.dir.join("Docs/a.txt"), b"alpha");
+            write_old(&two.dir.join("Docs/b.txt"), b"bravo");
+            crate::folders::scan(&env.st, &one.drive).await.unwrap();
+            crate::folders::scan(&env.st, &two.drive).await.unwrap();
+            let (docs, _) = env.node_at(&one.drive, "Docs").await.unwrap();
+            let (there, _) = env.node_at(&two.drive, "Docs").await.unwrap();
+            let _stop = testing::stop_at(&two.drive, Stop::Placed);
+            let req = || {
+                let v = serde_json::json!({ "ids": [docs], "dest_id": two.root, "resolutions": { docs.clone(): "replace" } });
+                Json(serde_json::from_value(v).unwrap())
+            };
+            let res = if moving {
+                crate::nodes::move_nodes(State(env.st.clone()), admin.clone(), req()).await
+            } else {
+                crate::nodes::copy_nodes(State(env.st.clone()), admin.clone(), req()).await
+            };
+            if let Ok(Json(job)) = res {
+                assert_eq!(crate::jobs::wait_for(&env.st, &job.id).await.state, "failed");
+            }
+
+            // Asked to replace, it didn't: what was there is back where it was, out of the trash
+            assert_eq!(env.node_at(&two.drive, "Docs").await.map(|n| n.0), Some(there.clone()), "moving: {moving}");
+            assert_eq!(std::fs::read(two.dir.join("Docs/b.txt")).unwrap(), b"bravo", "moving: {moving}");
+            assert!(!two.dir.join("Docs/a.txt").exists(), "moving: {moving}");
+            assert_eq!(std::fs::read(one.dir.join("Docs/a.txt")).unwrap(), b"alpha");
         }
     }
 }

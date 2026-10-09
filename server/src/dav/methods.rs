@@ -226,7 +226,7 @@ pub(super) async fn copy_to(st: &AppState, user: &User, src: &Node, dest: &Node,
     let before: HashSet<String> = children_of(&mut *st.db.acquire().await?, &dest.id, &src.kind).await?.into_iter().map(|(id, _)| id).collect();
     let Json(req) = json_req(json!({ "ids": [src.id], "dest_id": dest.id }))?;
     if let Some(across) = nodes::copy_items(st, user, &req).await? {
-        across.run(st, user, &Default::default()).await?;
+        nodes::run_content(st, user, across, &Default::default()).await?;
     }
     let after = children_of(&mut *st.db.acquire().await?, &dest.id, &src.kind).await?;
     let (id, copied) = after.into_iter().find(|(id, _)| !before.contains(id)).ok_or_else(|| AppError::internal("the copy wasn't found"))?;

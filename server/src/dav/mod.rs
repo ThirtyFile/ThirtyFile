@@ -183,7 +183,7 @@ async fn rename(st: &AppState, user: &User, id: &str, name: &str) -> AppResult<(
 async fn move_into(st: &AppState, user: &User, id: &str, dest: &str) -> AppResult<()> {
     let Json(req) = json_req(json!({ "ids": [id], "dest_id": dest }))?;
     if let Some(across) = nodes::move_items(st, user, &req).await? {
-        across.run(st, user, &Default::default()).await?;
+        nodes::run_content(st, user, across, &Default::default()).await?;
     }
     Ok(())
 }
