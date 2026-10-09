@@ -120,6 +120,7 @@
         <pre><code>docker logs --tail 100 thirtyfile</code></pre>
         <h2 id="health">稼働状態を確認する</h2>
         <p><code>http://files.example.com:8080/api/health</code> はサーバーの状態を返します。通常は <code>"status": "ok"</code>、<code>/data</code> または <code>/storage</code> の空き容量が 1 GB 未満の場合、保存場所に接続できない場合、または過去 1 日以内にバックグラウンド処理がエラーで止まり再起動した場合（どの処理かはログに出ます）は <code>"degraded"</code> です。両フォルダーの空き容量と総容量、各保存場所が <code>ok</code> か <code>offline</code> かも返すので、ディスクがいっぱいになる前に監視ツールで警告できます。アップロードと WebDAV で送られたファイルはまず <code>/data</code> に受け取るため、受け取った後の <code>/data</code> の空きが 64 MB を切る場合は受け付けません。監視では JSON の <code>status</code> を確認してください。状態が degraded でも HTTP 200 を返します。データベースの確認に失敗すると、HTTP 503 と <code>"status": "error"</code> を返します。Docker のヘルスチェックは HTTP 200 を正常とするため、空き容量不足や保存場所のオフラインだけでコンテナーが再起動することはありません。状態低下の警告は、ログに最大 1 時間に 1 回記録されます。</p>
+        <p>これらの詳細は、リバースプロキシを通さずサーバー自身から送られた要求と、サインイン中の管理者にだけ返されます。それ以外には <code>status</code> だけが返されます。</p>
         <p>誰でもアクセスできるため、バージョンは返しません。知らない人に、既知の問題を調べるためのバージョン情報を渡さないためです。サインイン後は <a href="account.html">アカウントメニュー</a> の最後の行に、たとえば <strong>ThirtyFile 0.5.0</strong> と表示されます。管理者は <strong>コントロールパネル</strong> の右下でも確認でき、そのリリースノートへのリンクになっています。サーバーでは <code>docker exec thirtyfile thirtyfile --version</code> で表示できます。</p>
         <h2 id="check">保存されたファイルを確認する</h2>
         <p>データベースにあるすべてのファイルが保存場所に残っているか、データベースにないファイルが保存場所に残っていないか（手作業で置いたものなど）を確認します。</p>

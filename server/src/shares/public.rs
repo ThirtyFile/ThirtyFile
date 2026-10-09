@@ -261,23 +261,24 @@ pub async fn public_info(
         note_access(&st, &share.id, true);
     }
     let unlocked = unlocked(&st, &headers, &token, &share);
-    let mut info = json!({
+    // Before its password, a link tells only that it needs one: not who made it, until when it works, how often it can
+    // still be used or what it allows
+    if !unlocked {
+        return Ok(Json(json!({ "token": share.id, "needs_password": true, "owner": null })));
+    }
+    Ok(Json(json!({
         "token": share.id,
-        // Only once unlocked: the link alone shouldn't tell who in the organisation has which account
-        "owner": unlocked.then_some(share.owner_name.as_str()),
+        "owner": share.owner_name,
         "expires_at": share.expires_at,
         "downloads_left": downloads_left(&share),
-        "needs_password": !unlocked,
+        "needs_password": false,
         "allow_upload": share.allow_upload,
         "drop_only": share.drop_only,
         "allow_download": share.allow_download,
         // Upload size limit per file in bytes (0 = none), so the page can refuse larger files before sending them
         "max_upload": st.max_upload,
-    });
-    if unlocked {
-        info["node"] = public_node_json(&node);
-    }
-    Ok(Json(info))
+        "node": public_node_json(&node),
+    })))
 }
 
 #[derive(Deserialize)]

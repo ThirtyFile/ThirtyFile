@@ -344,7 +344,7 @@ mod tests {
         // The same when an administrator resets the password
         let token = add_link(&env, amy.id).await;
         let admin = env.admin().await;
-        let req = serde_json::from_value(json!({ "password": random_token(20) })).unwrap();
+        let req = serde_json::from_value(json!({ "password": random_token(20), "my_password": crate::testutil::password() })).unwrap();
         let _ = crate::admin::update(State(env.st.clone()), auth::Admin(admin), axum::extract::Path(amy.id), Json(req)).await.unwrap();
         assert!(reset_req(&env, &token, &random_token(20)).await.is_err());
     }

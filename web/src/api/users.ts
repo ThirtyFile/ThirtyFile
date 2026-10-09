@@ -10,7 +10,8 @@ export const usersApi = {
   /** `personal_space` / `personal_location`: "My files" and its storage location; left out, the system settings decide */
   createUser: (req: Partial<Omit<UserRow, "personal_space" | "personal_location">> & { password: string; personal_space?: boolean; personal_location?: string }) =>
     post<UserRow>("/admin/users", req),
-  updateUser: (id: number, req: Partial<UserRow> & { password?: string }) => request<UserRow>("PATCH", enc`/admin/users/${id}`, req),
+  /** A new password or a different role also takes the administrator's own password (and code): `my_password`, `my_code` */
+  updateUser: (id: number, req: Partial<UserRow> & { password?: string; my_password?: string; my_code?: string }) => request<UserRow>("PATCH", enc`/admin/users/${id}`, req),
   /** Deletes a user: their personal space's files are moved to another space (move_to, a space id) or deleted (delete_files) */
   deleteUser: (id: number, files: { move_to?: string; delete_files?: boolean } = {}) => request<Job>("DELETE", enc`/admin/users/${id}` + qs(toParams(files))),
   /** Gives a user a personal space on a storage location (the system setting's when left out) */

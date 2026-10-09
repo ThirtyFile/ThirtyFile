@@ -25,7 +25,6 @@ import { api, type UserRow } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ConfirmDialog } from "@/components/dialogs";
 import { useLocationName } from "@/components/LocationSelect";
 import { confirm } from "@/lib/confirm";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
@@ -35,7 +34,7 @@ import { formatBytes, formatDate, formatDateTime, errorMessage } from "@/lib/uti
 import { LoginLogDialog } from "@/components/logs/LoginLog";
 import { DevicesDialog } from "@/components/DevicesDialog";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
-import { AddPersonalDialog, RemovePersonalDialog, DeleteUserDialog } from "@/admin/users/AccountDialogs";
+import { AddPersonalDialog, RemovePersonalDialog, DeleteUserDialog, ResetTwoFactorDialog } from "@/admin/users/AccountDialogs";
 import { UserDialog } from "@/admin/users/UserDialog";
 import { PERMISSION_LABEL, PERMISSIONS } from "@/admin/users/permissions";
 
@@ -295,17 +294,10 @@ export function AdminUsersPage() {
       {loginsOf && <LoginLogDialog title={t('Sign-in log for "{name}"', { name: loginsOf.username })} userId={loginsOf.id} onClose={() => setLoginsOf(null)} />}
       {devicesOf && <DevicesDialog user={devicesOf} onClose={() => setDevicesOf(null)} />}
       {resetting && (
-        <ConfirmDialog
-          title={t('Reset two-factor sign-in for "{name}"?', { name: resetting.username })}
-          description={t(
-            "For someone who lost their phone and recovery codes. Their authenticator app and recovery codes stop working, and they sign in with just their password until they set it up again (right away, if two-factor sign-in is required).",
-          )}
-          confirmText={t("Reset")}
-          destructive
+        <ResetTwoFactorDialog
+          user={resetting}
           onClose={() => setResetting(null)}
-          onConfirm={async () => {
-            await api.resetTwoFactor(resetting.id);
-            toast.success(t("Two-factor sign-in reset"));
+          onDone={() => {
             setResetting(null);
             qc.invalidateQueries({ queryKey: keys.adminUsers() });
           }}

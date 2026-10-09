@@ -1,4 +1,5 @@
-//! Giving someone a personal space later, removing it, and deleting an account: what happens to the files in it
+//! Giving someone a personal space later, removing it, and deleting an account: what happens to the files in it.
+//! Resetting someone's two-factor sign-in.
 
 import { useState } from "react";
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,7 +10,8 @@ import { affected, invalidate, keys, queries } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { ErrorText } from "@/components/dialogs";
+import { ConfirmDialog, ErrorText } from "@/components/dialogs";
+import { useConfirmIdentity } from "@/components/ConfirmIdentity";
 import { LocationSelect, useDefaultLocationId, useLocationName } from "@/components/LocationSelect";
 import { followJob } from "@/lib/jobs";
 import { useMe } from "@/lib/session";
@@ -281,5 +283,29 @@ export function DeleteUserDialog({ user, onClose, onDeleted }: { user: UserRow; 
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Resetting the two-factor sign-in of someone who lost their phone: it lets the account in with the password alone, so the administrator confirms who they are */
+export function ResetTwoFactorDialog({ user, onClose, onDone }: { user: UserRow; onClose(): void; onDone(): void }) {
+  const identity = useConfirmIdentity("reset-2fa");
+  return (
+    <ConfirmDialog
+      title={t('Reset two-factor sign-in for "{name}"?', { name: user.username })}
+      description={t(
+        "For someone who lost their phone and recovery codes. Their authenticator app and recovery codes stop working, and they sign in with just their password until they set it up again (right away, if two-factor sign-in is required).",
+      )}
+      confirmText={t("Reset")}
+      destructive
+      ready={identity.ready}
+      onClose={onClose}
+      onConfirm={async () => {
+        await api.resetTwoFactor(user.id, identity.values.password, identity.values.code);
+        toast.success(t("Two-factor sign-in reset"));
+        onDone();
+      }}
+    >
+      {identity.fields(t("For your security, this can only be done within 10 minutes of signing in."))}
+    </ConfirmDialog>
   );
 }

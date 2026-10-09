@@ -637,18 +637,20 @@ pub struct DirectoryQuery {
     q: String,
 }
 
-pub async fn directory(State(st): State<AppState>, _: User, Query(q): Query<DirectoryQuery>) -> AppResult<Json<Vec<Principal>>> {
+pub async fn directory(State(st): State<AppState>, user: User, Query(q): Query<DirectoryQuery>) -> AppResult<Json<Vec<Principal>>> {
     let term = format!("%{}%", crate::util::like_escape(q.q.trim()));
+    // Sharing needs the names; which accounts are administrators is for administrators to see
     let rows: Vec<Principal> = sqlx::query_as(
         "SELECT 'group' AS principal_type, g.id AS principal_id, g.name,
                 (SELECT CASE COUNT(*) WHEN 1 THEN '1 member' ELSE COUNT(*) || ' members' END FROM group_members WHERE group_id = g.id) AS detail
          FROM groups g WHERE g.name LIKE ?1 ESCAPE '\\'
          UNION ALL
-         SELECT 'user', u.id, u.username, CASE u.role WHEN 'admin' THEN 'Administrator' ELSE 'User' END
+         SELECT 'user', u.id, u.username, CASE WHEN NOT ?2 THEN '' WHEN u.role = 'admin' THEN 'Administrator' ELSE 'User' END
          FROM users u WHERE u.disabled = 0 AND u.username LIKE ?1 ESCAPE '\\'
          ORDER BY 1 DESC, 3 LIMIT 30",
     )
     .bind(term)
+    .bind(user.is_admin())
     .fetch_all(&st.db)
     .await?;
     Ok(Json(rows))
@@ -876,6 +878,21 @@ mod tests {
         assert!(sso.google.groups.is_empty() && sso.domain_rules[0].groups == vec![99]);
         let Json(again) = create_group(State(env.st.clone()), Admin(admin), group("Support")).await.unwrap();
         assert!(again["id"].as_i64().unwrap() > id);
+    }
+
+    #[tokio::test]
+    async fn the_people_picker_tells_who_is_an_administrator_to_administrators_only() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let roles = |who: User| {
+            let st = env.st.clone();
+            async move {
+                let Json(rows) = directory(State(st), who, Query(DirectoryQuery { q: String::new() })).await.unwrap();
+                rows.into_iter().filter(|p| p.principal_type == PrincipalType::User).map(|p| (p.name, p.detail)).collect::<Vec<_>>()
+            }
+        };
+        assert!(roles(env.admin().await).await.contains(&("admin".to_string(), "Administrator".to_string())));
+        assert!(roles(amy.clone()).await.iter().all(|(_, detail)| detail.is_empty()));
     }
 
     #[tokio::test]

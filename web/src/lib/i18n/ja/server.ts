@@ -1149,6 +1149,7 @@ export default {
   "Sign out and sign in again, then create the app password within 10 minutes": "サインアウトしてもう一度サインインし、10 分以内にアプリパスワードを作成してください",
   "Sign out and sign in again, then change your email address within 10 minutes": "サインアウトしてもう一度サインインし、10 分以内にメールアドレスを変更してください",
   "Sign out and sign in again, then link the account within 10 minutes": "サインアウトしてもう一度サインインし、10 分以内にアカウントをリンクしてください",
+  "Sign out and sign in again, then make this change within 10 minutes": "サインアウトしてもう一度サインインし、10 分以内にこの変更を行ってください",
   "Only an account with a verified email address in a domain allowed on this site can be linked": "リンクできるのは、このサイトで許可されたドメインの確認済みメールアドレスを持つアカウントだけです",
   // Share-link passwords (shares.rs)
   "Too many wrong passwords for this link. Try again in {n} seconds.": "このリンクのパスワードの誤りが多すぎます。{n} 秒後にもう一度お試しください",

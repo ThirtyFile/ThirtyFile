@@ -17,6 +17,7 @@ import { useMe } from "@/lib/session";
 import { t } from "@/lib/i18n";
 import { formatBytes } from "@/lib/utils";
 import { SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
+import { useConfirmIdentity } from "@/components/ConfirmIdentity";
 import { PERMISSION_LABEL, PERMISSIONS_HINT } from "@/admin/users/permissions";
 
 const GB = 1024 ** 3;
@@ -48,6 +49,9 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
   const personalLocation = location ?? system.data?.personal_location ?? "";
   // "Default location" is sent as the location it names: left out, the system setting would apply instead
   const defaultLocation = useDefaultLocationId();
+  // A new password or a different role hands the account over, so the administrator confirms who they are first
+  const identity = useConfirmIdentity("u-me");
+  const handsOver = !!user && (!!password || role !== user.role);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -59,7 +63,10 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
         can_share: canShare,
         quota_bytes: quotaGb ? Math.round(Number(quotaGb) * GB) : 0,
       };
-      if (user) return api.updateUser(user.id, { ...body, disabled, password: password || undefined });
+      if (user) {
+        const mine = handsOver ? { my_password: identity.values.password, my_code: identity.values.code } : {};
+        return api.updateUser(user.id, { ...body, disabled, password: password || undefined, ...mine });
+      }
       return api.createUser({ ...body, username, password, personal_space: withPersonal, personal_location: withPersonal ? personalLocation || defaultLocation : undefined });
     },
     onSuccess: (row) => {
@@ -179,13 +186,19 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
                 {t("Disable this account (can't sign in, and share links stop working)")}
               </Label>
             )}
+            {handsOver && (
+              <div className="grid gap-2 rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">{t("A new password or another role lets someone else use this account, so confirm it's you first.")}</p>
+                {identity.fields(t("For your security, this can only be done within 10 minutes of signing in."))}
+              </div>
+            )}
             <ErrorText id="u-error">{save.error?.message}</ErrorText>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
               {t("Cancel")}
             </Button>
-            <Button type="submit" disabled={save.isPending || (!user && (!username || !password))}>
+            <Button type="submit" disabled={save.isPending || (!user && (!username || !password)) || (handsOver && !identity.ready)}>
               {save.isPending && <Loader2Icon className="animate-spin" />}
               {user ? t("Save") : t("Create")}
             </Button>

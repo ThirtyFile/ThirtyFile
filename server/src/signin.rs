@@ -209,7 +209,22 @@ pub async fn open_session(st: &AppState, user_id: i64, method: &str, ip: &str, h
     .await?;
     sqlx::query("UPDATE users SET last_login_at = ? WHERE id = ?").bind(ts).bind(user_id).execute(&mut *tx).await?;
     tx.commit().await?;
+    warn_if_insecure_cookies(st, headers);
     Ok(cookie_header(st, SESSION_COOKIE, &token, "/", SESSION_TTL))
+}
+
+/// A sign-in that came over HTTPS (as a reverse proxy says) while cookies aren't marked Secure: neither
+/// THIRTYFILE_SECURE_COOKIE nor an https Site URL is set. The session would then also be sent over plain HTTP, should
+/// anything reach the server that way. Said once in the log, where whoever set it up looks.
+fn warn_if_insecure_cookies(st: &AppState, headers: &HeaderMap) {
+    static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let https = headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()).is_some_and(|v| v.trim().eq_ignore_ascii_case("https"))
+        || headers.get("forwarded").and_then(|v| v.to_str().ok()).is_some_and(|v| v.to_ascii_lowercase().contains("proto=https"));
+    if https && !st.https() && !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        tracing::warn!(
+            "Signed in over HTTPS, but cookies aren't marked Secure: set the Site URL to the https:// address (Control panel › General), or THIRTYFILE_SECURE_COOKIE=true"
+        );
+    }
 }
 
 pub async fn logout(State(st): State<AppState>, ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>, headers: HeaderMap) -> AppResult<impl IntoResponse> {

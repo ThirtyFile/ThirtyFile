@@ -75,6 +75,9 @@ export function ConfirmDialog(props: {
   destructive?: boolean;
   /** Can't be undone (e.g. deleting permanently): Cancel has the focus, so pressing Enter doesn't do it */
   irreversible?: boolean;
+  /** More to fill in before confirming (such as the administrator's password), with `ready` once it is */
+  children?: ReactNode;
+  ready?: boolean;
   onConfirm(): Promise<void>;
   onClose(): void;
 }) {
@@ -86,12 +89,13 @@ export function ConfirmDialog(props: {
           <DialogTitle>{props.title}</DialogTitle>
           {props.description && <DialogDescription>{props.description}</DialogDescription>}
         </DialogHeader>
+        {props.children}
         <ErrorText>{error}</ErrorText>
         <DialogFooter>
           <Button variant="outline" onClick={props.onClose} autoFocus={props.irreversible}>
             {t("Cancel")}
           </Button>
-          <Button variant={props.destructive ? "destructive" : "default"} disabled={busy} onClick={() => run()} autoFocus={!props.irreversible}>
+          <Button variant={props.destructive ? "destructive" : "default"} disabled={busy || props.ready === false} onClick={() => run()} autoFocus={!props.irreversible && !props.children}>
             {busy && <Loader2Icon className="animate-spin" />}
             {props.confirmText ?? t("OK")}
           </Button>

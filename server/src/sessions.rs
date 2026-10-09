@@ -37,10 +37,11 @@ pub struct Device {
 async fn devices_of(st: &AppState, user_id: i64, current: Option<&str>) -> AppResult<Vec<Device>> {
     let mut list: Vec<Device> = sqlx::query_as(
         "SELECT id, user_agent, ip, method, created_at, last_used_at FROM sessions
-         WHERE user_id = ? AND expires_at > ? ORDER BY COALESCE(last_used_at, created_at) DESC, created_at DESC",
+         WHERE user_id = ? AND expires_at > ? AND COALESCE(last_used_at, created_at) > ? ORDER BY COALESCE(last_used_at, created_at) DESC, created_at DESC",
     )
     .bind(user_id)
     .bind(now())
+    .bind(crate::auth::idle_before())
     .fetch_all(&st.db)
     .await?;
     for d in &mut list {
@@ -223,6 +224,25 @@ mod tests {
         }
         let (t, ip) = last_used().await;
         assert!(t >= now() - 5 && ip == "198.51.100.4", "{t} {ip}");
+    }
+
+    #[tokio::test]
+    async fn a_session_left_unused_for_two_weeks_ends() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let (_, cookie) = env.sign_in(&amy, "laptop").await;
+        let idle = |days: i64| {
+            let st = env.st.clone();
+            async move {
+                sqlx::query("UPDATE sessions SET last_used_at = ? WHERE user_id = ?").bind(now() - days * 86400).bind(amy.id).execute(&st.db).await.unwrap();
+            }
+        };
+        idle(13).await;
+        assert!(env.session_user(&cookie).await.is_some(), "still in use");
+        idle(15).await;
+        assert!(env.session_user(&cookie).await.is_none(), "ended for being idle");
+        // Not listed among the devices signed in any more
+        assert!(devices_of(&env.st, amy.id, None).await.unwrap().is_empty());
     }
 
     #[tokio::test]

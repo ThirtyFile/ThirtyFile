@@ -57,11 +57,20 @@ async fn probe_once(target: std::net::SocketAddr) -> bool {
 /// outage of a file server, and SQLite fails when it can't write
 const LOW_DISK: u64 = 1024 * 1024 * 1024;
 
+/// Whether a request comes from the server itself, directly (Docker's health check, a monitor running there): not
+/// through a reverse proxy, which may well connect from this machine too but passes on what others ask
+fn from_this_machine(parts: &axum::http::request::Parts) -> bool {
+    let peer = parts.extensions.get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().map(|c| c.0.ip());
+    let forwarded = ["x-forwarded-for", "forwarded", "x-real-ip"].iter().any(|h| parts.headers.contains_key(*h));
+    peer.is_some_and(|ip| ip.is_loopback() || ip.to_canonical().is_loopback()) && !forwarded
+}
+
 /// Health check (for Docker HEALTHCHECK and load balancers): no sign-in required; checks that the database is readable.
 /// It doesn't name the version, which would tell anyone which release to look up for known problems: people who are
-/// signed in get it from /api/auth/me.
-pub async fn health(axum::extract::State(st): axum::extract::State<AppState>) -> axum::response::Response {
-    use axum::response::IntoResponse;
+/// signed in get it from /api/auth/me. Everyone gets the status; the disks' space and the storage locations' state are
+/// for the server itself and for administrators who are signed in, since they tell how the storage is laid out.
+pub async fn health(axum::extract::State(st): axum::extract::State<AppState>, mut parts: axum::http::request::Parts) -> axum::response::Response {
+    use axum::{extract::FromRequestParts, response::IntoResponse};
     if let Err(e) = sqlx::query_scalar::<_, i64>("SELECT 1").fetch_one(&st.db).await {
         tracing::warn!("health check failed: {e}");
         return (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "status": "error" }))).into_response();
@@ -99,8 +108,13 @@ pub async fn health(axum::extract::State(st): axum::extract::State<AppState>) ->
             tracing::warn!("Health check degraded: {}", warnings.join("; "));
         }
     }
+    let detailed = from_this_machine(&parts) || crate::auth::User::from_request_parts(&mut parts, &st).await.is_ok_and(|u| u.is_admin());
     // Still 200: restarting the container doesn't free disk space or bring a storage service back
-    axum::Json(serde_json::json!({ "status": status, "disks": disks, "locations": locations })).into_response()
+    if detailed {
+        axum::Json(serde_json::json!({ "status": status, "disks": disks, "locations": locations })).into_response()
+    } else {
+        axum::Json(serde_json::json!({ "status": status })).into_response()
+    }
 }
 
 #[cfg(test)]
@@ -114,16 +128,39 @@ mod tests {
     async fn health_reports_disks_and_offline_storage_locations() {
         let env = crate::testutil::env().await;
         let body = |res: Response| async { serde_json::from_slice::<serde_json::Value>(&axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap()).unwrap() };
-        let res = health(axum::extract::State(env.st.clone())).await;
+        // A request as the server itself makes it, one through a proxy on the same machine, and one from elsewhere
+        let ask_as = |from: &str, forwarded: bool, cookie: Option<String>| {
+            let mut req = axum::http::Request::builder().uri("/api/health");
+            if forwarded {
+                req = req.header("x-forwarded-for", "203.0.113.9");
+            }
+            if let Some(c) = cookie {
+                req = req.header(axum::http::header::COOKIE, c);
+            }
+            let (mut parts, _) = req.body(()).unwrap().into_parts();
+            parts.extensions.insert(axum::extract::ConnectInfo(from.parse::<std::net::SocketAddr>().unwrap()));
+            health(axum::extract::State(env.st.clone()), parts)
+        };
+        let ask = |from: &str, forwarded: bool| ask_as(from, forwarded, None);
+        let res = ask("127.0.0.1:5000", false).await;
         assert_eq!(res.status(), StatusCode::OK);
         let v = body(res).await;
         assert!(v.get("version").is_none(), "anyone can ask, so it doesn't name the release");
         // Disk space is only read on Unix
         assert!(!cfg!(unix) || v["disks"]["data"]["total_bytes"].as_u64().unwrap() > 0);
         env.st.location_health.lock().insert("nas".into(), state::LocationHealth { ok: false, error: Some("secret host".into()), checked_at: 0 });
-        let v = body(health(axum::extract::State(env.st.clone())).await).await;
+        let v = body(ask("127.0.0.1:5000", false).await).await;
         assert_eq!((v["status"].as_str(), v["locations"]["nas"].as_str()), (Some("degraded"), Some("offline")));
         assert!(!v.to_string().contains("secret host"), "reasons stay private");
+        // Others get the status only: not how the storage is laid out
+        for v in [body(ask("127.0.0.1:5000", true).await).await, body(ask("198.51.100.7:5000", false).await).await] {
+            assert_eq!(v, serde_json::json!({ "status": "degraded" }));
+        }
+        // Administrators who are signed in get the details from anywhere; other people don't
+        let (_, admin) = env.sign_in(&env.admin().await, "test").await;
+        assert_eq!(body(ask_as("198.51.100.7:5000", true, Some(admin)).await).await["locations"]["nas"], "offline");
+        let (_, amy) = env.sign_in(&env.user("amy", true).await, "test").await;
+        assert_eq!(body(ask_as("198.51.100.7:5000", true, Some(amy)).await).await, serde_json::json!({ "status": "degraded" }));
     }
 
     /// A server on a local port that answers every request with `reply`, once per connection

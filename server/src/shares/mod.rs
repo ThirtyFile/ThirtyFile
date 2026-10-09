@@ -1246,6 +1246,17 @@ mod tests {
         assert!(open_share(&env.st, &info.id, &with(&old)).await.is_err());
         let forged = cookie.replace(cookie.split('=').nth(1).unwrap().split('.').next().unwrap(), &(now() + 999_999).to_string());
         assert!(open_share(&env.st, &info.id, &with(&forged)).await.is_err(), "the time is signed");
+
+        // Before its password, the link tells only that it needs one; unlocked, what it is and allows
+        let ask = |h: HeaderMap| {
+            let addr: std::net::SocketAddr = "203.0.113.9:1".parse().unwrap();
+            public_info(State(env.st.clone()), Path(info.id.clone()), ConnectInfo(addr), h, Visitor { ip: String::new(), user_agent: String::new() })
+        };
+        let Json(locked) = ask(HeaderMap::new()).await.unwrap();
+        assert_eq!(locked, json!({ "token": info.id, "needs_password": true, "owner": null }));
+        let Json(open) = ask(with(&cookie)).await.unwrap();
+        assert_eq!((open["needs_password"].as_bool(), open["owner"].as_str()), (Some(false), Some("amy")));
+        assert!(open.get("allow_download").is_some() && open.get("node").is_some());
     }
 
     #[tokio::test]
@@ -1304,7 +1315,7 @@ mod tests {
         if let Some(c) = cookie {
             h.insert(header::COOKIE, c.parse().unwrap());
         }
-        let res = public_upload_create(State(env.st.clone()), Path(token.to_string()), h, visitor()).await?;
+        let res = public_upload_create(State(env.st.clone()), Path(token.to_string()), uploads::from_browser(h, token, "first"), visitor()).await?;
         let location = res.headers()[header::LOCATION].to_str().unwrap().to_string();
         assert!(location.starts_with(&format!("/api/public/shares/{token}/uploads/")), "{location}");
         Ok(location.rsplit('/').next().unwrap().to_string())
@@ -1314,7 +1325,14 @@ mod tests {
         let mut h = HeaderMap::new();
         h.insert(header::CONTENT_TYPE, "application/offset+octet-stream".parse().unwrap());
         h.insert("upload-offset", "0".parse().unwrap());
-        let res = public_upload_patch(State(env.st.clone()), Path((token.to_string(), id.to_string())), h, visitor(), axum::body::Body::from(data)).await?;
+        let res = public_upload_patch(
+            State(env.st.clone()),
+            Path((token.to_string(), id.to_string())),
+            uploads::from_browser(h, token, "first"),
+            visitor(),
+            axum::body::Body::from(data),
+        )
+        .await?;
         Ok(res.headers().get("x-node-id").map(|v| v.to_str().unwrap().to_string()))
     }
 
@@ -1470,7 +1488,7 @@ mod tests {
         let mut h = HeaderMap::new();
         h.insert("upload-length", "5".parse().unwrap());
         h.insert("upload-metadata", format!("filename {},onConflict {}", b64("secret.txt"), b64("replace")).parse().unwrap());
-        let res = public_upload_create(State(env.st.clone()), Path(info.id.clone()), h, visitor()).await.unwrap();
+        let res = public_upload_create(State(env.st.clone()), Path(info.id.clone()), uploads::from_browser(h, &info.id, "first"), visitor()).await.unwrap();
         let up = res.headers()[header::LOCATION].to_str().unwrap().rsplit('/').next().unwrap().to_string();
         let copy = send_upload(&env, &info.id, &up, b"hacks").await.unwrap().expect("the upload finished");
         assert_ne!(copy, secret);
@@ -1506,13 +1524,20 @@ mod tests {
         let mut h = HeaderMap::new();
         h.insert("upload-length", "5".parse().unwrap());
         h.insert("upload-metadata", format!("filename {},relativePath {}", b64("secret.txt"), b64("Private")).parse().unwrap());
-        let res = public_upload_create(State(env.st.clone()), Path(info.id.clone()), h, visitor()).await.unwrap();
+        let res = public_upload_create(State(env.st.clone()), Path(info.id.clone()), uploads::from_browser(h, &info.id, "first"), visitor()).await.unwrap();
         let up = res.headers()[header::LOCATION].to_str().unwrap().rsplit('/').next().unwrap().to_string();
         let mut h = HeaderMap::new();
         h.insert(header::CONTENT_TYPE, "application/offset+octet-stream".parse().unwrap());
         h.insert("upload-offset", "0".parse().unwrap());
-        let res =
-            public_upload_patch(State(env.st.clone()), Path((info.id.clone(), up.clone())), h, visitor(), axum::body::Body::from(&b"hello"[..])).await.unwrap();
+        let res = public_upload_patch(
+            State(env.st.clone()),
+            Path((info.id.clone(), up.clone())),
+            uploads::from_browser(h, &info.id, "first"),
+            visitor(),
+            axum::body::Body::from(&b"hello"[..]),
+        )
+        .await
+        .unwrap();
         // The file is kept under another name, but the visitor isn't told which: that would say the name was taken
         assert!(res.headers().get("x-node-name").is_none());
         let id = res.headers()["x-node-id"].to_str().unwrap().to_string();
@@ -1520,7 +1545,9 @@ mod tests {
         assert_eq!(node(&env, &id).await.parent_id.as_deref(), Some(inbox.as_str()));
         let (inside,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE parent_id = ?").bind(&private).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(inside, 0);
-        let res = public_upload_head(State(env.st.clone()), Path((info.id.clone(), up)), HeaderMap::new(), visitor()).await.unwrap();
+        let res = public_upload_head(State(env.st.clone()), Path((info.id.clone(), up)), uploads::from_browser(HeaderMap::new(), &info.id, "first"), visitor())
+            .await
+            .unwrap();
         assert!(res.headers().get("x-node-name").is_none());
     }
 

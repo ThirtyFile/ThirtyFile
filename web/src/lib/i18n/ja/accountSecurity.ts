@@ -73,6 +73,8 @@ export default {
   "Two-factor sign-in is on": "2 段階認証がオン",
   "Reset two-factor sign-in": "2 段階認証をリセット",
   "Reset two-factor sign-in for \"{name}\"?": "「{name}」の 2 段階認証をリセットしますか？",
+  "A new password or another role lets someone else use this account, so confirm it's you first.": "新しいパスワードや別の役割を設定すると、他の人がこのアカウントを使えるようになります。まずご本人であることを確認してください。",
+  "For your security, this can only be done within 10 minutes of signing in.": "セキュリティのため、この操作はサインインしてから 10 分以内にのみ行えます。",
   "For someone who lost their phone and recovery codes. Their authenticator app and recovery codes stop working, and they sign in with just their password until they set it up again (right away, if two-factor sign-in is required).": "スマートフォンと回復コードの両方をなくした人向けです。その人の認証アプリと回復コードは使えなくなり、もう一度設定するまではパスワードだけでサインインします（2 段階認証が必須の場合は、サインイン時にすぐ設定を求められます）。",
   "Two-factor sign-in reset": "2 段階認証をリセットしました",
   "Require two-factor sign-in for password accounts": "パスワードでのサインインに 2 段階認証を必須にする",
