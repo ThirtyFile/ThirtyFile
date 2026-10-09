@@ -36,10 +36,22 @@ export function lookItems(list: readonly (Item | undefined)[], selected: Readonl
   return picked.length > 1 ? picked : loaded;
 }
 
+/** Where an item is in the list (-1: not there), by the list's index when it has one (a large folder) */
+export function positionOf(id: string, shown: readonly (Item | undefined)[], index?: ReadonlyMap<string, number>): number {
+  return index?.get(id) ?? shown.findIndex((n) => n?.id === id);
+}
+
 /** The explorer's part of Quick look: its key, and the window while it is open */
-export function QuickLook({ s, a }: { p: ExplorerProps; s: ExplorerState; a: ExplorerActions }) {
+export function QuickLook({ p, s, a }: { p: ExplorerProps; s: ExplorerState; a: ExplorerActions }) {
   const open = useStore(shown);
   const k = s.kit.keys;
+  // Nothing selected (another folder opened, the selection cleared): it closes, rather than coming back by itself on
+  // the next item selected
+  useEffect(() => {
+    if (!s.count) shown.set(false);
+  }, [s.count]);
+  // Nor after leaving the explorer (another page)
+  useEffect(() => () => shown.set(false), []);
   // The style's key opens it on what is selected, from the list (not while typing, in a menu or a dialog)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -53,30 +65,42 @@ export function QuickLook({ s, a }: { p: ExplorerProps; s: ExplorerState; a: Exp
     return () => window.removeEventListener("keydown", onKey);
   });
   if (!open || !s.count) return null;
-  return <QuickLookWindow s={s} a={a} onClose={() => shown.set(false)} />;
+  return <QuickLookWindow p={p} s={s} a={a} onClose={() => shown.set(false)} />;
 }
 
-function QuickLookWindow({ s, a, onClose }: { s: ExplorerState; a: ExplorerActions; onClose(): void }) {
+function QuickLookWindow({ p, s, a, onClose }: { p: ExplorerProps; s: ExplorerState; a: ExplorerActions; onClose(): void }) {
   const k = s.kit.keys;
-  const items = useMemo(() => lookItems(s.shown, s.selected), [s.shown, s.selected]);
+  /** Browsing the whole list (the item shown is the one selected), rather than the items selected */
+  const all = !(s.selected.size > 1);
+  const picked = useMemo(() => (all ? [] : lookItems(s.shown, s.selected)), [all, s.shown, s.selected]);
   // The item shown: at first the one with the focus among those selected (else the first selected)
   const [id, setId] = useState(() => {
     const focused = (document.activeElement as HTMLElement | null)?.closest?.<HTMLElement>("[data-node-id]")?.dataset.nodeId;
     if (focused && s.selected.has(focused)) return focused;
-    return (s.anchor && s.selected.has(s.anchor) ? s.anchor : s.selectedNodes[0]?.id) ?? items[0]?.id;
+    return (s.anchor && s.selected.has(s.anchor) ? s.anchor : s.selectedNodes[0]?.id) ?? lookItems(s.shown, s.selected)[0]?.id;
   });
-  const at = items.findIndex((n) => n.id === id);
-  const node = items[at];
-  /** Browsing the whole list: the item shown is the one selected */
-  const all = !(s.selected.size > 1);
+  // Where it is: in the whole list, a large folder's parts not loaded included, or among the items selected
+  const at = useMemo(() => (all ? (id ? positionOf(id, s.shown, p.list?.index) : -1) : picked.findIndex((n) => n.id === id)), [all, id, s.shown, p.list, picked]);
+  const node = all ? s.shown[at] : picked[at];
+  const total = all ? s.total : picked.length;
+  /** A position whose part of the list is loading, to go to once it is there */
+  const [waiting, setWaiting] = useState<number | null>(null);
   const close = () => {
     onClose();
     // The focus goes back to the list, on the item last shown
     setTimeout(() => node && s.listNav.current?.show(node.id, true));
   };
-  const go = (step: 1 | -1) => {
-    const next = items[at + step];
-    if (!next) return;
+  const showAt = (i: number) => {
+    if (i < 0 || i >= total) return;
+    const next = all ? s.shown[i] : picked[i];
+    if (!next) {
+      // Not loaded yet: the list goes there, which loads it
+      setWaiting(i);
+      s.listNav.current?.scrollTo(i);
+      return;
+    }
+    setWaiting(null);
+    if (next.id.startsWith("new:")) return;
     setId(next.id);
     if (all) {
       s.setSelected(new Set([next.id]));
@@ -84,6 +108,11 @@ function QuickLookWindow({ s, a, onClose }: { s: ExplorerState; a: ExplorerActio
     }
     s.listNav.current?.show(next.id, false);
   };
+  const go = (step: 1 | -1) => showAt((waiting ?? at) + step);
+  useEffect(() => {
+    if (waiting !== null && s.shown[waiting]) showAt(waiting);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- once the part waited for has loaded
+  }, [waiting, s.shown]);
 
   // An item that went away (deleted, moved) closes it
   useEffect(() => {
@@ -92,13 +121,21 @@ function QuickLookWindow({ s, a, onClose }: { s: ExplorerState; a: ExplorerActio
 
   const root = useRef<HTMLDivElement>(null);
   useOverlayFocus(root, !!node, { onClose: close });
+  // The focus starts on the window itself, not its first button: Space closes it, as it opened it, until a button is
+  // chosen with Tab (Space then presses that button)
+  useEffect(() => {
+    root.current?.focus();
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Not while seeking in a player or typing
       const target = e.target as HTMLElement | null;
       if (target?.closest?.(".cm-editor, video, audio, input, textarea, select, [contenteditable]") || target?.closest?.('[data-slot="dialog-content"]')) return;
-      if (pressed(e, k.quickLook)) close();
-      else if (pressedKey(e, [...k.itemDown, ...k.itemRight]) && !e.shiftKey) go(1);
+      if (pressed(e, k.quickLook)) {
+        // Space on one of its buttons presses the button
+        if (target?.closest?.("button, a, [role=menuitem]")) return;
+        close();
+      } else if (pressedKey(e, [...k.itemDown, ...k.itemRight]) && !e.shiftKey) go(1);
       else if (pressedKey(e, [...k.itemUp, ...k.itemLeft]) && !e.shiftKey) go(-1);
       else return;
       e.preventDefault();
@@ -110,44 +147,49 @@ function QuickLookWindow({ s, a, onClose }: { s: ExplorerState; a: ExplorerActio
 
   if (!node) return null;
   return (
-    <div
-      ref={root}
-      role="dialog"
-      aria-modal="true"
-      aria-label={t("Quick look: {name}", { name: node.name })}
-      className="fixed top-1/2 left-1/2 z-40 flex h-[min(580px,calc(100dvh-3rem))] w-[min(820px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl"
-    >
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b px-2">
-        <Button variant="ghost" size="icon-sm" aria-label={t("Close")} title={`${t("Close")} (${shortcut(k.quickLook[0])})`} onClick={close}>
-          <XIcon />
-        </Button>
-        <div className="min-w-0 flex-1 text-center">
-          <div className="truncate text-[13px] font-medium" title={node.name}>
-            {node.name}
+    <>
+      {/* The window is modal: a click beside it closes it, as Escape does, instead of reaching the page */}
+      <div aria-hidden className="fixed inset-0 z-40" onPointerDown={close} />
+      <div
+        ref={root}
+        role="dialog"
+        tabIndex={-1}
+        aria-modal="true"
+        aria-label={t("Quick look: {name}", { name: node.name })}
+        className="fixed top-1/2 left-1/2 z-40 flex outline-none h-[min(580px,calc(100dvh-3rem))] w-[min(820px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl"
+      >
+        <div className="flex h-11 shrink-0 items-center gap-2 border-b px-2">
+          <Button variant="ghost" size="icon-sm" aria-label={t("Close")} title={`${t("Close")} (${shortcut(k.quickLook[0])})`} onClick={close}>
+            <XIcon />
+          </Button>
+          <div className="min-w-0 flex-1 text-center">
+            <div className="truncate text-[13px] font-medium" title={node.name}>
+              {node.name}
+            </div>
+            <div className="text-[11px] text-muted-foreground">{t("{n} of {total}", { n: at + 1, total })}</div>
           </div>
-          <div className="text-[11px] text-muted-foreground">{t("{n} of {total}", { n: at + 1, total: items.length })}</div>
+          <Button variant="ghost" size="icon-sm" aria-label={t("Previous item")} title={t("Previous item")} disabled={at <= 0} onClick={() => go(-1)}>
+            <ChevronLeftIcon />
+          </Button>
+          <Button variant="ghost" size="icon-sm" aria-label={t("Next item")} title={t("Next item")} disabled={at >= total - 1} onClick={() => go(1)}>
+            <ChevronRightIcon />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              onClose();
+              a.open(node);
+            }}
+          >
+            <ExternalLinkIcon /> {t("Open")}
+          </Button>
         </div>
-        <Button variant="ghost" size="icon-sm" aria-label={t("Previous item")} title={t("Previous item")} disabled={at <= 0} onClick={() => go(-1)}>
-          <ChevronLeftIcon />
-        </Button>
-        <Button variant="ghost" size="icon-sm" aria-label={t("Next item")} title={t("Next item")} disabled={at >= items.length - 1} onClick={() => go(1)}>
-          <ChevronRightIcon />
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            onClose();
-            a.open(node);
-          }}
-        >
-          <ExternalLinkIcon /> {t("Open")}
-        </Button>
+        <div className="relative flex min-h-0 flex-1 items-center justify-center bg-muted/30">
+          {node.kind === "file" ? <FileViewer key={node.id} node={node} source={privateSource} editable={false} embedded /> : <FolderCard node={node} />}
+        </div>
       </div>
-      <div className="relative flex min-h-0 flex-1 items-center justify-center bg-muted/30">
-        {node.kind === "file" ? <FileViewer key={node.id} node={node} source={privateSource} editable={false} embedded /> : <FolderCard node={node} />}
-      </div>
-    </div>
+    </>
   );
 }
 

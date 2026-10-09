@@ -25,7 +25,7 @@ import { t } from "@/lib/i18n";
 import { usePersisted } from "@/lib/session";
 import { formatBytes, formatDateTime } from "@/lib/utils";
 import type { OwnViewProps } from "../types";
-import { FolderCard, openQuickLook } from "./quickLook";
+import { FolderCard, openQuickLook, positionOf } from "./quickLook";
 
 /** How long the selection stays on an item before its preview loads (holding an arrow key passes many) */
 const SETTLE_MS = 200;
@@ -37,11 +37,6 @@ const SETTLE_MS = 200;
 export function galleryItem(selected: readonly Item[], focused: string | null, anchor: string | null): Item | undefined {
   const byId = (id: string | null) => (id === null ? undefined : selected.find((n) => n.id === id));
   return byId(focused) ?? byId(anchor) ?? selected[0];
-}
-
-/** Where an item is in the list (-1: not there), by the list's index when it has one (a large folder) */
-export function positionOf(id: string, shown: readonly (Item | undefined)[], index?: ReadonlyMap<string, number>): number {
-  return index?.get(id) ?? shown.findIndex((n) => n?.id === id);
 }
 
 export function GalleryView({ p, s, a, list, empty }: OwnViewProps) {

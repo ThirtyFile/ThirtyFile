@@ -5,11 +5,11 @@ import { join } from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { kits, StyleKitContext, useView, useViews, type StyleKit } from "@/components/style";
+import { kits, StyleKitContext, useStyleKit, useView, useViews, type StyleKit } from "@/components/style";
 import { windowsKit } from "@/components/style/windows";
 import { WINDOWS_KEYS } from "@/components/style/windows/keys";
 import { openShortcuts, ShortcutsHost } from "@/components/ShortcutsDialog";
-import { READY_STYLES, STYLE_CHOICES } from "@/lib/style";
+import { READY_STYLES, STYLE_CHOICES, StyleChoiceContext } from "@/lib/style";
 import { keysOf, pressed, pressedKey, type Action, type KeyPress } from "@/lib/style/keymap";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -201,6 +201,39 @@ describe("the views offered on a screen", () => {
   test("Columns is offered on wider screens, not on phones, which show the style's own view instead", () => {
     expect(offered(false)).toEqual({ ids: ["grid", "medium", "compact", "list", "tiles", "columns"], view: "columns" });
     expect(offered(true)).toEqual({ ids: ["grid", "medium", "compact", "list", "tiles"], view: "list" });
+  });
+  /** The kit the Mac style uses on a phone or a wider screen */
+  function macKitOn(phone: boolean): StyleKit {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: phone && query.includes("max-width"), addEventListener() {}, removeEventListener() {} }));
+    const seen: { kit?: StyleKit } = {};
+    function Probe() {
+      seen.kit = useStyleKit();
+      return null;
+    }
+    const r = createRoot(document.createElement("div"));
+    act(() =>
+      r.render(
+        <StyleChoiceContext.Provider value="mac">
+          <Probe />
+        </StyleChoiceContext.Provider>,
+      ),
+    );
+    act(() => r.unmount());
+    return seen.kit!;
+  }
+
+  test("on a phone the Mac style has the Windows style's parts, menus and keys, with its own look and icons", () => {
+    const mac = kits().mac!;
+    expect(macKitOn(false)).toBe(mac);
+    const phone = macKitOn(true);
+    expect(phone.id).toBe("mac");
+    expect(phone.ItemIcon).toBe(mac.ItemIcon);
+    expect(phone.keys).toBe(windowsKit.keys);
+    expect(phone.menu).toBe(windowsKit.menu);
+    expect(phone.Frame).toBe(windowsKit.Frame);
+    expect([phone.clickToRename, phone.newAtEnd]).toEqual([windowsKit.clickToRename, windowsKit.newAtEnd]);
+    // The same object each time, so what depends on it doesn't change on every render
+    expect(macKitOn(true)).toBe(phone);
   });
 });
 

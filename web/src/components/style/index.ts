@@ -26,7 +26,23 @@ export const StyleKitContext = createContext<StyleKit | null>(null);
 export function useStyleKit(): StyleKit {
   const forced = useContext(StyleKitContext);
   const { style } = useInterfaceStyle();
-  return forced ?? kits()[style] ?? windowsKit;
+  const phone = useMediaQuery("(max-width: 47.99rem)");
+  const kit = forced ?? kits()[style] ?? windowsKit;
+  // Phones get the layout every style shares (the Windows style's frame), and with it its menus, keys and ways: a
+  // style other than Windows keeps only its look and icons there
+  return phone && !forced && kit !== windowsKit ? onPhones(kit) : kit;
+}
+
+const phoneKits = new Map<StyleKit, StyleKit>();
+
+/** `kit` as phones have it: the Windows style's parts, with `kit`'s name (its look applies) and icons */
+function onPhones(kit: StyleKit): StyleKit {
+  let k = phoneKits.get(kit);
+  if (!k) {
+    k = { ...windowsKit, id: kit.id, ItemIcon: kit.ItemIcon };
+    phoneKits.set(kit, k);
+  }
+  return k;
 }
 
 /** The style the page was last shown in (kept in the browser), whose assets start loading with the page */

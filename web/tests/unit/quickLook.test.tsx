@@ -32,23 +32,34 @@ describe("the window", () => {
   });
 
   /** The explorer's state, as far as Quick look uses it: the list, and a selection that follows */
-  function render(selected: string[]) {
-    const s = {
+  function state(selected: string[], shown: readonly (Item | undefined)[] = LIST, total = shown.length) {
+    return {
       kit: macKit,
-      shown: LIST,
+      shown,
+      total,
       selected: new Set(selected),
       anchor: selected[0] ?? null,
       count: selected.length,
-      selectedNodes: LIST.filter((n) => selected.includes(n.id)),
+      selectedNodes: shown.filter((n): n is Item => !!n && selected.includes(n.id)),
       setSelected: vi.fn<(next: Set<string>) => void>(),
       setAnchor: vi.fn<(id: string) => void>(),
-      listNav: { current: { show: vi.fn<(id: string, focus: boolean) => void>() } },
+      listNav: { current: { show: vi.fn<(id: string, focus: boolean) => void>(), scrollTo: vi.fn<(index: number) => void>() } },
     };
-    const a = { open: vi.fn<(n: Item) => void>() };
-    const el = document.createElement("div");
-    document.body.append(el);
-    root = createRoot(el);
+  }
+  const a = { open: vi.fn<(n: Item) => void>() };
+  /** Shows Quick look's part of the explorer with the state `s` (again, when it changed) */
+  function show(s: ReturnType<typeof state>) {
+    if (!root) {
+      const el = document.createElement("div");
+      document.body.append(el);
+      root = createRoot(el);
+    }
     act(() => root!.render(<QuickLook p={{} as ExplorerProps} s={s as unknown as ExplorerState} a={a as unknown as ExplorerActions} />));
+  }
+  function render(selected: string[], shown?: readonly (Item | undefined)[], total?: number) {
+    a.open.mockClear();
+    const s = state(selected, shown, total);
+    show(s);
     return { s, a };
   }
   /** A key pressed where the focus is (in the window once it is open) */
@@ -99,6 +110,44 @@ describe("the window", () => {
   test("nothing opens with nothing selected", () => {
     render([]);
     key(" ");
+    expect(dialog()).toBeNull();
+  });
+
+  test("in a large folder it counts every item, and going to one not loaded yet loads its part first", () => {
+    const shown = [LIST[1], LIST[2], undefined, undefined];
+    const { s } = render(["b.png"], shown, 1000);
+    key(" ");
+    expect(dialog()!.textContent).toContain("2 of 1,000");
+    key("ArrowDown");
+    // Not loaded: the list goes there, and Quick look waits for it
+    expect(s.listNav.current.scrollTo).toHaveBeenCalledWith(2);
+    expect(dialog()!.getAttribute("aria-label")).toBe("Quick look: b.png");
+    const loaded = state(["b.png"], [LIST[1], LIST[2], LIST[3], undefined], 1000);
+    show(loaded);
+    expect(dialog()!.getAttribute("aria-label")).toBe("Quick look: c.pdf");
+    expect(dialog()!.textContent).toContain("3 of 1,000");
+    expect(loaded.setSelected).toHaveBeenLastCalledWith(new Set(["c.pdf"]));
+  });
+
+  test("it closes when nothing is selected any more, and doesn't come back by itself", () => {
+    render(["a.txt"]);
+    key(" ");
+    expect(dialog()).not.toBeNull();
+    // Another folder opened: the selection is cleared
+    show(state([]));
+    expect(dialog()).toBeNull();
+    show(state(["b.png"]));
+    expect(dialog()).toBeNull();
+  });
+
+  test("Space on one of its buttons presses the button, and a click beside it closes it", () => {
+    render(["a.txt"]);
+    key(" ");
+    const next = [...dialog()!.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Next item")!;
+    act(() => next.focus());
+    key(" ");
+    expect(dialog()).not.toBeNull();
+    act(() => void document.querySelector("[aria-hidden].fixed.inset-0")!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
     expect(dialog()).toBeNull();
   });
 });

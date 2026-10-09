@@ -11,7 +11,8 @@ import { FileList, type ListNav } from "@/components/FileList";
 import type { Item } from "@/components/fileList/layout";
 import { StyleKitContext } from "@/components/style";
 import { macKit } from "@/components/style/mac";
-import { GalleryView, galleryItem, positionOf } from "@/components/style/mac/gallery";
+import { GalleryView, galleryItem } from "@/components/style/mac/gallery";
+import { positionOf } from "@/components/style/mac/quickLook";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
