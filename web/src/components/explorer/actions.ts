@@ -1,4 +1,5 @@
 /** File explorer actions: open, download, favorite, cut / copy / paste, new folder / text file, delete for good, keyboard shortcuts and drag-and-drop upload */
+import { focusIsFree } from "@/lib/focus";
 import { useEffect, type DragEvent } from "react";
 import { toast } from "sonner";
 import { api, privateSource, type Node } from "@/api";
@@ -327,6 +328,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         await waitForJob(job);
       });
       toast.success(t("Permanently deleted"));
+      focusListAgain();
     } catch (e) {
       toast.error(errorMessage(e, t("Operation failed")));
       reportShown("delete", e);
@@ -334,6 +336,13 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       void changed({ folders: [...parents, picked.span?.folder], trash: true, contents: true, usage: true });
     }
   };
+
+  /** Items that had the focus are gone (trashed, deleted): it goes back to the list, as in File Explorer, once the rows
+   * are out, rather than nowhere (the dialog gives it back to a row that no longer exists) */
+  const focusListAgain = () =>
+    setTimeout(() => {
+      if (focusIsFree(document.activeElement)) s.listNav.current?.focusStart();
+    });
 
   /** Move to the trash (after the dialog asked); `picked` one by one can be put back from the message */
   const trash = async (picked: Picked) => {
@@ -349,7 +358,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     setSelected(new Set());
     if (picked.span) {
       toast.success(t("Moved {n} item to trash|Moved {n} items to trash", { n: picked.count }));
-      void changed({ folders: [picked.span.folder], trash: true, contents: true, usage: true });
+      void changed({ folders: [picked.span.folder], trash: true, contents: true, usage: true }).then(focusListAgain);
       return;
     }
     // Restoring can fail, e.g. the original folder was deleted, a name conflict, or the space is full
@@ -360,7 +369,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       after: () => changed({ folders: parents, trash: true, contents: true, usage: true }),
     });
     // The rows go at once; the lists aren't loaded again for it
-    void changed({ removed: picked.ids, usage: true });
+    void changed({ removed: picked.ids, usage: true }).then(focusListAgain);
     s.newItems.drop(picked.ids);
   };
   // Keyboard shortcuts, the style's (moving around, search and refresh are the address bar's: see Frame)

@@ -102,7 +102,7 @@ test("only people who are signed in are told which release runs", async ({ page,
   const line = `ThirtyFile ${version}`;
 
   // A quiet line at the bottom of the account menu, not something to choose
-  await page.getByRole("button", { name: /^a\s*admin$/i }).click();
+  await page.getByRole("button", { name: "admin", exact: true }).click();
   const menu = page.getByRole("menu");
   await expect(menu.getByText(line, { exact: true })).toBeVisible();
   await expect(menu.getByRole("menuitem", { name: line })).toHaveCount(0);

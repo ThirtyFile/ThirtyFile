@@ -61,6 +61,8 @@ test("a visitor gets the language of the browser: Japanese, Simplified Chinese o
     await page.goto("/login");
     await expect(page.getByRole("button", { name: dict["Click or press any key to sign in"] })).toBeVisible();
     await expect(languageSwitch(page)).toHaveValue(lang);
+    // Named in the page's language, and in English for someone who can't read it
+    await expect(languageSwitch(page)).toHaveAccessibleName(`${dict["Language"]} / Language`);
     expect(await htmlLang(page)).toBe(tag);
     // The server already put that language's dictionary on the page
     await expect(page.locator(`script[src="/${lang}.js"]`)).toHaveCount(1);
