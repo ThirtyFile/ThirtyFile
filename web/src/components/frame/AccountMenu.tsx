@@ -92,7 +92,10 @@ export function AccountMenu({ usage }: { usage: string | null }) {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger render={<button type="button" className="flex items-center gap-2 rounded px-1 py-1 text-left hover:bg-muted" />}>
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-brand text-[11px] font-medium text-brand-foreground uppercase">{me.username.slice(0, 1)}</span>
+          {/* The initial is a picture of the name, which follows: read once ("admin", not "a admin") */}
+          <span aria-hidden className="flex size-6 shrink-0 items-center justify-center rounded-full bg-brand text-[11px] font-medium text-brand-foreground uppercase">
+            {me.username.slice(0, 1)}
+          </span>
           <span className="min-w-0 flex-1 truncate text-xs" title={me.display_name ? me.username : undefined}>
             {me.display_name || me.username}
           </span>

@@ -36,8 +36,8 @@ export function Resizer(props: {
       aria-valuemax={props.max}
       tabIndex={props.untabbable ? -1 : 0}
       className={cn(
-        // A bar where it is when it has the keyboard focus (the mouse only changes the cursor)
-        "absolute inset-y-0 z-10 w-1.5 cursor-col-resize rounded-full outline-none focus-visible:bg-brand max-md:hidden",
+        // A bar where it is when it has the keyboard focus, ringed as buttons are (the mouse only changes the cursor)
+        "absolute inset-y-0 z-10 w-1.5 cursor-col-resize rounded-full outline-none focus-visible:bg-brand focus-visible:ring-3 focus-visible:ring-ring max-md:hidden",
         props.edge === "right" ? "-right-[3px]" : "-left-[3px]",
         // The last column's handle stays inside the table: sticking out, it would make the list scroll sideways
         "[th:last-child>&]:right-0",

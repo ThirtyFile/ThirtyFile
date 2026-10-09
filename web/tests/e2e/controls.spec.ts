@@ -1,6 +1,6 @@
 // Tabs, drop-down lists, choices and error messages work with the keyboard and a screen reader.
 import { expect, test } from "@playwright/test";
-import { makeFolder, signIn } from "./helpers";
+import { answer, makeFolder, makeUser, openFolder, signIn, signInAsNewUser, uploadFile } from "./helpers";
 
 test("Tab doesn't stop on the tabs' close buttons, and Delete closes the focused tab", async ({ page }) => {
   await signIn(page);
@@ -72,4 +72,58 @@ test("a wrong share password marks the field and points it to the message", asyn
   await expect(field).toHaveAttribute("aria-invalid", "true");
   const described = await field.getAttribute("aria-describedby");
   await expect(page.locator(`[id="${described}"]`)).toHaveRole("alert");
+});
+
+/** Where the keyboard focus is: inside a dialog, or nowhere in particular (the page's body) */
+const focusInDialog = (page: import("@playwright/test").Page) => page.evaluate(() => !!document.activeElement?.closest("[role=dialog]"));
+const focusLost = (page: import("@playwright/test").Page) => page.evaluate(() => !document.activeElement || document.activeElement === document.body);
+
+test("Tab and Shift+Tab stay inside an open dialog", async ({ page }) => {
+  await signIn(page);
+  // The account button is read as the name it shows, not with its initial in front ("aadmin")
+  await expect(page.getByRole("button", { name: "admin", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "New tag" }).click();
+  const dialog = page.getByRole("dialog", { name: "New tag" });
+  await expect(dialog.getByLabel("Name")).toBeFocused();
+  for (const key of ["Tab", "Tab", "Tab", "Tab", "Tab", "Tab", "Shift+Tab", "Shift+Tab", "Shift+Tab", "Shift+Tab", "Shift+Tab", "Shift+Tab", "Shift+Tab"]) {
+    await page.keyboard.press(key);
+    // Past the last control the focus meets a guard just outside the dialog, which sends it back to the first: settled,
+    // it is inside again
+    await expect.poll(() => focusInDialog(page), { message: `after ${key}` }).toBe(true);
+  }
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+});
+
+test("after a wrong password is acknowledged, the focus is back in the password field", async ({ page, browser, baseURL }) => {
+  await signIn(page);
+  // An account of its own: wrong passwords slow down further sign-ins to the account, which the other tests use
+  const username = await makeUser(page, "wrong-password");
+  const fresh = await browser.newContext({ baseURL });
+  const login = await fresh.newPage();
+  await login.goto("/login");
+  await login.getByRole("button", { name: "Click or press any key to sign in" }).click();
+  await expect(login.getByLabel("Username")).toBeFocused();
+  await login.getByLabel("Username").fill(username);
+  await login.getByLabel("Password").fill("not the password");
+  await login.getByRole("button", { name: "Sign in", exact: true }).click();
+  await login.getByRole("button", { name: "OK" }).click();
+  await expect(login.getByLabel("Password")).toBeFocused();
+  await fresh.close();
+});
+
+test("after confirming Move to trash, the focus is in the list, not lost", async ({ page }) => {
+  await signInAsNewUser(page, "trash-focus");
+  const dir = await makeFolder(page, "Trash focus");
+  await uploadFile(page, dir, "a.txt", "a");
+  await uploadFile(page, dir, "b.txt", "b");
+  await page.evaluate(() => localStorage.setItem("tf-view", JSON.stringify("list")));
+  await openFolder(page, dir);
+  await page.locator("[data-node-id]").filter({ hasText: "a.txt" }).click();
+  await page.keyboard.press("Delete");
+  const trashed = answer(page, "POST", "/api/nodes/trash");
+  await page.getByRole("button", { name: "Move to trash" }).click();
+  expect((await trashed).ok()).toBe(true);
+  await expect(page.locator("[data-node-id]").filter({ hasText: "a.txt" })).toHaveCount(0);
+  await expect.poll(() => focusLost(page)).toBe(false);
 });
