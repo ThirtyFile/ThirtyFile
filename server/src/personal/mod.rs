@@ -36,7 +36,7 @@ const RETRY_INTERVAL: Duration = Duration::from_secs(60);
 /// The location of new personal spaces by the policy: the one chosen in the settings while it exists, else the
 /// default location
 pub async fn policy_location(st: &AppState, conn: &mut SqliteConnection) -> AppResult<String> {
-    let chosen = st.system.read().unwrap().personal_location.clone();
+    let chosen = st.system.read().personal_location.clone();
     if !chosen.is_empty() && crate::db::location_exists(conn, &chosen).await? {
         return Ok(chosen);
     }
@@ -48,7 +48,7 @@ pub async fn policy_location(st: &AppState, conn: &mut SqliteConnection) -> AppR
 /// (chosen just now), else it gives way to the policy (a domain rule saved before the location was deleted).
 /// Returns the location, or None for no personal space.
 pub async fn choose(st: &AppState, conn: &mut SqliteConnection, create: Option<bool>, location: Option<&str>, strict: bool) -> AppResult<Option<String>> {
-    if !create.unwrap_or_else(|| st.system.read().unwrap().personal_spaces) {
+    if !create.unwrap_or_else(|| st.system.read().personal_spaces) {
         return Ok(None);
     }
     match location.filter(|l| !l.is_empty()) {
@@ -172,13 +172,19 @@ async fn retry_in(st: &AppState, tx: &mut SqliteConnection, id: i64) -> AppResul
 /// Tries the waiting personal spaces again every minute (a location that is back is used within a minute). First makes
 /// personal spaces left read-only by a removal that was interrupted writable again (`release_interrupted`).
 pub fn spawn_retry(st: AppState) {
-    tokio::spawn(async move {
-        release_interrupted(&st).await;
-        let mut tick = tokio::time::interval(RETRY_INTERVAL);
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            tick.tick().await;
-            retry_pending(&st, None).await;
+    crate::util::supervise("personal space retries", move |restarted| {
+        let st = st.clone();
+        async move {
+            // Only at the start: after a restart of this loop alone, a removal marked as running may still be running
+            if !restarted {
+                release_interrupted(&st).await;
+            }
+            let mut tick = tokio::time::interval(RETRY_INTERVAL);
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tick.tick().await;
+                retry_pending(&st, None).await;
+            }
         }
     });
 }

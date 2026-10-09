@@ -20,18 +20,22 @@ pub const RETRY_WAITING: i64 = 300;
 /// Looks at the policies every few seconds, and when woken (`Queue::policies`)
 pub fn spawn<W, T, F>(st: AppState, what: &'static str, wake: W, tick: T)
 where
-    W: Fn(&AppState) -> &tokio::sync::Notify + Send + 'static,
-    T: Fn(AppState, i64) -> F + Send + 'static,
-    F: Future<Output = AppResult<()>> + Send,
+    W: Fn(&AppState) -> &tokio::sync::Notify + Send + Sync + 'static,
+    T: Fn(AppState, i64) -> F + Send + Sync + 'static,
+    F: Future<Output = AppResult<()>> + Send + 'static,
 {
-    tokio::spawn(async move {
-        loop {
-            if let Err(e) = tick(st.clone(), crate::util::now()).await {
-                tracing::warn!("{what}: {}", e.message);
-            }
-            tokio::select! {
-                _ = wake(&st).notified() => {}
-                _ = tokio::time::sleep(std::time::Duration::from_secs(BATCH_SECONDS as u64)) => {}
+    let (wake, tick) = (std::sync::Arc::new(wake), std::sync::Arc::new(tick));
+    crate::util::supervise(what, move |_| {
+        let (st, wake, tick) = (st.clone(), wake.clone(), tick.clone());
+        async move {
+            loop {
+                if let Err(e) = tick(st.clone(), crate::util::now()).await {
+                    tracing::warn!("{what}: {}", e.message);
+                }
+                tokio::select! {
+                    _ = wake(&st).notified() => {}
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(BATCH_SECONDS as u64)) => {}
+                }
             }
         }
     });
@@ -130,7 +134,7 @@ pub async fn requeue(conn: &mut sqlx::SqliteConnection, table: &str, id: &str, p
 
 /// Whether `location` was checked since `last_run` and works: a run waiting for it is tried again at once
 pub fn back(st: &AppState, location: &str, last_run: Option<i64>) -> bool {
-    st.location_health.lock().unwrap().get(location).is_some_and(|h| h.ok && last_run.is_some_and(|l| h.checked_at > l))
+    st.location_health.lock().get(location).is_some_and(|h| h.ok && last_run.is_some_and(|l| h.checked_at > l))
 }
 
 /// What administrators are told about a policy

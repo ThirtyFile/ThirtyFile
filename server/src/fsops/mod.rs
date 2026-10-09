@@ -190,10 +190,10 @@ fn disk_wake() -> Duration {
 
 /// Folder spaces whose disk left a step unanswered: until it answers, their changes fail at once, so a disk that hangs
 /// ties up one thread, not one more per request
-static STUCK: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+static STUCK: crate::sync::Mutex<Vec<String>> = crate::sync::Mutex::new(Vec::new());
 
 fn stuck(drive: &str) -> bool {
-    STUCK.lock().unwrap().iter().any(|d| d == drive)
+    STUCK.lock().iter().any(|d| d == drive)
 }
 
 fn not_answering() -> AppError {
@@ -215,12 +215,12 @@ where
         Ok(done) => done.map_err(AppError::internal)?,
         Err(_) => {
             tracing::warn!("The disk of the folder space {drive} didn't answer within {} s", wait.as_secs());
-            STUCK.lock().unwrap().push(drive.to_string());
+            STUCK.lock().push(drive.to_string());
             // It is let go once the step is done at last (whatever it did then shows at the next scan)
             let drive = drive.to_string();
             tokio::spawn(async move {
                 let _ = task.await;
-                STUCK.lock().unwrap().retain(|d| *d != drive);
+                STUCK.lock().retain(|d| *d != drive);
                 tracing::info!("The disk of the folder space {drive} answers again");
             });
             Err(not_answering())
@@ -269,7 +269,9 @@ async fn after_place() {
 /// Tests: a disk that doesn't answer
 #[cfg(test)]
 pub(crate) mod testing {
-    use std::{collections::HashMap, sync::Mutex, time::Duration};
+    use std::{collections::HashMap, time::Duration};
+
+    use crate::sync::Mutex;
 
     static HUNG: Mutex<Option<HashMap<String, Duration>>> = Mutex::new(None);
 
@@ -278,10 +280,10 @@ pub(crate) mod testing {
         struct Answer(String);
         impl Drop for Answer {
             fn drop(&mut self) {
-                HUNG.lock().unwrap().get_or_insert_default().remove(&self.0);
+                HUNG.lock().get_or_insert_default().remove(&self.0);
             }
         }
-        HUNG.lock().unwrap().get_or_insert_default().insert(drive.to_string(), delay);
+        HUNG.lock().get_or_insert_default().insert(drive.to_string(), delay);
         Answer(drive.to_string())
     }
 
@@ -292,17 +294,17 @@ pub(crate) mod testing {
         struct Identities(std::path::PathBuf);
         impl Drop for Identities {
             fn drop(&mut self) {
-                NO_IDENTITIES.lock().unwrap().retain(|d| *d != self.0);
+                NO_IDENTITIES.lock().retain(|d| *d != self.0);
             }
         }
         let dir = std::fs::canonicalize(dir).unwrap();
-        NO_IDENTITIES.lock().unwrap().push(dir.clone());
+        NO_IDENTITIES.lock().push(dir.clone());
         Identities(dir)
     }
 
     pub fn identities(dir: &std::path::Path) -> bool {
         let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-        !NO_IDENTITIES.lock().unwrap().contains(&dir)
+        !NO_IDENTITIES.lock().contains(&dir)
     }
 
     static NO_LINKS: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -312,15 +314,15 @@ pub(crate) mod testing {
         struct Links(String);
         impl Drop for Links {
             fn drop(&mut self) {
-                NO_LINKS.lock().unwrap().retain(|d| *d != self.0);
+                NO_LINKS.lock().retain(|d| *d != self.0);
             }
         }
-        NO_LINKS.lock().unwrap().push(drive.to_string());
+        NO_LINKS.lock().push(drive.to_string());
         Links(drive.to_string())
     }
 
     pub fn hard_links(drive: &str) -> bool {
-        !NO_LINKS.lock().unwrap().iter().any(|d| d == drive)
+        !NO_LINKS.lock().iter().any(|d| d == drive)
     }
 
     /// Disk steps are given up after a second (instead of 20 or 60) until the guard is dropped
@@ -342,15 +344,15 @@ pub(crate) mod testing {
         struct Grace(String);
         impl Drop for Grace {
             fn drop(&mut self) {
-                NO_GRACE.lock().unwrap().retain(|d| *d != self.0);
+                NO_GRACE.lock().retain(|d| *d != self.0);
             }
         }
-        NO_GRACE.lock().unwrap().push(drive.to_string());
+        NO_GRACE.lock().push(drive.to_string());
         Grace(drive.to_string())
     }
 
     pub fn versions_grace(drive: &str) -> bool {
-        !NO_GRACE.lock().unwrap().iter().any(|d| d == drive)
+        !NO_GRACE.lock().iter().any(|d| d == drive)
     }
 
     /// Where a change can stop as if ThirtyFile stopped there (`stop_at`)
@@ -377,16 +379,16 @@ pub(crate) mod testing {
         struct Reset(String);
         impl Drop for Reset {
             fn drop(&mut self) {
-                STOPS.lock().unwrap().retain(|(d, _)| *d != self.0);
+                STOPS.lock().retain(|(d, _)| *d != self.0);
             }
         }
-        STOPS.lock().unwrap().push((drive.to_string(), at));
+        STOPS.lock().push((drive.to_string(), at));
         Reset(drive.to_string())
     }
 
     /// Whether a change to `drive` stops at `at` (once)
     pub fn stops(drive: &str, at: Stop) -> bool {
-        let mut stops = STOPS.lock().unwrap();
+        let mut stops = STOPS.lock();
         let Some(i) = stops.iter().position(|(d, s)| d == drive && *s == at) else { return false };
         stops.remove(i);
         true
@@ -401,16 +403,16 @@ pub(crate) mod testing {
 
     /// A file at `path` was put on disk (`sync_file`)
     pub fn synced(path: &std::path::Path) {
-        SYNCED.lock().unwrap().push(path.to_path_buf());
+        SYNCED.lock().push(path.to_path_buf());
     }
 
     pub fn was_synced(path: &std::path::Path) -> bool {
-        SYNCED.lock().unwrap().iter().any(|p| p == path)
+        SYNCED.lock().iter().any(|p| p == path)
     }
 
     /// A call to the disk of `drive`
     pub fn disk_call(drive: &str) {
-        let delay = HUNG.lock().unwrap().as_ref().and_then(|h| h.get(drive).copied());
+        let delay = HUNG.lock().as_ref().and_then(|h| h.get(drive).copied());
         if let Some(d) = delay {
             std::thread::sleep(d);
         }
@@ -715,7 +717,7 @@ mod tests {
         assert!(env.node_at(&space.drive, "notes (conflict copy).txt").await.is_some());
 
         // The copy is named in the system default language, whoever saves
-        env.st.system.write().unwrap().default_lang = "zh-TW".into();
+        env.st.system.write().default_lang = "zh-TW".into();
         write_old(&space.dir.join("notes.txt"), b"changed on the server again");
         let err = save(b"four", node(&env, &id).await.updated_at).await.unwrap_err();
         assert_eq!(err.code, Some("conflict_copy"), "{}", err.message);
@@ -1248,20 +1250,20 @@ mod tests {
         // While the copy waits for the index, the destination holds it under a copy's name: should ThirtyFile stop
         // now, the copy is removed later (`clean_leftovers`) rather than put in place next to the original, which is
         // still in "One"
-        let (dir, seen) = (two.dir.clone(), std::sync::Arc::new(std::sync::Mutex::new(Vec::new())));
+        let (dir, seen) = (two.dir.clone(), std::sync::Arc::new(crate::sync::Mutex::new(Vec::new())));
         let names = seen.clone();
         let _hook = hook_after_place(move || {
             let (dir, names) = (dir.clone(), names.clone());
             Box::pin(async move {
                 let found = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned());
-                names.lock().unwrap().extend(found.filter(|n| n.starts_with(".thirtyfile-") && n != crate::folders::MARKER));
+                names.lock().extend(found.filter(|n| n.starts_with(".thirtyfile-") && n != crate::folders::MARKER));
             })
         });
         OTHER_DISK.with(|d| d.set(true));
         let moved = crate::nodes::move_nodes(State(env.st.clone()), admin.clone(), req(json!({ "ids": [sub], "dest_id": two.root }))).await;
         OTHER_DISK.with(|d| d.set(false));
         assert_eq!(moved.unwrap().0.state, "done");
-        let seen = seen.lock().unwrap().clone();
+        let seen = seen.lock().clone();
         assert!(seen.len() == 1 && seen[0].starts_with(COPY_PREFIX), "{seen:?}");
         assert!(two.dir.join("Sub/x.txt").is_file());
     }

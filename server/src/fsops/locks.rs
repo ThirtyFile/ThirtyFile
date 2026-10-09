@@ -20,8 +20,8 @@ pub(super) struct Renamed {
 pub struct SpaceLocks {
     pub(super) st: AppState,
     pub(super) held: Vec<(String, OwnedMutexGuard<()>)>,
-    pub(super) renamed: std::sync::Mutex<Vec<Renamed>>,
-    pub(super) unfinished: std::sync::Mutex<Vec<changes::Unfinished>>,
+    pub(super) renamed: crate::sync::Mutex<Vec<Renamed>>,
+    pub(super) unfinished: crate::sync::Mutex<Vec<changes::Unfinished>>,
     pub(super) committed: std::sync::atomic::AtomicBool,
 }
 
@@ -40,17 +40,17 @@ impl SpaceLocks {
 
     /// `note`, for a rename written into the space's journal (`journal`)
     pub(super) fn note_journaled(&self, now: Pinned, was: Pinned, made: Option<Pinned>, journal: Option<Entry>) {
-        self.renamed.lock().unwrap_or_else(|e| e.into_inner()).push(Renamed { now, was, made, journal });
+        self.renamed.lock().push(Renamed { now, was, made, journal });
     }
 
     /// What the change leaves to finish after its transaction, if anything
     pub fn later(&self, unfinished: Option<changes::Unfinished>) {
-        self.unfinished.lock().unwrap_or_else(|e| e.into_inner()).extend(unfinished);
+        self.unfinished.lock().extend(unfinished);
     }
 
     /// The change is in the index: its renames stay, and what it left to finish is finished once the locks go
     pub fn committed(&self) {
-        let renamed = std::mem::take(&mut *self.renamed.lock().unwrap_or_else(|e| e.into_inner()));
+        let renamed = std::mem::take(&mut *self.renamed.lock());
         remove_entries_later(renamed.into_iter().filter_map(|r| r.journal).collect());
         self.committed.store(true, std::sync::atomic::Ordering::SeqCst);
     }
@@ -58,12 +58,12 @@ impl SpaceLocks {
 
 impl Drop for SpaceLocks {
     fn drop(&mut self) {
-        let unfinished = std::mem::take(self.unfinished.get_mut().unwrap_or_else(|e| e.into_inner()));
+        let unfinished = std::mem::take(self.unfinished.get_mut());
         if *self.committed.get_mut() && !unfinished.is_empty() {
             let held = std::mem::take(&mut self.held).into_iter().map(|(_, g)| g).collect();
             changes::finish_later(&self.st, unfinished, held);
         }
-        let renamed = std::mem::take(self.renamed.get_mut().unwrap_or_else(|e| e.into_inner()));
+        let renamed = std::mem::take(self.renamed.get_mut());
         if renamed.is_empty() {
             return;
         }

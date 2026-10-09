@@ -35,9 +35,9 @@ pub use crate::storage::BUILTIN;
 #[derive(Default)]
 pub struct Memory {
     /// Storage locations whose marker was found or written since the server started (locations/markers.rs)
-    pub marked: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    pub marked: crate::sync::Mutex<std::collections::BTreeSet<String>>,
     /// Storage locations whose failed deletions are being retried now (locations/health.rs)
-    pub retries: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    pub retries: crate::sync::Mutex<std::collections::BTreeSet<String>>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -130,7 +130,7 @@ mod tests {
             .await
             .unwrap();
         let backend = crate::storage::LocalStorage::create(folder.map_or_else(|| env.dir.join(id), FsPath::to_path_buf), id).unwrap();
-        env.st.storages.write().unwrap().insert(id.into(), Arc::new(backend));
+        env.st.storages.write().insert(id.into(), Arc::new(backend));
     }
 
     async fn make_default(env: &testutil::TestEnv, id: &str) {

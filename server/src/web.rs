@@ -176,7 +176,7 @@ pub async fn serve(State(st): State<crate::state::AppState>, uri: Uri, headers: 
             // Inject branding (title, favicon, colors) so the default styling doesn't flash while loading
             let lang = PageLang::of(&st, &headers).await;
             let page = lang.tag(&String::from_utf8_lossy(&index.data));
-            let mut html = crate::branding::inject(&page, &st.part::<crate::branding::Memory>().settings.read().unwrap(), &lang.script());
+            let mut html = crate::branding::inject(&page, &st.part::<crate::branding::Memory>().settings.read(), &lang.script());
             if let Some(dict) = lang.dictionary()
                 && Assets::get(&dict).is_some()
             {
@@ -225,7 +225,7 @@ mod tests {
         let env = crate::testutil::env().await;
         let amy = env.user("amy", true).await;
         let (_, session) = env.sign_in(&amy, "Firefox").await;
-        env.st.system.write().unwrap().default_lang = "en".into();
+        env.st.system.write().default_lang = "en".into();
         let page = |h: HeaderMap| {
             let st = env.st.clone();
             async move { PageLang::of(&st, &h).await }

@@ -215,7 +215,7 @@ async fn copy_one(cx: &Ctx<'_>, dst: &Arc<dyn Storage>, root: &Pinned, item: &It
     };
     #[cfg(test)]
     {
-        let hook = AFTER_STORE.lock().unwrap().iter().find(|(id, _)| *id == job.id).map(|(_, h)| h.clone());
+        let hook = AFTER_STORE.lock().iter().find(|(id, _)| *id == job.id).map(|(_, h)| h.clone());
         if let Some(hook) = hook {
             hook(hash.clone()).await;
         }
@@ -265,7 +265,7 @@ pub type Hook = std::sync::Arc<dyn Fn(String) -> futures_util::future::BoxFuture
 
 /// Tests: called for a move (by its id) between storing a content and recording the copy
 #[cfg(test)]
-pub static AFTER_STORE: std::sync::Mutex<Vec<(String, Hook)>> = std::sync::Mutex::new(Vec::new());
+pub static AFTER_STORE: crate::sync::Mutex<Vec<(String, Hook)>> = crate::sync::Mutex::new(Vec::new());
 
 /// Stores a temp file at the target unless it has that content already (the temp file goes either way); returns
 /// whether it was stored now. The caller holds the content's staging guard.

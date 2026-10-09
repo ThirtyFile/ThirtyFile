@@ -79,11 +79,15 @@ pub async fn health(axum::extract::State(st): axum::extract::State<AppState>) ->
     }
     // Only whether each storage location is reachable: the reasons can name servers, and this endpoint is public
     let locations: serde_json::Map<String, serde_json::Value> =
-        st.location_health.lock().unwrap().iter().map(|(id, h)| (id.clone(), serde_json::Value::from(if h.ok { "ok" } else { "offline" }))).collect();
+        st.location_health.lock().iter().map(|(id, h)| (id.clone(), serde_json::Value::from(if h.ok { "ok" } else { "offline" }))).collect();
     for (id, s) in &locations {
         if s != "ok" {
             warnings.push(format!("storage location {id} is offline"));
         }
+    }
+    // A background task that stopped on an error was started again: worth a look at the logs, for a day
+    if util::last_restart().is_some_and(|t| util::now() - t < 86400) {
+        warnings.push("a background task stopped on an error and was started again".into());
     }
     let status = if warnings.is_empty() { "ok" } else { "degraded" };
     if !warnings.is_empty() {
@@ -116,7 +120,7 @@ mod tests {
         assert!(v.get("version").is_none(), "anyone can ask, so it doesn't name the release");
         // Disk space is only read on Unix
         assert!(!cfg!(unix) || v["disks"]["data"]["total_bytes"].as_u64().unwrap() > 0);
-        env.st.location_health.lock().unwrap().insert("nas".into(), state::LocationHealth { ok: false, error: Some("secret host".into()), checked_at: 0 });
+        env.st.location_health.lock().insert("nas".into(), state::LocationHealth { ok: false, error: Some("secret host".into()), checked_at: 0 });
         let v = body(health(axum::extract::State(env.st.clone())).await).await;
         assert_eq!((v["status"].as_str(), v["locations"]["nas"].as_str()), (Some("degraded"), Some("offline")));
         assert!(!v.to_string().contains("secret host"), "reasons stay private");

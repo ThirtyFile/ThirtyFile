@@ -249,7 +249,7 @@ pub async fn build_overview(st: &AppState, now: i64) -> AppResult<Overview> {
         sqlx::query_as("SELECT id, name, kind FROM storage_locations ORDER BY (id = 'local') DESC, created_at, name").fetch_all(&st.db).await?;
     let mut locations = Vec::new();
     for (id, name, kind) in rows {
-        let health = st.location_health.lock().unwrap().get(&id).cloned();
+        let health = st.location_health.lock().get(&id).cloned();
         locations.push(LocationUsage {
             online: st.location_offline(&id).is_none(),
             error: st.location_offline(&id),
@@ -282,7 +282,7 @@ pub async fn build_overview(st: &AppState, now: i64) -> AppResult<Overview> {
             _ => queue.moves_paused = n,
         }
     }
-    queue.jobs_running = st.part::<crate::jobs::Memory>().jobs.lock().unwrap().values().filter(|j| j.state == "running").count() as i64;
+    queue.jobs_running = st.part::<crate::jobs::Memory>().jobs.lock().values().filter(|j| j.state == "running").count() as i64;
     (queue.pending_deletes,) = sqlx::query_as("SELECT COUNT(*) FROM pending_blob_deletes").fetch_one(&st.db).await?;
 
     let alerts = alerts(&thresholds, &locations, total.as_ref());

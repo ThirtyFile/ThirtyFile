@@ -205,7 +205,7 @@ pub async fn test(State(st): State<AppState>, Admin(admin): Admin, headers: Head
     }
     let saved = load(&st.db).await;
     let s = settings_from(SettingsReq { enabled: true, ..req.settings }, &saved)?;
-    let site = st.part::<crate::branding::Memory>().settings.read().unwrap().site_name.clone();
+    let site = st.part::<crate::branding::Memory>().settings.read().site_name.clone();
     // In the language of the administrator who sends it
     let visitor = crate::i18n::Visitor::SignedIn(crate::i18n::saved(&st, admin.id).await?);
     let lang = crate::i18n::resolve(&headers, visitor, crate::i18n::system_default(&st));

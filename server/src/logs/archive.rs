@@ -47,7 +47,7 @@ async fn status(st: &AppState) -> AppResult<Value> {
         sqlx::query_as("SELECT id, kind, from_at, to_at, rows, bytes, created_at FROM log_archives ORDER BY to_at DESC, id DESC").fetch_all(&st.db).await?;
     let last_run: Option<i64> = get_setting(&st.db, "log_archived_at").await?.and_then(|v| v.parse().ok());
     Ok(json!({
-        "settings": *st.part::<Memory>().settings.read().unwrap(),
+        "settings": *st.part::<Memory>().settings.read(),
         "activity": { "rows": activity_rows, "oldest": activity_oldest },
         "share_access": { "rows": share_rows, "oldest": share_oldest },
         "login_log": { "rows": login_rows, "oldest": login_oldest },
@@ -90,7 +90,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
         record_activity(&mut tx, &user, None, "settings", &detail).await?;
         tx.commit().await?;
     }
-    *st.part::<Memory>().settings.write().unwrap() = s;
+    *st.part::<Memory>().settings.write() = s;
     Ok(Json(status(&st).await?))
 }
 
@@ -250,7 +250,7 @@ pub async fn run_archive(st: &AppState) -> AppResult<ArchiveSummary> {
     let Ok(_running) = st.part::<Memory>().archive_lock.try_lock() else {
         return Err(AppError::new(axum::http::StatusCode::CONFLICT, "Log archiving is already running"));
     };
-    let cfg = st.part::<Memory>().settings.read().unwrap().clone();
+    let cfg = st.part::<Memory>().settings.read().clone();
     let mut sum = ArchiveSummary::default();
     tokio::fs::create_dir_all(archive_dir(st)).await?;
     for (i, (kind, days)) in KINDS.into_iter().zip([cfg.activity_days, cfg.share_days, cfg.login_days, cfg.activity_days]).enumerate() {
@@ -508,7 +508,7 @@ mod tests {
         assert_eq!(v["settings"]["activity_days"], 30);
         let saved = super::super::load_settings(&env.st.db).await;
         assert_eq!((saved.activity_days, saved.share_days, saved.login_days, saved.archive, saved.record_visitor), (30, 0, 1, false, false));
-        assert_eq!(env.st.part::<Memory>().settings.read().unwrap().login_days, 1, "in use at once");
+        assert_eq!(env.st.part::<Memory>().settings.read().login_days, 1, "in use at once");
         assert_eq!(
             logged(&env, "settings").await,
             ["Log settings: activity 30 days, share visits never cleaned up, sign-ins 1 day, delete directly, archives kept forever, visitor IPs not recorded"]

@@ -246,11 +246,17 @@ impl Server {
         let listener = tokio::net::TcpListener::bind(&self.addr).await?;
         tracing::info!("ThirtyFile started: http://{}", self.addr);
         serve(listener, app).await?;
+        // Background loops end, giving back the connections they hold
+        crate::util::stop_background();
         // Sign-in and share access events still queued are written before exiting
         self.log_writer.finish().await;
         // Let SQLite update its statistics and fold the write-ahead log into the database file
         let _ = sqlx::query("PRAGMA optimize").execute(&db_pool).await;
-        db_pool.close().await;
+        // A job still running (a backup, say) holds a connection until it reaches a pause: it isn't waited for past a
+        // few seconds, and continues from what it recorded at the next start
+        if tokio::time::timeout(std::time::Duration::from_secs(5), db_pool.close()).await.is_err() {
+            tracing::warn!("Background jobs were still running when ThirtyFile stopped; they continue at the next start");
+        }
         tracing::info!("Stopped");
         Ok(())
     }

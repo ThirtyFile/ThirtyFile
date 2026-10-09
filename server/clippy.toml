@@ -4,3 +4,8 @@ disallowed-methods = [
     { path = "sqlx::Connection::begin", reason = "start write transactions with db::begin_write (BEGIN IMMEDIATE)" },
     { path = "sqlx::Acquire::begin", reason = "start write transactions with db::begin_write (BEGIN IMMEDIATE)" },
 ]
+disallowed-types = [
+    # A panic while one is held "poisons" it, and every later lock().unwrap() panics: one failed request would break all
+    { path = "std::sync::Mutex", reason = "use crate::sync::Mutex, which a panic doesn't make unusable" },
+    { path = "std::sync::RwLock", reason = "use crate::sync::RwLock, which a panic doesn't make unusable" },
+]

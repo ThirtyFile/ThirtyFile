@@ -105,13 +105,13 @@ impl Job {
 
 /// Changes the search of location `id` (`Memory::unused_searches`, one per location, the latest) if it is `scan_id`
 fn update(st: &AppState, id: &str, scan_id: &str, f: impl FnOnce(&mut Job)) {
-    if let Some(job) = st.part::<crate::location_tools::Memory>().unused_searches.lock().unwrap().get_mut(id).filter(|j| j.scan_id == scan_id) {
+    if let Some(job) = st.part::<crate::location_tools::Memory>().unused_searches.lock().get_mut(id).filter(|j| j.scan_id == scan_id) {
         f(job);
     }
 }
 
 pub async fn unused_status(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> Json<Option<Job>> {
-    Json(st.part::<crate::location_tools::Memory>().unused_searches.lock().unwrap().get(&id).map(Job::view))
+    Json(st.part::<crate::location_tools::Memory>().unused_searches.lock().get(&id).map(Job::view))
 }
 
 /// Starts a search in the background; its progress is read with `unused_status`
@@ -138,7 +138,7 @@ pub async fn find_unused(State(st): State<AppState>, _: Admin, Path(id): Path<St
         all: Vec::new(),
     };
     {
-        let mut jobs = st.part::<crate::location_tools::Memory>().unused_searches.lock().unwrap();
+        let mut jobs = st.part::<crate::location_tools::Memory>().unused_searches.lock();
         if jobs.get(&id).is_some_and(|j| matches!(j.phase, Phase::Scanning | Phase::Removing)) {
             return Err(AppError::conflict("This location is already being checked or cleaned up"));
         }
@@ -190,7 +190,7 @@ pub async fn scan(st: &AppState, id: &str, s: &dyn Storage, cutoff: i64, seen: &
         .into_iter()
         .map(|r| r.0)
         .collect();
-        let staging: HashSet<String> = st.part::<crate::tree::Memory>().blob_guard.lock().unwrap().staging.keys().cloned().collect();
+        let staging: HashSet<String> = st.part::<crate::tree::Memory>().blob_guard.lock().staging.keys().cloned().collect();
         for e in chunk {
             if known.contains(&e.name) || staging.contains(&e.name) {
                 continue;
@@ -218,7 +218,7 @@ pub async fn remove_unused(State(st): State<AppState>, Admin(user): Admin, Path(
     let loc = location(&st, &id).await?;
     locations::require_own_place(&st, &id, &loc.kind, st.storage(&id)?.as_ref()).await?;
     let (job, items) = {
-        let mut jobs = st.part::<crate::location_tools::Memory>().unused_searches.lock().unwrap();
+        let mut jobs = st.part::<crate::location_tools::Memory>().unused_searches.lock();
         let job = jobs
             .get_mut(&id)
             .filter(|j| j.scan_id == req.scan_id && j.phase == Phase::Found)
@@ -396,7 +396,7 @@ mod tests {
             .await
             .unwrap();
         let dir = env.dir.join(&id);
-        env.st.storages.write().unwrap().insert(id.clone(), std::sync::Arc::new(crate::storage::LocalStorage::create(dir.clone(), &id).unwrap()));
+        env.st.storages.write().insert(id.clone(), std::sync::Arc::new(crate::storage::LocalStorage::create(dir.clone(), &id).unwrap()));
         let marker = dir.join(storage::LOCATION_MARKER);
         // Another installation's marker (the place was set up by another ThirtyFile with a location of the same id)
         std::fs::write(&marker, format!("{id}\nanother-installation\n")).unwrap();

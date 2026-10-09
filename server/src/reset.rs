@@ -38,7 +38,7 @@ const WRONG_LINKS: usize = 20;
 /// Where reset links point: the "Site URL" setting. Never the address a request came with, which whoever sends the
 /// request chooses; without the setting, resetting by email isn't offered.
 fn link_base(st: &AppState) -> Option<String> {
-    Some(st.system.read().unwrap().public_url.clone()).filter(|u| !u.is_empty())
+    Some(st.system.read().public_url.clone()).filter(|u| !u.is_empty())
 }
 
 /// What the sign-in page offers
@@ -97,7 +97,7 @@ pub async fn forgot(
             tx.commit().await?;
         }
         logs::record_login(&st, Some(id), &username, "password_reset_requested", &ip, &headers);
-        let site = st.part::<crate::branding::Memory>().settings.read().unwrap().site_name.clone();
+        let site = st.part::<crate::branding::Memory>().settings.read().site_name.clone();
         let link = format!("{base}/reset-password?token={token}");
         // In the account's language, not the one of whoever asked
         let lang = crate::i18n::recipient(&chosen_lang, &last_lang, crate::i18n::system_default(&st));
@@ -190,7 +190,7 @@ mod tests {
         let Json(o) = options(State(env.st.clone())).await.unwrap();
         assert_eq!(o["password_reset"], false);
         assert!(forgot_req("amy").await.is_err());
-        env.st.system.write().unwrap().public_url = "https://files.example.com".into();
+        env.st.system.write().public_url = "https://files.example.com".into();
         email_on(&env, 1).await;
         let Json(o) = options(State(env.st.clone())).await.unwrap();
         assert_eq!(o["password_reset"], true);
@@ -274,7 +274,7 @@ mod tests {
         let (links,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM password_resets").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(links, 0);
 
-        env.st.system.write().unwrap().public_url = "https://files.example.com".into();
+        env.st.system.write().public_url = "https://files.example.com".into();
         let Json(o) = options(State(env.st.clone())).await.unwrap();
         assert_eq!(o["password_reset"], true);
         assert!(forgot_req().await.is_ok());
@@ -291,8 +291,8 @@ mod tests {
         sqlx::query("UPDATE users SET email = 'amy@example.com', chosen_lang = 'zh-TW' WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
         let (port, mut mails) = crate::mail::tests::fake_server(true).await;
         email_on(&env, port).await;
-        env.st.system.write().unwrap().public_url = "https://files.example.com".into();
-        env.st.system.write().unwrap().default_lang = "en".into();
+        env.st.system.write().public_url = "https://files.example.com".into();
+        env.st.system.write().default_lang = "en".into();
         let mut headers = HeaderMap::new();
         headers.insert(axum::http::header::COOKIE, "tf_lang=en; tf_lang_chosen=1".parse().unwrap());
         headers.insert(axum::http::header::ACCEPT_LANGUAGE, "en-US".parse().unwrap());
@@ -313,7 +313,7 @@ mod tests {
         // Without a language of her own: the system default, before the language she last used
         sqlx::query("UPDATE users SET chosen_lang = '', lang = 'zh-TW' WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
         sqlx::query("DELETE FROM password_resets").execute(&env.st.db).await.unwrap();
-        env.st.part::<crate::auth::Memory>().login_failures.lock().unwrap().clear();
+        env.st.part::<crate::auth::Memory>().login_failures.lock().clear();
         asks(2).await;
         let (_, text) = tokio::time::timeout(std::time::Duration::from_secs(10), mails.recv()).await.unwrap().unwrap();
         assert!(text.contains(&first_line(Lang::En)), "{text}");
@@ -353,7 +353,7 @@ mod tests {
     async fn a_new_password_ends_sign_ins_waiting_for_their_second_step() {
         let env = testutil::env().await;
         let (amy, token) = amy_with_link(&env).await;
-        env.st.system.write().unwrap().require_two_factor = true;
+        env.st.system.write().require_two_factor = true;
         let login = |password: &str| {
             let req = crate::signin::LoginReq { username: "amy".into(), password: password.into() };
             crate::signin::login(State(env.st.clone()), addr(), HeaderMap::new(), Json(req))

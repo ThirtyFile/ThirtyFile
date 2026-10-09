@@ -30,7 +30,7 @@ async fn add_bucket(env: &TestEnv, id: &str) {
         .execute(&env.st.db)
         .await
         .unwrap();
-    env.st.storages.write().unwrap().insert(id.into(), Arc::new(LocalStorage::create(env.dir.join(id), id).unwrap()));
+    env.st.storages.write().insert(id.into(), Arc::new(LocalStorage::create(env.dir.join(id), id).unwrap()));
 }
 
 /// Where a location of `add_bucket` (or the built-in one, "blobs") keeps a content
@@ -135,7 +135,7 @@ impl Storage for Hooked {
 /// The built-in location, with a hook before each read
 fn hook_builtin(env: &TestEnv, on_open: impl Fn(String) -> BoxFuture<'static, ()> + Send + Sync + 'static) {
     let hooked = Hooked { inner: LocalStorage::new(env.dir.join("blobs"), "local"), on_open: Box::new(on_open) };
-    env.st.storages.write().unwrap().insert("local".into(), Arc::new(hooked));
+    env.st.storages.write().insert("local".into(), Arc::new(hooked));
 }
 
 /// Stops a move (pauses or cancels it) at the `at`-th content it reads; counts the reads
@@ -163,7 +163,7 @@ fn stop_reading(env: &TestEnv, location: &str, ctl: &Arc<Control>, at: usize, ca
             Box::pin(async {})
         }),
     };
-    env.st.storages.write().unwrap().insert(location.into(), Arc::new(hooked));
+    env.st.storages.write().insert(location.into(), Arc::new(hooked));
 }
 
 /// Files with different content in Amy's space, more than a page of them; returns (id, content)
@@ -418,7 +418,7 @@ async fn a_move_to_a_location_that_cant_be_reached_fails_and_can_be_resumed() {
     let files = many_files(&env, &amy, 3).await;
     let id = move_to(&env, &[&drive], "bucket").await.unwrap();
     // Gone before it starts: it fails, and the space stays as it was
-    let backend = env.st.storages.write().unwrap().remove("bucket").unwrap();
+    let backend = env.st.storages.write().remove("bucket").unwrap();
     assert_eq!(run_move(&env, &id).await, "failed");
     let (error,): (Option<String>,) = sqlx::query_as("SELECT error FROM space_moves WHERE id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
     assert!(error.unwrap().starts_with("The target storage location can't be reached"));
@@ -431,7 +431,7 @@ async fn a_move_to_a_location_that_cant_be_reached_fails_and_can_be_resumed() {
     assert!(move_to(&env, &[&bobs], "bucket").await.unwrap_err().message.starts_with("The target storage location can't be reached"));
 
     // Back again: resumed, it finishes
-    env.st.storages.write().unwrap().insert("bucket".into(), backend);
+    env.st.storages.write().insert("bucket".into(), backend);
     let _ = resume(State(env.st.clone()), Admin(env.admin().await), Path(id.clone())).await.unwrap();
     assert_eq!(run_move(&env, &id).await, "done");
     assert_eq!(read(&env, &amy, &files[0].0).await, files[0].1);
@@ -545,7 +545,7 @@ async fn moves_run_one_at_a_time_unless_set_otherwise() {
     }
     // A task leaves the running list just after it records how its move ended
     let deadline = Instant::now() + Duration::from_secs(30);
-    while !env.st.part::<Memory>().queue.running.lock().unwrap().is_empty() {
+    while !env.st.part::<Memory>().queue.running.lock().is_empty() {
         assert!(Instant::now() < deadline, "a move that ended is still on the running list");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -580,7 +580,7 @@ impl Storage for PutHook {
 /// The bucket of `add_bucket`, with a hook each time something is stored in it
 fn hook_bucket(env: &TestEnv, id: &str, on_put: impl Fn(String) -> BoxFuture<'static, ()> + Send + Sync + 'static) {
     let hooked = PutHook { inner: LocalStorage::new(env.dir.join(id), id), on_put: Box::new(on_put) };
-    env.st.storages.write().unwrap().insert(id.into(), Arc::new(hooked));
+    env.st.storages.write().insert(id.into(), Arc::new(hooked));
 }
 
 /// Pauses or cancels a move once `at` files are stored in the bucket
@@ -873,7 +873,7 @@ async fn add_nas(env: &TestEnv, id: &str) -> std::path::PathBuf {
         .execute(&env.st.db)
         .await
         .unwrap();
-    env.st.storages.write().unwrap().insert(id.into(), Arc::new(LocalStorage::create(dir.clone(), id).unwrap()));
+    env.st.storages.write().insert(id.into(), Arc::new(LocalStorage::create(dir.clone(), id).unwrap()));
     dir
 }
 
@@ -1093,7 +1093,7 @@ async fn several_spaces_move_one_after_the_other_and_a_location_can_then_be_dele
         if left == 0 {
             break;
         }
-        assert!(env.st.part::<Memory>().queue.running.lock().unwrap().len() <= 1);
+        assert!(env.st.part::<Memory>().queue.running.lock().len() <= 1);
         tokio::time::sleep(Duration::from_millis(20)).await;
         start_due(&env.st).await.unwrap();
     }
@@ -1353,7 +1353,7 @@ async fn content_stored_by_a_move_is_kept_from_deletion_until_the_copy_is_record
     let id = move_to(&env, &[&all], "bucket").await.unwrap();
     // Background deletion runs right after the content is stored again, before the copy is recorded
     let st = env.st.clone();
-    to_store::AFTER_STORE.lock().unwrap().push((
+    to_store::AFTER_STORE.lock().push((
         id.clone(),
         Arc::new(move |_| {
             let st = st.clone();
@@ -1363,7 +1363,7 @@ async fn content_stored_by_a_move_is_kept_from_deletion_until_the_copy_is_record
         }),
     ));
     let ended = run_move(&env, &id).await;
-    to_store::AFTER_STORE.lock().unwrap().retain(|(m, _)| *m != id);
+    to_store::AFTER_STORE.lock().retain(|(m, _)| *m != id);
     assert_eq!(ended, "done");
     assert!(stored(&env, "bucket", content).is_file());
     assert_eq!(read(&env, &admin, &f).await, content);
@@ -1390,7 +1390,7 @@ async fn a_move_into_a_folder_finishes_when_items_it_planned_are_deleted_meanwhi
     sqlx::query("UPDATE nodes SET trashed_at = 0 WHERE id = ?").bind(&old).execute(&env.st.db).await.unwrap();
     assert_eq!(crate::nodes::purge_expired_trash(&env.st, 1).await.unwrap(), 1);
     sqlx::query("UPDATE node_versions SET created_at = 0").execute(&env.st.db).await.unwrap();
-    env.st.system.write().unwrap().version_days = 1;
+    env.st.system.write().version_days = 1;
     assert_eq!(crate::versions::prune(&env.st).await.unwrap(), 1);
     let _ = resume(State(env.st.clone()), Admin(env.admin().await), Path(id.clone())).await.unwrap();
     let ended = run_move(&env, &id).await;
@@ -1457,7 +1457,7 @@ async fn files_written_into_a_folder_are_finished_off_the_thread_that_serves_req
     let id = move_to(&env, &[&mine], "local").await.unwrap();
     assert_eq!(run_move(&env, &id).await, "done");
     // The test's runtime runs every task on this thread: dating, syncing and renaming the files ran elsewhere
-    let finished = to_folder::FINISHED_ON.lock().unwrap();
+    let finished = to_folder::FINISHED_ON.lock();
     assert!(!finished.is_empty());
     assert!(!finished.contains(&std::thread::current().id()));
 }
@@ -1485,7 +1485,7 @@ async fn a_move_whose_end_couldnt_be_recorded_runs_again() {
     let (_job, ctl) = take_job(&env, &id).await;
     // Its task ended without recording how (the disk was full, say, or it panicked): it is no longer running, and the
     // database still says it is
-    env.st.part::<Memory>().queue.running.lock().unwrap().remove(&id);
+    env.st.part::<Memory>().queue.running.lock().remove(&id);
     drop(ctl);
     assert_eq!(state(&env, &id).await, "running");
     start_due(&env.st).await.unwrap();

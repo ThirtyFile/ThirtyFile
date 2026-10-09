@@ -25,7 +25,7 @@ pub struct Memory {
     /// Folder spaces were added, changed or removed: watching follows
     pub spaces_changed: tokio::sync::Notify,
     /// The folder spaces whose every folder is watched for changes now
-    pub watched: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    pub watched: std::sync::Arc<crate::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
 /// A folder is checked this long after its last change (a little longer than files are left to settle)
@@ -47,7 +47,7 @@ type Spaces = HashMap<String, PathBuf>;
 /// Whether every folder of the space is watched now: changes there show up by themselves, so the regular scan of it
 /// runs less often (folders.rs)
 pub fn is_watched(st: &AppState, drive_id: &str) -> bool {
-    st.part::<Memory>().watched.lock().unwrap().contains(drive_id)
+    st.part::<Memory>().watched.lock().contains(drive_id)
 }
 
 /// Watches every folder space from one thread with one inotify instance, since every user has a folder space and
@@ -58,27 +58,46 @@ pub fn spawn_watchers(st: AppState) {
     let (tx, rx) = std::sync::mpsc::channel::<Spaces>();
     {
         let st = st.clone();
-        if let Err(e) = std::thread::Builder::new().name("thirtyfile-watch".into()).spawn(move || watch(st, handle, rx)) {
+        if let Err(e) = std::thread::Builder::new().name("thirtyfile-watch".into()).spawn(move || watch_until_closed(&st, &handle, &rx)) {
             tracing::warn!("Can't watch folder spaces for changes: {e}");
             return;
         }
     }
-    tokio::spawn(async move {
-        loop {
-            let spaces: Vec<(String, String)> =
-                sqlx::query_as("SELECT id, source_path FROM drives WHERE mode = 'folder' AND disabled = 0 AND source_path IS NOT NULL")
-                    .fetch_all(&st.db)
-                    .await
-                    .unwrap_or_default();
-            if tx.send(spaces.into_iter().map(|(id, p)| (id, PathBuf::from(p))).collect()).is_err() {
-                return;
-            }
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(60)) => {}
-                _ = st.part::<Memory>().spaces_changed.notified() => {}
+    crate::util::supervise("folder space list for watching", move |_| {
+        let (st, tx) = (st.clone(), tx.clone());
+        async move {
+            loop {
+                let spaces: Vec<(String, String)> =
+                    sqlx::query_as("SELECT id, source_path FROM drives WHERE mode = 'folder' AND disabled = 0 AND source_path IS NOT NULL")
+                        .fetch_all(&st.db)
+                        .await
+                        .unwrap_or_default();
+                if tx.send(spaces.into_iter().map(|(id, p)| (id, PathBuf::from(p))).collect()).is_err() {
+                    return;
+                }
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(60)) => {}
+                    _ = st.part::<Memory>().spaces_changed.notified() => {}
+                }
             }
         }
     });
+}
+
+/// Runs the watcher until the list of spaces stops coming. Should it panic, no space counts as watched (they are
+/// scanned as often as the others) and it starts again after a pause, with the next list of spaces.
+fn watch_until_closed(st: &AppState, handle: &tokio::runtime::Handle, rx: &std::sync::mpsc::Receiver<Spaces>) {
+    let mut pause = Duration::from_secs(5);
+    loop {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| watch(st.clone(), handle.clone(), rx)));
+        st.part::<Memory>().watched.lock().clear();
+        if result.is_ok() {
+            return;
+        }
+        tracing::error!("Watching folder spaces for changes stopped on an error; it starts again in {} s", pause.as_secs());
+        std::thread::sleep(pause);
+        pause = (pause * 2).min(Duration::from_secs(600));
+    }
 }
 
 /// Unknown or shared file systems cannot establish external event delivery by registering a watch or writing a
@@ -119,7 +138,7 @@ struct Watcher {
     /// Spaces using refresh-on-open and regular scans, with their paths (told in the log once)
     skipped: HashMap<String, PathBuf>,
     /// Where the fully watched spaces are told (`Memory::watched`)
-    published: std::sync::Arc<std::sync::Mutex<HashSet<String>>>,
+    published: std::sync::Arc<crate::sync::Mutex<HashSet<String>>>,
 }
 
 impl Drop for Watcher {
@@ -277,11 +296,11 @@ impl Watcher {
 
     /// Tells the scanner which spaces are fully watched: none once the watch limit was reached
     fn publish(&self) {
-        *self.published.lock().unwrap() = if self.limited { Default::default() } else { self.roots.keys().cloned().collect() };
+        *self.published.lock() = if self.limited { Default::default() } else { self.roots.keys().cloned().collect() };
     }
 }
 
-fn watch(st: AppState, handle: tokio::runtime::Handle, rx: std::sync::mpsc::Receiver<Spaces>) {
+fn watch(st: AppState, handle: tokio::runtime::Handle, rx: &std::sync::mpsc::Receiver<Spaces>) {
     // SAFETY: plain system call
     let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
     if fd < 0 {
@@ -494,7 +513,7 @@ mod tests {
         let mut w = watcher();
         w.update(HashMap::from([("d1".to_string(), dir.clone())]));
         assert_eq!(paths(&w), ["", "Sub", "Sub/Inner"]);
-        assert!(w.published.lock().unwrap().contains("d1"));
+        assert!(w.published.lock().contains("d1"));
 
         // Renamed: the old paths go, the new ones come (not a lookup of a missing path at every change)
         std::fs::rename(dir.join("Sub"), dir.join("Moved")).unwrap();
@@ -516,7 +535,7 @@ mod tests {
 
         // Spaces that go stop being watched
         w.update(HashMap::new());
-        assert!(w.dirs.is_empty() && !w.published.lock().unwrap().contains("d1"));
+        assert!(w.dirs.is_empty() && !w.published.lock().contains("d1"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

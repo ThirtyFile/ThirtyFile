@@ -496,7 +496,7 @@ async fn write_one(st: &AppState, dir: &Pinned, name: &str, hash: Option<&str>, 
         // Waiting for the disk blocks: not on the thread that serves requests
         tokio::task::spawn_blocking(move || {
             #[cfg(test)]
-            FINISHED_ON.lock().unwrap().push(std::thread::current().id());
+            FINISHED_ON.lock().push(std::thread::current().id());
             out.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(modified.max(0) as u64))?;
             out.sync_all()?;
             drop(out);
@@ -520,7 +520,7 @@ async fn write_one(st: &AppState, dir: &Pinned, name: &str, hash: Option<&str>, 
 
 /// Tests: the threads that finished writing a file into the folder (dated, synced and renamed it)
 #[cfg(test)]
-pub static FINISHED_ON: std::sync::Mutex<Vec<std::thread::ThreadId>> = std::sync::Mutex::new(Vec::new());
+pub static FINISHED_ON: crate::sync::Mutex<Vec<std::thread::ThreadId>> = crate::sync::Mutex::new(Vec::new());
 
 /// Switches the space to its folder in one transaction. False when an item isn't planned or copied yet.
 async fn switch(cx: &Ctx<'_>, folder: &Path) -> AppResult<bool> {

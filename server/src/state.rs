@@ -2,8 +2,10 @@ use std::{
     any::{Any, TypeId},
     collections::HashMap,
     path::PathBuf,
-    sync::{Arc, Mutex, RwLock},
+    sync::Arc,
 };
+
+use crate::sync::{Mutex, RwLock};
 
 use sqlx::SqlitePool;
 
@@ -155,15 +157,15 @@ impl Inner {
 
     /// Returns the root folder id of the shared space when it is enabled
     pub fn shared_root(&self) -> Option<String> {
-        let s = self.system.read().unwrap();
+        let s = self.system.read();
         s.shared_enabled.then(|| s.shared_root_id.clone())
     }
     /// Returns the reason when a storage location is offline (its settings couldn't be loaded, or the most recent connection check failed)
     pub fn location_offline(&self, location: &str) -> Option<String> {
-        if !self.storages.read().unwrap().contains_key(location) {
+        if !self.storages.read().contains_key(location) {
             return Some("Storage location unavailable".into());
         }
-        let health = self.location_health.lock().unwrap();
+        let health = self.location_health.lock();
         health.get(location).filter(|h| !h.ok).map(|h| h.error.clone().unwrap_or_else(|| "Can't connect".into()))
     }
 
@@ -177,7 +179,7 @@ impl Inner {
     /// Whether the site is served over HTTPS: THIRTYFILE_SECURE_COOKIE, or a Site URL that starts with https. Cookies are
     /// then marked Secure and browsers are told to use HTTPS only (HSTS).
     pub fn https(&self) -> bool {
-        self.secure_cookie || self.system.read().unwrap().public_url.starts_with("https://")
+        self.secure_cookie || self.system.read().public_url.starts_with("https://")
     }
 
     pub fn tmp_dir(&self) -> PathBuf {
@@ -209,13 +211,13 @@ mod tests {
             secure_cookie: false,
             trash_days: 30,
             max_upload: 0,
-            system: env.st.system.read().unwrap().clone(),
+            system: env.st.system.read().clone(),
             parts: Parts::default().with(Counter::default()).with(Names::default()),
         });
         st.part::<Counter>().0.fetch_add(2, std::sync::atomic::Ordering::Relaxed);
-        st.part::<Names>().0.lock().unwrap().push("amy".into());
+        st.part::<Names>().0.lock().push("amy".into());
         assert_eq!(st.part::<Counter>().0.load(std::sync::atomic::Ordering::Relaxed), 2);
-        assert_eq!(*st.part::<Names>().0.lock().unwrap(), ["amy"]);
+        assert_eq!(*st.part::<Names>().0.lock(), ["amy"]);
         // A part nobody added is a mistake in app::startup::parts, and says so
         let missing = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| st.part::<String>().len())).unwrap_err();
         let message = missing.downcast_ref::<String>().cloned().unwrap_or_default();

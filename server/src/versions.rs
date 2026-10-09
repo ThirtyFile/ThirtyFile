@@ -47,7 +47,7 @@ pub struct Policy {
 
 impl Policy {
     pub fn of(st: &AppState) -> Policy {
-        let s = st.system.read().unwrap();
+        let s = st.system.read();
         Policy { keep: s.version_keep, days: s.version_days }
     }
 }
@@ -277,37 +277,42 @@ pub async fn purge_nodes(conn: &mut SqliteConnection, ids: &str) -> AppResult<Re
 /// that are gone (removed from a folder space on the server, say). Returns how many went.
 pub async fn prune(st: &AppState) -> AppResult<usize> {
     let policy = Policy::of(st);
-    let _w = st.write_lock.lock().await;
-    let mut tx = crate::db::begin_write(&st.db).await?;
-    let mut rows: Vec<(Option<String>, Option<String>, Option<String>)> =
-        sqlx::query_as("DELETE FROM node_versions WHERE node_id NOT IN (SELECT id FROM nodes) RETURNING blob_hash, drive_id, fs_path").fetch_all(&mut *tx).await?;
+    // Found without the write lock, then deleted a batch per transaction: with many versions, one transaction would
+    // hold every other change for seconds. A version found here stays one to delete: its file stays gone, it only gets
+    // older, and newer versions only push it further down the list.
+    let mut ids: Vec<String> = Vec::new();
+    let mut add = |rows: Vec<(String,)>| ids.extend(rows.into_iter().map(|(id,)| id));
+    add(sqlx::query_as("SELECT id FROM node_versions WHERE node_id NOT IN (SELECT id FROM nodes)").fetch_all(&st.db).await?);
     if policy.days > 0 {
-        rows.extend(
-            sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>)>(
-                "DELETE FROM node_versions WHERE created_at < ? RETURNING blob_hash, drive_id, fs_path",
-            )
-            .bind(now() - policy.days * 86400)
-            .fetch_all(&mut *tx)
-            .await?,
-        );
+        add(sqlx::query_as("SELECT id FROM node_versions WHERE created_at < ?").bind(now() - policy.days * 86400).fetch_all(&st.db).await?);
     }
-    rows.extend(
-        sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>)>(
-            "DELETE FROM node_versions WHERE id IN (
-               SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY created_at DESC, rowid DESC) AS n FROM node_versions)
-               WHERE n > ?
-             ) RETURNING blob_hash, drive_id, fs_path",
-        )
-        .bind(policy.keep.max(0))
-        .fetch_all(&mut *tx)
-        .await?,
-    );
-    let n = rows.len();
-    let removed = released(&mut tx, rows).await?;
-    tx.commit().await?;
-    removed.finish(st);
+    add(sqlx::query_as(
+        "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY created_at DESC, rowid DESC) AS n FROM node_versions) WHERE n > ?",
+    )
+    .bind(policy.keep.max(0))
+    .fetch_all(&st.db)
+    .await?);
+    ids.sort_unstable();
+    ids.dedup();
+    let mut n = 0;
+    for batch in ids.chunks(PRUNE_BATCH) {
+        let _w = st.write_lock.lock().await;
+        let mut tx = crate::db::begin_write(&st.db).await?;
+        let rows: Vec<(Option<String>, Option<String>, Option<String>)> =
+            sqlx::query_as("DELETE FROM node_versions WHERE id IN (SELECT value FROM json_each(?)) RETURNING blob_hash, drive_id, fs_path")
+                .bind(serde_json::to_string(batch).unwrap())
+                .fetch_all(&mut *tx)
+                .await?;
+        n += rows.len();
+        let removed = released(&mut tx, rows).await?;
+        tx.commit().await?;
+        removed.finish(st);
+    }
     Ok(n)
 }
+
+/// Versions deleted per transaction by `prune`
+const PRUNE_BATCH: usize = if cfg!(test) { 3 } else { 2000 };
 
 /// Files in a versions folder that no version refers to are removed only once they have been there this long: a change
 /// that isn't committed yet may have just put one there
@@ -588,7 +593,7 @@ mod tests {
     }
 
     fn set_policy(env: &testutil::TestEnv, keep: i64, days: i64) {
-        let mut s = env.st.system.write().unwrap();
+        let mut s = env.st.system.write();
         s.version_keep = keep;
         s.version_days = days;
     }
@@ -685,6 +690,31 @@ mod tests {
         assert_eq!(prune(&env.st).await.unwrap(), 1);
         assert_eq!(count(&env, "SELECT COUNT(*) FROM blobs").await, 1);
         assert_eq!(count(&env, "SELECT COUNT(*) FROM node_versions").await, 0);
+    }
+
+    #[tokio::test]
+    async fn many_versions_are_pruned_a_batch_at_a_time() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        set_policy(&env, 10, 90);
+        let mut files = Vec::new();
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            let id = new_file(&env, &amy, amy.root(), name).await;
+            for body in [b"1".as_slice(), b"22", b"333", b"4444"] {
+                let body: &'static [u8] = Box::leak(body.to_vec().into_boxed_slice());
+                save(&env, &amy, &id, body).await;
+            }
+            files.push(id);
+        }
+        // Three versions of each of three files past what is kept now: more than one batch
+        set_policy(&env, 1, 90);
+        assert_eq!(prune(&env.st).await.unwrap(), 9);
+        for id in &files {
+            assert_eq!(versions(&env, &amy, id).await.iter().map(|v| v.size).collect::<Vec<_>>(), [3], "the newest stays");
+        }
+        // The current contents and the one version kept of each
+        assert_eq!(count(&env, "SELECT COUNT(*) FROM blobs").await, 2);
+        assert_eq!(prune(&env.st).await.unwrap(), 0);
     }
 
     #[tokio::test]

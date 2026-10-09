@@ -1,4 +1,6 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use crate::sync::Mutex;
 
 use axum::{
     Json,
@@ -147,14 +149,14 @@ pub fn request_id() -> Option<String> {
 
 /// Notes who sent the request being answered (called when the session is recognised)
 pub fn note_user(id: i64, username: &str) {
-    let _ = REQUEST.try_with(|c| *c.user.lock().unwrap() = Some((id, username.to_string())));
+    let _ = REQUEST.try_with(|c| *c.user.lock() = Some((id, username.to_string())));
 }
 
 /// Notes the route template that answers the request (a `route_layer`: routing is done by then)
 pub async fn note_route(req: Request, next: Next) -> Response {
     if let Some(p) = req.extensions().get::<MatchedPath>() {
         let p = p.as_str().to_string();
-        let _ = REQUEST.try_with(|c| *c.route.lock().unwrap() = Some(p));
+        let _ = REQUEST.try_with(|c| *c.route.lock() = Some(p));
     }
     next.run(req).await
 }

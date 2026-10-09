@@ -25,7 +25,7 @@ async fn add_location(env: &TestEnv, id: &str, kind: &str, config: serde_json::V
         .execute(&env.st.db)
         .await
         .unwrap();
-    env.st.storages.write().unwrap().insert(id.into(), backend);
+    env.st.storages.write().insert(id.into(), backend);
 }
 
 async fn add_nas(env: &TestEnv, id: &str) -> PathBuf {
@@ -525,7 +525,7 @@ async fn a_sync_waits_for_its_target_continues_after_a_restart_and_is_refused_af
     // Not before its time, unless the location was seen working again since
     assert!(settle(&env, &id).await.is_empty());
     let back = crate::state::LocationHealth { ok: true, error: None, checked_at: crate::util::now() + 1 };
-    env.st.location_health.lock().unwrap().insert("nas".into(), back);
+    env.st.location_health.lock().insert("nas".into(), back);
     assert_eq!(settle(&env, &id).await, ["done"]);
     // ThirtyFile stopped during a sync: it waits for its turn again
     env.upload(&amy, amy.root(), "b.txt", b"b").await;
@@ -615,7 +615,7 @@ async fn folder_spaces_are_read_from_their_folder_kept_from_cleanup_and_read_whe
     // The disk fails: the files are read from their copies, as they were read, and open as usual
     fail_builtin(&env);
     let offline = crate::state::LocationHealth { ok: false, error: Some("The folder isn't there".into()), checked_at: 0 };
-    env.st.location_health.lock().unwrap().insert("local".into(), offline);
+    env.st.location_health.lock().insert("local".into(), offline);
     assert_eq!(read(&env, &admin, &plan).await.unwrap(), b"plan, second");
     let Json(info) = crate::nodes::get(State(env.st.clone()), admin.clone(), Path(plan.clone())).await.unwrap();
     assert!(serde_json::to_value(&info).unwrap()["offline"].is_null());
@@ -638,7 +638,7 @@ async fn folder_spaces_are_read_from_their_folder_kept_from_cleanup_and_read_whe
     let Json(info) = crate::nodes::get(State(env.st.clone()), admin.clone(), Path(plan.clone())).await.unwrap();
     assert!(!serde_json::to_value(&info).unwrap()["offline"].is_null());
     repair_builtin(&env);
-    env.st.location_health.lock().unwrap().remove("local");
+    env.st.location_health.lock().remove("local");
     assert_eq!(read(&env, &admin, &plan).await.unwrap(), b"plan, second");
 }
 
@@ -716,7 +716,7 @@ async fn a_folder_file_that_keeps_changing_keeps_its_copy_as_last_read_and_is_li
     crate::folders::scan(&env.st, &mine).await.unwrap();
     let changing = [(all.clone(), "app.log"), (mine.clone(), "diary.txt"), (all.clone(), "new.log")];
     let keep_changing = |on: bool| {
-        let mut list = super::folders::KEEPS_CHANGING.lock().unwrap();
+        let mut list = super::folders::KEEPS_CHANGING.lock();
         list.retain(|(s, _)| *s != all && *s != mine);
         if on {
             list.extend(changing.iter().map(|(s, p)| (s.clone(), p.to_string())));
@@ -880,7 +880,7 @@ async fn a_promotion_refuses_content_missing_since_its_preflight() {
     let entered = Arc::new(tokio::sync::Notify::new());
     let proceed = Arc::new(tokio::sync::Notify::new());
     let inner = env.st.storage("nas").unwrap();
-    env.st.storages.write().unwrap().insert("nas".into(), Arc::new(PausedPing { inner, entered: entered.clone(), proceed: proceed.clone() }));
+    env.st.storages.write().insert("nas".into(), Arc::new(PausedPing { inner, entered: entered.clone(), proceed: proceed.clone() }));
     let st = env.st.clone();
     let admin = env.admin().await;
     let task = tokio::spawn(async move {
@@ -942,7 +942,7 @@ async fn a_copy_of_another_length_is_replaced_without_deleting_what_is_there_fir
     std::fs::write(stored(&nas, b"the content"), b"the cont").unwrap();
     let deletes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let inner = env.st.storage("nas").unwrap();
-    env.st.storages.write().unwrap().insert("nas".into(), Arc::new(Watched { inner, deletes: deletes.clone() }));
+    env.st.storages.write().insert("nas".into(), Arc::new(Watched { inner, deletes: deletes.clone() }));
     let id = make(&env, json!({ "source": "local", "targets": [{ "location": "nas" }] })).await;
     assert_eq!(settle(&env, &id).await, ["done"]);
     assert_eq!(std::fs::read(stored(&nas, b"the content")).unwrap(), b"the content");

@@ -105,7 +105,7 @@ pub struct SharePolicy {
 }
 
 pub fn policy(st: &AppState) -> SharePolicy {
-    let s = st.system.read().unwrap();
+    let s = st.system.read();
     SharePolicy { password_required: s.share_password_required, max_days: s.share_max_days, public_links: s.public_links }
 }
 
@@ -1230,7 +1230,7 @@ mod tests {
             }
         }
         assert!(waited, "guessing from many addresses is slowed down");
-        env.st.part::<crate::auth::Memory>().login_failures.lock().unwrap().clear();
+        env.st.part::<crate::auth::Memory>().login_failures.lock().clear();
 
         // The unlock lasts a day, even when the cookie is kept longer
         let res = try_from("203.0.113.9", password).await.unwrap();

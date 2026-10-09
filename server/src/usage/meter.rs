@@ -12,10 +12,12 @@ use std::{
     io,
     path::Path,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
+
+use crate::sync::Mutex;
 
 use futures_util::future::BoxFuture;
 use tokio::io::{AsyncRead, ReadBuf};
@@ -260,7 +262,7 @@ pub struct Meters {
 
 impl Meters {
     fn with(&self, location: &str, op: Op, work: Work, f: impl FnOnce(&mut Window)) {
-        let mut all = self.windows.lock().unwrap();
+        let mut all = self.windows.lock();
         let per = match all.get_mut(location) {
             Some(per) => per,
             None => all.entry(location.to_string()).or_default(),
@@ -295,17 +297,17 @@ impl Meters {
 
     /// The counters so far, which start again from nothing
     pub fn take(&self) -> Windows {
-        std::mem::take(&mut *self.windows.lock().unwrap())
+        std::mem::take(&mut *self.windows.lock())
     }
 
     /// The counters so far, left as they are
     pub fn snapshot(&self) -> Windows {
-        self.windows.lock().unwrap().clone()
+        self.windows.lock().clone()
     }
 
     /// Puts counters back (writing them failed: they are written with the next ones)
     pub fn restore(&self, windows: Windows) {
-        let mut all = self.windows.lock().unwrap();
+        let mut all = self.windows.lock();
         for (location, per) in windows {
             let mine = all.entry(location).or_default();
             for (k, w) in per {
@@ -316,11 +318,11 @@ impl Meters {
 
     /// Operations running now, by location
     pub fn active(&self) -> HashMap<String, Active> {
-        self.active.lock().unwrap().iter().filter(|(_, a)| a.calls > 0 || a.transfers > 0).map(|(k, v)| (k.clone(), *v)).collect()
+        self.active.lock().iter().filter(|(_, a)| a.calls > 0 || a.transfers > 0).map(|(k, v)| (k.clone(), *v)).collect()
     }
 
     fn change_active(&self, location: &str, f: impl FnOnce(&mut Active)) {
-        let mut all = self.active.lock().unwrap();
+        let mut all = self.active.lock();
         match all.get_mut(location) {
             Some(a) => f(a),
             None => f(all.entry(location.to_string()).or_default()),
@@ -528,7 +530,7 @@ impl Storage for Metered {
 impl crate::state::Inner {
     /// Gets the backend of a storage location; its calls are counted for Storage usage (usage/)
     pub fn storage(&self, location: &str) -> crate::error::AppResult<Arc<dyn Storage>> {
-        let backend = self.storages.read().unwrap().get(location).cloned().ok_or_else(|| {
+        let backend = self.storages.read().get(location).cloned().ok_or_else(|| {
             crate::error::AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("Storage location \"{location}\" is currently unavailable"))
         })?;
         Ok(Metered::wrap(backend, self.part::<super::Memory>().meters.clone(), self.recheck.clone(), location))

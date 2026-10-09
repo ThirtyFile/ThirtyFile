@@ -164,7 +164,7 @@ pub async fn create(State(st): State<AppState>, Admin(me): Admin, Json(req): Jso
                 can_write: req.can_write,
                 can_delete: req.can_delete,
                 can_share: req.can_share,
-                quota_bytes: req.quota_bytes.unwrap_or_else(|| st.system.read().unwrap().default_user_quota).max(0),
+                quota_bytes: req.quota_bytes.unwrap_or_else(|| st.system.read().default_user_quota).max(0),
                 source: "password",
                 provisioned_by: None,
                 personal_space: personal.as_deref(),
@@ -505,14 +505,14 @@ mod tests {
     async fn default_language_is_validated_and_saved() {
         let env = testutil::env().await;
         let admin = env.admin().await;
-        assert_eq!(env.st.system.read().unwrap().default_lang, "auto");
+        assert_eq!(env.st.system.read().default_lang, "auto");
         let settings = SettingsReq { default_lang: Some("zh-TW".into()), ..Default::default() };
         let Json(info) = update_settings(State(env.st.clone()), Admin(admin.clone()), Json(settings)).await.unwrap();
         assert_eq!(info.default_lang, "zh-TW");
         assert_eq!(crate::settings::load_system_settings(&env.st.db).await.unwrap().default_lang, "zh-TW");
         let bad = SettingsReq { default_lang: Some("fr".into()), ..Default::default() };
         assert!(update_settings(State(env.st.clone()), Admin(admin.clone()), Json(bad)).await.is_err());
-        assert_eq!(env.st.system.read().unwrap().default_lang, "zh-TW");
+        assert_eq!(env.st.system.read().default_lang, "zh-TW");
         // Every language the server knows, also those the Control panel doesn't offer yet
         for lang in ["zh-CN", "ja", "en", "auto"] {
             let settings = SettingsReq { default_lang: Some(lang.into()), ..Default::default() };

@@ -161,16 +161,16 @@ impl ProviderConfig {
 /// What single sign-on keeps in memory (a part of `AppState`)
 pub struct Memory {
     /// Third-party sign-in settings
-    pub settings: std::sync::RwLock<SsoSettings>,
+    pub settings: crate::sync::RwLock<SsoSettings>,
     /// Sign-ins in progress
     pub pending: PendingMap,
     /// One-time tickets for linking a sign-in method to an account: ticket → (user, created)
-    pub link_tickets: std::sync::Mutex<HashMap<String, (i64, std::time::Instant)>>,
+    pub link_tickets: crate::sync::Mutex<HashMap<String, (i64, std::time::Instant)>>,
 }
 
 impl Memory {
     pub fn new(settings: SsoSettings) -> Memory {
-        Memory { settings: std::sync::RwLock::new(settings), pending: Default::default(), link_tickets: Default::default() }
+        Memory { settings: crate::sync::RwLock::new(settings), pending: Default::default(), link_tickets: Default::default() }
     }
 }
 
@@ -300,11 +300,11 @@ struct Endpoints {
 }
 
 #[cfg(test)]
-pub static MOCK_BASE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+pub static MOCK_BASE: crate::sync::Mutex<Option<String>> = crate::sync::Mutex::new(None);
 
 fn endpoints(provider: &str, cfg: &ProviderConfig) -> Endpoints {
     #[cfg(test)]
-    if let Some(base) = MOCK_BASE.lock().unwrap().clone() {
+    if let Some(base) = MOCK_BASE.lock().clone() {
         return Endpoints {
             authorize: format!("{base}/{provider}/authorize"),
             token: format!("{base}/{provider}/token"),
@@ -350,7 +350,7 @@ fn endpoints(provider: &str, cfg: &ProviderConfig) -> Endpoints {
 
 /// The site's public URL: prefers the "Site URL" system setting, otherwise derived from the request's Host
 pub fn base_url(st: &AppState, headers: &HeaderMap) -> String {
-    let public = st.system.read().unwrap().public_url.clone();
+    let public = st.system.read().public_url.clone();
     if !public.is_empty() {
         return public;
     }
@@ -395,7 +395,9 @@ mod tests {
         Router,
         routing::{get as rget, post as rpost},
     };
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+
+    use crate::sync::Mutex;
 
     /// Mock provider: the token endpoint returns the id_token content specified by the test; GitHub also has user and email endpoints
     #[derive(Default)]
@@ -419,7 +421,7 @@ mod tests {
                 rpost(move |body: String| {
                     let m = m1.clone();
                     async move {
-                        let mut m = m.lock().unwrap();
+                        let mut m = m.lock();
                         m.last_form = body;
                         Json(json!({ "access_token": "at", "id_token": jwt(&m.claims) }))
                     }
@@ -429,14 +431,14 @@ mod tests {
                 "/github/user",
                 rget(move || {
                     let m = m2.clone();
-                    async move { Json(m.lock().unwrap().gh_user.clone()) }
+                    async move { Json(m.lock().gh_user.clone()) }
                 }),
             )
             .route(
                 "/github/emails",
                 rget(move || {
                     let m = m3.clone();
-                    async move { Json(m.lock().unwrap().gh_emails.clone()) }
+                    async move { Json(m.lock().gh_emails.clone()) }
                 }),
             );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -464,7 +466,7 @@ mod tests {
             c.client_secret = crate::testutil::password().into();
         }
         f(&mut s);
-        *env.st.part::<Memory>().settings.write().unwrap() = s;
+        *env.st.part::<Memory>().settings.write() = s;
     }
 
     fn location(r: &Response) -> String {
@@ -488,7 +490,7 @@ mod tests {
         let _g = SERIAL.lock().await;
         let env = testutil::env().await;
         let (m, base) = mock_server().await;
-        *MOCK_BASE.lock().unwrap() = Some(base);
+        *MOCK_BASE.lock() = Some(base);
         enable(&env, |_| {});
         let amy = env.user("amy", true).await;
         let start_with =
@@ -512,7 +514,7 @@ mod tests {
         assert_eq!(kind, "sign_in_method");
         let data: Value = serde_json::from_str(&data).unwrap();
         assert_eq!((data["provider"].as_str(), data["account"].as_str()), (Some("google"), Some("ben@example.com")));
-        *MOCK_BASE.lock().unwrap() = None;
+        *MOCK_BASE.lock() = None;
     }
 
     #[tokio::test]
@@ -520,7 +522,7 @@ mod tests {
         let _g = SERIAL.lock().await;
         let env = testutil::env().await;
         let (m, base) = mock_server().await;
-        *MOCK_BASE.lock().unwrap() = Some(base);
+        *MOCK_BASE.lock() = Some(base);
         let amy = env.user("amy", true).await;
         let linked = || async {
             sqlx::query_as::<_, (String,)>("SELECT email FROM user_identities WHERE user_id = ?").bind(amy.id).fetch_optional(&env.st.db).await.unwrap()
@@ -555,7 +557,7 @@ mod tests {
         let req = serde_json::from_value(json!({ "password": crate::util::random_token(20) })).unwrap();
         let _ = crate::admin::update(State(env.st.clone()), Admin(admin), Path(amy.id), Json(req)).await.unwrap();
         assert_eq!(linked().await, None);
-        *MOCK_BASE.lock().unwrap() = None;
+        *MOCK_BASE.lock() = None;
     }
 
     /// Runs the whole flow: start sign-in → (provider) → callback; claims are generated from the nonce
@@ -582,7 +584,7 @@ mod tests {
         assert!(url.contains("code_challenge_method=S256"), "{url}");
         assert_eq!(query_param(&url, "redirect_uri"), format!("http://drive.test/api/auth/sso/{provider}/callback"));
         let (state, nonce) = (query_param(&url, "state"), query_param(&url, "nonce"));
-        m.lock().unwrap().claims = make(&nonce);
+        m.lock().claims = make(&nonce);
         let q = CallbackQuery { code: Some("code-1".into()), state: Some(state), error: None, error_description: None };
         callback(
             State(env.st.clone()),
@@ -617,7 +619,7 @@ mod tests {
         let _g = SERIAL.lock().await;
         let env = testutil::env().await;
         let (m, base) = mock_server().await;
-        *MOCK_BASE.lock().unwrap() = Some(base);
+        *MOCK_BASE.lock() = Some(base);
         enable(&env, |_| {});
         env.user("amy@example.com", true).await;
         // An attacker starts a sign-in and hands the callback URL to another browser (without the state cookie)
@@ -634,7 +636,7 @@ mod tests {
         .await;
         let url = location(&r);
         let (state, nonce) = (query_param(&url, "state"), query_param(&url, "nonce"));
-        m.lock().unwrap().claims = google(&nonce, "g-1", "amy@example.com", true);
+        m.lock().claims = google(&nonce, "g-1", "amy@example.com", true);
         let q = CallbackQuery { code: Some("code-1".into()), state: Some(state), error: None, error_description: None };
         let r =
             callback(State(env.st.clone()), Path("google".into()), Query(q), ConnectInfo("127.0.0.1:1".parse().unwrap()), headers, Err(AppError::unauthorized()))
@@ -655,7 +657,7 @@ mod tests {
         let _g = SERIAL.lock().await;
         let env = testutil::env().await;
         let (_m, base) = mock_server().await;
-        *MOCK_BASE.lock().unwrap() = Some(base);
+        *MOCK_BASE.lock() = Some(base);
         enable(&env, |_| {});
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
@@ -687,7 +689,7 @@ mod tests {
         let _g = SERIAL.lock().await;
         let env = testutil::env().await;
         let (m, base) = mock_server().await;
-        *MOCK_BASE.lock().unwrap() = Some(base);
+        *MOCK_BASE.lock() = Some(base);
         enable(&env, |_| {});
         let attacker = env.user("mallory", true).await;
         let victim = env.user("victim", true).await;
@@ -707,7 +709,7 @@ mod tests {
         let set = r.headers()[header::SET_COOKIE].to_str().unwrap().to_string();
         headers.insert(header::COOKIE, set.split(';').next().unwrap().parse().unwrap());
         let (state, nonce) = (query_param(&url, "state"), query_param(&url, "nonce"));
-        m.lock().unwrap().claims = google(&nonce, "g-9", "victim@example.com", true);
+        m.lock().claims = google(&nonce, "g-9", "victim@example.com", true);
         let q = CallbackQuery { code: Some("code-1".into()), state: Some(state), error: None, error_description: None };
         let r = callback(State(env.st.clone()), Path("google".into()), Query(q), ConnectInfo("127.0.0.1:1".parse().unwrap()), headers, Ok(victim)).await;
         assert!(location(&r).contains("sso_error="), "{}", location(&r));
@@ -746,7 +748,7 @@ mod tests {
         let _g = SERIAL.lock().await;
         let env = testutil::env().await;
         let (m, base) = mock_server().await;
-        *MOCK_BASE.lock().unwrap() = Some(base);
+        *MOCK_BASE.lock() = Some(base);
         enable(&env, |_| {});
         let amy = env.user("amy@example.com", true).await;
         without_password(&env, &amy).await;
@@ -755,7 +757,7 @@ mod tests {
         let r = login(&env, &m, "google", None, |n| google(n, "g-1", "Amy@Example.com", true)).await;
         assert_eq!(location(&r), "/files/abc");
         assert!(r.headers().contains_key(header::SET_COOKIE));
-        assert!(m.lock().unwrap().last_form.contains("code_verifier="), "PKCE: the token exchange must include code_verifier");
+        assert!(m.lock().last_form.contains("code_verifier="), "PKCE: the token exchange must include code_verifier");
         // Afterwards sign-in uses the external account's identifier (even if the email changes)
         let r = login(&env, &m, "google", None, |n| google(n, "g-1", "renamed@example.com", true)).await;
         assert_eq!(location(&r), "/files/abc");
@@ -765,7 +767,7 @@ mod tests {
         assert!(location(&r).starts_with("/login?sso_error="));
         // Automatic creation on: create the account (with the default space size)
         enable(&env, |s| s.google.provisioning = Provisioning::Create);
-        env.st.system.write().unwrap().default_user_quota = 5 << 30;
+        env.st.system.write().default_user_quota = 5 << 30;
         let r = login(&env, &m, "google", None, |n| google(n, "g-2", "ben@example.com", true)).await;
         assert_eq!(location(&r), "/files/abc");
         let (quota,): (i64,) = sqlx::query_as("SELECT quota_bytes FROM users WHERE username = 'ben@example.com'").fetch_one(&env.st.db).await.unwrap();
@@ -804,7 +806,7 @@ mod tests {
         sqlx::query("UPDATE users SET disabled = 1 WHERE username = 'amy@example.com'").execute(&env.st.db).await.unwrap();
         let r = login(&env, &m, "google", None, |n| google(n, "g-1", "amy@example.com", true)).await;
         assert!(location(&r).contains("sso_error"));
-        *MOCK_BASE.lock().unwrap() = None;
+        *MOCK_BASE.lock() = None;
     }
 
     #[tokio::test]
@@ -823,13 +825,13 @@ mod tests {
         assert!(save(oidc(&format!("{base}/other"))).await.is_err());
         // Its endpoints are read from the discovery document
         let _ = save(oidc(&format!("{base}/realm/"))).await.unwrap();
-        let cfg = env.st.part::<Memory>().settings.read().unwrap().oidc.clone();
+        let cfg = env.st.part::<Memory>().settings.read().oidc.clone();
         assert_eq!((cfg.issuer, cfg.authorize_url, cfg.token_url), (format!("{base}/realm"), format!("{base}/oidc/authorize"), format!("{base}/oidc/token")));
         let Json(list) = providers(State(env.st.clone())).await;
         assert!(list.as_array().unwrap().iter().any(|p| p["id"] == "oidc" && p["label"] == "Company login"), "{list}");
 
         // Signing in works like with the others: an account is created for the verified email
-        *MOCK_BASE.lock().unwrap() = Some(base);
+        *MOCK_BASE.lock() = Some(base);
         let r = login(&env, &m, "oidc", None, |n| {
             json!({ "iss": "https://auth.example.com/realm", "aud": "oidc-client", "exp": now() + 600, "nonce": n, "sub": "k-1", "email": "kim@example.com", "email_verified": true, "name": "Kim" })
         })
@@ -837,7 +839,7 @@ mod tests {
         assert_eq!(location(&r), "/files/abc");
         let (source,): (String,) = sqlx::query_as("SELECT source FROM users WHERE username = 'kim@example.com'").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(source, "oidc");
-        *MOCK_BASE.lock().unwrap() = None;
+        *MOCK_BASE.lock() = None;
     }
 
     #[tokio::test]
@@ -845,7 +847,7 @@ mod tests {
         let _g = SERIAL.lock().await;
         let env = testutil::env().await;
         let (m, base) = mock_server().await;
-        *MOCK_BASE.lock().unwrap() = Some(base);
+        *MOCK_BASE.lock() = Some(base);
         enable(&env, |s| s.google.provisioning = Provisioning::Create);
         let user_of = |subject: &'static str| {
             let db = env.st.db.clone();
@@ -873,7 +875,7 @@ mod tests {
         let r = login(&env, &m, "google", None, |n| google(n, "g-33", "Ben@Example.com", true)).await;
         assert_eq!(location(&r), "/files/abc");
         assert_eq!(user_of("g-33").await, ben);
-        *MOCK_BASE.lock().unwrap() = None;
+        *MOCK_BASE.lock() = None;
     }
 
     #[tokio::test]
@@ -881,7 +883,7 @@ mod tests {
         let _g = SERIAL.lock().await;
         let env = testutil::env().await;
         let (m, base) = mock_server().await;
-        *MOCK_BASE.lock().unwrap() = Some(base);
+        *MOCK_BASE.lock() = Some(base);
         let amy = env.user("amy@example.com", true).await;
         without_password(&env, &amy).await;
         let ms = |n: &str| json!({ "iss": "https://login.microsoftonline.com/t1/v2.0", "aud": "microsoft-client", "exp": now() + 600, "nonce": n, "tid": "t1", "oid": "o1", "preferred_username": "amy@example.com" });
@@ -896,7 +898,7 @@ mod tests {
         assert_eq!(location(&r), "/files/abc");
         let (subject,): (String,) = sqlx::query_as("SELECT subject FROM user_identities WHERE provider = 'microsoft'").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(subject, "t1:o1");
-        *MOCK_BASE.lock().unwrap() = None;
+        *MOCK_BASE.lock() = None;
     }
 
     #[tokio::test]
@@ -904,7 +906,7 @@ mod tests {
         let _g = SERIAL.lock().await;
         let env = testutil::env().await;
         let (m, base) = mock_server().await;
-        *MOCK_BASE.lock().unwrap() = Some(base);
+        *MOCK_BASE.lock() = Some(base);
         enable(&env, |_| {});
 
         // The username is the verified email, but signing in through the provider would skip the account's password
@@ -952,7 +954,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(n, 0);
-        *MOCK_BASE.lock().unwrap() = None;
+        *MOCK_BASE.lock() = None;
     }
 
     #[tokio::test]
@@ -960,7 +962,7 @@ mod tests {
         let _g = SERIAL.lock().await;
         let env = testutil::env().await;
         let (m, base) = mock_server().await;
-        *MOCK_BASE.lock().unwrap() = Some(base);
+        *MOCK_BASE.lock() = Some(base);
         let amy = env.user("amy@example.com", true).await;
         without_password(&env, &amy).await;
         enable(&env, |s| s.microsoft.tenant = "t1".into());
@@ -993,7 +995,7 @@ mod tests {
         let r = login(&env, &m, "microsoft", None, ms("o2", json!({ "idp": "https://sts.windows.net/t1/", "acct": 0 }))).await;
         assert_eq!(location(&r), "/files/abc");
         assert_eq!(identities_of(&env, &amy).await, 1);
-        *MOCK_BASE.lock().unwrap() = None;
+        *MOCK_BASE.lock() = None;
     }
 
     #[tokio::test]
@@ -1001,11 +1003,11 @@ mod tests {
         let _g = SERIAL.lock().await;
         let env = testutil::env().await;
         let (m, base) = mock_server().await;
-        *MOCK_BASE.lock().unwrap() = Some(base);
+        *MOCK_BASE.lock() = Some(base);
         enable(&env, |_| {});
         let amy = env.user("amy", true).await;
         {
-            let mut mm = m.lock().unwrap();
+            let mut mm = m.lock();
             mm.gh_user = json!({ "id": 42, "login": "amy-gh", "name": "Amy" });
             mm.gh_emails = json!([{ "email": "amy@personal.example", "primary": true, "verified": true }]);
         }
@@ -1025,7 +1027,7 @@ mod tests {
         let _ = unlink(State(env.st.clone()), amy, Path("github".into()), ConnectInfo("127.0.0.1:1".parse().unwrap()), HeaderMap::new()).await.unwrap();
         let r = login(&env, &m, "github", None, |_| json!({})).await;
         assert!(location(&r).contains("sso_error"));
-        *MOCK_BASE.lock().unwrap() = None;
+        *MOCK_BASE.lock() = None;
     }
 
     #[test]
@@ -1041,7 +1043,7 @@ mod tests {
         let _g = SERIAL.lock().await;
         let env = testutil::env().await;
         let (m, base) = mock_server().await;
-        *MOCK_BASE.lock().unwrap() = Some(base);
+        *MOCK_BASE.lock() = Some(base);
         let (gid,): (i64,) =
             sqlx::query_as("INSERT INTO groups (name, description, created_at) VALUES ('staff', '', 0) RETURNING id").fetch_one(&env.st.db).await.unwrap();
         env.user("carol@example.com", true).await;
@@ -1089,7 +1091,7 @@ mod tests {
 
         // GitHub "off": even an existing user whose username is the email isn't matched
         {
-            let mut mm = m.lock().unwrap();
+            let mut mm = m.lock();
             mm.gh_user = json!({ "id": 77, "login": "carol" });
             mm.gh_emails = json!([{ "email": "carol@example.com", "primary": true, "verified": true }]);
         }
@@ -1125,7 +1127,7 @@ mod tests {
         // Existing users still sign in
         let r = login(&env, &m, "google", None, |n| google(n, "g-10", "dana@example.com", true)).await;
         assert_eq!(location(&r), "/files/abc");
-        *MOCK_BASE.lock().unwrap() = None;
+        *MOCK_BASE.lock() = None;
     }
 
     #[tokio::test]
@@ -1133,7 +1135,7 @@ mod tests {
         let _g = SERIAL.lock().await;
         let env = testutil::env().await;
         let (m, base) = mock_server().await;
-        *MOCK_BASE.lock().unwrap() = Some(base);
+        *MOCK_BASE.lock() = Some(base);
         let (gid,): (i64,) =
             sqlx::query_as("INSERT INTO groups (name, description, created_at) VALUES ('partners', '', 0) RETURNING id").fetch_one(&env.st.db).await.unwrap();
         enable(&env, |s| {
@@ -1188,7 +1190,7 @@ mod tests {
         assert_eq!(location(&r), "/files/abc");
         let (name,): (String,) = sqlx::query_as("SELECT display_name FROM users WHERE username = 'pat@partner.example'").fetch_one(&env.st.db).await.unwrap();
         assert_eq!(name, "Patricia");
-        *MOCK_BASE.lock().unwrap() = None;
+        *MOCK_BASE.lock() = None;
     }
 
     #[tokio::test]
@@ -1196,7 +1198,7 @@ mod tests {
         let _g = SERIAL.lock().await;
         let env = testutil::folders_env().await;
         let (m, base) = mock_server().await;
-        *MOCK_BASE.lock().unwrap() = Some(base);
+        *MOCK_BASE.lock() = Some(base);
         // A Local folder location whose folder isn't there (a share that isn't mounted)
         let nas = env.dir.join("nas");
         sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES ('nas', 'NAS', 'local', ?, 0, 0)")
@@ -1250,6 +1252,6 @@ mod tests {
         let r = login(&env, &m, "google", None, |n| google(n, "g-32", "zoe@example.com", true)).await;
         assert_eq!(location(&r), "/files/abc");
         assert_eq!(space("zoe@example.com").await.1.as_deref(), Some(crate::locations::BUILTIN));
-        *MOCK_BASE.lock().unwrap() = None;
+        *MOCK_BASE.lock() = None;
     }
 }

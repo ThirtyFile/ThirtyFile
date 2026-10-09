@@ -395,7 +395,7 @@ mod tests {
         assert!(call(&app, Method::GET, "/api/auth/me", &[(header::COOKIE, cookie.clone())], None).await.headers().get(header::STRICT_TRANSPORT_SECURITY).is_none());
 
         // An https Site URL: cookies are Secure and browsers are told to keep to HTTPS; signing out clears their cache
-        env.st.system.write().unwrap().public_url = "https://drive.example.com".into();
+        env.st.system.write().public_url = "https://drive.example.com".into();
         let res = call(&app, Method::GET, "/api/auth/me", &[(header::COOKIE, cookie.clone())], None).await;
         assert_eq!(res.headers()[header::STRICT_TRANSPORT_SECURITY], "max-age=31536000");
         assert!(auth::cookie_header(&env.st, "x", "y", "/", 1).ends_with("; Secure"));

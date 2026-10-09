@@ -398,7 +398,7 @@ pub async fn update(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
 /// The policy's job running now stops after the item it is copying
 fn pause_running(st: &AppState, policy: &str) {
     let running: Vec<(String, std::sync::Arc<crate::backups::runner::Control>)> =
-        st.part::<Memory>().queue.running.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        st.part::<Memory>().queue.running.lock().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     let st = st.clone();
     let policy = policy.to_string();
     tokio::spawn(async move {
@@ -558,7 +558,7 @@ pub async fn purge(State(st): State<AppState>, Admin(user): Admin, Json(req): Js
 // ───────────── Jobs ─────────────
 
 pub async fn pause_job(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
-    if let Some(ctl) = st.part::<Memory>().queue.running.lock().unwrap().get(&id) {
+    if let Some(ctl) = st.part::<Memory>().queue.running.lock().get(&id) {
         ctl.pause.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
@@ -591,7 +591,7 @@ pub async fn resume_job(State(st): State<AppState>, _: Admin, Path(id): Path<Str
 }
 
 pub async fn cancel_job(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
-    if let Some(ctl) = st.part::<Memory>().queue.running.lock().unwrap().get(&id) {
+    if let Some(ctl) = st.part::<Memory>().queue.running.lock().get(&id) {
         ctl.cancel.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
@@ -819,7 +819,7 @@ pub async fn promote(State(st): State<AppState>, Admin(user): Admin, Path(id): P
     }
     // A job of the policy running now was asked for before: it stops, and its results are refused anyway
     let running: Vec<(String, std::sync::Arc<crate::backups::runner::Control>)> =
-        st.part::<Memory>().queue.running.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        st.part::<Memory>().queue.running.lock().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     for (job, ctl) in running {
         let mine: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM replica_jobs WHERE id = ? AND policy_id = ?").bind(&job).bind(&id).fetch_optional(&st.db).await?;
         if mine.is_some() {

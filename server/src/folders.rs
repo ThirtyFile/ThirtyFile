@@ -168,13 +168,13 @@ pub enum ScanPhase {
 #[derive(Default)]
 pub struct Memory {
     /// Scans of folder spaces running now, by space
-    pub scans: std::sync::Mutex<std::collections::HashMap<String, ScanProgress>>,
+    pub scans: crate::sync::Mutex<std::collections::HashMap<String, ScanProgress>>,
     /// When each folder of a folder space was last read from disk, by id
-    pub reads: std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
+    pub reads: crate::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
     /// Per folder space: the lock a change to it and the index update of a scan take turns with, and the lock scans
     /// of it take one at a time
-    pub space_locks: std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
-    pub scan_locks: std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+    pub space_locks: crate::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+    pub scan_locks: crate::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
 }
 
 /// A scan in progress, shown in the Control panel
@@ -191,11 +191,11 @@ pub struct ScanProgress {
 
 /// The scan of this space running now, if any
 pub fn progress(st: &AppState, drive_id: &str) -> Option<ScanProgress> {
-    st.part::<Memory>().scans.lock().unwrap().get(drive_id).cloned()
+    st.part::<Memory>().scans.lock().get(drive_id).cloned()
 }
 
 fn set_progress(st: &AppState, drive_id: &str, f: impl FnOnce(&mut ScanProgress)) {
-    let mut map = st.part::<Memory>().scans.lock().unwrap();
+    let mut map = st.part::<Memory>().scans.lock();
     let p = map.entry(drive_id.to_string()).or_insert_with(|| ScanProgress { phase: ScanPhase::Reading, found: 0, done: 0, total: 0, started_at: now() });
     f(p);
 }
@@ -205,7 +205,7 @@ struct ProgressGuard(AppState, String);
 
 impl Drop for ProgressGuard {
     fn drop(&mut self) {
-        self.0.part::<Memory>().scans.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.1);
+        self.0.part::<Memory>().scans.lock().remove(&self.1);
     }
 }
 
@@ -898,7 +898,7 @@ const SYNC_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 /// Tests: every folder counts as not read for a while
 #[cfg(test)]
 pub fn forget_reads(st: &AppState) {
-    st.part::<Memory>().reads.lock().unwrap().clear();
+    st.part::<Memory>().reads.lock().clear();
 }
 
 /// A folder of a folder space is opened (listed on the web, or over WebDAV): new and changed items on the server show
@@ -907,7 +907,7 @@ pub fn forget_reads(st: &AppState) {
 /// copy of a large folder into it, say), or when its disk doesn't answer within a few seconds: the listing then shows
 /// the index as it is.
 pub async fn sync_opened(st: &AppState, folder: &Node) {
-    if watched(st, folder.drive()) || st.part::<Memory>().reads.lock().unwrap().get(&folder.id).is_some_and(|t| t.elapsed() < REREAD_AFTER) {
+    if watched(st, folder.drive()) || st.part::<Memory>().reads.lock().get(&folder.id).is_some_and(|t| t.elapsed() < REREAD_AFTER) {
         return;
     }
     if let Err(e) = try_sync_folder(st, folder, false).await {
@@ -1007,7 +1007,7 @@ async fn try_sync_folder(st: &AppState, folder: &Node, wait: bool) -> AppResult<
     }
     drop(_scanning);
     {
-        let mut reads = st.part::<Memory>().reads.lock().unwrap();
+        let mut reads = st.part::<Memory>().reads.lock();
         reads.retain(|_, t| t.elapsed() < REREAD_AFTER);
         reads.insert(folder.id.clone(), read_at);
     }
@@ -1061,7 +1061,7 @@ pub struct FolderChanges {
 
 pub fn changes(st: &AppState, drive_id: &str) -> FolderChanges {
     let watching = watched(st, drive_id);
-    let minutes = st.system.read().unwrap().scan_minutes;
+    let minutes = st.system.read().scan_minutes;
     FolderChanges { watching, scan_minutes: if watching { minutes.saturating_mul(WATCHED_SCAN_FACTOR) } else { minutes } }
 }
 
@@ -1072,10 +1072,14 @@ fn scan_due(st: &AppState, drive_id: &str, last: i64, at: i64) -> bool {
 
 /// Scans every folder space whose last scan is older than the interval set in the Control panel (0 = never)
 pub fn spawn_scanner(st: AppState) {
-    tokio::spawn(async move {
+    crate::util::supervise("scanner", move |_| scan_due_spaces(st.clone()));
+}
+
+async fn scan_due_spaces(st: AppState) {
+    {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-            let minutes = st.system.read().unwrap().scan_minutes;
+            let minutes = st.system.read().scan_minutes;
             if minutes <= 0 {
                 continue;
             }
@@ -1101,12 +1105,12 @@ pub fn spawn_scanner(st: AppState) {
                 }
             }
         }
-    });
+    }
 }
 
 /// The lock a change to a folder space and the index update of a scan or sync take turns with
 pub(crate) fn drive_lock(st: &AppState, drive_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-    st.part::<Memory>().space_locks.lock().unwrap().entry(drive_id.to_string()).or_default().clone()
+    st.part::<Memory>().space_locks.lock().entry(drive_id.to_string()).or_default().clone()
 }
 
 /// Holds a folder space still while a move switches it over (moves/): no scan updates its index and no change from the
@@ -1119,7 +1123,7 @@ pub(crate) async fn hold(st: &AppState, drive_id: &str) -> (tokio::sync::OwnedMu
 
 /// Scans of a space, one at a time (a scan asked for while one runs waits for it, `scan_later` skips)
 fn scan_lock(st: &AppState, drive_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-    st.part::<Memory>().scan_locks.lock().unwrap().entry(drive_id.to_string()).or_default().clone()
+    st.part::<Memory>().scan_locks.lock().entry(drive_id.to_string()).or_default().clone()
 }
 
 /// Why the storage location a folder space is on can't be used now (its folder isn't there, or holds another
@@ -1628,11 +1632,11 @@ mod tests {
         assert!(scan_due(&env.st, "unwatched", at - 900, at));
         #[cfg(target_os = "linux")]
         {
-            env.st.part::<crate::watch::Memory>().watched.lock().unwrap().insert("watched".into());
+            env.st.part::<crate::watch::Memory>().watched.lock().insert("watched".into());
             assert!(!scan_due(&env.st, "watched", at - 900, at));
             assert!(scan_due(&env.st, "watched", at - 3600, at));
         }
-        env.st.system.write().unwrap().scan_minutes = 0;
+        env.st.system.write().scan_minutes = 0;
         assert!(!scan_due(&env.st, "unwatched", 0, at));
         assert!(!scan_due(&env.st, "watched", 0, at));
     }

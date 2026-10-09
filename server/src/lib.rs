@@ -53,6 +53,7 @@ mod sso;
 mod state;
 mod storage;
 mod style;
+mod sync;
 mod tags;
 #[cfg(test)]
 mod testutil;

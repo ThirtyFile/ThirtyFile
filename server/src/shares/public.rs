@@ -125,7 +125,7 @@ pub struct Seen {
 }
 
 /// `Memory::links`, by link token
-pub type SeenLinks = std::sync::Mutex<std::collections::HashMap<String, Seen>>;
+pub type SeenLinks = crate::sync::Mutex<std::collections::HashMap<String, Seen>>;
 pub(super) const SEEN_FOR: std::time::Duration = std::time::Duration::from_secs(2);
 /// Links, and items per link, kept at most
 pub(super) const SEEN_LINKS: usize = 1000;
@@ -133,7 +133,7 @@ pub(super) const SEEN_ITEMS: usize = 5000;
 
 /// The link `token` as it was seen a moment ago, when nothing changed since and it still works
 pub(super) fn seen(st: &AppState, token: &str) -> Option<(Share, Node)> {
-    let links = st.part::<crate::shares::Memory>().links.lock().unwrap();
+    let links = st.part::<crate::shares::Memory>().links.lock();
     let s = links.get(token).filter(|s| s.at.elapsed() < SEEN_FOR && s.writes == crate::db::writes())?;
     if !policy(st).public_links || s.share.expires_at.is_some_and(|t| t <= now()) {
         return None;
@@ -143,7 +143,7 @@ pub(super) fn seen(st: &AppState, token: &str) -> Option<(Share, Node)> {
 
 /// Keeps what was found of the link `token`, read after `writes` writes had been saved
 pub(super) fn keep_seen(st: &AppState, token: &str, share: &Share, root: &Node, writes: u64) {
-    let mut links = st.part::<crate::shares::Memory>().links.lock().unwrap();
+    let mut links = st.part::<crate::shares::Memory>().links.lock();
     if links.len() >= SEEN_LINKS {
         links.retain(|_, s| s.at.elapsed() < SEEN_FOR);
         if links.len() >= SEEN_LINKS {
@@ -179,23 +179,15 @@ pub(super) async fn shared_node(st: &AppState, share: &Share, root: &Node, id: &
         return Err(AppError::not_found("Item not found"));
     }
     let writes = crate::db::writes();
-    if let Some(n) = st
-        .part::<crate::shares::Memory>()
-        .links
-        .lock()
-        .unwrap()
-        .get(&share.id)
-        .filter(|s| s.writes == writes && s.at.elapsed() < SEEN_FOR)
-        .and_then(|s| s.within.get(id))
+    if let Some(n) =
+        st.part::<crate::shares::Memory>().links.lock().get(&share.id).filter(|s| s.writes == writes && s.at.elapsed() < SEEN_FOR).and_then(|s| s.within.get(id))
     {
         return Ok(n.clone());
     }
     let mut c = st.db.acquire().await?;
     match tree::get_node(&mut c, id).await? {
         Some(n) if n.trashed_at.is_none() && tree::is_within(&mut c, &n.id, &share.node_id).await? => {
-            if let Some(s) =
-                st.part::<crate::shares::Memory>().links.lock().unwrap().get_mut(&share.id).filter(|s| s.writes == writes && s.within.len() < SEEN_ITEMS)
-            {
+            if let Some(s) = st.part::<crate::shares::Memory>().links.lock().get_mut(&share.id).filter(|s| s.writes == writes && s.within.len() < SEEN_ITEMS) {
                 s.within.insert(n.id.clone(), n.clone());
             }
             Ok(n)

@@ -366,8 +366,8 @@ pub fn send_later(st: &AppState, mut emails: Vec<Outgoing>) {
         if !cfg.ready() {
             return;
         }
-        let site = st.part::<crate::branding::Memory>().settings.read().unwrap().site_name.clone();
-        let base = st.system.read().unwrap().public_url.clone();
+        let site = st.part::<crate::branding::Memory>().settings.read().site_name.clone();
+        let base = st.system.read().public_url.clone();
         let default = crate::i18n::system_default(&st);
         for e in emails {
             let lang = crate::i18n::recipient(&e.chosen_lang, &e.lang, default);
@@ -712,7 +712,7 @@ fn tell_old_address(st: &AppState, old: String, username: &str, lang: Lang, new:
         if !cfg.ready() {
             return;
         }
-        let site = st.part::<crate::branding::Memory>().settings.read().unwrap().site_name.clone();
+        let site = st.part::<crate::branding::Memory>().settings.read().site_name.clone();
         let (subject, body) = email_changed(lang, &site, &username, &new);
         if let Err(e) = crate::mail::send(&cfg, &site, &crate::mail::Message { to: &old, subject: &subject, body: &body }).await {
             tracing::warn!("Couldn't tell {old} that the email address of {username} changed: {e}");
@@ -863,7 +863,7 @@ mod tests {
         let mut c = env.st.db.acquire().await.unwrap();
         crate::mail::store(&mut c, &crate::mail::tests::settings(port)).await.unwrap();
         drop(c);
-        env.st.system.write().unwrap().default_lang = "en".into();
+        env.st.system.write().default_lang = "en".into();
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
         let cat = env.user("cat", true).await;

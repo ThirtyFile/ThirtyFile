@@ -73,7 +73,7 @@ pub const MAX_MIN_PASSWORD: usize = 64;
 
 /// The minimum password length currently set
 pub fn min_password(st: &AppState) -> usize {
-    st.system.read().unwrap().min_password_length
+    st.system.read().min_password_length
 }
 
 pub fn validate_password(p: &str, min: usize) -> AppResult<()> {
@@ -256,7 +256,7 @@ impl FromRequestParts<AppState> for Admin {
 /// limit while the first one is still hashing. Returns false (nothing recorded) when the limit is already reached.
 /// A successful attempt is taken back with `attempt_succeeded`.
 pub fn begin_attempt(st: &AppState, key: &str, limit: usize) -> bool {
-    let mut map = st.part::<Memory>().login_failures.lock().unwrap();
+    let mut map = st.part::<Memory>().login_failures.lock();
     let cutoff = now() - FAIL_WINDOW;
     let list = map.entry(key.to_string()).or_default();
     list.retain(|t| *t > cutoff);
@@ -271,7 +271,7 @@ pub fn begin_attempt(st: &AppState, key: &str, limit: usize) -> bool {
 /// each attempt must wait twice as long after the previous one as the one before (up to `ACCOUNT_MAX_DELAY`), which
 /// slows down guessing from many addresses without letting anyone lock the real user out. Returns the seconds to wait.
 pub fn begin_account_attempt(st: &AppState, key: &str) -> Result<(), i64> {
-    let mut map = st.part::<Memory>().login_failures.lock().unwrap();
+    let mut map = st.part::<Memory>().login_failures.lock();
     let ts = now();
     let list = map.entry(key.to_string()).or_default();
     list.retain(|t| *t > ts - FAIL_WINDOW);
@@ -291,12 +291,12 @@ pub fn begin_account_attempt(st: &AppState, key: &str) -> Result<(), i64> {
 /// rather than a password hash): the attempt is checked first and only a failure is counted, with `begin_attempt`.
 pub fn attempts_exhausted(st: &AppState, key: &str, limit: usize) -> bool {
     let cutoff = now() - FAIL_WINDOW;
-    st.part::<Memory>().login_failures.lock().unwrap().get(key).is_some_and(|list| list.iter().filter(|t| **t > cutoff).count() >= limit)
+    st.part::<Memory>().login_failures.lock().get(key).is_some_and(|list| list.iter().filter(|t| **t > cutoff).count() >= limit)
 }
 
 /// Removes the attempt recorded by `begin_attempt` (the password was right)
 pub fn attempt_succeeded(st: &AppState, key: &str) {
-    let mut map = st.part::<Memory>().login_failures.lock().unwrap();
+    let mut map = st.part::<Memory>().login_failures.lock();
     if let Some(list) = map.get_mut(key) {
         list.pop();
         if list.is_empty() {
@@ -308,7 +308,7 @@ pub fn attempt_succeeded(st: &AppState, key: &str) {
 /// Clears expired failed sign-in records (runs periodically, so large numbers of random usernames can't exhaust memory)
 pub fn prune_login_failures(st: &AppState) {
     let cutoff = now() - FAIL_WINDOW;
-    st.part::<Memory>().login_failures.lock().unwrap().retain(|_, list| {
+    st.part::<Memory>().login_failures.lock().retain(|_, list| {
         list.retain(|t| *t > cutoff);
         !list.is_empty()
     });
@@ -319,7 +319,7 @@ pub struct Memory {
     /// Trust X-Forwarded-For sent by a reverse proxy
     pub trust_proxy: TrustProxy,
     /// Failed sign-in records: username → failure timestamps
-    pub login_failures: std::sync::Mutex<std::collections::HashMap<String, Vec<i64>>>,
+    pub login_failures: crate::sync::Mutex<std::collections::HashMap<String, Vec<i64>>>,
 }
 
 impl Memory {
@@ -460,7 +460,7 @@ pub async fn confirm_password(st: &AppState, user_id: i64, password: String) -> 
     if !verify_password(password, hash).await? {
         return Err(AppError::bad_request("Current password is incorrect"));
     }
-    st.part::<Memory>().login_failures.lock().unwrap().remove(&key);
+    st.part::<Memory>().login_failures.lock().remove(&key);
     Ok(())
 }
 

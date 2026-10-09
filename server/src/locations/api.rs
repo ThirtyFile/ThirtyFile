@@ -100,8 +100,8 @@ pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<Lo
             let path = config["path"].as_str().map(str::trim).filter(|p| !p.is_empty());
             path.map_or_else(|| st.storage_dir.clone(), std::path::PathBuf::from)
         }));
-        let health = st.location_health.lock().unwrap().get(&r.id).cloned();
-        let connected = st.storages.read().unwrap().contains_key(&r.id) && health.as_ref().is_none_or(|h| h.ok);
+        let health = st.location_health.lock().get(&r.id).cloned();
+        let connected = st.storages.read().contains_key(&r.id) && health.as_ref().is_none_or(|h| h.ok);
         out.push(LocationInfo {
             builtin: r.id == BUILTIN,
             id: r.id,

@@ -143,7 +143,7 @@ pub async fn list(State(st): State<AppState>, user: User) -> AppResult<Json<Vec<
 }
 
 fn can_create_drive(st: &AppState, user: &User) -> bool {
-    user.is_admin() || st.system.read().unwrap().allow_user_drives
+    user.is_admin() || st.system.read().allow_user_drives
 }
 
 #[derive(Deserialize)]
@@ -755,7 +755,7 @@ pub async fn delete_group(State(st): State<AppState>, Admin(user): Admin, Path(i
     sqlx::query("DELETE FROM grants WHERE principal_type = 'group' AND principal_id = ?").bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM groups WHERE id = ?").bind(id).execute(&mut *tx).await?;
     // Accounts created by single sign-on must no longer be added to it
-    let mut sso = st.part::<crate::sso::Memory>().settings.read().unwrap().clone();
+    let mut sso = st.part::<crate::sso::Memory>().settings.read().clone();
     let changed = sso.forget_group(id);
     if changed {
         crate::sso::store(&mut tx, &sso).await?;
@@ -763,7 +763,7 @@ pub async fn delete_group(State(st): State<AppState>, Admin(user): Admin, Path(i
     logs::record_activity(&mut tx, &user, None, "group_delete", &name).await?;
     tx.commit().await?;
     if changed {
-        *st.part::<crate::sso::Memory>().settings.write().unwrap() = sso;
+        *st.part::<crate::sso::Memory>().settings.write() = sso;
     }
     Ok(Json(json!({ "ok": true })))
 }
@@ -781,7 +781,7 @@ mod tests {
         let own = spaces.iter().find(|d| d.root_id == admin.root()).unwrap();
         let info = serde_json::to_value(own).unwrap();
         assert_eq!(info["folder_changes"], json!({ "watching": false, "scan_minutes": 15 }));
-        env.st.system.write().unwrap().scan_minutes = 0;
+        env.st.system.write().scan_minutes = 0;
         let Json(spaces) = admin_list(State(env.st.clone()), Admin(admin.clone())).await.unwrap();
         assert_eq!(serde_json::to_value(&spaces[0]).unwrap()["folder_changes"]["scan_minutes"], 0);
         let Json(accessible) = list(State(env.st.clone()), admin).await.unwrap();
@@ -867,12 +867,12 @@ mod tests {
         let Json(g) = create_group(State(env.st.clone()), Admin(admin.clone()), group("Sales")).await.unwrap();
         let id = g["id"].as_i64().unwrap();
         {
-            let mut sso = env.st.part::<crate::sso::Memory>().settings.write().unwrap();
+            let mut sso = env.st.part::<crate::sso::Memory>().settings.write();
             sso.google.groups = vec![id];
             sso.domain_rules = vec![crate::sso::DomainRule { domain: "example.com".into(), groups: vec![id, 99], ..Default::default() }];
         }
         let _ = delete_group(State(env.st.clone()), Admin(admin.clone()), Path(id)).await.unwrap();
-        let sso = env.st.part::<crate::sso::Memory>().settings.read().unwrap().clone();
+        let sso = env.st.part::<crate::sso::Memory>().settings.read().clone();
         assert!(sso.google.groups.is_empty() && sso.domain_rules[0].groups == vec![99]);
         let Json(again) = create_group(State(env.st.clone()), Admin(admin), group("Support")).await.unwrap();
         assert!(again["id"].as_i64().unwrap() > id);
@@ -881,7 +881,7 @@ mod tests {
     #[tokio::test]
     async fn standard_users_can_create_a_limited_number_of_spaces() {
         let env = testutil::env().await;
-        env.st.system.write().unwrap().allow_user_drives = true;
+        env.st.system.write().allow_user_drives = true;
         let amy = env.user("amy", true).await;
         for i in 0..MAX_OWN_SPACES {
             let _ = create(
@@ -1003,7 +1003,7 @@ mod tests {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let detail = "connection to nas.example.com (192.0.2.7:22) refused";
-        env.st.location_health.lock().unwrap().insert("local".into(), crate::state::LocationHealth { ok: false, error: Some(detail.into()), checked_at: 0 });
+        env.st.location_health.lock().insert("local".into(), crate::state::LocationHealth { ok: false, error: Some(detail.into()), checked_at: 0 });
         let Json(spaces) = list(State(env.st.clone()), amy.clone()).await.unwrap();
         assert!(!spaces.is_empty());
         for s in &spaces {
@@ -1019,7 +1019,7 @@ mod tests {
     #[tokio::test]
     async fn deleting_a_team_space_needs_the_delete_permission() {
         let env = testutil::env().await;
-        env.st.system.write().unwrap().allow_user_drives = true;
+        env.st.system.write().allow_user_drives = true;
         let amy = env.user("amy", true).await;
         let req = CreateDriveReq { name: "Team".into(), quota_bytes: 0, source_path: None, read_only: false, location_id: None };
         let Json(info) = create(State(env.st.clone()), amy.clone(), Json(req)).await.unwrap();
@@ -1063,7 +1063,7 @@ mod tests {
     #[tokio::test]
     async fn a_space_created_by_a_standard_user_carries_their_quota() {
         let env = testutil::env().await;
-        env.st.system.write().unwrap().allow_user_drives = true;
+        env.st.system.write().allow_user_drives = true;
         let amy = env.user("amy", true).await;
         sqlx::query("UPDATE users SET quota_bytes = 5000 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
         let mut conn = env.st.db.acquire().await.unwrap();

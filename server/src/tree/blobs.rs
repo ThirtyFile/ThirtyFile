@@ -19,7 +19,7 @@ use crate::{
 /// What content deletion keeps in memory (a part of `AppState`)
 #[derive(Default)]
 pub struct Memory {
-    pub blob_guard: std::sync::Mutex<BlobGuard>,
+    pub blob_guard: crate::sync::Mutex<BlobGuard>,
     /// Purge of deleted spaces' content: (running, asked to run again)
     pub detached_purge: (std::sync::atomic::AtomicBool, std::sync::atomic::AtomicBool),
 }
@@ -366,7 +366,7 @@ async fn claim_for_deletion(st: &AppState, hash: &str, location: &str) -> Option
             }
         }
     }
-    let mut g = st.part::<Memory>().blob_guard.lock().unwrap();
+    let mut g = st.part::<Memory>().blob_guard.lock();
     if g.staging.contains_key(hash) {
         return None;
     }
@@ -420,7 +420,7 @@ pub struct BlobMark {
 
 impl Drop for BlobMark {
     fn drop(&mut self) {
-        let mut g = self.st.part::<Memory>().blob_guard.lock().unwrap();
+        let mut g = self.st.part::<Memory>().blob_guard.lock();
         let marks = if self.deleting { &mut g.deleting } else { &mut g.staging };
         if let Some(n) = marks.get_mut(&self.hash) {
             *n -= 1;
@@ -504,7 +504,7 @@ pub struct StagedBlob {
 pub async fn stage_guard(st: &AppState, hash: &str) -> BlobMark {
     loop {
         {
-            let mut g = st.part::<Memory>().blob_guard.lock().unwrap();
+            let mut g = st.part::<Memory>().blob_guard.lock();
             if !g.deleting.contains_key(hash) {
                 *g.staging.entry(hash.to_string()).or_default() += 1;
                 break;
@@ -732,7 +732,7 @@ mod tests {
             inner: crate::storage::LocalStorage::create(env.dir.join("flaky"), "flaky").unwrap(),
             down: std::sync::atomic::AtomicBool::new(true),
         });
-        env.st.storages.write().unwrap().insert("flaky".into(), flaky.clone());
+        env.st.storages.write().insert("flaky".into(), flaky.clone());
         let hash = "cd".repeat(32);
         let blob = env.dir.join("flaky").join("cd").join("cd").join(&hash);
         let tmp = env.dir.join("flaky-src");

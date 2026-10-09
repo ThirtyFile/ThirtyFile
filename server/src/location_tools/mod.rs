@@ -23,7 +23,7 @@ pub use unused::{Job as UnusedSearch, find_unused, remove_unused, unused_status}
 #[derive(Default)]
 pub struct Memory {
     /// Searches for unused content, by storage location (location_tools/unused.rs)
-    pub unused_searches: std::sync::Mutex<std::collections::HashMap<String, UnusedSearch>>,
+    pub unused_searches: crate::sync::Mutex<std::collections::HashMap<String, UnusedSearch>>,
 }
 
 use std::path::PathBuf;

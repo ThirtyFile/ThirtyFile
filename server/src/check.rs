@@ -166,7 +166,7 @@ mod tests {
         // Same size, other bytes: only --verify notices
         let path = env.dir.join("blobs").join(&changed[0..2]).join(&changed[2..4]).join(&changed);
         std::fs::write(&path, "WILL be changed").unwrap();
-        let storages = env.st.storages.read().unwrap().clone();
+        let storages = env.st.storages.read().clone();
         let reports = run(&env.st.db, &storages, true, |_, _| {}).await.unwrap();
         let (_, r) = reports.iter().find(|(id, _)| id == "local").unwrap();
         assert_eq!(r.missing, [gone]);

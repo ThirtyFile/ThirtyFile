@@ -9,7 +9,7 @@ pub(super) enum Placed {
     /// was renamed there (same disk), so undoing renames it back; `copied`: the originals of a move that copied them
     /// (another disk), removed once the index follows; `placed`: where `put_in_place` renamed it to, so that should the
     /// index not follow after all, `undo` takes it back from there
-    Disk { wrap: Pinned, tmp: Pinned, renamed_from: Option<Pinned>, copied: Option<CopiedTree>, placed: Box<std::sync::Mutex<Option<Pinned>>> },
+    Disk { wrap: Pinned, tmp: Pinned, renamed_from: Option<Pinned>, copied: Option<CopiedTree>, placed: Box<crate::sync::Mutex<Option<Pinned>>> },
     /// In the destination's content store: one staged content per file, and the file's size and modification time as
     /// it was stored (by node id)
     Store(HashMap<String, StagedBlob>, HashMap<String, (u64, i64)>),
@@ -214,7 +214,7 @@ pub(crate) const COPY_PREFIX: &str = ".thirtyfile-copy-";
 pub(super) async fn undo(st: &AppState, placed: Placed) {
     match placed {
         Placed::Disk { wrap, tmp, renamed_from, placed, .. } => {
-            let placed = (*placed).into_inner().unwrap_or_else(|e| e.into_inner());
+            let placed = (*placed).into_inner();
             // On a blocking thread (the disk may be one that doesn't answer), waited for so that it is back when the
             // change reports its failure
             let back = tokio::task::spawn_blocking(move || {
@@ -385,7 +385,7 @@ pub(super) async fn still_there(conn: &mut SqliteConnection, dest: &Node) -> App
 pub(super) async fn put_in_place(
     dest: &Node,
     tmp: &Pinned,
-    placed: &std::sync::Mutex<Option<Pinned>>,
+    placed: &crate::sync::Mutex<Option<Pinned>>,
     name: &str,
     rels: &[Option<String>],
 ) -> AppResult<Vec<Option<Stat>>> {
@@ -397,7 +397,7 @@ pub(super) async fn put_in_place(
         Ok((final_path, stats))
     })
     .await?;
-    *placed.lock().unwrap_or_else(|e| e.into_inner()) = Some(final_path);
+    *placed.lock() = Some(final_path);
     #[cfg(test)]
     if testing::stops(dest.drive(), testing::Stop::Placed) {
         return Err(testing::stopped());
@@ -408,7 +408,7 @@ pub(super) async fn put_in_place(
 /// Once the index followed content put in place: the folder that held it goes, before the change is reported done
 pub(super) async fn placed_for_good(placed: &Placed) {
     if let Placed::Disk { wrap, placed, .. } = placed
-        && placed.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+        && placed.lock().is_some()
     {
         let wrap = wrap.clone();
         let removed = tokio::task::spawn_blocking(move || {

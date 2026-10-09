@@ -10,7 +10,7 @@ pub(super) const OFFLINE_INTERVAL: Duration = Duration::from_secs(20);
 pub(super) const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub(super) fn set_health(st: &AppState, id: &str, error: Option<String>) {
-    st.location_health.lock().unwrap().insert(id.to_string(), LocationHealth { ok: error.is_none(), error, checked_at: now() });
+    st.location_health.lock().insert(id.to_string(), LocationHealth { ok: error.is_none(), error, checked_at: now() });
 }
 
 /// Whether a location can be reached now (a lightweight check that writes no data), within `PROBE_TIMEOUT`. The check
@@ -34,7 +34,7 @@ pub async fn probe(st: &AppState, id: &str) -> Result<(), String> {
     if res.is_ok() {
         let _ = tokio::time::timeout(PROBE_TIMEOUT, crate::usage::probe(mark_after_check(st, id, storage.as_ref()))).await;
     }
-    let was_ok = st.location_health.lock().unwrap().get(id).is_none_or(|h| h.ok);
+    let was_ok = st.location_health.lock().get(id).is_none_or(|h| h.ok);
     set_health(st, id, res.clone().err());
     match (&res, was_ok) {
         (Err(e), true) => tracing::warn!("Storage location {id} is unreachable: {e}"),
@@ -47,14 +47,14 @@ pub async fn probe(st: &AppState, id: &str) -> Result<(), String> {
 /// Retries a location's failed deletions in a task of its own, so a long batch (a slow or refusing storage service)
 /// doesn't hold up the health checks of the other locations. At most one batch per location runs at a time.
 pub(super) fn retry_in_background(st: &AppState, id: &str) {
-    if !st.part::<crate::locations::Memory>().retries.lock().unwrap().insert(id.to_string()) {
+    if !st.part::<crate::locations::Memory>().retries.lock().insert(id.to_string()) {
         return;
     }
     // Released when the task ends, also if it panics
     struct Running(AppState, String);
     impl Drop for Running {
         fn drop(&mut self) {
-            self.0.part::<super::Memory>().retries.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.1);
+            self.0.part::<super::Memory>().retries.lock().remove(&self.1);
         }
     }
     let (st, running) = (st.clone(), Running(st.clone(), id.to_string()));
@@ -71,11 +71,15 @@ pub(super) fn retry_in_background(st: &AppState, id: &str) {
 /// Checks all storage locations every 30 seconds (every 20 seconds while any is offline), and immediately when an operation fails.
 /// Reachable locations also retry files whose deletion failed earlier
 pub fn spawn_health_monitor(st: AppState) {
-    tokio::spawn(async move {
+    crate::util::supervise("storage location checks", move |_| monitor(st.clone()));
+}
+
+async fn monitor(st: AppState) {
+    {
         let mut first = true;
         loop {
             if !first {
-                let any_down = st.location_health.lock().unwrap().values().any(|h| !h.ok);
+                let any_down = st.location_health.lock().values().any(|h| !h.ok);
                 tokio::select! {
                     _ = tokio::time::sleep(if any_down { OFFLINE_INTERVAL } else { HEALTH_INTERVAL }) => {}
                     // Several requests may fail at the same time: wait a moment and merge them into one check
@@ -83,7 +87,7 @@ pub fn spawn_health_monitor(st: AppState) {
                 }
             }
             first = false;
-            let ids: Vec<String> = st.storages.read().unwrap().keys().cloned().collect();
+            let ids: Vec<String> = st.storages.read().keys().cloned().collect();
             let results = futures_util::future::join_all(ids.iter().map(|id| probe(&st, id))).await;
             for (id, res) in ids.iter().zip(results) {
                 if res.is_ok() {
@@ -91,7 +95,7 @@ pub fn spawn_health_monitor(st: AppState) {
                 }
             }
         }
-    });
+    }
 }
 
 /// What connecting does with a Local folder location's folder (storage/markers.rs, `LOCATION_MARKER`)
@@ -221,7 +225,7 @@ pub async fn test_existing(State(st): State<AppState>, _: Admin, Path(id): Path<
             if row.kind != "local" {
                 claim_place(&st, &id, b.as_ref()).await?;
             }
-            st.storages.write().unwrap().insert(id.clone(), b);
+            st.storages.write().insert(id.clone(), b);
             // In the background: up to 1000 deletions on a slow storage service shouldn't hold the request
             retry_in_background(&st, &id);
             Ok(Json(json!({ "ok": true })))
@@ -272,7 +276,7 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(req): J
         }
         return Err(e);
     }
-    st.storages.write().unwrap().insert(id.clone(), backend);
+    st.storages.write().insert(id.clone(), backend);
     Ok(Json(json!({ "id": id })))
 }
 
@@ -344,7 +348,7 @@ pub async fn update(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
     }
     if let Some((backend, cfg)) = new_backend {
         let place_moved = row.kind != "local" && place_of(&row.kind, &saved) != place_of(&row.kind, &cfg);
-        let old = st.storages.write().unwrap().insert(id.clone(), backend);
+        let old = st.storages.write().insert(id.clone(), backend);
         // Just checked
         set_health(&st, &id, None);
         if moved.is_some() {
@@ -353,7 +357,7 @@ pub async fn update(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
         // An S3, SFTP or FTP location moved to another place: the old one is free again
         if place_moved && let Some(old) = old {
             release_place(&st, &id, old.as_ref()).await;
-            st.part::<crate::locations::Memory>().marked.lock().unwrap().insert(id.clone());
+            st.part::<crate::locations::Memory>().marked.lock().insert(id.clone());
         }
     }
     Ok(Json(json!({ "ok": true })))
@@ -395,7 +399,7 @@ pub(super) async fn follow_folder(conn: &mut SqliteConnection, id: &str, from: &
 }
 
 pub async fn set_default(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
-    if !st.storages.read().unwrap().contains_key(&id) {
+    if !st.storages.read().contains_key(&id) {
         return Err(AppError::bad_request("This storage location can't be reached right now, so it can't be set as the default"));
     }
     let _w = st.write_lock.lock().await;
@@ -473,8 +477,8 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
     logs::record_activity(&mut tx, &user, None, "storage_delete", &name).await?;
     tx.commit().await?;
     drop(w);
-    let backend = st.storages.write().unwrap().remove(&id);
-    st.location_health.lock().unwrap().remove(&id);
+    let backend = st.storages.write().remove(&id);
+    st.location_health.lock().remove(&id);
     // An S3, SFTP or FTP location's place no longer names it either
     if kind != "local"
         && let Some(backend) = backend
