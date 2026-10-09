@@ -86,7 +86,7 @@ export function SheetMenu(p: SheetMenuProps) {
       <DropdownMenuSeparator />
       <DropdownMenuItem onClick={p.onClear}>
         <EraserIcon /> {t("Clear contents")}
-        <Shortcut>Delete</Shortcut>
+        <Shortcut>Delete</Shortcut> {/* i18n-ignore: the name printed on the key */}
       </DropdownMenuItem>
       <DropdownMenuItem onClick={p.onClearFormat}>
         <RemoveFormattingIcon /> {t("Clear formats")}

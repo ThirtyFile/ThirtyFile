@@ -8,6 +8,9 @@
 //  5. no entry outside server.ts is left over: its English text still appears in web/src or server/src
 //  6. a translation fits its language: no parameter the English text doesn't have, and no more plural forms than the
 //     language has (Intl.PluralRules: Chinese and Japanese have one)
+//  7. no interface text is written in JSX without t(): text between tags (`<Label>Client ID</Label>`), or a string
+//     beside a translated one (`cond ? t("Application (client) ID") : "Client ID"`), which 1 can't see. A heuristic:
+//     English words starting with a capital; lines marked `i18n-ignore` are allowed
 // Missing (1, 4) and left-over (5) entries fail the check for the languages that must be complete (COMPLETE, and
 // --require); for the others they are reported only. Every language offered to people (`ready` in src/lib/i18n.ts) must
 // be complete. In a language that isn't complete yet, entries still holding their placeholder (the Traditional Chinese
@@ -273,4 +276,25 @@ if (unrequired.length) console.log(`Languages offered in the interface that aren
 if (unknown.length) console.log(`Languages without a dictionary folder: ${unknown.join(", ")}`);
 console.log(`Chinese or Japanese text outside the dictionaries (not marked i18n-ignore${strict ? ", comments included" : ", comments skipped"}): ${bare.length}`);
 for (const b of bare) console.log("  · " + b);
+
+// 7. Interface text in JSX that doesn't go through t()
+const literals = [];
+{
+  const between = />\s*([A-Z][a-z]+(?: [A-Za-z][A-Za-z]*)*)\s*<\//;
+  const beside = /[?:]\s*"([A-Z][A-Za-z]*(?: [A-Za-z][A-Za-z]*)*)"\s*[})]/;
+  for (const [f, r] of files) {
+    const rel = r.replaceAll("\\", "/");
+    if (!rel.endsWith(".tsx") || (only && !only.some((o) => rel === o || rel.endsWith(o)))) continue;
+    readFileSync(f, "utf8")
+      .split("\n")
+      .forEach((line, i) => {
+        if (line.includes("i18n-ignore") || /^\s*(\/\/|\*|\/\*)/.test(line)) return;
+        const m = line.match(between) ?? (/\bt\(|\btc\(/.test(line) ? line.match(beside) : null);
+        if (m) literals.push(`${rel}:${i + 1}: ${m[1]}`);
+      });
+  }
+}
+console.log(`Interface text in JSX without t() (not marked i18n-ignore): ${literals.length}`);
+for (const l of literals) console.log("  · " + l);
+if (literals.length) failed = true;
 process.exitCode = failed ? 1 : 0;

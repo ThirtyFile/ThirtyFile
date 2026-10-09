@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TagIcon, XIcon } from "lucide-react";
 import { api, privateSource, type FolderContents, type HistoryEntry, type Node } from "@/api";
@@ -17,6 +17,7 @@ import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
 import { t, tServer } from "@/lib/i18n";
 import { FOLDER_CONTENTS } from "@/lib/queries";
 import { usePersisted } from "@/lib/session";
+import { useSettled } from "@/lib/useSettled";
 import { formatBytes, formatDateTime } from "@/lib/utils";
 
 /** Right-hand "Details" pane (Windows 11 style) */
@@ -31,19 +32,6 @@ const add = (a: FolderContents, b: FolderContents): FolderContents => ({ size: a
 
 /** How long the selection has to stay the same before its details are asked for */
 const SETTLE_MS = 250;
-
-/**
- * `value` once it has stayed the same for `ms`: moving through a list with the arrow keys doesn't ask the server about
- * every item passed (a held key would send hundreds of requests). The first value is there at once.
- */
-export function useSettled<T>(value: T, ms: number): T {
-  const [settled, setSettled] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setSettled(value), ms);
-    return () => clearTimeout(timer);
-  }, [value, ms]);
-  return settled;
-}
 
 /** The server sends at most this many entries */
 const HISTORY_LIMIT = 50;

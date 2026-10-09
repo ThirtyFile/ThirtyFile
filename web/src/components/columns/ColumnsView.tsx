@@ -15,7 +15,7 @@ import type { ExplorerProps } from "@/components/Explorer";
 import type { ExplorerActions } from "@/components/explorer/actions";
 import type { ExplorerState } from "@/components/explorer/state";
 import { FileList, type FileListProps, type ListNav } from "@/components/FileList";
-import { useSettled } from "@/components/DetailsPane";
+import { useSettled } from "@/lib/useSettled";
 import { ItemError } from "@/components/ErrorState";
 import { Resizer } from "@/components/Resizer";
 import { Skeleton } from "@/components/ui/skeleton";
