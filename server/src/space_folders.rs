@@ -1,6 +1,6 @@
 //! Where spaces keep their files on this server's disks.
 //!
-//! Spaces on the built-in storage and on *Local folder* locations are folder spaces (folders.rs): their files are
+//! Spaces on the built-in storage and on *Local folder* locations are folder spaces (folders/): their files are
 //! ordinary files in a folder of the location's folder (the storage folder, `/storage` in Docker, for the built-in one):
 //!
 //! - `company` for the company space "All files"

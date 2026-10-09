@@ -6,7 +6,7 @@
 //! 2. Each content the spaces use that the target should hold and doesn't is copied from where it is kept (or, when
 //!    that can't be read, from another checked replica), stored where the target keeps content, read back and checked,
 //!    then recorded. Until it is recorded, the copy is listed for deletion a day later, so one a stop left unrecorded
-//!    doesn't stay; content deleted meanwhile isn't recorded. Folder spaces are read from their folder (folders.rs).
+//!    doesn't stay; content deleted meanwhile isn't recorded. Folder spaces are read from their folder (folders/).
 //! 3. Copies of content nothing uses any more lose their row and are deleted like any content nothing uses.
 //! 4. The changes it holds are recorded: the target is current until the spaces change again.
 //!

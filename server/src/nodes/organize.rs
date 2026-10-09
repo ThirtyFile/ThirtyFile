@@ -1,6 +1,30 @@
 //! Creating folders, renaming, moving, copying and putting items in the trash
 
-use super::*;
+use std::collections::{HashMap, HashSet};
+
+use axum::{
+    Json,
+    extract::{Path, State},
+};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use sqlx::SqliteConnection;
+
+use crate::{
+    auth::User,
+    error::{AppError, AppResult},
+    fsops,
+    jobs::{self, Job, Limit, Outcome},
+    logs,
+    state::AppState,
+    tree::{
+        self, Need, Node,
+        changes::{self},
+    },
+    util::{new_id, now, validate_name},
+};
+
+use super::{MAX_BATCH, MAX_COPY_ITEMS, trash_root};
 
 #[derive(Deserialize)]
 pub struct CreateFolderReq {

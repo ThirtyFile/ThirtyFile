@@ -491,6 +491,32 @@ pub async fn next_id(conn: &mut SqliteConnection, table: Counted) -> Result<i64,
 mod tests {
     use super::*;
 
+    /// A temporary folder of a test, removed when the test ends, also when an assertion fails
+    struct Scratch(std::path::PathBuf);
+
+    impl std::ops::Deref for Scratch {
+        type Target = std::path::PathBuf;
+        fn deref(&self) -> &std::path::PathBuf {
+            &self.0
+        }
+    }
+
+    impl AsRef<std::path::Path> for Scratch {
+        fn as_ref(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn scratch(prefix: &str) -> Scratch {
+        Scratch(std::env::temp_dir().join(format!("{prefix}-{}", crate::util::new_id())))
+    }
+
     /// A database file whose migrations table holds `applied` (version, checksum), as an earlier version left it
     async fn database_with(dir: &Path, applied: &[(i64, Vec<u8>)]) -> std::path::PathBuf {
         std::fs::create_dir_all(dir).unwrap();
@@ -518,7 +544,7 @@ mod tests {
 
     #[tokio::test]
     async fn databases_this_version_cant_use_are_refused_plainly_and_left_alone() {
-        let base = std::env::temp_dir().join(format!("thirtyfile-old-{}", crate::util::new_id()));
+        let base = scratch("thirtyfile-old");
         let current = sqlx::migrate!("./migrations").iter().find(|m| m.version == 1).unwrap().checksum.to_vec();
         let cases = [
             // 0.3 kept a migration per change
@@ -540,12 +566,11 @@ mod tests {
         let db = connect(&base.join("drive.db"), 16).await.unwrap();
         db.close().await;
         check_existing(&base.join("drive.db")).await.unwrap();
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[tokio::test]
     async fn items_of_folder_spaces_from_0_4_0_are_kept_without_a_birth_time() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-040-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-040");
         let path = dir.join("drive.db");
         // As 0.4.0 left it: its one migration, and an item of a folder space
         let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
@@ -556,18 +581,17 @@ mod tests {
             .await
             .unwrap();
         db.close().await;
-        // Until the next scan records when it was created (folders.rs)
+        // Until the next scan records when it was created (folders/)
         let db = connect(&path, 16).await.unwrap();
         let (ino, birth): (Option<i64>, Option<i64>) = sqlx::query_as("SELECT fs_ino, fs_birth_ns FROM nodes WHERE id = 'n'").fetch_one(&db).await.unwrap();
         assert_eq!((ino, birth), (Some(7), None));
         db.close().await;
         assert!(dir.join("backups").join(format!("drive-before-{}.db", crate::VERSION)).is_file());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn a_database_from_0_4_0_gets_an_empty_error_log_and_keeps_its_logs() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-040-errors-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-040-errors");
         let path = dir.join("drive.db");
         let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
         let db = open(&path, 16, &v040).await.unwrap();
@@ -582,12 +606,11 @@ mod tests {
         let (count, message): (i64, String) = sqlx::query_as("SELECT count, message FROM error_log").fetch_one(&db).await.unwrap();
         assert_eq!((count, message.as_str()), (1, ""));
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn a_database_from_0_4_0_gets_the_list_of_unfinished_changes() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-040-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-040");
         let path = dir.join("drive.db");
         // As 0.4.0 left it: its one migration, and a folder in the trash
         let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
@@ -607,12 +630,11 @@ mod tests {
         assert_eq!(n, 0);
         db.close().await;
         assert!(dir.join("backups").join(format!("drive-before-{}.db", crate::VERSION)).is_file());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn a_database_from_0_4_0_gets_empty_lists_of_copies_and_keeps_its_locations() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-040-copies-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-040-copies");
         let path = dir.join("drive.db");
         let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
         let db = open(&path, 16, &v040).await.unwrap();
@@ -630,12 +652,11 @@ mod tests {
         // A location holding a copy can't go
         assert!(sqlx::query("DELETE FROM storage_locations WHERE id = 'nas'").execute(&db).await.is_err());
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn a_database_from_0_4_0_counts_the_changes_of_its_spaces_from_then_on() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-040-changes-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-040-changes");
         let path = dir.join("drive.db");
         let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
         let db = open(&path, 16, &v040).await.unwrap();
@@ -666,12 +687,11 @@ mod tests {
         let (schedule, keep): (String, i64) = sqlx::query_as("SELECT schedule, keep_days FROM backup_policies").fetch_one(&db).await.unwrap();
         assert_eq!((schedule.as_str(), keep), (r#"{"daily":"03:00"}"#, 30));
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn a_database_from_0_4_0_gets_empty_lists_of_replicas() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-040-replicas-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-040-replicas");
         let path = dir.join("drive.db");
         let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
         let db = open(&path, 16, &v040).await.unwrap();
@@ -691,12 +711,11 @@ mod tests {
         // Its targets must be locations
         assert!(sqlx::query("INSERT INTO replica_targets (policy_id, location_id, priority) VALUES ('p', 'nowhere', 1)").execute(&db).await.is_err());
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn accounts_from_0_4_0_keep_the_language_they_last_used_and_have_none_chosen() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-040-languages-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-040-languages");
         let path = dir.join("drive.db");
         let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
         let db = open(&path, 16, &v040).await.unwrap();
@@ -708,12 +727,11 @@ mod tests {
         assert_eq!((chosen.as_str(), last.as_str()), ("", "zh-TW"));
         sqlx::query("UPDATE users SET chosen_lang = 'ja' WHERE id = 1").execute(&db).await.unwrap();
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn accounts_from_0_4_0_get_the_interface_style_of_their_operating_system() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-040-styles-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-040-styles");
         let path = dir.join("drive.db");
         let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
         let db = open(&path, 16, &v040).await.unwrap();
@@ -730,12 +748,11 @@ mod tests {
         let (style,): (String,) = sqlx::query_as("SELECT ui_style FROM users WHERE id = 2").fetch_one(&db).await.unwrap();
         assert_eq!(style, "auto");
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn a_database_from_0_4_0_takes_tags_that_go_with_their_items_and_people() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-040-tags-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-040-tags");
         let path = dir.join("drive.db");
         let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
         let db = open(&path, 16, &v040).await.unwrap();
@@ -777,12 +794,11 @@ mod tests {
         let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM tags").fetch_one(&db).await.unwrap();
         assert_eq!(left, 1);
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn a_database_from_0_4_0_takes_smart_folders_that_go_with_their_people() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-040-smart-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-040-smart");
         let path = dir.join("drive.db");
         let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
         let db = open(&path, 16, &v040).await.unwrap();
@@ -810,12 +826,11 @@ mod tests {
         sqlx::query("DELETE FROM users WHERE id = 2").execute(&db).await.unwrap();
         assert_eq!(count().await, 0);
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn a_database_from_0_4_0_keeps_what_the_replicas_page_shows() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-040-replica-counts-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-040-replica-counts");
         let path = dir.join("drive.db");
         let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
         let db = open(&path, 16, &v040).await.unwrap();
@@ -837,12 +852,11 @@ mod tests {
             sqlx::query_as("SELECT t.held, u.copies FROM replica_targets t JOIN replica_unneeded u ON u.location_id = t.location_id").fetch_one(&db).await.unwrap();
         assert_eq!((held, copies), (3, 2));
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn items_from_0_4_0_keep_their_uploader() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-040-found-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-040-found");
         let path = dir.join("drive.db");
         let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
         let db = open(&path, 16, &v040).await.unwrap();
@@ -861,12 +875,11 @@ mod tests {
         sqlx::query("UPDATE nodes SET found = 1").execute(&db).await.unwrap();
         assert_eq!(read().await, (1, String::new()));
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn a_database_from_0_4_0_finds_the_jobs_of_a_policy_by_their_state() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-040-jobs-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-040-jobs");
         let path = dir.join("drive.db");
         let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
         let db = open(&path, 16, &v040).await.unwrap();
@@ -901,12 +914,11 @@ mod tests {
         let (state,): (String,) = sqlx::query_as("SELECT state FROM backup_jobs WHERE id = 'j'").fetch_one(&db).await.unwrap();
         assert_eq!(state, "queued");
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn a_database_from_0_4_0_counts_changes_with_an_index_and_only_when_kept_columns_change() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-040-seq-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-040-seq");
         let path = dir.join("drive.db");
         let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
         let db = open(&path, 16, &v040).await.unwrap();
@@ -943,12 +955,11 @@ mod tests {
         let (unused,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'error_log_user'").fetch_one(&db).await.unwrap();
         assert_eq!(unused, 0);
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn the_database_and_its_wal_file_give_back_the_space_they_no_longer_use() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-shrink-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-shrink");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("drive.db");
         let db = connect(&path, 16).await.unwrap();
@@ -969,12 +980,11 @@ mod tests {
         assert!(size("drive.db") < 20 << 20, "{}", size("drive.db"));
         assert_eq!(size("drive.db-wal"), 0);
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn a_database_made_without_auto_vacuum_is_compacted_on_request() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-compact-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-compact");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("drive.db");
         // As earlier versions made it: no track of free pages, which can't be changed without rewriting it
@@ -1007,12 +1017,11 @@ mod tests {
         assert!(before > 8 << 20 && after < 4 << 20, "{before} → {after}");
         assert_eq!(modes().await, [2, 2, 2]);
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn listings_are_reindexed_when_names_sort_differently() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-order-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-order");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("drive.db");
         let db = connect(&path, 16).await.unwrap();
@@ -1024,12 +1033,11 @@ mod tests {
         let db = connect(&path, 16).await.unwrap();
         assert_eq!(get_setting(&db, "natural_order").await.unwrap(), Some(current));
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn a_database_from_0_4_0_reads_a_space_a_page_at_a_time() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-040-pages-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-040-pages");
         let path = dir.join("drive.db");
         let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
         let db = open(&path, 16, &v040).await.unwrap();
@@ -1066,12 +1074,11 @@ mod tests {
         let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id = 'd'").fetch_one(&db).await.unwrap();
         assert_eq!(n, 1);
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn the_database_is_only_copied_on_request_when_it_is_up_to_date() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("drive.db");
         let db = connect(&path, 16).await.unwrap();
@@ -1081,12 +1088,11 @@ mod tests {
         backup_to(&db, &dir.join("manual.db")).await.unwrap();
         assert!(backup_to(&db, &dir.join("manual.db")).await.is_err());
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn every_saved_write_is_counted_and_the_wal_file_is_still_checkpointed() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-test");
         std::fs::create_dir_all(&dir).unwrap();
         let db = connect(&dir.join("drive.db"), 16).await.unwrap();
         sqlx::query("CREATE TABLE scratch (data BLOB)").execute(&db).await.unwrap();
@@ -1107,7 +1113,6 @@ mod tests {
         let wal = std::fs::metadata(dir.join("drive.db-wal")).unwrap().len();
         assert!(wal < 10 << 20, "{wal}");
         db.close().await;
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Migrations read from a folder holding `files` from server/migrations, plus `extra` (name, SQL)
@@ -1126,7 +1131,7 @@ mod tests {
     /// migration files. A data folder made by 0.4.0 is copied before they run, then upgraded with its data kept.
     #[tokio::test]
     async fn a_database_from_0_4_0_is_copied_then_upgraded_when_a_migration_file_is_added() {
-        let dir = std::env::temp_dir().join(format!("thirtyfile-upgrade-{}", crate::util::new_id()));
+        let dir = scratch("thirtyfile-upgrade");
         let path = dir.join("data").join("drive.db");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let mut ours: Vec<_> = std::fs::read_dir("migrations").unwrap().map(|e| e.unwrap().path()).collect();
@@ -1167,7 +1172,6 @@ mod tests {
         db.close().await;
         let copies = std::fs::read_dir(copy.parent().unwrap()).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().ends_with(".db")).count();
         assert_eq!(copies, 1);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

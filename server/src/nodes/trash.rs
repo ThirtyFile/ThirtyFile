@@ -1,6 +1,30 @@
 //! The trash: listing, restoring, deleting for good and emptying it
 
-use super::*;
+use std::collections::HashMap;
+
+use axum::{
+    Json,
+    extract::{Query, State},
+};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use sqlx::SqliteConnection;
+
+use crate::{
+    auth::User,
+    error::{AppError, AppResult},
+    fsops,
+    jobs::{self, Job, Limit, Outcome},
+    logs,
+    state::AppState,
+    tree::{
+        self, NODE_COLS, Need, Node, Role,
+        changes::{self, NOT_PURGING},
+    },
+    util::now,
+};
+
+use super::{BatchReq, Listing, Located, Resolution, encode_cursor, locate, outermost, page_of, replace_existing};
 
 /// Spaces whose trash the user works with: their own spaces (at least `min_role`), plus every team space for administrators
 pub(super) async fn trash_drives(conn: &mut SqliteConnection, user: &User, min_role: Role) -> AppResult<Vec<String>> {

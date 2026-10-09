@@ -17,24 +17,17 @@ use std::collections::{HashMap, HashSet};
 
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    extract::{Path, State},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 use sqlx::SqliteConnection;
 
 use crate::{
     auth::User,
     error::{AppError, AppResult},
-    fsops,
-    jobs::{self, Job, Limit, Outcome},
-    logs, paths,
+    paths,
     state::AppState,
-    tree::{
-        self, Crumb, NODE_COLS, Need, Node, Role,
-        changes::{self, NOT_PURGING},
-    },
-    util::{new_id, now, validate_name},
+    tree::{self, Crumb, Node, Role},
 };
 
 const MAX_BATCH: usize = 1000;
@@ -233,8 +226,8 @@ async fn locate(st: &AppState, user: &User, mut nodes: Vec<Node>) -> AppResult<V
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil;
-    use axum::http::StatusCode;
+    use crate::{logs, testutil, util::now};
+    use axum::{extract::Query, http::StatusCode};
 
     fn batch(ids: &[&str], dest: &str) -> Json<BatchReq> {
         Json(BatchReq { ids: ids.iter().map(|s| s.to_string()).collect(), dest_id: Some(dest.to_string()), ..Default::default() })

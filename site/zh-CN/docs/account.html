@@ -126,6 +126,12 @@
         <p>通过 <code>Authorization</code> 请求头发送，或者将其作为 HTTP Basic 登录的密码，与用户名一起使用：</p>
         <pre><code>curl -H "Authorization: Bearer tfa_…" https://drive.example.com/api/auth/me
 curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;file id&gt;/content?download=1"</code></pre>
+        <h3 id="api-answers">API 的响应</h3>
+        <ul>
+          <li><strong>错误</strong>以 JSON 返回：<code>{"error": "…"}</code>，消息为英文，有时另附给程序用的 <code>"code"</code>（例如 <code>upload_discarded</code>）。</li>
+          <li><strong>状态码</strong>：<code>400</code> 无法按要求进行（名称无效，或超过上限，例如 50 个应用密码）；<code>401</code> 未登录，或应用密码无效；<code>403</code> 看得到项目，但不能对它这样做；<code>404</code> 不存在，或不是你看得到的（没有访问权限的项目一律返回“找不到”，不透露它是否存在）；<code>409</code> 冲突（名称已被使用、期间有变动）；<code>413</code> 超过上限或空间大小；<code>429</code> 同时太多，请稍后再试；<code>507</code> 服务器磁盘空间不足。</li>
+          <li><strong>列表</strong>：文件夹的项目以数组返回。加上 <code>?limit=</code> 时改为分页，返回 <code>{"items": […], "next": "…"}</code>：把 <code>next</code> 作为 <code>?after=</code> 获取下一页，直到没有 <code>next</code>。</li>
+        </ul>
         <p>应用密码也能让文件在文件资源管理器、Finder 或兼容的手机文件应用中显示为驱动器：参阅<a href="webdav.html">映射为网络驱动器</a>。</p>
         <p>应用密码仅用于文件操作：浏览、搜索、下载、上传，以及整理文件与文件夹。不能修改账号密码、创建应用密码、关联登录方式、创建分享链接或使用控制面板，也不会获取 cookie。只读应用密码会被拒绝执行任何更改操作。</p>
         <div class="note">修改密码、管理员重置密码或重置两步验证，都会移除所有应用密码；之后需重新创建。让设备退出登录不会影响应用密码，请主动移除不再信任的密码。账号被禁用或删除后，应用密码随即失效。错误的应用密码与错误的登录密码共用同一限制：同一地址失败 30 次后，必须等待 15 分钟。</div>

@@ -1,6 +1,23 @@
 //! Finding items: search, favorites, recent files and what is shared with me
 
-use super::*;
+use std::collections::HashMap;
+
+use axum::{
+    Json,
+    extract::{Path, Query, State},
+};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+
+use crate::{
+    auth::User,
+    error::{AppError, AppResult},
+    state::AppState,
+    tree::{self, NODE_COLS, Need, Node, Role},
+    util::now,
+};
+
+use super::{Arg, Held, ListQuery, Located, MAX_BATCH, bind_all, locate, not_root, order_clause};
 
 #[derive(Deserialize)]
 pub struct SearchQuery {

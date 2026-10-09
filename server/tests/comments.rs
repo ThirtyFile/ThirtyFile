@@ -1,4 +1,4 @@
-//! Comments that name a source file (`folders.rs`, `backups/policy.rs`) name one that exists: files that were moved
+//! Comments that name a source file (`watch.rs`, `backups/policy.rs`) name one that exists: files that were moved
 //! or split into folders leave comments pointing nowhere
 
 use std::path::{Path, PathBuf};
