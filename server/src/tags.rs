@@ -186,23 +186,28 @@ pub async fn apply(State(st): State<AppState>, user: User, Json(req): Json<Apply
         return Err(AppError::bad_request(format!("Change at most {MAX_CHANGED} tags at once")));
     }
     let add: Vec<i64> = req.add.iter().copied().filter(|t| !req.remove.contains(t)).collect();
+    // Checked before taking the write lock, which every other change waits for: a check is a few queries per item
+    let mut items = Vec::new();
+    {
+        let mut c = st.db.acquire().await?;
+        for id in &req.ids {
+            // Any item the person can see, and nothing else: someone else's item is "not found"
+            let node = tree::node_for(&mut c, &user, id, Need::Read).await?;
+            if node.parent_id.is_none() {
+                return Err(AppError::bad_request("This can't be done on the root folder of a space"));
+            }
+            items.push(node.id);
+        }
+    }
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     check_own(&mut tx, &user, &req.add).await?;
     check_own(&mut tx, &user, &req.remove).await?;
-    let mut items = Vec::new();
-    for id in &req.ids {
-        // Any item the person can see, and nothing else: someone else's item is "not found"
-        let node = tree::node_for(&mut tx, &user, id, Need::Read).await?;
-        if node.parent_id.is_none() {
-            return Err(AppError::bad_request("This can't be done on the root folder of a space"));
-        }
-        items.push(node.id);
-    }
     let (items, at) = (serde_json::to_string(&items).unwrap(), now());
+    // Items that went to the trash meanwhile get no new tags
     sqlx::query(
         "INSERT OR IGNORE INTO tagged (node_id, tag_id, owner_id, created_at)
-         SELECT i.value, t.value, ?3, ?4 FROM json_each(?1) i, json_each(?2) t",
+         SELECT i.value, t.value, ?3, ?4 FROM json_each(?1) i JOIN nodes n ON n.id = i.value AND n.trashed_at IS NULL, json_each(?2) t",
     )
     .bind(&items)
     .bind(serde_json::to_string(&add).unwrap())
