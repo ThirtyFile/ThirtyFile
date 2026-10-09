@@ -4,7 +4,7 @@
 //!
 //! A replica policy takes the spaces of a location (its primary) and keeps each content they use on its first `copies`
 //! targets, by priority, that aren't where that content is kept. Folder spaces are read from their folder, which other
-//! programs change too (folders.rs). Copies are made soon after changes or on
+//! programs change too (folders/). Copies are made soon after changes or on
 //! a schedule, per target (sync.rs), each checked by reading it back, and read back again every few days (`verify`).
 //! A copy goes where the target keeps content (its content store), so a promotion only has to point the content at it.
 //!

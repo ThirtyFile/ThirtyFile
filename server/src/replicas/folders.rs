@@ -5,7 +5,7 @@
 //!
 //! - What was read is recorded per item (`replica_folder_files`): where, its size and modification time, and the
 //!   SHA-256 of its content. A file whose record isn't what the index has now is read again: a file another program
-//!   changed is read again once the check for changes (folders.rs) has seen it, which is how far a folder space's
+//!   changed is read again once the check for changes (folders/) has seen it, which is how far a folder space's
 //!   replicas can be behind, besides the sync's own delay. Each sync checks the folder for changes first.
 //! - A file that keeps changing (a log another program writes, say) is handled as backups handle it: a file read whole
 //!   and unchanged while it was read is copied as read, even when the index has it otherwise by then; one that changed

@@ -127,6 +127,12 @@
         <p>透過 <code>Authorization</code> 請求標頭傳送，或者將其作為 HTTP Basic 登入的密碼，與使用者名稱一起使用：</p>
         <pre><code>curl -H "Authorization: Bearer tfa_…" https://drive.example.com/api/auth/me
 curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;file id&gt;/content?download=1"</code></pre>
+        <h3 id="api-answers">API 的回應</h3>
+        <ul>
+          <li><strong>錯誤</strong>以 JSON 回傳：<code>{"error": "…"}</code>，訊息為英文，有時另附給程式用的 <code>"code"</code>（例如 <code>upload_discarded</code>）。</li>
+          <li><strong>狀態碼</strong>：<code>400</code> 無法照要求進行（名稱無效，或超過上限，例如 50 組應用程式密碼）；<code>401</code> 未登入，或應用程式密碼無效；<code>403</code> 看得到項目，但不能對它這樣做；<code>404</code> 不存在，或不是你看得到的（沒有存取權的項目一律回「找不到」，不透露它是否存在）；<code>409</code> 衝突（名稱已被使用、期間有變動）；<code>413</code> 超過上限或空間大小；<code>429</code> 同時太多，請稍後再試；<code>507</code> 伺服器磁碟空間不足。</li>
+          <li><strong>清單</strong>：資料夾的項目以陣列回傳。加上 <code>?limit=</code> 時改為分頁，回傳 <code>{"items": […], "next": "…"}</code>：把 <code>next</code> 當作 <code>?after=</code> 取下一頁，直到沒有 <code>next</code>。</li>
+        </ul>
         <p>應用程式密碼也能讓檔案在檔案總管、Finder 或相容的手機檔案 App 中顯示為磁碟機：參閱<a href="webdav.html">連線為網路磁碟機</a>。</p>
         <p>應用程式密碼僅用於檔案操作：瀏覽、搜尋、下載、上傳，以及整理檔案與資料夾。不能修改帳號密碼、建立應用程式密碼、關聯登入方式、建立分享連結或使用控制台，也不會取得 cookie。唯讀應用程式密碼會被拒絕執行任何更改操作。</p>
         <div class="note">修改密碼、管理員重設密碼或重設兩步驟驗證，都會移除所有應用程式密碼；之後需重新建立。讓裝置登出不會影響應用程式密碼，請主動移除不再信任的密碼。帳號被停用或刪除後，應用程式密碼隨即失效。錯誤的應用程式密碼與錯誤的登入密碼共用同一限制：同一位址失敗 30 次後，必須等待 15 分鐘。</div>

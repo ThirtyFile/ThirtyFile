@@ -45,7 +45,7 @@ pub fn spaces_changed(st: &AppState) {
 type Spaces = HashMap<String, PathBuf>;
 
 /// Whether every folder of the space is watched now: changes there show up by themselves, so the regular scan of it
-/// runs less often (folders.rs)
+/// runs less often (folders/)
 pub fn is_watched(st: &AppState, drive_id: &str) -> bool {
     st.part::<Memory>().watched.lock().contains(drive_id)
 }
