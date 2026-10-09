@@ -1061,7 +1061,7 @@ export default {
   "Downloads are turned off for this link": "這個連結不開放下載",
   "This link doesn't accept files": "這個連結不接收檔案",
   "Too many uploads at once through this link. Try again later.": "透過這個連結同時上傳的檔案過多，請稍後再試。",
-  "Through share link {link}": "透過分享連結 {link}",
+  "Through a share link": "透過分享連結",
   "only accepts files": "只收檔案",
   "accepts files": "可上傳檔案",
   "preview only": "僅供預覽",

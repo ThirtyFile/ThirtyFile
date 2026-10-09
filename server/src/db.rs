@@ -797,6 +797,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_database_from_0_4_0_keeps_no_share_link_addresses_in_its_activity() {
+        let dir = scratch("thirtyfile-040-links");
+        let path = dir.join("drive.db");
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query(
+            "INSERT INTO activity (at, username, action, detail) VALUES
+             (1, 'visitor', 'upload', 'Through share link /share/abc123'), (2, 'amy', 'upload', 'Replaced the existing file'), (3, 'amy', 'move', '→ Docs')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        db.close().await;
+
+        let db = connect(&path, 16).await.unwrap();
+        let details: Vec<(String,)> = sqlx::query_as("SELECT detail FROM activity ORDER BY at").fetch_all(&db).await.unwrap();
+        assert_eq!(details.into_iter().map(|(d,)| d).collect::<Vec<_>>(), ["Through a share link", "Replaced the existing file", "→ Docs"]);
+        db.close().await;
+    }
+
+    #[tokio::test]
     async fn a_database_from_0_4_0_takes_smart_folders_that_go_with_their_people() {
         let dir = scratch("thirtyfile-040-smart");
         let path = dir.join("drive.db");

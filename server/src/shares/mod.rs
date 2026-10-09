@@ -1346,7 +1346,8 @@ mod tests {
         // Recorded in the activity log and the link's access log
         let (detail,): (String,) =
             sqlx::query_as("SELECT detail FROM activity WHERE action = 'upload' AND node_id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();
-        assert_eq!(detail, format!("Through share link /share/{}", info.id));
+        // Which link it was is for the link's access log: the item's history is read by everyone who can see the item
+        assert_eq!(detail, "Through a share link");
         let mut logged = 0;
         for _ in 0..100 {
             (logged,) =

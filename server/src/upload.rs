@@ -87,7 +87,8 @@ impl Uploader {
     }
     /// The activity log's detail for the uploaded file
     fn log_detail(&self) -> String {
-        self.share.as_ref().map(|s| format!("Through share link /share/{}", s.id)).unwrap_or_default()
+        // Which link is in the link's own access log, for those who may manage it
+        self.share.as_ref().map(|_| "Through a share link".to_string()).unwrap_or_default()
     }
     fn share_id(&self) -> Option<&str> {
         self.share.as_ref().map(|s| s.id.as_str())
