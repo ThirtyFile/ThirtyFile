@@ -354,7 +354,14 @@ async fn put_object(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, hash: &str,
         .tries(
             |_: &std::io::Error| true,
             || async {
-                dst.put_at(&key, tmp).await?;
+                // Each attempt stores a link to the temp file: one whose stored content doesn't check out is tried
+                // again with the content still at hand
+                let attempt = crate::storage::attempt_of(tmp).await?;
+                let stored = dst.put_at(&key, &attempt).await;
+                if stored.is_err() {
+                    let _ = tokio::fs::remove_file(&attempt).await;
+                }
+                stored?;
                 match dst.stat(&key).await? {
                     Some(e) if e.size == size as u64 => Ok(()),
                     _ => Err(std::io::Error::other("The content stored on the destination isn't complete")),
@@ -363,7 +370,9 @@ async fn put_object(cx: &Ctx<'_>, set: &Set, dst: &Arc<dyn Storage>, hash: &str,
         )
         .await;
     match put {
-        Ok(()) => {}
+        Ok(()) => {
+            let _ = tokio::fs::remove_file(tmp).await;
+        }
         Err(Ok(stop)) => return Ok(Err(stop)),
         Err(Err(e)) => return Err(unreachable_dest(&e)),
     }

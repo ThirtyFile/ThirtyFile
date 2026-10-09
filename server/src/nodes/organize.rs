@@ -79,6 +79,9 @@ pub struct BatchReq {
     /// What to do with each item (by id) whose name the destination already has; the browser asks first (`conflicts`)
     #[serde(default)]
     pub(super) resolutions: HashMap<String, Resolution>,
+    /// Copying one item: the name the copy gets (WebDAV COPY names it), with a number when that is taken
+    #[serde(default)]
+    pub(super) name: Option<String>,
 }
 
 /// The answer to "the destination already has an item with this name"
@@ -179,7 +182,7 @@ async fn put_back_replaced(st: &AppState, user: &User, dest: &str, id: &str) -> 
         return Ok(());
     }
     drop(c);
-    let req = BatchReq { ids: vec![id.to_string()], dest_id: None, resolutions: HashMap::new() };
+    let req = BatchReq { ids: vec![id.to_string()], ..Default::default() };
     super::restore(State(st.clone()), user.clone(), Json(req)).await.map(|_| ())
 }
 
@@ -302,6 +305,17 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
     let mut tx = crate::db::begin_write(&st.db).await?;
     let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Write).await?;
     locks.check(&dest)?;
+    // The name asked for one item's copy (else each copy has its original's)
+    let named = match req.name.as_deref().filter(|_| ids.len() == 1) {
+        Some(n) => {
+            let n = crate::util::validate_name(n)?;
+            if dest.in_folder_space() {
+                fsops::check_name(&n)?;
+            }
+            Some(n)
+        }
+        None => None,
+    };
     let mut plans = Vec::new();
     let mut replaced = Vec::new();
     let mut total = 0i64;
@@ -314,9 +328,11 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
         if tree::is_within(&mut tx, &dest.id, &node.id).await? {
             return Err(AppError::bad_request(format!("Can't copy \"{}\" into its own subfolder", node.name)));
         }
-        // Without an answer the copy gets a number, as it always did; a copy into its own folder always does
-        if node.parent_id.as_deref() != Some(dest.id.as_str())
-            && let Some(existing) = tree::find_child(&mut tx, &dest.id, &node.name).await?
+        let wanted = named.clone().unwrap_or_else(|| node.name.clone());
+        // Without an answer the copy gets a number, as it always did; a copy into its own folder always does (unless
+        // it is named)
+        if (named.is_some() || node.parent_id.as_deref() != Some(dest.id.as_str()))
+            && let Some(existing) = tree::find_child(&mut tx, &dest.id, &wanted).await?
         {
             match req.resolution(&node.id) {
                 Some(Resolution::Skip) => continue,
@@ -335,8 +351,10 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
         if items > MAX_COPY_ITEMS {
             return Err(AppError::bad_request("Copy at most 20,000 items at once"));
         }
-        let nodes = live_items(tree::subtree(&mut tx, &node.id).await?);
+        let mut nodes = live_items(tree::subtree(&mut tx, &node.id).await?);
         total += nodes.iter().map(|n| n.size).sum::<i64>();
+        // The first is the item itself: its copy is made under the name it gets (a number added when taken)
+        nodes[0].name = wanted;
         plans.push(nodes);
     }
     tree::check_quota(&mut tx, dest.drive(), total).await?;

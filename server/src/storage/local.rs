@@ -179,7 +179,9 @@ impl Storage for LocalStorage {
             // Below the verified folder, the folders named by the hash are made as needed
             self.verify().await?;
             // Already stored, unless what is there is shorter or longer (a copy cut short by a power loss, say): then it
-            // is replaced
+            // is replaced. A copy of the right length isn't read again here (that would read every file uploaded twice):
+            // one damaged in place is found by `thirtyfile check`, and replaced from a verified copy by restores and
+            // replicas (`repair_file`)
             if let Ok(there) = tokio::fs::symlink_metadata(&dest).await
                 && there.is_file()
                 && there.len() == tokio::fs::metadata(src).await?.len()

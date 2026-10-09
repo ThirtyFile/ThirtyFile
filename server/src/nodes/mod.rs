@@ -140,7 +140,7 @@ pub struct Contents {
 /// Size and number of items inside the given folders (the items themselves are not counted; a file holds nothing).
 /// Items in the trash are left out. For the Details pane, of one folder or of a selection of several.
 pub async fn contents(State(st): State<AppState>, user: User, Json(req): Json<ContentsReq>) -> AppResult<Json<Contents>> {
-    let ids = BatchReq { ids: req.ids, dest_id: None, resolutions: Default::default() }.ids()?;
+    let ids = BatchReq { ids: req.ids, ..Default::default() }.ids()?;
     let mut c = st.db.acquire().await?;
     let mut folders = Vec::with_capacity(ids.len());
     for id in &ids {
@@ -1111,6 +1111,7 @@ mod tests {
             ids: ids.iter().map(|s| s.to_string()).collect(),
             dest_id: dest.map(str::to_string),
             resolutions: ids.iter().map(|s| (s.to_string(), answer)).collect(),
+            name: None,
         })
     }
 

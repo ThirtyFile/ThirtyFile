@@ -41,6 +41,8 @@ use crate::{
 
 /// Most an archive may hold once extracted, whatever the space's quota
 pub const MAX_EXTRACT_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+/// How often (in bytes extracted) an extraction checks again that its space still has room for what came out so far
+const QUOTA_CHECK_EVERY: i64 = if cfg!(test) { 4 } else { 64 * 1024 * 1024 };
 /// Most files and folders an archive may hold
 pub const MAX_EXTRACT_ENTRIES: u64 = 20_000;
 /// Most folders a path in an archive may go down, like an uploaded folder (each level is created while every other
@@ -541,7 +543,7 @@ async fn extract_into(st: &AppState, user: &User, progress: &Tracker, zip: &Node
     let mut staged: Vec<(usize, content::Staged)> = Vec::new();
     let mut written: HashMap<usize, content::Written> = HashMap::new();
     let result = async {
-        let mut actual = 0i64;
+        let (mut actual, mut checked) = (0i64, 0i64);
         for (i, p) in plan.iter().enumerate() {
             if p.file.is_none() {
                 continue;
@@ -550,6 +552,15 @@ async fn extract_into(st: &AppState, user: &User, progress: &Tracker, zip: &Node
             let p = progress.clone();
             let x = tokio::task::spawn_blocking(move || extract_entry(&archive, &entry, tmp, &|n| p.add(n))).await??;
             actual += x.size as i64;
+            // The space may fill up meanwhile (other uploads): checked again as the extraction goes, so a refused one
+            // leaves little stored for nothing (it is removed a day later), not the whole archive
+            if actual - checked >= QUOTA_CHECK_EVERY {
+                checked = actual;
+                if let Err(e) = tree::check_quota(&mut *st.db.acquire().await?, &drive, actual).await {
+                    let _ = tokio::fs::remove_file(&x.tmp).await;
+                    return Err(e);
+                }
+            }
             let received = content::Received { path: x.tmp, size: x.size, hash: Some(x.hash) };
             staged.push((i, content::stage(st, &parent, received).await?));
         }
@@ -624,6 +635,7 @@ async fn extract_into_folder(
     plan: Vec<Planned>,
 ) -> AppResult<(String, String)> {
     let staged = fsops::staging(parent).await?;
+    let (mut actual, mut checked) = (0u64, 0u64);
     for p in &plan {
         // Names a folder space can't show (.DS_Store, Thumbs.db, ThirtyFile's own…) are left out
         if p.dirs.iter().chain(&p.file).any(|n| crate::folders::ignored(n)) {
@@ -632,17 +644,23 @@ async fn extract_into_folder(
         let (archive, entry, tmp) = (archive.to_path_buf(), p.entry.clone(), st.tmp_dir().join(format!("unzip-{}", new_id())));
         let (top, dirs, file, p) = (staged.top.clone(), p.dirs.clone(), p.file.clone(), progress.clone());
         // On the disk of the folder space: on a blocking thread
-        tokio::task::spawn_blocking(move || -> AppResult<()> {
+        actual += tokio::task::spawn_blocking(move || -> AppResult<u64> {
             let dir = fsops::make_dirs(&top, &dirs).map_err(fsops::disk_error)?;
-            let Some(file) = file else { return Ok(()) };
+            let Some(file) = file else { return Ok(0) };
             let x = extract_entry(&archive, &entry, tmp, &|n| p.add(n))?;
             let moved = fsops::move_in(&x.tmp, &dir, &file);
             if moved.is_err() {
                 let _ = std::fs::remove_file(&x.tmp);
             }
-            moved.map_err(fsops::disk_error)
+            moved.map_err(fsops::disk_error).map(|_| x.size)
         })
         .await??;
+        // The space may fill up meanwhile (other uploads): checked again as the extraction goes, rather than once the
+        // whole archive is on the disk
+        if actual - checked >= QUOTA_CHECK_EVERY as u64 {
+            checked = actual;
+            tree::check_quota(&mut *st.db.acquire().await?, parent.drive(), actual as i64).await?;
+        }
     }
     // The new folder is named after the archive
     let stem = validate_name(split_name(&zip.name, false).0).ok().filter(|s| !crate::folders::ignored(s)).unwrap_or_else(|| "Extracted".into());

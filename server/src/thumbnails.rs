@@ -24,11 +24,26 @@ pub struct Memory {
     pub permits: tokio::sync::Semaphore,
     /// Most memory one thumbnail may use to decode its image
     pub decode_bytes: u64,
+    /// The thumbnails being made, by content: someone else asking for one waits for it rather than decode the same
+    /// picture again (a grid of new photos opened by several people at once)
+    making: crate::sync::Mutex<std::collections::HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
 }
 
 impl Memory {
     pub fn new(jobs: usize, decode_bytes: u64) -> Memory {
-        Memory { permits: tokio::sync::Semaphore::new(jobs), decode_bytes }
+        Memory { permits: tokio::sync::Semaphore::new(jobs), decode_bytes, making: Default::default() }
+    }
+
+    /// The turn to make the thumbnail of `key`, shared by everyone asking for it at the same time
+    fn making(&self, key: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+        let mut making = self.making.lock();
+        if let Some(turn) = making.get(key).and_then(std::sync::Weak::upgrade) {
+            return turn;
+        }
+        making.retain(|_, w| w.strong_count() > 0);
+        let turn = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+        making.insert(key.to_string(), std::sync::Arc::downgrade(&turn));
+        turn
     }
 }
 
@@ -231,12 +246,15 @@ pub async fn thumbnail_response(st: &AppState, headers: &HeaderMap, n: &Node) ->
     if !tokio::fs::try_exists(&path).await? {
         // Made in a task of its own, which holds its turn (a permit) until the thumbnail is in the cache: a browser
         // that stops waiting neither frees the turn while the picture is still being decoded nor throws the work away
-        let (st, path) = (st.clone(), path.clone());
+        let (st, path, key) = (st.clone(), path.clone(), hash.to_string());
         tokio::spawn(async move {
-            let _permit = st.part::<Memory>().permits.acquire().await.map_err(AppError::internal)?;
+            // Whoever asked first makes it; the others wait for that, then find it in the cache
+            let turn = st.part::<Memory>().making(&key);
+            let _making = turn.lock().await;
             if tokio::fs::try_exists(&path).await? {
                 return Ok(());
             }
+            let _permit = st.part::<Memory>().permits.acquire().await.map_err(AppError::internal)?;
             let mut data = Vec::with_capacity(size as usize);
             source.open(&st, 0, size).await?.read_to_end(&mut data).await?;
             let max_alloc = st.part::<Memory>().decode_bytes;
@@ -330,6 +348,18 @@ pub async fn thumbnail(State(st): State<AppState>, user: User, Path(id): Path<St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn people_asking_for_the_same_thumbnail_at_once_share_one_turn_to_make_it() {
+        let m = Memory::new(4, 1 << 20);
+        let (a, b, other) = (m.making("photo"), m.making("photo"), m.making("other"));
+        assert!(std::sync::Arc::ptr_eq(&a, &b), "the second waits for the first");
+        assert!(!std::sync::Arc::ptr_eq(&a, &other));
+        drop((a, b, other));
+        // Once nobody waits, the turn is forgotten
+        let _ = m.making("third");
+        assert_eq!(m.making.lock().len(), 1);
+    }
     use crate::testutil::{self, blob_file};
 
     /// A PNG of the given size, as a browser would upload it

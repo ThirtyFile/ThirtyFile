@@ -25,7 +25,7 @@ use props::*;
 use put::*;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     path::{Path, PathBuf},
     time::{Duration, UNIX_EPOCH},
 };
