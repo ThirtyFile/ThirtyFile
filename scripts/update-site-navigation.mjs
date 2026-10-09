@@ -89,7 +89,7 @@ ${links}
         const toc = `        <details class="guide-toc">
           <summary>${t("On this page")}</summary>
           <ol>
-${sections.map(([, anchor, label]) => `            <li><a href="#${anchor}">${label.replace(/<[^>]*>/g, "")}</a></li>`).join("\n")}
+${sections.map(([, anchor, label]) => `            <li><a href="#${anchor}">${label.replace(/<[^>]*>/g, "").replace(/[<>]/g, "")}</a></li>`).join("\n")}
           </ol>
         </details>\n`;
         html = html.replace(/^(\s*<h2\b)/m, toc + "$1");
