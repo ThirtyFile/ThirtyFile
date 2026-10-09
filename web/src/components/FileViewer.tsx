@@ -42,7 +42,7 @@ export function FileViewer(props: {
 
   // key: a new element (and a fresh error state) for each file
   if (isBrowserMedia(node)) return <Media key={node.id} node={node} url={url} source={props.source} allowDownload={props.allowDownload} autoPlay={props.autoPlay !== false} />;
-  if (cat === "pdf") return <iframe key={node.id} src={url} title={node.name} className={cn("size-full bg-white", !embedded && "max-w-5xl rounded-lg")} />;
+  if (cat === "pdf") return <iframe key={node.id} src={props.source.viewUrl(node)} title={node.name} className={cn("size-full bg-white", !embedded && "max-w-5xl rounded-lg")} />;
   if (isOfficePreviewable(node))
     return (
       <div className={cn("size-full overflow-hidden", !embedded && "max-w-6xl rounded-lg")}>

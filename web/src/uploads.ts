@@ -46,6 +46,8 @@ export interface UploadTask {
   /** Byte transfer is separate from preparing the session and waiting for its final server confirmation. */
   phase?: "preparing" | "sending" | "finishing";
   error?: string;
+  /** The server refused it for good (an invalid name, no permission, discarded): it isn't kept to continue after a reload */
+  refused?: boolean;
   upload?: tus.Upload;
   file: File;
   /** When the name is taken: give that file the new content, or keep both (the new one gets a number) */
@@ -150,7 +152,7 @@ function persist() {
   const now = Date.now();
   const byScope = new Map<string, UploadRecord[]>();
   for (const task of tasks) {
-    if (!task.scope || task.status === "done") continue;
+    if (!task.scope || task.status === "done" || task.refused) continue;
     const list = byScope.get(task.scope) ?? [];
     list.push({
       id: task.recordId,
@@ -367,6 +369,12 @@ function landed(task: UploadTask) {
   else landedTimer ??= setTimeout(flushLanded, LANDED_MS);
 }
 
+/** Whether the server refused an upload in a way sending it again won't change (a session that ended, a full space or
+ * a busy server can be waited out; an invalid name, a missing permission or a missing folder can't) */
+export function refusedForGood(e: ApiError): boolean {
+  return e.code === "upload_discarded" || [400, 403, 404, 410, 422].includes(e.status);
+}
+
 function uploadError(err: Error): ApiError {
   const res = (err as tus.DetailedError).originalResponse;
   // Handled like api.request: the server's message translated, and an expired session sends the user to sign in
@@ -423,6 +431,7 @@ function start(task: UploadTask) {
       if (task.upload !== upload || task.status !== "uploading") return;
       const e = uploadError(err);
       reportShown("upload", e, task.parentId);
+      task.refused = refusedForGood(e);
       fail(task, e.message);
     },
     onShouldRetry: (err) => {
@@ -538,6 +547,7 @@ function pump() {
 function requeue(task: UploadTask) {
   setStatus(task, "queued");
   task.error = undefined;
+  task.refused = false;
   queue.push(task);
 }
 

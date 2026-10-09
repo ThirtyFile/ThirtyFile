@@ -12,9 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog, ErrorText, errorProps } from "@/components/dialogs";
 import { Frame, ToolButton, ToolSeparator } from "@/components/Frame";
-import { useSettingsSearch } from "@/admin/controlPanel";
 import { t, tc } from "@/lib/i18n";
-import { formatDate } from "@/lib/utils";
+import { formatDate, matches } from "@/lib/utils";
 
 /** Group management (admins): groups can be space members or targets of folder sharing */
 export function GroupsPage() {
@@ -35,7 +34,9 @@ export function GroupsPage() {
     </>
   );
 
-  const searchSettings = useSettingsSearch();
+  // The search box finds groups here, as it finds users on the Users page
+  const [search, setSearch] = useState("");
+  const shown = search.trim() ? groups.filter((g) => matches(search, g.name, g.description)) : groups;
   const columns: Column<Group>[] = [
     {
       header: t("Name"),
@@ -65,13 +66,13 @@ export function GroupsPage() {
       icon={UsersRoundIcon}
       crumbs={[{ label: t("Control panel"), to: "/admin" }, { label: t("Groups") }]}
       upTo="/admin"
-      searchPlaceholder={t("Search settings")}
-      onSearch={searchSettings}
+      searchPlaceholder={t("Search groups")}
+      onSearch={setSearch}
       footer={<span>{t("{n} group|{n} groups", { n: groups.length })}</span>}
     >
       <DataTable
         label={t("Groups")}
-        rows={groups}
+        rows={shown}
         rowKey={(g) => String(g.id)}
         columns={columns}
         fixed

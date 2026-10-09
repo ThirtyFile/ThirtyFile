@@ -289,3 +289,21 @@ test("a pending archive link can be canceled before a download starts", async ({
   prepare.release();
   await expect(page.getByRole("button", { name: "Download again" })).toBeVisible();
 });
+
+test("a session that ends elsewhere sends the person to sign in once, saying why", async ({ page }) => {
+  await signInAsNewUser(page, "session-end");
+  await page.goto("/files");
+  await expect(page.getByRole("heading", { name: "My files", exact: true, level: 1 })).toBeVisible();
+  const refused: string[] = [];
+  page.on("response", (r) => {
+    if (r.status() === 401) refused.push(r.url());
+  });
+  // Signed out on another device (the same session)
+  expect((await page.request.post("/api/auth/logout")).ok()).toBe(true);
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(page.getByText("Your session ended. Sign in again.")).toBeVisible();
+  await expect(page).toHaveTitle(/^Sign in - /);
+  // Each list asked once, not again and again until the page changed
+  expect(refused.length).toBeGreaterThan(0);
+  expect(refused.filter((url, i) => refused.indexOf(url) !== i)).toEqual([]);
+});

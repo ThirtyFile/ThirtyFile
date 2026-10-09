@@ -149,8 +149,9 @@ function PrincipalPicker(props: { value: Principal | null; onChange(p: Principal
                 className={cn("flex w-full cursor-default items-center gap-2 rounded px-2 py-1.5 text-left text-sm", i === current && "bg-accent")}
               >
                 <Icon className="size-4 shrink-0 text-muted-foreground" />
-                <span className="truncate">{o.name}</span>
-                <span className="ml-auto shrink-0 text-xs text-muted-foreground">{o.principal_type === "group" ? `${t("Groups")} · ${tServer(o.detail)}` : roleDetail(o.detail)}</span>
+                {/* The whole name, on two lines if it must: a cut-off name can't tell similar ones apart */}
+                <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{o.name}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{o.principal_type === "group" ? `${t("Groups")} · ${tServer(o.detail)}` : roleDetail(o.detail)}</span>
               </div>
             );
           })}

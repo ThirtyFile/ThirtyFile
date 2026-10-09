@@ -20,6 +20,7 @@ const pdf = (): Node => ({
 });
 const source: FileSource = {
   contentUrl: (n) => `/content/${n.id}`,
+  viewUrl: () => "/view",
   thumbUrl: (n) => `/thumb/${n.id}`,
   downloadLink: () => Promise.resolve(""),
 };

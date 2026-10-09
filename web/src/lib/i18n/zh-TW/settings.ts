@@ -345,6 +345,7 @@ export default {
   "Redirect URI": "重新導向 URI（Redirect URI）",
   "Redirect URI copied": "已複製重新導向 URI",
   "Application (client) ID": "應用程式（用戶端）ID",
+  "Client ID": "用戶端 ID",
   "Client secret": "用戶端密碼",
   "Directory (tenant) ID": "目錄（租用戶）ID",
   "Any OpenID Connect provider, such as Keycloak, Authentik, Authelia or Zitadel: create a confidential client (web application) with the redirect URI below, and enter its issuer URL, client ID and secret. The provider must send a verified email address.": "任何 OpenID Connect 服務，例如 Keycloak、Authentik、Authelia 或 Zitadel：建立一個機密用戶端（Web 應用程式），填入下方的重新導向 URI，再填寫它的 Issuer URL、Client ID 與密鑰。服務必須提供已驗證的電子郵件地址。",

@@ -505,7 +505,8 @@ pub(super) async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: 
         tree::touch(&mut tx, p).await?;
     }
     tree::touch(&mut tx, &dest.id).await?;
-    logs::record_activity(&mut tx, user, Some(top), "move", &format!("→ {}", if dest.parent_id.is_none() { "Root folder" } else { &dest.name })).await?;
+    let to = tree::place_name(&mut tx, dest).await?;
+    logs::record_activity(&mut tx, user, Some(top), "move", &format!("→ {to}")).await?;
     tx.commit().await?;
     Ok((extras, remove))
 }
@@ -603,7 +604,8 @@ pub(super) async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: 
     crate::tags::copy_tags(&mut tx, user.id, ids.iter().map(|(from, to)| (*from, to.as_str()))).await?;
     tree::adjust_usage(&mut tx, dest.drive(), bytes).await?;
     tree::touch(&mut tx, &dest.id).await?;
-    logs::record_activity(&mut tx, user, Some(top), "copy", &format!("→ {}", if dest.parent_id.is_none() { "Root folder" } else { &dest.name })).await?;
+    let to = tree::place_name(&mut tx, dest).await?;
+    logs::record_activity(&mut tx, user, Some(top), "copy", &format!("→ {to}")).await?;
     tx.commit().await?;
     Ok(extras)
 }

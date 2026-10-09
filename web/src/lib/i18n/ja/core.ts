@@ -62,4 +62,6 @@ export default {
   "drive::{n} member|{n} members": "メンバー {n} 人",
   "drive::Shared by {name}": "{name} が共有",
   "date::Expires {date}": "有効期限 {date}",
+  "Page not found": "ページが見つかりません",
+  "There's no page at this address. Check the link, or start from All spaces.": "このアドレスにページはありません。リンクを確認するか、「すべてのスペース」から始めてください。",
 } satisfies Record<string, string>;

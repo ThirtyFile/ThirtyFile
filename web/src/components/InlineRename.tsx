@@ -1,8 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { toast } from "sonner";
 import { cn, errorMessage } from "@/lib/utils";
-import { t } from "@/lib/i18n";
+import { t, tServer } from "@/lib/i18n";
 import { reportShown } from "@/lib/errorReport";
+
+/** Characters a name can't have (as on Windows; the server refuses them too) */
+const FORBIDDEN = [...'\\/:*?"<>|'];
 
 /**
  * Inline rename (like Windows File Explorer): the name turns into an input with only the base name selected.
@@ -55,6 +58,13 @@ export function InlineRename({
     if (!name || name === initial) {
       finished.current = true;
       onDone(byKey);
+      return;
+    }
+    // The characters File Explorer refuses, refused before asking the server (its message, translated)
+    const bad = [...name].find((c) => FORBIDDEN.includes(c));
+    if (bad) {
+      toast.error(tServer(`Name can't contain ${bad}`));
+      requestAnimationFrame(() => ref.current?.focus());
       return;
     }
     setBusy(true);

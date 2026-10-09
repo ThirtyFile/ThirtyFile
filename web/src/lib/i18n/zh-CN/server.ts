@@ -194,6 +194,7 @@ export default {
   "Can't copy \"{name}\" into its own subfolder": "无法把“{name}”复制到它自己的子文件夹中",
   "Root folder": "根目录",
   "→ Root folder": "→ 根目录",
+  "→ My files": "→ 我的文件",
   "Item not found in trash": "回收站中找不到这个项目",
   "{n} item|{n} items": "{n} 个项目",
   "This isn't a file": "这不是文件",

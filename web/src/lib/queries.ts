@@ -292,6 +292,9 @@ async function apply(qc: QueryClient, c: Combined) {
     refetch((q) => isTreeList(q) && !!rowsOf(q.state.data)?.some((n) => folders.has(n.id)));
   }
   if (c.later.size) later((q) => q.queryKey[0] === "children" && c.later.has(idOf(q) ?? ""));
+  // The activity of the folders changed (it lists what happens inside them) and of the items changed or moved
+  const active = new Set([...folders, ...c.updated.keys(), ...c.moved.keys()]);
+  if (active.size) refetch((q) => q.queryKey[0] === "node" && q.queryKey[2] === "history" && active.has(q.queryKey[1] as string));
 
   // Gone: what was loaded inside them, and their own details
   if (gone.size) {

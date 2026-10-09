@@ -62,4 +62,6 @@ export default {
   "drive::{n} member|{n} members": "{n} 位成员",
   "drive::Shared by {name}": "由 {name} 共享",
   "date::Expires {date}": "{date} 到期",
+  "Page not found": "找不到页面",
+  "There's no page at this address. Check the link, or start from All spaces.": "这个网址没有对应的页面。请检查链接，或从“所有空间”开始。",
 } satisfies Record<string, string>;

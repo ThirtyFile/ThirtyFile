@@ -17,4 +17,5 @@ export default {
   "Sign-in screen": "登录界面",
   // Server messages and activity log
   "The background image can't be larger than 5 MB": "背景图片不能超过 5 MB",
+  "Your session ended. Sign in again.": "你的登录会话已结束，请重新登录。",
 } satisfies Record<string, string>;

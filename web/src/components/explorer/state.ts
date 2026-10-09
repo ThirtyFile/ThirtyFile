@@ -8,6 +8,7 @@ import { capsOf } from "@/lib/drives";
 import { takeArrival } from "@/lib/columns";
 import { openMenuByKey } from "@/lib/contextMenus";
 import { focusIsFree } from "@/lib/focus";
+import { useDetailsPane } from "@/lib/detailsPane";
 import type { GroupBy } from "@/lib/listView";
 import { inSpan, smartListing, spanCount, type FolderSpan, type ListSpan, type Picked } from "@/lib/span";
 import { usePersisted, useMe } from "@/lib/session";
@@ -38,7 +39,7 @@ export function useExplorerState(p: ExplorerProps) {
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [dragging, setDragging] = useState(false);
   const [showCheckboxes, setShowCheckboxes] = usePersisted("tf-checkboxes", false);
-  const [detailsOpen, setDetailsOpen] = usePersisted("tf-details-pane", false);
+  const [detailsOpen, setDetailsOpen] = useDetailsPane();
   const clip = useClipboard();
   const fileInput = useRef<HTMLInputElement>(null);
   const dirInput = useRef<HTMLInputElement>(null);
@@ -133,8 +134,9 @@ export function useExplorerState(p: ExplorerProps) {
   const single = !span && selectedNodes.length === 1 ? selectedNodes[0] : null;
   const allFavorite = selectedNodes.length > 0 && selectedNodes.every((n) => n.is_favorite);
 
-  // Clear the selection when switching folders
-  const place = `${p.folderId}|${p.crumbs.map((c) => c.label).join("/")}`;
+  // Clear the selection when switching folders: a folder by its id (renaming the folder shown doesn't leave it), the
+  // other pages (Recent, a search) by what they show
+  const place = p.folderId ?? `|${p.crumbs.map((c) => c.label).join("/")}`;
   /** The folder shown before this one (the folder id is unknown for a moment while the next folder loads) */
   const lastFolder = useRef(p.folderId);
   const cameFrom = useRef<string | undefined>(undefined);

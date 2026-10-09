@@ -38,7 +38,7 @@ beforeAll(() => {
   };
 });
 
-const source: FileSource = { contentUrl: (n) => `/api/files/${n.id}/content`, thumbUrl: () => "", downloadLink: () => Promise.resolve("") };
+const source: FileSource = { contentUrl: (n) => `/api/files/${n.id}/content`, viewUrl: () => "/view", thumbUrl: () => "", downloadLink: () => Promise.resolve("") };
 const node = (name: string): Node => ({
   id: name,
   parent_id: "folder",

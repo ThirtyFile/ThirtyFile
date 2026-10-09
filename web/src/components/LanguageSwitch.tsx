@@ -4,8 +4,9 @@ import { LANGS, lang, setLang, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 /** Language switcher (login page, public share page; reloads the page after switching). Someone signed in (on a share
- * page) also gets it saved with their account, as in the account menu */
-export function LanguageSwitch({ className }: { className?: string }) {
+ * page) also gets it saved with their account, as in the account menu; on the sign-in page nobody is (`signedOut`), so
+ * nothing is asked of the server. `beforeReload`: what the page keeps for after the reload. */
+export function LanguageSwitch({ className, signedOut, beforeReload }: { className?: string; signedOut?: boolean; beforeReload?: () => void }) {
   return (
     <label className={cn("inline-flex items-center gap-1.5 text-xs text-muted-foreground", className)}>
       <LanguagesIcon className="size-3.5" aria-hidden="true" />
@@ -15,7 +16,12 @@ export function LanguageSwitch({ className }: { className?: string }) {
         value={lang}
         onChange={(e) => {
           const next = e.target.value as Lang;
-          void api.setLanguageIfSignedIn(next).then(() => setLang(next));
+          const switchTo = () => {
+            beforeReload?.();
+            setLang(next);
+          };
+          if (signedOut) switchTo();
+          else void api.setLanguageIfSignedIn(next).then(switchTo);
         }}
       >
         {LANGS.map((l) => (

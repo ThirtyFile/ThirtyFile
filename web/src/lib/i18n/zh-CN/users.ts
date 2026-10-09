@@ -82,6 +82,8 @@ export default {
   "{n} user|{n} users": "{n} 个用户",
   "{n} user found|{n} users found": "找到 {n} 个用户",
   "Search users": "搜索用户",
+  "Search groups": "搜索用户组",
+  "Search spaces": "搜索空间",
   "No users match \"{query}\"": "没有与“{query}”匹配的用户",
   "{n} group|{n} groups": "{n} 个用户组",
   "{n} team space|{n} team spaces": "{n} 个团队空间",

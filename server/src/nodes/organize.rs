@@ -264,7 +264,8 @@ pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
         sqlx::query("UPDATE nodes SET parent_id = ?, name = ? WHERE id = ?").bind(&dest.id).bind(&name).bind(&node.id).execute(&mut *tx).await?;
         node.name = name;
         tree::touch(&mut tx, node.parent_id.as_deref().unwrap()).await?;
-        logs::record_activity(&mut tx, &user, Some(&node), "move", &format!("→ {}", if dest.parent_id.is_none() { "Root folder" } else { &dest.name })).await?;
+        let to = tree::place_name(&mut tx, &dest).await?;
+        logs::record_activity(&mut tx, &user, Some(&node), "move", &format!("→ {to}")).await?;
     }
     tree::touch(&mut tx, &dest.id).await?;
     tx.commit().await?;
@@ -380,7 +381,8 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
         tree::add_blob_refs(&mut tx, &blobs).await?;
         // The copies get the copier's tags of the originals (each person's tags are their own)
         crate::tags::copy_tags(&mut tx, user.id, ids.iter().map(|(from, to)| (from.as_str(), to.as_str()))).await?;
-        logs::record_activity(&mut tx, &user, Some(&nodes[0]), "copy", &format!("→ {}", if dest.parent_id.is_none() { "Root folder" } else { &dest.name })).await?;
+        let to = tree::place_name(&mut tx, &dest).await?;
+        logs::record_activity(&mut tx, &user, Some(&nodes[0]), "copy", &format!("→ {to}")).await?;
     }
     tree::adjust_usage(&mut tx, dest.drive(), total).await?;
     tree::touch(&mut tx, &dest.id).await?;

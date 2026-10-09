@@ -194,6 +194,7 @@ export default {
   "Can't copy \"{name}\" into its own subfolder": "「{name}」をそれ自身のサブフォルダーにコピーすることはできません",
   "Root folder": "ルートフォルダー",
   "→ Root folder": "→ ルートフォルダー",
+  "→ My files": "→ マイファイル",
   "Item not found in trash": "ごみ箱にこの項目が見つかりません",
   "{n} item|{n} items": "{n} 個の項目",
   "This isn't a file": "ファイルではありません",

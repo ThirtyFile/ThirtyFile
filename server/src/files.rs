@@ -242,6 +242,18 @@ pub struct ContentQuery {
     download: Option<u8>,
 }
 
+/// `content` at an address that ends in the file's name: the browser's PDF viewer titles a document by its address
+/// when it has no title of its own ("content" otherwise). The name in the address isn't used.
+pub async fn content_named(
+    st: State<AppState>,
+    user: User,
+    Path((id, _name)): Path<(String, String)>,
+    q: Query<ContentQuery>,
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    content(st, user, Path(id), q, headers).await
+}
+
 pub async fn content(State(st): State<AppState>, user: User, Path(id): Path<String>, Query(q): Query<ContentQuery>, headers: HeaderMap) -> AppResult<Response> {
     let node = tree::owned_node(&mut *st.db.acquire().await?, &user, &id).await?;
     let download = q.download == Some(1);

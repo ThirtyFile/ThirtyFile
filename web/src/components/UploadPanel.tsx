@@ -88,7 +88,7 @@ export function UploadPanel({ visitor = false, endpoint = "/api/uploads" }: { vi
       {!collapsed && recovered.length > 0 && <RecoveredUploads endpoint={endpoint} batches={recovered} />}
       {!collapsed && tasks.length > 0 && (
         <ContextMenu>
-          <ContextMenuTrigger className="block max-h-72 overflow-y-auto" onContextMenuCapture={() => setMenuId(null)}>
+          <ContextMenuTrigger className="block max-h-[min(18rem,calc(100dvh-16rem))] overflow-y-auto" onContextMenuCapture={() => setMenuId(null)}>
             {rows.map((task) => {
               const p = task.size ? Math.round((task.sent / task.size) * 100) : 100;
               const pending = task.status === "uploading" && (task.phase === "preparing" || task.phase === "finishing");

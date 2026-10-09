@@ -29,7 +29,8 @@ import { ItemError } from "@/components/ErrorState";
 import { FileViewer } from "@/components/FileViewer";
 import { crumbPath, Frame, ToolButton, ToolSeparator } from "@/components/Frame";
 import { ShareDialog } from "@/components/ShareDialog";
-import { usePersisted, useMe } from "@/lib/session";
+import { useMe } from "@/lib/session";
+import { useDetailsPane } from "@/lib/detailsPane";
 import { extOf, formatBytes, formatDateTime } from "@/lib/utils";
 import { hasDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
@@ -60,7 +61,7 @@ export function FileViewPage() {
     // While the storage service is offline, check every 15 seconds and open automatically once it recovers
     refetchInterval: (q) => (q.state.data?.offline ? 15_000 : false),
   });
-  const [detailsOpen, setDetailsOpen] = usePersisted("tf-details-pane", false);
+  const [detailsOpen, setDetailsOpen] = useDetailsPane();
   const [dialog, setDialog] = useState<"rename" | "share" | "access" | null>(null);
   // Excel edit mode; when switching back to the tab with unsaved changes, go straight back to the editor
   const [editingId, setEditingId] = useState<string | null>(() => (hasDraft(id) ? id : null));
@@ -191,7 +192,7 @@ export function FileViewPage() {
     <Frame
       toolbar={toolbar}
       icon={FileIcon}
-      crumbs={node ? loc.crumbs : [{ label: "…" }]}
+      crumbs={node ? loc.crumbs : [{ label: info.isError ? t("This file can't be found") : "…" }]}
       path={pathOf(info.data) ?? crumbPath(loc.crumbs)}
       upTo={node ? parentUrl : null}
       activeFolder={folders.length ? folders[folders.length - 1].id : undefined}

@@ -129,7 +129,9 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
                 id="u-quota"
                 type="number"
                 min={0}
-                step="0.1"
+                // Any size, such as 0.05 GB: a step would make the browser refuse others with a message of its own
+                step="any"
+                inputMode="decimal"
                 value={quotaGb}
                 onChange={(e) => {
                   setQuotaGb(e.target.value);

@@ -17,4 +17,5 @@ export default {
   "Sign-in screen": "サインイン画面",
   // Server messages and activity log
   "The background image can't be larger than 5 MB": "背景画像は 5 MB 以下にしてください",
+  "Your session ended. Sign in again.": "セッションが終了しました。もう一度サインインしてください。",
 } satisfies Record<string, string>;

@@ -193,6 +193,15 @@ pub async fn get_drive(conn: &mut SqliteConnection, id: &str) -> AppResult<Optio
     Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(id).fetch_optional(conn).await?)
 }
 
+/// A folder as the activity log names it: by its name, or a space's top folder by the space's name ("My files"), as
+/// the pages show it
+pub async fn place_name(conn: &mut SqliteConnection, folder: &Node) -> AppResult<String> {
+    if folder.parent_id.is_some() {
+        return Ok(folder.name.clone());
+    }
+    Ok(get_drive(conn, folder.drive()).await?.map(|d| d.name).unwrap_or_else(|| folder.name.clone()))
+}
+
 pub fn resolve_alias<'a>(user: &'a User, id: &'a str) -> AppResult<&'a str> {
     Ok(match id {
         // The personal space, which a user may not have (personal/): the web never asks them for it

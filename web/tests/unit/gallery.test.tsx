@@ -40,7 +40,7 @@ const node = (name: string): Item => ({
   is_favorite: false,
 });
 const ITEMS = ["Drafts", "beach.jpg", "clip.mp4", "report.pdf"].map(node);
-const source: FileSource = { contentUrl: () => "", thumbUrl: () => "", downloadLink: () => Promise.resolve("") };
+const source: FileSource = { contentUrl: () => "", viewUrl: () => "/view", thumbUrl: () => "", downloadLink: () => Promise.resolve("") };
 
 /** A box scrolling across, 1000 pixels wide, which the strip is laid out in (the test page has no layout or style sheet) */
 function scrollingBox() {

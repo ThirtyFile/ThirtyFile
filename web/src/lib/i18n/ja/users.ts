@@ -82,6 +82,8 @@ export default {
   "{n} user|{n} users": "{n} 人のユーザー",
   "{n} user found|{n} users found": "{n} 人のユーザーが見つかりました",
   "Search users": "ユーザーを検索",
+  "Search groups": "グループを検索",
+  "Search spaces": "スペースを検索",
   "No users match \"{query}\"": "「{query}」に一致するユーザーはいません",
   "{n} group|{n} groups": "{n} 個のグループ",
   "{n} team space|{n} team spaces": "{n} 個のチームスペース",
