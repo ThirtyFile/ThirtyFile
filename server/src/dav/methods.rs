@@ -57,15 +57,53 @@ pub(super) async fn propfind(st: &AppState, user: &User, segs: &[String], header
                     crate::folders::sync_opened(st, &node).await;
                     c = st.db.acquire().await?;
                 }
-                let mut list = nodes::list_children(&mut c, &node.id, &nodes::ListQuery::default()).await?;
-                for n in std::mem::take(list.items_mut()) {
-                    let q = if with_quota && n.is_folder() { quota(&mut c, &mut quotas, n.drive()).await? } else { None };
-                    out.add(&href(&child(&n.name), n.is_folder()), &want, node_props(&n, &n.name, q));
-                }
+                drop(c);
+                return Ok(children_streamed(st, out, &node.id, path, want, with_quota));
             }
         }
     }
     Ok(out.finish())
+}
+
+/// Items in a WebDAV listing of a folder read and written at a time
+const LISTING_PAGE: i64 = if cfg!(test) { 2 } else { 1000 };
+
+/// A folder's listing (`head`: the multistatus so far, with the folder itself) followed by its items, a page at a time
+/// as the client reads them: a folder of 200,000 items is neither held in memory as one answer nor read in one query
+fn children_streamed(st: &AppState, head: Multistatus, folder: &str, path: Vec<String>, want: Want, with_quota: bool) -> Response {
+    let (st, folder) = (st.clone(), folder.to_string());
+    // The state: where the next page starts (Some(None) for the first); None once the last page was sent
+    let pages = futures_util::stream::unfold(Some(None::<String>), move |state| {
+        let (st, folder, path, want) = (st.clone(), folder.clone(), path.clone(), want.clone());
+        async move {
+            let after = state?;
+            let page = async {
+                let mut c = st.db.acquire().await?;
+                let mut list = nodes::list_children(&mut c, &folder, &nodes::ListQuery::page(after, LISTING_PAGE)).await?;
+                let next = list.next().map(str::to_string);
+                let mut quotas = HashMap::new();
+                let mut part = Multistatus::part();
+                for n in std::mem::take(list.items_mut()) {
+                    let q = if with_quota && n.is_folder() { quota(&mut c, &mut quotas, n.drive()).await? } else { None };
+                    let mut p = path.clone();
+                    p.push(n.name.clone());
+                    part.add(&href(&p, n.is_folder()), &want, node_props(&n, &n.name, q));
+                }
+                if next.is_none() {
+                    part.xml.push_str("</D:multistatus>");
+                }
+                AppResult::Ok((part.xml, next.map(Some)))
+            };
+            Some(match page.await {
+                Ok((xml, state)) => (Ok::<_, std::io::Error>(bytes::Bytes::from(xml)), state),
+                // Cut short: the client sees an answer that doesn't end, rather than one that looks complete
+                Err(e) => (Err(std::io::Error::other(e.message)), None),
+            })
+        }
+    });
+    let first = futures_util::stream::iter([Ok::<_, std::io::Error>(bytes::Bytes::from(head.xml))]);
+    let body = futures_util::StreamExt::chain(first, pages);
+    (StatusCode::MULTI_STATUS, [(header::CONTENT_TYPE, "application/xml; charset=utf-8")], Body::from_stream(body)).into_response()
 }
 
 /// Accepted and not stored: every property is reported as set
@@ -212,26 +250,12 @@ pub(super) async fn move_to(st: &AppState, user: &User, src: &Node, dest: &Node,
     rename(st, user, &src.id, name).await
 }
 
-/// (id, name) of a folder's items of one kind, newest first
-pub(super) async fn children_of(conn: &mut SqliteConnection, parent_id: &str, kind: &str) -> AppResult<Vec<(String, String)>> {
-    Ok(sqlx::query_as("SELECT id, name FROM nodes WHERE parent_id = ? AND kind = ? AND trashed_at IS NULL ORDER BY created_at DESC")
-        .bind(parent_id)
-        .bind(kind)
-        .fetch_all(conn)
-        .await?)
-}
-
-/// Copies an item into `dest` as `name` (the copy gets a free name first, then the one asked for)
+/// Copies an item into `dest` as `name`: the copy is made under that name, so nothing made there at the same time
+/// (another COPY) can be taken for it
 pub(super) async fn copy_to(st: &AppState, user: &User, src: &Node, dest: &Node, name: &str) -> AppResult<()> {
-    let before: HashSet<String> = children_of(&mut *st.db.acquire().await?, &dest.id, &src.kind).await?.into_iter().map(|(id, _)| id).collect();
-    let Json(req) = json_req(json!({ "ids": [src.id], "dest_id": dest.id }))?;
+    let Json(req) = json_req(json!({ "ids": [src.id], "dest_id": dest.id, "name": name }))?;
     if let Some(across) = nodes::copy_items(st, user, &req).await? {
         nodes::run_content(st, user, across, &Default::default()).await?;
-    }
-    let after = children_of(&mut *st.db.acquire().await?, &dest.id, &src.kind).await?;
-    let (id, copied) = after.into_iter().find(|(id, _)| !before.contains(id)).ok_or_else(|| AppError::internal("the copy wasn't found"))?;
-    if copied != name {
-        rename(st, user, &id, name).await?;
     }
     Ok(())
 }

@@ -26,6 +26,13 @@ pub struct ListQuery {
 pub const MAX_PAGE: i64 = 5000;
 
 impl ListQuery {
+    /// One page of `limit` items in the default order, after `after` (the `next` of the page before; None: from the start)
+    pub fn page(after: Option<String>, limit: i64) -> ListQuery {
+        ListQuery { after, limit: Some(limit), ..Default::default() }
+    }
+}
+
+impl ListQuery {
     /// For listings anyone with a link can ask for: one page of at most MAX_PAGE items when no page size was given,
     /// so a single request can't make the server send a whole large folder
     pub fn paged(mut self) -> Self {
@@ -59,6 +66,14 @@ impl<T> Listing<T> {
         match self {
             Listing::All(items) => Listing::All(f(items)),
             Listing::Page { items, next, total } => Listing::Page { items: f(items), next, total },
+        }
+    }
+
+    /// Where the next page starts, when there is one
+    pub fn next(&self) -> Option<&str> {
+        match self {
+            Listing::Page { next, .. } => next.as_deref(),
+            Listing::All(_) => None,
         }
     }
 

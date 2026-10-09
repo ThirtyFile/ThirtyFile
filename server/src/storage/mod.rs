@@ -277,6 +277,21 @@ impl From<std::io::Error> for crate::error::AppError {
     }
 }
 
+/// A file for one attempt at storing `tmp` (`put_at` and `repair_file` remove what they store): a hard link to it, or a
+/// copy where links can't be made. `tmp` itself stays for an attempt after this one, should the stored content not
+/// check out; the caller removes it once it is no longer needed.
+pub async fn attempt_of(tmp: &Path) -> io::Result<std::path::PathBuf> {
+    let (from, to) = (tmp.to_path_buf(), tmp.with_extension(format!("try-{}", crate::util::new_id())));
+    tokio::task::spawn_blocking(move || {
+        if std::fs::hard_link(&from, &to).is_err() {
+            std::fs::copy(&from, &to)?;
+        }
+        Ok(to)
+    })
+    .await
+    .map_err(io::Error::other)?
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -284,5 +299,23 @@ mod tests {
         assert_eq!(super::dir_levels("/srv/blobs/ab"), ["/srv", "/srv/blobs", "/srv/blobs/ab"]);
         assert_eq!(super::dir_levels("./blobs/ab"), ["./blobs", "./blobs/ab"]);
         assert!(super::dir_levels("").is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_attempt_at_storing_a_temp_file_leaves_it_for_the_next_one() {
+        use super::Storage;
+        let dir = std::env::temp_dir().join(format!("thirtyfile-attempt-{}", crate::util::new_id()));
+        std::fs::create_dir_all(dir.join("store")).unwrap();
+        super::prepare_builtin(&dir.join("store"), false).unwrap();
+        let store = super::local::LocalStorage::new(dir.join("store"), "local");
+        let tmp = dir.join("content.tmp");
+        std::fs::write(&tmp, b"content").unwrap();
+        for key in ["a/one", "a/two"] {
+            let attempt = super::attempt_of(&tmp).await.unwrap();
+            store.put_at(key, &attempt).await.unwrap();
+            assert!(!attempt.exists(), "what was stored is taken");
+            assert_eq!(std::fs::read(&tmp).unwrap(), b"content", "the temp file stays for another attempt");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

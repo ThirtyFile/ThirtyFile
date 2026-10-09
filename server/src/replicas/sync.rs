@@ -79,8 +79,15 @@ pub(super) async fn put_verified(cx: &Ctx<'_>, dst: &Arc<dyn Storage>, location:
         .tries(
             |_: &std::io::Error| true,
             || async {
-                // Written in full first, then put in the content's place (`repair_file`): what is there stays until then
-                dst.repair_file(hash, tmp).await?;
+                // Written in full first, then put in the content's place (`repair_file`): what is there stays until
+                // then. Each attempt writes a link to the temp file, so one that doesn't read back whole is tried again
+                // with the content still at hand.
+                let attempt = crate::storage::attempt_of(tmp).await?;
+                let repaired = dst.repair_file(hash, &attempt).await;
+                if repaired.is_err() {
+                    let _ = tokio::fs::remove_file(&attempt).await;
+                }
+                repaired?;
                 match read_back(dst.as_ref(), hash, size).await? {
                     (h, n) if h == hash && n == size as u64 => Ok(()),
                     _ => Err(crate::hashing::unusable(crate::hashing::Unusable::Damaged, crate::backups::capture::DAMAGED)),
@@ -89,7 +96,10 @@ pub(super) async fn put_verified(cx: &Ctx<'_>, dst: &Arc<dyn Storage>, location:
         )
         .await;
     match put {
-        Ok(()) => Ok(Ok(())),
+        Ok(()) => {
+            let _ = tokio::fs::remove_file(tmp).await;
+            Ok(Ok(()))
+        }
         Err(Ok(stop)) => Ok(Err(stop)),
         Err(Err(e)) => Err(AppError::new(
             axum::http::StatusCode::BAD_GATEWAY,

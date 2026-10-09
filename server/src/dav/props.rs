@@ -3,7 +3,7 @@
 use super::*;
 
 /// Which properties a PROPFIND asks for
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub(super) enum Want {
     All,
     Names,
@@ -210,6 +210,12 @@ impl Multistatus {
             self.propstat(&missing, "404 Not Found");
         }
         self.xml.push_str("</D:response>");
+    }
+
+    /// The start of a multistatus whose responses follow as a stream (`Multistatus::part`): a large folder isn't held
+    /// in memory as one answer
+    pub(super) fn part() -> Self {
+        Multistatus { xml: String::new() }
     }
 
     pub(super) fn finish(mut self) -> Response {
