@@ -542,6 +542,18 @@ mod tests {
         env.grant(&top, &ben, "viewer").await;
         assert_eq!(history(ben.clone(), &top).await.unwrap(), ["trash b.txt", "rename top", "edit b.txt", "upload a.txt"]);
         assert_eq!(history(ben.clone(), &other).await.unwrap_err().status, axum::http::StatusCode::NOT_FOUND);
+        // Details (where something was moved, say) are for those who manage it: they can name places a viewer can't see
+        {
+            let mut c = env.st.db.acquire().await.unwrap();
+            let node = tree::get_node(&mut c, &a).await.unwrap().unwrap();
+            record_activity(&mut c, &amy, Some(&node), "move", "→ Private plans").await.unwrap();
+        }
+        let details = |who: User| {
+            let (st, top) = (env.st.clone(), top.clone());
+            async move { node_history(State(st), who, Path(top)).await.unwrap().0.into_iter().map(|r| r.detail).next().unwrap() }
+        };
+        assert_eq!(details(amy.clone()).await, "→ Private plans");
+        assert_eq!(details(ben.clone()).await, "");
 
         // Only the most recent entries
         for _ in 0..60 {

@@ -1061,7 +1061,7 @@ export default {
   "Downloads are turned off for this link": "此链接不允许下载",
   "This link doesn't accept files": "此链接不接收文件",
   "Too many uploads at once through this link. Try again later.": "通过此链接同时上传的文件过多，请稍后再试。",
-  "Through share link {link}": "通过分享链接 {link}",
+  "Through a share link": "通过分享链接",
   "only accepts files": "只收文件",
   "accepts files": "可上传文件",
   "preview only": "仅限预览",

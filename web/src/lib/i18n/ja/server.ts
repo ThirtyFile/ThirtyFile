@@ -1061,7 +1061,7 @@ export default {
   "Downloads are turned off for this link": "このリンクではダウンロードが無効になっています",
   "This link doesn't accept files": "このリンクではファイルを受け取れません",
   "Too many uploads at once through this link. Try again later.": "このリンクを通じた同時アップロードが多すぎます。しばらくしてからもう一度お試しください。",
-  "Through share link {link}": "共有リンク {link} 経由",
+  "Through a share link": "共有リンク経由",
   "only accepts files": "ファイルの受け取り専用",
   "accepts files": "ファイルのアップロード可",
   "preview only": "プレビューのみ",

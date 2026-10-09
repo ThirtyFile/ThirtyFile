@@ -52,7 +52,10 @@ pub async fn export_activity(State(st): State<AppState>, user: User, Query(q): Q
 pub async fn node_history(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Json<Vec<HistoryRow>>> {
     let mut c = st.db.acquire().await?;
     let (node, role) = tree::node_with_role(&mut c, &user, &id).await?;
-    let mut qb = QueryBuilder::<Sqlite>::new("SELECT a.id, a.at, a.username, a.node_id, a.node_name, a.action, a.detail FROM activity a WHERE ");
+    // Details (where an item was moved or copied to, say) are for those who manage it, as in the activity log: they can
+    // name places someone who can only see this item can't
+    let detail = if role >= Role::Manager { "a.detail" } else { "'' AS detail" };
+    let mut qb = QueryBuilder::<Sqlite>::new(format!("SELECT a.id, a.at, a.username, a.node_id, a.node_name, a.action, {detail} FROM activity a WHERE "));
     if node.parent_id.is_none() {
         qb.push("a.drive_id = ").push_bind(node.drive().to_string()).push(" AND a.node_id IS NOT NULL");
     } else if node.is_folder() {
