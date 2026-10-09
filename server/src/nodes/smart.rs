@@ -188,6 +188,10 @@ pub struct SmartFolder {
     id: i64,
     name: String,
     query: SmartQuery,
+    /// What it looks for couldn't be read (a damaged row): it lists nothing, and can be given a new search, renamed
+    /// or deleted, without hiding the person's other smart folders
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    unreadable: bool,
 }
 
 #[derive(sqlx::FromRow)]
@@ -197,10 +201,15 @@ struct SmartRow {
     query: String,
 }
 
-impl TryFrom<SmartRow> for SmartFolder {
-    type Error = AppError;
-    fn try_from(r: SmartRow) -> AppResult<Self> {
-        Ok(SmartFolder { id: r.id, name: r.name, query: serde_json::from_str(&r.query).map_err(AppError::internal)? })
+impl From<SmartRow> for SmartFolder {
+    fn from(r: SmartRow) -> Self {
+        match serde_json::from_str(&r.query) {
+            Ok(query) => SmartFolder { id: r.id, name: r.name, query, unreadable: false },
+            Err(e) => {
+                tracing::warn!("Smart folder {} can't be read: {e}", r.id);
+                SmartFolder { id: r.id, name: r.name, query: SmartQuery::default(), unreadable: true }
+            }
+        }
     }
 }
 
@@ -212,7 +221,7 @@ async fn own(conn: &mut SqliteConnection, user: &User, id: i64) -> AppResult<Sma
         .fetch_optional(&mut *conn)
         .await?
         .ok_or_else(|| AppError::not_found("Smart folder not found"))?;
-    row.try_into()
+    Ok(row.into())
 }
 
 /// The signed-in person's smart folders, by name
@@ -221,7 +230,7 @@ pub async fn smart_folders(State(st): State<AppState>, user: User) -> AppResult<
         .bind(user.id)
         .fetch_all(&st.db)
         .await?;
-    Ok(Json(rows.into_iter().map(SmartFolder::try_from).collect::<AppResult<_>>()?))
+    Ok(Json(rows.into_iter().map(SmartFolder::from).collect()))
 }
 
 pub async fn smart_folder(State(st): State<AppState>, user: User, Path(id): Path<i64>) -> AppResult<Json<SmartFolder>> {
@@ -283,7 +292,7 @@ pub async fn create_smart_folder(State(st): State<AppState>, user: User, Json(re
         .fetch_one(&mut *tx)
         .await?;
     tx.commit().await?;
-    Ok(Json(SmartFolder { id, name, query }))
+    Ok(Json(SmartFolder { id, name, query, unreadable: false }))
 }
 
 /// Renames a smart folder, or changes what it looks for
@@ -298,10 +307,13 @@ pub async fn update_smart_folder(State(st): State<AppState>, user: User, Path(id
     }
     if let Some(query) = req.query {
         folder.query = query.checked(&mut tx, &user).await?;
+        folder.unreadable = false;
     }
-    sqlx::query("UPDATE smart_folders SET name = ?, query = ?, updated_at = ? WHERE id = ?")
+    // One that couldn't be read keeps what it had until it is given a new search (its stand-in looks for everything)
+    let query = (!folder.unreadable).then(|| serde_json::to_string(&folder.query).unwrap());
+    sqlx::query("UPDATE smart_folders SET name = ?, query = COALESCE(?, query), updated_at = ? WHERE id = ?")
         .bind(&folder.name)
-        .bind(serde_json::to_string(&folder.query).unwrap())
+        .bind(query)
         .bind(now())
         .bind(id)
         .execute(&mut *tx)
@@ -323,6 +335,9 @@ pub async fn delete_smart_folder(State(st): State<AppState>, user: User, Path(id
 /// What the person's smart folder `id` holds for them now
 async fn held_by(conn: &mut SqliteConnection, user: &User, id: i64) -> AppResult<Held> {
     let folder = own(conn, user, id).await?;
+    if folder.unreadable {
+        return Ok(Held::new("0".into(), Vec::new()));
+    }
     let Some(criteria) = folder.query.criteria(conn, user).await? else { return Ok(Held::new("0".into(), Vec::new())) };
     let (drives, folders) = tree::scope(conn, user).await?;
     Ok(criteria.held(drives, folders))
@@ -580,6 +595,66 @@ mod tests {
         // A tag deleted: nothing has it any more
         let _ = crate::tags::delete(st(), amy.clone(), Path(urgent)).await.unwrap();
         assert!(names(&env, &amy, tagged).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn file_types_are_found_through_the_index_and_only_at_the_end_of_names() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        for name in ["REPORT.PDF", "notes.pdf.txt", "main.c", "pdf", "Résumé.docx"] {
+            env.file(&amy, amy.root(), name).await;
+        }
+        assert_eq!(found(&env, &amy, json!({ "ext": "pdf" })).await, ["REPORT.PDF"]);
+        assert_eq!(found(&env, &amy, json!({ "ext": "pdf,docx" })).await, ["REPORT.PDF", "Résumé.docx"]);
+        // One letter: no index, the same answer
+        assert_eq!(found(&env, &amy, json!({ "ext": "c,txt" })).await, ["main.c", "notes.pdf.txt"]);
+
+        // What no index narrows down takes turns (`Held::turn`); the trigram index serves names of 3 characters and
+        // more, and extensions of 2 and more
+        let held = |c: Criteria| c.held("[]".into(), "[]".into());
+        let crit = |term: &str, exts: &[&str]| Criteria { term: term.into(), exts: exts.iter().map(|e| e.to_string()).collect(), ..Default::default() };
+        assert!(held(crit("re", &[])).unindexed);
+        assert!(!held(crit("rep", &[])).unindexed);
+        assert!(!held(crit("", &["pdf", "jpg"])).unindexed);
+        assert!(held(crit("", &["pdf", "c"])).unindexed);
+        assert!(!held(Criteria { below: Some("x".into()), ..crit("a", &[]) }).unindexed);
+        let plan: Vec<(i64, i64, i64, String)> = {
+            let h = held(crit("", &["pdf"]));
+            let sql = format!("EXPLAIN QUERY PLAN SELECT n.id FROM nodes n WHERE {}", h.condition);
+            bind_all(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())), h.args).fetch_all(&env.st.db).await.unwrap()
+        };
+        assert!(plan.iter().any(|(.., d)| d.contains("nodes_fts")), "{plan:?}");
+    }
+
+    #[tokio::test]
+    async fn a_smart_folder_that_cant_be_read_hides_nothing_else_and_can_be_fixed_or_deleted() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        env.file(&amy, amy.root(), "report.pdf").await;
+        let good = make(&env, &amy, "PDFs", json!({ "ext": "pdf" })).await.unwrap();
+        let bad = make(&env, &amy, "Damaged", json!({ "ext": "pdf" })).await.unwrap();
+        sqlx::query("UPDATE smart_folders SET query = '{\"scope\": {\"kind\": \"nowhere\"}}' WHERE id = ?").bind(bad).execute(&env.st.db).await.unwrap();
+
+        let Json(all) = smart_folders(State(env.st.clone()), amy.clone()).await.unwrap();
+        let v = serde_json::to_value(&all).unwrap();
+        assert_eq!(v.as_array().unwrap().len(), 2, "{v}");
+        assert_eq!(v[0]["name"], "Damaged");
+        assert_eq!(v[0]["unreadable"], true);
+        assert!(v[1].get("unreadable").is_none());
+        // It lists nothing (its stand-in would look for everything)
+        assert!(names(&env, &amy, bad).await.is_empty());
+        assert_eq!(names(&env, &amy, good).await, ["report.pdf"]);
+
+        // Renamed, it keeps what it had; given a new search, it works again
+        let _ = update_smart_folder(State(env.st.clone()), amy.clone(), Path(bad), req(json!({ "name": "Still damaged" }))).await.unwrap();
+        let (kept,): (String,) = sqlx::query_as("SELECT query FROM smart_folders WHERE id = ?").bind(bad).fetch_one(&env.st.db).await.unwrap();
+        assert!(kept.contains("nowhere"), "{kept}");
+        let _ = update_smart_folder(State(env.st.clone()), amy.clone(), Path(bad), req(json!({ "query": { "name": "report" } }))).await.unwrap();
+        assert_eq!(names(&env, &amy, bad).await, ["report.pdf"]);
+        sqlx::query("UPDATE smart_folders SET query = 'not json' WHERE id = ?").bind(bad).execute(&env.st.db).await.unwrap();
+        let _ = delete_smart_folder(State(env.st.clone()), amy.clone(), Path(bad)).await.unwrap();
+        let Json(all) = smart_folders(State(env.st.clone()), amy.clone()).await.unwrap();
+        assert_eq!(all.len(), 1);
     }
 
     #[tokio::test]

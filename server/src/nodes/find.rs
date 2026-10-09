@@ -105,7 +105,10 @@ impl Criteria {
             sql += &format!(" AND n.id IN (SELECT node_id FROM tagged WHERE tag_id = {} AND owner_id = {})", arg(Arg::Int(*tag)), arg(Arg::Int(self.tagged_by)));
         }
         let term = self.term.trim();
+        // Whether an index narrows the items down (else every item in reach is read: `Held::turn`)
+        let mut indexed = self.below.is_some() || !self.tags.is_empty();
         if term.chars().count() >= 3 {
+            indexed = true;
             // The trigram index: the term as one phrase (quotes inside it doubled)
             let phrase = arg(Arg::Text(format!("\"{}\"", term.replace('"', "\"\""))));
             sql += &format!(" AND n.rowid IN (SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH {phrase})");
@@ -119,6 +122,13 @@ impl Criteria {
             _ => {}
         }
         if !self.exts.is_empty() {
+            // Through the trigram index too, when every extension with its dot has three characters or more (".pdf",
+            // not ".c"); the ends of the names are then checked below
+            if self.exts.iter().all(|e| e.chars().count() >= 2) {
+                let any = self.exts.iter().map(|e| format!("\".{}\"", e.replace('"', "\"\""))).collect::<Vec<_>>().join(" OR ");
+                sql += &format!(" AND n.rowid IN (SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH {})", arg(Arg::Text(any)));
+                indexed = true;
+            }
             let each: Vec<String> = self
                 .exts
                 .iter()
@@ -141,7 +151,7 @@ impl Criteria {
         if let Some(o) = self.owner.as_deref().map(str::trim).filter(|o| !o.is_empty()) {
             sql += &format!(" AND n.found = 0 AND n.owner_id = (SELECT id FROM users WHERE username = {})", arg(Arg::Text(o.to_string())));
         }
-        Held::new(sql, args)
+        Held { unindexed: !indexed, ..Held::new(sql, args) }
     }
 }
 
@@ -173,7 +183,9 @@ pub async fn search(State(st): State<AppState>, user: User, Query(q): Query<Sear
         tags,
         tagged_by: user.id,
     };
-    let Held { condition, mut args } = criteria.held(drives, folders);
+    let held = criteria.held(drives, folders);
+    let _turn = held.turn().await;
+    let Held { condition, mut args, .. } = held;
     let sql = format!("SELECT {NODE_COLS} FROM nodes n WHERE {condition} ORDER BY (n.kind = 'folder') DESC, n.updated_at DESC LIMIT ?{}", args.len() + 1);
     args.push(Arg::Int(SEARCH_LIMIT + 1));
     let mut nodes: Vec<Node> = bind_all(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())), args).fetch_all(&mut *c).await?;
@@ -193,23 +205,32 @@ pub async fn set_favorite(State(st): State<AppState>, user: User, Json(req): Jso
     if req.ids.is_empty() || req.ids.len() > MAX_BATCH {
         return Err(AppError::bad_request("Select 1 to 1000 items"));
     }
-    let _w = st.write_lock.lock().await;
-    let mut tx = crate::db::begin_write(&st.db).await?;
-    for id in &req.ids {
-        let node = tree::owned_node(&mut tx, &user, id).await?;
-        not_root(&node)?;
-        if req.favorite {
-            sqlx::query("INSERT OR IGNORE INTO favorites (user_id, node_id, created_at) VALUES (?, ?, ?)")
-                .bind(user.id)
-                .bind(&node.id)
-                .bind(now())
-                .execute(&mut *tx)
-                .await?;
-        } else {
-            sqlx::query("DELETE FROM favorites WHERE user_id = ? AND node_id = ?").bind(user.id).bind(&node.id).execute(&mut *tx).await?;
+    // Checked before taking the write lock, which every other change waits for: a check is a few queries per item
+    let mut ids = Vec::with_capacity(req.ids.len());
+    {
+        let mut c = st.db.acquire().await?;
+        for id in &req.ids {
+            let node = tree::owned_node(&mut c, &user, id).await?;
+            not_root(&node)?;
+            ids.push(node.id);
         }
     }
-    tx.commit().await?;
+    let ids = serde_json::to_string(&ids).unwrap();
+    let _w = st.write_lock.lock().await;
+    if req.favorite {
+        // Items that went to the trash meanwhile don't become favorites
+        sqlx::query(
+            "INSERT OR IGNORE INTO favorites (user_id, node_id, created_at)
+             SELECT ?1, n.id, ?2 FROM json_each(?3) i JOIN nodes n ON n.id = i.value AND n.trashed_at IS NULL",
+        )
+        .bind(user.id)
+        .bind(now())
+        .bind(&ids)
+        .execute(&st.db)
+        .await?;
+    } else {
+        sqlx::query("DELETE FROM favorites WHERE user_id = ? AND node_id IN (SELECT value FROM json_each(?))").bind(user.id).bind(&ids).execute(&st.db).await?;
+    }
     Ok(Json(json!({ "ok": true })))
 }
 

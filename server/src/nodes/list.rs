@@ -189,11 +189,22 @@ pub async fn list_children(conn: &mut SqliteConnection, parent_id: &str, q: &Lis
 pub(super) struct Held {
     pub(super) condition: String,
     pub(super) args: Vec<Arg>,
+    /// No index narrows it down: each look at it reads every item the person can see (`turn`)
+    pub(super) unindexed: bool,
 }
+
+/// Looks at listings no index narrows down that may run at the same time, whoever asks: a few people paging through
+/// large smart folders, or one person asking again and again, can't take every core
+static UNINDEXED: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 
 impl Held {
     pub(super) fn new(condition: String, args: Vec<Arg>) -> Self {
-        Held { condition, args }
+        Held { condition, args, unindexed: false }
+    }
+
+    /// Waits for a turn to read the listing when no index narrows it down (held for as long as the result is)
+    pub(super) async fn turn(&self) -> Option<tokio::sync::SemaphorePermit<'static>> {
+        if self.unindexed { UNINDEXED.acquire().await.ok() } else { None }
     }
 
     /// What a folder holds: its children, not in the trash
@@ -204,6 +215,7 @@ impl Held {
 
 /// The items `held` holds (with `extra` columns) in the order of `order_clause`; with a limit, one page of them
 pub(super) async fn list_held(conn: &mut SqliteConnection, held: &Held, extra: &str, q: &ListQuery) -> AppResult<Listing<Node>> {
+    let _turn = held.turn().await;
     let sort = SortCol::parse(q.sort.as_deref());
     let desc = q.order.as_deref() == Some("desc");
     let (limit, after) = page_of::<Cursor>(q.limit, q.after.as_deref())?;
@@ -226,15 +238,20 @@ pub(super) async fn list_held(conn: &mut SqliteConnection, held: &Held, extra: &
     // SQLite reads a negative limit as no limit
     args.push(Arg::Int(limit.unwrap_or(-1)));
     args.push(Arg::Int(offset.unwrap_or(0)));
-    let rows: Vec<SortRow> = bind_all(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())), args).fetch_all(&mut *conn).await?;
+    // A page from a position and the count it goes with are read in one view: changes in between would make the count
+    // disagree with the page, and the list skip or repeat an item
+    #[allow(clippy::disallowed_methods, reason = "a read-only transaction for one consistent view; it never writes")]
+    let mut tx = sqlx::Acquire::begin(&mut *conn).await?;
+    let rows: Vec<SortRow> = bind_all(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())), args).fetch_all(&mut *tx).await?;
     let next = match (limit, rows.last()) {
         (Some(l), Some(last)) if rows.len() as i64 == l => Some(encode_cursor(&last.cursor(sort))),
         _ => None,
     };
     let total = match offset {
-        Some(_) => Some(count_held(conn, held).await?),
+        Some(_) => Some(count_held(&mut tx, held).await?),
         None => None,
     };
+    tx.commit().await?;
     let items = rows.into_iter().map(|r| r.node).collect();
     Ok(match total {
         Some(total) => Listing::Page { items, next, total: Some(total) },
@@ -352,6 +369,7 @@ pub async fn position(State(st): State<AppState>, user: User, Path(id): Path<Str
 
 /// Where an item is in the listing of what `held` holds
 pub(super) async fn position_in(conn: &mut SqliteConnection, held: &Held, q: &PositionQuery) -> AppResult<Position> {
+    let _turn = held.turn().await;
     let sort = SortCol::parse(q.sort.as_deref());
     let desc = q.order.as_deref() == Some("desc");
     let total = count_held(conn, held).await?;
@@ -397,6 +415,7 @@ pub async fn select(State(st): State<AppState>, user: User, Path(id): Path<Strin
 
 /// The ids of the items selected of those `held` holds, a batch at a time (see `select`)
 pub(super) async fn select_in(c: &mut SqliteConnection, held: &Held, req: &SelectReq) -> AppResult<Selected> {
+    let _turn = held.turn().await;
     let sort = SortCol::parse(req.sort.as_deref());
     let desc = req.order.as_deref() == Some("desc");
     let limit = req.limit.unwrap_or(MAX_BATCH as i64).clamp(1, MAX_BATCH as i64);
