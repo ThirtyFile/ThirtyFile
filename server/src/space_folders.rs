@@ -23,9 +23,11 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::{LazyLock, Mutex},
+    sync::LazyLock,
     time::{Duration, Instant},
 };
+
+use crate::sync::Mutex;
 
 use sqlx::SqliteConnection;
 
@@ -142,9 +144,9 @@ pub async fn check(st: &AppState, location: &str) -> bool {
     // Not a folder of this server, or unknown: `make_folder_space` tells
     let Some(root) = root else { return true };
     let root = std::path::absolute(&root).unwrap_or(root);
-    let offline = st.location_health.lock().unwrap().get(location).is_some_and(|h| !h.ok);
+    let offline = st.location_health.lock().get(location).is_some_and(|h| !h.ok);
     let ok = !offline && read_marker(&root).await.as_deref() == Some(location);
-    let mut unavailable = UNAVAILABLE.lock().unwrap();
+    let mut unavailable = UNAVAILABLE.lock();
     unavailable.retain(|_, at| at.elapsed() < UNAVAILABLE_FOR);
     let key = (root, location.to_string());
     if ok {
@@ -195,7 +197,7 @@ pub async fn make_folder_space(conn: &mut SqliteConnection, builtin: Option<&Pat
     // share that isn't mounted must not get the space's folder on the disk below its mount point
     let unavailable =
         || AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("The folder of the storage location ({}) isn't available", root.display()));
-    let checked_unavailable = UNAVAILABLE.lock().unwrap().get(&(root.clone(), location.clone())).is_some_and(|at| at.elapsed() < UNAVAILABLE_FOR);
+    let checked_unavailable = UNAVAILABLE.lock().get(&(root.clone(), location.clone())).is_some_and(|at| at.elapsed() < UNAVAILABLE_FOR);
     if checked_unavailable || read_marker(&root).await.as_deref() != Some(location.as_str()) {
         return Err(unavailable());
     }
@@ -237,7 +239,7 @@ mod tests {
     static HANGING: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
     pub(super) async fn hang_if_asked(root: &Path) {
-        if HANGING.lock().unwrap().iter().any(|p| p == root) {
+        if HANGING.lock().iter().any(|p| p == root) {
             std::future::pending::<()>().await;
         }
     }
@@ -262,7 +264,7 @@ mod tests {
         };
 
         // Its disk stops answering: the retry waits for it, but not while holding the write lock
-        HANGING.lock().unwrap().push(nas.clone());
+        HANGING.lock().push(nas.clone());
         let st = env.st.clone();
         let retry = tokio::spawn(async move { crate::personal::retry_pending(&st, None).await });
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -282,14 +284,14 @@ mod tests {
         assert!(started.elapsed() < DISK_TIMEOUT * 2, "asked the disk twice: {:?}", started.elapsed());
 
         // Known to be offline: the disk isn't asked at all
-        env.st.location_health.lock().unwrap().insert("nas".into(), crate::state::LocationHealth { ok: false, error: None, checked_at: 0 });
+        env.st.location_health.lock().insert("nas".into(), crate::state::LocationHealth { ok: false, error: None, checked_at: 0 });
         let started = Instant::now();
         assert_eq!(crate::personal::retry_pending(&env.st, None).await, 0);
         assert!(started.elapsed() < Duration::from_secs(1), "waited for an offline location: {:?}", started.elapsed());
 
         // Answering and online again: the space is created
-        HANGING.lock().unwrap().retain(|p| p != &nas);
-        env.st.location_health.lock().unwrap().remove("nas");
+        HANGING.lock().retain(|p| p != &nas);
+        env.st.location_health.lock().remove("nas");
         assert_eq!(crate::personal::retry_pending(&env.st, None).await, 1);
         assert_eq!(pending().await, None);
         assert!(nas.join("users/ben").is_dir());
@@ -481,7 +483,7 @@ mod tests {
         assert_eq!(create(admin.clone(), both).await.unwrap_err().status, axum::http::StatusCode::BAD_REQUEST);
         // Standard users (when they may create spaces) get the default location, and can't choose
         sqlx::query("INSERT INTO settings (key, value) VALUES ('allow_user_drives', '1')").execute(&env.st.db).await.unwrap();
-        env.st.system.write().unwrap().allow_user_drives = true;
+        env.st.system.write().allow_user_drives = true;
         let amy = env.user("amy", true).await;
         assert_eq!(create(amy.clone(), json!({ "name": "Mine", "location_id": "nas" })).await.unwrap_err().status, axum::http::StatusCode::FORBIDDEN);
         let mine = create(amy, json!({ "name": "Mine" })).await.unwrap();

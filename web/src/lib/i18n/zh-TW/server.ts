@@ -205,6 +205,7 @@ export default {
   "The destination isn't a folder": "目標不是資料夾",
   "Too many items with the same name": "同名項目過多",
   "Not enough storage space in \"{name}\"": "「{name}」的儲存空間不足",
+  "There isn't enough free space on the server to receive this file": "伺服器的可用空間不足，無法接收這個檔案",
   "The file is too large to edit online": "檔案過大，無法線上編輯",
   "Someone else changed this file while you were editing it. Reload the latest version and edit again.": "這個檔案在你編輯期間已被其他人修改，請重新載入最新版本後再編輯",
   "No thumbnail": "沒有縮圖",

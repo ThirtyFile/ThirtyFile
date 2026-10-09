@@ -142,7 +142,7 @@ fn chosen_here(headers: &HeaderMap) -> Option<Lang> {
 
 /// The system default language; None when it follows the browser ("auto")
 pub fn system_default(st: &AppState) -> Option<Lang> {
-    Lang::parse(&st.system.read().unwrap().default_lang)
+    Lang::parse(&st.system.read().default_lang)
 }
 
 /// The language of the names ThirtyFile gives what it creates in people's folders ("Files of amy", "report (conflict
@@ -399,7 +399,7 @@ mod tests {
         let _ = set("").await.unwrap();
         let me = me_lang(&env.st, amy.id, &HeaderMap::new()).await.unwrap();
         assert_eq!((me.lang, me.ui_lang), ("", None));
-        env.st.system.write().unwrap().default_lang = "zh-TW".into();
+        env.st.system.write().default_lang = "zh-TW".into();
         assert_eq!(me_lang(&env.st, amy.id, &HeaderMap::new()).await.unwrap().ui_lang, Some("zh-TW"));
         let (last,): (String,) = sqlx::query_as("SELECT lang FROM users WHERE id = ?").bind(amy.id).fetch_one(&env.st.db).await.unwrap();
         assert_eq!(last, "ja");

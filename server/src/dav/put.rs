@@ -49,6 +49,7 @@ pub(super) async fn put(st: &AppState, user: &User, segs: &[String], headers: &H
     if let Some(len) = headers.get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<u64>().ok()) {
         check_size(st, len)?;
         tree::check_quota(&mut c, parent.drive(), len as i64 - replaced).await?;
+        crate::util::DiskRoom::check(&st.tmp_dir(), len).await?;
     } else if let Some((left, drive)) = tree::room_left(&mut c, parent.drive(), None).await? {
         room = Some((u64::try_from(left + replaced).unwrap_or(0), drive));
     }
@@ -71,6 +72,8 @@ pub(super) async fn put(st: &AppState, user: &User, segs: &[String], headers: &H
 /// with `hash` its SHA-256
 pub(super) async fn receive(st: &AppState, body: Body, path: &Path, hash: bool, room: Option<(u64, tree::Drive)>) -> AppResult<(u64, Option<String>)> {
     use sha2::Digest;
+    // Received in the data folder first, whatever space it is for
+    let mut disk = crate::util::DiskRoom::check(&st.tmp_dir(), 0).await?;
     let mut file = tokio::fs::File::create(path).await?;
     let mut stream = body.into_data_stream();
     let mut size = 0u64;
@@ -83,6 +86,7 @@ pub(super) async fn receive(st: &AppState, body: Body, path: &Path, hash: bool, 
         {
             return Err(tree::quota_error(drive));
         }
+        disk.before(chunk.len() as u64).await?;
         file.write_all(&chunk).await?;
         if let Some(h) = &mut hasher {
             h.update(&chunk);

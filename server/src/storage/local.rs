@@ -18,7 +18,7 @@ pub struct LocalStorage {
 const DISK_WAIT: Duration = Duration::from_secs(60);
 
 /// The folders of Local folder locations with a step on their disk that was given up and hasn't returned yet
-static STUCK: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+static STUCK: crate::sync::Mutex<Vec<PathBuf>> = crate::sync::Mutex::new(Vec::new());
 
 fn not_answering(root: &Path) -> io::Error {
     io::Error::other(StorageError { message: UNAVAILABLE, detail: format!("{} doesn't answer", root.display()) })
@@ -49,7 +49,7 @@ impl LocalStorage {
     /// processor has one. Until a step that was given up returns, the next ones fail at once instead of piling up
     /// threads that wait for it too.
     async fn on_disk<T: Send + 'static>(&self, step: impl FnOnce() -> io::Result<T> + Send + 'static) -> io::Result<T> {
-        if STUCK.lock().unwrap_or_else(|e| e.into_inner()).contains(&self.root) {
+        if STUCK.lock().contains(&self.root) {
             return Err(not_answering(&self.root));
         }
         #[cfg(test)]
@@ -65,12 +65,12 @@ impl LocalStorage {
             Ok(done) => done.map_err(io::Error::other)?,
             Err(_) => {
                 tracing::warn!("The folder {} of a storage location didn't answer within {} s", self.root.display(), self.wait.as_secs());
-                STUCK.lock().unwrap_or_else(|e| e.into_inner()).push(self.root.clone());
+                STUCK.lock().push(self.root.clone());
                 // Let go once the step returns at last
                 let root = self.root.clone();
                 tokio::spawn(async move {
                     let _ = task.await;
-                    STUCK.lock().unwrap_or_else(|e| e.into_inner()).retain(|r| *r != root);
+                    STUCK.lock().retain(|r| *r != root);
                     tracing::info!("The folder {} of a storage location answers again", root.display());
                 });
                 Err(not_answering(&self.root))

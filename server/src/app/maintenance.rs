@@ -8,7 +8,11 @@ use crate::{auth, backups, db, logs, nodes, notify, state::AppState, thumbnails,
 pub fn spawn_maintenance(st: AppState, trash_days: i64) {
     // Content of spaces deleted while the server stopped before it was all removed
     tree::purge_detached_later(&st);
-    tokio::spawn(async move {
+    util::supervise("maintenance", move |_| maintain(st.clone(), trash_days));
+}
+
+async fn maintain(st: AppState, trash_days: i64) {
+    {
         let mut tick = tokio::time::interval(Duration::from_secs(3600));
         let mut hours: u32 = 0;
         loop {
@@ -62,5 +66,5 @@ pub fn spawn_maintenance(st: AppState, trash_days: i64) {
             let _w = st.write_lock.lock().await;
             let _ = sqlx::query("DELETE FROM sessions WHERE expires_at < ?").bind(util::now()).execute(&st.db).await;
         }
-    });
+    }
 }

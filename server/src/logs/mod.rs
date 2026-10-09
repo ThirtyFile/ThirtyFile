@@ -33,7 +33,7 @@ use crate::{db::get_setting, error::AppError, state::AppState};
 /// What the logs keep in memory (a part of `AppState`)
 pub struct Memory {
     /// Log retention and archive settings
-    pub settings: std::sync::RwLock<LogSettings>,
+    pub settings: crate::sync::RwLock<LogSettings>,
     /// Sign-in and share-access events, written to the database in batches by one background task (see `spawn_writer`)
     pub queue: tokio::sync::mpsc::Sender<LogEvent>,
     /// The error log's rate limits and recently failed requests (logs/errors.rs)
@@ -41,12 +41,12 @@ pub struct Memory {
     /// Held while log archiving runs: the manual "archive now" and the daily run must not process the same rows
     pub archive_lock: tokio::sync::Mutex<()>,
     /// Last logged page view per "share|address": repeated views within a minute aren't logged again
-    pub share_views: std::sync::Mutex<std::collections::HashMap<String, i64>>,
+    pub share_views: crate::sync::Mutex<std::collections::HashMap<String, i64>>,
 }
 
 impl Memory {
     pub fn new(settings: LogSettings, queue: tokio::sync::mpsc::Sender<LogEvent>) -> Memory {
-        Memory { settings: std::sync::RwLock::new(settings), queue, errors: Default::default(), archive_lock: Default::default(), share_views: Default::default() }
+        Memory { settings: crate::sync::RwLock::new(settings), queue, errors: Default::default(), archive_lock: Default::default(), share_views: Default::default() }
     }
 }
 
@@ -97,7 +97,7 @@ impl FromRequestParts<AppState> for Visitor {
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, st: &AppState) -> Result<Self, Self::Rejection> {
-        if !st.part::<Memory>().settings.read().unwrap().record_visitor {
+        if !st.part::<Memory>().settings.read().record_visitor {
             return Ok(Visitor { ip: String::new(), user_agent: String::new() });
         }
         let addr = parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|c| c.0);
@@ -255,14 +255,14 @@ mod tests {
         assert_eq!(res.headers()[header::CONTENT_LENGTH], len.to_string().as_str());
 
         // Archive files are removed after their retention period
-        env.st.part::<Memory>().settings.write().unwrap().archive_keep_days = 30;
+        env.st.part::<Memory>().settings.write().archive_keep_days = 30;
         let sum = run_archive(&env.st).await.unwrap();
         assert_eq!(sum.pruned_files, 2);
         assert!(!env.dir.join("archives").join(&file).exists());
 
         // Archiving off: delete directly
         insert_activity(&env, &amy, t - 400 * DAY, "upload", "another-old-file").await;
-        env.st.part::<Memory>().settings.write().unwrap().archive = false;
+        env.st.part::<Memory>().settings.write().archive = false;
         let sum = run_archive(&env.st).await.unwrap();
         assert_eq!(sum.deleted[0], 1);
         let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM log_archives").fetch_one(&env.st.db).await.unwrap();

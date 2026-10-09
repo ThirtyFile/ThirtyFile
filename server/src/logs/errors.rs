@@ -15,11 +15,9 @@
 //! for; quoted names in messages are left out (`redact`); server failures record the kind of error, and the full text
 //! stays in the server log under the request id. No request or response bodies, cookies, tokens or passwords are kept.
 
-use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+
+use crate::sync::Mutex;
 
 use axum::{
     Json,
@@ -67,7 +65,7 @@ pub async fn track(State(st): State<AppState>, req: Request, next: Next) -> Resp
         if let Ok(v) = HeaderValue::from_str(&ctx.id) {
             res.headers_mut().insert("x-request-id", v);
         }
-        let route = ctx.route.lock().unwrap().clone();
+        let route = ctx.route.lock().clone();
         if let Some((severity, kind)) = classify(&method, &path, route.as_deref(), status) {
             let info = res.extensions().get::<ErrorInfo>().cloned();
             record_server(&st, &ctx, Answered { method: &method, path: &path, route, status, info }, (severity, kind));
@@ -140,7 +138,7 @@ fn record_server(st: &AppState, ctx: &RequestCtx, answered: Answered<'_>, (sever
     }
     let resource = resource_of(route.as_deref(), path);
     let route = route.unwrap_or_else(|| if path == "/dav" || path.starts_with("/dav/") { "/dav/…".into() } else { "(no route)".into() });
-    let (user_id, username) = ctx.user.lock().unwrap().clone().map_or((None, String::new()), |(id, name)| (Some(id), name));
+    let (user_id, username) = ctx.user.lock().clone().map_or((None, String::new()), |(id, name)| (Some(id), name));
     let message = match &info {
         Some(i) => redact(&i.message),
         None if status == StatusCode::GATEWAY_TIMEOUT => "The request took too long".to_string(),
@@ -306,7 +304,7 @@ impl Limits {
 
 impl ErrorLogState {
     fn allow_server(&self) -> bool {
-        let mut l = self.limits.lock().unwrap();
+        let mut l = self.limits.lock();
         l.roll();
         if l.server >= SERVER_PER_MINUTE {
             l.drop_one();
@@ -318,7 +316,7 @@ impl ErrorLogState {
 
     /// Whether a page's report is accepted: per person, or per address (and all such together) when not signed in
     fn allow_client(&self, key: &str, anonymous: bool) -> bool {
-        let mut l = self.limits.lock().unwrap();
+        let mut l = self.limits.lock();
         l.roll();
         let n = l.clients.get(key).copied().unwrap_or(0);
         if n >= CLIENT_PER_MINUTE || (anonymous && l.anonymous >= ANONYMOUS_PER_MINUTE) {
@@ -333,7 +331,7 @@ impl ErrorLogState {
     }
 
     fn remember(&self, request: &str, fingerprint: &str) {
-        let mut m = self.requests.lock().unwrap();
+        let mut m = self.requests.lock();
         if m.len() >= REMEMBERED_REQUESTS {
             let cutoff = now() - REPEAT_WINDOW;
             m.retain(|_, (_, at)| *at >= cutoff);
@@ -345,7 +343,7 @@ impl ErrorLogState {
     }
 
     fn fingerprint_of(&self, request: &str) -> Option<String> {
-        self.requests.lock().unwrap().get(request).map(|(f, _)| f.clone())
+        self.requests.lock().get(request).map(|(f, _)| f.clone())
     }
 }
 

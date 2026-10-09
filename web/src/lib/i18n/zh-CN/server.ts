@@ -205,6 +205,7 @@ export default {
   "The destination isn't a folder": "目标不是文件夹",
   "Too many items with the same name": "同名项目过多",
   "Not enough storage space in \"{name}\"": "“{name}”的存储空间不足",
+  "There isn't enough free space on the server to receive this file": "服务器的可用空间不足，无法接收这个文件",
   "The file is too large to edit online": "文件过大，无法在线编辑",
   "Someone else changed this file while you were editing it. Reload the latest version and edit again.": "这个文件在你编辑期间已被其他人修改，请重新加载最新版本后再编辑",
   "No thumbnail": "没有缩略图",

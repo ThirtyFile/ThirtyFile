@@ -74,13 +74,13 @@ const UNUSED_DAYS: u64 = 30;
 const TMP_GRACE: std::time::Duration = std::time::Duration::from_secs(3600);
 
 /// Thumbnails shown since the last `sweep`, whose time on disk was moved to now: once a day at most for each
-static SHOWN: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
+static SHOWN: crate::sync::Mutex<Option<std::collections::HashSet<String>>> = crate::sync::Mutex::new(None);
 
 /// A thumbnail is shown (or asked for again, whether or not the browser had it): its time on disk becomes now, so that
 /// `sweep` keeps it, once a day at most
 fn shown(st: &AppState, key: &str) {
     {
-        let mut shown = SHOWN.lock().unwrap_or_else(|e| e.into_inner());
+        let mut shown = SHOWN.lock();
         let shown = shown.get_or_insert_default();
         // (a day of a very large server: started over, which only dates some of them again)
         if shown.len() >= 100_000 {
@@ -147,7 +147,7 @@ fn sweep_rule(name: &str, age: std::time::Duration) -> Swept<'_> {
 /// Daily: removes the thumbnails nobody was shown for `UNUSED_DAYS` (those of folder spaces' files go this way, as
 /// nothing tells when such a file is gone), those whose content is gone, and the temporary files a stop left
 pub async fn sweep(st: &AppState) {
-    SHOWN.lock().unwrap_or_else(|e| e.into_inner()).take();
+    SHOWN.lock().take();
     let root = st.data_dir.join("thumbs");
     let dirs: Vec<std::path::PathBuf> = match tokio::task::spawn_blocking(move || std::fs::read_dir(root).map(|r| r.flatten().map(|e| e.path()).collect())).await {
         Ok(Ok(d)) => d,

@@ -31,7 +31,7 @@ use crate::{
 #[derive(Default)]
 pub struct Memory {
     /// Uploads currently receiving a PATCH, so the same upload isn't written concurrently.
-    pub active: std::sync::Mutex<std::collections::HashSet<String>>,
+    pub active: crate::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 const TUS_VERSION: &str = "1.0.0";
@@ -189,6 +189,9 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
         _ => "keep",
     };
 
+    // The file is received in the data folder first, whatever space it is for (looked at before taking the write lock:
+    // a disk that is slow to answer mustn't hold up every change)
+    crate::util::DiskRoom::check(&st.tmp_dir(), size).await?;
     let id = new_id();
     {
         let _w = st.write_lock.lock().await;
@@ -333,13 +336,13 @@ struct ActiveGuard {
 
 impl ActiveGuard {
     fn claim(st: &AppState, id: &str) -> Option<ActiveGuard> {
-        st.part::<Memory>().active.lock().unwrap().insert(id.to_string()).then(|| ActiveGuard { st: st.clone(), id: id.to_string() })
+        st.part::<Memory>().active.lock().insert(id.to_string()).then(|| ActiveGuard { st: st.clone(), id: id.to_string() })
     }
 }
 
 impl Drop for ActiveGuard {
     fn drop(&mut self) {
-        self.st.part::<Memory>().active.lock().unwrap().remove(&self.id);
+        self.st.part::<Memory>().active.lock().remove(&self.id);
     }
 }
 
@@ -391,7 +394,8 @@ pub async fn patch_as(st: &AppState, up: &Uploader, id: &str, headers: &HeaderMa
     let mut file = tokio::fs::OpenOptions::new().write(true).open(upload_path(&st, &id)).await?;
     file.set_len(offset).await?;
     file.seek(SeekFrom::Start(offset)).await?;
-    let failure = receive(&mut file, body, &mut offset, size, &mut hasher).await;
+    let mut disk = crate::util::DiskRoom::check(&st.tmp_dir(), 0).await?;
+    let failure = receive(&mut file, body, &mut offset, size, &mut hasher, &mut disk).await;
     file.flush().await?;
     file.sync_data().await?;
     drop(file);
@@ -429,7 +433,14 @@ pub async fn patch_as(st: &AppState, up: &Uploader, id: &str, headers: &HeaderMa
 /// Writes what the request's body brings into the upload's file at `offset`, up to its declared `size`, hashing it as
 /// it arrives (`hasher`, content-store uploads); moves `offset` past what was written. Returns why it stopped before
 /// the body ended, if it did: what was received is kept, so the upload can resume.
-async fn receive(file: &mut tokio::fs::File, body: Body, offset: &mut u64, size: u64, hasher: &mut Option<Sha256>) -> Option<AppError> {
+async fn receive(
+    file: &mut tokio::fs::File,
+    body: Body,
+    offset: &mut u64,
+    size: u64,
+    hasher: &mut Option<Sha256>,
+    disk: &mut crate::util::DiskRoom,
+) -> Option<AppError> {
     let mut stream = body.into_data_stream();
     loop {
         let bytes = match crate::http_body::next_chunk(&mut stream).await {
@@ -439,6 +450,9 @@ async fn receive(file: &mut tokio::fs::File, body: Body, offset: &mut u64, size:
         };
         if *offset + bytes.len() as u64 > size {
             return Some(AppError::bad_request("The uploaded data exceeds the declared file size"));
+        }
+        if let Err(e) = disk.before(bytes.len() as u64).await {
+            return Some(e);
         }
         if let Err(e) = file.write_all(&bytes).await {
             return Some(e.into());
@@ -737,7 +751,7 @@ pub async fn purge_expired(st: &AppState) -> AppResult<usize> {
                 .bind(LINK_UPLOAD_IDLE)
                 .fetch_all(&st.db)
                 .await?;
-        let active = st.part::<Memory>().active.lock().unwrap().clone();
+        let active = st.part::<Memory>().active.lock().clone();
         let ids: Vec<(String,)> = expired.into_iter().filter(|(id,)| !active.contains(id)).collect();
         let list = serde_json::to_string(&ids.iter().map(|(id,)| id).collect::<Vec<_>>()).unwrap();
         sqlx::query("DELETE FROM uploads WHERE id IN (SELECT value FROM json_each(?))").bind(list).execute(&st.db).await?;
@@ -898,7 +912,7 @@ mod tests {
         tokio::time::advance(crate::http_body::UPLOAD_IDLE + std::time::Duration::from_secs(1)).await;
         tokio::time::resume();
         assert_eq!(request.await.unwrap().unwrap_err().status, StatusCode::REQUEST_TIMEOUT);
-        assert!(!env.st.part::<Memory>().active.lock().unwrap().contains(&id));
+        assert!(!env.st.part::<Memory>().active.lock().contains(&id));
         let res = head(State(env.st.clone()), amy.clone(), Path(id.clone())).await.unwrap();
         assert_eq!(res.headers()["upload-offset"], "5");
         let (hashed,): (i64,) = sqlx::query_as("SELECT hashed FROM uploads WHERE id = ?").bind(&id).fetch_one(&env.st.db).await.unwrap();

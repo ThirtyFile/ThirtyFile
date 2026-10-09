@@ -706,14 +706,14 @@ pub async fn update_policy(State(st): State<AppState>, Admin(user): Admin, Path(
     };
     if !enabled && was {
         // The policy's snapshot being made now stops after the item it is copying
-        let running: Vec<String> = st.part::<Memory>().queue.running.lock().unwrap().keys().cloned().collect();
+        let running: Vec<String> = st.part::<Memory>().queue.running.lock().keys().cloned().collect();
         let mine: Option<(String,)> = sqlx::query_as("SELECT id FROM backup_jobs WHERE set_id = ? AND kind = 'snapshot' AND id IN (SELECT value FROM json_each(?))")
             .bind(&id)
             .bind(serde_json::to_string(&running).unwrap())
             .fetch_optional(&st.db)
             .await?;
         if let Some((job,)) = mine
-            && let Some(ctl) = st.part::<Memory>().queue.running.lock().unwrap().get(&job)
+            && let Some(ctl) = st.part::<Memory>().queue.running.lock().get(&job)
         {
             ctl.pause.store(true, Ordering::SeqCst);
         }
@@ -750,7 +750,7 @@ async fn job_state(st: &AppState, id: &str) -> AppResult<(runner::Job, runner::J
 
 /// Pauses a job: a running one stops after the item it is working on, keeping what it did
 pub async fn pause(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
-    if let Some(ctl) = st.part::<Memory>().queue.running.lock().unwrap().get(&id) {
+    if let Some(ctl) = st.part::<Memory>().queue.running.lock().get(&id) {
         ctl.pause.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
@@ -785,7 +785,7 @@ pub async fn cancel(State(st): State<AppState>, _: Admin, Path(id): Path<String>
     if job.kind == "remove" {
         return Err(AppError::conflict("Deleting a copy can't be cancelled: a copy half deleted can't be restored from. Pause it instead."));
     }
-    if let Some(ctl) = st.part::<Memory>().queue.running.lock().unwrap().get(&id) {
+    if let Some(ctl) = st.part::<Memory>().queue.running.lock().get(&id) {
         ctl.cancel.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }

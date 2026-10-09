@@ -43,7 +43,7 @@ async fn add_location(env: &TestEnv, id: &str, kind: &str, config: serde_json::V
         .execute(&env.st.db)
         .await
         .unwrap();
-    env.st.storages.write().unwrap().insert(id.into(), backend);
+    env.st.storages.write().insert(id.into(), backend);
 }
 
 /// Copies everything on `source` to `dest`: (set, job)
@@ -238,7 +238,7 @@ impl Storage for Hooked {
 
 /// Puts a hook on a location's `put_at` of content (objects); the hook hears how many were stored so far
 fn on_object_put(env: &TestEnv, location: &str, hook: impl Fn(usize) -> BoxFuture<'static, ()> + Send + Sync + 'static) {
-    let inner = env.st.storages.read().unwrap().get(location).cloned().unwrap();
+    let inner = env.st.storages.read().get(location).cloned().unwrap();
     let puts = Arc::new(AtomicUsize::new(0));
     let hooked = Hooked {
         inner,
@@ -251,7 +251,7 @@ fn on_object_put(env: &TestEnv, location: &str, hook: impl Fn(usize) -> BoxFutur
             }
         }),
     };
-    env.st.storages.write().unwrap().insert(location.into(), Arc::new(hooked));
+    env.st.storages.write().insert(location.into(), Arc::new(hooked));
 }
 
 /// Pauses or cancels a job once `at` objects were stored
@@ -294,7 +294,7 @@ async fn everything_on_a_location_is_copied_and_a_space_restored_from_it_after_i
     let old = env.upload(&amy, amy.root(), "old.txt", b"thrown away").await;
     trash(&env, &amy, &old).await;
     // The same content in the company space: stored once, copied once
-    let company = env.st.system.read().unwrap().shared_root_id.clone();
+    let company = env.st.system.read().shared_root_id.clone();
     env.upload(&admin, &company, "plan.txt", b"alpha").await;
     let nas = add_nas(&env, "nas").await;
     let (default_before,): (String,) = sqlx::query_as("SELECT id FROM storage_locations WHERE is_default = 1").fetch_one(&env.st.db).await.unwrap();
@@ -349,7 +349,7 @@ async fn a_personal_space_is_only_restored_into_its_owners_and_its_items_are_nev
     let admin = env.admin().await;
     let amy = env.user("amy", true).await;
     let secret = env.upload(&amy, amy.root(), "secret-plans.txt", b"amy's").await;
-    let company = env.st.system.read().unwrap().shared_root_id.clone();
+    let company = env.st.system.read().shared_root_id.clone();
     env.upload(&admin, &company, "agenda.txt", b"the company's").await;
     add_nas(&env, "nas").await;
     // Amy's content is damaged where it is kept: the copy fails, without naming her file
@@ -463,7 +463,7 @@ async fn copies_run_one_at_a_time_and_one_whose_end_couldnt_be_recorded_runs_aga
     let nas = add_nas(&env, "nas").await;
     let (set, job) = copy_all(&env, "local", "nas").await;
     let (_j, ctl) = take_job(&env, &job).await;
-    env.st.part::<super::Memory>().queue.running.lock().unwrap().remove(&job);
+    env.st.part::<super::Memory>().queue.running.lock().remove(&job);
     drop(ctl);
     assert_eq!(state(&env, &job).await.0, "running");
     let (_, second) = copy_all(&env, "local", "nas").await;
@@ -879,7 +879,7 @@ async fn a_folder_or_some_items_come_back_into_their_place_or_a_new_folder_and_n
     let env = testutil::env().await;
     let admin = env.admin().await;
     let bob = env.user("bob", true).await;
-    let company = env.st.system.read().unwrap().shared_root_id.clone();
+    let company = env.st.system.read().shared_root_id.clone();
     let space = env.drive_of(&company).await;
     let docs = env.folder(&admin, &company, "Docs").await;
     let sub = env.folder(&admin, &docs, "Sub").await;
@@ -1061,7 +1061,7 @@ async fn a_restore_skips_a_name_taken_while_backup_content_is_read() {
     let entered = Arc::new(tokio::sync::Notify::new());
     let proceed = Arc::new(tokio::sync::Notify::new());
     let inner = env.st.storage("nas").unwrap();
-    env.st.storages.write().unwrap().insert("nas".into(), Arc::new(PauseRead { inner, entered: entered.clone(), proceed: proceed.clone() }));
+    env.st.storages.write().insert("nas".into(), Arc::new(PauseRead { inner, entered: entered.clone(), proceed: proceed.clone() }));
     let (job, ctl) = take_job(&env, &id).await;
     let st = env.st.clone();
     let task = tokio::spawn(async move {

@@ -134,7 +134,7 @@ impl Engine for MoveEngine {
 
     /// As many as the Moves page allows (1 by default)
     fn limit(&self, st: &AppState) -> usize {
-        st.system.read().unwrap().move_jobs.clamp(1, MAX_JOBS) as usize
+        st.system.read().move_jobs.clamp(1, MAX_JOBS) as usize
     }
 
     fn run<'a>(&'a self, cx: &'a Ctx<'a>) -> BoxFuture<'a, AppResult<Stop>> {
@@ -438,7 +438,7 @@ async fn mark_cancelled(conn: &mut SqliteConnection, job: &Job) -> AppResult<()>
 /// changed that people should know.
 async fn finish(conn: &mut SqliteConnection, cx: &Ctx<'_>, cleanup: bool, note: Option<&str>) -> AppResult<()> {
     let (files, bytes) = {
-        let p = cx.ctl.progress.lock().unwrap();
+        let p = cx.ctl.progress.lock();
         (p.files_done, p.bytes_done)
     };
     sqlx::query(
@@ -531,7 +531,7 @@ pub async fn list(State(st): State<AppState>, _: Admin) -> AppResult<Json<MovesL
             (m.files_done, m.bytes_done, m.files_total, m.bytes_total) = (files_done, bytes_done, files_total, bytes_total);
         }
     }
-    Ok(Json(MovesList { moves, concurrency: st.system.read().unwrap().move_jobs }))
+    Ok(Json(MovesList { moves, concurrency: st.system.read().move_jobs }))
 }
 
 #[derive(Deserialize)]
@@ -658,7 +658,7 @@ async fn job_for(st: &AppState, id: &str) -> AppResult<(Job, String)> {
 
 /// Pauses a move: a running one stops after the item it is copying, keeping what it copied
 pub async fn pause(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
-    if let Some(ctl) = st.part::<Memory>().queue.running.lock().unwrap().get(&id) {
+    if let Some(ctl) = st.part::<Memory>().queue.running.lock().get(&id) {
         ctl.pause.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
@@ -689,7 +689,7 @@ pub async fn resume(State(st): State<AppState>, _: Admin, Path(id): Path<String>
 
 /// Cancels a move: the space stays where it was, and what was copied is removed
 pub async fn cancel(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
-    if let Some(ctl) = st.part::<Memory>().queue.running.lock().unwrap().get(&id) {
+    if let Some(ctl) = st.part::<Memory>().queue.running.lock().get(&id) {
         ctl.cancel.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
@@ -732,7 +732,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
         .await;
         crate::db::settle(tx, res).await?;
     }
-    st.system.write().unwrap().move_jobs = req.concurrency;
+    st.system.write().move_jobs = req.concurrency;
     st.part::<Memory>().queue.wake.notify_one();
     Ok(Json(json!({ "ok": true })))
 }

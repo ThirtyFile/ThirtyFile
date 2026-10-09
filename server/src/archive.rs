@@ -14,9 +14,11 @@ use std::{
     io::{Read, Write},
     path::PathBuf,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::Arc,
     task::{Context, Poll, ready},
 };
+
+use crate::sync::Mutex;
 
 use axum::{Json, extract::State};
 use serde::Deserialize;
@@ -141,7 +143,7 @@ impl<W: AsyncWrite + Unpin> AsyncWrite for Capped<W> {
             None
         };
         if let Some(over) = over {
-            *this.over.lock().unwrap() = Some(over);
+            *this.over.lock() = Some(over);
             return Poll::Ready(Err(std::io::Error::other("the ZIP file doesn't fit")));
         }
         let n = ready!(Pin::new(&mut this.inner).poll_write(cx, buf))?;
@@ -261,7 +263,7 @@ async fn run_compress(st: AppState, user: User, progress: Tracker, roots: Vec<No
     .await;
     if let Err(e) = written {
         let _ = tokio::fs::remove_file(&tmp).await;
-        let over = *over.lock().unwrap();
+        let over = *over.lock();
         return Err(match (over, &room) {
             (Some(Over::Quota), Some((_, drive))) => tree::quota_error(drive),
             (Some(Over::Disk), _) => AppError::bad_request("Compressing stopped because ThirtyFile's data folder is running out of free space"),
@@ -873,7 +875,7 @@ mod tests {
         zip.write_all(&chunk).await.unwrap();
         zip.write_all(&chunk).await.unwrap();
         assert!(zip.write_all(&chunk).await.is_err());
-        assert_eq!((*over.lock().unwrap(), zip.inner.len()), (Some(Over::Quota), 200));
+        assert_eq!((*over.lock(), zip.inner.len()), (Some(Over::Quota), 200));
 
         // The data disk's free space, looked at again as the file grows (uploads and other jobs use the disk too)
         let over = Arc::new(Mutex::new(None));
@@ -885,7 +887,7 @@ mod tests {
         zip.write_all(&chunk).await.unwrap();
         FREE_SPACE.set(Some(DISK_RESERVE + 50));
         assert!(zip.write_all(&chunk).await.is_err());
-        assert_eq!((*over.lock().unwrap(), zip.inner.len()), (Some(Over::Disk), 200));
+        assert_eq!((*over.lock(), zip.inner.len()), (Some(Over::Disk), 200));
         FREE_SPACE.set(None);
     }
 

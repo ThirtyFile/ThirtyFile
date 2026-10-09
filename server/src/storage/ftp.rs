@@ -9,9 +9,11 @@ use std::{
     collections::HashSet,
     io,
     path::Path,
-    sync::{Arc, Mutex as StdMutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
+
+use crate::sync::Mutex as StdMutex;
 
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
@@ -156,7 +158,7 @@ impl FtpStorage {
     async fn checkout(&self) -> io::Result<(Conn, tokio::sync::OwnedSemaphorePermit)> {
         let permit = self.permits.clone().acquire_owned().await.map_err(unavailable)?;
         loop {
-            let idle = self.idle.lock().unwrap().pop();
+            let idle = self.idle.lock().pop();
             let Some(mut c) = idle else { break };
             if c.last_used.elapsed() < IDLE_CHECK || timed(c.ftp.noop()).await.is_ok() {
                 return Ok((c, permit));
@@ -167,7 +169,7 @@ impl FtpStorage {
 
     fn checkin(&self, mut c: Conn) {
         c.last_used = Instant::now();
-        self.idle.lock().unwrap().push(c);
+        self.idle.lock().push(c);
     }
 
     fn path(&self, rel: &str) -> String {
@@ -185,11 +187,11 @@ impl FtpStorage {
 
     /// Creates folders level by level (ignoring already-exists errors)
     async fn ensure_dir(&self, c: &mut Conn, dir: &str) -> io::Result<()> {
-        if dir.is_empty() || self.dirs.lock().unwrap().contains(dir) {
+        if dir.is_empty() || self.dirs.lock().contains(dir) {
             return Ok(());
         }
         for path in crate::storage::dir_levels(dir) {
-            if self.dirs.lock().unwrap().contains(&path) {
+            if self.dirs.lock().contains(&path) {
                 continue;
             }
             match timed(c.ftp.mkdir(path.as_str())).await {
@@ -202,7 +204,7 @@ impl FtpStorage {
                 }
                 Err(e) => return Err(e),
             }
-            self.dirs.lock().unwrap().insert(path);
+            self.dirs.lock().insert(path);
         }
         Ok(())
     }
@@ -346,7 +348,7 @@ impl FtpStorage {
             if at_end {
                 if timed(stream.finish()).await.is_ok() {
                     c.last_used = Instant::now();
-                    idle.lock().unwrap().push(c);
+                    idle.lock().push(c);
                 }
             } else {
                 let _ = timed(c.ftp.abort(stream)).await;

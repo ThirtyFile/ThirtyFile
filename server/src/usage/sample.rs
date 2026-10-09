@@ -34,7 +34,11 @@ pub fn bucket(at: i64, span: i64) -> i64 {
 /// Starts the sampler: capacity is measured shortly after the start, then everything at its own multiple of five
 /// minutes
 pub fn spawn(st: AppState) {
-    tokio::spawn(async move {
+    crate::util::supervise("usage sampler", move |_| sample(st.clone()));
+}
+
+async fn sample(st: AppState) {
+    {
         tokio::time::sleep(Duration::from_secs(10)).await;
         if let Err(e) = sample_capacity(&st, now()).await {
             tracing::warn!("Couldn't measure how much the storage locations hold: {}", e.message);
@@ -46,7 +50,7 @@ pub fn spawn(st: AppState) {
             tokio::time::sleep(Duration::from_secs((next - t) as u64 + 2)).await;
             tick(&st, next).await;
         }
-    });
+    }
 }
 
 /// What the sampler does at the end of the period that ends at `end`
@@ -436,7 +440,7 @@ const RELOAD_AFTER: Duration = Duration::from_secs(10);
 /// isn't known
 pub async fn folder_location(st: &AppState, path: &Path) -> String {
     {
-        let map = st.part::<Memory>().meters.folders.lock().unwrap();
+        let map = st.part::<Memory>().meters.folders.lock();
         if let Some(loc) = map.find(path) {
             return loc.to_string();
         }
@@ -459,7 +463,7 @@ pub async fn folder_location(st: &AppState, path: &Path) -> String {
             .collect::<Vec<_>>()
     });
     let folders = tokio::time::timeout(Duration::from_secs(3), resolve).await.ok().and_then(Result::ok).unwrap_or_default();
-    let mut map = st.part::<Memory>().meters.folders.lock().unwrap();
+    let mut map = st.part::<Memory>().meters.folders.lock();
     *map = FolderMap { folders, loaded: Some(Instant::now()) };
     map.find(path).unwrap_or_default().to_string()
 }

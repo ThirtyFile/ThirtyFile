@@ -205,6 +205,7 @@ export default {
   "The destination isn't a folder": "宛先がフォルダーではありません",
   "Too many items with the same name": "同じ名前の項目が多すぎます",
   "Not enough storage space in \"{name}\"": "「{name}」のストレージ容量が不足しています",
+  "There isn't enough free space on the server to receive this file": "サーバーの空き容量が不足しているため、このファイルを受け取れません",
   "The file is too large to edit online": "ファイルが大きすぎるため、オンラインで編集できません",
   "Someone else changed this file while you were editing it. Reload the latest version and edit again.": "編集中にこのファイルが他のユーザーによって変更されました。最新のバージョンを再読み込みしてから、もう一度編集してください",
   "No thumbnail": "サムネイルがありません",

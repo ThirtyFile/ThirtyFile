@@ -6,12 +6,13 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
 
+use crate::sync::Mutex;
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use sqlx::SqliteConnection;
@@ -217,20 +218,20 @@ impl<J: QueueJob> Ctx<'_, J> {
     }
 
     pub fn set_counts(&self, files_done: i64, bytes_done: i64, files_total: i64, bytes_total: i64) {
-        let mut p = self.ctl.progress.lock().unwrap();
+        let mut p = self.ctl.progress.lock();
         (p.files_done, p.bytes_done, p.files_total, p.bytes_total) = (files_done, bytes_done, files_total, bytes_total);
         p.flushed = None;
     }
 
     /// What is left is `files` and `bytes`: the totals are what was done so far and that
     pub fn set_left(&self, files: i64, bytes: i64) {
-        let mut p = self.ctl.progress.lock().unwrap();
+        let mut p = self.ctl.progress.lock();
         p.files_total = p.files_done + files;
         p.bytes_total = p.bytes_done + bytes;
     }
 
     pub fn add_total(&self, files: i64, bytes: i64) {
-        let mut p = self.ctl.progress.lock().unwrap();
+        let mut p = self.ctl.progress.lock();
         p.files_total += files;
         p.bytes_total += bytes;
     }
@@ -238,7 +239,7 @@ impl<J: QueueJob> Ctx<'_, J> {
     /// An item was done: counted, and written to the database every few seconds
     pub async fn done(&self, files: i64, bytes: i64) -> AppResult<()> {
         let due = {
-            let mut p = self.ctl.progress.lock().unwrap();
+            let mut p = self.ctl.progress.lock();
             p.files_done += files;
             p.bytes_done += bytes;
             p.files_total = p.files_total.max(p.files_done);
@@ -257,7 +258,7 @@ impl<J: QueueJob> Ctx<'_, J> {
         if self.rate_limit <= 0 {
             return;
         }
-        let done = self.ctl.progress.lock().unwrap().bytes_done.max(0) as f64;
+        let done = self.ctl.progress.lock().bytes_done.max(0) as f64;
         let due = Duration::from_secs_f64(done / self.rate_limit as f64);
         while let Some(wait) = throttle_wait(due, self.started.elapsed())
             && self.stop().is_none()
@@ -271,7 +272,7 @@ impl<J: QueueJob> Ctx<'_, J> {
     pub fn failed(&self, space: &str, item: Option<String>, error: String) {
         tracing::warn!("{}: an item couldn't be copied: {error}", self.table);
         let item = item.filter(|_| !self.private.contains(space));
-        let mut p = self.ctl.progress.lock().unwrap();
+        let mut p = self.ctl.progress.lock();
         p.failed += 1;
         if p.failures.len() < MAX_FAILURES {
             p.failures.push(Failure { item, error });
@@ -282,14 +283,14 @@ impl<J: QueueJob> Ctx<'_, J> {
     /// counted. Items of personal spaces aren't named.
     pub fn noted(&self, space: &str, item: Option<String>, note: String) {
         let item = item.filter(|_| !self.private.contains(space));
-        let mut p = self.ctl.progress.lock().unwrap();
+        let mut p = self.ctl.progress.lock();
         if p.failures.len() < MAX_FAILURES {
             p.failures.push(Failure { item, error: note });
         }
     }
 
     pub fn failed_count(&self) -> i64 {
-        self.ctl.progress.lock().unwrap().failed
+        self.ctl.progress.lock().failed
     }
 
     /// The failures so far as one error, None when there are none
@@ -304,7 +305,7 @@ impl<J: QueueJob> Ctx<'_, J> {
     }
 
     fn progress(&self) -> (i64, i64, i64, i64, i64, String) {
-        let mut p = self.ctl.progress.lock().unwrap();
+        let mut p = self.ctl.progress.lock();
         let now = Instant::now();
         if let Some((at, bytes)) = p.flushed {
             let secs = now.duration_since(at).as_secs_f64();
@@ -442,8 +443,13 @@ pub fn spawn_runner(st: AppState) {
 
 /// Starts a queue's runner: jobs that were running when ThirtyFile stopped continue, then queued jobs start in turn
 pub fn spawn<E: Engine>(st: AppState, engine: &'static E) {
-    tokio::spawn(async move {
-        if let Err(e) = recover_with(&st, engine).await {
+    crate::util::supervise("job queue", move |restarted| run_queue(st.clone(), engine, restarted));
+}
+
+/// A queue's runner; after a restart of the runner alone, the jobs marked running are still running
+async fn run_queue<E: Engine>(st: AppState, engine: &'static E, restarted: bool) {
+    {
+        if !restarted && let Err(e) = recover_with(&st, engine).await {
             tracing::warn!("Couldn't continue the jobs of {} that were running: {}", engine.queue(&st).table, e.message);
         }
         loop {
@@ -455,7 +461,7 @@ pub fn spawn<E: Engine>(st: AppState, engine: &'static E) {
                 _ = tokio::time::sleep(Duration::from_secs(30)) => {}
             }
         }
-    });
+    }
 }
 
 /// After a restart: jobs of backups/ that were running wait for their turn again
@@ -483,7 +489,7 @@ async fn requeue_orphans(st: &AppState, q: &Queue) -> AppResult<()> {
     let _w = st.write_lock.lock().await;
     // Read with the write lock held: a task takes its place in the list before its job is marked running (`take_in`),
     // and leaves it only after its last write (`Running`)
-    let running: Vec<String> = q.running.lock().unwrap().keys().cloned().collect();
+    let running: Vec<String> = q.running.lock().keys().cloned().collect();
     let orphans =
         sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {} SET state = 'queued' WHERE state = 'running' AND id NOT IN (SELECT value FROM json_each(?))", q.table)))
             .bind(serde_json::to_string(&running).unwrap())
@@ -502,7 +508,7 @@ pub(crate) async fn start_due_in<E: Engine>(st: &AppState, engine: &'static E) -
     let q = engine.queue(st);
     requeue_orphans(st, q).await?;
     loop {
-        let busy: Vec<String> = q.running.lock().unwrap().keys().cloned().collect();
+        let busy: Vec<String> = q.running.lock().keys().cloned().collect();
         if busy.len() >= engine.limit(st) {
             return Ok(());
         }
@@ -532,7 +538,7 @@ pub(super) async fn take(st: &AppState, job: &Job) -> AppResult<Option<Arc<Contr
 pub(crate) async fn take_in<E: Engine>(st: &AppState, engine: &'static E, job: &E::Job) -> AppResult<Option<Arc<Control>>> {
     let q = engine.queue(st);
     let ctl = Arc::new(Control::default());
-    q.running.lock().unwrap().insert(job.id().to_string(), ctl.clone());
+    q.running.lock().insert(job.id().to_string(), ctl.clone());
     let taken = async {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
@@ -557,7 +563,7 @@ pub(crate) async fn take_in<E: Engine>(st: &AppState, engine: &'static E, job: &
     }
     .await;
     if !matches!(taken, Ok(true)) {
-        q.running.lock().unwrap().remove(job.id());
+        q.running.lock().remove(job.id());
     }
     Ok(taken?.then_some(ctl))
 }
@@ -567,7 +573,7 @@ struct Running<'a>(&'a Queue, String);
 
 impl Drop for Running<'_> {
     fn drop(&mut self) {
-        self.0.running.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.1);
+        self.0.running.lock().remove(&self.1);
         self.0.wake.notify_one();
     }
 }
@@ -672,7 +678,7 @@ async fn set_state<E: Engine>(cx: &Ctx<'_, E::Job>, engine: &E, state: JobState,
 /// In the transaction that ends a job of backups/ or replicas/ well: it is done, with its progress and `note`
 pub(crate) async fn finish(conn: &mut SqliteConnection, cx: &Ctx<'_>, note: Option<&str>) -> AppResult<()> {
     let (files, bytes, failed, failures) = {
-        let p = cx.ctl.progress.lock().unwrap();
+        let p = cx.ctl.progress.lock();
         (p.files_done, p.bytes_done, p.failed, serde_json::to_string(&p.failures).unwrap())
     };
     sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -745,9 +751,9 @@ async fn trim_history(st: &AppState, table: &str, group: &str, t: i64) -> AppRes
 /// The progress of a running job, fresher than the database (written every few seconds): files and bytes done and in
 /// all, and the speed
 pub(crate) fn live(q: &Queue, id: &str) -> Option<(i64, i64, i64, i64, f64)> {
-    let running = q.running.lock().unwrap();
+    let running = q.running.lock();
     let ctl = running.get(id)?;
-    let p = ctl.progress.lock().unwrap();
+    let p = ctl.progress.lock();
     Some((p.files_done, p.bytes_done, p.files_total, p.bytes_total, p.rate))
 }
 

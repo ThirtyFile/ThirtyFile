@@ -3,7 +3,7 @@
 use super::*;
 
 pub(super) fn admin_view(st: &AppState, headers: &HeaderMap) -> Value {
-    let cfg = st.part::<Memory>().settings.read().unwrap().clone();
+    let cfg = st.part::<Memory>().settings.read().clone();
     let base = base_url(st, headers);
     let provider = |p: &str| {
         let c = cfg.provider(p).unwrap();
@@ -29,7 +29,7 @@ pub(super) fn admin_view(st: &AppState, headers: &HeaderMap) -> Value {
         "allowed_domains": cfg.allowed_domains,
         "domain_rules": cfg.domain_rules,
         "max_created_per_hour": MAX_CREATED_PER_HOUR,
-        "public_url_set": !st.system.read().unwrap().public_url.is_empty(),
+        "public_url_set": !st.system.read().public_url.is_empty(),
     })
 }
 
@@ -38,7 +38,7 @@ pub async fn get_settings(State(st): State<AppState>, _: Admin, headers: HeaderM
 }
 
 pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, headers: HeaderMap, Json(mut req): Json<SsoSettings>) -> AppResult<Json<Value>> {
-    let old = st.part::<Memory>().settings.read().unwrap().clone();
+    let old = st.part::<Memory>().settings.read().clone();
     for p in PROVIDERS {
         check_provider(&st, p, req.provider_mut(p).unwrap(), old.provider(p).unwrap()).await?;
     }
@@ -52,7 +52,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, hea
         logs::record_activity(&mut tx, &user, None, "settings", &detail).await?;
         tx.commit().await?;
     }
-    *st.part::<Memory>().settings.write().unwrap() = req;
+    *st.part::<Memory>().settings.write() = req;
     Ok(Json(admin_view(&st, &headers)))
 }
 
@@ -188,7 +188,7 @@ pub(super) fn summary(req: &SsoSettings) -> String {
     )
 }
 
-pub type PendingMap = std::sync::Mutex<HashMap<String, Pending>>;
+pub type PendingMap = crate::sync::Mutex<HashMap<String, Pending>>;
 
 /// Domain list as entered (commas, spaces or line breaks between entries) → lowercase, deduplicated, validated
 pub(super) fn normalize_domains(raw: &[String]) -> AppResult<Vec<String>> {

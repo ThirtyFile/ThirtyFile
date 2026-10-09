@@ -121,7 +121,7 @@
         <h2 id="logs">檢視紀錄</h2>
         <pre><code>docker logs --tail 100 thirtyfile</code></pre>
         <h2 id="health">檢查執行狀態</h2>
-        <p><code>http://files.example.com:8080/api/health</code> 回傳伺服器狀態：<code>"status": "ok"</code>；當 <code>/data</code> 或 <code>/storage</code> 剩餘容量不足 1 GB，或儲存位置不可達時，回傳 <code>"degraded"</code>。它還列出兩個資料夾的剩餘和總容量，以及各儲存位置的 <code>ok</code> 或 <code>offline</code> 狀態，便於監控工具在磁碟用滿前警示。請設定監控檢查 JSON 的 <code>status</code>：降級健康狀態仍回傳 HTTP 200。資料庫檢查失敗則回傳 HTTP 503 和 <code>"status": "error"</code>。Docker 健康探針接受 HTTP 200，所以剩餘空間不足或儲存位置離線本身不會導致容器重新啟動。降級狀態的紀錄警告每小時最多記錄一次。</p>
+        <p><code>http://files.example.com:8080/api/health</code> 回傳伺服器狀態：<code>"status": "ok"</code>；當 <code>/data</code> 或 <code>/storage</code> 剩餘容量不足 1 GB、儲存位置不可達，或過去一天內有背景工作因錯誤停止而重新啟動（紀錄會寫出是哪一項）時，回傳 <code>"degraded"</code>。它還列出兩個資料夾的剩餘和總容量，以及各儲存位置的 <code>ok</code> 或 <code>offline</code> 狀態，便於監控工具在磁碟用滿前警示。上傳和透過 WebDAV 傳送的檔案會先收進 <code>/data</code>，若收下後 <code>/data</code> 剩不到 64 MB，就會拒絕接收。請設定監控檢查 JSON 的 <code>status</code>：降級健康狀態仍回傳 HTTP 200。資料庫檢查失敗則回傳 HTTP 503 和 <code>"status": "error"</code>。Docker 健康探針接受 HTTP 200，所以剩餘空間不足或儲存位置離線本身不會導致容器重新啟動。降級狀態的紀錄警告每小時最多記錄一次。</p>
         <p>任何人都可查詢此端點，所以它不顯示版本，避免陌生人據此查詢已知漏洞。登入後可從<a href="account.html">帳號選單</a>最後一行檢視，例如 <strong>ThirtyFile 0.5.0</strong>。管理員也可在<strong>控制台</strong>右下角檢視，按一下可開啟該版本說明。在伺服器上執行 <code>docker exec thirtyfile thirtyfile --version</code> 可輸出版本。</p>
         <h2 id="check">檢查已儲存的檔案</h2>
         <p>如需檢查資料庫中的每個檔案是否仍位於儲存位置，以及儲存位置是否包含資料庫未知的檔案（例如手動留下的檔案），請執行：</p>

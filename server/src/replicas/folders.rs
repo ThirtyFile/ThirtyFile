@@ -99,7 +99,7 @@ impl Changing {
 
 /// Folder files a test has keep changing whenever they are read: (space, path)
 #[cfg(test)]
-pub(super) static KEEPS_CHANGING: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+pub(super) static KEEPS_CHANGING: crate::sync::Mutex<Vec<(String, String)>> = crate::sync::Mutex::new(Vec::new());
 
 /// Whether the record `f` still matches its item
 const MATCHES: &str = "(EXISTS (SELECT 1 FROM nodes n WHERE n.id = f.item_id AND f.path IS n.fs_path AND f.size IS n.fs_size AND f.mtime_ns IS n.fs_mtime_ns)
@@ -264,7 +264,7 @@ async fn read_to(cx: &Ctx<'_>, root: &Pinned, space: &str, rel: &str, tmp: &Path
     let read = cx
         .tries(changed, || {
             #[cfg(test)]
-            let keeps_changing = KEEPS_CHANGING.lock().unwrap().iter().any(|(s, p)| s == space && p == rel);
+            let keeps_changing = KEEPS_CHANGING.lock().iter().any(|(s, p)| s == space && p == rel);
             let (root, rel, tmp) = (root.clone(), rel.to_string(), tmp.to_path_buf());
             async move {
                 let _ = std::fs::remove_file(&tmp);

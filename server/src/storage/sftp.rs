@@ -9,10 +9,12 @@ use std::{
     io::{self, SeekFrom},
     path::Path,
     pin::Pin,
-    sync::{Arc, Mutex as StdMutex},
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
+
+use crate::sync::Mutex as StdMutex;
 
 use futures_util::future::BoxFuture;
 use russh::{
@@ -107,7 +109,7 @@ impl client::Handler for Handler {
     async fn check_server_key(&mut self, key: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
         let fp = fingerprint(key);
         let ok = self.expected.as_deref().is_none_or(|e| e == fp);
-        *self.seen.lock().unwrap() = Some(fp);
+        *self.seen.lock() = Some(fp);
         Ok(ok)
     }
 }
@@ -148,7 +150,7 @@ impl SftpStorage {
 
     /// Host key fingerprint seen on the most recent connection (recorded when a location is added)
     pub fn host_key(&self) -> Option<String> {
-        self.seen_key.lock().unwrap().clone()
+        self.seen_key.lock().clone()
     }
 
     async fn conn(&self) -> io::Result<Arc<Conn>> {
@@ -171,7 +173,7 @@ impl SftpStorage {
 
     async fn connect(&self) -> io::Result<Conn> {
         let cfg = &self.cfg;
-        let expected = Some(cfg.host_key.trim().to_string()).filter(|k| !k.is_empty()).or_else(|| self.first_key.lock().unwrap().clone());
+        let expected = Some(cfg.host_key.trim().to_string()).filter(|k| !k.is_empty()).or_else(|| self.first_key.lock().clone());
         let handler = Handler { expected: expected.clone(), seen: self.seen_key.clone() };
         let config = client::Config { inactivity_timeout: Some(Duration::from_secs(600)), keepalive_interval: Some(Duration::from_secs(30)), ..Default::default() };
         let addr = (cfg.host.trim().to_string(), cfg.port());
@@ -205,7 +207,7 @@ impl SftpStorage {
             return Err(denied("Incorrect username, password, or private key. Couldn't sign in to SFTP.", "authentication failed"));
         }
         if expected.is_none() {
-            *self.first_key.lock().unwrap() = self.host_key();
+            *self.first_key.lock() = self.host_key();
         }
         let channel = handle.channel_open_session().await.map_err(unavailable)?;
         channel.request_subsystem(true, "sftp").await.map_err(unavailable)?;
@@ -225,11 +227,11 @@ impl SftpStorage {
 
     /// Creates folders level by level (skipping existing ones)
     async fn ensure_dir(&self, conn: &Conn, dir: &str) -> io::Result<()> {
-        if self.dirs.lock().unwrap().contains(dir) {
+        if self.dirs.lock().contains(dir) {
             return Ok(());
         }
         for path in crate::storage::dir_levels(dir) {
-            if self.dirs.lock().unwrap().contains(&path) {
+            if self.dirs.lock().contains(&path) {
                 continue;
             }
             if !conn.sftp.try_exists(path.as_str()).await.map_err(sftp_err)? {
@@ -240,7 +242,7 @@ impl SftpStorage {
                     return Err(sftp_err(e));
                 }
             }
-            self.dirs.lock().unwrap().insert(path);
+            self.dirs.lock().insert(path);
         }
         Ok(())
     }

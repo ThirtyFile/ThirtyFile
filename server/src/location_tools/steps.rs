@@ -89,7 +89,7 @@ pub async fn test_steps(State(st): State<AppState>, _: Admin, Path(id): Path<Str
     let metered = crate::usage::Metered::wrap(backend.clone(), st.part::<crate::usage::Memory>().meters.clone(), st.recheck.clone(), &loc.id);
     let report = crate::usage::probe(run(&st, metered, &loc.kind, LARGE)).await;
     if report.ok {
-        st.storages.write().unwrap().entry(id.clone()).or_insert(backend);
+        st.storages.write().entry(id.clone()).or_insert(backend);
         let _ = locations::probe(&st, &id).await;
     }
     Ok(Json(report))

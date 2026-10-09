@@ -75,7 +75,7 @@ pub(super) async fn system_info(st: &AppState) -> AppResult<SystemInfo> {
     )
     .fetch_one(&st.db)
     .await?;
-    let s = st.system.read().unwrap().clone();
+    let s = st.system.read().clone();
     Ok(SystemInfo {
         shared_enabled: s.shared_enabled,
         shared_root_id: s.shared_root_id,
@@ -156,7 +156,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
         save_sharing(&mut tx, &user, &req).await?;
         save_versions(&mut tx, &user, &req).await?;
         tx.commit().await?;
-        apply(&mut st.system.write().unwrap(), req, public_url);
+        apply(&mut st.system.write(), req, public_url);
     }
     Ok(Json(system_info(&st).await?))
 }
@@ -235,7 +235,7 @@ async fn save_sign_in(st: &AppState, tx: &mut SqliteConnection, user: &User, req
         set_setting(tx, "require_two_factor", if require { "1" } else { "0" }).await?;
         // Turned on: password sign-ins without a second factor end (they set it up when signing in again), except
         // the administrator's own, who is asked the next time
-        if require && !st.system.read().unwrap().require_two_factor {
+        if require && !st.system.read().require_two_factor {
             sqlx::query(
                 "DELETE FROM sessions WHERE method = 'password' AND id IS NOT ?
                    AND user_id IN (SELECT id FROM users WHERE totp_secret IS NULL AND password_hash != ?)",

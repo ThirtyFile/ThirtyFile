@@ -68,7 +68,7 @@ async fn add_nas(env: &TestEnv, id: &str) -> std::path::PathBuf {
         .execute(&env.st.db)
         .await
         .unwrap();
-    env.st.storages.write().unwrap().insert(id.into(), Arc::new(LocalStorage::create(dir.clone(), id).unwrap()));
+    env.st.storages.write().insert(id.into(), Arc::new(LocalStorage::create(dir.clone(), id).unwrap()));
     dir
 }
 
@@ -326,7 +326,7 @@ async fn a_retry_never_queues_a_new_snapshot_and_one_waiting_goes_once_its_locat
     assert_eq!(policy::trigger(&env.st, &set, "retry", None).await.unwrap(), None);
     // Its location was checked since, and works: at once
     let back = crate::state::LocationHealth { ok: true, error: None, checked_at: t + 1 };
-    env.st.location_health.lock().unwrap().insert("nas".into(), back);
+    env.st.location_health.lock().insert("nas".into(), back);
     assert_eq!(policy::trigger(&env.st, &set, "retry", None).await.unwrap(), Some(id.clone()));
     assert_eq!(open_jobs(&env, &set).await, [(id, "queued".to_string())]);
 }

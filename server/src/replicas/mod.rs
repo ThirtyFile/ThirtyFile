@@ -48,7 +48,7 @@ pub struct Memory {
     /// Replica jobs running now
     pub queue: crate::backups::Queue,
     /// When reads last fell back to a replica, by location
-    pub fallbacks: std::sync::Mutex<std::collections::HashMap<String, i64>>,
+    pub fallbacks: crate::sync::Mutex<std::collections::HashMap<String, i64>>,
 }
 
 impl Default for Memory {
@@ -336,7 +336,7 @@ pub(super) async fn note_fallback(st: &AppState, primary: &str, replica: &str) {
     let due = {
         // When reads last fell back from each location: the activity log says so at most every ten minutes
         let key = primary.to_string();
-        let mut seen = st.part::<Memory>().fallbacks.lock().unwrap();
+        let mut seen = st.part::<Memory>().fallbacks.lock();
         let last = seen.get(&key).copied().unwrap_or(0);
         let due = now() - last >= 600;
         if due {

@@ -153,21 +153,21 @@ pub fn numbered_name(name: &str, n: u32, is_folder: bool) -> String {
 }
 
 /// Work that may not come back (a call to a disk or network share that stopped answering), by what it is waiting for
-static WAITING: std::sync::Mutex<std::collections::BTreeSet<String>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
+static WAITING: crate::sync::Mutex<std::collections::BTreeSet<String>> = crate::sync::Mutex::new(std::collections::BTreeSet::new());
 
 /// Marks `key` as waited for until dropped; None when it is already
 struct Waiting(String);
 
 impl Waiting {
     fn claim(key: String) -> Option<Waiting> {
-        let claimed = WAITING.lock().unwrap().insert(key.clone());
+        let claimed = WAITING.lock().insert(key.clone());
         claimed.then(|| Waiting(key))
     }
 }
 
 impl Drop for Waiting {
     fn drop(&mut self) {
-        WAITING.lock().unwrap().remove(&self.0);
+        WAITING.lock().remove(&self.0);
     }
 }
 
@@ -210,6 +210,127 @@ pub async fn within<T: Send + 'static>(key: String, wait: std::time::Duration, w
         r
     });
     tokio::time::timeout_at(deadline, task).await.ok()?.ok()
+}
+
+/// Cancelled when the server stops: background loops end then, and give back the database connections they hold
+static STOPPING: std::sync::LazyLock<tokio_util::sync::CancellationToken> = std::sync::LazyLock::new(tokio_util::sync::CancellationToken::new);
+
+/// The server is stopping: background loops end (`supervise`)
+pub fn stop_background() {
+    STOPPING.cancel();
+}
+
+/// When a background loop last stopped on a panic and was started again (0: never), for the health check
+static LAST_RESTART: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// When a background loop last had to be started again after a panic, if ever
+pub fn last_restart() -> Option<i64> {
+    Some(LAST_RESTART.load(std::sync::atomic::Ordering::Relaxed)).filter(|t| *t > 0)
+}
+
+/// Runs a background loop (the hourly maintenance, the scanner…) for as long as the server runs. Should it panic, it
+/// is started again after a pause, longer after each panic up to ten minutes, and the panic is logged: otherwise the
+/// task would just end, and what it does (emptying the trash, say) would stop until a restart without anyone knowing.
+/// `make` gets whether this is a restart, for work that is only for the server's start. Its errors are its own to
+/// handle; returning ends it. It ends when the server stops (`stop_background`).
+pub fn supervise<F, Fut>(name: &'static str, make: F)
+where
+    F: Fn(bool) -> Fut + Send + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    let first_pause = std::time::Duration::from_millis(if cfg!(test) { 10 } else { 5_000 });
+    tokio::spawn(async move {
+        let mut pause = first_pause;
+        let mut restarted = false;
+        loop {
+            let started = std::time::Instant::now();
+            let mut task = tokio::spawn(make(restarted));
+            let e = tokio::select! {
+                ended = &mut task => match ended {
+                    Ok(()) => return,
+                    Err(e) if e.is_panic() => e,
+                    // Cancelled: the runtime is stopping
+                    Err(_) => return,
+                },
+                () = STOPPING.cancelled() => {
+                    task.abort();
+                    return;
+                }
+            };
+            let payload = e.into_panic();
+            let message = payload.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| payload.downcast_ref::<String>().cloned()).unwrap_or_default();
+            // A loop that ran a good while before it failed starts again soon
+            if started.elapsed() > std::time::Duration::from_secs(3600) {
+                pause = first_pause;
+            }
+            LAST_RESTART.store(now(), std::sync::atomic::Ordering::Relaxed);
+            tracing::error!("The background task \"{name}\" stopped on an error and starts again in {} s: {message}", pause.as_secs());
+            tokio::select! {
+                () = tokio::time::sleep(pause) => {}
+                () = STOPPING.cancelled() => return,
+            }
+            pause = (pause * 2).min(std::time::Duration::from_secs(600));
+            restarted = true;
+        }
+    });
+}
+
+/// Free space the data disk keeps while files are received there: it also holds the database, which fails for
+/// everyone when it can't write
+pub const DATA_DISK_RESERVE: u64 = 64 * 1024 * 1024;
+/// How often (in bytes received) the data disk's free space is looked at again
+const DATA_DISK_CHECK_EVERY: u64 = 32 * 1024 * 1024;
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: the data disk's free space for `DiskRoom` (None: what the disk says)
+    pub static DATA_DISK_FREE: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+/// Keeps files being received in the data folder (uploads, WebDAV) from filling its disk
+pub struct DiskRoom {
+    dir: std::path::PathBuf,
+    /// Bytes received since the free space was last looked at
+    since: u64,
+}
+
+impl DiskRoom {
+    /// Refused when the disk holding `dir` hasn't room for `expect` more bytes and the reserve
+    pub async fn check(dir: &std::path::Path, expect: u64) -> crate::error::AppResult<DiskRoom> {
+        let room = DiskRoom { dir: dir.to_path_buf(), since: 0 };
+        room.look(expect).await?;
+        Ok(room)
+    }
+
+    /// Before writing `n` more bytes: refused when the disk is about to run into the reserve (looked at again every
+    /// few tens of megabytes)
+    pub async fn before(&mut self, n: u64) -> crate::error::AppResult<()> {
+        self.since += n;
+        if self.since >= DATA_DISK_CHECK_EVERY {
+            self.since = 0;
+            self.look(n).await?;
+        }
+        Ok(())
+    }
+
+    async fn look(&self, n: u64) -> crate::error::AppResult<()> {
+        #[cfg(test)]
+        let free = match DATA_DISK_FREE.with(|f| f.get()) {
+            Some(f) => Some(f),
+            None => disk_space_soon(&self.dir).await.map(|(free, _)| free),
+        };
+        #[cfg(not(test))]
+        let free = disk_space_soon(&self.dir).await.map(|(free, _)| free);
+        if let Some(free) = free
+            && n.saturating_add(DATA_DISK_RESERVE) > free
+        {
+            return Err(crate::error::AppError::new(
+                axum::http::StatusCode::INSUFFICIENT_STORAGE,
+                "There isn't enough free space on the server to receive this file",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// `disk_space`, on a blocking thread and within a few seconds (None when the disk doesn't answer)
@@ -309,6 +430,34 @@ pub fn system_folder(real: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
+
+    #[tokio::test]
+    async fn a_background_loop_that_panics_starts_again() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let (runs, restarts) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
+        let done = Arc::new(crate::sync::Mutex::new(Some(done_tx)));
+        let (r, re) = (runs.clone(), restarts.clone());
+        super::supervise("test loop", move |restarted| {
+            let (r, re, done) = (r.clone(), re.clone(), done.clone());
+            async move {
+                re.fetch_add(usize::from(restarted), Ordering::SeqCst);
+                if r.fetch_add(1, Ordering::SeqCst) < 2 {
+                    panic!("something unexpected");
+                }
+                if let Some(tx) = done.lock().take() {
+                    let _ = tx.send(());
+                }
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(5), done_rx).await.unwrap().unwrap();
+        assert_eq!(runs.load(Ordering::SeqCst), 3);
+        assert_eq!(restarts.load(Ordering::SeqCst), 2, "told that it is a restart");
+        assert!(super::last_restart().is_some());
+    }
 
     #[tokio::test]
     async fn a_disk_that_doesnt_answer_ties_up_one_thread_and_is_asked_again_once_it_answers() {
