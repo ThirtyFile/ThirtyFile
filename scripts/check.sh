@@ -6,9 +6,9 @@
 #   scripts/check.sh server    the server: migration files numbered without repeats or gaps, formatting, tests, and
 #                              clippy with warnings as errors
 #   scripts/check.sh migrations  only the migration files' numbers
-#   scripts/check.sh e2e       the end-to-end test in a real browser (sign in, upload, preview, download), against a
-#                              server built from here (the first time, get the browser: cd web && pnpm exec
-#                              playwright install chromium)
+#   scripts/check.sh e2e       the interface's size budget (scripts/check-bundle.mjs), then the end-to-end test in a
+#                              real browser (sign in, upload, preview, download), against a server built from here
+#                              (the first time, get the browser: cd web && pnpm exec playwright install chromium)
 #   scripts/check.sh site      the website: each translated page in every language with matching language links, and
 #                              links and anchors that resolve (scripts/check-site.mjs; it needs only Node)
 #   scripts/check.sh quick     pull-request checks, without unit/browser tests or artifact compilation
@@ -104,6 +104,8 @@ e2e() {
   # The server embeds the interface it is built with (server/build.rs), so the interface is built first
   cd "$ROOT/web"
   pnpm build
+  # What every page downloads at the start, any one chunk, and the Mac style's chunks kept out of the start
+  node scripts/check-bundle.mjs
   (cd "$ROOT/server" && cargo build --locked)
   local bin="${CARGO_TARGET_DIR:-$ROOT/server/target}/debug/thirtyfile"
   if [ -f "$bin.exe" ]; then bin="$bin.exe"; fi

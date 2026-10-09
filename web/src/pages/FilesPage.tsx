@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useMemo } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef } from "react";
 import { Navigate, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { FolderIcon, Loader2Icon } from "lucide-react";
@@ -63,12 +63,24 @@ function HomeWithoutPersonal() {
 
 function FolderPage({ id }: { id: string }) {
   const [sort, onSort, setSort] = useSort();
-  // Refresh more often while the storage service is offline, so the notice disappears automatically once it recovers
+  // While the storage service is offline, asked again every 15 seconds, so the notice goes once it recovers. Otherwise
+  // not on a timer: the list of spaces (asked every 30 seconds) says when the space's storage goes offline or the space
+  // becomes read-only, and the folder's details are asked again then
   const info = useQuery({
     queryKey: keys.node(id),
     queryFn: () => api.node(id),
-    refetchInterval: (q) => (q.state.data?.offline ? 15_000 : 60_000),
+    refetchInterval: (q) => (q.state.data?.offline ? 15_000 : false),
   });
+  const drives = useDrives();
+  const space = drives.data?.find((d) => d.id === info.data?.drive.id);
+  const spaceState = space ? `${space.offline}|${space.read_only}` : null;
+  const seenState = useRef(spaceState);
+  useEffect(() => {
+    if (spaceState === null) return;
+    if (seenState.current !== null && seenState.current !== spaceState) void info.refetch();
+    seenState.current = spaceState;
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- when the space's state changes
+  }, [spaceState]);
   const node = info.data?.node;
   const folderId = node?.id;
   // A large folder loads the parts in view (lib/windows). Grouped by date or type, every group shows in full, so the

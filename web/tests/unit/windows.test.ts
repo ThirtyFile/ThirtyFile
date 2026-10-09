@@ -1,7 +1,7 @@
 // A large folder a part at a time (lib/windows), and what is selected in it without being loaded (lib/span)
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { api } from "@/api";
-import { assemble, KEEP, neighbours, toKeep, WINDOW } from "@/lib/windows";
+import { assemble, KEEP, neighbours, startsWith, toKeep, WINDOW } from "@/lib/windows";
 import { batchesOf, chunks, eachBatch, inSpan, spanCount, type FolderSpan } from "@/lib/span";
 
 type Item = { id: string; kind: "file" | "folder" };
@@ -123,5 +123,16 @@ describe("spans", () => {
   test("items picked one by one go 1,000 at a time", () => {
     const many = Array.from({ length: 2500 }, (_, i) => `n${i}`);
     expect(chunks(many).map((c) => c.length)).toEqual([1000, 1000, 500]);
+  });
+});
+
+describe("telling which listing a cached part belongs to", () => {
+  test("by the listing's key, part by part, the folder's id undefined while it loads included", () => {
+    const prefix = ["children", "f1", "name", "asc", "at"];
+    expect(startsWith(["children", "f1", "name", "asc", "at", 200], prefix)).toBe(true);
+    expect(startsWith(["children", "f1", "name", "desc", "at", 200], prefix)).toBe(false);
+    expect(startsWith(["children", "f1"], prefix)).toBe(false);
+    expect(startsWith(["children", undefined, "name", "asc", "at", 0], ["children", undefined, "name", "asc", "at"])).toBe(true);
+    expect(startsWith(["children", null, "name", "asc", "at", 0], ["children", undefined, "name", "asc", "at"])).toBe(false);
   });
 });

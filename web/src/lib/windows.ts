@@ -106,19 +106,33 @@ export const windowsKey = (folder: string | undefined, sort: SortKey, order: Sor
 
 const startOf = (q: Query) => q.queryKey[5] as number;
 
+/** Whether `key` begins with `prefix` (whose parts are plain values: ids, sort keys): compared part by part, since the
+ * cache tells every subscriber of every change while files arrive */
+export function startsWith(key: QueryKey, prefix: QueryKey): boolean {
+  if (key.length < prefix.length) return false;
+  for (let i = 0; i < prefix.length; i++) if (key[i] !== prefix[i]) return false;
+  return true;
+}
+
 /** Changes the version when a part of this listing is added, changed or removed */
 function useCacheVersion(key: QueryKey) {
   const qc = useQueryClient();
   const version = useRef(0);
   const text = JSON.stringify(key);
+  // The key as it is (undefined parts too), for the listing `text` names
+  const current = useRef(key);
+  current.current = key;
   const subscribe = useCallback(
-    (onChange: () => void) =>
-      qc.getQueryCache().subscribe((e) => {
+    (onChange: () => void) => {
+      const prefix = current.current;
+      return qc.getQueryCache().subscribe((e) => {
         if (e.type !== "added" && e.type !== "removed" && e.type !== "updated") return;
-        if (JSON.stringify(e.query.queryKey.slice(0, 5)) !== text) return;
+        if (!startsWith(e.query.queryKey, prefix)) return;
         version.current++;
         onChange();
-      }),
+      });
+    },
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- `text` stands for the key
     [qc, text],
   );
   return useSyncExternalStore(subscribe, () => version.current);

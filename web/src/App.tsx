@@ -11,6 +11,7 @@ import { StyleChoiceContext, styleChoice } from "@/lib/style";
 import { adoptLanguage, languageToAdopt, t } from "@/lib/i18n";
 import { errorMessage, unreachable } from "@/lib/utils";
 import { useApplyBranding } from "@/lib/branding";
+import { StyleReady } from "@/components/style/StyleReady";
 import { ConfirmHost } from "@/components/confirm";
 import type { ControlPanelKey } from "@/admin/controlPanel";
 import { ADMIN_PAGES, adminPath } from "@/admin/pages";
@@ -126,7 +127,9 @@ function RequireAuth() {
   return (
     <MeContext.Provider value={me.data}>
       <StyleChoiceContext.Provider value={styleChoice(me.data.style)}>
-        <AppShell />
+        <StyleReady>
+          <AppShell />
+        </StyleReady>
         {/* "Replace or skip" questions before uploading, moving, copying or restoring: they read the signed-in user's settings */}
         <ConflictHost />
         {/* Making and changing tags, from the menus, the details pane and the navigation pane */}
@@ -153,7 +156,14 @@ export function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
-          <Route path="/share/:token/:nodeId?" element={<PublicSharePage />} />
+          <Route
+            path="/share/:token/:nodeId?"
+            element={
+              <StyleReady>
+                <PublicSharePage />
+              </StyleReady>
+            }
+          />
           <Route element={<RequireAuth />}>
             <Route index element={<Navigate to="/files" replace />} />
             <Route path="/files/:id?" element={<FilesPage />} />

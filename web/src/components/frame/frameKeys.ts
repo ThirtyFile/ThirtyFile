@@ -13,14 +13,17 @@ import { useStyleKit } from "@/components/style";
 import { pressed } from "@/lib/style/keymap";
 import { useTabActions, useTabsState } from "@/tabs";
 
-/** Refreshing: everything shown loads again, and new items kept where they were made go to their sorted places */
+/** What Refresh leaves alone: the account, the site's branding and the sign-in options don't change with a page */
+const NOT_REFRESHED = new Set(["me", "branding", "auth-options", "sso-providers"]);
+
+/** Refreshing: what the page shows loads again, and new items kept where they were made go to their sorted places */
 export function useRefresh() {
   const qc = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const refresh = async () => {
     setRefreshing(true);
     listRefreshed();
-    await qc.invalidateQueries();
+    await qc.invalidateQueries({ predicate: (q) => !NOT_REFRESHED.has(q.queryKey[0] as string) });
     setRefreshing(false);
   };
   return { refreshing, refresh };

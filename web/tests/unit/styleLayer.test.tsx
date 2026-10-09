@@ -4,8 +4,11 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, test, vi } from "vitest";
-import { kits, StyleKitContext, useStyleKit, useView, useViews, type StyleKit } from "@/components/style";
+import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
+import { kits, loadMacKit, StyleKitContext, useStyleKit, useView, useViews, type StyleKit } from "@/components/style";
+
+// The Mac kit is a chunk of its own, loaded when the style is in use
+beforeAll(() => loadMacKit());
 import { windowsKit } from "@/components/style/windows";
 import { WINDOWS_KEYS } from "@/components/style/windows/keys";
 import { openShortcuts, ShortcutsHost } from "@/components/ShortcutsDialog";

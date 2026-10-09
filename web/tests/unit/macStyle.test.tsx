@@ -3,11 +3,14 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { FolderIcon } from "lucide-react";
 import { api, type Drive, type Located, type Me, type SmartFolder, type Tag } from "@/api";
 import { keys } from "@/api/queryKeys";
-import { kits } from "@/components/style";
+import { kits, loadMacKit } from "@/components/style";
+
+// The Mac kit is a chunk of its own, loaded when the style is in use
+beforeAll(() => loadMacKit());
 import { macKit } from "@/components/style/mac";
 import { MacSidebar } from "@/components/style/mac/sidebar";
 import { GoToFolder, PathBar, openGoToFolder } from "@/components/style/mac/pathBar";
