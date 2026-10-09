@@ -196,7 +196,10 @@
   const link = (file) => at(TRANSLATED.includes(file) ? lang : "en", file);
   const guideUrl = (id) => link(`docs/${id === "install" ? "index" : id}.html`);
   // The same page in another language, or that language's home page when this page isn't translated
-  const counterpart = (code) => at(code, TRANSLATED.includes(path) ? path : "index.html") + window.location.hash;
+  const pageIn = (code) => at(code, TRANSLATED.includes(path) ? path : "index.html");
+  // The same, at the section being read. The address is the visitor's, so it is only ever set as a link's href,
+  // never written into markup.
+  const counterpart = (code) => pageIn(code) + window.location.hash;
 
   const storage = {
     get(key) {
@@ -226,7 +229,7 @@
   const languageMenu = () => `
     <details class="lang-menu">
       <summary>${GLOBE}<span class="visually-hidden">${t("Language")} </span><span class="lang-name">${LANGUAGES.find(([code]) => code === lang)[1]}</span></summary>
-      <ul>${LANGUAGES.map(([code, name]) => `<li><a href="${counterpart(code)}" hreflang="${code}" lang="${code}"${code === lang ? ' aria-current="true"' : ""}>${name}</a></li>`).join("")}</ul>
+      <ul>${LANGUAGES.map(([code, name]) => `<li><a href="${pageIn(code)}" hreflang="${code}" lang="${code}"${code === lang ? ' aria-current="true"' : ""}>${name}</a></li>`).join("")}</ul>
     </details>`;
   let header = document.querySelector(".site-header");
   if (!header) {
@@ -309,12 +312,13 @@
       <div class="lang-offer" lang="${wanted}" role="region" aria-label="${t("Language", wanted)}">
         <div class="wrap">
           <p>${t("This page is also available in English.", wanted)}</p>
-          <a href="${counterpart(wanted)}" hreflang="${wanted}">${t("Read it in English", wanted)}</a>
+          <a href="${pageIn(wanted)}" hreflang="${wanted}">${t("Read it in English", wanted)}</a>
           <button type="button" aria-label="${t("Close", wanted)}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
           </button>
         </div>
       </div>`);
+    offer.querySelector("a").href = counterpart(wanted);
     header.after(offer);
     offer.querySelector("button").addEventListener("click", () => offer.remove());
   }

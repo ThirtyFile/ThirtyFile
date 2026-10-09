@@ -223,7 +223,7 @@ pub async fn set_favorite(State(st): State<AppState>, user: User, Json(req): Jso
         return Err(AppError::bad_request("Select 1 to 1000 items"));
     }
     // Checked before taking the write lock, which every other change waits for: a check is a few queries per item
-    let mut ids = Vec::with_capacity(req.ids.len());
+    let mut ids = Vec::new();
     {
         let mut c = st.db.acquire().await?;
         for id in &req.ids {
