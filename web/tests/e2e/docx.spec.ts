@@ -201,3 +201,74 @@ test("rows and columns are added and deleted from the menus, and Ctrl+Z right af
   expect(xml).toContain('<w:tblW w:w="9000" w:type="dxa"/>');
   expect([...xml.matchAll(/<w:gridCol w:w="3000"\/>/g)]).toHaveLength(3);
 });
+
+test("cells selected together are merged, a cell is split from the dialog, and Ctrl+Z right after undoes it", async ({ page }) => {
+  await signIn(page);
+  const dir = await makeFolder(page, "Word merge");
+  const cell = (text: string) => `<w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/></w:tcPr><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:tc>`;
+  const body =
+    '<w:tbl><w:tblPr><w:tblW w:w="6000" w:type="dxa"/></w:tblPr><w:tblGrid><w:gridCol w:w="3000"/><w:gridCol w:w="3000"/></w:tblGrid>' +
+    `<w:tr>${cell("A")}${cell("B")}</w:tr><w:tr>${cell("C")}${cell("D")}</w:tr></w:tbl><w:p/>`;
+  const id = await uploadFile(page, dir, "merge.docx", Buffer.from(await buildDocument(body)));
+  const { frame } = await openEditor(page, id, "merge.docx");
+  const cellsMenu = async (item: string) => {
+    await page.getByRole("button", { name: "Cells", exact: true }).click();
+    await page.getByRole("menuitem", { name: item }).click();
+  };
+  const centre = async (text: string) => {
+    const box = (await frame.getByText(text, { exact: true }).boundingBox())!;
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  };
+
+  // Dragging from A to B selects both; merging joins them, and Ctrl+Z right after splits them again
+  const a = await centre("A");
+  const b = await centre("B");
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 5 });
+  await page.mouse.up();
+  await expect(frame.locator("td[data-picked]")).toHaveCount(2);
+  await cellsMenu("Merge cells");
+  await expect(frame.locator("tr").first().locator("td")).toHaveCount(1);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(frame.locator("tr").first().locator("td")).toHaveCount(2);
+
+  // Shift+click selects from the cursor's cell: A and C merge down
+  await frame.getByText("A", { exact: true }).click();
+  await frame.getByText("C", { exact: true }).click({ modifiers: ["Shift"] });
+  await expect(frame.locator("td[data-picked]")).toHaveCount(2);
+  await cellsMenu("Merge cells");
+
+  // D split into two columns
+  await frame.getByText("D", { exact: true }).click();
+  await cellsMenu("Split cell…");
+  const dialog = page.getByRole("dialog", { name: "Split cell" });
+  await dialog.getByLabel("Number of columns").fill("2");
+  await dialog.getByLabel("Number of rows").fill("1");
+  await dialog.getByRole("button", { name: "Split" }).click();
+  await expect(frame.locator("tr").nth(1).locator("td")).toHaveCount(2);
+
+  const save = saving(page, id);
+  await page.getByRole("button", { name: "Save" }).click();
+  expect((await save).ok()).toBe(true);
+  const { xml } = await savedXml(page, id);
+  const rows = [...xml.matchAll(/<w:tr>(.*?)<\/w:tr>/g)].map((m) =>
+    [...m[1].matchAll(/<w:tc>(.*?)<\/w:tc>/g)].map((c) => ({
+      text: [...c[1].matchAll(/<w:t>([^<]*)<\/w:t>/g)].map((x) => x[1]).join(""),
+      span: Number(/<w:gridSpan w:val="(\d+)"\/>/.exec(c[1])?.[1] ?? 1),
+      merge: /<w:vMerge w:val="restart"\/>/.test(c[1]) ? "restart" : /<w:vMerge\/>/.test(c[1]) ? "continue" : "-",
+    })),
+  );
+  expect(rows).toEqual([
+    [
+      { text: "AC", span: 1, merge: "restart" },
+      { text: "B", span: 2, merge: "-" },
+    ],
+    [
+      { text: "", span: 1, merge: "continue" },
+      { text: "D", span: 1, merge: "-" },
+      { text: "", span: 1, merge: "-" },
+    ],
+  ]);
+  expect([...xml.matchAll(/<w:gridCol w:w="(\d+)"\/>/g)].map((m) => m[1])).toEqual(["3000", "1500", "1500"]);
+});

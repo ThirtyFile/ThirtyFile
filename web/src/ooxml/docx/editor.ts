@@ -9,7 +9,8 @@
  * Table cells are edited the same way, each as an editable place of its own inside the table (which itself stays as it
  * is): Enter and Backspace stay in the cell, and Tab moves to the next cell (Shift+Tab to the one before), as in Word.
  * Rows and columns are added and deleted by changing the document (tableOps.ts) and opening the view again on it: the
- * host keeps the change before it, so Ctrl+Z right after undoes it.
+ * host keeps the change before it, so Ctrl+Z right after undoes it. Cells are selected together for merging by
+ * dragging across them or Shift+clicking another one; any key lets go of them.
  *
  * The browser's editing is limited to what can be written back: plain text only (formatting commands, pasting rich
  * content and dragging are refused), and Backspace or Delete never joins a paragraph with a block that is kept as it is.
@@ -21,7 +22,7 @@ import { BlockWriter, type BlockItem } from "./blocks";
 import type { Flow, PageFloat } from "./context";
 import { DOCX_CSS } from "./css";
 import { originalPieces, planEdits, readAllEdits, readParagraph, samePieces, saveEdits, writeXml, type EditPlan } from "./edit";
-import { changeTable, type TableOp } from "./tableOps";
+import { cellRange, changeTable, type TableOp } from "./tableOps";
 import { loadDocx, normalStyle } from "./index";
 import { contentWidth, parseSection, type Section } from "./section";
 import { fixScaled, resolveTabs } from "./tabs";
@@ -56,8 +57,8 @@ export interface EditorOptions {
   onSave(): void;
   /** Ctrl+Z: true when the host undid something itself (a change of a table's shape), so the browser doesn't */
   onUndo?(): boolean;
-  /** The caret went into a table cell, or out of one */
-  onPlace?(inCell: boolean): void;
+  /** The caret went into a table cell or out of one (`cell`), or cells were selected together for merging (`cells`) */
+  onPlace?(place: { cell: boolean; cells: number }): void;
 }
 
 export interface DocxEditor {
@@ -67,7 +68,7 @@ export interface DocxEditor {
    * The document with the table of the caret's cell changed as `op` says, and the cell (container) to put the caret in
    * once it is opened again; undefined when the caret isn't in a cell or that table can't be changed this way
    */
-  tableOp(op: TableOp): { xml: string; cell: number | null } | undefined;
+  tableOp(op: TableOp, split?: { cols: number; rows: number }): { xml: string; cell: number | null } | undefined;
   focus(): void;
   dispose(): void;
 }
@@ -83,6 +84,8 @@ const EDIT_CSS = `
 .tf-docx-ro:has([data-cell]):hover{outline:none}
 .tf-docx-editable [data-cell]{outline:none;cursor:text}
 .tf-docx-editable [data-cell]:focus-within{box-shadow:inset 0 0 0 2px rgba(37,99,235,.55)}
+.tf-docx-editable [data-cell][data-picked]{background-image:linear-gradient(rgba(37,99,235,.22),rgba(37,99,235,.22))}
+.tf-docx-editable [data-picked] ::selection{background:transparent}
 `;
 
 /** Input the editor can't write back: formatting, lists, links, rich drops */
@@ -221,6 +224,8 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
     // Keys an input method uses while composing (choosing a candidate, say) are its own
     if (e.isComposing || e.keyCode === 229) return;
     const mod = e.ctrlKey || e.metaKey;
+    // Typing, moving or Escape lets go of cells selected together (shortcuts such as Ctrl+S don't)
+    if (picked && !mod && !["Shift", "Control", "Alt", "Meta"].includes(e.key)) unpick();
     if (mod && !e.altKey && e.key.toLowerCase() === "s") {
       e.preventDefault();
       opts.onSave();
@@ -267,16 +272,74 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   };
   const onDrag = (e: DragEvent) => e.preventDefault();
   const onInput = () => opts.onInput();
-  // Whether the caret is in a table cell, told when it changes (the host's table menus follow it)
+  // Whether the caret is in a table cell, and how many cells are selected together, told when it changes (the host's
+  // table menus follow it)
   let inCell: boolean | null = null;
+  let picked: { a: HTMLElement; b: HTMLElement } | null = null;
+  const cellOf = (n: Node | null) => {
+    const host = hostOf(n, editable);
+    return host && host !== editable ? host : null;
+  };
+  const pickedCells = () => Array.from(editable.querySelectorAll<HTMLElement>("[data-cell][data-picked]"));
+  const place = () => opts.onPlace?.({ cell: inCell === true || !!picked, cells: picked ? pickedCells().length : 0 });
   const onSelection = () => {
-    const host = hostOf(getSelection()?.anchorNode ?? null, editable);
-    const now = !!host && host !== editable;
+    const now = !!cellOf(getSelection()?.anchorNode ?? null);
     if (now === inCell) return;
     inCell = now;
-    opts.onPlace?.(now);
+    place();
+  };
+  const unpick = () => {
+    if (!picked) return;
+    for (const el of pickedCells()) delete el.dataset.picked;
+    picked = null;
+    place();
+  };
+  /** The cells from one to the other, grown as merging would (never through a merged cell) */
+  const pick = (a: HTMLElement, b: HTMLElement) => {
+    for (const el of pickedCells()) delete el.dataset.picked;
+    const ta = plan.containers[Number(a.dataset.cell)]?.el;
+    const tb = plan.containers[Number(b.dataset.cell)]?.el;
+    const range = new Set(ta && tb ? (cellRange(ta, tb) ?? []) : []);
+    picked = range.size > 1 ? { a, b } : null;
+    if (picked) for (const host of Array.from(editable.querySelectorAll<HTMLElement>("[data-cell]"))) if (range.has(plan.containers[Number(host.dataset.cell)]?.el)) host.dataset.picked = "";
+    place();
+  };
+  let dragFrom: HTMLElement | null = null;
+  const sameTable = (a: HTMLElement, b: HTMLElement) => a.closest("table") === b.closest("table");
+  const onMouseDown = (e: MouseEvent) => {
+    if (e.button !== 0) return;
+    const cell = cellOf(e.target as Node);
+    if (e.shiftKey && cell) {
+      const from = picked?.a ?? cellOf(getSelection()?.anchorNode ?? null);
+      if (from && from !== cell && sameTable(from, cell)) {
+        e.preventDefault();
+        pick(from, cell);
+        return;
+      }
+    }
+    unpick();
+    dragFrom = cell;
+  };
+  const onMouseMove = (e: MouseEvent) => {
+    if (!dragFrom || !(e.buttons & 1)) return;
+    const over = cellOf(e.target as Node);
+    if (!over || !sameTable(over, dragFrom)) return;
+    if (over === dragFrom) {
+      // Back in the cell the drag started in: selecting its text again
+      unpick();
+      return;
+    }
+    if (picked?.b !== over) pick(dragFrom, over);
+    getSelection()?.removeAllRanges();
+    e.preventDefault();
+  };
+  const onMouseUp = () => {
+    dragFrom = null;
   };
   document.addEventListener("selectionchange", onSelection);
+  editable.addEventListener("mousedown", onMouseDown);
+  editable.addEventListener("mousemove", onMouseMove);
+  document.addEventListener("mouseup", onMouseUp);
   editable.addEventListener("beforeinput", onBeforeInput);
   editable.addEventListener("keydown", onKeyDown);
   editable.addEventListener("paste", onPaste);
@@ -302,26 +365,31 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
       const xml = saveEdits(plan, readAllEdits(editable), shown);
       return { path: loaded.docPath, xml, caret: caretOf(editable), scroll: root.scrollTop };
     },
-    tableOp(op) {
-      const host = hostOf(getSelection()?.anchorNode ?? null, editable);
-      const c = host && host !== editable ? Number(host.dataset.cell) : NaN;
-      const tc = plan.containers[c]?.el;
-      if (!tc || tc.localName !== "tc") return undefined;
-      // The document as edited, with the caret's cell marked so it can be found in it
+    tableOp(op, split) {
+      // Merging: the cells selected together; anything else: the caret's cell (or the first of those selected)
+      const host = op === "merge" ? picked?.a : (cellOf(getSelection()?.anchorNode ?? null) ?? picked?.a);
+      const tc = host ? plan.containers[Number(host.dataset.cell)]?.el : undefined;
+      const otherTc = op === "merge" && picked ? plan.containers[Number(picked.b.dataset.cell)]?.el : undefined;
+      if (!tc || tc.localName !== "tc" || (op === "merge" && !otherTc)) return undefined;
+      // The document as edited, with the cells marked so they can be found in it
       tc.setAttribute("data-tf-cell", "");
+      otherTc?.setAttribute("data-tf-other", "");
       let text: string;
       try {
         text = saveEdits(plan, readAllEdits(editable), shown) ?? writeXml(plan.doc);
       } finally {
         tc.removeAttribute("data-tf-cell");
+        otherTc?.removeAttribute("data-tf-other");
       }
       const doc = new DOMParser().parseFromString(text, "application/xml");
       const body = Array.from(doc.documentElement.children).find((e) => e.localName === "body");
       const cells = Array.from(body?.querySelectorAll("*") ?? []).filter((e) => e.localName === "tc");
       const target = cells.find((e) => e.hasAttribute("data-tf-cell"));
+      const other = cells.find((e) => e.hasAttribute("data-tf-other"));
       if (!target) return undefined;
       target.removeAttribute("data-tf-cell");
-      const focusCell = changeTable(target, op);
+      other?.removeAttribute("data-tf-other");
+      const focusCell = changeTable(target, op, { other, cols: split?.cols, rows: split?.rows });
       if (focusCell === undefined) return undefined;
       // Containers are the body, then the cells in document order (as planEdits makes them)
       const after = Array.from(body?.querySelectorAll("*") ?? []).filter((e) => e.localName === "tc");
@@ -332,6 +400,9 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
     dispose() {
       ro?.disconnect();
       document.removeEventListener("selectionchange", onSelection);
+      document.removeEventListener("mouseup", onMouseUp);
+      editable.removeEventListener("mousedown", onMouseDown);
+      editable.removeEventListener("mousemove", onMouseMove);
       editable.removeEventListener("beforeinput", onBeforeInput);
       editable.removeEventListener("keydown", onKeyDown);
       editable.removeEventListener("paste", onPaste);

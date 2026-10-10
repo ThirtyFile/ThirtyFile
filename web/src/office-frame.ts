@@ -28,8 +28,11 @@ type ScrollMessage = { type: "scroll"; x: number; y: number };
  */
 type EditMessage = { type: "edit"; kind: "docx"; buffer: ArrayBuffer; xml?: string | null; texts: EditorTexts; caret?: Caret | null; scroll?: number };
 type CollectMessage = { type: "collect"; id: number };
-/** Word editing: add or delete a row or column of the table the caret is in (answered "table-refused" when it can't be) */
-type TableMessage = { type: "table"; op: TableOp };
+/**
+ * Word editing: change the table the caret is in (answered "table-refused" when it can't be): a row or column added or
+ * deleted, the cells selected together merged, or the caret's cell split into `cols` columns and `rows` rows
+ */
+type TableMessage = { type: "table"; op: TableOp; cols?: number; rows?: number };
 type Message = RenderMessage | LoadXlsxMessage | DrawingsMessage | ScrollMessage | EditMessage | CollectMessage | TableMessage;
 
 const root = document.getElementById("root")!;
@@ -67,7 +70,7 @@ async function render({ kind, buffer }: RenderMessage) {
 
 /** After typing stops, and when the frame loses focus, the edited document goes to the host, which keeps it when the tab is switched */
 const CHANGED_DELAY = 600;
-const TABLE_OPS = new Set<string>(["rowAbove", "rowBelow", "colLeft", "colRight", "deleteRow", "deleteCol"]);
+const TABLE_OPS = new Set<string>(["rowAbove", "rowBelow", "colLeft", "colRight", "deleteRow", "deleteCol", "merge", "split"]);
 
 /**
  * The document being edited. `base` is the document.xml the view was last opened on (null: the archive's): a change of
@@ -122,7 +125,7 @@ async function openEditor(xml: string | null, caret: Caret | null | undefined, s
       queue = queue.then(() => reopen(last.xml, last.caret)).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
       return true;
     },
-    onPlace: (cell) => reply({ type: "place", cell }),
+    onPlace: (place) => reply({ type: "place", ...place }),
   });
 }
 
@@ -157,12 +160,13 @@ async function edit({ buffer, xml, texts, caret, scroll }: EditMessage) {
   }
 }
 
-async function tableOp({ op }: TableMessage) {
+async function tableOp({ op, cols, rows }: TableMessage) {
   if (!editor || !editing) return;
   const before = edited();
   let changed: ReturnType<DocxEditor["tableOp"]>;
   try {
-    changed = editor.tableOp(op);
+    const split = op === "split" ? { cols: Number(cols) || 1, rows: Number(rows) || 1 } : undefined;
+    changed = editor.tableOp(op, split);
   } catch (err) {
     console.warn("docx table", err);
     changed = undefined;
