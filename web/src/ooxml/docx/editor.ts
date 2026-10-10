@@ -6,6 +6,9 @@
  * (one contenteditable for the whole body, so selecting, typing, Enter, Backspace and undo are the browser's own); every
  * other block is shown as it is and can't be changed (edit.ts says which, and how the edits are written back).
  *
+ * Table cells are edited the same way, each as an editable place of its own inside the table (which itself stays as it
+ * is): Enter and Backspace stay in the cell, and Tab moves to the next cell (Shift+Tab to the one before), as in Word.
+ *
  * The browser's editing is limited to what can be written back: plain text only (formatting commands, pasting rich
  * content and dragging are refused), and Backspace or Delete never joins a paragraph with a block that is kept as it is.
  */
@@ -15,7 +18,7 @@ import { breathe } from "../core/yield";
 import { BlockWriter, type BlockItem } from "./blocks";
 import type { Flow, PageFloat } from "./context";
 import { DOCX_CSS } from "./css";
-import { originalPieces, planEdits, readEdits, readParagraph, samePieces, saveEdits, type EditPlan } from "./edit";
+import { originalPieces, planEdits, readAllEdits, readParagraph, samePieces, saveEdits, type EditPlan } from "./edit";
 import { loadDocx, normalStyle } from "./index";
 import { contentWidth, parseSection, type Section } from "./section";
 import { fixScaled, resolveTabs } from "./tabs";
@@ -27,6 +30,8 @@ export interface EditorTexts {
   label: string;
   /** Shown over a block that can't be changed here */
   locked: string;
+  /** Shown over a table, whose cells' text can be changed */
+  table: string;
 }
 
 /** Where the caret was: the n-th block of the view, and how many characters into its text */
@@ -62,6 +67,9 @@ const EDIT_CSS = `
 .tf-docx-ro:hover{outline:1px dashed #94a3b8;outline-offset:2px}
 .tf-docx-editable [data-ro]{user-select:none}
 .tf-docx-editable .tf-docx-p{tab-size:48px}
+.tf-docx-ro:has([data-cell]):hover{outline:none}
+.tf-docx-editable [data-cell]{outline:none;cursor:text}
+.tf-docx-editable [data-cell]:focus-within{box-shadow:inset 0 0 0 2px rgba(37,99,235,.55)}
 `;
 
 /** Input the editor can't write back: formatting, lists, links, rich drops */
@@ -69,7 +77,7 @@ const REFUSED = new Set(["insertFromDrop", "deleteByDrag", "insertOrderedList", 
 
 /** Characters XML can't hold (a pasted control character would make the file unreadable) */
 // oxlint-disable-next-line no-control-regex -- control characters are removed on purpose
-const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f￾￿]/g;
+const CONTROL = /[\u{0}-\u{8}\u{b}\u{c}\u{e}-\u{1f}\u{fffe}\u{ffff}]/gu;
 
 export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts: EditorOptions): Promise<DocxEditor> {
   const rootRels = await pkg.rels("");
@@ -81,10 +89,12 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   if (!plan) throw new Error("The document has no body");
 
   // ── Sections: each block's section, as the preview groups them ──
+  const bodyBlocks = plan.containers[0].blocks;
   const sectPrs: (Element | null)[] = [];
-  const secOf: number[] = [];
-  for (const b of plan.blocks) {
-    secOf.push(sectPrs.length);
+  const secOf = new Map<number, number>();
+  for (const i of bodyBlocks) {
+    const b = plan.blocks[i];
+    secOf.set(i, sectPrs.length);
     const sp = b.localName === "p" ? kid(kid(b, "pPr"), "sectPr") : null;
     if (sp) sectPrs.push(sp);
   }
@@ -101,6 +111,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
     role: "textbox",
     "aria-multiline": "true",
     "aria-label": opts.texts.label,
+    "data-host": "",
   });
   const sheet = h(
     "div",
@@ -124,12 +135,37 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   const shown = new Set<number>();
   const floats: PageFloat[] = [];
   const shared = { fields: [] as Flow["fields"], comments: new Set<string>() };
-  const edit = { runId: (r: Element) => plan.runIds.get(r) };
+  const edit: NonNullable<Flow["edit"]> = {
+    runId: (r) => plan.runIds.get(r),
+    // A table cell: its blocks, each an editable paragraph or kept as it is, in an editable place of its own
+    cell(tc, host, _content, f) {
+      const c = plan.containerOf.get(tc);
+      if (c === undefined) return false;
+      let cellItems: BlockItem[] = [];
+      const w = new BlockWriter(f, (item) => cellItems.push(item));
+      for (const i of plan.containers[c].blocks) {
+        cellItems = [];
+        const block = plan.blocks[i];
+        if (block.localName === "AlternateContent") w.blocks(alternate(block));
+        else w.block(block);
+        const el = viewOf(plan, i, cellItems, opts.texts);
+        if (el) {
+          host.append(el);
+          shown.add(i);
+        }
+      }
+      host.contentEditable = "true";
+      host.dataset.cell = String(c);
+      host.dataset.host = "";
+      return true;
+    },
+  };
   let items: BlockItem[] = [];
   let writer: BlockWriter | null = null;
   let writerSec = -1;
-  for (const [i, block] of plan.blocks.entries()) {
-    const sec = Math.min(secOf[i], sections.length - 1);
+  for (const i of bodyBlocks) {
+    const block = plan.blocks[i];
+    const sec = Math.min(secOf.get(i) ?? 0, sections.length - 1);
     if (!writer || sec !== writerSec) {
       const s = sections[sec];
       const cols = s.cols.num;
@@ -176,7 +212,15 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
       opts.onSave();
       return;
     }
-    if (e.key === "Tab" && !mod && !e.altKey && !e.shiftKey) {
+    if (e.key === "Tab" && !mod && !e.altKey) {
+      const cell = hostOf(getSelection()?.anchorNode ?? null, editable);
+      // In a table, Tab goes to the next cell and Shift+Tab to the one before; elsewhere Tab types a tab
+      if (cell && cell !== editable) {
+        e.preventDefault();
+        moveToCell(cell, e.shiftKey ? -1 : 1);
+        return;
+      }
+      if (e.shiftKey) return;
       e.preventDefault();
       document.execCommand("insertText", false, "\t");
       return;
@@ -186,7 +230,9 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
       // to join a paragraph with a table
       const sel = getSelection();
       if (!sel?.rangeCount || !sel.isCollapsed) return;
-      const p = blockOf(editable, sel.anchorNode);
+      const host = hostOf(sel.anchorNode, editable);
+      if (!host) return;
+      const p = blockOf(host, sel.anchorNode);
       if (!p || p.dataset.block !== undefined) return;
       const back = e.key === "Backspace";
       const neighbour = back ? p.previousElementSibling : p.nextElementSibling;
@@ -219,7 +265,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
 
   return {
     collect() {
-      const xml = saveEdits(plan, readEdits(editable), shown);
+      const xml = saveEdits(plan, readAllEdits(editable), shown);
       return { path: loaded.docPath, xml, caret: caretOf(editable), scroll: root.scrollTop };
     },
     focus: () => editable.focus({ preventScroll: true }),
@@ -236,7 +282,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
 }
 
 /**
- * The view of one body block: an editable paragraph (`data-para`), a block shown as it is (`data-block`), or null when
+ * The view of one block (of the body or a cell): an editable paragraph (`data-para`), a block shown as it is (`data-block`), or null when
  * the renderer showed nothing for it (a paragraph that only ends a section).
  */
 function viewOf(plan: EditPlan, i: number, items: BlockItem[], texts: EditorTexts): HTMLElement | null {
@@ -249,9 +295,34 @@ function viewOf(plan: EditPlan, i: number, items: BlockItem[], texts: EditorText
     if (samePieces(readParagraph(only), originalPieces(plan, i))) return only;
     delete only.dataset.para;
   }
-  const kept = h("div", { class: "tf-docx-ro", contenteditable: "false", "data-block": i, title: texts.locked });
+  const kept = h("div", { class: "tf-docx-ro", contenteditable: "false", "data-block": i });
   for (const it of items) kept.append(it.el);
+  kept.title = kept.querySelector("[data-cell]") ? texts.table : texts.locked;
   return kept;
+}
+
+/** The editable place holding a node: the view, or a table cell */
+function hostOf(node: Node | null, editable: HTMLElement): HTMLElement | null {
+  const el = node instanceof Element ? node : (node?.parentElement ?? null);
+  const host = el?.closest<HTMLElement>("[data-host]") ?? null;
+  return host && editable.contains(host) ? host : null;
+}
+
+/** Tab in a table: the caret goes to the end of the next (or previous) cell of the same table */
+function moveToCell(cell: HTMLElement, step: number) {
+  const table = cell.closest("table");
+  if (!table) return;
+  const cells = Array.from(table.querySelectorAll<HTMLElement>("[data-cell]")).filter((c) => c.closest("table") === table);
+  const next = cells[cells.indexOf(cell) + step];
+  if (!next) return;
+  next.focus({ preventScroll: true });
+  const r = document.createRange();
+  r.selectNodeContents(next);
+  r.collapse(false);
+  const sel = getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(r);
+  next.scrollIntoView({ block: "nearest" });
 }
 
 /** List numbers and bookmark anchors before a paragraph's text: shown, but not part of the text */

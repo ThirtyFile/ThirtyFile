@@ -139,7 +139,14 @@ export interface Flow {
    * Editing (editor.ts): the id of a run whose text can be edited. Its text is marked with the id (`data-r`), never
    * joined with another run's, and its tabs are tab characters rather than laid-out gaps
    */
-  edit?: { runId(r: Element): number | undefined };
+  edit?: {
+    runId(r: Element): number | undefined;
+    /**
+     * Fills a table cell (`tc`) into `host` for editing, instead of the plain rendering (`content` is what it holds,
+     * `f` its flow); false leaves it to the plain rendering
+     */
+    cell?(tc: Element, host: HTMLElement, content: Element[], f: Flow): boolean;
+  };
 }
 
 export function childFlow(f: Flow, patch: Partial<Flow>): Flow {
