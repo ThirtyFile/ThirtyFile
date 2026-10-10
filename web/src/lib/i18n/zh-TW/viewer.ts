@@ -95,6 +95,12 @@ export default {
   "Rename": "重新命名",
   "Editing workbook": "編輯活頁簿中",
   "Edit workbook": "編輯活頁簿",
+  "Editing document": "編輯文件中",
+  "Edit document": "編輯文件",
+  "Document text": "文件內容",
+  "This part can't be changed here. It's kept as it is.": "這個部分無法在這裡修改，會原樣保留。",
+  "Only the text can be changed here. Tables, pictures and other parts are kept as they are.": "這裡只能修改文字。表格、圖片和其他部分都會原樣保留。",
+  "This document has unsaved changes. They'll be lost if you stop editing.": "這份文件有尚未儲存的修改。結束編輯後修改會遺失。",
   "Search files": "搜尋檔案",
   "Modified {date}": "修改於 {date}",
   // Quick look, the Mac style's preview window (components/style/mac/quickLook.tsx)

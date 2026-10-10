@@ -60,6 +60,8 @@ export function attr(el: Element | null | undefined, name: string): string | nul
   const direct = el.getAttribute(name);
   if (direct !== null) return direct;
   for (const a of Array.from(el.attributes)) if (a.localName === name) return a.value;
+  // A parser that keeps the prefix in the attribute's name (happy-dom, in the unit tests)
+  for (const a of Array.from(el.attributes)) if (a.name.endsWith(`:${name}`)) return a.value;
   return null;
 }
 
@@ -258,6 +260,17 @@ export function readEntry(zip: JSZip, path: string, type: "string" | "uint8array
   });
 }
 
+/**
+ * A copy of the archive to change without touching the original. Entries are never changed in place (writing a file
+ * replaces its entry, removing one drops it from the list), so the copy can share them: nothing is unzipped or compressed,
+ * and entries left unchanged are written into the saved file as they are.
+ */
+export function cloneZip(zip: JSZip): JSZip {
+  const copy = new JSZip();
+  Object.assign(copy.files, zip.files);
+  return copy;
+}
+
 export class OoxmlPackage {
   private docs = new Map<string, Promise<Document | null>>();
   private relsCache = new Map<string, Promise<Rel[]>>();
@@ -297,6 +310,11 @@ export class OoxmlPackage {
       this.docs.set(path, p);
     }
     return p;
+  }
+
+  /** Use this text for an XML part instead of the archive's (an edited document.xml that isn't saved yet) */
+  replaceXml(path: string, text: string) {
+    this.docs.set(path, Promise.resolve(parseXml(text)));
   }
 
   /** Relationships of a part (word/document.xml → word/_rels/document.xml.rels) */

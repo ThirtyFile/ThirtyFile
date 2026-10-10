@@ -6,6 +6,7 @@ import {
   ChevronRightIcon,
   DownloadIcon,
   FileIcon,
+  FileTextIcon,
   FolderOpenIcon,
   InfoIcon,
   Loader2Icon,
@@ -44,6 +45,7 @@ import { pathOf } from "@/lib/paths";
 import { neighbours, useFolderWindows } from "@/lib/windows";
 
 const SheetEditor = lazy(() => import("@/components/sheet/SheetEditor"));
+const DocxEditor = lazy(() => import("@/components/docx/DocxEditor"));
 
 /** Where focus takes the arrow keys for itself: typing, a media player's seek bar, lists, menus and the workbook */
 const OWN_ARROWS =
@@ -63,7 +65,7 @@ export function FileViewPage() {
   });
   const [detailsOpen, setDetailsOpen] = useDetailsPane();
   const [dialog, setDialog] = useState<"rename" | "share" | "access" | null>(null);
-  // Excel edit mode; when switching back to the tab with unsaved changes, go straight back to the editor
+  // Excel or Word edit mode; when switching back to the tab with unsaved changes, go straight back to the editor
   const [editingId, setEditingId] = useState<string | null>(() => (hasDraft(id) ? id : null));
   // The same route element stays mounted from one file to the next: re-check the draft when the file changes
   useEffect(() => {
@@ -133,6 +135,8 @@ export function FileViewPage() {
   };
   const canEditSheet = !!node && extOf(node.name) === "xlsx" && caps.write && node.size <= me.max_edit_bytes;
   const sheetEditing = !!node && editingId === node.id && canEditSheet;
+  const canEditDoc = !!node && extOf(node.name) === "docx" && caps.write && node.size <= me.max_edit_bytes;
+  const docEditing = !!node && editingId === node.id && canEditDoc;
   const rootUrl = loc.rootUrl;
   const folders = path.slice(0, -1);
   const parentUrl = folders.length ? `/files/${folders[folders.length - 1].id}` : rootUrl;
@@ -163,6 +167,22 @@ export function FileViewPage() {
           >
             <SheetIcon />
             {sheetEditing ? t("Editing workbook") : t("Edit workbook")}
+          </Button>
+        </>
+      )}
+      {canEditDoc && (
+        <>
+          {/* Word-specific features are kept separate from general file actions */}
+          <ToolSeparator />
+          <Button
+            variant={docEditing ? "secondary" : "ghost"}
+            className="h-9 gap-1.5 px-2.5 text-[13px] text-blue-700 dark:text-blue-400 [&_svg]:size-[18px]"
+            aria-pressed={docEditing}
+            disabled={docEditing}
+            onClick={() => node && setEditingId(node.id)}
+          >
+            <FileTextIcon />
+            {docEditing ? t("Editing document") : t("Edit document")}
           </Button>
         </>
       )}
@@ -222,6 +242,10 @@ export function FileViewPage() {
                 {sheetEditing ? (
                   <Suspense fallback={<Loader2Icon className="size-6 animate-spin text-muted-foreground" />}>
                     <SheetEditor node={node} source={privateSource} onExit={() => setEditingId(null)} onSaved={onSaved} />
+                  </Suspense>
+                ) : docEditing ? (
+                  <Suspense fallback={<Loader2Icon className="size-6 animate-spin text-muted-foreground" />}>
+                    <DocxEditor node={node} source={privateSource} onExit={() => setEditingId(null)} onSaved={onSaved} />
                   </Suspense>
                 ) : (
                   <FileViewer node={node} source={privateSource} editable={caps.write} embedded onSaved={onSaved} />

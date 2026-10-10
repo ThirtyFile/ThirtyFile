@@ -17,7 +17,7 @@ A self-hosted file manager that looks and works like Windows File Explorer, in y
 
 - Tabs, folder tree, drag and drop, right-click menus and keyboard shortcuts
 - Map it as a drive on a computer or phone (WebDAV)
-- Preview Word, PowerPoint and Excel in the browser; edit Excel and text files online; earlier versions are kept
+- Preview Word, PowerPoint and Excel in the browser; edit the text of Word documents, Excel workbooks and text files online; earlier versions are kept
 - Share with a link (password, expiry date, download limit), or receive files through one
 - Keep files as ordinary folders on a local disk or NAS, or on S3-compatible storage, SFTP or FTP; show an existing folder as a space
 - Personal, company and team spaces, with roles and size limits

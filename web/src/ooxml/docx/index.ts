@@ -100,8 +100,21 @@ export async function renderDocx(buf: ArrayBuffer, root: HTMLElement): Promise<R
   return result;
 }
 
-async function build(pkg: OoxmlPackage, root: HTMLElement, state: RenderState) {
-  // ── Read parts ──
+/** A document's parts, read and ready to render: shared by the preview and the editor */
+export interface LoadedDocx {
+  doc: DocCtx;
+  docPath: string;
+  docXml: Document | null;
+  docRels: Rel[];
+  /** Header and footer parts by path */
+  parts: Map<string, Document | null>;
+  /** Paths of the footnotes and endnotes parts */
+  footnotesPath: string | null;
+  endnotesPath: string | null;
+}
+
+/** Reads a document's parts (styles, numbering, theme, settings, headers and footers, notes, SmartArt drawings) */
+export async function loadDocx(pkg: OoxmlPackage): Promise<LoadedDocx> {
   const rootRels = await pkg.rels("");
   const docPath = rootRels.find((r) => r.type.endsWith("/officeDocument"))?.target ?? "word/document.xml";
   const [docXml, docRels] = await Promise.all([pkg.xml(docPath), pkg.rels(docPath)]);
@@ -172,6 +185,27 @@ async function build(pkg: OoxmlPackage, root: HTMLElement, state: RenderState) {
       }),
     ),
   );
+  return { doc, docPath, docXml, docRels, parts, footnotesPath: target("/footnotes") ?? null, endnotesPath: target("/endnotes") ?? null };
+}
+
+/** The base text style of the document (the default paragraph style's run properties) */
+export function normalStyle(doc: DocCtx) {
+  const { styles, theme, settings } = doc;
+  return runStyle(
+    cascadeRun(
+      styles.baseRunProps(),
+      [styles.styleRun(styles.defaults.paragraph)].filter((x) => !!x),
+      null,
+    ),
+    theme,
+    settings.script,
+  );
+}
+
+async function build(pkg: OoxmlPackage, root: HTMLElement, state: RenderState) {
+  // ── Read parts ──
+  const { doc, docPath, docXml, docRels, parts, footnotesPath, endnotesPath } = await loadDocx(pkg);
+  const { theme, settings } = doc;
 
   // ── Sections and blocks ──
   const body = kid(docXml?.documentElement, "body");
@@ -195,22 +229,14 @@ async function build(pkg: OoxmlPackage, root: HTMLElement, state: RenderState) {
     }
   }
   const baseFlow: Flow = { doc, part: docPath, rels: docRels, section: sections[0], width: contentWidth(sections[0]), story: "note", depth: 0, fields: [], comments: new Set(), floats: [] };
-  const footnotes = renderNotes(doc.noteRefs, "foot", baseFlow, target("/footnotes") ?? null);
-  const endnotes = endnoteBlock(renderNotes(doc.noteRefs, "end", baseFlow, target("/endnotes") ?? null));
+  const footnotes = renderNotes(doc.noteRefs, "foot", baseFlow, footnotesPath);
+  const endnotes = endnoteBlock(renderNotes(doc.noteRefs, "end", baseFlow, endnotesPath));
   if (endnotes) blocks.push({ el: endnotes, pageBreak: false, columnBreak: false, sec: sections.length - 1 });
   if (!blocks.length) blocks.push({ el: h("p", { class: "tf-docx-p" }, h("br")), pageBreak: false, columnBreak: false, sec: 0 });
 
   // ── Layout ──
   const bg = textColor(kid(docXml?.documentElement, "background"), theme);
-  const normal = runStyle(
-    cascadeRun(
-      styles.baseRunProps(),
-      [styles.styleRun(styles.defaults.paragraph)].filter((x) => !!x),
-      null,
-    ),
-    theme,
-    settings.script,
-  );
+  const normal = normalStyle(doc);
   const style = h("style", null, DOCX_CSS);
   const container = h("div", {
     class: "tf-docx",

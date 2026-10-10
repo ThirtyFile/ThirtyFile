@@ -124,6 +124,8 @@ class InlineRenderer {
   private rev: "ins" | "del" | null = null;
   private lastSpan: HTMLElement | null = null;
   private lastKey = "";
+  /** Editing: the id of the editable run being rendered */
+  private runId: number | undefined;
   /** Style of the first text run (the paragraph's strut font) */
   strut: RunStyle | null = null;
   strutRatio = 0;
@@ -216,11 +218,11 @@ class InlineRenderer {
     if (this.noteStyle) st$["font-size"] = `${Math.round(rs.size * 0.65 * 100) / 100}pt`;
     const style = css(st$);
     const cls = this.classes(this.noteStyle ? "tf-docx-sup" : rs.scale ? "tf-docx-sx" : undefined);
-    const key = `${style}|${cls}`;
+    const key = `${style}|${cls}|${this.runId ?? ""}`;
     if (this.lastSpan && key === this.lastKey && this.lastSpan.parentElement === this.sink && this.sink.lastChild === this.lastSpan && !rs.scale) {
       this.lastSpan.append(text);
     } else {
-      const span = h("span", { style, class: cls || undefined }, text);
+      const span = h("span", { style, class: cls || undefined, "data-r": this.runId }, text);
       if (rs.scale) {
         // Horizontal scaling: fix up spacing from the actual width after layout
         span.dataset.sx = String(rs.scale);
@@ -245,6 +247,10 @@ class InlineRenderer {
 
   tab(rs: RunStyle, ptab?: TabRef["ptab"]) {
     if (this.muted || rs.hidden) return;
+    if (this.runId !== undefined) {
+      this.text("\t", rs);
+      return;
+    }
     const el = h("span", { class: "tf-docx-tab", style: css({ "font-size": rs.css["font-size"], "font-family": rs.family, color: rs.css.color }) });
     this.lineHeightFor(rs, " ");
     this.inlineEl(el);
@@ -262,7 +268,7 @@ class InlineRenderer {
       return;
     }
     this.lineHeightFor(rs, " ");
-    this.sink.append(h("br", clear && clear !== "none" ? { style: "clear:both" } : null));
+    this.sink.append(h("br", { style: clear && clear !== "none" ? "clear:both" : undefined, "data-r": this.runId }));
     this.lastSpan = null;
     this.hasContent = true;
     this.endsWithBr = true;
@@ -452,6 +458,16 @@ class InlineRenderer {
   }
 
   private run(r: Element) {
+    const outer = this.runId;
+    this.runId = this.f.edit?.runId(r);
+    try {
+      this.runContent(r);
+    } finally {
+      this.runId = outer;
+    }
+  }
+
+  private runContent(r: Element) {
     const f = this.f;
     const doc = f.doc;
     const rPr = kid(r, "rPr");

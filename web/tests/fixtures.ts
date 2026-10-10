@@ -101,3 +101,49 @@ export async function buildDocx(paragraphs: string[]): Promise<ArrayBuffer> {
   );
   return zip.generateAsync({ type: "arraybuffer" });
 }
+
+const WORD = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+const WORD14 = "http://schemas.microsoft.com/office/word/2010/wordml";
+
+/**
+ * A Word document with `body` as the content of <w:body> (its final section properties are added), a style sheet
+ * (Heading1), a numbered list (numId 1), a link target (rId10, https://example.com/) and an unknown part
+ */
+export async function buildDocument(body: string): Promise<ArrayBuffer> {
+  const zip = new JSZip();
+  zip.file(
+    "[Content_Types].xml",
+    `${XML}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' +
+      '<Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>' +
+      "</Types>",
+  );
+  zip.file("_rels/.rels", `${XML}<Relationships xmlns="${PKG}"><Relationship Id="rId1" Type="${DOC_REL}/officeDocument" Target="word/document.xml"/></Relationships>`);
+  zip.file(
+    "word/_rels/document.xml.rels",
+    `${XML}<Relationships xmlns="${PKG}"><Relationship Id="rId1" Type="${DOC_REL}/styles" Target="styles.xml"/>` +
+      `<Relationship Id="rId2" Type="${DOC_REL}/numbering" Target="numbering.xml"/>` +
+      `<Relationship Id="rId10" Type="${DOC_REL}/hyperlink" Target="https://example.com/" TargetMode="External"/></Relationships>`,
+  );
+  zip.file(
+    "word/document.xml",
+    `${XML}<w:document xmlns:w="${WORD}" xmlns:r="${R}" xmlns:w14="${WORD14}"><w:body>${body}` +
+      '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>',
+  );
+  zip.file(
+    "word/styles.xml",
+    `${XML}<w:styles xmlns:w="${WORD}"><w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="22"/></w:rPr></w:rPrDefault></w:docDefaults>` +
+      '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>' +
+      '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:style></w:styles>',
+  );
+  zip.file(
+    "word/numbering.xml",
+    `${XML}<w:numbering xmlns:w="${WORD}"><w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/>` +
+      '<w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr></w:lvl></w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num></w:numbering>',
+  );
+  zip.file(UNKNOWN_PART, UNKNOWN_CONTENT);
+  return zip.generateAsync({ type: "arraybuffer" });
+}

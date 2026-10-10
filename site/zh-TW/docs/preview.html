@@ -80,6 +80,7 @@
           <ol>
             <li><a href="#what">瀏覽器可開啟的格式</a></li>
             <li><a href="#excel">編輯 Excel 活頁簿</a></li>
+            <li><a href="#word">編輯 Word 文件</a></li>
             <li><a href="#text">編輯文字檔案</a></li>
             <li><a href="#markdown">Markdown</a></li>
             <li><a href="#thumbnails">縮圖</a></li>
@@ -95,7 +96,7 @@
             <tr><td>影片（.mp4、.webm、.mov）</td><td>支援</td><td></td></tr>
             <tr><td>音訊（.mp3、.wav、.ogg、.flac、.aac、.m4a）</td><td>支援</td><td></td></tr>
             <tr><td>PDF</td><td>支援</td><td></td></tr>
-            <tr><td>Word（.docx）</td><td>支援</td><td></td></tr>
+            <tr><td>Word（.docx）</td><td>支援</td><td>支援</td></tr>
             <tr><td>PowerPoint（.pptx）</td><td>支援</td><td></td></tr>
             <tr><td>Excel（.xlsx）</td><td>支援</td><td>支援</td></tr>
             <tr><td>Markdown（.md）</td><td>支援，顯示為排版頁面</td><td>支援</td></tr>
@@ -123,6 +124,20 @@
         <p>僅檢視活頁簿時，螢幕閱讀器可以在工作表後面的表格中讀取目前螢幕顯示的儲存格。用方向鍵捲動工作表時，表格內容也會隨之更新。</p>
         <p>儲存僅修改你編輯過的儲存格，圖表、圖片和活頁簿中其他內容保持原樣。</p>
         <div class="note">超過 20 MB 的活頁簿可以檢視，但不能線上編輯。請下載並使用 Excel。</div>
+        <h2 id="word">編輯 Word 文件</h2>
+        <p>開啟文件，按一下<strong>編輯文件</strong>。文件會顯示成一整頁長頁面，保留字型、大小、間距和清單編號。編輯時不顯示分頁、頁首和頁尾。</p>
+        <ul>
+          <li>像一般編輯器一樣輸入、刪除和選取文字。按 <kbd>Enter</kbd> 會開始設定相同的新段落，<kbd>Shift</kbd> + <kbd>Enter</kbd> 會換行，<kbd>Tab</kbd> 會輸入定位字元。</li>
+          <li>新輸入的文字沿用所在位置的格式：在粗體文字中輸入的字也是粗體。</li>
+          <li>貼上時只會貼上純文字，每一行會成為一個段落。</li>
+          <li>按一下連結會把游標放進連結；按 <kbd>Ctrl</kbd> + 按一下（Mac 上是 <kbd>⌘</kbd> + 按一下）才會開啟連結。</li>
+          <li>表格、圖片、頁碼等欄位、追蹤修訂、註解、註腳和方程式會原樣顯示，不能在這裡修改，它們所在的段落也不能修改。滑鼠移到上面時會顯示外框。表格不會和旁邊的段落合併，但選取範圍跨過表格再刪除時，表格會一起刪除。</li>
+          <li>目前還不能在這裡修改格式，例如粗體或樣式。</li>
+          <li>按 <kbd>Ctrl</kbd> + <kbd>Z</kbd> 復原，按 <kbd>Ctrl</kbd> + <kbd>S</kbd> 儲存。尚未儲存的修改在切換到其他檔案或分頁再回來時仍會保留。</li>
+        </ul>
+        <p>儲存時只會修改你編輯過的段落，文件中其他內容保持原樣，原本的內容會保留成較早的版本。</p>
+        <div class="note">超過 20 MB 的文件可以檢視，但不能線上編輯。請下載並使用 Word。</div>
+
         <h2 id="text">編輯文字檔案</h2>
         <p>文字與程式碼檔案會在編輯器中開啟，支援大多數程式語言的語法醒目提示。按 <kbd>Ctrl</kbd> + <kbd>S</kbd> 儲存。</p>
         <p>儲存尚未完成時切換分頁，各檔案的修改仍獨立儲存。開始儲存後輸入的文字在儲存完成時仍屬於未儲存內容，請再次儲存。捨棄草稿後，即使較早的儲存請求完成，也不會恢復該草稿。</p>

@@ -95,6 +95,12 @@ export default {
   "Rename": "名前の変更",
   "Editing workbook": "ブックを編集中",
   "Edit workbook": "ブックを編集",
+  "Editing document": "文書を編集中",
+  "Edit document": "文書を編集",
+  "Document text": "文書の本文",
+  "This part can't be changed here. It's kept as it is.": "この部分はここでは変更できません。そのまま保持されます。",
+  "Only the text can be changed here. Tables, pictures and other parts are kept as they are.": "ここで変更できるのは文字だけです。表、画像などの部分はそのまま保持されます。",
+  "This document has unsaved changes. They'll be lost if you stop editing.": "この文書には保存されていない変更があります。編集を終了すると変更は失われます。",
   "Search files": "ファイルを検索",
   "Modified {date}": "{date} に更新",
   // Quick look, the Mac style's preview window (components/style/mac/quickLook.tsx)

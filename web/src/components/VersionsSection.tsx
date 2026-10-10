@@ -25,8 +25,8 @@ export function VersionsSection({ node, canRestore, ready = true }: { node: Node
   });
 
   const restore = async (v: FileVersion) => {
-    // Changes not saved yet in the spreadsheet editor would be saved over the restored content
-    const unsaved = !!getDraft(node.id, "sheet");
+    // Changes not saved yet in the spreadsheet or document editor would be saved over the restored content
+    const unsaved = !!getDraft(node.id, "sheet") || !!getDraft(node.id, "docx");
     const ok = await confirm({
       title: t("Restore this version?"),
       description: unsaved

@@ -55,7 +55,8 @@ test("resetting someone's password asks for the administrator's own first", asyn
   await expect(dialog.getByRole("alert")).toHaveText("Current password is incorrect");
   await mine.fill(PASSWORD);
   await save.click();
-  await expect(dialog).toBeHidden();
+  // Checking the administrator's password and setting the new one hashes twice, which takes a while on a busy machine
+  await expect(dialog).toBeHidden({ timeout: 20_000 });
   await expect(page.getByText("User updated")).toBeVisible();
 });
 
