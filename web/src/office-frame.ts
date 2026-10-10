@@ -15,6 +15,7 @@ import { OoxmlPackage, h } from "@/ooxml/core/package";
 import { parseTheme, type Theme } from "@/ooxml/core/theme";
 import { anchorBox, readDrawings, renderItem } from "@/ooxml/xlsx/drawings";
 import { openDocxEditor, type Caret, type DocxEditor, type EditorTexts } from "@/ooxml/docx/editor";
+import type { TableOp } from "@/ooxml/docx/tableOps";
 
 type RenderMessage = { type: "render"; kind: "docx" | "pptx"; buffer: ArrayBuffer };
 /** Excel: the workbook is loaded once, then each worksheet's drawing objects are rendered on request at the given column/row positions */
@@ -27,7 +28,9 @@ type ScrollMessage = { type: "scroll"; x: number; y: number };
  */
 type EditMessage = { type: "edit"; kind: "docx"; buffer: ArrayBuffer; xml?: string | null; texts: EditorTexts; caret?: Caret | null; scroll?: number };
 type CollectMessage = { type: "collect"; id: number };
-type Message = RenderMessage | LoadXlsxMessage | DrawingsMessage | ScrollMessage | EditMessage | CollectMessage;
+/** Word editing: add or delete a row or column of the table the caret is in (answered "table-refused" when it can't be) */
+type TableMessage = { type: "table"; op: TableOp };
+type Message = RenderMessage | LoadXlsxMessage | DrawingsMessage | ScrollMessage | EditMessage | CollectMessage | TableMessage;
 
 const root = document.getElementById("root")!;
 /**
@@ -64,13 +67,29 @@ async function render({ kind, buffer }: RenderMessage) {
 
 /** After typing stops, and when the frame loses focus, the edited document goes to the host, which keeps it when the tab is switched */
 const CHANGED_DELAY = 600;
+const TABLE_OPS = new Set<string>(["rowAbove", "rowBelow", "colLeft", "colRight", "deleteRow", "deleteCol"]);
+
+/**
+ * The document being edited. `base` is the document.xml the view was last opened on (null: the archive's): a change of
+ * a table's shape opens the view again on the changed document, keeping the one before it in `undo`, for Ctrl+Z right
+ * after (`typed` says whether anything was typed since)
+ */
+let editing: { pkg: OoxmlPackage; texts: EditorTexts; base: string | null; undo: { xml: string | null; caret: Caret | null }[]; typed: boolean } | null = null;
 let changedTimer = 0;
+
+/** The edited document.xml, null when it is the archive's */
+function edited() {
+  if (!editor || !editing) throw new Error("The document isn't open for editing");
+  const c = editor.collect();
+  return { ...c, xml: c.xml ?? editing.base };
+}
+
 function sendChanged() {
   window.clearTimeout(changedTimer);
   changedTimer = 0;
   if (!editor) return;
   try {
-    reply({ type: "changed", ...editor.collect() });
+    reply({ type: "changed", ...edited() });
   } catch (err) {
     console.warn("docx edit", err);
   }
@@ -79,41 +98,86 @@ window.addEventListener("blur", () => {
   if (changedTimer) sendChanged();
 });
 
+async function openEditor(xml: string | null, caret: Caret | null | undefined, scroll: number | undefined) {
+  const e = editing!;
+  editor?.dispose();
+  editor = null;
+  e.base = xml;
+  editor = await openDocxEditor(e.pkg, root, {
+    xml,
+    texts: e.texts,
+    caret,
+    scroll,
+    onInput: () => {
+      e.typed = true;
+      reply({ type: "input" });
+      window.clearTimeout(changedTimer);
+      changedTimer = window.setTimeout(sendChanged, CHANGED_DELAY);
+    },
+    onSave: () => reply({ type: "save" }),
+    onUndo: () => {
+      const last = e.undo[e.undo.length - 1];
+      if (!last || e.typed) return false;
+      e.undo.pop();
+      queue = queue.then(() => reopen(last.xml, last.caret)).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
+      return true;
+    },
+    onPlace: (cell) => reply({ type: "place", cell }),
+  });
+}
+
+/** The view opened again on a changed document, and the host told */
+async function reopen(xml: string | null, caret: Caret | null) {
+  const scroll = root.scrollTop;
+  await openEditor(xml, caret, scroll);
+  editing!.typed = false;
+  reply({ type: "input" });
+  sendChanged();
+}
+
 async function edit({ buffer, xml, texts, caret, scroll }: EditMessage) {
   dispose?.();
   dispose = null;
   editor = null;
   root.replaceChildren();
   const pkg = await OoxmlPackage.open(buffer);
+  editing = { pkg, texts, base: xml ?? null, undo: [], typed: false };
   try {
-    const opened = await openDocxEditor(pkg, root, {
-      xml,
-      texts,
-      caret,
-      scroll,
-      onInput: () => {
-        reply({ type: "input" });
-        window.clearTimeout(changedTimer);
-        changedTimer = window.setTimeout(sendChanged, CHANGED_DELAY);
-      },
-      onSave: () => reply({ type: "save" }),
-    });
-    editor = opened;
+    await openEditor(xml ?? null, caret, scroll);
     dispose = () => {
-      opened.dispose();
+      editor?.dispose();
       pkg.dispose();
       editor = null;
+      editing = null;
     };
   } catch (e) {
     pkg.dispose();
+    editing = null;
     throw e;
   }
 }
 
+async function tableOp({ op }: TableMessage) {
+  if (!editor || !editing) return;
+  const before = edited();
+  let changed: ReturnType<DocxEditor["tableOp"]>;
+  try {
+    changed = editor.tableOp(op);
+  } catch (err) {
+    console.warn("docx table", err);
+    changed = undefined;
+  }
+  if (!changed) {
+    reply({ type: "table-refused" });
+    return;
+  }
+  editing.undo.push({ xml: before.xml, caret: before.caret });
+  await reopen(changed.xml, changed.cell !== null ? { block: -1, offset: 0, cell: changed.cell } : before.caret);
+}
+
 function collect({ id }: CollectMessage) {
   try {
-    if (!editor) throw new Error("The document isn't open for editing");
-    reply({ type: "collected", id, ...editor.collect() });
+    reply({ type: "collected", id, ...edited() });
   } catch (err) {
     reply({ type: "collect-error", id, message: err instanceof Error ? err.message : String(err) });
   }
@@ -224,6 +288,7 @@ window.addEventListener("message", (e: MessageEvent) => {
   }
   let job: () => Promise<void>;
   if (msg?.type === "edit" && msg.kind === "docx" && msg.buffer instanceof ArrayBuffer && msg.texts && typeof msg.texts === "object") job = () => edit(msg);
+  else if (msg?.type === "table" && TABLE_OPS.has(msg.op)) job = () => tableOp(msg);
   else if (msg?.type === "render" && (msg.kind === "docx" || msg.kind === "pptx") && msg.buffer instanceof ArrayBuffer) job = () => render(msg);
   else if (msg?.type === "load" && msg.kind === "xlsx" && msg.buffer instanceof ArrayBuffer) job = () => loadXlsx(msg);
   else if (msg?.type === "render" && msg.kind === "xlsx-drawings" && typeof msg.sheet === "string" && msg.cols instanceof Float64Array && msg.rows instanceof Float64Array) {

@@ -317,6 +317,11 @@ export class OoxmlPackage {
     this.docs.set(path, Promise.resolve(parseXml(text)));
   }
 
+  /** Read an XML part from the archive again (after `replaceXml`) */
+  forgetXml(path: string) {
+    this.docs.delete(path);
+  }
+
   /** Relationships of a part (word/document.xml → word/_rels/document.xml.rels) */
   rels(part: string): Promise<Rel[]> {
     let p = this.relsCache.get(part);

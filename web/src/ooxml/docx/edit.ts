@@ -542,6 +542,12 @@ export function editedBlocks(plan: EditPlan, edited: EditedBlock[], shown: Reado
 
 const DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n';
 
+/** A document part as Word writes it, with its XML declaration */
+export function writeXml(doc: Document): string {
+  const xml = new XMLSerializer().serializeToString(doc);
+  return xml.startsWith("<?xml") ? xml : DECLARATION + xml;
+}
+
 /** What the view holds for each container it showed: the body's (container 0), and each cell's */
 export type Edits = Map<number, EditedBlock[]>;
 
@@ -562,8 +568,7 @@ export function saveEdits(plan: EditPlan, edits: EditedBlock[] | Edits, shown: R
   const old = changes.map(({ el }) => Array.from(el.childNodes));
   changes.forEach(({ el, kids }) => el.replaceChildren(...kids));
   try {
-    const xml = new XMLSerializer().serializeToString(plan.doc);
-    return xml.startsWith("<?xml") ? xml : DECLARATION + xml;
+    return writeXml(plan.doc);
   } finally {
     for (let i = changes.length - 1; i >= 0; i--) changes[i].el.replaceChildren(...old[i]);
   }
