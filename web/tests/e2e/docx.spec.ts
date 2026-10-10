@@ -152,3 +152,52 @@ test("text typed into table cells is saved there, and Tab moves from cell to cel
   expect(xml).toMatch(/<w:tc><w:tcPr><w:tcW w:w="4500"\/><\/w:tcPr><w:p><w:r><w:t>1200<\/w:t><\/w:r><\/w:p><w:p><w:r><w:t>units<\/w:t><\/w:r><\/w:p><\/w:tc>/);
   expect(xml).toContain("<w:p><w:r><w:t>Intro</w:t></w:r></w:p><w:tbl>");
 });
+
+test("rows and columns are added and deleted from the menus, and Ctrl+Z right after undoes it", async ({ page }) => {
+  await signIn(page);
+  const dir = await makeFolder(page, "Word rows");
+  const cell = (text: string) => `<w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/></w:tcPr><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:tc>`;
+  const body =
+    "<w:p><w:r><w:t>Intro</w:t></w:r></w:p>" +
+    '<w:tbl><w:tblPr><w:tblW w:w="6000" w:type="dxa"/></w:tblPr><w:tblGrid><w:gridCol w:w="3000"/><w:gridCol w:w="3000"/></w:tblGrid>' +
+    `<w:tr>${cell("A")}${cell("B")}</w:tr><w:tr>${cell("C")}${cell("D")}</w:tr></w:tbl><w:p/>`;
+  const id = await uploadFile(page, dir, "rows.docx", Buffer.from(await buildDocument(body)));
+  const { frame } = await openEditor(page, id, "rows.docx");
+  const menu = async (name: "Insert" | "Delete", item: string) => {
+    await page.getByRole("button", { name, exact: true }).click();
+    await page.getByRole("menuitem", { name: item }).click();
+  };
+
+  // The menus work on the table the cursor is in
+  await expect(page.getByRole("button", { name: "Insert", exact: true })).toBeDisabled();
+  await frame.getByText("C", { exact: true }).click();
+  await menu("Insert", "Insert row below");
+  await page.keyboard.type("E");
+  await expect(frame.locator("tr")).toHaveCount(3);
+
+  // Deleting a column, then Ctrl+Z right after, brings it back
+  await frame.getByText("B", { exact: true }).click();
+  await menu("Delete", "Delete column");
+  await expect(frame.getByText("D", { exact: true })).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(frame.getByText("D", { exact: true })).toBeVisible();
+
+  await frame.getByText("A", { exact: true }).click();
+  await menu("Insert", "Insert column right");
+  await expect(page.getByText("Unsaved changes")).toBeVisible();
+
+  const save = saving(page, id);
+  await page.getByRole("button", { name: "Save" }).click();
+  expect((await save).ok()).toBe(true);
+  const { xml } = await savedXml(page, id);
+  const rows = [...xml.matchAll(/<w:tr>(.*?)<\/w:tr>/g)].map((m) =>
+    [...m[1].matchAll(/<w:tc>(.*?)<\/w:tc>/g)].map((c) => [...c[1].matchAll(/<w:t>([^<]*)<\/w:t>/g)].map((x) => x[1]).join("")),
+  );
+  expect(rows).toEqual([
+    ["A", "", "B"],
+    ["C", "", "D"],
+    ["E", "", ""],
+  ]);
+  expect(xml).toContain('<w:tblW w:w="9000" w:type="dxa"/>');
+  expect([...xml.matchAll(/<w:gridCol w:w="3000"\/>/g)]).toHaveLength(3);
+});

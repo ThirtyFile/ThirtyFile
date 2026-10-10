@@ -4,10 +4,22 @@
  * unsaved edits when switching tabs (session.ts).
  */
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { Loader2Icon, SaveIcon, XIcon } from "lucide-react";
+import {
+  BetweenHorizontalEndIcon,
+  BetweenHorizontalStartIcon,
+  BetweenVerticalEndIcon,
+  BetweenVerticalStartIcon,
+  ChevronDownIcon,
+  Columns3Icon,
+  Loader2Icon,
+  Rows3Icon,
+  SaveIcon,
+  XIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { ApiError, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/dialogs";
 import { frameDocument, loadFrameScript } from "@/components/officeFrame";
 import { getDraft, setDraft } from "@/lib/drafts";
@@ -16,6 +28,7 @@ import { shortcut } from "@/lib/keys";
 import { cancellable } from "@/lib/cancellable";
 import { officeErrorMessage } from "@/lib/officeErrors";
 import type { Caret } from "@/ooxml/docx/editor";
+import type { TableOp } from "@/ooxml/docx/tableOps";
 import { TOO_LARGE } from "@/ooxml/core/package";
 import { dropSession, isDirty, keepSession, openSession, releaseIfClean, reusableSession, saveSession, type DocxSession } from "./session";
 
@@ -113,8 +126,8 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
   /** Saving in progress (live value: Ctrl+S may be pressed again before the page updates) */
   const savingRef = useRef(false);
   const [confirmExit, setConfirmExit] = useState(false);
-  /** document.xml the frame opened (null: the file's): what it holds while the frame reports no change */
-  const opened = useRef(session.current);
+  /** Whether the caret is in a table cell: the Insert and Delete menus change its table */
+  const [inCell, setInCell] = useState(false);
   const waiting = useRef(new Map<number, { resolve(c: Collected): void; reject(e: Error): void }>());
   const nextId = useRef(0);
 
@@ -127,7 +140,8 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
   /** What the frame holds becomes the session's */
   const absorb = (c: Collected) => {
     session.path = c.path;
-    session.current = c.xml ?? opened.current;
+    // The frame says the whole edited document.xml (null: the file's as opened)
+    session.current = c.xml;
     session.caret = c.caret;
     session.scroll = c.scroll;
   };
@@ -167,6 +181,13 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
     }
   };
 
+  /** A row or column of the caret's table added or deleted, in the frame; the caret stays there */
+  const table = (op: TableOp) => {
+    frame.current?.contentWindow?.postMessage({ type: "table", op }, "*");
+    frame.current?.focus();
+  };
+  const tableOff = !inCell || loading || !!error;
+
   const exit = () => {
     if (isDirty(session) || dirty) setConfirmExit(true);
     else {
@@ -190,6 +211,12 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
         break;
       case "save":
         void save();
+        break;
+      case "place":
+        setInCell(!!(msg as { cell?: unknown }).cell);
+        break;
+      case "table-refused":
+        toast.error(t("This table's rows and columns can't be changed here."));
         break;
       case "collected":
       case "collect-error": {
@@ -283,6 +310,62 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
         <p className="min-w-0 flex-1 text-xs text-muted-foreground">{t("Only the text can be changed here, in tables too. Pictures and other parts are kept as they are.")}</p>
         {dirty && <span className="shrink-0 text-xs text-amber-600 dark:text-amber-400">{t("Unsaved changes")}</span>}
         <div className="flex shrink-0 items-center gap-1">
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={tableOff ? t("Put the cursor in a table to change its rows and columns") : t("Insert")}
+                  disabled={tableOff}
+                  className="gap-1"
+                  onMouseDown={(e) => e.preventDefault()}
+                />
+              }
+            >
+              <BetweenHorizontalStartIcon /> {t("Insert")}
+              <ChevronDownIcon className="size-3 opacity-60" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-auto">
+              <DropdownMenuItem onClick={() => table("rowAbove")}>
+                <BetweenHorizontalStartIcon /> {t("Insert row above")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => table("rowBelow")}>
+                <BetweenHorizontalEndIcon /> {t("Insert row below")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => table("colLeft")}>
+                <BetweenVerticalStartIcon /> {t("Insert column left")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => table("colRight")}>
+                <BetweenVerticalEndIcon /> {t("Insert column right")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={tableOff ? t("Put the cursor in a table to change its rows and columns") : t("Delete")}
+                  disabled={tableOff}
+                  className="gap-1"
+                  onMouseDown={(e) => e.preventDefault()}
+                />
+              }
+            >
+              <Rows3Icon /> {t("Delete")}
+              <ChevronDownIcon className="size-3 opacity-60" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-auto">
+              <DropdownMenuItem variant="destructive" onClick={() => table("deleteRow")}>
+                <Rows3Icon /> {t("Delete row")}
+              </DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" onClick={() => table("deleteCol")}>
+                <Columns3Icon /> {t("Delete column")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button size="sm" disabled={!dirty || saving || loading || !!error} onClick={() => void save()}>
             {saving ? <Loader2Icon className="animate-spin" /> : <SaveIcon />}
             {t("Save")}

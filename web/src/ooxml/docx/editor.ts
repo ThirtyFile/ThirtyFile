@@ -8,6 +8,8 @@
  *
  * Table cells are edited the same way, each as an editable place of its own inside the table (which itself stays as it
  * is): Enter and Backspace stay in the cell, and Tab moves to the next cell (Shift+Tab to the one before), as in Word.
+ * Rows and columns are added and deleted by changing the document (tableOps.ts) and opening the view again on it: the
+ * host keeps the change before it, so Ctrl+Z right after undoes it.
  *
  * The browser's editing is limited to what can be written back: plain text only (formatting commands, pasting rich
  * content and dragging are refused), and Backspace or Delete never joins a paragraph with a block that is kept as it is.
@@ -18,7 +20,8 @@ import { breathe } from "../core/yield";
 import { BlockWriter, type BlockItem } from "./blocks";
 import type { Flow, PageFloat } from "./context";
 import { DOCX_CSS } from "./css";
-import { originalPieces, planEdits, readAllEdits, readParagraph, samePieces, saveEdits, type EditPlan } from "./edit";
+import { originalPieces, planEdits, readAllEdits, readParagraph, samePieces, saveEdits, writeXml, type EditPlan } from "./edit";
+import { changeTable, type TableOp } from "./tableOps";
 import { loadDocx, normalStyle } from "./index";
 import { contentWidth, parseSection, type Section } from "./section";
 import { fixScaled, resolveTabs } from "./tabs";
@@ -34,10 +37,11 @@ export interface EditorTexts {
   table: string;
 }
 
-/** Where the caret was: the n-th block of the view, and how many characters into its text */
+/** Where the caret was: the n-th block of the view, and how many characters into its text; or at the end of a table cell (its container) */
 export interface Caret {
   block: number;
   offset: number;
+  cell?: number;
 }
 
 export interface EditorOptions {
@@ -50,11 +54,20 @@ export interface EditorOptions {
   onInput(): void;
   /** Ctrl+S */
   onSave(): void;
+  /** Ctrl+Z: true when the host undid something itself (a change of a table's shape), so the browser doesn't */
+  onUndo?(): boolean;
+  /** The caret went into a table cell, or out of one */
+  onPlace?(inCell: boolean): void;
 }
 
 export interface DocxEditor {
   /** document.xml as edited (null when the view holds the text it was opened with), where the caret is, and the scroll position */
   collect(): { path: string; xml: string | null; caret: Caret | null; scroll: number };
+  /**
+   * The document with the table of the caret's cell changed as `op` says, and the cell (container) to put the caret in
+   * once it is opened again; undefined when the caret isn't in a cell or that table can't be changed this way
+   */
+  tableOp(op: TableOp): { xml: string; cell: number | null } | undefined;
   focus(): void;
   dispose(): void;
 }
@@ -83,6 +96,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   const rootRels = await pkg.rels("");
   const docPath = rootRels.find((r) => r.type.endsWith("/officeDocument"))?.target ?? "word/document.xml";
   if (opts.xml) pkg.replaceXml(docPath, opts.xml);
+  else pkg.forgetXml(docPath);
   const loaded = await loadDocx(pkg);
   const { doc, docXml, docRels } = loaded;
   const plan = planEdits(docXml);
@@ -212,6 +226,10 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
       opts.onSave();
       return;
     }
+    if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "z" && opts.onUndo?.()) {
+      e.preventDefault();
+      return;
+    }
     if (e.key === "Tab" && !mod && !e.altKey) {
       const cell = hostOf(getSelection()?.anchorNode ?? null, editable);
       // In a table, Tab goes to the next cell and Shift+Tab to the one before; elsewhere Tab types a tab
@@ -249,6 +267,16 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   };
   const onDrag = (e: DragEvent) => e.preventDefault();
   const onInput = () => opts.onInput();
+  // Whether the caret is in a table cell, told when it changes (the host's table menus follow it)
+  let inCell: boolean | null = null;
+  const onSelection = () => {
+    const host = hostOf(getSelection()?.anchorNode ?? null, editable);
+    const now = !!host && host !== editable;
+    if (now === inCell) return;
+    inCell = now;
+    opts.onPlace?.(now);
+  };
+  document.addEventListener("selectionchange", onSelection);
   editable.addEventListener("beforeinput", onBeforeInput);
   editable.addEventListener("keydown", onKeyDown);
   editable.addEventListener("paste", onPaste);
@@ -258,8 +286,14 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
 
   if (opts.scroll) root.scrollTop = opts.scroll;
   const focus = () => {
-    editable.focus({ preventScroll: true });
-    if (opts.caret) placeCaret(editable, opts.caret);
+    const caret = opts.caret;
+    const cell = caret?.cell !== undefined ? editable.querySelector<HTMLElement>(`[data-cell="${caret.cell}"]`) : null;
+    if (cell) caretAtEnd(cell);
+    else {
+      editable.focus({ preventScroll: true });
+      if (caret) placeCaret(editable, caret);
+    }
+    onSelection();
   };
   focus();
 
@@ -268,9 +302,36 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
       const xml = saveEdits(plan, readAllEdits(editable), shown);
       return { path: loaded.docPath, xml, caret: caretOf(editable), scroll: root.scrollTop };
     },
+    tableOp(op) {
+      const host = hostOf(getSelection()?.anchorNode ?? null, editable);
+      const c = host && host !== editable ? Number(host.dataset.cell) : NaN;
+      const tc = plan.containers[c]?.el;
+      if (!tc || tc.localName !== "tc") return undefined;
+      // The document as edited, with the caret's cell marked so it can be found in it
+      tc.setAttribute("data-tf-cell", "");
+      let text: string;
+      try {
+        text = saveEdits(plan, readAllEdits(editable), shown) ?? writeXml(plan.doc);
+      } finally {
+        tc.removeAttribute("data-tf-cell");
+      }
+      const doc = new DOMParser().parseFromString(text, "application/xml");
+      const body = Array.from(doc.documentElement.children).find((e) => e.localName === "body");
+      const cells = Array.from(body?.querySelectorAll("*") ?? []).filter((e) => e.localName === "tc");
+      const target = cells.find((e) => e.hasAttribute("data-tf-cell"));
+      if (!target) return undefined;
+      target.removeAttribute("data-tf-cell");
+      const focusCell = changeTable(target, op);
+      if (focusCell === undefined) return undefined;
+      // Containers are the body, then the cells in document order (as planEdits makes them)
+      const after = Array.from(body?.querySelectorAll("*") ?? []).filter((e) => e.localName === "tc");
+      const at = focusCell ? after.indexOf(focusCell) : -1;
+      return { xml: writeXml(doc), cell: at >= 0 ? at + 1 : null };
+    },
     focus: () => editable.focus({ preventScroll: true }),
     dispose() {
       ro?.disconnect();
+      document.removeEventListener("selectionchange", onSelection);
       editable.removeEventListener("beforeinput", onBeforeInput);
       editable.removeEventListener("keydown", onKeyDown);
       editable.removeEventListener("paste", onPaste);
@@ -308,21 +369,25 @@ function hostOf(node: Node | null, editable: HTMLElement): HTMLElement | null {
   return host && editable.contains(host) ? host : null;
 }
 
+/** The caret at the end of a cell's text */
+function caretAtEnd(cell: HTMLElement) {
+  cell.focus({ preventScroll: true });
+  const r = document.createRange();
+  r.selectNodeContents(cell);
+  r.collapse(false);
+  const sel = getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(r);
+  cell.scrollIntoView({ block: "nearest" });
+}
+
 /** Tab in a table: the caret goes to the end of the next (or previous) cell of the same table */
 function moveToCell(cell: HTMLElement, step: number) {
   const table = cell.closest("table");
   if (!table) return;
   const cells = Array.from(table.querySelectorAll<HTMLElement>("[data-cell]")).filter((c) => c.closest("table") === table);
   const next = cells[cells.indexOf(cell) + step];
-  if (!next) return;
-  next.focus({ preventScroll: true });
-  const r = document.createRange();
-  r.selectNodeContents(next);
-  r.collapse(false);
-  const sel = getSelection();
-  sel?.removeAllRanges();
-  sel?.addRange(r);
-  next.scrollIntoView({ block: "nearest" });
+  if (next) caretAtEnd(next);
 }
 
 /** List numbers and bookmark anchors before a paragraph's text: shown, but not part of the text */
@@ -368,6 +433,9 @@ function atEdge(p: HTMLElement, caret: Range, start: boolean): boolean {
 function caretOf(editable: HTMLElement): Caret | null {
   const sel = getSelection();
   if (!sel?.rangeCount) return null;
+  // In a table cell: that cell (the caret goes back to its end)
+  const host = hostOf(sel.anchorNode, editable);
+  if (host && host !== editable) return { block: -1, offset: 0, cell: Number(host.dataset.cell) };
   const p = blockOf(editable, sel.anchorNode);
   if (!p) return null;
   const r = document.createRange();
