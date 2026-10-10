@@ -227,7 +227,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
         break;
       }
       case "table-refused":
-        toast.error(t("This table's rows and columns can't be changed here."));
+        toast.error(t("This table can't be changed that way here."));
         break;
       case "collected":
       case "collect-error": {

@@ -199,7 +199,7 @@ export default {
   "Insert row below": "在下方插入行",
   "Insert column right": "在右侧插入列",
   "Put the cursor in a table to change its rows and columns": "把光标放在表格中，才能修改行与列",
-  "This table's rows and columns can't be changed here.": "这个表格的行与列无法在这里修改。",
+  "This table can't be changed that way here.": "这个表格无法在这里这样修改。",
   "Insert {n} row above|Insert {n} rows above": "在上方插入 {n} 行",
   "Insert {n} column left|Insert {n} columns left": "在左侧插入 {n} 列",
   "Delete": "删除",

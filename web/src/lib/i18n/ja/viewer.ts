@@ -199,7 +199,7 @@ export default {
   "Insert row below": "下に行を挿入",
   "Insert column right": "右に列を挿入",
   "Put the cursor in a table to change its rows and columns": "表の行と列を変更するには、カーソルを表の中に置いてください",
-  "This table's rows and columns can't be changed here.": "この表の行と列はここでは変更できません。",
+  "This table can't be changed that way here.": "この表はここではそのように変更できません。",
   "Insert {n} row above|Insert {n} rows above": "上に {n} 行を挿入",
   "Insert {n} column left|Insert {n} columns left": "左に {n} 列を挿入",
   "Delete": "削除",
