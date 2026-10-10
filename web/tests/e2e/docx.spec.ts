@@ -115,3 +115,40 @@ test("unsaved edits are still there after leaving the document and coming back",
   const { xml } = await savedXml(page, id);
   expect(xml).toContain("<w:t>Draft</w:t>");
 });
+
+test("text typed into table cells is saved there, and Tab moves from cell to cell", async ({ page }) => {
+  await signIn(page);
+  const dir = await makeFolder(page, "Word cells");
+  const cell = (props: string, text: string) => `<w:tc><w:tcPr><w:tcW w:w="4500"/>${props}</w:tcPr><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:tc>`;
+  const header = cell('<w:shd w:val="clear" w:fill="FFFF00"/>', "Region") + cell("", "Sales");
+  const body =
+    "<w:p><w:r><w:t>Intro</w:t></w:r></w:p>" +
+    '<w:tbl><w:tblPr><w:tblW w:w="9000"/></w:tblPr><w:tblGrid><w:gridCol w:w="4500"/><w:gridCol w:w="4500"/></w:tblGrid>' +
+    `<w:tr>${header}</w:tr><w:tr>${cell("", "North")}${cell("", "120")}</w:tr></w:tbl><w:p/>`;
+  const id = await uploadFile(page, dir, "cells.docx", Buffer.from(await buildDocument(body)));
+  const { frame } = await openEditor(page, id, "cells.docx");
+
+  await frame.getByText("North").click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" East");
+  // Tab goes to the end of the next cell; Enter there starts a new paragraph in that cell
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("0");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("units");
+  // Shift+Tab goes back, Backspace at the start of a cell stays in it
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Home");
+  await page.keyboard.press("Backspace");
+  await expect(frame.getByText("North East")).toBeVisible();
+  await expect(page.getByText("Unsaved changes")).toBeVisible();
+
+  const save = saving(page, id);
+  await page.keyboard.press("ControlOrMeta+s");
+  expect((await save).ok()).toBe(true);
+  const { xml } = await savedXml(page, id);
+  expect(xml).toContain(`<w:tr>${header}</w:tr>`);
+  expect(xml).toContain('<w:tc><w:tcPr><w:tcW w:w="4500"/></w:tcPr><w:p><w:r><w:t>North East</w:t></w:r></w:p></w:tc>');
+  expect(xml).toMatch(/<w:tc><w:tcPr><w:tcW w:w="4500"\/><\/w:tcPr><w:p><w:r><w:t>1200<\/w:t><\/w:r><\/w:p><w:p><w:r><w:t>units<\/w:t><\/w:r><\/w:p><\/w:tc>/);
+  expect(xml).toContain("<w:p><w:r><w:t>Intro</w:t></w:r></w:p><w:tbl>");
+});

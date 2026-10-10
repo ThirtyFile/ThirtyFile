@@ -13,6 +13,9 @@
  *
  * Paragraphs are editable when they only hold runs of text (with tabs and line breaks), links around such runs, and
  * bookmarks. Anything else in a paragraph makes the whole paragraph a block that is kept as it is.
+ *
+ * Table cells hold blocks of their own (each cell is a container, like the body): their paragraphs are edited the same
+ * way, while the table's rows, columns and settings stay as they are. A cell always keeps a paragraph, as Word needs.
  */
 
 import { attr, kid } from "../core/package";
@@ -26,9 +29,9 @@ const TEXT_KIDS = new Set(["rPr", "t", "tab", "br", "cr", "softHyphen", "noBreak
 const MARKERS = new Set(["bookmarkStart", "bookmarkEnd", "proofErr"]);
 /** Paragraph-mark formatting that is about tracked changes, not looks: not given to text typed into an empty paragraph */
 const TRACKING = new Set(["ins", "del", "moveFrom", "moveTo", "rPrChange"]);
-/** Characters an XML file can't hold, and halves of characters without their other half: never written */
+/** Characters an XML file can't hold, and halves of characters without their other half (the u flag matches only those): never written */
 // oxlint-disable-next-line no-control-regex -- control characters are removed on purpose
-const UNWRITABLE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f￾￿]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+const UNWRITABLE = /[\u{0}-\u{8}\u{b}\u{c}\u{e}-\u{1f}\u{fffe}\u{ffff}\u{d800}-\u{dfff}]/gu;
 
 /** Text of one run in the edited view: `run` is its id in the plan, null for text that came from nowhere (typed into an empty view) */
 export interface Piece {
@@ -39,14 +42,23 @@ export interface Piece {
 /** What the edited view holds, in order: blocks kept as they are, and paragraphs with their text */
 export type EditedBlock = { kind: "keep"; block: number } | { kind: "para"; source: number | null; pieces: Piece[] };
 
+/** Where blocks are: the body (always container 0) and every table cell */
+export interface Container {
+  el: Element;
+  /** Its blocks in order, by index in the plan's `blocks` (a cell's properties and the body's last section left out) */
+  blocks: number[];
+}
+
 export interface EditPlan {
   doc: Document;
   body: Element;
   /** Namespace and prefix of the document's elements (transitional or strict) */
   ns: string;
   prefix: string | null;
-  /** The body's blocks in order, its final section properties left out */
+  /** The blocks of every container, the body's first */
   blocks: Element[];
+  containers: Container[];
+  containerOf: Map<Element, number>;
   editable: boolean[];
   /** Every run of the editable paragraphs, by id */
   runs: Element[];
@@ -127,28 +139,45 @@ export function runText(r: Element): string {
   return s;
 }
 
+/** A container's own property elements: a cell's (first), the body's last section (last) */
+function propsOf(el: Element, body: Element): { head: Element[]; tail: Element[] } {
+  if (el === body)
+    return {
+      head: [],
+      tail: Array.from(el.children)
+        .filter((c) => c.localName === "sectPr")
+        .slice(-1),
+    };
+  return { head: Array.from(el.children).filter((c) => c.localName === "tcPr"), tail: [] };
+}
+
 export function planEdits(doc: Document | null): EditPlan | null {
   const root = doc?.documentElement;
   const body = kid(root, "body");
   if (!doc || !body) return null;
-  const sect =
-    Array.from(body.children)
-      .filter((c) => c.localName === "sectPr")
-      .pop() ?? null;
-  const blocks = Array.from(body.children).filter((c) => c !== sect);
   const plan: EditPlan = {
     doc,
     body,
     ns: body.namespaceURI ?? "",
     prefix: body.prefix,
-    blocks,
+    blocks: [],
+    containers: [],
+    containerOf: new Map(),
     editable: [],
     runs: [],
     runIds: new Map(),
     before: new Map(),
     after: new Map(),
   };
-  blocks.forEach((b, i) => {
+  // The body, then every table cell in it (tables inside cells too), in document order
+  const cells = Array.from(body.querySelectorAll("*")).filter((e) => e.localName === "tc");
+  for (const el of [body, ...cells]) {
+    const { head, tail } = propsOf(el, body);
+    const own = Array.from(el.children).filter((c) => !head.includes(c) && !tail.includes(c));
+    plan.containerOf.set(el, plan.containers.length);
+    plan.containers.push({ el, blocks: own.map((b) => plan.blocks.push(b) - 1) });
+  }
+  plan.blocks.forEach((b, i) => {
     const editable = b.localName === "p" && isEditableParagraph(b);
     plan.editable.push(editable);
     if (!editable) return;
@@ -333,6 +362,16 @@ export function readEdits(root: HTMLElement): EditedBlock[] {
   return out;
 }
 
+/**
+ * Every container of the view: the body (the view itself, container 0), and each table cell it shows as one of its own
+ * (`data-cell` names the container). A cell's text is read only as its cell's, never as part of the body.
+ */
+export function readAllEdits(root: HTMLElement): Map<number, EditedBlock[]> {
+  const out = new Map<number, EditedBlock[]>([[0, readEdits(root)]]);
+  for (const host of Array.from(root.querySelectorAll<HTMLElement>("[data-cell]"))) out.set(Number(host.dataset.cell), readEdits(host));
+  return out;
+}
+
 // ───────────── Writing the edits back ─────────────
 
 class Writer {
@@ -437,12 +476,13 @@ class Writer {
 }
 
 /**
- * The body's new blocks for the edited view, or null when nothing changed. `shown` are the blocks the view showed:
- * the others (a paragraph holding only a section break, say) stay where they were.
+ * A container's new blocks for its edited view (container 0 is the body), or null when nothing changed. `shown` are
+ * the blocks the view showed: the others (a paragraph holding only a section break, say) stay where they were.
  */
-export function editedBlocks(plan: EditPlan, edited: EditedBlock[], shown: ReadonlySet<number>): Element[] | null {
-  const n = plan.blocks.length;
-  const w = new Writer(plan);
+export function editedBlocks(plan: EditPlan, edited: EditedBlock[], shown: ReadonlySet<number>, container = 0, w = new Writer(plan)): Element[] | null {
+  const own = plan.containers[container]?.blocks ?? [];
+  const n = own.length;
+  const at = new Map(own.map((b, i) => [b, i]));
   const referenced = new Set<number>();
   const occurrences = new Map<number, number[]>();
   edited.forEach((e, i) => {
@@ -456,66 +496,75 @@ export function editedBlocks(plan: EditPlan, edited: EditedBlock[], shown: Reado
   });
   const out: Element[] = [];
   let next = 0;
-  // Blocks before `b` that the view didn't show, or that were deleted but end a section, stay in their place
-  const passTo = (b: number) => {
-    for (; next < Math.min(b, n); next++) {
-      if (referenced.has(next)) continue;
-      const block = plan.blocks[next];
-      const kept = shown.has(next) ? w.sectionBreak(block) : block;
+  // Blocks before the n-th that the view didn't show, or that were deleted but end a section, stay in their place
+  const passTo = (local: number | undefined) => {
+    if (local === undefined) return;
+    for (; next < Math.min(local, n); next++) {
+      const b = own[next];
+      if (referenced.has(b)) continue;
+      const kept = shown.has(b) ? w.sectionBreak(plan.blocks[b]) : plan.blocks[b];
       if (kept) out.push(kept);
     }
-    next = Math.max(next, b + 1);
+    next = Math.max(next, local + 1);
   };
   const kept = new Set<number>();
   edited.forEach((e, i) => {
     if (e.kind === "keep") {
-      // A block is written once, wherever the view may have repeated it
-      if (e.block < 0 || e.block >= n || kept.has(e.block)) return;
+      // A block is written once, and only in its own container, wherever the view may have repeated it
+      if (!at.has(e.block) || kept.has(e.block)) return;
       kept.add(e.block);
-      passTo(e.block);
+      passTo(at.get(e.block));
       out.push(plan.blocks[e.block]);
       return;
     }
     const occ = e.source !== null ? (occurrences.get(e.source) ?? []) : [];
     const first = occ[0] === i;
     const last = occ[occ.length - 1] === i;
-    if (first) passTo(e.source!);
+    if (first) passTo(at.get(e.source!));
     const pieces = mergePieces(e.pieces);
     const src = e.source !== null ? plan.blocks[e.source] : null;
-    if (first && src && plan.editable[e.source!] && samePieces(pieces, originalPieces(plan, e.source!)) && (last || !sectPrOf(src))) {
+    if (first && src && at.has(e.source!) && plan.editable[e.source!] && samePieces(pieces, originalPieces(plan, e.source!)) && (last || !sectPrOf(src))) {
       out.push(src);
       return;
     }
     out.push(w.paragraph(e.source, pieces, first, last));
   });
   passTo(n);
-  // Word needs a paragraph in the body, and one after a table that ends it
-  const template = [...plan.blocks].reverse().find((b) => b.localName === "p") ?? null;
-  const lastIsP = plan.blocks[n - 1]?.localName === "p";
+  // Word needs a paragraph in the body and in every cell, and one after a table that ends them
+  const template = [...own].reverse().find((b) => plan.blocks[b].localName === "p");
+  const lastIsP = n > 0 && plan.blocks[own[n - 1]].localName === "p";
   if (!out.some((b) => b.localName === "p") || (lastIsP && out[out.length - 1]?.localName !== "p")) {
-    out.push(w.paragraph(template ? plan.blocks.indexOf(template) : null, [], false, false));
+    out.push(w.paragraph(template ?? null, [], false, false));
   }
-  if (out.length === n && out.every((b, i) => b === plan.blocks[i])) return null;
+  if (out.length === n && out.every((b, i) => b === plan.blocks[own[i]])) return null;
   return out;
 }
 
 const DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n';
 
-/** document.xml with the edited view's changes, or null when nothing changed */
-export function saveEdits(plan: EditPlan, edited: EditedBlock[], shown: ReadonlySet<number>): string | null {
-  const blocks = editedBlocks(plan, edited, shown);
-  if (!blocks) return null;
-  const { body, doc } = plan;
-  // The new blocks go into the body only while it is written out, so the plan keeps describing the document as opened
-  const old = Array.from(body.childNodes);
-  const sect = Array.from(body.children)
-    .filter((c) => c.localName === "sectPr")
-    .pop();
-  body.replaceChildren(...blocks, ...(sect ? [sect] : []));
+/** What the view holds for each container it showed: the body's (container 0), and each cell's */
+export type Edits = Map<number, EditedBlock[]>;
+
+/** document.xml with the edited view's changes (`edits`: the body's, or each container's), or null when nothing changed */
+export function saveEdits(plan: EditPlan, edits: EditedBlock[] | Edits, shown: ReadonlySet<number>): string | null {
+  const byContainer: Edits = Array.isArray(edits) ? new Map([[0, edits]]) : edits;
+  const w = new Writer(plan);
+  const changes: { el: Element; kids: Node[] }[] = [];
+  for (const [c, edited] of byContainer) {
+    const blocks = editedBlocks(plan, edited, shown, c, w);
+    if (!blocks) continue;
+    const el = plan.containers[c].el;
+    const { head, tail } = propsOf(el, plan.body);
+    changes.push({ el, kids: [...head, ...blocks, ...tail] });
+  }
+  if (!changes.length) return null;
+  // The new blocks go into their containers only while the document is written out, so the plan keeps describing it as opened
+  const old = changes.map(({ el }) => Array.from(el.childNodes));
+  changes.forEach(({ el, kids }) => el.replaceChildren(...kids));
   try {
-    const xml = new XMLSerializer().serializeToString(doc);
+    const xml = new XMLSerializer().serializeToString(plan.doc);
     return xml.startsWith("<?xml") ? xml : DECLARATION + xml;
   } finally {
-    body.replaceChildren(...old);
+    for (let i = changes.length - 1; i >= 0; i--) changes[i].el.replaceChildren(...old[i]);
   }
 }

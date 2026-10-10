@@ -400,7 +400,7 @@ export function renderTable(tbl: Element, f: Flow): HTMLElement | null {
         const box = h("div", { class: "tf-docx-vert" + (dir === "btLr" || dir === "tbLrV" ? " tf-docx-btlr" : "") });
         fillBlocks(box, content, flow);
         td.append(box);
-      } else fillBlocks(td, content, flow);
+      } else if (!flow.edit?.cell?.(c.tc, td, content, flow)) fillBlocks(td, content, flow);
       if (!td.childNodes.length) td.append(h("p", { class: "tf-docx-p" }, h("br")));
       row.append(td);
     }

@@ -2,7 +2,7 @@
 // what changed into document.xml (everything else stays as it was)
 import { describe, expect, test } from "vitest";
 import { attr } from "@/ooxml/core/package";
-import { isEditableParagraph, originalPieces, planEdits, readEdits, saveEdits, type EditedBlock, type EditPlan } from "@/ooxml/docx/edit";
+import { isEditableParagraph, originalPieces, planEdits, readAllEdits, readEdits, saveEdits, type EditedBlock, type EditPlan, type Edits } from "@/ooxml/docx/edit";
 
 const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const W14 = "http://schemas.microsoft.com/office/word/2010/wordml";
@@ -15,14 +15,14 @@ const parse = (xml: string) => new DOMParser().parseFromString(xml, "application
 const plan = (body: string, ns?: string) => planEdits(parse(docXml(body, ns)))!;
 const serialize = (el: Element) => new XMLSerializer().serializeToString(el);
 
-/** The edited view as it was opened: every shown block, editable paragraphs with their own text */
-function asOpened(p: EditPlan): EditedBlock[] {
-  return p.blocks.map((_, i) => (p.editable[i] ? { kind: "para", source: i, pieces: originalPieces(p, i) } : { kind: "keep", block: i }));
+/** A container's edited view as it was opened (the body's by default): its blocks, editable paragraphs with their own text */
+function asOpened(p: EditPlan, container = 0): EditedBlock[] {
+  return p.containers[container].blocks.map((i) => (p.editable[i] ? { kind: "para", source: i, pieces: originalPieces(p, i) } : { kind: "keep", block: i }));
 }
 const all = (p: EditPlan) => new Set(p.blocks.map((_, i) => i));
 
 /** The body blocks of the saved document.xml */
-function saved(p: EditPlan, edited: EditedBlock[], shown = all(p)) {
+function saved(p: EditPlan, edited: EditedBlock[] | Edits, shown = all(p)) {
   const xml = saveEdits(p, edited, shown);
   expect(xml).not.toBeNull();
   const out = parse(xml!);
@@ -272,5 +272,92 @@ describe("reading the edited view back", () => {
       { kind: "para", source: 0, pieces: [{ run: 0, text: "a" }] },
       { kind: "para", source: 0, pieces: [{ run: 0, text: "b" }] },
     ]);
+  });
+});
+
+describe("table cells", () => {
+  const TABLE =
+    '<w:tbl><w:tblPr><w:tblW w:w="5000"/></w:tblPr><w:tblGrid><w:gridCol w:w="2500"/><w:gridCol w:w="2500"/></w:tblGrid>' +
+    '<w:tr><w:tc><w:tcPr><w:tcW w:w="2500"/><w:shd w:fill="FFFF00"/></w:tcPr><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Region</w:t></w:r></w:p></w:tc>' +
+    '<w:tc><w:tcPr><w:tcW w:w="2500"/></w:tcPr><w:p><w:r><w:t>Sales</w:t></w:r></w:p></w:tc></w:tr></w:tbl>';
+
+  test("each cell is a container of its own, after the body", () => {
+    const pl = plan(`<w:p><w:r><w:t>Before</w:t></w:r></w:p>${TABLE}`);
+    expect(pl.containers.map((c) => c.el.localName)).toEqual(["body", "tc", "tc"]);
+    expect(pl.containers[0].blocks.map((i) => pl.blocks[i].localName)).toEqual(["p", "tbl"]);
+    expect(pl.containers.slice(1).map((c) => c.blocks.map((i) => text(pl.blocks[i])))).toEqual([["Region"], ["Sales"]]);
+    expect(pl.containers.slice(1).every((c) => c.blocks.every((i) => pl.editable[i]))).toBe(true);
+  });
+
+  test("a changed cell keeps its settings and formatting; the table and the other cells stay as they were", () => {
+    const pl = plan(`<w:p><w:r><w:t>Before</w:t></w:r></w:p>${TABLE}`);
+    const [, , region] = pl.blocks;
+    const other = serialize(pl.containers[2].el);
+    const edits = new Map<number, EditedBlock[]>([
+      [0, asOpened(pl)],
+      [
+        1,
+        [
+          { kind: "para", source: pl.blocks.indexOf(region), pieces: [{ run: originalPieces(pl, 2)[0].run, text: "Area" }] },
+          { kind: "para", source: 2, pieces: [{ run: null, text: "North" }] },
+        ],
+      ],
+      [2, asOpened(pl, 2)],
+    ]);
+    const { body } = saved(pl, edits);
+    const cells = find(body, "tc");
+    expect(Array.from(cells[0].children).map((c) => c.localName)).toEqual(["tcPr", "p", "p"]);
+    expect(find(cells[0], "shd")).toHaveLength(1);
+    // The edited run keeps its bold; the paragraph typed without a run has the paragraph mark's formatting (none)
+    expect(find(cells[0], "b")).toHaveLength(1);
+    expect(find(cells[0], "p").map(text)).toEqual(["Area", "North"]);
+    expect(serialize(cells[1])).toBe(other);
+    expect(find(body, "tblW")).toHaveLength(1);
+    // The plan still describes the document as opened
+    expect(text(pl.containers[1].el)).toBe("Region");
+  });
+
+  test("a cell left without paragraphs gets an empty one, as Word needs", () => {
+    const pl = plan(TABLE);
+    const { body } = saved(pl, new Map([[1, []]]));
+    const cell = find(body, "tc")[0];
+    expect(Array.from(cell.children).map((c) => c.localName)).toEqual(["tcPr", "p"]);
+    expect(text(cell)).toBe("");
+  });
+
+  test("a table inside a cell has cells of its own", () => {
+    const pl = plan(`<w:tbl><w:tr><w:tc><w:p><w:r><w:t>Outer</w:t></w:r></w:p>${TABLE}<w:p/></w:tc></w:tr></w:tbl>`);
+    expect(pl.containers).toHaveLength(4);
+    const inner = 2;
+    const i = pl.containers[inner].blocks[0];
+    const { body } = saved(pl, new Map([[inner, [{ kind: "para", source: i, pieces: [{ run: originalPieces(pl, i)[0].run, text: "Zone" }] }]]]));
+    expect(find(body, "t").map((t) => t.textContent)).toEqual(["Outer", "Zone", "Sales"]);
+  });
+
+  test("the view's cells are read as their own containers, not as the body's text", () => {
+    const root = document.createElement("div");
+    root.innerHTML =
+      '<p data-para="0"><span data-r="0">Before</span></p>' +
+      '<div data-block="1" contenteditable="false"><table><tr><td data-cell="1" data-host=""><p data-para="2"><span data-r="1">Area</span></p><p data-para="2"><span data-r="1">North</span></p></td>' +
+      '<td data-cell="2" data-host=""><p data-para="3"><span data-r="2">Sales</span></p></td></tr></table></div>';
+    expect(readAllEdits(root)).toEqual(
+      new Map([
+        [
+          0,
+          [
+            { kind: "para", source: 0, pieces: [{ run: 0, text: "Before" }] },
+            { kind: "keep", block: 1 },
+          ],
+        ],
+        [
+          1,
+          [
+            { kind: "para", source: 2, pieces: [{ run: 1, text: "Area" }] },
+            { kind: "para", source: 2, pieces: [{ run: 1, text: "North" }] },
+          ],
+        ],
+        [2, [{ kind: "para", source: 3, pieces: [{ run: 2, text: "Sales" }] }]],
+      ]),
+    );
   });
 });

@@ -228,7 +228,11 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
         ready = true;
         window.clearTimeout(readyTimer);
         const buffer = session.buffer.slice(0);
-        const texts = { label: t("Document text"), locked: t("This part can't be changed here. It's kept as it is.") };
+        const texts = {
+          label: t("Document text"),
+          locked: t("This part can't be changed here. It's kept as it is."),
+          table: t("The text in this table's cells can be changed. Its rows and columns are kept as they are."),
+        };
         // "*": the sandboxed frame has an opaque origin, which no target origin can name; only that frame receives it
         frame.current?.contentWindow?.postMessage({ type: "edit", kind: "docx", buffer, xml: session.current, texts, caret: session.caret, scroll: session.scroll }, "*", [buffer]);
         openTimer = window.setTimeout(() => {
@@ -276,7 +280,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
   return (
     <div className="flex size-full flex-col bg-background text-foreground">
       <div className="flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b px-2 py-1">
-        <p className="min-w-0 flex-1 text-xs text-muted-foreground">{t("Only the text can be changed here. Tables, pictures and other parts are kept as they are.")}</p>
+        <p className="min-w-0 flex-1 text-xs text-muted-foreground">{t("Only the text can be changed here, in tables too. Pictures and other parts are kept as they are.")}</p>
         {dirty && <span className="shrink-0 text-xs text-amber-600 dark:text-amber-400">{t("Unsaved changes")}</span>}
         <div className="flex shrink-0 items-center gap-1">
           <Button size="sm" disabled={!dirty || saving || loading || !!error} onClick={() => void save()}>
